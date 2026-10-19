@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-19T23:00:00+02:00
+timestamp: 2026-10-19T23:30:00+02:00
 ---
 
 # Security model and threat model
@@ -146,6 +146,15 @@ ways or return text that steers the model. tab-mcp cannot judge a page's honesty
 pairing page names the page's origin so the user knows whom they trust. The closed origin
 list (DEC-032) keeps other sites from borrowing a hosted relay's domain to look
 trustworthy. `SECURITY.md` says this plainly.
+
+### Planned: identity binding (0.2+)
+
+With [identity binding](/design/identity-binding.md) the AI app acts with exactly the
+rights of the tab's user, because both must be signed in as the same person at the same
+OpenID Connect provider. A taken-over provider account then also gives the AI connection.
+The web app's assertion signing key and the relay's OIDC client secret become operator
+secrets. A mismatch is refused with "This AI tool is logged in as someone else than the
+page."
 
 ## Safe defaults
 

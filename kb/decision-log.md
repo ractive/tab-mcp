@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-19T23:00:00+02:00
+timestamp: 2026-10-19T23:30:00+02:00
 ---
 
 # Decision log
@@ -352,6 +352,17 @@ atomic "use once" that refresh rotation needs so two concurrent refreshes cannot
 succeed, and `listGrants(addressId, now)`, which lets the tab show the connected apps after
 a reload. Times are milliseconds since the epoch. The conformance suite is exported as
 `@ractive-ch/tab-mcp/testing` (`tokenStoreConformance(name, factory)`, `bun:test`).
+
+## DEC-042: Pairing is a replaceable method; identity binding planned for 0.2+ (owner)
+
+The step at `/authorize` that proves the browser belongs to the tab's user is a pairing
+method behind a small interface in the authorization server. Version 0.1 has one method,
+the 6-digit code (DEC-028). Planned for 0.2+: identity binding, where the relay connects an
+AI app to a tab only if both are signed in as the same person at the same OpenID Connect
+provider ([design](/design/identity-binding.md),
+[iteration 7](/iterations/iteration-7-identity-binding.md),
+[research needed](/research/identity-binding-research-needed.md)). Building pairing as an
+interface in iteration 3 lets that extension fit without rebuilding the OAuth server.
 
 # Citations
 
