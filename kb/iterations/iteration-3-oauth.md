@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 3: OAuth authorization server with pairing"
 description: "Our own authorization server: metadata, CIMD client validation, pairing codes typed on the authorize page, token endpoint with PKCE and rotating refresh tokens, revocation, spec tests, conformance runs and a security review."
-status: in-progress
+status: completed
 tags:
   - iteration
   - oauth
