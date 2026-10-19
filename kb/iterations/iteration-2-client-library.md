@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 2: browser library"
 description: "The tab-side library: a small eager core with WebMCP-style registerTool, and on connect() the lazily loaded connection and MCP handler, pairing UI and consequential-tool confirmation."
-status: planned
+status: in-progress
 tags:
   - iteration
   - client
@@ -38,20 +38,20 @@ mcp.revoke(grantId); mcp.disconnect(); mcp.newAddress();
 
 ## Tasks
 
-- [ ] Measure first (DEC-035): what makes up the SDK's ~82 KB gzipped for `createMcpHandler` + `McpServer` + `fromJsonSchema` (bundle metafile by package and module); record the result and the choice in the decision log: keep the SDK, or write the tab-side stateless subset (`server/discover`, `tools/list`, `tools/call`, `subscriptions/listen`, errors, header/body checks) and keep the SDK client only in tests
-- [ ] Split: an eagerly loaded core (registry, events, pairing state, `localStorage` secret) and a lazily loaded part (connection, tunnel, MCP handler) behind a dynamic `import()` in `connect()`; report both sizes (core target ≤ 5 KB gzipped)
-- [ ] Tool registry mirroring WebMCP: name rules (1–128 of `[A-Za-z0-9_.-]`), non-empty description, `inputSchema` default `{ "type": "object" }`, duplicate names rejected, `signal` abort unregisters, registration allowed before and after `connect()`
-- [ ] MCP handler (SDK `createMcpHandler(factory, { legacy: "reject" })` or our subset, per the measurement): tools from the registry, argument validation against `inputSchema`, tools-changed notification on registry change, SSE for `tools/call` (DEC-020); if our subset, a conformance test with the SDK client
-- [ ] Result and annotation mapping (DEC-022, DEC-023)
-- [ ] Tunnel client: `http.request` → `Request` (+ `parsedBody`, `authInfo`, `AbortController`) → stream the `Response` back as `http.response` or `start`/`chunk`/`end`; `http.cancel` aborts
-- [ ] `connect()` only with transient user activation (where supported), opens `wss://…/tab` with `tab-mcp.v1`, sends `hello` with the secret from `localStorage` (DEC-027; try/catch, a page-lifetime secret without storage), resolves with the address; `disconnect()` sends `bye`; `newAddress()` sends `grants.revokeAll`, makes a new secret and reconnects; no automatic reconnect
-- [ ] App name (DEC-045): `new TabMcp({ appName: "saturnus", … })` sent as `hello.app.name`; the dialog shows `session.appName` when present
-- [ ] Heartbeat: answer `ping`; treat two missed pings as dead
-- [ ] Pairing (DEC-028): default "Connect your AI tool" `<dialog>` with the address, copy button, short instructions per AI app and "When asked, enter the code 123456"; `pairing.start` on open and `pairing.stop` on close, the code replaced as `pairing.code` messages arrive; connected apps from `session.grants`, `grant.added`/`grant.removed`, each with Disconnect (`grant.revoke`)
-- [ ] Consequential tools: confirmation before `execute` via `onConfirm` or the default dialog (tool title, client, argument summary); refusal → `isError` result "The user declined"
-- [ ] Default UI is small, unstyled-by-default (CSS custom properties), accessible (`<dialog>`, focus, Escape closes), and fully replaceable through the events and methods above
-- [ ] Public types self-contained (no imports from private workspace packages); `isolatedDeclarations` clean
-- [ ] Unit tests in Bun against a relay from iteration 1 (in-process); pairing messages against a scripted relay stub until iteration 3 implements them in the relay
+- [x] Measure first (DEC-035): what makes up the SDK's ~82 KB gzipped for `createMcpHandler` + `McpServer` + `fromJsonSchema` (bundle metafile by package and module); record the result and the choice in the decision log: keep the SDK, or write the tab-side stateless subset (`server/discover`, `tools/list`, `tools/call`, `subscriptions/listen`, errors, header/body checks) and keep the SDK client only in tests
+- [x] Split: an eagerly loaded core (registry, events, pairing state, `localStorage` secret) and a lazily loaded part (connection, tunnel, MCP handler) behind a dynamic `import()` in `connect()`; report both sizes (core target ≤ 5 KB gzipped)
+- [x] Tool registry mirroring WebMCP: name rules (1–128 of `[A-Za-z0-9_.-]`), non-empty description, `inputSchema` default `{ "type": "object" }`, duplicate names rejected, `signal` abort unregisters, registration allowed before and after `connect()`
+- [x] MCP handler (SDK `createMcpHandler(factory, { legacy: "reject" })` or our subset, per the measurement): tools from the registry, argument validation against `inputSchema`, tools-changed notification on registry change, SSE for `tools/call` (DEC-020); if our subset, a conformance test with the SDK client
+- [x] Result and annotation mapping (DEC-022, DEC-023)
+- [x] Tunnel client: `http.request` → `Request` (+ `parsedBody`, `authInfo`, `AbortController`) → stream the `Response` back as `http.response` or `start`/`chunk`/`end`; `http.cancel` aborts
+- [x] `connect()` only with transient user activation (where supported), opens `wss://…/tab` with `tab-mcp.v1`, sends `hello` with the secret from `localStorage` (DEC-027; try/catch, a page-lifetime secret without storage), resolves with the address; `disconnect()` sends `bye`; `newAddress()` sends `grants.revokeAll`, makes a new secret and reconnects; no automatic reconnect
+- [x] App name (DEC-045): `new TabMcp({ appName: "saturnus", … })` sent as `hello.app.name`; the dialog shows `session.appName` when present
+- [x] Heartbeat: answer `ping`; treat two missed pings as dead
+- [x] Pairing (DEC-028): default "Connect your AI tool" `<dialog>` with the address, copy button, short instructions per AI app and "When asked, enter the code 123456"; `pairing.start` on open and `pairing.stop` on close, the code replaced as `pairing.code` messages arrive; connected apps from `session.grants`, `grant.added`/`grant.removed`, each with Disconnect (`grant.revoke`)
+- [x] Consequential tools: confirmation before `execute` via `onConfirm` or the default dialog (tool title, client, argument summary); refusal → `isError` result "The user declined"
+- [x] Default UI is small, unstyled-by-default (CSS custom properties), accessible (`<dialog>`, focus, Escape closes), and fully replaceable through the events and methods above
+- [x] Public types self-contained (no imports from private workspace packages); `isolatedDeclarations` clean
+- [x] Unit tests in Bun against a relay from iteration 1 (in-process); pairing messages against a scripted relay stub until iteration 3 implements them in the relay
 
 ## Acceptance criteria
 
@@ -64,6 +64,19 @@ mcp.revoke(grantId); mcp.disconnect(); mcp.newAddress();
 - Sizes of the core and the lazily loaded part reported in the PR (lazy part ≤ 100 KB
   gzipped with the SDK, much less with our subset).
 - `bun run verify` green.
+
+## Results
+
+- Sizes (minified / gzipped, CDN build): core 9.6 / 3.8 KiB,
+  connection 37.4 / 11.5 KiB (MCP subset, tunnel, `@cfworker/json-schema`), default UI
+  5.5 / 2.3 KiB. The SDK's server would have been 309.5 / 81.3 KiB (DEC-049).
+- Decisions taken while building: DEC-049 to DEC-054.
+- Tests: registry, mapping, secret, 36-case conformance with the SDK's
+  `createMcpHandler`, protocol against a scripted relay (pairing, grants, heartbeat,
+  errors), SDK client through an in-process relay, dialogs in happy-dom, lazy loading and
+  the package layout, the relay as a separate process, headless Chrome over CDP. Firefox
+  158 checked by hand with `ff-rdp`: connect (with `resume`, since a synthetic click has
+  no user activation), dialog, tool call and a confirmed consequential call.
 
 ## Test approach
 

@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T11:00:00+02:00
+timestamp: 2026-10-20T14:00:00+02:00
 ---
 
 # Decision log
@@ -103,6 +103,8 @@ work). Source: [SDK research](/research/mcp-typescript-sdk-v2.md).
 **Amended by DEC-035:** the SDK part is loaded only on `connect()`, and iteration 2 first
 measures the bundle; if it is mostly unused features and Zod, the tab-side stateless subset
 is written by us and the SDK stays a test dependency.
+
+**Replaced for the tab by DEC-049** after the measurement: the tab runs its own subset.
 
 ## DEC-014: The relay does not depend on the MCP SDK at runtime
 
@@ -419,6 +421,18 @@ from [iteration 2](/iterations/iteration-2-client-library.md) and shown from ite
 A project with stricter requirements (own limits it cannot share, own operator, separate
 logs or store) gets its own relay instance instead ([iteration 6](/iterations/iteration-6-deployment-bunny.md)).
 
+## DEC-046: Deployments live outside this repository (owner)
+
+The open-source repository holds no deployment secrets and no owner
+infrastructure. The owner's hosted relay for `https://ractive.ch` is deployed
+from the private repository `ractive/ractive.ch` (`infra/relay/`, OpenTofu,
+state in the bunny storage zone `ractive-ch-terraform-state`), which may later manage
+more of ractive.ch on bunny.net. This project's release secrets (Docker Hub;
+npm via OIDC) stay here. Supersedes the owner-instance parts of DEC-043 and
+DEC-044; iteration 6 becomes generic, secret-free deployment docs and
+examples. Reason: one operator's secrets and infrastructure do not belong in a
+public, reusable project.
+
 ## DEC-047: Escaped errors are logged; rejections keep the relay running
 
 The relay handles errors per tab message and per request (a bad tab response fails only
@@ -440,6 +454,111 @@ would hold a socket forever. The relay reads bodies with its own deadline
 makes Bun close the socket. `server.timeout(req, 0)` (switching Bun's idle timer off) runs
 only right before an authenticated request is forwarded. From the review of PR #1.
 
+## DEC-049: The tab runs its own stateless MCP subset; the SDK stays in tests
+
+Measured at the start of iteration 2, as DEC-035 asks (`scripts/measure-sdk.ts` in the
+client package repeats it): a browser bundle of `createMcpHandler` + `McpServer` +
+`fromJsonSchema` from `@modelcontextprotocol/server` 2.3.1 is 309.5 KiB minified and
+81.3 KiB gzipped. By package (minified): the server package 194 KiB (63 %), zod 4 99 KiB
+(32 %), `@modelcontextprotocol/core` 16 KiB (5 %, OAuth metadata and error schemas the tab
+never uses). Inside the server package: zod schemas for two protocol revisions (the
+2025-11-25 legacy set is the larger), the `Protocol` engine, the era-classification ladder,
+`McpServer`/`Server`, the web-standard transport and `createMcpHandler`, MRTR, completions,
+bearer-auth and OAuth-metadata middleware, and an inlined `@cfworker/json-schema` (22 KiB
+minified, 5.9 KiB gzipped). The tab needs `server/discover`, `tools/list`, `tools/call`,
+`subscriptions/listen`, the request checks and argument validation: mostly unused features
+and zod, the case DEC-035 names.
+
+Decision: the tab-side subset is ours (`packages/tab-mcp-client/src/mcp.ts`), with
+`@cfworker/json-schema` 4.1.1 (MIT, the validator the SDK itself uses in browsers) for
+arguments. Sizes now: core 3.8 KiB gzipped (with the page), connection chunk 11.5 KiB
+gzipped including the validator (on `connect()`), default UI 2.3 KiB gzipped (when a
+dialog opens), instead of 81 KiB plus the core. No Apache-2.0 SDK code ships, so no NOTICE.
+Conformance: a test sends 36 requests (every rung of the 2026-07-28 check ladder,
+discover, list, call, errors, notifications, batches, posted responses, a base64 `Mcp-Name`)
+to our handler and to the SDK's `createMcpHandler(…, { legacy: "reject" })` and requires
+the same HTTP status, JSON-RPC error code and result shape; the SDK `Client` pinned to
+2026-07-28 calls tools end to end through the relay. Re-run both when the SDK or the spec
+changes. Kept from the SDK's behaviour: `ttlMs: 0` and `cacheScope: "private"` on
+`server/discover` and `tools/list` (the research note's 60 s would leave AI apps without a
+listen stream on a stale list), `ping` answered 404 / `-32601` (gone in 2026-07-28), an
+unknown tool `-32602` in band, failed argument validation an `isError` result,
+`tools/call` always as SSE and the rest as JSON. Tools must not use `x-mcp-header`
+(registration refuses it). Replaces the tab half of DEC-013; the relay is unaffected
+(DEC-014).
+
+## DEC-050: No reconnect by the library; `connect({ resume: true })` for "Keep AI access on"
+
+The library never reconnects by itself (plan, protocol). `connect()` refuses to run
+without transient user activation where the browser tracks it
+(`navigator.userActivation`), so a session starts from a click (DEC-009). Whether AI
+access survives a reload or a dropped connection is the page's choice: a page that offers
+something like "Keep AI access on" (turned on by the user with a click) calls
+`connect({ resume: true })` on load or after `disconnected`, which skips the activation
+check. The check is a guard against accidental connects, not a security boundary: a page
+can always open a WebSocket itself. Events for the page: `statechange`, `connected`,
+`disconnected` (with a reason from the bye or close code: `user`, `new_address`,
+`replaced`, `expired`, `idle`, `shutdown`, `heartbeat`, `policy`, `too_large`,
+`rate_limited`, `closed`, `network`), `replaced`, `error`, `pairingcode`, `grantschange`,
+`toolschange`. `disconnect()` and `newAddress()` report `disconnected` at once and ignore
+late callbacks of the old connection.
+
+## DEC-051: Registration rules beyond WebMCP
+
+`registerTool` returns a promise, as in the WebMCP draft: it rejects with a `TypeError`
+for an invalid tool and an `InvalidStateError` for a duplicate name, and the tool is
+registered before it resolves. `inputSchema` must have `"type": "object"` (MCP requires an
+object schema; WebMCP does not say), is copied at registration, and may not use
+`x-mcp-header` (DEC-049). Registration also refuses what the validator (loaded only on
+`connect()`) would throw on later: a `pattern` that is not a regular expression and a
+`$ref` that does not resolve inside the schema; should anything still fail outside the
+tool, the call answers `-32603`, and a result that is not JSON becomes an `isError` result. Only boolean annotations are kept. `execute(input, { signal,
+client })` gets the caller (grant id, client id, verified host, declared name when the
+grant is known) besides WebMCP's signal. Several registrations in one task produce one
+`notifications/tools/list_changed`.
+
+## DEC-052: The address secret is kept per relay; plain-text relays only on loopback
+
+The secret's storage key is `tab-mcp:secret:<relay origin>` (overridable with
+`storageKey`), so a page that talks to two relays never sends one relay's secret to the
+other, whose operator could otherwise take over the address there. The library refuses
+`http:`/`ws:` relay URLs except for `localhost`, `127.0.0.1` and `[::1]`, because the
+secret travels in `hello`. `storage: null` keeps the secret for the page's lifetime;
+storage that throws (blocked, quota) falls back to that silently. The secret is read from
+storage on every connect, so a rotation in another tab is seen.
+
+## DEC-053: The npm package is built into `dist/` with its own `package.json`
+
+The workspace keeps `exports` pointing at `src/` (tests, the example and type checks run
+without a build). `bun run build` in the client package (`scripts/build.ts`) writes the
+publishable directory `dist/`: ESM for bundlers with `@cfworker/json-schema` external and
+the core, connection and UI as separate chunks; a minified, self-contained CDN build in
+`dist/cdn/` (`exports["./cdn"]`); declarations from TypeScript 7 `tsc` with
+`isolatedDeclarations` (their `.ts` specifiers rewritten to `.js`); and a generated
+`package.json`, LICENSE and AI_NOTICE. Iteration 5 packs and publishes `dist/` (DEC-024).
+A test builds it and type-checks a consumer file against the declarations.
+
+## DEC-054: Default confirmation and dialogs
+
+A consequential tool is confirmed after its arguments are validated, so the user is never
+asked about a call that would fail. Without `onConfirm` and without a `document` the call
+is declined. The default confirmation focuses "Don't allow", names the client by its
+declared name and verified host, shows the arguments in full in a scrolling box (hidden
+when there are none; if they could not be shown, Allow is not offered), keeps "Allow"
+disabled for 750 ms after it opens (`confirmDelayMs`, never below 500 ms) so a click meant
+for the page cannot approve, and closes itself when the call is cancelled. `revoke()`
+returns `false` while not connected (only the relay can revoke); the connect dialog then
+disables its Disconnect buttons and says to connect the page again first. Chunks of
+streamed bodies are sized from the relay's `maxMessageBytes` (512 bytes of envelope, 6
+bytes per UTF-16 unit at worst); below 896 bytes the library refuses the session. Both dialogs are `<dialog>` elements opened
+with `showModal()` (Escape closes them), built with `textContent` only, styled through
+CSSOM with `--tab-mcp-*` custom properties (no inline `style` attributes, so a strict CSP
+needs no exception). The connect dialog shows `session.appName`, else the page's own
+`appName`, until iteration 3 makes the relay send it; its code line stays hidden until the
+relay sends a code. Tests pass a happy-dom `document` instead of registering DOM globals,
+because the relay's tests share the process; the browser test needs Chrome (required when
+`CI` is set, skipped otherwise).
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
@@ -448,15 +567,3 @@ only right before an authenticated request is forwarded. From the review of PR #
 - [Bun runtime and publishing research](/research/bun-runtime-and-publishing.md)
 - [bunny.net research](/research/bunny-magic-containers.md)
 - [WebMCP registerTool](/research/webmcp-register-tool.md)
-
-## DEC-046: Deployments live outside this repository (owner)
-
-The open-source repository holds no deployment secrets and no owner
-infrastructure. The owner's hosted relay for `https://ractive.ch` is deployed
-from the private repository `ractive/ractive.ch` (`infra/relay/`, OpenTofu,
-state in the bunny storage zone `ractive-ch-terraform-state`), which may later manage
-more of ractive.ch on bunny.net. This project's release secrets (Docker Hub;
-npm via OIDC) stay here. Supersedes the owner-instance parts of DEC-043 and
-DEC-044; iteration 6 becomes generic, secret-free deployment docs and
-examples. Reason: one operator's secrets and infrastructure do not belong in a
-public, reusable project.

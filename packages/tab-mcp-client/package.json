@@ -6,6 +6,10 @@
 	"exports": {
 		".": "./src/index.ts"
 	},
+	"scripts": {
+		"build": "bun scripts/build.ts",
+		"measure-sdk": "bun scripts/measure-sdk.ts"
+	},
 	"files": [
 		"src",
 		"README.md",
@@ -25,5 +29,14 @@
 		"model-context-protocol",
 		"browser",
 		"webmcp"
-	]
+	],
+	"dependencies": {
+		"@cfworker/json-schema": "4.1.1"
+	},
+	"devDependencies": {
+		"@modelcontextprotocol/client": "2.3.1",
+		"@modelcontextprotocol/server": "2.3.1",
+		"@ractive-ch/tab-mcp": "workspace:*",
+		"happy-dom": "21.0.3"
+	}
 }
