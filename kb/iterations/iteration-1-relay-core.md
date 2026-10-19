@@ -5,7 +5,7 @@ description: >-
   The relay's tab WebSocket, stable addresses, the token store, the HTTP tunnel
   with limits, timeouts and keep-alives, and the health endpoint, tested with a
   scripted tab and the MCP SDK client.
-status: in-progress
+status: completed
 tags:
   - iteration
   - relay
