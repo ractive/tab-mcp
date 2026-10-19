@@ -20,6 +20,21 @@ const DOC = (id: string, extra: Record<string, unknown> = {}) => ({
 	...extra,
 });
 
+interface Pinned {
+	url: string;
+	host: string | undefined;
+	serverName: string | undefined;
+}
+
+/** The URL the fetch was meant for: the pinned URL with its Host header put back. */
+function original(url: string, init?: RequestInit): string {
+	const u = new URL(url);
+	const host = (init?.headers as Record<string, string> | undefined)?.["host"];
+	return host === undefined
+		? url
+		: `${u.protocol}//${host}${u.pathname}${u.search}`;
+}
+
 /** A fetcher with a fake DNS and a fake network. */
 function fetcher(
 	responder: (url: string) => Response,
@@ -27,15 +42,23 @@ function fetcher(
 	options: { allowedHosts?: string[] } = {},
 ) {
 	const calls: string[] = [];
+	const pinned: Pinned[] = [];
 	const f = new ClientMetadataFetcher({
 		lookup: async () => addresses,
-		fetch: (async (url: string | URL | Request) => {
-			calls.push(String(url));
-			return responder(String(url));
+		fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+			const meant = original(String(url), init);
+			calls.push(meant);
+			pinned.push({
+				url: String(url),
+				host: (init?.headers as Record<string, string> | undefined)?.["host"],
+				serverName: (init as { tls?: { serverName?: string } } | undefined)?.tls
+					?.serverName,
+			});
+			return responder(meant);
 		}) as typeof fetch,
 		...options,
 	});
-	return { f, calls };
+	return { f, calls, pinned };
 }
 
 async function reason(promise: Promise<unknown>): Promise<string> {
@@ -130,6 +153,66 @@ describe("threat model A3: SSRF guards", () => {
 			);
 			expect(calls).toEqual([]);
 		}
+	});
+
+	test("review finding 4: the fetch is pinned to the vetted address (IPv4 first), Host and TLS name kept", async () => {
+		const { f, pinned } = fetcher(
+			(url) => Response.json(DOC(url)),
+			["2606:4700::6810:1", "93.184.216.34"],
+		);
+		await f.get("https://ai.example/client.json");
+		expect(pinned).toEqual([
+			{
+				url: "https://93.184.216.34/client.json",
+				host: "ai.example",
+				serverName: "ai.example",
+			},
+		]);
+		const v6 = fetcher((url) => Response.json(DOC(url)), ["2606:4700::6810:1"]);
+		await v6.f.get("https://ai.example/client.json");
+		expect(v6.pinned[0]?.url).toBe("https://[2606:4700::6810:1]/client.json");
+	});
+
+	test("review finding 4: every failure from resolving to parsing shows one fixed message, no upstream status", async () => {
+		const messages = new Set<string>();
+		const cases: [Response, string[]][] = [
+			[
+				new Response("{}", {
+					status: 404,
+					headers: { "content-type": "application/json" },
+				}),
+				["93.184.216.34"],
+			],
+			[
+				new Response(null, {
+					status: 302,
+					headers: { location: "https://x.example/" },
+				}),
+				["93.184.216.34"],
+			],
+			[
+				new Response("<html>", { headers: { "content-type": "text/html" } }),
+				["93.184.216.34"],
+			],
+			[
+				new Response("{nope", {
+					headers: { "content-type": "application/json" },
+				}),
+				["93.184.216.34"],
+			],
+			[new Response("{}", { status: 500 }), ["10.0.0.1"]],
+		];
+		for (const [response, addresses] of cases) {
+			const { f } = fetcher(() => response, addresses);
+			try {
+				await f.get("https://ai.example/client.json");
+			} catch (error) {
+				messages.add((error as Error).message);
+			}
+		}
+		expect([...messages]).toEqual([
+			"The AI app's details could not be loaded from ai.example.",
+		]);
 	});
 
 	test("an unresolvable host is refused", async () => {
@@ -252,6 +335,15 @@ describe("threat model A3: SSRF guards", () => {
 		expect(await reason(f.get("https://claude.ai/oauth/x"))).toBe("accepted");
 	});
 
+	test("review finding 3: fetches across many hosts are capped together", async () => {
+		const { f } = fetcher(() => new Response("{}", { status: 500 }));
+		const reasons: string[] = [];
+		for (let i = 0; i < 32; i++)
+			reasons.push(await reason(f.get(`https://h${i}.example/c.json`)));
+		expect(reasons.slice(0, 30).every((r) => r === "fetch_failed")).toBe(true);
+		expect(reasons.slice(30)).toEqual(["rate_limited", "rate_limited"]);
+	});
+
 	test("fetches per host are rate-limited", async () => {
 		const { f } = fetcher(() => new Response("{}", { status: 500 }));
 		const reasons: string[] = [];
@@ -295,6 +387,33 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		expect(
 			await check(DOC(id, { redirect_uris: ["javascript:alert(1)"] })),
 		).toBe("invalid_metadata");
+		// Review finding 8: https, loopback http, reverse-domain private-use schemes only.
+		for (const uri of [
+			"file:///etc/passwd",
+			"blob:https://x.example/1",
+			"data:text/html,x",
+			"http://ai.example/callback",
+			"myapp:/callback",
+			"ftp://ai.example/cb",
+			"https://user:pw@ai.example/cb",
+		]) {
+			expect([uri, await check(DOC(id, { redirect_uris: [uri] }))]).toEqual([
+				uri,
+				"invalid_metadata",
+			]);
+		}
+		for (const uri of [
+			"https://ai.example/cb",
+			"http://localhost/callback",
+			"http://127.0.0.1/callback",
+			"http://[::1]/callback",
+			"com.example.app:/oauth/callback",
+		]) {
+			expect([uri, await check(DOC(id, { redirect_uris: [uri] }))]).toEqual([
+				uri,
+				"accepted",
+			]);
+		}
 		expect(await check([] as unknown as Record<string, unknown>)).toBe(
 			"invalid_metadata",
 		);
@@ -320,6 +439,24 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		);
 	});
 
+	test("review finding 7: a name with a web address in parentheses is refused", async () => {
+		expect(await check(DOC(id, { client_name: "Claude (claude.ai)" }))).toBe(
+			"invalid_metadata",
+		);
+		expect(
+			await check(DOC(id, { client_name: "Claude ( claude.ai/x )" })),
+		).toBe("invalid_metadata");
+		expect(
+			await check(DOC(id, { client_name: "Claude\u200B (claude.ai)" })),
+		).toBe("invalid_metadata");
+		expect(await check(DOC(id, { client_name: "Tool (beta 2)" }))).toBe(
+			"accepted",
+		);
+		expect(await check(DOC(id, { client_name: "Tool (v1.2)" }))).toBe(
+			"accepted",
+		);
+	});
+
 	test("Claude Code's published document is accepted", async () => {
 		const claude = "https://claude.ai/oauth/claude-code-client-metadata";
 		expect(
@@ -341,8 +478,25 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		).toBe("accepted");
 	});
 
-	test("names are cleaned for display: control and bidi characters, whitespace, length", () => {
-		expect(displayName("  Evil‮edoc\u0000 AI\n")).toBe("Evil edoc AI");
+	test("names are cleaned for display: control, format and invisible characters, whitespace, length", () => {
+		expect(displayName("  Evil\u202Eedoc\u0000 AI\n")).toBe("Eviledoc AI");
+		// Format (Cf) and invisible characters are removed (review finding 7).
+		for (const invisible of [
+			"\u200B",
+			"\u200C",
+			"\u200D",
+			"\u200E",
+			"\u200F",
+			"\u061C",
+			"\u2060",
+			"\uFEFF",
+			"\u00AD",
+			"\u3164",
+			"\u115F",
+		]) {
+			expect(displayName(`Cl${invisible}aude`)).toBe("Claude");
+		}
+		expect(displayName("A\u2028B")).toBe("A B");
 		expect([...displayName("x".repeat(100))]).toHaveLength(64);
 	});
 });
@@ -364,7 +518,8 @@ describe("caching per Cache-Control (5 min to 24 h)", () => {
 			new ClientMetadataFetcher({
 				lookup: async () => ["93.184.216.34"],
 				now: () => now,
-				fetch: (async (url: string) => {
+				fetch: (async (pinnedUrl: string, init?: RequestInit) => {
+					const url = original(pinnedUrl, init);
 					calls.push(url);
 					return Response.json(DOC(url), {
 						headers: { "cache-control": cacheControl },

@@ -69,16 +69,24 @@ async function defaultLookup(hostname: string): Promise<string[]> {
 	return records.map((r) => r.address);
 }
 
-/** Collapse whitespace, drop control characters, cap the length. */
+/**
+ * Invisible characters that are not format characters (`Cf`): Hangul and
+ * other fillers, the braille blank, combining grapheme joiner.
+ */
+const INVISIBLE = /[\u034F\u115F\u1160\u17B4\u17B5\u2800\u3164\uFFA0]/gu;
+
+/**
+ * Clean a self-declared name for display: control and line/paragraph
+ * separators become spaces; format characters (`Cf`: zero-width, bidi,
+ * word joiner, BOM, soft hyphen, …) and other invisible characters are
+ * removed; whitespace collapses; at most 64 characters (DEC-065).
+ */
 export function displayName(raw: string): string {
-	let cleaned = "";
-	for (const ch of raw.normalize("NFC")) {
-		const c = ch.codePointAt(0) ?? 0;
-		const control = c < 0x20 || (c >= 0x7f && c <= 0x9f);
-		// Bidi controls could reorder the text around the name.
-		const bidi = (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
-		cleaned += control || bidi ? " " : ch;
-	}
+	let cleaned = raw
+		.normalize("NFC")
+		.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
+		.replace(/\p{Cf}/gu, "")
+		.replace(INVISIBLE, "");
 	cleaned = cleaned.replace(/\s+/g, " ").trim();
 	const chars = [...cleaned];
 	return chars.length > MAX_NAME_LENGTH
@@ -112,6 +120,8 @@ function isIpLiteral(hostname: string): boolean {
 export class ClientMetadataFetcher {
 	readonly #cache = new Map<string, { meta: ClientMetadata; until: number }>();
 	readonly #perHost = new RateLimiter({ capacity: 5, refillPerSecond: 0.2 });
+	/** All fetches together: many attacker-owned hosts cannot add up (DEC-061). */
+	readonly #global = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
 	readonly #allowedHosts: readonly string[];
 	readonly #logger: Logger | undefined;
 	readonly #timeoutMs: number;
@@ -144,8 +154,14 @@ export class ClientMetadataFetcher {
 				"Too many requests for this AI app's details. Try again in a minute.",
 			);
 		}
-		await this.#checkAddresses(url);
-		const { meta, ttlMs } = await this.#fetchDocument(url, clientId);
+		if (!this.#global.take("all", now)) {
+			throw new ClientMetadataError(
+				"rate_limited",
+				"The relay is busy. Try again in a minute.",
+			);
+		}
+		const address = await this.#vettedAddress(url);
+		const { meta, ttlMs } = await this.#fetchDocument(url, clientId, address);
 		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
 			const oldest = this.#cache.keys().next().value;
 			if (oldest !== undefined) this.#cache.delete(oldest);
@@ -200,10 +216,7 @@ export class ClientMetadataFetcher {
 			);
 		}
 		if (isIpLiteral(url.hostname) && !this.#addressAllowed(url.hostname)) {
-			throw new ClientMetadataError(
-				"private_address",
-				"The AI app's client_id points to a private network address.",
-			);
+			throw this.#notLoaded("private_address", url);
 		}
 		return url;
 	}
@@ -213,79 +226,94 @@ export class ClientMetadataFetcher {
 		return this.#testMode !== undefined && isLoopbackHost(address);
 	}
 
-	/** Resolve the host and refuse it if any address is not public. */
-	async #checkAddresses(url: URL): Promise<void> {
+	/**
+	 * One fixed message for every failure from resolving to parsing, so the
+	 * page tells nothing about what answered (threat model A3, DEC-066). The
+	 * reason goes to the log.
+	 */
+	#notLoaded(reason: string, url: URL, detail = reason): ClientMetadataError {
+		this.#logger?.info("oauth.cimd_failed", { host: url.host, reason: detail });
+		return new ClientMetadataError(
+			reason,
+			`The AI app's details could not be loaded from ${url.host}.`,
+		);
+	}
+
+	/**
+	 * Resolve the host, refuse it if any address is not public, and return the
+	 * address to connect to (IPv4 first). The fetch is pinned to it, so a DNS
+	 * answer that changes between check and connect is never used.
+	 */
+	async #vettedAddress(url: URL): Promise<string> {
 		const hostname = url.hostname.replace(/^\[|\]$/g, "");
-		if (isIpLiteral(hostname)) return; // checked in #checkUrl
-		if (this.#testMode !== undefined && isLoopbackHost(hostname)) return;
+		if (isIpLiteral(hostname)) return hostname; // checked in #checkUrl
 		let addresses: string[];
 		try {
 			addresses = await this.#lookup(hostname);
 		} catch {
-			throw new ClientMetadataError(
-				"unresolvable",
-				`The AI app's host ${url.host} could not be found.`,
-			);
+			throw this.#notLoaded("unresolvable", url);
 		}
 		if (
 			addresses.length === 0 ||
 			!addresses.every((a) => this.#addressAllowed(a))
 		) {
-			throw new ClientMetadataError(
-				"private_address",
-				"The AI app's client_id points to a private network address.",
-			);
+			throw this.#notLoaded("private_address", url);
 		}
+		return (
+			addresses.find((a) => parseIpv4(a) !== undefined) ?? addresses[0] ?? ""
+		);
 	}
 
 	async #fetchDocument(
 		url: URL,
 		clientId: string,
+		address: string,
 	): Promise<{ meta: ClientMetadata; ttlMs: number }> {
-		const unreachable = (message: string) =>
-			new ClientMetadataError("fetch_failed", message);
+		const fail = (detail: string) =>
+			this.#notLoaded("fetch_failed", url, detail);
+		// Connect to the vetted address; Host and the TLS server name stay the
+		// original host, so the certificate is checked against it.
+		const pinned = new URL(clientId);
+		pinned.hostname = address.includes(":") ? `[${address}]` : address;
+		const hostname = url.hostname.replace(/^\[|\]$/g, "");
+		const tls =
+			url.protocol === "https:"
+				? {
+						tls: {
+							...(isIpLiteral(hostname) ? {} : { serverName: hostname }),
+							...(this.#testMode?.ca === undefined
+								? {}
+								: { ca: this.#testMode.ca }),
+						},
+					}
+				: {};
 		let response: Response;
 		try {
-			response = await this.#fetch(clientId, {
+			response = await this.#fetch(pinned.href, {
 				method: "GET",
 				redirect: "manual",
-				headers: { accept: "application/json" },
+				headers: { accept: "application/json", host: url.host },
 				signal: AbortSignal.timeout(this.#timeoutMs),
-				...(this.#testMode?.ca === undefined
-					? {}
-					: { tls: { ca: this.#testMode.ca } }),
+				...tls,
 			} as RequestInit);
 		} catch (error) {
-			this.#logger?.info("oauth.cimd_failed", {
-				host: url.host,
-				reason: error instanceof Error ? error.name : "unknown",
-			});
-			throw unreachable("The AI app's details could not be loaded.");
+			throw fail(
+				`fetch_failed:${error instanceof Error ? error.name : "unknown"}`,
+			);
 		}
 		try {
-			if (response.status >= 300 && response.status < 400) {
-				throw unreachable(
-					"The AI app's details are behind a redirect, which is not followed.",
-				);
-			}
-			if (response.status !== 200) {
-				throw unreachable(
-					`The AI app's details could not be loaded (HTTP ${response.status}).`,
-				);
-			}
+			if (response.status !== 200) throw fail(`status_${response.status}`);
 			const type = (response.headers.get("content-type") ?? "")
 				.split(";")[0]
 				?.trim()
 				.toLowerCase();
-			if (type !== "application/json") {
-				throw unreachable("The AI app's details are not JSON.");
-			}
-			const text = await this.#readLimited(response);
+			if (type !== "application/json") throw fail("not_json");
+			const text = await this.#readLimited(response, url);
 			let doc: unknown;
 			try {
 				doc = JSON.parse(text);
 			} catch {
-				throw unreachable("The AI app's details are not valid JSON.");
+				throw fail("bad_json");
 			}
 			const meta = validateDocument(doc, clientId, url);
 			return { meta, ttlMs: cacheMs(response.headers.get("cache-control")) };
@@ -294,12 +322,8 @@ export class ClientMetadataFetcher {
 		}
 	}
 
-	async #readLimited(response: Response): Promise<string> {
-		const tooLarge = () =>
-			new ClientMetadataError(
-				"too_large",
-				"The AI app's details are too large.",
-			);
+	async #readLimited(response: Response, url: URL): Promise<string> {
+		const tooLarge = () => this.#notLoaded("too_large", url);
 		const length = Number(response.headers.get("content-length") ?? "0");
 		if (length > this.#maxBytes) throw tooLarge();
 		const reader = response.body?.getReader();
@@ -321,10 +345,7 @@ export class ClientMetadataFetcher {
 				Buffer.concat(chunks),
 			);
 		} catch {
-			throw new ClientMetadataError(
-				"fetch_failed",
-				"The AI app's details are not valid UTF-8.",
-			);
+			throw this.#notLoaded("fetch_failed", url, "bad_utf8");
 		}
 	}
 }
@@ -353,6 +374,12 @@ export function validateDocument(
 	const name = d["client_name"];
 	if (typeof name !== "string" || displayName(name) === "") {
 		throw invalid("The AI app's details have no client_name.");
+	}
+	// "Claude (claude.ai)" from evil.example would read like a verified host.
+	if (/\(\s*[^()\s]*[a-z0-9-]\.[a-z]{2,}[^()]*\)/i.test(displayName(name))) {
+		throw invalid(
+			"The AI app's name contains a web address in parentheses, which this relay does not show.",
+		);
 	}
 	const uris = d["redirect_uris"];
 	if (
@@ -393,20 +420,28 @@ export function validateDocument(
 	};
 }
 
-/** An absolute URI without a fragment (RFC 6749 §3.1.2). */
+/** A private-use URI scheme in reverse-domain form (RFC 8252 §7.1), e.g. `com.example.app:`. */
+const PRIVATE_USE_SCHEME = /^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+:$/;
+
+/**
+ * A redirect URI the relay accepts (DEC-067): absolute, no fragment or
+ * credentials, and `https:`; `http:` only for loopback hosts (RFC 8252 §7.3);
+ * or a reverse-domain private-use scheme for native apps (RFC 8252 §7.1).
+ * Everything else (`file:`, `blob:`, `data:`, `javascript:`, plain `http:`,
+ * one-word custom schemes) is refused.
+ */
 export function isRedirectUri(value: string): boolean {
-	if (value.length > 2048) return false;
+	if (value.length > 2048 || value.includes("#")) return false;
+	let u: URL;
 	try {
-		const u = new URL(value);
-		return (
-			u.hash === "" &&
-			!value.includes("#") &&
-			u.protocol !== "javascript:" &&
-			u.protocol !== "data:"
-		);
+		u = new URL(value);
 	} catch {
 		return false;
 	}
+	if (u.username !== "" || u.password !== "") return false;
+	if (u.protocol === "https:") return u.hostname !== "";
+	if (u.protocol === "http:") return LOOPBACK_REDIRECT_HOSTS.has(u.hostname);
+	return PRIVATE_USE_SCHEME.test(u.protocol);
 }
 
 const LOOPBACK_REDIRECT_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
