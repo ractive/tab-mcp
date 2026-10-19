@@ -2,6 +2,7 @@
 
 ## 2026-10-19
 
+- Iteration 5a: npm release workflow for @ractive-ch/tab-mcp-client 0.1.0-alpha.0 (bootstrap proven on the branch), npm publishing steps, DEC-055 (release tags and dist-tags)
 - Iteration 2: browser library built; DEC-049 (own MCP subset after measuring the SDK) to DEC-054
 - Review of PR #1 fixed: DEC-047 (crash logging), DEC-048 (body-read deadline), Bun idle-timeout finding
 - Iteration 1 implemented on iter-1/relay-core; DEC-040 order and relay error codes documented
