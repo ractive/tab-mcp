@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 2: browser library"
 description: "The tab-side library: a small eager core with WebMCP-style registerTool, and on connect() the lazily loaded connection and MCP handler, pairing UI and consequential-tool confirmation."
-status: planned
+status: in-progress
 tags:
   - iteration
   - client

@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T11:00:00+02:00
+timestamp: 2026-10-20T14:00:00+02:00
 ---
 
 # Decision log
@@ -103,6 +103,8 @@ work). Source: [SDK research](/research/mcp-typescript-sdk-v2.md).
 **Amended by DEC-035:** the SDK part is loaded only on `connect()`, and iteration 2 first
 measures the bundle; if it is mostly unused features and Zod, the tab-side stateless subset
 is written by us and the SDK stays a test dependency.
+
+**Replaced for the tab by DEC-049** after the measurement: the tab runs its own subset.
 
 ## DEC-014: The relay does not depend on the MCP SDK at runtime
 
@@ -419,6 +421,18 @@ from [iteration 2](/iterations/iteration-2-client-library.md) and shown from ite
 A project with stricter requirements (own limits it cannot share, own operator, separate
 logs or store) gets its own relay instance instead ([iteration 6](/iterations/iteration-6-deployment-bunny.md)).
 
+## DEC-046: Deployments live outside this repository (owner)
+
+The open-source repository holds no deployment secrets and no owner
+infrastructure. The owner's hosted relay for `https://ractive.ch` is deployed
+from the private repository `ractive/ractive.ch` (`infra/relay/`, OpenTofu,
+state in the bunny storage zone `ractive-ch-terraform-state`), which may later manage
+more of ractive.ch on bunny.net. This project's release secrets (Docker Hub;
+npm via OIDC) stay here. Supersedes the owner-instance parts of DEC-043 and
+DEC-044; iteration 6 becomes generic, secret-free deployment docs and
+examples. Reason: one operator's secrets and infrastructure do not belong in a
+public, reusable project.
+
 ## DEC-047: Escaped errors are logged; rejections keep the relay running
 
 The relay handles errors per tab message and per request (a bad tab response fails only
@@ -440,6 +454,39 @@ would hold a socket forever. The relay reads bodies with its own deadline
 makes Bun close the socket. `server.timeout(req, 0)` (switching Bun's idle timer off) runs
 only right before an authenticated request is forwarded. From the review of PR #1.
 
+## DEC-049: The tab runs its own stateless MCP subset; the SDK stays in tests
+
+Measured at the start of iteration 2, as DEC-035 asks (`scripts/measure-sdk.ts` in the
+client package repeats it): a browser bundle of `createMcpHandler` + `McpServer` +
+`fromJsonSchema` from `@modelcontextprotocol/server` 2.3.1 is 309.5 KiB minified and
+81.3 KiB gzipped. By package (minified): the server package 194 KiB (63 %), zod 4 99 KiB
+(32 %), `@modelcontextprotocol/core` 16 KiB (5 %, OAuth metadata and error schemas the tab
+never uses). Inside the server package: zod schemas for two protocol revisions (the
+2025-11-25 legacy set is the larger), the `Protocol` engine, the era-classification ladder,
+`McpServer`/`Server`, the web-standard transport and `createMcpHandler`, MRTR, completions,
+bearer-auth and OAuth-metadata middleware, and an inlined `@cfworker/json-schema` (22 KiB
+minified, 5.9 KiB gzipped). The tab needs `server/discover`, `tools/list`, `tools/call`,
+`subscriptions/listen`, the request checks and argument validation: mostly unused features
+and zod, the case DEC-035 names.
+
+Decision: the tab-side subset is ours (`packages/tab-mcp-client/src/mcp.ts`), with
+`@cfworker/json-schema` 4.1.1 (MIT, the validator the SDK itself uses in browsers) for
+arguments. Sizes now: core 3.4 KiB gzipped (with the page), connection chunk 11.4 KiB
+gzipped including the validator (on `connect()`), default UI 2.1 KiB gzipped (when a
+dialog opens), instead of 81 KiB plus the core. No Apache-2.0 SDK code ships, so no NOTICE.
+Conformance: a test sends 36 requests (every rung of the 2026-07-28 check ladder,
+discover, list, call, errors, notifications, batches, posted responses, a base64 `Mcp-Name`)
+to our handler and to the SDK's `createMcpHandler(…, { legacy: "reject" })` and requires
+the same HTTP status, JSON-RPC error code and result shape; the SDK `Client` pinned to
+2026-07-28 calls tools end to end through the relay. Re-run both when the SDK or the spec
+changes. Kept from the SDK's behaviour: `ttlMs: 0` and `cacheScope: "private"` on
+`server/discover` and `tools/list` (the research note's 60 s would leave AI apps without a
+listen stream on a stale list), `ping` answered 404 / `-32601` (gone in 2026-07-28), an
+unknown tool `-32602` in band, failed argument validation an `isError` result,
+`tools/call` always as SSE and the rest as JSON. Tools must not use `x-mcp-header`
+(registration refuses it). Replaces the tab half of DEC-013; the relay is unaffected
+(DEC-014).
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
@@ -448,15 +495,3 @@ only right before an authenticated request is forwarded. From the review of PR #
 - [Bun runtime and publishing research](/research/bun-runtime-and-publishing.md)
 - [bunny.net research](/research/bunny-magic-containers.md)
 - [WebMCP registerTool](/research/webmcp-register-tool.md)
-
-## DEC-046: Deployments live outside this repository (owner)
-
-The open-source repository holds no deployment secrets and no owner
-infrastructure. The owner's hosted relay for `https://ractive.ch` is deployed
-from the private repository `ractive/ractive.ch` (`infra/relay/`, OpenTofu,
-state in the bunny storage zone `ractive-ch-terraform-state`), which may later manage
-more of ractive.ch on bunny.net. This project's release secrets (Docker Hub;
-npm via OIDC) stay here. Supersedes the owner-instance parts of DEC-043 and
-DEC-044; iteration 6 becomes generic, secret-free deployment docs and
-examples. Reason: one operator's secrets and infrastructure do not belong in a
-public, reusable project.
