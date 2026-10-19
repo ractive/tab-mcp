@@ -307,6 +307,8 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 				_meta: resultMeta({ [META_SUBSCRIPTION]: id }),
 			},
 		};
+		// This stream's own listener: two AI apps may both use the same id.
+		let own: { id: Id; send(m: unknown): void; end(): void } | undefined;
 		const stream = new ReadableStream<Uint8Array>({
 			start: (controller) => {
 				controller.enqueue(
@@ -340,6 +342,7 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 						}
 					},
 				};
+				own = listener;
 				listeners.add(listener);
 				signal.addEventListener("abort", () => {
 					listeners.delete(listener);
@@ -351,7 +354,7 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 				});
 			},
 			cancel: () => {
-				for (const l of listeners) if (l.id === id) listeners.delete(l);
+				if (own !== undefined) listeners.delete(own);
 			},
 		});
 		return new Response(stream, { status: 200, headers: SSE_HEADERS });

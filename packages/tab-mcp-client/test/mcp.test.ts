@@ -617,3 +617,32 @@ test("decodeHeaderValue", () => {
 	expect(decodeHeaderValue("=?base64?nope!?=")).toBeUndefined();
 	expect(decodeHeaderValue("=?base64?/w==?=")).toBeUndefined(); // not UTF-8
 });
+
+describe("review fixes", () => {
+	test("cancelling one listen stream keeps another with the same id", async () => {
+		const { registry, handler } = ours();
+		const open = async () => {
+			const res = await handler.handle(
+				request({
+					name: "",
+					body: rpc(1, "subscriptions/listen", {
+						notifications: { toolsListChanged: true },
+					}),
+				}),
+				{ grant: GRANT },
+			);
+			const reader = res.body?.getReader();
+			if (reader === undefined) throw new Error("no body");
+			await reader.read(); // the acknowledgement
+			return reader;
+		};
+		const first = await open();
+		const second = await open();
+		await first.cancel();
+		registry.register({ name: "late", description: "Late", execute: () => "" });
+		handler.toolsChanged();
+		const next = new TextDecoder().decode((await second.read()).value);
+		expect(next).toContain("notifications/tools/list_changed");
+		await second.cancel();
+	});
+});
