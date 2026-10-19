@@ -14,8 +14,15 @@ Configuration is read from environment variables:
   TAB_MCP_HOST                listen address (0.0.0.0)
   TAB_MCP_ALLOWED_ORIGINS     comma-separated page origins allowed to connect; empty = none;
                               * = any website (open relay, logs a warning)
+  TAB_MCP_SITES               JSON array of sites with their own app name or limits, e.g.
+                              [{"origin":"https://ractive.ch","name":"saturnus",
+                                "limits":{"maxConcurrentRequests":4}}]
+                              (a site here needs no entry in TAB_MCP_ALLOWED_ORIGINS)
+  TAB_MCP_CLIENT_ID_HOSTS     comma-separated hosts whose AI apps may connect
+                              (client id metadata documents); empty = any
   TAB_MCP_TRUST_PROXY         none | x-real-ip | x-forwarded-for (none)
-  TAB_MCP_CORS                on | off: CORS without credentials on the MCP endpoint (on)
+  TAB_MCP_CORS                on | off: CORS without credentials on the MCP, OAuth
+                              metadata, token and revoke endpoints (on)
   TAB_MCP_STORE               sqlite | memory (sqlite)
   TAB_MCP_SQLITE_PATH         SQLite file for grants and token hashes (tab-mcp.db)
   TAB_MCP_MAX_SESSIONS        tab sessions in total (500)
@@ -27,7 +34,8 @@ Configuration is read from environment variables:
   TAB_MCP_SESSION_LIFETIME_S  absolute tab session lifetime (43200)
   TAB_MCP_HEARTBEAT_S         protocol ping interval (25)
   TAB_MCP_BODY_TIMEOUT_S      deadline for receiving an MCP request body (10)
-  TAB_MCP_MAX_MESSAGE_BYTES   request body and WebSocket message limit (1048576)
+  TAB_MCP_MAX_MESSAGE_BYTES   request body and WebSocket message limit (1048576;
+                              at least 16384)
   TAB_MCP_ACCESS_TOKEN_TTL_S  access token lifetime (3600)
   TAB_MCP_REFRESH_TOKEN_TTL_S refresh token lifetime (2592000)
   TAB_MCP_LOG_LEVEL           error | warn | info | debug (info); bodies are never logged

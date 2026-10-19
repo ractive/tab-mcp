@@ -1,7 +1,8 @@
 /**
  * Integration: the relay as a separate process (`bun src/main.ts`) with a
  * SQLite store, a scripted tab and the MCP SDK client. Tokens are issued by
- * writing into the same SQLite file (OAuth comes in iteration 3).
+ * writing into the same SQLite file: the binary has no test switch for a
+ * loopback CIMD fixture, so the OAuth flow runs in-process (oauth.test.ts).
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";

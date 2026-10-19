@@ -84,6 +84,8 @@ export interface TabOptions {
 	pong?: boolean;
 	/** Handles `http.request`; default: the SDK handler with test tools. */
 	onRequest?: RequestHandler;
+	/** The app name sent in hello. */
+	app?: string;
 }
 
 /** A scripted (non-browser) tab: Bun's WebSocket plus the SDK handler. */
@@ -94,6 +96,8 @@ export class ScriptedTab {
 	readonly opened: Promise<void>;
 	readonly closed: Promise<{ code: number; reason: string }>;
 	session: SessionMessage | undefined;
+	/** The latest pairing code the relay sent (codes are not consumed by `next`). */
+	pairingCode: string | undefined;
 	readonly #options: TabOptions;
 	readonly #waiters: {
 		match: (m: RelayMessage) => boolean;
@@ -137,6 +141,9 @@ export class ScriptedTab {
 			type: "hello",
 			library: { name: "scripted-tab", version: "0.0.0" },
 			page: { title: "Test page" },
+			...(this.#options.app === undefined
+				? {}
+				: { app: { name: this.#options.app } }),
 			secret: this.secret,
 		});
 		const m = await this.next("session");
@@ -161,6 +168,22 @@ export class ScriptedTab {
 		});
 	}
 
+	/** Start pairing and wait for the first code. */
+	async startPairing(): Promise<string> {
+		this.send({ type: "pairing.start" });
+		const m = await this.next("pairing.code");
+		return (m as { code: string }).code;
+	}
+
+	/** Wait for a pairing code other than `previous`. */
+	async nextCode(previous: string | undefined): Promise<string> {
+		await waitFor(
+			() => this.pairingCode !== undefined && this.pairingCode !== previous,
+			"a new pairing code",
+		);
+		return this.pairingCode ?? "";
+	}
+
 	signalFor(id: string): AbortSignal | undefined {
 		return this.#controllers.get(id)?.signal;
 	}
@@ -171,6 +194,7 @@ export class ScriptedTab {
 
 	#onMessage(text: string): void {
 		const msg = JSON.parse(text) as RelayMessage;
+		if (msg.type === "pairing.code") this.pairingCode = msg.code;
 		if (msg.type === "ping" && this.#options.pong !== false) {
 			this.send({ type: "pong", t: msg.t });
 		}

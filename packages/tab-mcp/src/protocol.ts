@@ -5,6 +5,8 @@
  * normative description is `kb/design/protocol.md` (later `docs/protocol.md`).
  */
 
+import { isAppName, MAX_APP_NAME } from "./config.ts";
+
 export const SUBPROTOCOL = "tab-mcp.v1";
 
 /** The only MCP revision the relay serves (DEC-033). */
@@ -45,7 +47,7 @@ export interface GrantRef {
 	scopes: string[];
 }
 
-/** A connected AI app as listed to the tab (filled from iteration 3 on). */
+/** A connected AI app as listed to the tab. */
 export interface GrantInfo {
 	grantId: string;
 	client: { id: string; name: string; host: string };
@@ -59,6 +61,8 @@ export interface SessionMessage {
 	sessionId: string;
 	address: string;
 	origin: string;
+	/** The name `/authorize` shows: the site's configured name, else the page's. */
+	appName?: string;
 	expiresAt: string;
 	limits: Limits;
 	grants: GrantInfo[];
@@ -85,6 +89,20 @@ export interface HttpCancelMessage {
 	id: string;
 	reason: "client_closed" | "timeout" | "error";
 }
+export interface PairingCodeMessage {
+	type: "pairing.code";
+	code: string;
+	expiresAt: string;
+}
+export interface GrantAddedMessage {
+	type: "grant.added";
+	grant: GrantInfo;
+}
+export interface GrantRemovedMessage {
+	type: "grant.removed";
+	grantId: string;
+	reason: "revoked" | "reuse_detected" | "expired";
+}
 export interface ErrorMessage {
 	type: "error";
 	code: ErrorCode;
@@ -97,6 +115,9 @@ export type RelayMessage =
 	| ByeMessage
 	| HttpRequestMessage
 	| HttpCancelMessage
+	| PairingCodeMessage
+	| GrantAddedMessage
+	| GrantRemovedMessage
 	| ErrorMessage;
 
 export type ErrorCode =
@@ -112,6 +133,8 @@ export interface HelloMessage {
 	type: "hello";
 	library: { name: string; version: string };
 	page: { title: string };
+	/** Self-declared app name (DEC-045), unverified. */
+	app?: { name: string };
 	secret: string;
 }
 export interface PongMessage {
@@ -146,8 +169,25 @@ export interface TabErrorMessage {
 	message: string;
 	id?: string;
 }
+export interface PairingStartMessage {
+	type: "pairing.start";
+}
+export interface PairingStopMessage {
+	type: "pairing.stop";
+}
+export interface GrantRevokeMessage {
+	type: "grant.revoke";
+	grantId: string;
+}
+export interface GrantsRevokeAllMessage {
+	type: "grants.revokeAll";
+}
 export type TabMessage =
 	| HelloMessage
+	| PairingStartMessage
+	| PairingStopMessage
+	| GrantRevokeMessage
+	| GrantsRevokeAllMessage
 	| PongMessage
 	| ByeMessage
 	| HttpResponseMessage
@@ -245,15 +285,20 @@ export function parseTabMessage(text: string): ParseResult {
 				return bad("hello.page must be {title}");
 			}
 			if (typeof v["secret"] !== "string") return bad("hello.secret missing");
-			return {
-				ok: true,
-				message: {
-					type,
-					library: { name: library["name"], version: library["version"] },
-					page: { title: page["title"] },
-					secret: v["secret"],
-				},
+			const app = v["app"];
+			if (app !== undefined && (!isObject(app) || !isAppName(app["name"]))) {
+				return bad(`hello.app.name must be 1-${MAX_APP_NAME} characters`);
+			}
+			const hello: HelloMessage = {
+				type,
+				library: { name: library["name"], version: library["version"] },
+				page: { title: page["title"] },
+				secret: v["secret"],
 			};
+			if (isObject(app) && isAppName(app["name"])) {
+				hello.app = { name: app["name"] };
+			}
+			return { ok: true, message: hello };
 		}
 		case "pong": {
 			const t = v["t"];
@@ -296,6 +341,15 @@ export function parseTabMessage(text: string): ParseResult {
 		case "http.response.end": {
 			if (id === undefined) return bad("http.response.end.id missing");
 			return { ok: true, message: { type, id } };
+		}
+		case "pairing.start":
+		case "pairing.stop":
+		case "grants.revokeAll":
+			return { ok: true, message: { type } };
+		case "grant.revoke": {
+			const grantId = v["grantId"];
+			if (!isId(grantId)) return bad("grant.revoke.grantId missing");
+			return { ok: true, message: { type, grantId } };
 		}
 		case "error": {
 			const code = v["code"];

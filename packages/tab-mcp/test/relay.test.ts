@@ -320,7 +320,7 @@ describe("MCP endpoint checks", () => {
 	});
 
 	test("invalid JSON, batches and oversized bodies are refused", async () => {
-		const r = relay({ maxMessageBytes: 1000 });
+		const r = relay({ maxMessageBytes: 16_384 });
 		const address = r.relay.addressFor(newSecret());
 		const bad = await mcpPost(address, "{nope");
 		expect(bad.status).toBe(400);
@@ -333,7 +333,7 @@ describe("MCP endpoint checks", () => {
 			address,
 			rpc(1, "tools/call", {
 				name: "echo",
-				arguments: { text: "x".repeat(2000) },
+				arguments: { text: "x".repeat(20_000) },
 			}),
 		);
 		expect(big.status).toBe(413);
@@ -831,7 +831,7 @@ describe("tunnel", () => {
 	});
 
 	test("a tab message over the limit fails that request with 502", async () => {
-		const r = relay({ maxMessageBytes: 2000 });
+		const r = relay({ maxMessageBytes: 16_384 });
 		const t = tab(r, {
 			onRequest: (msg, tab) => {
 				tab.send({
@@ -839,7 +839,7 @@ describe("tunnel", () => {
 					id: msg.id,
 					status: 200,
 					headers: {},
-					body: "x".repeat(5000),
+					body: "x".repeat(40_000),
 				});
 			},
 		});

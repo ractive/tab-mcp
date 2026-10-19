@@ -3,9 +3,10 @@ import {
 	isWellFormedSecret,
 	shortAddress,
 } from "./address.ts";
-import type { RelayConfig } from "./config.ts";
+import type { RelayConfig, Site, SiteLimits } from "./config.ts";
 import { Exchange, RelayErrorCode, type RpcId } from "./exchange.ts";
 import type { Logger } from "./log.ts";
+import { PairingCodes } from "./oauth/pairing.ts";
 import {
 	type ByeReason,
 	CloseCode,
@@ -39,6 +40,12 @@ export interface SessionHost {
 	claimAddress(session: TabSession): TabSession | undefined;
 	/** Called once when a session is over. */
 	released(session: TabSession): void;
+	/** The tab pressed Disconnect for one app; false if the grant is not this address's. */
+	revokeGrant(session: TabSession, grantId: string): Promise<boolean>;
+	/** The tab revokes every grant of its address ("New address"). */
+	revokeAll(session: TabSession): Promise<void>;
+	/** Pairing code lifetime (tests shorten it). */
+	readonly pairingCodeTtlMs?: number;
 }
 
 export interface ForwardInput {
@@ -53,15 +60,16 @@ export interface ForwardInput {
 	onDone: (exchange: Exchange) => void;
 }
 
-export function limitsOf(config: RelayConfig): Limits {
+/** The limits announced to the tab (protocol: `session.limits`). */
+export function limitsOf(limits: SiteLimits | RelayConfig): Limits {
 	return {
-		maxMessageBytes: config.maxMessageBytes,
-		maxBodyBytes: config.maxMessageBytes,
-		requestTimeoutMs: config.requestTimeoutMs,
-		idleTimeoutMs: config.idleTimeoutMs,
-		heartbeatMs: config.heartbeatMs,
-		keepAliveMs: config.keepAliveMs,
-		maxConcurrentRequests: config.maxConcurrentRequests,
+		maxMessageBytes: limits.maxMessageBytes,
+		maxBodyBytes: limits.maxMessageBytes,
+		requestTimeoutMs: limits.requestTimeoutMs,
+		idleTimeoutMs: limits.idleTimeoutMs,
+		heartbeatMs: limits.heartbeatMs,
+		keepAliveMs: limits.keepAliveMs,
+		maxConcurrentRequests: limits.maxConcurrentRequests,
 	};
 }
 
@@ -86,9 +94,15 @@ export class TabSession {
 	readonly sessionId = newId("s");
 	readonly ip: string;
 	readonly origin: string;
+	/** The site this session's origin belongs to (DEC-045). */
+	readonly site: Site;
 	readonly openedAt = Date.now();
 	/** Set once `hello` was accepted. */
 	addressId: string | undefined;
+	/** The app name `/authorize` shows: the site's name, else the page's claim. */
+	appName: string | undefined;
+	/** Pairing codes while the tab's dialog is open (DEC-028). */
+	readonly codes: PairingCodes;
 	readonly pending = new Map<string, Exchange>();
 
 	readonly #ws: SocketLike;
@@ -101,11 +115,30 @@ export class TabSession {
 	#heartbeatTimer: Timer | undefined;
 	#lifetimeTimer: Timer | undefined;
 
-	constructor(ws: SocketLike, ip: string, origin: string, host: SessionHost) {
+	constructor(
+		ws: SocketLike,
+		ip: string,
+		origin: string,
+		site: Site,
+		host: SessionHost,
+	) {
 		this.#ws = ws;
 		this.ip = ip;
 		this.origin = origin;
+		this.site = site;
 		this.#host = host;
+		this.codes = new PairingCodes(
+			(code, expiresAt) => {
+				this.send({
+					type: "pairing.code",
+					code,
+					expiresAt: new Date(expiresAt).toISOString(),
+				});
+			},
+			host.pairingCodeTtlMs === undefined
+				? {}
+				: { ttlMs: host.pairingCodeTtlMs },
+		);
 		this.#helloTimer = setTimeout(() => {
 			if (this.#state === "new") {
 				this.#protocolError("bad_message", "no hello in time");
@@ -115,6 +148,11 @@ export class TabSession {
 
 	get ready(): boolean {
 		return this.#state === "ready";
+	}
+
+	/** The limits of this session (its site's). */
+	get limits(): SiteLimits {
+		return this.site.limits;
 	}
 
 	/** Send one message; false if Bun dropped it under backpressure (DEC-021). */
@@ -143,8 +181,7 @@ export class TabSession {
 			this.#protocolError("bad_message", "binary frames are not allowed");
 			return;
 		}
-		const tooLarge =
-			Buffer.byteLength(data) > this.#host.config.maxMessageBytes;
+		const tooLarge = Buffer.byteLength(data) > this.limits.maxMessageBytes;
 		const parsed = parseTabMessage(data);
 		if (tooLarge) {
 			const id = messageId(parsed);
@@ -205,7 +242,7 @@ export class TabSession {
 				this.#protocolError("bad_message", "hello expected");
 				return;
 			}
-			await this.#hello(msg.secret, msg.library);
+			await this.#hello(msg.secret, msg.library, msg.app?.name);
 			return;
 		}
 		if (this.#state === "hello") return; // still answering hello
@@ -218,6 +255,20 @@ export class TabSession {
 				return;
 			case "bye":
 				this.end(CloseCode.normal, "bye");
+				return;
+			case "pairing.start":
+				if (this.site.pairing === "code") this.codes.start();
+				return;
+			case "pairing.stop":
+				this.codes.stop();
+				return;
+			case "grant.revoke":
+				if (!(await this.#host.revokeGrant(this, msg.grantId))) {
+					this.#sendError("unknown_id", "unknown grant");
+				}
+				return;
+			case "grants.revokeAll":
+				await this.#host.revokeAll(this);
 				return;
 			case "error":
 				this.#host.logger.debug("tab.error", {
@@ -246,6 +297,7 @@ export class TabSession {
 	async #hello(
 		secret: string,
 		library: { name: string; version: string },
+		appName: string | undefined,
 	): Promise<void> {
 		if (!isWellFormedSecret(secret)) {
 			this.#protocolError(
@@ -257,6 +309,7 @@ export class TabSession {
 		clearTimeout(this.#helloTimer);
 		this.#state = "hello";
 		this.addressId = addressIdFromSecret(secret);
+		this.appName = this.site.name ?? appName;
 		const replaced = this.#host.claimAddress(this);
 		if (replaced !== undefined) {
 			replaced.end(
@@ -289,23 +342,24 @@ export class TabSession {
 		}
 		if (this.#state !== "hello") return; // closed meanwhile
 
-		const config = this.#host.config;
-		const expiresAt = this.openedAt + config.sessionLifetimeMs;
+		const limits = this.limits;
+		const expiresAt = this.openedAt + limits.sessionLifetimeMs;
 		this.#state = "ready";
 		const sent = this.send({
 			type: "session",
 			sessionId: this.sessionId,
 			address: `${this.#host.publicUrl()}/a/${this.addressId}/mcp`,
 			origin: this.origin,
+			...(this.appName === undefined ? {} : { appName: this.appName }),
 			expiresAt: new Date(expiresAt).toISOString(),
-			limits: limitsOf(config),
+			limits: limitsOf(limits),
 			grants,
 		});
 		if (!sent) {
 			this.end(CloseCode.policyViolation, "send failed");
 			return;
 		}
-		this.#heartbeatTimer = setInterval(() => this.#tick(), config.heartbeatMs);
+		this.#heartbeatTimer = setInterval(() => this.#tick(), limits.heartbeatMs);
 		this.#lifetimeTimer = setTimeout(
 			() =>
 				this.end(
@@ -335,7 +389,7 @@ export class TabSession {
 		// which still caps it.
 		if (
 			this.pending.size === 0 &&
-			Date.now() - this.#lastRequestAt >= this.#host.config.idleTimeoutMs
+			Date.now() - this.#lastRequestAt >= this.limits.idleTimeoutMs
 		) {
 			this.end(CloseCode.idleTimeout, "idle", "idle");
 			return;
@@ -348,14 +402,14 @@ export class TabSession {
 	forward(input: ForwardInput): Exchange {
 		this.#lastRequestAt = Date.now();
 		const id = `r${++this.#nextRequest}`;
-		const config = this.#host.config;
+		const limits = this.limits;
 		const exchange = new Exchange({
 			id,
 			rpcId: input.rpcId,
 			isListen: input.isListen,
-			requestTimeoutMs: config.requestTimeoutMs,
-			keepAliveMs: config.keepAliveMs,
-			maxBodyBytes: limitsOf(config).maxBodyBytes,
+			requestTimeoutMs: limits.requestTimeoutMs,
+			keepAliveMs: limits.keepAliveMs,
+			maxBodyBytes: limitsOf(limits).maxBodyBytes,
 			extraHeaders: input.extraHeaders,
 			cancel: (reason) => {
 				if (!this.send({ type: "http.cancel", id, reason })) {
@@ -412,6 +466,7 @@ export class TabSession {
 		if (this.#state === "ended") return;
 		const wasReady = this.#state === "ready" || this.#state === "hello";
 		this.#state = "ended";
+		this.codes.stop();
 		clearTimeout(this.#helloTimer);
 		clearInterval(this.#heartbeatTimer);
 		clearTimeout(this.#lifetimeTimer);
