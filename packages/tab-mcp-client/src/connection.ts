@@ -70,6 +70,23 @@ const KNOWN_TYPES = new Set([
 	"error",
 ]);
 
+/**
+ * Split text into pieces of at most `max` UTF-16 units, never between the two
+ * halves of a surrogate pair (a lone half would not survive JSON and UTF-8).
+ */
+export function* pieces(text: string, max: number): Generator<string> {
+	let i = 0;
+	while (i < text.length) {
+		let end = Math.min(i + max, text.length);
+		const last = text.charCodeAt(end - 1);
+		if (end < text.length && last >= 0xd800 && last <= 0xdbff) {
+			end += end - 1 > i ? -1 : 1; // keep the pair together
+		}
+		yield text.slice(i, end);
+		i = end;
+	}
+}
+
 /** Open the WebSocket and run the session. */
 export function openConnection(
 	host: ConnectionHost,
@@ -208,12 +225,9 @@ export function openConnection(
 					status: response.status,
 					headers,
 				});
-				for (let i = 0; i < body.length && live(); i += maxChunk) {
-					send({
-						type: "http.response.chunk",
-						id: msg.id,
-						data: body.slice(i, i + maxChunk),
-					});
+				for (const data of pieces(body, maxChunk)) {
+					if (!live()) break;
+					send({ type: "http.response.chunk", id: msg.id, data });
 				}
 				if (live()) send({ type: "http.response.end", id: msg.id });
 				return;
@@ -233,12 +247,8 @@ export function openConnection(
 				const { done, value } = await reader.read();
 				if (done || !live()) break;
 				const text = decoder.decode(value, { stream: true });
-				for (let i = 0; i < text.length; i += maxChunk) {
-					send({
-						type: "http.response.chunk",
-						id: msg.id,
-						data: text.slice(i, i + maxChunk),
-					});
+				for (const data of pieces(text, maxChunk)) {
+					send({ type: "http.response.chunk", id: msg.id, data });
 				}
 			}
 			if (live()) send({ type: "http.response.end", id: msg.id });

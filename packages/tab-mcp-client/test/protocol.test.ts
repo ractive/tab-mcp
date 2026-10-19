@@ -368,3 +368,16 @@ describe("grants", () => {
 		expect(t.state).toBe("connected");
 	});
 });
+
+test("pieces never split a surrogate pair", async () => {
+	const { pieces } = await import("../src/connection.ts");
+	const text = "ab😀cd😀😀e";
+	for (let max = 1; max <= text.length; max++) {
+		const parts = [...pieces(text, max)];
+		expect(parts.join("")).toBe(text);
+		for (const part of parts) {
+			expect(part.length).toBeLessThanOrEqual(Math.max(max, 2));
+			expect(() => encodeURIComponent(part)).not.toThrow(); // throws on a lone surrogate
+		}
+	}
+});
