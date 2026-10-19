@@ -166,7 +166,9 @@ are outside the JSON-RPC reserved range:
 | `-31003` | 503 | The page closed its connection while the request was in flight. |
 | `-31004` | 429 | Too many concurrent requests for this page. |
 | `-31005` | 503 | The WebSocket send was dropped under backpressure (DEC-021). |
-| `-31006` | 502 | The page's response exceeded `maxMessageBytes`. |
+| `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; listen streams excepted). |
+| `-31007` | 502 | The page sent an invalid response (malformed message, header value that is not an RFC 9110 field value, body with status 204/205/304). |
+| `-31008` | 503 | The token store is unavailable; sent with `Retry-After`, so clients keep their tokens. |
 
 The relay notices that an AI app closed a streamed response when it next writes to it, so
 at the latest after one keep-alive interval; then it sends `http.cancel`.

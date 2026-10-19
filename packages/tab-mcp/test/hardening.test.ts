@@ -7,6 +7,7 @@ import { newSecret } from "../src/address.ts";
 import { Exchange } from "../src/exchange.ts";
 import { parseTabMessage } from "../src/protocol.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
+import { MemoryTokenStore } from "../src/store/memory.ts";
 import {
 	mcpPost,
 	rpc,
@@ -390,5 +391,29 @@ describe("4: an open listen stream keeps the session from going idle", () => {
 		abort.abort();
 		expect(await t.next("bye")).toEqual({ type: "bye", reason: "idle" });
 		expect((await t.closed).code).toBe(4002);
+	});
+});
+
+describe("5: a failing token store is not an invalid token", () => {
+	test("a store error answers 503 with Retry-After, so clients keep their tokens", async () => {
+		const store = new MemoryTokenStore();
+		store.get = async () => {
+			throw new Error("database is locked");
+		};
+		const r = relay({ store });
+		const res = await mcpPost(
+			r.relay.addressFor(newSecret()),
+			rpc(4, "tools/list"),
+			{ token: "tmcp_at_whatever" },
+		);
+		expect(res.status).toBe(503);
+		expect(res.headers.get("retry-after")).toBe("5");
+		expect(res.headers.get("www-authenticate")).toBeNull();
+		const body = (await res.json()) as { id: number; error: { code: number } };
+		expect(body.id).toBe(4);
+		expect(body.error.code).toBe(-31008);
+		expect(r.logs.events("store.error")).toEqual([
+			expect.objectContaining({ op: "get" }),
+		]);
 	});
 });

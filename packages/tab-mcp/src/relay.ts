@@ -257,7 +257,7 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 	async function authenticate(
 		req: Request,
 		addressId: string,
-	): Promise<TokenRecord | "missing" | "invalid"> {
+	): Promise<TokenRecord | "missing" | "invalid" | "unavailable"> {
 		const header = req.headers.get("authorization");
 		if (header === null) return "missing";
 		const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/i.exec(header.trim());
@@ -271,7 +271,7 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				op: "get",
 				message: error instanceof Error ? error.message : "unknown",
 			});
-			return "invalid";
+			return "unavailable";
 		}
 		if (
 			record === undefined ||
@@ -441,6 +441,17 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		}
 
 		const auth = await authenticate(req, addressId);
+		if (auth === "unavailable") {
+			// Not the token's fault: a 401 would make clients drop valid tokens.
+			logDone(503, method, { reason: "store_unavailable" });
+			return rpcError(
+				503,
+				rpcId,
+				RelayErrorCode.storeUnavailable,
+				"The relay cannot check tokens right now. Try again shortly.",
+				{ ...corsHeaders, "retry-after": "5" },
+			);
+		}
 		if (typeof auth === "string") {
 			logDone(401, method);
 			return json(
