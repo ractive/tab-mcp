@@ -35,3 +35,29 @@ type = "list"
 
 [schema.default.properties.timestamp]
 type = "datetime-tz"
+
+[schema.types]
+
+[schema.types.iteration]
+required = ["title", "status", "description"]
+
+[schema.types.iteration.properties]
+
+[schema.types.iteration.properties.status]
+type = "enum"
+values = ["planned", "in-progress", "completed"]
+
+[schema.types.decision-log]
+required = ["title"]
+
+[schema.types.research]
+required = ["title", "description"]
+
+[schema.types.design]
+required = ["title", "description"]
+
+[schema.types.questions]
+required = ["title"]
+
+[schema.types.operations]
+required = ["title", "description"]
