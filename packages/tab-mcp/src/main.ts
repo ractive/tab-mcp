@@ -26,6 +26,7 @@ Configuration is read from environment variables:
   TAB_MCP_IDLE_TIMEOUT_S      close a tab session without MCP requests (3600)
   TAB_MCP_SESSION_LIFETIME_S  absolute tab session lifetime (43200)
   TAB_MCP_HEARTBEAT_S         protocol ping interval (25)
+  TAB_MCP_BODY_TIMEOUT_S      deadline for receiving an MCP request body (10)
   TAB_MCP_MAX_MESSAGE_BYTES   request body and WebSocket message limit (1048576)
   TAB_MCP_ACCESS_TOKEN_TTL_S  access token lifetime (3600)
   TAB_MCP_REFRESH_TOKEN_TTL_S refresh token lifetime (2592000)

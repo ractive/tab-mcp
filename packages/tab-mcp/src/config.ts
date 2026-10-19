@@ -28,6 +28,8 @@ export interface RelayConfig {
 	sessionLifetimeMs: number;
 	heartbeatMs: number;
 	helloTimeoutMs: number;
+	/** Deadline for receiving an MCP request body (Bun's idle timer does not cover it). */
+	bodyTimeoutMs: number;
 	/** Limit for MCP request bodies and for messages from the tab. */
 	maxMessageBytes: number;
 	accessTokenTtlMs: number;
@@ -60,6 +62,7 @@ export const DEFAULT_CONFIG: Readonly<RelayConfig> = {
 	sessionLifetimeMs: 43_200_000,
 	heartbeatMs: 25_000,
 	helloTimeoutMs: 10_000,
+	bodyTimeoutMs: 10_000,
 	maxMessageBytes: 1_048_576,
 	accessTokenTtlMs: 3_600_000,
 	refreshTokenTtlMs: 2_592_000_000,
@@ -129,6 +132,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		"sessionLifetimeMs",
 		"heartbeatMs",
 		"helloTimeoutMs",
+		"bodyTimeoutMs",
 		"maxMessageBytes",
 		"accessTokenTtlMs",
 		"refreshTokenTtlMs",
@@ -242,6 +246,7 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 	set("idleTimeoutMs", seconds(env, "TAB_MCP_IDLE_TIMEOUT_S"));
 	set("sessionLifetimeMs", seconds(env, "TAB_MCP_SESSION_LIFETIME_S"));
 	set("heartbeatMs", seconds(env, "TAB_MCP_HEARTBEAT_S"));
+	set("bodyTimeoutMs", seconds(env, "TAB_MCP_BODY_TIMEOUT_S"));
 	set("maxMessageBytes", integer(env, "TAB_MCP_MAX_MESSAGE_BYTES"));
 	set("accessTokenTtlMs", seconds(env, "TAB_MCP_ACCESS_TOKEN_TTL_S"));
 	set("refreshTokenTtlMs", seconds(env, "TAB_MCP_REFRESH_TOKEN_TTL_S"));

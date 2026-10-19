@@ -298,7 +298,27 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		}
 		let bytes: ArrayBuffer;
 		try {
-			bytes = await req.arrayBuffer();
+			// Bun's idle timeout does not fire while a body is being read, so a
+			// client that stalls mid-body would hold the socket; our own deadline
+			// answers 408 and closes the connection.
+			const reading = req.arrayBuffer();
+			reading.catch(() => {}); // rejects once the socket is closed
+			let timer: Timer | undefined;
+			const deadline = new Promise<"timeout">((resolve) => {
+				timer = setTimeout(() => resolve("timeout"), config.bodyTimeoutMs);
+			});
+			const result = await Promise.race([reading, deadline]);
+			clearTimeout(timer);
+			if (result === "timeout") {
+				return rpcError(
+					408,
+					undefined,
+					-32600,
+					"The request body did not arrive in time.",
+					{ ...corsHeaders, connection: "close" },
+				);
+			}
+			bytes = result;
 		} catch {
 			return rpcError(
 				400,
@@ -393,7 +413,6 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		addressId: string,
 	): Promise<Response> {
 		const started = Date.now();
-		server.timeout(req, 0); // our own timers apply (Bun research, finding 1)
 		const logDone = (
 			status: number,
 			method: string,
@@ -477,6 +496,11 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				return "";
 			}
 		})();
+		// Only now, for an authenticated request that is about to be forwarded,
+		// switch off Bun's idle timer: our own request timer and keep-alives take
+		// over (Bun research, finding 1). Body reading and every unauthenticated
+		// path keep the idle timeout, so a stalled client cannot hold a socket.
+		server.timeout(req, 0);
 		const exchange = session.forward({
 			method: "POST",
 			headers,

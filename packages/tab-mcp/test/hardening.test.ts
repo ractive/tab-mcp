@@ -3,6 +3,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { newSecret } from "../src/address.ts";
 import { parseTabMessage } from "../src/protocol.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import {
@@ -175,4 +176,80 @@ describe("1: a tab cannot crash the relay with bad responses", () => {
 		const res = await mcpPost(address, rpc(1, "tools/list"), { token });
 		expect(res.status).toBe(502);
 	});
+});
+
+/** Open a raw TCP connection, send `data`, and report when the server closes it. */
+async function stalledRequest(
+	port: number,
+	data: string,
+): Promise<{ closedAfterMs: Promise<number>; received: () => string }> {
+	const started = Date.now();
+	let resolveClosed: (ms: number) => void = () => {};
+	const closedAfterMs = new Promise<number>((resolve) => {
+		resolveClosed = resolve;
+	});
+	let received = "";
+	const socket = await Bun.connect({
+		hostname: "127.0.0.1",
+		port,
+		socket: {
+			data: (_s, chunk) => {
+				received += new TextDecoder().decode(chunk);
+			},
+			close: () => resolveClosed(Date.now() - started),
+			error: () => resolveClosed(Date.now() - started),
+		},
+	});
+	socket.write(data);
+	return { closedAfterMs, received: () => received };
+}
+
+describe("2: unauthenticated requests keep Bun's idle timeout", () => {
+	test("a stalled unauthenticated POST to the MCP endpoint is closed after the idle timeout", async () => {
+		const r = relay({ httpIdleTimeoutS: 1, bodyTimeoutMs: 500 });
+		const address = new URL(r.relay.addressFor(newSecret()));
+		const { closedAfterMs, received } = await stalledRequest(
+			r.relay.port,
+			`POST ${address.pathname} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nContent-Length: 100\r\n\r\n{"jsonrpc":`,
+		);
+		const ms = await Promise.race([
+			closedAfterMs,
+			Bun.sleep(4000).then(() => -1),
+		]);
+		expect(ms).toBeGreaterThan(0);
+		expect(ms).toBeLessThan(2500);
+		expect(received()).toStartWith("HTTP/1.1 408");
+	}, 6000);
+
+	test("a stalled POST with a valid token is closed the same way (nothing is forwarded)", async () => {
+		const r = relay({ bodyTimeoutMs: 500 });
+		const { t, address, token } = await connected(r, undefined);
+		const { closedAfterMs, received } = await stalledRequest(
+			r.relay.port,
+			`POST ${new URL(address).pathname} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${token}\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nContent-Length: 100\r\n\r\n{`,
+		);
+		const ms = await Promise.race([
+			closedAfterMs,
+			Bun.sleep(4000).then(() => -1),
+		]);
+		expect(ms).toBeGreaterThan(0);
+		expect(received()).toStartWith("HTTP/1.1 408");
+		expect(t.received.some((m) => m.type === "http.request")).toBe(false);
+	}, 6000);
+
+	test("an authenticated, forwarded request still outlives the idle timeout", async () => {
+		const r = relay({ httpIdleTimeoutS: 1, keepAliveMs: 20_000 });
+		const { address, token } = await connected(r, async (msg, tab) => {
+			await Bun.sleep(2200);
+			tab.send({
+				type: "http.response",
+				id: msg.id,
+				status: 200,
+				headers: { "content-type": "application/json" },
+				body: '{"jsonrpc":"2.0","id":1,"result":{}}',
+			});
+		});
+		const res = await mcpPost(address, rpc(1, "tools/list"), { token });
+		expect(res.status).toBe(200);
+	}, 6000);
 });
