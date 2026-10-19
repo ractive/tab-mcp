@@ -6,9 +6,15 @@
 #   otherwise.
 # - Pull requests that touch the package or this file run the dry run.
 # - workflow_dispatch: `dry-run` (default) builds, tests, packs and dry-runs;
-#   `bootstrap` also signs the tarball with GitHub OIDC provenance and uploads
-#   it for the owner's one-time manual `npm publish --provenance-file`;
-#   `publish` publishes like a release (run it on the release tag).
+#   `bootstrap` (on main only) also signs the tarball with GitHub OIDC
+#   provenance and uploads it for the owner's one-time manual
+#   `npm publish --provenance-file`; `publish` publishes like a release (run
+#   it on the release tag).
+# - Bootstrap and publish refuse a commit that is not on main. That guards
+#   against mistakes, not against someone who can push a tag: the workflow
+#   file at the tagged commit runs. Only the owner may create release tags
+#   (tag ruleset), and the `release` environment needs the owner's approval
+#   (kb/operations/npm-publishing.md).
 #
 # The relay (`relay-v*`) and the Docker image join later as further jobs
 # behind the `plan` job, with their own entry in scripts/npm-pack.ts.
@@ -101,6 +107,10 @@ jobs:
             version=$INPUT_VERSION
             release_tag=
             prerelease=
+            if [ "$mode" = bootstrap ] && [ "$REF" != refs/heads/main ]; then
+              echo "::error::bootstrap runs on refs/heads/main only, not $REF"
+              exit 1
+            fi
             if [ "$mode" != dry-run ] && [ -z "$version" ]; then
               echo "::error::mode '$mode' needs the version to confirm"
               exit 1
@@ -124,7 +134,7 @@ jobs:
           echo "$package $mode ${version:-(package version)} on $REF"
 
   # Build, test, pack, check, dry-run and install the tarball; no OIDC token
-  # in this job.
+  # in this job. Bootstrap and publish only build commits that are on main.
   client-pack:
     needs: plan
     if: needs.plan.outputs.package == 'client'
@@ -140,6 +150,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: The commit to release is on main
+        if: needs.plan.outputs.mode != 'dry-run'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on main; release only reviewed, merged commits"
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
@@ -232,11 +253,7 @@ jobs:
           INTEGRITY: ${{ needs.client-pack.outputs.integrity }}
         shell: bash
         run: |
-          set -euo pipefail
-          tarballs=("$DIR"/*.tgz)
-          [ "${#tarballs[@]}" -eq 1 ]
-          [ "$(jq -r .integrity "$DIR/pack.json")" = "$INTEGRITY" ]
-          node scripts/npm-provenance.mjs sign "${tarballs[0]}"
+          node scripts/npm-provenance.mjs sign "$DIR" --integrity "$INTEGRITY"
           ls -l "$DIR"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -252,8 +269,13 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -268,31 +290,6 @@ jobs:
           INTEGRITY: ${{ needs.client-pack.outputs.integrity }}
           VERSION: ${{ needs.client-pack.outputs.version }}
           DIST_TAG: ${{ needs.client-pack.outputs.dist_tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tarballs=("$DIR"/*.tgz)
-          [ "${#tarballs[@]}" -eq 1 ]
-          [ "$(jq -r .integrity "$DIR/pack.json")" = "$INTEGRITY" ]
-          spec="@ractive-ch/tab-mcp-client@$VERSION"
-          if published=$(npm view "$spec" dist.integrity \
-              --registry https://registry.npmjs.org 2> "$RUNNER_TEMP/npm-view.err"); then
-            :
-          elif grep -q E404 "$RUNNER_TEMP/npm-view.err"; then
-            published=
-          else
-            cat "$RUNNER_TEMP/npm-view.err" >&2
-            exit 1
-          fi
-          if [ -n "$published" ]; then
-            if [ "$published" = "$INTEGRITY" ]; then
-              echo "::notice::$spec is already published with the same bytes; skipped"
-              exit 0
-            fi
-            echo "::error::$spec is already published with other bytes ($published); versions are immutable, release a new version"
-            exit 1
-          fi
-          npm publish "${tarballs[0]}" --provenance --access public \
-            --tag "$DIST_TAG" --ignore-scripts \
-            --registry https://registry.npmjs.org
-          echo "::notice::published $spec with dist-tag $DIST_TAG"
+        run: >-
+          node scripts/npm-publish.mjs "$DIR" --integrity "$INTEGRITY"
+          --version "$VERSION" --dist-tag "$DIST_TAG"

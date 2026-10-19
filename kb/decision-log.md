@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-19T23:45:00+02:00
+timestamp: 2026-10-20T00:30:00+02:00
 ---
 
 # Decision log
@@ -580,8 +580,18 @@ the signing job (bootstrap) and the publishing job (environment `release`) get
 provenance code (`scripts/npm-provenance.mjs`) for the owner's first manual upload; after
 that, npm trusted publishing (repository `ractive/tab-mcp`, workflow `release.yml`,
 environment `release`) publishes with `npm publish --provenance`. A version that is already
-on npm is skipped when its integrity matches and fails the job otherwise. npm is pinned
-(12.2.0) because the signing step loads npm's internal modules. Steps:
+on npm is skipped when the downloaded tarball's own hash matches and fails the job
+otherwise; a stable version below the current `latest` is refused. npm is pinned (12.2.0)
+because the signing step loads npm's internal modules.
+
+Bootstrap runs only on `main`; bootstrap and publish refuse a commit that is not on `main`.
+These checks catch mistakes; the guard against a tag on an unreviewed commit (whose own
+workflow file would run) is that only the owner may create release tags (tag ruleset) and
+the `release` environment accepts release tags only and needs the owner's approval. The
+owner's `verify` before the manual upload accepts only bundles signed by `release.yml` of
+`ractive/tab-mcp` on `main` or on the version's tag. `latest` stays on `0.1.0-alpha.0`
+(the registry sets it on a package's first publication and never removes it) until the
+first stable version; the owner may move it by hand with `npm dist-tag add`. Steps:
 [npm publishing](/operations/npm-publishing.md).
 
 # Citations

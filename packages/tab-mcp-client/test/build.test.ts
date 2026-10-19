@@ -110,6 +110,11 @@ test("the build produces a package whose declarations type-check for a consumer"
 		`@cfworker/json-schema ${deps["@cfworker/json-schema"]}`,
 	);
 	expect(pkg["publishConfig"]).toEqual({ access: "public" });
+	// The README's CDN example pins the version being published.
+	const readme = await Bun.file(join(dist, "README.md")).text();
+	expect(readme).toContain(
+		`npm/@ractive-ch/tab-mcp-client@${pkg["version"]}/cdn/tab-mcp-client.min.js`,
+	);
 	expect(pkg["private"]).toBeUndefined();
 	const declarations = await Bun.file(join(dist, "index.d.ts")).text();
 	expect(declarations).not.toContain('.ts"');
