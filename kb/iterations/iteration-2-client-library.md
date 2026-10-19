@@ -67,9 +67,9 @@ mcp.revoke(grantId); mcp.disconnect(); mcp.newAddress();
 
 ## Results
 
-- Sizes (minified / gzipped, CDN build): core 8.4 / 3.4 KiB plus a 0.2 KiB shared chunk,
-  connection 37.0 / 11.4 KiB (MCP subset, tunnel, `@cfworker/json-schema`), default UI
-  5.2 / 2.1 KiB. The SDK's server would have been 309.5 / 81.3 KiB (DEC-049).
+- Sizes (minified / gzipped, CDN build): core 9.6 / 3.8 KiB,
+  connection 37.4 / 11.5 KiB (MCP subset, tunnel, `@cfworker/json-schema`), default UI
+  5.5 / 2.3 KiB. The SDK's server would have been 309.5 / 81.3 KiB (DEC-049).
 - Decisions taken while building: DEC-049 to DEC-054.
 - Tests: registry, mapping, secret, 36-case conformance with the SDK's
   `createMcpHandler`, protocol against a scripted relay (pairing, grants, heartbeat,

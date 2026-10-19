@@ -471,8 +471,8 @@ and zod, the case DEC-035 names.
 
 Decision: the tab-side subset is ours (`packages/tab-mcp-client/src/mcp.ts`), with
 `@cfworker/json-schema` 4.1.1 (MIT, the validator the SDK itself uses in browsers) for
-arguments. Sizes now: core 3.4 KiB gzipped (with the page), connection chunk 11.4 KiB
-gzipped including the validator (on `connect()`), default UI 2.1 KiB gzipped (when a
+arguments. Sizes now: core 3.8 KiB gzipped (with the page), connection chunk 11.5 KiB
+gzipped including the validator (on `connect()`), default UI 2.3 KiB gzipped (when a
 dialog opens), instead of 81 KiB plus the core. No Apache-2.0 SDK code ships, so no NOTICE.
 Conformance: a test sends 36 requests (every rung of the 2026-07-28 check ladder,
 discover, list, call, errors, notifications, batches, posted responses, a base64 `Mcp-Name`)
@@ -509,7 +509,10 @@ late callbacks of the old connection.
 for an invalid tool and an `InvalidStateError` for a duplicate name, and the tool is
 registered before it resolves. `inputSchema` must have `"type": "object"` (MCP requires an
 object schema; WebMCP does not say), is copied at registration, and may not use
-`x-mcp-header` (DEC-049). Only boolean annotations are kept. `execute(input, { signal,
+`x-mcp-header` (DEC-049). Registration also refuses what the validator (loaded only on
+`connect()`) would throw on later: a `pattern` that is not a regular expression and a
+`$ref` that does not resolve inside the schema; should anything still fail outside the
+tool, the call answers `-32603`, and a result that is not JSON becomes an `isError` result. Only boolean annotations are kept. `execute(input, { signal,
 client })` gets the caller (grant id, client id, verified host, declared name when the
 grant is known) besides WebMCP's signal. Several registrations in one task produce one
 `notifications/tools/list_changed`.
@@ -540,8 +543,14 @@ A test builds it and type-checks a consumer file against the declarations.
 A consequential tool is confirmed after its arguments are validated, so the user is never
 asked about a call that would fail. Without `onConfirm` and without a `document` the call
 is declined. The default confirmation focuses "Don't allow", names the client by its
-declared name and verified host, shows the arguments as text (hidden when there are none)
-and closes itself when the call is cancelled. Both dialogs are `<dialog>` elements opened
+declared name and verified host, shows the arguments in full in a scrolling box (hidden
+when there are none; if they could not be shown, Allow is not offered), keeps "Allow"
+disabled for 750 ms after it opens (`confirmDelayMs`, never below 500 ms) so a click meant
+for the page cannot approve, and closes itself when the call is cancelled. `revoke()`
+returns `false` while not connected (only the relay can revoke); the connect dialog then
+disables its Disconnect buttons and says to connect the page again first. Chunks of
+streamed bodies are sized from the relay's `maxMessageBytes` (512 bytes of envelope, 6
+bytes per UTF-16 unit at worst); below 896 bytes the library refuses the session. Both dialogs are `<dialog>` elements opened
 with `showModal()` (Escape closes them), built with `textContent` only, styled through
 CSSOM with `--tab-mcp-*` custom properties (no inline `style` attributes, so a strict CSP
 needs no exception). The connect dialog shows `session.appName`, else the page's own
