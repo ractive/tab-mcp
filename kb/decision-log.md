@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T00:30:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # Decision log
@@ -593,6 +593,194 @@ owner's `verify` before the manual upload accepts only bundles signed by `releas
 (the registry sets it on a package's first publication and never removes it) until the
 first stable version; the owner may move it by hand with `npm dist-tag add`. Steps:
 [npm publishing](/operations/npm-publishing.md).
+
+## DEC-056: Sites as JSON, allowed origins as shorthand, a floor for message sizes
+
+Sites (DEC-045) are configured with `TAB_MCP_SITES`, a JSON array in the same shape as
+`createRelay({ sites })`: `{ origin, name?, pairing?, limits? }`, where `limits` may set
+`maxMessageBytes`, `maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`,
+`idleTimeoutMs`, `sessionLifetimeMs` and `heartbeatMs` in the units of the
+configuration (milliseconds, bytes). Unknown keys are refused at start, so a typo is not
+silently ignored. `TAB_MCP_ALLOWED_ORIGINS` stays as the short form for sites without
+overrides; an origin may appear in only one of the two. With `*`, configured sites keep
+their settings and every other origin gets the instance defaults. `pairing: "oidc"` is
+refused at start until identity binding exists (iteration 7), rather than accepted and
+then failing at `/authorize`. A JSON variable was chosen over a config file: one more
+environment variable fits Docker and bunny.net without a volume, and a file can be added
+later. `maxMessageBytes` must be at least 16 KiB, for the instance and every site: MCP
+requests need room, and the browser library refuses sessions below 896 bytes (found in
+the review of PR #2). The page's `hello.app.name` must be 1-64 characters without
+control characters, else the relay closes the session (`bad_message`); the library
+refuses such a name in its constructor, so a page cannot trip over it.
+
+## DEC-057: The /authorize form: a pending request, Bun.CSRF and a cookie, no scripts
+
+A valid authorization request becomes a pending request kept in memory for 10 minutes;
+the form posts only its random id, the pairing fields and a CSRF token. The token is
+`Bun.CSRF.generate` bound (`sessionId`) to the pending request and to a random visit id
+in a first-party cookie (`__Host-tab-mcp-authorize` on https; `HttpOnly`,
+`SameSite=Lax`), so only the browser that opened the page can submit it. Posts with an
+`Origin` other than the relay or `Sec-Fetch-Site` other than `same-origin` are refused
+as well. This adds little against an attacker typing guesses (the attempt limits do
+that) but closes cross-site form posts as a class. The page has no JavaScript:
+`default-src 'none'; style-src 'self'` with the stylesheet at `/authorize.css`,
+`frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`
+(not `no-referrer`: with it, Firefox and Chrome send `Origin: null` on the form post, found
+in a headless Firefox run), `Cache-Control: no-store`, and `form-action 'self'` plus the client's redirect origin
+(Chrome applies `form-action` to the redirect after the post). No
+`Cross-Origin-Opener-Policy`: claude.ai opens `/authorize` in a popup and needs the
+opener back on its callback page. Errors before the redirect URI is trusted (bad client
+id, document or redirect URI) are shown on the page; all later errors go back to the
+client with `error`, `state` and `iss`.
+
+## DEC-058: Token endpoint rules
+
+- Scope: the only scope is `tools`. A request without `scope`, or with `tools` among
+  other values (e.g. `offline_access`), is granted `tools`, and the token response always
+  names the granted scope; a request with none of the known scopes gets `invalid_scope`.
+- An authorization code is burnt by its first presentation, even if a check then fails
+  (wrong verifier, redirect URI, client), so the verifier cannot be guessed against one
+  code. A code presented again revokes the grant made with it (RFC 6749 §4.1.2).
+- A refresh token presented a second time revokes the whole grant (DEC-029). That includes
+  the loser of two concurrent refreshes with the same token: `markUsed` lets exactly one
+  win, and the other counts as reuse. A client that refreshes twice in parallel thus loses
+  its connection; the alternative (a grace period) would also let a thief who races the
+  victim keep a token.
+- A refresh token presented with another `client_id` is refused without revoking (the
+  presenter is not the client; the grant stays usable for its owner).
+- `/revoke` with either token ends the whole grant: the grant is the connection the page
+  lists. A token of another client is refused with `invalid_client` (RFC 7009 §2.1); an
+  unknown token gets 200 (§2.2).
+- Client authentication is `none` only: a `client_secret`, a client assertion or an
+  `Authorization` header gets `invalid_client` (401 with `WWW-Authenticate` for the
+  header, RFC 6749 §5.2).
+- The rate limit (30 requests, then 1 per second per IP) answers 429 with
+  `temporarily_unavailable` and `Retry-After`.
+
+## DEC-059: Client ID Metadata Document details
+
+The `client_id` must be its own canonical URL (`new URL(id).href === id`), which refuses
+dot segments, upper-case hosts, an explicit default port and other aliases without
+special cases; it needs `https:`, a path, the default port, no credentials or fragment.
+IP literals and every address the host resolves to must be public. The document needs
+`client_id` equal to the URL, `client_name` and 1-20 `redirect_uris` (absolute, no
+fragment, not `javascript:`/`data:`); `token_endpoint_auth_method` absent or `none`; no
+`client_secret`; `grant_types` and `response_types`, if present, allow the code flow.
+Caching: `max-age` clamped to 5 minutes-24 hours, `no-store`/`no-cache` 5 minutes, no
+header 1 hour; at most 1000 documents. Fetches per host: 5, then 1 every 5 s. The name
+shown is cleaned (control and bidi characters become spaces, whitespace collapsed, at
+most 64 characters). The test-only switch that lets the fetcher reach a local HTTPS
+fixture (loopback hosts, any port, `http:`, an extra CA) is reachable only through
+`createTestRelay`, which the package does not export (its `exports` map blocks deep
+imports), refuses to run without `development: true` and logs `relay.test_hooks`; no
+environment variable or `createRelay` option turns it on.
+
+## DEC-060: Pairing attempt limits and code behaviour
+
+Besides the 5 attempts per code (DEC-028), pairing attempts are limited per address (10,
+then 1 every 30 s) and per IP (20, then 1 every 10 s); page loads per IP (30, then 1
+every 2 s). With an attacker who can keep the dialog's codes coming, the per-address
+limit bounds the chance of a guessed code to about 2 880 guesses a day out of a million
+codes (0.3 % a day while the dialog stays open). Input that is not 6 digits (spaces and a
+dash are allowed) is answered without counting an attempt. A code typed after it expired
+gets "That code has expired" (it counts as an attempt on the new code). A second
+`pairing.start` while codes are on repeats the current code instead of replacing it, so
+two dialogs show the same code. Codes are compared in constant time and never logged.
+Codes come only while the tab has sent `pairing.start`; `/authorize` explains that the
+code is shown in the page's "Connect your AI tool" dialog.
+
+**Limits replaced by DEC-061** (security review of PR #4: the per-address limit was
+charged for every post, so anyone who knew an address could lock its owner out).
+
+## DEC-061: Only real guesses count; per-IP limits by /64; open requests capped
+
+From the security review of PR #4. Replaces the limits of DEC-060.
+
+- A pairing method is given an `admit()` callback and calls it right before judging an
+  answer that could be right: for the code method, a well-formed 6-digit code while a code
+  is active. Malformed input, an empty field, junk and a closed dialog are answered
+  without charging anything. `admit()` charges two buckets: per address and network (10
+  guesses, then 1 a minute) and per address overall (30, then 1 every 30 s). One network
+  can therefore never use up an address's allowance alone; the overall bucket keeps the
+  brute-force bound (about 2 880 guesses a day per address against a million codes, and
+  only while the page's dialog is open). An attacker with many networks can still exhaust
+  the overall bucket and keep the owner waiting; the page then says so and points to
+  "New address" in the page, which the attacker does not learn. Availability against a
+  distributed attacker is traded for the brute-force bound on purpose.
+- Every per-IP limit (tab sessions, `/authorize` page loads and posts, guesses, `/token`,
+  `/revoke`) counts an IPv4 address as is (/32: many users already share one behind NAT
+  or CGNAT, a /24 would group strangers) and an IPv6 address by its /64, which one
+  subscriber usually gets whole.
+- No pending authorization is kept for an address without a connected tab: the "Open
+  the page first" page reloads the same request (Try again) or links back with
+  `access_denied` (Cancel). At most 10 pending requests per network and 20 per address
+  are open; more are refused with 429 instead of evicting others' requests. Requests all
+  live 10 minutes, so the map's insertion order is expiry order and sweeps stop at the
+  first live one. CIMD fetches are also limited all together (30, then 1 a second), so
+  many attacker-owned hosts do not add up.
+
+## DEC-062: A grant ends 90 days after pairing at the latest
+
+From the security review of PR #4: with only the sliding 30 days of DEC-029, a stolen
+refresh token that is used once a month never expires. Refreshes still slide by 30 days
+as DEC-029 says, but no token outlives `grantCreatedAt + grantLifetimeMs`
+(`TAB_MCP_GRANT_LIFETIME_S`, default 90 days); access tokens and `expires_in` are capped
+the same way. 90 days rather than the 30 the review suggested: a 30-day absolute end
+would turn DEC-029's "valid 30 days from then" into a fixed monthly re-pairing, which
+changes an owner decision; 90 days bounds a theft to one quarter while a used connection
+asks for the code at most four times a year. The owner can shorten it by configuration.
+
+## DEC-063: Revocation leaves a tombstone; put refuses revoked grants
+
+From the security review of PR #4: with an asynchronous store, a refresh or code
+exchange could store new tokens after Disconnect had deleted the grant's tokens. Amends
+DEC-041: `revoke(selector, { now, keepUntil })` deletes the tokens and records a tombstone
+(for a grant, or for an address with the revocation time); `put` returns `false` and
+stores nothing for a record of a tombstoned grant, or of a grant of a tombstoned address
+created at or before the revocation. Check and insert are atomic (a SQLite transaction;
+synchronous in memory), so whichever runs first, no token survives the revocation. The
+relay keeps tombstones for the grant lifetime (DEC-062), the longest any earlier token
+could live; `deleteExpired` drops them afterwards. A refused `put` ends the token
+request with `invalid_grant`. The conformance suite checks all of this; custom stores
+must implement it (`put` now returns a boolean, so they fail to type-check until they do).
+
+## DEC-064: Invalid requests are shown, not redirected
+
+From the security review of PR #4 (RFC 9700 §4.11.2): anyone can publish a client
+document with their own redirect URI, so redirecting every invalid request there would
+make the relay an open redirector. Amends DEC-057: after the redirect URI is trusted,
+an invalid request (wrong response type, missing PKCE, wrong resource or scope, repeated
+parameters) shows a relay page that names the client's host and links back with
+`error`, `state` and `iss`. Only the user's own Cancel redirects at once
+(`access_denied`). No allow-list exception: one rule is easier to reason about.
+
+## DEC-065: Names without invisible characters; the verified host always beside them
+
+From the security review of PR #4. Amends DEC-059: the shown client name drops all format
+characters (`Cf`: zero-width, bidi, word joiner, BOM, soft hyphen) and other invisible
+characters (Hangul fillers, braille blank), turns controls and line separators into
+spaces, and is refused if it contains a web address in parentheses (e.g. "Claude
+(claude.ai)", which would read like the verified host). The page's heading and title are
+"Connect <name> from <verified host>".
+
+## DEC-066: CIMD fetches are pinned to the vetted address
+
+From the security review of PR #4 (DNS rebinding, threat model A3). Bun's `fetch`
+accepts `tls.serverName`, so the relay connects to the address that passed the SSRF
+check (IPv4 first) and sends the original `Host` and TLS server name; the certificate is
+still checked against the host name. A second DNS answer is never used. All failures
+from resolving to parsing (unresolvable, private address, redirect, status, type, size,
+time-out, TLS, JSON) show one fixed message, "The AI app's details could not be loaded
+from <host>.", with the reason only in the log; validation errors of a fetched (public)
+document keep their specific messages.
+
+## DEC-067: Redirect URIs: https, loopback http, reverse-domain native schemes
+
+From the security review of PR #4. A client document's `redirect_uris` must be `https:`;
+`http:` only on `localhost`, `127.0.0.1` or `[::1]` (RFC 8252 §7.3); or a private-use
+scheme in reverse-domain form such as `com.example.app:/callback` (RFC 8252 §7.1), which
+native apps need. One-word custom schemes, `file:`, `blob:`, `data:`, `javascript:`,
+plain `http:` on other hosts and URIs with credentials or fragments are refused.
 
 # Citations
 

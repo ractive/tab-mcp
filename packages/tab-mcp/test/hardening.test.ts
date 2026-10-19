@@ -259,10 +259,10 @@ describe("2: unauthenticated requests keep Bun's idle timeout", () => {
 });
 
 describe("3: response size and backpressure", () => {
-	const chunk = "x".repeat(900);
+	const chunk = "x".repeat(9000);
 
 	test("a streamed response over maxBodyBytes ends with an error and cancels the tab", async () => {
-		const r = relay({ maxMessageBytes: 2000 });
+		const r = relay({ maxMessageBytes: 16_384 });
 		const { t, address, token } = await connected(r, (msg, tab) => {
 			tab.send({
 				type: "http.response.start",
@@ -283,7 +283,7 @@ describe("3: response size and backpressure", () => {
 			token,
 		});
 		const text = await res.text();
-		expect(text.length).toBeLessThan(2000 + 300);
+		expect(text.length).toBeLessThan(16_384 + 300);
 		expect(text).toContain('"code":-31006');
 		expect(await t.next("http.cancel")).toEqual({
 			type: "http.cancel",
@@ -293,7 +293,7 @@ describe("3: response size and backpressure", () => {
 	});
 
 	test("a wrapped (non-SSE) streamed body over maxBodyBytes fails too", async () => {
-		const r = relay({ maxMessageBytes: 2000, keepAliveMs: 30 });
+		const r = relay({ maxMessageBytes: 16_384, keepAliveMs: 30 });
 		const { t, address, token } = await connected(r, async (msg, tab) => {
 			await Bun.sleep(80); // the relay starts the event stream first
 			tab.send({
@@ -316,7 +316,7 @@ describe("3: response size and backpressure", () => {
 	});
 
 	test("listen streams have no total limit", async () => {
-		const r = relay({ maxMessageBytes: 2000 });
+		const r = relay({ maxMessageBytes: 16_384 });
 		const { address, token } = await connected(r, (msg, tab) => {
 			tab.send({
 				type: "http.response.start",

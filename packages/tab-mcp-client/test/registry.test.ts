@@ -202,7 +202,7 @@ describe("TabMcp options", () => {
 		expect(() => ok("not a url")).toThrow(TypeError);
 	});
 
-	test("appName is at most 64 characters; server needs name and version", () => {
+	test("appName is 1-64 characters without control characters; server needs name and version", () => {
 		const make = (o: object) => () =>
 			new TabMcp({
 				relay: "https://r.example",
@@ -212,6 +212,10 @@ describe("TabMcp options", () => {
 			});
 		expect(make({ appName: "x".repeat(64) })).not.toThrow();
 		expect(make({ appName: "x".repeat(65) })).toThrow(/appName/);
+		// What the relay would refuse in hello is refused here already.
+		expect(make({ appName: "" })).toThrow(/appName/);
+		expect(make({ appName: "  " })).toThrow(/appName/);
+		expect(make({ appName: "a\nb" })).toThrow(/appName/);
 		expect(make({ server: { name: "t" } })).toThrow(/server/);
 	});
 });

@@ -1,16 +1,29 @@
 import type { Server, ServerWebSocket } from "bun";
 import pkg from "../package.json" with { type: "json" };
 import { addressIdFromSecret, isAddressId, shortAddress } from "./address.ts";
-import { type RelayConfig, resolveConfig, type StoreKind } from "./config.ts";
+import {
+	largestMessageBytes,
+	type RelayConfig,
+	resolveConfig,
+	type Site,
+	type StoreKind,
+	siteFor,
+} from "./config.ts";
 import {
 	type Exchange,
 	RelayErrorCode,
 	type RpcId,
 	rpcErrorBody,
 } from "./exchange.ts";
+import { ipPrefixKey } from "./ip.ts";
 import { createLogger, type Logger, truncateIp } from "./log.ts";
 import {
+	AuthorizationServer,
+	type AuthorizationTestMode,
+} from "./oauth/server.ts";
+import {
 	CloseCode,
+	type GrantInfo,
 	MCP_PROTOCOL_VERSION,
 	PROTOCOL_VERSION_META_KEY,
 	SUBPROTOCOL,
@@ -64,7 +77,17 @@ export interface Relay {
 interface WsData {
 	ip: string;
 	origin: string;
+	site: Site;
 	session?: TabSession;
+}
+
+/**
+ * Test-only relaxations, never reachable from configuration or the package's
+ * public API (`createTestRelay` is not exported from the package): CIMD
+ * fetches from loopback test servers, shorter code lifetimes.
+ */
+export interface RelayTestHooks extends AuthorizationTestMode {
+	pairingCodeTtlMs?: number;
 }
 
 interface Body {
@@ -127,6 +150,27 @@ It does not log request contents. Source and documentation:
 
 /** Start a relay. Returns once the server listens. */
 export function createRelay(options: CreateRelayOptions = {}): Relay {
+	return startRelay(options, undefined);
+}
+
+/**
+ * A relay with test hooks. Only for this repository's tests: it refuses to
+ * start outside development and logs a warning.
+ */
+export function createTestRelay(
+	options: CreateRelayOptions,
+	hooks: RelayTestHooks,
+): Relay {
+	if (options.development !== true) {
+		throw new Error("test hooks need development: true");
+	}
+	return startRelay(options, hooks);
+}
+
+function startRelay(
+	options: CreateRelayOptions,
+	hooks: RelayTestHooks | undefined,
+): Relay {
 	const { store: storeOption, logger: givenLogger, ...partial } = options;
 	const tokenStore = typeof storeOption === "object" ? storeOption : undefined;
 	const config = resolveConfig(
@@ -156,11 +200,54 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 			}
 		: {};
 
+	/** Tombstones outlive every token issued before the revocation (DEC-063). */
+	const revokeOptions = () => {
+		const now = Date.now();
+		return { now, keepUntil: now + config.grantLifetimeMs };
+	};
+
+	function grantRemoved(
+		addressId: string,
+		grantId: string,
+		reason: "revoked" | "reuse_detected" | "expired",
+	): void {
+		const session = sessions.get(addressId);
+		if (session?.ready)
+			session.send({ type: "grant.removed", grantId, reason });
+	}
+
 	const host = {
 		config,
 		logger,
 		store,
+		...(hooks?.pairingCodeTtlMs === undefined
+			? {}
+			: { pairingCodeTtlMs: hooks.pairingCodeTtlMs }),
 		publicUrl: () => publicUrl,
+		async revokeGrant(session: TabSession, grantId: string): Promise<boolean> {
+			const addressId = session.addressId;
+			if (addressId === undefined) return false;
+			const grants = await store.listGrants(addressId, Date.now());
+			if (!grants.some((g) => g.grantId === grantId)) return false;
+			await store.revoke({ grantId }, revokeOptions());
+			logger.info("oauth.revoked", {
+				address: shortAddress(addressId),
+				by: "tab",
+			});
+			grantRemoved(addressId, grantId, "revoked");
+			return true;
+		},
+		async revokeAll(session: TabSession): Promise<void> {
+			const addressId = session.addressId;
+			if (addressId === undefined) return;
+			const grants = await store.listGrants(addressId, Date.now());
+			await store.revoke({ addressId }, revokeOptions());
+			logger.info("oauth.revoked_all", {
+				address: shortAddress(addressId),
+				grants: grants.length,
+			});
+			for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+		},
 		claimAddress(session: TabSession): TabSession | undefined {
 			const id = session.addressId;
 			if (id === undefined) return undefined;
@@ -201,10 +288,33 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		return server.requestIP(req)?.address ?? "unknown";
 	}
 
-	function originAllowed(origin: string | null): boolean {
-		if (config.allowedOrigins === "*") return true;
-		if (origin === null) return false;
-		return config.allowedOrigins.includes(origin);
+	const auth = new AuthorizationServer(
+		{
+			config,
+			logger,
+			store,
+			publicUrl: () => publicUrl,
+			session: (addressId) => {
+				const s = sessions.get(addressId);
+				return s?.ready === true ? s : undefined;
+			},
+			grantAdded: (addressId: string, grant: GrantInfo) => {
+				const session = sessions.get(addressId);
+				if (session?.ready) session.send({ type: "grant.added", grant });
+			},
+			grantRemoved: (addressId, grantId, reason) =>
+				grantRemoved(
+					addressId,
+					grantId,
+					reason as "revoked" | "reuse_detected" | "expired",
+				),
+		},
+		hooks,
+	);
+	if (hooks !== undefined) {
+		logger.warn("relay.test_hooks", {
+			message: "test hooks are on: never use this relay outside tests",
+		});
 	}
 
 	function handleTab(
@@ -212,7 +322,8 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		server: Server<WsData>,
 	): Response | undefined {
 		const origin = req.headers.get("origin");
-		if (!originAllowed(origin)) {
+		const site = siteFor(config, origin);
+		if (site === undefined) {
 			logger.info("tab.refused", { reason: "origin" });
 			return json(403, { error: "origin_not_allowed" });
 		}
@@ -225,7 +336,9 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				supported: [SUBPROTOCOL],
 			});
 		}
-		const ip = clientIp(req, server);
+		const realIp = clientIp(req, server);
+		// Counted per /64 for IPv6 (DEC-061): one subscriber owns a whole /64.
+		const ip = ipPrefixKey(realIp);
 		if (allSessions.size >= config.maxSessions) {
 			logger.warn("tab.refused", { reason: "max_sessions" });
 			return json(429, { error: "too_many_sessions" });
@@ -234,13 +347,13 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		if (count >= config.maxSessionsPerIp) {
 			logger.warn("tab.refused", {
 				reason: "max_sessions_per_ip",
-				ip: truncateIp(ip),
+				ip: truncateIp(realIp),
 			});
 			return json(429, { error: "too_many_sessions" });
 		}
 		perIp.set(ip, count + 1);
 		const ok = server.upgrade(req, {
-			data: { ip, origin: origin ?? "" },
+			data: { ip, origin: origin ?? "", site },
 			headers: { "Sec-WebSocket-Protocol": SUBPROTOCOL },
 		});
 		if (ok) return undefined;
@@ -285,9 +398,12 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		return record;
 	}
 
-	async function readBody(req: Request): Promise<Body | Response> {
+	async function readBody(
+		req: Request,
+		maxBytes: number,
+	): Promise<Body | Response> {
 		const length = Number(req.headers.get("content-length") ?? "0");
-		if (length > config.maxMessageBytes) {
+		if (length > maxBytes) {
 			return rpcError(
 				413,
 				undefined,
@@ -328,7 +444,7 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				corsHeaders,
 			);
 		}
-		if (bytes.byteLength > config.maxMessageBytes) {
+		if (bytes.byteLength > maxBytes) {
 			return rpcError(
 				413,
 				undefined,
@@ -431,7 +547,12 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				...extra,
 			});
 
-		const body = await readBody(req);
+		// The page's own limit when it is connected; else the instance's (the
+		// request then ends with 401 or 503 anyway).
+		const body = await readBody(
+			req,
+			sessions.get(addressId)?.limits.maxMessageBytes ?? config.maxMessageBytes,
+		);
 		if (body instanceof Response) {
 			logDone(body.status, "?");
 			return body;
@@ -486,7 +607,7 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				corsHeaders,
 			);
 		}
-		if (session.pending.size >= config.maxConcurrentRequests) {
+		if (session.pending.size >= session.limits.maxConcurrentRequests) {
 			logDone(429, method);
 			return rpcError(
 				429,
@@ -573,11 +694,16 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 			headers: { ...corsHeaders, allow: "POST" },
 		});
 
+	const postOnly = () =>
+		new Response(null, { status: 405, headers: { allow: "POST, OPTIONS" } });
+	const largest = largestMessageBytes(config);
+	const ipOf = (req: Request, srv: Server<WsData>) =>
+		ipPrefixKey(clientIp(req, srv));
 	const server = Bun.serve({
 		port: config.port,
 		hostname: config.host,
 		development: false,
-		maxRequestBodySize: config.maxMessageBytes + 1024,
+		maxRequestBodySize: largest + 1024,
 		idleTimeout: config.httpIdleTimeoutS,
 		routes: {
 			"/healthz": {
@@ -600,6 +726,29 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 					}),
 			},
 			"/tab": (req, srv) => handleTab(req, srv),
+			"/.well-known/oauth-authorization-server": {
+				GET: () => auth.metadata(),
+				OPTIONS: () => auth.preflight("GET"),
+			},
+			"/.well-known/oauth-protected-resource/a/:id/mcp": {
+				GET: (req) => auth.protectedResource(req.params.id),
+				OPTIONS: () => auth.preflight("GET"),
+			},
+			"/authorize": {
+				GET: (req, srv) => auth.authorize(req, ipOf(req, srv)),
+				POST: (req, srv) => auth.authorizeSubmit(req, ipOf(req, srv)),
+			},
+			"/authorize.css": { GET: () => auth.stylesheet() },
+			"/token": {
+				POST: (req, srv) => auth.token(req, ipOf(req, srv)),
+				OPTIONS: () => auth.preflight("POST"),
+				GET: postOnly,
+			},
+			"/revoke": {
+				POST: (req, srv) => auth.revoke(req, ipOf(req, srv)),
+				OPTIONS: () => auth.preflight("POST"),
+				GET: postOnly,
+			},
 			"/a/:id/mcp": {
 				POST: (req, srv) => {
 					const id = req.params.id;
@@ -617,14 +766,20 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		fetch: () => new Response("Not found", { status: 404 }),
 		websocket: {
 			data: {} as WsData,
-			maxPayloadLength: config.maxMessageBytes * 4,
+			maxPayloadLength: largest * 4,
 			backpressureLimit: config.backpressureLimitBytes,
 			closeOnBackpressureLimit: false,
 			idleTimeout: 120,
 			sendPings: true,
 			perMessageDeflate: false,
 			open(ws: ServerWebSocket<WsData>) {
-				const session = new TabSession(ws, ws.data.ip, ws.data.origin, host);
+				const session = new TabSession(
+					ws,
+					ws.data.ip,
+					ws.data.origin,
+					ws.data.site,
+					host,
+				);
 				ws.data.session = session;
 				allSessions.add(session);
 			},
@@ -643,6 +798,7 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 	if (publicUrl === "") publicUrl = `http://localhost:${port}`;
 
 	const sweep = setInterval(() => {
+		auth.sweep();
 		store
 			.deleteExpired(Date.now())
 			.then((n) => {
@@ -656,14 +812,19 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 			);
 	}, config.sweepIntervalMs);
 
+	const siteCount =
+		config.allowedOrigins === "*"
+			? "*"
+			: config.allowedOrigins.length + config.sites.length;
 	if (config.allowedOrigins === "*") {
 		logger.warn("relay.open_relay", {
 			message:
 				"TAB_MCP_ALLOWED_ORIGINS=* lets any website open tab sessions on this relay",
 		});
-	} else if (config.allowedOrigins.length === 0) {
+	} else if (siteCount === 0) {
 		logger.warn("relay.no_origins", {
-			message: "TAB_MCP_ALLOWED_ORIGINS is empty: no page can connect",
+			message:
+				"TAB_MCP_ALLOWED_ORIGINS and TAB_MCP_SITES are empty: no page can connect",
 		});
 	}
 	logger.info("relay.start", {
@@ -671,7 +832,7 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		url: publicUrl,
 		port,
 		store: ownsStore ? config.store : "custom",
-		origins: config.allowedOrigins === "*" ? "*" : config.allowedOrigins.length,
+		origins: siteCount,
 	});
 
 	let stopping: Promise<void> | undefined;

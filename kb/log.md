@@ -2,6 +2,8 @@
 
 ## 2026-10-19
 
+- Security review of PR #4: eight findings fixed, DEC-061 to DEC-067
+- Iteration 3 built on iter-3/oauth: OAuth authorization server with pairing codes and sites, DEC-056 to DEC-060; real-browser check with Claude Code's metadata document
 - Review of PR #3: release guards (main-only bootstrap, commits on main, tarball hash, signer check, latest never backwards), owner steps reordered, latest known issue
 - Iteration 5a: npm release workflow for @ractive-ch/tab-mcp-client 0.1.0-alpha.0 (bootstrap proven on the branch), npm publishing steps, DEC-055 (release tags and dist-tags)
 - Iteration 2: browser library built; DEC-049 (own MCP subset after measuring the SDK) to DEC-054

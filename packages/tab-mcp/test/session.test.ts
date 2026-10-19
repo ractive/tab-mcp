@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { newSecret } from "../src/address.ts";
-import { resolveConfig } from "../src/config.ts";
+import { resolveConfig, siteFor } from "../src/config.ts";
 import { TabSession } from "../src/session.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import { LogCapture } from "./helpers.ts";
@@ -26,15 +26,25 @@ afterEach(() => {
 });
 
 async function readySession(socket: FakeSocket, logs = new LogCapture()) {
-	const config = resolveConfig({ development: true });
-	const session = new TabSession(socket, "127.0.0.1", "https://page.example", {
-		config,
-		logger: logs.logger,
-		store: new MemoryTokenStore(),
-		publicUrl: () => "http://relay.test",
-		claimAddress: () => undefined,
-		released: () => {},
-	});
+	const config = resolveConfig({ development: true, allowedOrigins: "*" });
+	const site = siteFor(config, "https://page.example");
+	if (site === undefined) throw new Error("no site");
+	const session = new TabSession(
+		socket,
+		"127.0.0.1",
+		"https://page.example",
+		site,
+		{
+			config,
+			logger: logs.logger,
+			store: new MemoryTokenStore(),
+			publicUrl: () => "http://relay.test",
+			claimAddress: () => undefined,
+			released: () => {},
+			revokeGrant: async () => false,
+			revokeAll: async () => {},
+		},
+	);
 	sessions.push(session);
 	session.handleFrame(
 		JSON.stringify({

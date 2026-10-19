@@ -28,6 +28,19 @@ import { LIBRARY_NAME, VERSION } from "./version.ts";
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** What the relay accepts as `hello.app.name` (protocol: session). */
+function isAppName(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		value.trim().length > 0 &&
+		value.length <= 64 &&
+		![...value].some((ch) => {
+			const c = ch.codePointAt(0) ?? 0;
+			return c < 0x20 || (c >= 0x7f && c <= 0x9f);
+		})
+	);
+}
+
 /** `wss://host/tab` for a relay given as `https://host`, `wss://host` or with `/tab`. */
 export function tabUrl(relay: string): { url: string; origin: string } {
 	let u: URL;
@@ -118,12 +131,9 @@ export class TabMcp extends EventTarget {
 		) {
 			throw new TypeError("TabMcp: server needs a name and a version");
 		}
-		if (
-			appName !== undefined &&
-			(typeof appName !== "string" || appName.length > 64)
-		) {
+		if (appName !== undefined && !isAppName(appName)) {
 			throw new TypeError(
-				"TabMcp: appName must be a string of at most 64 characters",
+				"TabMcp: appName must be 1-64 characters without control characters",
 			);
 		}
 		this.#relayUrl = url;

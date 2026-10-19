@@ -236,6 +236,11 @@ export function showConnectDialog(
 		{ className: "tab-mcp-code" },
 		"When asked, enter the code ",
 		code,
+		el(doc, "br"),
+		el(doc, "small", {
+			className: "tab-mcp-code-note",
+			text: "A new code appears every 2 minutes and after each use.",
+		}),
 	);
 	codeLine.setAttribute("aria-live", "polite");
 
@@ -299,7 +304,14 @@ export function showConnectDialog(
 	};
 	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
 	apps.append(appsNote);
+	// Grants that were there when the dialog opened; a new one is announced.
+	const known = new Set(mcp.grants.map((g) => g.grantId));
 	const renderGrants = () => {
+		for (const grant of mcp.grants) {
+			if (known.has(grant.grantId)) continue;
+			known.add(grant.grantId);
+			status.textContent = `${clientLabel(grant.client)} is connected.`;
+		}
 		const connected = mcp.state === "connected";
 		appList.replaceChildren(
 			...mcp.grants.map((grant) => {

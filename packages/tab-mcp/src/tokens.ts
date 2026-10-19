@@ -41,8 +41,9 @@ export interface GrantInput {
 }
 
 /**
- * Issue an access token for a grant and store its hash. Used by tests until the
- * token endpoint exists (iteration 3), which will issue through the same path.
+ * Issue an access token for a grant and store its hash, without OAuth. An
+ * internal helper for tests that need a token but not the flow; the token
+ * endpoint issues through `issueTokenPair`.
  */
 export async function issueAccessToken(
 	store: TokenStore,
@@ -65,4 +66,61 @@ export async function issueAccessToken(
 	};
 	await store.put(record);
 	return { token, record };
+}
+
+/**
+ * A new access token and refresh token for a grant (DEC-029). Neither lives
+ * beyond `grantEndsAt` (DEC-062). Returns `undefined` if the store refuses
+ * them because the grant was revoked meanwhile (its tombstone, DEC-063).
+ */
+export async function issueTokenPair(
+	store: TokenStore,
+	grant: Required<Omit<GrantInput, "scopes">> & { scopes: string[] },
+	options: {
+		accessTtlMs: number;
+		refreshTtlMs: number;
+		grantEndsAt: number;
+		now?: number;
+	},
+): Promise<
+	{ accessToken: string; refreshToken: string; expiresIn: number } | undefined
+> {
+	const now = options.now ?? Date.now();
+	const accessToken = newToken("access");
+	const refreshToken = newToken("refresh");
+	const base = {
+		grantId: grant.grantId,
+		addressId: grant.addressId,
+		clientId: grant.clientId,
+		clientName: grant.clientName,
+		scopes: grant.scopes,
+		grantCreatedAt: grant.grantCreatedAt,
+		issuedAt: now,
+	};
+	const accessExpires = Math.min(
+		now + options.accessTtlMs,
+		options.grantEndsAt,
+	);
+	// The refresh token first: a grant whose access token exists always has
+	// a way to be listed and revoked. If a revocation lands between the two
+	// puts, it deletes the first and its tombstone refuses the second.
+	const refreshStored = await store.put({
+		...base,
+		hash: hashToken(refreshToken),
+		kind: "refresh",
+		expiresAt: Math.min(now + options.refreshTtlMs, options.grantEndsAt),
+	});
+	if (!refreshStored) return undefined;
+	const accessStored = await store.put({
+		...base,
+		hash: hashToken(accessToken),
+		kind: "access",
+		expiresAt: accessExpires,
+	});
+	if (!accessStored) return undefined;
+	return {
+		accessToken,
+		refreshToken,
+		expiresIn: Math.max(0, Math.floor((accessExpires - now) / 1000)),
+	};
 }

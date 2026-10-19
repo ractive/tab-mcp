@@ -1,6 +1,6 @@
 /**
  * The library in Bun against an in-process relay from iteration 1, called by
- * the MCP SDK client (tokens issued through the store until iteration 3).
+ * the MCP SDK client (tokens issued through the store; the OAuth flow is in oauth-e2e.test.ts).
  */
 import {
 	afterAll,

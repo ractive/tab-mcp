@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-20T11:00:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # tab-mcp architecture
@@ -55,6 +55,7 @@ for why.
 | `/.well-known/oauth-protected-resource/a/{id}/mcp` | GET | RFC 9728 metadata for that address |
 | `/.well-known/oauth-authorization-server` | GET | RFC 8414 metadata (issuer = relay origin) |
 | `/authorize` | GET, POST | pairing page in the user's browser: names the AI app and page origin, asks for the code |
+| `/authorize.css` | GET | the pairing page's stylesheet (the page has no scripts; DEC-057) |
 | `/token` | POST | authorization code + PKCE → tokens; refresh token rotation |
 | `/revoke` | POST | RFC 7009 token revocation |
 | `/healthz` | GET | health (`{"status":"ok","version":"…","counters":{"claudeHeaderWorkaround":n}}`) |
@@ -161,10 +162,18 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 
 ## Configuration (relay)
 
-From iteration 3 the relay is configured per site (DEC-045): a list of
-`{ origin, name?, pairing: "code" | "oidc", limits overrides }` with the instance-wide
-values below as defaults; the configured sites are the origin allow-list. The exact format
-(e.g. a `TAB_MCP_SITES` JSON value or a config file) is settled in iteration 3.
+The relay is configured per site (DEC-045, DEC-056): `TAB_MCP_SITES` (or
+`createRelay({ sites })`) is a JSON array of `{ origin, name?, pairing?, limits? }` with the
+instance-wide values below as defaults; `limits` may set `maxMessageBytes`,
+`maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`, `idleTimeoutMs`,
+`sessionLifetimeMs` and `heartbeatMs` (milliseconds, bytes). `pairing` is `code` (the only
+method so far; `oidc` is refused until identity binding exists). The configured sites
+together with `TAB_MCP_ALLOWED_ORIGINS` are the origin allow-list; an origin may appear in
+only one of them. Example:
+
+```sh
+TAB_MCP_SITES='[{"origin":"https://ractive.ch","name":"saturnus","limits":{"maxConcurrentRequests":4}}]'
+```
 
 Environment variables with safe defaults; the full list goes to `docs/configuration.md` in
 [iteration 5](/iterations/iteration-5-packaging-release.md). Library users pass the same
@@ -175,7 +184,8 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_PUBLIC_URL` | required | external origin, e.g. `https://relay.ractive.ch` (issuer and address base); `https:` unless development |
 | `TAB_MCP_PORT` | `8080` | listen port |
 | `TAB_MCP_HOST` | `0.0.0.0` | listen address |
-| `TAB_MCP_ALLOWED_ORIGINS` | empty = refuse all tabs | comma-separated page origins allowed to open sessions; `*` = open relay (warning at start) |
+| `TAB_MCP_ALLOWED_ORIGINS` | empty = refuse all tabs | comma-separated page origins allowed to open sessions with the defaults; `*` = open relay (warning at start) |
+| `TAB_MCP_SITES` | empty | JSON array of sites with their own name, pairing method or limits (see above) |
 | `TAB_MCP_TRUST_PROXY` | `none` | `none`, `x-real-ip` or `x-forwarded-for` (client IP source) |
 | `TAB_MCP_CORS` | `on` | `off` drops the CORS headers (DEC-036) |
 | `TAB_MCP_STORE` | `sqlite` | `sqlite` or `memory` |
@@ -189,8 +199,9 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_SESSION_LIFETIME_S` | 43200 | absolute WebSocket session lifetime |
 | `TAB_MCP_HEARTBEAT_S` | 25 | protocol ping interval |
 | `TAB_MCP_BODY_TIMEOUT_S` | 10 | deadline for receiving an MCP request body (408 and close; DEC-048) |
-| `TAB_MCP_MAX_MESSAGE_BYTES` | 1048576 | request body and WebSocket message limit |
+| `TAB_MCP_MAX_MESSAGE_BYTES` | 1048576 | request body and WebSocket message limit; at least 16384 |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` / `TAB_MCP_REFRESH_TOKEN_TTL_S` | 3600 / 2592000 | token lifetimes |
+| `TAB_MCP_GRANT_LIFETIME_S` | 7776000 | absolute end of a connection after pairing; refreshes never go beyond it (DEC-062) |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug` (never bodies) |
 
 # Citations

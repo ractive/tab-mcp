@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-20T10:00:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
@@ -47,7 +47,7 @@ Direction: T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `page: {title}`, `app?: {name}`, `secret` | First message after open. `page.title` is untrusted and never logged. `app.name` (e.g. `saturnus`, up to 64 characters) is self-declared and shown on `/authorize` (DEC-045; sent from iteration 2, shown from iteration 3). |
+| `hello` | T→R | `library: {name, version}`, `page: {title}`, `app?: {name}`, `secret` | First message after open. `page.title` is untrusted and never logged. `app.name` (e.g. `saturnus`: 1-64 characters, no control characters, else `bad_message` and close 1008) is self-declared and shown on `/authorize` unless the site configures a name (DEC-045, DEC-056). |
 | `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the public MCP URL the user gives to the AI app. |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
@@ -65,11 +65,12 @@ and close 4005.
 `sessionId` is a fresh random id per WebSocket and appears only in logs and in this
 protocol, never in URLs. `origin` is the page origin the relay saw on the upgrade (shown on
 `/authorize`); `appName` is the name `/authorize` will show (the site's configured name, else
-the page's `app.name`). `limits` are the site's limits (DEC-045). `grants` lists the AI apps connected to this address (see below; empty until
-[iteration 3](/iterations/iteration-3-oauth.md)).
+the page's `app.name`; absent if neither exists). `limits` are the site's limits (DEC-045).
+`grants` lists the AI apps connected to this address (see below).
 
 `limits` carries `maxMessageBytes`, `maxBodyBytes`, `requestTimeoutMs`, `idleTimeoutMs`,
 `heartbeatMs`, `keepAliveMs`, `maxConcurrentRequests` so the tab can show and respect them.
+`maxMessageBytes` is at least 16 384 (DEC-056).
 
 ```json
 {"type":"session","sessionId":"s_6Gx…","origin":"https://ractive.ch",
@@ -87,13 +88,13 @@ types the code on the relay's `/authorize` page.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `pairing.start` | T→R | — | The page's "Connect your AI tool" dialog is open; the relay starts issuing codes. |
-| `pairing.code` | R→T | `code`, `expiresAt` | The code to show: 6 digits, single-use, 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. |
-| `pairing.stop` | T→R | — | The dialog closed; the current code becomes invalid. |
-| `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first token). |
-| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. |
+| `pairing.start` | T→R | — | The page's "Connect your AI tool" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. |
+| `pairing.code` | R→T | `code`, `expiresAt` | The code to show: 6 digits, single-use, 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. Guesses are also limited per address and network and per address overall; malformed input is not counted (DEC-061). |
+| `pairing.stop` | T→R | — | The dialog closed; the current code becomes invalid and no more codes come. |
+| `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
+| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that is not this address's gets `error` `unknown_id`. |
 | `grants.revokeAll` | T→R | — | Revoke every grant of this address (used before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended (`revoked`, `expired`, `reuse_detected`). |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address") or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that simply run out (at the latest 90 days after pairing, DEC-062) are not announced. |
 
 A grant as the tab sees it:
 
@@ -102,8 +103,10 @@ A grant as the tab sees it:
  "name":"Claude Code","host":"claude.ai"},"createdAt":"2026-10-19T20:00:00.000Z"}
 ```
 
-`client.name` is self-declared in the Client ID Metadata Document; `client.host` (the host
-of the verified `client_id` URL) is the verified part. Codes are never logged.
+`client.name` is self-declared in the Client ID Metadata Document (cleaned: no control or
+bidi characters, at most 64 characters); `client.host` (the host of the verified `client_id`
+URL) is the verified part. Codes are never logged. A session that ends (any close) stops its
+codes; grants stay.
 
 ### Tunnelled MCP requests
 

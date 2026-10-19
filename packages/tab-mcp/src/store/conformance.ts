@@ -19,6 +19,8 @@ export function tokenStoreConformance(
 		const now = 1_800_000_000_000;
 		let seq = 0;
 
+		const until = { now, keepUntil: now + 86_400_000 };
+
 		const record = (over: Partial<TokenRecord> = {}): TokenRecord => {
 			seq++;
 			return {
@@ -46,7 +48,7 @@ export function tokenStoreConformance(
 
 		test("put then get returns an equal record", async () => {
 			const r = record({ scopes: ["tools", "extra"] });
-			await store.put(r);
+			expect(await store.put(r)).toBe(true);
 			expect(await store.get(r.hash)).toEqual(r);
 		});
 
@@ -105,7 +107,7 @@ export function tokenStoreConformance(
 			const a2 = record({ grantId: "g_a", kind: "refresh" });
 			const b = record({ grantId: "g_b" });
 			for (const r of [a, a2, b]) await store.put(r);
-			expect(await store.revoke({ grantId: "g_a" })).toBe(2);
+			expect(await store.revoke({ grantId: "g_a" }, until)).toBe(2);
 			expect(await store.get(a.hash)).toBeUndefined();
 			expect(await store.get(a2.hash)).toBeUndefined();
 			expect(await store.get(b.hash)).toEqual(b);
@@ -116,13 +118,55 @@ export function tokenStoreConformance(
 			const b = record({ addressId: "addr-b", grantId: "g_b" });
 			await store.put(a);
 			await store.put(b);
-			expect(await store.revoke({ addressId: "addr-a" })).toBe(1);
+			expect(await store.revoke({ addressId: "addr-a" }, until)).toBe(1);
 			expect(await store.get(a.hash)).toBeUndefined();
 			expect(await store.get(b.hash)).toEqual(b);
 		});
 
 		test("revoke of nothing returns 0", async () => {
-			expect(await store.revoke({ grantId: "none" })).toBe(0);
+			expect(await store.revoke({ grantId: "none" }, until)).toBe(0);
+		});
+
+		test("a revoked grant gets no new tokens until its tombstone expires", async () => {
+			await store.revoke({ grantId: "g_dead" }, until);
+			const late = record({ grantId: "g_dead", kind: "refresh" });
+			expect(await store.put(late)).toBe(false);
+			expect(await store.get(late.hash)).toBeUndefined();
+			expect(await store.put(record({ grantId: "g_alive" }))).toBe(true);
+			await store.deleteExpired(until.keepUntil);
+			expect(await store.put(record({ grantId: "g_dead" }))).toBe(true);
+		});
+
+		test("a revoked address refuses grants created up to the revocation, not later ones", async () => {
+			await store.revoke({ addressId: "addr-a" }, until);
+			expect(
+				await store.put(record({ grantId: "g_before", grantCreatedAt: now })),
+			).toBe(false);
+			expect(
+				await store.put(
+					record({ grantId: "g_after", grantCreatedAt: now + 1 }),
+				),
+			).toBe(true);
+			expect(
+				await store.put(
+					record({
+						grantId: "g_elsewhere",
+						addressId: "addr-b",
+						grantCreatedAt: now,
+					}),
+				),
+			).toBe(true);
+		});
+
+		test("a put racing a revocation of its grant never survives it", async () => {
+			for (let i = 0; i < 20; i++) {
+				const r = record({ grantId: `g_race_${i}`, kind: "refresh" });
+				await Promise.all([
+					store.put(r),
+					store.revoke({ grantId: r.grantId }, until),
+				]);
+				expect(await store.get(r.hash)).toBeUndefined();
+			}
 		});
 
 		test("deleteExpired removes records with expiresAt <= now only", async () => {

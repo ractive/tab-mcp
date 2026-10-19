@@ -1,4 +1,5 @@
 import type { LogLevel } from "./config.ts";
+import { parseIpv4, parseIpv6 } from "./ip.ts";
 
 /**
  * Structured JSON-line logging (threat model A9). Callers pass only metadata:
@@ -48,48 +49,6 @@ export function createLogger(
 		info: (e, f) => write("info", e, f),
 		debug: (e, f) => write("debug", e, f),
 	};
-}
-
-/** Parse dotted-quad IPv4 into four octets, or undefined. */
-function parseIpv4(ip: string): number[] | undefined {
-	const parts = ip.split(".");
-	if (parts.length !== 4) return undefined;
-	const octets = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : -1));
-	return octets.every((o) => o >= 0 && o <= 255) ? octets : undefined;
-}
-
-/** Parse IPv6 (with `::`, an optional zone, an embedded IPv4 tail) into 8 groups. */
-function parseIpv6(ip: string): number[] | undefined {
-	const address = ip.split("%")[0] ?? "";
-	const halves = address.split("::");
-	if (halves.length > 2) return undefined;
-	const parseSide = (side: string): number[] | undefined => {
-		if (side === "") return [];
-		const groups: number[] = [];
-		const items = side.split(":");
-		for (const [i, item] of items.entries()) {
-			if (i === items.length - 1 && item.includes(".")) {
-				const v4 = parseIpv4(item);
-				if (v4 === undefined) return undefined;
-				groups.push(
-					((v4[0] ?? 0) << 8) | (v4[1] ?? 0),
-					((v4[2] ?? 0) << 8) | (v4[3] ?? 0),
-				);
-			} else if (/^[0-9a-fA-F]{1,4}$/.test(item)) {
-				groups.push(Number.parseInt(item, 16));
-			} else {
-				return undefined;
-			}
-		}
-		return groups;
-	};
-	const head = parseSide(halves[0] ?? "");
-	const tail = halves.length === 2 ? parseSide(halves[1] ?? "") : [];
-	if (head === undefined || tail === undefined) return undefined;
-	if (halves.length === 1) return head.length === 8 ? head : undefined;
-	const missing = 8 - head.length - tail.length;
-	if (missing < 1) return undefined;
-	return [...head, ...new Array<number>(missing).fill(0), ...tail];
 }
 
 /**

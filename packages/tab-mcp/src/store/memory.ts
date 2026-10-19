@@ -1,5 +1,6 @@
 import type {
 	GrantSummary,
+	RevokeOptions,
 	RevokeSelector,
 	TokenRecord,
 	TokenStore,
@@ -47,9 +48,19 @@ export function summarizeGrants(
 /** Tokens in process memory; everything is lost on restart. */
 export class MemoryTokenStore implements TokenStore {
 	readonly #records = new Map<string, TokenRecord>();
+	/** Revoked grants: grant id → keep until. */
+	readonly #revokedGrants = new Map<string, number>();
+	/** Revoked addresses: address id → { at, keep until }. */
+	readonly #revokedAddresses = new Map<string, { at: number; until: number }>();
 
-	async put(record: TokenRecord): Promise<void> {
+	async put(record: TokenRecord): Promise<boolean> {
+		if (this.#revokedGrants.has(record.grantId)) return false;
+		const address = this.#revokedAddresses.get(record.addressId);
+		if (address !== undefined && record.grantCreatedAt <= address.at) {
+			return false;
+		}
 		this.#records.set(record.hash, copy(record));
+		return true;
 	}
 
 	async get(hash: string): Promise<TokenRecord | undefined> {
@@ -64,7 +75,19 @@ export class MemoryTokenStore implements TokenStore {
 		return true;
 	}
 
-	async revoke(selector: RevokeSelector): Promise<number> {
+	async revoke(
+		selector: RevokeSelector,
+		options: RevokeOptions,
+	): Promise<number> {
+		if ("grantId" in selector) {
+			this.#revokedGrants.set(selector.grantId, options.keepUntil);
+		} else {
+			const old = this.#revokedAddresses.get(selector.addressId);
+			this.#revokedAddresses.set(selector.addressId, {
+				at: Math.max(old?.at ?? 0, options.now),
+				until: Math.max(old?.until ?? 0, options.keepUntil),
+			});
+		}
 		let n = 0;
 		for (const [hash, r] of this.#records) {
 			if (matches(r, selector)) {
@@ -83,6 +106,12 @@ export class MemoryTokenStore implements TokenStore {
 	}
 
 	async deleteExpired(now: number): Promise<number> {
+		for (const [id, until] of this.#revokedGrants) {
+			if (until <= now) this.#revokedGrants.delete(id);
+		}
+		for (const [id, t] of this.#revokedAddresses) {
+			if (t.until <= now) this.#revokedAddresses.delete(id);
+		}
 		let n = 0;
 		for (const [hash, r] of this.#records) {
 			if (r.expiresAt <= now) {
@@ -95,5 +124,7 @@ export class MemoryTokenStore implements TokenStore {
 
 	async close(): Promise<void> {
 		this.#records.clear();
+		this.#revokedGrants.clear();
+		this.#revokedAddresses.clear();
 	}
 }
