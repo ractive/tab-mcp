@@ -681,11 +681,16 @@ ${cancel}
 				"This page's pairing method is not available.",
 			);
 		}
-		const page = escapeHtml(session.origin);
+		// A browser always sends an Origin; only a non-browser tab on an open
+		// relay has none.
+		const page =
+			session.origin === ""
+				? "a page that did not say where it runs"
+				: `<span class="origin">${escapeHtml(session.origin)}</span>`;
 		const target =
 			session.appName === undefined
-				? `tools from <span class="origin">${page}</span>`
-				: `<strong>${escapeHtml(session.appName)}</strong> on <span class="origin">${page}</span>`;
+				? `tools from ${page}`
+				: `<strong>${escapeHtml(session.appName)}</strong> on ${page}`;
 		const body = `<h1>Connect ${escapeHtml(client.name)}</h1>
 <p>You're connecting ${clientLabel} to ${target}.</p>
 <p>${escapeHtml(client.name)} can then use this page's tools while the page is open. You can disconnect it in the page at any time.</p>

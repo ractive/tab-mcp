@@ -1038,7 +1038,8 @@ describe("threat model A7: the /authorize page", () => {
 		expect(csp).toContain("form-action 'self' https://app.example");
 		expect(csp).not.toContain("script-src");
 		expect(page.headers.get("x-frame-options")).toBe("DENY");
-		expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+		// same-origin, not no-referrer: with no-referrer browsers post `Origin: null`.
+		expect(page.headers.get("referrer-policy")).toBe("same-origin");
 		expect(page.headers.get("cache-control")).toBe("no-store");
 		expect(page.html).not.toContain("<script");
 		expect(page.html).toContain('<html lang="en">');
