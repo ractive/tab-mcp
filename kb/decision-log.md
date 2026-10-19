@@ -425,3 +425,15 @@ logs or store) gets its own relay instance instead ([iteration 6](/iterations/it
 - [Bun runtime and publishing research](/research/bun-runtime-and-publishing.md)
 - [bunny.net research](/research/bunny-magic-containers.md)
 - [WebMCP registerTool](/research/webmcp-register-tool.md)
+
+## DEC-046: Deployments live outside this repository (owner)
+
+The open-source repository holds no deployment secrets and no owner
+infrastructure. The owner's hosted relay for `https://ractive.ch` is deployed
+from the private repository `ractive/ractive.ch` (`infra/relay/`, OpenTofu,
+state in the bunny storage zone `ractive-ch-tfstate`), which may later manage
+more of ractive.ch on bunny.net. This project's release secrets (Docker Hub;
+npm via OIDC) stay here. Supersedes the owner-instance parts of DEC-043 and
+DEC-044; iteration 6 becomes generic, secret-free deployment docs and
+examples. Reason: one operator's secrets and infrastructure do not belong in a
+public, reusable project.

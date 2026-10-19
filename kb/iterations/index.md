@@ -9,7 +9,7 @@
 * [Iteration 3: OAuth authorization server with pairing](iteration-3-oauth.md) - Our own authorization server: metadata, CIMD client validation, pairing codes typed on the authorize page, token endpoint with PKCE and rotating refresh tokens, revocation, spec tests, conformance runs and a security review.
 * [Iteration 4: calculator example and end-to-end tests](iteration-4-calculator-e2e.md) - The four-function calculator page as the minimal example, an automated browser end-to-end test, a headless Claude Code run, and the first compatibility matrix.
 * [Iteration 5: packaging, documentation and release](iteration-5-packaging-release.md) - npm builds with declarations, trusted publishing with provenance, the multi-arch Docker image, project documentation, the developer skill, dependency updates and the token-expiry warning.
-* [Iteration 6: hosted relay on bunny.net](iteration-6-deployment-bunny.md) - Run the owner's public relay as a single Magic Containers instance behind the bunny CDN with a custom domain, health checks and a privacy notice.
+* [Iteration 6: deployment documentation and examples](iteration-6-deployment-bunny.md) - Generic, secret-free deployment docs and examples for running a tab-mcp relay (Docker, a bunny.net Magic Containers example); the owner's ractive.ch instance is deployed from the private ractive/ractive.ch repository.
 * [Iteration 7: identity binding (0.2+)](iteration-7-identity-binding.md) - Backlog plan for binding a tab and an AI app to the same OpenID Connect identity, as a second pairing method next to the code.
 
 <!-- okf:index:end -->
