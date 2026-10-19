@@ -507,6 +507,13 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 				return "";
 			}
 		})();
+		// The AI app may have gone while the body was read or the token checked:
+		// then forward nothing (the abort event has already fired and would not
+		// cancel the exchange, which would hold a slot until the timeout).
+		if (req.signal.aborted) {
+			logDone(499, method, { outcome: "client_closed" });
+			return new Response(null, { status: 499 });
+		}
 		// Only now, for an authenticated request that is about to be forwarded,
 		// switch off Bun's idle timer: our own request timer and keep-alives take
 		// over (Bun research, finding 1). Body reading and every unauthenticated

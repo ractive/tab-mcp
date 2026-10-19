@@ -417,3 +417,31 @@ describe("5: a failing token store is not an invalid token", () => {
 		]);
 	});
 });
+
+describe("6: a request aborted before forwarding is not forwarded", () => {
+	test("aborting while the token is checked: no http.request, no slot held", async () => {
+		const store = new MemoryTokenStore();
+		const get = store.get.bind(store);
+		store.get = async (hash) => {
+			await Bun.sleep(200);
+			return get(hash);
+		};
+		const r = relay({ store, maxConcurrentRequests: 1 });
+		const t = tab(r, { onRequest: () => {} }); // never answers
+		const session = await t.connect();
+		const token = await tokenFor(store, t.addressId);
+		const abort = new AbortController();
+		const pending = mcpPost(session.address, rpc(1, "tools/list"), {
+			token,
+			signal: abort.signal,
+		}).catch(() => "aborted");
+		await Bun.sleep(50);
+		abort.abort();
+		expect(await pending).toBe("aborted");
+		await Bun.sleep(300);
+		expect(t.received.some((m) => m.type === "http.request")).toBe(false);
+		expect(r.logs.events("mcp.request")).toEqual([
+			expect.objectContaining({ status: 499, outcome: "client_closed" }),
+		]);
+	});
+});
