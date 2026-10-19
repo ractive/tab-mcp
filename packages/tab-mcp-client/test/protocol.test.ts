@@ -391,3 +391,60 @@ test("pieces never split a surrogate pair", async () => {
 		}
 	}
 });
+
+describe("message size (review of PR #2)", () => {
+	const call = (id: string, name: string) => ({
+		type: "http.request",
+		id,
+		method: "POST",
+		path: "/mcp",
+		headers: {
+			"content-type": "application/json",
+			"mcp-protocol-version": "2026-07-28",
+			"mcp-method": "tools/call",
+			"mcp-name": name,
+		},
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/call",
+			params: {
+				name,
+				_meta: {
+					"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+					"io.modelcontextprotocol/clientCapabilities": {},
+				},
+			},
+		}),
+		grant: {
+			grantId: "g_1",
+			clientId: "https://x.example/c.json",
+			scopes: ["tools"],
+		},
+	});
+
+	test("every frame stays within a small maxMessageBytes (multi-byte text, escapes)", async () => {
+		relay.limits = { ...STUB_LIMITS, maxMessageBytes: 2000 };
+		const text = "\u0001".repeat(4000) + "😀é".repeat(500);
+		await t.registerTool({
+			name: "noisy",
+			description: "Escapes a lot",
+			execute: () => text,
+		});
+		await t.connect();
+		relay.send(call("r1", "noisy"));
+		await relay.next("http.response.end");
+		const data = relay.received
+			.filter((m) => m.type === "http.response.chunk")
+			.map((m) => String(m["data"]))
+			.join("");
+		expect(data).toContain(JSON.stringify(text).slice(1, -1));
+		expect(Math.max(...relay.frameBytes)).toBeLessThanOrEqual(2000);
+	});
+
+	test("a limit too small to frame anything refuses to connect", async () => {
+		relay.limits = { ...STUB_LIMITS, maxMessageBytes: 300 };
+		await expect(t.connect()).rejects.toThrow(/message limit/);
+		expect(t.state).toBe("disconnected");
+	});
+});

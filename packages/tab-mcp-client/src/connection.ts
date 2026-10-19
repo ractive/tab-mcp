@@ -71,6 +71,29 @@ const KNOWN_TYPES = new Set([
 ]);
 
 /**
+ * Room for a message's envelope (`http.response` with its headers, or a
+ * chunk) with an id of up to 128 characters (protocol limit).
+ */
+const ENVELOPE_BYTES = 512;
+/** Worst case per UTF-16 unit once JSON-encoded as UTF-8: `\u0001` is 6 bytes. */
+const WORST_BYTES_PER_UNIT = 6;
+const MIN_CHUNK_UNITS = 64;
+export const MIN_MESSAGE_BYTES: number =
+	ENVELOPE_BYTES + WORST_BYTES_PER_UNIT * MIN_CHUNK_UNITS;
+
+/**
+ * The largest piece of body text (UTF-16 units) whose message cannot exceed
+ * the relay's `maxMessageBytes`; `undefined` if the limit is too small to
+ * frame anything useful.
+ */
+export function chunkSize(maxMessageBytes: number): number | undefined {
+	const units = Math.floor(
+		(maxMessageBytes - ENVELOPE_BYTES) / WORST_BYTES_PER_UNIT,
+	);
+	return units >= MIN_CHUNK_UNITS ? units : undefined;
+}
+
+/**
  * Split text into pieces of at most `max` UTF-16 units, never between the two
  * halves of a surrogate pair (a lone half would not survive JSON and UTF-8).
  */
@@ -275,14 +298,19 @@ export function openConnection(
 	function onMessage(message: RelayMessage): void {
 		if (state === "opening") {
 			if (message.type === "session") {
+				const chunk = chunkSize(message.limits.maxMessageBytes);
+				if (chunk === undefined) {
+					fail(
+						new Error(
+							`The relay's message limit (${message.limits.maxMessageBytes} bytes) is too small; tab-mcp needs at least ${MIN_MESSAGE_BYTES}.`,
+						),
+					);
+					return;
+				}
+				maxChunk = chunk;
 				state = "ready";
 				clearTimeout(connectTimer);
 				heartbeatMs = message.limits.heartbeatMs;
-				// Room for JSON escaping and the envelope within maxMessageBytes.
-				maxChunk = Math.max(
-					1024,
-					Math.floor((message.limits.maxMessageBytes - 1024) / 6),
-				);
 				armHeartbeat();
 				resolveReady(host.sessionStarted(message));
 			} else if (message.type === "error") {

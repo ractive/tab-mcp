@@ -38,6 +38,7 @@ Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization
 - [ ] Spec tests: one test group per requirement of RFC 6749 §4.1/§5.2/§6, RFC 7636, RFC 8414, RFC 9728, RFC 9207, RFC 7009, RFC 8707 and the MCP authorization pages, citing the section
 - [ ] Conformance runs: `oauth4webapi` (dev dependency, pinned) as client for discovery, authorization code with PKCE, refresh rotation and revocation; the MCP SDK client for the full MCP flow
 - [ ] Separate security review of the OAuth diff (fresh-context reviewer, threat model A1–A4, A7) before merging; findings fixed or recorded in the decision log
+- [ ] Configuration floor for `maxMessageBytes` (e.g. 16 KiB): the relay accepts any positive value today, but the browser library refuses a session whose limit cannot frame a response chunk (below 896 bytes, found in the review of PR #2), and MCP requests need room too
 - [ ] Replace the iteration-1 store-level token helper with real flows in tests where it matters (keep it as an internal test helper)
 
 ## Acceptance criteria

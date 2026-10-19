@@ -22,6 +22,8 @@ type Message = Record<string, unknown> & { type: string };
 export class StubRelay {
 	readonly server: Server<undefined>;
 	readonly received: Message[] = [];
+	/** UTF-8 size of every frame the tab sent. */
+	readonly frameBytes: number[] = [];
 	limits: Limits = STUB_LIMITS;
 	grants: Grant[] = [];
 	/** Answer `hello` with a `session` (off: the test answers itself). */
@@ -47,6 +49,7 @@ export class StubRelay {
 					this.#socket = ws;
 				},
 				message: (ws, data) => {
+					this.frameBytes.push(Buffer.byteLength(String(data)));
 					const m = JSON.parse(String(data)) as Message;
 					if (m.type === "hello" && this.answerHello) {
 						ws.send(
