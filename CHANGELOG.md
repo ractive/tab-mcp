@@ -7,7 +7,12 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
-### [0.1.0-alpha.0] - unreleased
+### [0.1.0-alpha.1] - 2026-10-20
+
+No changes to the library. Published through the release workflow (trusted publishing)
+to validate it; the release step now reads `npm view` output from npm 11 and 12 alike.
+
+### [0.1.0-alpha.0] - 2026-10-19
 
 First alpha of the browser library, on the npm dist-tag `alpha`.
 
