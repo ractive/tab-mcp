@@ -6,13 +6,15 @@ status: planned
 tags:
   - iteration
   - deployment
-timestamp: 2026-10-20T00:15:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # Iteration 6: hosted relay on bunny.net
 
 Goal: a public relay (e.g. `relay.ractive.ch`) for pages on `https://ractive.ch` (saturnus
-first). The calculator example keeps using a local relay (DEC-032).
+first). The calculator example keeps using a local relay (DEC-032). One instance serves
+several projects on ractive.ch as configured sites (DEC-045); a project with stricter
+requirements (own limits, operator, logs or store) gets its own instance instead.
 
 Read first: [bunny.net research](/research/bunny-magic-containers.md),
 [threat model](/design/threat-model.md) A5, A8, A9, DEC-029, 030, 032, 043, 044.
@@ -42,7 +44,7 @@ The hosted relay is infrastructure as code (DEC-043): OpenTofu with the official
 
 - [ ] Verify first: WebSockets through a Magic Containers CDN endpoint (pull-zone toggle), SSE with `Cache-Control: no-cache`, a 3-minute tool call with keep-alives; if WebSockets fail, switch to the Anycast endpoint with TLS terminated in the relay (`Bun.serve` `tls`) and record it in the decision log
 - [ ] App (in OpenTofu): image `ractive/tab-mcp:X.Y.Z` (amd64), one region, min = max = 1 replica, termination grace 30 s
-- [ ] Env: `TAB_MCP_PUBLIC_URL=https://relay.ractive.ch`, `TAB_MCP_ALLOWED_ORIGINS=https://ractive.ch` (exactly; browsers send no path), `TAB_MCP_TRUST_PROXY=x-real-ip`, limits
+- [ ] Env: `TAB_MCP_PUBLIC_URL=https://relay.ractive.ch`, the site list with `https://ractive.ch` (exactly; browsers send no path; DEC-045 sites with names such as `saturnus`), `TAB_MCP_TRUST_PROXY=x-real-ip`, limits
 - [ ] Persistent storage for the SQLite token store (`/data`): verify that Magic Containers offers a persistent volume; if not, record in the decision log that a deploy logs out every AI app (re-pairing needed) or choose a hosted store
 - [ ] Pull zone: WebSockets on, request coalescing off, no caching for the relay paths, custom hostname with TLS, IPv6 per zone policy
 - [ ] Health checks on `/healthz` (startup, readiness, liveness)

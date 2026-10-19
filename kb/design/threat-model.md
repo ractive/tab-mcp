@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-19T23:30:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # Security model and threat model
@@ -137,6 +137,18 @@ Logs are JSON lines with event, a shortened address id, session id, MCP method, 
 status, duration, client id host and coarse error codes. Never bodies, tool names,
 arguments, results, tokens, codes or secrets. Client IPs appear only in rate-limit warnings,
 truncated (/24, /48). The hosted instance's privacy notice states this.
+
+### A11: Several sites on one relay (DEC-045)
+
+- One relay may serve several sites, each configured by origin. The relay verifies the
+  origin (from the browser's `Origin` header); the app name a page sends is self-declared
+  and unverified. The pairing page therefore shows the name next to the verified origin:
+  "to saturnus on `https://ractive.ch`". Pages on the same origin can claim each other's
+  names; within one's own origin that is acceptable, because they share a trust domain
+  anyway (same-origin pages can read each other's `localStorage` and secrets).
+- A configured site `name` overrides the page's claim.
+- Sites share one operator, one store and one log; a project that needs separation gets
+  its own instance.
 
 ### A10: A page that misleads (phishing)
 

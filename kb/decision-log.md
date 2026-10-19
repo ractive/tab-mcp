@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T00:15:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # Decision log
@@ -236,7 +236,8 @@ Replaces the code comparison (DEC-007). When the user clicks "Connect your AI to
 shows the MCP address to paste into the AI app and "When asked, enter the code 123456".
 The relay's `/authorize` page asks for that code and names the connecting AI app (from its
 verified Client ID Metadata Document) and the page's origin (the `Origin` of the tab's
-WebSocket): "You're connecting Claude (claude.ai) to tools from `https://ractive.ch`". The
+WebSocket): "You're connecting Claude (claude.ai) to tools from `https://ractive.ch`"
+(extended with the page's app name by DEC-045). The
 code has 6 digits, is single-use, valid 2 minutes, and allows at most 5 attempts; while the
 dialog is open the tab shows a fresh code automatically (after expiry, use or 5 failed
 attempts). The relay makes the codes and sends them to the tab; the tab asks for them only
@@ -395,6 +396,26 @@ secret) means the zone holds only ciphertext; this is one more reason for OpenTo
 Terraform. Secrets, all GitHub Actions secrets set by the owner: `BUNNY_API_KEY`, the
 storage zone's S3 access key and secret, `TOFU_STATE_PASSPHRASE`. Settles the backend
 question left open in DEC-043.
+
+## DEC-045: One relay serves several sites; configuration per origin (owner)
+
+One hosted relay instance can serve several projects on ractive.ch.
+
+1. **App name.** The tab sends an app name when connecting (e.g. `saturnus`, in `hello`).
+   The relay's `/authorize` page shows "You're connecting <client> to <app name> on
+   <origin>". The name is self-declared by the page and not verified; the origin is.
+   Within one's own origin that is acceptable (the threat model says so).
+2. **Sites.** Relay configuration becomes per origin, not only per instance: a list of
+   sites `{ origin, name?, pairing: "code" | "oidc", limits overrides }` with
+   instance-wide defaults. The origin allow-list is the list of configured sites; an empty
+   list admits nobody (DEC-032 still holds; `*` stays the explicit open-relay setting).
+   A configured `name` takes precedence over the name the page sends.
+
+(2) is built in [iteration 3](/iterations/iteration-3-oauth.md), because the site's
+`pairing` choice shapes the pairing-method interface (DEC-042); (1) is sent by the client
+from [iteration 2](/iterations/iteration-2-client-library.md) and shown from iteration 3.
+A project with stricter requirements (own limits it cannot share, own operator, separate
+logs or store) gets its own relay instance instead ([iteration 6](/iterations/iteration-6-deployment-bunny.md)).
 
 # Citations
 

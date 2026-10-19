@@ -6,7 +6,7 @@ status: planned
 tags:
   - iteration
   - client
-timestamp: 2026-10-19T23:00:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # Iteration 2: browser library
@@ -17,7 +17,7 @@ serve tool calls through the relay from iteration 1, paying nothing until it con
 Read first: [architecture](/design/architecture.md), [protocol](/design/protocol.md),
 [WebMCP registerTool](/research/webmcp-register-tool.md),
 [SDK research](/research/mcp-typescript-sdk-v2.md), DEC-010, 013, 020, 022, 023, 027, 028,
-035.
+035, 045.
 
 ## API sketch
 
@@ -45,6 +45,7 @@ mcp.revoke(grantId); mcp.disconnect(); mcp.newAddress();
 - [ ] Result and annotation mapping (DEC-022, DEC-023)
 - [ ] Tunnel client: `http.request` → `Request` (+ `parsedBody`, `authInfo`, `AbortController`) → stream the `Response` back as `http.response` or `start`/`chunk`/`end`; `http.cancel` aborts
 - [ ] `connect()` only with transient user activation (where supported), opens `wss://…/tab` with `tab-mcp.v1`, sends `hello` with the secret from `localStorage` (DEC-027; try/catch, a page-lifetime secret without storage), resolves with the address; `disconnect()` sends `bye`; `newAddress()` sends `grants.revokeAll`, makes a new secret and reconnects; no automatic reconnect
+- [ ] App name (DEC-045): `new TabMcp({ appName: "saturnus", … })` sent as `hello.app.name`; the dialog shows `session.appName` when present
 - [ ] Heartbeat: answer `ping`; treat two missed pings as dead
 - [ ] Pairing (DEC-028): default "Connect your AI tool" `<dialog>` with the address, copy button, short instructions per AI app and "When asked, enter the code 123456"; `pairing.start` on open and `pairing.stop` on close, the code replaced as `pairing.code` messages arrive; connected apps from `session.grants`, `grant.added`/`grant.removed`, each with Disconnect (`grant.revoke`)
 - [ ] Consequential tools: confirmation before `execute` via `onConfirm` or the default dialog (tool title, client, argument summary); refusal → `isError` result "The user declined"

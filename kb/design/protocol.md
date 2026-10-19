@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-19T23:00:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
@@ -47,8 +47,8 @@ Direction: T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `page: {title}`, `secret` | First message after open. `page.title` is untrusted and only logged as its length. |
-| `session` | R→T | `sessionId`, `address`, `origin`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the public MCP URL the user gives to the AI app. |
+| `hello` | T→R | `library: {name, version}`, `page: {title}`, `app?: {name}`, `secret` | First message after open. `page.title` is untrusted and never logged. `app.name` (e.g. `saturnus`, up to 64 characters) is self-declared and shown on `/authorize` (DEC-045; sent from iteration 2, shown from iteration 3). |
+| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the public MCP URL the user gives to the AI app. |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
 | `bye` | both | `reason` | Orderly end; the sender closes the socket after it. Reasons from the relay: `replaced`, `expired`, `idle`, `shutdown`. |
@@ -64,7 +64,8 @@ and close 4005.
 
 `sessionId` is a fresh random id per WebSocket and appears only in logs and in this
 protocol, never in URLs. `origin` is the page origin the relay saw on the upgrade (shown on
-`/authorize`). `grants` lists the AI apps connected to this address (see below; empty until
+`/authorize`); `appName` is the name `/authorize` will show (the site's configured name, else
+the page's `app.name`). `limits` are the site's limits (DEC-045). `grants` lists the AI apps connected to this address (see below; empty until
 [iteration 3](/iterations/iteration-3-oauth.md)).
 
 `limits` carries `maxMessageBytes`, `maxBodyBytes`, `requestTimeoutMs`, `idleTimeoutMs`,

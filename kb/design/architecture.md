@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-19T23:00:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # tab-mcp architecture
@@ -160,6 +160,11 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
   arguments, results, tokens, codes and secrets (tokens only as hashes in the store).
 
 ## Configuration (relay)
+
+From iteration 3 the relay is configured per site (DEC-045): a list of
+`{ origin, name?, pairing: "code" | "oidc", limits overrides }` with the instance-wide
+values below as defaults; the configured sites are the origin allow-list. The exact format
+(e.g. a `TAB_MCP_SITES` JSON value or a config file) is settled in iteration 3.
 
 Environment variables with safe defaults; the full list goes to `docs/configuration.md` in
 [iteration 5](/iterations/iteration-5-packaging-release.md). Library users pass the same

@@ -7,7 +7,7 @@ tags:
   - iteration
   - oauth
   - relay
-timestamp: 2026-10-19T23:30:00+02:00
+timestamp: 2026-10-20T00:45:00+02:00
 ---
 
 # Iteration 3: OAuth authorization server with pairing
@@ -19,7 +19,7 @@ else can. Written by us without an OAuth library (DEC-031).
 Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization),
 [AI app support](/research/ai-app-support.md) (requirements list),
 [threat model](/design/threat-model.md) A1–A4, A7 and A10, DEC-006, 015, 027–031, 033,
-036, 040, 041.
+036, 040, 041, 042, 045.
 
 ## Tasks
 
@@ -27,9 +27,10 @@ Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization
 - [ ] `/.well-known/oauth-authorization-server` (RFC 8414): issuer, endpoints, `response_types_supported: ["code"]`, `grant_types_supported: ["authorization_code", "refresh_token"]`, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`, `authorization_response_iss_parameter_supported: true`, `revocation_endpoint`, `scopes_supported`; no `registration_endpoint`; CORS
 - [ ] CIMD fetcher: SSRF guards (https, resolve and refuse private ranges, no redirects, 5 s, 64 KiB, JSON), validation (`client_id` equality, `client_name`, `redirect_uris`, `token_endpoint_auth_method` `none`), cache by `Cache-Control` (5 min–24 h), optional host allow-list
 - [ ] Redirect URI matching: exact, except loopback `localhost`/`127.0.0.1`/`[::1]` with any port (RFC 8252)
-- [ ] Pairing as a replaceable **pairing method** interface (DEC-042): the authorization server asks the configured method whether a browser at `/authorize` may pair with an address (render its step, check the submission, report the outcome) and knows nothing about codes; today's only method is the 6-digit code, the planned [identity binding](/design/identity-binding.md) is the next; tests run the OAuth flow against a stub method too
+- [ ] Sites (DEC-045): per-origin configuration `{ origin, name?, pairing: "code" | "oidc", limits overrides }` with instance-wide defaults; the sites are the origin allow-list (empty = nobody, `*` open relay as before); a format for the binary and Docker (e.g. `TAB_MCP_SITES` JSON or a config file) and for `createRelay({ sites })`; the session's limits and pairing method come from its site; `hello.app.name` accepted (≤ 64 characters, unverified) and a configured name preferred, sent back as `session.appName`
+- [ ] Pairing as a replaceable **pairing method** interface (DEC-042), chosen per site (DEC-045): the authorization server asks the configured method whether a browser at `/authorize` may pair with an address (render its step, check the submission, report the outcome) and knows nothing about codes; today's only method is the 6-digit code, the planned [identity binding](/design/identity-binding.md) is the next; tests run the OAuth flow against a stub method too
 - [ ] The code method in the relay (DEC-028): `pairing.start`/`pairing.stop` from the tab, `pairing.code` with 6 uniform random digits, single-use, 2 minutes, 5 attempts, a fresh code by itself while pairing is on; codes never logged
-- [ ] `/authorize`: parameter validation; errors before a trusted redirect URI shown on the page; tab offline → "Open the page and click Connect your AI tool" with a retry; otherwise "You're connecting <client name> (<client host>) to tools from <page origin>" and a code field; form protected with `Bun.CSRF`; wrong code counts an attempt; success → redirect with `code`, `state`, `iss`; Cancel → `error=access_denied`; server-rendered with escaping, CSP and security headers
+- [ ] `/authorize`: parameter validation; errors before a trusted redirect URI shown on the page; tab offline → "Open the page and click Connect your AI tool" with a retry; otherwise "You're connecting <client name> (<client host>) to <app name> on <page origin>" (DEC-045; without an app name: "to tools from <page origin>") and a code field; form protected with `Bun.CSRF`; wrong code counts an attempt; success → redirect with `code`, `state`, `iss`; Cancel → `error=access_denied`; server-rendered with escaping, CSP and security headers
 - [ ] `/token` `authorization_code`: PKCE S256 (`Bun.CryptoHasher`), single-use 60 s codes bound to client id, redirect URI and resource; constant-time comparisons; creates a grant bound to the address; access token 1 h + refresh token 30 days (DEC-029); RFC 6749 error responses; `Cache-Control: no-store`; CORS
 - [ ] `/token` `refresh_token`: rotation through `markUsed` (atomic), a new refresh token each time, reuse of a used one revokes the grant (`grant.removed` `reuse_detected`); `resource` and `client_id` must match the grant
 - [ ] `/revoke` (RFC 7009), `grant.revoke` and `grants.revokeAll` from the tab; `session.grants`, `grant.added`, `grant.removed` to the tab
