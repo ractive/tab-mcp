@@ -99,6 +99,8 @@ export class Exchange {
 	#state: "waiting" | "streaming" | "done" = "waiting";
 	/** The relay started the stream; a tab `http.response` becomes one event. */
 	#relayStarted = false;
+	/** The tab sent `http.response.start`: only chunks and the end may follow. */
+	#tabStarted = false;
 	/** Buffer a non-SSE streamed body to send it as one event. */
 	#wrap = false;
 	#wrapped = "";
@@ -137,6 +139,10 @@ export class Exchange {
 
 	/** A complete response from the tab. */
 	onResponse(msg: HttpResponseMessage): void {
+		if (this.#tabStarted) {
+			this.#badResponse("http.response after http.response.start");
+			return;
+		}
 		if (this.#state === "waiting") {
 			if (!this.#account(msg.body)) return;
 			if (NULL_BODY_STATUSES.has(msg.status) && msg.body !== "") {
@@ -163,6 +169,11 @@ export class Exchange {
 	}
 
 	onStart(msg: HttpResponseStartMessage): void {
+		if (this.#tabStarted) {
+			this.#badResponse("http.response.start sent twice");
+			return;
+		}
+		this.#tabStarted = true;
 		if (this.#state === "waiting") {
 			if (NULL_BODY_STATUSES.has(msg.status)) {
 				this.#badResponse(`status ${msg.status} cannot be streamed`);

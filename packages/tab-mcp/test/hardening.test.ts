@@ -445,3 +445,61 @@ describe("6: a request aborted before forwarding is not forwarded", () => {
 		]);
 	});
 });
+
+describe("7: http.response after http.response.start", () => {
+	for (const relayStarted of [false, true]) {
+		test(`fails the request instead of hanging${relayStarted ? " (relay-started stream)" : ""}`, async () => {
+			const r = relay({ requestTimeoutMs: 5000, keepAliveMs: 40 });
+			const { t, address, token } = await connected(r, async (msg, tab) => {
+				if (relayStarted) await Bun.sleep(80);
+				tab.send({
+					type: "http.response.start",
+					id: msg.id,
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+				tab.send({
+					type: "http.response",
+					id: msg.id,
+					status: 200,
+					headers: {},
+					body: "{}",
+				});
+			});
+			const started = Date.now();
+			const res = await mcpPost(address, rpc(1, "tools/call", { name: "x" }), {
+				token,
+			});
+			const text = await res.text();
+			expect(Date.now() - started).toBeLessThan(1000);
+			expect(text).toContain('"code":-31007');
+			expect(await t.next("error")).toEqual({
+				type: "error",
+				code: "bad_message",
+				message: expect.stringContaining("http.response.start"),
+				id: expect.any(String),
+			});
+			expect((await t.next("http.cancel")).type).toBe("http.cancel");
+		});
+	}
+
+	test("a second http.response.start fails the request too", async () => {
+		const r = relay({ requestTimeoutMs: 5000 });
+		const { address, token } = await connected(r, (msg, tab) => {
+			const start = {
+				type: "http.response.start",
+				id: msg.id,
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			};
+			tab.send(start);
+			tab.send(start);
+		});
+		const started = Date.now();
+		const text = await (
+			await mcpPost(address, rpc(1, "tools/call", { name: "x" }), { token })
+		).text();
+		expect(Date.now() - started).toBeLessThan(1000);
+		expect(text).toContain('"code":-31007');
+	});
+});

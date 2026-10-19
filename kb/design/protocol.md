@@ -140,6 +140,11 @@ of the verified `client_id` URL) is the verified part. Codes are never logged.
 - On streamed responses the relay writes an SSE comment (`: keep-alive`) to the AI app
   every `keepAliveMs` while the tab is silent, but only at an event boundary (when the
   bytes forwarded so far end with a blank line). The tab never sends keep-alives.
+- A request gets either one `http.response`, or one `http.response.start` followed by any
+  number of `http.response.chunk` and one `http.response.end`. An `http.response` after
+  `http.response.start`, or a second `http.response.start`, is a protocol error: the relay
+  answers `error` `bad_message` with the `id`, fails the request (`-31007`) and sends
+  `http.cancel`.
 - `http.cancel` aborts the tab's `Request.signal`; the tab sends nothing more for that `id`.
   Late messages for a cancelled `id` are dropped silently.
 
