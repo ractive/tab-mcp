@@ -38,7 +38,7 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 ### Docker
 
 - [ ] `Dockerfile` (multi-stage, `oven/bun:1.4.3-alpine` build, `oven/bun:1.4.3-distroless` runtime, non-root, `HEALTHCHECK` not possible in distroless → documented health endpoint instead), `TAB_MCP_STORE=sqlite` and `TAB_MCP_SQLITE_PATH=/data/tab-mcp.db` with `/data` a volume writable by the non-root user, `.dockerignore`
-- [ ] Release job: buildx multi-arch amd64 + arm64, push to `ractive-ch/tab-mcp` (Docker Hub organisation `ractive-ch` from the `DOCKERHUB_NAMESPACE` variable; login with the `DOCKERHUB_USERNAME` variable + `DOCKERHUB_TOKEN` secret) and `ghcr.io/ractive/tab-mcp`, tags `X.Y.Z`, `X.Y`, `latest`, provenance and SBOM attestations, all actions pinned by SHA
+- [ ] Release job: buildx multi-arch amd64 + arm64, push to `ractive/tab-mcp` (Docker Hub, `DOCKERHUB_USERNAME` variable + `DOCKERHUB_TOKEN` secret) and `ghcr.io/ractive/tab-mcp`, tags `X.Y.Z`, `X.Y`, `latest`, provenance and SBOM attestations, all actions pinned by SHA
 - [ ] Token-expiry warning: scheduled monthly workflow (and a step in the release workflow) that reads the repository variable `DOCKERHUB_TOKEN_EXPIRES` (`2027-10-19`) and fails with a clear message, or opens an issue, when the date is within 30 days, pointing to `kb/operations/release-secrets.md`
 
 ### Documentation

@@ -15,7 +15,7 @@ timestamp: 2026-10-20T00:45:00+02:00
 deployment secrets and no owner infrastructure. The owner's hosted relay for
 `https://ractive.ch` is planned and deployed from the private repository
 `ractive/ractive.ch` (its `kb/iterations/iteration-07-infra-bunny.md`,
-`infra/relay/`), using a released `ractive-ch/tab-mcp` image. The research and
+`infra/relay/`), using a released `ractive/tab-mcp` image. The research and
 OpenTofu work from the earlier version of this iteration moved there.
 
 What stays here, generic and secret-free:

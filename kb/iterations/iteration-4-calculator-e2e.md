@@ -22,7 +22,7 @@ Read first: [architecture](/design/architecture.md),
 
 - [ ] `examples/calculator`: plain HTML + TypeScript, four functions, display, memory (M+, MR, MC), a "Connect your AI tool" button opening the library's pairing dialog, connected apps list with Disconnect
 - [ ] Tools: `press_keys` (sequence of keys, returns the display), `read_display` (read-only), `clear` (C), `clear_memory` (consequential: asks in the page)
-- [ ] Dev script `bun run example` starting a local relay (development mode, origin `http://localhost:…` allowed, memory store) and serving the page with an HTML import route; README shows the same with `docker run ractive-ch/tab-mcp` (the example never uses the hosted relay, DEC-032)
+- [ ] Dev script `bun run example` starting a local relay (development mode, origin `http://localhost:…` allowed, memory store) and serving the page with an HTML import route; README shows the same with `docker run ractive/tab-mcp` (the example never uses the hosted relay, DEC-032)
 - [ ] E2E test: relay + page in headless Chrome (CDP helper) + SDK client doing the full OAuth flow; the test clicks Connect in the page via CDP, reads the pairing code from the dialog and types it on the `/authorize` page; checks `press_keys` "12+30=" → 42 and that `clear_memory` waits for the page confirmation
 - [ ] Headless Claude Code check (local-only script, never in CI: it needs a Claude login, DEC-037): obtain a token through the e2e helper, then `claude -p --mcp-config cfg.json --strict-mcp-config --allowedTools "mcp__calc__*" "Use the calculator to compute 12*12"` with `"headers": {"Authorization": "Bearer ${TABMCP_TOKEN}"}`; assert the page shows 144
 - [ ] Negative check: `MCP_PROTOCOL_NEGOTIATION=legacy` Claude Code gets the documented 400 error
