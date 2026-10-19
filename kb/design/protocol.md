@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-20T00:45:00+02:00
+timestamp: 2026-10-20T10:00:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
@@ -140,6 +140,11 @@ of the verified `client_id` URL) is the verified part. Codes are never logged.
 - On streamed responses the relay writes an SSE comment (`: keep-alive`) to the AI app
   every `keepAliveMs` while the tab is silent, but only at an event boundary (when the
   bytes forwarded so far end with a blank line). The tab never sends keep-alives.
+- A request gets either one `http.response`, or one `http.response.start` followed by any
+  number of `http.response.chunk` and one `http.response.end`. An `http.response` after
+  `http.response.start`, or a second `http.response.start`, is a protocol error: the relay
+  answers `error` `bad_message` with the `id`, fails the request (`-31007`) and sends
+  `http.cancel`.
 - `http.cancel` aborts the tab's `Request.signal`; the tab sends nothing more for that `id`.
   Late messages for a cancelled `id` are dropped silently.
 
@@ -153,7 +158,27 @@ Example:
  "grant":{"grantId":"g_1","clientId":"https://claude.ai/oauth/claude-code-client-metadata","scopes":["tools"]}}
 ```
 
-### Errors
+### Errors the relay sends to the AI app
+
+When the relay itself ends an MCP request, the AI app gets a JSON-RPC error with the
+request's id (as an HTTP error, or as a final SSE event if the stream had started). Codes
+are outside the JSON-RPC reserved range:
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `-31001` | 503 | The page is not open (valid token, no tab connected). |
+| `-31002` | 504 | The page did not answer within `requestTimeoutMs`. |
+| `-31003` | 503 | The page closed its connection while the request was in flight. |
+| `-31004` | 429 | Too many concurrent requests for this page. |
+| `-31005` | 503 | The WebSocket send was dropped under backpressure (DEC-021). |
+| `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; listen streams excepted). |
+| `-31007` | 502 | The page sent an invalid response (malformed message, header value that is not an RFC 9110 field value, body with status 204/205/304). |
+| `-31008` | 503 | The token store is unavailable; sent with `Retry-After`, so clients keep their tokens. |
+
+The relay notices that an AI app closed a streamed response when it next writes to it, so
+at the latest after one keep-alive interval; then it sends `http.cancel`.
+
+### Errors between tab and relay
 
 `{"type":"error","code":"…","message":"…","id":"r42"?}` in either direction. `id` refers to
 the request it concerns, if any.
@@ -177,7 +202,7 @@ status and a JSON-RPC error body, as the MCP handler produced it.
 | 1008 | Policy violation (bad message, no `hello` in time). |
 | 1009 | Message too large. |
 | 4001 | Session expired (absolute lifetime). |
-| 4002 | Idle timeout (no MCP request for `idleTimeoutMs`). |
+| 4002 | Idle timeout: no MCP request for `idleTimeoutMs` and nothing in flight; an open `subscriptions/listen` stream counts as activity. |
 | 4003 | Heartbeat lost. |
 | 4004 | Relay shutting down. |
 | 4005 | Replaced by a newer session for the same address. |

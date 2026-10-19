@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T00:45:00+02:00
+timestamp: 2026-10-20T11:00:00+02:00
 ---
 
 # Decision log
@@ -338,9 +338,11 @@ client must accept `text/event-stream`. The tab's own SSE for `tools/call` (DEC-
 ## DEC-040: Order of checks on the MCP endpoint
 
 With stable, hash-derived addresses the relay cannot tell an unknown address from one whose
-tab is offline. Order: method (405) → `MCP-Protocol-Version` pre-check (400 / `-32022`,
-with the DEC-033 exception) → body size and JSON → bearer token valid for this address
-(401) → tab online (503 "the page is not open") → concurrency limit (429) → forward. No 404
+tab is offline. Order: method (405) → body size and JSON (413 / 400; the version check
+needs the body for `initialize` and the DEC-033 exception) → `MCP-Protocol-Version`
+pre-check (400 / `-32022`, `-32020` when the header is missing) → bearer token valid for
+this address (401) → tab online (503 "the page is not open") → concurrency limit (429) →
+forward. Implemented in iteration 1. No 404
 for unknown addresses, so addresses cannot be probed. Supersedes DEC-018.
 
 ## DEC-041: Shape of the `TokenStore`
@@ -416,6 +418,27 @@ One hosted relay instance can serve several projects on ractive.ch.
 from [iteration 2](/iterations/iteration-2-client-library.md) and shown from iteration 3.
 A project with stricter requirements (own limits it cannot share, own operator, separate
 logs or store) gets its own relay instance instead ([iteration 6](/iterations/iteration-6-deployment-bunny.md)).
+
+## DEC-047: Escaped errors are logged; rejections keep the relay running
+
+The relay handles errors per tab message and per request (a bad tab response fails only
+its request with 502 / `-31007`). As defence in depth, `installCrashLogging` in the
+`tab-mcp` binary logs anything that still escapes, never silently: an unhandled promise
+rejection is logged (`process.unhandled_rejection`) and the relay keeps running, so one
+bad request or tab cannot end every other session; an uncaught exception is logged
+(`process.uncaught_exception`) and the process exits with 1, because its state may be
+inconsistent; the supervisor restarts it and AI apps keep their tokens (they live in the
+store). Only the error's name is logged, since messages can carry request data. From the
+review of PR #1.
+
+## DEC-048: A deadline for reading MCP request bodies
+
+Bun 1.4.3's `idleTimeout` does not fire while a handler waits for an unfinished request
+body (checked with `arrayBuffer()` and a stream reader), so a client that stalls mid-body
+would hold a socket forever. The relay reads bodies with its own deadline
+(`TAB_MCP_BODY_TIMEOUT_S`, default 10 s) and answers 408 with `Connection: close`, which
+makes Bun close the socket. `server.timeout(req, 0)` (switching Bun's idle timer off) runs
+only right before an authenticated request is forwarded. From the review of PR #1.
 
 # Citations
 

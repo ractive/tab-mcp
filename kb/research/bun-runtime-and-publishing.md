@@ -7,7 +7,7 @@ tags:
   - typescript
   - release
   - spike
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-20T12:00:00+02:00
 ---
 
 # Bun 1.4.3, TypeScript 7 and publishing for tab-mcp
@@ -20,9 +20,18 @@ Spiked on Bun 1.4.3 (macOS arm64) on 2026-10-19; spikes outside the repo, delete
    streaming response too**; writing does not reset it (spike: SSE writing every 0.5 s cut
    after ~4 s with `idleTimeout: 3`). Fix: `server.timeout(req, 0)` per MCP request and our
    own timers.
+   **But it does not fire while a handler waits for an unfinished request body**
+   (checked 2026-10-20 with `arrayBuffer()` and a stream reader: the socket stayed open;
+   without a body read, `idleTimeout: 1` closed it after about 4 s). Answering early with
+   `Connection: close` makes Bun close the socket (DEC-048).
 2. **`ws.send()` returns 0 and drops the message** once `backpressureLimit` is exceeded
    (spike: 176 of 200 16-KiB sends dropped at a 64-KiB limit). The relay must check the
    return value and fail the HTTP request on 0; `-1` means queued, `drain` follows.
+   **Tests that hold a streamed response must keep reading it:** Bun's `fetch` closes the
+   connection when an unread `Response` is garbage-collected (shown with `Bun.gc(true)`:
+   5 of 5 unreferenced listen responses closed, 0 of 5 referenced ones), and the relay
+   then rightly reports `client_closed`. Under CPU load the periodic GC lands inside short
+   test windows; this made the listen-stream test flaky in CI (2026-10-20).
 3. **`bun publish` cannot do provenance** (`--provenance` is documented as an error), and
    **npm trusted publishing needs the package to exist** first. Plan: owner publishes the
    first version by hand; CI then does `bun pm pack` (rewrites `workspace:*`) and

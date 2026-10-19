@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-20T00:45:00+02:00
+timestamp: 2026-10-20T11:00:00+02:00
 ---
 
 # tab-mcp architecture
@@ -57,7 +57,7 @@ for why.
 | `/authorize` | GET, POST | pairing page in the user's browser: names the AI app and page origin, asks for the code |
 | `/token` | POST | authorization code + PKCE → tokens; refresh token rotation |
 | `/revoke` | POST | RFC 7009 token revocation |
-| `/healthz` | GET | health (`{"status":"ok","version":"…"}`) |
+| `/healthz` | GET | health (`{"status":"ok","version":"…","counters":{"claudeHeaderWorkaround":n}}`) |
 | `/` | GET | short HTML page: what this relay is, link to the privacy notice |
 
 The metadata endpoints, `/token`, `/revoke` and the MCP endpoint send CORS headers without
@@ -188,6 +188,7 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_IDLE_TIMEOUT_S` | 3600 | session without MCP requests |
 | `TAB_MCP_SESSION_LIFETIME_S` | 43200 | absolute WebSocket session lifetime |
 | `TAB_MCP_HEARTBEAT_S` | 25 | protocol ping interval |
+| `TAB_MCP_BODY_TIMEOUT_S` | 10 | deadline for receiving an MCP request body (408 and close; DEC-048) |
 | `TAB_MCP_MAX_MESSAGE_BYTES` | 1048576 | request body and WebSocket message limit |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` / `TAB_MCP_REFRESH_TOKEN_TTL_S` | 3600 / 2592000 | token lifetimes |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug` (never bodies) |
