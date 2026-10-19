@@ -109,6 +109,7 @@ export function confirmDialog(
 	args.style.setProperty("white-space", "pre-wrap");
 	args.style.setProperty("max-height", "12rem");
 	args.style.setProperty("overflow", "auto");
+	args.hidden = Object.keys(request.arguments).length === 0;
 	dialog.append(
 		el(doc, "p", {
 			text: `${clientLabel(request.client)} wants to run ${title}.`,
@@ -244,9 +245,10 @@ export function showConnectDialog(
 			return;
 		}
 		address.value = session.address;
+		const appName = session.appName ?? mcp.appName;
 		status.textContent =
-			session.appName !== undefined
-				? `${session.appName} is ready for your AI tool.`
+			appName !== undefined
+				? `${appName} is ready for your AI tool.`
 				: "This page is ready for your AI tool.";
 		addressBox.hidden = false;
 		help.hidden = false;

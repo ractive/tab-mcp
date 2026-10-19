@@ -171,6 +171,11 @@ export class TabMcp extends EventTarget {
 		return this.#session?.address;
 	}
 
+	/** The app name AI apps see when pairing: the relay's (`session.appName`), else the page's own. */
+	get appName(): string | undefined {
+		return this.#session?.appName ?? this.#appName;
+	}
+
 	/** The AI apps connected to this address. */
 	get grants(): readonly Grant[] {
 		return this.#grants;
