@@ -1,52 +1,53 @@
 ---
 type: questions
-title: "Open questions for the owner"
-description: Decisions the plan made provisionally or could not make, each with a recommendation.
+title: Questions for the owner (closed)
+description: >-
+  The owner's answers of 2026-10-19 to the plan's open questions, each pointing
+  to its decision; no question is open.
 tags:
   - questions
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-19T23:00:00+02:00
 ---
 
 # Open questions for the owner
 
-Each question has a recommendation; the plan follows it until the owner decides otherwise.
+**Closed on 2026-10-19.** The owner answered every question; each answer is recorded in the
+[decision log](/decision-log.md). No question is open.
 
-1. **Stable addresses (DEC-017).** Keep the address the same across visits via a key in the
-   page's `localStorage`, or a new address per session? A new address per session means
-   re-adding the connector in claude.ai/ChatGPT every time. *Recommendation: stable, with a
-   "New address" button.*
-2. **Compare or type the code?** The plan has the user compare the 4-digit code shown on
-   `/authorize` with the one in the tab. Typing the code from `/authorize` into the tab
-   prevents blind approval at the cost of one more step. *Recommendation: compare (as
-   decided), and switch to typing if usability tests show people click without looking.*
-3. **Claude header bug workaround (DEC-019).** Accept `MCP-Protocol-Version: 2025-11-25`
-   when the body says `2026-07-28`? Without it claude.ai connectors in Desktop and Claude
-   Code fail today (claude-code #93290). *Recommendation: yes, narrowly, removed once
-   fixed.*
-4. **Clients locked out.** 2026-07-28-only locks out VS Code/Copilot, Gemini CLI and default
-   Codex; CIMD-only locks out Cursor. Accept for now and list them in the compatibility
-   matrix? *Recommendation: yes; revisit when Cursor ships CIMD.*
-5. **Refresh tokens (DEC-016).** None; the access token lives as long as the session.
-   Acceptable? *Recommendation: yes.*
-6. **Default limits.** Request timeout 120 s, idle 60 min, session lifetime 12 h, 5 sessions
-   per IP, 1 MiB messages. Long enough for saturnus (e.g. long-running programs on the
-   emulated calculator)? *Recommendation: these defaults; saturnus can ask for more on the
-   hosted instance.*
-7. **SDK licence.** The MCP SDK v2 is Apache-2.0. The client package depends on it (not
-   bundled) and the CDN build bundles it with its notice. Fine? *Recommendation: yes.*
-8. **Bundle size.** The SDK adds about 82 KB gzipped to pages. Acceptable for saturnus, or
-   should a later iteration replace it with a small hand-written handler?
-   *Recommendation: accept for 0.1; measure in saturnus.*
-9. **ghcr.io in addition to Docker Hub?** *Recommendation: yes, it costs one login step.*
-10. **Dependabot or Renovate?** *Recommendation: Dependabot (already used in your other
-    repositories, supports `bun.lock`); Renovate only if Dependabot's Bun support falls
-    short.*
-11. **Hosted relay origin allow-list.** Which page origins should `relay.ractive.ch` accept
-    (ractive.ch, the example's GitHub Pages origin, others on request)?
-12. **Browser-based MCP clients.** No CORS on the MCP endpoint in version 1, so MCP clients
-    running in a web page cannot connect. Needed? *Recommendation: no.*
-13. **Claude Code CI run.** The headless Claude Code check needs an account and costs
-    tokens; keep it local-only? *Recommendation: local-only script, not in CI.*
+1. **Stable addresses.** Yes: the address is derived from a secret kept in the page, with a
+   "New address" button; the newest tab with the same secret wins. → DEC-027.
+2. **Compare or type the code?** Neither as planned: pairing like a TV sign-in. The tab
+   shows the address and a 6-digit code; the user types the code on the relay's
+   `/authorize` page, which names the AI app and the page's origin. → DEC-028.
+3. **Claude header bug workaround.** Yes, exactly the one mismatched case, until Claude fixes
+   it. → DEC-033.
+4. **Clients locked out.** Accepted: 2026-07-28 only, CIMD only, no dynamic client
+   registration; the compatibility matrix tracks VS Code, Cursor, Gemini CLI and default
+   Codex. → DEC-033.
+5. **Refresh tokens.** Yes after all: 1-hour access tokens and rotating 30-day refresh
+   tokens with reuse detection, bound to the stable address; stored as hashes in a
+   `TokenStore` (SQLite by default). → DEC-029, DEC-030, DEC-041.
+6. **Default limits.** 300 s per request with keep-alives throughout, 60 min idle, 12 h
+   session lifetime, 5 sessions per IP, 1 MiB messages; all configurable. → DEC-034,
+   DEC-039.
+7. **SDK licence.** Apache-2.0 is acceptable; its notice ships with any bundle that contains
+   it. → DEC-035.
+8. **Bundle size.** The heavy part loads only on `connect()`; iteration 2 starts by measuring
+   the SDK and replaces it with our own stateless subset if it is mostly unused code and
+   Zod. → DEC-035.
+9. **ghcr.io in addition to Docker Hub?** Yes. → DEC-037.
+10. **Dependabot or Renovate?** Dependabot. → DEC-037.
+11. **Hosted relay origin allow-list.** Exactly `https://ractive.ch`. The calculator example
+    uses a local relay. The default list is empty; an open relay needs an explicit setting
+    and logs a warning. → DEC-032.
+12. **Browser-based MCP clients.** Yes: CORS without credentials on the metadata, token and
+    MCP endpoints, configurable off. → DEC-036.
+13. **Claude Code CI run.** Local only. → DEC-037.
+
+The owner also decided that the OAuth authorization server is written without an OAuth
+library and must pass spec tests, conformance runs against `oauth4webapi` and the MCP SDK
+client and a separate security review (DEC-031), and that the security documents carry a
+phishing note: connecting an AI app to a page means trusting the page (DEC-038).
 
 ## What tab-mcp must offer saturnus (for the later integration)
 
@@ -54,9 +55,9 @@ Each question has a recommendation; the plan follows it until the owner decides 
   content).
 - Consequential tools (e.g. "reset calculator", "delete file") confirmed in the page.
 - Tool-list changes when the emulated model changes (register/abort).
-- A replaceable consent and status UI that fits saturnus's design.
-- A stable address across visits (question 1) and the hosted relay allowing
-  `https://ractive.ch`.
+- A replaceable pairing and status UI that fits saturnus's design.
+- A stable address across visits (DEC-027) and the hosted relay allowing
+  `https://ractive.ch` (DEC-032).
 
 # Citations
 

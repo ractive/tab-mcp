@@ -1,18 +1,21 @@
 ---
 type: design
 title: "Tab↔relay protocol, version 1"
-description: The versioned WebSocket protocol between the browser library and the relay — message types, JSON shapes, errors, heartbeat and limits.
+description: >-
+  The versioned WebSocket protocol between the browser library and the relay —
+  message types (session, pairing, grants, tunnel), JSON shapes, errors, heartbeat
+  and limits.
 tags:
   - protocol
   - design
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-19T23:00:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
 
 The browser library (the *tab*) and the relay talk over one WebSocket per tab session. The
 protocol tunnels the AI app's MCP HTTP requests to the tab and the tab's HTTP responses
-back, and carries the session's control messages (consent, revocation, heartbeat). It knows
+back, and carries the session's control messages (pairing, grants, heartbeat). It knows
 nothing about MCP tools: the tab runs the MCP server logic (see
 [architecture](/design/architecture.md)).
 
@@ -23,7 +26,7 @@ tab implementations would follow.
 ## Connection
 
 - URL: `wss://<relay>/tab`. The relay refuses the upgrade (HTTP 403, no upgrade) unless the
-  `Origin` header is on its allow-list.
+  `Origin` header is on its allow-list (DEC-032; default empty = nobody).
 - Version negotiation: the tab offers the WebSocket subprotocol `tab-mcp.v1`
   (`Sec-WebSocket-Protocol`). The relay accepts it or refuses the upgrade with HTTP 426 and
   a JSON body `{"error":"unsupported_protocol","supported":["tab-mcp.v1"]}`. A future
@@ -34,6 +37,7 @@ tab implementations would follow.
   answers with `error` code `unknown_type`.
 - A session begins only after a user action in the page: the library opens the WebSocket
   only from `connect()`, which pages call from a click handler.
+- The tab must send `hello` within 10 s of the open, else the relay closes with 1008.
 
 ## Message types
 
@@ -43,54 +47,62 @@ Direction: T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `page: {title}`, `addressKey?` | First message after open. `page.title` is shown on the consent page; it is untrusted. |
-| `session` | R→T | `sessionId`, `address`, `expiresAt`, `limits` | The session exists. `address` is the public MCP URL the user gives to the AI app. |
+| `hello` | T→R | `library: {name, version}`, `page: {title}`, `secret` | First message after open. `page.title` is untrusted and only logged as its length. |
+| `session` | R→T | `sessionId`, `address`, `origin`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the public MCP URL the user gives to the AI app. |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
-| `bye` | both | `reason` | Orderly end; the sender closes the socket after it. |
+| `bye` | both | `reason` | Orderly end; the sender closes the socket after it. Reasons from the relay: `replaced`, `expired`, `idle`, `shutdown`. |
 
-`addressKey` makes the address stable across sessions: a random 32-byte base64url string
-the library keeps in the page's `localStorage`. The relay derives the address id as
-`base64url(SHA-256("tab-mcp address v1" ‖ addressKey))`, truncated to 22 characters
-(128 bits), so the relay stores nothing between sessions and the address does not reveal
-the key. Without `addressKey` the relay picks a random id. If a session with the same
-address is already connected, the new one replaces it and the old socket is closed with
-4005. Tokens never survive a session, whatever the address.
+`secret` makes the address stable across sessions (DEC-027): 32 random bytes as base64url
+without padding (43 characters), kept by the library in the page's `localStorage`. The relay
+derives the address id as `base32(sha256(secret))` (SHA-256 over the secret's UTF-8 text,
+RFC 4648 base32, lower case, no padding, 52 characters), so it stores nothing to recognise
+an address and the address does not reveal the secret. A `hello` without a well-formed
+`secret` gets `error` `bad_message` and close 1008. If a session with the same address is
+already connected, the new one replaces it: the old tab gets `bye` with reason `replaced`
+and close 4005.
 
 `sessionId` is a fresh random id per WebSocket and appears only in logs and in this
-protocol, never in URLs.
+protocol, never in URLs. `origin` is the page origin the relay saw on the upgrade (shown on
+`/authorize`). `grants` lists the AI apps connected to this address (see below; empty until
+[iteration 3](/iterations/iteration-3-oauth.md)).
 
 `limits` carries `maxMessageBytes`, `maxBodyBytes`, `requestTimeoutMs`, `idleTimeoutMs`,
-`heartbeatMs`, `maxConcurrentRequests` so the tab can show and respect them.
+`heartbeatMs`, `keepAliveMs`, `maxConcurrentRequests` so the tab can show and respect them.
 
 ```json
-{"type":"session","sessionId":"s_6Gx…","address":"https://relay.ractive.ch/a/k3J9…/mcp",
- "expiresAt":"2026-10-20T08:00:00Z",
- "limits":{"maxMessageBytes":1048576,"maxBodyBytes":1048576,"requestTimeoutMs":120000,
-           "idleTimeoutMs":3600000,"heartbeatMs":25000,"maxConcurrentRequests":8}}
+{"type":"session","sessionId":"s_6Gx…","origin":"https://ractive.ch",
+ "address":"https://relay.ractive.ch/a/mzxw6ytboi4dmnrqgq3tm…/mcp",
+ "expiresAt":"2026-10-20T08:00:00.000Z","grants":[],
+ "limits":{"maxMessageBytes":1048576,"maxBodyBytes":1048576,"requestTimeoutMs":300000,
+           "idleTimeoutMs":3600000,"heartbeatMs":25000,"keepAliveMs":20000,
+           "maxConcurrentRequests":8}}
 ```
 
-### Consent and grants
+### Pairing and grants
+
+Pairing works like a TV sign-in (DEC-028): the tab shows the address and a code, the user
+types the code on the relay's `/authorize` page.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `auth.request` | R→T | `authId`, `client`, `code`, `expiresAt` | An AI app opened `/authorize` for this session. |
-| `auth.decision` | T→R | `authId`, `allow` | The user's answer in the page. |
-| `auth.cancelled` | R→T | `authId`, `reason` | Expired, browser left the `/authorize` page, or superseded. |
-| `grant.added` | R→T | `grantId`, `client` | A token was issued after an `allow`. |
-| `grant.revoke` | T→R | `grantId` | The user removes one connected app in the page. |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended (revoked, expired). |
+| `pairing.start` | T→R | — | The page's "Connect your AI tool" dialog is open; the relay starts issuing codes. |
+| `pairing.code` | R→T | `code`, `expiresAt` | The code to show: 6 digits, single-use, 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. |
+| `pairing.stop` | T→R | — | The dialog closed; the current code becomes invalid. |
+| `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first token). |
+| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. |
+| `grants.revokeAll` | T→R | — | Revoke every grant of this address (used before "New address"). |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended (`revoked`, `expired`, `reuse_detected`). |
 
-`client` is what the relay learned from the Client ID Metadata Document:
+A grant as the tab sees it:
 
 ```json
-{"id":"https://claude.ai/oauth/claude-code-client-metadata","name":"Claude Code",
- "uri":"https://claude.ai","redirectHost":"localhost","logoUri":null}
+{"grantId":"g_…","client":{"id":"https://claude.ai/oauth/claude-code-client-metadata",
+ "name":"Claude Code","host":"claude.ai"},"createdAt":"2026-10-19T20:00:00.000Z"}
 ```
 
-`name` is self-declared by the client and shown as such; `id` and `redirectHost` are the
-verified parts. `code` is a 4-digit string that the `/authorize` page shows too; the user
-approves only if both match.
+`client.name` is self-declared in the Client ID Metadata Document; `client.host` (the host
+of the verified `client_id` URL) is the verified part. Codes are never logged.
 
 ### Tunnelled MCP requests
 
@@ -112,18 +124,21 @@ approves only if both match.
   relay, then forwarded verbatim).
 - `grant` identifies the caller: `{"grantId":"g_…","clientId":"https://…","scopes":["tools"]}`.
   The tab passes it to the MCP handler as `authInfo`.
-- Response `headers` are filtered by the relay to `content-type`, `cache-control`,
-  `x-accel-buffering`; the relay sets the rest.
-- A response must end within `requestTimeoutMs`, except for `subscriptions/listen`
+- Response `headers` are filtered by the relay to `content-type` and `cache-control`; the
+  relay sets the rest (`x-accel-buffering: no` on streams, CORS headers).
+- A response must end within `requestTimeoutMs` (300 s), except for `subscriptions/listen`
   (recognised by `mcp-method`), which may stay open for the session's lifetime. Streams are
   counted against `maxConcurrentRequests`.
-- The tab answers `tools/call` with a streamed SSE response that starts at once (the SDK's
-  `responseMode: "sse"`), because CDNs in front of the relay give up when no response
-  headers arrive within 60 s (bunny.net) and a confirmation in the page can take longer.
+- The tab answers `tools/call` with a streamed SSE response that starts at once (DEC-020).
   Other methods may answer with one `http.response`.
+- If the tab has not started any response within `keepAliveMs` (20 s) for a request with a
+  JSON-RPC `id`, the relay answers the AI app with `200 text/event-stream` itself
+  (DEC-039). A later `http.response` is then sent as one SSE event
+  (`event: message`, `data: <body>`); a later `http.response.start` continues on the same
+  stream and its status and headers are dropped. The tab does not need to know.
 - On streamed responses the relay writes an SSE comment (`: keep-alive`) to the AI app
-  every 20 s while the tab is silent, but only at an event boundary (when the bytes
-  forwarded so far end with a blank line). The tab never needs to send keep-alives.
+  every `keepAliveMs` while the tab is silent, but only at an event boundary (when the
+  bytes forwarded so far end with a blank line). The tab never sends keep-alives.
 - `http.cancel` aborts the tab's `Request.signal`; the tab sends nothing more for that `id`.
   Late messages for a cancelled `id` are dropped silently.
 
@@ -140,13 +155,13 @@ Example:
 ### Errors
 
 `{"type":"error","code":"…","message":"…","id":"r42"?}` in either direction. `id` refers to
-the request or auth exchange it concerns, if any.
+the request it concerns, if any.
 
 | Code | Sent by | Meaning |
 |---|---|---|
-| `bad_message` | both | Not JSON, missing fields, binary frame. |
+| `bad_message` | both | Not JSON, missing fields, binary frame, malformed `secret`. |
 | `unknown_type` | both | Message type not understood but an answer was expected. |
-| `unknown_id` | both | `id`/`authId`/`grantId` not known (or already finished). |
+| `unknown_id` | both | `id`/`grantId` not known (or already finished). |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. |
 | `rate_limited` | relay | The tab sent too much; the relay may close with 4008. |
 
@@ -158,7 +173,7 @@ status and a JSON-RPC error body, as the MCP handler produced it.
 | Code | Meaning |
 |---|---|
 | 1000 | Normal close (`bye`, user pressed Disconnect). |
-| 1008 | Policy violation (bad message after warning). |
+| 1008 | Policy violation (bad message, no `hello` in time). |
 | 1009 | Message too large. |
 | 4001 | Session expired (absolute lifetime). |
 | 4002 | Idle timeout (no MCP request for `idleTimeoutMs`). |
@@ -168,10 +183,10 @@ status and a JSON-RPC error body, as the MCP handler produced it.
 | 4008 | Rate limited. |
 
 On any close the relay ends the session: pending HTTP requests get `503` with a JSON-RPC
-error, listen streams end, every grant and token of the session is deleted, pending
-authorizations are cancelled. A stable address answers "tab not connected" until the page
-connects again; the AI app then has to authorize again.
-The library never reconnects on its own, because a session needs a user action.
+error, listen streams end, the pairing code becomes invalid. Grants and tokens stay
+(DEC-029): they belong to the address, not to the WebSocket. While no tab is connected, MCP
+requests with a valid token get `503` "the page is not open". The library never reconnects
+on its own, because a session needs a user action.
 
 ## Heartbeat
 
@@ -187,16 +202,19 @@ pings so proxies keep the connection open.
 |---|---|---|
 | WebSocket message | 1 MiB | both |
 | MCP request body | 1 MiB | relay (HTTP 413) |
-| Request timeout | 120 s | relay (504 and `http.cancel`) |
+| Request timeout | 300 s | relay (504 and `http.cancel`; keep-alives throughout) |
+| Keep-alive interval | 20 s | relay |
 | Concurrent requests per session | 8 | relay (429) |
 | Idle timeout | 60 min | relay (close 4002) |
 | Session lifetime | 12 h | relay (close 4001) |
-| Pending authorizations per session | 3 | relay |
+| Sessions per IP / in total | 5 / 500 | relay (HTTP 429 on upgrade) |
 
-All are configurable on the relay; see the threat model for why each exists.
+All are configurable on the relay (DEC-034); see the threat model for why each exists.
 
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
 - [MCP TypeScript SDK v2 research](/research/mcp-typescript-sdk-v2.md)
+- [Decision log](/decision-log.md)
 - [RFC 6455 WebSocket close codes](https://www.rfc-editor.org/rfc/rfc6455#section-7.4)
+- [RFC 4648 base32](https://www.rfc-editor.org/rfc/rfc4648#section-6)

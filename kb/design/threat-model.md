@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-19T23:00:00+02:00
 ---
 
 # Security model and threat model
@@ -18,16 +18,20 @@ Becomes `SECURITY.md` (reporting, supported versions) and `docs/threat-model.md`
 1. **The page's capabilities**: whatever the tools can read or do in the user's tab
    (calculator state; in saturnus, the emulated calculator's memory and files).
 2. **Tool arguments and results** in transit through the relay.
-3. **Access tokens**: anyone holding one can call the tab's tools until the session ends.
-4. **The user's attention**: consent prompts and confirmations must not be spammed or
+3. **Tokens**: anyone holding an access token can call the tab's tools while the tab is
+   open, for up to an hour; a refresh token yields new access tokens for up to 30 days.
+4. **The address secret** in the page's `localStorage`: whoever has it can take over the
+   address (but not existing grants' tokens).
+5. **The token store** (SQLite file): token hashes and grant metadata.
+6. **The user's attention**: pairing dialogs and confirmations must not be spammed or
    confusing.
-5. **The relay's availability and its operator's bill.**
+7. **The relay's availability and its operator's bill.**
 
 ## Trust boundaries and what each party sees
 
 | Party | Sees | Trusted for |
 |---|---|---|
-| Page (and its author) | its own tools, consent decisions | defining tools honestly; it already runs in the user's browser |
+| Page (and its author) | its own tools, pairing codes | defining tools honestly; it already runs in the user's browser (see A10) |
 | Relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or altering traffic |
 | AI app | the tools it is allowed to call, their results | following the user's intent (it is driven by a model) |
 | Model provider behind the AI app | the same as the AI app | — |
@@ -41,17 +45,16 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
 ### A1: Someone who learns the address (shared screenshot, chat log, shoulder-surfing)
 
 - The address alone grants nothing: every MCP request needs a token, and a token needs the
-  user's Allow click in the tab.
-- **Code comparison**: the tab and the `/authorize` page show the same 4-digit code. An
-  attacker who starts an authorization (even with a genuine client such as their own
-  claude.ai account) gets a different code on their own page; the victim sees a request
-  in the tab that matches nothing on their screen.
-- If two authorizations are pending at the same time, the tab warns explicitly.
-- Pending authorizations per address are capped (3) and expire after 5 minutes;
-  `/authorize` is rate-limited per IP and per address.
-- "New address" in the page replaces the `addressKey`; the old address becomes unknown.
-- Residual: a user who clicks Allow without comparing the codes. See the open question on
-  typing the code instead.
+  pairing code that only the tab shows (DEC-028).
+- **Pairing code typed at `/authorize`**: 6 digits, single-use, valid 2 minutes, at most 5
+  attempts per code, issued only while the page's dialog is open. An attacker without a
+  view of the tab has 5 guesses in a million per code. The page names the AI app and the
+  page origin, so the user sees what they are connecting.
+- `/authorize` attempts are also rate-limited per IP and per address.
+- No 404 for unknown addresses (DEC-040): without a token every address looks the same.
+- "New address" in the page revokes the old address's grants and replaces the secret.
+- Residual: a user who reads the code out to someone else (social engineering), or types it
+  into a pairing started by an attacker's AI app. The page shows which app is connecting.
 
 ### A2: A malicious or impersonating OAuth client
 
@@ -59,7 +62,7 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
   URL the relay fetches; the document's `client_id` must equal the URL and `redirect_uri`
   must be listed. Exact match, except loopback redirects where the port is ignored
   (RFC 8252).
-- The consent UI shows the declared name **and** the verified client id host and redirect
+- The pairing page shows the declared name **and** the verified client id host and redirect
   host; a client calling itself "Claude" from `evil.example` shows `evil.example`.
 - PKCE S256 required; codes are single-use, 60 s, bound to client id, redirect URI and
   resource. `iss` in the response (RFC 9207) defeats mix-up.
@@ -77,20 +80,25 @@ JSON and never returned to the requester except as a pass/fail.
 
 ### A4: Token theft and replay
 
-- Tokens are 256-bit random, opaque, stored only as SHA-256 hashes, accepted only in the
-  `Authorization` header and only for their own address (audience check against
-  `resource`).
-- They die with the session: tab closed, Disconnect, revoke, idle timeout (60 min),
-  lifetime (12 h), relay restart. No refresh tokens.
+- Tokens are 256-bit random, opaque, stored only as SHA-256 hashes (a stolen store file
+  yields no usable token), accepted only in the `Authorization` header and only for their
+  own address (audience check against `resource`).
+- Access tokens live 1 hour. Refresh tokens live 30 days and rotate on every use; reusing
+  an old one revokes the whole grant (RFC 9700), which cuts off a thief and the victim
+  alike and shows the theft. `markUsed` is atomic, so two racing refreshes cannot both win.
+- Disconnect in the page revokes at once; "New address" revokes all grants of the old
+  address.
+- Tokens are useless while the tab is closed (503 "the page is not open").
 - The relay never forwards the `Authorization` header to the tab.
 
 ### A5: A hostile page or another site using someone's relay
 
-- Tab WebSockets only from allowed origins (default: none). This stops other websites in a
-  browser; a non-browser client can forge `Origin`, so it is abuse control, not a security
-  boundary for users.
+- Tab WebSockets only from allowed origins (default: none; DEC-032). An open relay needs
+  `TAB_MCP_ALLOWED_ORIGINS=*` and logs a warning. The owner's hosted relay allows exactly
+  `https://ractive.ch`. This stops other websites in a browser; a non-browser client can
+  forge `Origin`, so it is abuse control, not a security boundary for users.
 - Limits: sessions per IP (5) and in total (500), message and body size (1 MiB), concurrent
-  requests per session (8), request timeout (120 s), idle timeout, session lifetime.
+  requests per session (8), request timeout (300 s), idle timeout, session lifetime.
 
 ### A6: The AI app (or a prompt injection) misuses the tools
 
@@ -104,12 +112,17 @@ JSON and never returned to the requester except as a pass/fail.
 
 ### A7: Cross-site attacks on the relay's pages
 
-- `/authorize` sends `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
-  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and binds the waiting page to
-  the browser with a `__Host-` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`).
-- All values shown on the page (client name, page title) are HTML-escaped and length-capped.
-- The MCP endpoint ignores cookies; no CORS headers are sent for it (AI apps are not
-  browsers; browser-based MCP clients are out of scope for version 1).
+- `/authorize` sends `Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`; its code form carries a
+  `Bun.CSRF` token. Framing is refused so the code field cannot be overlaid.
+- All values shown on the page (client name, page origin) are HTML-escaped and
+  length-capped.
+- CORS without credentials on the metadata, token, revoke and MCP endpoints (DEC-036):
+  `Access-Control-Allow-Origin: *`, never `Allow-Credentials`; the relay uses no cookies
+  there and tokens are only bearer headers, so a foreign origin can do nothing it could not
+  do from a server. The MCP spec's `Origin` check protects local servers from DNS
+  rebinding; a public relay with bearer tokens has no ambient authority to protect.
+  `TAB_MCP_CORS=off` turns it off.
 
 ### A8: Denial of service
 
@@ -120,14 +133,23 @@ still be flooded; the CDN in front absorbs volumetric attacks.
 
 ### A9: Logs and privacy
 
-Logs are JSON lines with event, hashed address id, session id, MCP method, HTTP status,
-duration, client id host and coarse error codes. Never bodies, tool names, arguments,
-results, tokens, codes or `addressKey`s. Client IPs appear only in rate-limit warnings,
+Logs are JSON lines with event, a shortened address id, session id, MCP method, HTTP
+status, duration, client id host and coarse error codes. Never bodies, tool names,
+arguments, results, tokens, codes or secrets. Client IPs appear only in rate-limit warnings,
 truncated (/24, /48). The hosted instance's privacy notice states this.
+
+### A10: A page that misleads (phishing)
+
+Connecting an AI app to a page means trusting that page like any MCP server (DEC-038): its
+tool descriptions and results reach the model, and it can describe a tool in misleading
+ways or return text that steers the model. tab-mcp cannot judge a page's honesty; the
+pairing page names the page's origin so the user knows whom they trust. The closed origin
+list (DEC-032) keeps other sites from borrowing a hosted relay's domain to look
+trustworthy. `SECURITY.md` says this plainly.
 
 ## Safe defaults
 
-- No tab origins allowed until configured.
+- No tab origins allowed until configured; `*` only explicitly, with a warning.
 - `TAB_MCP_PUBLIC_URL` must be `https:` unless `NODE_ENV=development`.
 - No unauthenticated MCP mode exists, not even as a flag.
 - `development: false`, body limits set, `server.timeout` handled explicitly.
@@ -138,7 +160,13 @@ truncated (/24, /48). The hosted instance's privacy notice states this.
 
 - The relay operator can read and alter all traffic. Mitigation: open source, self-hosting,
   no logs of bodies; not solvable with MCP over HTTPS.
-- Users who approve without comparing codes.
+- Users who give the pairing code to someone else, or type it for an AI app they did not
+  start.
+- A page that misleads the AI app (A10).
+- Whoever copies the address secret out of `localStorage` (e.g. a script injected into the
+  page) can take over the address while the tab is closed and call nothing without a
+  token, but can pair a new app if the user then types a code. Pages must keep XSS out, as
+  for any session secret.
 - The AI app's model can be steered by content (prompt injection) into calling tools the
   user did not intend; page-side confirmation covers consequential tools only.
 - Client-declared names are self-asserted; only hosts are verified.

@@ -1,60 +1,70 @@
 ---
 type: iteration
-title: "Iteration 3: OAuth authorization server with tab consent"
-description: Protected-resource and authorization-server metadata, CIMD client validation, the authorize page with code comparison, token endpoint with PKCE, revocation.
+title: "Iteration 3: OAuth authorization server with pairing"
+description: "Our own authorization server: metadata, CIMD client validation, pairing codes typed on the authorize page, token endpoint with PKCE and rotating refresh tokens, revocation, spec tests, conformance runs and a security review."
 status: planned
 tags:
   - iteration
   - oauth
   - relay
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-19T23:00:00+02:00
 ---
 
-# Iteration 3: OAuth authorization server with tab consent
+# Iteration 3: OAuth authorization server with pairing
 
-Goal: a real MCP client obtains a token through the standard MCP authorization flow, with
-the user approving in the tab, and nothing else can.
+Goal: a real MCP client obtains tokens through the standard MCP authorization flow, with
+the user typing the code shown in the tab on the relay's `/authorize` page, and nothing
+else can. Written by us without an OAuth library (DEC-031).
 
 Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization),
 [AI app support](/research/ai-app-support.md) (requirements list),
-[threat model](/design/threat-model.md) A1–A4 and A7, DEC-006, 007, 015, 016.
+[threat model](/design/threat-model.md) A1–A4, A7 and A10, DEC-006, 015, 027–031, 033,
+036, 040, 041.
 
 ## Tasks
 
-- [ ] `WWW-Authenticate: Bearer resource_metadata="…", scope="tools"` on 401
-- [ ] `/.well-known/oauth-protected-resource/a/:id/mcp` (RFC 9728): `resource`, `authorization_servers`, `scopes_supported: ["tools"]`, `bearer_methods_supported: ["header"]`
-- [ ] `/.well-known/oauth-authorization-server` (RFC 8414): issuer, endpoints, `response_types_supported: ["code"]`, `grant_types_supported: ["authorization_code"]`, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`, `authorization_response_iss_parameter_supported: true`, `revocation_endpoint`, `scopes_supported`
+- [ ] `/.well-known/oauth-protected-resource/a/:id/mcp` (RFC 9728): `resource`, `authorization_servers`, `scopes_supported: ["tools"]`, `bearer_methods_supported: ["header"]`; CORS (DEC-036)
+- [ ] `/.well-known/oauth-authorization-server` (RFC 8414): issuer, endpoints, `response_types_supported: ["code"]`, `grant_types_supported: ["authorization_code", "refresh_token"]`, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`, `authorization_response_iss_parameter_supported: true`, `revocation_endpoint`, `scopes_supported`; no `registration_endpoint`; CORS
 - [ ] CIMD fetcher: SSRF guards (https, resolve and refuse private ranges, no redirects, 5 s, 64 KiB, JSON), validation (`client_id` equality, `client_name`, `redirect_uris`, `token_endpoint_auth_method` `none`), cache by `Cache-Control` (5 min–24 h), optional host allow-list
 - [ ] Redirect URI matching: exact, except loopback `localhost`/`127.0.0.1`/`[::1]` with any port (RFC 8252)
-- [ ] `/authorize`: parameter validation; errors before a trusted redirect URI shown on the page; `resource` must be a known address; waits up to 5 min for the tab to connect; pending authorization with a 4-digit code (crypto random), cap 3 per address, 5 min expiry; `auth.request` to the tab; server-rendered page with escaping, CSP and security headers, `__Host-` cookie binding
-- [ ] `/authorize/wait` long-poll (with `server.timeout`), bound to the cookie; on allow redirect with `code`, `state`, `iss`; on deny/expiry `error=access_denied`; a no-JS "Continue" form protected with `Bun.CSRF`
-- [ ] `/token`: `authorization_code` with PKCE S256 (`Bun.CryptoHasher`), single-use 60 s codes bound to client id, redirect URI and resource; constant-time comparisons; opaque 256-bit token; `expires_in` = remaining session lifetime; RFC 6749 error responses; `Cache-Control: no-store`
-- [ ] `/revoke` (RFC 7009) and `grant.revoke` from the tab
-- [ ] Rate limits for `/authorize`, `/token`, CIMD fetches (token buckets)
-- [ ] Replace the iteration-1 test grant API with real flows in tests (keep it only as an internal test helper)
+- [ ] Pairing codes in the relay (DEC-028): `pairing.start`/`pairing.stop` from the tab, `pairing.code` with 6 uniform random digits, single-use, 2 minutes, 5 attempts, a fresh code by itself while pairing is on; codes never logged
+- [ ] `/authorize`: parameter validation; errors before a trusted redirect URI shown on the page; tab offline → "Open the page and click Connect your AI tool" with a retry; otherwise "You're connecting <client name> (<client host>) to tools from <page origin>" and a code field; form protected with `Bun.CSRF`; wrong code counts an attempt; success → redirect with `code`, `state`, `iss`; Cancel → `error=access_denied`; server-rendered with escaping, CSP and security headers
+- [ ] `/token` `authorization_code`: PKCE S256 (`Bun.CryptoHasher`), single-use 60 s codes bound to client id, redirect URI and resource; constant-time comparisons; creates a grant bound to the address; access token 1 h + refresh token 30 days (DEC-029); RFC 6749 error responses; `Cache-Control: no-store`; CORS
+- [ ] `/token` `refresh_token`: rotation through `markUsed` (atomic), a new refresh token each time, reuse of a used one revokes the grant (`grant.removed` `reuse_detected`); `resource` and `client_id` must match the grant
+- [ ] `/revoke` (RFC 7009), `grant.revoke` and `grants.revokeAll` from the tab; `session.grants`, `grant.added`, `grant.removed` to the tab
+- [ ] Rate limits for `/authorize` (per IP and address), `/token`, CIMD fetches (token buckets)
+- [ ] Spec tests: one test group per requirement of RFC 6749 §4.1/§5.2/§6, RFC 7636, RFC 8414, RFC 9728, RFC 9207, RFC 7009, RFC 8707 and the MCP authorization pages, citing the section
+- [ ] Conformance runs: `oauth4webapi` (dev dependency, pinned) as client for discovery, authorization code with PKCE, refresh rotation and revocation; the MCP SDK client for the full MCP flow
+- [ ] Separate security review of the OAuth diff (fresh-context reviewer, threat model A1–A4, A7) before merging; findings fixed or recorded in the decision log
+- [ ] Replace the iteration-1 store-level token helper with real flows in tests where it matters (keep it as an internal test helper)
 
 ## Acceptance criteria
 
 - The SDK `Client` (pinned 2026-07-28, `clientMetadataUrl` served by a test fixture over
-  HTTPS-equivalent test mode) completes discovery → authorize → tab approval (scripted
-  tab auto-approves after checking the code) → token → tool call.
+  HTTPS-equivalent test mode) completes discovery → authorize → code typed (the test reads
+  the code from the scripted tab and posts the form) → token → tool call → refresh.
+- `oauth4webapi` completes the same flow and the refresh rotation.
 - Negative tests: wrong PKCE verifier, reused code, expired code, mismatched redirect URI,
-  `client_id` document mismatch, private-IP CIMD host, oversized CIMD, tab denies, token
-  for another address, revoked grant, session ended → each fails with the right error.
-- Two concurrent authorizations for one address are both flagged to the tab.
-- The authorize page renders hostile client names and page titles escaped (test).
+  `client_id` document mismatch, private-IP CIMD host, oversized CIMD, wrong pairing code
+  (5 times → new code), expired pairing code, tab offline, token for another address,
+  revoked grant, reused refresh token (grant revoked) → each fails with the right error.
+- The authorize page renders hostile client names escaped (test).
+- The security review is done and its findings handled.
 - `bun run verify` green.
 
 ## Test approach
 
 `bun test` with a local CIMD fixture server (the relay's CIMD fetcher gets a test-only
-override to allow `http://127.0.0.1` fixtures; production builds refuse it), scripted tab,
-SDK client with a custom `OAuthClientProvider` that follows the authorize page's redirect
-by calling `/authorize/wait` directly.
+override to allow `http://127.0.0.1` fixtures; production configuration refuses it),
+scripted tab, SDK client with a custom `OAuthClientProvider` that completes the authorize
+page by posting the code, and `oauth4webapi` driven the same way.
 
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
 - [AI app support research](/research/ai-app-support.md)
+- [RFC 6749 OAuth 2.0](https://www.rfc-editor.org/rfc/rfc6749)
 - [RFC 7009 token revocation](https://www.rfc-editor.org/rfc/rfc7009)
 - [RFC 7636 PKCE](https://www.rfc-editor.org/rfc/rfc7636)
+- [RFC 9700 OAuth security best current practice](https://www.rfc-editor.org/rfc/rfc9700)
+- [oauth4webapi](https://github.com/panva/oauth4webapi)

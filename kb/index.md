@@ -15,6 +15,6 @@
 
 ## questions
 
-* [Open questions for the owner](open-questions.md) - Decisions the plan made provisionally or could not make, each with a recommendation.
+* [Questions for the owner (closed)](open-questions.md) - The owner's answers of 2026-10-19 to the plan's open questions, each pointing to its decision; no question is open.
 
 <!-- okf:index:end -->
