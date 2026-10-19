@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-19T23:30:00+02:00
+timestamp: 2026-10-20T00:00:00+02:00
 ---
 
 # Decision log
@@ -363,6 +363,20 @@ provider ([design](/design/identity-binding.md),
 [iteration 7](/iterations/iteration-7-identity-binding.md),
 [research needed](/research/identity-binding-research-needed.md)). Building pairing as an
 interface in iteration 3 lets that extension fit without rebuilding the OAuth server.
+
+## DEC-043: The hosted relay is infrastructure as code with OpenTofu (owner)
+
+The owner's relay on bunny.net is managed with OpenTofu (preferred to Terraform for an
+open-source project) and the official `BunnyWay/bunnynet` provider
+(`bunnynet_compute_container_app`, `bunnynet_compute_container_imageregistry`, plus pull
+zone and DNS records as needed). The bunny account is shared with other projects: OpenTofu
+manages only its own state, every resource name starts with `tab-mcp-`, and shared
+resources are never managed (single DNS records, not a shared zone). The bunny API key
+lives only in the GitHub Actions secret `BUNNY_API_KEY`, set by the owner with
+`gh secret set`, never on a developer machine. `plan` runs on pull requests, `apply` on main
+or by manual dispatch. The remote state backend (HCP Terraform free tier, an S3-compatible
+bucket, or encrypted state in GitHub) is chosen in
+[iteration 6](/iterations/iteration-6-deployment-bunny.md); the state may contain secrets.
 
 # Citations
 

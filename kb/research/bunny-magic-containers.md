@@ -5,7 +5,7 @@ description: Notes for the deployment iteration — WebSockets, long requests, s
 tags:
   - deployment
   - bunny
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-20T00:00:00+02:00
 ---
 
 # bunny.net Magic Containers for the relay
@@ -35,6 +35,10 @@ Notes only; verified in the deployment iteration.
   are replaced by the edge. Trust them only behind the CDN endpoint.
 - **Env:** dashboard env vars; no separate secret store documented. The relay needs no
   secret in version 1 (tokens are random and in memory).
+- **Infrastructure as code:** official Terraform/OpenTofu provider `BunnyWay/bunnynet` with
+  `bunnynet_compute_container_app` and `bunnynet_compute_container_imageregistry` (DEC-043).
+  Open: persistent volumes and custom domains for container apps in the provider, and
+  whether API keys can be limited in scope (iteration 6 research).
 - **Pricing:** $0.02 per CPU-hour used, $0.005 per GB-hour RAM, egress $0.01/GB, CDN
   traffic and WebSocket minutes extra.
 
