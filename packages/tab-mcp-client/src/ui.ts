@@ -74,14 +74,17 @@ function clientLabel(client: ToolCallClient | Grant["client"]): string {
 		: host;
 }
 
-function summarize(args: Record<string, unknown>): string {
-	let text: string;
+/**
+ * The arguments as text, in full: what the user approves must be visible.
+ * (The relay caps a request at 1 MiB, so this stays bounded.) `undefined`
+ * when they cannot be shown, and then "Allow" is not offered.
+ */
+function showArguments(args: Record<string, unknown>): string | undefined {
 	try {
-		text = JSON.stringify(args, null, 2) ?? "";
+		return JSON.stringify(args, null, 2);
 	} catch {
-		text = "(arguments that cannot be shown)";
+		return undefined;
 	}
-	return text.length > 1000 ? `${text.slice(0, 1000)}…` : text;
 }
 
 /** Ask whether a consequential tool may run. Resolves `true` only for "Allow". */
@@ -102,10 +105,13 @@ export function confirmDialog(
 		" ",
 		allow,
 	);
+	const shown = showArguments(request.arguments);
 	const args = el(doc, "pre", {
 		className: "tab-mcp-arguments",
-		text: summarize(request.arguments),
+		text:
+			shown ?? "The arguments cannot be shown, so this call cannot be allowed.",
 	});
+	if (shown === undefined) allow.hidden = true;
 	args.style.setProperty("white-space", "pre-wrap");
 	args.style.setProperty("max-height", "12rem");
 	args.style.setProperty("overflow", "auto");

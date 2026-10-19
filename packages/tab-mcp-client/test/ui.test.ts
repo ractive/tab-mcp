@@ -26,6 +26,25 @@ const byText = (root: ParentNode, text: string) => {
 	return found;
 };
 
+/** Resolves once the button is enabled (event-driven, via MutationObserver). */
+function enabled(button: HTMLButtonElement): Promise<void> {
+	if (!button.disabled) return Promise.resolve();
+	return new Promise((resolve) => {
+		const observer = new (
+			window.MutationObserver as unknown as typeof MutationObserver
+		)(() => {
+			if (!button.disabled) {
+				observer.disconnect();
+				resolve();
+			}
+		});
+		observer.observe(button, {
+			attributes: true,
+			attributeFilter: ["disabled"],
+		});
+	});
+}
+
 function question(signal = new AbortController().signal): ConfirmRequest {
 	return {
 		tool: {
@@ -63,7 +82,9 @@ describe("confirmDialog", () => {
 			dialog.querySelector("h2")?.id ?? "none",
 		);
 		expect(doc.activeElement?.textContent).toBe("Don't allow");
-		byText(dialog, "Allow").click();
+		const allow = byText(dialog, "Allow");
+		await enabled(allow);
+		allow.click();
 		expect(await answer).toBe(true);
 		expect(doc.querySelector("dialog")).toBeNull();
 	});
@@ -82,6 +103,22 @@ describe("confirmDialog", () => {
 		controller.abort();
 		expect(await aborted).toBe(false);
 		expect(doc.querySelector("dialog")).toBeNull();
+	});
+});
+
+describe("confirmDialog safety (review of PR #2)", () => {
+	test("long arguments are shown in full", async () => {
+		const long = "x".repeat(5000);
+		const answer = confirmDialog(
+			{ ...question(), arguments: { long, tail: "END-MARKER" } },
+			doc,
+		);
+		const text =
+			doc.querySelector("dialog.tab-mcp-confirm pre")?.textContent ?? "";
+		expect(text).toContain(long);
+		expect(text).toContain("END-MARKER");
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe(false);
 	});
 });
 
