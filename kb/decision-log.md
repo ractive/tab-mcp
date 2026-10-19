@@ -338,9 +338,11 @@ client must accept `text/event-stream`. The tab's own SSE for `tools/call` (DEC-
 ## DEC-040: Order of checks on the MCP endpoint
 
 With stable, hash-derived addresses the relay cannot tell an unknown address from one whose
-tab is offline. Order: method (405) → `MCP-Protocol-Version` pre-check (400 / `-32022`,
-with the DEC-033 exception) → body size and JSON → bearer token valid for this address
-(401) → tab online (503 "the page is not open") → concurrency limit (429) → forward. No 404
+tab is offline. Order: method (405) → body size and JSON (413 / 400; the version check
+needs the body for `initialize` and the DEC-033 exception) → `MCP-Protocol-Version`
+pre-check (400 / `-32022`, `-32020` when the header is missing) → bearer token valid for
+this address (401) → tab online (503 "the page is not open") → concurrency limit (429) →
+forward. Implemented in iteration 1. No 404
 for unknown addresses, so addresses cannot be probed. Supersedes DEC-018.
 
 ## DEC-041: Shape of the `TokenStore`

@@ -2,6 +2,7 @@
 
 ## 2026-10-19
 
+- Iteration 1 implemented on iter-1/relay-core; DEC-040 order and relay error codes documented
 - One relay serves several sites: app name from the tab, per-origin site configuration (DEC-045)
 - Iteration 6: OpenTofu state in a bunny storage zone over S3 with client-side encryption (DEC-044)
 - Iteration 6: hosted relay as infrastructure as code with OpenTofu and the BunnyWay/bunnynet provider (DEC-043), with research items

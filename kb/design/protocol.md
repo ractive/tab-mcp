@@ -153,7 +153,25 @@ Example:
  "grant":{"grantId":"g_1","clientId":"https://claude.ai/oauth/claude-code-client-metadata","scopes":["tools"]}}
 ```
 
-### Errors
+### Errors the relay sends to the AI app
+
+When the relay itself ends an MCP request, the AI app gets a JSON-RPC error with the
+request's id (as an HTTP error, or as a final SSE event if the stream had started). Codes
+are outside the JSON-RPC reserved range:
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `-31001` | 503 | The page is not open (valid token, no tab connected). |
+| `-31002` | 504 | The page did not answer within `requestTimeoutMs`. |
+| `-31003` | 503 | The page closed its connection while the request was in flight. |
+| `-31004` | 429 | Too many concurrent requests for this page. |
+| `-31005` | 503 | The WebSocket send was dropped under backpressure (DEC-021). |
+| `-31006` | 502 | The page's response exceeded `maxMessageBytes`. |
+
+The relay notices that an AI app closed a streamed response when it next writes to it, so
+at the latest after one keep-alive interval; then it sends `http.cancel`.
+
+### Errors between tab and relay
 
 `{"type":"error","code":"…","message":"…","id":"r42"?}` in either direction. `id` refers to
 the request it concerns, if any.
