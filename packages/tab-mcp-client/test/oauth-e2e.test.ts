@@ -306,7 +306,10 @@ test("Disconnect in the dialog revokes the app's tokens at once", async () => {
 	);
 	const browser = new TestBrowser(relay.url);
 	const page = await browser.open(provider.authorizationUrl?.href ?? "");
-	expect(page.html).toContain('to tools from <span class="origin">');
+	// Bun's WebSocket sends no Origin; a browser always does.
+	expect(page.html).toContain(
+		"to tools from a page that did not say where it runs",
+	);
 	const done = await browser.submit(page, {
 		action: "connect",
 		code: tab.pairingCode?.code ?? "",
