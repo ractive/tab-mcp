@@ -12,6 +12,7 @@ import {
 	type TabOptions,
 	type TestRelay,
 	tokenFor,
+	waitFor,
 } from "./helpers.ts";
 
 let current: TestRelay | undefined;
@@ -131,7 +132,10 @@ describe("tab WebSocket", () => {
 		expect(res.status).toBe(429);
 		a.close();
 		await a.closed;
-		await Bun.sleep(20);
+		await waitFor(
+			() => r.relay.sessionCount === 1,
+			"the closed session to be released",
+		);
 		await tab(r).connect();
 	});
 
@@ -243,8 +247,7 @@ describe("tab WebSocket", () => {
 		await t.connect();
 		t.send({ type: "bye", reason: "user" });
 		expect((await t.closed).code).toBe(1000);
-		await Bun.sleep(10);
-		expect(r.relay.sessionCount).toBe(0);
+		await waitFor(() => r.relay.sessionCount === 0, "the session to end");
 	});
 
 	test("stopping the relay sends bye shutdown and closes with 4004", async () => {
@@ -725,8 +728,11 @@ describe("tunnel", () => {
 	});
 
 	test("listen streams are exempt from the request timeout", async () => {
-		// keep-alives make the relay notice the closed connection (it learns on write)
-		const r = relay({ requestTimeoutMs: 80, keepAliveMs: 50 });
+		// Event-driven: the client reads the stream like a real AI app and waits
+		// for keep-alives well past the request timeout. The body must stay
+		// referenced: Bun's fetch closes the connection when an unread Response
+		// is garbage-collected, which the relay rightly reports as client_closed.
+		const r = relay({ requestTimeoutMs: 80, keepAliveMs: 40 });
 		const t = tab(r, {
 			onRequest: (msg, tab) => {
 				tab.send({
@@ -739,22 +745,35 @@ describe("tunnel", () => {
 		});
 		await t.connect();
 		const token = await tokenFor(r.store, t.addressId);
-		const abort = new AbortController();
 		const res = await mcpPost(
 			t.session?.address ?? "",
 			rpc(5, "subscriptions/listen", {
 				notifications: { toolsListChanged: true },
 			}),
-			{
-				token,
-				signal: abort.signal,
-			},
+			{ token },
 		);
 		expect(res.status).toBe(200);
-		await Bun.sleep(250);
+		const reader = res.body?.getReader();
+		if (reader === undefined) throw new Error("no body");
+		const decoder = new TextDecoder();
+		let text = "";
+		const started = Date.now();
+		// Five keep-alives span at least 200 ms, more than twice the 80 ms timeout.
+		while ((text.match(/: keep-alive\n\n/g)?.length ?? 0) < 5) {
+			const { done, value } = await reader.read();
+			if (done) throw new Error("listen stream ended");
+			text += decoder.decode(value, { stream: true });
+			Bun.gc(true); // GC must not matter while the body is referenced
+		}
+		expect(Date.now() - started).toBeGreaterThanOrEqual(160);
 		expect(t.received.some((m) => m.type === "http.cancel")).toBe(false);
-		abort.abort();
-		expect((await t.next("http.cancel")).type).toBe("http.cancel");
+		expect(r.logs.events("mcp.request")).toEqual([]); // still open
+		await reader.cancel();
+		expect(await t.next("http.cancel")).toEqual({
+			type: "http.cancel",
+			id: expect.any(String),
+			reason: "client_closed",
+		});
 	});
 
 	test("a client abort sends http.cancel and aborts the tab's request", async () => {
@@ -799,7 +818,7 @@ describe("tunnel", () => {
 		expect(((await res.json()) as { error: { code: number } }).error.code).toBe(
 			-31003,
 		);
-		await Bun.sleep(20);
+		// the session was released before the in-flight request was failed
 		expect(
 			(await mcpPost(address, rpc(9, "tools/list"), { token })).status,
 		).toBe(503);
@@ -859,7 +878,12 @@ describe("tunnel", () => {
 			token,
 		});
 		expect(await res.text()).toBe('{"jsonrpc":"2.0","id":1,"result":{}}');
-		await Bun.sleep(20);
+		// A round trip after the late frames: the relay processed them in order
+		// and kept the session.
+		t.send({ type: "probe.after-late", id: "probe1" });
+		expect(
+			await t.next("error", (m) => m.type === "error" && m.id === "probe1"),
+		).toMatchObject({ code: "unknown_type" });
 		expect(t.ws.readyState).toBe(WebSocket.OPEN);
 	});
 });

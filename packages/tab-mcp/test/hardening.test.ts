@@ -17,6 +17,7 @@ import {
 	type TabOptions,
 	type TestRelay,
 	tokenFor,
+	waitFor,
 } from "./helpers.ts";
 
 let current: TestRelay | undefined;
@@ -369,7 +370,7 @@ describe("3: response size and backpressure", () => {
 
 describe("4: an open listen stream keeps the session from going idle", () => {
 	test("a session whose only request is a listen stream is not closed as idle", async () => {
-		const r = relay({ heartbeatMs: 20, idleTimeoutMs: 80, keepAliveMs: 50 });
+		const r = relay({ heartbeatMs: 20, idleTimeoutMs: 80, keepAliveMs: 40 });
 		const { t, address, token } = await connected(r, (msg, tab) => {
 			tab.send({
 				type: "http.response.start",
@@ -378,18 +379,27 @@ describe("4: an open listen stream keeps the session from going idle", () => {
 				headers: { "content-type": "text/event-stream" },
 			});
 		});
-		const abort = new AbortController();
 		const res = await mcpPost(
 			address,
 			rpc(1, "subscriptions/listen", { notifications: {} }),
-			{ token, signal: abort.signal },
+			{ token },
 		);
 		expect(res.status).toBe(200);
-		await Bun.sleep(400);
+		// Read like a real client (an unread Response can be garbage-collected,
+		// which closes the connection); wait for keep-alives spanning several idle
+		// periods instead of sleeping.
+		const reader = res.body?.getReader();
+		if (reader === undefined) throw new Error("no body");
+		let text = "";
+		while ((text.match(/: keep-alive\n\n/g)?.length ?? 0) < 8) {
+			const { done, value } = await reader.read();
+			if (done) throw new Error("listen stream ended");
+			text += new TextDecoder().decode(value);
+		}
 		expect(t.ws.readyState).toBe(WebSocket.OPEN);
 		expect(t.received.some((m) => m.type === "bye")).toBe(false);
 		// once the stream is gone, the idle timeout applies again
-		abort.abort();
+		await reader.cancel();
 		expect(await t.next("bye")).toEqual({ type: "bye", reason: "idle" });
 		expect((await t.closed).code).toBe(4002);
 	});
@@ -439,7 +449,11 @@ describe("6: a request aborted before forwarding is not forwarded", () => {
 		await Bun.sleep(50);
 		abort.abort();
 		expect(await pending).toBe("aborted");
-		await Bun.sleep(300);
+		// event-driven: wait until the relay finished handling the request
+		await waitFor(
+			() => r.logs.events("mcp.request").length > 0,
+			"the request log line",
+		);
 		expect(t.received.some((m) => m.type === "http.request")).toBe(false);
 		expect(r.logs.events("mcp.request")).toEqual([
 			expect.objectContaining({ status: 499, outcome: "client_closed" }),

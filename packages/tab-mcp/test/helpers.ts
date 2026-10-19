@@ -390,3 +390,16 @@ export function rpc(
 		},
 	};
 }
+
+/** Wait until `condition` holds (polling each 5 ms), or fail after `timeoutMs`. */
+export async function waitFor(
+	condition: () => boolean,
+	what: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!condition()) {
+		if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+		await Bun.sleep(5);
+	}
+}
