@@ -330,9 +330,11 @@ export class TabSession {
 			this.end(CloseCode.heartbeatLost, "heartbeat lost");
 			return;
 		}
-		const busy = [...this.pending.values()].some((e) => !e.isListen);
+		// Idle = no MCP request and nothing in flight, listen streams included:
+		// a listen stream may stay open for the session's lifetime (protocol.md),
+		// which still caps it.
 		if (
-			!busy &&
+			this.pending.size === 0 &&
 			Date.now() - this.#lastRequestAt >= this.#host.config.idleTimeoutMs
 		) {
 			this.end(CloseCode.idleTimeout, "idle", "idle");

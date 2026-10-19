@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-20T00:45:00+02:00
+timestamp: 2026-10-20T10:00:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
@@ -195,7 +195,7 @@ status and a JSON-RPC error body, as the MCP handler produced it.
 | 1008 | Policy violation (bad message, no `hello` in time). |
 | 1009 | Message too large. |
 | 4001 | Session expired (absolute lifetime). |
-| 4002 | Idle timeout (no MCP request for `idleTimeoutMs`). |
+| 4002 | Idle timeout: no MCP request for `idleTimeoutMs` and nothing in flight; an open `subscriptions/listen` stream counts as activity. |
 | 4003 | Heartbeat lost. |
 | 4004 | Relay shutting down. |
 | 4005 | Replaced by a newer session for the same address. |

@@ -364,3 +364,31 @@ describe("3: response size and backpressure", () => {
 		expect(cancels).toEqual(["error"]);
 	});
 });
+
+describe("4: an open listen stream keeps the session from going idle", () => {
+	test("a session whose only request is a listen stream is not closed as idle", async () => {
+		const r = relay({ heartbeatMs: 20, idleTimeoutMs: 80, keepAliveMs: 50 });
+		const { t, address, token } = await connected(r, (msg, tab) => {
+			tab.send({
+				type: "http.response.start",
+				id: msg.id,
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+		});
+		const abort = new AbortController();
+		const res = await mcpPost(
+			address,
+			rpc(1, "subscriptions/listen", { notifications: {} }),
+			{ token, signal: abort.signal },
+		);
+		expect(res.status).toBe(200);
+		await Bun.sleep(400);
+		expect(t.ws.readyState).toBe(WebSocket.OPEN);
+		expect(t.received.some((m) => m.type === "bye")).toBe(false);
+		// once the stream is gone, the idle timeout applies again
+		abort.abort();
+		expect(await t.next("bye")).toEqual({ type: "bye", reason: "idle" });
+		expect((await t.closed).code).toBe(4002);
+	});
+});
