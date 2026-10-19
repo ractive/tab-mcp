@@ -68,12 +68,23 @@ export async function issueAccessToken(
 	return { token, record };
 }
 
-/** A new access token and refresh token for a grant (DEC-029). */
+/**
+ * A new access token and refresh token for a grant (DEC-029). Neither lives
+ * beyond `grantEndsAt` (DEC-062). Returns `undefined` if the store refuses
+ * them because the grant was revoked meanwhile (its tombstone, DEC-063).
+ */
 export async function issueTokenPair(
 	store: TokenStore,
 	grant: Required<Omit<GrantInput, "scopes">> & { scopes: string[] },
-	options: { accessTtlMs: number; refreshTtlMs: number; now?: number },
-): Promise<{ accessToken: string; refreshToken: string }> {
+	options: {
+		accessTtlMs: number;
+		refreshTtlMs: number;
+		grantEndsAt: number;
+		now?: number;
+	},
+): Promise<
+	{ accessToken: string; refreshToken: string; expiresIn: number } | undefined
+> {
 	const now = options.now ?? Date.now();
 	const accessToken = newToken("access");
 	const refreshToken = newToken("refresh");
@@ -86,19 +97,30 @@ export async function issueTokenPair(
 		grantCreatedAt: grant.grantCreatedAt,
 		issuedAt: now,
 	};
+	const accessExpires = Math.min(
+		now + options.accessTtlMs,
+		options.grantEndsAt,
+	);
 	// The refresh token first: a grant whose access token exists always has
-	// a way to be listed and revoked.
-	await store.put({
+	// a way to be listed and revoked. If a revocation lands between the two
+	// puts, it deletes the first and its tombstone refuses the second.
+	const refreshStored = await store.put({
 		...base,
 		hash: hashToken(refreshToken),
 		kind: "refresh",
-		expiresAt: now + options.refreshTtlMs,
+		expiresAt: Math.min(now + options.refreshTtlMs, options.grantEndsAt),
 	});
-	await store.put({
+	if (!refreshStored) return undefined;
+	const accessStored = await store.put({
 		...base,
 		hash: hashToken(accessToken),
 		kind: "access",
-		expiresAt: now + options.accessTtlMs,
+		expiresAt: accessExpires,
 	});
-	return { accessToken, refreshToken };
+	if (!accessStored) return undefined;
+	return {
+		accessToken,
+		refreshToken,
+		expiresIn: Math.max(0, Math.floor((accessExpires - now) / 1000)),
+	};
 }

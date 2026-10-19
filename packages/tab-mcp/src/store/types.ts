@@ -12,6 +12,11 @@
  *   decides. It returns `undefined` after `revoke` or `deleteExpired` removed it.
  * - `markUsed` is atomic: for one hash, exactly one call ever returns `true`,
  *   even when several run at the same time.
+ * - `revoke` leaves a tombstone at least until `keepUntil`: until then `put` refuses
+ *   (returns `false`, stores nothing) a record of a revoked grant, or of a
+ *   grant of a revoked address created at or before the revocation. Checking
+ *   the tombstone and inserting must be atomic, so tokens minted by a refresh
+ *   that raced a revocation can never outlive it.
  * - Times are milliseconds since the Unix epoch.
  */
 
@@ -48,9 +53,19 @@ export interface GrantSummary {
 
 export type RevokeSelector = { grantId: string } | { addressId: string };
 
+export interface RevokeOptions {
+	/** When the revocation happens. */
+	now: number;
+	/** Keep the tombstone until then (the longest a token issued before could live). */
+	keepUntil: number;
+}
+
 export interface TokenStore {
-	/** Insert or replace a token record. */
-	put(record: TokenRecord): Promise<void>;
+	/**
+	 * Insert or replace a token record. Returns `false`, and stores nothing,
+	 * if its grant was revoked (see the tombstone rule above).
+	 */
+	put(record: TokenRecord): Promise<boolean>;
 	/** The record for a token hash, or `undefined`. */
 	get(hash: string): Promise<TokenRecord | undefined>;
 	/**
@@ -58,15 +73,18 @@ export interface TokenStore {
 	 * it, `false` if it was already used or does not exist. Must be atomic.
 	 */
 	markUsed(hash: string, now: number): Promise<boolean>;
-	/** Delete every token of a grant or of an address. Returns how many. */
-	revoke(selector: RevokeSelector): Promise<number>;
+	/**
+	 * Delete every token of a grant or of an address and leave a tombstone
+	 * until `options.keepUntil`. Returns how many tokens were deleted.
+	 */
+	revoke(selector: RevokeSelector, options: RevokeOptions): Promise<number>;
 	/**
 	 * The grants of an address that still have a usable token at `now` (an
 	 * unexpired access token or an unexpired, unused refresh token), oldest
 	 * first.
 	 */
 	listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
-	/** Delete every record with `expiresAt <= now`. Returns how many. */
+	/** Delete every record with `expiresAt <= now` and tombstones past `keepUntil`. Returns how many records. */
 	deleteExpired(now: number): Promise<number>;
 	/** Release resources (database handles). Optional. */
 	close?(): Promise<void>;

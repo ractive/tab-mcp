@@ -41,6 +41,9 @@ const PENDING_TTL_MS = 10 * 60_000;
 /** Authorization codes are single-use and short-lived (RFC 6749 §4.1.2). */
 const AUTH_CODE_TTL_MS = 60_000;
 const MAX_PENDING = 10_000;
+/** Open authorization requests per IP (prefix) and per address (DEC-061). */
+const MAX_PENDING_PER_IP = 10;
+const MAX_PENDING_PER_ADDRESS = 20;
 const MAX_CODES = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
@@ -85,6 +88,8 @@ interface AuthorizationRequest {
 interface Pending extends AuthorizationRequest {
 	id: string;
 	expiresAt: number;
+	/** The IP (prefix) key that opened it, for the per-IP cap. */
+	ip: string;
 }
 
 interface IssuedCode extends AuthorizationRequest {
@@ -166,7 +171,10 @@ function hostOf(url: string): string {
 export class AuthorizationServer {
 	readonly #host: AuthorizationHost;
 	readonly #cimd: ClientMetadataFetcher;
+	/** Insertion order is expiry order (one lifetime for all), so sweeps stop early. */
 	readonly #pending = new Map<string, Pending>();
+	readonly #pendingPerIp = new Map<string, number>();
+	readonly #pendingPerAddress = new Map<string, number>();
 	readonly #codes = new Map<string, IssuedCode>();
 	readonly #authCodeTtlMs: number;
 	readonly #methods: Partial<Record<PairingKind, PairingMethod>>;
@@ -176,13 +184,22 @@ export class AuthorizationServer {
 		capacity: 30,
 		refillPerSecond: 0.5,
 	});
-	/** Pairing attempts per IP and per address (threat model A1). */
+	/** Form posts per IP (every action; locks out only that network). */
 	readonly #attemptsPerIp = new RateLimiter({
 		capacity: 20,
 		refillPerSecond: 0.1,
 	});
-	readonly #attemptsPerAddress = new RateLimiter({
+	/**
+	 * Code guesses (well-formed, against an active code) per address and IP:
+	 * one network cannot use up an address's allowance alone (DEC-061).
+	 */
+	readonly #guessesPerAddressIp = new RateLimiter({
 		capacity: 10,
+		refillPerSecond: 1 / 60,
+	});
+	/** Code guesses per address from everywhere: the brute-force cap (A1). */
+	readonly #guessesPerAddress = new RateLimiter({
+		capacity: 30,
 		refillPerSecond: 1 / 30,
 	});
 	readonly #tokenPerIp = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
@@ -317,18 +334,61 @@ export class AuthorizationServer {
 		);
 	}
 
-	/** Back to the client with `error` (RFC 6749 §4.1.2.1) and `iss`. */
+	/** The client's redirect URI with `error` (RFC 6749 §4.1.2.1) and `iss`. */
+	#errorUrl(
+		redirectUri: string,
+		state: string | undefined,
+		error: string,
+		description: string,
+	): string {
+		const url = new URL(redirectUri);
+		const params: Record<string, string> = {
+			error,
+			error_description: description,
+			...(state === undefined ? {} : { state }),
+			iss: this.#issuer,
+		};
+		for (const [k, v] of Object.entries(params)) url.searchParams.append(k, v);
+		return url.href;
+	}
+
+	/**
+	 * An invalid request from a client: not redirected automatically, so the
+	 * relay is no open redirector for self-published clients (RFC 9700
+	 * §4.11.2). The page names the destination and links to it (DEC-064).
+	 */
+	#invalidRequestPage(
+		redirectUri: string,
+		state: string | undefined,
+		error: string,
+		description: string,
+	): Response {
+		const url = this.#errorUrl(redirectUri, state, error, description);
+		const host = hostOf(redirectUri);
+		return this.#page(
+			400,
+			"This connection cannot be made",
+			`<h1>This connection cannot be made</h1>
+<p role="alert">The AI tool sent a request this relay cannot accept: ${escapeHtml(description)} (${escapeHtml(error)}).</p>
+<p>You can go back to the AI tool at ${escapeHtml(host)} to tell it, or close this page.</p>
+<div class="actions"><a class="button" href="${escapeHtml(url)}">Go back to ${escapeHtml(host)}</a></div>`,
+		);
+	}
+
+	/** The user's own Cancel: back to the client at once (`access_denied`). */
 	#redirectError(
 		redirectUri: string,
 		state: string | undefined,
 		error: string,
 		description: string,
 	): Response {
-		return this.#redirect(redirectUri, {
-			error,
-			error_description: description,
-			...(state === undefined ? {} : { state }),
-			iss: this.#issuer,
+		return new Response(null, {
+			status: 303,
+			headers: {
+				location: this.#errorUrl(redirectUri, state, error, description),
+				"cache-control": "no-store",
+				"referrer-policy": "no-referrer",
+			},
 		});
 	}
 
@@ -404,7 +464,7 @@ export class AuthorizationServer {
 		// From here on errors go back to the (now trusted) redirect URI.
 		const state = "duplicate" in p ? undefined : p["state"];
 		const fail = (error: string, description: string) =>
-			this.#redirectError(redirectUri, state, error, description);
+			this.#invalidRequestPage(redirectUri, state, error, description);
 		if ("duplicate" in p) {
 			return fail("invalid_request", `${p.duplicate} was sent more than once`);
 		}
@@ -440,9 +500,34 @@ export class AuthorizationServer {
 			return fail("invalid_scope", `the only scope is "${SCOPE}"`);
 		}
 
+		// No connected tab: nothing to pair with, so nothing is kept (DEC-061).
+		if (this.#host.session(addressId) === undefined) {
+			return this.#offlinePage(
+				client,
+				`/authorize${new URL(req.url).search}`,
+				this.#errorUrl(
+					redirectUri,
+					state,
+					"access_denied",
+					"the user cancelled the connection",
+				),
+			);
+		}
+		this.#sweepPending();
+		if (
+			this.#pending.size >= MAX_PENDING ||
+			(this.#pendingPerIp.get(ip) ?? 0) >= MAX_PENDING_PER_IP ||
+			(this.#pendingPerAddress.get(addressId) ?? 0) >= MAX_PENDING_PER_ADDRESS
+		) {
+			return this.#errorPage(
+				429,
+				"Too many connection requests are open right now. Wait a few minutes and try again.",
+			);
+		}
 		const pending: Pending = {
 			id: random(24),
 			expiresAt: Date.now() + PENDING_TTL_MS,
+			ip,
 			client,
 			redirectUri,
 			state,
@@ -451,8 +536,7 @@ export class AuthorizationServer {
 			resource,
 			scopes,
 		};
-		if (this.#pending.size >= MAX_PENDING) this.#sweepPending(true);
-		this.#pending.set(pending.id, pending);
+		this.#addPending(pending);
 		const browser = this.#browserId(req);
 		return this.#pairingPage(
 			pending,
@@ -461,6 +545,48 @@ export class AuthorizationServer {
 			200,
 			browser.cookie,
 		);
+	}
+
+	#addPending(p: Pending): void {
+		this.#pending.set(p.id, p);
+		this.#pendingPerIp.set(p.ip, (this.#pendingPerIp.get(p.ip) ?? 0) + 1);
+		this.#pendingPerAddress.set(
+			p.addressId,
+			(this.#pendingPerAddress.get(p.addressId) ?? 0) + 1,
+		);
+	}
+
+	#dropPending(p: Pending): void {
+		if (!this.#pending.delete(p.id)) return;
+		const dec = (map: Map<string, number>, key: string) => {
+			const n = (map.get(key) ?? 1) - 1;
+			if (n <= 0) map.delete(key);
+			else map.set(key, n);
+		};
+		dec(this.#pendingPerIp, p.ip);
+		dec(this.#pendingPerAddress, p.addressId);
+	}
+
+	/** The tab is not connected: try again by loading the page again. */
+	#offlinePage(
+		client: ClientMetadata,
+		retryUrl: string,
+		cancelUrl: string,
+		error?: string,
+	): Response {
+		const errorHtml =
+			error === undefined
+				? ""
+				: `<p class="error" role="alert">${escapeHtml(error)}</p>`;
+		const body = `<h1>Open the page first</h1>
+${errorHtml}
+<p><strong>${escapeHtml(client.name)}</strong> (${escapeHtml(client.host)}) wants to use the tools of a web page, but that page is not open right now.</p>
+<p>Open the page, click “Connect your AI tool”, then try again here.</p>
+<div class="actions">
+<a class="button primary" href="${escapeHtml(retryUrl)}">Try again</a>
+<a class="button" href="${escapeHtml(cancelUrl)}">Cancel</a>
+</div>`;
+		return this.#page(200, "Open the page first", body);
 	}
 
 	/** POST `/authorize`: the pairing form (connect, cancel, try again). */
@@ -515,7 +641,7 @@ export class AuthorizationServer {
 
 		const action = form.get("action");
 		if (action === "cancel") {
-			this.#pending.delete(pending.id);
+			this.#dropPending(pending);
 			this.#host.logger.info("oauth.cancelled", {
 				address: shortAddress(pending.addressId),
 				client: pending.client.host,
@@ -539,14 +665,6 @@ export class AuthorizationServer {
 				"The page is still not open.",
 			);
 		}
-		if (!this.#attemptsPerAddress.take(pending.addressId)) {
-			return this.#pairingPage(
-				pending,
-				browser.id,
-				"Too many attempts for this page. Wait a few minutes and try again.",
-				429,
-			);
-		}
 		const method = this.#methods[session.site.pairing];
 		if (method === undefined) {
 			return this.#errorPage(
@@ -554,20 +672,30 @@ export class AuthorizationServer {
 				"This page's pairing method is not available.",
 			);
 		}
-		const result = await method.check(session, form);
+		// Only a real guess is charged: the method calls this right before it
+		// compares a well-formed answer (DEC-061).
+		const admit = () =>
+			this.#guessesPerAddressIp.take(`${pending.addressId}|${ip}`) &&
+			this.#guessesPerAddress.take(pending.addressId);
+		const result = await method.check(session, form, admit);
 		if (!result.ok) {
 			this.#host.logger.info("oauth.pairing_failed", {
 				address: shortAddress(pending.addressId),
 				client: pending.client.host,
 				reason: result.reason,
 			});
-			return this.#pairingPage(pending, browser.id, result.message, 400);
+			return this.#pairingPage(
+				pending,
+				browser.id,
+				result.message,
+				result.reason === "rate_limited" ? 429 : 400,
+			);
 		}
 
-		this.#pending.delete(pending.id);
+		this.#dropPending(pending);
 		const code = random(32);
 		if (this.#codes.size >= MAX_CODES) this.#sweepCodes(true);
-		const { id: _id, expiresAt: _expires, ...request } = pending;
+		const { id: _id, expiresAt: _expires, ip: _ip, ...request } = pending;
 		this.#codes.set(hashToken(code), {
 			...request,
 			expiresAt: Date.now() + this.#authCodeTtlMs,
@@ -660,6 +788,8 @@ export class AuthorizationServer {
 
 		const session = this.#host.session(pending.addressId);
 		if (session === undefined) {
+			// The tab went away after the page was opened: keep the request,
+			// so Try again (a post) can continue once the tab is back.
 			const body = `<h1>Open the page first</h1>
 ${errorHtml}
 <p>${clientLabel} wants to use the tools of a web page, but that page is not open right now.</p>
@@ -691,7 +821,10 @@ ${cancel}
 			session.appName === undefined
 				? `tools from ${page}`
 				: `<strong>${escapeHtml(session.appName)}</strong> on ${page}`;
-		const body = `<h1>Connect ${escapeHtml(client.name)}</h1>
+		// The verified host is part of the heading and title, so a
+		// self-declared name never stands alone (DEC-065).
+		const heading = `Connect ${client.name} from ${client.host}`;
+		const body = `<h1>${escapeHtml(heading)}</h1>
 <p>You're connecting ${clientLabel} to ${target}.</p>
 <p>${escapeHtml(client.name)} can then use this page's tools while the page is open. You can disconnect it in the page at any time.</p>
 ${errorHtml}
@@ -704,7 +837,7 @@ ${cancel}
 </div>
 </form>
 <p class="help">After you connect, your browser goes back to ${escapeHtml(hostOf(pending.redirectUri))}. Only connect AI tools you started yourself.</p>`;
-		return this.#page(status, `Connect ${client.name}`, body, targets, extra);
+		return this.#page(status, heading, body, targets, extra);
 	}
 
 	// /token
@@ -896,9 +1029,14 @@ ${cancel}
 			{
 				accessTtlMs: config.accessTokenTtlMs,
 				refreshTtlMs: config.refreshTokenTtlMs,
+				grantEndsAt: now + config.grantLifetimeMs,
 				now,
 			},
 		);
+		if (tokens === undefined) {
+			// Revoked while the tokens were issued (code reuse, New address).
+			throw invalid("the connection was revoked");
+		}
 		this.#host.logger.info("oauth.grant_created", {
 			address: shortAddress(issued.addressId),
 			client: issued.client.host,
@@ -916,13 +1054,13 @@ ${cancel}
 	}
 
 	#tokenBody(
-		tokens: { accessToken: string; refreshToken: string },
+		tokens: { accessToken: string; refreshToken: string; expiresIn: number },
 		scopes: string[],
 	): Record<string, unknown> {
 		return {
 			access_token: tokens.accessToken,
 			token_type: "Bearer",
-			expires_in: Math.floor(this.#host.config.accessTokenTtlMs / 1000),
+			expires_in: tokens.expiresIn,
 			refresh_token: tokens.refreshToken,
 			scope: scopes.join(" "),
 		};
@@ -990,9 +1128,15 @@ ${cancel}
 			{
 				accessTtlMs: this.#host.config.accessTokenTtlMs,
 				refreshTtlMs: this.#host.config.refreshTokenTtlMs,
+				// Refreshes slide, but never beyond the grant's absolute end (DEC-062).
+				grantEndsAt: record.grantCreatedAt + this.#host.config.grantLifetimeMs,
 				now,
 			},
 		);
+		if (tokens === undefined) {
+			// The grant was revoked while this refresh ran (DEC-063).
+			throw invalid("the connection was revoked");
+		}
 		this.#host.logger.debug("oauth.refreshed", {
 			address: shortAddress(record.addressId),
 			client: hostOf(record.clientId),
@@ -1013,7 +1157,11 @@ ${cancel}
 		grantId: string,
 		reason: string,
 	): Promise<void> {
-		const n = await this.#host.store.revoke({ grantId });
+		const now = Date.now();
+		const n = await this.#host.store.revoke(
+			{ grantId },
+			{ now, keepUntil: now + this.#host.config.grantLifetimeMs },
+		);
 		if (n > 0) this.#host.grantRemoved(addressId, grantId, reason);
 	}
 
@@ -1080,17 +1228,12 @@ ${cancel}
 
 	// Housekeeping
 
-	#sweepPending(force = false): void {
+	/** Drop expired requests; insertion order is expiry order, so stop at the first live one. */
+	#sweepPending(): void {
 		const now = Date.now();
-		for (const [id, p] of this.#pending) {
-			if (p.expiresAt <= now) this.#pending.delete(id);
-		}
-		if (force && this.#pending.size >= MAX_PENDING) {
-			// Still full: drop the oldest (Map keeps insertion order).
-			const drop = this.#pending.size - MAX_PENDING + 1;
-			for (const id of [...this.#pending.keys()].slice(0, drop)) {
-				this.#pending.delete(id);
-			}
+		for (const p of this.#pending.values()) {
+			if (p.expiresAt > now) break;
+			this.#dropPending(p);
 		}
 	}
 
@@ -1115,7 +1258,8 @@ ${cancel}
 		const now = Date.now();
 		this.#viewsPerIp.sweep(now);
 		this.#attemptsPerIp.sweep(now);
-		this.#attemptsPerAddress.sweep(now);
+		this.#guessesPerAddressIp.sweep(now);
+		this.#guessesPerAddress.sweep(now);
 		this.#tokenPerIp.sweep(now);
 	}
 }

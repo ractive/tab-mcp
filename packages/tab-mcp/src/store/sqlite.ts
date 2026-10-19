@@ -2,13 +2,14 @@ import { Database } from "bun:sqlite";
 import { summarizeGrants } from "./memory.ts";
 import type {
 	GrantSummary,
+	RevokeOptions,
 	RevokeSelector,
 	TokenKind,
 	TokenRecord,
 	TokenStore,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 interface Row {
 	hash: string;
@@ -62,6 +63,14 @@ export class SqliteTokenStore implements TokenStore {
 		};
 		if (row.user_version >= SCHEMA_VERSION) return;
 		this.#db.transaction(() => {
+			// Version 2: tombstones of revoked grants and addresses.
+			this.#db.run(`CREATE TABLE IF NOT EXISTS revocations (
+				kind TEXT NOT NULL CHECK (kind IN ('grant', 'address')),
+				id TEXT NOT NULL,
+				at INTEGER NOT NULL,
+				keep_until INTEGER NOT NULL,
+				PRIMARY KEY (kind, id)
+			) STRICT`);
 			this.#db.run(`CREATE TABLE IF NOT EXISTS tokens (
 				hash TEXT PRIMARY KEY,
 				kind TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
@@ -88,7 +97,25 @@ export class SqliteTokenStore implements TokenStore {
 		})();
 	}
 
-	async put(r: TokenRecord): Promise<void> {
+	async put(r: TokenRecord): Promise<boolean> {
+		return this.#db.transaction(() => {
+			const revoked = this.#db
+				.query(
+					`SELECT 1 FROM revocations WHERE (kind = 'grant' AND id = $grant_id)
+					OR (kind = 'address' AND id = $address_id AND at >= $created)`,
+				)
+				.get({
+					grant_id: r.grantId,
+					address_id: r.addressId,
+					created: r.grantCreatedAt,
+				});
+			if (revoked !== null) return false;
+			this.#insert(r);
+			return true;
+		})();
+	}
+
+	#insert(r: TokenRecord): void {
 		this.#db
 			.query(
 				`INSERT OR REPLACE INTO tokens (hash, kind, grant_id, address_id, client_id,
@@ -127,7 +154,28 @@ export class SqliteTokenStore implements TokenStore {
 		return result.changes === 1;
 	}
 
-	async revoke(selector: RevokeSelector): Promise<number> {
+	async revoke(
+		selector: RevokeSelector,
+		options: RevokeOptions,
+	): Promise<number> {
+		return this.#db.transaction(() => {
+			this.#db
+				.query(
+					`INSERT INTO revocations (kind, id, at, keep_until) VALUES ($kind, $id, $at, $until)
+					ON CONFLICT (kind, id) DO UPDATE SET at = max(at, excluded.at),
+					keep_until = max(keep_until, excluded.keep_until)`,
+				)
+				.run({
+					kind: "grantId" in selector ? "grant" : "address",
+					id: "grantId" in selector ? selector.grantId : selector.addressId,
+					at: options.now,
+					until: options.keepUntil,
+				});
+			return this.#delete(selector);
+		})();
+	}
+
+	#delete(selector: RevokeSelector): number {
 		const result =
 			"grantId" in selector
 				? this.#db
@@ -150,6 +198,9 @@ export class SqliteTokenStore implements TokenStore {
 	}
 
 	async deleteExpired(now: number): Promise<number> {
+		this.#db
+			.query("DELETE FROM revocations WHERE keep_until <= $now")
+			.run({ now });
 		return this.#db
 			.query("DELETE FROM tokens WHERE expires_at <= $now")
 			.run({ now }).changes;

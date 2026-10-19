@@ -89,6 +89,11 @@ export interface RelayConfig {
 	maxMessageBytes: number;
 	accessTokenTtlMs: number;
 	refreshTokenTtlMs: number;
+	/**
+	 * Absolute end of a grant after pairing: refreshes slide by
+	 * `refreshTokenTtlMs` but never beyond this (DEC-062).
+	 */
+	grantLifetimeMs: number;
 	/** How often expired tokens are deleted from the store. */
 	sweepIntervalMs: number;
 	/** Per-socket WebSocket send buffer; beyond it sends are dropped (DEC-021). */
@@ -123,6 +128,7 @@ export const DEFAULT_CONFIG: Readonly<RelayConfig> = {
 	maxMessageBytes: 1_048_576,
 	accessTokenTtlMs: 3_600_000,
 	refreshTokenTtlMs: 2_592_000_000,
+	grantLifetimeMs: 7_776_000_000,
 	sweepIntervalMs: 600_000,
 	backpressureLimitBytes: 4 * 1_048_576,
 	httpIdleTimeoutS: 30,
@@ -210,6 +216,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		"maxMessageBytes",
 		"accessTokenTtlMs",
 		"refreshTokenTtlMs",
+		"grantLifetimeMs",
 		"sweepIntervalMs",
 		"backpressureLimitBytes",
 		"httpIdleTimeoutS",
@@ -488,6 +495,7 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 	set("maxMessageBytes", integer(env, "TAB_MCP_MAX_MESSAGE_BYTES"));
 	set("accessTokenTtlMs", seconds(env, "TAB_MCP_ACCESS_TOKEN_TTL_S"));
 	set("refreshTokenTtlMs", seconds(env, "TAB_MCP_REFRESH_TOKEN_TTL_S"));
+	set("grantLifetimeMs", seconds(env, "TAB_MCP_GRANT_LIFETIME_S"));
 	set(
 		"logLevel",
 		oneOf(env, "TAB_MCP_LOG_LEVEL", [

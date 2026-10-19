@@ -210,9 +210,12 @@ export interface AuthorizePage {
 export class TestBrowser {
 	readonly #cookies = new Map<string, string>();
 	readonly relayUrl: string;
+	/** Sent with every request, e.g. `x-real-ip` behind a trusted proxy. */
+	readonly #headers: Record<string, string>;
 
-	constructor(relayUrl: string) {
+	constructor(relayUrl: string, headers: Record<string, string> = {}) {
 		this.relayUrl = relayUrl;
+		this.#headers = headers;
 	}
 
 	#remember(res: Response): void {
@@ -224,8 +227,9 @@ export class TestBrowser {
 	}
 
 	#cookieHeader(): Record<string, string> {
-		if (this.#cookies.size === 0) return {};
+		if (this.#cookies.size === 0) return { ...this.#headers };
 		return {
+			...this.#headers,
 			cookie: [...this.#cookies].map(([k, v]) => `${k}=${v}`).join("; "),
 		};
 	}

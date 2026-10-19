@@ -38,6 +38,8 @@ Configuration is read from environment variables:
                               at least 16384)
   TAB_MCP_ACCESS_TOKEN_TTL_S  access token lifetime (3600)
   TAB_MCP_REFRESH_TOKEN_TTL_S refresh token lifetime (2592000)
+  TAB_MCP_GRANT_LIFETIME_S    absolute end of a connection after pairing; refreshes never
+                              go beyond it (7776000 = 90 days)
   TAB_MCP_LOG_LEVEL           error | warn | info | debug (info); bodies are never logged
 
 Stops on SIGTERM or SIGINT: tabs get "bye" and close code 4004.

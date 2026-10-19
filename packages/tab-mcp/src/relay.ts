@@ -15,6 +15,7 @@ import {
 	type RpcId,
 	rpcErrorBody,
 } from "./exchange.ts";
+import { ipPrefixKey } from "./ip.ts";
 import { createLogger, type Logger, truncateIp } from "./log.ts";
 import {
 	AuthorizationServer,
@@ -199,6 +200,12 @@ function startRelay(
 			}
 		: {};
 
+	/** Tombstones outlive every token issued before the revocation (DEC-063). */
+	const revokeOptions = () => {
+		const now = Date.now();
+		return { now, keepUntil: now + config.grantLifetimeMs };
+	};
+
 	function grantRemoved(
 		addressId: string,
 		grantId: string,
@@ -222,7 +229,7 @@ function startRelay(
 			if (addressId === undefined) return false;
 			const grants = await store.listGrants(addressId, Date.now());
 			if (!grants.some((g) => g.grantId === grantId)) return false;
-			await store.revoke({ grantId });
+			await store.revoke({ grantId }, revokeOptions());
 			logger.info("oauth.revoked", {
 				address: shortAddress(addressId),
 				by: "tab",
@@ -234,7 +241,7 @@ function startRelay(
 			const addressId = session.addressId;
 			if (addressId === undefined) return;
 			const grants = await store.listGrants(addressId, Date.now());
-			await store.revoke({ addressId });
+			await store.revoke({ addressId }, revokeOptions());
 			logger.info("oauth.revoked_all", {
 				address: shortAddress(addressId),
 				grants: grants.length,
@@ -329,7 +336,9 @@ function startRelay(
 				supported: [SUBPROTOCOL],
 			});
 		}
-		const ip = clientIp(req, server);
+		const realIp = clientIp(req, server);
+		// Counted per /64 for IPv6 (DEC-061): one subscriber owns a whole /64.
+		const ip = ipPrefixKey(realIp);
 		if (allSessions.size >= config.maxSessions) {
 			logger.warn("tab.refused", { reason: "max_sessions" });
 			return json(429, { error: "too_many_sessions" });
@@ -338,7 +347,7 @@ function startRelay(
 		if (count >= config.maxSessionsPerIp) {
 			logger.warn("tab.refused", {
 				reason: "max_sessions_per_ip",
-				ip: truncateIp(ip),
+				ip: truncateIp(realIp),
 			});
 			return json(429, { error: "too_many_sessions" });
 		}
@@ -688,7 +697,8 @@ function startRelay(
 	const postOnly = () =>
 		new Response(null, { status: 405, headers: { allow: "POST, OPTIONS" } });
 	const largest = largestMessageBytes(config);
-	const ipOf = (req: Request, srv: Server<WsData>) => clientIp(req, srv);
+	const ipOf = (req: Request, srv: Server<WsData>) =>
+		ipPrefixKey(clientIp(req, srv));
 	const server = Bun.serve({
 		port: config.port,
 		hostname: config.host,

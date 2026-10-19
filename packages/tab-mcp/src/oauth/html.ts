@@ -33,8 +33,8 @@ input[type="text"] { font: 1.5rem/1.2 ui-monospace, SFMono-Regular, Menlo, monos
 input[type="text"]:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 1.25rem; }
 button, .button { font: inherit; padding: 0.5rem 1.25rem; border-radius: 0.4rem; border: 2px solid var(--accent); cursor: pointer; text-decoration: none; display: inline-block; }
-button.primary { background: var(--accent); color: Canvas; }
-button.secondary, .button { background: transparent; color: var(--accent); }
+button.primary, .button.primary { background: var(--accent); color: Canvas; }
+button.secondary, .button:not(.primary) { background: transparent; color: var(--accent); }
 footer { margin-top: 2.5rem; font-size: 0.85rem; color: GrayText; }
 `;
 

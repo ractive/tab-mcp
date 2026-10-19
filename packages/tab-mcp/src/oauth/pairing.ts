@@ -34,10 +34,16 @@ export interface PairingMethod {
 	readonly kind: PairingKind;
 	/** HTML of the method's step (escaped by the method). */
 	render(target: PairingTarget): string;
-	/** Check the submitted form fields. */
+	/**
+	 * Check the submitted form fields. Call `admit()` right before judging an
+	 * answer that could be right (a real guess); if it returns false, refuse
+	 * with reason `rate_limited` without judging. Malformed input and a state
+	 * that cannot succeed are answered without calling it (DEC-061).
+	 */
 	check(
 		target: PairingTarget,
 		form: URLSearchParams,
+		admit: () => boolean,
 	): PairingResult | Promise<PairingResult>;
 }
 
@@ -47,6 +53,7 @@ export const PAIRING_MAX_ATTEMPTS = 5;
 
 export type CodeCheck =
 	| "ok"
+	| "limited"
 	| "wrong"
 	| "expired"
 	| "locked"
@@ -121,12 +128,20 @@ export class PairingCodes {
 		this.#previous = undefined;
 	}
 
-	/** Check a typed code; a correct one is used up and replaced. */
-	check(input: string, now = Date.now()): CodeCheck {
+	/**
+	 * Check a typed code; a correct one is used up and replaced. `admit` is
+	 * asked only for a well-formed code while a code is active.
+	 */
+	check(
+		input: string,
+		now = Date.now(),
+		admit: () => boolean = () => true,
+	): CodeCheck {
 		const current = this.#current;
 		if (current === undefined) return "inactive";
 		const typed = input.replace(/[\s-]/g, "");
 		if (!/^\d{6}$/.test(typed)) return "malformed";
+		if (!admit()) return "limited";
 		if (now >= current.expiresAt) {
 			this.#previous = current.code;
 			this.#issue();
@@ -171,6 +186,8 @@ const MESSAGES: Record<Exclude<CodeCheck, "ok">, string> = {
 	inactive:
 		"The page is not showing a code right now. In the page, open “Connect your AI tool” to see one, then enter it here.",
 	malformed: "Enter the 6 digits shown in the page.",
+	limited:
+		"Too many attempts for this page. Wait a few minutes and try again. If it keeps happening, someone else may be guessing: use “New address” in the page.",
 };
 
 /** The 6-digit code typed at `/authorize` (DEC-028). */
@@ -181,15 +198,23 @@ export const codePairing: PairingMethod = {
 <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus aria-describedby="code-help"></p>
 <p id="code-help" class="help">In the page, “Connect your AI tool” shows a 6-digit code. It changes every 2 minutes.</p>`;
 	},
-	check(target, form): PairingResult {
-		const result = target.codes.check(form.get("code") ?? "");
+	check(target, form, admit): PairingResult {
+		const result = target.codes.check(
+			form.get("code") ?? "",
+			Date.now(),
+			admit,
+		);
 		if (result === "ok") return { ok: true };
 		let message = MESSAGES[result];
 		if (result === "wrong") {
 			const left = target.codes.attemptsLeft;
 			message += ` ${left === 1 ? "1 try is" : `${left} tries are`} left for this code.`;
 		}
-		return { ok: false, message, reason: result };
+		return {
+			ok: false,
+			message,
+			reason: result === "limited" ? "rate_limited" : result,
+		};
 	},
 };
 

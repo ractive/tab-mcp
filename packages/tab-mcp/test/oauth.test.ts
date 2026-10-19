@@ -178,6 +178,17 @@ function refresh(
 	});
 }
 
+/** The link of the invalid-request page, as the URL it leads to. */
+function errorLink(html: string): URL {
+	return errorLinkNamed(html, "Go back to");
+}
+
+function errorLinkNamed(html: string, label: string): URL {
+	const href = new RegExp(`href="([^"]+)">${label}`).exec(html)?.[1];
+	if (href === undefined) throw new Error(`no link "${label}"`);
+	return new URL(href.replaceAll("&amp;", "&").replaceAll("&#39;", "'"));
+}
+
 async function toolsList(address: string, token: string): Promise<number> {
 	return (await mcpPost(address, rpc(1, "tools/list"), { token })).status;
 }
@@ -347,8 +358,12 @@ describe("RFC 6749 §4.1.1/§4.1.2: authorization request and response", () => {
 				...params,
 			}),
 		);
-		expect(page.status).toBe(303);
-		const location = new URL(page.location ?? "");
+		// RFC 9700 §4.11.2 (review finding 5): no automatic redirect to a
+		// self-published client; a page names the destination and links to it.
+		expect(page.status).toBe(400);
+		expect(page.location).toBeUndefined();
+		expect(page.html).toContain("Go back to 127.0.0.1:4567");
+		const location = errorLink(page.html);
 		expect(location.searchParams.get("error")).toBe(error);
 		expect(location.searchParams.get("iss")).toBe(ctx.r.url);
 		expect(location.searchParams.get("code")).toBeNull();
@@ -402,8 +417,8 @@ describe("RFC 6749 §4.1.1/§4.1.2: authorization request and response", () => {
 			resource: ctx.address,
 		})}&state=again`;
 		const page = await ctx.browser.open(url);
-		expect(page.status).toBe(303);
-		expect(new URL(page.location ?? "").searchParams.get("error")).toBe(
+		expect(page.status).toBe(400);
+		expect(errorLink(page.html).searchParams.get("error")).toBe(
 			"invalid_request",
 		);
 	});
@@ -480,18 +495,20 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		);
 		expect(page.status).toBe(200);
 		expect(page.html).toContain("Open the page first");
-		expect(page.html).toContain('value="retry"');
-		const stillOffline = await browser.submit(page, {
-			action: "connect",
-			code: "123456",
-		});
-		expect(stillOffline.html).toContain("The page is still not open.");
+		// Nothing is kept for an address without a tab (review finding 3):
+		// no form, Try again reloads the same request, Cancel links back.
+		expect(page.requestId).toBeUndefined();
+		const retryHref = /href="([^"]+)">Try again/.exec(page.html)?.[1] ?? "";
+		const cancel = errorLinkNamed(page.html, "Cancel");
+		expect(cancel.searchParams.get("error")).toBe("access_denied");
 
 		const tab = new ScriptedTab(r.wsUrl, { secret });
 		tabs.push(tab);
 		await tab.connect();
 		const code = await tab.startPairing();
-		const retry = await browser.submit(page, { action: "retry" });
+		const retry = await browser.open(
+			`${r.url}${retryHref.replaceAll("&amp;", "&")}`,
+		);
 		expect(retry.html).toContain("You're connecting");
 		const done = await browser.submit(retry, { action: "connect", code });
 		expect(done.status).toBe(303);
@@ -596,7 +613,7 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		expect(ok.status).toBe(303);
 	});
 
-	test("attempts per address are rate-limited (threat model A1)", async () => {
+	test("one network's guesses per address are rate-limited (threat model A1)", async () => {
 		const ctx = await setup();
 		let page = await open(ctx);
 		const code = await currentCode(ctx);

@@ -384,7 +384,10 @@ describe("MCP endpoint checks", () => {
 		expect(
 			(await mcpPost(address, rpc(1, "tools/list"), { token })).status,
 		).toBe(200);
-		await r.store.revoke({ addressId: t.addressId });
+		await r.store.revoke(
+			{ addressId: t.addressId },
+			{ now: Date.now(), keepUntil: Date.now() + 60_000 },
+		);
 		expect(
 			(await mcpPost(address, rpc(1, "tools/list"), { token })).status,
 		).toBe(401);

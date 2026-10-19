@@ -128,3 +128,25 @@ export function isLoopbackHost(hostname: string): boolean {
 	const v6 = parseIpv6(h);
 	return v6?.slice(0, 7).every((x) => x === 0) === true && v6[7] === 1;
 }
+
+/**
+ * The key per-IP limits count under (threat model A8, DEC-061): an IPv4
+ * address as is (/32, since many users share one behind NAT or CGNAT
+ * anyway), an IPv6 address by its /64, which one subscriber usually gets
+ * whole. IPv4-mapped IPv6 counts as IPv4. Anything else is used verbatim.
+ */
+export function ipPrefixKey(ip: string): string {
+	const v4 = parseIpv4(ip);
+	if (v4 !== undefined) return v4.join(".");
+	const v6 = parseIpv6(ip.replace(/^\[|\]$/g, ""));
+	if (v6 === undefined) return ip;
+	if (v6.slice(0, 5).every((g) => g === 0) && v6[5] === 0xffff) {
+		const hi = v6[6] ?? 0;
+		const lo = v6[7] ?? 0;
+		return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+	}
+	return `${v6
+		.slice(0, 4)
+		.map((g) => g.toString(16))
+		.join(":")}::/64`;
+}
