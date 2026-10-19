@@ -89,7 +89,7 @@ tab is `createMcpHandler(...).fetch(Request)`.**
 
 | Part | Decision |
 |---|---|
-| Tab-side MCP logic (discover, list, call, validation, listen, cache hints) | take: `@modelcontextprotocol/server` `createMcpHandler`, `legacy: "reject"` |
+| Tab-side MCP logic (discover, list, call, validation, listen, cache hints) | take: `@modelcontextprotocol/server` `createMcpHandler`, `legacy: "reject"` (changed by DEC-049: our own subset after measuring 81 KiB gzipped) |
 | Tab↔relay link | write: tunnel HTTP request/response over the WebSocket (not a `Transport`) |
 | Relay header pre-checks, bearer check, PRM/AS metadata documents | take the web-standard helpers where they fit; write the rest |
 | OAuth authorization server (authorize, token, CIMD fetch, consent with code) | write |

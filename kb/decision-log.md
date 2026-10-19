@@ -487,6 +487,69 @@ unknown tool `-32602` in band, failed argument validation an `isError` result,
 (registration refuses it). Replaces the tab half of DEC-013; the relay is unaffected
 (DEC-014).
 
+## DEC-050: No reconnect by the library; `connect({ resume: true })` for "Keep AI access on"
+
+The library never reconnects by itself (plan, protocol). `connect()` refuses to run
+without transient user activation where the browser tracks it
+(`navigator.userActivation`), so a session starts from a click (DEC-009). Whether AI
+access survives a reload or a dropped connection is the page's choice: a page that offers
+something like "Keep AI access on" (turned on by the user with a click) calls
+`connect({ resume: true })` on load or after `disconnected`, which skips the activation
+check. The check is a guard against accidental connects, not a security boundary: a page
+can always open a WebSocket itself. Events for the page: `statechange`, `connected`,
+`disconnected` (with a reason from the bye or close code: `user`, `new_address`,
+`replaced`, `expired`, `idle`, `shutdown`, `heartbeat`, `policy`, `too_large`,
+`rate_limited`, `closed`, `network`), `replaced`, `error`, `pairingcode`, `grantschange`,
+`toolschange`. `disconnect()` and `newAddress()` report `disconnected` at once and ignore
+late callbacks of the old connection.
+
+## DEC-051: Registration rules beyond WebMCP
+
+`registerTool` returns a promise, as in the WebMCP draft: it rejects with a `TypeError`
+for an invalid tool and an `InvalidStateError` for a duplicate name, and the tool is
+registered before it resolves. `inputSchema` must have `"type": "object"` (MCP requires an
+object schema; WebMCP does not say), is copied at registration, and may not use
+`x-mcp-header` (DEC-049). Only boolean annotations are kept. `execute(input, { signal,
+client })` gets the caller (grant id, client id, verified host, declared name when the
+grant is known) besides WebMCP's signal. Several registrations in one task produce one
+`notifications/tools/list_changed`.
+
+## DEC-052: The address secret is kept per relay; plain-text relays only on loopback
+
+The secret's storage key is `tab-mcp:secret:<relay origin>` (overridable with
+`storageKey`), so a page that talks to two relays never sends one relay's secret to the
+other, whose operator could otherwise take over the address there. The library refuses
+`http:`/`ws:` relay URLs except for `localhost`, `127.0.0.1` and `[::1]`, because the
+secret travels in `hello`. `storage: null` keeps the secret for the page's lifetime;
+storage that throws (blocked, quota) falls back to that silently. The secret is read from
+storage on every connect, so a rotation in another tab is seen.
+
+## DEC-053: The npm package is built into `dist/` with its own `package.json`
+
+The workspace keeps `exports` pointing at `src/` (tests, the example and type checks run
+without a build). `bun run build` in the client package (`scripts/build.ts`) writes the
+publishable directory `dist/`: ESM for bundlers with `@cfworker/json-schema` external and
+the core, connection and UI as separate chunks; a minified, self-contained CDN build in
+`dist/cdn/` (`exports["./cdn"]`); declarations from TypeScript 7 `tsc` with
+`isolatedDeclarations` (their `.ts` specifiers rewritten to `.js`); and a generated
+`package.json`, LICENSE and AI_NOTICE. Iteration 5 packs and publishes `dist/` (DEC-024).
+A test builds it and type-checks a consumer file against the declarations.
+
+## DEC-054: Default confirmation and dialogs
+
+A consequential tool is confirmed after its arguments are validated, so the user is never
+asked about a call that would fail. Without `onConfirm` and without a `document` the call
+is declined. The default confirmation focuses "Don't allow", names the client by its
+declared name and verified host, shows the arguments as text (hidden when there are none)
+and closes itself when the call is cancelled. Both dialogs are `<dialog>` elements opened
+with `showModal()` (Escape closes them), built with `textContent` only, styled through
+CSSOM with `--tab-mcp-*` custom properties (no inline `style` attributes, so a strict CSP
+needs no exception). The connect dialog shows `session.appName`, else the page's own
+`appName`, until iteration 3 makes the relay send it; its code line stays hidden until the
+relay sends a code. Tests pass a happy-dom `document` instead of registering DOM globals,
+because the relay's tests share the process; the browser test needs Chrome (required when
+`CI` is set, skipped otherwise).
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)

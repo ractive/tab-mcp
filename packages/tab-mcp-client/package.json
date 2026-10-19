@@ -6,6 +6,10 @@
 	"exports": {
 		".": "./src/index.ts"
 	},
+	"scripts": {
+		"build": "bun scripts/build.ts",
+		"measure-sdk": "bun scripts/measure-sdk.ts"
+	},
 	"files": [
 		"src",
 		"README.md",
