@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T14:00:00+02:00
+timestamp: 2026-10-20T00:30:00+02:00
 ---
 
 # Decision log
@@ -558,6 +558,41 @@ needs no exception). The connect dialog shows `session.appName`, else the page's
 relay sends a code. Tests pass a happy-dom `document` instead of registering DOM globals,
 because the relay's tests share the process; the browser test needs Chrome (required when
 `CI` is set, skipped otherwise).
+
+## DEC-055: Release tags per package, dist-tags from the version, one release workflow
+
+Each package is released on its own: a GitHub release with the tag `client-v<version>`
+publishes `@ractive-ch/tab-mcp-client`; the relay will use `relay-v<version>` (npm and the
+Docker image). The tag must equal the version in the package's `package.json`, and the
+GitHub release must be marked as a pre-release exactly when the version is one. The npm
+dist-tag comes from the version: `alpha`, `beta` or `rc` for a pre-release named so
+(`0.1.0-alpha.0` → `alpha`; other pre-release names are refused), `latest` only for a stable
+version. The first version is `0.1.0-alpha.0`. The source `package.json` is `private` so it
+cannot be published by mistake; the build writes the published one into `dist/` (DEC-053).
+
+One workflow, `.github/workflows/release.yml`, does the dry run on pull requests, the
+bootstrap and the release, so they cannot drift apart (GitHub also only dispatches a
+workflow it already knows). A job without an OIDC token builds, tests, packs and checks the
+tarball (`scripts/npm-pack.ts`: file list, manifest, exact repository URL, exact dependency
+versions), dry-runs the publication and installs the tarball into an empty project; only
+the signing job (bootstrap) and the publishing job (environment `release`) get
+`id-token: write`, and both use that same tarball. The bootstrap signs it with npm's own
+provenance code (`scripts/npm-provenance.mjs`) for the owner's first manual upload; after
+that, npm trusted publishing (repository `ractive/tab-mcp`, workflow `release.yml`,
+environment `release`) publishes with `npm publish --provenance`. A version that is already
+on npm is skipped when the downloaded tarball's own hash matches and fails the job
+otherwise; a stable version below the current `latest` is refused. npm is pinned (12.2.0)
+because the signing step loads npm's internal modules.
+
+Bootstrap runs only on `main`; bootstrap and publish refuse a commit that is not on `main`.
+These checks catch mistakes; the guard against a tag on an unreviewed commit (whose own
+workflow file would run) is that only the owner may create release tags (tag ruleset) and
+the `release` environment accepts release tags only and needs the owner's approval. The
+owner's `verify` before the manual upload accepts only bundles signed by `release.yml` of
+`ractive/tab-mcp` on `main` or on the version's tag. `latest` stays on `0.1.0-alpha.0`
+(the registry sets it on a package's first publication and never removes it) until the
+first stable version; the owner may move it by hand with `npm dist-tag add`. Steps:
+[npm publishing](/operations/npm-publishing.md).
 
 # Citations
 

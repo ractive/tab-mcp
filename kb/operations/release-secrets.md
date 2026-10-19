@@ -6,7 +6,7 @@ tags:
   - release
   - operations
   - secrets
-timestamp: 2026-10-19T20:00:00+02:00
+timestamp: 2026-10-19T23:45:00+02:00
 ---
 
 # Release credentials and how to renew them
@@ -47,9 +47,10 @@ Both packages (`@ractive-ch/tab-mcp`, `@ractive-ch/tab-mcp-client`) publish thro
 trusted publishing (OpenID Connect from GitHub Actions) with provenance. There is no
 stored npm token, so nothing expires. The owner uploads the first version of each package
 by hand; afterwards a trusted publisher (repository `ractive/tab-mcp`, workflow
-`release.yml`) is configured per package on npmjs.com. If publishing fails with a 403/404
-from the registry, check that the trusted-publisher entry still names the right
-repository, workflow file name and environment.
+`release.yml`, environment `release`) is configured per package on npmjs.com. If publishing
+fails with a 403/404 from the registry, check that the trusted-publisher entry still names
+the right repository, workflow file name and environment. Steps:
+[npm publishing](/operations/npm-publishing.md).
 
 ## GitHub Container Registry (if used)
 
@@ -61,3 +62,4 @@ renew.
 - [Docker Hub personal access tokens](https://docs.docker.com/security/for-developers/access-tokens/)
 - [gh secret set](https://cli.github.com/manual/gh_secret_set)
 - [npm trusted publishers](https://docs.npmjs.com/trusted-publishers)
+- [npm publishing](/operations/npm-publishing.md)

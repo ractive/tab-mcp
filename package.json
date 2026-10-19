@@ -8,7 +8,7 @@
 	],
 	"scripts": {
 		"verify": "biome ci . && bun run typecheck && bun test",
-		"typecheck": "bun check -p packages/tab-mcp && bun check -p packages/tab-mcp-client && bun check -p packages/tab-mcp-client/tsconfig.test.json && bun check -p examples/calculator",
+		"typecheck": "bun check -p packages/tab-mcp && bun check -p packages/tab-mcp-client && bun check -p packages/tab-mcp-client/tsconfig.test.json && bun check -p examples/calculator && bun check -p scripts",
 		"lint": "biome check .",
 		"fix": "biome check --write .",
 		"test": "bun test"

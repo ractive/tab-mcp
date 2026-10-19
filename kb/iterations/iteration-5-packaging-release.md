@@ -2,12 +2,12 @@
 type: iteration
 title: "Iteration 5: packaging, documentation and release"
 description: npm builds with declarations, trusted publishing with provenance, the multi-arch Docker image, project documentation, the developer skill, dependency updates and the token-expiry warning.
-status: planned
+status: in-progress
 tags:
   - iteration
   - release
   - docs
-timestamp: 2026-10-19T23:00:00+02:00
+timestamp: 2026-10-19T23:45:00+02:00
 ---
 
 # Iteration 5: packaging, documentation and release
@@ -24,16 +24,18 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 
 ### Builds
 
-- [ ] Client: `bun build --target=browser --format=esm --packages=external --splitting` to `dist/` (core and lazily loaded chunk, DEC-035), declarations with `tsc -p tsconfig.build.json` (TS 7, `emitDeclarationOnly`, `isolatedDeclarations`), `exports` pointing to `dist/index.js` + `dist/index.d.ts`, `files: ["dist", …]`, `@modelcontextprotocol/server` as a dependency (pinned) only if iteration 2 kept the SDK
-- [ ] Client CDN build: self-contained minified ESM with a lazily loaded chunk; if the SDK is bundled, its Apache-2.0 licence and NOTICE in `dist/THIRD-PARTY-NOTICES.txt`
+- [x] Client: the build writes `dist/` with its own `package.json` (DEC-053): ESM with lazily loaded chunks (DEC-035), declarations from `tsc -p tsconfig.build.json`, no SDK (DEC-049); done in iteration 2, metadata and `publishConfig` in iteration 5a
+- [x] Client CDN build: self-contained minified ESM with lazily loaded chunks; the bundled `@cfworker/json-schema` licence in `THIRD-PARTY-NOTICES.txt` (a test keeps its version in step)
 - [ ] Relay: `bun build --target=bun` to `dist/`, `bin` → `dist/main.js` with `#!/usr/bin/env bun`; exports `.` (`createRelay`, `TokenStore` types, built-in stores) and `./testing` (conformance suite)
-- [ ] `bun pm pack --dry-run` checks in CI: expected file lists, no `src/`, no `workspace:`
+- [ ] Pack checks in CI: client done in iteration 5a (`scripts/npm-pack.ts` in `release.yml` on pull requests: expected file list, no `src/`, no `workspace:`, exact versions); relay still to add
 
 ### npm release
 
-- [ ] `.github/workflows/release.yml` on GitHub release `published` and `workflow_dispatch` (dry run): verify, build, pack, check versions match the tag, `npm publish <tgz> --provenance --access public` with npm ≥ 11.5.1 via OIDC (`id-token: write`), skip already-published versions
-- [ ] Bootstrap mode (like hyalo's `prepare_npm_bootstrap`): build and upload the tarballs as an artifact for the owner's first manual `npm publish`; then the owner runs `npm trust github <pkg> --file release.yml --repo ractive/tab-mcp --allow-publish` for both packages
-- [ ] Document the bootstrap steps in `RELEASING.md`
+- [x] `.github/workflows/release.yml` (iteration 5a, DEC-055): GitHub release `client-v<version>` and `workflow_dispatch` (`dry-run`, `bootstrap`, `publish`), dry run on pull requests; verify, build, pack, checks against tag and pre-release flag, dry-run publish, install test, then `npm publish <tgz> --provenance --tag <alpha|beta|rc|latest>` with npm 12.2.0 via OIDC in environment `release`; skips a version already published with the same integrity
+- [x] Bootstrap mode: signs the exact tarball with GitHub OIDC provenance and uploads it with the bundle (artifact `npm-bootstrap-tab-mcp-client-<version>`); proven on the branch in run 39328703960
+- [x] Document the bootstrap and release steps: [npm publishing](/operations/npm-publishing.md) (instead of `RELEASING.md`)
+- [ ] Owner: bootstrap `@ractive-ch/tab-mcp-client@0.1.0-alpha.0`, configure its trusted publisher and the `release` environment, create the GitHub release `client-v0.1.0-alpha.0` ([steps](/operations/npm-publishing.md))
+- [ ] Relay `@ractive-ch/tab-mcp` (after OAuth, iteration 3): a `relay` entry in `scripts/npm-pack.ts`, `relay-pack`/`relay-bootstrap`/`relay-publish` jobs for `relay-v*` releases, the Docker jobs on the same tag, then its own bootstrap and trusted publisher
 
 ### Docker
 
