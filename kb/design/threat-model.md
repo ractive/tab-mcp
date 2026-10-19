@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-20T00:45:00+02:00
+timestamp: 2026-10-20T18:00:00+02:00
 ---
 
 # Security model and threat model
@@ -50,7 +50,10 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
   attempts per code, issued only while the page's dialog is open. An attacker without a
   view of the tab has 5 guesses in a million per code. The page names the AI app and the
   page origin, so the user sees what they are connecting.
-- `/authorize` attempts are also rate-limited per IP and per address.
+- `/authorize` attempts are also rate-limited per address (10, then 1 every 30 s) and per IP
+  (20, then 1 every 10 s); input that is not 6 digits is not counted. Even an attacker who
+  could keep fresh codes coming gets about 2 880 guesses a day per address against a
+  million codes (DEC-060), and only while the user keeps the page's dialog open.
 - No 404 for unknown addresses (DEC-040): without a token every address looks the same.
 - "New address" in the page revokes the old address's grants and replaces the secret.
 - Residual: a user who reads the code out to someone else (social engineering), or types it
@@ -65,7 +68,10 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
 - The pairing page shows the declared name **and** the verified client id host and redirect
   host; a client calling itself "Claude" from `evil.example` shows `evil.example`.
 - PKCE S256 required; codes are single-use, 60 s, bound to client id, redirect URI and
-  resource. `iss` in the response (RFC 9207) defeats mix-up.
+  resource, and burnt by their first presentation even if a check fails; a code presented
+  twice revokes the grant made with it. `iss` in every response (RFC 9207) defeats mix-up.
+- The `client_id` must be its own canonical URL, so look-alike spellings of one client id
+  (case, dot segments, explicit ports) are refused rather than treated as other clients.
 - Optional operator allow-list of client id hosts (`TAB_MCP_CLIENT_ID_HOSTS`).
 
 ### A3: SSRF through CIMD fetches
@@ -74,9 +80,13 @@ The relay fetches a URL chosen by an unauthenticated party. Guards: `https:` onl
 port only, no credentials in the URL, resolve the host first and refuse private, loopback,
 link-local, CGNAT and multicast ranges (IPv4 and IPv6), no redirects, 5 s timeout, 64 KiB
 limit, `application/json` only, response cached per `Cache-Control` (max 24 h, min 5 min),
-per-host fetch rate limit. Residual: DNS rebinding between the check and the connect (Bun
-cannot pin the resolved IP for `fetch`); acceptable because the response is only parsed as
-JSON and never returned to the requester except as a pass/fail.
+per-host fetch rate limit (5, then 1 every 5 s). IP literals are judged directly; host names
+are refused if any resolved address is not public. Residual: DNS rebinding between the check
+and the connect (Bun cannot pin the resolved IP for `fetch`); acceptable because the
+response is only parsed as JSON and never returned to the requester except as a pass/fail
+(the page shows a fixed message per failure kind). The test-only switch that lets the
+fetcher reach a loopback fixture exists only behind `createTestRelay`, which the package
+does not export and which refuses to run outside development (DEC-059).
 
 ### A4: Token theft and replay
 
@@ -85,7 +95,9 @@ JSON and never returned to the requester except as a pass/fail.
   own address (audience check against `resource`).
 - Access tokens live 1 hour. Refresh tokens live 30 days and rotate on every use; reusing
   an old one revokes the whole grant (RFC 9700), which cuts off a thief and the victim
-  alike and shows the theft. `markUsed` is atomic, so two racing refreshes cannot both win.
+  alike and shows the theft. `markUsed` is atomic, so two racing refreshes cannot both win;
+  the loser counts as reuse (DEC-058). A refresh token presented by another client id is
+  refused without revoking.
 - Disconnect in the page revokes at once; "New address" revokes all grants of the old
   address.
 - Tokens are useless while the tab is closed (503 "the page is not open").
@@ -112,9 +124,13 @@ JSON and never returned to the requester except as a pass/fail.
 
 ### A7: Cross-site attacks on the relay's pages
 
-- `/authorize` sends `Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
-  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`; its code form carries a
-  `Bun.CSRF` token. Framing is refused so the code field cannot be overlaid.
+- `/authorize` sends `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store`; the
+  page has no JavaScript. Framing is refused so the code field cannot be overlaid.
+- The form posts only a pending-request id; its `Bun.CSRF` token is bound to that request
+  and to a first-party `HttpOnly`, `SameSite=Lax` cookie, and posts with a foreign `Origin`
+  or `Sec-Fetch-Site` are refused (DEC-057). No `Cross-Origin-Opener-Policy`, because
+  claude.ai's popup flow needs its opener back.
 - All values shown on the page (client name, page origin) are HTML-escaped and
   length-capped.
 - CORS without credentials on the metadata, token, revoke and MCP endpoints (DEC-036):
@@ -126,8 +142,10 @@ JSON and never returned to the requester except as a pass/fail.
 
 ### A8: Denial of service
 
-In-memory token buckets per IP for `/tab`, `/authorize`, `/token` and per grant for the
-MCP endpoint; WebSocket backpressure checked on every send (a dropped send fails the
+In-memory token buckets: `/authorize` page loads per IP, pairing attempts per IP and per
+address, `/token` and `/revoke` per IP, CIMD fetches per host (DEC-059, DEC-060); session
+limits per IP for `/tab` and concurrent requests per session for the MCP endpoint; pending
+authorizations and codes are bounded maps with expiry; WebSocket backpressure checked on every send (a dropped send fails the
 request instead of hanging); bounded maps with expiry sweeps. A single-instance relay can
 still be flooded; the CDN in front absorbs volumetric attacks.
 
