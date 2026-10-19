@@ -530,3 +530,22 @@ describe("8: truncateIp parses IPv6 properly", () => {
 		});
 	}
 });
+
+describe("9: the Claude header workaround is logged once, counted in /healthz", () => {
+	test("three workaround requests: one log line, counter 3", async () => {
+		const r = relay();
+		const { address, token } = await connected(r, undefined);
+		for (let i = 1; i <= 3; i++) {
+			const res = await mcpPost(address, rpc(i, "tools/list"), {
+				token,
+				headers: { "mcp-protocol-version": "2025-11-25" },
+			});
+			expect(res.status).toBe(200);
+		}
+		expect(r.logs.events("mcp.claude_header_workaround")).toHaveLength(1);
+		const health = (await (await fetch(`${r.relay.url}/healthz`)).json()) as {
+			counters: Record<string, number>;
+		};
+		expect(health.counters).toEqual({ claudeHeaderWorkaround: 3 });
+	});
+});

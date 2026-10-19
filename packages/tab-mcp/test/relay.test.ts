@@ -546,9 +546,7 @@ describe("tunnel", () => {
 			headers: { "mcp-protocol-version": "2025-11-25" },
 		});
 		expect(res.status).toBe(200);
-		expect(r.logs.events("mcp.claude_header_workaround")).toEqual([
-			expect.objectContaining({ count: 1 }),
-		]);
+		expect(r.logs.events("mcp.claude_header_workaround")).toHaveLength(1);
 		// any other mismatch stays refused
 		const other = await mcpPost(
 			t.session?.address ?? "",
@@ -873,6 +871,7 @@ describe("health and index", () => {
 		expect(await health.json()).toEqual({
 			status: "ok",
 			version: expect.any(String),
+			counters: { claudeHeaderWorkaround: 0 },
 		});
 		const index = await fetch(`${r.relay.url}/`);
 		expect(index.headers.get("content-type")).toContain("text/html");

@@ -384,8 +384,13 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 			header === CLAUDE_MISMATCHED_HEADER &&
 			metaVersion(body) === MCP_PROTOCOL_VERSION
 		) {
-			claudeWorkarounds++;
-			logger.info("mcp.claude_header_workaround", { count: claudeWorkarounds });
+			// Logged once per process; the running count is in /healthz.
+			if (++claudeWorkarounds === 1) {
+				logger.info("mcp.claude_header_workaround", {
+					message:
+						"accepting MCP-Protocol-Version 2025-11-25 with a 2026-07-28 body (claude-code #93290); counted in /healthz",
+				});
+			}
 			return { forwardVersion: MCP_PROTOCOL_VERSION };
 		}
 		if (header === null) {
@@ -576,7 +581,12 @@ export function createRelay(options: CreateRelayOptions = {}): Relay {
 		idleTimeout: config.httpIdleTimeoutS,
 		routes: {
 			"/healthz": {
-				GET: () => json(200, { status: "ok", version: VERSION }),
+				GET: () =>
+					json(200, {
+						status: "ok",
+						version: VERSION,
+						counters: { claudeHeaderWorkaround: claudeWorkarounds },
+					}),
 			},
 			"/": {
 				GET: () =>
