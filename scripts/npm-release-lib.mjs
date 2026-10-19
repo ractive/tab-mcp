@@ -41,6 +41,21 @@ const SEMVER =
 	/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** Semver precedence: negative, zero or positive like a sort comparator. */
+/**
+ * The value of one field from `npm view <spec> <field> --json`: npm 11 prints
+ * a JSON string, npm 12 a one-element array. Empty output means "not there".
+ * More than one value is an error: the spec named several versions.
+ */
+export function viewValue(stdout) {
+	const out = stdout.trim();
+	if (out === "") return undefined;
+	const value = JSON.parse(out);
+	if (!Array.isArray(value)) return value;
+	if (value.length === 0) return undefined;
+	if (value.length === 1) return value[0];
+	throw new Error(`npm view returned ${value.length} values, expected one`);
+}
+
 export function compareVersions(a, b) {
 	const pa = SEMVER.exec(a);
 	const pb = SEMVER.exec(b);

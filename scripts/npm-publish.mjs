@@ -17,6 +17,7 @@ import {
 	findOneTarball,
 	integrityOf,
 	publishDecision,
+	viewValue,
 } from "./npm-release-lib.mjs";
 
 const REGISTRY = "https://registry.npmjs.org";
@@ -67,8 +68,11 @@ function view(what, field) {
 		{ encoding: "utf8" },
 	);
 	if (r.status === 0) {
-		const out = r.stdout.trim();
-		return out === "" ? undefined : JSON.parse(out);
+		try {
+			return viewValue(r.stdout);
+		} catch (error) {
+			fail(`npm view ${what} ${field}: ${error.message}`);
+		}
 	}
 	if (/E404/.test(r.stderr + r.stdout)) return undefined;
 	process.stderr.write(r.stderr);

@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import {
 	integrityOf,
 	publishDecision,
 	signerProblems,
+	viewValue,
 } from "./npm-release-lib.mjs";
 
 const tmp = mkdtempSync(join(tmpdir(), "npm-release-lib-"));
@@ -141,4 +142,18 @@ test("only the release workflow on main or the version's tag may sign", () => {
 		).join(),
 	).toContain("workflow");
 	expect(signerProblems({}, manifest)).toHaveLength(3);
+});
+
+describe("viewValue", () => {
+	test("npm 11 prints a string, npm 12 a one-element array; both give the value", () => {
+		expect(viewValue('"sha512-AAA"\n')).toBe("sha512-AAA");
+		expect(viewValue('[\n  "sha512-AAA"\n]\n')).toBe("sha512-AAA");
+	});
+	test("empty output and an empty array mean not there", () => {
+		expect(viewValue("")).toBeUndefined();
+		expect(viewValue("[]")).toBeUndefined();
+	});
+	test("several values are refused", () => {
+		expect(() => viewValue('["1.0.0","1.0.1"]')).toThrow("2 values");
+	});
 });
