@@ -235,7 +235,7 @@ jobs:
           set -euo pipefail
           tarballs=("$DIR"/*.tgz)
           [ "${#tarballs[@]}" -eq 1 ]
-          [ "$(jq -r '.[0].integrity' "$DIR/pack.json")" = "$INTEGRITY" ]
+          [ "$(jq -r .integrity "$DIR/pack.json")" = "$INTEGRITY" ]
           node scripts/npm-provenance.mjs sign "${tarballs[0]}"
           ls -l "$DIR"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -273,9 +273,17 @@ jobs:
           set -euo pipefail
           tarballs=("$DIR"/*.tgz)
           [ "${#tarballs[@]}" -eq 1 ]
-          [ "$(jq -r '.[0].integrity' "$DIR/pack.json")" = "$INTEGRITY" ]
+          [ "$(jq -r .integrity "$DIR/pack.json")" = "$INTEGRITY" ]
           spec="@ractive-ch/tab-mcp-client@$VERSION"
-          published=$(npm view "$spec" dist.integrity --registry https://registry.npmjs.org 2>/dev/null || true)
+          if published=$(npm view "$spec" dist.integrity \
+              --registry https://registry.npmjs.org 2> "$RUNNER_TEMP/npm-view.err"); then
+            :
+          elif grep -q E404 "$RUNNER_TEMP/npm-view.err"; then
+            published=
+          else
+            cat "$RUNNER_TEMP/npm-view.err" >&2
+            exit 1
+          fi
           if [ -n "$published" ]; then
             if [ "$published" = "$INTEGRITY" ]; then
               echo "::notice::$spec is already published with the same bytes; skipped"

@@ -9,7 +9,7 @@
  * Options: `--version V` (must equal the package version), `--release-tag T`
  * (must be `<prefix>v<version>`), `--prerelease true|false` (the GitHub
  * release's flag, must match the version). Writes `<out>/<tarball>.tgz` and
- * `<out>/pack.json` (npm's pack report) and, on GitHub Actions, the outputs
+ * `<out>/pack.json` (npm's pack report for it) and, on GitHub Actions, the outputs
  * `name`, `version`, `dist_tag`, `tarball` and `integrity`.
  */
 
@@ -143,6 +143,15 @@ export function checkManifest(
 	return problems;
 }
 
+/** One package in `npm pack --json`'s report. */
+interface PackResult {
+	name: string;
+	version: string;
+	filename: string;
+	integrity: string;
+	files: { path: string }[];
+}
+
 async function main() {
 	const { values, positionals } = parseArgs({
 		args: Bun.argv.slice(2),
@@ -202,20 +211,18 @@ async function main() {
 		{ stderr: "inherit" },
 	);
 	if (pack.exitCode !== 0) fail(["npm pack failed"]);
-	const report = JSON.parse(pack.stdout.toString()) as {
-		name: string;
-		version: string;
-		filename: string;
-		integrity: string;
-		files: { path: string }[];
-	}[];
-	await Bun.write(
-		join(values.out, "pack.json"),
-		`${JSON.stringify(report, null, 2)}\n`,
-	);
+	// npm 11 prints an array of results, npm 12 an object keyed by name.
+	const parsed = JSON.parse(pack.stdout.toString()) as unknown;
+	const report = (
+		Array.isArray(parsed) ? parsed : Object.values(parsed as object)
+	) as PackResult[];
 	const [packed] = report;
 	if (report.length !== 1 || packed === undefined)
 		fail([`npm pack reported ${report.length} packages`]);
+	await Bun.write(
+		join(values.out, "pack.json"),
+		`${JSON.stringify(packed, null, 2)}\n`,
+	);
 	const tarball = join(values.out, packed.filename);
 	if (packed.name !== spec.name || packed.version !== version)
 		problems.push(`packed ${packed.name}@${packed.version}`);
