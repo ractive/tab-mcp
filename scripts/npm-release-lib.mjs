@@ -26,7 +26,9 @@ export function integrityOf(bytes) {
  * one (an empty or mixed artifact).
  */
 export function findOneTarball(dir) {
-	const tarballs = readdirSync(dir).filter((f) => f.endsWith(".tgz"));
+	const tarballs = readdirSync(dir)
+		.filter((f) => f.endsWith(".tgz"))
+		.sort();
 	if (tarballs.length !== 1) {
 		throw new Error(
 			`expected exactly one .tgz in ${dir}, found ${tarballs.length}${tarballs.length ? `: ${tarballs.join(", ")}` : ""}`,
