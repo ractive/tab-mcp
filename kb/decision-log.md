@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T00:00:00+02:00
+timestamp: 2026-10-20T00:15:00+02:00
 ---
 
 # Decision log
@@ -377,6 +377,24 @@ lives only in the GitHub Actions secret `BUNNY_API_KEY`, set by the owner with
 or by manual dispatch. The remote state backend (HCP Terraform free tier, an S3-compatible
 bucket, or encrypted state in GitHub) is chosen in
 [iteration 6](/iterations/iteration-6-deployment-bunny.md); the state may contain secrets.
+
+**Backend decided in DEC-044** (bunny storage zone over S3, encrypted on the client).
+
+## DEC-044: OpenTofu state in a bunny storage zone, encrypted on the client (owner)
+
+The state backend for DEC-043 is a bunny.net storage zone (e.g. `tab-mcp-tfstate`, region
+`de`) through its S3-compatible API. S3 compatibility must be enabled when the zone is
+created and cannot be added later; the owner creates the zone. Bunny's S3 API is a
+preview/beta and its documentation disagrees on the URL style (path-style; virtual-hosted
+per newer pages), so the backend needs a custom endpoint, path-style addressing and the
+AWS-specific validations skipped. Whether bunny supports the S3 conditional writes that
+OpenTofu's native locking (`use_lockfile`) needs is unknown and is tested with a throwaway
+state; the fallback is that only the GitHub workflow runs `apply`, serialised by a workflow
+`concurrency` group. OpenTofu's client-side state encryption (passphrase in a GitHub
+secret) means the zone holds only ciphertext; this is one more reason for OpenTofu over
+Terraform. Secrets, all GitHub Actions secrets set by the owner: `BUNNY_API_KEY`, the
+storage zone's S3 access key and secret, `TOFU_STATE_PASSPHRASE`. Settles the backend
+question left open in DEC-043.
 
 # Citations
 

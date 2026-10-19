@@ -6,7 +6,7 @@ status: planned
 tags:
   - iteration
   - deployment
-timestamp: 2026-10-20T00:00:00+02:00
+timestamp: 2026-10-20T00:15:00+02:00
 ---
 
 # Iteration 6: hosted relay on bunny.net
@@ -15,7 +15,7 @@ Goal: a public relay (e.g. `relay.ractive.ch`) for pages on `https://ractive.ch`
 first). The calculator example keeps using a local relay (DEC-032).
 
 Read first: [bunny.net research](/research/bunny-magic-containers.md),
-[threat model](/design/threat-model.md) A5, A8, A9, DEC-029, 030, 032, 043.
+[threat model](/design/threat-model.md) A5, A8, A9, DEC-029, 030, 032, 043, 044.
 
 The hosted relay is infrastructure as code (DEC-043): OpenTofu with the official
 `BunnyWay/bunnynet` provider, in a bunny account shared with other projects.
@@ -26,14 +26,17 @@ The hosted relay is infrastructure as code (DEC-043): OpenTofu with the official
 
 - [ ] Provider support: does `BunnyWay/bunnynet` manage persistent volumes for container apps (needed for the `bun:sqlite` store at `/data`) and custom domains on container apps (or only through a pull zone)?
 - [ ] API keys: does bunny offer API keys limited in scope (per product or per resource)? If not, record that the key in CI can change the whole shared account, and keep its use to the plan/apply jobs
-- [ ] Remote state backend: choose and record in the decision log — HCP Terraform free tier, an S3-compatible bucket (e.g. bunny Storage, if S3-compatible enough), or state encrypted in GitHub (OpenTofu state encryption); the state may contain secrets, so it must be encrypted at rest and never committed in plain text
+- [ ] State backend on a bunny storage zone (DEC-044): check the S3 API's current status and URL style (preview/beta; the docs disagree on path-style versus virtual-hosted) and the backend settings it needs (custom endpoint, path-style, skipped AWS-specific validations: credentials, region, metadata API, account id)
+- [ ] State locking: test with a throwaway state whether bunny's S3 API supports conditional writes (OpenTofu's native S3 locking, `use_lockfile`); if not, rely on the fallback of DEC-044 and record it
 
 ### Infrastructure as code (DEC-043)
 
+- [ ] Owner step: create the storage zone `tab-mcp-tfstate` (region `de`) **with S3 compatibility enabled at creation** (it cannot be added later) and an S3 access key for it; set the GitHub Actions secrets `BUNNY_API_KEY`, the zone's S3 access key and secret (e.g. `TOFU_STATE_S3_ACCESS_KEY`, `TOFU_STATE_S3_SECRET_KEY`) and `TOFU_STATE_PASSPHRASE` with `gh secret set`
+- [ ] `infra/backend.tf`: S3 backend pointing at the storage zone (custom endpoint, path-style, AWS validations skipped), OpenTofu client-side state encryption (`encryption` block, PBKDF2 key provider from `TOFU_STATE_PASSPHRASE`, enforced for state and plan files) so the zone holds only ciphertext
 - [ ] `infra/` with OpenTofu, the `BunnyWay/bunnynet` provider pinned exactly: `bunnynet_compute_container_imageregistry` (Docker Hub or ghcr.io, public image), `bunnynet_compute_container_app` (image, region, replicas, env, health checks), plus pull zone and a single DNS record as needed
 - [ ] Shared account rules: every resource name starts with `tab-mcp-`; never manage shared resources (manage one DNS record such as `relay` in the existing zone, never the zone itself); OpenTofu only manages its own state
-- [ ] Workflow `infra.yml`: `tofu fmt -check`, `validate` and `plan` on pull requests touching `infra/` (plan as a PR comment or job summary), `apply` on main and by manual dispatch; actions pinned by SHA; `BUNNY_API_KEY` only as a GitHub Actions secret (set by the owner with `gh secret set BUNNY_API_KEY`), never on a developer machine
-- [ ] Record `BUNNY_API_KEY` (and the state backend's credentials) in `kb/operations/release-secrets.md` with renewal steps
+- [ ] Workflow `infra.yml`: `tofu fmt -check`, `validate` and `plan` on pull requests touching `infra/` (plan as a PR comment or job summary), `apply` on main and by manual dispatch; a workflow-wide `concurrency` group (`tab-mcp-infra`, no cancel-in-progress) so only one plan/apply touches the state at a time; actions pinned by SHA; all bunny and state credentials only as GitHub Actions secrets, never on a developer machine
+- [ ] Record `BUNNY_API_KEY`, the storage zone's S3 key pair and `TOFU_STATE_PASSPHRASE` in `kb/operations/release-secrets.md` with renewal steps (a lost passphrase makes the state unreadable: note where the owner keeps a copy)
 
 ### Deployment
 
@@ -68,3 +71,5 @@ a load smoke (100 sessions, 10 req/s) against the limits.
 - [bunny.net Terraform resources](https://docs.bunny.net/integrations/terraform/resources)
 - [BunnyWay/bunnynet provider](https://registry.terraform.io/providers/BunnyWay/bunnynet/latest)
 - [OpenTofu state encryption](https://opentofu.org/docs/language/state/encryption/)
+- [bunny.net Storage S3 compatibility](https://docs.bunny.net/storage/s3)
+- [OpenTofu S3 backend](https://opentofu.org/docs/language/settings/backends/s3/)
