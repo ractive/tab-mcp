@@ -61,3 +61,11 @@ renew.
 - [Docker Hub personal access tokens](https://docs.docker.com/security/for-developers/access-tokens/)
 - [gh secret set](https://cli.github.com/manual/gh_secret_set)
 - [npm trusted publishers](https://docs.npmjs.com/trusted-publishers)
+
+## Docker Hub namespace
+
+Images go to the Docker Hub organisation `ractive-ch` (repository variable
+`DOCKERHUB_NAMESPACE=ractive-ch`, set 2026-10-19), as `ractive-ch/tab-mcp`. The login
+is the owner's user (`DOCKERHUB_USERNAME=ractive`) with `DOCKERHUB_TOKEN`; the token's
+user needs write access to the organisation's repositories. The GitHub repository and
+the ghcr.io image stay under `ractive` (`ractive/tab-mcp`, `ghcr.io/ractive/tab-mcp`).

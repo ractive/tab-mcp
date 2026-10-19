@@ -27,7 +27,7 @@ The relay knows nothing about tools; tool lists and calls are answered in the ta
 
 ## DEC-003: Packages and names (owner)
 
-`packages/tab-mcp` = relay, npm `@ractive-ch/tab-mcp`, Docker Hub `ractive/tab-mcp`
+`packages/tab-mcp` = relay, npm `@ractive-ch/tab-mcp`, Docker Hub `ractive-ch/tab-mcp`
 (amd64 + arm64); `packages/tab-mcp-client` = browser library, npm
 `@ractive-ch/tab-mcp-client`; `examples/calculator` = minimal example. saturnus is the first
 real user, integrated in a separate later project.
@@ -278,7 +278,7 @@ The relay accepts tab WebSockets only from configured origins; the default list 
 which admits nobody. An open relay needs an explicit setting (`TAB_MCP_ALLOWED_ORIGINS=*`)
 and logs a warning at start. The owner's hosted relay allows exactly `https://ractive.ch`
 (browsers send only the origin, not the path, so a path cannot be allowed). The calculator
-example runs against a local relay (`docker run ractive/tab-mcp`), not the hosted one.
+example runs against a local relay (`docker run ractive-ch/tab-mcp`), not the hosted one.
 
 ## DEC-033: MCP 2026-07-28 only, CIMD only, one Claude header case (owner)
 
