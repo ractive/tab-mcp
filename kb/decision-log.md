@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T01:15:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # Decision log
@@ -688,6 +688,99 @@ gets "That code has expired" (it counts as an attempt on the new code). A second
 two dialogs show the same code. Codes are compared in constant time and never logged.
 Codes come only while the tab has sent `pairing.start`; `/authorize` explains that the
 code is shown in the page's "Connect your AI tool" dialog.
+
+**Limits replaced by DEC-061** (security review of PR #4: the per-address limit was
+charged for every post, so anyone who knew an address could lock its owner out).
+
+## DEC-061: Only real guesses count; per-IP limits by /64; open requests capped
+
+From the security review of PR #4. Replaces the limits of DEC-060.
+
+- A pairing method is given an `admit()` callback and calls it right before judging an
+  answer that could be right: for the code method, a well-formed 6-digit code while a code
+  is active. Malformed input, an empty field, junk and a closed dialog are answered
+  without charging anything. `admit()` charges two buckets: per address and network (10
+  guesses, then 1 a minute) and per address overall (30, then 1 every 30 s). One network
+  can therefore never use up an address's allowance alone; the overall bucket keeps the
+  brute-force bound (about 2 880 guesses a day per address against a million codes, and
+  only while the page's dialog is open). An attacker with many networks can still exhaust
+  the overall bucket and keep the owner waiting; the page then says so and points to
+  "New address" in the page, which the attacker does not learn. Availability against a
+  distributed attacker is traded for the brute-force bound on purpose.
+- Every per-IP limit (tab sessions, `/authorize` page loads and posts, guesses, `/token`,
+  `/revoke`) counts an IPv4 address as is (/32: many users already share one behind NAT
+  or CGNAT, a /24 would group strangers) and an IPv6 address by its /64, which one
+  subscriber usually gets whole.
+- No pending authorization is kept for an address without a connected tab: the "Open
+  the page first" page reloads the same request (Try again) or links back with
+  `access_denied` (Cancel). At most 10 pending requests per network and 20 per address
+  are open; more are refused with 429 instead of evicting others' requests. Requests all
+  live 10 minutes, so the map's insertion order is expiry order and sweeps stop at the
+  first live one. CIMD fetches are also limited all together (30, then 1 a second), so
+  many attacker-owned hosts do not add up.
+
+## DEC-062: A grant ends 90 days after pairing at the latest
+
+From the security review of PR #4: with only the sliding 30 days of DEC-029, a stolen
+refresh token that is used once a month never expires. Refreshes still slide by 30 days
+as DEC-029 says, but no token outlives `grantCreatedAt + grantLifetimeMs`
+(`TAB_MCP_GRANT_LIFETIME_S`, default 90 days); access tokens and `expires_in` are capped
+the same way. 90 days rather than the 30 the review suggested: a 30-day absolute end
+would turn DEC-029's "valid 30 days from then" into a fixed monthly re-pairing, which
+changes an owner decision; 90 days bounds a theft to one quarter while a used connection
+asks for the code at most four times a year. The owner can shorten it by configuration.
+
+## DEC-063: Revocation leaves a tombstone; put refuses revoked grants
+
+From the security review of PR #4: with an asynchronous store, a refresh or code
+exchange could store new tokens after Disconnect had deleted the grant's tokens. Amends
+DEC-041: `revoke(selector, { now, keepUntil })` deletes the tokens and records a tombstone
+(for a grant, or for an address with the revocation time); `put` returns `false` and
+stores nothing for a record of a tombstoned grant, or of a grant of a tombstoned address
+created at or before the revocation. Check and insert are atomic (a SQLite transaction;
+synchronous in memory), so whichever runs first, no token survives the revocation. The
+relay keeps tombstones for the grant lifetime (DEC-062), the longest any earlier token
+could live; `deleteExpired` drops them afterwards. A refused `put` ends the token
+request with `invalid_grant`. The conformance suite checks all of this; custom stores
+must implement it (`put` now returns a boolean, so they fail to type-check until they do).
+
+## DEC-064: Invalid requests are shown, not redirected
+
+From the security review of PR #4 (RFC 9700 §4.11.2): anyone can publish a client
+document with their own redirect URI, so redirecting every invalid request there would
+make the relay an open redirector. Amends DEC-057: after the redirect URI is trusted,
+an invalid request (wrong response type, missing PKCE, wrong resource or scope, repeated
+parameters) shows a relay page that names the client's host and links back with
+`error`, `state` and `iss`. Only the user's own Cancel redirects at once
+(`access_denied`). No allow-list exception: one rule is easier to reason about.
+
+## DEC-065: Names without invisible characters; the verified host always beside them
+
+From the security review of PR #4. Amends DEC-059: the shown client name drops all format
+characters (`Cf`: zero-width, bidi, word joiner, BOM, soft hyphen) and other invisible
+characters (Hangul fillers, braille blank), turns controls and line separators into
+spaces, and is refused if it contains a web address in parentheses (e.g. "Claude
+(claude.ai)", which would read like the verified host). The page's heading and title are
+"Connect <name> from <verified host>".
+
+## DEC-066: CIMD fetches are pinned to the vetted address
+
+From the security review of PR #4 (DNS rebinding, threat model A3). Bun's `fetch`
+accepts `tls.serverName`, so the relay connects to the address that passed the SSRF
+check (IPv4 first) and sends the original `Host` and TLS server name; the certificate is
+still checked against the host name. A second DNS answer is never used. All failures
+from resolving to parsing (unresolvable, private address, redirect, status, type, size,
+time-out, TLS, JSON) show one fixed message, "The AI app's details could not be loaded
+from <host>.", with the reason only in the log; validation errors of a fetched (public)
+document keep their specific messages.
+
+## DEC-067: Redirect URIs: https, loopback http, reverse-domain native schemes
+
+From the security review of PR #4. A client document's `redirect_uris` must be `https:`;
+`http:` only on `localhost`, `127.0.0.1` or `[::1]` (RFC 8252 §7.3); or a private-use
+scheme in reverse-domain form such as `com.example.app:/callback` (RFC 8252 §7.1), which
+native apps need. One-word custom schemes, `file:`, `blob:`, `data:`, `javascript:`,
+plain `http:` on other hosts and URIs with credentials or fragments are refused.
 
 # Citations
 

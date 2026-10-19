@@ -38,6 +38,9 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   revocation.
 - Per-site configuration (`TAB_MCP_SITES`): app name, pairing method and limits per page
   origin; `TAB_MCP_CLIENT_ID_HOSTS` to limit which AI apps may connect.
+- `TAB_MCP_GRANT_LIFETIME_S`: a connection ends at the latest 90 days after pairing.
+- `TokenStore`: `revoke` leaves a tombstone and `put` returns `false` for tokens of a
+  revoked grant (custom stores must implement both; the conformance suite checks them).
 
 #### Changed
 

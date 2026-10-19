@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-20T01:15:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # Security model and threat model
@@ -50,10 +50,13 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
   attempts per code, issued only while the page's dialog is open. An attacker without a
   view of the tab has 5 guesses in a million per code. The page names the AI app and the
   page origin, so the user sees what they are connecting.
-- `/authorize` attempts are also rate-limited per address (10, then 1 every 30 s) and per IP
-  (20, then 1 every 10 s); input that is not 6 digits is not counted. Even an attacker who
-  could keep fresh codes coming gets about 2 880 guesses a day per address against a
-  million codes (DEC-060), and only while the user keeps the page's dialog open.
+- Guesses are also limited per address and network (10, then 1 a minute) and per address
+  overall (30, then 1 every 30 s); only a well-formed code against an active code counts,
+  so junk cannot lock the owner out (DEC-061). Even an attacker who could keep fresh codes
+  coming gets about 2 880 guesses a day per address against a million codes, and only
+  while the user keeps the page's dialog open. An attacker on many networks can make the
+  owner wait; "New address" in the page ends that, because the attacker does not learn
+  the new address. Per-IP limits count an IPv6 /64 as one network.
 - No 404 for unknown addresses (DEC-040): without a token every address looks the same.
 - "New address" in the page revokes the old address's grants and replaces the secret.
 - Residual: a user who reads the code out to someone else (social engineering), or types it
@@ -72,6 +75,13 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
   twice revokes the grant made with it. `iss` in every response (RFC 9207) defeats mix-up.
 - The `client_id` must be its own canonical URL, so look-alike spellings of one client id
   (case, dot segments, explicit ports) are refused rather than treated as other clients.
+- Redirect URIs must be `https:`, loopback `http:` or a reverse-domain native scheme
+  (DEC-067). Invalid requests are shown on a relay page with a link back instead of being
+  redirected, so a self-published client cannot use the relay as an open redirector
+  (DEC-064); only the user's own Cancel redirects at once.
+- Shown names lose invisible and format characters, names with a web address in
+  parentheses are refused, and the heading reads "Connect <name> from <verified host>"
+  (DEC-065).
 - Optional operator allow-list of client id hosts (`TAB_MCP_CLIENT_ID_HOSTS`).
 
 ### A3: SSRF through CIMD fetches
@@ -80,11 +90,12 @@ The relay fetches a URL chosen by an unauthenticated party. Guards: `https:` onl
 port only, no credentials in the URL, resolve the host first and refuse private, loopback,
 link-local, CGNAT and multicast ranges (IPv4 and IPv6), no redirects, 5 s timeout, 64 KiB
 limit, `application/json` only, response cached per `Cache-Control` (max 24 h, min 5 min),
-per-host fetch rate limit (5, then 1 every 5 s). IP literals are judged directly; host names
-are refused if any resolved address is not public. Residual: DNS rebinding between the check
-and the connect (Bun cannot pin the resolved IP for `fetch`); acceptable because the
-response is only parsed as JSON and never returned to the requester except as a pass/fail
-(the page shows a fixed message per failure kind). The test-only switch that lets the
+per-host fetch rate limit (5, then 1 every 5 s) and one for all fetches (30, then 1 a second).
+IP literals are judged directly; host names are refused if any resolved address is not
+public. The fetch connects to the vetted address itself, with the original `Host` and TLS
+server name (DEC-066), so DNS rebinding between check and connect does not reach another
+address. Every failure from resolving to parsing shows the same message without upstream
+status, so the page cannot be used to probe what answers where. The test-only switch that lets the
 fetcher reach a loopback fixture exists only behind `createTestRelay`, which the package
 does not export and which refuses to run outside development (DEC-059).
 
@@ -93,11 +104,16 @@ does not export and which refuses to run outside development (DEC-059).
 - Tokens are 256-bit random, opaque, stored only as SHA-256 hashes (a stolen store file
   yields no usable token), accepted only in the `Authorization` header and only for their
   own address (audience check against `resource`).
-- Access tokens live 1 hour. Refresh tokens live 30 days and rotate on every use; reusing
+- Access tokens live 1 hour. Refresh tokens live 30 days (at most until 90 days after
+  pairing) and rotate on every use; reusing
   an old one revokes the whole grant (RFC 9700), which cuts off a thief and the victim
   alike and shows the theft. `markUsed` is atomic, so two racing refreshes cannot both win;
   the loser counts as reuse (DEC-058). A refresh token presented by another client id is
   refused without revoking.
+- Refreshes slide by 30 days, but no token outlives the grant's absolute end, 90 days after
+  pairing (DEC-062): a stolen refresh token cannot be kept alive forever.
+- Revocation leaves a tombstone in the store and `put` refuses tokens of a revoked grant
+  atomically, so a refresh that races Disconnect cannot bring the grant back (DEC-063).
 - Disconnect in the page revokes at once; "New address" revokes all grants of the old
   address.
 - Tokens are useless while the tab is closed (503 "the page is not open").
@@ -142,8 +158,9 @@ does not export and which refuses to run outside development (DEC-059).
 
 ### A8: Denial of service
 
-In-memory token buckets: `/authorize` page loads per IP, pairing attempts per IP and per
-address, `/token` and `/revoke` per IP, CIMD fetches per host (DEC-059, DEC-060); session
+In-memory token buckets: `/authorize` page loads and posts per IP, guesses per address
+and network and per address, `/token` and `/revoke` per IP, CIMD fetches per host and in
+total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64; session
 limits per IP for `/tab` and concurrent requests per session for the MCP endpoint; pending
 authorizations and codes are bounded maps with expiry; WebSocket backpressure checked on every send (a dropped send fails the
 request instead of hanging); bounded maps with expiry sweeps. A single-instance relay can
@@ -209,7 +226,6 @@ page."
 - The AI app's model can be steered by content (prompt injection) into calling tools the
   user did not intend; page-side confirmation covers consequential tools only.
 - Client-declared names are self-asserted; only hosts are verified.
-- DNS rebinding in CIMD fetches (see A3).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay
   accepts; it is limited to one exact version pair.
 

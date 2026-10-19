@@ -7,7 +7,7 @@ tags:
   - iteration
   - oauth
   - relay
-timestamp: 2026-10-20T01:15:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # Iteration 3: OAuth authorization server with pairing
@@ -37,7 +37,7 @@ Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization
 - [x] Rate limits for `/authorize` (per IP and address), `/token`, CIMD fetches (token buckets)
 - [x] Spec tests: one test group per requirement of RFC 6749 §4.1/§5.2/§6, RFC 7636, RFC 8414, RFC 9728, RFC 9207, RFC 7009, RFC 8707 and the MCP authorization pages, citing the section
 - [x] Conformance runs: `oauth4webapi` (dev dependency, pinned) as client for discovery, authorization code with PKCE, refresh rotation and revocation; the MCP SDK client for the full MCP flow
-- [ ] Separate security review of the OAuth diff (fresh-context reviewer, threat model A1–A4, A7) before merging; findings fixed or recorded in the decision log
+- [x] Separate security review of the OAuth diff (fresh-context reviewer, threat model A1–A4, A7) before merging; findings fixed or recorded in the decision log
 - [x] Configuration floor for `maxMessageBytes` (e.g. 16 KiB): the relay accepts any positive value today, but the browser library refuses a session whose limit cannot frame a response chunk (below 896 bytes, found in the review of PR #2), and MCP requests need room too
 - [x] Replace the iteration-1 store-level token helper with real flows in tests where it matters (keep it as an internal test helper)
 
@@ -64,7 +64,7 @@ Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization
 - Decisions taken while building: DEC-056 (sites as JSON, message floor), DEC-057 (the
   form: pending request, `Bun.CSRF` with a cookie, no scripts, no COOP), DEC-058 (token
   endpoint rules), DEC-059 (CIMD details and the test-only switch), DEC-060 (attempt
-  limits).
+  limits, replaced by DEC-061).
 - Tests: `oauth.test.ts` (one group per RFC section and the pairing rules, including every
   negative case of the acceptance criteria and a stub pairing method), `cimd.test.ts`
   (URL rules, SSRF targets, document rules, caching, redirect matching), `pairing.test.ts`,
@@ -76,7 +76,12 @@ Read first: [MCP spec research](/research/mcp-2026-07-28-spec.md) (Authorization
   published client metadata document (fetched from claude.ai) and a loopback redirect; the
   run found that `Referrer-Policy: no-referrer` makes browsers post `Origin: null`, now
   `same-origin`. Contrast checks pass.
-- Open: the separate security review of the OAuth diff (task above) before merging.
+- Security review of PR #4 (two fresh-context reviewers): eight findings, all fixed with a
+  test each that fails on the code before the fix (`oauth-hardening.test.ts`, plus
+  `cimd.test.ts`, `oauth.test.ts` and the store conformance suite): DEC-061 (only real
+  guesses count, limits per /64, capped open requests), DEC-062 (90-day grant end),
+  DEC-063 (revocation tombstones), DEC-064 (invalid requests shown, not redirected),
+  DEC-065 (names), DEC-066 (pinned CIMD fetches), DEC-067 (redirect URI schemes).
 - Manual check with Claude Code: relay on `http://localhost:8080`, a page that runs the
   library on an allowed origin, `claude mcp add --transport http <name> <address>`, then
   `/mcp` → Authenticate in Claude Code and the code from the page (steps in the PR).

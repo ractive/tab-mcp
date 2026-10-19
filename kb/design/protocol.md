@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-20T01:15:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
@@ -89,12 +89,12 @@ types the code on the relay's `/authorize` page.
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
 | `pairing.start` | T→R | — | The page's "Connect your AI tool" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. |
-| `pairing.code` | R→T | `code`, `expiresAt` | The code to show: 6 digits, single-use, 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. |
+| `pairing.code` | R→T | `code`, `expiresAt` | The code to show: 6 digits, single-use, 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. Guesses are also limited per address and network and per address overall; malformed input is not counted (DEC-061). |
 | `pairing.stop` | T→R | — | The dialog closed; the current code becomes invalid and no more codes come. |
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
 | `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that is not this address's gets `error` `unknown_id`. |
 | `grants.revokeAll` | T→R | — | Revoke every grant of this address (used before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address") or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that simply run out are not announced. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address") or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that simply run out (at the latest 90 days after pairing, DEC-062) are not announced. |
 
 A grant as the tab sees it:
 

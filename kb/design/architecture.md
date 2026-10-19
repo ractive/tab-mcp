@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-20T01:15:00+02:00
+timestamp: 2026-10-20T01:34:00+02:00
 ---
 
 # tab-mcp architecture
@@ -201,6 +201,7 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_BODY_TIMEOUT_S` | 10 | deadline for receiving an MCP request body (408 and close; DEC-048) |
 | `TAB_MCP_MAX_MESSAGE_BYTES` | 1048576 | request body and WebSocket message limit; at least 16384 |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` / `TAB_MCP_REFRESH_TOKEN_TTL_S` | 3600 / 2592000 | token lifetimes |
+| `TAB_MCP_GRANT_LIFETIME_S` | 7776000 | absolute end of a connection after pairing; refreshes never go beyond it (DEC-062) |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug` (never bodies) |
 
 # Citations
