@@ -353,6 +353,7 @@ export class TabSession {
 			isListen: input.isListen,
 			requestTimeoutMs: config.requestTimeoutMs,
 			keepAliveMs: config.keepAliveMs,
+			maxBodyBytes: limitsOf(config).maxBodyBytes,
 			extraHeaders: input.extraHeaders,
 			cancel: (reason) => {
 				if (!this.send({ type: "http.cancel", id, reason })) {

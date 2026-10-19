@@ -32,6 +32,11 @@ export interface ExchangeOptions {
 	isListen: boolean;
 	requestTimeoutMs: number;
 	keepAliveMs: number;
+	/**
+	 * Limit for the response body the tab sends (not for listen streams), and
+	 * the bound for bytes queued towards an AI app that does not read.
+	 */
+	maxBodyBytes: number;
 	/** Extra headers for every response (CORS). */
 	extraHeaders: Record<string, string>;
 	/** Tell the tab to stop working on this request. */
@@ -98,6 +103,8 @@ export class Exchange {
 	#wrapped = "";
 	#controller: ReadableStreamDefaultController<Uint8Array> | undefined;
 	#atBoundary = true;
+	/** Response body bytes received from the tab so far. */
+	#bodyBytes = 0;
 	#startTimer: Timer | undefined;
 	#requestTimer: Timer | undefined;
 	#keepAliveTimer: Timer | undefined;
@@ -130,6 +137,7 @@ export class Exchange {
 	/** A complete response from the tab. */
 	onResponse(msg: HttpResponseMessage): void {
 		if (this.#state === "waiting") {
+			if (!this.#account(msg.body)) return;
 			if (NULL_BODY_STATUSES.has(msg.status) && msg.body !== "") {
 				this.#badResponse(`status ${msg.status} must not have a body`);
 				return;
@@ -147,6 +155,7 @@ export class Exchange {
 			this.#respond(response, msg.status);
 			this.#finish("ok");
 		} else if (this.#state === "streaming" && this.#relayStarted) {
+			if (!this.#account(msg.body)) return;
 			if (msg.body !== "") this.#write(sseEvent(msg.body));
 			this.#finish("ok");
 		}
@@ -173,6 +182,7 @@ export class Exchange {
 
 	onChunk(data: string): void {
 		if (this.#state !== "streaming") return;
+		if (!this.#account(data)) return;
 		if (this.#wrap) this.#wrapped += data;
 		else this.#write(data);
 	}
@@ -228,6 +238,24 @@ export class Exchange {
 		);
 	}
 
+	/**
+	 * Count response bytes from the tab; past `maxBodyBytes` (listen streams
+	 * excepted) fail with 502 / -31006 and cancel the tab. False when failed.
+	 */
+	#account(data: string): boolean {
+		this.#bodyBytes += Buffer.byteLength(data);
+		if (this.isListen || this.#bodyBytes <= this.#options.maxBodyBytes) {
+			return true;
+		}
+		this.fail(
+			502,
+			RelayErrorCode.tooLarge,
+			"The page sent a response that is too large.",
+			true,
+		);
+		return false;
+	}
+
 	#timeout(): void {
 		if (this.#state === "done") return;
 		this.fail(
@@ -249,12 +277,19 @@ export class Exchange {
 	}
 
 	#openStream(status: number, headers: Headers): void {
-		const stream = new ReadableStream<Uint8Array>({
-			start: (controller) => {
-				this.#controller = controller;
+		// Bounded queue: if the AI app stops reading, desiredSize goes negative
+		// once maxBodyBytes are queued, and the exchange ends (see #write).
+		const stream = new ReadableStream<Uint8Array>(
+			{
+				start: (controller) => {
+					this.#controller = controller;
+				},
+				cancel: () => this.clientClosed(),
 			},
-			cancel: () => this.clientClosed(),
-		});
+			new ByteLengthQueuingStrategy({
+				highWaterMark: this.#options.maxBodyBytes,
+			}),
+		);
 		if (isEventStream(Object.fromEntries(headers))) {
 			headers.set("x-accel-buffering", "no");
 			if (!headers.has("cache-control"))
@@ -286,6 +321,14 @@ export class Exchange {
 			return;
 		}
 		this.#atBoundary = endsAtBoundary(text);
+		const room = this.#controller.desiredSize;
+		if (room !== null && room < 0) {
+			// The AI app is not reading: stop the tab, drop the stream. No error
+			// event, since nothing more would reach the reader anyway.
+			this.#options.cancel("error");
+			this.#finish("backpressure");
+			return;
+		}
 		this.#scheduleKeepAlive();
 	}
 

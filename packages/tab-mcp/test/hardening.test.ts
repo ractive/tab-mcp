@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { newSecret } from "../src/address.ts";
+import { Exchange } from "../src/exchange.ts";
 import { parseTabMessage } from "../src/protocol.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import {
@@ -252,4 +253,114 @@ describe("2: unauthenticated requests keep Bun's idle timeout", () => {
 		const res = await mcpPost(address, rpc(1, "tools/list"), { token });
 		expect(res.status).toBe(200);
 	}, 6000);
+});
+
+describe("3: response size and backpressure", () => {
+	const chunk = "x".repeat(900);
+
+	test("a streamed response over maxBodyBytes ends with an error and cancels the tab", async () => {
+		const r = relay({ maxMessageBytes: 2000 });
+		const { t, address, token } = await connected(r, (msg, tab) => {
+			tab.send({
+				type: "http.response.start",
+				id: msg.id,
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+			for (let i = 0; i < 5; i++) {
+				tab.send({
+					type: "http.response.chunk",
+					id: msg.id,
+					data: `data: ${chunk}\n\n`,
+				});
+			}
+			tab.send({ type: "http.response.end", id: msg.id });
+		});
+		const res = await mcpPost(address, rpc(1, "tools/call", { name: "x" }), {
+			token,
+		});
+		const text = await res.text();
+		expect(text.length).toBeLessThan(2000 + 300);
+		expect(text).toContain('"code":-31006');
+		expect(await t.next("http.cancel")).toEqual({
+			type: "http.cancel",
+			id: expect.any(String),
+			reason: "error",
+		});
+	});
+
+	test("a wrapped (non-SSE) streamed body over maxBodyBytes fails too", async () => {
+		const r = relay({ maxMessageBytes: 2000, keepAliveMs: 30 });
+		const { t, address, token } = await connected(r, async (msg, tab) => {
+			await Bun.sleep(80); // the relay starts the event stream first
+			tab.send({
+				type: "http.response.start",
+				id: msg.id,
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+			for (let i = 0; i < 5; i++)
+				tab.send({ type: "http.response.chunk", id: msg.id, data: chunk });
+			tab.send({ type: "http.response.end", id: msg.id });
+		});
+		const res = await mcpPost(address, rpc(1, "tools/call", { name: "x" }), {
+			token,
+		});
+		const text = await res.text();
+		expect(text).not.toContain(chunk);
+		expect(text).toContain('"code":-31006');
+		expect((await t.next("http.cancel")).type).toBe("http.cancel");
+	});
+
+	test("listen streams have no total limit", async () => {
+		const r = relay({ maxMessageBytes: 2000 });
+		const { address, token } = await connected(r, (msg, tab) => {
+			tab.send({
+				type: "http.response.start",
+				id: msg.id,
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+			for (let i = 0; i < 5; i++)
+				tab.send({
+					type: "http.response.chunk",
+					id: msg.id,
+					data: `data: ${chunk}\n\n`,
+				});
+			tab.send({ type: "http.response.end", id: msg.id });
+		});
+		const res = await mcpPost(
+			address,
+			rpc(1, "subscriptions/listen", { notifications: {} }),
+			{ token },
+		);
+		expect((await res.text()).split(chunk).length - 1).toBe(5);
+	});
+
+	test("an AI app that does not read: the queue is bounded and the tab is cancelled", async () => {
+		const cancels: string[] = [];
+		const exchange = new Exchange({
+			id: "r1",
+			rpcId: 1,
+			isListen: true,
+			requestTimeoutMs: 60_000,
+			keepAliveMs: 60_000,
+			maxBodyBytes: 4000,
+			extraHeaders: {},
+			cancel: (reason) => cancels.push(reason),
+			onDone: () => {},
+		});
+		exchange.onStart({
+			type: "http.response.start",
+			id: "r1",
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+		await exchange.response; // never read
+		for (let i = 0; i < 20 && !exchange.done; i++) {
+			exchange.onChunk(`data: ${chunk}\n\n`);
+		}
+		expect(exchange.done).toBe(true);
+		expect(cancels).toEqual(["error"]);
+	});
 });
