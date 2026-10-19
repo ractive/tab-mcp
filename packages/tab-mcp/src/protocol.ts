@@ -169,6 +169,13 @@ const MAX_ID = 128;
 const MAX_HEADER_COUNT = 32;
 const MAX_HEADER_VALUE = 8192;
 
+/**
+ * RFC 9110 §5.5 field value: visible ASCII, obs-text (0x80-0xFF), space and
+ * tab; no other control characters (CR, LF, NUL, DEL, …) and nothing beyond
+ * 0xFF, which `Headers` would reject.
+ */
+const FIELD_VALUE = /^[\t\x20-\x7E\x80-\xFF]*$/;
+
 type Json = Record<string, unknown>;
 
 function isObject(v: unknown): v is Json {
@@ -193,7 +200,9 @@ function isHeaders(v: unknown): v is Record<string, string> {
 	if (entries.length > MAX_HEADER_COUNT) return false;
 	return entries.every(
 		([k, val]) =>
-			/^[a-z0-9-]{1,64}$/.test(k) && isString(val, MAX_HEADER_VALUE),
+			/^[a-z0-9-]{1,64}$/.test(k) &&
+			isString(val, MAX_HEADER_VALUE) &&
+			FIELD_VALUE.test(val),
 	);
 }
 

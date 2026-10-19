@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { ConfigError, configFromEnv } from "./config.ts";
-import { createLogger } from "./log.ts";
+import { createLogger, installCrashLogging } from "./log.ts";
 import { createRelay, type Relay, VERSION } from "./relay.ts";
 
 const HELP = `tab-mcp ${VERSION}: relay between AI apps (MCP clients) and tools offered by a web page in a browser tab.
@@ -51,10 +51,9 @@ if (args.length > 0) {
 let relay: Relay;
 try {
 	const config = configFromEnv(process.env);
-	relay = createRelay({
-		...config,
-		logger: createLogger(config.logLevel ?? "info"),
-	});
+	const logger = createLogger(config.logLevel ?? "info");
+	installCrashLogging(logger);
+	relay = createRelay({ ...config, logger });
 } catch (error) {
 	if (error instanceof ConfigError) {
 		process.stderr.write(`tab-mcp: configuration error: ${error.message}\n`);

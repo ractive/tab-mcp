@@ -19,6 +19,7 @@ export const RelayErrorCode = {
 	overloaded: -31004,
 	sendFailed: -31005,
 	tooLarge: -31006,
+	badResponse: -31007,
 } as const;
 
 export type CancelReason = "client_closed" | "timeout" | "error";
@@ -40,6 +41,9 @@ export interface ExchangeOptions {
 }
 
 const encoder = new TextEncoder();
+
+/** Statuses that must not carry a body (Fetch "null body status", 101/103 excluded by the parser). */
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 /** Response headers the relay passes on from the tab. */
 const PASSED_RESPONSE_HEADERS = new Set(["content-type", "cache-control"]);
@@ -81,6 +85,8 @@ export class Exchange {
 	status = 0;
 	/** How the exchange ended (for logs). */
 	outcome = "pending";
+	/** Why the tab's response was refused, for the tab's `error` message. */
+	badResponseReason: string | undefined;
 
 	readonly #options: ExchangeOptions;
 	#resolve!: (response: Response) => void;
@@ -124,13 +130,21 @@ export class Exchange {
 	/** A complete response from the tab. */
 	onResponse(msg: HttpResponseMessage): void {
 		if (this.#state === "waiting") {
-			this.#respond(
-				new Response(msg.body === "" ? null : msg.body, {
+			if (NULL_BODY_STATUSES.has(msg.status) && msg.body !== "") {
+				this.#badResponse(`status ${msg.status} must not have a body`);
+				return;
+			}
+			let response: Response;
+			try {
+				response = new Response(msg.body === "" ? null : msg.body, {
 					status: msg.status,
 					headers: this.#headers(msg.headers),
-				}),
-				msg.status,
-			);
+				});
+			} catch {
+				this.#badResponse("the response could not be built");
+				return;
+			}
+			this.#respond(response, msg.status);
 			this.#finish("ok");
 		} else if (this.#state === "streaming" && this.#relayStarted) {
 			if (msg.body !== "") this.#write(sseEvent(msg.body));
@@ -140,7 +154,18 @@ export class Exchange {
 
 	onStart(msg: HttpResponseStartMessage): void {
 		if (this.#state === "waiting") {
-			this.#openStream(msg.status, this.#headers(msg.headers));
+			if (NULL_BODY_STATUSES.has(msg.status)) {
+				this.#badResponse(`status ${msg.status} cannot be streamed`);
+				return;
+			}
+			let headers: Headers;
+			try {
+				headers = this.#headers(msg.headers);
+			} catch {
+				this.#badResponse("the response headers are invalid");
+				return;
+			}
+			this.#openStream(msg.status, headers);
 		} else if (this.#state === "streaming" && this.#relayStarted) {
 			this.#wrap = !isEventStream(msg.headers);
 		}
@@ -189,6 +214,20 @@ export class Exchange {
 		this.#finish(`error_${code}`);
 	}
 
+	/**
+	 * The tab sent a response the relay cannot pass on: 502 to the AI app (or an
+	 * error event), cancel the tab's work. `reason` goes to the tab, not the app.
+	 */
+	#badResponse(reason: string): void {
+		this.badResponseReason = reason;
+		this.fail(
+			502,
+			RelayErrorCode.badResponse,
+			"The page sent an invalid response.",
+			true,
+		);
+	}
+
 	#timeout(): void {
 		if (this.#state === "done") return;
 		this.fail(
@@ -221,8 +260,15 @@ export class Exchange {
 			if (!headers.has("cache-control"))
 				headers.set("cache-control", "no-cache");
 		}
+		let response: Response;
+		try {
+			response = new Response(stream, { status, headers });
+		} catch {
+			this.#badResponse("the response could not be built");
+			return;
+		}
 		this.#state = "streaming";
-		this.#respond(new Response(stream, { status, headers }), status);
+		this.#respond(response, status);
 		this.#scheduleKeepAlive();
 	}
 

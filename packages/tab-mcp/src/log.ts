@@ -59,3 +59,35 @@ export function truncateIp(ip: string): string {
 	const parts = ip.split(".");
 	return parts.length === 4 ? `${parts.slice(0, 3).join(".")}.0/24` : "?";
 }
+
+/**
+ * Defence in depth (DEC-047). The relay catches errors per message and per
+ * request; anything that still escapes is logged, never silently fatal:
+ * - an unhandled promise rejection is logged and the relay keeps running, so one
+ *   bad request or tab cannot end every other session;
+ * - an uncaught exception is logged and the process exits with 1, because the
+ *   relay's state may be inconsistent; the supervisor (Docker, systemd) restarts
+ *   it and AI apps keep their tokens (they live in the store).
+ * Only the error's name is logged: messages can carry request data.
+ * Returns a function that removes the handlers.
+ */
+export function installCrashLogging(
+	logger: Logger,
+	exit: (code: number) => void = (code) => process.exit(code),
+): () => void {
+	const name = (error: unknown) =>
+		error instanceof Error ? error.name : typeof error;
+	const onRejection = (error: unknown) => {
+		logger.error("process.unhandled_rejection", { error: name(error) });
+	};
+	const onException = (error: unknown) => {
+		logger.error("process.uncaught_exception", { error: name(error) });
+		exit(1);
+	};
+	process.on("unhandledRejection", onRejection);
+	process.on("uncaughtException", onException);
+	return () => {
+		process.off("unhandledRejection", onRejection);
+		process.off("uncaughtException", onException);
+	};
+}

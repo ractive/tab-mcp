@@ -161,9 +161,18 @@ export class TabSession {
 		if (!parsed.ok) {
 			if (this.#state === "new") {
 				this.#protocolError("bad_message", parsed.error);
-			} else {
-				this.#sendError("bad_message", parsed.error, parsed.id);
+				return;
 			}
+			this.#sendError("bad_message", parsed.error, parsed.id);
+			// A malformed response must not leave its request hanging.
+			const exchange =
+				parsed.id === undefined ? undefined : this.pending.get(parsed.id);
+			exchange?.fail(
+				502,
+				RelayErrorCode.badResponse,
+				"The page sent an invalid response.",
+				true,
+			);
 			return;
 		}
 		if ("unknown" in parsed) {
@@ -178,7 +187,16 @@ export class TabSession {
 			}
 			return;
 		}
-		void this.#handle(parsed.message);
+		// One bad frame must never become an unhandled rejection (it would end
+		// the process): log it, tell the tab, keep the session.
+		this.#handle(parsed.message).catch((error: unknown) => {
+			this.#host.logger.error("tab.handler_error", {
+				session: this.sessionId,
+				type: parsed.message.type,
+				message: error instanceof Error ? error.name : "unknown",
+			});
+			this.#sendError("bad_message", "the relay could not handle this message");
+		});
 	}
 
 	async #handle(msg: TabMessage): Promise<void> {
@@ -217,6 +235,9 @@ export class TabSession {
 				else if (msg.type === "http.response.start") exchange.onStart(msg);
 				else if (msg.type === "http.response.chunk") exchange.onChunk(msg.data);
 				else exchange.onEnd();
+				if (exchange.badResponseReason !== undefined) {
+					this.#sendError("bad_message", exchange.badResponseReason, msg.id);
+				}
 				return;
 			}
 		}
