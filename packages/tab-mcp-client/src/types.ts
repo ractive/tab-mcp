@@ -111,6 +111,11 @@ export interface TabMcpOptions {
 	/** Approves consequential tool calls; default: a dialog in the page. */
 	onConfirm?: ConfirmHandler;
 	/**
+	 * How long the default confirmation keeps "Allow" disabled after it opens,
+	 * in milliseconds: 750 by default, never less than 500.
+	 */
+	confirmDelayMs?: number;
+	/**
 	 * Where the address secret lives; default `localStorage`. `null` keeps it
 	 * only for the page's lifetime (a new address on every visit).
 	 */

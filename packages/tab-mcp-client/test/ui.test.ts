@@ -120,6 +120,33 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		byText(doc, "Don't allow").click();
 		expect(await answer).toBe(false);
 	});
+
+	test("Allow is disabled for a moment after the dialog opens; a click then does nothing", async () => {
+		const started = Date.now();
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const dialog = doc.querySelector(
+			"dialog.tab-mcp-confirm",
+		) as HTMLDialogElement;
+		const allow = byText(dialog, "Allow");
+		expect(allow.disabled).toBe(true);
+		allow.click();
+		expect(dialog.open).toBe(true);
+		await enabled(allow);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(590);
+		allow.click();
+		expect(await answer).toBe(true);
+	});
+
+	test("the delay cannot go below 500 ms", async () => {
+		const started = Date.now();
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 0 });
+		const allow = byText(doc, "Allow");
+		expect(allow.disabled).toBe(true);
+		await enabled(allow);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(490);
+		allow.click();
+		expect(await answer).toBe(true);
+	});
 });
 
 describe("showConnectDialog", () => {

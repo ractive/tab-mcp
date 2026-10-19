@@ -95,6 +95,7 @@ export class TabMcp extends EventTarget {
 	readonly #server: ServerInfo;
 	readonly #appName: string | undefined;
 	readonly #onConfirm: ConfirmHandler | undefined;
+	readonly #confirmDelayMs: number | undefined;
 	readonly #relayUrl: string;
 	readonly #secrets: SecretStore;
 	#state: ConnectionState = "disconnected";
@@ -129,6 +130,7 @@ export class TabMcp extends EventTarget {
 		this.#server = { ...server };
 		this.#appName = appName;
 		this.#onConfirm = options.onConfirm;
+		this.#confirmDelayMs = options.confirmDelayMs;
 		this.#secrets = new SecretStore(
 			options.storage,
 			options.storageKey ?? `tab-mcp:secret:${origin}`,
@@ -397,7 +399,14 @@ export class TabMcp extends EventTarget {
 		}
 		const doc = globalThis.document as Document | undefined;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
-		return import("./ui.ts").then((ui) => ui.confirmDialog(request, doc));
+		const delay = this.#confirmDelayMs;
+		return import("./ui.ts").then((ui) =>
+			ui.confirmDialog(
+				request,
+				doc,
+				delay === undefined ? {} : { allowDelayMs: delay },
+			),
+		);
 	}
 
 	/** The callbacks of one connection; once it is not current they are ignored. */

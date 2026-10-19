@@ -87,16 +87,32 @@ function showArguments(args: Record<string, unknown>): string | undefined {
 	}
 }
 
-/** Ask whether a consequential tool may run. Resolves `true` only for "Allow". */
+/** How long "Allow" stays disabled after the confirmation opens, and the floor. */
+export const ALLOW_DELAY_MS = 750;
+export const MIN_ALLOW_DELAY_MS = 500;
+
+/**
+ * Ask whether a consequential tool may run. Resolves `true` only for "Allow",
+ * which stays disabled for `allowDelayMs` (default 750, at least 500) after
+ * the dialog opens, so a click meant for the page cannot approve.
+ */
 export function confirmDialog(
 	request: ConfirmRequest,
 	doc: Document,
+	options: { allowDelayMs?: number } = {},
 ): Promise<boolean> {
+	const delay = Math.max(
+		MIN_ALLOW_DELAY_MS,
+		options.allowDelayMs ?? ALLOW_DELAY_MS,
+	);
 	if (request.signal.aborted) return Promise.resolve(false);
 	const title = request.tool.title ?? request.tool.name;
 	const { dialog } = newDialog(doc, "tab-mcp-confirm", `Allow ${title}?`);
 	const deny = button(doc, "Don't allow", () => dialog.close("deny"));
-	const allow = button(doc, "Allow", () => dialog.close("allow"));
+	const allow = button(doc, "Allow", () => {
+		if (!allow.disabled) dialog.close("allow");
+	});
+	allow.disabled = true;
 	const actions = el(
 		doc,
 		"div",
@@ -131,9 +147,11 @@ export function confirmDialog(
 	return new Promise((resolve) => {
 		const onAbort = () => dialog.close("deny");
 		request.signal.addEventListener("abort", onAbort, { once: true });
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		dialog.addEventListener(
 			"close",
 			() => {
+				clearTimeout(timer);
 				request.signal.removeEventListener("abort", onAbort);
 				const allowed = dialog.returnValue === "allow";
 				dialog.remove();
@@ -143,6 +161,10 @@ export function confirmDialog(
 		);
 		dialog.showModal();
 		deny.focus(); // the safe choice is the default
+		// Counted from when the dialog is shown, not from when it was built.
+		timer = setTimeout(() => {
+			allow.disabled = false;
+		}, delay);
 	});
 }
 

@@ -169,9 +169,18 @@ test.skipIf(chrome === undefined)(
 			expect(question).toContain("Allow Clear memory?");
 			expect(question).toContain("client.example wants to run Clear memory.");
 			expect(await page.eval("memory()")).toBe(7);
-			await page.eval(
-				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow').click()",
-			);
+			// "Allow" starts disabled (a click meant for the page cannot approve).
+			expect(
+				await page.eval(
+					`new Promise((resolve) => {
+					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow');
+					const wasDisabled = allow.disabled;
+					const click = () => { allow.click(); resolve(wasDisabled); };
+					if (!allow.disabled) return click();
+					new MutationObserver((_, o) => { if (!allow.disabled) { o.disconnect(); click(); } }).observe(allow, { attributes: true });
+				})`,
+				),
+			).toBe(true);
 			expect((await call).content).toEqual([{ type: "text", text: "cleared" }]);
 			expect(await page.eval("memory()")).toBe(0);
 		} finally {
