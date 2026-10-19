@@ -50,14 +50,66 @@ export function createLogger(
 	};
 }
 
-/** Truncate an IP for logs: IPv4 to /24, IPv6 to /48. */
-export function truncateIp(ip: string): string {
-	if (ip.includes(":")) {
-		const parts = ip.split(":").filter((p) => p !== "");
-		return `${parts.slice(0, 3).join(":")}::/48`;
-	}
+/** Parse dotted-quad IPv4 into four octets, or undefined. */
+function parseIpv4(ip: string): number[] | undefined {
 	const parts = ip.split(".");
-	return parts.length === 4 ? `${parts.slice(0, 3).join(".")}.0/24` : "?";
+	if (parts.length !== 4) return undefined;
+	const octets = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : -1));
+	return octets.every((o) => o >= 0 && o <= 255) ? octets : undefined;
+}
+
+/** Parse IPv6 (with `::`, an optional zone, an embedded IPv4 tail) into 8 groups. */
+function parseIpv6(ip: string): number[] | undefined {
+	const address = ip.split("%")[0] ?? "";
+	const halves = address.split("::");
+	if (halves.length > 2) return undefined;
+	const parseSide = (side: string): number[] | undefined => {
+		if (side === "") return [];
+		const groups: number[] = [];
+		const items = side.split(":");
+		for (const [i, item] of items.entries()) {
+			if (i === items.length - 1 && item.includes(".")) {
+				const v4 = parseIpv4(item);
+				if (v4 === undefined) return undefined;
+				groups.push(
+					((v4[0] ?? 0) << 8) | (v4[1] ?? 0),
+					((v4[2] ?? 0) << 8) | (v4[3] ?? 0),
+				);
+			} else if (/^[0-9a-fA-F]{1,4}$/.test(item)) {
+				groups.push(Number.parseInt(item, 16));
+			} else {
+				return undefined;
+			}
+		}
+		return groups;
+	};
+	const head = parseSide(halves[0] ?? "");
+	const tail = halves.length === 2 ? parseSide(halves[1] ?? "") : [];
+	if (head === undefined || tail === undefined) return undefined;
+	if (halves.length === 1) return head.length === 8 ? head : undefined;
+	const missing = 8 - head.length - tail.length;
+	if (missing < 1) return undefined;
+	return [...head, ...new Array<number>(missing).fill(0), ...tail];
+}
+
+/**
+ * Truncate an IP for logs: IPv4 to /24, IPv6 to /48. IPv4-mapped IPv6
+ * (`::ffff:a.b.c.d`) is treated as IPv4. `?` if it does not parse.
+ */
+export function truncateIp(ip: string): string {
+	const v4 = parseIpv4(ip);
+	if (v4 !== undefined) return `${v4.slice(0, 3).join(".")}.0/24`;
+	const v6 = parseIpv6(ip);
+	if (v6 === undefined) return "?";
+	const mapped = v6.slice(0, 5).every((g) => g === 0) && v6[5] === 0xffff;
+	if (mapped) {
+		const hi = v6[6] ?? 0;
+		return `${hi >> 8}.${hi & 0xff}.${(v6[7] ?? 0) >> 8}.0/24`;
+	}
+	return `${v6
+		.slice(0, 3)
+		.map((g) => g.toString(16))
+		.join(":")}::/48`;
 }
 
 /**

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { newSecret } from "../src/address.ts";
 import { Exchange } from "../src/exchange.ts";
+import { truncateIp } from "../src/log.ts";
 import { parseTabMessage } from "../src/protocol.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
@@ -502,4 +503,30 @@ describe("7: http.response after http.response.start", () => {
 		expect(Date.now() - started).toBeLessThan(1000);
 		expect(text).toContain('"code":-31007');
 	});
+});
+
+describe("8: truncateIp parses IPv6 properly", () => {
+	const cases: [string, string][] = [
+		["192.168.1.77", "192.168.1.0/24"],
+		["2001:db8:85a3:8d3:1319:8a2e:370:7348", "2001:db8:85a3::/48"],
+		["2001:db8::1", "2001:db8:0::/48"],
+		["2001:DB8:0:0:8:800:200C:417A", "2001:db8:0::/48"],
+		["::1", "0:0:0::/48"],
+		["::", "0:0:0::/48"],
+		["fe80::1%en0", "fe80:0:0::/48"],
+		["::ffff:192.168.1.77", "192.168.1.0/24"],
+		["::ffff:c0a8:14d", "192.168.1.0/24"],
+		["unknown", "?"],
+		["1.2.3", "?"],
+		["1.2.3.999", "?"],
+		["1::2::3", "?"],
+		["12345::1", "?"],
+		["1:2:3:4:5:6:7:8:9", "?"],
+		["", "?"],
+	];
+	for (const [ip, expected] of cases) {
+		test(`${JSON.stringify(ip)} → ${expected}`, () => {
+			expect(truncateIp(ip)).toBe(expected);
+		});
+	}
 });
