@@ -4,6 +4,7 @@
 #   @ractive-ch/tab-mcp-client with provenance through npm trusted publishing
 #   (OIDC, no token), dist-tag `alpha`/`beta`/`rc` for pre-releases, `latest`
 #   otherwise.
+# - Pull requests that touch the package or this file run the dry run.
 # - workflow_dispatch: `dry-run` (default) builds, tests, packs and dry-runs;
 #   `bootstrap` also signs the tarball with GitHub OIDC provenance and uploads
 #   it for the owner's one-time manual `npm publish --provenance-file`;
@@ -20,6 +21,15 @@ name: Release
 on:
   release:
     types: [published]
+  pull_request:
+    paths:
+      - "packages/tab-mcp-client/**"
+      - "scripts/npm-*"
+      - "package.json"
+      - "bun.lock"
+      - "LICENSE"
+      - "AI_NOTICE"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
     inputs:
       package:
@@ -79,6 +89,12 @@ jobs:
             mode=publish
             release_tag=$RELEASE_TAG
             prerelease=$RELEASE_PRERELEASE
+          elif [ "$EVENT" = pull_request ]; then
+            package=client
+            mode=dry-run
+            version=
+            release_tag=
+            prerelease=
           else
             package=$INPUT_PACKAGE
             mode=$INPUT_MODE
@@ -107,7 +123,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "$package $mode ${version:-(package version)} on $REF"
 
-  # Build, test, pack and check the tarball; no OIDC token in this job.
+  # Build, test, pack, check, dry-run and install the tarball; no OIDC token
+  # in this job.
   client-pack:
     needs: plan
     if: needs.plan.outputs.package == 'client'
@@ -132,6 +149,7 @@ jobs:
       - run: npm install --global "npm@$NPM_VERSION"
       - run: bun install --frozen-lockfile
       - run: bun run verify
+        if: github.event_name != 'pull_request' # ci.yml runs it on pull requests
       - run: bun run build
         working-directory: packages/tab-mcp-client
       - id: pack
@@ -161,6 +179,24 @@ jobs:
             npm publish "$TARBALL" --dry-run --offline --cache "$cache" \
               --ignore-scripts --access public --tag "$DIST_TAG" \
               --registry https://registry.npmjs.org
+      - name: Install the tarball into an empty project
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.pack.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer=$(mktemp -d "$RUNNER_TEMP/npm-consumer.XXXXXX")
+          cd "$consumer"
+          npm init --yes > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund "$TARBALL"
+          node --input-type=module -e "
+            const lib = await import('@ractive-ch/tab-mcp-client');
+            const cdn = await import('@ractive-ch/tab-mcp-client/cdn');
+            if (lib.VERSION !== process.env.VERSION) throw new Error('VERSION ' + lib.VERSION);
+            if (typeof lib.TabMcp !== 'function' || typeof cdn.TabMcp !== 'function') throw new Error('no TabMcp');
+            console.log('imported', lib.VERSION);
+          "
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-pack-tab-mcp-client-${{ steps.pack.outputs.version }}
