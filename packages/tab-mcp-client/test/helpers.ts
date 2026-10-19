@@ -79,7 +79,8 @@ function hashToken(token: string): string {
 
 /**
  * Issue an access token for an address through the relay's public
- * `TokenStore` interface (OAuth comes in iteration 3).
+ * `TokenStore` interface, for tests about the tunnel rather than OAuth
+ * (the OAuth flow itself: oauth-e2e.test.ts).
  */
 export async function tokenFor(
 	store: TokenStore,

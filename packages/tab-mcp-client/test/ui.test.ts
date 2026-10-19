@@ -219,7 +219,33 @@ describe("showConnectDialog", () => {
 		await code;
 		const codeLine = dialog.querySelector(".tab-mcp-code") as HTMLElement;
 		expect(codeLine.hidden).toBe(false);
-		expect(codeLine.textContent).toBe("When asked, enter the code 123456");
+		expect(codeLine.querySelector(".tab-mcp-code-value")?.textContent).toBe(
+			"123456",
+		);
+		expect(codeLine.textContent).toBe(
+			"When asked, enter the code 123456A new code appears every 2 minutes and after each use.",
+		);
+
+		// A newly connected app is announced in the status line.
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({
+			type: "grant.added",
+			grant: {
+				grantId: "g_2",
+				client: {
+					id: "https://chatgpt.com/c.json",
+					name: "ChatGPT",
+					host: "chatgpt.com",
+				},
+				createdAt: "2026-10-20T10:00:00.000Z",
+			},
+		});
+		await added;
+		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
+			"ChatGPT (chatgpt.com) is connected.",
+		);
+		relay.send({ type: "grant.removed", grantId: "g_2", reason: "revoked" });
+		await nextEvent(mcp, "grantschange");
 
 		byText(dialog, "Disconnect").click();
 		expect(await relay.next("grant.revoke")).toEqual({

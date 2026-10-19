@@ -1,6 +1,6 @@
 /**
  * The tab side of the protocol against a scripted relay: hello, heartbeat,
- * pairing and grants (the relay implements those in iteration 3), errors.
+ * pairing and grants, errors. The real relay: relay.test.ts, oauth-e2e.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { TabMcp } from "../src/index.ts";

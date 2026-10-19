@@ -1,6 +1,6 @@
 /**
- * A scripted relay for the protocol parts the real relay does not have yet
- * (pairing and grants come in iteration 3): it answers `hello` with a
+ * A scripted relay for protocol cases that are hard to provoke from the real
+ * relay (exact message orders, malformed frames): it answers `hello` with a
  * `session`, records what the tab sends, and sends what a test tells it to.
  */
 

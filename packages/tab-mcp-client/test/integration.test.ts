@@ -1,8 +1,8 @@
 /**
  * Integration: the relay as its own process (`bun packages/tab-mcp/src/main.ts`)
  * with a SQLite store, this library in Bun as the tab, and the MCP SDK client
- * as the AI app. The token is written into the same SQLite file (OAuth comes
- * in iteration 3).
+ * as the AI app. The token is written into the same SQLite file (the binary
+ * has no test switch for a loopback CIMD fixture; OAuth: oauth-e2e.test.ts).
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
