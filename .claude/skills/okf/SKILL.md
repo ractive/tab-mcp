@@ -1,0 +1,246 @@
+---
+name: okf
+user_invocable: false
+description: >
+  Author and maintain Open Knowledge Format (OKF) bundles with hyalo. Use this skill
+  whenever you are producing or editing an OKF knowledge bundle — a directory of Markdown
+  "concept" files with YAML frontmatter, distributed as a git repo or tarball. Trigger it
+  when: scaffolding a new OKF concept, validating a bundle against the spec, browsing
+  concepts by their `type`, wiring cross-links between concepts, or maintaining the
+  reserved `index.md` / `log.md` files. Even if the user does not say "OKF" by name, use
+  this skill when the task involves a knowledge bundle whose files carry a `type`
+  frontmatter key, `# Schema` / `# Citations` sections, or a bundle-root `index.md`
+  with an `okf_version` key. hyalo owns the deterministic frontmatter/link mechanics; the
+  LLM does only the semantic work (prose, titles, tags, crawl judgment).
+---
+
+# OKF (Open Knowledge Format) — Authoring & Maintenance with hyalo
+
+OKF is **a directory of Markdown files with YAML frontmatter**, distributed as a git repo
+or tarball. It is a *format, not a platform* — no proprietary account or SDK is ever
+required. hyalo is a natural, vendor-neutral OKF authoring/validation CLI: it owns every
+deterministic mechanic (parse frontmatter, enforce `type`, check links, scaffold, browse),
+leaving the LLM to do only the semantic work.
+
+## Concept model (spec essentials)
+
+- **Knowledge Bundle** = a self-contained directory tree. The unit of distribution.
+- **Concept** = one `.md` document. The **Concept ID** is its path minus `.md`
+  (`tables/users.md` → `tables/users`).
+- **Frontmatter is YAML with exactly one required field: `type`** (an open string —
+  unknown types MUST be tolerated). Recommended optional fields: `title`, `description`,
+  `resource` (a canonical URI), `tags` (a list), `timestamp` (RFC 3339, offset-aware,
+  e.g. `2026-05-28T22:44:47+00:00` or `...Z`).
+- **Relationships** = plain Markdown links (untyped edges; the edge's meaning lives in the
+  prose). Hierarchy is implicit from the directory layout.
+- **Provenance** = a `# Citations` section plus git history. Conventional headings (SHOULD):
+  `# Schema`, `# Examples`, `# Citations`.
+- **Reserved files** `index.md` and `log.md` are **frontmatter-free by design**, with one
+  exception: the *bundle-root* `index.md` MAY carry a single `okf_version: "0.1"` key and
+  nothing else — every other `index.md`/`log.md` (including nested ones) has no frontmatter.
+  - `index.md` = a pure Markdown link list: `* [Title](path) - description`.
+  - `log.md` = a date-grouped chronological history (newest first, `YYYY-MM-DD` headings).
+- **Permissive consumption:** consumers MUST NOT reject on missing optional fields, unknown
+  `type` values, unknown extra keys, **broken cross-links**, or a missing `index.md`.
+
+## The deterministic-vs-LLM split
+
+Keep these separate. Never make the LLM reinvent the mechanical layer:
+
+- **LLM-only** (you do this): prose bodies, semantic `title` / `description` / `tags`,
+  crawl and augmentation judgment.
+- **Ground-truth-only** (comes from the source system, e.g. BigQuery): `type`, `resource`.
+- **Deterministic mechanics** (hyalo does this): validate frontmatter, scaffold new
+  concepts, browse by type, check links, move files without breaking links.
+
+## Reserved-file rules
+
+- `index.md` and `log.md` carry **no `type`** — the OKF profile's
+  `[schema] exempt = ["**/index.md", "**/log.md"]` exempts them from the required-`type`
+  check. Do **not** add a `type` to them.
+- The bundle-root `index.md` may carry a lone `okf_version: "0.1"` key — nothing else.
+- `index.md` bodies are link lists; `log.md` bodies are dated changelog entries. These are
+  *derived* data — **regenerate them with `hyalo okf index` / `hyalo okf log`** rather than
+  hand-editing (see "Maintaining reserved files" below).
+
+## Link forms
+
+- Cross-links between concepts are plain Markdown links. **Bundle-absolute links
+  (`/tables/x.md`, the spec-recommended §5 form) are preferred** — they stay stable when a
+  document moves. The OKF profile sets `site_prefix = ""` so a leading `/` resolves from the
+  bundle root.
+- To move or rename a concept and rewrite every inbound link vault-wide, use
+  `hyalo mv old.md --to new.md` — never a raw `mv` (it would orphan the links).
+
+## The exact hyalo commands
+
+Use these — do not fall back to Read/Grep/Glob for OKF bundle work.
+
+```bash
+# Scaffold a new concept from the schema (fills TBD placeholders), then see what to fill in:
+hyalo new --type "BigQuery Table" --file tables/blocks.md
+hyalo lint --file tables/blocks.md
+
+# Browse concepts by their OKF `type`:
+hyalo find --property type="BigQuery Table"
+hyalo find --property type=Reference --tag bitcoin
+
+# Read a specific conventional section of a concept:
+hyalo read tables/blocks.md --section "# Schema"
+hyalo read tables/blocks.md --section "# Citations"
+
+# Validate the whole bundle against the OKF §9 conformance rules.
+# On a vault created with `init --profile okf` these run under a plain `hyalo lint`;
+# on any other checkout (CI, a cloned third-party bundle) add `--profile okf` to
+# overlay them without touching .hyalo.toml. Errors only on missing frontmatter /
+# missing `type`; warns (never rejects) on broken links, reserved-file structure,
+# and citations — the OKF permissive-consumption model:
+hyalo lint --profile okf
+hyalo lint --profile okf --strict   # also fail on undeclared frontmatter properties, for stricter CI gates
+
+# Set / update frontmatter deterministically (never hand-edit the YAML block):
+hyalo set tables/blocks.md --property title="Bitcoin Blocks Table"
+hyalo set tables/blocks.md --tag bigquery
+
+# Find broken cross-links (advisory only — the spec forbids rejecting on them):
+hyalo find --broken-links
+
+# Move a concept and rewrite inbound links across the bundle:
+hyalo mv tables/blocks.md --to tables/bitcoin_blocks.md
+```
+
+## Maintaining reserved files (`index.md` / `log.md`)
+
+`index.md` and `log.md` are *derived* — never hand-edit them. hyalo regenerates both
+deterministically (no LLM). Run these after adding, editing, moving, or removing concepts:
+
+```bash
+# Regenerate every directory's index.md from concept frontmatter.
+# Concepts are grouped by `type`; entries are `* [title](relative-link) - description`
+# (title falls back to the filename; description optional); subdirectories are listed too.
+hyalo okf index --dry-run          # preview (default); exits 0 — drift is `results.changed`
+hyalo okf index --apply            # write the regenerated index.md files
+hyalo okf index tables --apply     # scope to a single subtree
+hyalo okf index --apply --replace  # overwrite a marker-less index.md (destructive; rarely needed)
+
+# Prepend a dated entry to a log.md (newest first, under a YYYY-MM-DD heading).
+# TARGET selects the log: a directory -> TARGET/log.md, a log.md path, or omitted -> bundle root.
+hyalo okf log --message "Added the blocks table" --apply
+hyalo okf log tables --action Update --message "Refreshed the schema section" --apply
+```
+
+Key rules for these generators:
+
+- **`okf index` owns only a managed region** delimited by `<!-- okf:index:begin -->` /
+  `<!-- okf:index:end -->`. Prose you write outside those markers is preserved — put any
+  bundle overview above the begin marker.
+- **Adopting a hand-written `index.md` is non-destructive.** The first `--apply` on an
+  existing `index.md` that has *no* markers keeps its entire body and appends the managed
+  region after it (dry-run says `adopt (preserving N existing lines)`); it never overwrites
+  your content. Use `--replace` only when you deliberately want to discard the old body.
+- **Malformed concepts don't abort the run.** A concept with unparseable frontmatter is
+  skipped with a stderr warning and every other index is still generated; scope a run
+  (`hyalo okf index <subtree>`) to stay clear of a bad file elsewhere in the vault. Keep the
+  generators out of template/fixture trees with `[okf] ignore = ["_template/**", ...]` in
+  `.hyalo.toml`.
+- It **preserves the bundle-root `index.md`'s `okf_version`** key and never adds frontmatter
+  to nested `index.md`/`log.md` files.
+- It is **idempotent** (running `--apply` twice changes nothing) and **CI-friendly**: gate on
+  the payload, not the exit code — a dry run exits 0 like every other dry run in hyalo
+  (DEC-307, iter-274), and reports drift as `results.changed`:
+  `hyalo okf index --format json --jq '.results.changed'` is `0` when the committed
+  `index.md` files are current.
+- Both default to `--dry-run`; pass `--apply` to write. Do the concept edits first (with
+  `hyalo set` / `hyalo new` / `hyalo mv`), then regenerate the reserved files.
+
+## Validating conformance (`lint --profile okf`)
+
+**Validation is the last step of every edit loop.** After changing concepts and
+regenerating `index.md`/`log.md`, check the bundle against the OKF §9 conformance rules:
+
+```bash
+hyalo lint --profile okf            # whole bundle (add nothing extra on an init --profile okf vault)
+hyalo lint --profile okf --strict   # CI gate: also exit non-zero on missing-`type` warnings
+```
+
+What it reports (permissive-consumption: *warn, don't reject*):
+
+- **Error** — the only hard failures, matching SPEC §9: a non-reserved `.md` with no
+  parseable frontmatter, or with an empty/missing `type`. Reserved `index.md`/`log.md`
+  are exempt (frontmatter-free by design).
+- **Warn (never error)** — broken cross-links; reserved-file structure (`index.md`
+  should be a link list, `log.md` date-grouped newest-first); missing/malformed
+  `# Citations`; and a `# Schema`/`# Citations` section emptied out by an edit.
+- **Always allowed** — unknown `type` values and extra frontmatter keys.
+
+Citations are first-class here: keep factual claims cited under a `# Citations` section
+(numbered `1.` or `-` bullets both fine), with links that resolve — bundle-relative or
+`references/…` paths are checked on disk; external `http(s)` URLs are surfaced but not
+network-fetched. Toggle any single rule off with
+`hyalo lint-rules set OKF-CITATIONS-PRESENT --enabled false`; list them with
+`hyalo lint-rules list`.
+
+## Setting up an OKF bundle
+
+```bash
+hyalo init --profile okf            # writes an OKF-ready .hyalo.toml
+hyalo init --profile okf --claude   # also installs this skill for Claude Code
+```
+
+The OKF profile's `.hyalo.toml` sets: `[schema.default] required = ["type"]`, the
+recommended props (`title`, `description`, `resource` with a URL pattern, `tags`,
+`timestamp: datetime-tz`), `exempt = ["**/index.md", "**/log.md"]`, `site_prefix = ""`
+for bundle-root links, `validate_on_write = true` so authoring stays conformant, and
+`[lint] profiles = ["okf"]` so a plain `hyalo lint` runs the §9 conformance + citation rules
+(no `--profile okf` needed on this vault).
+
+## Adding domain types
+
+The OKF profile is **vendor-neutral** and ships **no example concept types** — a
+real bundle's `type` values are domain-specific (a data catalog, a research
+library, and an API reference all differ). Declare the types your bundle uses
+before scaffolding with `hyalo new --type <name>`; the `[schema.default]` block
+above already applies to every concept, so a type only adds what is specific to
+it (extra required fields, `required_sections`). Two ways:
+
+```bash
+# 1) From the CLI (quoted names with spaces are fine end-to-end):
+hyalo types set "Data Table" --required type,title
+# then edit .hyalo.toml to add required_sections for it, e.g.:
+#   [schema.types."Data Table"]
+#   required = ["type", "title"]
+#   required_sections = ["# Schema", "# Citations"]
+
+# 2) By hand in .hyalo.toml (same result), then verify:
+hyalo types list
+hyalo types show "Data Table"
+```
+
+Reserved `default` cannot be used as a type name — it names the fallback
+`[schema.default]` table, which you edit directly. Once a type is declared,
+`hyalo new --type "Data Table" --file tables/blocks.md` scaffolds it. The
+examples below use a `"BigQuery Table"` domain type; substitute your own.
+
+## Example concept
+
+```markdown
+---
+type: BigQuery Table
+resource: https://bigquery.googleapis.com/v2/projects/bigquery-public-data/datasets/crypto_bitcoin/tables/blocks
+title: Bitcoin Blocks Table
+description: Details about the Bitcoin Blocks BigQuery table, including its schema.
+tags:
+- bitcoin
+- bigquery
+timestamp: '2026-05-28T22:43:59+00:00'
+---
+
+# Schema
+
+| Field | Type |
+| --- | --- |
+| hash | hex_string |
+
+# Citations
+- https://github.com/blockchain-etl/bitcoin-etl
+```

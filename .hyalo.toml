@@ -1,0 +1,37 @@
+dir = "kb"
+site_prefix = ""
+validate_on_write = true
+
+# Mark this vault as OKF-flavoured so plain `hyalo lint` runs the OKF §9
+# conformance rules (advisory citation / reserved-file / augmentation checks)
+# without needing `--profile okf` on every invocation. `hyalo lint --profile
+# okf` on such a vault is then a no-op overlay (idempotent).
+[lint]
+profiles = ["okf"]
+
+[schema]
+# Reserved OKF files carry no `type`, so exempt them from the required-`type`
+# check. `index.md` (bundle/section index) and `log.md` (changelog) are reserved.
+exempt = ["**/index.md", "**/log.md"]
+
+[schema.default]
+# OKF concepts are identified by their `type`.
+required = ["type"]
+
+# Recommended OKF properties (declared as optional so authoring is not blocked,
+# but type-checked when present).
+[schema.default.properties.title]
+type = "string"
+
+[schema.default.properties.description]
+type = "string"
+
+[schema.default.properties.resource]
+type = "string"
+pattern = "^\\w[\\w+.-]*://"
+
+[schema.default.properties.tags]
+type = "list"
+
+[schema.default.properties.timestamp]
+type = "datetime-tz"

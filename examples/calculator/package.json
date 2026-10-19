@@ -1,0 +1,8 @@
+{
+	"name": "tab-mcp-example-calculator",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@ractive-ch/tab-mcp-client": "workspace:*"
+	}
+}

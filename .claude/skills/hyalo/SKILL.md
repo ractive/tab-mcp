@@ -1,0 +1,1138 @@
+---
+name: hyalo
+user_invocable: false
+description: >
+  Use the hyalo CLI instead of Read/Edit/Grep/Glob when working with markdown (.md) files
+  that have YAML frontmatter. This skill MUST be consulted whenever Claude is working with
+  markdown documentation directories, knowledgebases, wikis, notes, Obsidian-compatible
+  collections, Zettelkasten systems, iteration plans, or any collection of .md files with
+  frontmatter. Trigger this skill when: searching or filtering markdown files by content,
+  tags, or properties; reading or modifying YAML frontmatter; managing tags or metadata
+  across documents; toggling task checkboxes in markdown; getting an overview of a
+  documentation directory; querying document properties or status fields; bulk-updating
+  metadata across many markdown files; or when you find yourself repeatedly using
+  Grep/Glob/Read on .md files. Even if the user does not mention "hyalo" by name, use this
+  skill whenever the task involves structured markdown documents with frontmatter.
+---
+
+# Hyalo CLI — Preferred Tool for Markdown with Frontmatter
+
+Hyalo is a fast CLI for querying and mutating YAML frontmatter, tags, tasks, and structure
+in directories of markdown files. Its killer features are combined filtering (e.g.
+`hyalo find -e "regex" --property status!=done --tag feature`) which you can't easily
+replicate with Grep/Glob, and bulk mutations (`hyalo set --where-property`) that replace
+multiple Read + Edit calls.
+
+Install the published CLI with `cargo install hyalo-cli` or, on a supported Node.js
+platform, `npm install --global @ractive-ch/hyalo`.
+
+Since 0.23.0 the npm package also exports a typed TypeScript API (ESM and CommonJS). In
+0.24.1, `find`, `read`, `summary` and `config` (`import { find } from "@ractive-ch/hyalo"`)
+return typed envelopes, `set`, `task` and `lint` wrap those commands, and `raw` / `execute`
+run any argv. Releases
+after 0.24.1 add typed `terms`, `tags` and `backlinks`; the installed package's README
+lists what your version exports.
+
+Filters combine freely — content search + property conditions + tag + section + task status
+in a single call, something impossible with Grep/Glob alone:
+
+```bash
+hyalo find "error handling" --property status!=completed --tag iteration --section "Tasks" --task todo
+```
+
+## BM25 Full-Text Search
+
+Start here — the same block opens `hyalo find --help`:
+
+```text
+FIND 101 -- PATTERN is a query language; structure is a flag:
+  hyalo find 'a b'                         # both words (implicit AND), ranked
+  hyalo find 'a b OR c'                    # OR binds tighter: a AND (b OR c)
+  hyalo find '"a b"~3'                     # in order, at most 3 words apart; '"a b"' = exact
+  hyalo find 'config*'                     # prefix over stems: config, configur, ...
+  hyalo find -- '-a (b OR c)'              # -term excludes, ( ) groups; a leading - needs --
+  hyalo find 'a b' --granularity section   # one hit per section: the paragraph, not the file
+  hyalo find 'a' --facet dir --facet tags  # file counts per directory / tag, all matches
+  hyalo terms config                       # the dictionary: the stems a prefix expands to
+  structure is selected with flags: --title --tag --glob --section --property
+```
+
+The positional argument to `find` triggers BM25 ranked full-text search with automatic
+stemming ("running" matches "run", "runner", etc.). Results are sorted by relevance score
+by default (unless `--sort` is specified).
+
+Each ranked result includes `score` and `matches`: up to 3 body snippets with
+`{line, section, text}`, ordered by distinct query tokens then line number. Tokens use
+the same stemming/CJK rules as ranking; quoted phrases must be consecutive on one line,
+and OR accepts either side of a group. `--section` scopes snippets. Frontmatter is excluded;
+title-only hits and phrases spanning lines can have `matches: []`. Text mode prints
+the same line/section context as regex. Indexed queries read only final selected files
+after `--limit` to recover original snippet text.
+
+```bash
+hyalo find "rust"                        # single term, stemmed
+hyalo find "rust programming"            # AND: both terms required (implicit)
+hyalo find "rust OR golang"              # OR: either term matches
+hyalo find "rust -java"                  # NOT: exclude documents with "java"
+hyalo find '"error handling"'            # Phrase: exact consecutive match (after stemming)
+hyalo find '"error handling" -panic'     # Phrase + negation combined
+hyalo find '"error handling"~3'          # Slop: in order, at most 3 extra words between (max 64)
+hyalo find "rust OR golang -obsolete"    # Mixed: either rust or golang, not obsolete
+hyalo find "rust async OR tokio"         # OR binds tighter: rust AND (async OR tokio)
+hyalo find -- '(bm25 OR stemming) -tantivy' # Groups nest; -( … ) negates a group
+hyalo find "config*"                     # Prefix over stems: matches "configuration"
+hyalo find --title iteration --tag iteration 'link*'   # Structure via flags, words in PATTERN
+hyalo terms conf                         # Stemmed dictionary terms with document counts
+```
+
+`OR` binds tighter than implicit AND (before iteration 302 one `OR` made every term an
+alternative). `prefix*` expands to the dictionary's **stems** (most frequent 256, with a
+`-q`-proof warning past that). Search terms are words, phrases, prefixes and their boolean
+combinations; structure is selected with flags (`--title`, `--section`, `--tag`, `--glob`),
+so `title:x` or `foo:bar` is a plain word (DEC-366). Unbalanced `(`, empty `()` or bare `*` exit 1
+(`invalid search query`). Terms are stemmed in every language present in the vault.
+Accents fold (`résumé` = `resume`); an identifier (`getUserName`, `get_user_name`,
+`get-user-name`) indexes its whole plus its parts, so `user` finds it. Ranking is BM25F:
+title, headings and tags/aliases outweigh body (a tag-only term matches), and terms that sit
+close together get a proximity bonus (`[search]` / `[search.weights]` in `.hyalo.toml`).
+A zero-result query names close dictionary terms for words no document contains, hints
+the corrected query, and carries a top-level `suggestions: [{term, candidates: [{term,
+docs}]}]` key. `hyalo terms [PREFIX]` lists `{term, docs}` (`--limit`, default 50, 0 =
+unlimited).
+
+Find the paragraph, not just the file: `hyalo find 'snapshot index' --granularity section
+--limit 5` returns one hit per matching section (`{file, section: {heading, level,
+line_start, line_end, path}, score, matches}`), then follow each hit's read hint
+(`hyalo read <file> --section '<heading>'` or `--lines A:B`). A section must hold every
+positive word itself; negated terms are decided per file (DEC-334). `--limit`
+counts sections; `--sort`, `--reverse`, `--fields` and `-e` are rejected.
+
+See the distribution of a match set: `hyalo find --tag iteration --facet property:status
+--facet dir` adds a top-level `facets: [{facet, buckets: [{value, count}], truncated}]`
+counting FILES over the full match set before `--limit` (DEC-335). Specs: `tags` (exact,
+no prefix folding), `property:K` (dot-paths and case folding as in `--property K=V`;
+missing/null counts under `null`),
+`type`, `dir`. At most 50 buckets per facet; hints drill into the 3 largest.
+
+For literal pattern matching (not stemmed), use regex: `hyalo find -e "exact_string"`.
+
+Stemmer language: `--stemmer french` (or the older `--language french`) selects the French
+Snowball stemmer for BM25 tokenization. Accepts full names (english, german, french, …) or
+ISO 639-1 codes (en, de, fr, …). This is *not* markdown code-block language filtering.
+Per-file override via frontmatter `language: french`. Config default via
+`[search] language = "french"` in `.hyalo.toml`.
+
+Property filters support: `K=V` (eq), `K!=V` (neq), `K>=V`/`K<=V`/`K>V`/`K<V` (comparison),
+`K` (existence), `!K` (absence — files missing the property), `K~=pattern` or `K~=/pattern/flags`
+(regex match on value; for list properties, matches if any element matches), and the value
+shapes `K=null` / `K!=null` / `K=[]` / `K!=[]`:
+
+```bash
+hyalo find --property '!status'           # files missing the status property
+hyalo find --property 'title~=draft'      # title contains "draft"
+hyalo find --property 'title~=/^Draft/i'  # case-insensitive regex on title
+hyalo find --property 'aliases=null'      # present, but the value is a YAML null
+hyalo find --property 'aliases!=null'     # present AND non-null
+hyalo find --property 'aliases=[]'        # present, and an empty list
+```
+
+**Null vs empty vs absent (iter-264, DEC-274):** `!K` is *absent*, `K=null` is *present with a
+YAML null* (`~`, `null`, or an empty value), `K=[]` is *present and an empty list*. A list
+containing a null (`aliases: [null]`) matches none of them — the value's own type is what is
+tested, so `K=null` and `--fields properties-typed` (`type: "null"`) always agree.
+
+**Comparisons are typed (DEC-274):** `>`, `>=`, `<`, `<=` compare numerically when both sides
+parse as numbers (`rating>=6` matches `rating: "7"`), by date when both parse as ISO dates, and
+as text only when both are plain strings. A value of any other kind never matches, so
+`last>=2023-09-01` skips `last: "[[2022-04]]"` instead of comparing it as text.
+
+**Rejected input (DEC-276, BUG-23/24):** the regex operator is `~=`, never `=~` — `title=~/pat/`
+is now a hard error naming `~=` (it used to be silently read as equality against the literal
+value `~/pat/`, which matched every YAML null in the vault). An empty pattern (`title~=` or
+`title~=//`) and an empty selection (`--fields ''`, `--fields ,`) are errors too; all of them
+exit 1, like every other bad argument. iter-274 extends the family: an **empty operand**
+(`K=`, `K>=`, `K>`), a **second `=`** (`a=b=c`) and an empty filter name (`=b`) are errors
+rather than filters that quietly match nothing. Say what you meant instead: `K` for presence,
+`K=null` for a YAML null, `!K` for absence, `K~=/a=b/` for a value containing a literal `=`.
+
+**Exit codes (DEC-307):** **0** the command answered — a dry run and a zero-result query have
+both answered, and drift or findings are reported in the payload (`okf index` →
+`results.changed`), not in the exit code, unless a `--strict`-style flag asked for a gate;
+**1** every hyalo-own user error, always rendered as the standard error envelope so
+`--format json` parses; **2** clap usage errors and internal errors. The distinction that
+matters to a script is 1 ("I typed it wrong") versus 2 ("hyalo broke").
+
+`K` may be a **dot-path** into nested frontmatter. A literal dotted key in a flat map is
+tried first; otherwise the path is walked. Maps descend by key, and sequences descend too:
+a numeric segment pins one element, any other segment auto-descends into *every* element and
+collects the hits — so the usual list semantics apply (`=`/`~=` match when any element
+matches, `!=` when none does):
+
+```bash
+hyalo find --property contact.email=team@example.com   # contact: {email: ...}
+hyalo find --property contacts.email=ada@example.com   # contacts: [{name, email}, ...] — any element
+hyalo find --property contacts.0.email=ada@example.com # first element only
+hyalo find --property '!contacts.phone'                # no element has a phone
+```
+
+**The promoted title (DEC-283).** `title` is resolved in three steps: a scalar frontmatter
+`title`, else the first H1 heading, else **the filename stem** — Obsidian's own behaviour, so
+a vault whose notes carry no `title` property still sorts and filters usefully instead of
+showing `title: (none)` everywhere. JSON reports which one it was under `title_source`
+(`"property"`, `"h1"` or `"filename"`), so a consumer can tell an authored title from a
+derived one. `--title` and `--property title~=` both match the promoted value — neither is
+frontmatter-only. To test the raw frontmatter key, use `--property title` / `--property
+'!title'`.
+
+Case-insensitive substring by default; use `"/regex/"` for regex.
+
+```bash
+hyalo find --title "meeting"           # substring match on the promoted title
+hyalo find --title "/^Design/i"        # regex on the promoted title
+hyalo find --limit 5 --format json --jq '[.results[] | {file, title, title_source}]'
+```
+
+Neither one sees body prose. An identifier that lives in a `##` heading — `DEC-251` in a
+decision log, say — is not a title, so `--property 'title~=/DEC-25/'` correctly returns
+nothing. When that happens hyalo checks whether the same regex occurs in body text and, if
+it does, leads the zero-result hints with the body search that works
+(`hyalo find -e 'DEC-25'`). Read the hints before re-guessing the filter.
+
+`--section` uses case-insensitive **substring** matching by default — `"Tasks"` matches
+`"Tasks [4/4]"`, `"My Tasks"`, etc. Use `"/regex/"` for regex. Prefix `##` to pin heading level.
+
+`--glob` supports negation with `!` prefix to exclude files: `--glob '!**/draft-*'`.
+
+`--glob` is also how you address sequence-keyed documents (iterations, decisions, ...):
+the number may be zero-padded and the file archived in a subdirectory, so prefer the
+recursive form — `find --glob '**/iteration-02-*.md'` reaches both `iterations/iteration-2-*.md`
+and `iterations/done/iteration-02-links.md`. (`--file` is exact, `--glob` is the only
+globbing flag; single-file commands like `read`/`set` have no `--glob` — resolve with
+`find --glob ... --filenames-only`, then pass the exact path.)
+
+`--sort` controls result ordering. Available: `file` (default), `modified`, `date`, `title`,
+`backlinks_count`, `links_count`, `score`, or `property:<KEY>` for any frontmatter property.
+
+**Direction (iter-264, DEC-273):** every key sorts **ascending** and `--reverse` inverts it, so
+`--sort backlinks_count --reverse` is "most linked first" exactly as `--sort modified --reverse`
+is "newest first". `score` is the one exception — it ranks best-match-first (descending
+relevance), and `--reverse score` puts the weakest match first. Files whose sort property is
+missing or null always sort **last**, in both directions. (Before 0.23, `backlinks_count` and
+`links_count` sorted descending, so `--reverse` on those two keys meant the opposite of what it
+means everywhere else — a script relying on the old order needs its `--reverse` flipped.)
+
+```bash
+hyalo find --sort modified --reverse --limit 10   # recently modified files
+hyalo find --sort property:priority                # sort by custom property (nulls last)
+hyalo find --sort backlinks_count --reverse        # most-linked files first
+```
+
+Without `--fields`, every result item carries `file`, `modified`, `size` (bytes), `lines`,
+`title`, `properties` and `tags` — read `size`/`lines` before a `read` to know what a file
+will cost.
+
+`--fields` is an **exact projection**: the result carries exactly the fields you name, plus
+`file`, which names the result and is never dropped. So `--fields title` returns `{file, title}`,
+`--fields size,lines` returns `{file, size, lines}`, and `--fields file` means "just the paths".
+`modified`, `size` and `lines` are ordinary members of the *default* set — cheap enough to always
+pay for, but dropped when an explicit `--fields` does not name them.
+
+Available fields: `file`, `modified`, `size`, `lines`, `title`, `properties`, `properties-typed`,
+`tags`, `sections` (alias: `outline`), `tasks`, `links`, `backlinks`, and `all` for everything
+(the pre-0.22 default shape and then some). Everything whose size scales with the document body
+(`sections`, `tasks`, `links`) and the whole-vault `backlinks` lookup stay out of the default set,
+but a filter that implies one still returns it on top of whatever set is in force: `--section`
+adds `sections`, `--task` adds `tasks`, `--broken-links` adds `links`, `--orphan`/`--dead-end` add
+`links` and `backlinks`, and `--sort links_count` / `--sort backlinks_count` add the field they
+rank on. A saved view's pinned `fields` behaves exactly like an explicit `--fields`; a CLI
+`--fields` replaces the pin rather than adding to it.
+
+`title` is promoted: it has its own field and is *not* repeated inside `properties` — ask for
+`--fields properties` alone to get the raw property map including `title`. Any scalar promotes,
+stringified as written (`title: 42` → `"42"`, `title: 2026-08-30` → `"2026-08-30"`,
+`title: true` → `"true"`); a list or map cannot, so the item's `title` falls back to the first H1,
+the raw value stays in `properties.title`, and `hyalo lint` reports `HYALO007`.
+`properties-typed` returns a `[{name, type, value}]` array instead of a `{key: value}` map;
+`backlinks` requires scanning all files to build the link graph. Each backlink entry contains
+`source` (file path), `line` (line number), and an optional `label`.
+
+```bash
+hyalo find --fields backlinks --file my-note.md       # see who links to this note (--file required: positional is PATTERN)
+hyalo find --orphan                                        # find orphan files (no inbound or outbound links)
+hyalo find --dead-end                                      # find dead-end files (inbound but no outbound links)
+hyalo find --broken-links                                  # find files with at least one unresolved link
+hyalo find --fields links --limit 0 --jq '[.results[].links[].kind]|group_by(.)|map({kind:.[0],n:length})'  # bucket links by kind
+hyalo find --fields properties,backlinks              # combine with other fields
+```
+
+**All JSON output uses a consistent envelope:** `{"results": <payload>, "total": N, "hints": [...]}`.
+`total` is present for list commands (find, lint, tags summary, properties summary, backlinks,
+types list, views list, lint-rules list) — the same set `--count` accepts.
+`hints` is always present on a result (empty `[]` when `--no-hints`); an error envelope carries it only when it has a hint to offer. `--jq` operates on the full envelope:
+
+```bash
+hyalo find --property status=draft --count                 # count matching files (bare integer)
+hyalo find --property status=draft --jq '.total'           # same, via jq
+hyalo find --property status=draft --limit 0 --jq '.results[].file'  # just file paths
+hyalo summary --jq '.results.tasks.total'                  # tasks count from summary
+```
+
+User `--jq` compilation and evaluation run in separate child processes, each with a
+3-second deadline. Source is capped at 64 KiB, serialized input at 64 MiB, and output
+at 10 MiB / 1,000,000 values. Compilation failure precedes writes; evaluation failure
+reports committed effects, so inspect them before retrying a mutation. Linux limits
+worker address space to 512 MiB. macOS and Windows have no hard memory cap;
+intermediate allocations can still exhaust host memory before termination.
+
+**Conventions inside `results`** (so one query works across commands):
+
+- The envelope owns `total`. Where a command repeats `total` inside `results` it means *the
+  number of items that command considered* — `set`/`remove`/`append`/`properties rename`/
+  `tags rename` use `total = modified + skipped`. A count of *findings* is never called
+  `total`: `lint` reports `.results.violations`, `links auto` reports `.results.matched`.
+- **`links auto` holds back common-word titles by default** (DEC-286). Titles that are
+  ordinary English words, generic doc filenames or platform names (`index`, `README`,
+  `github`, `markdown`), plus any title that dominates the run (25+ matches and 2.5% of it),
+  are excluded and listed under `.results.default_excluded_titles` /
+  `.default_excluded_mentions`. Setting `[links.auto] exclude_titles` hands the decision to
+  your own list; `warn_common_titles = false` (or `--no-warn-common-titles`) proposes every
+  candidate again.
+- Top-level `results` keys are always present, including `0`, `false`, `[]` and `null`. Only
+  per-item records inside arrays omit absent optional keys, so `.results.dry_run` is `false`
+  (not missing) on a non-dry-run of any mutating command.
+- Every mutating command whose `results` is an object reports `dry_run`, so one query answers
+  "did this write?" — `hyalo madr toc --jq '.results.dry_run'`. The `apply`-style generators
+  (`madr`, `okf`, `changelog`) and batch `mv` also keep an older `apply`/`applied` key that is
+  always its exact inverse. `task toggle`/`task set` are the exception: they return an array of
+  per-task records, and the dry-run records are the ones carrying `old_status`.
+- `skipped_count` is reported by the bulk-mutation family only — `set`, `remove`, `append`,
+  `properties rename`, `tags rename`:
+  `hyalo set --glob '**/*.md' --property status=draft --dry-run --jq '.results.skipped_count'`.
+  A single-target command has no scanned-but-unchanged set, so it reports no count.
+  (Every mutating example in this document carries `--dry-run` in its shipped text, and
+  `cargo run -p xtask -- check-jq-recipes` fails if one does not: a recipe is meant to be
+  pasted, so it must never be a write.)
+- `links fix` pairs each bucket count with a list whose suffix names the record type:
+  `…_fixes` holds fix proposals (`old_target`/`new_target`/`strategy`/`confidence`),
+  `…_links` holds links with no proposal.
+
+**Hints are enabled by default.** Every query appends drill-down suggestions (`-> hyalo ...`
+lines in text mode, a `"hints"` array in the JSON envelope). Read and follow these hints — they show
+concrete next commands to explore deeper. Use `--no-hints` to suppress them. **`--jq` computes
+no hints at all** (DEC-313): it is the machine path, and hint generation is a second pass over
+the results. `.hints` under `--jq` is therefore always `[]` — read hints from plain
+`--format json`, not through a filter.
+
+**Check the `writes` marker before running a hint.** Read-only suggestions are prefixed `->`;
+a suggestion that modifies the vault or `.hyalo.toml` is prefixed `=>` and tagged `[writes]`
+(JSON: `"writes": true` on the hint object). Only the `->` ones are safe to run unattended:
+
+```bash
+hyalo find --tag rust --format json    # read `.hints[]`; each carries `cmd` and `writes`
+```
+
+Pipe through `--jq` to reshape output into anything — dashboards, burndowns, reports.
+`--jq` requires JSON output; piping naturally produces JSON, so `--jq` works without
+an explicit `--format json` in most contexts:
+
+```bash
+hyalo find --property status=in-progress --fields tasks \
+  --jq '.results | map({file, done: ([.tasks[] | select(.status == "x")] | length), total: (.tasks | length)})'
+```
+
+**Run `hyalo --help` and `hyalo <command> --help` to learn the full API.**
+
+## Paths are vault-relative, wherever you run from
+
+Hyalo reads `dir` from `.hyalo.toml` and resolves every file path against it. The config is
+found in the current directory, or in the nearest parent directory whose configured vault
+contains you — so running from the project root and running from inside the vault both work,
+and both take the same vault-relative paths.
+
+- **ALWAYS pass `--file` paths relative to the configured `dir`** (e.g.
+  `iterations/iteration-17.md`). Never pass an absolute path.
+- **Prefer the project root** (the directory that contains `.hyalo.toml`). It is the only
+  place where the vault and the working directory cannot disagree.
+
+Worked example:
+
+```bash
+# ✅ Right (from project root — hyalo resolves the path against `dir`)
+hyalo set iterations/iteration-17.md --property status=in-progress
+
+# ✅ Also right (from inside the vault — the parent .hyalo.toml is adopted, paths unchanged)
+cd kb && hyalo set iterations/iteration-17.md --property status=in-progress
+
+# ❌ Wrong (absolute path — bypasses the configured `dir` entirely)
+hyalo set --file /Users/me/proj/kb/iterations/iteration-17.md --property status=in-progress
+```
+
+From a directory *deeper* than the vault root, hyalo prints a stderr note naming the config it
+adopted and the vault it resolved to — the vault is wider than where you are standing. Pass
+`--dir .` if you meant to scope the run to the current directory. An absolute `--file` path
+still draws a correction warning: **treat it as a signal** to rewrite the path as a
+vault-relative one before continuing.
+
+## Setup (run once per project)
+
+ALWAYS run `which hyalo` as your very first step. Do not skip this.
+
+- **Not on PATH?** Inform the user: "The `hyalo` CLI is not installed. You can install it
+  from https://github.com/ractive/hyalo." Fall back to Read/Edit/Grep/Glob.
+- **On PATH?** Check for `.hyalo.toml` in the project root. If it exists, hyalo is
+  configured — the `dir` setting means you don't need `--dir` on every command.
+- **No `.hyalo.toml` but a directory with many `.md` files?** (e.g. `docs/`, `knowledgebase/`,
+  `wiki/`, `notes/`, `content/`, or any folder with 10+ markdown files) Suggest creating one:
+  ```toml
+  dir = "docs"
+  ```
+
+**After confirming hyalo works**, add a line to the project's `CLAUDE.md` so future
+conversations use hyalo without needing this skill:
+
+```
+Use `hyalo` CLI (not Read/Grep/Glob) for all markdown knowledgebase operations (frontmatter, tags, tasks, search). Run `hyalo --help` for usage. Output format auto-detects (text on terminals, json when piped); pass `--format text`/`--format json` to override.
+```
+
+This one-line instruction saves tokens in every future conversation.
+
+## Moving or renaming files
+
+When moving or renaming any file in the knowledgebase, always use `hyalo mv` — never use
+system `mv`, `git mv`, or any other tool. `hyalo mv` automatically rewrites all `[[wikilinks]]`
+and `[markdown](links)` across the vault that pointed to the old path. Without it, moves
+silently break links throughout the knowledgebase.
+
+```bash
+# Move a file to a subfolder (updates all links vault-wide)
+hyalo mv backlog/my-item.md --to backlog/done/my-item.md
+
+# Preview what would change without writing
+hyalo mv old-path.md --to new-path.md --dry-run
+```
+
+`hyalo mv` rewrites relative `.md` paths only. It leaves untouched: site-absolute links
+(`/docs/...`, handled separately via site prefix), URL-scheme links (`http://`, `mailto:`),
+fragment-only links (`#section`), and bare non-`.md` wiki tokens. File permissions (e.g.
+`0644`) are preserved through all atomic rewrites.
+
+## Absolute link resolution (site prefix)
+
+Documentation sites often use root-absolute links like `/docs/guides/setup.md`. Hyalo resolves
+these by stripping a **site prefix** — e.g., with prefix `docs`, the link `/docs/guides/setup.md`
+becomes the vault-relative path `guides/setup.md`.
+
+**Auto-derived by default** from the last path component of `--dir`:
+- `--dir ../vscode-docs/docs` → prefix = `docs`
+- `--dir /home/me/wiki` → prefix = `wiki`
+- `--dir .` → prefix = name of the current directory (e.g. `wiki`)
+
+**Override when the directory name doesn't match the URL prefix:**
+```bash
+# Directory is "content/" but links use "/docs/..." prefix
+hyalo --site-prefix docs --dir ./content find --fields links
+
+# Disable absolute-link resolution entirely
+hyalo --site-prefix "" find --fields links
+```
+
+Also settable in `.hyalo.toml` as `site_prefix = "docs"`.
+Precedence: `--site-prefix` flag > `.hyalo.toml` > auto-derived from `--dir`.
+`hyalo config` reports the effective value and its source
+(`flag` / `config` / `derived` / `disabled`).
+
+## Link target resolution order
+
+A link target is resolved against the vault in this order — the first hit wins:
+
+1. **The path as written** — `guides/setup.md`.
+2. **With `.md` appended** — `guides/setup` → `guides/setup.md`.
+3. **As a directory** — `guides` → `guides/index.md`.
+4. **Bare stem lookup** (wikilinks only, no `/` in the target) — `[[setup]]`
+   finds `guides/setup.md` when exactly one file has that basename.
+
+Directory-index resolution (step 3) is what makes docs corpora that publish
+`foo/index.md` as the page `/foo` — MDN, GitHub Docs, Docusaurus, Hugo — read
+as linked rather than 100% broken. All the site-absolute spellings work:
+`/foo`, `foo` and `/foo/` reach `foo/index.md`, and `/foo#section` checks that
+file's headings.
+
+**Precedence:** a real file beats a directory index, so `foo` resolves to
+`foo.md` when both `foo.md` and `foo/index.md` exist. Write the target with a
+trailing slash (`foo/`) to name the directory explicitly — that flips the
+order and reaches `foo/index.md`.
+
+`hyalo backlinks foo/index.md` counts every directory spelling, and
+`hyalo mv foo/index.md bar/index.md` rewrites `/foo` to `/bar` — keeping the
+spelling style, never appending `.md` or injecting a site prefix the author
+did not write.
+
+## When to use hyalo vs. built-in tools
+
+- **hyalo:** queries, frontmatter reads/mutations, tag management, task toggling, bulk updates, **moving/renaming files**, extracting sections
+- **Edit tool:** body prose changes (rewriting paragraphs) that hyalo can't handle
+- **Write tool:** creating brand new markdown files
+
+Use `hyalo read` to extract file content without opening the full file:
+
+```bash
+hyalo read my-note.md                              # full body (no frontmatter)
+hyalo read my-note.md --section "Tasks"            # extract one section
+hyalo read my-note.md --lines 1:20                 # line range (1-based)
+hyalo read my-note.md --frontmatter                # frontmatter only (verbatim)
+hyalo read my-note.md --frontmatter --lines 1:     # frontmatter plus the full body
+```
+
+Standalone `--frontmatter` omits the body. Combine it with `--lines` or `--section` to
+request both. It echoes the block's **own bytes** between its `---` fences — indentation,
+quote style and comments exactly as on disk. Nothing is re-serialized on a read path. In JSON
+the parsed map stays under `.results.frontmatter` and the raw text sits beside it as
+`.results.frontmatter_raw` (`null` for a file with no frontmatter block).
+
+Start with `hyalo summary` to orient yourself in a new directory (text output is the
+default in interactive terminals).
+
+`Files:` counts the notes hyalo could actually read. When some could not be, the line reads
+`Files: 75 (28 skipped, 0 excluded)` — `skipped` are files whose YAML frontmatter would not
+parse (see them with `hyalo lint --rule HYALO005`), `excluded` are files dropped by
+`[scan] exclude`. Both are in JSON as `results.files.skipped` / `results.files.excluded`, with
+per-directory attribution under `results.files.directories[].skipped`.
+
+Every scanning command reports unusable files as **one** stderr line
+(`warning: skipped N files with unparsable frontmatter …`) rather than one YAML excerpt per
+file. `-q` silences it; `[scan] verbose_skips = true` or `RUST_LOG=hyalo=debug` brings the full
+per-file diagnostics back.
+
+## Available commands — read the CLI's own help first
+
+`hyalo -h` lists every command grouped by intent (read / write / config), one line each,
+with the capability families each one covers. `hyalo <cmd> -h` is the short page for one
+command; `hyalo <cmd> --help` is its full syntax reference — property operators, sort keys,
+`--fields` values, output shapes, and a cookbook. Both are generated from the binary you
+are actually running, so they cannot drift the way a copy in this file can. Read them
+before guessing a flag, and before falling back to `grep`.
+
+```bash
+hyalo -h                 # every command, grouped, with composed examples
+hyalo find -h            # one screen: filters, output flags, examples
+hyalo find --help        # every operator, sort key, field name and recipe
+```
+
+What follows is only what those pages do not say — the behaviour that surprises people.
+
+Flags that only `--help` mentions, worth knowing:
+
+- `summary --recent N` (`-n`) sizes the recently-modified list; `summary --depth N` limits the directory listing (stats stay complete).
+- `find --filenames0` is the NUL-terminated `--filenames-only`, for `xargs -0`; `--desc` is an alias of `--reverse`.
+- `lint-rules list --enabled-only` / `--disabled-only` filter the rule table.
+- `links fix --expand-short-form` rewrites resolving bare `[[Name]]` links to `[[sub/Name]]` on `--apply` (breaks Obsidian's short-form style).
+- `task set --status '?'` (any single character) writes a custom checkbox status; `--dry-run` previews it.
+- `changelog add --wrap 80` wraps the new bullet at 80 columns with a hanging indent.
+
+### Pitfalls
+
+- **Frontmatter follows YAML 1.2 core** (DEC-350). `01234` is the integer 1234, the plain
+  words `NaN`/`Infinity` stay strings (only `.nan`/`.inf` keep their string fallback), and
+  `set` keeps its old quoting except that `---`, `...` and `0X1F` are now quoted.
+- **Hidden paths resolve without discovery.** Explicit Markdown paths such as
+  `.gitignore` and `.github/workflows/lint.yml` can resolve by in-vault existence,
+  including hidden paths omitted by scan exclusions or gitignore. They do not enter
+  document discovery, bare-name/alias lookup, or fuzzy candidates. Nonhidden excluded
+  targets retain the existing scan policy; escaping symlinks never resolve in-vault.
+- **Anchor lint and repair have separate controls.** `HYALO006` checks file targets;
+  `HYALO008` checks heading fragments (warning by default, promoted by `--strict`
+  unless severity is explicitly configured). Scoped lint keeps vault-wide targets.
+  `links fix --dry-run` proposes a numbered-heading repair only for one eligible
+  match, such as `#success-metrics` to `#6-success-metrics`. Ordinary `links fix --apply`
+  writes safe target and anchor repairs together. `--apply-fuzzy` additionally enables
+  eligible fuzzy file-target repairs; broader fuzzy anchor guesses remain advisory.
+  Ambiguous or unsupported destinations are deferred with a reason. Broken counts
+  describe the pre-apply scan; anchor proposals and outcomes have separate fields.
+- **`mv` has two modes.** Single-file mode writes immediately (`--dry-run` to preview;
+  `--apply` is rejected there). Batch mode (`--glob`/`--property`/`--tag`/`--type`)
+  defaults to dry-run and needs `--apply` to commit. A batch **dry run** lists destination
+  collisions under `collisions: [{source, destination}]` and still plans everything else;
+  `--apply` refuses. Batch JSON also answers `total_files_updated` / `total_links_updated`.
+- **`mv` skips a link it cannot attribute, and says so.** A bare `[[stem]]` two files share is
+  listed in `skipped_ambiguous` with its `candidates` — in a frontmatter value (with the
+  `property` it came from) exactly as in body prose, whatever directory the moved file, its
+  twin and the linking file sit in, and including the moved file's **own** body self-links
+  (marked `self: true`). `--allow-ambiguous` rewrites them all.
+- **`mv` destinations resolve like sources.** A CWD-relative path carrying the configured
+  vault dir works from the project root, an **absolute** path inside the vault is accepted,
+  and `--to .`, `--to ./` and `--to <vault-dir>/` all name the **vault root**.
+- **`links fix` withholds low-confidence repairs.** Fuzzy hits and basename fallbacks are
+  reported separately and excluded from `--apply` unless you pass `--apply-fuzzy`, which is
+  gated again by a confidence floor (0.8 default; `--min-confidence <0.0-1.0>` or
+  `[links] fuzzy_min_confidence`). Confidence weights the final path segment at 70% and the
+  directory path at 30%. A repair is written in the form the link was written in, and one
+  whose emitted target would still not resolve is refused and reported under `unfixable`.
+  Targets normalizing above the vault root count as `out_of_vault`, not `broken`.
+  Destinations containing `{%`, `{{` or `${` are template expressions, counted under
+  `templated` and never rewritten. A target with an explicit non-`.md` extension is never
+  matched against a `.md` note (DEC-266), so a broken `Companies.base` is honestly unfixable
+  rather than rewritten into a note link, and no candidate is ever reported at confidence 0.0.
+- **`append` does not accept `--tag`.** Tags are scalar list items; use `set --tag`.
+- **`--where-property` / `--where-tag` default to all `**/*.md`** when neither `--file` nor
+  `--glob` is given. Always pair a bulk mutation with `--dry-run` first.
+- **Bare `properties` / `tags` / `types` / `views` / `lint-rules` run their `summary`
+  (or `list`) action** — there is no separate command to remember. `--index` is accepted on
+  the bare form as well as on the subcommand (`hyalo properties --index` ==
+  `hyalo properties summary --index`).
+- **`properties rename` renames the key in place** — it keeps its position in the block and
+  the value's exact source text (quoting, spacing, comments, list indentation), and an empty
+  `rating:` becomes an empty `score:`, never `score: null`.
+- **`tags rename` on a parent moves the whole subtree** (Obsidian semantics): `--from music
+  --to audio` also renames `music/genres`, works when only children exist, and never matches
+  `musical` (the match needs a `/` boundary). `results.renamed_tags` lists every tag it
+  actually touched with its file count.
+- **`lint` exits 1 when errors are found**, which is what makes it usable as a CI gate;
+  `--strict` promotes the schema's missing-`type` and undeclared-property warnings and HYALO003/004/006/007/008 to errors (a HYALO rule keeps an explicitly configured severity).
+- **Every link carries a `kind`** (`--fields links`): `wikilink`, `embed` (`![[…]]`),
+  `markdown`, `external` (any `scheme:` URI — `https:`, `obsidian://`, `mailto:`, `file://`)
+  or `attachment` (resolved to a non-`.md` vault file: an image, a PDF, an Obsidian `.base`).
+  `![alt](img.png)` is an embed too (DEC-297), so a missing image is visible. A same-file anchor
+  (`[[#H]]`, `[text](#frag)`) keeps the syntax it was written in — an anchor-only *markdown*
+  link is `kind: "markdown"` and carries its link text.
+  `external` and `attachment` are **never broken** — they stay out of `find --broken-links`,
+  `summary.links.broken` and HYALO006, and are not graph edges for `--orphan` / `--dead-end`.
+  So bucket broken links with
+  `select(((.kind == "external" or .kind == "attachment") | not) and ((.path == null and (.out_of_vault | not)) or .broken_anchor))`.
+- **A bare `[[alias]]` is broken by default, and `links fix` repairs it** (DEC-308, amends
+  DEC-296): Obsidian does not resolve a hand-typed `[[Leah]]` — aliases feed its link
+  *suggester*, which writes `[[Leah Ferguson|Leah]]` — so `[links] aliases` defaults to
+  **false** and such a link counts in `summary.links.broken`, `--broken-links` and HYALO006.
+  It still carries `via: "alias"` (text: `(unresolved) (via alias)`), marking it broken **but
+  exactly fixable**: `links fix` puts the suggester's own rewrite in an `alias_fixes` /
+  `alias_fix_plans` bucket — strategy `Alias`, confidence 1.0, applied by plain `--apply`,
+  never fuzzy. A label survives (`[[Leah|boss]]` → `[[Leah Ferguson|boss]]`); an embed or
+  markdown form rewrites the target only. Set `[links] aliases = true` (Alias Linker plugin)
+  and `[[Leah]]` resolves instead, case-folded, with a filename or path always winning. In
+  either mode an ambiguous *stem* is never tie-broken by an alias, and an alias claimed by two
+  notes is ambiguous — `links fix` lists the `candidates` and HYALO006 says "ambiguous
+  wikilink … matches 2 candidates". `hyalo config --jq '.results.links.aliases'` reports it.
+- **Link resolution folds case on every platform** (DEC-267), so `[[AidenLx]]` resolves to
+  `People/aidenlx.md` whatever the filesystem does. Opt out with `[links] case_insensitive =
+  "false"`. `links fix --case-insensitive` no longer changes what resolves; it only hides the
+  cosmetic `link-case-mismatch` rewrite plans. `hyalo config --jq
+  '.results.links.case_insensitive'` reports the effective mode. `false` disables hyalo's
+  case-folding index only: the literal path probe that runs first belongs to the filesystem, so
+  on a case-insensitive volume the link still resolves — to the canonical on-disk path.
+  Exact-match resolution is guaranteed only on a case-sensitive filesystem.
+- **A `site_prefix` link is never a case mismatch** (DEC-295): a site-absolute target carrying
+  the configured prefix (`/en-US/docs/Web/CSS/Guides/Anchor_positioning`) is written in the
+  site's own URL convention, not the on-disk folder casing, so `links fix` produces no case plan
+  for it — on a copy of MDN's CSS tree that rule had proposed 5096 rewrites across 1049 files.
+  Broken site-absolute links are still fixed, and every rewrite **keeps the incoming form**: a
+  directory link stays a directory link (trailing slash included), an authored `.md` stays
+  `.md`, and neither `/index` nor `.md` is appended to a form that lacked it.
+- **A dead `#anchor` that prefixes exactly one heading gets a `suggested_fragment`** (DEC-268):
+  `[[decision-log#DEC-068]]` reports `"DEC-068: Snapshot index format"` as the text to write.
+  Reported, never applied — an ambiguous prefix suggests nothing; a fragment covering the whole
+  heading is suggested (iter-275).
+- **`-`, `_` and a space are one word separator when an anchor RESOLVES** (DEC-309, amends
+  DEC-268/DEC-298): `#Browser_compatibility` resolves to `## Browser compatibility` outright,
+  which took MDN's broken-anchor count from 10 929 to 529. A nested heading path
+  `[[note#Heading One#Sub Two]]` resolves by walking the outline (DEC-311) — the second segment
+  must sit under the first, so a heading that exists elsewhere is still a broken anchor.
+- **Wikilink targets are trimmed, and `./` is canonical** (DEC-310): `[[ a ]]`, `[[a ]]`,
+  `[[a #Heading]]` and `[[./a]]` all report `path: "a.md"`; `target` keeps the written text.
+- **`links fix` reports the string it will write** (iter-272): every plan carries
+  `emitted_target` beside the vault-relative `new_target`, filled by the same planning pass in
+  `--dry-run` and `--apply`, so a preview is byte-accurate about what lands on disk. Since
+  iter-277 that includes the *below-floor* entries in `fuzzy_fixes`, which are the ones a
+  reader inspects before opting in.
+- **One graph, one answer** (DEC-318, iter-277): `summary.orphans` / `summary.dead_ends` equal
+  `find --orphan --count` / `find --dead-end --count`. An external URI, a same-file anchor and
+  any target with an explicit non-`.md` extension are not note-graph edges — a *broken*
+  `![[missing.png]]` included, since resolution never crosses an explicit extension. It is
+  still a broken link and still reported by `find --broken-links`.
+- **A contested fuzzy match is damped below the floor** (DEC-319, iter-277): a winner that
+  beats its runner-up by only a narrow margin has its confidence scaled down, so it is
+  reported in `fuzzy_fixes` for review rather than written by `--apply-fuzzy`. A unique match
+  keeps its score. `links fix`'s `broken_anchors` is always the count `find --broken-links`
+  computes (it used to be a hard-coded 0 whenever any target was broken); `null` still means
+  "could not check". A winner the scorer rates as an **exact** match (1.0) is exempt from the
+  damping (iter-279): a perfect match is not a guess, and a real 1.0-vs-1.0 tie is declined
+  outright anyway.
+- **Near-neighbour stems are scored, not damped** (DEC-324, iter-279): DEC-319's margin cannot
+  reach a wrong candidate whose runner-up is absent or far away, so the *basename* score itself
+  tightened three ways. camelCase is a word boundary, so `CatMuse` is `["cat", "muse"]` and
+  `[[Cat]]` is a name missing a word (0.867 → 0.481). A token pair clears the 0.85 floor on
+  plain **Jaro**, not Jaro-Winkler — a shared given name or vendor prefix may sharpen a match
+  but never create one, so `paulbricman` no longer matches `paultreanor` — unless one token is
+  a prefix of the other (`get` in `getting`, which still matches; see DEC-326 for how much of
+  a prefix that takes). And a token left entirely
+  unmatched costs its share of the two names' characters, so `obsidian-floating-toc-plugin`
+  against `obsidian-plugin-toc` falls 0.857 → 0.694. The character charge applies to the
+  basename only: a directory reorganisation renames whole levels by design, and charging it
+  there took 828 correct GitHub Docs relocations below the floor. Consequence to know: a
+  basename that **gains a whole word** is now below the floor (`decision-log` →
+  `decision-log-archive` is 0.607) — still reported in `fuzzy_fixes`, applied with
+  `--min-confidence 0.5`.
+- **The candidacy gate reads a stem the same way the scorer does** (DEC-325, iter-280): a
+  candidate only gets scored if it first clears `--threshold` on a cheap Jaro-Winkler
+  prefilter, and that prefilter compared the raw, case-sensitive stems — so a pair the scorer
+  rates a perfect 1.0 never reached it. `[[my-long-note]]` never shortlisted `MyLongNote.md`
+  (raw 0.53), `[[html-parser]]` never shortlisted `HTMLParser.md` (0.45): an Obsidian vault
+  naming notes in prose case could not be repaired from a slug-spelled link at all. Both sides
+  are now normalised before the comparison — split into words (camelCase included), lowercased,
+  rejoined with `-` — so `[[my-long-note]]` fixes to `MyLongNote.md` at 1.0 and
+  `--apply-fuzzy` writes it. A plain lowercase-hyphen slug is its own normal form byte for
+  byte, so a documentation vault sees nothing change: GitHub Docs (5,476 fuzzy proposals) and
+  MDN produce byte-identical `links fix` output at the same wall time. What a wider gate does
+  expose is the scorer as it stands. DEC-326 (iter-281) closed the exposed `[[Mathjax]]` →
+  `mathpad.md` false match: a basename prefix must exceed twice its leftover in the shorter
+  token. Directory overlap deliberately uses a looser rule (DEC-329, iter-282): the prefix
+  must outweigh the leftover, so `management`/`managing` qualifies. Both features still need
+  0.85 on Jaro-Winkler. The SAML directory relocation returns from 0.795 to 0.804, above the
+  default apply floor, while basename `Mathjax`/`mathpad` stays closed.
+- **`links fix`'s two site-prefix warnings count the same set** (iter-277), and the
+  "stripped 0 of N" one says "derived from the directory name" when nothing configured the
+  prefix it is blaming.
+- **Autolinks are inventoried** (iter-277): `<https://…>` and `<obsidian://…>` appear in
+  `--fields links` with `kind: "external"`, so an external-target histogram is complete. A
+  bare URL in prose is deliberately not inventoried — it carries no link syntax.
+- **Link-kind histogram, and missing images** — no flag, two `--jq` recipes:
+  `hyalo find --fields links --limit 0 --jq '[.results[].links[].kind] | group_by(.) | map({kind: .[0], n: length})'`
+  and
+  `hyalo find --fields links --limit 0 --jq '.results[] as $f | $f.links[] | select(.kind == "embed" and .path == null) | "\($f.file):\($f.line) \(.target)"'`
+- **`find --broken-links --format text` prints only the broken links** of each matched file
+  (iter-277). JSON is unchanged: it carries every link with its own `path` / `broken_anchor`
+  verdict.
+- **A bulk write phase is durable per directory, not per file** (DEC-317, iter-277):
+  `lint --fix`, `mv`, `links fix --apply`, `set`/`append`/`remove --glob`,
+  `properties rename` and `tags rename` still replace every file atomically, but a phase over
+  8 files fsyncs each touched directory once at the end rather than every file before its
+  rename — the Obsidian Hub's `lint --fix` went from 48.1 s to 2.35 s. Past a few hundred
+  files the phase reports progress on stderr; `-q` silences it.
+- **`config` reports a broken config rather than failing.** `results.malformed` /
+  `results.parse_error` mean every other value shown is a built-in default.
+- **`views run <name>` is exactly `find --view <name>`** — same merge rules, same output.
+- **Anchor fix writes the right fragment form** (DEC-351, iter-311): a wikilink anchor fix gets
+  the heading TEXT (`[[note#3. Deploy Steps]]`), a markdown anchor fix keeps the GFM slug
+  (`note.md#3-deploy-steps`) — Obsidian only matches a wikilink fragment against heading text,
+  never a slug. `links fix` and `find --broken-links` share one anchor-suggestion chooser; a
+  deferred anchor fix carries that `suggested_fragment`, and the `Fixable:` text line counts
+  anchor fixes too, so it cannot read 0 next to an "Apply N fixes" hint.
+- **A fragment also resolves against an explicit HTML anchor** (DEC-353, iter-311):
+  `<a id="x">`, `<a name="x">`, `<h1 id="x">`…`<h6 id="x">` are valid targets, matched
+  byte-for-byte (case-sensitive) against the id/name value, independent of any ATX heading.
+  `find --broken-links`, HYALO008 and `links fix` all take the combined check.
+- **`mv` rewrites bare attachment/embed links too** (DEC-352, iter-311): `[img](img.png)`,
+  `![embed](img.png)` and `[cfg](.gitignore)` are rebased on a cross-directory move exactly
+  like the `.md` sibling, when they resolve to a real file. The vault-wide bare-attachment
+  read-side fallback is unchanged — that is genuine Obsidian semantics, not a bug.
+- **Wikilink resolution folds Unicode composition** (DEC-354, iter-311): `[[Café NFD]]`
+  (precomposed) resolves a file named with decomposed accents and vice versa, matching
+  Obsidian; `mv`/`links fix` propose no rewrite for a target differing only in composition.
+- **A site-absolute bare `/` resolves to the vault root** (iter-311): `[x](/)` resolves to
+  `index.md` when it exists, consistent with `/dir` resolving to `dir/index.md`.
+- **`links fix`'s text rendering shows the truthful write** (iter-311): case-mismatch,
+  relocation, fuzzy and certain-fix text lines show `emitted_target`, not the vault-relative
+  `new_target` a wikilink write never puts on disk verbatim (a wikilink always drops `.md`).
+- **`--apply-fuzzy` without `--apply` never claims a write** (iter-311): `fuzzy_applied` is
+  `false` on every dry run; the text distinguishes "never opted in — pass --apply-fuzzy" from
+  "opted in but this is a dry run — pass --apply". A `[[<placeholder>]]` angle-bracket target
+  joins the `templated` bucket, never offered as a fuzzy candidate.
+
+## Schema & Lint
+
+`hyalo lint` runs two passes in one invocation:
+
+1. **Frontmatter** — validates against the `[schema]` block in `.hyalo.toml`. No-op when no schema is configured.
+2. **Markdown body** — stock mdbook-lint rules (MD001..MD060, with gaps — `hyalo lint-rules list` has the set) plus the HYALO native rules:
+   - **HYALO001** — bare `[]` should be `- [ ]` (autofixable)
+   - **HYALO002** — `status: completed` requires all task checkboxes ticked (fires only when `[schema.types.*].properties.status` is declared as an enum containing `"completed"`)
+   - **HYALO003** — a well-known date key (`date`, `created`, `modified`, `updated`) holding a non-`YYYY-MM-DD` string; needs no schema
+   - **HYALO004** — a schema-declared `datetime` / `datetime-tz` property holding an invalid datetime
+   - **HYALO006** / **HYALO008** — broken link target / broken heading anchor; **HYALO007** — a list or map `title`
+   - HYALO003, 004, 006, 007 and 008 warn by default; `--strict` promotes them to errors unless their severity is configured explicitly (the schema's missing-type and undeclared-property warnings always become errors)
+   - **HYALO005** — frontmatter that cannot be parsed (invalid YAML, duplicate keys, oversized scalar). Error by default and the file still counts in `files_checked`, so a corrupt file fails CI instead of vanishing silently. Severity is configurable via `[lint.rules.HYALO005]` but no profile downgrades it.
+
+```bash
+hyalo lint                               # whole vault, summary mode
+hyalo lint iterations/iter-42.md         # one file
+hyalo lint --fix --dry-run               # preview autofixes
+hyalo lint --fix                         # apply
+```
+
+**Obsidian grammar (autofix safety).** Five stock rules are narrowed so `--fix` cannot
+corrupt a vault; `hyalo lint-rules show <ID>` states each deviation:
+
+- **MD018** exempts tag lines — a single `#` plus a tag token is `#todo`, not a heading
+  missing its space. `##Heading`, `#1`, and a capitalized word followed by prose
+  (`#Heading typo`) still fire.
+- **MD034** ignores URLs that already sit inside link markup (link/image destination,
+  autolink, wikilink, reference definition).
+- **MD042** accepts an image as link text (`[![](img.png)](https://…)`).
+- **MD001** reports a skipped heading level but is **not autofixable**: renumbering a
+  deliberate `######` caption rewrites authored structure. Silence the warning with
+  `hyalo lint-rules set MD001 --enabled false`.
+- **MD047** skips a file with no body at all: a frontmatter-only note ends with the newline
+  that closes its `---` block, so there is no line left to terminate.
+
+**Code blocks are content, not defects (iter-271).** A rule that lints prose does not fire on
+a line inside a fenced (```` ``` ```` / `~~~`) or indented code block, or inside an HTML
+comment — MD019 used to rewrite `#   three` inside a ```` ```text ```` sample. The exceptions
+are the rules whose subject *is* the block: **MD031/MD040/MD046/MD048** (the fence itself),
+**MD047** (the file's final newline) and **MD010** (a hard tab in a sample is a real
+portability problem, as markdownlint also holds). **MD031** additionally stays quiet at the
+opener of a fence that never closes, where its "blank line after" would land inside the sample.
+
+**Suppression comments (DEC-294).** markdownlint's own directives are honoured, taking rule
+ids or aliases, case-insensitively; with no ids a directive covers every rule, HYALO ones
+included:
+
+```markdown
+<!-- markdownlint-disable no-hard-tabs -->
+	a sample whose point is the tab
+<!-- markdownlint-enable no-hard-tabs -->
+
+<!-- markdownlint-disable-next-line MD009 -->
+a line that keeps its trailing spaces   
+```
+
+`-disable-line`, `-disable-file` and `-enable-file` work too; `-capture`/`-restore` are not
+supported, and MDN's `-nolint` info-string suffix is not markdownlint syntax and is ignored.
+
+When two fixes want the same bytes one is deferred and reported as a conflict;
+`--fix` text output names it as `conflict <RULE> line <N>: range overlap with <RULE>`
+(first 20 per file, `--detailed` for all).
+
+Use `hyalo lint --help` for narrowing flags (`--rule`, `--rule-prefix`, `--detailed`, `--max-per-rule`, `--fix-rule`, etc.). The snapshot index does **not** accelerate the body pass.
+
+**Strict mode:** `hyalo lint --strict` (or `[lint] strict = true` in `.hyalo.toml`)
+promotes the "no `type` property" and "undeclared property in frontmatter" warnings,
+HYALO003/004/006/007/008 (date, datetime, broken link, non-scalar title, broken anchor) to
+errors, so lint exits non-zero on those cases; a HYALO rule keeps an explicitly configured
+severity, the SCHEMA warnings always become errors. Useful in CI and `/hyalo-tidy` to fail
+fast on schema drift.
+
+**GitHub PR annotations:** `hyalo lint --strict --format github` (lint-only) emits
+`::error`/`::warning file=…,line=…,title=<RULE_ID>::<message>` GitHub Actions workflow
+commands so violations render as inline PR annotations, plus a one-line summary. Paths are
+repo-root-relative, so run it from the repository root. Composes with `--files-from -` for a
+diff-aware variant. Annotations are never truncated (the display caps are lifted for github).
+Under `--fix --dry-run --format github`, would-be-fixed violations become `::notice` with a
+`[fixable]` title prefix and the summary reads `N fixable, M remaining`. Other subcommands
+reject `--format github`.
+
+**Skip visibility & unlimited output:** with `--files-from`, dropped input paths surface as a
+`note:` line (`--format text`, stderr) or a `::notice::` (`--format github`), so a diff-scoped
+run always shows what it skipped without `jq`. `--limit 0` on lint means **unlimited** (lift
+the file cap) — the `errors`/exit code always reflect the whole vault, never just the shown slice.
+
+**Tune which rules run with `hyalo lint-rules`** (list / show / set / remove). Reach for it when a rule is too noisy on your KB style — disable it or change its severity rather than living with the warnings:
+
+```bash
+hyalo lint-rules list                          # see what's enabled
+hyalo lint-rules set MD013 --enabled false     # turn one off
+hyalo lint-rules set HYALO001 --severity error # promote to error
+```
+
+Lint also warns about comma-joined tags (e.g. `tags: ["cli,ux"]` instead of two list
+items); `--fix` splits them into proper list entries automatically.
+
+Lint additionally validates saved views in `.hyalo.toml`: if a `[views.*]` entry only
+sets `fields` (which controls output columns, not which files match), lint flags it so
+you can add a real filter like `orphan = true` or `tag = [...]` (saved views
+store tags under the `tag` key).
+
+Exit codes: 0 = clean, 1 = errors found, 2 = internal error.
+
+`hyalo lint --rule SCHEMA` (or `--rule-prefix SCHEMA`) runs the frontmatter/schema pass alone —
+the id its findings are already reported under, and what `summary`'s schema hint points at.
+`lint-rules list`/`show` carry a `SCHEMA` row marked `configurable: false`: its severity comes
+from the schema, so change it with `hyalo types set`, never `lint-rules set`. `lint --fix` JSON
+also reports `rules_fixed: {rule: n}` beside `rules_fired`, and a truncated text listing says
+`pass --limit 0 for the full list`. An **empty** `--files-from` list examines nothing and still
+exits 0, so it warns on stderr (`-q` does not silence it): in a gate, "no input" and "no
+findings" must not look alike.
+
+**Schema format:**
+
+```toml
+[schema.default]
+required = ["title"]
+
+[schema.types.iteration]
+required = ["title", "date", "status", "branch", "tags"]
+
+[schema.types.iteration.properties.status]
+type = "enum"
+values = ["planned", "in-progress", "completed", "superseded"]
+
+[schema.types.iteration.properties.date]
+type = "date"
+
+[schema.types.iteration.properties.branch]
+type = "string"
+pattern = "^iter-\\d+/"
+```
+
+Property types: `string` (optional `pattern` regex), `date` (YYYY-MM-DD), `datetime` (naive YYYY-MM-DDThh:mm:ss, no offset), `datetime-tz` (timezone-aware RFC 3339: YYYY-MM-DDThh:mm:ss plus `Z` or `±hh:mm`, e.g. `2026-05-28T22:44:47+00:00`), `number`, `boolean`, `list`, `string-list` (optional `item_pattern` regex), `object-list` (list of maps; see below), `enum` (with `values`). `datetime` and `datetime-tz` are disjoint — a naive value never satisfies `datetime-tz` and vice-versa.
+
+**`object-list`** describes a list whose items must all be YAML maps, with three flat per-key keys: `required-keys` (present in every item), `allowed-keys` (the complete key set; omit to allow extras), and a `key-patterns` table mapping key → regex applied to that key's scalar value:
+
+```toml
+[schema.types.memory.properties.sources]
+type = "object-list"
+required-keys = ["ref"]
+allowed-keys = ["ref", "commit", "version", "updated", "read"]
+
+[schema.types.memory.properties.sources.key-patterns]
+ref = "^(github|jira|slack|decision):|^https?://"
+commit = "^[0-9a-f]{7,40}$"
+```
+
+Lint reports every violating item independently, naming the 0-based item index and the key (`property "sources" item 1: unknown key "rev" (allowed: ...)`); a leftover plain-string item gets a `did you mean \`- ref: <value>\`?` fix-it hint, because `find --property sources.ref=…` skips scalar items and would otherwise never report it. Every `key-patterns` regex is compiled when `.hyalo.toml` loads, so a bad regex is a `schema/malformed` error, not a per-file message. `object-list` is **config-only**: `types set --property-type` rejects it (as it does `string-list`) and `--fix` has no fixer, so its violations report `autofixable: false`.
+
+Reserved-file exemption: `[schema] exempt = ["**/index.md", "**/log.md"]` binds matching files to no schema (they skip missing-`type`, required-property, and undeclared-property checks). Globs are vault-relative and cross-platform.
+
+**`required` empty-value semantics:** a required property whose value is YAML null (`tags: ~`) or an empty array (`tags: []`) is an error (`required property "tags" must not be empty`). Vacuous values convey no information for a required field, so they're treated as semantically equivalent to absent. This fires regardless of declared constraint type. Atomic-typed required properties (`string`, `date`, `number`, ...) only need to be present — an empty string or zero still satisfies them. So `required = ["tags"]` + `type = "list"` is the idiomatic way to enforce non-empty tags; no separate `min_items` knob exists.
+
+When no `[schema]` block exists, lint exits 0 with zero violations (backwards compatible).
+
+`hyalo summary` includes a `schema` field with error/warning counts when a schema is configured.
+
+**Validate on write:** `hyalo set` and `hyalo append` accept `--validate` to reject values
+that would fail lint. Enable globally via `[schema] validate_on_write = true` in `.hyalo.toml`.
+
+**A `--validate` write refuses when the schema itself is broken (DEC-290).** If `[schema]`
+is present but cannot be loaded — an uncompilable regex, a key on the wrong property type —
+the schema falls back to empty, so validating against it would reject nothing. `set` /
+`append` therefore exit 1 and write nothing whenever validation was asked for (`--validate`
+or `validate_on_write`), `--dry-run` included. The same write *without* `--validate` still
+proceeds, and `mv`, `remove`, `task toggle` and every read are unaffected — fix `[schema]`
+(`hyalo lint` reports it as `schema/malformed`) or drop `--validate` for that one write.
+
+**Ignore known-bad files:** add `[lint] ignore = ["legacy/known-bad.md", "vendor/**/*.md"]`
+to `.hyalo.toml` to skip listed files during `hyalo lint` (plain strings match literally;
+glob meta-characters use `--glob` semantics). Read-only commands still count them among the
+files they skipped.
+
+**Naming a file overrides the ignore list (DEC-284).** A path given positionally, with
+`--file`, or through `--files-from` is linted even when `[lint] ignore` matches it — naming a
+file is a stronger signal than a glob written once in `.hyalo.toml`. `--glob` and the bare
+vault sweep keep honouring the list. So `git diff --name-only | hyalo lint --files-from -`
+lints changed ignored files (what a diff gate wants); select paths with `--glob` when you
+*do* want the ignore list applied.
+
+**Exclude a tree from the whole tool:** `[lint] ignore` narrows one command. `[scan] exclude =
+["Templates/**"]` is the vault-wide knob — hyalo's analogue of Obsidian's "Excluded files".
+Matching files are dropped at discovery, so `find`, `summary`, `tags`, `properties`, `lint`,
+`links *`, `mv`, `backlinks`, `create-index`, `views`, `types`, `okf` and `madr` all see the
+same vault, and `--index` reads drop them too (no rebuild needed after changing the list).
+Naming an excluded file explicitly (`--file Templates/x.md`) is **refused** with the matching
+glob, never silently skipped. `hyalo config` reports the effective list under
+`results.scan.exclude`.
+Discovery also honours `.gitignore`, `.ignore`, `.git/info/exclude` and global excludes the way
+Git does (DEC-342, amended iter-314) — `.gitignore` only inside a git repository (a `.git`
+directory at or above the vault), like ripgrep; `.ignore` applies either way: an ignored note is absent
+from unscoped reads and counted under `summary`'s `results.files.excluded`, but a path you
+name (`--file`, positional, `--files-from`) is still returned under every `--fields`.
+
+**A broken `.hyalo.toml` fails a gate:** `lint`, `find --strict` and `views run` exit 1 when the
+config does not parse, because their exit code is a verdict and a verdict computed without the
+config's `[lint] ignore` and schemas is not the one the vault asked for. An unloadable `[schema]`
+alone (the rest of the config parses fine) refuses the same three gates — plain `lint` included
+(DEC-362, iter-314). Other reads, and a plain write without `--validate`, still answer/proceed,
+with a warning `-q` cannot suppress.
+
+`hyalo lint --count` returns just the number of files with violations.
+
+## Types — manage type schemas
+
+`hyalo types` manages `[schema.types.*]` entries in `.hyalo.toml` without hand-editing TOML. All mutations preserve existing comments and formatting.
+
+```bash
+hyalo types list                                     # list all defined types
+hyalo types show iteration                           # full merged schema for a type
+hyalo types remove iteration                         # remove a type entry
+hyalo types set iteration --required title,date      # create or update type (upsert)
+hyalo types set iteration --default "status=planned" # set default (auto-applies to vault files)
+hyalo types set iteration --property-type "date=date"
+hyalo types set iteration --property-values "status=planned,in-progress,completed"
+hyalo types set iteration --filename-template "iterations/iteration-{n}-{slug}.md"
+hyalo types set iteration --required branch --dry-run  # preview without writing
+```
+
+`types set` is an upsert — it auto-creates the type if it doesn't exist. When adding `--required` fields, a property constraint is auto-created for fields without an explicit one; its **type is inferred from the values the vault already holds** for that key on files of this type (`string` when there are none), so declaring a list-valued property required does not instantly make every file violate it.
+
+**How a file binds to a type** (DEC-281): `type:` may be a plain string, a `[[Wikilink]]` (bare or quoted; an alias or a path resolves to the note name), or a **one-element list** of either — the shape Obsidian's property editor writes for a link-typed property. `type: ["[[Authors]]"]`, `type: "[[Authors]]"` and `type: Authors` all bind to `Authors`. A multi-element list names no type and `lint` reports it.
+
+When `--default` is used, hyalo applies the default to all vault files of that type missing that property.
+
+**Scaffolding a file from a type:** `hyalo new --type <name> --file <path>` writes the type's
+required properties and required sections. `--dry-run` prints the scaffold (JSON adds
+`content`) and writes nothing — not even the parent directory. The placeholders are
+deliberately un-fillable rather than plausible (DEC-285): a required `string` gets `TBD`, and
+a required `number` / `date` / `datetime` / `boolean` with no schema `default` is written
+**empty** (`rating:`), which `hyalo lint` reports as "required property must not be empty".
+A `default` declared in the schema (including `$today`) is emitted verbatim. `new` writes
+only what the schema declares — chain `hyalo set` for anything else.
+
+```bash
+hyalo new --type iteration --file iterations/iteration-99-x.md --dry-run   # preview
+hyalo new --type note --file notes/draft.md && hyalo set notes/draft.md --property status=draft
+```
+
+## Views — saved find queries
+
+Views save frequently-used filter combinations under a name in `.hyalo.toml`.
+They compose: CLI flags passed alongside `--view` extend or override the saved filters.
+
+**Before constructing a complex `hyalo find`, check if a matching view exists:**
+```bash
+hyalo views list
+```
+
+**If you run the same multi-filter find command 3+ times, save it as a view:**
+```bash
+hyalo views set stale-iterations --property type=iteration --property status=in-progress
+hyalo views set perf-research "performance" --tag research   # BM25 pattern + filter
+hyalo views set orphans --orphan                             # files with no inbound/outbound links
+hyalo views set dead-ends --dead-end                         # files with inbound but no outbound links
+hyalo find --view stale-iterations                    # reuse later
+hyalo find --view stale-iterations --limit 5          # compose with overrides
+hyalo views run stale-iterations --limit 5            # same query, view-first spelling
+hyalo views run perf-research "cache eviction"        # positional PATTERN overrides the saved one
+```
+
+hyalo suggests saving non-trivial queries as views in its hint output — follow those hints.
+
+**Manage views:**
+- `hyalo views list` — show all saved views
+- `hyalo views set <name> [filters...]` — create or update a view
+- `hyalo views remove <name>` — delete a view
+- `hyalo find --view <name> [extra filters...]` — use a view, optionally with overrides
+- `hyalo views run <name> [PATTERN] [extra filters...]` — the same query, spelled view-first
+
+## Output format
+
+Output format is auto-detected — `text` for interactive terminals, `json` when piped.
+Pass `--format text` or `--format json` to override, or set a default in `.hyalo.toml`
+(`format = "text"` / `format = "json"`). An explicit `--format` flag always wins.
+
+`text` is the compact, low-token format designed for LLM consumption — less noise than
+JSON, fewer tokens. Use it when orienting yourself or scanning results.
+
+**`init` and `deinit` are the exception to auto-detection.** Their summary is a human
+progress report, so it stays text even when piped; pass `--format json` (or `--jq`) to get
+`{results: {command, root, actions: [{action, target, detail?}], notes?}, hints, dir}`
+instead. `--dir` scopes them like every other command: naming a tree outside the current
+directory initializes — or cleans — *that* tree, not this one.
+
+**`--format text` and `--jq` are mutually exclusive.** `--jq` operates on JSON, so it
+requires JSON output. Piping naturally produces JSON, so `--jq` works without an
+explicit flag in most contexts. If you need to filter/reshape output, just pipe through
+`--jq`. If you want a readable overview, rely on the auto-default (or pass
+`--format text` explicitly when piping to a pager).
+
+## The backlinks command
+
+Use `hyalo backlinks <path>` to find all files that link to a given file (reverse link
+lookup). This builds an in-memory link graph by scanning all `.md` files in the directory,
+detecting both `[[wikilinks]]` and `[markdown](links)` in body content *and*
+`[[wikilinks]]` in **every** frontmatter value — a scalar (`type: "[[Author]]"`), a
+list (`categories: ["[[Books]]"]`), or a nested map, at any depth. Each such entry
+comes back with `kind: "frontmatter"`, the `property` it was written under, and the
+frontmatter line it sits on. Set `[links] frontmatter = false` in `.hyalo.toml` to
+narrow the scan back to the four legacy link properties (`related`, `depends-on`,
+`supersedes`, `superseded-by`), or `[links] frontmatter_properties = [...]` to name
+your own list. The file can be passed positionally or with `--file`.
+
+```bash
+# Which files reference iteration-37?
+hyalo backlinks iterations/iteration-37-bulk-mutations.md
+
+# JSON output for programmatic use
+hyalo backlinks iterations/iteration-37-bulk-mutations.md --format json
+```
+
+Supports `--format text` (compact), `--format json`, and `--limit N` (default: 50,
+use `--limit 0` for all). Format auto-detects when not passed. Useful for impact
+analysis (what depends on this file?), finding orphan pages, and navigating link
+structure.
+
+## Default output limits
+
+Capped commands (`find`, `lint`, `tags summary`, `properties summary`, `backlinks`) return at
+most **50 results** by default to avoid flooding the context window. When results are truncated,
+output shows "showing N of M matches" and a hint to get all results. Any command whose JSON
+`results` is a bare array — `find`, `properties`, `tags`, `terms`, `task toggle`/`task set` —
+also carries `truncated: true` in that case (omitted — never `false` — when nothing was cut), so
+a script can detect a sampled answer without comparing `results | length` to `total` itself; a
+command whose `results` is an object instead (`backlinks`, `lint`) never carries it. `--jq` and
+`--count` already lift the default cap on their own (an explicit `--limit` still caps even under
+them), so `truncated` matters mainly under plain `--format json`.
+
+`types list`, `views list` and `lint-rules list` emit a `total` (so `--count` works) but are
+*not* capped and reject `--limit` — they enumerate small fixed catalogs and always return
+everything.
+
+- `--limit N` — override the default (e.g. `--limit 20` for fewer, `--limit 200` for more)
+- `--limit 0` — unlimited output (returns everything)
+- `--count` — just get the total count without any results
+
+The default can be changed in `.hyalo.toml`:
+```toml
+default_limit = 100   # 0 = unlimited
+```
+
+## Snapshot index — ALWAYS create for vaults with 500+ files
+
+**For any vault with more than ~500 files, ALWAYS create a snapshot index before running
+queries.** The index makes property/tag queries 10-15x faster (e.g. ~80ms vs ~1.5s on a
+14K-file vault). Without it, every query scans every file from disk.
+
+**Rule of thumb:** run `hyalo summary` first. If it reports more than 500 files,
+immediately create an index before proceeding with any analysis.
+
+```bash
+# Step 1: Check vault size
+hyalo summary
+
+# Step 2: Create index if >500 files (one scan, reused by all subsequent queries)
+hyalo create-index
+
+# Step 3: Use --index on ALL subsequent commands (defaults to .hyalo-index in vault dir)
+hyalo find --property status=in-progress --index
+hyalo summary --index
+hyalo tags --index          # also `tags summary --index`
+hyalo properties --index    # also `properties summary --index`
+hyalo backlinks some-note.md --index
+
+# Mutations also work with --index — they patch the index after each write
+hyalo set note.md --property status=completed --index
+hyalo task toggle note.md --line 5 --index
+
+# Drop the index when done
+hyalo drop-index
+```
+
+The index is **ephemeral** — create it, use it, drop it within the same session. Never persist
+it across sessions.
+
+**Index-aware mutations:** all mutation commands (`set`, `remove`, `append`, `task`, `mv`,
+`tags rename`, `properties rename`) support `--index`. They still read/write individual files
+on disk, but after each mutation they patch the in-memory index entry and save the snapshot
+back — keeping it current for subsequent queries. This is safe as long as **no external tool
+modifies files in the vault** while the index is active. If only hyalo touches the files,
+the index stays consistent across interleaved reads and writes.
+
+Re-running `hyalo create-index` is incremental: unchanged files (same size and mtime) are
+reused, only changed/new/removed ones are re-scanned (`reused`, `refreshed`, `removed`,
+`rebuilt` in the result); `--force` rebuilds from scratch and never loads the old snapshot
+first. A rerun that changed nothing at all — same entry count, frontmatter-skip list,
+`[scan] exclude`/gitignore counts, attachments, and a clean directory-mtime probe (a dirty
+one, even a directory that moved and moved back, forces a real write) — leaves the
+snapshot file untouched and reports `written: false`. An `--index` read of a drifted
+snapshot re-scans just the drifted files in memory and says so on stderr — it never writes
+the snapshot, so run `create-index` to persist. An older-format snapshot, or one built
+under a different `[search] code_blocks` than the current config (read straight from the
+snapshot header, never forcing a lazy BM25 decode), is refused with a warning naming both
+values (survives `-q`) and the run falls back to a disk scan; `hyalo summary --index`
+reports `index_format_version`, `code_blocks` and `source` ("index" or "disk") even on a
+refused snapshot.
