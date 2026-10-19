@@ -230,4 +230,3 @@ with "already published with other bytes" although the bytes were identical: npm
 `npm view … --json` as a one-element array, npm 11 as a string, and the script compared the
 array with the string. Fixed in `viewValue` (`scripts/npm-release-lib.mjs`, with tests);
 the published 0.1.0-alpha.0 is correct and needs nothing. The fix is in every later release.
-
