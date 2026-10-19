@@ -2,7 +2,14 @@
 	"name": "tab-mcp-example-calculator",
 	"private": true,
 	"type": "module",
+	"scripts": {
+		"start": "bun dev.ts"
+	},
 	"dependencies": {
 		"@ractive-ch/tab-mcp-client": "workspace:*"
+	},
+	"devDependencies": {
+		"@modelcontextprotocol/client": "2.3.1",
+		"@ractive-ch/tab-mcp": "workspace:*"
 	}
 }

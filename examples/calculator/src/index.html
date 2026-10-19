@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<title>Calculator · tab-mcp example</title>
+		<link rel="stylesheet" href="./style.css" />
+	</head>
+	<body>
+		<main>
+			<h1>Calculator</h1>
+			<p class="intro">
+				A tab-mcp example: connect your AI tool and it can use this
+				calculator while the tab is open.
+			</p>
+
+			<section class="calculator" aria-label="Calculator">
+				<output id="display" class="display" aria-live="polite" aria-atomic="true">
+					<span id="memory-flag" class="memory-flag" hidden title="A number is in memory">M</span>
+					<span id="display-value">0</span>
+				</output>
+				<div class="keys">
+					<button type="button" data-memory="clear" class="memory" aria-label="MC, memory clear">MC</button>
+					<button type="button" data-memory="recall" class="memory" aria-label="MR, memory recall">MR</button>
+					<button type="button" data-memory="add" class="memory" aria-label="M+, memory add">M+</button>
+					<button type="button" data-key="C" class="clear" aria-label="Clear">C</button>
+
+					<button type="button" data-key="7">7</button>
+					<button type="button" data-key="8">8</button>
+					<button type="button" data-key="9">9</button>
+					<button type="button" data-key="/" class="operator" aria-label="Divide">÷</button>
+
+					<button type="button" data-key="4">4</button>
+					<button type="button" data-key="5">5</button>
+					<button type="button" data-key="6">6</button>
+					<button type="button" data-key="*" class="operator" aria-label="Multiply">×</button>
+
+					<button type="button" data-key="1">1</button>
+					<button type="button" data-key="2">2</button>
+					<button type="button" data-key="3">3</button>
+					<button type="button" data-key="-" class="operator" aria-label="Subtract">−</button>
+
+					<button type="button" data-key="0">0</button>
+					<button type="button" data-key="." aria-label="Decimal point">.</button>
+					<button type="button" data-key="=" class="equals" aria-label="Equals">=</button>
+					<button type="button" data-key="+" class="operator" aria-label="Add">+</button>
+				</div>
+			</section>
+
+			<section class="ai" aria-labelledby="ai-title">
+				<h2 id="ai-title">AI access</h2>
+				<p id="ai-status" role="status">Off. No AI tool can use this page.</p>
+				<div class="ai-actions">
+					<button type="button" id="connect" class="primary">Connect your AI tool</button>
+					<button type="button" id="stop" hidden>Turn off AI access</button>
+				</div>
+				<div id="apps" hidden>
+					<h3>Connected apps</h3>
+					<ul id="app-list"></ul>
+				</div>
+				<p class="note">
+					Relay: <code id="relay-url">…</code>. The AI tool's requests go
+					through this relay to this tab; closing the tab stops them.
+				</p>
+			</section>
+		</main>
+		<script type="module" src="./main.ts"></script>
+	</body>
+</html>

@@ -1,0 +1,223 @@
+:root {
+	color-scheme: light dark;
+	--bg: #f6f7f9;
+	--fg: #1b1f24;
+	--muted: #4f5761;
+	--panel: #ffffff;
+	--border: #c9ced6;
+	--key: #eef0f3;
+	--key-fg: #1b1f24;
+	--operator: #dfe7f5;
+	--operator-fg: #123d7a;
+	--accent: #1f5fbf;
+	--accent-fg: #ffffff;
+	--danger: #a32020;
+	--display-bg: #1b1f24;
+	--display-fg: #f3f5f7;
+	--focus: #1f5fbf;
+	--tab-mcp-font: inherit;
+	--tab-mcp-color: var(--fg);
+	--tab-mcp-background: var(--panel);
+	--tab-mcp-border: 1px solid var(--border);
+	--tab-mcp-radius: 0.75rem;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #121417;
+		--fg: #e8eaed;
+		--muted: #a9b0b9;
+		--panel: #1c1f24;
+		--border: #3a4049;
+		--key: #2a2f36;
+		--key-fg: #e8eaed;
+		--operator: #24344d;
+		--operator-fg: #bcd4ff;
+		--accent: #6ea2ff;
+		--accent-fg: #0b1220;
+		--danger: #ff8a8a;
+		--display-bg: #050607;
+		--display-fg: #f3f5f7;
+		--focus: #8db6ff;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	font:
+		1rem / 1.5 system-ui,
+		-apple-system,
+		"Segoe UI",
+		sans-serif;
+}
+
+main {
+	max-width: 24rem;
+	margin: 0 auto;
+	padding: 1.5rem 1rem 3rem;
+}
+
+h1 {
+	margin: 0 0 0.25rem;
+	font-size: 1.75rem;
+}
+
+h2 {
+	margin: 0 0 0.5rem;
+	font-size: 1.15rem;
+}
+
+h3 {
+	margin: 1rem 0 0.25rem;
+	font-size: 1rem;
+}
+
+.intro,
+.note {
+	color: var(--muted);
+}
+
+.note {
+	font-size: 0.875rem;
+	overflow-wrap: anywhere;
+}
+
+.calculator,
+.ai {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 1rem;
+	padding: 1rem;
+	margin-top: 1rem;
+}
+
+.display {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	min-height: 4rem;
+	padding: 0.5rem 0.75rem;
+	border-radius: 0.5rem;
+	background: var(--display-bg);
+	color: var(--display-fg);
+	font:
+		2.25rem / 1 ui-monospace,
+		"SF Mono",
+		Menlo,
+		monospace;
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+}
+
+.memory-flag {
+	margin-right: auto;
+	font-size: 0.9rem;
+	opacity: 0.8;
+}
+
+.keys {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 0.5rem;
+	margin-top: 0.75rem;
+}
+
+button {
+	font: inherit;
+	color: var(--key-fg);
+	background: var(--key);
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	padding: 0.4rem 0.8rem;
+	cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+	filter: brightness(0.95);
+}
+
+button:focus-visible {
+	outline: 3px solid var(--focus);
+	outline-offset: 2px;
+}
+
+button:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.keys button {
+	min-height: 3.25rem;
+	font-size: 1.25rem;
+}
+
+.keys .memory {
+	font-size: 1rem;
+}
+
+.keys .operator {
+	background: var(--operator);
+	color: var(--operator-fg);
+}
+
+.keys .clear {
+	color: var(--danger);
+}
+
+.keys .equals,
+.primary {
+	background: var(--accent);
+	color: var(--accent-fg);
+	border-color: var(--accent);
+}
+
+.pressed {
+	animation: pressed 0.3s ease-out;
+}
+
+@keyframes pressed {
+	from {
+		box-shadow: 0 0 0 4px var(--focus);
+	}
+	to {
+		box-shadow: 0 0 0 0 transparent;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.pressed {
+		animation: none;
+	}
+}
+
+.ai-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+#app-list {
+	margin: 0;
+	padding-left: 1.25rem;
+}
+
+#app-list li {
+	margin: 0.25rem 0;
+	overflow-wrap: anywhere;
+}
+
+.disconnect {
+	font-size: 0.875rem;
+	padding: 0.15rem 0.6rem;
+}
+
+code {
+	font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
