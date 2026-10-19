@@ -7,7 +7,7 @@ tags:
   - iteration
   - oauth
   - relay
-timestamp: 2026-10-20T18:00:00+02:00
+timestamp: 2026-10-20T01:15:00+02:00
 ---
 
 # Iteration 3: OAuth authorization server with pairing

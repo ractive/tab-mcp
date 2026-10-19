@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-20T18:00:00+02:00
+timestamp: 2026-10-20T01:15:00+02:00
 ---
 
 # Security model and threat model

@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T18:00:00+02:00
+timestamp: 2026-10-20T01:15:00+02:00
 ---
 
 # Decision log

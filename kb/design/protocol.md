@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-20T18:00:00+02:00
+timestamp: 2026-10-20T01:15:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
