@@ -297,12 +297,17 @@ export function showConnectDialog(
 		code.textContent = current?.code ?? "";
 		codeLine.hidden = current === undefined;
 	};
+	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
+	apps.append(appsNote);
 	const renderGrants = () => {
+		const connected = mcp.state === "connected";
 		appList.replaceChildren(
 			...mcp.grants.map((grant) => {
-				const disconnect = button(doc, "Disconnect", () =>
-					mcp.revoke(grant.grantId),
-				);
+				const disconnect = button(doc, "Disconnect", () => {
+					if (!mcp.revoke(grant.grantId)) renderGrants();
+				});
+				// Only the relay can revoke, so only while connected.
+				disconnect.disabled = !connected;
 				return el(
 					doc,
 					"li",
@@ -312,15 +317,23 @@ export function showConnectDialog(
 				);
 			}),
 		);
+		appsNote.textContent = connected
+			? ""
+			: "To disconnect an app, connect this page again first.";
+		appsNote.hidden = connected;
 		apps.hidden = mcp.grants.length === 0;
 	};
 	const onDisconnected = () => {
 		status.textContent =
 			"Disconnected. AI tools can use this page again after you connect.";
 		renderSession(undefined);
+		renderGrants();
 		renderCode();
 	};
-	const onConnected = () => renderSession(mcp.session);
+	const onConnected = () => {
+		renderSession(mcp.session);
+		renderGrants();
+	};
 
 	mcp.addEventListener("pairingcode", renderCode);
 	mcp.addEventListener("grantschange", renderGrants);

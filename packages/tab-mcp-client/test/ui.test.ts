@@ -280,6 +280,11 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toContain(
 			"Disconnected",
 		);
+		const disconnect = byText(dialog, "Disconnect");
+		expect(disconnect.disabled).toBe(true);
+		expect(dialog.querySelector(".tab-mcp-apps")?.textContent).toContain(
+			"connect this page again",
+		);
 		expect(
 			(dialog.querySelector(".tab-mcp-address") as HTMLElement).hidden,
 		).toBe(true);

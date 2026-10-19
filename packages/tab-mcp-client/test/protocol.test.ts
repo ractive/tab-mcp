@@ -233,7 +233,7 @@ describe("grants", () => {
 			"g_1",
 			"g_2",
 		]);
-		t.revoke("g_1");
+		expect(t.revoke("g_1")).toBe(true);
 		expect(await relay.next("grant.revoke")).toEqual({
 			type: "grant.revoke",
 			grantId: "g_1",
@@ -243,6 +243,16 @@ describe("grants", () => {
 		expect((await removed).detail.grants.map((g) => g.grantId)).toEqual([
 			"g_2",
 		]);
+	});
+
+	test("revoke() reports false while not connected", async () => {
+		expect(t.revoke("g_1")).toBe(false);
+		relay.grants = [GRANT];
+		await t.connect();
+		const gone = nextEvent(t, "disconnected");
+		relay.close(4002);
+		await gone;
+		expect(t.revoke("g_1")).toBe(false);
 	});
 
 	test("a tool call names its client from the grants list", async () => {

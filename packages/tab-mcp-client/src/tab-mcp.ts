@@ -306,10 +306,13 @@ export class TabMcp extends EventTarget {
 		this.#setPairingCode(undefined);
 	}
 
-	/** Disconnect one AI app: its tokens stop working at once. */
-	revoke(grantId: string): void {
-		if (this.#state === "connected")
-			this.#connection?.send({ type: "grant.revoke", grantId });
+	/**
+	 * Disconnect one AI app: its tokens stop working at once. Works only while
+	 * connected (the relay does it); returns `false` when it could not be sent.
+	 */
+	revoke(grantId: string): boolean {
+		if (this.#state !== "connected") return false;
+		return this.#connection?.send({ type: "grant.revoke", grantId }) === true;
 	}
 
 	/**
