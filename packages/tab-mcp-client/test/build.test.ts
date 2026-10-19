@@ -98,9 +98,19 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"cdn/tab-mcp-client.min.js",
 		"LICENSE",
 		"AI_NOTICE",
+		"README.md",
+		"THIRD-PARTY-NOTICES.txt",
 	]) {
 		expect(await Bun.file(join(dist, file)).exists()).toBe(true);
 	}
+	// The CDN build bundles @cfworker/json-schema: the notice names the pinned version.
+	const deps = pkg["dependencies"] as Record<string, string>;
+	const notices = await Bun.file(join(dist, "THIRD-PARTY-NOTICES.txt")).text();
+	expect(notices).toContain(
+		`@cfworker/json-schema ${deps["@cfworker/json-schema"]}`,
+	);
+	expect(pkg["publishConfig"]).toEqual({ access: "public" });
+	expect(pkg["private"]).toBeUndefined();
 	const declarations = await Bun.file(join(dist, "index.d.ts")).text();
 	expect(declarations).not.toContain('.ts"');
 

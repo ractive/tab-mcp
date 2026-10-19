@@ -1,0 +1,75 @@
+# Pull-request dry run of the npm packages (DEC-055): build, pack, check the
+# tarball like the release does, dry-run the publication and install the
+# tarball into an empty project. Publishes nothing.
+
+name: npm packages
+
+on:
+  pull_request:
+    paths:
+      - "packages/tab-mcp-client/**"
+      - "scripts/npm-*"
+      - "package.json"
+      - "bun.lock"
+      - "LICENSE"
+      - "AI_NOTICE"
+      - ".github/workflows/npm-packages.yml"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: read
+
+env:
+  NPM_VERSION: 12.2.0
+  NODE_VERSION: "24"
+  BUN_VERSION: 1.4.3
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+        working-directory: packages/tab-mcp-client
+      - id: pack
+        name: Pack and check the tarball
+        run: bun scripts/npm-pack.ts client --out "$RUNNER_TEMP/npm-pack"
+      - name: Dry-run the publication
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          DIST_TAG: ${{ steps.pack.outputs.dist_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache=$(mktemp -d "$RUNNER_TEMP/npm-dry-run.XXXXXX")
+          npm publish "$TARBALL" --dry-run --offline --cache "$cache" \
+            --ignore-scripts --access public --tag "$DIST_TAG" \
+            --registry https://registry.npmjs.org
+      - name: Install the tarball into an empty project
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.pack.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer=$(mktemp -d "$RUNNER_TEMP/npm-consumer.XXXXXX")
+          cd "$consumer"
+          npm init --yes > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund "$TARBALL"
+          node --input-type=module -e "
+            const lib = await import('@ractive-ch/tab-mcp-client');
+            const cdn = await import('@ractive-ch/tab-mcp-client/cdn');
+            if (lib.VERSION !== process.env.VERSION) throw new Error('VERSION ' + lib.VERSION);
+            if (typeof lib.TabMcp !== 'function' || typeof cdn.TabMcp !== 'function') throw new Error('no TabMcp');
+            console.log('imported', lib.VERSION);
+          "

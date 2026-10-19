@@ -1,0 +1,254 @@
+# npm releases (DEC-055, kb/operations/npm-publishing.md).
+#
+# - A published GitHub release `client-v<version>` publishes
+#   @ractive-ch/tab-mcp-client with provenance through npm trusted publishing
+#   (OIDC, no token), dist-tag `alpha`/`beta`/`rc` for pre-releases, `latest`
+#   otherwise.
+# - workflow_dispatch: `dry-run` (default) builds, tests, packs and dry-runs;
+#   `bootstrap` also signs the tarball with GitHub OIDC provenance and uploads
+#   it for the owner's one-time manual `npm publish --provenance-file`;
+#   `publish` publishes like a release (run it on the release tag).
+#
+# The relay (`relay-v*`) and the Docker image join later as further jobs
+# behind the `plan` job, with their own entry in scripts/npm-pack.ts.
+#
+# The trusted publisher on npmjs.com names this file (`release.yml`) and the
+# environment `release`; renaming either breaks publishing.
+
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to release
+        type: choice
+        options: [client]
+        default: client
+      mode:
+        description: dry-run, bootstrap (signed tarball for the owner) or publish
+        type: choice
+        options: [dry-run, bootstrap, publish]
+        default: dry-run
+      version:
+        description: Version to confirm (required for bootstrap and publish)
+        type: string
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NPM_VERSION: 12.2.0
+  NODE_VERSION: "24"
+  BUN_VERSION: 1.4.3
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      package: ${{ steps.plan.outputs.package }}
+      mode: ${{ steps.plan.outputs.mode }}
+      version: ${{ steps.plan.outputs.version }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          INPUT_PACKAGE: ${{ inputs.package }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = release ]; then
+            case "$RELEASE_TAG" in
+              client-v*) package=client; version=${RELEASE_TAG#client-v} ;;
+              *) echo "::error::release tag '$RELEASE_TAG' names no package (expected client-v<version>)"; exit 1 ;;
+            esac
+            mode=publish
+            release_tag=$RELEASE_TAG
+            prerelease=$RELEASE_PRERELEASE
+          else
+            package=$INPUT_PACKAGE
+            mode=$INPUT_MODE
+            version=$INPUT_VERSION
+            release_tag=
+            prerelease=
+            if [ "$mode" != dry-run ] && [ -z "$version" ]; then
+              echo "::error::mode '$mode' needs the version to confirm"
+              exit 1
+            fi
+            if [ "$mode" = publish ]; then
+              # Publish from the release tag, so the provenance names it.
+              release_tag=$package-v$version
+              if [ "$REF" != "refs/tags/$release_tag" ]; then
+                echo "::error::publish runs on the tag $release_tag, not $REF"
+                exit 1
+              fi
+            fi
+          fi
+          {
+            echo "package=$package"
+            echo "mode=$mode"
+            echo "version=$version"
+            echo "release_tag=$release_tag"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "$package $mode ${version:-(package version)} on $REF"
+
+  # Build, test, pack and check the tarball; no OIDC token in this job.
+  client-pack:
+    needs: plan
+    if: needs.plan.outputs.package == 'client'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.pack.outputs.version }}
+      dist_tag: ${{ steps.pack.outputs.dist_tag }}
+      integrity: ${{ steps.pack.outputs.integrity }}
+      artifact: npm-pack-tab-mcp-client-${{ steps.pack.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+      - run: bun run build
+        working-directory: packages/tab-mcp-client
+      - id: pack
+        name: Pack and check the tarball
+        env:
+          PACK_DIR: ${{ runner.temp }}/npm-pack
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(client --out "$PACK_DIR")
+          [ -n "$VERSION" ] && args+=(--version "$VERSION")
+          [ -n "$RELEASE_TAG" ] && args+=(--release-tag "$RELEASE_TAG")
+          [ -n "$PRERELEASE" ] && args+=(--prerelease "$PRERELEASE")
+          bun scripts/npm-pack.ts "${args[@]}"
+      - name: Dry-run the publication
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          DIST_TAG: ${{ steps.pack.outputs.dist_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache=$(mktemp -d "$RUNNER_TEMP/npm-dry-run.XXXXXX")
+          env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+            npm publish "$TARBALL" --dry-run --offline --cache "$cache" \
+              --ignore-scripts --access public --tag "$DIST_TAG" \
+              --registry https://registry.npmjs.org
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-pack-tab-mcp-client-${{ steps.pack.outputs.version }}
+          path: ${{ runner.temp }}/npm-pack
+          if-no-files-found: error
+          retention-days: 30
+
+  # Sign the exact tarball with GitHub OIDC provenance for the owner's first
+  # manual upload (npm trusted publishing needs the package to exist).
+  client-bootstrap:
+    needs: [plan, client-pack]
+    if: needs.plan.outputs.mode == 'bootstrap'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.client-pack.outputs.artifact }}
+          path: ${{ runner.temp }}/npm-bootstrap
+      - name: Sign and verify the provenance
+        env:
+          DIR: ${{ runner.temp }}/npm-bootstrap
+          INTEGRITY: ${{ needs.client-pack.outputs.integrity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarballs=("$DIR"/*.tgz)
+          [ "${#tarballs[@]}" -eq 1 ]
+          [ "$(jq -r '.[0].integrity' "$DIR/pack.json")" = "$INTEGRITY" ]
+          node scripts/npm-provenance.mjs sign "${tarballs[0]}"
+          ls -l "$DIR"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-bootstrap-tab-mcp-client-${{ needs.client-pack.outputs.version }}
+          path: ${{ runner.temp }}/npm-bootstrap
+          if-no-files-found: error
+          retention-days: 90
+
+  # Publish through npm trusted publishing; the OIDC token only exists here.
+  client-publish:
+    needs: [plan, client-pack]
+    if: needs.plan.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.client-pack.outputs.artifact }}
+          path: ${{ runner.temp }}/npm-publish
+      - name: Publish, or skip an identical published version
+        env:
+          DIR: ${{ runner.temp }}/npm-publish
+          INTEGRITY: ${{ needs.client-pack.outputs.integrity }}
+          VERSION: ${{ needs.client-pack.outputs.version }}
+          DIST_TAG: ${{ needs.client-pack.outputs.dist_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarballs=("$DIR"/*.tgz)
+          [ "${#tarballs[@]}" -eq 1 ]
+          [ "$(jq -r '.[0].integrity' "$DIR/pack.json")" = "$INTEGRITY" ]
+          spec="@ractive-ch/tab-mcp-client@$VERSION"
+          published=$(npm view "$spec" dist.integrity --registry https://registry.npmjs.org 2>/dev/null || true)
+          if [ -n "$published" ]; then
+            if [ "$published" = "$INTEGRITY" ]; then
+              echo "::notice::$spec is already published with the same bytes; skipped"
+              exit 0
+            fi
+            echo "::error::$spec is already published with other bytes ($published); versions are immutable, release a new version"
+            exit 1
+          fi
+          npm publish "${tarballs[0]}" --provenance --access public \
+            --tag "$DIST_TAG" --ignore-scripts \
+            --registry https://registry.npmjs.org
+          echo "::notice::published $spec with dist-tag $DIST_TAG"

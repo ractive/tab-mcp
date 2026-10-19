@@ -1,6 +1,7 @@
 {
 	"name": "@ractive-ch/tab-mcp-client",
-	"version": "0.0.0",
+	"version": "0.1.0-alpha.0",
+	"private": true,
 	"description": "Browser library: offer a web page's tools to AI agents through a tab-mcp relay",
 	"type": "module",
 	"exports": {
@@ -13,6 +14,7 @@
 	"files": [
 		"src",
 		"README.md",
+		"THIRD-PARTY-NOTICES.txt",
 		"LICENSE",
 		"AI_NOTICE"
 	],
@@ -20,9 +22,10 @@
 	"author": "Jean-Pierre Bergamin <james@ractive.ch>",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ractive/tab-mcp.git"
+		"url": "git+https://github.com/ractive/tab-mcp.git",
+		"directory": "packages/tab-mcp-client"
 	},
-	"homepage": "https://github.com/ractive/tab-mcp#readme",
+	"homepage": "https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp-client#readme",
 	"bugs": "https://github.com/ractive/tab-mcp/issues",
 	"keywords": [
 		"mcp",

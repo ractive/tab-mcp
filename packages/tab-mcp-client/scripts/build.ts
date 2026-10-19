@@ -1,11 +1,13 @@
 /**
- * Build the npm package layout into `dist/` (not published yet, DEC-024):
+ * Build the npm package layout into `dist/` (DEC-024, DEC-053); the release
+ * workflow packs and publishes this directory (DEC-055):
  *
  * - `dist/*.js`: ESM for bundlers (`--packages=external`), split so that the
  *   connection and the UI stay separate chunks loaded by `connect()`;
  * - `dist/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
  * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`;
- * - `dist/package.json`, README, LICENSE, AI_NOTICE: the directory to pack.
+ * - `dist/package.json`, README, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
+ *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
  *
  * Prints the gzipped sizes of the core and the lazily loaded chunks.
  */
@@ -79,6 +81,7 @@ const published = {
 	bugs: pkg["bugs"],
 	keywords: pkg["keywords"],
 	dependencies: pkg["dependencies"],
+	publishConfig: { access: "public" },
 };
 await Bun.write(
 	join(dist, "package.json"),
@@ -88,6 +91,7 @@ for (const [from, to] of [
 	[join(root, "../../LICENSE"), "LICENSE"],
 	[join(root, "../../AI_NOTICE"), "AI_NOTICE"],
 	[join(root, "README.md"), "README.md"],
+	[join(root, "THIRD-PARTY-NOTICES.txt"), "THIRD-PARTY-NOTICES.txt"],
 ] as const) {
 	const file = Bun.file(from);
 	if (await file.exists()) await Bun.write(join(dist, to), file);
