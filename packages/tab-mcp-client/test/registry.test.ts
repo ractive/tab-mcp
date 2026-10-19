@@ -63,6 +63,44 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		).toThrow(/x-mcp-header/);
 	});
 
+	test("refuses schemas the validator would choke on: bad patterns, unresolved or remote $refs", () => {
+		const r = new ToolRegistry();
+		const bad = [
+			{ type: "object", properties: { a: { type: "string", pattern: "(" } } },
+			{ type: "object", patternProperties: { "[": { type: "string" } } },
+			{ type: "object", properties: { a: { $ref: "#/$defs/missing" } } },
+			{
+				type: "object",
+				properties: { a: { $ref: "https://example.com/s.json" } },
+			},
+		];
+		for (const [i, inputSchema] of bad.entries()) {
+			expect(() => r.register(tool({ name: `bad${i}`, inputSchema }))).toThrow(
+				TypeError,
+			);
+		}
+		r.register(
+			tool({
+				name: "good",
+				inputSchema: {
+					type: "object",
+					$defs: {
+						n: { type: "number" },
+						"a/b": { $anchor: "ab", type: "string" },
+					},
+					properties: {
+						a: { $ref: "#/$defs/n" },
+						b: { $ref: "#/$defs/a~1b" },
+						c: { $ref: "#ab" },
+						d: { type: "string", pattern: "^\\p{L}+$" },
+						e: { $ref: "#" },
+					},
+				},
+			}),
+		);
+		expect(r.get("good")).toBeDefined();
+	});
+
 	test("keeps a copy of the schema", () => {
 		const r = new ToolRegistry();
 		const schema = { type: "object", properties: { a: { type: "number" } } };

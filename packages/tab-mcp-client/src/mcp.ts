@@ -271,27 +271,46 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	): Response {
 		const stream = new ReadableStream<Uint8Array>({
 			start: (controller) => {
-				void runTool(params, signal, grant).then((outcome) => {
+				/** Send the one answer and end the stream, whatever happens. */
+				const finish = (message: unknown) => {
 					if (signal.aborted) return; // nobody listens any more
+					let event: Uint8Array;
 					try {
-						if (typeof outcome["invalid"] === "string") {
-							controller.enqueue(
-								sseEvent({
-									jsonrpc: "2.0",
-									id,
-									error: { code: -32602, message: outcome["invalid"] },
-								}),
-							);
-						} else {
-							controller.enqueue(
-								sseEvent(result(id, outcome as CallToolResult)),
-							);
-						}
+						event = sseEvent(message);
+					} catch {
+						// e.g. a BigInt or a cycle inside a passed-through result
+						event = sseEvent(
+							result(
+								id,
+								errorResult("The tool returned a result that is not JSON."),
+							),
+						);
+					}
+					try {
+						controller.enqueue(event);
 						controller.close();
 					} catch {
 						// the stream was cancelled meanwhile
 					}
-				});
+				};
+				runTool(params, signal, grant).then(
+					(outcome) =>
+						finish(
+							typeof outcome["invalid"] === "string"
+								? {
+										jsonrpc: "2.0",
+										id,
+										error: { code: -32602, message: outcome["invalid"] },
+									}
+								: result(id, outcome as CallToolResult),
+						),
+					() =>
+						finish({
+							jsonrpc: "2.0",
+							id,
+							error: { code: -32603, message: "Internal error" },
+						}),
+				);
 			},
 		});
 		return new Response(stream, { status: 200, headers: SSE_HEADERS });

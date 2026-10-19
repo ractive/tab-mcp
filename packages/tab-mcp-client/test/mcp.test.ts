@@ -645,4 +645,39 @@ describe("review fixes", () => {
 		expect(next).toContain("notifications/tools/list_changed");
 		await second.cancel();
 	});
+
+	test("a result that is not JSON ends the stream with an isError result", async () => {
+		const { registry, handler } = ours();
+		registry.register({
+			name: "bigint",
+			description: "Returns a BigInt inside content",
+			execute: () => ({ content: [{ type: "text", text: 1n }] }),
+		});
+		const res = await handler.handle(
+			request({ name: "", body: rpc(1, "tools/call", { name: "bigint" }) }),
+			{ grant: GRANT },
+		);
+		const { message } = await outcome(res);
+		expect(message?.["result"]).toMatchObject({ isError: true });
+	}, 2000);
+
+	test("a failure outside the tool ends the stream with -32603", async () => {
+		const handler = createMcpHandler({
+			tools: {
+				list: () => [],
+				get: () => {
+					throw new Error("broken source");
+				},
+			},
+			server: SERVER,
+			confirm: async () => true,
+			client: (g) => ({ grantId: g.grantId, id: g.clientId, host: "x" }),
+		});
+		const res = await handler.handle(
+			request({ name: "", body: rpc(2, "tools/call", { name: "x" }) }),
+			{ grant: GRANT },
+		);
+		const { message } = await outcome(res);
+		expect(message?.["error"]).toMatchObject({ code: -32603 });
+	}, 2000);
 });
