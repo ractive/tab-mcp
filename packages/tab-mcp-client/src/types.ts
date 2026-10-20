@@ -205,6 +205,37 @@ export interface DisconnectDetail {
 }
 
 /** Events of `TabMcp`. */
+/** A tool call from an AI app as it starts (the `toolcall` event). */
+export interface ToolCallStart {
+	/** Unique in this page; `toolcallend` carries the same id. */
+	id: number;
+	tool: string;
+	title?: string;
+	arguments: Record<string, unknown>;
+	client: ToolCallClient;
+}
+
+/** How a tool call ended: `declined` by the user, `cancelled` by the AI app. */
+export type ToolCallOutcome = "ok" | "error" | "declined" | "cancelled";
+
+/** The MCP result of a tool call, as the AI app gets it. */
+export interface ToolCallResult {
+	content: unknown[];
+	structuredContent?: Record<string, unknown>;
+	isError?: boolean;
+	[key: string]: unknown;
+}
+
+/** A tool call as it ends (the `toolcallend` event). */
+export interface ToolCallEnd {
+	id: number;
+	tool: string;
+	client: ToolCallClient;
+	outcome: ToolCallOutcome;
+	result: ToolCallResult;
+	durationMs: number;
+}
+
 export interface TabMcpEventMap {
 	statechange: CustomEvent<{ state: ConnectionState }>;
 	connected: CustomEvent<SessionInfo>;
@@ -217,4 +248,8 @@ export interface TabMcpEventMap {
 	pairingcode: CustomEvent<PairingCode | null>;
 	grantschange: CustomEvent<{ grants: readonly Grant[] }>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
+	/** An AI app called a tool (before any confirmation). */
+	toolcall: CustomEvent<ToolCallStart>;
+	/** That call ended; also when the user declined it or the AI app cancelled it. */
+	toolcallend: CustomEvent<ToolCallEnd>;
 }

@@ -20,7 +20,14 @@ import {
 } from "./mapping.ts";
 import type { GrantRef } from "./protocol.ts";
 import type { RegisteredTool } from "./registry.ts";
-import type { ConfirmRequest, ServerInfo, ToolCallClient } from "./types.ts";
+import type {
+	ConfirmRequest,
+	ServerInfo,
+	ToolCallClient,
+	ToolCallEnd,
+	ToolCallOutcome,
+	ToolCallStart,
+} from "./types.ts";
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 const META_VERSION = "io.modelcontextprotocol/protocolVersion";
@@ -47,7 +54,15 @@ export interface McpHandlerOptions {
 	confirm(request: ConfirmRequest): Promise<boolean>;
 	/** The caller of a request, from its grant. */
 	client(grant: GrantRef): ToolCallClient;
+	/** Told about every call of a known tool, as it starts and as it ends. */
+	observe?: {
+		start(call: ToolCallStart): void;
+		end(call: ToolCallEnd): void;
+	};
 }
+
+/** Tool call ids, unique in the page. */
+let lastCallId = 0;
 
 export interface McpRequestContext {
 	grant: GrantRef;
@@ -236,9 +251,37 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		const raw = params["arguments"] ?? {};
 		if (!isObject(raw))
 			return { invalid: "Invalid params: arguments must be an object" };
-		const invalid = validate(tool, raw);
-		if (invalid !== undefined) return errorResult(invalid);
 		const client = options.client(grant);
+		const call: ToolCallStart = {
+			id: ++lastCallId,
+			tool: tool.name,
+			arguments: raw,
+			client,
+		};
+		if (tool.title !== undefined) call.title = tool.title;
+		const started = Date.now();
+		options.observe?.start(call);
+		const [outcome, res] = await decideAndRun(tool, raw, signal, client);
+		options.observe?.end({
+			id: call.id,
+			tool: tool.name,
+			client,
+			outcome,
+			result: res,
+			durationMs: Date.now() - started,
+		});
+		return res;
+	}
+
+	/** Validate, confirm and run one call. */
+	async function decideAndRun(
+		tool: RegisteredTool,
+		raw: Json,
+		signal: AbortSignal,
+		client: ToolCallClient,
+	): Promise<[ToolCallOutcome, CallToolResult]> {
+		const invalid = validate(tool, raw);
+		if (invalid !== undefined) return ["error", errorResult(invalid)];
 		if (tool.annotations.consequentialHint === true) {
 			const question: ConfirmRequest = {
 				tool: { name: tool.name, description: tool.description },
@@ -253,13 +296,18 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 			} catch {
 				allowed = false;
 			}
-			if (!allowed) return errorResult("The user declined");
+			if (!allowed)
+				return [
+					signal.aborted ? "cancelled" : "declined",
+					errorResult("The user declined"),
+				];
 		}
-		if (signal.aborted) return errorResult("Cancelled");
+		if (signal.aborted) return ["cancelled", errorResult("Cancelled")];
 		try {
-			return toCallToolResult(await tool.execute(raw, { signal, client }));
+			const res = toCallToolResult(await tool.execute(raw, { signal, client }));
+			return [res.isError === true ? "error" : "ok", res];
 		} catch (error) {
-			return thrownResult(error);
+			return [signal.aborted ? "cancelled" : "error", thrownResult(error)];
 		}
 	}
 

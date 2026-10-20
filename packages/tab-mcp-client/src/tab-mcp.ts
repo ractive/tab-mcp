@@ -450,6 +450,11 @@ export class TabMcp extends EventTarget {
 			appName: this.#appName,
 			library: { name: LIBRARY_NAME, version: VERSION },
 			confirm: (request) => this.#confirm(request),
+			toolCallStarted: (call) => {
+				if (current()) this.#emit("toolcall", call);
+			},
+			// Always: a call that started must end, even after the connection went.
+			toolCallEnded: (call) => this.#emit("toolcallend", call),
 			clientFor: (grant: GrantRef): ToolCallClient => {
 				const known = this.#grants.find((g) => g.grantId === grant.grantId);
 				const client: ToolCallClient = {
