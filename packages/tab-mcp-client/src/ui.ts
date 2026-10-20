@@ -316,18 +316,25 @@ export function showConnectDialog(
 
 	// Set while New address waits for the new session.
 	let renewing = false;
+	// The question names the apps connected now; pairing goes on while it is open.
+	const renderQuestion = (): boolean => {
+		const names = mcp.grants.map((g) => clientLabel(g.client));
+		if (names.length === 0) return false;
+		confirmText.textContent = `A new address disconnects ${listOf(names)}. To use this page again, add the new address to ${names.length === 1 ? "it" : "them"}.`;
+		return true;
+	};
 	const askNewAddress = () => {
 		if (mcp.state !== "connected") return;
-		const names = mcp.grants.map((g) => clientLabel(g.client));
-		if (names.length === 0) {
+		if (!renderQuestion()) {
 			getNewAddress();
 			return;
 		}
-		confirmText.textContent = `A new address disconnects ${listOf(names)}. To use this page again, add the new address to ${names.length === 1 ? "it" : "them"}.`;
 		confirmBox.hidden = false;
 		cancelNew.focus(); // the safe choice is the default
 	};
 	const getNewAddress = () => {
+		// Focus moves before the focused control is hidden.
+		close.focus();
 		confirmBox.hidden = true;
 		renewing = true;
 		status.textContent = "Getting a new address…";
@@ -341,7 +348,8 @@ export function showConnectDialog(
 			},
 			(error: unknown) => {
 				renewing = false;
-				status.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}`;
+				status.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}. Close this and connect again.`;
+				close.focus();
 			},
 		);
 	};
@@ -412,6 +420,11 @@ export function showConnectDialog(
 			: "To disconnect an app, connect this page again first.";
 		appsNote.hidden = connected;
 		apps.hidden = mcp.grants.length === 0;
+		if (!confirmBox.hidden && !renderQuestion()) {
+			// Nobody left to disconnect: no question needed.
+			confirmBox.hidden = true;
+			fresh.focus();
+		}
 	};
 	const onDisconnected = (event: CustomEvent<DisconnectDetail>) => {
 		if (event.detail.reason !== "new_address")

@@ -327,6 +327,43 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
+	test("the New address question follows the connected apps while it is open", async () => {
+		const { dialog } = await open();
+		const fresh = byText(dialog, "New address");
+		const question = dialog.querySelector(
+			".tab-mcp-new-address-question",
+		) as HTMLElement;
+		fresh.click();
+		expect(question.hidden).toBe(false);
+
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({
+			type: "grant.added",
+			grant: {
+				grantId: "g_2",
+				client: {
+					id: "https://chatgpt.com/c.json",
+					name: "ChatGPT",
+					host: "chatgpt.com",
+				},
+				createdAt: "2026-10-20T10:00:00.000Z",
+			},
+		});
+		await added;
+		expect(question.querySelector("p")?.textContent).toBe(
+			"A new address disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page again, add the new address to them.",
+		);
+
+		for (const grantId of ["g_1", "g_2"]) {
+			const removed = nextEvent(mcp, "grantschange");
+			relay.send({ type: "grant.removed", grantId, reason: "revoked" });
+			await removed;
+		}
+		expect(question.hidden).toBe(true);
+		expect(doc.activeElement).toBe(fresh);
+		byText(dialog, "Close").click();
+	});
+
 	test("New address, confirmed, revokes the apps, makes a new secret and connects again", async () => {
 		relay.grants = [
 			GRANT,
