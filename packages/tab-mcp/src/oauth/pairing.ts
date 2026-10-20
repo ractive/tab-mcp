@@ -184,7 +184,7 @@ const MESSAGES: Record<Exclude<CodeCheck, "ok">, string> = {
 	locked:
 		"Too many wrong codes. The page now shows a new code: enter that one.",
 	inactive:
-		"The page is not showing a code right now. In the page, open “Connect your AI tool” to see one, then enter it here.",
+		"The page is not showing a code right now. In the page, open “Connect your AI app” to see one, then enter it here.",
 	malformed: "Enter the 6 digits shown in the page.",
 	limited:
 		"Too many attempts for this page. Wait a few minutes and try again. If it keeps happening, someone else may be guessing: use “New address” in the page.",
@@ -196,7 +196,7 @@ export const codePairing: PairingMethod = {
 	render(): string {
 		return `<p><label for="code">Code shown in the page</label>
 <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus aria-describedby="code-help"></p>
-<p id="code-help" class="help">In the page, “Connect your AI tool” shows a 6-digit code. It changes every 2 minutes.</p>`;
+<p id="code-help" class="help">In the page, “Connect your AI app” shows a 6-digit code. It changes every 2 minutes.</p>`;
 	},
 	check(target, form, admit): PairingResult {
 		const result = target.codes.check(

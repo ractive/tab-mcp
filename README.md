@@ -24,7 +24,7 @@ computer.
  Web page with @ractive-ch/tab-mcp-client, open in your browser tab
 ```
 
-1. You click "Connect your AI tool" in the page. The page opens a WebSocket to the relay
+1. You click "Connect your AI app" in the page. The page opens a WebSocket to the relay
    and shows an address and a 6-digit code.
 2. You add the address to your AI app. The AI app opens the relay's sign-in page in your
    browser. It names the AI app and the page; you type the code.
@@ -42,7 +42,7 @@ only hashes of tokens. More in the [threat model](docs/threat-model.md).
 
 You need a page that offers tab-mcp, such as the [calculator example](examples/calculator).
 
-1. In the page, click "Connect your AI tool" and copy the address.
+1. In the page, click "Connect your AI app" and copy the address.
 2. Add it to your AI app:
    - **Claude Code:** `claude mcp add --transport http calc <address>`, then run `/mcp`
      in Claude Code and choose Authenticate.

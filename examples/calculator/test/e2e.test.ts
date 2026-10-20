@@ -79,7 +79,7 @@ test.skipIf(chrome === undefined)(
 		const page = await openCalculator(stack);
 		expect(
 			await page.eval("document.querySelector('#ai-status').textContent"),
-		).toBe("Off. No AI tool can use this page.");
+		).toBe("Off. No AI app can use this page.");
 
 		// Pairing: the dialog's address and code, the code typed on /authorize.
 		const pairing: Pairing = await pair(stack, page, stack.clientId());
@@ -206,7 +206,7 @@ test.skipIf(chrome === undefined)(
 		await page.click("#stop");
 		await waitFor(
 			page,
-			"document.querySelector('#ai-status').textContent === 'Off. No AI tool can use this page.'",
+			"document.querySelector('#ai-status').textContent === 'Off. No AI app can use this page.'",
 		);
 		await page.close();
 	},

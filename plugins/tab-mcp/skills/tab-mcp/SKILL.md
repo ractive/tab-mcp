@@ -1,6 +1,6 @@
 ---
 name: tab-mcp
-description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the connect and pairing flow, confirmation for consequential tools, security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP-style registerTool or "Connect your AI tool", or needs to self-host the tab-mcp relay.
+description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the connect and pairing flow, confirmation for consequential tools, security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP-style registerTool or "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
 compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.3+ or Docker.
 ---
@@ -98,8 +98,8 @@ What happens:
 1. `showConnectDialog()` calls `connect()`, which opens the WebSocket. Browsers that
    report user activation refuse `connect()` outside a user action, so never call it on
    page load.
-2. The "Connect your AI tool" dialog shows the address
-   (`https://<relay>/a/<id>/mcp`), a copy button, steps for Claude, ChatGPT and Claude
+2. The "Connect your AI app" dialog shows the address
+   (`https://<relay>/a/<id>/mcp`), Copy and New address buttons, steps for Claude, ChatGPT and Claude
    Code, and a 6-digit code. The code is valid for 2 minutes and is replaced by itself.
 3. The user adds the address to the AI app, for example
    `claude mcp add --transport http notes <address>` and then `/mcp` → Authenticate in
@@ -115,9 +115,10 @@ apps stay paired across reloads. While the page is closed, their calls get "the 
 not open". The library never reconnects by itself. If the page offers a "Keep AI access
 on" switch that the user turned on, call `connect({ resume: true })` on load.
 
-Add a "New address" button that calls `mcp.newAddress()` from a click. It disconnects
-every app and makes a new address; the relay's pages point users to it when someone may
-be guessing codes. The default dialog has no such button.
+"New address" in the dialog calls `mcp.newAddress()`: it disconnects every app and makes
+a new address, and the dialog asks first when apps are connected. The relay's pages point
+users to it when someone may be guessing codes. A custom UI calls `mcp.newAddress()` from
+a click.
 
 For a custom UI, use `connect()`, `startPairing()`/`stopPairing()` (codes come only while
 pairing is on), `revoke(grantId)`, `disconnect()`, the properties `address`,

@@ -70,7 +70,7 @@ export function renderPage(title: string, body: string): string {
 <body>
 <main>
 ${body}
-<footer>tab-mcp relay. It passes requests between AI tools and web pages and does not store their contents.</footer>
+<footer>tab-mcp relay. It passes requests between AI apps and web pages and does not store their contents.</footer>
 </main>
 </body>
 </html>`;

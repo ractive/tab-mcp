@@ -57,8 +57,8 @@ process.stdout.write(`
 Calculator: http://localhost:${page.port}/
 Relay:      ${relayUrl}${relay === undefined ? " (external)" : " (local, development mode, memory store)"}
 
-Open the page, click "Connect your AI tool", and add the address it shows to
-your AI tool, e.g. Claude Code:
+Open the page, click "Connect your AI app", and add the address it shows to
+your AI app, e.g. Claude Code:
 
   claude mcp add --transport http calc <address>
 

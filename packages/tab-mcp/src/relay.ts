@@ -603,7 +603,7 @@ function startRelay(
 				503,
 				rpcId,
 				RelayErrorCode.pageNotOpen,
-				'The page is not open. Open the web page that offers these tools and click "Connect your AI tool".',
+				'The page is not open. Open the web page that offers these tools and click "Connect your AI app".',
 				corsHeaders,
 			);
 		}

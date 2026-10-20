@@ -260,7 +260,7 @@ export interface Pairing {
 }
 
 /**
- * Click "Connect your AI tool", let the AI app run into 401 and discover the
+ * Click "Connect your AI app", let the AI app run into 401 and discover the
  * relay, then do the user's part in a second tab: open `/authorize`, type the
  * code shown in the page's dialog, click Connect. Returns once the AI app has
  * its tokens and the page lists it as connected.

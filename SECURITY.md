@@ -43,7 +43,7 @@ honest.
   type the code.
 - Type a pairing code only for an AI app you started yourself, and never read the code
   out to anyone.
-- Disconnect AI apps you no longer use, in the page's "Connect your AI tool" dialog.
+- Disconnect AI apps you no longer use, in the page's "Connect your AI app" dialog.
 
 A relay accepts pages only from the origins its operator lists. This keeps other
 websites from using a well-known relay's address to look trustworthy. It does not make
