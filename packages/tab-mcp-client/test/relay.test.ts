@@ -189,6 +189,8 @@ describe("tools through the relay", () => {
 			).detail;
 			expect(durationMs).toBeGreaterThanOrEqual(0);
 			events.push(`end ${id} ${outcome} ${JSON.stringify(result.content)}`);
+			// A listener that changes the result changes only its copy.
+			result.content.length = 0;
 		});
 		const nextQuestion = () =>
 			new Promise<(typeof questions)[number]>((resolve) => {

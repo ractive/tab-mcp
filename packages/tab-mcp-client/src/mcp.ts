@@ -64,6 +64,15 @@ export interface McpHandlerOptions {
 /** Tool call ids, unique in the page. */
 let lastCallId = 0;
 
+/** A deep copy for an event; the value itself when it cannot be cloned. */
+function copy<T>(value: T): T {
+	try {
+		return structuredClone(value);
+	} catch {
+		return value;
+	}
+}
+
 export interface McpRequestContext {
 	grant: GrantRef;
 	/** The body as text when the caller already has it. */
@@ -252,11 +261,12 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		if (!isObject(raw))
 			return { invalid: "Invalid params: arguments must be an object" };
 		const client = options.client(grant);
+		// Copies: a listener cannot change what the tool gets or the AI app receives.
 		const call: ToolCallStart = {
 			id: ++lastCallId,
 			tool: tool.name,
-			arguments: raw,
-			client,
+			arguments: copy(raw),
+			client: { ...client },
 		};
 		if (tool.title !== undefined) call.title = tool.title;
 		const started = Date.now();
@@ -265,9 +275,9 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		options.observe?.end({
 			id: call.id,
 			tool: tool.name,
-			client,
+			client: { ...client },
 			outcome,
-			result: res,
+			result: copy(res),
 			durationMs: Date.now() - started,
 		});
 		return res;
@@ -303,12 +313,15 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 				];
 		}
 		if (signal.aborted) return ["cancelled", errorResult("Cancelled")];
+		let res: CallToolResult;
 		try {
-			const res = toCallToolResult(await tool.execute(raw, { signal, client }));
-			return [res.isError === true ? "error" : "ok", res];
+			res = toCallToolResult(await tool.execute(raw, { signal, client }));
 		} catch (error) {
-			return [signal.aborted ? "cancelled" : "error", thrownResult(error)];
+			res = thrownResult(error);
 		}
+		// Cancelled is cancelled, however the tool answered the abort.
+		if (signal.aborted) return ["cancelled", res];
+		return [res.isError === true ? "error" : "ok", res];
 	}
 
 	function callTool(

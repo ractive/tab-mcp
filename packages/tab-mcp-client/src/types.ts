@@ -204,7 +204,6 @@ export interface DisconnectDetail {
 	code: number;
 }
 
-/** Events of `TabMcp`. */
 /** A tool call from an AI app as it starts (the `toolcall` event). */
 export interface ToolCallStart {
 	/** Unique in this page; `toolcallend` carries the same id. */
@@ -236,6 +235,7 @@ export interface ToolCallEnd {
 	durationMs: number;
 }
 
+/** Events of `TabMcp`. */
 export interface TabMcpEventMap {
 	statechange: CustomEvent<{ state: ConnectionState }>;
 	connected: CustomEvent<SessionInfo>;
