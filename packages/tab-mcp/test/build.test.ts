@@ -56,9 +56,11 @@ test("the build produces a runnable bin and declarations that type-check", async
 
 	await Bun.write(
 		join(consumer, "server.ts"),
-		`import { createRelay, MemoryTokenStore, type Relay, type TokenStore, VERSION } from "@ractive-ch/tab-mcp";
+		`import { createRelay, MemoryTokenStore, type Relay, type RevokeOptions, type TokenStore, VERSION } from "@ractive-ch/tab-mcp";
 import { tokenStoreConformance } from "@ractive-ch/tab-mcp/testing";
 const store: TokenStore = new MemoryTokenStore();
+const revokeOptions: RevokeOptions = { now: 0, keepUntil: 1 };
+export const revoked: Promise<number> = store.revoke({ grantId: "g" }, revokeOptions);
 export const relay: Relay = createRelay({ publicUrl: "https://relay.example", allowedOrigins: ["https://app.example"], store });
 tokenStoreConformance("memory", () => new MemoryTokenStore());
 export const v: string = VERSION;
