@@ -46,9 +46,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   confirmation for consequential tools.
 - ESM build for bundlers with type declarations, and a self-contained build for
   `<script type="module">` under `@ractive-ch/tab-mcp-client/cdn`.
-- The connect dialog shows the pairing code from the relay, notes that it changes every
-  2 minutes, and announces each newly connected AI app.
-- `appName` must be 1-64 characters without control characters, as the relay requires.
+- The connect dialog shows the pairing code from the relay.
 
 ## @ractive-ch/tab-mcp
 
