@@ -89,6 +89,7 @@ export const PACKAGES: Record<string, PackageSpec> = {
 		files: [
 			"AI_NOTICE",
 			"LICENSE",
+			"README.md",
 			"package.json",
 			"main.js",
 			"main.js.map",
