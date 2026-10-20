@@ -49,13 +49,12 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp
+  ractive/tab-mcp:0.1.0-alpha.1
 
 TAB_MCP_RELAY=http://localhost:8080 bun run example
 ```
 
-**The `ractive/tab-mcp` image is not published yet; it comes with iteration 5.** Until
-then, start the same relay from the repository:
+Or start the same relay from the repository:
 
 ```sh
 NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 \
