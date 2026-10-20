@@ -1,18 +1,22 @@
 ---
 type: operations
 title: "npm publishing: bootstrap and releases"
-description: The owner's one-time steps to put @ractive-ch/tab-mcp-client on npm from a CI-signed tarball and switch on trusted publishing, and how every later release works.
+description: >-
+  The owner's one-time steps to put @ractive-ch/tab-mcp-client and
+  @ractive-ch/tab-mcp on npm from CI-signed tarballs and switch on trusted publishing, the
+  relay's image registries, and how every later release works.
 tags:
   - release
   - operations
   - npm
-timestamp: 2026-10-20T00:30:00+02:00
+timestamp: 2026-10-20T07:10:00+02:00
 ---
 
 # npm publishing: bootstrap and releases
 
 How `@ractive-ch/tab-mcp-client` gets to npm (DEC-055). The relay `@ractive-ch/tab-mcp`
-follows the same steps later with the tag `relay-v<version>`.
+follows the same steps with the tag `relay-v<version>`, and its release also pushes the
+Docker image ([relay](#the-relay-and-its-image) below).
 
 npm trusted publishing (GitHub OIDC, no token) only works for a package that already
 exists. So the first version is uploaded once by the owner, from a tarball that CI built,
@@ -53,6 +57,8 @@ commands in an up-to-date checkout of `main`.
    EOF
    gh api -X POST repos/ractive/tab-mcp/environments/release/deployment-branch-policies \
      -f name='client-v*' -f type=tag
+   gh api -X POST repos/ractive/tab-mcp/environments/release/deployment-branch-policies \
+     -f name='relay-v*' -f type=tag
    ```
 
    (Same in the web UI: Settings → Rules → Rulesets → New tag ruleset; Settings →
@@ -180,8 +186,123 @@ commands in an up-to-date checkout of `main`.
    ```
 
 A dry run of everything except signing and publishing runs on every pull request that
-touches the client package or the workflow, and by hand with `-f mode=dry-run` on any
+touches a package, the image or the workflow (both packages and the image build, without
+pushing), and by hand with `-f mode=dry-run` (and `-f package=client` or `relay`) on any
 branch.
+
+## The relay and its image
+
+The relay is released like the client, with `package=relay` and the tag
+`relay-v<version>` (DEC-068, DEC-069). Its first version is `0.1.0-alpha.0`
+(`packages/tab-mcp/package.json`; the relay reads its version from there, so there is no
+second place to change). A relay release publishes the npm package first and then pushes
+the image `ractive/tab-mcp` (Docker Hub) and `ghcr.io/ractive/tab-mcp` with the tag
+`X.Y.Z`; a stable version also gets `X.Y` and `latest`, a pre-release never does.
+
+### One-time bootstrap of the relay (owner)
+
+Step 1 above covers the relay too (the `relay-v*` tag ruleset and the `relay-v*`
+deployment policy of `release`; add the second policy if the environment was set up for
+the client only). Then:
+
+1. Start the bootstrap run on `main`:
+
+   ```sh
+   gh workflow run release.yml --repo ractive/tab-mcp --ref main \
+     -f package=relay -f mode=bootstrap -f version=0.1.0-alpha.0
+   gh run list --repo ractive/tab-mcp --workflow release.yml --event workflow_dispatch --limit 1
+   gh run watch <run-id> --repo ractive/tab-mcp
+   ```
+
+   Jobs `plan`, `relay-pack` (verify, build, pack, checks, dry-run publish, install test
+   with the `tab-mcp` command and the conformance suite), `relay-image` (both
+   architectures, smoke test) and `relay-bootstrap` must be green.
+
+2. Download and check the bundle in a new, empty directory:
+
+   ```sh
+   dir=$(mktemp -d)
+   gh run download <run-id> --repo ractive/tab-mcp \
+     -n npm-bootstrap-tab-mcp-0.1.0-alpha.0 -D "$dir"
+   ls "$dir"   # ractive-ch-tab-mcp-0.1.0-alpha.0.tgz, .sigstore.json, pack.json
+   node scripts/npm-provenance.mjs verify \
+     "$dir/ractive-ch-tab-mcp-0.1.0-alpha.0.tgz" \
+     "$dir/ractive-ch-tab-mcp-0.1.0-alpha.0.sigstore.json"
+   npm publish "$dir/ractive-ch-tab-mcp-0.1.0-alpha.0.tgz" --dry-run \
+     --tag alpha --access public
+   ```
+
+   `verify` ends with `signer accepted` only for `release.yml` of `ractive/tab-mcp` on
+   `refs/heads/main` (or `refs/tags/relay-v0.1.0-alpha.0`).
+
+3. Publish that tarball with the CI-signed provenance, and check it:
+
+   ```sh
+   npm login
+   npm publish "$dir/ractive-ch-tab-mcp-0.1.0-alpha.0.tgz" \
+     --provenance-file "$dir/ractive-ch-tab-mcp-0.1.0-alpha.0.sigstore.json" \
+     --tag alpha --access public --registry https://registry.npmjs.org
+   npm view @ractive-ch/tab-mcp dist-tags
+   npm view @ractive-ch/tab-mcp@0.1.0-alpha.0 dist.integrity  # equals pack.json's integrity
+   ```
+
+   As with the client, `latest` points at `0.1.0-alpha.0` until the first stable version
+   (see "Known issue: latest").
+
+4. Configure the trusted publisher for `@ractive-ch/tab-mcp` exactly as in step 7 above
+   (owner `ractive`, repository `tab-mcp`, workflow `release.yml`, environment `release`):
+
+   ```sh
+   npm trust github @ractive-ch/tab-mcp --repo ractive/tab-mcp \
+     --file release.yml --env release --allow-publish
+   npm trust list @ractive-ch/tab-mcp
+   ```
+
+   Then Settings → Publishing access → "Require two-factor authentication and disallow
+   tokens".
+
+5. Prepare the image registries (once):
+   - Docker Hub: the repository variable `DOCKERHUB_USERNAME` (`ractive`), the secret
+     `DOCKERHUB_TOKEN` and the variable `DOCKERHUB_TOKEN_EXPIRES` as in
+     [release credentials](/operations/release-secrets.md). Create the repository
+     `ractive/tab-mcp` on hub.docker.com as public beforehand; a push would otherwise
+     create it with the account's default visibility.
+   - ghcr.io: nothing before the first push. Afterwards the package
+     `ghcr.io/ractive/tab-mcp` is private: github.com/ractive → Packages → `tab-mcp` →
+     Package settings → change visibility to public, and check that it is linked to the
+     repository `ractive/tab-mcp` (the image's `org.opencontainers.image.source` label
+     links it).
+
+6. Create the GitHub release on the commit the bootstrap run built:
+
+   ```sh
+   sha=$(gh run view <run-id> --repo ractive/tab-mcp --json headSha --jq .headSha)
+   gh release create relay-v0.1.0-alpha.0 --repo ractive/tab-mcp --target "$sha" \
+     --prerelease --title "tab-mcp 0.1.0-alpha.0" --notes "First alpha of the relay."
+   ```
+
+   Approve the run's `release` environment (asked for `relay-publish` and then
+   `relay-image-publish`). `relay-publish` finds the version on npm with the same integrity
+   and skips; `relay-image-publish` checks the token expiry, then pushes the smoke-tested
+   archive from `relay-image` as `ractive/tab-mcp:0.1.0-alpha.0` and `ghcr.io/ractive/tab-mcp:0.1.0-alpha.0` for
+   linux/amd64 and linux/arm64 with provenance and SBOM. Afterwards make the ghcr.io
+   package public (step 5).
+
+7. Check the image:
+
+   ```sh
+   docker buildx imagetools inspect ractive/tab-mcp:0.1.0-alpha.0
+   docker run --rm ractive/tab-mcp:0.1.0-alpha.0 --version
+   ```
+
+### Later relay releases
+
+Set the version in `packages/tab-mcp/package.json`, run `bun install`, add a `CHANGELOG.md`
+entry, merge, create the release `relay-v<version>` on the merge commit (pre-release flag
+exactly when the version is one) and approve both jobs. To retry without a new release:
+`gh workflow run release.yml --ref relay-v<version> -f package=relay -f mode=publish -f
+version=<version>`; an identical npm version is skipped and the image is pushed again with
+the same tags.
 
 ## Known issue: latest
 

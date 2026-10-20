@@ -1,0 +1,40 @@
+# Dependabot version updates (DEC-037, DEC-071).
+#
+# Every update goes through ci.yml and, for packages, the image and the
+# workflows, the release dry run in release.yml.
+#
+# - bun: the workspace's bun.lock. Versions are pinned exactly in every
+#   package.json, and Dependabot replaces an exact pin with the new exact
+#   version (the bun ecosystem takes no `versioning-strategy`).
+# - github-actions: actions are pinned by full commit SHA with a `# vX.Y.Z`
+#   comment; Dependabot updates both.
+# - docker: the Dockerfile's base images, pinned by tag and digest. The two
+#   oven/bun stages are grouped so build and runtime move together. Bun's
+#   version also appears in package.json (@types/bun), the workflows
+#   (BUN_VERSION, bun-version) and the plan; a test keeps the Dockerfile in
+#   step with @types/bun, so a lone Docker bump fails until the rest follows.
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      bun-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      oven-bun:
+        patterns: ["oven/bun"]

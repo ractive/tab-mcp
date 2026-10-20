@@ -1,10 +1,17 @@
 {
 	"name": "@ractive-ch/tab-mcp",
-	"version": "0.0.0",
+	"version": "0.1.0-alpha.0",
+	"private": true,
 	"description": "Relay that lets AI agents call the MCP tools of a web page open in a browser tab",
 	"type": "module",
 	"bin": {
 		"tab-mcp": "./src/main.ts"
+	},
+	"scripts": {
+		"build": "bun scripts/build.ts"
+	},
+	"engines": {
+		"bun": ">=1.4.3"
 	},
 	"files": [
 		"src",
@@ -16,9 +23,10 @@
 	"author": "Jean-Pierre Bergamin <james@ractive.ch>",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ractive/tab-mcp.git"
+		"url": "git+https://github.com/ractive/tab-mcp.git",
+		"directory": "packages/tab-mcp"
 	},
-	"homepage": "https://github.com/ractive/tab-mcp#readme",
+	"homepage": "https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp#readme",
 	"bugs": "https://github.com/ractive/tab-mcp/issues",
 	"keywords": [
 		"mcp",

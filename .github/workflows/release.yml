@@ -1,23 +1,31 @@
-# npm releases (DEC-055, kb/operations/npm-publishing.md).
+# Releases (DEC-055, DEC-069; kb/operations/npm-publishing.md).
 #
 # - A published GitHub release `client-v<version>` publishes
-#   @ractive-ch/tab-mcp-client with provenance through npm trusted publishing
-#   (OIDC, no token), dist-tag `alpha`/`beta`/`rc` for pre-releases, `latest`
-#   otherwise.
-# - Pull requests that touch the package or this file run the dry run.
-# - workflow_dispatch: `dry-run` (default) builds, tests, packs and dry-runs;
-#   `bootstrap` (on main only) also signs the tarball with GitHub OIDC
-#   provenance and uploads it for the owner's one-time manual
-#   `npm publish --provenance-file`; `publish` publishes like a release (run
-#   it on the release tag).
+#   @ractive-ch/tab-mcp-client; `relay-v<version>` publishes
+#   @ractive-ch/tab-mcp and the image ractive/tab-mcp (Docker Hub) and
+#   ghcr.io/ractive/tab-mcp. npm packages get provenance through npm trusted
+#   publishing (OIDC, no token), dist-tag `alpha`/`beta`/`rc` for
+#   pre-releases, `latest` otherwise. Images get tags `X.Y.Z`; a stable
+#   version also `X.Y` and `latest` (a pre-release never moves them), with
+#   provenance and SBOM attestations, for linux/amd64 and linux/arm64.
+# - Pull requests that touch a package, the image or this file run the dry
+#   run of both packages and the image build (no push).
+# - workflow_dispatch: `dry-run` (default) builds, tests, packs and dry-runs
+#   (and builds the image for the relay); `bootstrap` (on main only) also
+#   signs the tarball with GitHub OIDC provenance and uploads it for the
+#   owner's one-time manual `npm publish --provenance-file`; `publish`
+#   publishes like a release (run it on the release tag).
 # - Bootstrap and publish refuse a commit that is not on main. That guards
 #   against mistakes, not against someone who can push a tag: the workflow
 #   file at the tagged commit runs. Only the owner may create release tags
 #   (tag ruleset), and the `release` environment needs the owner's approval
 #   (kb/operations/npm-publishing.md).
-#
-# The relay (`relay-v*`) and the Docker image join later as further jobs
-# behind the `plan` job, with their own entry in scripts/npm-pack.ts.
+# - The image is pushed only after the relay's npm publication succeeded (or
+#   was skipped as identical), so the npm checks (version, tag) also hold for
+#   the image. The pushed image is the smoke-tested OCI archive, byte for
+#   byte. `latest` and `X.Y` move only when npm says the version is not below
+#   `latest` and is the highest `X.Y.*` (scripts/image-tags.mjs), so a re-run
+#   of an old tag never moves them backwards.
 #
 # The trusted publisher on npmjs.com names this file (`release.yml`) and the
 # environment `release`; renaming either breaks publishing.
@@ -30,7 +38,12 @@ on:
   pull_request:
     paths:
       - "packages/tab-mcp-client/**"
+      - "packages/tab-mcp/**"
       - "scripts/npm-*"
+      - "scripts/docker-*"
+      - "scripts/token-expiry*"
+      - "Dockerfile"
+      - ".dockerignore"
       - "package.json"
       - "bun.lock"
       - "LICENSE"
@@ -41,7 +54,7 @@ on:
       package:
         description: Package to release
         type: choice
-        options: [client]
+        options: [client, relay]
         default: client
       mode:
         description: dry-run, bootstrap (signed tarball for the owner) or publish
@@ -90,13 +103,14 @@ jobs:
           if [ "$EVENT" = release ]; then
             case "$RELEASE_TAG" in
               client-v*) package=client; version=${RELEASE_TAG#client-v} ;;
-              *) echo "::error::release tag '$RELEASE_TAG' names no package (expected client-v<version>)"; exit 1 ;;
+              relay-v*) package=relay; version=${RELEASE_TAG#relay-v} ;;
+              *) echo "::error::release tag '$RELEASE_TAG' names no package (expected client-v<version> or relay-v<version>)"; exit 1 ;;
             esac
             mode=publish
             release_tag=$RELEASE_TAG
             prerelease=$RELEASE_PRERELEASE
           elif [ "$EVENT" = pull_request ]; then
-            package=client
+            package=all
             mode=dry-run
             version=
             release_tag=
@@ -137,7 +151,7 @@ jobs:
   # in this job. Bootstrap and publish only build commits that are on main.
   client-pack:
     needs: plan
-    if: needs.plan.outputs.package == 'client'
+    if: needs.plan.outputs.package == 'client' || needs.plan.outputs.package == 'all'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -229,7 +243,7 @@ jobs:
   # manual upload (npm trusted publishing needs the package to exist).
   client-bootstrap:
     needs: [plan, client-pack]
-    if: needs.plan.outputs.mode == 'bootstrap'
+    if: needs.plan.outputs.package == 'client' && needs.plan.outputs.mode == 'bootstrap'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -265,7 +279,7 @@ jobs:
   # Publish through npm trusted publishing; the OIDC token only exists here.
   client-publish:
     needs: [plan, client-pack]
-    if: needs.plan.outputs.mode == 'publish'
+    if: needs.plan.outputs.package == 'client' && needs.plan.outputs.mode == 'publish'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -293,3 +307,358 @@ jobs:
         run: >-
           node scripts/npm-publish.mjs "$DIR" --integrity "$INTEGRITY"
           --version "$VERSION" --dist-tag "$DIST_TAG"
+
+  # The relay's npm package: the same steps as the client's.
+  relay-pack:
+    needs: plan
+    if: needs.plan.outputs.package == 'relay' || needs.plan.outputs.package == 'all'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.pack.outputs.version }}
+      dist_tag: ${{ steps.pack.outputs.dist_tag }}
+      integrity: ${{ steps.pack.outputs.integrity }}
+      artifact: npm-pack-tab-mcp-${{ steps.pack.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: The commit to release is on main
+        if: needs.plan.outputs.mode != 'dry-run'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on main; release only reviewed, merged commits"
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - run: bun install --frozen-lockfile
+      # The browser tests in verify need Chrome; ci.yml runs verify on pull requests.
+      - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        if: github.event_name != 'pull_request'
+        id: chrome
+        with:
+          chrome-version: stable
+      - run: bun run verify
+        if: github.event_name != 'pull_request'
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: bun run build
+        working-directory: packages/tab-mcp
+      - id: pack
+        name: Pack and check the tarball
+        env:
+          PACK_DIR: ${{ runner.temp }}/npm-pack
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(relay --out "$PACK_DIR")
+          [ -n "$VERSION" ] && args+=(--version "$VERSION")
+          [ -n "$RELEASE_TAG" ] && args+=(--release-tag "$RELEASE_TAG")
+          [ -n "$PRERELEASE" ] && args+=(--prerelease "$PRERELEASE")
+          bun scripts/npm-pack.ts "${args[@]}"
+      - name: Dry-run the publication
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          DIST_TAG: ${{ steps.pack.outputs.dist_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache=$(mktemp -d "$RUNNER_TEMP/npm-dry-run.XXXXXX")
+          env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+            npm publish "$TARBALL" --dry-run --offline --cache "$cache" \
+              --ignore-scripts --access public --tag "$DIST_TAG" \
+              --registry https://registry.npmjs.org
+      - name: Install the tarball into an empty project
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ steps.pack.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer=$(mktemp -d "$RUNNER_TEMP/npm-consumer.XXXXXX")
+          cd "$consumer"
+          npm init --yes > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund "$TARBALL"
+          # The command runs on Bun (DEC-024).
+          test "$(./node_modules/.bin/tab-mcp --version)" = "$VERSION"
+          bun -e "
+            const lib = await import('@ractive-ch/tab-mcp');
+            if (lib.VERSION !== process.env.VERSION) throw new Error('VERSION ' + lib.VERSION);
+            if (typeof lib.createRelay !== 'function' || typeof lib.SqliteTokenStore !== 'function') throw new Error('no createRelay');
+            console.log('imported', lib.VERSION);
+          "
+          cat > store.test.ts <<'TS'
+          import { MemoryTokenStore } from "@ractive-ch/tab-mcp";
+          import { tokenStoreConformance } from "@ractive-ch/tab-mcp/testing";
+          tokenStoreConformance("MemoryTokenStore", () => new MemoryTokenStore());
+          TS
+          bun test ./store.test.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-pack-tab-mcp-${{ steps.pack.outputs.version }}
+          path: ${{ runner.temp }}/npm-pack
+          if-no-files-found: error
+          retention-days: 30
+
+  relay-bootstrap:
+    needs: [plan, relay-pack]
+    if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'bootstrap'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.relay-pack.outputs.artifact }}
+          path: ${{ runner.temp }}/npm-bootstrap
+      - name: Sign and verify the provenance
+        env:
+          DIR: ${{ runner.temp }}/npm-bootstrap
+          INTEGRITY: ${{ needs.relay-pack.outputs.integrity }}
+        shell: bash
+        run: |
+          node scripts/npm-provenance.mjs sign "$DIR" --integrity "$INTEGRITY"
+          ls -l "$DIR"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-bootstrap-tab-mcp-${{ needs.relay-pack.outputs.version }}
+          path: ${{ runner.temp }}/npm-bootstrap
+          if-no-files-found: error
+          retention-days: 90
+
+  relay-publish:
+    needs: [plan, relay-pack, relay-image]
+    if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.relay-pack.outputs.artifact }}
+          path: ${{ runner.temp }}/npm-publish
+      - name: Publish, or skip an identical published version
+        env:
+          DIR: ${{ runner.temp }}/npm-publish
+          INTEGRITY: ${{ needs.relay-pack.outputs.integrity }}
+          VERSION: ${{ needs.relay-pack.outputs.version }}
+          DIST_TAG: ${{ needs.relay-pack.outputs.dist_tag }}
+        run: >-
+          node scripts/npm-publish.mjs "$DIR" --integrity "$INTEGRITY"
+          --version "$VERSION" --dist-tag "$DIST_TAG"
+
+  # Build the image for both architectures, with provenance and SBOM, into
+  # an OCI archive; load its amd64 image (the runner's own) and run it
+  # through the smoke test; upload the archive. relay-image-publish pushes
+  # exactly this archive, so the pushed bytes are the smoke-tested ones. No
+  # registry login and no build cache here (DEC-069).
+  relay-image:
+    needs: [plan, relay-pack]
+    if: needs.plan.outputs.package == 'relay' || needs.plan.outputs.package == 'all'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.archive.outputs.digest }}
+      artifact: relay-image-${{ needs.relay-pack.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: tab-mcp
+          flavor: latest=false
+          tags: type=raw,value=${{ needs.relay-pack.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=tab-mcp
+            org.opencontainers.image.version=${{ needs.relay-pack.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+      - name: Build linux/amd64 and linux/arm64 into an OCI archive
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=oci,dest=${{ runner.temp }}/relay-image/image.tar
+      - id: archive
+        name: Record the archive's digests
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+        shell: bash
+        run: |
+          set -euo pipefail
+          skopeo --version
+          # The archive holds one image index: both platforms and their attestations.
+          test "$(tar -xOf "$ARCHIVE" index.json | jq '.manifests | length')" = 1
+          digest=$(tar -xOf "$ARCHIVE" index.json | jq -r '.manifests[0].digest')
+          tar -xOf "$ARCHIVE" "blobs/${digest/://}" | jq -r '.manifests[]
+            | select(.platform.os == "linux" and .platform.architecture != "unknown")
+            | "\(.platform.architecture) \(.digest)"'
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "image index $digest"
+      - name: Load the amd64 image from the archive
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+          DIGEST: ${{ steps.archive.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          skopeo copy --override-os linux --override-arch amd64 \
+            "oci-archive:$ARCHIVE" docker-daemon:tab-mcp:smoke
+          # The loaded image has the archive's amd64 layers (diff IDs; the
+          # image ID depends on the daemon's image store).
+          manifest=$(tar -xOf "$ARCHIVE" "blobs/${DIGEST/://}" | jq -r '.manifests[]
+            | select(.platform.os == "linux" and .platform.architecture == "amd64")
+            | .digest')
+          config=$(tar -xOf "$ARCHIVE" "blobs/${manifest/://}" | jq -r .config.digest)
+          want=$(tar -xOf "$ARCHIVE" "blobs/${config/://}" | jq -c .rootfs.diff_ids)
+          loaded=$(docker image inspect tab-mcp:smoke --format '{{json .RootFS.Layers}}' | jq -c .)
+          echo "amd64 manifest $manifest, config $config"
+          test "$loaded" = "$want"
+      - name: Smoke test
+        run: bun scripts/docker-smoke.ts tab-mcp:smoke
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relay-image-${{ needs.relay-pack.outputs.version }}
+          path: ${{ runner.temp }}/relay-image/image.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  # Push the smoke-tested archive once npm has the same version (published
+  # or identical).
+  relay-image-publish:
+    needs: [plan, relay-pack, relay-image, relay-publish]
+    if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
+      - name: Docker Hub token expiry
+        env:
+          DOCKERHUB_TOKEN_EXPIRES: ${{ vars.DOCKERHUB_TOKEN_EXPIRES }}
+        run: bun scripts/token-expiry.ts --mode warn
+      - id: tags
+        name: Image tags
+        env:
+          VERSION: ${{ needs.relay-pack.outputs.version }}
+          DIST_TAG: ${{ needs.relay-pack.outputs.dist_tag }}
+        # X.Y.Z always; latest only when not below npm's latest, X.Y only
+        # for the highest stable X.Y.* on npm, also when the npm publication
+        # was skipped as identical (a re-run of an old tag).
+        run: >-
+          node scripts/image-tags.mjs --package @ractive-ch/tab-mcp
+          --version "$VERSION" --dist-tag "$DIST_TAG"
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: |
+            docker.io/ractive/tab-mcp
+            ghcr.io/ractive/tab-mcp
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.relay-pack.outputs.version }}
+            type=raw,value=${{ steps.tags.outputs.minor }},enable=${{ steps.tags.outputs.move_minor }}
+            type=raw,value=latest,enable=${{ steps.tags.outputs.latest }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.relay-image.outputs.artifact }}
+          path: ${{ runner.temp }}/relay-image
+      - name: Check the archive is the smoke-tested one
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+          DIGEST: ${{ needs.relay-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(tar -xOf "$ARCHIVE" index.json | jq -r '.manifests[0].digest')
+          echo "archive $actual, smoke-tested $DIGEST"
+          test "$actual" = "$DIGEST"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the archive and check the pushed digest
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ needs.relay-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          skopeo --version
+          # --all: both platforms and the attestations; --preserve-digests:
+          # fail instead of re-encoding anything. skopeo reads the logins
+          # from ~/.docker/config.json.
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            skopeo copy --all --preserve-digests --retry-times 3 \
+              "oci-archive:$ARCHIVE" "docker://$tag"
+            pushed="sha256:$(skopeo inspect --raw "docker://$tag" | sha256sum | cut -d' ' -f1)"
+            echo "$tag $pushed"
+            if [ "$pushed" != "$DIGEST" ]; then
+              echo "::error::$tag is $pushed, not the smoke-tested $DIGEST"
+              exit 1
+            fi
+          done <<< "$TAGS"

@@ -5,6 +5,8 @@
  *
  *   bun run --cwd packages/tab-mcp-client build
  *   bun scripts/npm-pack.ts client --out /tmp/pack
+ *   bun run --cwd packages/tab-mcp build
+ *   bun scripts/npm-pack.ts relay --out /tmp/pack-relay
  *
  * Options: `--version V` (must equal the package version), `--release-tag T`
  * (must be `<prefix>v<version>`), `--prerelease true|false` (the GitHub
@@ -14,7 +16,7 @@
  */
 
 import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { parseArgs } from "node:util";
 
 /** The exact repository URL npm compares with the provenance statement. */
@@ -30,13 +32,17 @@ interface PackageSpec {
 	tagPrefix: string;
 	exports: unknown;
 	types: string;
+	/** `bin` of the published package.json, if it has commands. */
+	bin?: Record<string, string>;
 	/** Files in the tarball, chunk hashes written as `[hash]`. */
 	files: string[];
-	/** Each `.ts` file here (tests excluded) ships a `.d.ts`. */
+	/** Each `.ts` file under here (tests excluded) ships a `.d.ts`. */
 	declarationsFrom: string;
+	/** Source files (relative to `declarationsFrom`) that ship no `.d.ts`. */
+	noDeclarations?: string[];
 }
 
-/** Packages this script knows; the relay joins later (iteration 5). */
+/** Packages this script knows. */
 export const PACKAGES: Record<string, PackageSpec> = {
 	client: {
 		name: "@ractive-ch/tab-mcp-client",
@@ -68,6 +74,31 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"cdn/ui-[hash].min.js.map",
 		],
 		declarationsFrom: "src",
+	},
+	relay: {
+		name: "@ractive-ch/tab-mcp",
+		workspace: "packages/tab-mcp",
+		dist: "dist",
+		tagPrefix: "relay-v",
+		exports: {
+			".": { types: "./index.d.ts", default: "./index.js" },
+			"./testing": { types: "./testing.d.ts", default: "./testing.js" },
+		},
+		types: "./index.d.ts",
+		bin: { "tab-mcp": "./main.js" },
+		files: [
+			"AI_NOTICE",
+			"LICENSE",
+			"package.json",
+			"main.js",
+			"main.js.map",
+			"index.js",
+			"index.js.map",
+			"testing.js",
+			"testing.js.map",
+		],
+		declarationsFrom: "src",
+		noDeclarations: ["main.ts"],
 	},
 };
 
@@ -120,6 +151,7 @@ export function checkManifest(
 	expect("type", pkg["type"], "module");
 	expect("exports", pkg["exports"], spec.exports);
 	expect("types", pkg["types"], spec.types);
+	expect("bin", pkg["bin"], spec.bin);
 	expect("publishConfig", pkg["publishConfig"], { access: "public" });
 	const repository = pkg["repository"] as Record<string, unknown> | undefined;
 	expect("repository.url", repository?.["url"], REPOSITORY_URL);
@@ -228,8 +260,13 @@ async function main() {
 		problems.push(`packed ${packed.name}@${packed.version}`);
 
 	// The file list, with chunk hashes normalised and declarations derived.
-	const declarations = readdirSync(join(workspace, spec.declarationsFrom))
+	const declarations = readdirSync(join(workspace, spec.declarationsFrom), {
+		recursive: true,
+		encoding: "utf8",
+	})
+		.map((f) => f.split(sep).join("/"))
 		.filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+		.filter((f) => !spec.noDeclarations?.includes(f))
 		.map((f) => f.replace(/\.ts$/, ".d.ts"));
 	const expected = [...spec.files, ...declarations].sort();
 	const actual = packed.files.map((f) => normalizeChunk(f.path)).sort();

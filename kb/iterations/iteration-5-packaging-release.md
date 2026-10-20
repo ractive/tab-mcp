@@ -7,7 +7,7 @@ tags:
   - iteration
   - release
   - docs
-timestamp: 2026-10-19T23:45:00+02:00
+timestamp: 2026-10-20T07:10:00+02:00
 ---
 
 # Iteration 5: packaging, documentation and release
@@ -26,8 +26,8 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 
 - [x] Client: the build writes `dist/` with its own `package.json` (DEC-053): ESM with lazily loaded chunks (DEC-035), declarations from `tsc -p tsconfig.build.json`, no SDK (DEC-049); done in iteration 2, metadata and `publishConfig` in iteration 5a
 - [x] Client CDN build: self-contained minified ESM with lazily loaded chunks; the bundled `@cfworker/json-schema` licence in `THIRD-PARTY-NOTICES.txt` (a test keeps its version in step)
-- [ ] Relay: `bun build --target=bun` to `dist/`, `bin` → `dist/main.js` with `#!/usr/bin/env bun`; exports `.` (`createRelay`, `TokenStore` types, built-in stores) and `./testing` (conformance suite)
-- [ ] Pack checks in CI: client done in iteration 5a (`scripts/npm-pack.ts` in `release.yml` on pull requests: expected file list, no `src/`, no `workspace:`, exact versions); relay still to add
+- [x] Relay: `bun build --target=bun` to `dist/`, `bin` → `dist/main.js` with `#!/usr/bin/env bun`; exports `.` (`createRelay`, `TokenStore` types, built-in stores) and `./testing` (conformance suite)
+- [x] Pack checks in CI: client done in iteration 5a (`scripts/npm-pack.ts` in `release.yml` on pull requests: expected file list, no `src/`, no `workspace:`, exact versions); relay added with its own file list, `bin` and declarations (DEC-068)
 
 ### npm release
 
@@ -35,13 +35,14 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 - [x] Bootstrap mode: signs the exact tarball with GitHub OIDC provenance and uploads it with the bundle (artifact `npm-bootstrap-tab-mcp-client-<version>`); proven on the branch in run 39328703960
 - [x] Document the bootstrap and release steps: [npm publishing](/operations/npm-publishing.md) (instead of `RELEASING.md`)
 - [ ] Owner: bootstrap `@ractive-ch/tab-mcp-client@0.1.0-alpha.0`, configure its trusted publisher and the `release` environment, create the GitHub release `client-v0.1.0-alpha.0` ([steps](/operations/npm-publishing.md))
-- [ ] Relay `@ractive-ch/tab-mcp` (after OAuth, iteration 3): a `relay` entry in `scripts/npm-pack.ts`, `relay-pack`/`relay-bootstrap`/`relay-publish` jobs for `relay-v*` releases, the Docker jobs on the same tag, then its own bootstrap and trusted publisher
+- [x] Relay `@ractive-ch/tab-mcp` (after OAuth, iteration 3): a `relay` entry in `scripts/npm-pack.ts`, `relay-pack`/`relay-bootstrap`/`relay-publish` jobs for `relay-v*` releases, the Docker jobs on the same tag (DEC-068, DEC-069)
+- [ ] Owner: bootstrap `@ractive-ch/tab-mcp@0.1.0-alpha.0`, configure its trusted publisher, the `relay-v*` policy of `release`, the Docker Hub repository and variables, create the GitHub release `relay-v0.1.0-alpha.0`, make the ghcr.io package public ([steps](/operations/npm-publishing.md))
 
 ### Docker
 
-- [ ] `Dockerfile` (multi-stage, `oven/bun:1.4.3-alpine` build, `oven/bun:1.4.3-distroless` runtime, non-root, `HEALTHCHECK` not possible in distroless → documented health endpoint instead), `TAB_MCP_STORE=sqlite` and `TAB_MCP_SQLITE_PATH=/data/tab-mcp.db` with `/data` a volume writable by the non-root user, `.dockerignore`
-- [ ] Release job: buildx multi-arch amd64 + arm64, push to `ractive/tab-mcp` (Docker Hub, `DOCKERHUB_USERNAME` variable + `DOCKERHUB_TOKEN` secret) and `ghcr.io/ractive/tab-mcp`, tags `X.Y.Z`, `X.Y`, `latest`, provenance and SBOM attestations, all actions pinned by SHA
-- [ ] Token-expiry warning: scheduled monthly workflow (and a step in the release workflow) that reads the repository variable `DOCKERHUB_TOKEN_EXPIRES` (`2027-10-19`) and fails with a clear message, or opens an issue, when the date is within 30 days, pointing to `kb/operations/release-secrets.md`
+- [x] `Dockerfile` (multi-stage, `oven/bun:1.4.3-alpine` build, `oven/bun:1.4.3-distroless` runtime, non-root, `HEALTHCHECK` not possible in distroless → documented health endpoint instead), `TAB_MCP_STORE=sqlite` and `TAB_MCP_SQLITE_PATH=/data/tab-mcp.db` with `/data` a volume writable by the non-root user, `.dockerignore`
+- [x] Release job: buildx multi-arch amd64 + arm64, push to `ractive/tab-mcp` (Docker Hub, `DOCKERHUB_USERNAME` variable + `DOCKERHUB_TOKEN` secret) and `ghcr.io/ractive/tab-mcp`, tags `X.Y.Z`, `X.Y`, `latest`, provenance and SBOM attestations, all actions pinned by SHA
+- [x] Token-expiry warning: scheduled monthly workflow (and a step in the release workflow) that reads the repository variable `DOCKERHUB_TOKEN_EXPIRES` (`2027-10-19`) and fails with a clear message, or opens an issue, when the date is within 30 days, pointing to `kb/operations/release-secrets.md`
 
 ### Documentation
 
@@ -61,8 +62,8 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 
 ### Repository hygiene
 
-- [ ] Dependabot (DEC-037) for npm with the Bun lockfile, GitHub Actions and Docker, exact versions
-- [ ] CI: add the browser e2e job, `bun pm pack --dry-run` checks, Docker build (no push) on PRs
+- [x] Dependabot (DEC-037) for npm with the Bun lockfile, GitHub Actions and Docker, exact versions
+- [x] CI: add the browser e2e job, `bun pm pack --dry-run` checks, Docker build (no push) on PRs: the browser tests and the calculator e2e run inside `verify` in `ci.yml` (Chrome set up there since iteration 4); the pack checks are `scripts/npm-pack.ts` in the release dry run; the image builds for both architectures and passes `scripts/docker-smoke.ts` (DEC-069)
 
 ## Acceptance criteria
 
