@@ -12,7 +12,8 @@
 		"lint": "biome check .",
 		"fix": "biome check --write .",
 		"test": "bun test",
-		"example": "bun examples/calculator/dev.ts"
+		"example": "bun examples/calculator/dev.ts",
+		"e2e:claude": "bun examples/calculator/test/claude-code.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",

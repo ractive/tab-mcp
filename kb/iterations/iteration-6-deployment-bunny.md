@@ -26,6 +26,7 @@ What stays here, generic and secret-free:
 - [ ] An example OpenTofu module for bunny.net Magic Containers in `examples/deploy-bunny/` (no state, no secrets, placeholders only), documented as an example, not as the owner's setup
 - [ ] Operations notes: backups of the SQLite file, upgrading between versions, what a restart does to sessions and tokens
 - [ ] Privacy template: what an operator should tell users (what passes through the relay, what is stored)
+- [ ] Manual compatibility checks against the deployed relay (moved from iteration 4): claude.ai custom connector, Claude Desktop, ChatGPT developer mode; record app, version, date, revision, auth and result in `docs/compatibility.md`
 
 # Citations
 
