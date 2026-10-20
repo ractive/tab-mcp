@@ -177,7 +177,7 @@ export class Browser {
 		})) as {
 			sessionId: string;
 		};
-		const page = new Page(this, sessionId);
+		const page = new Page(this, sessionId, targetId);
 		await page.send("Page.enable");
 		await page.send("Runtime.enable");
 		return page;
@@ -199,11 +199,20 @@ export class Browser {
 export class Page {
 	readonly #browser: Browser;
 	readonly sessionId: string;
+	readonly targetId: string;
 	readonly console: string[] = [];
 
-	constructor(browser: Browser, sessionId: string) {
+	constructor(browser: Browser, sessionId: string, targetId: string) {
 		this.#browser = browser;
 		this.sessionId = sessionId;
+		this.targetId = targetId;
+	}
+
+	/** Close the tab. */
+	async close(): Promise<void> {
+		await this.#browser.send("Target.closeTarget", {
+			targetId: this.targetId,
+		});
 	}
 
 	send(
@@ -237,10 +246,10 @@ export class Page {
 		return r.result.value as T;
 	}
 
-	/** A real mouse click (with user activation) in the middle of an element. */
+	/** A real mouse click (with user activation) in the middle of an element, scrolled into view. */
 	async click(selector: string): Promise<void> {
 		const box = await this.eval<{ x: number; y: number }>(
-			`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+			`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "center", inline: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
 		);
 		for (const type of ["mousePressed", "mouseReleased"]) {
 			await this.send("Input.dispatchMouseEvent", {

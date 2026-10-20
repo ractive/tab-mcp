@@ -1,5 +1,9 @@
 # Log
 
+## 2026-10-20
+
+- Iteration 4 on iter-4/calculator-e2e: calculator example, Chrome e2e in CI, headless Claude Code run (144, legacy refused with 400 / -32022), docs/compatibility.md; manual checks with claude.ai, Desktop and ChatGPT deferred to iteration 6; SDK Firefox issue drafted, not filed
+
 ## 2026-10-19
 
 - Security review of PR #4: eight findings fixed, DEC-061 to DEC-067

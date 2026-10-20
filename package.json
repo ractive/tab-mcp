@@ -11,7 +11,9 @@
 		"typecheck": "bun check -p packages/tab-mcp && bun check -p packages/tab-mcp-client && bun check -p packages/tab-mcp-client/tsconfig.test.json && bun check -p examples/calculator && bun check -p scripts",
 		"lint": "biome check .",
 		"fix": "biome check --write .",
-		"test": "bun test"
+		"test": "bun test",
+		"example": "bun examples/calculator/dev.ts",
+		"e2e:claude": "bun examples/calculator/test/claude-code.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.15",
