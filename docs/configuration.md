@@ -3,8 +3,9 @@
 The relay (`tab-mcp` command, Docker image `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`) reads its settings from environment variables. `tab-mcp --help`
 prints the same list. A value the relay cannot use stops it at start with
-`tab-mcp: configuration error: …` and exit code 2, so a typo never runs with a silent
-default.
+`tab-mcp: configuration error: …` and exit code 2, so a wrong value never runs with a
+silent default. A misspelled variable name is not detected: the relay ignores variables
+it does not know and uses the default.
 
 If you embed the relay with `createRelay()` from `@ractive-ch/tab-mcp`, pass the same
 settings as options (`publicUrl`, `allowedOrigins`, `sites`, `maxSessionsPerIp`, …, in
