@@ -841,6 +841,20 @@ the `bun` ecosystem takes no `versioning-strategy`). A test (`scripts/docker.tes
 requires the Dockerfile's base images and every Bun version in the workflows to equal
 `@types/bun`, so a partial Bun update fails until all places follow.
 
+## DEC-072: Leave alpha: 0.1.0 is the first stable release of both packages
+
+Owner decision (2026-10-20). The release after `0.1.0-alpha.1` is the stable `0.1.0` of
+the relay `@ractive-ch/tab-mcp` and the client `@ractive-ch/tab-mcp-client`, not an
+`alpha.2`. Both GitHub releases (`relay-v0.1.0`, `client-v0.1.0`) are normal releases, not
+pre-releases, so the release workflow publishes with `npm publish --tag latest`: that moves
+npm's `latest` off `0.1.0-alpha.0` (the "Known issue: latest" of DEC-055 ends). The relay
+image gets `0.1.0` and, because the version is stable and not below npm's `latest`, also
+`0.1` and `latest` (DEC-069, `scripts/image-tags.mjs`); later stable versions move them the
+same way, pre-releases never do. The docs drop `@alpha` and pin `0.1.0`; a test
+(`packages/tab-mcp-client/test/build.test.ts`) fails when a doc or plugin manifest names
+any other package version or image tag. Until 1.0, a minor version may still change
+settings, the protocol or the API.
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
