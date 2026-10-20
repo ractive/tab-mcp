@@ -4,6 +4,7 @@
  * `scripts/npm-pack.ts`) load it.
  */
 
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import path from "node:path";
@@ -16,6 +17,24 @@ export const TAG_PREFIXES = {
 	"@ractive-ch/tab-mcp-client": "client-v",
 	"@ractive-ch/tab-mcp": "relay-v",
 };
+
+export const REGISTRY = "https://registry.npmjs.org";
+
+/**
+ * The stdout of `npm view <what> <field> --json` against the public registry
+ * (no local cache), or undefined when the package or version does not exist.
+ * Throws when npm fails otherwise.
+ */
+export function npmView(what, field) {
+	const r = spawnSync(
+		"npm",
+		["view", what, field, "--json", "--prefer-online", "--registry", REGISTRY],
+		{ encoding: "utf8" },
+	);
+	if (r.status === 0) return r.stdout;
+	if (/E404/.test(r.stderr + r.stdout)) return undefined;
+	throw new Error(`npm view ${what} ${field} failed: ${r.stderr.trim()}`);
+}
 
 /** npm's `integrity` of a tarball's bytes: `sha512-<base64>`. */
 export function integrityOf(bytes) {
@@ -133,6 +152,81 @@ export function publishDecision({
 	return {
 		action: "publish",
 		message: `publish ${spec} with dist-tag ${distTag}`,
+	};
+}
+
+/**
+ * The list from `npm view <package> versions --json`: a JSON string for a
+ * package with one version, an array otherwise (npm 12 may wrap it in a
+ * one-element array). Empty output means no versions.
+ */
+export function viewList(stdout) {
+	const out = stdout.trim();
+	if (out === "") return [];
+	let value = JSON.parse(out);
+	if (Array.isArray(value) && value.length === 1 && Array.isArray(value[0]))
+		value = value[0];
+	if (typeof value === "string") return [value];
+	if (!Array.isArray(value) || !value.every((v) => typeof v === "string"))
+		throw new Error("npm view returned no list of versions");
+	return value;
+}
+
+/**
+ * Which moving tags the image of a published relay version gets, from npm's
+ * state after the publication (or after it was skipped as identical):
+ *
+ * - `latest` only when the version is stable and not below npm's current
+ *   `dist-tags.latest`;
+ * - `X.Y` only when the version is stable and the highest stable version of
+ *   that `X.Y` on npm.
+ *
+ * So re-running the publication of an old tag (relay-v1.0.5 after 1.1.0)
+ * pushes `1.0.5` but moves neither tag backwards. `versions` may lag behind
+ * the publication (registry caches); this version counts as published.
+ *
+ * Returns `{ latest: boolean, minor: string, moveMinor: boolean, message }`.
+ */
+export function imageTagDecision({ version, distTag, latest, versions }) {
+	const parsed = SEMVER.exec(version);
+	if (!parsed) throw new Error(`not a semver version: ${version}`);
+	const minor = `${parsed[1]}.${parsed[2]}`;
+	if (distTag !== "latest" || parsed[4] !== undefined) {
+		return {
+			latest: false,
+			minor,
+			moveMinor: false,
+			message: `${version} is a pre-release: only its own tag`,
+		};
+	}
+	if (latest === undefined)
+		throw new Error(
+			"npm has no latest dist-tag for a published stable version",
+		);
+	const moveLatest = compareVersions(version, latest) >= 0;
+	const higher = versions.filter((v) => {
+		const p = SEMVER.exec(v);
+		return (
+			p !== null &&
+			p[4] === undefined &&
+			`${p[1]}.${p[2]}` === minor &&
+			compareVersions(v, version) > 0
+		);
+	});
+	const moveMinor = higher.length === 0;
+	const notes = [
+		moveLatest
+			? `latest (npm latest is ${latest})`
+			: `not latest: npm latest is ${latest}`,
+		moveMinor
+			? `${minor} (highest ${minor}.x)`
+			: `not ${minor}: npm has ${higher.sort(compareVersions).at(-1)}`,
+	];
+	return {
+		latest: moveLatest,
+		minor,
+		moveMinor,
+		message: `${version}: ${notes.join("; ")}`,
 	};
 }
 

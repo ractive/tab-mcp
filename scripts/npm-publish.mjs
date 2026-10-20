@@ -16,11 +16,11 @@ import { parseArgs } from "node:util";
 import {
 	findOneTarball,
 	integrityOf,
+	npmView,
 	publishDecision,
+	REGISTRY,
 	viewValue,
 } from "./npm-release-lib.mjs";
-
-const REGISTRY = "https://registry.npmjs.org";
 
 function fail(message) {
 	console.error(`::error::${message}`);
@@ -62,21 +62,12 @@ const spec = `${manifest.name}@${version}`;
 
 /** A registry field, or undefined when the package or version does not exist. */
 function view(what, field) {
-	const r = spawnSync(
-		"npm",
-		["view", what, field, "--json", "--registry", REGISTRY],
-		{ encoding: "utf8" },
-	);
-	if (r.status === 0) {
-		try {
-			return viewValue(r.stdout);
-		} catch (error) {
-			fail(`npm view ${what} ${field}: ${error.message}`);
-		}
+	try {
+		const out = npmView(what, field);
+		return out === undefined ? undefined : viewValue(out);
+	} catch (error) {
+		fail(error.message);
 	}
-	if (/E404/.test(r.stderr + r.stdout)) return undefined;
-	process.stderr.write(r.stderr);
-	fail(`npm view ${what} ${field} failed`);
 }
 
 const decision = publishDecision({

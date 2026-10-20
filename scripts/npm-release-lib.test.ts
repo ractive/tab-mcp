@@ -5,9 +5,11 @@ import { join } from "node:path";
 import {
 	compareVersions,
 	findOneTarball,
+	imageTagDecision,
 	integrityOf,
 	publishDecision,
 	signerProblems,
+	viewList,
 	viewValue,
 } from "./npm-release-lib.mjs";
 
@@ -167,4 +169,84 @@ test("the relay is signed from main or its own relay-v tag", () => {
 	expect(
 		signerProblems(statement("refs/tags/client-v0.1.0-alpha.0"), relay).join(),
 	).toContain("refs/tags/relay-v0.1.0-alpha.0");
+});
+
+describe("viewList", () => {
+	test("one version is a string, several an array, npm 12 may wrap it", () => {
+		expect(viewList('"1.0.0"')).toEqual(["1.0.0"]);
+		expect(viewList('["1.0.0","1.0.1"]')).toEqual(["1.0.0", "1.0.1"]);
+		expect(viewList('[["1.0.0","1.0.1"]]')).toEqual(["1.0.0", "1.0.1"]);
+		expect(viewList("")).toEqual([]);
+		expect(() => viewList("{}")).toThrow();
+	});
+});
+
+describe("imageTagDecision", () => {
+	const versions = ["1.0.4", "1.0.5", "1.1.0-rc.1", "1.1.0"];
+	test("a new highest stable version moves latest and X.Y", () => {
+		const d = imageTagDecision({
+			version: "1.2.0",
+			distTag: "latest",
+			latest: "1.2.0",
+			versions: [...versions, "1.2.0"],
+		});
+		expect([d.latest, d.minor, d.moveMinor]).toEqual([true, "1.2", true]);
+	});
+	test("re-running an old tag after a newer release moves neither", () => {
+		// relay-v1.0.5 re-run after 1.1.0: npm skipped it as identical.
+		const old = imageTagDecision({
+			version: "1.0.5",
+			distTag: "latest",
+			latest: "1.1.0",
+			versions: [...versions, "1.0.6"],
+		});
+		expect([old.latest, old.moveMinor]).toEqual([false, false]);
+		expect(old.message).toContain("npm has 1.0.6");
+	});
+	test("a patch of an older line moves its X.Y but not latest", () => {
+		const d = imageTagDecision({
+			version: "1.0.6",
+			distTag: "latest",
+			latest: "1.1.0",
+			versions: [...versions, "1.0.6"],
+		});
+		expect([d.latest, d.minor, d.moveMinor]).toEqual([false, "1.0", true]);
+	});
+	test("re-running the current latest keeps both", () => {
+		const d = imageTagDecision({
+			version: "1.1.0",
+			distTag: "latest",
+			latest: "1.1.0",
+			versions,
+		});
+		expect([d.latest, d.moveMinor]).toEqual([true, true]);
+	});
+	test("pre-releases of the same X.Y do not block it; versions may lag", () => {
+		const d = imageTagDecision({
+			version: "1.3.0",
+			distTag: "latest",
+			latest: "1.1.0", // a cached packument from before the publication
+			versions: [...versions, "1.3.1-rc.0"],
+		});
+		expect([d.latest, d.moveMinor]).toEqual([true, true]);
+	});
+	test("a pre-release moves no tag", () => {
+		const d = imageTagDecision({
+			version: "1.2.0-rc.1",
+			distTag: "rc",
+			latest: "1.1.0",
+			versions,
+		});
+		expect([d.latest, d.moveMinor]).toEqual([false, false]);
+	});
+	test("a stable version without npm latest is an error", () => {
+		expect(() =>
+			imageTagDecision({
+				version: "1.0.0",
+				distTag: "latest",
+				latest: undefined,
+				versions: [],
+			}),
+		).toThrow("no latest");
+	});
 });
