@@ -135,7 +135,18 @@ Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()
 `startPairing()` and `stopPairing()` (codes come only while pairing is on),
 `revoke(grantId)`, the properties `state`, `address`, `pairingCode`, `grants` and
 `tools`, and the events `statechange`, `connected`, `disconnected`, `pairingcode`,
-`grantschange`, `toolschange`, `replaced` and `error`. The default dialogs take their
+`grantschange`, `toolschange`, `replaced` and `error`. For an activity log, `toolcall`
+and `toolcallend` report every call by an AI app: its id, tool, arguments and AI app as it
+starts, then its outcome (`ok`, `error`, `declined` or `cancelled`), result and duration.
+
+```ts
+mcp.addEventListener("toolcallend", (e) => {
+  const { tool, client, outcome, durationMs } = e.detail;
+  log(`${client.name ?? client.host}: ${tool} ${outcome} in ${durationMs} ms`);
+});
+```
+
+The default dialogs take their
 colours and sizes from `--tab-mcp-*` CSS custom properties (`--tab-mcp-font`,
 `--tab-mcp-color`, `--tab-mcp-background`, `--tab-mcp-border`, `--tab-mcp-radius`, …)
 and need no CSP exception.

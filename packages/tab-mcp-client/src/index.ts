@@ -24,6 +24,10 @@ export type {
 	Tool,
 	ToolAnnotations,
 	ToolCallClient,
+	ToolCallEnd,
+	ToolCallOutcome,
+	ToolCallResult,
+	ToolCallStart,
 	ToolExecuteOptions,
 } from "./types.ts";
 export { VERSION } from "./version.ts";

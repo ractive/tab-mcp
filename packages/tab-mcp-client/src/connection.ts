@@ -140,6 +140,10 @@ export function openConnection(
 		server: host.server,
 		confirm: (request) => host.confirm(request),
 		client: (grant) => host.clientFor(grant),
+		observe: {
+			start: (call) => host.toolCallStarted(call),
+			end: (call) => host.toolCallEnded(call),
+		},
 	});
 	const stopWatching = host.registry.onChange(() => handler.toolsChanged());
 

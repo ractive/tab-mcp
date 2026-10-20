@@ -11,7 +11,11 @@ import {
 	test,
 } from "bun:test";
 import type { TabMcp } from "../src/index.ts";
-import type { DisconnectDetail } from "../src/types.ts";
+import type {
+	DisconnectDetail,
+	ToolCallEnd,
+	ToolCallStart,
+} from "../src/types.ts";
 import {
 	connectClient,
 	MemoryStorage,
@@ -169,6 +173,25 @@ describe("tools through the relay", () => {
 					asked();
 				}),
 		});
+		const events: string[] = [];
+		t.addEventListener("toolcall", (e) => {
+			const {
+				id,
+				tool,
+				arguments: args,
+				client,
+			} = (e as CustomEvent<ToolCallStart>).detail;
+			events.push(`start ${id} ${tool} ${JSON.stringify(args)} ${client.host}`);
+		});
+		t.addEventListener("toolcallend", (e) => {
+			const { id, outcome, result, durationMs } = (
+				e as CustomEvent<ToolCallEnd>
+			).detail;
+			expect(durationMs).toBeGreaterThanOrEqual(0);
+			events.push(`end ${id} ${outcome} ${JSON.stringify(result.content)}`);
+			// A listener that changes the result changes only its copy.
+			result.content.length = 0;
+		});
 		const nextQuestion = () =>
 			new Promise<(typeof questions)[number]>((resolve) => {
 				asked = () => resolve(questions.shift() as (typeof questions)[number]);
@@ -206,6 +229,16 @@ describe("tools through the relay", () => {
 			content: [{ type: "text", text: "The user declined" }],
 		});
 		expect(runs).toBe(1);
+		const ids = events.map((line) => Number(line.split(" ")[1]));
+		expect(ids[1]).toBe(ids[0]);
+		expect(ids[3]).toBe(ids[2]);
+		expect(ids[2]).toBeGreaterThan(ids[0] ?? 0);
+		expect(events.map((line) => line.replace(/^(\w+) \d+/, "$1"))).toEqual([
+			"start clear_memory {} client.example",
+			'end ok [{"type":"text","text":"cleared"}]',
+			"start clear_memory {} client.example",
+			'end declined [{"type":"text","text":"The user declined"}]',
+		]);
 		await client.close();
 	});
 

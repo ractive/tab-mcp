@@ -15,6 +15,9 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   AI app until the page is reloaded or the app is disconnected. Like "Allow", it stays
   disabled for a moment after the dialog opens. A custom `onConfirm` is asked every time,
   as before.
+- The events `toolcall` and `toolcallend`: every call of a known tool by an AI app as it
+  starts (id, tool, arguments, AI app) and as it ends (outcome `ok`, `error`, `declined`
+  or `cancelled`, the result, the duration). For an activity log in the page.
 
 ### [0.1.0][client-0.1.0] - 2026-10-20
 
