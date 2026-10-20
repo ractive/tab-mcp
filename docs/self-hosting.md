@@ -55,6 +55,7 @@ services:
     environment:
       TAB_MCP_PUBLIC_URL: https://relay.example.com
       TAB_MCP_ALLOWED_ORIGINS: https://app.example.com
+      # For the nginx config below; x-forwarded-for behind Caddy (see "Client IP").
       TAB_MCP_TRUST_PROXY: x-real-ip
 volumes:
   tab-mcp-data:

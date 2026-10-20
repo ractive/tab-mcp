@@ -144,8 +144,9 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   not depend on the AI app.
 - Annotations reach the AI app as MCP hints (`readOnlyHint`, `destructiveHint`), so the
   AI app can ask too.
-- Tools marked `untrustedContentHint` mark their results (`openWorldHint`, and the
-  original hint in `_meta`), so AI apps can treat them as untrusted data.
+- Tools marked `untrustedContentHint` are announced with `openWorldHint: true` and the
+  original hint in the tool's `_meta`, so AI apps can treat that tool's results as
+  untrusted data. The results themselves carry no marker.
 - The page lists the connected AI apps; the user can disconnect each at any time.
 
 ### A7: Cross-site attacks on the relay's pages

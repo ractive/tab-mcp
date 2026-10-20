@@ -182,6 +182,11 @@ docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.1.0-alpha.1
 ```
 
+`x-real-ip` fits an nginx proxy that sets `X-Real-IP $remote_addr`; behind Caddy use
+`x-forwarded-for`. Set it only to a header your proxy overwrites, and never when clients
+can reach the relay directly, or they can pick their own IP and get around the per-IP
+limits.
+
 Without Docker: `bun add --global @ractive-ch/tab-mcp@alpha`, then `tab-mcp` with the same
 variables (Bun 1.4.3+). Run one relay process per public address. The reverse proxy must
 forward WebSockets on `/tab`, must not buffer event streams on `/a/…/mcp`, and must allow
