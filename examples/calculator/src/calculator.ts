@@ -42,7 +42,11 @@ export function isKey(value: string): value is Key {
 export function formatNumber(n: number): string {
 	if (!Number.isFinite(n)) return ERROR;
 	const rounded = Number(n.toPrecision(MAX_DIGITS));
-	return Object.is(rounded, -0) ? "0" : String(rounded);
+	if (Object.is(rounded, -0)) return "0";
+	// More integer digits than the display has: exponent form.
+	return Math.abs(rounded) >= 10 ** MAX_DIGITS
+		? rounded.toExponential()
+		: String(rounded);
 }
 
 function apply(a: number, op: Operator, b: number): number {
@@ -66,6 +70,8 @@ export class Calculator {
 	#operator: Operator | undefined;
 	/** The next digit starts a new number. */
 	#fresh = true;
+	/** The last key was an operator, so another one only replaces it. */
+	#afterOperator = false;
 	#memory = 0;
 
 	get display(): string {
@@ -109,6 +115,7 @@ export class Calculator {
 		this.#accumulator = undefined;
 		this.#operator = undefined;
 		this.#fresh = true;
+		this.#afterOperator = false;
 	}
 
 	/** M+: adds the displayed number to the memory. */
@@ -116,6 +123,7 @@ export class Calculator {
 		if (this.error) return;
 		this.#memory = Number(formatNumber(this.#memory + this.#value()));
 		this.#fresh = true;
+		this.#afterOperator = false;
 	}
 
 	/** MR: shows the memory as the current number. */
@@ -123,6 +131,7 @@ export class Calculator {
 		if (this.error) return;
 		this.#display = formatNumber(this.#memory);
 		this.#fresh = true;
+		this.#afterOperator = false;
 	}
 
 	/** MC: sets the memory to 0. */
@@ -135,6 +144,7 @@ export class Calculator {
 	}
 
 	#digit(key: Key): void {
+		this.#afterOperator = false;
 		if (this.#fresh) {
 			this.#display = key === "." ? "0." : key;
 			this.#fresh = false;
@@ -148,10 +158,11 @@ export class Calculator {
 
 	#operate(op: Operator): void {
 		// A second operator in a row only replaces the first.
-		if (!this.#fresh || this.#accumulator === undefined) this.#evaluate();
+		if (!this.#afterOperator) this.#evaluate();
 		this.#accumulator = this.#value();
 		this.#operator = op;
 		this.#fresh = true;
+		this.#afterOperator = true;
 	}
 
 	#equals(): void {
@@ -159,6 +170,7 @@ export class Calculator {
 		this.#accumulator = undefined;
 		this.#operator = undefined;
 		this.#fresh = true;
+		this.#afterOperator = false;
 	}
 
 	#evaluate(): void {

@@ -104,7 +104,7 @@ function grantLabel(grant: Grant): string {
 	return `${grant.client.name} (${grant.client.host})`;
 }
 
-function registerTools(mcp: TabMcp): void {
+async function registerTools(mcp: TabMcp): Promise<void> {
 	const pressKeys = (keys: string): string => {
 		calculator.pressAll(keys);
 		const last = [...keys].reverse().find((k) => k !== " ");
@@ -112,59 +112,65 @@ function registerTools(mcp: TabMcp): void {
 		render();
 		return calculator.display;
 	};
-	void mcp.registerTool({
-		name: "press_keys",
-		title: "Press keys",
-		description:
-			"Press calculator keys in order and return the display. Keys: digits 0-9, '.', " +
-			"'+', '-', '*', '/', '=' and 'C' (clear). It works like a pocket calculator " +
-			"with immediate execution: '2+3*4=' gives 20, not 14. Example: '12+30=' gives 42.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				keys: {
-					type: "string",
-					description: "The keys to press, e.g. '12*12='. Spaces are ignored.",
-					pattern: "^[0-9.+\\-*/=C ]{1,200}$",
+	await Promise.all([
+		mcp.registerTool({
+			name: "press_keys",
+			title: "Press keys",
+			description:
+				"Press calculator keys in order and return the display. Keys: digits 0-9, '.', " +
+				"'+', '-', '*', '/', '=' and 'C' (clear). It works like a pocket calculator " +
+				"with immediate execution: '2+3*4=' gives 20, not 14. Example: '12+30=' gives 42.",
+			inputSchema: {
+				type: "object",
+				properties: {
+					keys: {
+						type: "string",
+						description:
+							"The keys to press, e.g. '12*12='. Spaces are ignored.",
+						pattern: "^[0-9.+\\-*/=C ]{1,200}$",
+					},
 				},
+				required: ["keys"],
+				additionalProperties: false,
 			},
-			required: ["keys"],
-			additionalProperties: false,
-		},
-		execute: ({ keys }) => pressKeys(String(keys)),
-	});
-	void mcp.registerTool({
-		name: "read_display",
-		title: "Read display",
-		description:
-			"Read the calculator's display and the number in its memory, without pressing a key.",
-		inputSchema: { type: "object", additionalProperties: false },
-		annotations: { readOnlyHint: true },
-		execute: () => ({ display: calculator.display, memory: calculator.memory }),
-	});
-	void mcp.registerTool({
-		name: "clear",
-		title: "Clear",
-		description:
-			"Press C: clear the display and the pending operation. The memory stays. Returns the display.",
-		inputSchema: { type: "object", additionalProperties: false },
-		annotations: { idempotentHint: true },
-		execute: () => pressKeys("C"),
-	});
-	void mcp.registerTool({
-		name: "clear_memory",
-		title: "Clear memory",
-		description:
-			"Set the calculator's memory to 0 (MC). The user is asked in the page first.",
-		inputSchema: { type: "object", additionalProperties: false },
-		annotations: { consequentialHint: true },
-		execute: () => {
-			calculator.memoryClear();
-			flash('[data-memory="clear"]');
-			render();
-			return "Memory cleared.";
-		},
-	});
+			execute: ({ keys }) => pressKeys(String(keys)),
+		}),
+		mcp.registerTool({
+			name: "read_display",
+			title: "Read display",
+			description:
+				"Read the calculator's display and the number in its memory, without pressing a key.",
+			inputSchema: { type: "object", additionalProperties: false },
+			annotations: { readOnlyHint: true },
+			execute: () => ({
+				display: calculator.display,
+				memory: calculator.memory,
+			}),
+		}),
+		mcp.registerTool({
+			name: "clear",
+			title: "Clear",
+			description:
+				"Press C: clear the display and the pending operation. The memory stays. Returns the display.",
+			inputSchema: { type: "object", additionalProperties: false },
+			annotations: { idempotentHint: true },
+			execute: () => pressKeys("C"),
+		}),
+		mcp.registerTool({
+			name: "clear_memory",
+			title: "Clear memory",
+			description:
+				"Set the calculator's memory to 0 (MC). The user is asked in the page first.",
+			inputSchema: { type: "object", additionalProperties: false },
+			annotations: { consequentialHint: true },
+			execute: () => {
+				calculator.memoryClear();
+				flash('[data-memory="clear"]');
+				render();
+				return "Memory cleared.";
+			},
+		}),
+	]);
 }
 
 function showAccess(mcp: TabMcp): void {
@@ -213,26 +219,30 @@ function showAccess(mcp: TabMcp): void {
 	connectButton.disabled = false;
 }
 
+function showError(what: string, error: unknown): void {
+	status.textContent = `${what}: ${error instanceof Error ? error.message : String(error)}`;
+}
+
 render();
-loadConfig().then(
-	(config) => {
-		relayLabel.textContent = config.relay;
-		const mcp = new TabMcp({
-			relay: config.relay,
-			server: {
-				name: "calculator",
-				title: "Calculator",
-				version: "1.0.0",
-				instructions:
-					"A four-function calculator open in the user's browser tab. Calculate with " +
-					"press_keys and take the result from its answer; the user sees every key.",
-			},
-			appName: "Calculator",
-		});
-		registerTools(mcp);
-		showAccess(mcp);
-	},
-	(error: unknown) => {
-		status.textContent = `Cannot load the relay address: ${error instanceof Error ? error.message : String(error)}`;
-	},
-);
+loadConfig()
+	.then(
+		async (config) => {
+			relayLabel.textContent = config.relay;
+			const mcp = new TabMcp({
+				relay: config.relay,
+				server: {
+					name: "calculator",
+					title: "Calculator",
+					version: "1.0.0",
+					instructions:
+						"A four-function calculator open in the user's browser tab. Calculate with " +
+						"press_keys and take the result from its answer; the user sees every key.",
+				},
+				appName: "Calculator",
+			});
+			await registerTools(mcp);
+			showAccess(mcp);
+		},
+		(error: unknown) => showError("Cannot load the relay address", error),
+	)
+	.catch((error: unknown) => showError("Cannot start AI access", error));

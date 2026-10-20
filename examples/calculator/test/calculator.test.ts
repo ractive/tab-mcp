@@ -72,11 +72,29 @@ describe("Calculator", () => {
 		c.pressAll("3");
 		expect(c.display).toBe("3");
 	});
+
+	test("an operator after MR or M+ applies the pending operation", () => {
+		const c = new Calculator();
+		c.pressAll("5");
+		c.memoryAdd();
+		c.pressAll("C2+");
+		c.memoryRecall();
+		c.pressAll("+1=");
+		expect(c.display).toBe("8");
+		c.pressAll("C2+3");
+		c.memoryAdd();
+		c.pressAll("+1=");
+		expect(c.display).toBe("6");
+	});
 });
 
 test("formatNumber rounds to 12 significant digits", () => {
 	expect(formatNumber(2 / 3)).toBe("0.666666666667");
 	expect(formatNumber(-0)).toBe("0");
 	expect(formatNumber(1e21)).toBe("1e+21");
+	expect(formatNumber(999999999999)).toBe("999999999999");
+	expect(formatNumber(1e12)).toBe("1e+12");
+	expect(formatNumber(999999 ** 3)).toBe("9.99997000003e+17");
+	expect(formatNumber(-(999999 ** 3))).toBe("-9.99997000003e+17");
 	expect(formatNumber(Number.POSITIVE_INFINITY)).toBe("Error");
 });
