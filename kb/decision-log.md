@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T01:34:00+02:00
+timestamp: 2026-10-20T07:10:00+02:00
 ---
 
 # Decision log
@@ -781,6 +781,56 @@ From the security review of PR #4. A client document's `redirect_uris` must be `
 scheme in reverse-domain form such as `com.example.app:/callback` (RFC 8252 §7.1), which
 native apps need. One-word custom schemes, `file:`, `blob:`, `data:`, `javascript:`,
 plain `http:` on other hosts and URIs with credentials or fragments are refused.
+
+## DEC-068: The relay's npm package is `dist/` with three bundles and its own `package.json`
+
+As DEC-053 for the client: the workspace keeps `bin` and `exports` on `src/`, and
+`bun run build` in `packages/tab-mcp` (`scripts/build.ts`) writes the directory to pack.
+`bun build --target=bun` makes `main.js` (the `tab-mcp` command, first line
+`#!/usr/bin/env bun`), `index.js` and `testing.js`, one self-contained file each without
+code splitting: the relay has no runtime dependencies and `bun:*` stays an import, so no
+chunks and no hashed file names. Because `dist/` is the package root, the published `bin`
+is `./main.js` (the plan's `dist/main.js` seen from the workspace). Declarations come from
+`tsc` with `isolatedDeclarations` (a few defaulted parameters and fields got explicit
+types for it); `main.d.ts` is dropped. The relay reads only `version` from its
+`package.json` (a named JSON import), so the bundles do not carry the whole file. The
+source `package.json` is now `private` with version `0.1.0-alpha.0`, the first relay
+release (`relay-v0.1.0-alpha.0`, dist-tag `alpha`). There is no package README yet; the
+documentation part of iteration 5 adds it and its entry in `scripts/npm-pack.ts`.
+
+## DEC-069: The image is built on the build platform and pushed after npm
+
+The Dockerfile's build stage runs on `$BUILDPLATFORM` (its output is JavaScript), the
+runtime stage only copies files, so both architectures build without emulation. Base
+images are pinned by tag and digest. The runtime runs as uid/gid 65532 with `/data`
+(owned by 65532, a volume) holding the SQLite store; no `HEALTHCHECK` (the plan's choice:
+platforms probe `GET /healthz`). Image tags: `X.Y.Z` always, `X.Y` and `latest` only for a
+stable version, so a pre-release never moves them. In `release.yml` the image job builds
+both architectures without pushing on every pull request and dry run, then loads the amd64
+image and runs `scripts/docker-smoke.ts` (health and version, non-root, store in `/data`
+surviving a restart, a tab gets a session and its address answers 401 with resource
+metadata, foreign origins refused, prompt stop on SIGTERM). The npm publication of the
+relay waits for that job, and the push (environment `release`, Docker Hub and ghcr.io,
+provenance `mode=max` and SBOM) waits for the npm publication, so a version npm refuses
+(wrong tag, `latest` backwards) is never pushed as an image. No build cache is used: the
+build takes seconds and a shared cache could carry pull-request content into a release.
+
+## DEC-070: The token-expiry check fails a monthly run; the release only warns
+
+`scripts/token-expiry.ts` reads `DOCKERHUB_TOKEN_EXPIRES` (the day the token stops
+working). The monthly workflow `token-expiry.yml` fails when the date is 30 days away or
+less, or missing or malformed; a failed scheduled run is GitHub's notification, so no issue
+is opened. The release's image job runs the same check in warning mode: it must not block a
+release for a token that still works, but fails once the token has expired, with the
+renewal link, before the login fails with a less helpful message.
+
+## DEC-071: Dependabot for bun, GitHub Actions and Docker; one Bun version everywhere
+
+Weekly updates, minor and patch grouped per ecosystem, the two `oven/bun` stages grouped.
+Exact pins stay exact (Dependabot replaces an exact version with the new exact version;
+the `bun` ecosystem takes no `versioning-strategy`). A test (`scripts/docker.test.ts`)
+requires the Dockerfile's base images and every Bun version in the workflows to equal
+`@types/bun`, so a partial Bun update fails until all places follow.
 
 # Citations
 

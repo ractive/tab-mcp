@@ -2,6 +2,7 @@
 
 ## 2026-10-20
 
+- Iteration 5 packaging on iter-5/relay-docker: relay build to `dist/` and pack checks, relay npm jobs (pack, bootstrap, publish), Dockerfile (build platform stage, distroless, uid 65532, /data), image dry run with smoke test on pull requests and push to Docker Hub and ghcr.io after npm, token-expiry check, Dependabot; DEC-068 to DEC-071; relay bootstrap steps for the owner; documentation and skill still open
 - Iteration 4 on iter-4/calculator-e2e: calculator example, Chrome e2e in CI, headless Claude Code run (144, legacy refused with 400 / -32022), docs/compatibility.md; manual checks with claude.ai, Desktop and ChatGPT deferred to iteration 6; SDK Firefox issue drafted, not filed
 
 ## 2026-10-19

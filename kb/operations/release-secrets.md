@@ -6,7 +6,7 @@ tags:
   - release
   - operations
   - secrets
-timestamp: 2026-10-19T23:45:00+02:00
+timestamp: 2026-10-20T07:10:00+02:00
 ---
 
 # Release credentials and how to renew them
@@ -25,9 +25,10 @@ Start here when a publication fails with an authentication error.
 - **Expires: 2027-10-19 00:00:00** (valid 2026-10-19 → 2027-10-19).
 - Symptom when expired: the Docker login or push step of the release workflow fails with
   an authentication error (`unauthorized` / `incorrect username or password`).
-- Early warning: a scheduled workflow warns when the token is within 30 days of
-  `DOCKERHUB_TOKEN_EXPIRES` (planned in
-  [iteration 5](/iterations/iteration-5-packaging-release.md)).
+- Early warning: the workflow `token-expiry.yml` runs on the first of every month and
+  fails when `DOCKERHUB_TOKEN_EXPIRES` is 30 days away or less, or not set; the release's
+  image job warns then and fails once the date has passed (DEC-070). Run it by hand with
+  `gh workflow run token-expiry.yml --repo ractive/tab-mcp` after a renewal.
 
 ### Renewal
 
@@ -52,10 +53,11 @@ fails with a 403/404 from the registry, check that the trusted-publisher entry s
 the right repository, workflow file name and environment. Steps:
 [npm publishing](/operations/npm-publishing.md).
 
-## GitHub Container Registry (if used)
+## GitHub Container Registry
 
-Pushes to ghcr.io use the workflow's own `GITHUB_TOKEN` with `packages: write`; nothing to
-renew.
+Pushes to `ghcr.io/ractive/tab-mcp` use the workflow's own `GITHUB_TOKEN` with
+`packages: write`; nothing to renew. The package is private after its first push until
+the owner makes it public ([npm publishing](/operations/npm-publishing.md), relay step 5).
 
 # Citations
 
