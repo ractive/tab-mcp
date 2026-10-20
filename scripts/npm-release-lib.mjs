@@ -14,6 +14,7 @@ export const WORKFLOW = ".github/workflows/release.yml";
 /** Release tag prefix per published package name. */
 export const TAG_PREFIXES = {
 	"@ractive-ch/tab-mcp-client": "client-v",
+	"@ractive-ch/tab-mcp": "relay-v",
 };
 
 /** npm's `integrity` of a tarball's bytes: `sha512-<base64>`. */

@@ -63,3 +63,35 @@ test("the manifest check names what is wrong", () => {
 	expect(problems).toContain("workspace:*");
 	expect(problems).toContain("publishConfig");
 });
+
+test("the relay's manifest needs its bin and both exports", () => {
+	const spec = PACKAGES["relay"];
+	if (spec === undefined) throw new Error("no relay spec");
+	const good = {
+		name: "@ractive-ch/tab-mcp",
+		version: "0.1.0-alpha.0",
+		type: "module",
+		license: "MIT",
+		bin: { "tab-mcp": "./main.js" },
+		exports: spec.exports,
+		types: "./index.d.ts",
+		publishConfig: { access: "public" },
+		repository: {
+			type: "git",
+			url: "git+https://github.com/ractive/tab-mcp.git",
+			directory: "packages/tab-mcp",
+		},
+	};
+	expect(checkManifest(good, spec, "0.1.0-alpha.0")).toEqual([]);
+	const problems = checkManifest(
+		{
+			...good,
+			bin: { "tab-mcp": "./src/main.ts" },
+			exports: { ".": "./index.js" },
+		},
+		spec,
+		"0.1.0-alpha.0",
+	).join("\n");
+	expect(problems).toContain("bin");
+	expect(problems).toContain("exports");
+});

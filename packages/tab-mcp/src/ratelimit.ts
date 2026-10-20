@@ -31,7 +31,7 @@ export class RateLimiter {
 	}
 
 	/** Take one token for `key`; false when the bucket is empty. */
-	take(key: string, now = Date.now()): boolean {
+	take(key: string, now: number = Date.now()): boolean {
 		let bucket = this.#buckets.get(key);
 		if (bucket === undefined) {
 			if (this.#buckets.size >= this.#maxKeys) {
@@ -54,7 +54,7 @@ export class RateLimiter {
 	}
 
 	/** Drop buckets that are full again (nothing to remember). */
-	sweep(now = Date.now()): void {
+	sweep(now: number = Date.now()): void {
 		for (const [key, b] of this.#buckets) {
 			const elapsed = Math.max(0, now - b.updatedAt) / 1000;
 			if (b.tokens + elapsed * this.#refill >= this.#capacity) {

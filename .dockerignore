@@ -1,0 +1,10 @@
+# Only what the image build copies (Dockerfile); everything else stays out
+# of the build context (node_modules, dist, .git, kb, local databases, .env).
+*
+!LICENSE
+!AI_NOTICE
+!packages/tab-mcp/package.json
+!packages/tab-mcp/scripts/
+!packages/tab-mcp/src/
+**/*.test.ts
+**/.DS_Store

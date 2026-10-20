@@ -1,0 +1,32 @@
+# Monthly warning before the Docker Hub token expires (DEC-070). Fails, so
+# GitHub notifies the owner, when the repository variable
+# DOCKERHUB_TOKEN_EXPIRES is missing or less than 30 days away. Renewal:
+# kb/operations/release-secrets.md. The release workflow runs the same check
+# before pushing the image (warns only, fails once the token has expired).
+
+name: Token expiry
+
+on:
+  schedule:
+    - cron: "17 6 1 * *" # 06:17 UTC on the first of every month
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  dockerhub-token:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - name: Check DOCKERHUB_TOKEN_EXPIRES
+        env:
+          DOCKERHUB_TOKEN_EXPIRES: ${{ vars.DOCKERHUB_TOKEN_EXPIRES }}
+        run: bun scripts/token-expiry.ts --mode fail --days 30

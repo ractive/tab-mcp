@@ -157,3 +157,14 @@ describe("viewValue", () => {
 		expect(() => viewValue('["1.0.0","1.0.1"]')).toThrow("2 values");
 	});
 });
+
+test("the relay is signed from main or its own relay-v tag", () => {
+	const relay = { name: "@ractive-ch/tab-mcp", version: "0.1.0-alpha.0" };
+	expect(signerProblems(statement("refs/heads/main"), relay)).toEqual([]);
+	expect(
+		signerProblems(statement("refs/tags/relay-v0.1.0-alpha.0"), relay),
+	).toEqual([]);
+	expect(
+		signerProblems(statement("refs/tags/client-v0.1.0-alpha.0"), relay).join(),
+	).toContain("refs/tags/relay-v0.1.0-alpha.0");
+});

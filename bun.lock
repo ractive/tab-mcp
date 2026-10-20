@@ -22,7 +22,7 @@
     },
     "packages/tab-mcp": {
       "name": "@ractive-ch/tab-mcp",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "bin": {
         "tab-mcp": "./src/main.ts",
       },

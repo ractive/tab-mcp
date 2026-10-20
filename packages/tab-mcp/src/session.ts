@@ -91,19 +91,19 @@ function messageId(parsed: ParseResult): string | undefined {
 
 /** One tab's WebSocket session, from open to close. */
 export class TabSession {
-	readonly sessionId = newId("s");
+	readonly sessionId: string = newId("s");
 	readonly ip: string;
 	readonly origin: string;
 	/** The site this session's origin belongs to (DEC-045). */
 	readonly site: Site;
-	readonly openedAt = Date.now();
+	readonly openedAt: number = Date.now();
 	/** Set once `hello` was accepted. */
 	addressId: string | undefined;
 	/** The app name `/authorize` shows: the site's name, else the page's claim. */
 	appName: string | undefined;
 	/** Pairing codes while the tab's dialog is open (DEC-028). */
 	readonly codes: PairingCodes;
-	readonly pending = new Map<string, Exchange>();
+	readonly pending: Map<string, Exchange> = new Map();
 
 	readonly #ws: SocketLike;
 	readonly #host: SessionHost;

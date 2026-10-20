@@ -134,7 +134,7 @@ export class PairingCodes {
 	 */
 	check(
 		input: string,
-		now = Date.now(),
+		now: number = Date.now(),
 		admit: () => boolean = () => true,
 	): CodeCheck {
 		const current = this.#current;

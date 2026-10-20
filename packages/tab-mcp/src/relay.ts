@@ -1,5 +1,5 @@
 import type { Server, ServerWebSocket } from "bun";
-import pkg from "../package.json" with { type: "json" };
+import { version } from "../package.json" with { type: "json" };
 import { addressIdFromSecret, isAddressId, shortAddress } from "./address.ts";
 import {
 	largestMessageBytes,
@@ -34,7 +34,7 @@ import { SqliteTokenStore } from "./store/sqlite.ts";
 import type { TokenRecord, TokenStore } from "./store/types.ts";
 import { hashToken } from "./tokens.ts";
 
-export const VERSION: string = pkg.version;
+export const VERSION: string = version;
 
 /** The one mismatched header Claude sends today (claude-code #93290, DEC-033). */
 const CLAUDE_MISMATCHED_HEADER = "2025-11-25";
