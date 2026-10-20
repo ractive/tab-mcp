@@ -4,6 +4,7 @@
  * connection and the MCP handler with a dynamic `import()`.
  */
 
+import { AlwaysAllowed } from "./always-allowed.ts";
 import type { ConnectionHandle, ConnectionHost } from "./internal.ts";
 import type { GrantRef, SessionMessage } from "./protocol.ts";
 import { ToolRegistry } from "./registry.ts";
@@ -114,11 +115,7 @@ export class TabMcp extends EventTarget {
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
 	#grants: Grant[] = [];
-	/**
-	 * Tools the user chose "Always allow" for, per grant: kept for the page's
-	 * lifetime, dropped when the grant goes.
-	 */
-	readonly #alwaysAllowed = new Map<string, Set<string>>();
+	readonly #alwaysAllowed = new AlwaysAllowed();
 	#pairing = false;
 	#pairingCode: PairingCode | undefined;
 	#connection: ConnectionHandle | undefined;
@@ -150,9 +147,11 @@ export class TabMcp extends EventTarget {
 			options.storage,
 			options.storageKey ?? `tab-mcp:secret:${origin}`,
 		);
-		this.#registry.onChange(() =>
-			this.#emit("toolschange", { tools: this.tools }),
-		);
+		this.#registry.onChange(() => {
+			const tools = this.tools;
+			this.#alwaysAllowed.keepTools(tools);
+			this.#emit("toolschange", { tools });
+		});
 	}
 
 	/**
@@ -405,10 +404,7 @@ export class TabMcp extends EventTarget {
 
 	#setGrants(grants: Grant[]): void {
 		this.#grants = grants;
-		for (const grantId of this.#alwaysAllowed.keys()) {
-			if (!grants.some((g) => g.grantId === grantId))
-				this.#alwaysAllowed.delete(grantId);
-		}
+		this.#alwaysAllowed.keepGrants(grants.map((g) => g.grantId));
 		this.#emit("grantschange", { grants });
 	}
 
@@ -420,7 +416,7 @@ export class TabMcp extends EventTarget {
 				.then((allowed) => allowed === true);
 		}
 		const { grantId } = request.client;
-		if (this.#alwaysAllowed.get(grantId)?.has(request.tool.name) === true)
+		if (this.#alwaysAllowed.has(grantId, request.tool.name))
 			return Promise.resolve(true);
 		const doc = globalThis.document as Document | undefined;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
@@ -438,11 +434,8 @@ export class TabMcp extends EventTarget {
 				if (
 					answer === "always" &&
 					this.#grants.some((g) => g.grantId === grantId)
-				) {
-					const tools = this.#alwaysAllowed.get(grantId) ?? new Set();
-					tools.add(request.tool.name);
-					this.#alwaysAllowed.set(grantId, tools);
-				}
+				)
+					this.#alwaysAllowed.add(grantId, request.tool.name);
 				return answer !== "deny";
 			});
 	}
