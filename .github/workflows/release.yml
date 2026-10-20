@@ -21,8 +21,11 @@
 #   (tag ruleset), and the `release` environment needs the owner's approval
 #   (kb/operations/npm-publishing.md).
 # - The image is pushed only after the relay's npm publication succeeded (or
-#   was skipped as identical), so the npm checks (version, tag, `latest`
-#   never backwards) also hold for the image.
+#   was skipped as identical), so the npm checks (version, tag) also hold for
+#   the image. The pushed image is the smoke-tested OCI archive, byte for
+#   byte. `latest` and `X.Y` move only when npm says the version is not below
+#   `latest` and is the highest `X.Y.*` (scripts/image-tags.mjs), so a re-run
+#   of an old tag never moves them backwards.
 #
 # The trusted publisher on npmjs.com names this file (`release.yml`) and the
 # environment `release`; renaming either breaks publishing.
@@ -477,15 +480,20 @@ jobs:
           node scripts/npm-publish.mjs "$DIR" --integrity "$INTEGRITY"
           --version "$VERSION" --dist-tag "$DIST_TAG"
 
-  # Build the image for both architectures without pushing, then run the
-  # amd64 one (the runner's own) through the smoke test. No registry login
-  # and no build cache here (DEC-069).
+  # Build the image for both architectures, with provenance and SBOM, into
+  # an OCI archive; load its amd64 image (the runner's own) and run it
+  # through the smoke test; upload the archive. relay-image-publish pushes
+  # exactly this archive, so the pushed bytes are the smoke-tested ones. No
+  # registry login and no build cache here (DEC-069).
   relay-image:
-    needs: plan
+    needs: [plan, relay-pack]
     if: needs.plan.outputs.package == 'relay' || needs.plan.outputs.package == 'all'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      digest: ${{ steps.archive.outputs.digest }}
+      artifact: relay-image-${{ needs.relay-pack.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -494,25 +502,73 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build for linux/amd64 and linux/arm64
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: tab-mcp
+          flavor: latest=false
+          tags: type=raw,value=${{ needs.relay-pack.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=tab-mcp
+            org.opencontainers.image.version=${{ needs.relay-pack.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+      - name: Build linux/amd64 and linux/arm64 into an OCI archive
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           provenance: mode=max
           sbom: true
-          push: false
-      - name: Load the amd64 image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: tab-mcp:smoke
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=oci,dest=${{ runner.temp }}/relay-image/image.tar
+      - id: archive
+        name: Record the archive's digests
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+        shell: bash
+        run: |
+          set -euo pipefail
+          skopeo --version
+          # The archive holds one image index: both platforms and their attestations.
+          test "$(tar -xOf "$ARCHIVE" index.json | jq '.manifests | length')" = 1
+          digest=$(tar -xOf "$ARCHIVE" index.json | jq -r '.manifests[0].digest')
+          tar -xOf "$ARCHIVE" "blobs/${digest/://}" | jq -r '.manifests[]
+            | select(.platform.os == "linux" and .platform.architecture != "unknown")
+            | "\(.platform.architecture) \(.digest)"'
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "image index $digest"
+      - name: Load the amd64 image from the archive
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+          DIGEST: ${{ steps.archive.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          skopeo copy --override-os linux --override-arch amd64 \
+            "oci-archive:$ARCHIVE" docker-daemon:tab-mcp:smoke
+          # The loaded image has the archive's amd64 layers (diff IDs; the
+          # image ID depends on the daemon's image store).
+          manifest=$(tar -xOf "$ARCHIVE" "blobs/${DIGEST/://}" | jq -r '.manifests[]
+            | select(.platform.os == "linux" and .platform.architecture == "amd64")
+            | .digest')
+          config=$(tar -xOf "$ARCHIVE" "blobs/${manifest/://}" | jq -r .config.digest)
+          want=$(tar -xOf "$ARCHIVE" "blobs/${config/://}" | jq -c .rootfs.diff_ids)
+          loaded=$(docker image inspect tab-mcp:smoke --format '{{json .RootFS.Layers}}' | jq -c .)
+          echo "amd64 manifest $manifest, config $config"
+          test "$loaded" = "$want"
       - name: Smoke test
         run: bun scripts/docker-smoke.ts tab-mcp:smoke
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relay-image-${{ needs.relay-pack.outputs.version }}
+          path: ${{ runner.temp }}/relay-image/image.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
-  # Push the image once npm has the same version (published or identical).
+  # Push the smoke-tested archive once npm has the same version (published
+  # or identical).
   relay-image-publish:
     needs: [plan, relay-pack, relay-image, relay-publish]
     if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'publish'
@@ -525,9 +581,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          sparse-checkout: scripts
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm install --global "npm@$NPM_VERSION"
       - name: Docker Hub token expiry
         env:
           DOCKERHUB_TOKEN_EXPIRES: ${{ vars.DOCKERHUB_TOKEN_EXPIRES }}
@@ -537,17 +598,12 @@ jobs:
         env:
           VERSION: ${{ needs.relay-pack.outputs.version }}
           DIST_TAG: ${{ needs.relay-pack.outputs.dist_tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # X.Y.Z always; X.Y and latest only for a stable version.
-          if [ "$DIST_TAG" = latest ]; then stable=true; else stable=false; fi
-          IFS=. read -r major minor _ <<< "$VERSION"
-          {
-            echo "stable=$stable"
-            echo "minor=$major.$minor"
-          } >> "$GITHUB_OUTPUT"
-          echo "version $VERSION, stable $stable"
+        # X.Y.Z always; latest only when not below npm's latest, X.Y only
+        # for the highest stable X.Y.* on npm, also when the npm publication
+        # was skipped as identical (a re-run of an old tag).
+        run: >-
+          node scripts/image-tags.mjs --package @ractive-ch/tab-mcp
+          --version "$VERSION" --dist-tag "$DIST_TAG"
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -557,12 +613,22 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ needs.relay-pack.outputs.version }}
-            type=raw,value=${{ steps.tags.outputs.minor }},enable=${{ steps.tags.outputs.stable }}
-            type=raw,value=latest,enable=${{ steps.tags.outputs.stable }}
-          labels: |
-            org.opencontainers.image.title=tab-mcp
-            org.opencontainers.image.version=${{ needs.relay-pack.outputs.version }}
-            org.opencontainers.image.licenses=MIT
+            type=raw,value=${{ steps.tags.outputs.minor }},enable=${{ steps.tags.outputs.move_minor }}
+            type=raw,value=latest,enable=${{ steps.tags.outputs.latest }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.relay-image.outputs.artifact }}
+          path: ${{ runner.temp }}/relay-image
+      - name: Check the archive is the smoke-tested one
+        env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
+          DIGEST: ${{ needs.relay-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(tar -xOf "$ARCHIVE" index.json | jq -r '.manifests[0].digest')
+          echo "archive $actual, smoke-tested $DIGEST"
+          test "$actual" = "$DIGEST"
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: docker.io
@@ -573,28 +639,26 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - id: push
-        name: Build and push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          provenance: mode=max
-          sbom: true
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-      - name: Show what was pushed
+      - name: Push the archive and check the pushed digest
         env:
+          ARCHIVE: ${{ runner.temp }}/relay-image/image.tar
           TAGS: ${{ steps.meta.outputs.tags }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ needs.relay-image.outputs.digest }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "digest $DIGEST"
+          skopeo --version
+          # --all: both platforms and the attestations; --preserve-digests:
+          # fail instead of re-encoding anything. skopeo reads the logins
+          # from ~/.docker/config.json.
           while read -r tag; do
             [ -n "$tag" ] || continue
-            docker buildx imagetools inspect "$tag" --format '{{json .Manifest.Digest}}' | sed "s|^|$tag |"
+            skopeo copy --all --preserve-digests --retry-times 3 \
+              "oci-archive:$ARCHIVE" "docker://$tag"
+            pushed="sha256:$(skopeo inspect --raw "docker://$tag" | sha256sum | cut -d' ' -f1)"
+            echo "$tag $pushed"
+            if [ "$pushed" != "$DIGEST" ]; then
+              echo "::error::$tag is $pushed, not the smoke-tested $DIGEST"
+              exit 1
+            fi
           done <<< "$TAGS"

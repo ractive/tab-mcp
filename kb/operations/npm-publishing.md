@@ -283,8 +283,8 @@ the client only). Then:
 
    Approve the run's `release` environment (asked for `relay-publish` and then
    `relay-image-publish`). `relay-publish` finds the version on npm with the same integrity
-   and skips; `relay-image-publish` checks the token expiry, then pushes
-   `ractive/tab-mcp:0.1.0-alpha.0` and `ghcr.io/ractive/tab-mcp:0.1.0-alpha.0` for
+   and skips; `relay-image-publish` checks the token expiry, then pushes the smoke-tested
+   archive from `relay-image` as `ractive/tab-mcp:0.1.0-alpha.0` and `ghcr.io/ractive/tab-mcp:0.1.0-alpha.0` for
    linux/amd64 and linux/arm64 with provenance and SBOM. Afterwards make the ghcr.io
    package public (step 5).
 

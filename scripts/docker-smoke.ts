@@ -9,7 +9,9 @@
  * uid 65532, not root; the SQLite store lives in /data and survives a
  * restart; a tab from an allowed origin gets a session and an address, whose
  * MCP endpoint asks for OAuth (401 with resource metadata); a tab from
- * another origin is refused; `docker stop` ends it promptly (SIGTERM).
+ * another origin is refused; `docker stop` ends it promptly (SIGTERM); run
+ * without NODE_ENV=development (production), an http:// public URL stops it
+ * with a configuration error (exit 2).
  * Removes its container and volume afterwards. Needs `docker` on PATH.
  */
 
@@ -59,15 +61,31 @@ async function waitHealthy(): Promise<Response> {
 	}
 }
 
-/** Open a tab WebSocket from `from`; resolves with the first message or the close code. */
+/**
+ * Open a tab WebSocket from `from`; resolves with the first message or the
+ * close code, and rejects when neither comes within 10 s.
+ */
 function tab(
 	from: string,
 ): Promise<{ message?: Record<string, unknown>; code?: number }> {
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		const ws = new WebSocket(`ws://127.0.0.1:${port}/tab`, {
 			headers: { Origin: from },
 			protocols: ["tab-mcp.v1"],
-		} as unknown as string[]);
+		});
+		const timer = setTimeout(() => {
+			ws.close();
+			reject(
+				new Error(`the tab WebSocket from ${from} got no answer within 10 s`),
+			);
+		}, 10_000);
+		const done = (result: {
+			message?: Record<string, unknown>;
+			code?: number;
+		}) => {
+			clearTimeout(timer);
+			resolve(result);
+		};
 		ws.addEventListener("open", () =>
 			ws.send(
 				JSON.stringify({
@@ -81,15 +99,49 @@ function tab(
 			),
 		);
 		ws.addEventListener("message", (e) => {
-			resolve({ message: JSON.parse(String(e.data)) });
+			done({ message: JSON.parse(String(e.data)) });
 			ws.close();
 		});
-		ws.addEventListener("close", (e) => resolve({ code: e.code }));
-		ws.addEventListener("error", () => resolve({ code: -1 }));
+		ws.addEventListener("close", (e) => done({ code: e.code }));
+		ws.addEventListener("error", () => done({ code: -1 }));
 	});
 }
 
+/**
+ * Runs the image without NODE_ENV=development, as production does, with an
+ * http:// public URL: the relay must refuse to start with the config error.
+ */
+async function productionRefusesHttp(): Promise<void> {
+	const run = Bun.spawn(
+		[
+			"docker",
+			"run",
+			"--rm",
+			"--name",
+			`${name}-prod`,
+			"-e",
+			"TAB_MCP_PUBLIC_URL=http://relay.example",
+			"-e",
+			`TAB_MCP_ALLOWED_ORIGINS=${origin}`,
+			String(image),
+		],
+		{ stdout: "pipe", stderr: "pipe", timeout: 30_000 },
+	);
+	const [code, stderr] = await Promise.all([
+		run.exited,
+		new Response(run.stderr).text(),
+	]);
+	check(
+		code === 2 &&
+			stderr.includes("configuration error") &&
+			stderr.includes("must be https"),
+		`without NODE_ENV=development an http:// public URL is refused (exit ${code}: ${stderr.trim()})`,
+	);
+}
+
 try {
+	await productionRefusesHttp();
+
 	await $`docker volume create ${volume}`.quiet();
 	await $`docker run -d --name ${name} -p 127.0.0.1:${port}:8080 -v ${volume}:/data -e NODE_ENV=development -e TAB_MCP_PUBLIC_URL=${base} -e TAB_MCP_ALLOWED_ORIGINS=${origin} ${image}`.quiet();
 
@@ -162,7 +214,7 @@ try {
 		await $`docker exec ${name} /usr/local/bin/bun -e ${"console.log(require('node:fs').existsSync('/data/tab-mcp.db'))"}`.text();
 	check(after.trim() === "true", "the store survives a restart");
 } finally {
-	await $`docker rm -f ${name}`.quiet().nothrow();
+	await $`docker rm -f ${name} ${name}-prod`.quiet().nothrow();
 	await $`docker volume rm ${volume}`.quiet().nothrow();
 }
 

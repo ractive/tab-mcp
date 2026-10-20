@@ -804,16 +804,25 @@ The Dockerfile's build stage runs on `$BUILDPLATFORM` (its output is JavaScript)
 runtime stage only copies files, so both architectures build without emulation. Base
 images are pinned by tag and digest. The runtime runs as uid/gid 65532 with `/data`
 (owned by 65532, a volume) holding the SQLite store; no `HEALTHCHECK` (the plan's choice:
-platforms probe `GET /healthz`). Image tags: `X.Y.Z` always, `X.Y` and `latest` only for a
-stable version, so a pre-release never moves them. In `release.yml` the image job builds
-both architectures without pushing on every pull request and dry run, then loads the amd64
-image and runs `scripts/docker-smoke.ts` (health and version, non-root, store in `/data`
-surviving a restart, a tab gets a session and its address answers 401 with resource
-metadata, foreign origins refused, prompt stop on SIGTERM). The npm publication of the
-relay waits for that job, and the push (environment `release`, Docker Hub and ghcr.io,
-provenance `mode=max` and SBOM) waits for the npm publication, so a version npm refuses
-(wrong tag, `latest` backwards) is never pushed as an image. No build cache is used: the
-build takes seconds and a shared cache could carry pull-request content into a release.
+platforms probe `GET /healthz`). Image tags: `X.Y.Z` always; a stable version gets
+`latest` only when it is not below npm's `dist-tags.latest`, and `X.Y` only when it is the
+highest stable `X.Y.*` on npm (`scripts/image-tags.mjs`, asked after the npm step, also
+when that step skipped an identical version), so neither a pre-release nor a re-run of an
+old release tag moves them. In `release.yml` the image job builds both architectures, with
+provenance `mode=max` and SBOM, into one OCI archive on every pull request and dry run,
+loads its amd64 image with `skopeo` (checking its layer diff IDs against the archive) and
+runs `scripts/docker-smoke.ts` (health and version, non-root, store in `/data` surviving
+a restart, a tab gets a session and its address answers 401 with resource metadata,
+foreign origins refused, prompt stop on SIGTERM, and without `NODE_ENV=development` an
+`http://` public URL is a configuration error), then uploads the archive with its
+image-index digest. The npm publication of the relay waits for that job, and the push
+(environment `release`, Docker Hub and ghcr.io) waits for the npm publication, so a
+version npm refuses is never pushed as an image. The push does not rebuild: it copies the
+archive with `skopeo copy --all --preserve-digests` (both platforms and the attestation
+manifests, failing rather than re-encoding) and fails unless every pushed tag's index
+digest equals the smoke-tested one, so the published bytes are the tested bytes,
+attestations included. No build cache is used: the build takes seconds and a shared cache
+could carry pull-request content into a release.
 
 ## DEC-070: The token-expiry check fails a monthly run; the release only warns
 
