@@ -13,25 +13,24 @@ tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and gets an MCP address. 
 adds that address to their AI app and pairs it with a code shown in the page. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.1.0-alpha.1, alpha):
+Facts to keep in mind (version 0.1.0):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code works; VS Code, Cursor and Gemini CLI cannot connect.
   claude.ai and ChatGPT need a relay with a public HTTPS address.
 - The page needs a relay that allows its origin; run one (section 6).
-- Install with the `@alpha` tag; npm's `latest` still points at the first alpha.
 
 ## 1. Install the client
 
 ```sh
-npm install @ractive-ch/tab-mcp-client@alpha
+npm install @ractive-ch/tab-mcp-client
 ```
 
 Without a bundler, import the self-contained build from a CDN:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.1.0-alpha.1/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.1.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -170,7 +169,7 @@ Local development (a page on `http://localhost:3000`):
 docker run --rm -p 8080:8080 -e NODE_ENV=development \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
-  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.1.0-alpha.1
+  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.1.0
 ```
 
 Production: name the image version (pre-releases have no `latest` tag), keep `/data` on
@@ -180,7 +179,7 @@ a volume, and put the relay behind TLS:
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.1.0-alpha.1
+  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.1.0
 ```
 
 `x-real-ip` fits an nginx proxy that sets `X-Real-IP $remote_addr`; behind Caddy use
@@ -188,7 +187,7 @@ docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
 can reach the relay directly, or they can pick their own IP and get around the per-IP
 limits.
 
-Without Docker: `bun add --global @ractive-ch/tab-mcp@alpha`, then `tab-mcp` with the same
+Without Docker: `bun add --global @ractive-ch/tab-mcp`, then `tab-mcp` with the same
 variables (Bun 1.4.3+). Run one relay process per public address. The reverse proxy must
 forward WebSockets on `/tab`, must not buffer event streams on `/a/…/mcp`, and must allow
 requests of up to 300 s. The relay starts event streams after 20 s, which keeps 60 s

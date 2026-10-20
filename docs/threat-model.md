@@ -2,7 +2,7 @@
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
 relay `@ractive-ch/tab-mcp` and browser library `@ractive-ch/tab-mcp-client`
-0.1.0-alpha.1. To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+0.1.0. To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
 ## How it works, in short
 

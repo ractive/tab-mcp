@@ -73,13 +73,13 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
      -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
      -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
      -e TAB_MCP_STORE=memory \
-     ractive/tab-mcp:0.1.0-alpha.1
+     ractive/tab-mcp:0.1.0
    ```
 
 2. Install the browser library:
 
    ```sh
-   npm install @ractive-ch/tab-mcp-client@alpha
+   npm install @ractive-ch/tab-mcp-client
    ```
 
 3. Register tools and add a button:
@@ -136,13 +136,13 @@ The relay is one process with a SQLite file. Run it with Docker:
 docker run -d --name tab-mcp -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.1.0-alpha.1
+  ractive/tab-mcp:0.1.0
 ```
 
 Put it behind a reverse proxy with TLS. [Self-hosting](docs/self-hosting.md) explains
 WebSockets, event streams and proxy time limits; [configuration](docs/configuration.md)
 lists every setting and why the defaults are safe. The relay also runs without Docker on
-Bun (`bun add --global @ractive-ch/tab-mcp@alpha`, then `tab-mcp`).
+Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 
 ## Packages
 
@@ -165,10 +165,11 @@ Bun (`bun add --global @ractive-ch/tab-mcp@alpha`, then `tab-mcp`).
 
 ## Status
 
-**Alpha.** Settings, the protocol and the API can still change.
+**0.1.0**, the first stable release. Until 1.0, a new minor version can still change
+settings, the protocol or the API; the [changelog](CHANGELOG.md) says what changed.
 
-- Released: relay `@ractive-ch/tab-mcp` 0.1.0-alpha.1 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.1.0-alpha.1, on the npm tag `alpha`.
+- Released: relay `@ractive-ch/tab-mcp` 0.1.0 (npm and Docker) and browser library
+  `@ractive-ch/tab-mcp-client` 0.1.0, on the npm tag `latest`.
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
   through OAuth Client ID Metadata Documents. Claude Code works (tested headless with a
   token; its interactive sign-in is not tested yet); VS Code, Cursor and Gemini CLI

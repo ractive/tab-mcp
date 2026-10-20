@@ -19,16 +19,13 @@ fixed in the advisory.
 
 ## Supported versions
 
-tab-mcp is in alpha. Only the newest release of each package gets security fixes; a fix
+Only the newest release of each package gets security fixes; a fix
 comes as a new version, not as a patch to an older one.
 
 | Package | Supported | Not supported |
 |---|---|---|
-| `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.1.0-alpha.1 | 0.1.0-alpha.0 and older |
-| `@ractive-ch/tab-mcp-client` (npm) | 0.1.0-alpha.1 | 0.1.0-alpha.0 and older |
-
-npm's `latest` tag of both packages still points at 0.1.0-alpha.0. Install `@alpha` to
-get the supported version.
+| `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.1.0 | older versions |
+| `@ractive-ch/tab-mcp-client` (npm) | 0.1.0 | older versions |
 
 ## Connecting an AI app to a page means trusting the page
 

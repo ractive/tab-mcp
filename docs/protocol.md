@@ -207,7 +207,7 @@ optional and names the request the error concerns.
 | `unknown_type` | both | Message type not understood, but an answer was expected. |
 | `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's; the error has no `id`. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. |
-| `rate_limited` | relay | Reserved: the tab sent too much, and the relay may close with 4008. Relay 0.1.0-alpha.1 does not send it. |
+| `rate_limited` | relay | Reserved: the tab sent too much, and the relay may close with 4008. Relay 0.1.0 does not send it. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with
 an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
