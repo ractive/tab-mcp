@@ -12,7 +12,7 @@ The page registers four tools with `@ractive-ch/tab-mcp-client`:
 | `clear` | presses C: clears the display and the pending operation, keeps the memory |
 | `clear_memory` | sets the memory to 0 (MC); consequential, so the page asks you first |
 
-"Connect your AI tool" opens the library's dialog with the address for your AI app and
+"Connect your AI app" opens the library's dialog with the address for your AI app and
 the pairing code. Connected apps are listed under the calculator, each with Disconnect.
 
 The example only ever talks to a relay on your own machine, never to the hosted relay.
@@ -28,7 +28,7 @@ bun run example
 
 This starts a relay on `http://localhost:8080` (development mode, tokens in memory,
 only the page's origin allowed) and the page on `http://localhost:3000`. Open the page,
-click "Connect your AI tool", and add the address to your AI tool. With Claude Code:
+click "Connect your AI app", and add the address to your AI app. With Claude Code:
 
 ```sh
 claude mcp add --transport http calc <address>
@@ -49,7 +49,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.1.0-alpha.1
+  ractive/tab-mcp:0.1.0
 
 TAB_MCP_RELAY=http://localhost:8080 bun run example
 ```

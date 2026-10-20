@@ -156,3 +156,66 @@ mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
 	expect(tsc.stdout.toString() + tsc.stderr.toString()).toBe("");
 	expect(tsc.exitCode).toBe(0);
 }, 60_000);
+
+/**
+ * Docs and plugin manifests that pin a version (the release checklist in
+ * kb/operations/npm-publishing.md). Paths from the repository root.
+ */
+const PINNED_FILES = [
+	"README.md",
+	"SECURITY.md",
+	"packages/tab-mcp/README.md",
+	"packages/tab-mcp-client/README.md",
+	"examples/calculator/README.md",
+	"docs/protocol.md",
+	"docs/self-hosting.md",
+	"docs/threat-model.md",
+	"docs/token-store.md",
+	"plugins/tab-mcp/README.md",
+	"plugins/tab-mcp/skills/tab-mcp/SKILL.md",
+	"plugins/tab-mcp/.claude-plugin/plugin.json",
+	"plugins/tab-mcp/.codex-plugin/plugin.json",
+	".claude-plugin/marketplace.json",
+];
+
+test("docs and plugin manifests name only the current package versions", async () => {
+	const repo = join(root, "../..");
+	const version = async (dir: string) =>
+		(await Bun.file(join(repo, dir, "package.json")).json()).version as string;
+	const client = await version("packages/tab-mcp-client");
+	const relay = await version("packages/tab-mcp");
+	const current = new Set([client, relay]);
+	const wrong: string[] = [];
+	for (const file of PINNED_FILES) {
+		const text = await Bun.file(join(repo, file)).text();
+		const check = (pattern: RegExp, allowed: (v: string) => boolean) => {
+			for (const m of text.matchAll(pattern)) {
+				const v = m[1] ?? "";
+				if (!allowed(v)) wrong.push(`${file}: ${m[0]}`);
+			}
+		};
+		// npm install specs, CDN links: `@ractive-ch/tab-mcp-client@<v>`.
+		check(/@ractive-ch\/tab-mcp-client@([^\s/"'`)]*)/g, (v) => v === client);
+		check(/@ractive-ch\/tab-mcp@([^\s/"'`)]*)/g, (v) => v === relay);
+		// Images `ractive/tab-mcp:<tag>` and `ghcr.io/ractive/tab-mcp:<tag>`.
+		check(/ractive\/tab-mcp:([A-Za-z0-9._-]+)/g, (v) => v === relay);
+		// Any other 0.x version (not part of an IP address such as 127.0.0.1);
+		// widen the pattern when a package reaches 1.0.
+		check(/(?<![\d.])(0\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?![.\d])/g, (v) =>
+			current.has(v),
+		);
+		if (file.endsWith(".json")) {
+			const json = JSON.parse(text) as {
+				version?: string;
+				plugins?: { version?: string }[];
+			};
+			for (const v of [
+				json.version,
+				...(json.plugins ?? []).map((p) => p.version),
+			])
+				if (v !== undefined && !current.has(v))
+					wrong.push(`${file}: version ${v}`);
+		}
+	}
+	expect(wrong).toEqual([]);
+});

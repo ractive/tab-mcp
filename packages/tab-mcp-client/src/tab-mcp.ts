@@ -326,7 +326,7 @@ export class TabMcp extends EventTarget {
 	}
 
 	/**
-	 * Open the default "Connect your AI tool" dialog; connects first if needed
+	 * Open the default "Connect your AI app" dialog; connects first if needed
 	 * (call it from a click). Resolves when the dialog closes. Pages with their
 	 * own UI use the events and methods instead.
 	 */

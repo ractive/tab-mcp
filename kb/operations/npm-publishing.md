@@ -161,7 +161,10 @@ commands in an up-to-date checkout of `main`.
 1. Set the new version in `packages/tab-mcp-client/package.json`,
    `packages/tab-mcp-client/src/version.ts` and the CDN link in
    `packages/tab-mcp-client/README.md` (tests keep all three equal), run `bun install`
-   (the lockfile records it), add a `CHANGELOG.md` entry, merge to `main`.
+   (the lockfile records it), update the pinned versions in the docs and plugin manifests
+   (the test "docs and plugin manifests name only the current package versions" in
+   `packages/tab-mcp-client/test/build.test.ts` lists the files and fails on any other
+   version), add a `CHANGELOG.md` entry, merge to `main`.
 2. Create a GitHub release with the tag `client-v<version>` on exactly that merge commit,
    not on whatever `main` points to by then. Mark it as a pre-release exactly when the
    version is one (`0.1.0-alpha.1`, `0.2.0-beta.0`, `1.0.0-rc.1`); a stable version is a
@@ -311,8 +314,9 @@ publication even with `--tag alpha`, and does not let it be removed (`npm dist-t
 latest` is refused; not tried here, since it cannot be undone); it can only be pointed at
 another version. So `latest` stays at
 `0.1.0-alpha.0` while the workflow puts later alphas on `alpha` only, until the first
-stable version moves it. `npm install @ractive-ch/tab-mcp-client` therefore gets
-`0.1.0-alpha.0`; the README says to install `@alpha`.
+stable version moves it. Until 0.1.0, `npm install @ractive-ch/tab-mcp-client` therefore
+got `0.1.0-alpha.0` and the READMEs said to install `@alpha`; the stable 0.1.0 (DEC-072)
+moves `latest` of both packages.
 
 Decision (DEC-055): leave it there. If an old alpha behind `latest` becomes a problem, the
 owner may move it by hand, logged in:

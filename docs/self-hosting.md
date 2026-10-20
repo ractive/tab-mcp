@@ -15,7 +15,8 @@ page.
 The image is published as `ractive/tab-mcp` (Docker Hub) and `ghcr.io/ractive/tab-mcp`,
 for linux/amd64 and linux/arm64, with provenance and SBOM attestations. Every release
 has the tag `X.Y.Z`. Stable releases also get `X.Y` and `latest`; pre-releases do not.
-The current release is a pre-release, so name its version:
+`X.Y` and `latest` move to the newest stable release, never back to an older one. Name the
+full version, so the relay changes only when you choose:
 
 ```sh
 docker run -d --name tab-mcp --restart unless-stopped \
@@ -23,7 +24,7 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.1.0-alpha.1
+  ractive/tab-mcp:0.1.0
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
@@ -38,7 +39,7 @@ machine (see below). The image:
 - has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead. It
   answers `200` with `{"status":"ok","version":"…","counters":{…}}`.
 
-`docker run --rm ractive/tab-mcp:0.1.0-alpha.1 --version` prints the version. Every
+`docker run --rm ractive/tab-mcp:0.1.0 --version` prints the version. Every
 setting is listed in [configuration](configuration.md).
 
 With Docker Compose:
@@ -46,7 +47,7 @@ With Docker Compose:
 ```yaml
 services:
   tab-mcp:
-    image: ractive/tab-mcp:0.1.0-alpha.1
+    image: ractive/tab-mcp:0.1.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -67,13 +68,12 @@ The relay is also on npm as `@ractive-ch/tab-mcp`. It needs [Bun](https://bun.sh
 or newer; it does not run on Node.js.
 
 ```sh
-bun add --global @ractive-ch/tab-mcp@alpha
+bun add --global @ractive-ch/tab-mcp
 TAB_MCP_PUBLIC_URL=https://relay.example.com \
   TAB_MCP_ALLOWED_ORIGINS=https://app.example.com tab-mcp
 ```
 
-Install `@alpha`: npm's `latest` tag still points at the first alpha. Run it under a
-supervisor (systemd or similar) that restarts it. It stops on SIGTERM or SIGINT and tells
+Run it under a supervisor (systemd or similar) that restarts it. It stops on SIGTERM or SIGINT and tells
 each page (close code 4004).
 
 ## Behind a reverse proxy or CDN

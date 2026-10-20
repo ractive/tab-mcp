@@ -181,14 +181,14 @@ function showAccess(mcp: TabMcp): void {
 		status.textContent =
 			state === "connected"
 				? grants.length === 0
-					? "On. Add the address to your AI tool and enter the code shown."
+					? "On. Add the address to your AI app and enter the code shown."
 					: `On. ${count} connected.`
 				: state === "connecting"
 					? "Connecting…"
-					: "Off. No AI tool can use this page.";
+					: "Off. No AI app can use this page.";
 		stopButton.hidden = state === "disconnected";
 		connectButton.textContent =
-			state === "connected" ? "Show address and code" : "Connect your AI tool";
+			state === "connected" ? "Show address and code" : "Connect your AI app";
 		apps.hidden = grants.length === 0;
 		appList.replaceChildren(
 			...grants.map((grant) => {

@@ -26,6 +26,7 @@ export { MemoryTokenStore } from "./store/memory.ts";
 export { SqliteTokenStore } from "./store/sqlite.ts";
 export type {
 	GrantSummary,
+	RevokeOptions,
 	RevokeSelector,
 	TokenKind,
 	TokenRecord,

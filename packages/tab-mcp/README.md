@@ -10,9 +10,9 @@ and gets an MCP address. The user adds that address to an AI app and pairs it by
 a code from the page on the relay's sign-in page. The relay then forwards the AI app's
 requests to the page. It knows nothing about the tools themselves.
 
-**Status: alpha.** Settings and the API can still change. The relay speaks MCP revision
-2026-07-28 only and accepts AI apps that register through OAuth Client ID Metadata
-Documents; see [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md)
+**Status: 0.1.0.** Until 1.0, a new minor version can still change settings and the API.
+The relay speaks MCP revision 2026-07-28 only and accepts AI apps that register through
+OAuth Client ID Metadata Documents; see [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md)
 for which apps work.
 
 ## Run it
@@ -20,13 +20,11 @@ for which apps work.
 The relay needs [Bun](https://bun.sh) 1.4.3 or newer. It does not run on Node.js.
 
 ```sh
-bun add --global @ractive-ch/tab-mcp@alpha
+bun add --global @ractive-ch/tab-mcp
 TAB_MCP_PUBLIC_URL=https://relay.example.com \
   TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
   tab-mcp
 ```
-
-Install `@alpha`: npm's `latest` tag still points at the first alpha.
 
 Or with Docker (linux/amd64 and linux/arm64):
 
@@ -34,7 +32,7 @@ Or with Docker (linux/amd64 and linux/arm64):
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.1.0-alpha.1
+  ractive/tab-mcp:0.1.0
 ```
 
 The image is also on `ghcr.io/ractive/tab-mcp`. Put the relay behind a reverse proxy

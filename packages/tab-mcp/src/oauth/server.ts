@@ -330,7 +330,7 @@ export class AuthorizationServer {
 			"This connection cannot be made",
 			`<h1>This connection cannot be made</h1>
 <p role="alert">${escapeHtml(message)}</p>
-<p>Go back to your AI tool and try again. If it keeps happening, the AI tool may not work with this relay.</p>`,
+<p>Go back to your AI app and try again. If it keeps happening, the AI app may not work with this relay.</p>`,
 		);
 	}
 
@@ -369,8 +369,8 @@ export class AuthorizationServer {
 			400,
 			"This connection cannot be made",
 			`<h1>This connection cannot be made</h1>
-<p role="alert">The AI tool sent a request this relay cannot accept: ${escapeHtml(description)} (${escapeHtml(error)}).</p>
-<p>You can go back to the AI tool at ${escapeHtml(host)} to tell it, or close this page.</p>
+<p role="alert">The AI app sent a request this relay cannot accept: ${escapeHtml(description)} (${escapeHtml(error)}).</p>
+<p>You can go back to the AI app at ${escapeHtml(host)} to tell it, or close this page.</p>
 <div class="actions"><a class="button" href="${escapeHtml(url)}">Go back to ${escapeHtml(host)}</a></div>`,
 		);
 	}
@@ -581,7 +581,7 @@ export class AuthorizationServer {
 		const body = `<h1>Open the page first</h1>
 ${errorHtml}
 <p><strong>${escapeHtml(client.name)}</strong> (${escapeHtml(client.host)}) wants to use the tools of a web page, but that page is not open right now.</p>
-<p>Open the page, click “Connect your AI tool”, then try again here.</p>
+<p>Open the page, click “Connect your AI app”, then try again here.</p>
 <div class="actions">
 <a class="button primary" href="${escapeHtml(retryUrl)}">Try again</a>
 <a class="button" href="${escapeHtml(cancelUrl)}">Cancel</a>
@@ -603,7 +603,7 @@ ${errorHtml}
 		if (!this.#attemptsPerIp.take(ip)) {
 			return this.#errorPage(
 				429,
-				"Too many attempts from your network. Wait a few minutes, then start again from your AI tool.",
+				"Too many attempts from your network. Wait a few minutes, then start again from your AI app.",
 			);
 		}
 		const type = (req.headers.get("content-type") ?? "").split(";")[0]?.trim();
@@ -793,7 +793,7 @@ ${errorHtml}
 			const body = `<h1>Open the page first</h1>
 ${errorHtml}
 <p>${clientLabel} wants to use the tools of a web page, but that page is not open right now.</p>
-<p>Open the page, click “Connect your AI tool”, then try again here.</p>
+<p>Open the page, click “Connect your AI app”, then try again here.</p>
 <form method="post" action="/authorize">
 ${hidden}
 <div class="actions">
@@ -836,7 +836,7 @@ ${method.render(session)}
 ${cancel}
 </div>
 </form>
-<p class="help">After you connect, your browser goes back to ${escapeHtml(hostOf(pending.redirectUri))}. Only connect AI tools you started yourself.</p>`;
+<p class="help">After you connect, your browser goes back to ${escapeHtml(hostOf(pending.redirectUri))}. Only connect AI apps you started yourself.</p>`;
 		return this.#page(status, heading, body, targets, extra);
 	}
 

@@ -6,8 +6,8 @@ relay. The page connects to the relay and gets an address. The user adds that ad
 their AI app and types a pairing code from the page; the AI app then calls the page's
 tools while the tab stays open. Nothing is installed on the user's computer.
 
-**Status: alpha.** The API can still change. Which AI apps work is listed in
-[compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
+**Status: 0.1.0.** Until 1.0, a new minor version can still change the API. Which AI apps
+work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
 
@@ -22,7 +22,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.1.0-alpha.1
+  ractive/tab-mcp:0.1.0
 ```
 
 For production, see
@@ -31,16 +31,14 @@ For production, see
 ## Install
 
 ```sh
-npm install @ractive-ch/tab-mcp-client@alpha
+npm install @ractive-ch/tab-mcp-client
 ```
-
-Install `@alpha`: npm's `latest` tag still points at the first alpha.
 
 Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.1.0-alpha.1/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.1.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -112,7 +110,7 @@ const mcp = new TabMcp({
 
 1. The user clicks your button. `showConnectDialog()` connects (call it from the click
    handler: browsers that report user activation refuse `connect()` without one) and
-   opens the "Connect your AI tool" dialog.
+   opens the "Connect your AI app" dialog.
 2. The dialog shows the address and short instructions for Claude, ChatGPT and Claude
    Code. The user adds the address to their AI app.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
@@ -120,10 +118,10 @@ const mcp = new TabMcp({
 4. The dialog lists the connected app with a Disconnect button.
 
 The address stays the same across visits: the library keeps a secret per relay in
-`localStorage`. `newAddress()` disconnects every app and makes a new address. The
-default dialog has no button for it, so give your page a "New address" button that calls
-it (from a click): the relay's sign-in page points users to it when someone else may be
-guessing codes. Connected apps keep working after a reload once the page connects
+`localStorage`. "New address" in the dialog calls `newAddress()`, which disconnects every
+app and makes a new address; when apps are connected, the dialog asks first. The relay's
+sign-in page points users to it when someone else may be guessing codes. A page with its
+own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects
 again; while the page is closed, they get "the page is not open".
 
 The library never reconnects by itself. A page that offers something like "Keep AI

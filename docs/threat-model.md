@@ -2,7 +2,7 @@
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
 relay `@ractive-ch/tab-mcp` and browser library `@ractive-ch/tab-mcp-client`
-0.1.0-alpha.1. To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+0.1.0. To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
 ## How it works, in short
 
@@ -50,7 +50,7 @@ From a shared screenshot, a chat log or over the user's shoulder.
 - The address alone grants nothing. Every MCP request needs a token, and a token needs
   the pairing code that only the page shows.
 - The pairing code has 6 digits, works once, is valid for 2 minutes and allows 5
-  attempts. The relay issues codes only while the page's "Connect your AI tool" dialog is
+  attempts. The relay issues codes only while the page's "Connect your AI app" dialog is
   open. Without a view of the page, an attacker has 5 guesses in a million per code.
 - Guesses are also limited per address and network (10, then 1 a minute) and per address
   overall (30, then 1 every 30 seconds). Only a well-formed code against an active code

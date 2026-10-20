@@ -64,22 +64,24 @@ interface GrantSummary {
 
 type RevokeSelector = { grantId: string } | { addressId: string };
 
+interface RevokeOptions {
+  now: number;
+  keepUntil: number;      // keep the tombstone at least until then
+}
+
 interface TokenStore {
   put(record: TokenRecord): Promise<boolean>;
   get(hash: string): Promise<TokenRecord | undefined>;
   markUsed(hash: string, now: number): Promise<boolean>;
-  revoke(
-    selector: RevokeSelector,
-    options: { now: number; keepUntil: number },
-  ): Promise<number>;
+  revoke(selector: RevokeSelector, options: RevokeOptions): Promise<number>;
   listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
   deleteExpired(now: number): Promise<number>;
   close?(): Promise<void>;
 }
 ```
 
-`TokenStore`, `TokenRecord`, `GrantSummary`, `RevokeSelector` and `TokenKind` are
-exported as types from `@ractive-ch/tab-mcp`. All times are milliseconds since the Unix
+`TokenStore`, `TokenRecord`, `GrantSummary`, `RevokeSelector`, `RevokeOptions` and
+`TokenKind` are exported as types from `@ractive-ch/tab-mcp`. All times are milliseconds since the Unix
 epoch.
 
 | Method | What it must do |
@@ -136,7 +138,7 @@ tokenStoreConformance("RedisTokenStore", () =>
 ```
 
 ```sh
-bun add --dev @ractive-ch/tab-mcp@alpha
+bun add --dev @ractive-ch/tab-mcp
 bun test redis-token-store.test.ts
 ```
 
@@ -148,7 +150,7 @@ tests expect to start empty.
 
 This store uses Bun's built-in Redis client. Every write runs as one Lua script, which
 Redis executes atomically, so the guarantees hold across processes. It passes the
-conformance suite against relay 0.1.0-alpha.1 and Redis 7.0. It is a starting point, not
+conformance suite against relay 0.1.0 and Redis 7.0. It is a starting point, not
 a supported package: it assumes a single Redis node (the scripts touch keys they do not
 declare, which Redis Cluster does not allow), and `listGrants` reads tokens one by one.
 
@@ -156,6 +158,7 @@ declare, which Redis Cluster does not allow), and `listGrants` reads tokens one 
 // redis-token-store.ts
 import type {
 	GrantSummary,
+	RevokeOptions,
 	RevokeSelector,
 	TokenRecord,
 	TokenStore,
@@ -276,7 +279,7 @@ export class RedisTokenStore implements TokenStore {
 
 	async revoke(
 		selector: RevokeSelector,
-		options: { now: number; keepUntil: number },
+		options: RevokeOptions,
 	): Promise<number> {
 		const [kind, id] =
 			"grantId" in selector

@@ -1,5 +1,5 @@
 /**
- * The default UI, loaded on demand: the "Connect your AI tool" dialog
+ * The default UI, loaded on demand: the "Connect your AI app" dialog
  * (DEC-028) and the confirmation of consequential tools. Plain `<dialog>`
  * elements, no styles beyond a few CSS custom properties (`--tab-mcp-*`), all
  * text set with `textContent`. Pages with their own UI use the events and
@@ -9,6 +9,7 @@
 import type { TabMcp } from "./tab-mcp.ts";
 import type {
 	ConfirmRequest,
+	DisconnectDetail,
 	Grant,
 	SessionInfo,
 	ToolCallClient,
@@ -180,17 +181,26 @@ const INSTRUCTIONS: [string, string][] = [
 	["Claude Code", "Run: claude mcp add --transport http tools ADDRESS"],
 ];
 
+/** "A and B", "A, B and C". */
+function listOf(items: string[]): string {
+	return items.length < 2
+		? (items[0] ?? "")
+		: `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
 /**
- * The "Connect your AI tool" dialog: the address with a copy button, short
- * instructions, the pairing code while the relay sends one, and the connected
- * apps with Disconnect. Pairing is on while it is open.
+ * The "Connect your AI app" dialog: the address with Copy and New address,
+ * short instructions, the pairing code while the relay sends one, and the
+ * connected apps with Disconnect. Pairing is on while it is open. New address
+ * asks first when it would disconnect connected apps (`newAddress()` revokes
+ * them).
  */
 export function showConnectDialog(
 	mcp: TabMcp,
 	connecting: Promise<SessionInfo>,
 	doc: Document,
 ): Promise<void> {
-	const { dialog } = newDialog(doc, "tab-mcp-connect", "Connect your AI tool");
+	const { dialog } = newDialog(doc, "tab-mcp-connect", "Connect your AI app");
 	const status = el(doc, "p", {
 		className: "tab-mcp-status",
 		text: "Connecting…",
@@ -198,7 +208,7 @@ export function showConnectDialog(
 	status.setAttribute("role", "status");
 
 	const addressId = `tab-mcp-${++counter}-address`;
-	const label = el(doc, "label", { text: "Add this address to your AI tool:" });
+	const label = el(doc, "label", { text: "Add this address to your AI app:" });
 	label.htmlFor = addressId;
 	const address = el(doc, "input", {
 		id: addressId,
@@ -217,6 +227,8 @@ export function showConnectDialog(
 			clipboard.writeText(address.value).then(done, () => address.select());
 		else address.select();
 	});
+	const fresh = button(doc, "New address", () => askNewAddress());
+	fresh.className = "tab-mcp-new-address";
 	const addressBox = el(
 		doc,
 		"div",
@@ -225,7 +237,38 @@ export function showConnectDialog(
 		address,
 		" ",
 		copy,
+		" ",
+		fresh,
 	);
+
+	// Asked in the dialog before New address disconnects connected apps.
+	const confirmId = `tab-mcp-${++counter}-new-address`;
+	const confirmText = el(doc, "p", { id: confirmId });
+	const cancelNew = button(doc, "Cancel", () => {
+		confirmBox.hidden = true;
+		fresh.focus();
+	});
+	const confirmNew = button(doc, "Disconnect and get new address", () =>
+		getNewAddress(),
+	);
+	confirmNew.className = "tab-mcp-new-address-confirm";
+	const confirmBox = el(
+		doc,
+		"div",
+		{ className: "tab-mcp-new-address-question" },
+		confirmText,
+		el(
+			doc,
+			"div",
+			{ className: "tab-mcp-actions" },
+			cancelNew,
+			" ",
+			confirmNew,
+		),
+	);
+	confirmBox.setAttribute("role", "group");
+	confirmBox.setAttribute("aria-labelledby", confirmId);
+	confirmBox.hidden = true;
 
 	const code = el(doc, "strong", { className: "tab-mcp-code-value" });
 	code.style.setProperty("font-size", "var(--tab-mcp-code-size, 1.5em)");
@@ -265,24 +308,67 @@ export function showConnectDialog(
 	const close = button(doc, "Close", () => dialog.close());
 	const actions = el(doc, "div", { className: "tab-mcp-actions" }, close);
 
-	dialog.append(status, addressBox, codeLine, help, apps, actions);
+	dialog.append(status, addressBox, confirmBox, codeLine, help, apps, actions);
 	addressBox.hidden = true;
 	codeLine.hidden = true;
 	help.hidden = true;
 	apps.hidden = true;
 
+	// Set while New address waits for the new session.
+	let renewing = false;
+	// The question names the apps connected now; pairing goes on while it is open.
+	const renderQuestion = (): boolean => {
+		const names = mcp.grants.map((g) => clientLabel(g.client));
+		if (names.length === 0) return false;
+		confirmText.textContent = `A new address disconnects ${listOf(names)}. To use this page again, add the new address to ${names.length === 1 ? "it" : "them"}.`;
+		return true;
+	};
+	const askNewAddress = () => {
+		if (mcp.state !== "connected") return;
+		if (!renderQuestion()) {
+			getNewAddress();
+			return;
+		}
+		confirmBox.hidden = false;
+		cancelNew.focus(); // the safe choice is the default
+	};
+	const getNewAddress = () => {
+		// Focus moves before the focused control is hidden.
+		close.focus();
+		confirmBox.hidden = true;
+		renewing = true;
+		status.textContent = "Getting a new address…";
+		// Called from the click, so the reconnect has the user action it needs.
+		mcp.newAddress().then(
+			() => {
+				renewing = false;
+				status.textContent =
+					"This is a new address. Add it to your AI app again.";
+				close.focus();
+			},
+			(error: unknown) => {
+				renewing = false;
+				status.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}. Close this and connect again.`;
+				close.focus();
+			},
+		);
+	};
 	const renderSession = (session: SessionInfo | undefined) => {
 		if (session === undefined) {
 			addressBox.hidden = true;
+			confirmBox.hidden = true;
 			help.hidden = true;
 			return;
 		}
 		address.value = session.address;
+		copy.textContent = "Copy";
 		const appName = session.appName ?? mcp.appName;
-		status.textContent =
-			appName !== undefined
-				? `${appName} is ready for your AI tool.`
-				: "This page is ready for your AI tool.";
+		if (!renewing)
+			status.textContent =
+				appName !== undefined
+					? `${appName} is ready for your AI app.`
+					: "This page is ready for your AI app.";
+		fresh.disabled = mcp.state !== "connected";
 		addressBox.hidden = false;
 		help.hidden = false;
 		steps.replaceChildren(
@@ -334,10 +420,16 @@ export function showConnectDialog(
 			: "To disconnect an app, connect this page again first.";
 		appsNote.hidden = connected;
 		apps.hidden = mcp.grants.length === 0;
+		if (!confirmBox.hidden && !renderQuestion()) {
+			// Nobody left to disconnect: no question needed.
+			confirmBox.hidden = true;
+			fresh.focus();
+		}
 	};
-	const onDisconnected = () => {
-		status.textContent =
-			"Disconnected. AI tools can use this page again after you connect.";
+	const onDisconnected = (event: CustomEvent<DisconnectDetail>) => {
+		if (event.detail.reason !== "new_address")
+			status.textContent =
+				"Disconnected. AI apps can use this page again after you connect.";
 		renderSession(undefined);
 		renderGrants();
 		renderCode();

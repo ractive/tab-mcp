@@ -191,14 +191,12 @@ describe("showConnectDialog", () => {
 	test("shows the address, instructions and connected apps; pairing runs while open", async () => {
 		const { dialog, closed, session } = await open();
 		expect(dialog.open).toBe(true);
-		expect(dialog.querySelector("h2")?.textContent).toBe(
-			"Connect your AI tool",
-		);
+		expect(dialog.querySelector("h2")?.textContent).toBe("Connect your AI app");
 		expect((dialog.querySelector("input") as HTMLInputElement).value).toBe(
 			session.address,
 		);
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
-			"saturnus is ready for your AI tool.",
+			"saturnus is ready for your AI app.",
 		);
 		expect(dialog.querySelector(".tab-mcp-help")?.textContent).toContain(
 			`claude mcp add --transport http tools ${session.address}`,
@@ -296,6 +294,142 @@ describe("showConnectDialog", () => {
 		);
 		byText(dialog, "Close").click();
 		await closed;
+	});
+
+	test("New address asks first while apps are connected; Cancel keeps the address", async () => {
+		const { dialog, session } = await open();
+		const fresh = byText(dialog, "New address");
+		expect(fresh.disabled).toBe(false);
+		const question = dialog.querySelector(
+			".tab-mcp-new-address-question",
+		) as HTMLElement;
+		expect(question.hidden).toBe(true);
+
+		fresh.click();
+		expect(question.hidden).toBe(false);
+		expect(question.getAttribute("role")).toBe("group");
+		expect(question.getAttribute("aria-labelledby")).toBe(
+			question.querySelector("p")?.id ?? "none",
+		);
+		expect(question.querySelector("p")?.textContent).toBe(
+			"A new address disconnects Claude (claude.ai). To use this page again, add the new address to it.",
+		);
+		expect(doc.activeElement?.textContent).toBe("Cancel");
+
+		byText(question, "Cancel").click();
+		expect(question.hidden).toBe(true);
+		expect(doc.activeElement).toBe(fresh);
+		expect(mcp.state).toBe("connected");
+		expect(mcp.address).toBe(session.address);
+		expect(relay.received.some((m) => m.type === "grants.revokeAll")).toBe(
+			false,
+		);
+		byText(dialog, "Close").click();
+	});
+
+	test("the New address question follows the connected apps while it is open", async () => {
+		const { dialog } = await open();
+		const fresh = byText(dialog, "New address");
+		const question = dialog.querySelector(
+			".tab-mcp-new-address-question",
+		) as HTMLElement;
+		fresh.click();
+		expect(question.hidden).toBe(false);
+
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({
+			type: "grant.added",
+			grant: {
+				grantId: "g_2",
+				client: {
+					id: "https://chatgpt.com/c.json",
+					name: "ChatGPT",
+					host: "chatgpt.com",
+				},
+				createdAt: "2026-10-20T10:00:00.000Z",
+			},
+		});
+		await added;
+		expect(question.querySelector("p")?.textContent).toBe(
+			"A new address disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page again, add the new address to them.",
+		);
+
+		for (const grantId of ["g_1", "g_2"]) {
+			const removed = nextEvent(mcp, "grantschange");
+			relay.send({ type: "grant.removed", grantId, reason: "revoked" });
+			await removed;
+		}
+		expect(question.hidden).toBe(true);
+		expect(doc.activeElement).toBe(fresh);
+		byText(dialog, "Close").click();
+	});
+
+	test("New address, confirmed, revokes the apps, makes a new secret and connects again", async () => {
+		relay.grants = [
+			GRANT,
+			{
+				...GRANT,
+				grantId: "g_2",
+				client: {
+					id: "https://chatgpt.com/c.json",
+					name: "ChatGPT",
+					host: "chatgpt.com",
+				},
+			},
+		];
+		const { dialog } = await open();
+		const hello = await relay.next("hello");
+		byText(dialog, "New address").click();
+		expect(
+			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
+		).toBe(
+			"A new address disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page again, add the new address to them.",
+		);
+
+		relay.grants = []; // what the relay has for the new address
+		const connected = nextEvent(mcp, "connected");
+		byText(dialog, "Disconnect and get new address").click();
+		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
+			"Getting a new address…",
+		);
+		expect(await relay.next("grants.revokeAll")).toEqual({
+			type: "grants.revokeAll",
+		});
+		const again = await relay.next("hello");
+		expect(again["secret"]).not.toBe(hello["secret"]);
+		await connected;
+		await Bun.sleep(0);
+		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
+			"This is a new address. Add it to your AI app again.",
+		);
+		expect(
+			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
+				.hidden,
+		).toBe(true);
+		expect(
+			(dialog.querySelector(".tab-mcp-address") as HTMLElement).hidden,
+		).toBe(false);
+		expect((dialog.querySelector(".tab-mcp-apps") as HTMLElement).hidden).toBe(
+			true,
+		);
+		expect(mcp.pairing).toBe(true);
+		byText(dialog, "Close").click();
+	});
+
+	test("New address without connected apps does not ask", async () => {
+		relay.grants = [];
+		const { dialog } = await open();
+		await relay.next("hello");
+		byText(dialog, "New address").click();
+		expect(
+			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
+				.hidden,
+		).toBe(true);
+		expect(await relay.next("grants.revokeAll")).toEqual({
+			type: "grants.revokeAll",
+		});
+		await relay.next("hello");
+		byText(dialog, "Close").click();
 	});
 
 	test("the dialog follows a disconnect", async () => {
