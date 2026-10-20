@@ -33,6 +33,15 @@ workflow.
   (a tag ruleset), the trusted publisher on npm accepts only `release.yml` in the
   environment `release`, and that environment accepts only release tags and waits for the
   owner's approval. Set these up (step 1) before the trusted publisher exists (step 7).
+- **Paused since 2026-10-20 (owner):** the `release` environment has no required reviewer,
+  so releases in the coming days run without the owner's approval. The tag ruleset, the
+  environment's tag policies (`client-v*`, `relay-v*`) and the trusted publisher stay.
+  Turn the approval back on when releases settle:
+
+  ```sh
+  printf '{"reviewers":[{"type":"User","id":783861}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' \
+    | gh api -X PUT repos/ractive/tab-mcp/environments/release --input -
+  ```
 
 ## One-time bootstrap (owner)
 
