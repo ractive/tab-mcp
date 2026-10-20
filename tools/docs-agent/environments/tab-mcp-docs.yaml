@@ -1,0 +1,8 @@
+name: tab-mcp-docs
+# npm for Bun and the dependencies; three documentation sites for the plugin formats.
+config:
+  type: cloud
+  networking:
+    type: limited
+    allow_package_managers: true
+    allowed_hosts: [code.claude.com, agentskills.io, developers.openai.com]

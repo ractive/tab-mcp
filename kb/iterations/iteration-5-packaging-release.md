@@ -46,19 +46,19 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 
 ### Documentation
 
-- [ ] README: what it is, how it works (diagram), quick start for page authors and for users, self-hosting, status
-- [ ] `docs/protocol.md` from the [protocol design](/design/protocol.md), versioned `tab-mcp.v1`
-- [ ] `SECURITY.md` (reporting via GitHub private advisories, supported versions, the phishing note of DEC-038: connecting an AI app to a page means trusting the page) and `docs/threat-model.md` from the [threat model](/design/threat-model.md)
-- [ ] `docs/token-store.md`: the `TokenStore` interface, its guarantees (hashes only, atomic `markUsed`), how to run the conformance suite, and a sketch of a Redis or Prisma store
-- [ ] `docs/configuration.md` (every `TAB_MCP_*` variable, defaults, safe-default rationale, the open-relay warning), `docs/self-hosting.md` (Docker, reverse proxy notes: WebSockets, SSE buffering, 60 s first-byte limits)
-- [ ] `docs/compatibility.md` carried over from iteration 4
-- [ ] `CHANGELOG.md` (Keep a Changelog), package READMEs, `LICENSE` and `AI_NOTICE` in both packages
+- [x] README: what it is, how it works (diagram), quick start for page authors and for users, self-hosting, status
+- [x] `docs/protocol.md` from the [protocol design](/design/protocol.md), versioned `tab-mcp.v1`
+- [x] `SECURITY.md` (reporting via GitHub private advisories, supported versions, the phishing note of DEC-038: connecting an AI app to a page means trusting the page) and `docs/threat-model.md` from the [threat model](/design/threat-model.md)
+- [x] `docs/token-store.md`: the `TokenStore` interface, its guarantees (hashes only, atomic `markUsed`), how to run the conformance suite, and a sketch of a Redis or Prisma store
+- [x] `docs/configuration.md` (every `TAB_MCP_*` variable, defaults, safe-default rationale, the open-relay warning), `docs/self-hosting.md` (Docker, reverse proxy notes: WebSockets, SSE buffering, 60 s first-byte limits)
+- [x] `docs/compatibility.md` carried over from iteration 4
+- [x] `CHANGELOG.md` (Keep a Changelog), package READMEs, `LICENSE` and `AI_NOTICE` in both packages
 
 ### Developer skill
 
-- [ ] `plugins/tab-mcp/skills/tab-mcp/SKILL.md` (open Agent Skills format, under ~200 lines): install the client, register tools WebMCP-style, connect/pairing flow (address plus code typed on `/authorize`), consequential tools, security defaults, self-hosting the relay; `references/` only if needed
-- [ ] Cheap packaging as in hyalo: `plugins/tab-mcp/.claude-plugin/plugin.json` and root `.claude-plugin/marketplace.json` (Claude Code `/plugin marketplace add ractive/tab-mcp`), `plugins/tab-mcp/.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json` (Codex), `agents/openai.yaml`; a `pi` entry only if it needs no extra package; claude.ai: zip upload documented
-- [ ] Lint the skill with `hyalo lint` (SKILL rules) if the folder is in a hyalo vault, else by hand
+- [x] `plugins/tab-mcp/skills/tab-mcp/SKILL.md` (open Agent Skills format, under ~200 lines): install the client, register tools WebMCP-style, connect/pairing flow (address plus code typed on `/authorize`), consequential tools, security defaults, self-hosting the relay; `references/` only if needed
+- [x] Cheap packaging as in hyalo: `plugins/tab-mcp/.claude-plugin/plugin.json` and root `.claude-plugin/marketplace.json` (Claude Code `/plugin marketplace add ractive/tab-mcp`), `plugins/tab-mcp/.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json` (Codex), `agents/openai.yaml`; a `pi` entry only if it needs no extra package; claude.ai: zip upload documented
+- [x] Lint the skill with `hyalo lint` (SKILL rules) if the folder is in a hyalo vault, else by hand
 
 ### Repository hygiene
 

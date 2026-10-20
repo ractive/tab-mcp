@@ -8,7 +8,7 @@
  *   --target=bun`, one self-contained file each (the relay has no runtime
  *   dependencies; `bun:*` modules stay imports);
  * - `dist/**\/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
- * - `dist/package.json`, LICENSE, AI_NOTICE (and README.md once it exists).
+ * - `dist/package.json`, LICENSE, AI_NOTICE, README.md.
  *
  * `--no-declarations` skips `tsc` (the Docker build, which has no
  * `node_modules`, needs only `main.js`).

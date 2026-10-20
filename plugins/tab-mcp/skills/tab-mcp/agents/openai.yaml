@@ -1,0 +1,6 @@
+interface:
+  display_name: "tab-mcp"
+  short_description: "Offer a web page's tools to AI apps"
+  default_prompt: "Use $tab-mcp to let AI apps use this web page's features."
+policy:
+  allow_implicit_invocation: true

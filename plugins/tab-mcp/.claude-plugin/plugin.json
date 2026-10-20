@@ -1,0 +1,13 @@
+{
+	"name": "tab-mcp",
+	"version": "0.1.0-alpha.1",
+	"description": "Add tab-mcp to a web app: offer a page's functions as MCP tools to AI apps through a tab-mcp relay.",
+	"author": {
+		"name": "ractive",
+		"url": "https://github.com/ractive"
+	},
+	"homepage": "https://github.com/ractive/tab-mcp/tree/main/plugins/tab-mcp",
+	"repository": "https://github.com/ractive/tab-mcp",
+	"license": "MIT",
+	"keywords": ["mcp", "webmcp", "browser", "skill"]
+}

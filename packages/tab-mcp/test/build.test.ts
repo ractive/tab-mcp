@@ -38,6 +38,9 @@ test("the build produces a runnable bin and declarations that type-check", async
 	});
 	expect(pkg["dependencies"]).toBeUndefined();
 	expect(pkg["publishConfig"]).toEqual({ access: "public" });
+	for (const file of ["README.md", "LICENSE", "AI_NOTICE"]) {
+		expect(await Bun.file(join(dist, file)).exists()).toBe(true);
+	}
 
 	const main = await Bun.file(join(dist, "main.js")).text();
 	expect(main.startsWith("#!/usr/bin/env bun\n")).toBe(true);
