@@ -11,9 +11,9 @@ An app that cannot do both cannot connect.
 
 | App | Version | Date | Revision | Auth | Result |
 |---|---|---|---|---|---|
-| MCP TypeScript SDK client (`@modelcontextprotocol/client`, pinned to 2026-07-28) | 2.3.1 | 2026-10-20 | `b2901a9` | full OAuth flow: CIMD client id, PKCE, the pairing code typed on `/authorize` in headless Chrome 155 | works: lists and calls the calculator's tools, `clear_memory` waits for the page's confirmation, Disconnect in the page ends the token (`examples/calculator/test/e2e.test.ts`, part of CI) |
-| Claude Code, headless (`claude -p --mcp-config … --strict-mcp-config`) | 2.1.296 | 2026-10-20 | `b2901a9` | bearer token in `"headers": {"Authorization": "Bearer ${TABMCP_TOKEN}"}`, obtained by the SDK client's OAuth flow | works: "Use the calculator to compute 12*12" pressed the keys and the page showed 144 (`bun run e2e:claude`) |
-| Claude Code with `MCP_PROTOCOL_NEGOTIATION=legacy` | 2.1.296 | 2026-10-20 | `b2901a9` | bearer token as above | refused as intended: its `initialize` gets HTTP 400 with JSON-RPC error `-32022` "Unsupported protocol version: 2025-11-25", `supported: ["2026-07-28"]`; the server shows as failed and no tool runs |
+| MCP TypeScript SDK client (`@modelcontextprotocol/client`, pinned to 2026-07-28) | 2.3.1 | 2026-10-20 | `aebc41f` | full OAuth flow: CIMD client id, PKCE, the pairing code typed on `/authorize` in headless Chrome 155 | works: lists and calls the calculator's tools, `clear_memory` waits for the page's confirmation, Disconnect in the page ends the token (`examples/calculator/test/e2e.test.ts`, part of CI) |
+| Claude Code, headless (`claude -p --mcp-config … --strict-mcp-config`) | 2.1.296 | 2026-10-20 | `aebc41f` | bearer token in `"headers": {"Authorization": "Bearer ${TABMCP_TOKEN}"}`, obtained by the SDK client's OAuth flow | works: "Use the calculator to compute 12*12" pressed the keys and the page showed 144 (`bun run e2e:claude`) |
+| Claude Code with `MCP_PROTOCOL_NEGOTIATION=legacy` | 2.1.296 | 2026-10-20 | `aebc41f` | bearer token as above | refused as intended: its `initialize` gets HTTP 400 with JSON-RPC error `-32022` "Unsupported protocol version: 2025-11-25", `supported: ["2026-07-28"]`; the server shows as failed and no tool runs |
 
 ## Pending
 
