@@ -64,7 +64,7 @@ function question(signal = new AbortController().signal): ConfirmRequest {
 }
 
 describe("confirmDialog", () => {
-	test("shows the tool, the client and the arguments as text; Allow resolves true", async () => {
+	test("shows the tool, the client and the arguments as text; Allow resolves allow", async () => {
 		const answer = confirmDialog(question(), doc);
 		const dialog = doc.querySelector(
 			"dialog.tab-mcp-confirm",
@@ -85,24 +85,43 @@ describe("confirmDialog", () => {
 		const allow = byText(dialog, "Allow");
 		await enabled(allow);
 		allow.click();
-		expect(await answer).toBe(true);
+		expect(await answer).toBe("allow");
 		expect(doc.querySelector("dialog")).toBeNull();
 	});
 
-	test("Don't allow, Escape (close without a value) and an aborted call resolve false", async () => {
+	test("Don't allow, Escape (close without a value) and an aborted call resolve deny", async () => {
 		const denied = confirmDialog(question(), doc);
 		byText(doc, "Don't allow").click();
-		expect(await denied).toBe(false);
+		expect(await denied).toBe("deny");
 
 		const escaped = confirmDialog(question(), doc);
 		(doc.querySelector("dialog") as HTMLDialogElement).close();
-		expect(await escaped).toBe(false);
+		expect(await escaped).toBe("deny");
 
 		const controller = new AbortController();
 		const aborted = confirmDialog(question(controller.signal), doc);
 		controller.abort();
-		expect(await aborted).toBe(false);
+		expect(await aborted).toBe("deny");
 		expect(doc.querySelector("dialog")).toBeNull();
+	});
+});
+
+describe("confirmDialog: Always allow", () => {
+	test('waits like Allow, says how long it lasts, and resolves "always"', async () => {
+		const answer = confirmDialog(question(), doc);
+		const dialog = doc.querySelector(
+			"dialog.tab-mcp-confirm",
+		) as HTMLDialogElement;
+		expect(dialog.querySelector(".tab-mcp-always-note")?.textContent).toBe(
+			"Always allow: Clear memory runs without asking for Claude (claude.ai) until you reload this page or disconnect it.",
+		);
+		const always = byText(dialog, "Always allow");
+		expect(always.disabled).toBe(true);
+		always.click();
+		expect(dialog.open).toBe(true);
+		await enabled(always);
+		always.click();
+		expect(await answer).toBe("always");
 	});
 });
 
@@ -118,7 +137,17 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		expect(text).toContain(long);
 		expect(text).toContain("END-MARKER");
 		byText(doc, "Don't allow").click();
-		expect(await answer).toBe(false);
+		expect(await answer).toBe("deny");
+	});
+
+	test("arguments that cannot be shown offer neither Allow nor Always allow", async () => {
+		const loop: Record<string, unknown> = {};
+		loop["self"] = loop;
+		const answer = confirmDialog({ ...question(), arguments: loop }, doc);
+		expect(byText(doc, "Allow").hidden).toBe(true);
+		expect(byText(doc, "Always allow").hidden).toBe(true);
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe("deny");
 	});
 
 	test("Allow is disabled for a moment after the dialog opens; a click then does nothing", async () => {
@@ -134,7 +163,7 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		await enabled(allow);
 		expect(Date.now() - started).toBeGreaterThanOrEqual(590);
 		allow.click();
-		expect(await answer).toBe(true);
+		expect(await answer).toBe("allow");
 	});
 
 	test("the delay cannot go below 500 ms", async () => {
@@ -145,7 +174,7 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		await enabled(allow);
 		expect(Date.now() - started).toBeGreaterThanOrEqual(490);
 		allow.click();
-		expect(await answer).toBe(true);
+		expect(await answer).toBe("allow");
 	});
 });
 

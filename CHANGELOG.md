@@ -7,6 +7,15 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- "Always allow" in the default confirmation. That tool then runs without asking for that
+  AI app until the page is reloaded or the app is disconnected. Like "Allow", it stays
+  disabled for a moment after the dialog opens. A custom `onConfirm` is asked every time,
+  as before.
+
 ### [0.1.0][client-0.1.0] - 2026-10-20
 
 The first stable release, on the npm dist-tag `latest`; install without `@alpha`.

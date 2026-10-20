@@ -114,6 +114,11 @@ export class TabMcp extends EventTarget {
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
 	#grants: Grant[] = [];
+	/**
+	 * Tools the user chose "Always allow" for, per grant: kept for the page's
+	 * lifetime, dropped when the grant goes.
+	 */
+	readonly #alwaysAllowed = new Map<string, Set<string>>();
 	#pairing = false;
 	#pairingCode: PairingCode | undefined;
 	#connection: ConnectionHandle | undefined;
@@ -400,6 +405,10 @@ export class TabMcp extends EventTarget {
 
 	#setGrants(grants: Grant[]): void {
 		this.#grants = grants;
+		for (const grantId of this.#alwaysAllowed.keys()) {
+			if (!grants.some((g) => g.grantId === grantId))
+				this.#alwaysAllowed.delete(grantId);
+		}
 		this.#emit("grantschange", { grants });
 	}
 
@@ -410,16 +419,32 @@ export class TabMcp extends EventTarget {
 				.then(() => ask(request))
 				.then((allowed) => allowed === true);
 		}
+		const { grantId } = request.client;
+		if (this.#alwaysAllowed.get(grantId)?.has(request.tool.name) === true)
+			return Promise.resolve(true);
 		const doc = globalThis.document as Document | undefined;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
 		const delay = this.#confirmDelayMs;
-		return import("./ui.ts").then((ui) =>
-			ui.confirmDialog(
-				request,
-				doc,
-				delay === undefined ? {} : { allowDelayMs: delay },
-			),
-		);
+		return import("./ui.ts")
+			.then((ui) =>
+				ui.confirmDialog(
+					request,
+					doc,
+					delay === undefined ? {} : { allowDelayMs: delay },
+				),
+			)
+			.then((answer) => {
+				// Only while the grant is still there: a revoked app gets nothing.
+				if (
+					answer === "always" &&
+					this.#grants.some((g) => g.grantId === grantId)
+				) {
+					const tools = this.#alwaysAllowed.get(grantId) ?? new Set();
+					tools.add(request.tool.name);
+					this.#alwaysAllowed.set(grantId, tools);
+				}
+				return answer !== "deny";
+			});
 	}
 
 	/** The callbacks of one connection; once it is not current they are ignored. */

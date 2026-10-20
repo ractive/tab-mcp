@@ -92,28 +92,36 @@ function showArguments(args: Record<string, unknown>): string | undefined {
 export const ALLOW_DELAY_MS = 750;
 export const MIN_ALLOW_DELAY_MS = 500;
 
+/** The user's answer: "always" allows this tool for this AI app from now on. */
+export type ConfirmAnswer = "allow" | "always" | "deny";
+
 /**
- * Ask whether a consequential tool may run. Resolves `true` only for "Allow",
- * which stays disabled for `allowDelayMs` (default 750, at least 500) after
- * the dialog opens, so a click meant for the page cannot approve.
+ * Ask whether a consequential tool may run. "Allow" and "Always allow" stay
+ * disabled for `allowDelayMs` (default 750, at least 500) after the dialog
+ * opens, so a click meant for the page cannot approve. Everything else
+ * (Don't allow, Escape, an aborted call) is "deny".
  */
 export function confirmDialog(
 	request: ConfirmRequest,
 	doc: Document,
 	options: { allowDelayMs?: number } = {},
-): Promise<boolean> {
+): Promise<ConfirmAnswer> {
 	const delay = Math.max(
 		MIN_ALLOW_DELAY_MS,
 		options.allowDelayMs ?? ALLOW_DELAY_MS,
 	);
-	if (request.signal.aborted) return Promise.resolve(false);
+	if (request.signal.aborted) return Promise.resolve("deny");
 	const title = request.tool.title ?? request.tool.name;
 	const { dialog } = newDialog(doc, "tab-mcp-confirm", `Allow ${title}?`);
 	const deny = button(doc, "Don't allow", () => dialog.close("deny"));
 	const allow = button(doc, "Allow", () => {
 		if (!allow.disabled) dialog.close("allow");
 	});
+	const always = button(doc, "Always allow", () => {
+		if (!always.disabled) dialog.close("always");
+	});
 	allow.disabled = true;
+	always.disabled = true;
 	const actions = el(
 		doc,
 		"div",
@@ -121,14 +129,24 @@ export function confirmDialog(
 		deny,
 		" ",
 		allow,
+		" ",
+		always,
 	);
+	const alwaysNote = el(doc, "p", {
+		className: "tab-mcp-always-note",
+		text: `Always allow: ${title} runs without asking for ${clientLabel(request.client)} until you reload this page or disconnect it.`,
+	});
 	const shown = showArguments(request.arguments);
 	const args = el(doc, "pre", {
 		className: "tab-mcp-arguments",
 		text:
 			shown ?? "The arguments cannot be shown, so this call cannot be allowed.",
 	});
-	if (shown === undefined) allow.hidden = true;
+	if (shown === undefined) {
+		allow.hidden = true;
+		always.hidden = true;
+		alwaysNote.hidden = true;
+	}
 	args.style.setProperty("white-space", "pre-wrap");
 	args.style.setProperty("max-height", "12rem");
 	args.style.setProperty("overflow", "auto");
@@ -143,6 +161,7 @@ export function confirmDialog(
 		}),
 		args,
 		actions,
+		alwaysNote,
 	);
 	doc.body.append(dialog);
 	return new Promise((resolve) => {
@@ -154,9 +173,9 @@ export function confirmDialog(
 			() => {
 				clearTimeout(timer);
 				request.signal.removeEventListener("abort", onAbort);
-				const allowed = dialog.returnValue === "allow";
+				const value = dialog.returnValue;
 				dialog.remove();
-				resolve(allowed);
+				resolve(value === "allow" || value === "always" ? value : "deny");
 			},
 			{ once: true },
 		);
@@ -165,6 +184,7 @@ export function confirmDialog(
 		// Counted from when the dialog is shown, not from when it was built.
 		timer = setTimeout(() => {
 			allow.disabled = false;
+			always.disabled = false;
 		}, delay);
 	});
 }
