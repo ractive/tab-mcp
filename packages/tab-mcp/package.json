@@ -1,6 +1,6 @@
 {
 	"name": "@ractive-ch/tab-mcp",
-	"version": "0.1.0-alpha.0",
+	"version": "0.1.0-alpha.1",
 	"private": true,
 	"description": "Relay that lets AI agents call the MCP tools of a web page open in a browser tab",
 	"type": "module",
