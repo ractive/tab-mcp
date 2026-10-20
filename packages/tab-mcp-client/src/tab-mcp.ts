@@ -4,6 +4,7 @@
  * connection and the MCP handler with a dynamic `import()`.
  */
 
+import { AlwaysAllowed } from "./always-allowed.ts";
 import type { ConnectionHandle, ConnectionHost } from "./internal.ts";
 import type { GrantRef, SessionMessage } from "./protocol.ts";
 import { ToolRegistry } from "./registry.ts";
@@ -114,6 +115,7 @@ export class TabMcp extends EventTarget {
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
 	#grants: Grant[] = [];
+	readonly #alwaysAllowed = new AlwaysAllowed();
 	#pairing = false;
 	#pairingCode: PairingCode | undefined;
 	#connection: ConnectionHandle | undefined;
@@ -145,9 +147,11 @@ export class TabMcp extends EventTarget {
 			options.storage,
 			options.storageKey ?? `tab-mcp:secret:${origin}`,
 		);
-		this.#registry.onChange(() =>
-			this.#emit("toolschange", { tools: this.tools }),
-		);
+		this.#registry.onChange(() => {
+			const tools = this.tools;
+			this.#alwaysAllowed.keepTools(tools);
+			this.#emit("toolschange", { tools });
+		});
 	}
 
 	/**
@@ -400,6 +404,7 @@ export class TabMcp extends EventTarget {
 
 	#setGrants(grants: Grant[]): void {
 		this.#grants = grants;
+		this.#alwaysAllowed.keepGrants(grants.map((g) => g.grantId));
 		this.#emit("grantschange", { grants });
 	}
 
@@ -410,16 +415,29 @@ export class TabMcp extends EventTarget {
 				.then(() => ask(request))
 				.then((allowed) => allowed === true);
 		}
+		const { grantId } = request.client;
+		if (this.#alwaysAllowed.has(grantId, request.tool.name))
+			return Promise.resolve(true);
 		const doc = globalThis.document as Document | undefined;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
 		const delay = this.#confirmDelayMs;
-		return import("./ui.ts").then((ui) =>
-			ui.confirmDialog(
-				request,
-				doc,
-				delay === undefined ? {} : { allowDelayMs: delay },
-			),
-		);
+		return import("./ui.ts")
+			.then((ui) =>
+				ui.confirmDialog(
+					request,
+					doc,
+					delay === undefined ? {} : { allowDelayMs: delay },
+				),
+			)
+			.then((answer) => {
+				// Only while the grant is still there: a revoked app gets nothing.
+				if (
+					answer === "always" &&
+					this.#grants.some((g) => g.grantId === grantId)
+				)
+					this.#alwaysAllowed.add(grantId, request.tool.name);
+				return answer !== "deny";
+			});
 	}
 
 	/** The callbacks of one connection; once it is not current they are ignored. */

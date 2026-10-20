@@ -93,9 +93,11 @@ added and removed tools.
 ### Consequential tools
 
 Mark tools that change or delete something with `consequentialHint: true`. The page then
-asks the user before every call ("Allow" or "Don't allow"), showing the AI app and the
-arguments. A refusal reaches the AI app as an error result. Pass `onConfirm` to ask in
-your own UI:
+asks the user before every call ("Allow", "Always allow" or "Don't allow"), showing the AI
+app and the arguments. "Always allow" lets that tool run without asking for that AI app
+until the page is reloaded or the app is disconnected. A refusal reaches the AI app as an
+error result. Pass `onConfirm` to ask in your own UI (it is asked every time; remember
+answers there if you want to):
 
 ```ts
 const mcp = new TabMcp({
