@@ -98,8 +98,12 @@ test.skipIf(chrome === undefined)(
 				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps').textContent",
 			),
 		).toContain(`${CLIENT_NAME} (${host}) connected`);
-		await clickButton(page, "dialog.tab-mcp-connect", "Close");
-		await waitFor(page, "!document.querySelector('dialog[open]')");
+		await clickButton(
+			page,
+			"dialog.tab-mcp-connect",
+			"Close",
+			"!document.querySelector('dialog[open]')",
+		);
 		expect(
 			await page.eval("document.querySelector('#app-list').textContent"),
 		).toContain(`${CLIENT_NAME} (${host})`);

@@ -119,21 +119,43 @@ export function waitFor<T = unknown>(
 	})`);
 }
 
-/** Click a button by its exact text inside `scope` (a CSS selector). */
+/**
+ * Click a button by its exact text inside `scope` (a CSS selector). With
+ * `until`, wait for that condition and click again while it does not hold.
+ */
 export async function clickButton(
 	page: Page,
 	scope: string,
 	text: string,
+	until?: string,
 ): Promise<void> {
-	const id = `e2e-${crypto.randomUUID()}`;
-	const found = await page.eval<boolean>(`(() => {
-		const b = [...document.querySelectorAll(${JSON.stringify(`${scope} button`)})].find((b) => b.textContent.trim() === ${JSON.stringify(text)});
-		if (!b) return false;
-		b.id = ${JSON.stringify(id)};
-		return true;
-	})()`);
-	if (!found) throw new Error(`no button "${text}" in ${scope}`);
-	await page.click(`#${id}`);
+	const mark = async (): Promise<string | undefined> => {
+		const id = `e2e-${crypto.randomUUID()}`;
+		const found = await page.eval<boolean>(`(() => {
+			const b = [...document.querySelectorAll(${JSON.stringify(`${scope} button`)})].find((b) => b.textContent.trim() === ${JSON.stringify(text)});
+			if (!b) return false;
+			b.id = ${JSON.stringify(id)};
+			return true;
+		})()`);
+		return found ? id : undefined;
+	};
+	const first = await mark();
+	if (first === undefined) throw new Error(`no button "${text}" in ${scope}`);
+	await page.click(`#${first}`);
+	if (until === undefined) return;
+	// A click lands where the button was when its box was read; if the layout
+	// moved in between (the dialog resizing as its content changes), it
+	// misses. Click again while the button is still there.
+	for (let attempt = 1; ; attempt++) {
+		try {
+			await waitFor(page, until, 2_000);
+			return;
+		} catch (error) {
+			if (attempt === 5) throw error;
+		}
+		const again = await mark();
+		if (again !== undefined) await page.click(`#${again}`);
+	}
 }
 
 export interface Stack {

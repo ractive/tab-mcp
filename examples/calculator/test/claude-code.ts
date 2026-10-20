@@ -166,7 +166,12 @@ const check = (ok: boolean, what: string) => {
 try {
 	const page = await openCalculator(stack);
 	const pairing = await pair(stack, page, stack.clientId());
-	await clickButton(page, "dialog.tab-mcp-connect", "Close");
+	await clickButton(
+		page,
+		"dialog.tab-mcp-connect",
+		"Close",
+		"!document.querySelector('dialog[open]')",
+	);
 	const token = pairing.provider.tokens()?.access_token;
 	if (token === undefined) throw new Error("pairing gave no access token");
 	await writeConfig(dir, pairing.address);
