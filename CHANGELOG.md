@@ -7,12 +7,19 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
-### [0.1.0-alpha.1] - 2026-10-20
+### Unreleased
+
+#### Changed
+
+- README: how to get a relay, pairing, consequential tools and your own UI. Cursor is no
+  longer named among the AI apps, because it cannot connect yet.
+
+### [0.1.0-alpha.1][client-0.1.0-alpha.1] - 2026-10-20
 
 No changes to the library. Published through the release workflow (trusted publishing)
 to validate it; the release step now reads `npm view` output from npm 11 and 12 alike.
 
-### [0.1.0-alpha.0] - 2026-10-19
+### [0.1.0-alpha.0][client-0.1.0-alpha.0] - 2026-10-19
 
 First alpha of the browser library, on the npm dist-tag `alpha`.
 
@@ -29,24 +36,53 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   2 minutes, and announces each newly connected AI app.
 - `appName` must be 1-64 characters without control characters, as the relay requires.
 
-[0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
-
 ## @ractive-ch/tab-mcp
+
+The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
+`ghcr.io/ractive/tab-mcp`, tagged with the version.
 
 ### Unreleased
 
 #### Added
 
-- OAuth 2.1 authorization server for MCP clients: protected-resource and server metadata,
-  clients through Client ID Metadata Documents, PKCE S256, `iss`, a pairing page where the
-  user types the code shown in the page, rotating refresh tokens with reuse detection,
-  revocation.
+- Package README with the quick start, the `tab-mcp` command and the library API.
+
+### [0.1.0-alpha.1][relay-0.1.0-alpha.1] - 2026-10-20
+
+No changes to the relay. The first version published through the release workflow
+(trusted publishing) to validate it, and the first Docker image:
+`ractive/tab-mcp:0.1.0-alpha.1` and `ghcr.io/ractive/tab-mcp:0.1.0-alpha.1` for
+linux/amd64 and linux/arm64, with provenance and SBOM attestations.
+
+### [0.1.0-alpha.0][relay-0.1.0-alpha.0] - 2026-10-20
+
+First alpha of the relay, on the npm dist-tag `alpha`, uploaded by hand from the
+CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or newer.
+
+#### Added
+
+- Tab sessions over a WebSocket (`/tab`, protocol `tab-mcp.v1`): page origins from an
+  allow-list that is empty by default, a stable MCP address per page derived from a
+  secret the page keeps, heartbeat, idle timeout and session lifetime.
+- An MCP endpoint per address (`/a/<id>/mcp`) for MCP revision 2026-07-28 only. It
+  forwards requests to the page, starts the event stream itself after 20 seconds, sends
+  keep-alives, and limits body size, concurrent requests and request time. One exception
+  for Claude's mismatched `MCP-Protocol-Version` header, counted in `/healthz`.
+- OAuth 2.1 authorization server for AI apps: protected-resource and server metadata,
+  clients through Client ID Metadata Documents only, PKCE S256, `iss`, a pairing page
+  where the user types the code shown in the page, rotating refresh tokens with reuse
+  detection, revocation, and a connection lifetime of at most 90 days after pairing
+  (`TAB_MCP_GRANT_LIFETIME_S`).
 - Per-site configuration (`TAB_MCP_SITES`): app name, pairing method and limits per page
   origin; `TAB_MCP_CLIENT_ID_HOSTS` to limit which AI apps may connect.
-- `TAB_MCP_GRANT_LIFETIME_S`: a connection ends at the latest 90 days after pairing.
-- `TokenStore`: `revoke` leaves a tombstone and `put` returns `false` for tokens of a
-  revoked grant (custom stores must implement both; the conformance suite checks them).
+- `TokenStore` interface with SQLite (default) and memory stores, and the conformance
+  suite `@ractive-ch/tab-mcp/testing` for custom stores.
+- `createRelay()` for embedding, and the `tab-mcp` command configured with `TAB_MCP_*`
+  environment variables (`tab-mcp --help`).
+- `/healthz` with the version, and JSON-line logs that never contain request or response
+  bodies.
 
-#### Changed
-
-- `TAB_MCP_MAX_MESSAGE_BYTES` must be at least 16384.
+[client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
+[client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.1.0-alpha.1
+[relay-0.1.0-alpha.0]: https://www.npmjs.com/package/@ractive-ch/tab-mcp/v/0.1.0-alpha.0
