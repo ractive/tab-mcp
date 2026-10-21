@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 8: the relay's answer when the page is not open"
 description: When the page is not open, the relay waits a short grace period for it and then answers with HTTP 200 and a JSON-RPC message instead of 503, so an AI app's connector keeps its session.
-status: in-progress
+status: completed
 tags:
   - iteration
   - relay
