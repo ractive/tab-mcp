@@ -168,13 +168,14 @@ Example:
 
 When the relay itself ends an MCP request, the AI app gets a JSON-RPC error with the
 request's id: as an HTTP error, or as a final SSE event if the stream had started. The
-codes are outside the JSON-RPC reserved range.
+codes are outside the JSON-RPC reserved range. The page not being open is the exception,
+see [When the page is not open](#when-the-page-is-not-open).
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `-31001` | 503 | The page is not open (valid token, no tab connected). |
+| `-31001` | 200 | The page is not open (valid token, no tab connected). |
 | `-31002` | 504 | The page did not answer within `requestTimeoutMs`. |
-| `-31003` | 503 | The page closed its connection while the request was in flight. |
+| `-31003` | 200 | The page closed its connection while the request was in flight. |
 | `-31004` | 429 | Too many concurrent requests for this page. |
 | `-31005` | 503 | The WebSocket send was dropped under backpressure. |
 | `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; listen streams excepted). |
@@ -188,9 +189,37 @@ Before a request reaches the tab, the relay checks, in this order: the method (P
 else 405), the body size and JSON (413, 400), the `MCP-Protocol-Version` header (400 with
 JSON-RPC error `-32022` naming the supported version `2026-07-28`, or `-32020` when the
 header is missing), the bearer token for this address (401 with `WWW-Authenticate`), that
-the tab is online (503, `-31001`) and the concurrency limit (429, `-31004`). An unknown
+that the tab is online (see below) and the concurrency limit (429, `-31004`). An unknown
 address and an address whose tab is offline look the same without a token, so addresses
 cannot be probed.
+
+### When the page is not open
+
+Phones pause a tab in the background, so "not open" is often brief. A request with a valid
+token for an address without a connected tab waits up to `TAB_MCP_PAGE_WAIT_S` (10 s by
+default; 0 turns it off) for the page's session and is then forwarded as usual. The wait
+ends when the AI app closes its request. At most `maxConcurrentRequests` requests wait per
+address and at most `maxSessions` in all; beyond that the relay answers at once.
+`server/discover` does not wait: clients use it as a quick protocol-version probe.
+
+If the page does not come, the relay answers with **HTTP 200** and a JSON-RPC message,
+never with an HTTP error status: MCP clients that also speak older protocol versions take
+an HTTP error without a known MCP error as a sign of an old server and fall back to the
+old handshake, which this relay refuses (DEC-074).
+
+| Request | Answer (HTTP 200) |
+|---|---|
+| `tools/call` | A tool result with `isError: true`: "The page is not open, or not in front. Ask the user to open *app name* and keep it in front (on a phone, in split screen), then try again." The app name is the site's or the page's, else "the web page". |
+| `server/discover` | A stand-in result: `supportedVersions: ["2026-07-28"]`, `capabilities: {"tools": {"listChanged": true}}`, the text above as `instructions`, `ttlMs: 0`, `cacheScope: "private"`, `serverInfo` `tab-mcp`. |
+| any other request (`tools/list`, `subscriptions/listen`, …) | A JSON-RPC error `-31001` with the text above. For `tools/list` this keeps the AI app's last tool list; an empty list would replace it. |
+| a notification (no `id`) | HTTP 503 with error `-31001`: the spec requires an error status for a notification the server cannot accept. |
+
+If the page closes its connection while a request waits for its answer, a `tools/list`
+waits for the page once more and is sent again. A `tools/call` is never sent twice, since
+the page may have run it: it gets a tool result with `isError: true` saying the page
+closed while the tool was running and the result should be checked. Other requests get
+the answers above, with code `-31003` instead of `-31001`. If the relay had already
+started an event stream, the answer is its last event.
 
 One exception exists for a known client bug: a request with the header
 `MCP-Protocol-Version: 2025-11-25` whose body declares `2026-07-28` is accepted and
@@ -226,10 +255,11 @@ an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
 | 4005 | Replaced by a newer session for the same address. |
 | 4008 | Rate limited (reserved, see `rate_limited`). |
 
-On any close the relay ends the session: pending HTTP requests get 503 with a JSON-RPC
-error, listen streams end, and the pairing code becomes invalid. Grants and tokens stay:
-they belong to the address, not to the WebSocket. While no tab is connected, MCP
-requests with a valid token get 503 "the page is not open". The library never
+On any close the relay ends the session: pending HTTP requests get the answers in
+[When the page is not open](#when-the-page-is-not-open), listen streams end, and the
+pairing code becomes invalid. Grants and tokens stay: they belong to the address, not to
+the WebSocket. While no tab is connected, MCP requests with a valid token get "the page
+is not open". The library never
 reconnects on its own, because a session needs a user action.
 
 ## Heartbeat

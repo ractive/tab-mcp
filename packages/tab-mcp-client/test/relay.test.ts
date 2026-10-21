@@ -33,7 +33,8 @@ let r: TestRelay;
 const tabs: TabMcp[] = [];
 
 beforeAll(() => {
-	r = startRelay({ keepAliveMs: 50 });
+	// pageWaitMs 0: "the page is not open" at once (DEC-074).
+	r = startRelay({ keepAliveMs: 50, pageWaitMs: 0 });
 });
 afterAll(() => r.stop());
 afterEach(() => {
@@ -311,7 +312,7 @@ describe("disconnect", () => {
 		expect(t.state).toBe("disconnected");
 		expect(t.session).toBeUndefined();
 		const res = await mcpPost(address, rpc(1, "tools/list"), { token });
-		expect(res.status).toBe(503);
+		expect(res.status).toBe(200);
 		expect(((await res.json()) as { error: { code: number } }).error.code).toBe(
 			-31001,
 		);

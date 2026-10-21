@@ -51,6 +51,7 @@ than 0.
 | `TAB_MCP_SESSION_LIFETIME_S` | `43200` | Longest life of one tab session (12 hours; close code 4001). |
 | `TAB_MCP_HEARTBEAT_S` | `25` | Interval of the protocol `ping` to the tab. |
 | `TAB_MCP_BODY_TIMEOUT_S` | `10` | Deadline for receiving an MCP request body; a slower client gets HTTP 408. |
+| `TAB_MCP_PAGE_WAIT_S` | `10` | How long an MCP request waits for its page to open or reconnect (a phone pauses a tab in the background) before the relay answers "the page is not open". `0` answers at once; at most `60`. Waiting requests count against `TAB_MCP_MAX_CONCURRENT_REQUESTS` per address and `TAB_MCP_MAX_SESSIONS` in total; beyond that the relay answers at once. |
 | `TAB_MCP_MAX_MESSAGE_BYTES` | `1048576` | Largest MCP request body and largest WebSocket message from the tab (1 MiB). At least `16384`. |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` | `3600` | Access token lifetime (1 hour). |
 | `TAB_MCP_REFRESH_TOKEN_TTL_S` | `2592000` | Refresh token lifetime (30 days). Every refresh issues a new refresh token. |

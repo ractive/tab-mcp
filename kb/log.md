@@ -1,5 +1,9 @@
 # Log
 
+## 2026-10-21
+
+- Iteration 8 on iter-8/page-not-open: the relay waits up to TAB_MCP_PAGE_WAIT_S for the page, then answers "the page is not open" at HTTP 200 (tool error, stand-in server/discover, JSON-RPC error), DEC-074; headless Claude Code before/after
+
 ## 2026-10-20
 
 - Iteration 5 packaging on iter-5/relay-docker: relay build to `dist/` and pack checks, relay npm jobs (pack, bootstrap, publish), Dockerfile (build platform stage, distroless, uid 65532, /data), image dry run with smoke test on pull requests and push to Docker Hub and ghcr.io after npm, token-expiry check, Dependabot; DEC-068 to DEC-071; relay bootstrap steps for the owner; documentation and skill still open

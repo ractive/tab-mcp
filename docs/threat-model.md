@@ -124,7 +124,14 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.
 - Disconnect in the page revokes at once. "New address" revokes all grants of the old
   address.
-- Tokens are useless while the page is closed: requests get 503 "the page is not open".
+- Tokens are useless while the page is closed: requests get "the page is not open" (HTTP
+  200 with a JSON-RPC error or tool error, after waiting up to `TAB_MCP_PAGE_WAIT_S` for
+  the page). Waiting requests are bounded per address and in total, only requests
+  with a valid token for that address wait, and only requests of at most 16 KiB, so
+  all waiting requests together hold a few MiB. One actor with many self-made addresses
+  can fill the total and so switch the wait off for others: they then get the immediate
+  answer, as before the wait existed. There is no per-IP share, because AI apps' requests
+  come from a few shared addresses (all claude.ai users from Anthropic's).
 - The relay never forwards the `Authorization` header to the page.
 
 ### A5: Other websites using someone's relay
@@ -172,7 +179,9 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 In-memory rate limits cover `/authorize` page loads and posts per IP, code guesses per
 address and network and per address, `/token` and `/revoke` per IP, and metadata fetches
 per host and overall. IPv4 counts per address, IPv6 per /64. Sessions are limited per IP
-on `/tab`, and concurrent requests per session on the MCP endpoint. Pending
+on `/tab`, and concurrent requests per session on the MCP endpoint. Requests waiting for
+a page that is not open are limited per address and in total, and only a valid token for
+that address makes a request wait. Pending
 authorizations and codes live in bounded maps that expire. Every WebSocket send is
 checked: a send dropped under backpressure fails its request instead of hanging it. A
 single relay can still be flooded; put a CDN or proxy in front of it against volumetric

@@ -65,6 +65,29 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Added
+
+- `TAB_MCP_PAGE_WAIT_S` (default 10, at most 60, 0 = off): an MCP request whose page is
+  not open waits that long for the page to open or reconnect, then is forwarded as usual.
+  Phones pause a tab in the background, so this covers switching apps. The wait ends when
+  the AI app closes the request; at most `TAB_MCP_MAX_CONCURRENT_REQUESTS` requests wait
+  per address and `TAB_MCP_MAX_SESSIONS` in all. `server/discover` does not wait.
+
+#### Changed
+
+- "The page is not open" is answered with HTTP 200 instead of 503, so AI apps keep using
+  the 2026-07-28 protocol: an HTTP error made claude.ai and Claude Code fall back to the
+  old `initialize` handshake, which the relay refuses, and the connection did not recover
+  when the page came back. A `tools/call` gets a tool result with `isError: true` that
+  tells the model to ask the user to open the page (by its app name) and keep it in
+  front; `server/discover` gets a stand-in result with `ttlMs: 0`; other requests get the
+  JSON-RPC error `-31001`. Notifications keep the 503.
+- When the page closes its connection during a request, a `tools/list` waits for the page
+  once more and is sent again; a `tools/call` is not sent twice and gets a tool result
+  saying the page closed while the tool ran. Other requests get `-31003` at HTTP 200.
+
 ### [0.1.0][relay-0.1.0] - 2026-10-20
 
 The first stable release, on the npm dist-tag `latest`; install without `@alpha`. The

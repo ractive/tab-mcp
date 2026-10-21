@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-20T07:10:00+02:00
+timestamp: 2026-10-21T15:30:00+02:00
 ---
 
 # Decision log
@@ -858,15 +858,85 @@ settings, the protocol or the API.
 ## DEC-073: A grant ends 90 days after pairing at the latest
 
 Owner decision (2026-10-21). `TAB_MCP_GRANT_LIFETIME_S` keeps its default of 7776000
-(90 days), also on the hosted relay https://tab-mcp.ractive.ch: an AI app pairs again at
+(90 days), also on the hosted relay <https://tab-mcp.ractive.ch>: an AI app pairs again at
 most every 90 days. Access tokens last 1 hour and refresh tokens 30 days, renewed on each
 use; Disconnect in the page ends a grant at any time. Shorter would limit leaked tokens
 further at the cost of pairing more often; 90 days is the usual order for OAuth
 connectors.
 
+## DEC-074: "The page is not open" is an HTTP 200 answer after a short wait
+
+Iteration 8. Evidence: the owner's test on 2026-10-20 (hosted relay, CDN log, UTC).
+claude.ai paired with saturnus on Firefox Android (18:29:01 `/authorize` 303, `/token`
+200, four MCP POSTs 200 from UA "Claude-User"). At 18:30:09 a POST got 503
+`page_not_open`: the phone had paused the tab when the owner switched apps. From then on
+every call came as POST 400 then GET 405 (18:30:09/10, 18:30:11/12, 18:30:27, 18:31:36,
+18:31:41, 18:32:08, …), also after the page had reconnected (`/tab` 101 at 18:30:30,
+18:31:25, 18:34:40) and in split screen. The version check runs before the token check, so
+the 400s are refused `initialize` requests and the 405 is the GET of the old HTTP+SSE
+transport: Claude had fallen back to the legacy protocol and never came back.
+
+The spec explains it. A dual-era client detects a server's era by inspecting a failed
+request: a 4xx "without a recognized modern error body" means a legacy server, and the
+client falls back to `initialize` and possibly to HTTP+SSE; it caches the era and
+"re-probes if the cached assumption later fails" (Versioning, Backward Compatibility;
+Streamable HTTP, Backward Compatibility). On stdio the probe is `server/discover` and
+"any error that is not a recognized modern error" means legacy. `-31001` is not a modern
+error code, so an HTTP error with it reads as "legacy server". Headless Claude Code 2.1.296
+shows the same (local relay, the calculator, `claude -p`): with the page closed before the
+run, the `server/discover` probe got 503 and Claude Code sent `initialize` 2025-11-25 at
+once and failed to connect; with the page closed after a first `tools/call`, every 503
+counted as "HTTP connection dropped". After this change it stays on 2026-07-28 and the
+model gets the text. Claude Code also gives up on the discover probe after 5 s and then
+reconnects pinned to the legacy protocol.
+
+Decision:
+
+1. **Wait first.** A request with a valid token whose page is not open waits up to
+   `TAB_MCP_PAGE_WAIT_S` (default 10 s, at most 60, 0 = off) for the page's session and
+   is forwarded if it comes. The wait ends when the AI app closes the request or the relay
+   stops. At most `maxConcurrentRequests` requests wait per address and `maxSessions` in
+   all (a waiting request holds its body and a socket like a forwarded one); beyond that
+   the relay answers at once. `server/discover` never waits, because of the probe timeout.
+2. **Answer at HTTP 200.** Then the relay answers with HTTP 200 and a JSON-RPC message, by
+   method:
+   - `tools/call`: a tool result with `isError: true` and the text "The page is not open,
+     or not in front. Ask the user to open *name* and keep it in front (on a phone, in
+     split screen), then try again." (*name*: the site's or page's app name from the
+     address's last session, else "the web page"). The Tools spec says tool execution
+     errors are what clients SHOULD pass to the model; protocol errors only MAY be.
+   - `server/discover`: a stand-in result (`supportedVersions: ["2026-07-28"]`,
+     `capabilities: {tools: {listChanged: true}}`, the same text as `instructions`,
+     `ttlMs: 0`, `cacheScope: "private"`, `serverInfo` `tab-mcp`). It is the era probe, so
+     it must succeed; `ttlMs: 0` makes the result immediately stale, and the capabilities
+     are what the client library declares.
+   - everything else, `tools/list` and `subscriptions/listen` included: a JSON-RPC error
+     `-31001` with the same text. Not an empty `tools/list`: per the Caching spec, clients
+     "MAY serve stale responses if errors occur during re-fetching", so an error keeps the
+     tools the app already knows, while an empty list would replace them, and a
+     `list_changed` to undo it may never come. Claude Code logs "tools/list failed …
+     keeping previous tool set".
+   - a notification (no `id`): 503 as before. The spec requires an HTTP error status for a
+     notification the server cannot accept; none are defined over HTTP in 2026-07-28.
+3. **Page gone mid-request.** When the page's session ends while a request waits for the
+   page's answer, `tools/list` waits for the page again (once) and is sent again. A
+   `tools/call` is never sent twice: the page may have run it, so it gets a tool result
+   with `isError: true` saying so ("…may or may not have finished … check the result
+   before trying again"). `server/discover` gets the stand-in at once. Others get the
+   error with code `-31003`. If the relay had already started an event stream, the answer
+   is its last event.
+
+The log line keeps `reason: "page_not_open"` (status 200). Other 503s stay: a
+notification, a dropped send (`-31005`) and an unavailable token store (`-31008`). It is
+not proven that claude.ai behaves like Claude Code; the next test on a phone shows it.
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
+- [MCP versioning: backward compatibility](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning#backward-compatibility-with-initialization-based-versions)
+- [MCP Streamable HTTP: backward compatibility](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#backward-compatibility)
+- [MCP tools: error handling](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#error-handling)
+- [MCP caching](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching)
 - [MCP TypeScript SDK v2 research](/research/mcp-typescript-sdk-v2.md)
 - [AI app support research](/research/ai-app-support.md)
 - [Bun runtime and publishing research](/research/bun-runtime-and-publishing.md)

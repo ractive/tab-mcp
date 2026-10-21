@@ -169,9 +169,9 @@ are outside the JSON-RPC reserved range:
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `-31001` | 503 | The page is not open (valid token, no tab connected). |
+| `-31001` | 200 | The page is not open (valid token, no tab connected); see DEC-074 for the answer per method. |
 | `-31002` | 504 | The page did not answer within `requestTimeoutMs`. |
-| `-31003` | 503 | The page closed its connection while the request was in flight. |
+| `-31003` | 200 | The page closed its connection while the request was in flight (DEC-074). |
 | `-31004` | 429 | Too many concurrent requests for this page. |
 | `-31005` | 503 | The WebSocket send was dropped under backpressure (DEC-021). |
 | `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; listen streams excepted). |
@@ -211,10 +211,11 @@ status and a JSON-RPC error body, as the MCP handler produced it.
 | 4005 | Replaced by a newer session for the same address. |
 | 4008 | Rate limited. |
 
-On any close the relay ends the session: pending HTTP requests get `503` with a JSON-RPC
-error, listen streams end, the pairing code becomes invalid. Grants and tokens stay
+On any close the relay ends the session: pending HTTP requests get the page-not-open
+answers of DEC-074 (a `tools/list` waits for the page once more), listen streams end, the pairing code becomes invalid. Grants and tokens stay
 (DEC-029): they belong to the address, not to the WebSocket. While no tab is connected, MCP
-requests with a valid token get `503` "the page is not open". The library never reconnects
+requests with a valid token wait up to `TAB_MCP_PAGE_WAIT_S` for the page, then get "the
+page is not open" at HTTP 200 (DEC-074). The library never reconnects
 on its own, because a session needs a user action.
 
 ## Heartbeat

@@ -163,8 +163,8 @@ sets `X-Forwarded-For`, so set `TAB_MCP_TRUST_PROXY=x-forwarded-for`.
 - A restart ends every tab session. Pages show that they are disconnected; the user
   clicks Connect again.
 - Grants and token hashes are in the SQLite file, so AI apps stay paired across restarts
-  and upgrades. While no page is connected, their requests get HTTP 503 "the page is not
-  open".
+  and upgrades. While no page is connected, their requests get "the page is not open"
+  (HTTP 200 with a JSON-RPC error, see [protocol](protocol.md#when-the-page-is-not-open)).
 - With `TAB_MCP_STORE=memory` a restart ends every connection; users pair again.
 - To upgrade, pull the new tag and recreate the container with the same volume. Read the
   [changelog](../CHANGELOG.md) first.

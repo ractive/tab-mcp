@@ -25,6 +25,14 @@ export const RelayErrorCode = {
 
 export type CancelReason = "client_closed" | "timeout" | "error";
 
+/**
+ * What to do when the page goes away mid-request (DEC-074): send the request
+ * to the page again once it is back (only while nothing was sent to the AI
+ * app), or answer with this JSON-RPC message at HTTP 200 (`undefined` for a
+ * notification: then 503).
+ */
+export type PageGoneReply = { retry: true } | { retry: false; body?: string };
+
 export interface ExchangeOptions {
 	id: string;
 	/** JSON-RPC id of the request; `undefined` for a notification. */
@@ -44,6 +52,11 @@ export interface ExchangeOptions {
 	cancel: (reason: CancelReason) => void;
 	/** Called once when the exchange is over. */
 	onDone: (exchange: Exchange) => void;
+	/**
+	 * Decides the answer when the page goes away mid-request; `waiting` is true
+	 * while nothing was sent to the AI app. Without it: 503, `-31003`.
+	 */
+	pageGone?: (waiting: boolean) => PageGoneReply;
 }
 
 const encoder = new TextEncoder();
@@ -213,6 +226,44 @@ export class Exchange {
 			this.#respond(new Response(null, { status: 503 }), 0);
 		this.#options.cancel("client_closed");
 		this.#finish("client_closed", false);
+	}
+
+	/**
+	 * The page's session ended. With a retry the exchange ends without an
+	 * answer (its `response` never settles; the relay sends the request again),
+	 * else the AI app gets the `pageGone` answer at HTTP 200 (DEC-074).
+	 */
+	tabGone(): void {
+		if (this.#state === "done") return;
+		const waiting = this.#state === "waiting";
+		const reply = this.#options.pageGone?.(waiting);
+		if (reply?.retry === true && waiting) {
+			clearTimeout(this.#startTimer);
+			this.#finish("page_gone_retry");
+			return;
+		}
+		const body = reply?.retry === false ? reply.body : undefined;
+		if (body === undefined) {
+			this.fail(
+				503,
+				RelayErrorCode.tabGone,
+				"The page closed its connection to the relay.",
+				false,
+			);
+			return;
+		}
+		if (waiting) {
+			this.#respond(
+				new Response(body, {
+					status: 200,
+					headers: this.#headers({ "content-type": "application/json" }),
+				}),
+				200,
+			);
+		} else if (this.#atBoundary) {
+			this.#write(sseEvent(body));
+		}
+		this.#finish("page_gone");
 	}
 
 	/**

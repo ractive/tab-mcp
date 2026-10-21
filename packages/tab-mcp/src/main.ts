@@ -34,6 +34,9 @@ Configuration is read from environment variables:
   TAB_MCP_SESSION_LIFETIME_S  absolute tab session lifetime (43200)
   TAB_MCP_HEARTBEAT_S         protocol ping interval (25)
   TAB_MCP_BODY_TIMEOUT_S      deadline for receiving an MCP request body (10)
+  TAB_MCP_PAGE_WAIT_S         how long an MCP request waits for its page to open or
+                              reconnect before the relay answers "the page is not
+                              open" (10; 0 = answer at once; at most 60)
   TAB_MCP_MAX_MESSAGE_BYTES   request body and WebSocket message limit (1048576;
                               at least 16384)
   TAB_MCP_ACCESS_TOKEN_TTL_S  access token lifetime (3600)

@@ -91,6 +91,24 @@ describe("config", () => {
 		).toThrow(ConfigError);
 	});
 
+	test("TAB_MCP_PAGE_WAIT_S: 10 s by default, 0 turns it off, at most 60 s (DEC-074)", () => {
+		expect(DEFAULT_CONFIG.pageWaitMs).toBe(10_000);
+		expect(configFromEnv({ TAB_MCP_PAGE_WAIT_S: "0" }).pageWaitMs).toBe(0);
+		expect(configFromEnv({ TAB_MCP_PAGE_WAIT_S: "2.5" }).pageWaitMs).toBe(
+			2_500,
+		);
+		expect(() => configFromEnv({ TAB_MCP_PAGE_WAIT_S: "-1" })).toThrow(
+			ConfigError,
+		);
+		expect(
+			resolveConfig({ publicUrl: "https://r.example", pageWaitMs: 0 })
+				.pageWaitMs,
+		).toBe(0);
+		expect(() =>
+			resolveConfig({ publicUrl: "https://r.example", pageWaitMs: 61_000 }),
+		).toThrow(ConfigError);
+	});
+
 	test("DEFAULT_CONFIG has no public URL", () => {
 		expect(DEFAULT_CONFIG.publicUrl).toBeUndefined();
 	});
