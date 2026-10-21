@@ -52,6 +52,7 @@ interface TokenRecord {
   issuedAt: number;
   expiresAt: number;
   usedAt?: number;        // refresh tokens: when it was exchanged
+  subject?: string;       // identity binding: hash of the person the grant was made for
 }
 
 interface GrantSummary {
@@ -60,10 +61,18 @@ interface GrantSummary {
   clientName: string;
   scopes: string[];
   createdAt: number;
+  subject?: string;       // the grant's subject, if it has one
 }
 
 type RevokeSelector = { grantId: string } | { addressId: string };
+```
 
+`subject` is set only on grants made by identity binding. Store it and return it
+unchanged (and leave the key out when it was not set). A store that drops it does not
+break anything open: the relay then refuses every request of such a grant as a
+mismatch. The conformance suite checks the round trip.
+
+```ts
 interface RevokeOptions {
   now: number;
   keepUntil: number;      // keep the tombstone at least until then
@@ -305,6 +314,7 @@ export class RedisTokenStore implements TokenStore {
 				clientName: r.clientName,
 				scopes: r.scopes,
 				createdAt: r.grantCreatedAt,
+				...(r.subject === undefined ? {} : { subject: r.subject }),
 			});
 		}
 		return [...grants.values()].sort(

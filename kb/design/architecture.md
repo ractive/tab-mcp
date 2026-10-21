@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-20T01:34:00+02:00
+timestamp: 2026-10-21T18:00:00+02:00
 ---
 
 # tab-mcp architecture
@@ -167,8 +167,8 @@ The relay is configured per site (DEC-045, DEC-056): `TAB_MCP_SITES` (or
 `createRelay({ sites })`) is a JSON array of `{ origin, name?, pairing?, limits? }` with the
 instance-wide values below as defaults; `limits` may set `maxMessageBytes`,
 `maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`, `idleTimeoutMs`,
-`sessionLifetimeMs` and `heartbeatMs` (milliseconds, bytes). `pairing` is `code` (the only
-method so far; `oidc` is refused until identity binding exists). The configured sites
+`sessionLifetimeMs` and `heartbeatMs` (milliseconds, bytes). `pairing` is `code` or `oidc`
+(identity binding, DEC-079); without it the site takes `TAB_MCP_IDENTITY`. The configured sites
 together with `TAB_MCP_ALLOWED_ORIGINS` are the origin allow-list; an origin may appear in
 only one of them. Example:
 
@@ -205,6 +205,10 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` / `TAB_MCP_REFRESH_TOKEN_TTL_S` | 3600 / 2592000 | token lifetimes |
 | `TAB_MCP_GRANT_LIFETIME_S` | 7776000 | absolute end of a connection after pairing; refreshes never go beyond it (DEC-062) |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug` (never bodies) |
+| `TAB_MCP_IDENTITY` | `code` | pairing of sites without their own: `code` or `oidc` (DEC-079) |
+| `TAB_MCP_OIDC_ISSUER` / `TAB_MCP_OIDC_CLIENT_ID` / `TAB_MCP_OIDC_CLIENT_SECRET` | none | the relay as a client of the OpenID Connect provider (secret optional) |
+| `TAB_MCP_OIDC_SUBJECT_CLAIM` | `sub` | `sub` or `oid`, the claim compared |
+| `TAB_MCP_TAB_ASSERTION_ISSUER` / `TAB_MCP_TAB_ASSERTION_JWKS_URL` | none | the web app backend that signs tab assertions (DEC-076) |
 
 # Citations
 

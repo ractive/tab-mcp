@@ -57,6 +57,13 @@ than 0.
 | `TAB_MCP_REFRESH_TOKEN_TTL_S` | `2592000` | Refresh token lifetime (30 days). Every refresh issues a new refresh token. |
 | `TAB_MCP_GRANT_LIFETIME_S` | `7776000` | Absolute end of a connection, counted from pairing (90 days). Refreshes never go beyond it; then the user pairs again. |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. Logs are JSON lines on stdout and never contain request or response bodies. |
+| `TAB_MCP_IDENTITY` | `code` | How AI apps pair with pages of sites that do not set their own `pairing`: `code` (the code shown in the page) or `oidc` (the same sign-in, see [Identity binding](#identity-binding)). |
+| `TAB_MCP_OIDC_ISSUER` | none | The OpenID Connect provider's issuer, e.g. `https://login.example.com`. Required when any site uses `oidc`. |
+| `TAB_MCP_OIDC_CLIENT_ID` | none | The relay's client at that provider. Required for `oidc`. |
+| `TAB_MCP_OIDC_CLIENT_SECRET` | none | Its client secret. Without it the relay is a public client (PKCE only). Keep it in your platform's secret store. |
+| `TAB_MCP_OIDC_SUBJECT_CLAIM` | `sub` | The ID token claim compared with the page's user: `sub`, or `oid` for Microsoft Entra ID (whose `sub` differs per application). |
+| `TAB_MCP_TAB_ASSERTION_ISSUER` | none | The `iss` of the tab assertions your web app's backend signs. Required for `oidc`. |
+| `TAB_MCP_TAB_ASSERTION_JWKS_URL` | none | The URL of the public keys (JWKS) that sign those assertions. Required for `oidc`. |
 
 `NODE_ENV=development` is for local testing only. It allows an `http:` public URL and,
 without `TAB_MCP_PUBLIC_URL`, uses `http://localhost:<port>`. The Docker image sets
@@ -79,7 +86,7 @@ Each site is an object with these keys:
 |---|---|
 | `origin` | The page origin. Required. |
 | `name` | The app name the pairing page shows (1-64 characters). Without it the page's own `appName` is shown, which the page declares itself. |
-| `pairing` | `code`, the default and the only method so far. `oidc` is refused until identity binding exists. |
+| `pairing` | `code` (the code shown in the page) or `oidc` (identity binding). Without it the site uses `TAB_MCP_IDENTITY`. |
 | `limits` | Overrides of the instance limits, in milliseconds and bytes: `maxMessageBytes`, `maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`, `idleTimeoutMs`, `sessionLifetimeMs`, `heartbeatMs`. |
 
 Unknown keys stop the relay at start. With `TAB_MCP_ALLOWED_ORIGINS=*`, configured sites
@@ -92,7 +99,8 @@ keep their settings and every other origin gets the defaults.
   program can fake the `Origin` header, so the list controls abuse; it does not protect
   users on its own.
 - **Every MCP request needs a token,** and a token needs the pairing code shown only in
-  the page. There is no setting that turns this off.
+  the page, or, with identity binding, a sign-in as the page's own user. There is no
+  setting that turns this off.
 - **HTTPS is required** outside development, for the public URL and in the browser
   library.
 - **Tokens are short-lived and stored as hashes.** Access tokens last 1 hour, refresh
@@ -108,6 +116,60 @@ keep their settings and every other origin gets the defaults.
 - **CORS has no credentials.** The relay sets no cookies on its API endpoints, and tokens
   travel only in the `Authorization` header, so another website gains nothing a server
   could not do. Set `TAB_MCP_CORS=off` if no browser-based MCP client needs the relay.
+
+## Identity binding
+
+With identity binding, an AI app connects to a page without a code if the person signing
+in to the AI app's connection is the person signed in to the page, at the same OpenID
+Connect provider (your organisation's login, Google, Keycloak, Auth0, Okta, Microsoft
+Entra ID). Anyone else gets "This AI tool is logged in as someone other than the page."
+and nothing is connected. Logging out of the page ends the AI connection at once.
+
+It needs three things:
+
+1. **The relay as a client of your provider.** Register a web application (confidential
+   client) with the redirect URI `<TAB_MCP_PUBLIC_URL>/authorize/callback` and the scope
+   `openid`. Set its issuer, client id and secret.
+2. **Tab assertions from your web app's backend.** For the signed-in user, the backend
+   signs a short JWT that the page hands to the library (see the client README):
+
+   | Part | Value |
+   |---|---|
+   | header `typ` | `tab-mcp-identity+jwt` (required, so no other token of yours can be used instead) |
+   | header `alg` | RS256/384/512, PS256/384/512, ES256/384/512 or EdDSA (Ed25519), with a `kid` from your JWKS |
+   | `iss` | `TAB_MCP_TAB_ASSERTION_ISSUER` |
+   | `sub` | the user's subject **at the provider**: the same value the provider puts in the claim `TAB_MCP_OIDC_SUBJECT_CLAIM` |
+   | `aud` | the page's MCP address, `https://relay.example.com/a/<id>/mcp` (the library passes it to your code) |
+   | `exp` | at most 60 seconds ahead |
+   | `jti` | a unique id; the relay accepts each one once |
+
+   Publish the public keys at `TAB_MCP_TAB_ASSERTION_JWKS_URL`. Only your backend may hold
+   the private key, and it must sign only for its own signed-in user.
+3. **A subject that is the same for both clients.** Your web app and the relay are two
+   clients of the provider. Providers with pairwise subjects give each client its own
+   `sub`: use the same sector identifier for both, or compare a claim that is the same
+   across clients (`oid` with Entra ID). Never compare an e-mail address or a user name:
+   they can change or be given to someone else.
+
+```sh
+TAB_MCP_IDENTITY=oidc
+TAB_MCP_OIDC_ISSUER=https://login.example.com
+TAB_MCP_OIDC_CLIENT_ID=tab-mcp-relay
+TAB_MCP_OIDC_CLIENT_SECRET=…            # from your secret store
+TAB_MCP_TAB_ASSERTION_ISSUER=https://app.example.com
+TAB_MCP_TAB_ASSERTION_JWKS_URL=https://app.example.com/.well-known/tab-mcp-jwks.json
+```
+
+The relay checks these settings at start (`https:` URLs outside development, a client id,
+`sub` or `oid`) and refuses `oidc` together with `TAB_MCP_ALLOWED_ORIGINS=*`. It loads the
+provider's discovery document and keys when the first pairing page opens. One relay has
+one provider and one assertion signer; a site with another needs its own relay. With
+`TAB_MCP_SITES` a single site can use `oidc` while the others keep `code`.
+
+The page's "Connect your AI app" dialog must be open while the AI app connects, as with
+codes. Grants made this way remember (a hash of) the person: they work only while a page
+signed in as that person is open, and a page that signs in as someone else ends them.
+See the [threat model](threat-model.md) for what this does and does not protect.
 
 ## Open relay
 

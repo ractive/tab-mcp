@@ -128,6 +128,16 @@ teaches a coding agent to add tab-mcp to a web app. In Claude Code:
 
 For Codex and claude.ai, see the [plugin README](plugins/tab-mcp/README.md).
 
+### Identity binding
+
+For pages where users sign in, a relay can pair by identity instead of a code: an AI app
+connects only if the person signing in to the connection is the person signed in to the
+page, at the same OpenID Connect provider (Google, Keycloak, Auth0, Okta, Entra ID, your
+own). Your backend signs a short assertion for the page's user, and logging out of the
+page ends the AI connection at once. Set `TAB_MCP_IDENTITY=oidc`; the
+[configuration](docs/configuration.md#identity-binding) and the
+[client README](packages/tab-mcp-client/README.md#identity-binding-no-code) show how.
+
 ## Self-hosting
 
 The relay is one process with a SQLite file. Run it with Docker:
