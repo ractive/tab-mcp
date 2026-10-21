@@ -7,8 +7,11 @@ import { MCP_PROTOCOL_VERSION } from "./protocol.ts";
  * status that makes MCP clients re-probe the server's protocol era.
  */
 
-/** Why the page is not there: never came, or went away mid-request. */
-export type NotOpenPhase = "not_open" | "gone";
+/**
+ * Why the page is not there: never came, went away mid-request, or is open
+ * but nobody is signed in to it (identity binding, DEC-077).
+ */
+export type NotOpenPhase = "not_open" | "gone" | "signed_out";
 
 /** What the relay says about itself in a stand-in `server/discover` result. */
 export interface RelayInfo {
@@ -35,6 +38,15 @@ export function notOpenText(appName: string | undefined): string {
 	return `The page is not open, or not in front. Ask the user to open ${pageName(appName)} and keep it in front (on a phone, in split screen), then try again.`;
 }
 
+/** The text for a page that is open but not signed in (DEC-077). */
+export function signedOutText(appName: string | undefined): string {
+	return `The page is open, but nobody is signed in to it. Ask the user to sign in to ${pageName(appName)}, then try again.`;
+}
+
+function phaseText(phase: NotOpenPhase, appName: string | undefined): string {
+	return phase === "signed_out" ? signedOutText(appName) : notOpenText(appName);
+}
+
 /** The text for a tool call whose page went away while it ran. */
 export function goneDuringCallText(appName: string | undefined): string {
 	return `The page closed while the tool was running, so it may or may not have finished. Ask the user to open ${pageName(appName)} and keep it in front (on a phone, in split screen), then check the result before trying again.`;
@@ -57,7 +69,9 @@ export function notOpenAnswer(
 	const method = body["method"];
 	if (method === "tools/call") {
 		const text =
-			phase === "gone" ? goneDuringCallText(appName) : notOpenText(appName);
+			phase === "gone"
+				? goneDuringCallText(appName)
+				: phaseText(phase, appName);
 		return JSON.stringify({
 			jsonrpc: "2.0",
 			id,
@@ -79,7 +93,7 @@ export function notOpenAnswer(
 				resultType: "complete",
 				supportedVersions: [MCP_PROTOCOL_VERSION],
 				capabilities: { tools: { listChanged: true } },
-				instructions: notOpenText(appName),
+				instructions: phaseText(phase, appName),
 				ttlMs: 0,
 				cacheScope: "private",
 				_meta: {
@@ -97,7 +111,7 @@ export function notOpenAnswer(
 		error: {
 			code:
 				phase === "gone" ? RelayErrorCode.tabGone : RelayErrorCode.pageNotOpen,
-			message: notOpenText(appName),
+			message: phaseText(phase, appName),
 		},
 	});
 }

@@ -38,6 +38,8 @@ export interface GrantInput {
 	clientName: string;
 	scopes?: string[];
 	grantCreatedAt?: number;
+	/** The hashed identity of an identity-bound grant (DEC-077). */
+	subject?: string;
 }
 
 /**
@@ -64,6 +66,7 @@ export async function issueAccessToken(
 		issuedAt: now,
 		expiresAt: now + options.ttlMs,
 	};
+	if (grant.subject !== undefined) record.subject = grant.subject;
 	await store.put(record);
 	return { token, record };
 }
@@ -75,7 +78,10 @@ export async function issueAccessToken(
  */
 export async function issueTokenPair(
 	store: TokenStore,
-	grant: Required<Omit<GrantInput, "scopes">> & { scopes: string[] },
+	grant: Required<Omit<GrantInput, "scopes" | "subject">> & {
+		scopes: string[];
+		subject?: string;
+	},
 	options: {
 		accessTtlMs: number;
 		refreshTtlMs: number;
@@ -96,6 +102,7 @@ export async function issueTokenPair(
 		scopes: grant.scopes,
 		grantCreatedAt: grant.grantCreatedAt,
 		issuedAt: now,
+		...(grant.subject === undefined ? {} : { subject: grant.subject }),
 	};
 	const accessExpires = Math.min(
 		now + options.accessTtlMs,

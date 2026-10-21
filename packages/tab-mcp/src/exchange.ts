@@ -21,6 +21,7 @@ export const RelayErrorCode = {
 	tooLarge: -31006,
 	badResponse: -31007,
 	storeUnavailable: -31008,
+	signedOut: -31009,
 } as const;
 
 export type CancelReason = "client_closed" | "timeout" | "error";

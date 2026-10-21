@@ -81,6 +81,22 @@ export function tokenStoreConformance(
 			expect(got !== undefined && "usedAt" in got).toBe(false);
 		});
 
+		test("the subject of an identity-bound grant round-trips (DEC-077)", async () => {
+			const bound = record({ grantId: "g_bound", subject: "key-of-alice" });
+			const plain = record({ grantId: "g_plain" });
+			await store.put(bound);
+			await store.put(plain);
+			expect(await store.get(bound.hash)).toEqual(bound);
+			const got = await store.get(plain.hash);
+			expect(got !== undefined && "subject" in got).toBe(false);
+			const grants = await store.listGrants("addr-a", now);
+			expect(grants.find((g) => g.grantId === "g_bound")?.subject).toBe(
+				"key-of-alice",
+			);
+			const unbound = grants.find((g) => g.grantId === "g_plain");
+			expect(unbound !== undefined && "subject" in unbound).toBe(false);
+		});
+
 		test("markUsed succeeds once, then fails", async () => {
 			const r = record({ kind: "refresh" });
 			await store.put(r);

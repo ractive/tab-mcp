@@ -41,7 +41,6 @@ describe("configuration", () => {
 			{
 				origin: "https://ractive.ch",
 				name: "saturnus",
-				pairing: "code",
 				limits: { maxConcurrentRequests: 2 },
 			},
 		]);
@@ -78,7 +77,7 @@ describe("configuration", () => {
 				...base,
 				sites: [{ origin: "https://a.example", pairing: "oidc" }],
 			}),
-		).toThrow(/planned/);
+		).toThrow(/TAB_MCP_OIDC_ISSUER/);
 	});
 
 	test("maxMessageBytes has a floor of 16 KiB", () => {

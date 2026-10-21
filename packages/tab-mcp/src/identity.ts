@@ -1,0 +1,120 @@
+/**
+ * Identity binding (DEC-075 to DEC-079): the tab assertion the web app's
+ * backend signs for its user, and the key an address is bound to.
+ */
+
+import type { OidcConfig } from "./config.ts";
+import {
+	audiences,
+	JwksCache,
+	JwtError,
+	type KeySource,
+	numericDate,
+	verifyJwt,
+} from "./jwt.ts";
+
+/** The `typ` header of a tab assertion (explicit typing, RFC 8725 §3.11). */
+export const TAB_ASSERTION_TYP = "tab-mcp-identity+jwt";
+/** Longest lifetime of a tab assertion. */
+export const TAB_ASSERTION_MAX_LIFETIME_MS = 60_000;
+/** Clock leeway for `exp`, `iat` and `nbf`. */
+export const CLOCK_LEEWAY_MS = 5_000;
+const MAX_SUBJECT = 255;
+const MAX_JTI = 128;
+const MAX_SEEN_JTI = 100_000;
+
+/** The text for a person other than the page's user (DEC-077, DEC-079). */
+export const MISMATCH_TEXT =
+	"This AI tool is logged in as someone other than the page.";
+
+/**
+ * The binding key: SHA-256 over the provider's issuer and the subject, so the
+ * subject is never stored in the clear (DEC-077).
+ */
+export function identityKey(issuer: string, subject: string): string {
+	return new Bun.CryptoHasher("sha256")
+		.update(`${issuer}\n${subject}`)
+		.digest()
+		.toBase64({ alphabet: "base64url", omitPadding: true });
+}
+
+/** Verifies tab assertions (DEC-076) and remembers used `jti`s. */
+export class TabAssertionVerifier {
+	readonly #oidc: OidcConfig;
+	readonly #keys: KeySource;
+	/** jti → expiry; insertion order is roughly expiry order (all live ≤ 65 s). */
+	readonly #seen = new Map<string, number>();
+
+	constructor(oidc: OidcConfig, keys?: KeySource) {
+		this.#oidc = oidc;
+		this.#keys = keys ?? new JwksCache(oidc.assertionJwksUrl);
+	}
+
+	/**
+	 * Check an assertion for an MCP address; returns the binding key. Throws
+	 * `JwtError` with a short reason for the log.
+	 */
+	async verify(
+		token: string,
+		address: string,
+		now: number = Date.now(),
+	): Promise<string> {
+		const { payload } = await verifyJwt(token, this.#keys, {
+			typ: TAB_ASSERTION_TYP,
+		});
+		if (payload["iss"] !== this.#oidc.assertionIssuer) {
+			throw new JwtError(
+				"iss",
+				"the assertion's issuer is not the configured one",
+			);
+		}
+		const aud = audiences(payload);
+		if (aud.length !== 1 || aud[0] !== address) {
+			throw new JwtError("aud", "the assertion is not for this address");
+		}
+		const exp = numericDate(payload, "exp");
+		if (exp === undefined)
+			throw new JwtError("exp", "the assertion has no exp");
+		if (exp <= now - CLOCK_LEEWAY_MS) {
+			throw new JwtError("expired", "the assertion has expired");
+		}
+		if (exp > now + TAB_ASSERTION_MAX_LIFETIME_MS + CLOCK_LEEWAY_MS) {
+			throw new JwtError(
+				"lifetime",
+				"the assertion lives longer than 60 seconds",
+			);
+		}
+		const iat = numericDate(payload, "iat");
+		if (iat !== undefined && iat > now + CLOCK_LEEWAY_MS) {
+			throw new JwtError("iat", "the assertion was issued in the future");
+		}
+		const nbf = numericDate(payload, "nbf");
+		if (nbf !== undefined && nbf > now + CLOCK_LEEWAY_MS) {
+			throw new JwtError("nbf", "the assertion is not valid yet");
+		}
+		const sub = payload["sub"];
+		if (typeof sub !== "string" || sub === "" || sub.length > MAX_SUBJECT) {
+			throw new JwtError("sub", "the assertion needs a subject");
+		}
+		const jti = payload["jti"];
+		if (typeof jti !== "string" || jti === "" || jti.length > MAX_JTI) {
+			throw new JwtError("jti", "the assertion needs a jti");
+		}
+		this.#sweep(now);
+		if (this.#seen.has(jti)) {
+			throw new JwtError("replayed", "the assertion was already used");
+		}
+		if (this.#seen.size >= MAX_SEEN_JTI) {
+			throw new JwtError("busy", "too many assertions at once");
+		}
+		this.#seen.set(jti, exp + CLOCK_LEEWAY_MS);
+		return identityKey(this.#oidc.issuer, sub);
+	}
+
+	#sweep(now: number): void {
+		for (const [jti, until] of this.#seen) {
+			if (until > now) break;
+			this.#seen.delete(jti);
+		}
+	}
+}

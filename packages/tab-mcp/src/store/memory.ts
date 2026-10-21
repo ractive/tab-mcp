@@ -32,13 +32,15 @@ export function summarizeGrants(
 	const grants = new Map<string, GrantSummary>();
 	for (const r of records) {
 		if (!isLive(r, now) || grants.has(r.grantId)) continue;
-		grants.set(r.grantId, {
+		const summary: GrantSummary = {
 			grantId: r.grantId,
 			clientId: r.clientId,
 			clientName: r.clientName,
 			scopes: [...r.scopes],
 			createdAt: r.grantCreatedAt,
-		});
+		};
+		if (r.subject !== undefined) summary.subject = r.subject;
+		grants.set(r.grantId, summary);
 	}
 	return [...grants.values()].sort(
 		(a, b) => a.createdAt - b.createdAt || a.grantId.localeCompare(b.grantId),

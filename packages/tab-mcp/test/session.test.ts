@@ -43,6 +43,8 @@ async function readySession(socket: FakeSocket, logs = new LogCapture()) {
 			released: () => {},
 			revokeGrant: async () => false,
 			revokeAll: async () => {},
+			bindIdentity: async () => {},
+			signOut: async () => {},
 		},
 	);
 	sessions.push(session);
