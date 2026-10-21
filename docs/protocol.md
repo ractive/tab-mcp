@@ -122,8 +122,10 @@ signed in to the page, proved by the web app's backend
 | `identity.bound` | R→T | none | The assertion was accepted; the address is bound to this person for the session. |
 | `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the address (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. |
 
-A refused assertion gets `error` `identity_refused` with the reason in `message`; the
-session stays, and the binding it had ends (fail closed). Grants made by identity
+The relay handles `identity` and `identity.logout` one after another, in the order they
+came, and answers every `identity` exactly once, in that order. A refused assertion gets
+`error` `identity_refused` with the reason in `message`; the session stays, and the
+binding it had ends (fail closed), with its requests in flight. Grants made by identity
 binding remember the person (as a hash of issuer and subject). An MCP request on such a
 grant, or any request on an `oidc` site, reaches the page only while it is bound to the
 same person; another person gets HTTP 401 `invalid_token` with "This AI tool is logged

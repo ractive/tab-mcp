@@ -968,8 +968,8 @@ again when the hook is asked again (`refreshIdentity()`). The relay checks, in t
   given, not in the future (+5 s); `nbf`, if given, passed;
 - `sub` a non-empty string of at most 255 characters: the user's subject at the OIDC
   provider, in the claim the relay compares (DEC-079);
-- `jti` required (at most 128 characters) and single-use: the relay remembers it until
-  the assertion's `exp`. In memory is enough: an assertion is useful only on a session
+- `jti` required (at most 128 characters) and single-use per person: the relay remembers
+  (binding key, `jti`) until the assertion's `exp`. In memory is enough: an assertion is useful only on a session
   for its address, which needs the address secret.
 
 The relay answers `identity.bound` or an `error` with code `identity_refused` (the
@@ -977,7 +977,16 @@ session stays). Verification is written on WebCrypto, without a JOSE library: th
 has no runtime dependencies (DEC-068), the rules above are short, and allow-listing the
 algorithms per key type closes the known JWT pitfalls (`none`, HMAC with a public key,
 embedded keys). JWKS documents are fetched with a 5 s timeout and a 64 KiB limit, cached
-10 minutes, and fetched again for an unknown `kid` at most every 30 s.
+10 minutes, and fetched again for an unknown `kid` at most every 30 s. After a failed
+fetch the last good keys are served for up to an hour and the next attempt waits 30 s
+(review of PR #13: an outage must not sign every page out at once).
+
+`identity` and `identity.logout` of one session are handled one after another, in order,
+and every `identity` gets exactly one answer (also `identity_refused` when the store
+fails), so a slow check can never bind a user after a later sign-out. An authorization
+code made by identity binding is exchanged only while the page is still bound to the
+same person. The library counts only the relay's answer to its newest assertion and
+gives up after `identityTimeoutMs` (15 s).
 
 ## DEC-077: The address is bound to (provider, subject); grants carry the subject
 

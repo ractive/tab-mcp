@@ -17,7 +17,8 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   after every connect and sends the assertion to the relay. `refreshIdentity()` asks
   again (after a sign-in without a page load), `signOut()` tells the relay the user
   signed out, which ends every AI connection of the page at once. `identity` and the
-  event `identitychange` say whether the relay accepted the page's user.
+  event `identitychange` say whether the relay accepted the page's user; only the answer
+  to the newest assertion counts, and `identityTimeoutMs` (15 s) ends the wait.
 - `SessionInfo.pairing` (`code` or `oidc`). With `oidc` the connect dialog shows no code
   but "sign in with the account you use on this page".
 
