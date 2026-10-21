@@ -308,6 +308,17 @@ function startRelay(
 				grantRemoved(addressId, g.grantId, "revoked");
 			}
 			const changed = session.identity !== key;
+			if (changed && session.identity !== undefined) {
+				// Another person now: the old person's requests in flight end too.
+				for (const exchange of [...session.pending.values()]) {
+					exchange.fail(
+						401,
+						RelayErrorCode.signedOut,
+						"The page's user changed.",
+						true,
+					);
+				}
+			}
 			session.identity = key;
 			session.send({ type: "identity.bound" });
 			logger.info("identity.bound", {
