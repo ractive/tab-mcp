@@ -149,8 +149,9 @@ tests expect to start empty.
 ## Sketch: a Redis store
 
 This store uses Bun's built-in Redis client. Every write runs as one Lua script, which
-Redis executes atomically, so the guarantees hold across processes. It passes the
-conformance suite against relay 0.1.0 and Redis 7.0. It is a starting point, not
+Redis executes atomically, so the guarantees hold across processes. It passed the
+conformance suite with Redis 7.0 when it was written; the store interface has not changed
+since. It is a starting point, not
 a supported package: it assumes a single Redis node (the scripts touch keys they do not
 declare, which Redis Cluster does not allow), and `listGrants` reads tokens one by one.
 

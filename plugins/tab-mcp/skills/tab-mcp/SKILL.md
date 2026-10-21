@@ -13,7 +13,7 @@ tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and gets an MCP address. 
 adds that address to their AI app and pairs it with a code shown in the page. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.1.0):
+Facts to keep in mind (version 0.2.0):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code works; VS Code, Cursor and Gemini CLI cannot connect.
@@ -110,9 +110,14 @@ What happens:
    the tools while the page is connected.
 
 The address is stable across visits (a secret per relay in `localStorage`), and paired
-apps stay paired across reloads. While the page is closed, their calls get "the page is
-not open". The library never reconnects by itself. If the page offers a "Keep AI access
-on" switch that the user turned on, call `connect({ resume: true })` on load.
+apps stay paired across reloads. While the page is closed, their calls wait up to 10 s
+for it (the relay's `TAB_MCP_PAGE_WAIT_S`) and then get a tool result saying the page is
+not open. The library never reconnects by itself. If the page offers a "Keep AI access
+on" switch that the user turned on, call `connect({ resume: true })` on load. After a
+`disconnected` event with reason `network`, `heartbeat` or `shutdown`, call
+`connect({ resume: true })` again with a growing wait, and at once when the tab comes back
+to the front (`visibilitychange`) or the network returns (`online`): phones pause
+background tabs, which breaks the connection while the user is in the AI app.
 
 "New address" in the dialog calls `mcp.newAddress()`: it disconnects every app and makes
 a new address, and the dialog asks first when apps are connected. The relay's pages point
@@ -169,7 +174,7 @@ Local development (a page on `http://localhost:3000`):
 docker run --rm -p 8080:8080 -e NODE_ENV=development \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
-  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.1.0
+  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.2.0
 ```
 
 Production: name the image version (pre-releases have no `latest` tag), keep `/data` on
@@ -179,7 +184,7 @@ a volume, and put the relay behind TLS:
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.1.0
+  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.2.0
 ```
 
 `x-real-ip` fits an nginx proxy that sets `X-Real-IP $remote_addr`; behind Caddy use
