@@ -855,6 +855,15 @@ same way, pre-releases never do. The docs drop `@alpha` and pin `0.1.0`; a test
 any other package version or image tag. Until 1.0, a minor version may still change
 settings, the protocol or the API.
 
+## DEC-073: A grant ends 90 days after pairing at the latest
+
+Owner decision (2026-10-21). `TAB_MCP_GRANT_LIFETIME_S` keeps its default of 7776000
+(90 days), also on the hosted relay https://tab-mcp.ractive.ch: an AI app pairs again at
+most every 90 days. Access tokens last 1 hour and refresh tokens 30 days, renewed on each
+use; Disconnect in the page ends a grant at any time. Shorter would limit leaked tokens
+further at the cost of pairing more often; 90 days is the usual order for OAuth
+connectors.
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
