@@ -67,9 +67,13 @@ How long:
   latest {{90 days}} after pairing. Its tokens are then deleted. A note that the
   connection was ended (its id and the time) is kept for up to {{90 days}}, so that an
   old token cannot bring it back.
-- While a page is connected, the relay holds the connection, the current pairing code
-  (valid for 2 minutes) and rate-limit counters in memory only. A restart of the relay
-  clears them.
+- While a page is connected, the relay holds the connection and the current pairing code
+  (valid for 2 minutes) in memory only.
+- For its rate limits, the relay counts requests per IP address (IPv6 addresses
+  shortened to their first 64 bits) in memory only. A counter is dropped once its limit
+  has recovered (within about half an hour), the count of open page connections when
+  they close, and all of them at a restart at the latest; they are never written to
+  disk.
 - {{Backups: none. / Backups of the stored data are kept for N days.}}
 
 ## Logs

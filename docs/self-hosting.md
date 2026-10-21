@@ -110,16 +110,21 @@ again after an upgrade.
   ```
 
 - **Platform volumes** (container hosts, Kubernetes) are sometimes mounted owned by
-  root. Check the log after the first start: a `store.error` there means uid 65532
-  cannot write. On Kubernetes, `securityContext.fsGroup: 65532` fixes it. Where the
+  root. If uid 65532 cannot write there, the relay cannot open its store and stops at
+  start: the log shows `process.uncaught_exception` with `"error":"SQLiteError"`, the
+  process exits with code 1, and the platform restarts it in a loop. On Kubernetes, `securityContext.fsGroup: 65532` fixes it. Where the
   platform has no such setting, ask whether its volumes allow writes by other users; as
   a last resort, `TAB_MCP_STORE=memory` runs the relay without the file (users pair
   again after every restart).
 - The relay opens the file in SQLite's WAL mode, so it also writes `tab-mcp.db-wal` and
   `tab-mcp.db-shm` next to it. Keep the three together, on a local disk: SQLite's locking
   does not work reliably on network file systems (NFS, SMB).
-- The file is small: a few kilobytes per connected AI app. The smallest volume your
-  platform offers is plenty.
+- The file is small. It holds one row per token: each refresh adds an access and a
+  refresh token, and a used refresh token stays until it expires (30 days), so that its
+  reuse can be detected. An AI app in daily use refreshes about once an hour of use, so
+  it has a few hundred rows of a few hundred bytes each. That is an estimate, not a
+  measurement: on the order of 100 KiB per busy AI app, much less for occasional ones.
+  The smallest volume your platform offers is plenty.
 - It holds no usable tokens (only SHA-256 hashes), but it does list which AI apps are
   connected to which address. Keep it private (`0700` above).
 
@@ -135,7 +140,7 @@ ones to decide on for a public relay:
 | `TAB_MCP_TRUST_PROXY` | The header your proxy or CDN puts the client IP in, so per-IP limits count clients and not the proxy (see [Client IP](#client-ip)). |
 | `TAB_MCP_STORE`, `TAB_MCP_SQLITE_PATH` | Keep the image's defaults (`sqlite`, `/data/tab-mcp.db`) with a volume on `/data`. |
 | `TAB_MCP_KEEPALIVE_S` | 20 by default. Keep it below the shortest idle or first-byte limit of every proxy and CDN in front (see [Event streams](#event-streams-and-long-requests)). |
-| `TAB_MCP_PAGE_WAIT_S` | 10 by default. How long an MCP request waits for its page to open or reconnect before the relay answers "the page is not open". It covers a phone that paused the tab in the background. Raise it (at most 60) if your users switch apps often; the wait plus the tool's own time must stay below your proxy's timeouts. `0` answers at once. See [protocol](protocol.md#when-the-page-is-not-open). |
+| `TAB_MCP_PAGE_WAIT_S` | 10 by default. How long an MCP request waits for its page to open or reconnect before the relay answers "the page is not open". It covers a phone that paused the tab in the background. Raise it if your users switch apps often, but no response headers are sent while the request waits, so `TAB_MCP_PAGE_WAIT_S` + `TAB_MCP_KEEPALIVE_S` must stay below the first-byte limit of every proxy and CDN in front (see [Event streams](#event-streams-and-long-requests)). `0` answers at once; at most 60. See [protocol](protocol.md#when-the-page-is-not-open). |
 | `TAB_MCP_CLIENT_ID_HOSTS` | Empty admits any AI app that registers with a client id metadata document. List hosts (`claude.ai,chatgpt.com`) to admit only those apps. |
 | `TAB_MCP_CORS` | `on` by default, for browser-based MCP clients. `off` if none needs the relay. |
 | `TAB_MCP_MAX_SESSIONS`, `TAB_MCP_MAX_SESSIONS_PER_IP`, `TAB_MCP_MAX_CONCURRENT_REQUESTS`, `TAB_MCP_MAX_MESSAGE_BYTES` | Fit them to the memory you give the container (see [Resource limits](#resource-limits)). |
@@ -238,8 +243,10 @@ plain HTTP on a private network or the loopback interface.
 
 Forward the `Upgrade` and `Connection` headers on `/tab`. Many CDNs need WebSockets
 switched on per zone or site; without it the page cannot connect at all. The relay pings
-each page every 25 seconds (`TAB_MCP_HEARTBEAT_S`), both as a protocol message and as a
-WebSocket ping, so an idle timeout of 60 seconds or more on the proxy is enough. A
+each page every 25 seconds with a protocol message (`TAB_MCP_HEARTBEAT_S`), and Bun sends
+WebSocket ping frames on a connection that has been quiet for a while (its idle timeout
+is 120 seconds). The protocol pings alone keep data flowing every 25 seconds, so an idle
+timeout of 60 seconds or more on the proxy is enough. A
 session lasts up to 12 hours (`TAB_MCP_SESSION_LIFETIME_S`); a proxy may cut it earlier,
 and the page then shows that it is disconnected.
 
@@ -254,9 +261,14 @@ and the page then shows that it is disconnected.
   on the keep-alives: the relay writes `: keep-alive` every 20 seconds
   (`TAB_MCP_KEEPALIVE_S`) on a silent stream.
 - **60-second first-byte limits.** Some CDNs (bunny.net, for example) answer 504 when the
-  origin sends no response headers within 60 seconds. The relay starts the event stream
-  itself when the page has not answered after `TAB_MCP_KEEPALIVE_S`, so headers always
-  arrive well before that.
+  origin sends no response headers within 60 seconds. Once the page is connected, the
+  relay starts the event stream itself if the page has not answered after
+  `TAB_MCP_KEEPALIVE_S`. Before that, while the request waits for its page
+  (`TAB_MCP_PAGE_WAIT_S`), no headers are sent. So the first byte can come as late as
+  `TAB_MCP_PAGE_WAIT_S` + `TAB_MCP_KEEPALIVE_S` after the request (10 + 20 s with the
+  defaults). Keep that sum below the first-byte limit: behind a 60-second limit with the
+  default keep-alive, a page wait of at most about 35 seconds. A `tools/list` whose page
+  closed during the request waits for the page once more, which can add a second wait.
 - **Stream idle limits.** Some CDNs also close a stream that carries no data for about 30
   seconds. The keep-alives prevent that while `TAB_MCP_KEEPALIVE_S` is below the limit.
   Keep it below the shortest first-byte and idle limit of everything in front of the
@@ -357,8 +369,8 @@ container platform or a server, check these settings for the relay's hostname:
 
 and `Cache-Control: no-store`. It needs no token and touches no page. Use it:
 
-- as the platform's start and liveness probe (HTTP GET, expect 200). The relay is ready
-  a second or two after start; a liveness probe every 30 seconds with 3 failures allowed
+- as the platform's start and liveness probe (HTTP GET, expect 200). The image answered
+  `/healthz` within half a second of `docker run` in our test; a liveness probe every 30 seconds with 3 failures allowed
   is plenty;
 - after a deploy, to check `version` against the release you meant to run. Ask the
   container directly or through a path without a cache, not only through the CDN (see
@@ -373,7 +385,7 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 
 | Event | Meaning |
 |---|---|
-| `store.error` | The token store failed (disk full, permissions). MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. |
+| `store.error` | The token store failed while running (disk full, file removed). MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. A store that cannot be opened at all stops the relay at start instead (`process.uncaught_exception`, see [The data volume](#the-data-volume)). |
 | `relay.no_origins` | No page is allowed; every page is refused. A missing or misspelled setting. |
 | `relay.open_relay` | `TAB_MCP_ALLOWED_ORIGINS=*` is set. |
 | `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`. Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. |
@@ -381,21 +393,22 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 
 ## Resource limits
 
-The relay is light. At rest it uses about 25 MiB of memory, and little CPU even when
-busy: it forwards JSON and checks tokens. What makes memory grow is traffic in flight:
+The relay is light. The 0.2.1 image used about 8 MiB of memory at rest and after a few
+hundred HTTP requests (`docker stats`, arm64; no page connected), and little CPU: it
+forwards JSON and checks tokens. Each connected page adds a WebSocket and its buffers. What makes memory grow is traffic in flight:
 each MCP request body and each answer from the page can be up to
 `TAB_MCP_MAX_MESSAGE_BYTES` (1 MiB), for up to `TAB_MCP_MAX_CONCURRENT_REQUESTS` (8)
 requests per tab session and `TAB_MCP_MAX_SESSIONS` (500) sessions. The theoretical
 worst case of the defaults is therefore several GiB; ordinary traffic is far below it.
 
-- 256 to 512 MiB of memory and one CPU are a reasonable start for a site with a few
-  hundred users. Watch the real use and adjust.
+- As an estimate, not a measurement: 128 to 256 MiB of memory and one CPU should be
+  plenty for a site with a few hundred users. Watch the real use and adjust.
 - If you give it less, lower `TAB_MCP_MAX_SESSIONS`, `TAB_MCP_MAX_CONCURRENT_REQUESTS`
   or `TAB_MCP_MAX_MESSAGE_BYTES` so that their product fits.
 - Set a memory limit on the container (`mem_limit`, `MemoryMax=`, a Kubernetes limit),
   so a flood ends in a restart of the relay and not of the host.
-- Disk: a few kilobytes per connected AI app; the relay deletes expired tokens every 10
-  minutes.
+- Disk: small (see [The data volume](#the-data-volume)); the relay deletes expired
+  tokens every 10 minutes.
 - Against volumetric attacks, rely on the CDN or proxy in front; the relay's own limits
   protect it from single clients, not from a flood.
 
@@ -411,13 +424,17 @@ The relay writes in WAL mode, so copying `tab-mcp.db` alone while the relay runs
 an inconsistent or outdated copy. Either make a consistent copy with SQLite:
 
 ```sh
-# The image has no shell or sqlite3; run it from another container on the same volume.
+# The image has no shell or sqlite3; run it from another container on the same volume,
+# while the relay runs.
 docker run --rm -v tab-mcp-data:/data -v "$PWD":/backup alpine:3 \
-  sh -c 'apk add --no-cache sqlite >/dev/null &&
+  sh -c 'umask 077 && apk add --no-cache sqlite >/dev/null &&
          sqlite3 /data/tab-mcp.db ".backup /backup/tab-mcp-$(date +%F).db"'
 ```
 
-(`VACUUM INTO '/backup/…'` works too.) Or stop the relay, copy `tab-mcp.db` with its
+This container runs as root, because it installs `sqlite3`. Run it while the relay
+runs: the relay then holds `tab-mcp.db-wal` and `tab-mcp.db-shm`, and the backup only
+reads them, so no file in `/data` ends up owned by root. `umask 077` makes the backup
+file readable by its owner only. (`VACUUM INTO '/backup/…'` works too.) Or stop the relay, copy `tab-mcp.db` with its
 `-wal` and `-shm` files, and start it again; that ends every tab session (see
 [What a restart does](#what-a-restart-does)).
 
@@ -439,7 +456,7 @@ deleted at the next sweep. Keep backups as private as the file itself.
    ```sh
    VERSION=…   # the new release, in full
    docker pull "ractive/tab-mcp:$VERSION"
-   docker rm -f tab-mcp
+   docker stop tab-mcp && docker rm tab-mcp
    docker run -d --name tab-mcp … "ractive/tab-mcp:$VERSION"
    # Compose: change the tag, then
    docker compose up -d
@@ -513,8 +530,9 @@ Magic Containers with a pull zone):
   has no endpoint that skips the CDN.
 - **One instance, one region.** Set the platform's scaling to exactly one instance in
   one region. A second instance gets its own empty volume and its own sessions.
-- **Platform volumes may be root-owned** and may have no backups. Check the first
-  start's log for store errors (see [The data volume](#the-data-volume)), and make your
+- **Platform volumes may be root-owned** and may have no backups. If the relay
+  cannot write there, it stops at start and restarts in a loop; check the first start's
+  log (see [The data volume](#the-data-volume)), and make your
   own backups if pairings matter.
 - **A restart ends page connections; pairings survive.** With the SQLite file on a
   volume, an AI app that paired before a restart worked again in the same chat after the
