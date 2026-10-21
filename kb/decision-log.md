@@ -996,8 +996,8 @@ SQLite store, added on open). Then:
   HTTP 200 answer with "The page is open, but nobody is signed in to it. Ask the user to
   sign in to *name*, then try again."
 - When a page proves another identity than its grants were made for (a different user in
-  the same browser), the relay revokes those grants at once and tells the page
-  (`grant.removed`).
+  the same browser), the relay revokes those grants at once, ends their requests in
+  flight (`-31009`) and tells the page (`grant.removed`).
 - Grants without a subject (code pairing) on a `code` site are unaffected. A site that
   switches from `code` to `oidc` thus refuses its old code grants, and revokes them when
   its page first proves its user.
