@@ -158,7 +158,7 @@ await mcp.refreshIdentity();
 
 The library asks the function after every connect. `identity` (`none`, `pending`,
 `bound`, `refused`) and the event `identitychange` tell you whether the relay accepted
-it. An AI app signed in as someone else gets "This AI tool is logged in as someone other
+it; without an answer within `identityTimeoutMs` (15 s) it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
 than the page."
 
 ### Your own UI

@@ -129,6 +129,11 @@ export interface TabMcpOptions {
 	 * and by `refreshIdentity()`; only for relays whose site pairs by `oidc`.
 	 */
 	identityAssertion?: IdentityAssertionHandler;
+	/**
+	 * How long to wait for the relay's answer to an assertion before
+	 * `identity` goes back to `none`, in milliseconds; default 15000.
+	 */
+	identityTimeoutMs?: number;
 }
 
 /** What the page's identity hook gets. */

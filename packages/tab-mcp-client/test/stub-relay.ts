@@ -26,6 +26,8 @@ export class StubRelay {
 	readonly frameBytes: number[] = [];
 	limits: Limits = STUB_LIMITS;
 	grants: Grant[] = [];
+	/** `session.pairing`; `undefined` leaves it out (an older relay). */
+	pairing: "code" | "oidc" | undefined;
 	/** Answer `hello` with a `session` (off: the test answers itself). */
 	answerHello = true;
 	#socket: ServerWebSocket<undefined> | undefined;
@@ -62,6 +64,9 @@ export class StubRelay {
 								expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
 								limits: this.limits,
 								grants: this.grants,
+								...(this.pairing === undefined
+									? {}
+									: { pairing: this.pairing }),
 							}),
 						);
 					}
