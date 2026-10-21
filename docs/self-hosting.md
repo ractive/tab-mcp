@@ -5,10 +5,38 @@ you do not want another operator to see your users' tool traffic. The relay read
 tool argument and result in clear text, because TLS ends there (see the
 [threat model](threat-model.md)).
 
+This page covers running the relay in production: the Docker image, the settings that
+matter, TLS in front of it, health checks, resource limits, backups, upgrades and what
+to tell your users. Every setting is listed in [configuration](configuration.md).
+
+- [One instance](#one-instance)
+- [Docker](#docker)
+- [Settings for production](#settings-for-production)
+- [Without Docker](#without-docker)
+- [Behind a reverse proxy or CDN](#behind-a-reverse-proxy-or-cdn)
+- [Health checks and monitoring](#health-checks-and-monitoring)
+- [Resource limits](#resource-limits)
+- [Operations](#operations): backups, upgrades, rollback, restarts
+- [Lessons from a CDN deployment](#lessons-from-a-cdn-deployment)
+- [Before you go live](#before-you-go-live)
+
+## One instance
+
 The relay is one small process. It keeps tab sessions in memory and grants and token
-hashes in a SQLite file. Run **one instance** per public address: a page's WebSocket
-reaches one process, and an MCP request that lands on another process would find no
-page.
+hashes in a SQLite file. Run **exactly one instance** per public address:
+
+- A page's WebSocket reaches one process. An MCP request that a load balancer sends to
+  another process finds no page there.
+- The SQLite file is local to that process. Two processes on one file, or two copies of
+  the file, would disagree about which tokens are valid.
+
+So there is no horizontal scaling: no autoscaling beyond one, no second region, no
+deploy that runs the old and the new container side by side. A
+[shared token store](token-store.md) (Redis, PostgreSQL) keeps grants outside the
+process, but it does not change the first point: tab sessions still live in one
+process, so one address still needs one relay. A shared store helps when the relay's
+disk is not durable, not to run more relays. One instance serves 500 tab sessions by
+default (`TAB_MCP_MAX_SESSIONS`); for more, run a second relay with its own public URL.
 
 ## Docker
 
@@ -24,23 +52,25 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
+  -e TAB_MCP_TRUST_PROXY=x-real-ip \
   ractive/tab-mcp:0.2.1
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
-machine (see below). The image:
+machine (see [below](#behind-a-reverse-proxy-or-cdn)). The image:
 
 - runs as the non-root user 65532;
 - keeps grants and token hashes in `/data/tab-mcp.db` (`TAB_MCP_STORE=sqlite`,
-  `TAB_MCP_SQLITE_PATH=/data/tab-mcp.db`). A named volume works as is; a host directory
-  mounted at `/data` must be writable by uid 65532;
+  `TAB_MCP_SQLITE_PATH=/data/tab-mcp.db`);
 - listens on port 8080 (`TAB_MCP_PORT`) on all interfaces (`TAB_MCP_HOST=0.0.0.0`);
 - sets `NODE_ENV=production`, so the public URL must be `https:`;
-- has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead. It
-  answers `200` with `{"status":"ok","version":"…","counters":{…}}`.
+- has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead
+  (see [Health checks](#health-checks-and-monitoring)).
 
-`docker run --rm ractive/tab-mcp:0.2.1 --version` prints the version. Every
-setting is listed in [configuration](configuration.md).
+`docker run --rm ractive/tab-mcp:0.2.1 --version` prints the version, `--help` the
+settings. A setting the relay cannot use stops it at start with
+`tab-mcp: configuration error: …` and exit code 2; read the container log if it does not
+come up.
 
 With Docker Compose:
 
@@ -58,9 +88,84 @@ services:
       TAB_MCP_ALLOWED_ORIGINS: https://app.example.com
       # For the nginx config below; x-forwarded-for behind Caddy (see "Client IP").
       TAB_MCP_TRUST_PROXY: x-real-ip
+    mem_limit: 512m
+    cpus: 1
 volumes:
   tab-mcp-data:
 ```
+
+### The data volume
+
+Mount a volume at `/data`. Without one the SQLite file lives in the container's
+writable layer and is gone when the container is recreated, so every AI app has to pair
+again after an upgrade.
+
+- **A named volume** (`-v tab-mcp-data:/data`) works as is: Docker copies the owner of
+  the image's `/data` (uid 65532) into a new, empty volume.
+- **A host directory** mounted at `/data` must be writable by uid 65532:
+
+  ```sh
+  sudo install -d -o 65532 -g 65532 -m 0700 /srv/tab-mcp
+  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.2.1
+  ```
+
+- **Platform volumes** (container hosts, Kubernetes) are sometimes mounted owned by
+  root. Check the log after the first start: a `store.error` there means uid 65532
+  cannot write. On Kubernetes, `securityContext.fsGroup: 65532` fixes it. Where the
+  platform has no such setting, ask whether its volumes allow writes by other users; as
+  a last resort, `TAB_MCP_STORE=memory` runs the relay without the file (users pair
+  again after every restart).
+- The relay opens the file in SQLite's WAL mode, so it also writes `tab-mcp.db-wal` and
+  `tab-mcp.db-shm` next to it. Keep the three together, on a local disk: SQLite's locking
+  does not work reliably on network file systems (NFS, SMB).
+- The file is small: a few kilobytes per connected AI app. The smallest volume your
+  platform offers is plenty.
+- It holds no usable tokens (only SHA-256 hashes), but it does list which AI apps are
+  connected to which address. Keep it private (`0700` above).
+
+## Settings for production
+
+[Configuration](configuration.md) lists every setting with its default. These are the
+ones to decide on for a public relay:
+
+| Setting | What to set |
+|---|---|
+| `TAB_MCP_PUBLIC_URL` | Required. Exactly the `https:` origin users reach, such as `https://relay.example.com`, without a path. The relay builds MCP addresses and its OAuth issuer from it and refuses pairing form posts whose `Origin` differs. |
+| `TAB_MCP_ALLOWED_ORIGINS` or `TAB_MCP_SITES` | The pages that may connect (see [Sites](#sites-and-allowed-origins)). Without either, every page is refused. |
+| `TAB_MCP_TRUST_PROXY` | The header your proxy or CDN puts the client IP in, so per-IP limits count clients and not the proxy (see [Client IP](#client-ip)). |
+| `TAB_MCP_STORE`, `TAB_MCP_SQLITE_PATH` | Keep the image's defaults (`sqlite`, `/data/tab-mcp.db`) with a volume on `/data`. |
+| `TAB_MCP_KEEPALIVE_S` | 20 by default. Keep it below the shortest idle or first-byte limit of every proxy and CDN in front (see [Event streams](#event-streams-and-long-requests)). |
+| `TAB_MCP_PAGE_WAIT_S` | 10 by default. How long an MCP request waits for its page to open or reconnect before the relay answers "the page is not open". It covers a phone that paused the tab in the background. Raise it (at most 60) if your users switch apps often; the wait plus the tool's own time must stay below your proxy's timeouts. `0` answers at once. See [protocol](protocol.md#when-the-page-is-not-open). |
+| `TAB_MCP_CLIENT_ID_HOSTS` | Empty admits any AI app that registers with a client id metadata document. List hosts (`claude.ai,chatgpt.com`) to admit only those apps. |
+| `TAB_MCP_CORS` | `on` by default, for browser-based MCP clients. `off` if none needs the relay. |
+| `TAB_MCP_MAX_SESSIONS`, `TAB_MCP_MAX_SESSIONS_PER_IP`, `TAB_MCP_MAX_CONCURRENT_REQUESTS`, `TAB_MCP_MAX_MESSAGE_BYTES` | Fit them to the memory you give the container (see [Resource limits](#resource-limits)). |
+| `TAB_MCP_GRANT_LIFETIME_S` | 90 days by default: an AI app pairs again at the latest 90 days after pairing. Shorter limits a leaked token further at the cost of pairing more often. |
+| `TAB_MCP_LOG_LEVEL` | `info`. Logs are JSON lines on stdout without request or response bodies; `debug` adds detail, still without bodies. |
+
+Leave `NODE_ENV` as the image sets it (`production`). `development` allows `http:` and
+is for local testing only.
+
+### Sites and allowed origins
+
+Every page that may connect must be listed by its origin (scheme, host and port, no
+path). For pages with the default limits, list them in `TAB_MCP_ALLOWED_ORIGINS`:
+
+```sh
+TAB_MCP_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+```
+
+A page that needs its own app name on the pairing page, or its own limits, goes into
+`TAB_MCP_SITES` instead (an origin may be in only one of the two):
+
+```sh
+TAB_MCP_SITES='[{"origin":"https://app.example.com","name":"Notes","limits":{"maxConcurrentRequests":4}}]'
+```
+
+The `name` replaces the app name the page claims for itself, so users see a name you
+chose. Details in [configuration](configuration.md#sites). Do not use
+`TAB_MCP_ALLOWED_ORIGINS=*` on a public relay unless you mean to run an
+[open relay](configuration.md#open-relay). A page from an origin that is not listed is
+refused and logged as `tab.refused` with reason `origin`.
 
 ## Without Docker
 
@@ -73,13 +178,46 @@ TAB_MCP_PUBLIC_URL=https://relay.example.com \
   TAB_MCP_ALLOWED_ORIGINS=https://app.example.com tab-mcp
 ```
 
-Run it under a supervisor (systemd or similar) that restarts it. It stops on SIGTERM or SIGINT and tells
-each page (close code 4004).
+Without Docker, `TAB_MCP_SQLITE_PATH` defaults to `tab-mcp.db` in the working
+directory; set an absolute path. Run it under a supervisor that restarts it. With
+systemd:
+
+```ini
+[Unit]
+Description=tab-mcp relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tab-mcp
+StateDirectory=tab-mcp
+StateDirectoryMode=0700
+Environment=TAB_MCP_PUBLIC_URL=https://relay.example.com
+Environment=TAB_MCP_ALLOWED_ORIGINS=https://app.example.com
+Environment=TAB_MCP_TRUST_PROXY=x-real-ip
+Environment=TAB_MCP_HOST=127.0.0.1
+Environment=TAB_MCP_SQLITE_PATH=/var/lib/tab-mcp/tab-mcp.db
+ExecStart=/usr/local/bin/tab-mcp
+Restart=on-failure
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Point `ExecStart` at wherever `bun add --global` put `tab-mcp` (`which tab-mcp`); with
+`ProtectHome=true` that must not be under a home directory. The relay stops on SIGTERM
+or SIGINT and tells each page (close code 4004).
 
 ## Behind a reverse proxy or CDN
 
-The relay speaks plain HTTP. Put TLS in front of it with a reverse proxy or a CDN. The
-proxy must pass four kinds of traffic:
+The relay speaks plain HTTP. Put TLS in front of it with a reverse proxy or a CDN, and
+make sure clients cannot reach the relay's port directly (bind it to `127.0.0.1`, a
+private network, or the platform's internal endpoint only). The proxy must pass four
+kinds of traffic:
 
 | Path | Traffic |
 |---|---|
@@ -88,34 +226,68 @@ proxy must pass four kinds of traffic:
 | `/authorize`, `/authorize.css` | the pairing page in the user's browser, a form post with a cookie |
 | `/.well-known/…`, `/token`, `/revoke`, `/healthz`, `/` | short JSON or HTML answers |
 
-Check these points:
+### Public URL and TLS
 
-- **Public URL.** `TAB_MCP_PUBLIC_URL` must be exactly the origin users reach, such as
-  `https://relay.example.com`. The relay builds addresses and its OAuth issuer from it,
-  and refuses pairing form posts whose `Origin` differs.
-- **WebSockets.** Forward the `Upgrade` and `Connection` headers on `/tab`. The relay
-  pings each page every 25 seconds (`TAB_MCP_HEARTBEAT_S`), so an idle timeout of 60
-  seconds or more on the proxy is enough. A session lasts up to 12 hours
-  (`TAB_MCP_SESSION_LIFETIME_S`). Some CDNs need WebSockets switched on per zone.
-- **No buffering of event streams.** The proxy must pass each event on at once. The relay
-  sends `X-Accel-Buffering: no` (nginx honours it) and `Cache-Control: no-cache` on
-  streams. Turn off response buffering, caching and request coalescing for `/a/` if your
-  proxy or CDN does them anyway.
+`TAB_MCP_PUBLIC_URL` must be exactly the origin users reach. Terminate TLS at the proxy
+or CDN and redirect `http:` to `https:`. The relay builds its addresses and OAuth issuer
+from `TAB_MCP_PUBLIC_URL`, not from the `Host` header, so a second hostname pointing at
+the same relay does not work for pairing. The hop from the proxy to the relay can be
+plain HTTP on a private network or the loopback interface.
+
+### WebSockets
+
+Forward the `Upgrade` and `Connection` headers on `/tab`. Many CDNs need WebSockets
+switched on per zone or site; without it the page cannot connect at all. The relay pings
+each page every 25 seconds (`TAB_MCP_HEARTBEAT_S`), both as a protocol message and as a
+WebSocket ping, so an idle timeout of 60 seconds or more on the proxy is enough. A
+session lasts up to 12 hours (`TAB_MCP_SESSION_LIFETIME_S`); a proxy may cut it earlier,
+and the page then shows that it is disconnected.
+
+### Event streams and long requests
+
+- **No buffering.** The proxy must pass each event on at once. The relay sends
+  `X-Accel-Buffering: no` (nginx honours it) and `Cache-Control: no-cache` on streams.
+  Turn off response buffering, caching and request coalescing for `/a/` if your proxy or
+  CDN does them anyway.
 - **Long requests.** One MCP request may take up to 300 seconds
   (`TAB_MCP_REQUEST_TIMEOUT_S`). Allow at least that as the proxy's read timeout, or rely
-  on the keep-alives: the relay writes `: keep-alive` every 20 seconds on a silent stream.
+  on the keep-alives: the relay writes `: keep-alive` every 20 seconds
+  (`TAB_MCP_KEEPALIVE_S`) on a silent stream.
 - **60-second first-byte limits.** Some CDNs (bunny.net, for example) answer 504 when the
   origin sends no response headers within 60 seconds. The relay starts the event stream
-  itself when the page has not answered after `TAB_MCP_KEEPALIVE_S` (20 seconds), so
-  headers always arrive well before that. Keep `TAB_MCP_KEEPALIVE_S` below your proxy's
-  first-byte and idle limits.
+  itself when the page has not answered after `TAB_MCP_KEEPALIVE_S`, so headers always
+  arrive well before that.
+- **Stream idle limits.** Some CDNs also close a stream that carries no data for about 30
+  seconds. The keep-alives prevent that while `TAB_MCP_KEEPALIVE_S` is below the limit.
+  Keep it below the shortest first-byte and idle limit of everything in front of the
+  relay.
 - **Body size.** Allow request bodies up to `TAB_MCP_MAX_MESSAGE_BYTES` (1 MiB by
   default).
-- **Client IP.** The relay limits sessions and requests per client IP. Behind a proxy
-  every request comes from the proxy, so set `TAB_MCP_TRUST_PROXY` to the header your
-  proxy sets: `x-real-ip`, or `x-forwarded-for` (the relay uses its last entry). Never set
-  it when clients can reach the relay directly, because they could then pick their own IP.
-- **Cookies.** The pairing page sets a first-party cookie for its form. Do not strip it.
+
+### Client IP
+
+The relay limits sessions and requests per client IP. Behind a proxy every request comes
+from the proxy, so set `TAB_MCP_TRUST_PROXY` to the header your proxy sets: `x-real-ip`,
+or `x-forwarded-for` (the relay uses its last entry, the one the nearest proxy added).
+
+Only trust a header that a client cannot choose. That holds when the proxy overwrites
+the header (nginx with the config below; many CDNs for `X-Real-IP`, check yours) and
+**every** request goes through the proxy. If the relay also has a direct path, such as a
+published port, a platform's direct or anycast endpoint, or a second hostname that skips
+the CDN, a client can send its own header there and pick its IP. Remove that path, or
+leave `TAB_MCP_TRUST_PROXY=none`.
+
+### Caching, coalescing and cookies
+
+- **Caching.** Nothing the relay serves is worth caching at the edge. Turn the cache off
+  for the relay's hostname, and know that some CDNs still cache a response without cache
+  headers for a long time (see [Lessons](#lessons-from-a-cdn-deployment)). The relay
+  sends `no-store` on `/healthz`, `/authorize`, `/token` and `/revoke`, `no-cache` on
+  event streams, and a cache time of one hour on `/`.
+- **Request coalescing** (one origin request for identical requests in flight) must be
+  off: two AI apps' MCP requests must never be merged.
+- **Cookies.** The pairing page sets a first-party cookie for its form and checks it on
+  the post. A proxy or CDN that strips cookies makes every pairing fail.
 
 ### nginx
 
@@ -158,22 +330,214 @@ relay.example.com {
 Caddy gets the certificate, forwards WebSockets, and flushes event streams at once. It
 sets `X-Forwarded-For`, so set `TAB_MCP_TRUST_PROXY=x-forwarded-for`.
 
-## Restarts and upgrades
+### A CDN in front
 
-- A restart ends every tab session. Pages show that they are disconnected; the user
-  clicks Connect again.
+For a CDN (bunny.net, Cloudflare, Fastly, CloudFront and the like) in front of a
+container platform or a server, check these settings for the relay's hostname:
+
+- WebSockets on;
+- caching off, and no "cache everything" rule that matches the relay;
+- request coalescing off;
+- cookies passed through, not stripped;
+- response buffering off for event streams, if the CDN buffers;
+- origin timeouts longer than `TAB_MCP_KEEPALIVE_S` with a margin, better as long as
+  `TAB_MCP_REQUEST_TIMEOUT_S`;
+- the client IP header and `TAB_MCP_TRUST_PROXY` as above, with no path around the CDN;
+- the CDN's own access logs: they hold IP addresses and URLs (which contain the address
+  id). Shorten or anonymise the IPs if the CDN offers it, and name these logs in your
+  privacy notice.
+
+## Health checks and monitoring
+
+`GET /healthz` answers `200` with
+
+```json
+{"status":"ok","version":"0.2.1","counters":{"claudeHeaderWorkaround":0}}
+```
+
+and `Cache-Control: no-store`. It needs no token and touches no page. Use it:
+
+- as the platform's start and liveness probe (HTTP GET, expect 200). The relay is ready
+  a second or two after start; a liveness probe every 30 seconds with 3 failures allowed
+  is plenty;
+- after a deploy, to check `version` against the release you meant to run. Ask the
+  container directly or through a path without a cache, not only through the CDN (see
+  [Lessons](#lessons-from-a-cdn-deployment));
+- from an external uptime monitor through the public URL, so a broken certificate, DNS
+  record or CDN setting shows up too.
+
+`/healthz` says that the process answers. It does not say that pages can connect or AI
+apps can pair: after changing the proxy or CDN, connect a page and pair an AI app once.
+
+The logs are JSON lines on stdout. Events worth an alert or a look:
+
+| Event | Meaning |
+|---|---|
+| `store.error` | The token store failed (disk full, permissions). MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. |
+| `relay.no_origins` | No page is allowed; every page is refused. A missing or misspelled setting. |
+| `relay.open_relay` | `TAB_MCP_ALLOWED_ORIGINS=*` is set. |
+| `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`. Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. |
+| `oauth.refresh_reuse` | An old refresh token was used again, so the relay revoked that grant. A sign of a stolen token, or of a client that lost its newest token. |
+
+## Resource limits
+
+The relay is light. At rest it uses about 25 MiB of memory, and little CPU even when
+busy: it forwards JSON and checks tokens. What makes memory grow is traffic in flight:
+each MCP request body and each answer from the page can be up to
+`TAB_MCP_MAX_MESSAGE_BYTES` (1 MiB), for up to `TAB_MCP_MAX_CONCURRENT_REQUESTS` (8)
+requests per tab session and `TAB_MCP_MAX_SESSIONS` (500) sessions. The theoretical
+worst case of the defaults is therefore several GiB; ordinary traffic is far below it.
+
+- 256 to 512 MiB of memory and one CPU are a reasonable start for a site with a few
+  hundred users. Watch the real use and adjust.
+- If you give it less, lower `TAB_MCP_MAX_SESSIONS`, `TAB_MCP_MAX_CONCURRENT_REQUESTS`
+  or `TAB_MCP_MAX_MESSAGE_BYTES` so that their product fits.
+- Set a memory limit on the container (`mem_limit`, `MemoryMax=`, a Kubernetes limit),
+  so a flood ends in a restart of the relay and not of the host.
+- Disk: a few kilobytes per connected AI app; the relay deletes expired tokens every 10
+  minutes.
+- Against volumetric attacks, rely on the CDN or proxy in front; the relay's own limits
+  protect it from single clients, not from a flood.
+
+## Operations
+
+### Backups
+
+The SQLite file holds the pairings. Losing it does no harm beyond that every AI app has
+to pair again; it holds no page data and no usable tokens. Whether to back it up depends
+on how much a mass re-pairing would bother your users.
+
+The relay writes in WAL mode, so copying `tab-mcp.db` alone while the relay runs can give
+an inconsistent or outdated copy. Either make a consistent copy with SQLite:
+
+```sh
+# The image has no shell or sqlite3; run it from another container on the same volume.
+docker run --rm -v tab-mcp-data:/data -v "$PWD":/backup alpine:3 \
+  sh -c 'apk add --no-cache sqlite >/dev/null &&
+         sqlite3 /data/tab-mcp.db ".backup /backup/tab-mcp-$(date +%F).db"'
+```
+
+(`VACUUM INTO '/backup/…'` works too.) Or stop the relay, copy `tab-mcp.db` with its
+`-wal` and `-shm` files, and start it again; that ends every tab session (see
+[What a restart does](#what-a-restart-does)).
+
+To restore, stop the relay, put the copy in place as `tab-mcp.db`, delete any old
+`tab-mcp.db-wal` and `tab-mcp.db-shm`, make the file owned by uid 65532 and start the
+relay. Grants revoked after the backup come back; tokens that expired meanwhile are
+deleted at the next sweep. Keep backups as private as the file itself.
+
+### Upgrading
+
+1. Read the [changelog](../CHANGELOG.md) for every version between yours and the new one:
+   new, renamed or removed `TAB_MCP_*` settings, changed defaults, store changes. Until
+   1.0, a minor version can change settings and the protocol.
+2. Back up the SQLite file if you keep backups.
+3. Change the settings the changelog asks for. The relay stops at start on a value it
+   cannot use, but it does not notice a variable it no longer knows; remove those.
+4. Pull the new tag and recreate the container with the same volume:
+
+   ```sh
+   VERSION=…   # the new release, in full
+   docker pull "ractive/tab-mcp:$VERSION"
+   docker rm -f tab-mcp
+   docker run -d --name tab-mcp … "ractive/tab-mcp:$VERSION"
+   # Compose: change the tag, then
+   docker compose up -d
+   ```
+
+5. Check that `/healthz` reports the new version, from the container and through the
+   public URL. Then connect a page and make one tool call.
+
+Stop the old container before the new one starts: two relays on one SQLite file at the
+same time are not supported (see [One instance](#one-instance)).
+
+Relay and browser library (`@ractive-ch/tab-mcp-client`) are released on their own. The
+changelog says when a release of one needs a new version of the other.
+
+### Rollback
+
+Run the previous image tag with the same volume. The store's schema has a version
+number, and the changelog says when a release migrates it. A file migrated by a newer
+release may be unreadable for an older one. Then restore the backup made before the
+upgrade (pairings made since are lost), roll back with an empty volume and accept that
+users pair again, or roll forward with a fix.
+
+### What a restart does
+
+- Every tab session ends. Pages show that they are disconnected; the user clicks Connect
+  again and gets the same address (its secret is in the page's `localStorage`). A tool
+  call in progress ends with an error.
 - Grants and token hashes are in the SQLite file, so AI apps stay paired across restarts
-  and upgrades. While no page is connected, their requests get "the page is not open"
-  (HTTP 200 with a JSON-RPC error, see [protocol](protocol.md#when-the-page-is-not-open)).
-- With `TAB_MCP_STORE=memory` a restart ends every connection; users pair again.
-- To upgrade, pull the new tag and recreate the container with the same volume. Read the
-  [changelog](../CHANGELOG.md) first.
+  and upgrades. While no page is connected, their requests wait up to
+  `TAB_MCP_PAGE_WAIT_S` and then get "the page is not open" (HTTP 200 with a JSON-RPC
+  error or a tool error, see [protocol](protocol.md#when-the-page-is-not-open)). Once the
+  user clicks Connect, the same AI app works again without signing in.
+- Pairing codes and sign-ins in progress are kept in memory and are lost; the user starts
+  the sign-in again.
+- Rate-limit counters start from zero.
+- With `TAB_MCP_STORE=memory`, or without a volume, a restart ends every connection;
+  users pair again.
+
+On SIGTERM the relay closes each page with code 4004 and exits. Give it a few seconds
+(Docker's default of 10 is enough) before it is killed.
+
+### Ending every connection
+
+To cut off every connected AI app at once, stop the relay, delete the SQLite file with
+its `-wal` and `-shm` files (or the volume), and start it again. Every user pairs again.
+A single user ends their own connections with Disconnect or "New address" in the page.
+
+## Lessons from a CDN deployment
+
+From running the relay as a container on a hosting platform behind its CDN (bunny.net
+Magic Containers with a pull zone):
+
+- **A CDN can cache responses that have no cache headers, for a long time, even with
+  caching "off".** One CDN kept `/healthz` and `/` for 30 days, so after a deploy
+  `/healthz` through the CDN still reported the old version. Since 0.2.1 the relay sends
+  `Cache-Control: no-store` on `/healthz` and a cache time of one hour on `/`. Check a
+  deploy against the container itself (the platform's internal endpoint, `docker exec`,
+  a port-forward), not only through the CDN, and purge the CDN cache if it kept
+  anything.
+- **WebSocket support must be on** for the hostname. Some platforms turn it on for their
+  own endpoint; pin it in your configuration so a dashboard change shows up.
+- **Cookies must pass.** A CDN option that strips cookies "for caching" breaks pairing,
+  because the pairing page's form checks a first-party cookie.
+- **Request coalescing off,** and caching off. Neither helps the relay, and coalescing
+  can merge requests that must stay separate.
+- **CDN streaming limits.** Expect a first-byte limit (60 seconds) and a stream idle
+  limit (about 30 seconds) at the edge. The default `TAB_MCP_KEEPALIVE_S` of 20 stays
+  below both; set it explicitly so a change of the default cannot surprise you.
+- **The client IP header is only safe without a direct path.** Behind a CDN that
+  overwrites `X-Real-IP`, `TAB_MCP_TRUST_PROXY=x-real-ip` is right only if the container
+  has no endpoint that skips the CDN.
+- **One instance, one region.** Set the platform's scaling to exactly one instance in
+  one region. A second instance gets its own empty volume and its own sessions.
+- **Platform volumes may be root-owned** and may have no backups. Check the first
+  start's log for store errors (see [The data volume](#the-data-volume)), and make your
+  own backups if pairings matter.
+- **A restart ends page connections; pairings survive.** With the SQLite file on a
+  volume, an AI app that paired before a restart worked again in the same chat after the
+  page reconnected, without signing in.
+- **Guard the volume.** On some platforms deleting the app deletes its volume, and with
+  it every pairing. Use the platform's or your provisioning tool's deletion guard.
+- **New settings before the new image.** When a release needs a new environment
+  variable, change the environment first, then roll out the image. Tools that rewrite
+  the whole app definition can otherwise roll the image back.
 
 ## Before you go live
 
 - `TAB_MCP_ALLOWED_ORIGINS` or `TAB_MCP_SITES` lists your pages, and nothing else. Read
   the [open-relay warning](configuration.md#open-relay) before you use `*`.
-- `TAB_MCP_PUBLIC_URL` is `https:` and matches what users see.
-- `/healthz` answers through the proxy, and a page can connect and pair.
-- Tell your users what passes through the relay: every tool argument and result, which
-  the relay does not log or store.
+- `TAB_MCP_PUBLIC_URL` is `https:` and matches what users see; `http:` redirects to it.
+- The relay's port is reachable only through the proxy or CDN, and
+  `TAB_MCP_TRUST_PROXY` matches the proxy's header.
+- `/data` is a volume that survives recreating the container, writable by uid 65532.
+- One instance, with a memory limit.
+- `/healthz` answers through the proxy with the version you deployed, and is monitored.
+- A page can connect and pair an AI app, a tool call works, and a page stays connected
+  for more than 5 minutes.
+- After a restart, the AI app is still paired.
+- Your users get a privacy notice: every tool argument and result passes through the
+  relay, which does not log or store them. The
+  [privacy notice template](privacy-template.md) is a starting point.

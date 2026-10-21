@@ -56,8 +56,8 @@ You need a page that offers tab-mcp, such as the [calculator example](examples/c
    tab.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
-relay with a public HTTPS address; they have not been tested yet. See
-[compatibility](docs/compatibility.md).
+relay with a public HTTPS address. claude.ai works; Claude Desktop and ChatGPT have not
+been tested yet. See [compatibility](docs/compatibility.md).
 
 **Connecting an AI app to a page means trusting that page.** The page decides what its
 tools do and how they are described. Connect only pages you trust, and type a code only
@@ -139,8 +139,11 @@ docker run -d --name tab-mcp -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   ractive/tab-mcp:0.2.1
 ```
 
-Put it behind a reverse proxy with TLS. [Self-hosting](docs/self-hosting.md) explains
-WebSockets, event streams and proxy time limits; [configuration](docs/configuration.md)
+Put it behind a reverse proxy or CDN with TLS, and run exactly one instance.
+[Self-hosting](docs/self-hosting.md) explains the data volume, WebSockets, event streams
+and proxy time limits, health checks, backups and upgrades, with a
+[privacy notice template](docs/privacy-template.md) for your users;
+[configuration](docs/configuration.md)
 lists every setting and why the defaults are safe. The relay also runs without Docker on
 Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 
@@ -157,7 +160,9 @@ Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 
 - [Compatibility](docs/compatibility.md): which AI apps work, as tested
 - [Configuration](docs/configuration.md): every `TAB_MCP_*` setting
-- [Self-hosting](docs/self-hosting.md): Docker, reverse proxies, upgrades
+- [Self-hosting](docs/self-hosting.md): deploying the relay with Docker, behind a reverse
+  proxy or CDN; health checks, resource limits, backups, upgrades
+- [Privacy notice template](docs/privacy-template.md): what an operator tells its users
 - [Token store](docs/token-store.md): the `TokenStore` interface and its conformance suite
 - [Protocol](docs/protocol.md): the WebSocket protocol `tab-mcp.v1` between page and relay
 - [Threat model](docs/threat-model.md) and [security policy](SECURITY.md)
@@ -174,8 +179,8 @@ settings, the protocol or the API; the [changelog](CHANGELOG.md) says what chang
   through OAuth Client ID Metadata Documents. Claude Code works (tested headless with a
   token; its interactive sign-in is not tested yet); VS Code, Cursor and Gemini CLI
   cannot connect yet. Details in [compatibility](docs/compatibility.md).
-- Planned: tests with claude.ai, Claude Desktop and ChatGPT against a public relay, and
-  deployment guides.
+- Planned: tests with Claude Desktop and ChatGPT against a public relay (claude.ai
+  works, see [compatibility](docs/compatibility.md)).
 
 ## Development
 
