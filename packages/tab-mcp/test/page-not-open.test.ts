@@ -3,7 +3,6 @@ import { addressIdFromSecret, newSecret } from "../src/address.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import {
 	mcpPost,
-	ORIGIN,
 	rpc,
 	ScriptedTab,
 	startRelay,
