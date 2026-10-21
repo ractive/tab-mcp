@@ -3,6 +3,7 @@ import { version } from "../package.json" with { type: "json" };
 import { addressIdFromSecret, isAddressId, shortAddress } from "./address.ts";
 import {
 	largestMessageBytes,
+	MIN_MESSAGE_BYTES,
 	type RelayConfig,
 	resolveConfig,
 	type Site,
@@ -697,7 +698,12 @@ function startRelay(
 		// probe with a short timeout (Claude Code: 5 s, then it falls back to
 		// the legacy handshake), and the stand-in answer has `ttlMs: 0`.
 		const waitMs =
-			body.value["method"] === "server/discover" ? 0 : config.pageWaitMs;
+			body.value["method"] === "server/discover" ||
+			// Only small requests wait: a waiting request holds its body, and
+			// tool calls are small (review of iteration 8).
+			Buffer.byteLength(body.text) > MIN_MESSAGE_BYTES
+				? 0
+				: config.pageWaitMs;
 		const closed = () => {
 			logDone(499, method, { outcome: "client_closed" });
 			return new Response(null, { status: 499 });

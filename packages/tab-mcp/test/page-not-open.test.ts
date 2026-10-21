@@ -191,14 +191,11 @@ describe("the grace period", () => {
 		expect((await rpcMessage(res)).result?.["ttlMs"]).toBe(0);
 	});
 
-	test("a waited request still meets its site's smaller body limit", async () => {
-		const r = relay({
-			pageWaitMs: 3_000,
-			allowedOrigins: [],
-			sites: [{ origin: ORIGIN, limits: { maxMessageBytes: 16_384 } }],
-		});
-		const { secret, token, address } = await closedAddress(r);
-		const pending = mcpPost(
+	test("a request larger than 16 KiB does not wait: it holds no body for long", async () => {
+		const r = relay({ pageWaitMs: 3_000 });
+		const { token, address } = await closedAddress(r);
+		const started = Date.now();
+		const res = await mcpPost(
 			address,
 			rpc(1, "tools/call", {
 				name: "echo",
@@ -206,11 +203,9 @@ describe("the grace period", () => {
 			}),
 			{ token },
 		);
-		await Bun.sleep(150);
-		const t = tab(r, { secret });
-		await t.connect();
-		expect((await pending).status).toBe(413);
-		expect(t.received.some((m) => m.type === "http.request")).toBe(false);
+		expect(Date.now() - started).toBeLessThan(1_000);
+		expect(res.status).toBe(200);
+		expect(JSON.stringify(await res.json())).toContain("The page is not open");
 	});
 
 	test("after the grace period the relay answers 'not open'", async () => {

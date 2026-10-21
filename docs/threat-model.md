@@ -126,8 +126,12 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   address.
 - Tokens are useless while the page is closed: requests get "the page is not open" (HTTP
   200 with a JSON-RPC error or tool error, after waiting up to `TAB_MCP_PAGE_WAIT_S` for
-  the page). Waiting requests are bounded per address and in total, and only requests
-  with a valid token for that address wait.
+  the page). Waiting requests are bounded per address and in total, only requests
+  with a valid token for that address wait, and only requests of at most 16 KiB, so
+  all waiting requests together hold a few MiB. One actor with many self-made addresses
+  can fill the total and so switch the wait off for others: they then get the immediate
+  answer, as before the wait existed. There is no per-IP share, because AI apps' requests
+  come from a few shared addresses (all claude.ai users from Anthropic's).
 - The relay never forwards the `Authorization` header to the page.
 
 ### A5: Other websites using someone's relay
