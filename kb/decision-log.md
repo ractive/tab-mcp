@@ -999,7 +999,8 @@ SQLite store, added on open). Then:
   the same browser), the relay revokes those grants at once and tells the page
   (`grant.removed`).
 - Grants without a subject (code pairing) on a `code` site are unaffected. A site that
-  switches from `code` to `oidc` thus refuses its old code grants.
+  switches from `code` to `oidc` thus refuses its old code grants, and revokes them when
+  its page first proves its user.
 - A custom token store that drops the new field fails closed (every request is refused
   as a mismatch); the conformance suite checks the round trip.
 
