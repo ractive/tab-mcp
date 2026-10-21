@@ -122,7 +122,37 @@ export interface TabMcpOptions {
 	storage?: SecretStorage | null;
 	/** Storage key of the secret; default `tab-mcp:secret:<relay origin>`. */
 	storageKey?: string;
+	/**
+	 * Identity binding: returns a tab assertion from the web app's backend for
+	 * the page's signed-in user and this MCP address (`request.address` is its
+	 * `aud`), or `null` when nobody is signed in. Asked after every connect
+	 * and by `refreshIdentity()`; only for relays whose site pairs by `oidc`.
+	 */
+	identityAssertion?: IdentityAssertionHandler;
 }
+
+/** What the page's identity hook gets. */
+export interface IdentityAssertionRequest {
+	/** The MCP address: the assertion's `aud`. */
+	address: string;
+	/** The session the assertion is for. */
+	sessionId: string;
+}
+
+export type IdentityAssertionHandler = (
+	request: IdentityAssertionRequest,
+) => string | null | undefined | Promise<string | null | undefined>;
+
+/** Who the relay knows as the page's user (identity binding). */
+export type IdentityState =
+	/** No assertion was sent (not asked, signed out, or a `code` relay). */
+	| "none"
+	/** Asked the hook or waiting for the relay. */
+	| "pending"
+	/** The relay accepted the assertion. */
+	| "bound"
+	/** The relay refused it (`message` says why). */
+	| "refused";
 
 /** The session's limits, as the relay announces them. */
 export interface Limits {
@@ -151,6 +181,8 @@ export interface SessionInfo {
 	origin: string;
 	/** The app name the relay shows when pairing, if any. */
 	appName?: string;
+	/** How AI apps pair: a code shown here, or the same sign-in (`oidc`). */
+	pairing: "code" | "oidc";
 	expiresAt: string;
 	limits: Limits;
 }
@@ -247,6 +279,8 @@ export interface TabMcpEventMap {
 	/** A new pairing code, or `null` when there is none (any more). */
 	pairingcode: CustomEvent<PairingCode | null>;
 	grantschange: CustomEvent<{ grants: readonly Grant[] }>;
+	/** The relay accepted or refused the page's identity, or it was cleared. */
+	identitychange: CustomEvent<{ state: IdentityState; message?: string }>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;

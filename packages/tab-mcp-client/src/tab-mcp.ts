@@ -16,6 +16,8 @@ import type {
 	ConnectOptions,
 	DisconnectReason,
 	Grant,
+	IdentityAssertionHandler,
+	IdentityState,
 	PairingCode,
 	RegisterToolOptions,
 	ServerInfo,
@@ -84,6 +86,7 @@ function sessionInfo(m: SessionMessage): SessionInfo {
 		sessionId: m.sessionId,
 		address: m.address,
 		origin: m.origin,
+		pairing: m.pairing === "oidc" ? "oidc" : "code",
 		expiresAt: m.expiresAt,
 		limits: m.limits,
 	};
@@ -112,6 +115,10 @@ export class TabMcp extends EventTarget {
 	readonly #confirmDelayMs: number | undefined;
 	readonly #relayUrl: string;
 	readonly #secrets: SecretStore;
+	readonly #identityAssertion: IdentityAssertionHandler | undefined;
+	#identity: IdentityState = "none";
+	/** Incremented per identity request, so a late answer of an older one is dropped. */
+	#identityRound = 0;
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
 	#grants: Grant[] = [];
@@ -143,6 +150,7 @@ export class TabMcp extends EventTarget {
 		this.#appName = appName;
 		this.#onConfirm = options.onConfirm;
 		this.#confirmDelayMs = options.confirmDelayMs;
+		this.#identityAssertion = options.identityAssertion;
 		this.#secrets = new SecretStore(
 			options.storage,
 			options.storageKey ?? `tab-mcp:secret:${origin}`,
@@ -195,6 +203,83 @@ export class TabMcp extends EventTarget {
 	/** The AI apps connected to this address. */
 	get grants(): readonly Grant[] {
 		return this.#grants;
+	}
+
+	/** Who the relay knows as the page's user (identity binding). */
+	get identity(): IdentityState {
+		return this.#identity;
+	}
+
+	/**
+	 * Ask the `identityAssertion` hook again and send the result, e.g. after
+	 * the user signed in without a page load. Resolves `true` once the relay
+	 * accepted it; `false` when nobody is signed in, it was refused, or the
+	 * page is not connected.
+	 */
+	refreshIdentity(): Promise<boolean> {
+		const session = this.#session;
+		const ask = this.#identityAssertion;
+		if (
+			this.#state !== "connected" ||
+			session === undefined ||
+			ask === undefined
+		) {
+			return Promise.resolve(false);
+		}
+		const round = ++this.#identityRound;
+		const connection = this.#connection;
+		this.#setIdentity("pending");
+		return new Promise<boolean>((resolve) => {
+			const settle = (event: TabMcpEventMap["identitychange"]) => {
+				if (event.detail.state === "pending") return;
+				this.removeEventListener("identitychange", settle);
+				resolve(event.detail.state === "bound");
+			};
+			this.addEventListener("identitychange", settle);
+			Promise.resolve()
+				.then(() =>
+					ask({ address: session.address, sessionId: session.sessionId }),
+				)
+				.then(
+					(assertion) => {
+						if (
+							round !== this.#identityRound ||
+							this.#connection !== connection
+						) {
+							// Superseded (a newer request, a sign-out, a new connection): that one settles the state.
+							return;
+						}
+						if (typeof assertion !== "string" || assertion === "") {
+							this.#setIdentity("none");
+							return;
+						}
+						if (connection?.send({ type: "identity", assertion }) !== true) {
+							this.#setIdentity("none");
+						}
+					},
+					(error: unknown) => {
+						if (round !== this.#identityRound) return;
+						this.#emit("error", {
+							error: error instanceof Error ? error : new Error(String(error)),
+						});
+						this.#setIdentity("none");
+					},
+				);
+		});
+	}
+
+	/**
+	 * The page's user signed out: the relay ends every AI connection of this
+	 * address at once (identity binding). Call it from the web app's logout.
+	 * Returns `false` when it could not be sent (not connected); the grants
+	 * then stay, but work only while a page signed in as the same person is
+	 * open.
+	 */
+	signOut(): boolean {
+		this.#identityRound++;
+		this.#setIdentity("none");
+		if (this.#state !== "connected") return false;
+		return this.#connection?.send({ type: "identity.logout" }) === true;
 	}
 
 	/** Whether pairing is on (`startPairing()`). */
@@ -299,6 +384,8 @@ export class TabMcp extends EventTarget {
 		if (this.#state === "disconnected") return;
 		this.#session = undefined;
 		this.#setPairingCode(undefined);
+		this.#identityRound++;
+		this.#setIdentity("none");
 		this.#setState("disconnected");
 		if (wasConnected) this.#emit("disconnected", { reason, code: 1000 });
 	}
@@ -396,6 +483,15 @@ export class TabMcp extends EventTarget {
 		this.#emit("statechange", { state });
 	}
 
+	#setIdentity(state: IdentityState, message?: string): void {
+		if (this.#identity === state && message === undefined) return;
+		this.#identity = state;
+		this.#emit(
+			"identitychange",
+			message === undefined ? { state } : { state, message },
+		);
+	}
+
 	#setPairingCode(code: PairingCode | undefined): void {
 		if (this.#pairingCode === undefined && code === undefined) return;
 		this.#pairingCode = code;
@@ -472,6 +568,7 @@ export class TabMcp extends EventTarget {
 				this.#setGrants([...m.grants]);
 				if (this.#pairing) this.#connection?.send({ type: "pairing.start" });
 				this.#emit("connected", session);
+				if (session.pairing === "oidc") void this.refreshIdentity();
 				return session;
 			},
 			pairingCode: (code) => {
@@ -491,6 +588,11 @@ export class TabMcp extends EventTarget {
 			replaced: () => {
 				if (current()) this.#emit("replaced", null);
 			},
+			identityResult: (bound, message) => {
+				if (!current()) return;
+				if (bound) this.#setIdentity("bound");
+				else this.#setIdentity("refused", message ?? "");
+			},
 			error: (error) => {
 				if (current()) this.#emit("error", { error });
 			},
@@ -499,6 +601,8 @@ export class TabMcp extends EventTarget {
 				this.#connection = undefined;
 				this.#session = undefined;
 				this.#setPairingCode(undefined);
+				this.#identityRound++;
+				this.#setIdentity("none");
 				this.#setState("disconnected");
 				this.#emit("disconnected", { reason, code });
 			},
