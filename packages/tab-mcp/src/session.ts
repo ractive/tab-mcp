@@ -4,7 +4,12 @@ import {
 	shortAddress,
 } from "./address.ts";
 import type { RelayConfig, Site, SiteLimits } from "./config.ts";
-import { Exchange, RelayErrorCode, type RpcId } from "./exchange.ts";
+import {
+	Exchange,
+	type PageGoneReply,
+	RelayErrorCode,
+	type RpcId,
+} from "./exchange.ts";
 import type { Logger } from "./log.ts";
 import { PairingCodes } from "./oauth/pairing.ts";
 import {
@@ -40,6 +45,8 @@ export interface SessionHost {
 	claimAddress(session: TabSession): TabSession | undefined;
 	/** Called once when a session is over. */
 	released(session: TabSession): void;
+	/** Called once when a session is ready for MCP requests (DEC-074). */
+	ready?(session: TabSession): void;
 	/** The tab pressed Disconnect for one app; false if the grant is not this address's. */
 	revokeGrant(session: TabSession, grantId: string): Promise<boolean>;
 	/** The tab revokes every grant of its address ("New address"). */
@@ -58,6 +65,8 @@ export interface ForwardInput {
 	extraHeaders: Record<string, string>;
 	/** Called once with the finished exchange (for the request log line). */
 	onDone: (exchange: Exchange) => void;
+	/** The answer when the page goes away mid-request (DEC-074). */
+	pageGone?: (waiting: boolean) => PageGoneReply;
 }
 
 /** The limits announced to the tab (protocol: `session.limits`). */
@@ -376,6 +385,7 @@ export class TabSession {
 			library: `${library.name}@${library.version}`,
 			replaced: replaced !== undefined,
 		});
+		this.#host.ready?.(this);
 	}
 
 	#tick(): void {
@@ -423,6 +433,7 @@ export class TabSession {
 				this.#lastRequestAt = Date.now();
 				input.onDone(e);
 			},
+			...(input.pageGone === undefined ? {} : { pageGone: input.pageGone }),
 		});
 		this.pending.set(id, exchange);
 		const sent = this.send({
@@ -470,15 +481,10 @@ export class TabSession {
 		clearTimeout(this.#helloTimer);
 		clearInterval(this.#heartbeatTimer);
 		clearTimeout(this.#lifetimeTimer);
-		for (const exchange of [...this.pending.values()]) {
-			exchange.fail(
-				503,
-				RelayErrorCode.tabGone,
-				"The page closed its connection to the relay.",
-				false,
-			);
-		}
+		// Released first, so a request the relay sends again waits for the next
+		// session instead of finding this one.
 		this.#host.released(this);
+		for (const exchange of [...this.pending.values()]) exchange.tabGone();
 		if (wasReady) {
 			this.#host.logger.info("tab.closed", {
 				session: this.sessionId,

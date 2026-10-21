@@ -11,5 +11,6 @@
 * [Iteration 5: packaging, documentation and release](iteration-5-packaging-release.md) - npm builds with declarations, trusted publishing with provenance, the multi-arch Docker image, project documentation, the developer skill, dependency updates and the token-expiry warning.
 * [Iteration 6: deployment documentation and examples](iteration-6-deployment-bunny.md) - Generic, secret-free deployment docs and examples for running a tab-mcp relay (Docker, a bunny.net Magic Containers example); the owner's ractive.ch instance is deployed from the private ractive/ractive.ch repository.
 * [Iteration 7: identity binding (0.2+)](iteration-7-identity-binding.md) - Backlog plan for binding a tab and an AI app to the same OpenID Connect identity, as a second pairing method next to the code.
+* [Iteration 8: the relay's answer when the page is not open](iteration-8-page-not-open.md) - When the page is not open, the relay waits a short grace period for it and then answers with HTTP 200 and a JSON-RPC message instead of 503, so an AI app's connector keeps its session.
 
 <!-- okf:index:end -->

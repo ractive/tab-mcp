@@ -116,7 +116,8 @@ does not export and which refuses to run outside development (DEC-059).
   atomically, so a refresh that races Disconnect cannot bring the grant back (DEC-063).
 - Disconnect in the page revokes at once; "New address" revokes all grants of the old
   address.
-- Tokens are useless while the tab is closed (503 "the page is not open").
+- Tokens are useless while the tab is closed ("the page is not open", HTTP 200 with a
+  JSON-RPC error or tool error after a bounded wait; DEC-074).
 - The relay never forwards the `Authorization` header to the tab.
 
 ### A5: A hostile page or another site using someone's relay

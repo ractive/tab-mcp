@@ -52,6 +52,9 @@ export interface Site {
  */
 export const MIN_MESSAGE_BYTES = 16_384;
 
+/** Longest grace period for a page to (re)connect (DEC-074). */
+export const MAX_PAGE_WAIT_MS = 60_000;
+
 /** Longest app name (configured or sent by the page). */
 export const MAX_APP_NAME = 64;
 
@@ -85,6 +88,11 @@ export interface RelayConfig {
 	helloTimeoutMs: number;
 	/** Deadline for receiving an MCP request body (Bun's idle timer does not cover it). */
 	bodyTimeoutMs: number;
+	/**
+	 * How long an MCP request waits for its page to (re)connect before the relay
+	 * answers "the page is not open" (DEC-074); 0 answers at once.
+	 */
+	pageWaitMs: number;
 	/** Limit for MCP request bodies and for messages from the tab. */
 	maxMessageBytes: number;
 	accessTokenTtlMs: number;
@@ -125,6 +133,7 @@ export const DEFAULT_CONFIG: Readonly<RelayConfig> = {
 	heartbeatMs: 25_000,
 	helloTimeoutMs: 10_000,
 	bodyTimeoutMs: 10_000,
+	pageWaitMs: 10_000,
 	maxMessageBytes: 1_048_576,
 	accessTokenTtlMs: 3_600_000,
 	refreshTokenTtlMs: 2_592_000_000,
@@ -226,6 +235,16 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
 			throw new ConfigError(`${key} must be a positive number`);
 		}
+	}
+	if (
+		typeof config.pageWaitMs !== "number" ||
+		!Number.isFinite(config.pageWaitMs) ||
+		config.pageWaitMs < 0 ||
+		config.pageWaitMs > MAX_PAGE_WAIT_MS
+	) {
+		throw new ConfigError(
+			`pageWaitMs must be 0-${MAX_PAGE_WAIT_MS} (0-${MAX_PAGE_WAIT_MS / 1000} seconds)`,
+		);
 	}
 	if (config.maxMessageBytes < MIN_MESSAGE_BYTES) {
 		throw new ConfigError(
@@ -395,6 +414,17 @@ function seconds(env: Env, name: string): number | undefined {
 	return Math.round(n * 1000);
 }
 
+/** Like `seconds`, but 0 is allowed (it switches the feature off). */
+function secondsOrZero(env: Env, name: string): number | undefined {
+	const raw = env[name];
+	if (raw === undefined || raw === "") return undefined;
+	const n = Number(raw);
+	if (!Number.isFinite(n) || n < 0) {
+		throw new ConfigError(`${name} must be 0 or a positive number of seconds`);
+	}
+	return Math.round(n * 1000);
+}
+
 function integer(env: Env, name: string): number | undefined {
 	const raw = env[name];
 	if (raw === undefined || raw === "") return undefined;
@@ -492,6 +522,7 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 	set("sessionLifetimeMs", seconds(env, "TAB_MCP_SESSION_LIFETIME_S"));
 	set("heartbeatMs", seconds(env, "TAB_MCP_HEARTBEAT_S"));
 	set("bodyTimeoutMs", seconds(env, "TAB_MCP_BODY_TIMEOUT_S"));
+	set("pageWaitMs", secondsOrZero(env, "TAB_MCP_PAGE_WAIT_S"));
 	set("maxMessageBytes", integer(env, "TAB_MCP_MAX_MESSAGE_BYTES"));
 	set("accessTokenTtlMs", seconds(env, "TAB_MCP_ACCESS_TOKEN_TTL_S"));
 	set("refreshTokenTtlMs", seconds(env, "TAB_MCP_REFRESH_TOKEN_TTL_S"));

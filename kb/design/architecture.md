@@ -121,8 +121,9 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 1. The AI app POSTs `server/discover`, `tools/list`, `tools/call` with the bearer token.
 2. The relay checks (DEC-040): POST, `MCP-Protocol-Version` is `2026-07-28` (else 400 /
    `-32022` naming the supported version, except the one Claude case of DEC-033), body size
-   and JSON, the token is valid for this address, the tab is online (else 503 "the page is
-   not open"), concurrency. It calls `server.timeout(req, 0)` and starts its own request
+   and JSON, the token is valid for this address, the tab is online (else it waits up to
+   `TAB_MCP_PAGE_WAIT_S` for it and then answers "the page is not open" at HTTP 200;
+   DEC-074), concurrency. It calls `server.timeout(req, 0)` and starts its own request
    timer (300 s).
 3. It sends `http.request` with the filtered headers, the body and the grant. Nothing about
    the token goes to the tab.
@@ -147,8 +148,8 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 - "New address": the page revokes all grants of the old address (`grants.revokeAll`),
   makes a new secret and connects again.
 - Closing the tab, network loss (missed heartbeats), the idle timeout or the session
-  lifetime end the WebSocket session only. Grants and tokens stay; MCP calls get 503 "the
-  page is not open" until the page connects again with the same secret.
+  lifetime end the WebSocket session only. Grants and tokens stay; MCP calls get "the page
+  is not open" (HTTP 200, DEC-074) until the page connects again with the same secret.
 
 ## What lives where
 
@@ -199,6 +200,7 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_SESSION_LIFETIME_S` | 43200 | absolute WebSocket session lifetime |
 | `TAB_MCP_HEARTBEAT_S` | 25 | protocol ping interval |
 | `TAB_MCP_BODY_TIMEOUT_S` | 10 | deadline for receiving an MCP request body (408 and close; DEC-048) |
+| `TAB_MCP_PAGE_WAIT_S` | 10 | how long an MCP request waits for its page before "the page is not open"; 0 = at once, at most 60 (DEC-074) |
 | `TAB_MCP_MAX_MESSAGE_BYTES` | 1048576 | request body and WebSocket message limit; at least 16384 |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` / `TAB_MCP_REFRESH_TOKEN_TTL_S` | 3600 / 2592000 | token lifetimes |
 | `TAB_MCP_GRANT_LIFETIME_S` | 7776000 | absolute end of a connection after pairing; refreshes never go beyond it (DEC-062) |

@@ -17,6 +17,7 @@ import {
 } from "./exchange.ts";
 import { ipPrefixKey } from "./ip.ts";
 import { createLogger, type Logger, truncateIp } from "./log.ts";
+import { isRetryable, notOpenAnswer, type RelayInfo } from "./notopen.ts";
 import {
 	AuthorizationServer,
 	type AuthorizationTestMode,
@@ -35,6 +36,11 @@ import type { TokenRecord, TokenStore } from "./store/types.ts";
 import { hashToken } from "./tokens.ts";
 
 export const VERSION: string = version;
+
+const RELAY_INFO: RelayInfo = { name: "tab-mcp", version };
+
+/** Settles the race between an exchange and its page going away. */
+const RETRY = Symbol("retry");
 
 /** The one mismatched header Claude sends today (claude-code #93290, DEC-033). */
 const CLAUDE_MISMATCHED_HEADER = "2025-11-25";
@@ -189,6 +195,11 @@ function startRelay(
 	const sessions = new Map<string, TabSession>();
 	const allSessions = new Set<TabSession>();
 	const perIp = new Map<string, number>();
+	/** Requests waiting for their page, per address (DEC-074). */
+	const waiters = new Map<string, Set<(s: TabSession | undefined) => void>>();
+	let waitingCount = 0;
+	/** The app name of each address's last session, for "open <name>". */
+	const appNames = new Map<string, string>();
 	let claudeWorkarounds = 0;
 	let publicUrl = config.publicUrl ?? "";
 
@@ -265,7 +276,77 @@ function startRelay(
 			}
 			releaseIp(session.ip);
 		},
+		ready(session: TabSession): void {
+			const id = session.addressId;
+			if (id === undefined) return;
+			if (session.appName !== undefined) {
+				appNames.delete(id);
+				appNames.set(id, session.appName);
+				// Bounded: forget the oldest names first.
+				if (appNames.size > config.maxSessions * 2) {
+					const oldest = appNames.keys().next().value;
+					if (oldest !== undefined) appNames.delete(oldest);
+				}
+			}
+			const waiting = waiters.get(id);
+			if (waiting !== undefined) for (const wake of [...waiting]) wake(session);
+		},
 	};
+
+	function readySession(addressId: string): TabSession | undefined {
+		const s = sessions.get(addressId);
+		return s?.ready === true ? s : undefined;
+	}
+
+	/**
+	 * The page's ready session, waiting up to `waitMs` for it (DEC-074).
+	 * `undefined` when it does not come in time or too many requests wait
+	 * already; `"aborted"` when the AI app gave up.
+	 */
+	function waitForPage(
+		addressId: string,
+		signal: AbortSignal,
+		waitMs: number,
+	): Promise<TabSession | undefined | "aborted"> {
+		const now = readySession(addressId);
+		if (now !== undefined) return Promise.resolve(now);
+		if (waitMs === 0 || stopping !== undefined) {
+			return Promise.resolve(undefined);
+		}
+		const set = waiters.get(addressId) ?? new Set();
+		// A waiting request holds its body and a socket like a forwarded one: at
+		// most maxConcurrentRequests per address, maxSessions in all.
+		if (
+			set.size >= config.maxConcurrentRequests ||
+			waitingCount >= config.maxSessions
+		) {
+			return Promise.resolve(undefined);
+		}
+		return new Promise((resolve) => {
+			let timer: Timer | undefined;
+			let settled = false;
+			const done = (result: TabSession | undefined | "aborted") => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				signal.removeEventListener("abort", onAbort);
+				set.delete(wake);
+				waitingCount--;
+				if (set.size === 0 && waiters.get(addressId) === set) {
+					waiters.delete(addressId);
+				}
+				resolve(result);
+			};
+			const wake = (session: TabSession | undefined) => done(session);
+			const onAbort = () => done("aborted");
+			set.add(wake);
+			waiters.set(addressId, set);
+			waitingCount++;
+			timer = setTimeout(() => done(undefined), waitMs);
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (signal.aborted) onAbort();
+		});
+	}
 
 	function releaseIp(ip: string): void {
 		const n = (perIp.get(ip) ?? 1) - 1;
@@ -596,28 +677,6 @@ function startRelay(
 			);
 		}
 
-		const session = sessions.get(addressId);
-		if (session === undefined || !session.ready) {
-			logDone(503, method, { reason: "page_not_open" });
-			return rpcError(
-				503,
-				rpcId,
-				RelayErrorCode.pageNotOpen,
-				'The page is not open. Open the web page that offers these tools and click "Connect your AI app".',
-				corsHeaders,
-			);
-		}
-		if (session.pending.size >= session.limits.maxConcurrentRequests) {
-			logDone(429, method);
-			return rpcError(
-				429,
-				rpcId,
-				RelayErrorCode.overloaded,
-				"Too many requests at once for this page.",
-				corsHeaders,
-			);
-		}
-
 		const headers: Record<string, string> = {};
 		for (const [k, v] of req.headers) {
 			const key = k.toLowerCase();
@@ -633,41 +692,147 @@ function startRelay(
 				return "";
 			}
 		})();
-		// The AI app may have gone while the body was read or the token checked:
-		// then forward nothing (the abort event has already fired and would not
-		// cancel the exchange, which would hold a slot until the timeout).
-		if (req.signal.aborted) {
+		const isListen = body.value["method"] === "subscriptions/listen";
+		// `server/discover` does not wait: clients use it as the protocol-era
+		// probe with a short timeout (Claude Code: 5 s, then it falls back to
+		// the legacy handshake), and the stand-in answer has `ttlMs: 0`.
+		const waitMs =
+			body.value["method"] === "server/discover" ? 0 : config.pageWaitMs;
+		const closed = () => {
 			logDone(499, method, { outcome: "client_closed" });
 			return new Response(null, { status: 499 });
-		}
-		// Only now, for an authenticated request that is about to be forwarded,
-		// switch off Bun's idle timer: our own request timer and keep-alives take
+		};
+
+		// Only now, for an authenticated request, switch off Bun's idle timer:
+		// our own timers (the page wait, the request timer) and keep-alives take
 		// over (Bun research, finding 1). Body reading and every unauthenticated
 		// path keep the idle timeout, so a stalled client cannot hold a socket.
-		server.timeout(req, 0);
-		const exchange = session.forward({
-			method: "POST",
-			headers,
-			body: body.text,
+		if (readySession(addressId) === undefined && waitMs > 0) {
+			server.timeout(req, 0);
+		}
+		let retried = false;
+		for (;;) {
+			const found = await waitForPage(addressId, req.signal, waitMs);
+			// The AI app may have gone while the body was read, the token checked
+			// or the page awaited: then forward nothing (the abort event has
+			// already fired and would not cancel the exchange, which would hold a
+			// slot until the timeout).
+			if (found === "aborted" || req.signal.aborted) return closed();
+			if (found === undefined) {
+				return pageNotOpen(body.value, rpcId, addressId, logDone, method);
+			}
+			const session = found;
+			// The body was read with the instance's limit if the page was not
+			// open yet; its site may allow less.
+			if (Buffer.byteLength(body.text) > session.limits.maxMessageBytes) {
+				logDone(413, method);
+				return rpcError(
+					413,
+					rpcId,
+					-32600,
+					"Request body too large.",
+					corsHeaders,
+				);
+			}
+			if (session.pending.size >= session.limits.maxConcurrentRequests) {
+				logDone(429, method);
+				return rpcError(
+					429,
+					rpcId,
+					RelayErrorCode.overloaded,
+					"Too many requests at once for this page.",
+					corsHeaders,
+				);
+			}
+			server.timeout(req, 0);
+			let retry: () => void = () => {};
+			const retrying = new Promise<typeof RETRY>((resolve) => {
+				retry = () => resolve(RETRY);
+			});
+			const mayRetry =
+				!retried && waitMs > 0 && isRetryable(body.value["method"]);
+			const exchange = session.forward({
+				method: "POST",
+				headers,
+				body: body.text,
+				rpcId,
+				isListen,
+				grant: {
+					grantId: auth.grantId,
+					clientId: auth.clientId,
+					scopes: auth.scopes,
+				},
+				extraHeaders: corsHeaders,
+				onDone: (e: Exchange) => {
+					if (e.outcome === "page_gone_retry") return; // logged once, at the end
+					logDone(e.status, method, {
+						session: session.sessionId,
+						client: clientHostName,
+						outcome: e.outcome,
+						...(e.outcome === "page_gone" ? { reason: "page_not_open" } : {}),
+					});
+				},
+				pageGone: (waiting) => {
+					if (waiting && mayRetry && !req.signal.aborted) {
+						retry();
+						return { retry: true };
+					}
+					const answer = notOpenAnswer(
+						body.value,
+						rpcId,
+						session.appName,
+						"gone",
+						RELAY_INFO,
+					);
+					return answer === undefined
+						? { retry: false }
+						: { retry: false, body: answer };
+				},
+			});
+			const onAbort = () => exchange.clientClosed();
+			req.signal.addEventListener("abort", onAbort, { once: true });
+			const result = await Promise.race([exchange.response, retrying]);
+			if (result !== RETRY) return result;
+			req.signal.removeEventListener("abort", onAbort);
+			retried = true;
+		}
+	}
+
+	/** DEC-074: HTTP 200 and a JSON-RPC message, not an HTTP error status. */
+	function pageNotOpen(
+		value: Record<string, unknown>,
+		rpcId: RpcId | undefined,
+		addressId: string,
+		logDone: (
+			status: number,
+			method: string,
+			extra?: Record<string, string | number>,
+		) => void,
+		method: string,
+	): Response {
+		const answer = notOpenAnswer(
+			value,
 			rpcId,
-			isListen: body.value["method"] === "subscriptions/listen",
-			grant: {
-				grantId: auth.grantId,
-				clientId: auth.clientId,
-				scopes: auth.scopes,
-			},
-			extraHeaders: corsHeaders,
-			onDone: (e: Exchange) =>
-				logDone(e.status, method, {
-					session: session.sessionId,
-					client: clientHostName,
-					outcome: e.outcome,
-				}),
+			appNames.get(addressId),
+			"not_open",
+			RELAY_INFO,
+		);
+		if (answer === undefined) {
+			// A notification: the spec requires an HTTP error status.
+			logDone(503, method, { reason: "page_not_open" });
+			return rpcError(
+				503,
+				rpcId,
+				RelayErrorCode.pageNotOpen,
+				"The page is not open.",
+				corsHeaders,
+			);
+		}
+		logDone(200, method, { reason: "page_not_open" });
+		return new Response(answer, {
+			status: 200,
+			headers: { ...corsHeaders, "content-type": "application/json" },
 		});
-		req.signal.addEventListener("abort", () => exchange.clientClosed(), {
-			once: true,
-		});
-		return exchange.response;
 	}
 
 	function preflight(req: Request): Response {
@@ -794,6 +959,7 @@ function startRelay(
 		},
 	});
 
+	let stopping: Promise<void> | undefined;
 	const port = server.port ?? config.port;
 	if (publicUrl === "") publicUrl = `http://localhost:${port}`;
 
@@ -835,7 +1001,6 @@ function startRelay(
 		origins: siteCount,
 	});
 
-	let stopping: Promise<void> | undefined;
 	return {
 		url: publicUrl,
 		port,
@@ -847,6 +1012,9 @@ function startRelay(
 		stop() {
 			stopping ??= (async () => {
 				clearInterval(sweep);
+				for (const set of [...waiters.values()]) {
+					for (const wake of [...set]) wake(undefined);
+				}
 				for (const session of [...allSessions]) {
 					session.end(
 						CloseCode.shuttingDown,

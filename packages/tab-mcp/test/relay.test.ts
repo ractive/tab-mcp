@@ -404,8 +404,8 @@ describe("MCP endpoint checks", () => {
 		).toBe(401);
 	});
 
-	test("a valid token while the page is not open: 503 'the page is not open'", async () => {
-		const r = relay();
+	test("a valid token while the page is not open: HTTP 200 with a JSON-RPC error (DEC-074)", async () => {
+		const r = relay({ pageWaitMs: 0 });
 		const secret = newSecret();
 		const token = await tokenFor(r.store, addressIdFromSecret(secret));
 		const res = await mcpPost(
@@ -413,7 +413,7 @@ describe("MCP endpoint checks", () => {
 			rpc(7, "tools/list"),
 			{ token },
 		);
-		expect(res.status).toBe(503);
+		expect(res.status).toBe(200);
 		const body = (await res.json()) as {
 			id: number;
 			error: { code: number; message: string };
@@ -807,7 +807,7 @@ describe("tunnel", () => {
 	});
 
 	test("closing the tab fails in-flight requests; the token works again after reconnecting", async () => {
-		const r = relay();
+		const r = relay({ pageWaitMs: 0 });
 		const secret = newSecret();
 		const t = tab(r, { secret, onRequest: () => {} });
 		await t.connect();
@@ -817,14 +817,16 @@ describe("tunnel", () => {
 		await t.next("http.request");
 		t.close();
 		const res = await inFlight;
-		expect(res.status).toBe(503);
+		expect(res.status).toBe(200);
 		expect(((await res.json()) as { error: { code: number } }).error.code).toBe(
 			-31003,
 		);
 		// the session was released before the in-flight request was failed
+		const after = await mcpPost(address, rpc(9, "tools/list"), { token });
+		expect(after.status).toBe(200);
 		expect(
-			(await mcpPost(address, rpc(9, "tools/list"), { token })).status,
-		).toBe(503);
+			((await after.json()) as { error: { code: number } }).error.code,
+		).toBe(-31001);
 
 		const again = tab(r, { secret });
 		await again.connect();
