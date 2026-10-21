@@ -49,7 +49,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.2.0
+  ractive/tab-mcp:0.2.1
 
 TAB_MCP_RELAY=http://localhost:8080 bun run example
 ```

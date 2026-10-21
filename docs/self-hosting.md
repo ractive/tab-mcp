@@ -24,7 +24,7 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.2.0
+  ractive/tab-mcp:0.2.1
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
@@ -39,7 +39,7 @@ machine (see below). The image:
 - has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead. It
   answers `200` with `{"status":"ok","version":"…","counters":{…}}`.
 
-`docker run --rm ractive/tab-mcp:0.2.0 --version` prints the version. Every
+`docker run --rm ractive/tab-mcp:0.2.1 --version` prints the version. Every
 setting is listed in [configuration](configuration.md).
 
 With Docker Compose:
@@ -47,7 +47,7 @@ With Docker Compose:
 ```yaml
 services:
   tab-mcp:
-    image: ractive/tab-mcp:0.2.0
+    image: ractive/tab-mcp:0.2.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"

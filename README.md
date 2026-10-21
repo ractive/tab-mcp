@@ -73,7 +73,7 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
      -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
      -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
      -e TAB_MCP_STORE=memory \
-     ractive/tab-mcp:0.2.0
+     ractive/tab-mcp:0.2.1
    ```
 
 2. Install the browser library:
@@ -136,7 +136,7 @@ The relay is one process with a SQLite file. Run it with Docker:
 docker run -d --name tab-mcp -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.2.0
+  ractive/tab-mcp:0.2.1
 ```
 
 Put it behind a reverse proxy with TLS. [Self-hosting](docs/self-hosting.md) explains
@@ -168,7 +168,7 @@ Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 **0.2.0**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelog](CHANGELOG.md) says what changed.
 
-- Released: relay `@ractive-ch/tab-mcp` 0.2.0 (npm and Docker) and browser library
+- Released: relay `@ractive-ch/tab-mcp` 0.2.1 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.2.0, on the npm tag `latest`.
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
   through OAuth Client ID Metadata Documents. Claude Code works (tested headless with a

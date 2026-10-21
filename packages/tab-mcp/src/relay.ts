@@ -878,12 +878,18 @@ function startRelay(
 		idleTimeout: config.httpIdleTimeoutS,
 		routes: {
 			"/healthz": {
+				// no-store: a CDN in front caches answers without cache headers
+				// (bunny for 30 days), and a deploy check would read the old version.
 				GET: () =>
-					json(200, {
-						status: "ok",
-						version: VERSION,
-						counters: { claudeHeaderWorkaround: claudeWorkarounds },
-					}),
+					json(
+						200,
+						{
+							status: "ok",
+							version: VERSION,
+							counters: { claudeHeaderWorkaround: claudeWorkarounds },
+						},
+						{ "cache-control": "no-store" },
+					),
 			},
 			"/": {
 				GET: () =>
@@ -893,6 +899,7 @@ function startRelay(
 							"content-security-policy":
 								"default-src 'none'; frame-ancestors 'none'",
 							"x-content-type-options": "nosniff",
+							"cache-control": "public, max-age=3600",
 						},
 					}),
 			},

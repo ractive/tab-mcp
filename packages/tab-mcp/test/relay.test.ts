@@ -902,8 +902,11 @@ describe("health and index", () => {
 			version: expect.any(String),
 			counters: { claudeHeaderWorkaround: 0 },
 		});
+		// A CDN in front must not keep an old version (bunny caches for 30 days).
+		expect(health.headers.get("cache-control")).toBe("no-store");
 		const index = await fetch(`${r.relay.url}/`);
 		expect(index.headers.get("content-type")).toContain("text/html");
+		expect(index.headers.get("cache-control")).toBe("public, max-age=3600");
 		expect((await fetch(`${r.relay.url}/nope`)).status).toBe(404);
 	});
 });
