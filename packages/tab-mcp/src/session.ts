@@ -128,6 +128,7 @@ export class TabSession {
 	#state: "new" | "hello" | "ready" | "ended" = "new";
 	/** The "Connect your AI app" dialog is open (OIDC pairing, DEC-079). */
 	#dialogOpen = false;
+	#identityChain: Promise<void> = Promise.resolve();
 	#lastRequestAt = Date.now();
 	#missedPongs = 0;
 	#nextRequest = 0;
@@ -290,10 +291,12 @@ export class TabSession {
 				this.#dialogOpen = false;
 				return;
 			case "identity":
-				await this.#host.bindIdentity(this, msg.assertion);
+				await this.#serialIdentity(() =>
+					this.#host.bindIdentity(this, msg.assertion),
+				);
 				return;
 			case "identity.logout":
-				await this.#host.signOut(this);
+				await this.#serialIdentity(() => this.#host.signOut(this));
 				return;
 			case "grant.revoke":
 				if (!(await this.#host.revokeGrant(this, msg.grantId))) {
@@ -411,6 +414,17 @@ export class TabSession {
 			replaced: replaced !== undefined,
 		});
 		this.#host.ready?.(this);
+	}
+
+	/**
+	 * Identity messages run one after another, in the order they came: frames
+	 * are handled concurrently, and a slow assertion check must not finish
+	 * after a later sign-out (review of PR #13).
+	 */
+	#serialIdentity(run: () => Promise<void>): Promise<void> {
+		const next = this.#identityChain.then(run);
+		this.#identityChain = next.catch(() => {});
+		return next;
 	}
 
 	#tick(): void {

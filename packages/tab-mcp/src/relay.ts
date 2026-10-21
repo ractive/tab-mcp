@@ -269,12 +269,21 @@ function startRelay(
 			});
 			for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
 		},
+		/**
+		 * Called one at a time per session (the session chains `identity` and
+		 * `identity.logout`), so a slow check never lands after a later sign-out.
+		 * Always answers the tab once: `identity.bound` or `identity_refused`.
+		 */
 		async bindIdentity(session: TabSession, assertion: string): Promise<void> {
 			const addressId = session.addressId;
 			if (addressId === undefined) return;
 			const refuse = (reason: string, message: string) => {
-				// Fail closed: a refused assertion also ends an earlier binding.
-				session.identity = undefined;
+				// Fail closed: a refused assertion also ends an earlier binding,
+				// and the requests made under it.
+				if (session.identity !== undefined) {
+					session.identity = undefined;
+					failPending(session, "The page's user is no longer signed in.");
+				}
 				logger.info("identity.refused", {
 					address: shortAddress(addressId),
 					reason,
@@ -292,39 +301,43 @@ function startRelay(
 					`${publicUrl}/a/${addressId}/mcp`,
 				);
 			} catch (error) {
-				if (!(error instanceof JwtError)) throw error;
 				refuse(
-					error.reason,
-					`the identity assertion was refused: ${error.message}`,
+					error instanceof JwtError ? error.reason : "error",
+					`the identity assertion was refused: ${error instanceof JwtError ? error.message : "the relay could not check it"}`,
 				);
 				return;
 			}
 			if (!session.ready) return; // closed meanwhile
-			// Grants made for someone else (or with a code) end now (DEC-077).
-			const grants = await store.listGrants(addressId, Date.now());
-			const others = grants.filter((g) => g.subject !== key);
-			for (const g of others) {
-				await store.revoke({ grantId: g.grantId }, revokeOptions());
-				grantRemoved(addressId, g.grantId, "revoked");
-			}
 			const changed = session.identity !== key;
 			if (changed && session.identity !== undefined) {
-				// Another person now: the old person's requests in flight end too.
-				for (const exchange of [...session.pending.values()]) {
-					exchange.fail(
-						401,
-						RelayErrorCode.signedOut,
-						"The page's user changed.",
-						true,
-					);
-				}
+				// Another person now: nothing more for the old one, before any I/O.
+				session.identity = undefined;
+				failPending(session, "The page's user changed.");
 			}
+			// Grants made for someone else (or with a code) end now (DEC-077).
+			let revoked = 0;
+			try {
+				const grants = await store.listGrants(addressId, Date.now());
+				for (const g of grants.filter((g) => g.subject !== key)) {
+					await store.revoke({ grantId: g.grantId }, revokeOptions());
+					grantRemoved(addressId, g.grantId, "revoked");
+					revoked++;
+				}
+			} catch (error) {
+				logger.error("store.error", {
+					op: "identity",
+					message: error instanceof Error ? error.message : "unknown",
+				});
+				refuse("store_unavailable", "the relay cannot check grants right now");
+				return;
+			}
+			if (!session.ready) return;
 			session.identity = key;
 			session.send({ type: "identity.bound" });
 			logger.info("identity.bound", {
 				address: shortAddress(addressId),
 				changed,
-				revoked: others.length,
+				revoked,
 			});
 			host.ready(session); // requests waiting for a signed-in page go on
 		},
@@ -339,23 +352,25 @@ function startRelay(
 				});
 				return;
 			}
+			// First the binding and the requests in flight: they end even if the
+			// store fails below.
 			session.identity = undefined;
-			const grants = await store.listGrants(addressId, Date.now());
-			await store.revoke({ addressId }, revokeOptions());
-			// Requests in flight end now; the page is told to stop them.
-			for (const exchange of [...session.pending.values()]) {
-				exchange.fail(
-					401,
-					RelayErrorCode.signedOut,
-					"The page's user signed out.",
-					true,
-				);
+			failPending(session, "The page's user signed out.");
+			try {
+				const grants = await store.listGrants(addressId, Date.now());
+				await store.revoke({ addressId }, revokeOptions());
+				logger.info("identity.signed_out", {
+					address: shortAddress(addressId),
+					grants: grants.length,
+				});
+				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+			} catch (error) {
+				// The grants stay, but work only for a page bound to their person.
+				logger.error("store.error", {
+					op: "signOut",
+					message: error instanceof Error ? error.message : "unknown",
+				});
 			}
-			logger.info("identity.signed_out", {
-				address: shortAddress(addressId),
-				grants: grants.length,
-			});
-			for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
 		},
 		claimAddress(session: TabSession): TabSession | undefined {
 			const id = session.addressId;
@@ -390,6 +405,13 @@ function startRelay(
 			if (waiting !== undefined) for (const wake of [...waiting]) wake(session);
 		},
 	};
+
+	/** End a session's requests in flight; the page is told to stop them. */
+	function failPending(session: TabSession, message: string): void {
+		for (const exchange of [...session.pending.values()]) {
+			exchange.fail(401, RelayErrorCode.signedOut, message, true);
+		}
+	}
 
 	function readySession(
 		addressId: string,

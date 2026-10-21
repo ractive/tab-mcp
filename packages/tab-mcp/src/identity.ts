@@ -42,7 +42,7 @@ export function identityKey(issuer: string, subject: string): string {
 export class TabAssertionVerifier {
 	readonly #oidc: OidcConfig;
 	readonly #keys: KeySource;
-	/** jti → expiry; insertion order is roughly expiry order (all live ≤ 65 s). */
+	/** (binding key, jti) → expiry; insertion order is roughly expiry order (all live ≤ 65 s). */
 	readonly #seen = new Map<string, number>();
 
 	constructor(oidc: OidcConfig, keys?: KeySource) {
@@ -101,14 +101,17 @@ export class TabAssertionVerifier {
 			throw new JwtError("jti", "the assertion needs a jti");
 		}
 		this.#sweep(now);
-		if (this.#seen.has(jti)) {
+		// Keyed by the person too, so one user's jti cannot block another's.
+		const key = identityKey(this.#oidc.issuer, sub);
+		const seenKey = `${key}\n${jti}`;
+		if (this.#seen.has(seenKey)) {
 			throw new JwtError("replayed", "the assertion was already used");
 		}
 		if (this.#seen.size >= MAX_SEEN_JTI) {
 			throw new JwtError("busy", "too many assertions at once");
 		}
-		this.#seen.set(jti, exp + CLOCK_LEEWAY_MS);
-		return identityKey(this.#oidc.issuer, sub);
+		this.#seen.set(seenKey, exp + CLOCK_LEEWAY_MS);
+		return key;
 	}
 
 	#sweep(now: number): void {

@@ -8,7 +8,13 @@ import {
 	TAB_ASSERTION_TYP,
 	TabAssertionVerifier,
 } from "../src/identity.ts";
-import { type Jwk, JwtError, type KeySource, verifyJwt } from "../src/jwt.ts";
+import {
+	type Jwk,
+	JwksCache,
+	JwtError,
+	type KeySource,
+	verifyJwt,
+} from "../src/jwt.ts";
 import { APP_ISSUER, signingKey, signJwt } from "./oidc-fixture.ts";
 
 const ADDRESS = "https://relay.example/a/abc/mcp";
@@ -172,6 +178,20 @@ describe("tab assertions (DEC-076)", () => {
 		).toBe("jti");
 	});
 
+	test("the replay cache is per person: another user's jti does not collide", async () => {
+		const { verifier, make } = await setup();
+		const jti = "shared-jti";
+		expect(await reason(verifier.verify(await make({ jti }), ADDRESS))).toBe(
+			"accepted",
+		);
+		expect(
+			await reason(verifier.verify(await make({ jti, sub: "bob" }), ADDRESS)),
+		).toBe("accepted");
+		expect(await reason(verifier.verify(await make({ jti }), ADDRESS))).toBe(
+			"replayed",
+		);
+	});
+
 	test("wrong aud, iss, typ or sub are refused", async () => {
 		const { verifier, make } = await setup();
 		const check = async (claims: Record<string, unknown>, header = {}) =>
@@ -187,5 +207,66 @@ describe("tab assertions (DEC-076)", () => {
 		expect(await check({}, { typ: "JWT" })).toBe("typ");
 		expect(await check({ sub: "" })).toBe("sub");
 		expect(await check({ sub: 42 })).toBe("sub");
+	});
+});
+
+describe("JwksCache: stale keys on errors, no hammering", () => {
+	test("serves the last keys for a grace period while the JWKS is down, and waits 30 s between attempts", async () => {
+		const key = await signingKey("ES256", "k1");
+		let up = true;
+		let hits = 0;
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: () => {
+				hits++;
+				return up
+					? Response.json({ keys: [key.publicJwk] })
+					: new Response("down", { status: 503 });
+			},
+		});
+		let clock = 1_000_000;
+		const cache = new JwksCache(`http://127.0.0.1:${server.port}/jwks`, {
+			now: () => clock,
+		});
+		try {
+			expect(await cache.keys("k1")).toHaveLength(1);
+			expect(hits).toBe(1);
+			up = false;
+			clock += 11 * 60_000; // stale: the refetch fails, the old keys are served
+			expect(await cache.keys("k1")).toHaveLength(1);
+			expect(hits).toBe(2);
+			clock += 10_000; // within 30 s of the failure: no new attempt
+			expect(await cache.keys("k1")).toHaveLength(1);
+			expect(await cache.keys("other")).toHaveLength(0);
+			expect(hits).toBe(2);
+			clock += 21_000;
+			expect(await cache.keys("k1")).toHaveLength(1);
+			expect(hits).toBe(3);
+			clock += 60 * 60_000; // past the grace period
+			await expect(cache.keys("k1")).rejects.toThrow();
+		} finally {
+			await server.stop(true);
+		}
+	});
+
+	test("with no keys yet a failure throws, and the next call does not fetch again at once", async () => {
+		let hits = 0;
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: () => {
+				hits++;
+				return new Response("down", { status: 503 });
+			},
+		});
+		const cache = new JwksCache(`http://127.0.0.1:${server.port}/jwks`);
+		try {
+			await expect(cache.keys("k1")).rejects.toThrow();
+			await expect(cache.keys("k1")).rejects.toThrow();
+			expect(hits).toBe(1);
+		} finally {
+			await server.stop(true);
+		}
 	});
 });

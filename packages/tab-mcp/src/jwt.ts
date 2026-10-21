@@ -25,6 +25,8 @@ export const MAX_JWT_BYTES = 8192;
 const MAX_JWKS_BYTES = 65_536;
 const JWKS_TTL_MS = 10 * 60_000;
 const JWKS_REFETCH_MS = 30_000;
+/** How long the last good keys are served while the JWKS cannot be fetched. */
+const JWKS_GRACE_MS = 60 * 60_000;
 const FETCH_TIMEOUT_MS = 5_000;
 
 export class JwtError extends Error {
@@ -221,23 +223,43 @@ export class HttpJsonError extends Error {
 	}
 }
 
-/** A JWKS URL, cached 10 minutes, fetched again for an unknown kid at most every 30 s. */
+/**
+ * A JWKS URL, cached 10 minutes, fetched again for an unknown kid at most every
+ * 30 s. After a failed fetch the last good keys are served for up to an hour
+ * (an outage must not refuse every token at once), and the next attempt waits
+ * the same 30 s, so a dead endpoint is not hit (and waited for) on every check.
+ */
 export class JwksCache implements KeySource {
 	readonly #url: () => Promise<string>;
+	readonly #now: () => number;
 	#keys: Jwk[] = [];
 	#fetchedAt = 0;
+	#attemptedAt = Number.NEGATIVE_INFINITY;
+	#lastError: Error | undefined;
 	#inflight: Promise<void> | undefined;
 
-	constructor(url: string | (() => Promise<string>)) {
+	constructor(
+		url: string | (() => Promise<string>),
+		options: { now?: () => number } = {},
+	) {
 		this.#url = typeof url === "string" ? () => Promise.resolve(url) : url;
+		this.#now = options.now ?? Date.now;
 	}
 
 	async keys(kid: string | undefined): Promise<Jwk[]> {
-		const now = Date.now();
+		const now = this.#now();
 		const stale = now - this.#fetchedAt >= JWKS_TTL_MS;
 		const unknown = kid !== undefined && !this.#keys.some((k) => k.kid === kid);
-		if (stale || (unknown && now - this.#fetchedAt >= JWKS_REFETCH_MS)) {
-			await this.#refresh();
+		if ((stale || unknown) && now - this.#attemptedAt >= JWKS_REFETCH_MS) {
+			try {
+				await this.#refresh();
+			} catch (error) {
+				this.#lastError = error instanceof Error ? error : new Error("JWKS");
+			}
+		}
+		if (this.#now() - this.#fetchedAt >= JWKS_TTL_MS + JWKS_GRACE_MS) {
+			// Nothing usable: no keys yet, or keys past their grace period.
+			throw this.#lastError ?? new Error("the JWKS could not be loaded");
 		}
 		return kid === undefined
 			? this.#keys
@@ -246,6 +268,7 @@ export class JwksCache implements KeySource {
 
 	#refresh(): Promise<void> {
 		this.#inflight ??= (async () => {
+			this.#attemptedAt = this.#now();
 			try {
 				const doc = await fetchJson(await this.#url());
 				const keys = (doc as { keys?: unknown } | null)?.keys;
@@ -253,7 +276,8 @@ export class JwksCache implements KeySource {
 				this.#keys = keys.filter(
 					(k): k is Jwk => typeof k === "object" && k !== null,
 				);
-				this.#fetchedAt = Date.now();
+				this.#fetchedAt = this.#now();
+				this.#lastError = undefined;
 			} finally {
 				this.#inflight = undefined;
 			}

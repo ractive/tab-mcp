@@ -13,7 +13,10 @@ import {
 } from "bun:test";
 import { resolveConfig } from "../src/config.ts";
 import { identityKey, MISMATCH_TEXT } from "../src/identity.ts";
-import type { CreateRelayOptions } from "../src/relay.ts";
+import { JwksCache, type KeySource } from "../src/jwt.ts";
+import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
+import { MemoryTokenStore } from "../src/store/memory.ts";
+import type { RevokeOptions, RevokeSelector } from "../src/store/types.ts";
 import { issueAccessToken } from "../src/tokens.ts";
 import { mcpPost, rpc, ScriptedTab, waitFor } from "./helpers.ts";
 import {
@@ -63,12 +66,17 @@ interface Ctx {
 
 async function relay(
 	options: CreateRelayOptions = {},
+	hooks: RelayTestHooks = {},
 ): Promise<OAuthTestRelay> {
-	const r = startOAuthRelay(cimd, {
-		identity: "oidc",
-		oidc: provider.relayConfig(),
-		...options,
-	});
+	const r = startOAuthRelay(
+		cimd,
+		{
+			identity: "oidc",
+			oidc: provider.relayConfig(),
+			...options,
+		},
+		hooks,
+	);
 	current = r;
 	return r;
 }
@@ -95,8 +103,9 @@ async function signInTab(tab: ScriptedTab, sub: string): Promise<void> {
 async function setup(
 	options: CreateRelayOptions = {},
 	user: string | null = "alice",
+	hooks: RelayTestHooks = {},
 ): Promise<Ctx> {
-	const r = await relay(options);
+	const r = await relay(options, hooks);
 	const tab = await newTab(r);
 	if (user !== null) await signInTab(tab, user);
 	tab.send({ type: "pairing.start" });
@@ -560,5 +569,155 @@ describe("identity binding: configuration (DEC-079)", () => {
 		});
 		const err = (await tab.next("error")) as { code: string };
 		expect(err.code).toBe("identity_refused");
+	});
+});
+
+/** The app's keys, answered slowly: an assertion check that takes a while. */
+function slowKeys(ms: number): KeySource {
+	const cache = new JwksCache(provider.relayConfig().assertionJwksUrl);
+	return {
+		keys: async (kid) => {
+			await Bun.sleep(ms);
+			return cache.keys(kid);
+		},
+	};
+}
+
+/** A memory store that can be made to fail. */
+class FlakyStore extends MemoryTokenStore {
+	failing = false;
+	override async listGrants(addressId: string, now: number) {
+		if (this.failing) throw new Error("store down");
+		return super.listGrants(addressId, now);
+	}
+	override async revoke(selector: RevokeSelector, options: RevokeOptions) {
+		if (this.failing) throw new Error("store down");
+		return super.revoke(selector, options);
+	}
+}
+
+const slowCall = (token: string, address: string) =>
+	mcpPost(
+		address,
+		rpc(2, "tools/call", {
+			name: "echo",
+			arguments: { text: "x", delayMs: 3000 },
+		}),
+		{ token },
+	);
+
+describe("identity binding: review of PR #13", () => {
+	test("an identity still being checked never lands after a later sign-out (identity messages run in order)", async () => {
+		const ctx = await setup({}, null, { assertionKeys: slowKeys(150) });
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address),
+		});
+		ctx.tab.send({ type: "identity.logout" });
+		await ctx.tab.next("identity.bound");
+		await waitFor(
+			() => ctx.r.logs.events("identity.signed_out").length > 0,
+			"the sign-out",
+		);
+		const flow = await openAuthorize(ctx);
+		expect(flow.page.html).toContain("Nobody is signed in to the page");
+	});
+
+	test("an authorization code issued before a sign-out is refused at the token endpoint", async () => {
+		const ctx = await setup();
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const done = await connectThroughProvider(ctx, flow);
+		expect(done.status).toBe(303);
+		ctx.tab.send({ type: "identity.logout" });
+		await waitFor(
+			() => ctx.r.logs.events("identity.signed_out").length > 0,
+			"the sign-out",
+		);
+		const res = await postForm(`${ctx.r.url}/token`, {
+			grant_type: "authorization_code",
+			code: new URL(done.location ?? "").searchParams.get("code") ?? "",
+			redirect_uri: REDIRECT,
+			code_verifier: flow.verifier,
+			client_id: clientId,
+			resource: ctx.address,
+		});
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { error: string }).error).toBe(
+			"invalid_grant",
+		);
+	});
+
+	test("a refused assertion ends the bound user's requests in flight", async () => {
+		const ctx = await setup();
+		const token = await pairedToken(ctx);
+		const slow = slowCall(token, ctx.address);
+		await Bun.sleep(100);
+		const started = Date.now();
+		const now = Math.floor(Date.now() / 1000);
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address, {
+				exp: now - 30,
+			}),
+		});
+		await ctx.tab.next("error");
+		await (await slow).text();
+		expect(Date.now() - started).toBeLessThan(1000);
+		// The next person binds with nothing of the previous one still running.
+		await signInTab(ctx.tab, "bob");
+	});
+
+	test("sign-out ends requests in flight even when the store fails", async () => {
+		const store = new FlakyStore();
+		const ctx = await setup({ store, pageWaitMs: 0 });
+		const token = await pairedToken(ctx);
+		const slow = slowCall(token, ctx.address);
+		await Bun.sleep(100);
+		const started = Date.now();
+		store.failing = true;
+		ctx.tab.send({ type: "identity.logout" });
+		await (await slow).text();
+		expect(Date.now() - started).toBeLessThan(1000);
+		await waitFor(
+			() => ctx.r.logs.events("store.error").some((e) => e["op"] === "signOut"),
+			"the logged store error",
+		);
+		// The grant survived the failed revoke, but the page is bound to nobody.
+		store.failing = false;
+		const after = await mcpPost(ctx.address, add(), { token });
+		expect(after.status).toBe(200);
+		expect(await after.text()).toContain("nobody is signed in");
+	});
+
+	test("a store failure while binding answers identity_refused, never silence", async () => {
+		const store = new FlakyStore();
+		const ctx = await setup({ store }, null);
+		store.failing = true;
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address),
+		});
+		const err = (await ctx.tab.next("error")) as { code: string };
+		expect(err.code).toBe("identity_refused");
+		expect(ctx.r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
+			"store_unavailable",
+		);
+	});
+
+	test("URLs with a password are refused like those with a user name", () => {
+		expect(() =>
+			resolveConfig({
+				publicUrl: "https://relay.example",
+				allowedOrigins: ["https://app.example"],
+				identity: "oidc",
+				oidc: {
+					issuer: "https://:secret@login.example",
+					clientId: "relay",
+					assertionIssuer: "https://app.example",
+					assertionJwksUrl: "https://app.example/jwks",
+				},
+			}),
+		).toThrow(/credentials/);
 	});
 });

@@ -1130,6 +1130,14 @@ ${cancel}
 		) {
 			throw invalid("code_verifier does not match the code_challenge");
 		}
+		// Identity binding: the person paired must still be the page's user, so
+		// a code issued before a sign-out or a change of user buys nothing.
+		if (
+			issued.subject !== undefined &&
+			this.#host.session(issued.addressId)?.identity !== issued.subject
+		) {
+			throw invalid("the page's user signed out or changed");
+		}
 
 		const now = Date.now();
 		const grantId = newId("g");

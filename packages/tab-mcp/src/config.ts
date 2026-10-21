@@ -387,7 +387,12 @@ function checkUrl(value: unknown, name: string, development: boolean): string {
 	if (url.protocol !== "https:" && !(development && url.protocol === "http:")) {
 		throw new ConfigError(`${name} must be https: ${value}`);
 	}
-	if (url.search !== "" || url.hash !== "" || url.username !== "") {
+	if (
+		url.search !== "" ||
+		url.hash !== "" ||
+		url.username !== "" ||
+		url.password !== ""
+	) {
 		throw new ConfigError(
 			`${name} has no query, fragment or credentials: ${value}`,
 		);
