@@ -57,6 +57,6 @@ into the agent's skills directory, for example `.claude/skills/tab-mcp` or
 
 ## Versions
 
-The plugin version follows the packages it describes (`0.3.0`). Update the
+The plugin version follows the packages it describes (`0.4.0`). Update the
 skill and both `plugin.json` files, and the version in `.claude-plugin/marketplace.json`,
 when the client or relay API changes.

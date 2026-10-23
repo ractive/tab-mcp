@@ -53,7 +53,7 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
   -e TAB_MCP_TRUST_PROXY=x-real-ip \
-  ractive/tab-mcp:0.2.1
+  ractive/tab-mcp:0.3.0
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
@@ -67,7 +67,7 @@ machine (see [below](#behind-a-reverse-proxy-or-cdn)). The image:
 - has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead
   (see [Health checks](#health-checks-and-monitoring)).
 
-`docker run --rm ractive/tab-mcp:0.2.1 --version` prints the version, `--help` the
+`docker run --rm ractive/tab-mcp:0.3.0 --version` prints the version, `--help` the
 settings. A setting the relay cannot use stops it at start with
 `tab-mcp: configuration error: …` and exit code 2; read the container log if it does not
 come up.
@@ -77,7 +77,7 @@ With Docker Compose:
 ```yaml
 services:
   tab-mcp:
-    image: ractive/tab-mcp:0.2.1
+    image: ractive/tab-mcp:0.3.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -106,7 +106,7 @@ again after an upgrade.
 
   ```sh
   sudo install -d -o 65532 -g 65532 -m 0700 /srv/tab-mcp
-  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.2.1
+  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.3.0
   ```
 
 - **Platform volumes** (container hosts, Kubernetes) are sometimes mounted owned by
@@ -364,7 +364,7 @@ container platform or a server, check these settings for the relay's hostname:
 `GET /healthz` answers `200` with
 
 ```json
-{"status":"ok","version":"0.2.1","counters":{"claudeHeaderWorkaround":0}}
+{"status":"ok","version":"0.3.0","counters":{"claudeHeaderWorkaround":0}}
 ```
 
 and `Cache-Control: no-store`. It needs no token and touches no page. Use it:
@@ -393,7 +393,7 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 
 ## Resource limits
 
-The relay is light. The 0.2.1 image used about 8 MiB of memory at rest and after a few
+The relay is light. The image of October 2026 used about 8 MiB of memory at rest and after a few
 hundred HTTP requests (`docker stats`, arm64; no page connected), and little CPU: it
 forwards JSON and checks tokens. Each connected page adds a WebSocket and its buffers. What makes memory grow is traffic in flight:
 each MCP request body and each answer from the page can be up to
@@ -511,7 +511,7 @@ Magic Containers with a pull zone):
 
 - **A CDN can cache responses that have no cache headers, for a long time, even with
   caching "off".** One CDN kept `/healthz` and `/` for 30 days, so after a deploy
-  `/healthz` through the CDN still reported the old version. Since 0.2.1 the relay sends
+  `/healthz` through the CDN still reported the old version. The relay sends
   `Cache-Control: no-store` on `/healthz` and a cache time of one hour on `/`. Check a
   deploy against the container itself (the platform's internal endpoint, `docker exec`,
   a port-forward), not only through the CDN, and purge the CDN cache if it kept
