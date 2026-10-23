@@ -360,3 +360,44 @@ test("a relay that ends the attempt with 1008 stops reconnecting; 4004 retries",
 	await stopped;
 	expect(t.reconnecting).toBeUndefined();
 });
+
+test("a connect() that joins the attempt the library started is told by its promise only", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	const errors: string[] = [];
+	t.addEventListener("error", (e) => errors.push(e.detail.error.message));
+	relay.answerHello = false;
+	relay.close(4004);
+	await relay.next("hello"); // the timer's attempt is running
+	const joined = t.connect({ resume: true });
+	relay.send({
+		type: "error",
+		code: "origin_not_allowed",
+		message: "This origin is not allowed",
+	});
+	await expect(joined).rejects.toThrow("This origin is not allowed");
+	expect(t.reconnecting).toBeUndefined();
+	expect(errors).toEqual([]);
+});
+
+test("when error says why it stopped, reconnecting is over already: connect() from the listener starts afresh", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	const seen: { reconnecting: unknown; state: string }[] = [];
+	t.addEventListener("error", () =>
+		seen.push({ reconnecting: t.reconnecting, state: t.state }),
+	);
+	relay.answerHello = false;
+	relay.close(4004);
+	await relay.next("hello");
+	const stopped = new Promise<void>((resolve) =>
+		t.addEventListener("reconnecting", (e) => {
+			if (e.detail === null) resolve();
+		}),
+	);
+	relay.send({
+		type: "error",
+		code: "origin_not_allowed",
+		message: "This origin is not allowed",
+	});
+	await stopped;
+	expect(seen).toEqual([{ reconnecting: undefined, state: "disconnected" }]);
+});
