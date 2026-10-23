@@ -25,7 +25,7 @@ open. Nothing is installed on the user's computer.
 | Browser library | `@ractive-ch/tab-mcp-client` | in the page | the tools, the MCP server logic (loaded on `connect()`), the pairing and confirmation UI, the address secret |
 | Relay | `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | Bun server | tab sessions, OAuth (authorization server and resource server), limits; **not** tools |
 | Token store | `TokenStore` interface in the relay package | SQLite file (default), memory, or the library user's own | grants and token hashes per address |
-| Example | `examples/calculator` | static page with a local relay | four-function calculator with `press_keys`, `read_display`, `clear`, `clear_memory` (consequential) |
+| End-to-end test page | `test/e2e` | served by the e2e test, against a relay the test starts | four-function calculator with `press_keys`, `read_display`, `clear`, `clear_memory` (consequential); the live examples are on ractive.ch (DEC-080) |
 
 The relay is a dumb pipe for MCP: it authenticates the AI app, checks a few HTTP-level
 things, and tunnels the HTTP request to the tab over the tab's WebSocket

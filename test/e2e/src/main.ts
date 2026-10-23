@@ -1,6 +1,6 @@
 /**
  * The calculator page: the keypad, and four tools for AI apps through
- * tab-mcp. The relay's address comes from `/config.json`, which the example
+ * tab-mcp. The relay's address comes from `/config.json`, which the test page's
  * server (`server.ts`) answers.
  */
 

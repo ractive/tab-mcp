@@ -1,29 +1,25 @@
 /**
- * Serves the calculator page with Bun's HTML import (Bun bundles the page's
- * TypeScript and CSS) and `/config.json`, which tells the page its relay.
+ * Serves the calculator test page with Bun's HTML import (Bun bundles the
+ * page's TypeScript and CSS) and `/config.json`, which tells the page its relay.
  */
 
 import index from "./src/index.html";
 
-export interface ExampleServerOptions {
+export interface TestPageOptions {
 	/** The relay the page connects to, e.g. `http://localhost:8080` (a function: read per request). */
 	relay: string | (() => string);
-	/** Listen port; 0 picks a free one. */
-	port?: number;
-	/** Listen address; loopback by default. */
-	hostname?: string;
-	/** Bun's development mode (bundles on request, browser console in the terminal). */
-	development?: boolean;
+	/** Listen port on the loopback address; 0 picks a free one. */
+	port: number;
 }
 
-export function serveExample(
-	options: ExampleServerOptions,
+export function serveTestPage(
+	options: TestPageOptions,
 ): ReturnType<typeof Bun.serve> {
 	const { relay } = options;
 	return Bun.serve({
-		port: options.port ?? 3000,
-		hostname: options.hostname ?? "127.0.0.1",
-		development: options.development === true ? { console: true } : false,
+		port: options.port,
+		hostname: "127.0.0.1",
+		development: false,
 		routes: {
 			"/": index,
 			"/config.json": () =>

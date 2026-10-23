@@ -83,8 +83,8 @@ Spiked on Bun 1.4.3 (macOS arm64) on 2026-10-19; spikes outside the repo, delete
   --packages=external --outdir=dist`.
 - CDN build (self-contained): `--minify --outfile=./dist/tab-mcp-client.min.js`. No
   `--global-name` for IIFE; ship ESM for `<script type="module">`.
-- The example page builds with `bun build ./examples/calculator/index.html --outdir=…` or is
-  served by an HTML-import route in development.
+- A page builds with `bun build ./src/index.html --outdir=…` or is served by an HTML-import
+  route (the e2e test page, `test/e2e/server.ts`, does the latter).
 
 ## npm trusted publishing
 

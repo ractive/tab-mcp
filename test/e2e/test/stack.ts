@@ -29,7 +29,7 @@ import {
 	findChrome,
 	type Page,
 } from "../../../packages/tab-mcp-client/test/cdp.ts";
-import { serveExample } from "../server.ts";
+import { serveTestPage } from "../server.ts";
 
 export { findChrome, type Page };
 
@@ -190,7 +190,7 @@ export async function startStack(chrome: string): Promise<Stack> {
 		},
 	});
 	let relayUrl = "";
-	const page = serveExample({ relay: () => relayUrl, port: 0 });
+	const page = serveTestPage({ relay: () => relayUrl, port: 0 });
 	const pageOrigin = `http://127.0.0.1:${page.port}`;
 	const relay = createTestRelay(
 		{
