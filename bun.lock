@@ -10,16 +10,6 @@
         "typescript": "7.0.2",
       },
     },
-    "examples/calculator": {
-      "name": "tab-mcp-example-calculator",
-      "dependencies": {
-        "@ractive-ch/tab-mcp-client": "workspace:*",
-      },
-      "devDependencies": {
-        "@modelcontextprotocol/client": "2.3.1",
-        "@ractive-ch/tab-mcp": "workspace:*",
-      },
-    },
     "packages/tab-mcp": {
       "name": "@ractive-ch/tab-mcp",
       "version": "0.2.1",
@@ -43,6 +33,16 @@
         "@modelcontextprotocol/server": "2.3.1",
         "@ractive-ch/tab-mcp": "workspace:*",
         "happy-dom": "21.0.3",
+      },
+    },
+    "test/e2e": {
+      "name": "tab-mcp-e2e",
+      "dependencies": {
+        "@ractive-ch/tab-mcp-client": "workspace:*",
+      },
+      "devDependencies": {
+        "@modelcontextprotocol/client": "2.3.1",
+        "@ractive-ch/tab-mcp": "workspace:*",
       },
     },
   },
@@ -153,7 +153,7 @@
 
     "shebang-regex": ["shebang-regex@3.0.0", "", {}, "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="],
 
-    "tab-mcp-example-calculator": ["tab-mcp-example-calculator@workspace:examples/calculator"],
+    "tab-mcp-e2e": ["tab-mcp-e2e@workspace:test/e2e"],
 
     "typescript": ["typescript@7.0.2", "", { "optionalDependencies": { "@typescript/typescript-aix-ppc64": "7.0.2", "@typescript/typescript-darwin-arm64": "7.0.2", "@typescript/typescript-darwin-x64": "7.0.2", "@typescript/typescript-freebsd-arm64": "7.0.2", "@typescript/typescript-freebsd-x64": "7.0.2", "@typescript/typescript-linux-arm": "7.0.2", "@typescript/typescript-linux-arm64": "7.0.2", "@typescript/typescript-linux-loong64": "7.0.2", "@typescript/typescript-linux-mips64el": "7.0.2", "@typescript/typescript-linux-ppc64": "7.0.2", "@typescript/typescript-linux-riscv64": "7.0.2", "@typescript/typescript-linux-s390x": "7.0.2", "@typescript/typescript-linux-x64": "7.0.2", "@typescript/typescript-netbsd-arm64": "7.0.2", "@typescript/typescript-netbsd-x64": "7.0.2", "@typescript/typescript-openbsd-arm64": "7.0.2", "@typescript/typescript-openbsd-x64": "7.0.2", "@typescript/typescript-sunos-x64": "7.0.2", "@typescript/typescript-win32-arm64": "7.0.2", "@typescript/typescript-win32-x64": "7.0.2" }, "bin": { "tsc": "bin/tsc" } }, "sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA=="],
 

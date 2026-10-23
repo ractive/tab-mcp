@@ -166,7 +166,7 @@ const PINNED_FILES = [
 	"SECURITY.md",
 	"packages/tab-mcp/README.md",
 	"packages/tab-mcp-client/README.md",
-	"examples/calculator/README.md",
+	"test/e2e/README.md",
 	"docs/protocol.md",
 	"docs/self-hosting.md",
 	"docs/threat-model.md",
