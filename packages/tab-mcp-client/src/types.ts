@@ -120,7 +120,14 @@ export interface TabMcpOptions {
 	 * only for the page's lifetime (a new address on every visit).
 	 */
 	storage?: SecretStorage | null;
-	/** Storage key of the secret; default `tab-mcp:secret:<relay origin>`. */
+	/**
+	 * Storage key of the secret; default `tab-mcp:secret:<relay origin>:<server.name>`
+	 * (the name URI-encoded), so pages of one site with different server names get
+	 * different addresses. Changing `server.name` therefore changes the address: set
+	 * `storageKey` to keep it. Without it, a secret kept under 0.4's default
+	 * `tab-mcp:secret:<relay origin>` is copied to the new key by the first page that
+	 * connects, so that page keeps its address.
+	 */
 	storageKey?: string;
 	/**
 	 * Identity binding: returns a tab assertion from the web app's backend for
