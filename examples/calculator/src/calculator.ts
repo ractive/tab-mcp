@@ -118,10 +118,15 @@ export class Calculator {
 		this.#afterOperator = false;
 	}
 
-	/** M+: adds the displayed number to the memory. */
+	/** M+: adds the displayed number to the memory; an overflow shows Error and keeps the memory. */
 	memoryAdd(): void {
 		if (this.error) return;
-		this.#memory = Number(formatNumber(this.#memory + this.#value()));
+		const sum = this.#memory + this.#value();
+		if (!Number.isFinite(sum)) {
+			this.#display = ERROR;
+			return;
+		}
+		this.#memory = Number(formatNumber(sum));
 		this.#fresh = true;
 		this.#afterOperator = false;
 	}

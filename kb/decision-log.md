@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-21T18:00:00+02:00
+timestamp: 2026-10-23T16:00:00+02:00
 ---
 
 # Decision log
@@ -281,6 +281,7 @@ which admits nobody. An open relay needs an explicit setting (`TAB_MCP_ALLOWED_O
 and logs a warning at start. The owner's hosted relay allows exactly `https://ractive.ch`
 (browsers send only the origin, not the path, so a path cannot be allowed). The calculator
 example runs against a local relay (`docker run ractive/tab-mcp`), not the hosted one.
+Amended by DEC-080: live examples were published on ractive.ch (the calculator, removed again the same day).
 
 ## DEC-033: MCP 2026-07-28 only, CIMD only, one Claude header case (owner)
 
@@ -1058,6 +1059,24 @@ its own session there too).
   to the page first." Provider errors are shown on the page, the reason only in the log.
 - The owner's wording "logged in as someone else than the page" became "someone other
   than the page" (English idiom); the meaning is unchanged.
+
+## DEC-080: Live examples on ractive.ch use the hosted relay (owner)
+
+The owner, 2026-10-23: the examples are also published as live pages on ractive.ch, so
+people can try tab-mcp without running anything, starting with the calculator at
+<https://ractive.ch/tab-mcp/calculator/>. They connect to the hosted relay
+`tab-mcp.ractive.ch`, which already allows `https://ractive.ch` (DEC-032), so the relay
+does not change. The pages live in the ractive.ch site repository (DEC-046: deployments
+stay outside this repository) and use the npm release of `@ractive-ch/tab-mcp-client`,
+not the workspace. `bun run example` in this repository still starts a local relay and
+never uses the hosted one. A live page served from localhost uses only a relay named in
+its localStorage, never the hosted one.
+
+Amended the same day (owner): the live calculator is removed again. It only showed that
+the plumbing works; the diagram editor at <https://ractive.ch/tab-mcp/diagram/> shows what
+an AI app can do in a page, and <https://ractive.ch/tab-mcp/> lists the live examples.
+`/tab-mcp/calculator/` redirects there. `examples/calculator` stays in this repository as
+the page the end-to-end tests drive.
 
 # Citations
 

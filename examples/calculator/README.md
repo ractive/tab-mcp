@@ -16,6 +16,7 @@ The page registers four tools with `@ractive-ch/tab-mcp-client`:
 the pairing code. Connected apps are listed under the calculator, each with Disconnect.
 
 The example only ever talks to a relay on your own machine, never to the hosted relay.
+For pages to try without running anything, see the README's live examples.
 
 ## Run it
 

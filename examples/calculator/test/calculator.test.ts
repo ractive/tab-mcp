@@ -73,6 +73,20 @@ describe("Calculator", () => {
 		expect(c.display).toBe("3");
 	});
 
+	test("M+ that overflows shows Error and keeps the memory", () => {
+		const c = new Calculator();
+		c.pressAll(`999999999999${"*999999999999".repeat(24)}*99999999=`);
+		c.memoryAdd();
+		const memory = c.memory;
+		expect(Number.isFinite(memory)).toBe(true);
+		c.memoryAdd();
+		expect(c.display).toBe("Error");
+		expect(c.memory).toBe(memory);
+		c.press("C");
+		c.memoryRecall();
+		expect(c.display).toBe(formatNumber(memory));
+	});
+
 	test("an operator after MR or M+ applies the pending operation", () => {
 		const c = new Calculator();
 		c.pressAll("5");

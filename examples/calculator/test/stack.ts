@@ -257,6 +257,16 @@ export interface Pairing {
 	provider: TestProvider;
 	/** The `/authorize` page's text, as the user saw it. */
 	authorizeText: string;
+	/** The dialog's visible closing buttons while the code was shown, then once paired. */
+	buttonsBefore: string[];
+	buttonsAfter: string[];
+}
+
+/** The texts of the visible buttons in the connect dialog's bottom row. */
+export function dialogButtons(page: Page): Promise<string[]> {
+	return page.eval<string[]>(
+		"[...document.querySelectorAll('dialog.tab-mcp-connect[open] > .tab-mcp-actions button')].filter((b) => !b.hidden).map((b) => b.textContent)",
+	);
 }
 
 /**
@@ -280,6 +290,7 @@ export async function pair(
 		calculator,
 		`(document.querySelector('${dialog} .tab-mcp-code-value')?.textContent ?? '').match(/^\\d{6}$/)?.[0]`,
 	);
+	const buttonsBefore = await dialogButtons(calculator);
 
 	const provider = new TestProvider(clientId, stack.redirectUri);
 	const transport = new StreamableHTTPClientTransport(new URL(address), {
@@ -310,7 +321,8 @@ export async function pair(
 		calculator,
 		`document.querySelector('${dialog} .tab-mcp-status')?.textContent.endsWith('is connected.')`,
 	);
-	return { address, provider, authorizeText };
+	const buttonsAfter = await dialogButtons(calculator);
+	return { address, provider, authorizeText, buttonsBefore, buttonsAfter };
 }
 
 /** A connected SDK client using the pairing's tokens. */

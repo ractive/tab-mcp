@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 6: deployment documentation and examples"
 description: Generic, secret-free deployment docs and examples for running a tab-mcp relay (Docker, a bunny.net Magic Containers example); the owner's ractive.ch instance is deployed from the private ractive/ractive.ch repository.
-status: planned
+status: in-progress
 tags:
   - iteration
   - deployment
@@ -22,11 +22,11 @@ What stays here, generic and secret-free:
 
 ## Tasks
 
-- [ ] `docs/deploy.md`: running the relay with Docker (`docker run`, volume for the SQLite store, every `TAB_MCP_*` setting, sites/origins, TLS termination by a proxy or CDN, health endpoint, the 60 s header limit of some CDNs and the keep-alives)
-- [ ] An example OpenTofu module for bunny.net Magic Containers in `examples/deploy-bunny/` (no state, no secrets, placeholders only), documented as an example, not as the owner's setup
-- [ ] Operations notes: backups of the SQLite file, upgrading between versions, what a restart does to sessions and tokens
-- [ ] Privacy template: what an operator should tell users (what passes through the relay, what is stored)
-- [ ] Manual compatibility checks against the deployed relay (moved from iteration 4): claude.ai custom connector, Claude Desktop, ChatGPT developer mode; record app, version, date, revision, auth and result in `docs/compatibility.md`
+- [x] Deployment docs: running the relay with Docker (`docker run`, volume for the SQLite store, every `TAB_MCP_*` setting, sites/origins, TLS termination by a proxy or CDN, health endpoint, the 60 s header limit of some CDNs and the keep-alives). Done by extending and reorganising `docs/self-hosting.md` (it already covered Docker) instead of a parallel `docs/deploy.md`: one instance, data volume and permissions, production settings, proxy/CDN checklist, `/healthz` and log events, resource limits, lessons from the CDN deployment
+- [-] ~~An example OpenTofu module for bunny.net Magic Containers in `examples/deploy-bunny/`~~ Dropped by the owner (2026-10-21): too specific; the deployment docs cover bunny.net generically
+- [x] Operations notes: backups of the SQLite file, upgrading between versions, what a restart does to sessions and tokens (`docs/self-hosting.md`, "Operations": backups, upgrading, rollback, restarts, ending every connection)
+- [x] Privacy template: what an operator should tell users (what passes through the relay, what is stored) (`docs/privacy-template.md`)
+- [ ] Manual compatibility checks against the deployed relay (moved from iteration 4): claude.ai custom connector, Claude Desktop, ChatGPT developer mode; record app, version, date, revision, auth and result in `docs/compatibility.md`. The claude.ai custom connector is recorded there already (2026-10-20, works); Claude Desktop and ChatGPT need the owner's accounts
 
 # Citations
 
