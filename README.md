@@ -168,6 +168,14 @@ and proxy time limits, health checks, backups and upgrades, with a
 lists every setting and why the defaults are safe. The relay also runs without Docker on
 Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 
+**Your own store.** The relay keeps grants and token hashes (never tokens) in SQLite by
+default, or in memory. Embed it in your own Bun program with `createRelay()` and it takes
+any object that implements the `TokenStore` interface: PostgreSQL, Redis, Prisma or
+whatever your stack already runs. The package ships a conformance suite to check your
+store; [token store](docs/token-store.md) has the interface, the guarantees a store must
+give and an example. A shared store does not let several relays serve one address: tab
+sessions live in the relay's memory, so each address still needs exactly one process.
+
 ## Packages
 
 | Path | Published as | What |
