@@ -4,12 +4,12 @@ title: "Iteration 7: identity binding (0.2+)"
 description: >-
   Binding a tab and an AI app to the same OpenID Connect identity, as a second
   pairing method next to the code.
-status: in-progress
+status: completed
 tags:
   - iteration
   - oauth
   - security
-timestamp: 2026-10-21T18:00:00+02:00
+timestamp: 2026-10-23T18:00:00+02:00
 ---
 
 # Iteration 7: identity binding (0.2+)
