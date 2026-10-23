@@ -31,7 +31,12 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   the library connects again after 5, 10, 20 and 40 s, then every 60 s, and at once when
   the tab comes back to the front or the network returns. The property and event
   `reconnecting` report it; the option `reconnect` (`false`, or `{ delaysMs }`) changes
-  it. A reconnect asks `identityAssertion` again like a fresh connect.
+  it. A reconnect asks `identityAssertion` again like a fresh connect. An attempt the
+  relay refuses (not merely unreachable) stops reconnecting.
+- `identityMessage`: why the relay refused the page's identity, while `identity` is
+  `refused`.
+- `confirmInPage(request)`: the library's own confirmation dialog, for an `onConfirm`
+  that hands some calls to it.
 
 #### Changed
 

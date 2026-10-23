@@ -10,6 +10,10 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
 - `ConnectButton` for the "Connect your AI app" dialog, `useTabMcpState` for the status
   line and `useToolCalls` for "The AI's calls".
 
+The live version is at <https://ractive.ch/tab-mcp/examples/todo/> (from the next client
+release on), connected to the hosted relay `tab-mcp.ractive.ch`; all live examples:
+<https://ractive.ch/tab-mcp/>.
+
 The list is a small external store (`src/todos.ts`) read with `useSyncExternalStore`, so
 a tool call and the next one see the same list even before React renders.
 

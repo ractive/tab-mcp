@@ -1102,7 +1102,12 @@ Iteration 9's open questions, decided while building it (can be challenged):
   `server.name` makes a new one and warns (always, not only in development: the library
   cannot see the page's build mode without a bundler), other changes are ignored, but
   `onConfirm` and `identityAssertion` are read through a ref, so the latest closures
-  count. The provider disconnects its own instance when it unmounts.
+  count. Both wrappers are installed whether or not the props are there on the first
+  render (review of PR #20), so a handler added or removed later counts too: without
+  `onConfirm` the wrapper calls the new public `confirmInPage()` (the library's own
+  dialog, which an `onConfirm` may also hand calls to), without `identityAssertion` it
+  answers `null`, which is what no hook means (on an `oidc` relay `identity` passes
+  through `pending` to `none`). The provider disconnects its own instance when it unmounts.
 - The plan said the instance is made on the client only. It is made on the server too
   (during render), because the constructor touches no browser API and no storage, and
   effects (registering, connecting) never run there; so `useTabMcp()` always returns a
@@ -1135,7 +1140,7 @@ Iteration 9's open questions, decided while building it (can be challenged):
 - `examples/react-todo` is bundled by Bun's HTML import and `bun build`, not Vite as the
   plan said: the repository uses Bun's bundler (CLAUDE.md), and the example shows the
   library, not a build tool. Its end-to-end test gives the AI app a token through the
-  relay's store instead of pairing in Chrome, which the calculator end-to-end test
+  relay's store instead of pairing in Chrome, which the end-to-end test in `test/e2e`
   already covers.
 
 ## DEC-082: Reconnecting in the core library
@@ -1156,14 +1161,24 @@ once on `visibilitychange` to visible or `online`. Every connection is user-star
   successful connection.
 - The library schedules after emitting `disconnected`, and not when the page's own
   listener already connected (pages like saturnus that reconnect themselves are not
-  doubled until they drop their copy).
+  doubled until they drop their copy), nor when a listener ended it all with
+  `disconnect()` or `newAddress()` (review of PR #20: the generation changed).
+- A failed attempt is retried only when it failed for a reason that may get better:
+  `network` (no WebSocket at all, a timeout, a lost chunk), `heartbeat` or `shutdown`.
+  `connection.ts` rejects `ready` with the reason (the close code while opening, the
+  relay's `error` as `policy` or `rate_limited`, a `bye`'s reason); anything else stops
+  reconnecting (review of PR #20). A page whose origin is no longer allowed is the one
+  refusal it cannot see: the relay refuses the upgrade, and the browser reports that as
+  1006 like an unreachable relay, so it keeps trying every 60 s. Bun reports a failed
+  handshake as 1002; both count as `network`.
 - Not after `replaced` (another tab owns the address), `expired`, `idle`, `closed` or a
   refusal (`policy`, `too_large`, `rate_limited`): these do not get better by retrying,
   or retrying would fight another tab.
 - A reconnect is a connect: `session` triggers the identity assertion again
   (`identityAssertion`, relays that pair by `oidc`) and `pairing.start` when pairing is
   on, as after a fresh connect.
-- Cost: the core grows by about 0.5 KB gzipped, to 4.9 KB (budget 5 KB).
+- Cost: the core grows by about 0.5 KB gzipped, to 5.0 KB with the review fixes (budget
+  5 KB, with a few bytes left: the next core feature has to raise it or trim).
 
 # Citations
 

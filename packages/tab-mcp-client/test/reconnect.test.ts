@@ -257,3 +257,58 @@ test("a restarted relay: the tab is back on the same address, and the AI app's t
 		await second.stop();
 	}
 });
+
+test("disconnect() in the page's own disconnected listener: no reconnecting (review of PR #20)", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	const seen = record(t);
+	t.addEventListener("disconnected", () => t.disconnect(), { once: true });
+	const gone = nextEvent(t, "disconnected");
+	relay.close(4004);
+	await gone;
+	await Bun.sleep(60);
+	expect(seen).toEqual([]);
+	expect(t.reconnecting).toBeUndefined();
+	expect(relay.received.filter((m) => m.type === "hello")).toEqual([]);
+});
+
+test("a relay that refuses the reconnect attempt stops reconnecting (review of PR #20)", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	const seen = record(t);
+	relay.answerHello = false;
+	relay.close(4004);
+	await relay.next("hello"); // the first attempt
+	const stopped = new Promise<void>((resolve) =>
+		t.addEventListener("reconnecting", (e) => {
+			if (e.detail === null) resolve();
+		}),
+	);
+	relay.send({
+		type: "error",
+		code: "origin_not_allowed",
+		message: "This origin is not allowed",
+	});
+	await stopped;
+	expect(t.reconnecting).toBeUndefined();
+	expect(t.state).toBe("disconnected");
+	await Bun.sleep(60);
+	expect(relay.received.filter((m) => m.type === "hello")).toEqual([]);
+	expect(seen.map((s) => s?.attempt ?? null)).toEqual([1, null]);
+});
+
+test("a relay that ends the attempt with 1008 stops reconnecting; 4004 retries", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	relay.answerHello = false;
+	relay.close(4004);
+	await relay.next("hello");
+	relay.close(4004); // shutting down again while opening: retried
+	await relay.next("hello");
+	expect(t.reconnecting?.attempt).toBe(2);
+	const stopped = new Promise<void>((resolve) =>
+		t.addEventListener("reconnecting", (e) => {
+			if (e.detail === null) resolve();
+		}),
+	);
+	relay.close(1008, "policy");
+	await stopped;
+	expect(t.reconnecting).toBeUndefined();
+});

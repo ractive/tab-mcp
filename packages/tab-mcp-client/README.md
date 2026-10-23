@@ -108,6 +108,9 @@ const mcp = new TabMcp({
 });
 ```
 
+`mcp.confirmInPage(request)` is the library's own dialog, for an `onConfirm` that
+handles only some calls itself.
+
 ### Connecting and pairing
 
 1. The user clicks your button. `showConnectDialog()` connects (call it from the click
@@ -141,7 +144,8 @@ next attempt, its number and time) and the event `reconnecting` say so; `null` i
 event means it stopped, connected again or after `disconnect()`. Calling `connect()`
 meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
 another tab taking over the address (`replaced`), an expired or idle session, or a
-refusal by the relay. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
+refusal by the relay, and an attempt the relay refuses stops it (an unreachable relay is
+tried again). `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
 sets the waits (the last one repeats).
 
 The library does not connect on page load by itself. A page that offers something like
@@ -175,8 +179,8 @@ await mcp.refreshIdentity();
 ```
 
 The library asks the function after every connect. `identity` (`none`, `pending`,
-`bound`, `refused`) and the event `identitychange` tell you whether the relay accepted
-it; without an answer within `identityTimeoutMs` (15 s) it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
+`bound`, `refused`, with the reason in `identityMessage`) and the event
+`identitychange` tell you whether the relay accepted it; without an answer within `identityTimeoutMs` (15 s) it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
 than the page."
 
 ### Your own UI
@@ -235,7 +239,8 @@ function TodoList() {
 - `<TabMcpProvider {...options}>` takes the `TabMcp` options and makes the instance from
   its first render. A changed `relay` or `server.name` makes a new one (with a warning);
   other changes are ignored, except that `onConfirm` and `identityAssertion` are always
-  the latest ones. It disconnects its instance when it unmounts. `<TabMcpProvider
+  the latest ones, also when added or removed after the first render (without
+  `onConfirm`, the library's dialog asks). It disconnects its instance when it unmounts. `<TabMcpProvider
   client={mcp}>` uses an instance of your own instead (and leaves it connected).
 - `useTabMcp()` returns the instance, for everything the hooks do not cover
   (`newAddress()`, `signOut()`, `refreshIdentity()`, `revoke()`, …).

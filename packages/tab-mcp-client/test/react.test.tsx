@@ -29,6 +29,7 @@ import {
 	connectClient,
 	MemoryStorage,
 	newTab,
+	nextEvent,
 	startRelay,
 	type TestRelay,
 	tokenFor,
@@ -62,6 +63,20 @@ function render(element: ReactNode): void {
 		root ??= createRoot(container);
 		root.render(element);
 	});
+}
+
+/**
+ * Resolves once `check()` holds, polled every 5 ms with React's updates
+ * flushed in between (each poll is its own `act`); fails after `timeoutMs`.
+ */
+async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {
+	const end = Date.now() + timeoutMs;
+	while (!check()) {
+		if (Date.now() > end) throw new Error("timed out");
+		await act(async () => {
+			await Bun.sleep(5);
+		});
+	}
 }
 
 /** A tab on the stub relay that the test controls. */
@@ -209,9 +224,7 @@ test("a duplicate tool name reaches the error boundary", async () => {
 				</Boundary>
 			</TabMcpProvider>,
 		);
-		await act(async () => {
-			await Bun.sleep(0);
-		});
+		await until(() => container.textContent === "failed");
 	} finally {
 		console.error = quiet;
 	}
@@ -263,15 +276,17 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 	expect(snapshots).toHaveLength(renders);
 	// A pairing code (the dialog's), then a new grant.
 	await act(async () => {
+		const code = nextEvent(t, "pairingcode");
 		stub.send({
 			type: "pairing.code",
 			code: "ABCD-EFGH",
 			expiresAt: new Date(Date.now() + 60_000).toISOString(),
 		});
-		await Bun.sleep(30);
+		await code;
 	});
 	expect(snapshots.at(-1)?.pairingCode?.code).toBe("ABCD-EFGH");
 	await act(async () => {
+		const changed = nextEvent(t, "grantschange");
 		stub.send({
 			type: "grant.added",
 			grant: {
@@ -284,7 +299,7 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 				createdAt: new Date().toISOString(),
 			},
 		});
-		await Bun.sleep(30);
+		await changed;
 	});
 	expect(snapshots.at(-1)?.grants.map((g) => g.grantId)).toEqual(["g_1"]);
 });
@@ -311,21 +326,23 @@ test("useTabMcpState shows identity binding and reconnecting", async () => {
 	const sent = await stub.next("identity");
 	expect(latest?.identity).toBe("pending");
 	await act(async () => {
+		const answered = nextEvent(t, "identitychange");
 		stub.send({
 			type: "error",
 			code: "identity_refused",
 			message: "not this user",
 			round: sent["round"],
 		});
-		await Bun.sleep(30);
+		await answered;
 	});
 	expect(latest).toMatchObject({
 		identity: "refused",
 		identityMessage: "not this user",
 	});
 	await act(async () => {
+		const reconnecting = nextEvent(t, "reconnecting");
 		stub.close(4004, "shutdown");
-		await Bun.sleep(30);
+		await reconnecting;
 	});
 	expect(latest?.state).toBe("disconnected");
 	expect(latest?.identity).toBe("none");
@@ -366,12 +383,13 @@ test("a tool call reaches the latest execute; useToolCalls lists it with its end
 			session.address,
 			await tokenFor(relay.store, session.address),
 		);
+		const ended = nextEvent(t, "toolcallend");
 		const result = await act(() =>
 			client.callTool({ name: "add", arguments: { a: 1, b: 2 } }),
 		);
 		expect(result.content).toEqual([{ type: "text", text: "103" }]);
 		await act(async () => {
-			await Bun.sleep(20);
+			await ended;
 		});
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toMatchObject({
@@ -402,8 +420,12 @@ test("ConnectButton opens the connect dialog and takes a label function", async 
 	await act(async () => {
 		button.click();
 		await stub.next("hello");
-		await Bun.sleep(30);
 	});
+	await until(
+		() =>
+			button.textContent === "Connected" &&
+			doc.querySelector("dialog")?.hasAttribute("open") === true,
+	);
 	expect(button.textContent).toBe("Connected");
 	expect(doc.querySelector("dialog")?.hasAttribute("open")).toBe(true);
 });
@@ -546,5 +568,99 @@ test("useTabMcp outside a provider says what is missing", () => {
 	} finally {
 		console.error = quiet;
 		root = undefined; // React discarded the tree
+	}
+});
+
+test("an identity refused before the provider mounted shows its message (review of PR #20)", async () => {
+	stub.pairing = "oidc";
+	const t = tab({ identityAssertion: () => "a.b.c" });
+	await t.connect({ resume: true });
+	const sent = await stub.next("identity");
+	const refused = nextEvent(t, "identitychange");
+	stub.send({
+		type: "error",
+		code: "identity_refused",
+		message: "someone else",
+		round: sent["round"],
+	});
+	await refused;
+	expect(t.identityMessage).toBe("someone else");
+	let latest: TabMcpSnapshot | undefined;
+	function Status() {
+		latest = useTabMcpState();
+		return null;
+	}
+	render(
+		<TabMcpProvider client={t}>
+			<Status />
+		</TabMcpProvider>,
+	);
+	expect(latest).toMatchObject({
+		identity: "refused",
+		identityMessage: "someone else",
+	});
+});
+
+test("an onConfirm added after the first render is used; without one, the page's dialog asks (review of PR #20)", async () => {
+	const relay: TestRelay = startRelay();
+	const asked: string[] = [];
+	let instance: TabMcp | undefined;
+	let setConfirm: ((on: boolean) => void) | undefined;
+	function Probe() {
+		instance = useTabMcp();
+		useTool({
+			name: "clear",
+			description: "Clear everything",
+			annotations: { consequentialHint: true },
+			execute: () => "cleared",
+		});
+		return null;
+	}
+	function App() {
+		const [on, setOn] = useState(false);
+		setConfirm = setOn;
+		return (
+			<TabMcpProvider
+				relay={relay.url}
+				server={{ name: "todo", version: "1" }}
+				storage={new MemoryStorage()}
+				{...(on
+					? {
+							onConfirm: () => {
+								asked.push("page");
+								return true;
+							},
+						}
+					: {})}
+			>
+				<Probe />
+			</TabMcpProvider>
+		);
+	}
+	try {
+		render(<App />);
+		const t = instance as TabMcp;
+		const session = await act(() => t.connect({ resume: true }));
+		const client = await connectClient(
+			session.address,
+			await tokenFor(relay.store, session.address),
+		);
+		// No onConfirm yet: the library's dialog asks; "Don't allow" declines.
+		const first = client.callTool({ name: "clear", arguments: {} });
+		await until(() => doc.querySelector("dialog.tab-mcp-confirm") !== null);
+		const deny = [
+			...doc.querySelectorAll("dialog.tab-mcp-confirm button"),
+		].find((b) => b.textContent === "Don't allow") as HTMLButtonElement;
+		act(() => deny.click());
+		expect((await first).isError).toBe(true);
+		act(() => setConfirm?.(true));
+		const second = await act(() =>
+			client.callTool({ name: "clear", arguments: {} }),
+		);
+		expect(second.isError).toBeFalsy();
+		expect(asked).toEqual(["page"]);
+		await client.close();
+	} finally {
+		await relay.stop();
 	}
 });

@@ -91,7 +91,6 @@ class Store {
 	readonly #mcp: TabMcp;
 	readonly #listeners = new Set<() => void>();
 	#snapshot: TabMcpSnapshot;
-	#identityMessage: string | undefined;
 
 	constructor(mcp: TabMcp) {
 		this.#mcp = mcp;
@@ -102,9 +101,6 @@ class Store {
 			this.#snapshot = next;
 			for (const listener of [...this.#listeners]) listener();
 		};
-		mcp.addEventListener("identitychange", (event) => {
-			this.#identityMessage = event.detail.message;
-		});
 		for (const type of STATE_EVENTS) mcp.addEventListener(type, update);
 	}
 
@@ -126,8 +122,7 @@ class Store {
 			grants: mcp.grants,
 			pairingCode: mcp.pairingCode,
 			identity: mcp.identity,
-			identityMessage:
-				mcp.identity === "refused" ? this.#identityMessage : undefined,
+			identityMessage: mcp.identityMessage,
 			reconnecting: mcp.reconnecting,
 			tools:
 				tools.length === previous.tools.length &&
@@ -165,7 +160,7 @@ export type TabMcpProviderProps = (
  * Makes one `TabMcp` for its tree from the props of its first render. A
  * changed `relay` or `server.name` makes a new instance (and warns); other
  * changes are ignored, but `onConfirm` and `identityAssertion` are always
- * the latest ones. Pass `client` to use an instance of your own instead. The
+ * the latest ones (also when added or removed later). Pass `client` to use an instance of your own instead. The
  * provider's own instance is disconnected when the provider unmounts; it
  * never connects on the server.
  */
@@ -188,18 +183,21 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 			children?: ReactNode;
 			client?: undefined;
 		};
+		// Always installed, so that a handler added, changed or removed in a
+		// later render counts: without one, the library's own behaviour.
 		const handlers = () => latest.current as Partial<TabMcpOptions>;
-		if (options.onConfirm !== undefined) {
-			const first = options.onConfirm;
-			options.onConfirm = (request: ConfirmRequest) =>
-				(handlers().onConfirm ?? first)(request);
-		}
-		if (options.identityAssertion !== undefined) {
-			const first = options.identityAssertion;
-			options.identityAssertion = (request: IdentityAssertionRequest) =>
-				(handlers().identityAssertion ?? first)(request);
-		}
-		return new TabMcp(options);
+		const instance: TabMcp = new TabMcp({
+			...options,
+			onConfirm: (request: ConfirmRequest) => {
+				const ask = handlers().onConfirm;
+				return ask === undefined
+					? instance.confirmInPage(request)
+					: ask(request);
+			},
+			identityAssertion: (request: IdentityAssertionRequest) =>
+				handlers().identityAssertion?.(request) ?? null,
+		});
+		return instance;
 	}, [props.client, relay, serverName]);
 
 	const previous = useRef<TabMcp | undefined>(undefined);

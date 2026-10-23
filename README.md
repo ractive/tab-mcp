@@ -16,7 +16,8 @@ Try it without installing anything. These pages connect to the hosted relay
 
 | Page | What your AI app can do there |
 |---|---|
-| [Diagram editor](https://ractive.ch/tab-mcp/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
+| [Diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
+| [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); its source is [examples/react-todo](examples/react-todo) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
 
 ## How it works
@@ -50,7 +51,7 @@ only hashes of tokens. More in the [threat model](docs/threat-model.md).
 
 ## Quick start for users
 
-You need a page that offers tab-mcp, such as the [live diagram editor](https://ractive.ch/tab-mcp/diagram/).
+You need a page that offers tab-mcp, such as the [live diagram editor](https://ractive.ch/tab-mcp/examples/diagram/).
 
 1. In the page, click "Connect your AI app" and copy the address.
 2. Add it to your AI app:
@@ -173,6 +174,7 @@ Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
+| `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
 

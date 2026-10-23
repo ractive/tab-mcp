@@ -36,6 +36,14 @@ const BYE_REASONS: Record<string, DisconnectReason> = {
 	shutdown: "shutdown",
 };
 
+/**
+ * An error of `ready` that says why the connection did not open, so that
+ * reconnecting retries only what may get better (DEC-082).
+ */
+function refused(message: string, reason: DisconnectReason): Error {
+	return Object.assign(new Error(message), { reason });
+}
+
 /** Response headers the relay passes on (it drops the rest). */
 const RESPONSE_HEADERS = ["content-type", "cache-control"];
 
@@ -133,7 +141,7 @@ export function openConnection(
 	});
 	ready.catch(() => {}); // the caller handles it; never an unhandled rejection here
 	const connectTimer = setTimeout(() => {
-		fail(new Error("The relay did not answer in time."));
+		fail(refused("The relay did not answer in time.", "network"));
 	}, CONNECT_TIMEOUT_MS);
 
 	const handler = createMcpHandler({
@@ -306,8 +314,9 @@ export function openConnection(
 				const chunk = chunkSize(message.limits.maxMessageBytes);
 				if (chunk === undefined) {
 					fail(
-						new Error(
+						refused(
 							`The relay's message limit (${message.limits.maxMessageBytes} bytes) is too small; tab-mcp needs at least ${MIN_MESSAGE_BYTES}.`,
+							"policy",
 						),
 					);
 					return;
@@ -320,12 +329,18 @@ export function openConnection(
 				resolveReady(host.sessionStarted(message));
 			} else if (message.type === "error") {
 				fail(
-					new Error(
+					refused(
 						`The relay refused the connection: ${message.message || message.code}`,
+						message.code === "rate_limited" ? "rate_limited" : "policy",
 					),
 				);
 			} else if (message.type === "bye") {
-				fail(new Error(`The relay ended the connection: ${message.reason}`));
+				fail(
+					refused(
+						`The relay ended the connection: ${message.reason}`,
+						BYE_REASONS[message.reason] ?? "closed",
+					),
+				);
 			}
 			return;
 		}
@@ -378,7 +393,12 @@ export function openConnection(
 
 	ws.addEventListener("open", () => {
 		if (ws.protocol !== "" && ws.protocol !== SUBPROTOCOL) {
-			fail(new Error(`The relay speaks ${ws.protocol}, not ${SUBPROTOCOL}.`));
+			fail(
+				refused(
+					`The relay speaks ${ws.protocol}, not ${SUBPROTOCOL}.`,
+					"policy",
+				),
+			);
 			return;
 		}
 		const hello: TabMessage = {
@@ -420,11 +440,15 @@ export function openConnection(
 	ws.addEventListener("close", (event: CloseEvent) => {
 		if (state === "opening") {
 			finish(event.code);
+			// No WebSocket at all: browsers say 1006, Bun 1002. The page cannot
+			// tell a refused origin from an unreachable relay (DEC-082).
+			const unreachable = event.code === 1006 || event.code === 1002;
 			rejectReady(
-				new Error(
-					event.code === 1006
+				refused(
+					unreachable
 						? "Could not connect to the relay (refused, unreachable, or this page's origin is not allowed)."
 						: `The relay closed the connection (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
+					CLOSE_REASONS[event.code] ?? (unreachable ? "network" : "closed"),
 				),
 			);
 			return;

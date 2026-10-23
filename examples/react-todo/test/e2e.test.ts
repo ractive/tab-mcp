@@ -1,7 +1,7 @@
 /**
  * End to end (iteration 9): the React todo page in headless Chrome, a real
  * relay, and the MCP SDK client as the AI app (with a token put in the
- * relay's store; pairing itself is the calculator e2e's subject). The AI app
+ * relay's store; pairing itself is test/e2e's subject). The AI app
  * lists the tools, adds, completes and deletes a todo (with the page's
  * confirmation), and keeps working after the relay restarted. Needs Chrome:
  * required in CI, skipped elsewhere without it.

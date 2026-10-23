@@ -52,9 +52,7 @@ function reconnectDelays(
 		delays.length === 0 ||
 		!delays.every((d) => typeof d === "number" && d >= 0 && d < 2 ** 31)
 	) {
-		throw new TypeError(
-			"TabMcp: reconnect.delaysMs must be a non-empty list of waits in milliseconds",
-		);
+		throw new TypeError("TabMcp: reconnect.delaysMs: a non-empty list of ms");
 	}
 	return [...delays];
 }
@@ -145,6 +143,7 @@ export class TabMcp extends EventTarget {
 	readonly #secrets: SecretStore;
 	readonly #identityAssertion: IdentityAssertionHandler | undefined;
 	#identity: IdentityState = "none";
+	#identityMessage: string | undefined;
 	/** Incremented per identity request, so a late answer of an older one is dropped. */
 	#identityRound = 0;
 	readonly #identityTimeoutMs: number;
@@ -252,6 +251,11 @@ export class TabMcp extends EventTarget {
 	/** Who the relay knows as the page's user (identity binding). */
 	get identity(): IdentityState {
 		return this.#identity;
+	}
+
+	/** Why the relay refused the identity, while `identity` is `refused`. */
+	get identityMessage(): string | undefined {
+		return this.#identityMessage;
 	}
 
 	/**
@@ -472,9 +476,14 @@ export class TabMcp extends EventTarget {
 		if (this.#connecting !== undefined) return this.#connecting;
 		const info = this.#reconnecting;
 		const attempt = this.#start();
-		attempt.catch(() => {
-			if (info !== undefined && this.#reconnecting === info)
+		attempt.catch((error: unknown) => {
+			if (info === undefined || this.#reconnecting !== info) return;
+			// Only what may get better: an unreachable relay (network), a
+			// heartbeat or a shutdown; a refusal stops it (DEC-082).
+			const reason = (error as { reason?: DisconnectReason } | null)?.reason;
+			if (reason === undefined || RECONNECT_REASONS.has(reason))
 				this.#scheduleReconnect(info.reason, info.attempt + 1);
+			else this.#stopReconnecting();
 		});
 		return attempt;
 	}
@@ -606,6 +615,7 @@ export class TabMcp extends EventTarget {
 	#setIdentity(state: IdentityState, message?: string): void {
 		if (this.#identity === state && message === undefined) return;
 		this.#identity = state;
+		this.#identityMessage = state === "refused" ? message : undefined;
 		this.#emit(
 			"identitychange",
 			message === undefined ? { state } : { state, message },
@@ -631,6 +641,15 @@ export class TabMcp extends EventTarget {
 				.then(() => ask(request))
 				.then((allowed) => allowed === true);
 		}
+		return this.confirmInPage(request);
+	}
+
+	/**
+	 * The library's own confirmation: the dialog in the page with Allow,
+	 * Always allow and Deny (what runs without `onConfirm`). An `onConfirm`
+	 * may hand some calls to it. Resolves `false` where there is no document.
+	 */
+	confirmInPage(request: ConfirmRequest): Promise<boolean> {
 		const { grantId } = request.client;
 		if (this.#alwaysAllowed.has(grantId, request.tool.name))
 			return Promise.resolve(true);
@@ -722,6 +741,9 @@ export class TabMcp extends EventTarget {
 			},
 			closed: (reason: DisconnectReason, code: number) => {
 				if (!current()) return;
+				// Any listener below may end it all (`disconnect()`, `newAddress()`):
+				// that bumps the generation, and then nothing is scheduled.
+				const generation = this.#generation;
 				this.#connection = undefined;
 				this.#session = undefined;
 				this.#setPairingCode(undefined);
@@ -732,6 +754,7 @@ export class TabMcp extends EventTarget {
 				// After the page heard of it: its listener may have connected or ended it.
 				if (
 					RECONNECT_REASONS.has(reason) &&
+					this.#generation === generation &&
 					this.#state === "disconnected" &&
 					this.#connecting === undefined
 				)
