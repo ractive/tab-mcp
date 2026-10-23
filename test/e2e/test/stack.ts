@@ -1,7 +1,7 @@
 /**
  * The whole chain for the end-to-end tests: a relay (development mode, memory
  * store, only the page's origin allowed, CIMD fetches from a local HTTPS
- * fixture), the calculator page served as `bun run example` serves it,
+ * fixture), the calculator test page (`server.ts`),
  * headless Chrome over CDP (DEC-025), and an OAuth client like an AI app's
  * (the MCP SDK's) whose browser step is done in Chrome: the test reads the
  * pairing code from the page's dialog and types it on `/authorize`.
@@ -29,7 +29,7 @@ import {
 	findChrome,
 	type Page,
 } from "../../../packages/tab-mcp-client/test/cdp.ts";
-import { serveExample } from "../server.ts";
+import { serveTestPage } from "../server.ts";
 
 export { findChrome, type Page };
 
@@ -190,7 +190,7 @@ export async function startStack(chrome: string): Promise<Stack> {
 		},
 	});
 	let relayUrl = "";
-	const page = serveExample({ relay: () => relayUrl, port: 0 });
+	const page = serveTestPage({ relay: () => relayUrl, port: 0 });
 	const pageOrigin = `http://127.0.0.1:${page.port}`;
 	const relay = createTestRelay(
 		{

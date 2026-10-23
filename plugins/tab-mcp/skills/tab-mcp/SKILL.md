@@ -200,7 +200,7 @@ first-byte limits of CDNs happy. Health check: `GET /healthz`.
 
 ## Check your work
 
-Try the pairing flow by hand with Claude Code against a local relay. A complete page is
-the calculator example; the docs cover every setting and the proxy details:
-<https://github.com/ractive/tab-mcp> (`examples/calculator`, `docs/configuration.md`,
+Try the pairing flow by hand with Claude Code against a local relay. Live pages to try
+are at <https://ractive.ch/tab-mcp/>; the docs cover every setting and the proxy details:
+<https://github.com/ractive/tab-mcp> (`docs/configuration.md`,
 `docs/self-hosting.md`, `docs/compatibility.md`, `SECURITY.md`).

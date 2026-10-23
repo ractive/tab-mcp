@@ -201,7 +201,7 @@ only to `localhost`). See
 
 ## More
 
-- [Example: a calculator page](https://github.com/ractive/tab-mcp/tree/main/examples/calculator)
+- [Live examples](https://ractive.ch/tab-mcp/)
 - [Tab–relay protocol](https://github.com/ractive/tab-mcp/blob/main/docs/protocol.md)
 - [Changelog](https://github.com/ractive/tab-mcp/blob/main/CHANGELOG.md)
 

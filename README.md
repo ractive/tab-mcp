@@ -121,8 +121,8 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
 
 Mark tools that change or delete things with `annotations: { consequentialHint: true }`:
 the page then asks the user before each call. The
-[client README](packages/tab-mcp-client/README.md) covers the whole API, and the
-[calculator example](examples/calculator) is a complete page (`bun run example`).
+[client README](packages/tab-mcp-client/README.md) covers the whole API; the
+[live examples](https://ractive.ch/tab-mcp/) show what pages can offer.
 
 There is no public relay for other sites: run your own (next section).
 
@@ -173,7 +173,7 @@ Bun (`bun add --global @ractive-ch/tab-mcp`, then `tab-mcp`).
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `examples/calculator` | – | a small calculator page as an example ([README](examples/calculator/README.md)) |
+| `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
 
 ## Documentation

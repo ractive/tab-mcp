@@ -1087,8 +1087,9 @@ its localStorage, never the hosted one.
 Amended the same day (owner): the live calculator is removed again. It only showed that
 the plumbing works; the diagram editor at <https://ractive.ch/tab-mcp/diagram/> shows what
 an AI app can do in a page, and <https://ractive.ch/tab-mcp/> lists the live examples.
-`/tab-mcp/calculator/` redirects there. `examples/calculator` stays in this repository as
-the page the end-to-end tests drive.
+`/tab-mcp/calculator/` redirects there. The calculator then left this repository's examples
+too (owner): it lives on in `test/e2e` as the page the end-to-end tests drive, and the
+README points to the live examples instead.
 
 # Citations
 
