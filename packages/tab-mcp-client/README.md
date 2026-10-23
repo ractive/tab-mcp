@@ -132,9 +132,12 @@ shows the same address with a new code.
 The address stays the same across visits: the library keeps a secret per relay and page
 in `localStorage`, under `tab-mcp:secret:<relay origin>:<server.name>`, so two pages of one
 site with different server names get different addresses (set `storageKey` to choose the
-key yourself). A secret that 0.4 or older kept under `tab-mcp:secret:<relay origin>` is
-moved to the new key on the first connect, so an existing page keeps its address; on a
-site with several pages the first one to connect keeps it, the others get new ones. "New address" in the dialog calls `newAddress()`, which disconnects every
+key yourself; the name is URI-encoded, and renaming it changes the address). A secret that
+0.4 or older kept under `tab-mcp:secret:<relay origin>` is copied to the new key once, so an
+existing page keeps its address; on a site with several pages the first one to connect
+keeps it, the others get new ones. The old key stays for pages still on 0.4.
+
+"New address" in the dialog calls `newAddress()`, which disconnects every
 app and makes a new address; when apps are connected, the dialog asks first. The relay's
 sign-in page points users to it when someone else may be guessing codes. A page with its
 own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects

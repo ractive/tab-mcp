@@ -109,7 +109,7 @@ What happens:
 5. The dialog lists the connected app with a Disconnect button. The AI app can now call
    the tools while the page is connected.
 
-The address is stable across visits (a secret per relay in `localStorage`), and paired
+The address is stable across visits (a secret per relay and server name in `localStorage`), and paired
 apps stay paired across reloads. While the page is closed, their calls wait up to 10 s
 for it (the relay's `TAB_MCP_PAGE_WAIT_S`) and then get a tool result saying the page is
 not open. The library never reconnects by itself. If the page offers a "Keep AI access

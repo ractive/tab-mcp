@@ -13,11 +13,13 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 - The address secret's default storage key is `tab-mcp:secret:<relay origin>:<server.name>`
   instead of `tab-mcp:secret:<relay origin>`, so two pages of one site with different
-  server names no longer share an address by accident. A secret under the old key is moved
-  to the new one on the first connect, so an existing page keeps its address; on a site
-  with several pages the first one to connect keeps it and the others get new addresses.
-  An explicit `storageKey` is used as given, without a move. `SecretStorage` may have a
-  `removeItem` (used for the move). The core grows to 5.1 KB gzipped (DEC-083).
+  server names no longer share an address by accident (the name is URI-encoded in the
+  key; renaming `server.name` changes the address). A secret under the old key is copied
+  to the new one once, so an existing page keeps its address; on a site with several pages
+  the first one to connect keeps it and the others get new addresses. The old key stays,
+  for pages still on 0.4 and for a rollback, and a `<old key>#moved` marker records that
+  it was taken. An explicit `storageKey` is used as given, without a copy. The core grows
+  to 5.1 KB gzipped (DEC-083).
 
 ### [0.4.0][client-0.4.0] - 2026-10-23
 

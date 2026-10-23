@@ -99,8 +99,6 @@ export type ConfirmHandler = (
 export interface SecretStorage {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
-	/** Used to move a secret from the default key of 0.4 and older. */
-	removeItem?(key: string): void;
 }
 
 export interface TabMcpOptions {
@@ -123,10 +121,12 @@ export interface TabMcpOptions {
 	 */
 	storage?: SecretStorage | null;
 	/**
-	 * Storage key of the secret; default `tab-mcp:secret:<relay origin>:<server.name>`,
-	 * so pages of one site with different server names get different addresses.
-	 * Without it, a secret kept under 0.4's default `tab-mcp:secret:<relay origin>`
-	 * is moved to the new key once, so the page keeps its address.
+	 * Storage key of the secret; default `tab-mcp:secret:<relay origin>:<server.name>`
+	 * (the name URI-encoded), so pages of one site with different server names get
+	 * different addresses. Changing `server.name` therefore changes the address: set
+	 * `storageKey` to keep it. Without it, a secret kept under 0.4's default
+	 * `tab-mcp:secret:<relay origin>` is copied to the new key by the first page that
+	 * connects, so that page keeps its address.
 	 */
 	storageKey?: string;
 	/**

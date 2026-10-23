@@ -1187,16 +1187,21 @@ The owner, 2026-10-23. Until 0.4 the library kept the secret under
 shared one address: on ractive.ch the calculator and the diagram editor did, and an AI app
 paired with one got the other's tools. From 0.5 the default key is
 `tab-mcp:secret:<relay origin>:<server.name>`: `server.name` is required and names the
-page's MCP server, so it is the natural per-page part.
+page's MCP server, so it is the natural per-page part. It is URI-encoded in the key, and
+renaming it changes the address (the page's apps pair again).
 
-A secret under the old key is moved once (read, written under the new key, the old key
-removed through `SecretStorage.removeItem` where the storage has it), so a site with one
-page, saturnus for example, keeps its address without a change. On a site with several
-pages the first page to connect keeps the old address and the others get new ones; two
-pages connecting at the same instant could both take it, which a reload of either does not
-undo but "New address" does. An explicit `storageKey` is used as given and never moved.
+A secret under the old key is copied once: read, written under the new key, and a marker
+`<old key>#moved` set, so a site with one page, saturnus for example, keeps its address
+without a change. The old key is not removed (review of PR #23): a page of the same site
+still on 0.4, or a rollback to 0.4, keeps reading it. On a site with several pages the
+first page to connect keeps the old address and the others, seeing the marker, get new
+ones; two pages connecting at the same instant could both take it, which a reload of
+either does not undo but "New address" does. "New address" before the first connect also
+sets the marker, so the abandoned address is not picked up by another page. A secret that
+was read is used even when the writes fail (storage full). An explicit `storageKey` is
+used as given and never copied.
 
-The move costs about 80 bytes gzipped and takes the core to 5.1 KB; the budget in
+The copy costs about 80 bytes gzipped and takes the core to 5.1 KB; the budget in
 `build.test.ts` goes from 5 to 5.25 KB (DEC-082 said the next core feature would have to
 raise it).
 

@@ -192,7 +192,7 @@ export class TabMcp extends EventTarget {
 			options.storageKey === undefined
 				? new SecretStore(
 						options.storage,
-						`tab-mcp:secret:${origin}:${server.name}`,
+						`tab-mcp:secret:${origin}:${encodeURIComponent(server.name)}`,
 						`tab-mcp:secret:${origin}`,
 					)
 				: new SecretStore(options.storage, options.storageKey);

@@ -39,6 +39,8 @@ export class SecretStore {
 	readonly #key: string;
 	/** A key the secret may still be under (the default of 0.4 and older). */
 	readonly #oldKey: string | undefined;
+	/** Set once a page of this origin took over the old key's secret. */
+	readonly #claimKey: string | undefined;
 	#memory: string | undefined;
 
 	constructor(
@@ -49,6 +51,7 @@ export class SecretStore {
 		this.#storage = storage === undefined ? defaultStorage() : storage;
 		this.#key = key;
 		this.#oldKey = oldKey;
+		this.#claimKey = oldKey === undefined ? undefined : `${oldKey}#moved`;
 	}
 
 	/** The current secret; storage first, so a rotation in another tab is seen. */
@@ -56,14 +59,19 @@ export class SecretStore {
 		let stored: string | null = null;
 		try {
 			stored = this.#storage?.getItem(this.#key) ?? null;
-			// Moved once from the old shared key: the first page that asks keeps
-			// the address, the old key is removed, so the next page gets its own.
-			if (!isSecret(stored) && this.#oldKey !== undefined) {
+			// The old shared key's secret is copied once (DEC-083): the first page
+			// keeps the address and marks it taken, so the next page gets its own.
+			// The old key stays, for pages still on 0.4 and for a rollback.
+			if (
+				!isSecret(stored) &&
+				this.#oldKey !== undefined &&
+				this.#claimKey !== undefined &&
+				this.#storage?.getItem(this.#claimKey) == null
+			) {
 				const old = this.#storage?.getItem(this.#oldKey) ?? null;
 				if (isSecret(old)) {
-					this.#storage?.setItem(this.#key, old);
-					this.#storage?.removeItem?.(this.#oldKey);
-					stored = old;
+					stored = old; // kept for this page even if the writes below fail
+					this.#claim(old);
 				}
 			}
 		} catch {
@@ -80,11 +88,19 @@ export class SecretStore {
 	rotate(): string {
 		const secret = newSecret();
 		this.#memory = secret;
+		// Also marks the old shared secret taken: an address abandoned with "New
+		// address" is not picked up again by another page of the site.
+		this.#claim(secret);
+		return secret;
+	}
+
+	#claim(secret: string): void {
 		try {
 			this.#storage?.setItem(this.#key, secret);
+			if (this.#claimKey !== undefined)
+				this.#storage?.setItem(this.#claimKey, this.#key);
 		} catch {
 			// quota or blocked: the secret lives as long as the page
 		}
-		return secret;
 	}
 }
