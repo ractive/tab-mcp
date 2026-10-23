@@ -116,8 +116,15 @@ const mcp = new TabMcp({
 2. The dialog shows the address and short instructions for Claude, ChatGPT and Claude
    Code. The user adds the address to their AI app.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
-   code, which the user types there. The code changes every 2 minutes.
-4. The dialog lists the connected app with a Disconnect button.
+   code with a Copy button, which the user types or pastes there. The code changes every
+   2 minutes and after each use.
+4. The dialog announces and lists the connected app with a Disconnect button, and shows
+   "Done" to close it.
+
+Until an app connects, the dialog offers no prominent button under the code: only a small
+"Close" at the bottom (and Escape). Closing it stops the code (`stopPairing()`); the page
+stays connected and the address stays the same, so calling `showConnectDialog()` again
+shows the same address with a new code.
 
 The address stays the same across visits: the library keeps a secret per relay in
 `localStorage`. "New address" in the dialog calls `newAddress()`, which disconnects every

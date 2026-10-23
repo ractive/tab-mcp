@@ -92,6 +92,9 @@ test.skipIf(chrome === undefined)(
 		expect(pairing.authorizeText).toContain(
 			`to Calculator on ${new URL(stack.pageUrl).origin}`,
 		);
+		// While the code is shown only a small Close; once paired, Done.
+		expect(pairing.buttonsBefore).toEqual(["Close"]);
+		expect(pairing.buttonsAfter).toEqual(["Done"]);
 		const host = new URL(stack.cimd.origin).host;
 		expect(
 			await page.eval(
@@ -101,7 +104,7 @@ test.skipIf(chrome === undefined)(
 		await clickButton(
 			page,
 			"dialog.tab-mcp-connect",
-			"Close",
+			"Done",
 			"!document.querySelector('dialog[open]')",
 		);
 		expect(
