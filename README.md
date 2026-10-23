@@ -9,6 +9,17 @@ apps work) and type a code that the page shows. The AI app then calls the page's
 through the relay while the tab stays open. Nothing has to be installed on your
 computer.
 
+## Live examples
+
+Try it without installing anything. These pages connect to the hosted relay
+`tab-mcp.ractive.ch` (all of them: <https://ractive.ch/tab-mcp/>):
+
+| Page | What your AI app can do there |
+|---|---|
+| [Diagram editor](https://ractive.ch/tab-mcp/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
+| [Calculator](https://ractive.ch/tab-mcp/calculator/) | press the keys of a pocket calculator and read its display ([source](examples/calculator)) |
+| [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
+
 ## How it works
 
 ```text
@@ -40,7 +51,7 @@ only hashes of tokens. More in the [threat model](docs/threat-model.md).
 
 ## Quick start for users
 
-You need a page that offers tab-mcp, such as the [calculator example](examples/calculator).
+You need a page that offers tab-mcp, such as the [live diagram editor](https://ractive.ch/tab-mcp/diagram/).
 
 1. In the page, click "Connect your AI app" and copy the address.
 2. Add it to your AI app:
