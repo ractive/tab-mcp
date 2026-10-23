@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 5: packaging, documentation and release"
 description: npm builds with declarations, trusted publishing with provenance, the multi-arch Docker image, project documentation, the developer skill, dependency updates and the token-expiry warning.
-status: in-progress
+status: completed
 tags:
   - iteration
   - release
@@ -34,9 +34,9 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 - [x] `.github/workflows/release.yml` (iteration 5a, DEC-055): GitHub release `client-v<version>` and `workflow_dispatch` (`dry-run`, `bootstrap`, `publish`), dry run on pull requests; verify, build, pack, checks against tag and pre-release flag, dry-run publish, install test, then `npm publish <tgz> --provenance --tag <alpha|beta|rc|latest>` with npm 12.2.0 via OIDC in environment `release`; skips a version already published with the same integrity
 - [x] Bootstrap mode: signs the exact tarball with GitHub OIDC provenance and uploads it with the bundle (artifact `npm-bootstrap-tab-mcp-client-<version>`); proven on the branch in run 39328703960
 - [x] Document the bootstrap and release steps: [npm publishing](/operations/npm-publishing.md) (instead of `RELEASING.md`)
-- [ ] Owner: bootstrap `@ractive-ch/tab-mcp-client@0.1.0-alpha.0`, configure its trusted publisher and the `release` environment, create the GitHub release `client-v0.1.0-alpha.0` ([steps](/operations/npm-publishing.md))
+- [x] Owner: bootstrap `@ractive-ch/tab-mcp-client@0.1.0-alpha.0`, configure its trusted publisher and the `release` environment, create the GitHub release `client-v0.1.0-alpha.0` ([steps](/operations/npm-publishing.md))
 - [x] Relay `@ractive-ch/tab-mcp` (after OAuth, iteration 3): a `relay` entry in `scripts/npm-pack.ts`, `relay-pack`/`relay-bootstrap`/`relay-publish` jobs for `relay-v*` releases, the Docker jobs on the same tag (DEC-068, DEC-069)
-- [ ] Owner: bootstrap `@ractive-ch/tab-mcp@0.1.0-alpha.0`, configure its trusted publisher, the `relay-v*` policy of `release`, the Docker Hub repository and variables, create the GitHub release `relay-v0.1.0-alpha.0`, make the ghcr.io package public ([steps](/operations/npm-publishing.md))
+- [x] Owner: bootstrap `@ractive-ch/tab-mcp@0.1.0-alpha.0`, configure its trusted publisher, the `relay-v*` policy of `release`, the Docker Hub repository and variables, create the GitHub release `relay-v0.1.0-alpha.0` (done as `relay-v0.1.0-alpha.1`: the relay's first release was alpha.1, no alpha.0 exists), make the ghcr.io package public ([steps](/operations/npm-publishing.md))
 
 ### Docker
 
@@ -56,7 +56,7 @@ publishing) and `/Users/james/devel/hyalo/plugins/hyalo` (skill packaging).
 
 ### Developer skill
 
-- [x] `plugins/tab-mcp/skills/tab-mcp/SKILL.md` (open Agent Skills format, under ~200 lines): install the client, register tools WebMCP-style, connect/pairing flow (address plus code typed on `/authorize`), consequential tools, security defaults, self-hosting the relay; `references/` only if needed
+- [x] `plugins/tab-mcp/skills/tab-mcp/SKILL.md` (open Agent Skills format, about 200 lines; since client 0.5.0 the sign-in and React details are in `references/`): install the client, register tools WebMCP-style, connect/pairing flow (address plus code typed on `/authorize`), consequential tools, security defaults, self-hosting the relay; `references/` only if needed
 - [x] Cheap packaging as in hyalo: `plugins/tab-mcp/.claude-plugin/plugin.json` and root `.claude-plugin/marketplace.json` (Claude Code `/plugin marketplace add ractive/tab-mcp`), `plugins/tab-mcp/.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json` (Codex), `agents/openai.yaml`; a `pi` entry only if it needs no extra package; claude.ai: zip upload documented
 - [x] Lint the skill with `hyalo lint` (SKILL rules) if the folder is in a hyalo vault, else by hand
 

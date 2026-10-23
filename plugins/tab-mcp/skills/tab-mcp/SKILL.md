@@ -1,6 +1,6 @@
 ---
 name: tab-mcp
-description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the connect and pairing flow, confirmation for consequential tools, security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP-style registerTool or "Connect your AI app", or needs to self-host the tab-mcp relay.
+description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP-style registerTool or "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
 compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.3+ or Docker.
 ---
@@ -112,12 +112,21 @@ What happens:
 The address is stable across visits (a secret per relay and server name in `localStorage`), and paired
 apps stay paired across reloads. While the page is closed, their calls wait up to 10 s
 for it (the relay's `TAB_MCP_PAGE_WAIT_S`) and then get a tool result saying the page is
-not open. The library never reconnects by itself. If the page offers a "Keep AI access
-on" switch that the user turned on, call `connect({ resume: true })` on load. After a
-`disconnected` event with reason `network`, `heartbeat` or `shutdown`, call
-`connect({ resume: true })` again with a growing wait, and at once when the tab comes back
-to the front (`visibilitychange`) or the network returns (`online`): phones pause
-background tabs, which breaks the connection while the user is in the AI app.
+not open. Renaming `server.name` changes the address, so the apps pair again.
+
+When the connection breaks (reason `network`, `heartbeat` or `shutdown`: a dropped
+network, a phone pausing the tab in the background, a relay restart), the library
+connects again by itself: after 5, 10, 20 and 40 s, then every 60 s, and at once when the
+tab comes back to the front or the network returns. Do not write your own retry loop;
+show the property and event `reconnecting` (the next attempt, its number and time; once
+it stopped, the event carries `null` and the property is `undefined`). It never reconnects after `disconnect()`, a new address, another
+tab taking over the address (`replaced`), an expired or idle session or a refusal by the
+relay, and a first `connect()` that fails is not retried (show the error and let the
+user try again). `reconnect: false`
+turns it off, `reconnect: { delaysMs: [...] }` sets the waits.
+
+The library does not connect on page load by itself: if the page offers a "Keep AI
+access on" switch that the user turned on, call `connect({ resume: true })` on load.
 
 "New address" in the dialog calls `mcp.newAddress()`: it disconnects every app and makes
 a new address, and the dialog asks first when apps are connected. The relay's pages point
@@ -127,7 +136,11 @@ a click.
 For a custom UI, use `connect()`, `startPairing()`/`stopPairing()` (codes come only while
 pairing is on), `revoke(grantId)`, `disconnect()`, the properties `address`,
 `pairingCode` and `grants`, and the events `connected`, `disconnected`, `pairingcode`,
-`grantschange`, `statechange` and `error`.
+`grantschange`, `statechange`, `reconnecting` and `error`.
+
+**Sign-in instead of a code** (a relay that pairs by `oidc`): see
+[references/sign-in.md](references/sign-in.md). **React** single-page apps: see
+[references/react.md](references/react.md).
 
 ## 4. Consequential tools
 
