@@ -329,6 +329,7 @@ export function showConnectDialog(
 	code.style.setProperty("font-family", "var(--tab-mcp-mono, monospace)");
 	// One click selects the whole code; it stays plain, selectable text.
 	code.style.setProperty("user-select", "all");
+	code.style.setProperty("-webkit-user-select", "all");
 	// Reads the code shown at click time, so a rotated code is copied as shown.
 	const { button: copyCode, reset: resetCopyCode } = copyButton(
 		doc,
@@ -337,12 +338,15 @@ export function showConnectDialog(
 		() => doc.getSelection()?.selectAllChildren(code),
 	);
 	copyCode.className = "tab-mcp-code-copy";
+	// Only the sentence with the code is announced when the code changes,
+	// not its Copy button's "Copied".
+	const codeSentence = el(doc, "span", {}, "When asked, enter the code ", code);
+	codeSentence.setAttribute("aria-live", "polite");
 	const codeLine = el(
 		doc,
 		"p",
 		{ className: "tab-mcp-code" },
-		"When asked, enter the code ",
-		code,
+		codeSentence,
 		" ",
 		copyCode,
 		el(doc, "br"),
@@ -351,7 +355,6 @@ export function showConnectDialog(
 			text: "A new code appears every 2 minutes and after each use.",
 		}),
 	);
-	codeLine.setAttribute("aria-live", "polite");
 
 	const steps = el(doc, "ul");
 	const help = el(
@@ -401,12 +404,19 @@ export function showConnectDialog(
 	actions.style.setProperty("gap", "0.75rem");
 	actions.style.setProperty("margin-top", "1rem");
 	closeNote.style.setProperty("flex", "1");
-	// An app connected while this dialog is open (since the last new address).
+	// An app connected while this dialog is open (since the last new address),
+	// and still connected: the grants that made it so.
 	let paired = false;
+	const pairedGrants = new Set<string>();
+	// The note is about the code: only while one is shown and nothing paired.
+	const renderCloseNote = () => {
+		closeNote.hidden = paired || codeLine.hidden;
+	};
 	const setPaired = (value: boolean) => {
 		paired = value;
+		if (!paired) pairedGrants.clear();
 		const focused = doc.activeElement;
-		closeNote.hidden = paired;
+		renderCloseNote();
 		close.hidden = paired;
 		done.hidden = !paired;
 		// Focus never stays on a control that was just hidden.
@@ -501,6 +511,7 @@ export function showConnectDialog(
 		if (code.textContent !== (current?.code ?? "")) resetCopyCode();
 		code.textContent = current?.code ?? "";
 		codeLine.hidden = current === undefined;
+		renderCloseNote();
 	};
 	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
 	apps.append(appsNote);
@@ -518,7 +529,13 @@ export function showConnectDialog(
 			if (known.has(grant.grantId)) continue;
 			known.add(grant.grantId);
 			status.textContent = `${clientLabel(grant.client)} is connected.`;
+			pairedGrants.add(grant.grantId);
 			if (!paired) setPaired(true);
+		}
+		// The app that connected here is gone again (Disconnect, or revoked):
+		// back to Close and the note, the code still runs.
+		if (paired && !mcp.grants.some((g) => pairedGrants.has(g.grantId))) {
+			setPaired(false);
 		}
 		const connected = mcp.state === "connected";
 		appList.replaceChildren(

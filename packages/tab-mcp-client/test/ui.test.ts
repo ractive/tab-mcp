@@ -462,6 +462,52 @@ describe("showConnectDialog", () => {
 		expect(doc.querySelector("dialog")).toBeNull();
 	});
 
+	test("when the app that connected here is disconnected again, Close and the note come back", async () => {
+		relay.grants = [];
+		const { dialog } = await open();
+		await sendCode("123456");
+		const done = byText(dialog, "Done");
+		const close = byText(dialog, "Close");
+		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({ type: "grant.added", grant: GRANT });
+		await added;
+		expect(done.hidden).toBe(false);
+		done.focus();
+
+		const removed = nextEvent(mcp, "grantschange");
+		relay.send({
+			type: "grant.removed",
+			grantId: GRANT.grantId,
+			reason: "revoked",
+		});
+		await removed;
+		expect(done.hidden).toBe(true);
+		expect(close.hidden).toBe(false);
+		expect(note.hidden).toBe(false);
+		// Focus moves off the hidden Done.
+		expect(doc.activeElement).toBe(close);
+		close.click();
+	});
+
+	test("the note about the code shows only while a code is shown; only the code is announced", async () => {
+		relay.grants = [];
+		const { dialog } = await open();
+		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
+		// Connected, but no code yet: nothing to stop.
+		expect(note.hidden).toBe(true);
+		await sendCode("123456");
+		expect(note.hidden).toBe(false);
+		const code = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
+		const live = dialog.querySelector('[aria-live="polite"]') as HTMLElement;
+		expect(live.contains(code)).toBe(true);
+		// The Copy button's "Copied" is not read out as a new code.
+		expect(live.contains(dialog.querySelector(".tab-mcp-code-copy"))).toBe(
+			false,
+		);
+		byText(dialog, "Close").click();
+	});
+
 	test("a failed connection shows the reason in the dialog", async () => {
 		const offline = newTab("http://127.0.0.1:9");
 		const connecting = offline.connect();
