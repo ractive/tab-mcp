@@ -4,14 +4,16 @@
 	"type": "module",
 	"workspaces": [
 		"packages/*",
+		"examples/*",
 		"test/e2e"
 	],
 	"scripts": {
 		"verify": "biome ci . && bun run typecheck && bun test",
-		"typecheck": "bun check -p packages/tab-mcp && bun check -p packages/tab-mcp-client && bun check -p packages/tab-mcp-client/tsconfig.test.json && bun check -p test/e2e && bun check -p scripts",
+		"typecheck": "bun check -p packages/tab-mcp && bun check -p packages/tab-mcp-client && bun check -p packages/tab-mcp-client/tsconfig.test.json && bun check -p test/e2e && bun check -p examples/react-todo && bun check -p scripts",
 		"lint": "biome check .",
 		"fix": "biome check --write .",
 		"test": "bun test",
+		"example:react": "bun examples/react-todo/dev.ts",
 		"e2e:claude": "bun test/e2e/test/claude-code.ts"
 	},
 	"devDependencies": {

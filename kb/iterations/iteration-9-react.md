@@ -2,12 +2,12 @@
 type: iteration
 title: "Iteration 9: React bindings for single-page apps"
 description: A React entry point of the browser library (`@ractive-ch/tab-mcp-client/react`) with a provider, state and tool hooks and a connect button, plus automatic reconnecting in the core library, for SPAs that have no server to host an MCP server.
-status: planned
+status: in-progress
 tags:
   - iteration
   - client
   - react
-timestamp: 2026-10-21T19:30:00+02:00
+timestamp: 2026-10-23T20:00:00+02:00
 ---
 
 # Iteration 9: React bindings for single-page apps
@@ -107,14 +107,18 @@ React SPA), CHANGELOG. Client release 0.3.0.
 - Other frameworks later (Vue, Svelte, Solid): the core API works today; bindings only on
   demand.
 
+Decided on 2026-10-23 while building it (DEC-081, can be challenged by the owner):
+provider plus hooks; only a note on `"use client"` for Next.js and Remix; other
+frameworks on demand. Reconnecting: DEC-082.
+
 ## Tasks
 
-- [ ] Decide the open questions (owner) and record them as a DEC
-- [ ] Reconnecting in the core `TabMcp` (option, state/event, tests), docs
-- [ ] React entry `src/react.tsx`: provider, `useTabMcp`, `useTabMcpState`, `useTool`, `useToolCalls`, `ConnectButton`; package exports and optional peer dependency
-- [ ] Hook tests for React 18.3 and 19 (StrictMode, re-renders, unmount, server rendering)
-- [ ] `examples/react-todo` and its end-to-end test
-- [ ] README, plugin skill, CHANGELOG; release client 0.3.0
+- [x] Decide the open questions and record them as a DEC (DEC-081, decided in the implementation; the owner may reopen them)
+- [x] Reconnecting in the core `TabMcp`: option `reconnect` (`delaysMs`), getter and event `reconnecting`, tests with fake timers and the stub relay, a real relay restart; README (DEC-082)
+- [x] React entry `src/react.ts` (no JSX): provider, `useTabMcp`, `useTabMcpState` (with identity and reconnecting), `useTool`, `useToolCalls`, `ConnectButton`; package exports `./react`, optional peer dependency `react >=18.3.0 <20`, pack checks
+- [x] Hook tests for React 18.3 and 19 (StrictMode, re-renders, unmount, error boundary, server rendering); bundle size of the React entry in `build.test.ts`
+- [x] `examples/react-todo` (Bun's bundler instead of Vite, DEC-081) and its end-to-end test in headless Chrome, including a relay restart
+- [ ] README and CHANGELOG done; the plugin skill's React part with the release (the skill describes the published version); release the client (0.4.0: 0.3.0 is out)
 - [ ] saturnus: use the core reconnecting and drop its own
 
 ## Acceptance criteria

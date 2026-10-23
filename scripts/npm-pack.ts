@@ -34,6 +34,11 @@ interface PackageSpec {
 	types: string;
 	/** `bin` of the published package.json, if it has commands. */
 	bin?: Record<string, string>;
+	/**
+	 * The exact `peerDependencies` (ranges, unlike dependencies); each is
+	 * optional (`peerDependenciesMeta`), so plain installs pull in nothing.
+	 */
+	peerDependencies?: Record<string, string>;
 	/** Files in the tarball, chunk hashes written as `[hash]`. */
 	files: string[];
 	/** Each `.ts` file under here (tests excluded) ships a `.d.ts`. */
@@ -51,9 +56,11 @@ export const PACKAGES: Record<string, PackageSpec> = {
 		tagPrefix: "client-v",
 		exports: {
 			".": { types: "./index.d.ts", default: "./index.js" },
+			"./react": { types: "./react.d.ts", default: "./react.js" },
 			"./cdn": "./cdn/tab-mcp-client.min.js",
 		},
 		types: "./index.d.ts",
+		peerDependencies: { react: ">=18.3.0 <20" },
 		files: [
 			"AI_NOTICE",
 			"LICENSE",
@@ -62,6 +69,8 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"package.json",
 			"index.js",
 			"index.js.map",
+			"react.js",
+			"react.js.map",
 			"connection-[hash].js",
 			"connection-[hash].js.map",
 			"ui-[hash].js",
@@ -160,11 +169,19 @@ export function checkManifest(
 	if (pkg["private"] !== undefined) problems.push("private must not be set");
 	if (pkg["scripts"] !== undefined)
 		problems.push("scripts must not be set (nothing runs on install)");
-	for (const field of [
-		"dependencies",
-		"peerDependencies",
-		"optionalDependencies",
-	]) {
+	// Peer dependencies are ranges the package was tested against, all optional.
+	expect("peerDependencies", pkg["peerDependencies"], spec.peerDependencies);
+	const optional =
+		spec.peerDependencies === undefined
+			? undefined
+			: Object.fromEntries(
+					Object.keys(spec.peerDependencies).map((dep) => [
+						dep,
+						{ optional: true },
+					]),
+				);
+	expect("peerDependenciesMeta", pkg["peerDependenciesMeta"], optional);
+	for (const field of ["dependencies", "optionalDependencies"]) {
 		const deps = (pkg[field] ?? {}) as Record<string, string>;
 		for (const [dep, range] of Object.entries(deps)) {
 			if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(range))

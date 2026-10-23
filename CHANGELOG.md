@@ -21,6 +21,23 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   to the newest assertion counts, and `identityTimeoutMs` (15 s) ends the wait.
 - `SessionInfo.pairing` (`code` or `oidc`). With `oidc` the connect dialog shows no code
   but "sign in with the account you use on this page".
+- React bindings for single-page apps: `@ractive-ch/tab-mcp-client/react` with
+  `TabMcpProvider`, `useTabMcp()`, `useTabMcpState()` (state, address, grants, pairing
+  code, identity, reconnecting, tools; renders only on change), `useTool(tool, deps?)`
+  (registers while mounted, survives StrictMode, the latest `execute` without registering
+  again), `useToolCalls({ limit })` and `ConnectButton`. React 18.3 or 19 is an optional
+  peer dependency; the module starts with `"use client"`; not in the CDN build.
+- Reconnecting: after the connection broke (reason `network`, `heartbeat` or `shutdown`)
+  the library connects again after 5, 10, 20 and 40 s, then every 60 s, and at once when
+  the tab comes back to the front or the network returns. The property and event
+  `reconnecting` report it; the option `reconnect` (`false`, or `{ delaysMs }`) changes
+  it. A reconnect asks `identityAssertion` again like a fresh connect.
+
+#### Changed
+
+- The library now reconnects by itself by default (see above). Pages that reconnected in
+  their own `disconnected` listener keep working (the library then does not schedule its
+  own attempt) but can drop that code; `reconnect: false` keeps the old behaviour.
 
 ### [0.3.0][client-0.3.0] - 2026-10-23
 

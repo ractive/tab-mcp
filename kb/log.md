@@ -1,5 +1,9 @@
 # Log
 
+## 2026-10-23
+
+- Iteration 9 on iter-9/react: `@ractive-ch/tab-mcp-client/react` (provider, useTabMcp, useTabMcpState with identity and reconnecting, useTool, useToolCalls, ConnectButton; optional peer react >=18.3.0 <20, tested with React 18.3 and 19), reconnecting in the core (5, 10, 20, 40, then 60 s; at once on visibility or online), examples/react-todo with a Chrome e2e including a relay restart; DEC-081, DEC-082; skill, release and saturnus still open
+
 ## 2026-10-21
 
 - Iteration 8 on iter-8/page-not-open: the relay waits up to TAB_MCP_PAGE_WAIT_S for the page, then answers "the page is not open" at HTTP 200 (tool error, stand-in server/discover, JSON-RPC error), DEC-074; headless Claude Code before/after

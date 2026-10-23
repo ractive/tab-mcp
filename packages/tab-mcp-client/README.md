@@ -133,8 +133,19 @@ sign-in page points users to it when someone else may be guessing codes. A page 
 own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects
 again; while the page is closed, they get "the page is not open".
 
-The library never reconnects by itself. A page that offers something like "Keep AI
-access on" can call `connect({ resume: true })` on load.
+When the connection breaks (reason `network`, `heartbeat` or `shutdown`: a dropped
+network, a phone pausing the tab in the background, a relay restart), the library
+connects again by itself: after 5, 10, 20 and 40 seconds, then every 60 seconds, and at
+once when the tab comes back to the front or the network returns. `reconnecting` (the
+next attempt, its number and time) and the event `reconnecting` say so; `null` in the
+event means it stopped, connected again or after `disconnect()`. Calling `connect()`
+meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
+another tab taking over the address (`replaced`), an expired or idle session, or a
+refusal by the relay. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
+sets the waits (the last one repeats).
+
+The library does not connect on page load by itself. A page that offers something like
+"Keep AI access on" can call `connect({ resume: true })` on load.
 
 ### Identity binding (no code)
 
@@ -172,9 +183,9 @@ than the page."
 
 Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()`,
 `startPairing()` and `stopPairing()` (codes come only while pairing is on),
-`revoke(grantId)`, the properties `state`, `address`, `pairingCode`, `grants` and
-`tools`, and the events `statechange`, `connected`, `disconnected`, `pairingcode`,
-`grantschange`, `toolschange`, `replaced` and `error`. For an activity log, `toolcall`
+`revoke(grantId)`, the properties `state`, `address`, `pairingCode`, `grants`,
+`reconnecting` and `tools`, and the events `statechange`, `connected`, `disconnected`,
+`pairingcode`, `grantschange`, `reconnecting`, `toolschange`, `replaced` and `error`. For an activity log, `toolcall`
 and `toolcallend` report every call by an AI app: its id, tool, arguments and AI app as it
 starts, then its outcome (`ok`, `error`, `declined` or `cancelled`), result and duration.
 
@@ -190,6 +201,70 @@ colours and sizes from `--tab-mcp-*` CSS custom properties (`--tab-mcp-font`,
 `--tab-mcp-color`, `--tab-mcp-background`, `--tab-mcp-border`, `--tab-mcp-radius`, …)
 and need no CSP exception.
 
+## React
+
+`@ractive-ch/tab-mcp-client/react` has bindings for single-page apps with React 18.3 or
+19 (`react` is an optional peer dependency; pages without React install nothing more).
+A provider makes one `TabMcp` for the tree, each component registers the tools it owns,
+and a button opens the connect dialog:
+
+```tsx
+import { ConnectButton, TabMcpProvider, useTabMcpState, useTool } from "@ractive-ch/tab-mcp-client/react";
+
+export function App() {
+  return (
+    <TabMcpProvider relay="https://relay.example" server={{ name: "todo", version: "1.0.0" }} appName="Todo">
+      <TodoList />
+    </TabMcpProvider>
+  );
+}
+
+function TodoList() {
+  const todos = useTodos(); // your state
+  useTool({
+    name: "add_todo",
+    description: "Add a todo item",
+    inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+    execute: ({ text }) => todos.add(String(text)),
+  });
+  const { state, grants } = useTabMcpState();
+  return <><ConnectButton /> {state === "connected" && `${grants.length} AI apps`}</>;
+}
+```
+
+- `<TabMcpProvider {...options}>` takes the `TabMcp` options and makes the instance from
+  its first render. A changed `relay` or `server.name` makes a new one (with a warning);
+  other changes are ignored, except that `onConfirm` and `identityAssertion` are always
+  the latest ones. It disconnects its instance when it unmounts. `<TabMcpProvider
+  client={mcp}>` uses an instance of your own instead (and leaves it connected).
+- `useTabMcp()` returns the instance, for everything the hooks do not cover
+  (`newAddress()`, `signOut()`, `refreshIdentity()`, `revoke()`, …).
+- `useTabMcpState()` returns `{ state, address, session, grants, pairingCode, identity,
+  identityMessage, reconnecting, tools }` through `useSyncExternalStore`: the component
+  renders again only when one of them changed. On the server and during hydration it is
+  `disconnected`.
+- `useTool(tool, deps?)` registers the tool while the component is mounted and removes it
+  on unmount. `execute` is always the latest closure, so it may use the component's
+  current props and state without registering again; the tool is registered again only
+  when its name, title, description, input schema or annotations change, or one of
+  `deps`. StrictMode's double mount registers it once at a time. A duplicate name or an
+  invalid tool is thrown from the component's render, for an error boundary. Tools that
+  read state right after another tool changed it should read it from a store (as the
+  example does), not from a render's props.
+- `useToolCalls({ limit })` lists the AI app's tool calls since the component mounted,
+  newest first (default 20), each with its `end` (outcome, result, duration) once over.
+- `<ConnectButton>` calls `showConnectDialog()`. Its label follows the state ("Connect
+  your AI app", "Connecting…", "Reconnecting…", "AI app connected"); `children` (a node,
+  or a function of the state) and the usual button props replace or style it, and
+  `data-state` (`disconnected`, `connecting`, `connected`, `reconnecting`) is there for
+  CSS. An `onClick` that calls `preventDefault()` keeps the dialog closed.
+
+The module starts with `"use client"`, so React Server Components frameworks (Next.js's
+app router) render the provider on the client; it never connects or touches storage on
+the server. The CDN build does not include the React bindings: a page that loads tab-mcp
+from a CDN uses the core API. [examples/react-todo](https://github.com/ractive/tab-mcp/tree/main/examples/react-todo)
+is a complete todo app.
+
 ## Security
 
 Connecting an AI app to a page means trusting that page, as with any MCP server. Keep
@@ -202,6 +277,7 @@ only to `localhost`). See
 ## More
 
 - [Live examples](https://ractive.ch/tab-mcp/)
+- [Example: a React todo app](https://github.com/ractive/tab-mcp/tree/main/examples/react-todo)
 - [Tab–relay protocol](https://github.com/ractive/tab-mcp/blob/main/docs/protocol.md)
 - [Changelog](https://github.com/ractive/tab-mcp/blob/main/CHANGELOG.md)
 

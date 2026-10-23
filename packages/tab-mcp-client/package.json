@@ -5,7 +5,8 @@
 	"description": "Browser library: offer a web page's tools to AI agents through a tab-mcp relay",
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./react": "./src/react.ts"
 	},
 	"scripts": {
 		"build": "bun scripts/build.ts",
@@ -31,15 +32,30 @@
 		"mcp",
 		"model-context-protocol",
 		"browser",
-		"webmcp"
+		"webmcp",
+		"react"
 	],
 	"dependencies": {
 		"@cfworker/json-schema": "4.1.1"
+	},
+	"peerDependencies": {
+		"react": ">=18.3.0 <20"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"@modelcontextprotocol/client": "2.3.1",
 		"@modelcontextprotocol/server": "2.3.1",
 		"@ractive-ch/tab-mcp": "workspace:*",
-		"happy-dom": "21.0.3"
+		"@types/react": "19.3.0",
+		"@types/react-dom": "19.3.0",
+		"happy-dom": "21.0.4",
+		"react": "19.3.1",
+		"react-18": "npm:react@18.3.1",
+		"react-dom": "19.3.1",
+		"react-dom-18": "npm:react-dom@18.3.1"
 	}
 }

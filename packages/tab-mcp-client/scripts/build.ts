@@ -43,7 +43,31 @@ const cdn = await Bun.build({
 	sourcemap: "linked",
 	naming: { entry: "tab-mcp-client.min.js", chunk: "[name]-[hash].min.js" },
 });
-for (const result of [npm, cdn]) {
+// The React entry (iteration 9): its own file that imports the core entry
+// (`./index.js`, one `TabMcp` class for both) and `react`; not in the CDN build.
+const react = await Bun.build({
+	entrypoints: [join(root, "src/react.ts")],
+	target: "browser",
+	format: "esm",
+	outdir: dist,
+	sourcemap: "linked",
+	packages: "external",
+	naming: { entry: "[name].js" },
+	// The directive must open the module (React Server Components frameworks).
+	banner: '"use client";',
+	plugins: [
+		{
+			name: "core-entry-external",
+			setup(build) {
+				build.onResolve({ filter: /^\.\/index\.ts$/ }, () => ({
+					path: "./index.js",
+					external: true,
+				}));
+			},
+		},
+	],
+});
+for (const result of [npm, cdn, react]) {
 	if (!result.success) {
 		for (const log of result.logs) console.error(log);
 		process.exit(1);
@@ -70,6 +94,7 @@ const published = {
 	type: "module",
 	exports: {
 		".": { types: "./index.d.ts", default: "./index.js" },
+		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	},
 	types: "./index.d.ts",
@@ -81,6 +106,8 @@ const published = {
 	bugs: pkg["bugs"],
 	keywords: pkg["keywords"],
 	dependencies: pkg["dependencies"],
+	peerDependencies: pkg["peerDependencies"],
+	peerDependenciesMeta: pkg["peerDependenciesMeta"],
 	publishConfig: { access: "public" },
 };
 await Bun.write(

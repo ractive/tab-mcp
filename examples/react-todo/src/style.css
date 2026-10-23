@@ -1,0 +1,115 @@
+:root {
+	--bg: #f7f7f5;
+	--fg: #1d1d1b;
+	--muted: #6b6b66;
+	--line: #d9d9d4;
+	--accent: #2f5bd3;
+	font-family: system-ui, sans-serif;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #171716;
+		--fg: #ececea;
+		--muted: #9b9b95;
+		--line: #3a3a37;
+		--accent: #8aa8ff;
+	}
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+}
+
+main {
+	max-width: 36rem;
+	margin: 0 auto;
+	padding: 2rem 1rem;
+}
+
+header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+}
+
+h1 {
+	margin: 0;
+}
+
+.intro,
+.status,
+.empty {
+	color: var(--muted);
+}
+
+button {
+	font: inherit;
+	cursor: pointer;
+}
+
+.connect {
+	border: 1px solid var(--accent);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--accent);
+	padding: 0.4rem 0.9rem;
+}
+
+.connect[data-state="connected"] {
+	background: var(--accent);
+	color: var(--bg);
+}
+
+form {
+	display: flex;
+	gap: 0.5rem;
+}
+
+form input {
+	flex: 1;
+	font: inherit;
+	padding: 0.4rem 0.6rem;
+	border: 1px solid var(--line);
+	border-radius: 0.4rem;
+	background: transparent;
+	color: inherit;
+}
+
+.todos {
+	list-style: none;
+	padding: 0;
+}
+
+.todos li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.5rem 0;
+	border-bottom: 1px solid var(--line);
+}
+
+.todos li.done span {
+	text-decoration: line-through;
+	color: var(--muted);
+}
+
+.todos li button {
+	border: none;
+	background: none;
+	color: var(--muted);
+	font-size: 1.2rem;
+}
+
+.activity {
+	margin-top: 2rem;
+	font-size: 0.9rem;
+}
+
+.activity h2 {
+	font-size: 1rem;
+}
