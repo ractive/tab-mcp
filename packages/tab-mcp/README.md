@@ -62,6 +62,7 @@ The most important:
 | `TAB_MCP_SQLITE_PATH` | `tab-mcp.db` | the SQLite file for grants and token hashes |
 | `TAB_MCP_TRUST_PROXY` | `none` | `x-real-ip` or `x-forwarded-for` behind a proxy |
 | `TAB_MCP_PORT` | `8080` | listen port |
+| `TAB_MCP_IDENTITY` | `code` | `oidc` pairs AI apps by the same sign-in at your OpenID Connect provider instead of a code (identity binding; needs the `TAB_MCP_OIDC_*` and `TAB_MCP_TAB_ASSERTION_*` settings) |
 
 `GET /healthz` answers `200` with the version, for health checks.
 

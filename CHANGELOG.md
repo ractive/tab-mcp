@@ -7,6 +7,21 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- Identity binding with relays that pair by `oidc`: the option `identityAssertion`, a
+  function that returns a tab assertion from your web app's backend for the signed-in
+  user and the page's address (or `null` when nobody is signed in). The library asks it
+  after every connect and sends the assertion to the relay. `refreshIdentity()` asks
+  again (after a sign-in without a page load), `signOut()` tells the relay the user
+  signed out, which ends every AI connection of the page at once. `identity` and the
+  event `identitychange` say whether the relay accepted the page's user; only the answer
+  to the newest assertion counts, and `identityTimeoutMs` (15 s) ends the wait.
+- `SessionInfo.pairing` (`code` or `oidc`). With `oidc` the connect dialog shows no code
+  but "sign in with the account you use on this page".
+
 ### [0.3.0][client-0.3.0] - 2026-10-23
 
 #### Added
@@ -82,6 +97,31 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Added
+
+- Identity binding (`TAB_MCP_IDENTITY=oidc`, or `pairing: "oidc"` per site): an AI app
+  connects without a code when the person signing in at your OpenID Connect provider is
+  the person signed in to the page; anyone else gets "This AI tool is logged in as
+  someone other than the page." The relay is a client of the provider
+  (`TAB_MCP_OIDC_ISSUER`, `TAB_MCP_OIDC_CLIENT_ID`, `TAB_MCP_OIDC_CLIENT_SECRET`,
+  `TAB_MCP_OIDC_SUBJECT_CLAIM`; callback `/authorize/callback`), and the page proves its
+  user with a short JWT from the web app's backend (`TAB_MCP_TAB_ASSERTION_ISSUER`,
+  `TAB_MCP_TAB_ASSERTION_JWKS_URL`). Settings are checked at start.
+- Protocol: `identity`, `identity.bound`, `identity.logout`, error `identity_refused`,
+  `session.pairing`, MCP error `-31009`. Logout in the page revokes the address's grants
+  at once; a page that signs in as someone else revokes the previous person's grants.
+- `TokenRecord.subject` and `GrantSummary.subject`: the hashed identity of a grant made by
+  identity binding. Custom token stores must store and return it (the conformance suite
+  checks it); a store that drops it refuses those grants. The SQLite store adds the
+  column when it opens an older file.
+
+#### Changed
+
+- A site without `pairing` now takes `TAB_MCP_IDENTITY` (default `code`, so nothing
+  changes unless you set it); `resolveConfig()` no longer fills in `pairing: "code"`.
 
 ### [0.2.1][relay-0.2.1] - 2026-10-21
 

@@ -281,7 +281,7 @@ which admits nobody. An open relay needs an explicit setting (`TAB_MCP_ALLOWED_O
 and logs a warning at start. The owner's hosted relay allows exactly `https://ractive.ch`
 (browsers send only the origin, not the path, so a path cannot be allowed). The calculator
 example runs against a local relay (`docker run ractive/tab-mcp`), not the hosted one.
-Amended by DEC-075: a copy of the calculator is published on ractive.ch.
+Amended by DEC-080: live examples were published on ractive.ch (the calculator, removed again the same day).
 
 ## DEC-033: MCP 2026-07-28 only, CIMD only, one Claude header case (owner)
 
@@ -931,7 +931,148 @@ The log line keeps `reason: "page_not_open"` (status 200). Other 503s stay: a
 notification, a dropped send (`-31005`) and an unavailable token store (`-31008`). It is
 not proven that claude.ai behaves like Claude Code; the next test on a phone shows it.
 
-## DEC-075: Live examples on ractive.ch use the hosted relay (owner)
+## DEC-075: Identity binding is variant 1 only: the relay signs in at the provider
+
+Iteration 7, from the [research findings](/research/identity-binding-research-needed.md).
+The relay stays the AI app's only authorization server and becomes an OpenID Connect
+client of one configured provider: at `/authorize` the user signs in there, and the relay
+issues its own code and tokens if that person is the page's user. Variant 2 (the
+organisation's authorization server in the protected-resource metadata, the relay as a
+plain resource server) is dropped: no hosted provider registers unknown MCP clients and
+issues audiences per tab address (Keycloak's CIMD is experimental and it has no RFC 8707;
+Auth0 and Okta need registered APIs; Entra and Google have neither), and tokens from
+another server could not be listed in the page or revoked by Disconnect (DEC-029). The
+MCP-native route for enterprise providers is the Enterprise-Managed Authorization
+extension (ID-JAG presented at the relay's `/token` with the RFC 7523 JWT-bearer grant);
+it fits the relay's own authorization server and is the candidate for a later iteration,
+once more providers than Okta issue ID-JAGs. `code` stays the default and unchanged.
+
+## DEC-076: The tab assertion: a typed JWT from the web app, sent in an `identity` message
+
+The web app's backend signs a short JWT for the relay; the page hands it to the library
+(`identityAssertion` hook) and the library sends it as `{ type: "identity", assertion }`
+after `session` (the page learns its address from `session` and needs it for `aud`), and
+again when the hook is asked again (`refreshIdentity()`). The relay checks, in this order
+(RFC 7523 claim rules, RFC 8725):
+
+- compact JWS, at most 8 KiB; header `typ` exactly `tab-mcp-identity+jwt` (explicit
+  typing, so an ID token or access token signed with the same key is refused); no `crit`;
+  `alg` one of RS256/384/512, PS256/384/512, ES256/384/512, EdDSA (Ed25519), never `none`
+  or HMAC; the key from `TAB_MCP_TAB_ASSERTION_JWKS_URL`, chosen by `kid` (or the only key
+  of a matching type), whose `kty`/`crv` (and `alg`, if given) must fit the header's
+  `alg`; `jku`, `jwk`, `x5u` in the header are never used;
+- `iss` equal to `TAB_MCP_TAB_ASSERTION_ISSUER`;
+- `aud` exactly the session's MCP address (a string, or an array with that one value):
+  the address names both the relay and the page, so an assertion cannot be used at
+  another relay or for another address;
+- `exp` required, in the future (5 s leeway) and at most 60 s ahead (+5 s); `iat`, if
+  given, not in the future (+5 s); `nbf`, if given, passed;
+- `sub` a non-empty string of at most 255 characters: the user's subject at the OIDC
+  provider, in the claim the relay compares (DEC-079);
+- `jti` required (at most 128 characters) and single-use per person: the relay remembers
+  (binding key, `jti`) until the assertion's `exp`. In memory is enough: an assertion is useful only on a session
+  for its address, which needs the address secret.
+
+The relay answers `identity.bound` or an `error` with code `identity_refused` (the
+session stays). Verification is written on WebCrypto, without a JOSE library: the relay
+has no runtime dependencies (DEC-068), the rules above are short, and allow-listing the
+algorithms per key type closes the known JWT pitfalls (`none`, HMAC with a public key,
+embedded keys). JWKS documents are fetched with a 5 s timeout and a 64 KiB limit, cached
+10 minutes, and fetched again for an unknown `kid` at most every 30 s. After a failed
+fetch the last good keys are served for up to an hour and the next attempt waits 30 s
+(review of PR #13: an outage must not sign every page out at once).
+
+`identity` and `identity.logout` of one session are handled one after another, in order,
+and every `identity` gets exactly one answer (also `identity_refused` when the store
+fails), so a slow check can never bind a user after a later sign-out. An authorization
+code made by identity binding is exchanged only while the page is still bound to the
+same person. The library counts only the relay's answer to its newest assertion and
+gives up after `identityTimeoutMs` (15 s). The page numbers its assertions (`round`) and
+the relay echoes the number in its answer, so an answer that was lost (a frame dropped
+under backpressure, which the relay logs as `identity.answer_dropped`) or came late can
+never pass for the answer to a newer one (review of PR #13; an order-based match broke
+for good after one lost answer).
+
+The replay memory keeps at most 120 assertions per person (about two a second over its
+one-minute window) besides its relay-wide cap, so one signed-in user cannot fill it and
+get everyone else's refreshes refused; expired entries are swept from the whole map at
+most once a second. A JWKS fetch already running is awaited by every caller that comes
+meanwhile, so tabs reconnecting together after a restart, or a refresh during a key
+rotation, all get the keys; and responses are counted while they arrive, so a body
+without Content-Length is cut off at the 64 KiB limit (review of PR #13).
+
+## DEC-077: The address is bound to (provider, subject); grants carry the subject
+
+The binding key is SHA-256 of the provider's issuer and the subject (never stored in the
+clear). The session holds the key for its lifetime; it is proved again on every
+connection, since assertions live 60 s. A grant made by the OIDC pairing method records
+the key (`TokenRecord.subject`, `GrantSummary.subject`; a new nullable column in the
+SQLite store, added on open). Then:
+
+- An MCP request on a grant with a subject, or on a site with `pairing: "oidc"`, is
+  forwarded only to a page bound to the same key. A page bound to another person gets
+  401 `invalid_token` with "This AI tool is logged in as someone other than the page."
+  (the AI app signs in again and meets the same message at `/authorize`). A page that is
+  open but not signed in counts as not ready: the request waits like one for a closed
+  page (DEC-074) and is forwarded once the page proves its identity, else it gets the
+  HTTP 200 answer with "The page is open, but nobody is signed in to it. Ask the user to
+  sign in to *name*, then try again."
+- When a page proves another identity than its grants were made for (a different user in
+  the same browser), the relay revokes those grants at once, ends their requests in
+  flight (`-31009`) and tells the page (`grant.removed`).
+- Grants without a subject (code pairing) on a `code` site are unaffected. A site that
+  switches from `code` to `oidc` thus refuses its old code grants, and revokes them when
+  its page first proves its user.
+- A custom token store that drops the new field fails closed (every request is refused
+  as a mismatch); the conformance suite checks the round trip.
+
+## DEC-078: Logout is a message from the page; no back-channel logout
+
+`TabMcp.signOut()` sends `identity.logout`. The relay revokes every grant of the address
+(tombstone, DEC-063), fails the address's requests in flight with 401 and tells the page
+to cancel them, forgets the binding and answers `grant.removed` for each grant: the AI
+connection ends at once. The message needs no signature: the session is authenticated by
+the address secret, and the page could already revoke everything (`grants.revokeAll`).
+OIDC back-channel, front-channel and RP-initiated logout are not built: they end the
+provider's sessions, and the relay has none; a logout while no page is open needs nothing,
+because a grant works only while a page signed in as the same person is open (DEC-077).
+The web app must call `signOut()` in its open pages when its user logs out (it has to end
+its own session there too).
+
+## DEC-079: The OIDC pairing method and its settings
+
+- `TAB_MCP_IDENTITY=oidc` makes `oidc` the pairing of every site without its own
+  `pairing` (the `TAB_MCP_ALLOWED_ORIGINS` origins included); a site may set
+  `pairing: "oidc"` or `"code"` itself. With any `oidc` site the relay needs
+  `TAB_MCP_OIDC_ISSUER`, `TAB_MCP_OIDC_CLIENT_ID`, `TAB_MCP_TAB_ASSERTION_ISSUER` and
+  `TAB_MCP_TAB_ASSERTION_JWKS_URL` (https outside development) and refuses to start
+  without them; `TAB_MCP_OIDC_CLIENT_SECRET` (absent: a public client with PKCE only) and
+  `TAB_MCP_OIDC_SUBJECT_CLAIM` (`sub`, default, or `oid` for Entra ID) are optional. `oidc`
+  with the open relay (`*`) is refused: one provider cannot vouch for any website's users.
+  One provider and one assertion signer per relay instance; sites that need others get
+  their own instance (DEC-045).
+- The page's "Connect your AI app" dialog must be open (`pairing.start`), as for codes:
+  someone who knows the address cannot pair while the user is not connecting. The tab
+  sees `pairing: "oidc"` in `session` and shows no code.
+- Connect at `/authorize` redirects to the provider's authorization endpoint (from
+  discovery, whose `issuer` must equal the setting) with `response_type=code`,
+  `scope=openid`, PKCE S256, `state` and `nonce` (random, bound to the pending request and
+  the browser's visit cookie, 10 minutes, single-use), and `prompt=login` when the user
+  tries again after a mismatch. The callback is `<public URL>/authorize/callback` (to be
+  registered at the provider). The code is exchanged with `client_secret_basic` (or
+  `client_secret_post` when the provider lists only that); the ID token is validated as
+  OIDC Core §3.1.3.7 says (signature by the provider's JWKS with the algorithms above,
+  `iss`, `aud` containing the client id, `azp` if several audiences, `exp`, `iat`,
+  `nonce`). The subject is compared with the page's binding at callback time, so a page
+  that signed out meanwhile pairs nobody.
+- Match: the relay issues its code (DEC-029) and the grant records the subject. Mismatch:
+  a page says "This AI tool is logged in as someone other than the page." with Try again
+  (sign in as someone else) and Cancel; nothing is issued. A page not signed in: "Sign in
+  to the page first." Provider errors are shown on the page, the reason only in the log.
+- The owner's wording "logged in as someone else than the page" became "someone other
+  than the page" (English idiom); the meaning is unchanged.
+
+## DEC-080: Live examples on ractive.ch use the hosted relay (owner)
 
 The owner, 2026-10-23: the examples are also published as live pages on ractive.ch, so
 people can try tab-mcp without running anything, starting with the calculator at

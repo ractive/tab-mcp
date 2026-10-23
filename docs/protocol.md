@@ -46,7 +46,7 @@ T→R is tab to relay, R→T is relay to tab.
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
 | `hello` | T→R | `library: {name, version}`, `page: {title}`, `app?: {name}`, `secret` | First message after the open. `page.title` is untrusted and never logged. `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim; the relay shows it on `/authorize` unless the relay configures a name for the site. |
-| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app. |
+| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app. `pairing` is `code` or `oidc` (identity binding). |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
 | `bye` | both | `reason` | Orderly end; the sender closes the socket after it. Reasons from the relay: `replaced`, `expired`, `idle`, `shutdown`. |
@@ -65,15 +65,17 @@ old tab gets `bye` with reason `replaced` and close 4005.
 **The session message.** `sessionId` is a fresh random id per WebSocket. It appears only
 in logs and in this protocol, never in URLs. `origin` is the page origin the relay saw on
 the upgrade; `/authorize` shows it. `appName` is the name `/authorize` will show: the
-site's configured name, else the page's `app.name`, absent if neither exists. `grants`
-lists the AI apps already connected to this address (see below).
+site's configured name, else the page's `app.name`, absent if neither exists. `pairing`
+says how AI apps pair with this page: `code` (the tab shows codes) or `oidc` (the same
+sign-in, see [Identity binding](#identity-binding)); older relays omit it, which
+means `code`. `grants` lists the AI apps already connected to this address (see below).
 
 `limits` carries `maxMessageBytes`, `maxBodyBytes`, `requestTimeoutMs`, `idleTimeoutMs`,
 `heartbeatMs`, `keepAliveMs` and `maxConcurrentRequests`, so the tab can show and respect
 them. `maxMessageBytes` is at least 16 384.
 
 ```json
-{"type":"session","sessionId":"s_6Gx…","origin":"https://ractive.ch",
+{"type":"session","sessionId":"s_6Gx…","origin":"https://ractive.ch","pairing":"code",
  "address":"https://relay.ractive.ch/a/mzxw6ytboi4dmnrqgq3tm…/mcp",
  "expiresAt":"2026-10-20T08:00:00.000Z","grants":[],
  "limits":{"maxMessageBytes":1048576,"maxBodyBytes":1048576,"requestTimeoutMs":300000,
@@ -88,13 +90,13 @@ types the code on the relay's `/authorize` page when the AI app opens it.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `pairing.start` | T→R | none | The page's "Connect your AI app" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. |
+| `pairing.start` | T→R | none | The page's "Connect your AI app" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. With `oidc` it only marks the dialog as open: pairing needs it open. |
 | `pairing.code` | R→T | `code`, `expiresAt` | The code to show: 6 digits, single-use, valid 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. Guesses are also limited per address and network and per address overall; malformed input does not count. |
 | `pairing.stop` | T→R | none | The dialog closed; the current code becomes invalid and no more codes come. |
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
 | `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this address gets `error` `unknown_id`. |
 | `grants.revokeAll` | T→R | none | Revoke every grant of this address (sent before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address") or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that run out (at the latest 90 days after pairing) are not announced. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that run out (at the latest 90 days after pairing) are not announced. |
 
 A grant as the tab sees it:
 
@@ -107,6 +109,30 @@ A grant as the tab sees it:
 control, format or bidi characters, at most 64 characters). `client.host`, the host of the
 verified `client_id` URL, is the verified part. Codes are never logged. A session that
 ends, for any reason, stops its codes; grants stay.
+
+### Identity binding
+
+On a site with `pairing: "oidc"`, the relay pairs an AI app only with the person who is
+signed in to the page, proved by the web app's backend
+([configuration](configuration.md#identity-binding)).
+
+| Type | Dir | Fields | Meaning |
+|---|---|---|---|
+| `identity` | T→R | `assertion`, `round?` | A tab assertion for the page's signed-in user: a JWT of at most 8 192 bytes, `typ` `tab-mcp-identity+jwt`, `aud` this session's `address`, `exp` at most 60 s ahead, a single-use `jti`. Sent after `session` (every connection) and again after a sign-in. `round` (a non-negative integer) is the page's number for this assertion; the answer echoes it. |
+| `identity.bound` | R→T | `round?` | The assertion was accepted; the address is bound to this person for the session. `round` is the one of the `identity` it answers, when that had one. |
+| `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the address (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. |
+
+The relay handles `identity` and `identity.logout` one after another, in the order they
+came, and answers every `identity` exactly once. A refused assertion gets `error`
+`identity_refused` with the reason in `message` (and the `round`); the session stays, and the
+binding it had ends (fail closed), with its requests in flight. Grants made by identity
+binding remember the person (as a hash of issuer and subject). An MCP request on such a
+grant, or any request on an `oidc` site, reaches the page only while it is bound to the
+same person; another person gets HTTP 401 `invalid_token` with "This AI tool is logged
+in as someone other than the page.", and a page that is open but not signed in is waited
+for like a closed page (below), then answered with "The page is open, but nobody is
+signed in to it. …". When the page proves another person than before, the relay revokes
+the grants of the previous one and ends their requests in flight.
 
 ### Tunnelled MCP requests
 
@@ -181,6 +207,7 @@ see [When the page is not open](#when-the-page-is-not-open).
 | `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; listen streams excepted). |
 | `-31007` | 502 | The page sent an invalid response (malformed message, a header value that is not an RFC 9110 field value, a body with status 204, 205 or 304). |
 | `-31008` | 503 | The token store is unavailable. Sent with `Retry-After`, so clients keep their tokens. |
+| `-31009` | 401 | The page's user signed out or changed while the request was in flight (identity binding). |
 
 The relay notices that an AI app closed a streamed response when it next writes to it,
 so at the latest after one keep-alive interval. It then sends `http.cancel`.
@@ -237,6 +264,7 @@ optional and names the request the error concerns.
 | `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's; the error has no `id`. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. |
 | `rate_limited` | relay | Reserved: the tab sent too much, and the relay may close with 4008. The relay does not send it yet. |
+| `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with
 an HTTP status and a JSON-RPC error body, as its MCP handler produced it.

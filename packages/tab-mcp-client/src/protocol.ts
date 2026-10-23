@@ -22,6 +22,8 @@ export interface SessionMessage {
 	address: string;
 	origin: string;
 	appName?: string;
+	/** How AI apps pair: `code` or `oidc` (identity binding). Older relays omit it. */
+	pairing?: "code" | "oidc";
 	expiresAt: string;
 	limits: Limits;
 	grants: Grant[];
@@ -62,11 +64,18 @@ export interface GrantRemovedMessage {
 	grantId: string;
 	reason: string;
 }
+export interface IdentityBoundMessage {
+	type: "identity.bound";
+	/** The `round` of the `identity` this answers. */
+	round?: number;
+}
 export interface ErrorMessage {
 	type: "error";
 	code: string;
 	message: string;
 	id?: string;
+	/** On `identity_refused`: the `round` of the `identity` it answers. */
+	round?: number;
 }
 export type RelayMessage =
 	| SessionMessage
@@ -77,6 +86,7 @@ export type RelayMessage =
 	| PairingCodeMessage
 	| GrantAddedMessage
 	| GrantRemovedMessage
+	| IdentityBoundMessage
 	| ErrorMessage;
 
 // Tab → relay
@@ -110,6 +120,8 @@ export type TabMessage =
 	| { type: "pairing.stop" }
 	| { type: "grant.revoke"; grantId: string }
 	| { type: "grants.revokeAll" }
+	| { type: "identity"; assertion: string; round: number }
+	| { type: "identity.logout" }
 	| { type: "error"; code: string; message: string; id?: string };
 
 type Json = Record<string, unknown>;
@@ -164,7 +176,8 @@ export function parseRelayMessage(text: string): RelayMessage | undefined {
 				isLimits(v["limits"]) &&
 				Array.isArray(v["grants"]) &&
 				v["grants"].every(isGrant) &&
-				(v["appName"] === undefined || str(v["appName"]))
+				(v["appName"] === undefined || str(v["appName"])) &&
+				(v["pairing"] === undefined || str(v["pairing"]))
 				? (v as unknown as SessionMessage)
 				: undefined;
 		case "ping":
@@ -202,6 +215,10 @@ export function parseRelayMessage(text: string): RelayMessage | undefined {
 						reason: str(v["reason"]) ? v["reason"] : "",
 					}
 				: undefined;
+		case "identity.bound":
+			return typeof v["round"] === "number"
+				? { type: "identity.bound", round: v["round"] }
+				: { type: "identity.bound" };
 		case "error":
 			return str(v["code"]) ? (v as unknown as ErrorMessage) : undefined;
 		default:

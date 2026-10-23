@@ -355,6 +355,11 @@ export function showConnectDialog(
 			text: "A new code appears every 2 minutes and after each use.",
 		}),
 	);
+	// Identity binding: no code, the same account at the AI app's sign-in.
+	const signInLine = el(doc, "p", {
+		className: "tab-mcp-sign-in",
+		text: "When your AI app asks, sign in with the account you use on this page. No code is needed.",
+	});
 
 	const steps = el(doc, "ul");
 	const help = el(
@@ -426,9 +431,19 @@ export function showConnectDialog(
 	// The visible button that closes the dialog.
 	const closer = () => (paired ? done : close);
 
-	dialog.append(status, addressBox, confirmBox, codeLine, help, apps, actions);
+	dialog.append(
+		status,
+		addressBox,
+		confirmBox,
+		codeLine,
+		signInLine,
+		help,
+		apps,
+		actions,
+	);
 	addressBox.hidden = true;
 	codeLine.hidden = true;
+	signInLine.hidden = true;
 	help.hidden = true;
 	apps.hidden = true;
 
@@ -507,10 +522,12 @@ export function showConnectDialog(
 	};
 	const renderCode = () => {
 		const current = mcp.pairingCode;
+		const oidc = mcp.session?.pairing === "oidc";
 		// A new code is not copied yet.
 		if (code.textContent !== (current?.code ?? "")) resetCopyCode();
 		code.textContent = current?.code ?? "";
-		codeLine.hidden = current === undefined;
+		codeLine.hidden = oidc || current === undefined;
+		signInLine.hidden = !oidc;
 		renderCloseNote();
 	};
 	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
@@ -576,6 +593,7 @@ export function showConnectDialog(
 	const onConnected = () => {
 		renderSession(mcp.session);
 		renderGrants();
+		renderCode();
 	};
 
 	mcp.addEventListener("pairingcode", renderCode);

@@ -136,6 +136,38 @@ again; while the page is closed, they get "the page is not open".
 The library never reconnects by itself. A page that offers something like "Keep AI
 access on" can call `connect({ resume: true })` on load.
 
+### Identity binding (no code)
+
+On a relay that pairs by `oidc` ([identity binding](https://github.com/ractive/tab-mcp/blob/main/docs/configuration.md#identity-binding)),
+the user signs in to the AI app's connection with the account they use on your page,
+and no code is shown. Your backend proves who is signed in: give the library a function
+that fetches a short-lived tab assertion for the page's address.
+
+```ts
+const mcp = new TabMcp({
+  relay: "https://relay.example.com",
+  server: { name: "Calculator", version: "1.0.0" },
+  identityAssertion: async ({ address }) => {
+    const res = await fetch("/api/tab-mcp-assertion", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ address }), // the assertion's aud
+    });
+    return res.ok ? (await res.json()).assertion : null; // null: nobody signed in
+  },
+});
+
+// In your logout: the relay ends every AI connection of this page at once.
+logoutButton.onclick = () => { mcp.signOut(); /* then your own logout */ };
+// After a sign-in without a reload:
+await mcp.refreshIdentity();
+```
+
+The library asks the function after every connect. `identity` (`none`, `pending`,
+`bound`, `refused`) and the event `identitychange` tell you whether the relay accepted
+it; without an answer within `identityTimeoutMs` (15 s) it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
+than the page."
+
 ### Your own UI
 
 Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()`,

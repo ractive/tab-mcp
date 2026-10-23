@@ -216,6 +216,52 @@ trustworthy.
 - Sites on one relay share one operator, one store and one log. A project that needs
   separation runs its own relay.
 
+### A12: Identity binding (sites with `pairing: "oidc"`)
+
+Instead of a code, the user proves at `/authorize` that they are the page's user by
+signing in at the configured OpenID Connect provider. Two statements are compared: the
+web app's backend says who is signed in to the page (a tab assertion), the provider says
+who signed in at `/authorize` (an ID token).
+
+- **Someone else signs in.** Another person, or someone who only knows the address, gets
+  "This AI tool is logged in as someone other than the page." and nothing is issued. The
+  comparison happens when the provider sends the browser back, against the page's
+  binding at that moment, so a page that signed out meanwhile pairs nobody.
+- **Forged or replayed tab assertions.** The relay accepts only JWTs signed by a key of
+  the configured JWKS, with `typ` `tab-mcp-identity+jwt` (so an ID token or access token
+  signed with the same key is refused), the configured `iss`, `aud` exactly the page's
+  address, `exp` at most 60 s ahead and a `jti` it has not seen. `none`, HMAC and keys
+  embedded in the token are refused; each algorithm is tied to its key type. An assertion
+  for one address is useless at another, and sending one at all needs the address
+  secret. The web app's own ID token is never accepted: its audience is the web app.
+- **Forged ID tokens or a hijacked sign-in.** The relay is an ordinary OIDC client:
+  authorization code with PKCE S256, `state` and `nonce`, both random and single-use,
+  bound to the pending request and to the browser's visit cookie (a callback in another
+  browser is refused), and `iss` in the response checked when present. The ID token is
+  validated as OpenID Connect Core says (signature with the provider's keys, `iss`, `aud`,
+  `azp`, `exp`, `iat`, `nonce`).
+- **Phishing the user into a sign-in.** Someone who sends the user an `/authorize` link
+  for their own AI app would only need a click on Connect if the user is signed in at the
+  provider. The page's "Connect your AI app" dialog must be open, as with codes, and the
+  pairing page names the AI app and its verified host. The same click-through risk exists
+  for every OAuth consent page.
+- **A different person later uses the same browser.** Grants remember a hash of the
+  person they were made for. MCP requests reach the page only while it is bound to that
+  person; a page that proves another person revokes the previous person's grants and ends
+  their requests in flight. A page that is open but not signed in gets nothing forwarded.
+- **Logout.** `signOut()` in the page revokes every grant of the address at once and ends
+  requests in flight. A logout while no page is open needs nothing: the grants work only
+  while a page signed in as the same person is open. The web app must call `signOut()` in
+  its open pages when its user logs out.
+- **What it does not protect.** The AI app then acts with exactly the rights of the
+  page's user, so a taken-over provider account also gives the AI connection. A web app
+  backend that signs assertions for users who are not signed in, or a leaked assertion
+  key, lets anyone pair with that user's pages: keep the key like a session-signing key.
+  The relay's client secret lets its holder act as the relay at the provider; keep it in
+  the platform's secret store. Pairwise subjects can make the same person look like two
+  (see [configuration](configuration.md#identity-binding)); comparing an e-mail address
+  instead is refused, because e-mail addresses change hands.
+
 ## Safe defaults
 
 - No page origin is allowed until configured; `*` only explicitly, with a warning.
@@ -249,9 +295,5 @@ each default.
 - The relay accepts one known client bug: the header `MCP-Protocol-Version: 2025-11-25`
   with a body that declares `2026-07-28`. It is limited to this exact pair.
 
-## Planned: identity binding
-
-A later version may connect an AI app to a page only if both are signed in as the same
-person at the same OpenID Connect provider. The AI app would then act with exactly the
-rights of the page's user. A taken-over provider account would then also give the AI
-connection. Until it exists, sites that set `"pairing": "oidc"` are refused at start.
+- With identity binding: a taken-over account at the provider, a leaked assertion key or
+  a web app that vouches for the wrong user (A12).

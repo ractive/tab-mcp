@@ -45,6 +45,16 @@ Configuration is read from environment variables:
                               go beyond it (7776000 = 90 days)
   TAB_MCP_LOG_LEVEL           error | warn | info | debug (info); bodies are never logged
 
+Identity binding (pairing by the same sign-in instead of a code; docs/configuration.md):
+  TAB_MCP_IDENTITY            code | oidc: pairing of sites without their own (code)
+  TAB_MCP_OIDC_ISSUER         the OpenID Connect provider's issuer (required for oidc)
+  TAB_MCP_OIDC_CLIENT_ID      the relay's client at the provider (required for oidc);
+                              register <public URL>/authorize/callback as redirect URI
+  TAB_MCP_OIDC_CLIENT_SECRET  its secret (empty = public client, PKCE only)
+  TAB_MCP_OIDC_SUBJECT_CLAIM  sub | oid: the ID token claim compared (sub; oid for Entra ID)
+  TAB_MCP_TAB_ASSERTION_ISSUER    iss of the web app's tab assertions (required for oidc)
+  TAB_MCP_TAB_ASSERTION_JWKS_URL  JWKS of the web app's assertion keys (required for oidc)
+
 Stops on SIGTERM or SIGINT: tabs get "bye" and close code 4004.
 `;
 

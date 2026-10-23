@@ -51,6 +51,14 @@ export interface SessionHost {
 	revokeGrant(session: TabSession, grantId: string): Promise<boolean>;
 	/** The tab revokes every grant of its address ("New address"). */
 	revokeAll(session: TabSession): Promise<void>;
+	/** The page proves who its user is (DEC-076); answers the tab itself. */
+	bindIdentity(
+		session: TabSession,
+		assertion: string,
+		round?: number,
+	): Promise<void>;
+	/** The page's user signed out (DEC-078). */
+	signOut(session: TabSession): Promise<void>;
 	/** Pairing code lifetime (tests shorten it). */
 	readonly pairingCodeTtlMs?: number;
 }
@@ -112,11 +120,19 @@ export class TabSession {
 	appName: string | undefined;
 	/** Pairing codes while the tab's dialog is open (DEC-028). */
 	readonly codes: PairingCodes;
+	/**
+	 * The binding key of the page's user, once an assertion was accepted
+	 * (DEC-077); `undefined` while nobody is signed in.
+	 */
+	identity: string | undefined;
 	readonly pending: Map<string, Exchange> = new Map();
 
 	readonly #ws: SocketLike;
 	readonly #host: SessionHost;
 	#state: "new" | "hello" | "ready" | "ended" = "new";
+	/** The "Connect your AI app" dialog is open (OIDC pairing, DEC-079). */
+	#dialogOpen = false;
+	#identityChain: Promise<void> = Promise.resolve();
 	#lastRequestAt = Date.now();
 	#missedPongs = 0;
 	#nextRequest = 0;
@@ -157,6 +173,11 @@ export class TabSession {
 
 	get ready(): boolean {
 		return this.#state === "ready";
+	}
+
+	/** Whether the page's "Connect your AI app" dialog is open. */
+	get pairingOpen(): boolean {
+		return this.site.pairing === "code" ? this.codes.active : this.#dialogOpen;
 	}
 
 	/** The limits of this session (its site's). */
@@ -267,9 +288,19 @@ export class TabSession {
 				return;
 			case "pairing.start":
 				if (this.site.pairing === "code") this.codes.start();
+				else this.#dialogOpen = true;
 				return;
 			case "pairing.stop":
 				this.codes.stop();
+				this.#dialogOpen = false;
+				return;
+			case "identity":
+				await this.#serialIdentity(() =>
+					this.#host.bindIdentity(this, msg.assertion, msg.round),
+				);
+				return;
+			case "identity.logout":
+				await this.#serialIdentity(() => this.#host.signOut(this));
 				return;
 			case "grant.revoke":
 				if (!(await this.#host.revokeGrant(this, msg.grantId))) {
@@ -360,6 +391,7 @@ export class TabSession {
 			address: `${this.#host.publicUrl()}/a/${this.addressId}/mcp`,
 			origin: this.origin,
 			...(this.appName === undefined ? {} : { appName: this.appName }),
+			pairing: this.site.pairing,
 			expiresAt: new Date(expiresAt).toISOString(),
 			limits: limitsOf(limits),
 			grants,
@@ -386,6 +418,17 @@ export class TabSession {
 			replaced: replaced !== undefined,
 		});
 		this.#host.ready?.(this);
+	}
+
+	/**
+	 * Identity messages run one after another, in the order they came: frames
+	 * are handled concurrently, and a slow assertion check must not finish
+	 * after a later sign-out (review of PR #13).
+	 */
+	#serialIdentity(run: () => Promise<void>): Promise<void> {
+		const next = this.#identityChain.then(run);
+		this.#identityChain = next.catch(() => {});
+		return next;
 	}
 
 	#tick(): void {
@@ -478,6 +521,7 @@ export class TabSession {
 		const wasReady = this.#state === "ready" || this.#state === "hello";
 		this.#state = "ended";
 		this.codes.stop();
+		this.#dialogOpen = false;
 		clearTimeout(this.#helloTimer);
 		clearInterval(this.#heartbeatTimer);
 		clearTimeout(this.#lifetimeTimer);

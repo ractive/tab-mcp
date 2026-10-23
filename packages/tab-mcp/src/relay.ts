@@ -16,7 +16,9 @@ import {
 	type RpcId,
 	rpcErrorBody,
 } from "./exchange.ts";
+import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
 import { ipPrefixKey } from "./ip.ts";
+import { JwtError, type KeySource } from "./jwt.ts";
 import { createLogger, type Logger, truncateIp } from "./log.ts";
 import { isRetryable, notOpenAnswer, type RelayInfo } from "./notopen.ts";
 import {
@@ -28,6 +30,7 @@ import {
 	type GrantInfo,
 	MCP_PROTOCOL_VERSION,
 	PROTOCOL_VERSION_META_KEY,
+	type RelayMessage,
 	SUBPROTOCOL,
 } from "./protocol.ts";
 import { TabSession } from "./session.ts";
@@ -95,6 +98,8 @@ interface WsData {
  */
 export interface RelayTestHooks extends AuthorizationTestMode {
 	pairingCodeTtlMs?: number;
+	/** Keys for tab assertions instead of fetching the JWKS URL. */
+	assertionKeys?: KeySource;
 }
 
 interface Body {
@@ -203,6 +208,11 @@ function startRelay(
 	const appNames = new Map<string, string>();
 	let claudeWorkarounds = 0;
 	let publicUrl = config.publicUrl ?? "";
+	/** Tab assertions (identity binding, DEC-076), when configured. */
+	const assertions =
+		config.oidc === undefined
+			? undefined
+			: new TabAssertionVerifier(config.oidc, hooks?.assertionKeys);
 
 	const corsHeaders: Record<string, string> = config.cors
 		? {
@@ -260,6 +270,125 @@ function startRelay(
 			});
 			for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
 		},
+		/**
+		 * Called one at a time per session (the session chains `identity` and
+		 * `identity.logout`), so a slow check never lands after a later sign-out.
+		 * Always answers the tab once: `identity.bound` or `identity_refused`.
+		 */
+		async bindIdentity(
+			session: TabSession,
+			assertion: string,
+			round?: number,
+		): Promise<void> {
+			const addressId = session.addressId;
+			if (addressId === undefined) return;
+			const echo = round === undefined ? {} : { round };
+			// The page waits for this answer; a dropped one (backpressure) is
+			// logged, and the page's timeout gives up on it (the round tells a late
+			// answer from a new one).
+			const answer = (message: RelayMessage) => {
+				if (!session.send(message)) {
+					logger.warn("identity.answer_dropped", {
+						address: shortAddress(addressId),
+						type: message.type,
+					});
+				}
+			};
+			const refuse = (reason: string, message: string) => {
+				// Fail closed: a refused assertion also ends an earlier binding,
+				// and the requests made under it.
+				if (session.identity !== undefined) {
+					session.identity = undefined;
+					failPending(session, "The page's user is no longer signed in.");
+				}
+				logger.info("identity.refused", {
+					address: shortAddress(addressId),
+					reason,
+				});
+				answer({ type: "error", code: "identity_refused", message, ...echo });
+			};
+			if (session.site.pairing !== "oidc" || assertions === undefined) {
+				refuse("not_oidc", "this page's site does not use identity binding");
+				return;
+			}
+			let key: string;
+			try {
+				key = await assertions.verify(
+					assertion,
+					`${publicUrl}/a/${addressId}/mcp`,
+				);
+			} catch (error) {
+				refuse(
+					error instanceof JwtError ? error.reason : "error",
+					`the identity assertion was refused: ${error instanceof JwtError ? error.message : "the relay could not check it"}`,
+				);
+				return;
+			}
+			if (!session.ready) return; // closed meanwhile
+			const changed = session.identity !== key;
+			if (changed && session.identity !== undefined) {
+				// Another person now: nothing more for the old one, before any I/O.
+				session.identity = undefined;
+				failPending(session, "The page's user changed.");
+			}
+			// Grants made for someone else (or with a code) end now (DEC-077).
+			let revoked = 0;
+			try {
+				const grants = await store.listGrants(addressId, Date.now());
+				for (const g of grants.filter((g) => g.subject !== key)) {
+					await store.revoke({ grantId: g.grantId }, revokeOptions());
+					grantRemoved(addressId, g.grantId, "revoked");
+					revoked++;
+				}
+			} catch (error) {
+				logger.error("store.error", {
+					op: "identity",
+					message: error instanceof Error ? error.message : "unknown",
+				});
+				refuse("store_unavailable", "the relay cannot check grants right now");
+				return;
+			}
+			if (!session.ready) return;
+			session.identity = key;
+			answer({ type: "identity.bound", ...echo });
+			logger.info("identity.bound", {
+				address: shortAddress(addressId),
+				changed,
+				revoked,
+			});
+			host.ready(session); // requests waiting for a signed-in page go on
+		},
+		async signOut(session: TabSession): Promise<void> {
+			const addressId = session.addressId;
+			if (addressId === undefined) return;
+			if (session.site.pairing !== "oidc") {
+				session.send({
+					type: "error",
+					code: "identity_refused",
+					message: "this page's site does not use identity binding",
+				});
+				return;
+			}
+			// First the binding and the requests in flight: they end even if the
+			// store fails below.
+			session.identity = undefined;
+			failPending(session, "The page's user signed out.");
+			try {
+				const grants = await store.listGrants(addressId, Date.now());
+				await store.revoke({ addressId }, revokeOptions());
+				logger.info("identity.signed_out", {
+					address: shortAddress(addressId),
+					grants: grants.length,
+				});
+				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+			} catch (error) {
+				// The grants stay, but work only for a page bound to their person.
+				logger.error("store.error", {
+					op: "signOut",
+					message: error instanceof Error ? error.message : "unknown",
+				});
+			}
+		},
 		claimAddress(session: TabSession): TabSession | undefined {
 			const id = session.addressId;
 			if (id === undefined) return undefined;
@@ -294,9 +423,30 @@ function startRelay(
 		},
 	};
 
-	function readySession(addressId: string): TabSession | undefined {
+	/** End a session's requests in flight; the page is told to stop them. */
+	function failPending(session: TabSession, message: string): void {
+		for (const exchange of [...session.pending.values()]) {
+			exchange.fail(401, RelayErrorCode.signedOut, message, true);
+		}
+	}
+
+	function readySession(
+		addressId: string,
+		usable: (s: TabSession) => boolean = () => true,
+	): TabSession | undefined {
 		const s = sessions.get(addressId);
-		return s?.ready === true ? s : undefined;
+		return s?.ready === true && usable(s) ? s : undefined;
+	}
+
+	/**
+	 * Whether a session can take a grant's requests: a grant with a subject, or
+	 * any grant on an `oidc` site, needs a page that proved who its user is
+	 * (DEC-077). Whether it is the same person is checked after the wait.
+	 */
+	function usableFor(subject: string | undefined) {
+		return (s: TabSession) =>
+			(subject === undefined && s.site.pairing === "code") ||
+			s.identity !== undefined;
 	}
 
 	/**
@@ -308,8 +458,9 @@ function startRelay(
 		addressId: string,
 		signal: AbortSignal,
 		waitMs: number,
+		usable: (s: TabSession) => boolean,
 	): Promise<TabSession | undefined | "aborted"> {
-		const now = readySession(addressId);
+		const now = readySession(addressId, usable);
 		if (now !== undefined) return Promise.resolve(now);
 		if (waitMs === 0 || stopping !== undefined) {
 			return Promise.resolve(undefined);
@@ -338,7 +489,9 @@ function startRelay(
 				}
 				resolve(result);
 			};
-			const wake = (session: TabSession | undefined) => done(session);
+			const wake = (session: TabSession | undefined) => {
+				if (session === undefined || usable(session)) done(session);
+			};
 			const onAbort = () => done("aborted");
 			set.add(wake);
 			waiters.set(addressId, set);
@@ -713,12 +866,13 @@ function startRelay(
 		// our own timers (the page wait, the request timer) and keep-alives take
 		// over (Bun research, finding 1). Body reading and every unauthenticated
 		// path keep the idle timeout, so a stalled client cannot hold a socket.
-		if (readySession(addressId) === undefined && waitMs > 0) {
+		const usable = usableFor(auth.subject);
+		if (readySession(addressId, usable) === undefined && waitMs > 0) {
 			server.timeout(req, 0);
 		}
 		let retried = false;
 		for (;;) {
-			const found = await waitForPage(addressId, req.signal, waitMs);
+			const found = await waitForPage(addressId, req.signal, waitMs, usable);
 			// The AI app may have gone while the body was read, the token checked
 			// or the page awaited: then forward nothing (the abort event has
 			// already fired and would not cancel the exchange, which would hold a
@@ -728,6 +882,21 @@ function startRelay(
 				return pageNotOpen(body.value, rpcId, addressId, logDone, method);
 			}
 			const session = found;
+			// Identity binding: only the person the grant was made for (DEC-077).
+			if (
+				(auth.subject !== undefined || session.site.pairing === "oidc") &&
+				session.identity !== auth.subject
+			) {
+				logDone(401, method, { reason: "identity_mismatch" });
+				return json(
+					401,
+					{ error: "invalid_token", error_description: MISMATCH_TEXT },
+					{
+						...corsHeaders,
+						"www-authenticate": `${wwwAuthenticate(addressId, true)}, error_description="${MISMATCH_TEXT}"`,
+					},
+				);
+			}
 			// The body was read with the instance's limit if the page was not
 			// open yet; its site may allow less.
 			if (Buffer.byteLength(body.text) > session.limits.maxMessageBytes) {
@@ -816,11 +985,19 @@ function startRelay(
 		) => void,
 		method: string,
 	): Response {
+		// Open but not signed in (identity binding) reads differently.
+		const open = sessions.get(addressId);
+		const phase =
+			open?.ready === true &&
+			open.identity === undefined &&
+			open.site.pairing === "oidc"
+				? "signed_out"
+				: "not_open";
 		const answer = notOpenAnswer(
 			value,
 			rpcId,
-			appNames.get(addressId),
-			"not_open",
+			open?.appName ?? appNames.get(addressId),
+			phase,
 			RELAY_INFO,
 		);
 		if (answer === undefined) {
@@ -915,6 +1092,9 @@ function startRelay(
 			"/authorize": {
 				GET: (req, srv) => auth.authorize(req, ipOf(req, srv)),
 				POST: (req, srv) => auth.authorizeSubmit(req, ipOf(req, srv)),
+			},
+			"/authorize/callback": {
+				GET: (req, srv) => auth.authorizeCallback(req, ipOf(req, srv)),
 			},
 			"/authorize.css": { GET: () => auth.stylesheet() },
 			"/token": {

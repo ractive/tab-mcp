@@ -40,6 +40,12 @@ export interface TokenRecord {
 	expiresAt: number;
 	/** Refresh tokens: when it was exchanged for a new one. */
 	usedAt?: number;
+	/**
+	 * Identity binding (DEC-077): the hashed (provider, subject) the grant was
+	 * made for. Must be stored and returned unchanged; a store that drops it
+	 * makes every request of such a grant fail as a mismatch.
+	 */
+	subject?: string;
 }
 
 /** One connected AI app of an address. */
@@ -49,6 +55,8 @@ export interface GrantSummary {
 	clientName: string;
 	scopes: string[];
 	createdAt: number;
+	/** The grant's `subject`, if it has one (DEC-077). */
+	subject?: string;
 }
 
 export type RevokeSelector = { grantId: string } | { addressId: string };

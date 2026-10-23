@@ -67,6 +67,7 @@ const KNOWN_TYPES = new Set([
 	"pairing.code",
 	"grant.added",
 	"grant.removed",
+	"identity.bound",
 	"error",
 ]);
 
@@ -350,11 +351,22 @@ export function openConnection(
 			case "grant.removed":
 				host.grantRemoved(message.grantId);
 				return;
+			case "identity.bound":
+				host.identityResult(true, message.round);
+				return;
 			case "bye":
 				byeReason = BYE_REASONS[message.reason] ?? "closed";
 				if (byeReason === "replaced") host.replaced();
 				return;
 			case "error":
+				if (message.code === "identity_refused") {
+					host.identityResult(
+						false,
+						typeof message.round === "number" ? message.round : undefined,
+						message.message,
+					);
+					return;
+				}
 				host.error(
 					new Error(`Relay error ${message.code}: ${message.message}`),
 				);

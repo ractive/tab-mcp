@@ -2,8 +2,8 @@
  * Pairing (DEC-028, DEC-042): the step at `/authorize` that proves the browser
  * belongs to the tab's user. The authorization server only knows the
  * `PairingMethod` interface; which method a session uses comes from its site
- * (DEC-045). Today's only method is the 6-digit code shown in the tab; the
- * planned identity binding (kb/design/identity-binding.md) is the next.
+ * (DEC-045): the 6-digit code shown in the tab, or identity binding at an
+ * OpenID Connect provider (`oidc.ts`, DEC-079).
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -13,10 +13,23 @@ import type { PairingKind } from "../config.ts";
 export interface PairingTarget {
 	/** The code state of the session (used by the code method). */
 	readonly codes: PairingCodes;
+	/** The binding key of the page's user, if signed in (DEC-077). */
+	readonly identity: string | undefined;
+	/** Whether the page's "Connect your AI app" dialog is open. */
+	readonly pairingOpen: boolean;
+}
+
+/** The pending request a check belongs to (for methods that leave the page). */
+export interface PairingContext {
+	requestId: string;
+	browserId: string;
 }
 
 export type PairingResult =
-	| { ok: true }
+	/** Paired; `subject` is recorded on the grant (identity binding, DEC-077). */
+	| { ok: true; subject?: string }
+	/** Continue elsewhere (the provider's sign-in); the answer comes to `callback`. */
+	| { ok: "redirect"; location: string }
 	| {
 			ok: false;
 			/** Plain English for the page (plain text; the page escapes it). */
@@ -44,7 +57,18 @@ export interface PairingMethod {
 		target: PairingTarget,
 		form: URLSearchParams,
 		admit: () => boolean,
+		context?: PairingContext,
 	): PairingResult | Promise<PairingResult>;
+	/** Work before the page is shown (e.g. provider discovery); throws if unavailable. */
+	prepare?(): Promise<void>;
+	/** Extra origins the page's form may lead to (CSP `form-action`). */
+	formTargets?(): readonly string[];
+	/** The answer of a method that redirected (`/authorize/callback`). */
+	callback?(
+		params: URLSearchParams,
+		browserId: string,
+		targetFor: (requestId: string) => PairingTarget | undefined,
+	): Promise<{ requestId?: string; result: PairingResult }>;
 }
 
 /** Code lifetime and attempts (DEC-028). */
@@ -218,7 +242,7 @@ export const codePairing: PairingMethod = {
 	},
 };
 
-/** The methods by kind. `oidc` joins with identity binding (DEC-042). */
+/** The methods without settings; `oidc` is added by the server when configured. */
 export const PAIRING_METHODS: Partial<Record<PairingKind, PairingMethod>> = {
 	code: codePairing,
 };

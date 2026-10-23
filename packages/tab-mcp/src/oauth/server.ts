@@ -27,9 +27,11 @@ import {
 	redirectUriMatches,
 } from "./cimd.ts";
 import { AUTHORIZE_CSS, escapeHtml, pageHeaders, renderPage } from "./html.ts";
+import { OidcPairing } from "./oidc.ts";
 import {
 	PAIRING_METHODS,
 	type PairingMethod,
+	type PairingResult,
 	type PairingTarget,
 } from "./pairing.ts";
 
@@ -96,6 +98,8 @@ interface IssuedCode extends AuthorizationRequest {
 	expiresAt: number;
 	used: boolean;
 	grantId?: string;
+	/** The binding key the grant is made for (identity binding, DEC-077). */
+	subject?: string;
 }
 
 class OAuthError extends Error {
@@ -207,7 +211,21 @@ export class AuthorizationServer {
 	constructor(host: AuthorizationHost, testMode?: AuthorizationTestMode) {
 		this.#host = host;
 		this.#authCodeTtlMs = testMode?.authCodeTtlMs ?? AUTH_CODE_TTL_MS;
-		this.#methods = testMode?.pairingMethods ?? PAIRING_METHODS;
+		const oidc = host.config.oidc;
+		this.#methods = {
+			...PAIRING_METHODS,
+			...(oidc === undefined
+				? {}
+				: {
+						oidc: new OidcPairing({
+							config: oidc,
+							publicUrl: () => host.publicUrl(),
+							logger: host.logger,
+							development: host.config.development,
+						}),
+					}),
+			...testMode?.pairingMethods,
+		};
 		this.#cimd = new ClientMetadataFetcher({
 			allowedHosts: host.config.clientIdHosts,
 			logger: host.logger,
@@ -513,6 +531,22 @@ export class AuthorizationServer {
 				),
 			);
 		}
+		const method =
+			this.#methods[this.#host.session(addressId)?.site.pairing ?? "code"];
+		if (method?.prepare !== undefined) {
+			try {
+				await method.prepare();
+			} catch (error) {
+				this.#host.logger.warn("oidc.discovery_failed", {
+					message:
+						error instanceof Error ? error.message.slice(0, 200) : "unknown",
+				});
+				return this.#errorPage(
+					503,
+					"The sign-in provider of this page cannot be reached right now. Wait a minute and try again.",
+				);
+			}
+		}
 		this.#sweepPending();
 		if (
 			this.#pending.size >= MAX_PENDING ||
@@ -677,7 +711,25 @@ ${errorHtml}
 		const admit = () =>
 			this.#guessesPerAddressIp.take(`${pending.addressId}|${ip}`) &&
 			this.#guessesPerAddress.take(pending.addressId);
-		const result = await method.check(session, form, admit);
+		const result = await method.check(session, form, admit, {
+			requestId: pending.id,
+			browserId: browser.id,
+		});
+		if (result.ok === "redirect") {
+			this.#host.logger.info("oauth.pairing_redirect", {
+				address: shortAddress(pending.addressId),
+				client: pending.client.host,
+				method: method.kind,
+			});
+			return new Response(null, {
+				status: 303,
+				headers: {
+					location: result.location,
+					"cache-control": "no-store",
+					"referrer-policy": "no-referrer",
+				},
+			});
+		}
 		if (!result.ok) {
 			this.#host.logger.info("oauth.pairing_failed", {
 				address: shortAddress(pending.addressId),
@@ -692,6 +744,15 @@ ${errorHtml}
 			);
 		}
 
+		return this.#paired(pending, method.kind, result);
+	}
+
+	/** Pairing succeeded: issue the authorization code and send the browser back. */
+	#paired(
+		pending: Pending,
+		kind: PairingKind,
+		result: Extract<PairingResult, { ok: true }>,
+	): Response {
 		this.#dropPending(pending);
 		const code = random(32);
 		if (this.#codes.size >= MAX_CODES) this.#sweepCodes(true);
@@ -700,17 +761,74 @@ ${errorHtml}
 			...request,
 			expiresAt: Date.now() + this.#authCodeTtlMs,
 			used: false,
+			...(result.subject === undefined ? {} : { subject: result.subject }),
 		});
 		this.#host.logger.info("oauth.paired", {
 			address: shortAddress(pending.addressId),
 			client: pending.client.host,
-			method: method.kind,
+			method: kind,
 		});
 		return this.#redirect(pending.redirectUri, {
 			code,
 			...(pending.state === undefined ? {} : { state: pending.state }),
 			iss: this.#issuer,
 		});
+	}
+
+	/** GET `/authorize/callback`: the provider sends the browser back (DEC-079). */
+	async authorizeCallback(req: Request, ip: string): Promise<Response> {
+		if (!this.#viewsPerIp.take(ip)) {
+			return this.#errorPage(
+				429,
+				"Too many requests from your network. Wait a minute and try again.",
+			);
+		}
+		const method = this.#methods.oidc;
+		if (method?.callback === undefined) {
+			return new Response("Not found", { status: 404 });
+		}
+		const browser = this.#browserId(req);
+		if (browser.cookie !== undefined) {
+			// No visit cookie: not the browser that started the sign-in.
+			return this.#errorPage(
+				403,
+				"The sign-in could not be checked. Your browser may block cookies for this site; start again from your AI app.",
+			);
+		}
+		this.#sweepPending();
+		const params = new URL(req.url).searchParams;
+		const { requestId, result } = await method.callback(
+			params,
+			browser.id,
+			(id) => {
+				const p = this.#pending.get(id);
+				return p === undefined ? undefined : this.#host.session(p.addressId);
+			},
+		);
+		const pending =
+			requestId === undefined ? undefined : this.#pending.get(requestId);
+		if (pending === undefined || pending.expiresAt <= Date.now()) {
+			const message =
+				result.ok === false
+					? result.message
+					: "This connection request has expired or was already used.";
+			return this.#errorPage(400, message);
+		}
+		if (result.ok === true) return this.#paired(pending, method.kind, result);
+		const message =
+			result.ok === false ? result.message : "Something went wrong.";
+		const reason = result.ok === false ? result.reason : "unexpected";
+		this.#host.logger.info("oauth.pairing_failed", {
+			address: shortAddress(pending.addressId),
+			client: pending.client.host,
+			reason,
+		});
+		return this.#pairingPage(
+			pending,
+			browser.id,
+			message,
+			reason === "mismatch" ? 403 : 400,
+		);
 	}
 
 	#addressOf(resource: string | undefined): string | undefined {
@@ -783,7 +901,7 @@ ${errorHtml}
 				? ""
 				: `<p class="error" role="alert" id="error">${escapeHtml(error)}</p>`;
 		const extra = cookie === undefined ? {} : { "set-cookie": cookie };
-		const targets = [formTarget(pending.redirectUri)];
+		const targets: string[] = [formTarget(pending.redirectUri)];
 		const cancel = `<button type="submit" class="secondary" name="action" value="cancel" formnovalidate>Cancel</button>`;
 
 		const session = this.#host.session(pending.addressId);
@@ -811,6 +929,7 @@ ${cancel}
 				"This page's pairing method is not available.",
 			);
 		}
+		targets.push(...(method.formTargets?.() ?? []));
 		// A browser always sends an Origin; only a non-browser tab on an open
 		// relay has none.
 		const page =
@@ -1011,6 +1130,14 @@ ${cancel}
 		) {
 			throw invalid("code_verifier does not match the code_challenge");
 		}
+		// Identity binding: the person paired must still be the page's user, so
+		// a code issued before a sign-out or a change of user buys nothing.
+		if (
+			issued.subject !== undefined &&
+			this.#host.session(issued.addressId)?.identity !== issued.subject
+		) {
+			throw invalid("the page's user signed out or changed");
+		}
 
 		const now = Date.now();
 		const grantId = newId("g");
@@ -1025,6 +1152,7 @@ ${cancel}
 				clientName: issued.client.name,
 				scopes: issued.scopes,
 				grantCreatedAt: now,
+				...(issued.subject === undefined ? {} : { subject: issued.subject }),
 			},
 			{
 				accessTtlMs: config.accessTokenTtlMs,
@@ -1124,6 +1252,7 @@ ${cancel}
 				clientName: record.clientName,
 				scopes: record.scopes,
 				grantCreatedAt: record.grantCreatedAt,
+				...(record.subject === undefined ? {} : { subject: record.subject }),
 			},
 			{
 				accessTtlMs: this.#host.config.accessTokenTtlMs,

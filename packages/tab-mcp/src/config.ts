@@ -9,9 +9,29 @@ export type StoreKind = "sqlite" | "memory";
 
 /**
  * How a browser at `/authorize` proves it belongs to the tab's user (DEC-042):
- * the 6-digit code shown in the tab (DEC-028), or, later, identity binding.
+ * the 6-digit code shown in the tab (DEC-028), or identity binding at an
+ * OpenID Connect provider (DEC-075).
  */
 export type PairingKind = "code" | "oidc";
+
+/** Claims the relay may compare as the subject (DEC-079); never mutable ones. */
+export type SubjectClaim = "sub" | "oid";
+
+/** The OpenID Connect provider and the tab assertion signer (DEC-079). */
+export interface OidcConfig {
+	/** The provider's issuer (discovery at `/.well-known/openid-configuration`). */
+	issuer: string;
+	/** The relay's client at the provider. */
+	clientId: string;
+	/** Its secret; absent for a public client (PKCE only). */
+	clientSecret?: string;
+	/** The ID token claim compared with the tab's subject; default `sub`. */
+	subjectClaim?: SubjectClaim;
+	/** Expected `iss` of the tab assertions (the web app's backend). */
+	assertionIssuer: string;
+	/** JWKS of the web app's backend that signs tab assertions. */
+	assertionJwksUrl: string;
+}
 
 /** The limits a site may set for its own tab sessions (DEC-045). */
 export interface SiteLimits {
@@ -30,7 +50,7 @@ export interface SiteConfig {
 	origin: string;
 	/** The app name `/authorize` shows; wins over the name the page sends. */
 	name?: string;
-	/** Pairing method; `code` (the default) is the only one so far. */
+	/** Pairing method; default `identity` of the instance (`code`). */
 	pairing?: PairingKind;
 	/** Overrides of the instance-wide limits for this site's sessions. */
 	limits?: Partial<SiteLimits>;
@@ -70,6 +90,13 @@ export interface RelayConfig {
 	allowedOrigins: string[] | "*";
 	/** Sites with their own name, pairing method or limits (DEC-045). */
 	sites: SiteConfig[];
+	/**
+	 * The pairing of sites without their own (`allowedOrigins` included):
+	 * `code` (default, DEC-028) or `oidc` (identity binding, DEC-079).
+	 */
+	identity: PairingKind;
+	/** The provider and assertion signer; required when a site uses `oidc`. */
+	oidc?: OidcConfig;
 	/** Hosts whose Client ID Metadata Documents are accepted; empty = any. */
 	clientIdHosts: string[];
 	trustProxy: TrustProxy;
@@ -118,6 +145,7 @@ export const DEFAULT_CONFIG: Readonly<RelayConfig> = {
 	host: "0.0.0.0",
 	allowedOrigins: [],
 	sites: [],
+	identity: "code",
 	clientIdHosts: [],
 	trustProxy: "none",
 	cors: true,
@@ -203,6 +231,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		}
 		seen.add(site.origin);
 	}
+	validateIdentity(config);
 	config.clientIdHosts = config.clientIdHosts.map((h) => {
 		const host = h.trim().toLowerCase();
 		if (!/^[a-z0-9.-]+(:\d+)?$/.test(host)) {
@@ -309,15 +338,12 @@ function validateSite(input: unknown): SiteConfig {
 		out.name = site["name"];
 	}
 	const pairing = site["pairing"];
-	if (pairing !== undefined && pairing !== "code") {
-		if (pairing === "oidc") {
-			throw new ConfigError(
-				`pairing "oidc" (identity binding) is planned but not available yet: ${out.origin}`,
-			);
+	if (pairing !== undefined) {
+		if (pairing !== "code" && pairing !== "oidc") {
+			throw new ConfigError(`pairing must be "code" or "oidc": ${out.origin}`);
 		}
-		throw new ConfigError(`pairing must be "code": ${out.origin}`);
+		out.pairing = pairing;
 	}
-	out.pairing = "code";
 	const limits = site["limits"];
 	if (limits !== undefined) {
 		if (typeof limits !== "object" || limits === null) {
@@ -345,6 +371,85 @@ function validateSite(input: unknown): SiteConfig {
 		out.limits = parsed;
 	}
 	return out;
+}
+
+/** An https URL (http only in development) without query or fragment. */
+function checkUrl(value: unknown, name: string, development: boolean): string {
+	if (typeof value !== "string" || value === "") {
+		throw new ConfigError(`${name} is required for identity binding`);
+	}
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		throw new ConfigError(`${name} is not a URL: ${value}`);
+	}
+	if (url.protocol !== "https:" && !(development && url.protocol === "http:")) {
+		throw new ConfigError(`${name} must be https: ${value}`);
+	}
+	if (
+		url.search !== "" ||
+		url.hash !== "" ||
+		url.username !== "" ||
+		url.password !== ""
+	) {
+		throw new ConfigError(
+			`${name} has no query, fragment or credentials: ${value}`,
+		);
+	}
+	return value;
+}
+
+/** Whether any site pairs by identity, and the OIDC settings it needs (DEC-079). */
+function validateIdentity(config: RelayConfig): void {
+	if (config.identity !== "code" && config.identity !== "oidc") {
+		throw new ConfigError('identity must be "code" or "oidc"');
+	}
+	const used =
+		config.sites.some((s) => (s.pairing ?? config.identity) === "oidc") ||
+		(config.identity === "oidc" &&
+			config.allowedOrigins !== "*" &&
+			config.allowedOrigins.length > 0);
+	if (config.identity === "oidc" && config.allowedOrigins === "*") {
+		throw new ConfigError(
+			"TAB_MCP_IDENTITY=oidc cannot be used with TAB_MCP_ALLOWED_ORIGINS=* (one provider cannot vouch for any website's users)",
+		);
+	}
+	const oidc = config.oidc;
+	if (oidc === undefined) {
+		if (used) {
+			throw new ConfigError(
+				"identity binding (oidc) needs TAB_MCP_OIDC_ISSUER, TAB_MCP_OIDC_CLIENT_ID, TAB_MCP_TAB_ASSERTION_ISSUER and TAB_MCP_TAB_ASSERTION_JWKS_URL",
+			);
+		}
+		return;
+	}
+	const dev = config.development;
+	checkUrl(oidc.issuer, "TAB_MCP_OIDC_ISSUER", dev);
+	checkUrl(oidc.assertionJwksUrl, "TAB_MCP_TAB_ASSERTION_JWKS_URL", dev);
+	if (typeof oidc.clientId !== "string" || oidc.clientId === "") {
+		throw new ConfigError(
+			"TAB_MCP_OIDC_CLIENT_ID is required for identity binding",
+		);
+	}
+	if (
+		oidc.clientSecret !== undefined &&
+		typeof oidc.clientSecret !== "string"
+	) {
+		throw new ConfigError("TAB_MCP_OIDC_CLIENT_SECRET must be a string");
+	}
+	if (typeof oidc.assertionIssuer !== "string" || oidc.assertionIssuer === "") {
+		throw new ConfigError(
+			"TAB_MCP_TAB_ASSERTION_ISSUER is required for identity binding",
+		);
+	}
+	const claim = oidc.subjectClaim ?? "sub";
+	if (claim !== "sub" && claim !== "oid") {
+		throw new ConfigError(
+			'TAB_MCP_OIDC_SUBJECT_CLAIM must be "sub" or "oid" (a stable identifier, never email or a user name)',
+		);
+	}
+	config.oidc = { ...oidc, subjectClaim: claim };
 }
 
 /** The instance-wide limits, the defaults of every site. */
@@ -375,7 +480,7 @@ export function siteFor(
 	if (configured !== undefined) {
 		const site: Site = {
 			origin: configured.origin,
-			pairing: configured.pairing ?? "code",
+			pairing: configured.pairing ?? config.identity,
 			limits: { ...defaults, ...configured.limits },
 		};
 		if (configured.name !== undefined) site.name = configured.name;
@@ -387,7 +492,7 @@ export function siteFor(
 	) {
 		return {
 			origin: config.allowedOrigins === "*" ? "*" : (origin ?? ""),
-			pairing: "code",
+			pairing: config.allowedOrigins === "*" ? "code" : config.identity,
 			limits: defaults,
 		};
 	}
@@ -498,6 +603,30 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 			.filter((h) => h !== "");
 	}
 
+	set("identity", oneOf(env, "TAB_MCP_IDENTITY", ["code", "oidc"] as const));
+	const oidcVars = {
+		issuer: env["TAB_MCP_OIDC_ISSUER"],
+		clientId: env["TAB_MCP_OIDC_CLIENT_ID"],
+		clientSecret: env["TAB_MCP_OIDC_CLIENT_SECRET"],
+		subjectClaim: env["TAB_MCP_OIDC_SUBJECT_CLAIM"],
+		assertionIssuer: env["TAB_MCP_TAB_ASSERTION_ISSUER"],
+		assertionJwksUrl: env["TAB_MCP_TAB_ASSERTION_JWKS_URL"],
+	};
+	if (Object.values(oidcVars).some((v) => v !== undefined && v !== "")) {
+		const oidc: OidcConfig = {
+			issuer: oidcVars.issuer ?? "",
+			clientId: oidcVars.clientId ?? "",
+			assertionIssuer: oidcVars.assertionIssuer ?? "",
+			assertionJwksUrl: oidcVars.assertionJwksUrl ?? "",
+		};
+		if (oidcVars.clientSecret !== undefined && oidcVars.clientSecret !== "") {
+			oidc.clientSecret = oidcVars.clientSecret;
+		}
+		if (oidcVars.subjectClaim !== undefined && oidcVars.subjectClaim !== "") {
+			oidc.subjectClaim = oidcVars.subjectClaim as SubjectClaim;
+		}
+		out.oidc = oidc;
+	}
 	set(
 		"trustProxy",
 		oneOf(env, "TAB_MCP_TRUST_PROXY", [

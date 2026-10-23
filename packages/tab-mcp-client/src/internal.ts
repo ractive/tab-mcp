@@ -37,6 +37,13 @@ export interface ConnectionHost {
 	grantAdded(grant: Grant): void;
 	grantRemoved(grantId: string): void;
 	replaced(): void;
+	/** The relay accepted the page's identity assertion, or refused it. */
+	/** The relay's answer to the `identity` with this `round` (undefined from a relay that does not echo it). */
+	identityResult(
+		bound: boolean,
+		round: number | undefined,
+		message?: string,
+	): void;
 	error(error: Error): void;
 	/** The session is over (only after `sessionStarted`). */
 	closed(reason: DisconnectReason, code: number): void;

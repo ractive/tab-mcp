@@ -5,7 +5,8 @@
  * normative description is `kb/design/protocol.md` (later `docs/protocol.md`).
  */
 
-import { isAppName, MAX_APP_NAME } from "./config.ts";
+import { isAppName, MAX_APP_NAME, type PairingKind } from "./config.ts";
+import { MAX_JWT_BYTES } from "./jwt.ts";
 
 export const SUBPROTOCOL = "tab-mcp.v1";
 
@@ -63,6 +64,8 @@ export interface SessionMessage {
 	origin: string;
 	/** The name `/authorize` shows: the site's configured name, else the page's. */
 	appName?: string;
+	/** How AI apps pair with this page: `code` or `oidc` (DEC-079). */
+	pairing: PairingKind;
 	expiresAt: string;
 	limits: Limits;
 	grants: GrantInfo[];
@@ -103,11 +106,19 @@ export interface GrantRemovedMessage {
 	grantId: string;
 	reason: "revoked" | "reuse_detected" | "expired";
 }
+/** The page's identity assertion was accepted (DEC-076). */
+export interface IdentityBoundMessage {
+	type: "identity.bound";
+	/** The `round` of the `identity` this answers, echoed when it had one. */
+	round?: number;
+}
 export interface ErrorMessage {
 	type: "error";
 	code: ErrorCode;
 	message: string;
 	id?: string;
+	/** On `identity_refused`: the `round` of the `identity` it answers, if it had one. */
+	round?: number;
 }
 export type RelayMessage =
 	| SessionMessage
@@ -118,6 +129,7 @@ export type RelayMessage =
 	| PairingCodeMessage
 	| GrantAddedMessage
 	| GrantRemovedMessage
+	| IdentityBoundMessage
 	| ErrorMessage;
 
 export type ErrorCode =
@@ -125,7 +137,8 @@ export type ErrorCode =
 	| "unknown_type"
 	| "unknown_id"
 	| "too_large"
-	| "rate_limited";
+	| "rate_limited"
+	| "identity_refused";
 
 // Tab → relay
 
@@ -182,12 +195,25 @@ export interface GrantRevokeMessage {
 export interface GrantsRevokeAllMessage {
 	type: "grants.revokeAll";
 }
+/** The web app's signed statement of who the page's user is (DEC-076). */
+export interface IdentityMessage {
+	type: "identity";
+	assertion: string;
+	/** The page's number for this assertion, echoed in the answer (a lost answer cannot be mistaken for a later one). */
+	round?: number;
+}
+/** The page's user signed out: end every AI connection (DEC-078). */
+export interface IdentityLogoutMessage {
+	type: "identity.logout";
+}
 export type TabMessage =
 	| HelloMessage
 	| PairingStartMessage
 	| PairingStopMessage
 	| GrantRevokeMessage
 	| GrantsRevokeAllMessage
+	| IdentityMessage
+	| IdentityLogoutMessage
 	| PongMessage
 	| ByeMessage
 	| HttpResponseMessage
@@ -345,7 +371,30 @@ export function parseTabMessage(text: string): ParseResult {
 		case "pairing.start":
 		case "pairing.stop":
 		case "grants.revokeAll":
+		case "identity.logout":
 			return { ok: true, message: { type } };
+		case "identity": {
+			const assertion = v["assertion"];
+			if (
+				typeof assertion !== "string" ||
+				assertion === "" ||
+				assertion.length > MAX_JWT_BYTES
+			) {
+				return bad(
+					`identity.assertion must be a JWT of at most ${MAX_JWT_BYTES} bytes`,
+				);
+			}
+			const round = v["round"];
+			if (
+				round !== undefined &&
+				!(Number.isSafeInteger(round) && (round as number) >= 0)
+			) {
+				return bad("identity.round must be a non-negative integer");
+			}
+			return round === undefined
+				? { ok: true, message: { type, assertion } }
+				: { ok: true, message: { type, assertion, round: round as number } };
+		}
 		case "grant.revoke": {
 			const grantId = v["grantId"];
 			if (!isId(grantId)) return bad("grant.revoke.grantId missing");

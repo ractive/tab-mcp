@@ -1,20 +1,27 @@
 ---
 type: design
-title: "Identity binding (planned for 0.2+)"
-description: Planned extension in which the relay connects an AI app to a tab only if both are signed in as the same person at the same OpenID Connect provider; replaces the pairing code as a pairing method.
+title: Identity binding
+description: >-
+  The relay connects an AI app to a tab only if both are signed in as the same
+  person at the same OpenID Connect provider; a pairing method next to the code
+  (DEC-075 to DEC-079).
 tags:
   - design
   - security
   - oauth
-  - future
-timestamp: 2026-10-19T23:30:00+02:00
+timestamp: 2026-10-21T18:00:00+02:00
 ---
 
-# Identity binding (planned for 0.2+)
+# Identity binding
 
-Owner request of 2026-10-19. Not part of 0.1. Plan:
-[iteration 7](/iterations/iteration-7-identity-binding.md). Open points:
-[research needed](/research/identity-binding-research-needed.md).
+Owner request of 2026-10-19, built in
+[iteration 7](/iterations/iteration-7-identity-binding.md) after the
+[research](/research/identity-binding-research-needed.md). Decisions: DEC-075 (variant 1
+only), DEC-076 (tab assertion), DEC-077 (binding and grants), DEC-078 (logout), DEC-079
+(the OIDC method and its settings). The sketch below is the plan as written before the
+research; where it differs, the decisions win: the assertion travels in an `identity`
+message after `session` with `typ: tab-mcp-identity+jwt`, logout is an `identity.logout`
+message from the page, and variant 2 is not built.
 
 ## Idea
 
@@ -49,7 +56,7 @@ without rebuilding the OAuth server (DEC-042).
 - Works with any OIDC provider; the AI app sees no difference (still CIMD, PKCE, the
   relay's tokens).
 
-### Variant 2: the organisation's authorization server is the MCP AS
+### Variant 2: the organisation's authorization server is the MCP AS (dropped, DEC-075)
 
 - The relay's protected-resource metadata names the organisation's authorization server in
   `authorization_servers`.
@@ -80,7 +87,7 @@ secrets of the operator (to be added to the release/operations notes).
 | `TAB_MCP_IDENTITY` | `code` (default, DEC-028) or `oidc` |
 | `TAB_MCP_OIDC_ISSUER` | the provider's issuer URL (discovery) |
 | `TAB_MCP_OIDC_CLIENT_ID` / `TAB_MCP_OIDC_CLIENT_SECRET` | the relay's client at the provider (variant 1) |
-| `TAB_MCP_OIDC_AS` | external authorization server for the protected-resource metadata (variant 2) |
+| `TAB_MCP_OIDC_SUBJECT_CLAIM` | `sub` (default) or `oid` (Entra ID), the claim compared |
 | `TAB_MCP_TAB_ASSERTION_JWKS_URL` | JWKS of the web app's backend that signs tab assertions |
 | `TAB_MCP_TAB_ASSERTION_ISSUER` | expected `iss` of those assertions |
 
