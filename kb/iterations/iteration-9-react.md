@@ -118,7 +118,7 @@ frameworks on demand. Reconnecting: DEC-082.
 - [x] React entry `src/react.ts` (no JSX): provider, `useTabMcp`, `useTabMcpState` (with identity and reconnecting), `useTool`, `useToolCalls`, `ConnectButton`; package exports `./react`, optional peer dependency `react >=18.3.0 <20`, pack checks
 - [x] Hook tests for React 18.3 and 19 (StrictMode, re-renders, unmount, error boundary, server rendering); bundle size of the React entry in `build.test.ts`
 - [x] `examples/react-todo` (Bun's bundler instead of Vite, DEC-081) and its end-to-end test in headless Chrome, including a relay restart
-- [ ] README and CHANGELOG done; the plugin skill's React part with the release (the skill describes the published version); release the client (0.4.0: 0.3.0 is out)
+- [x] README and CHANGELOG done; the plugin skill's React part with the release (the skill describes the published version); release the client (0.4.0: 0.3.0 is out)
 - [ ] saturnus: use the core reconnecting and drop its own
 
 ## Acceptance criteria
