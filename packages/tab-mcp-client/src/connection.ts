@@ -352,7 +352,7 @@ export function openConnection(
 				host.grantRemoved(message.grantId);
 				return;
 			case "identity.bound":
-				host.identityResult(true);
+				host.identityResult(true, message.round);
 				return;
 			case "bye":
 				byeReason = BYE_REASONS[message.reason] ?? "closed";
@@ -360,7 +360,11 @@ export function openConnection(
 				return;
 			case "error":
 				if (message.code === "identity_refused") {
-					host.identityResult(false, message.message);
+					host.identityResult(
+						false,
+						typeof message.round === "number" ? message.round : undefined,
+						message.message,
+					);
 					return;
 				}
 				host.error(

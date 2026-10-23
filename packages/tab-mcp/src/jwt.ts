@@ -191,9 +191,27 @@ export async function fetchJson(
 	});
 	const length = Number(res.headers.get("content-length") ?? "0");
 	if (length > maxBytes) throw new Error(`response too large (${url})`);
-	const bytes = await res.arrayBuffer();
-	if (bytes.byteLength > maxBytes)
-		throw new Error(`response too large (${url})`);
+	// Counted while it arrives: a body without Content-Length (chunked) is cut
+	// off at the limit instead of being buffered whole first.
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	const reader = res.body?.getReader();
+	while (reader !== undefined) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > maxBytes) {
+			await reader.cancel();
+			throw new Error(`response too large (${url})`);
+		}
+		chunks.push(value);
+	}
+	const bytes = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
 	const text = new TextDecoder().decode(bytes);
 	let value: unknown;
 	try {
@@ -247,6 +265,10 @@ export class JwksCache implements KeySource {
 	}
 
 	async keys(kid: string | undefined): Promise<Jwk[]> {
+		// A fetch already running answers everyone who asks meanwhile (many tabs
+		// after a relay restart, a new kid during a rotation): without waiting,
+		// they would find the 30 s throttle set and read the old (or no) keys.
+		if (this.#inflight !== undefined) await this.#inflight.catch(() => {});
 		const now = this.#now();
 		const stale = now - this.#fetchedAt >= JWKS_TTL_MS;
 		const unknown = kid !== undefined && !this.#keys.some((k) => k.kid === kid);

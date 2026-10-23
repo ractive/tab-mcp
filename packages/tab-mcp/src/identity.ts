@@ -22,6 +22,12 @@ export const CLOCK_LEEWAY_MS = 5_000;
 const MAX_SUBJECT = 255;
 const MAX_JTI = 128;
 const MAX_SEEN_JTI = 100_000;
+/**
+ * Assertions one person may have in the replay window (about a minute): two
+ * a second. A page refreshes far less often; the cap keeps one signed-in user
+ * from filling `MAX_SEEN_JTI` and refusing everyone else.
+ */
+const MAX_JTI_PER_PERSON = 120;
 
 /** The text for a person other than the page's user (DEC-077, DEC-079). */
 export const MISMATCH_TEXT =
@@ -43,7 +49,11 @@ export class TabAssertionVerifier {
 	readonly #oidc: OidcConfig;
 	readonly #keys: KeySource;
 	/** (binding key, jti) → expiry; insertion order is roughly expiry order (all live ≤ 65 s). */
+	/** (person, jti) → until when it counts as used. */
 	readonly #seen = new Map<string, number>();
+	/** Entries in `#seen` per person. */
+	readonly #perPerson = new Map<string, number>();
+	#sweptAt = Number.NEGATIVE_INFINITY;
 
 	constructor(oidc: OidcConfig, keys?: KeySource) {
 		this.#oidc = oidc;
@@ -107,17 +117,30 @@ export class TabAssertionVerifier {
 		if (this.#seen.has(seenKey)) {
 			throw new JwtError("replayed", "the assertion was already used");
 		}
-		if (this.#seen.size >= MAX_SEEN_JTI) {
+		const mine = this.#perPerson.get(key) ?? 0;
+		if (mine >= MAX_JTI_PER_PERSON || this.#seen.size >= MAX_SEEN_JTI) {
 			throw new JwtError("busy", "too many assertions at once");
 		}
 		this.#seen.set(seenKey, exp + CLOCK_LEEWAY_MS);
+		this.#perPerson.set(key, mine + 1);
 		return key;
 	}
 
+	/**
+	 * Forgets the expired entries. They are not in expiry order (each
+	 * assertion has its own `exp`), so the whole map is checked, at most once a
+	 * second, and always when it is full.
+	 */
 	#sweep(now: number): void {
-		for (const [jti, until] of this.#seen) {
-			if (until > now) break;
-			this.#seen.delete(jti);
+		if (now - this.#sweptAt < 1000 && this.#seen.size < MAX_SEEN_JTI) return;
+		this.#sweptAt = now;
+		for (const [seenKey, until] of this.#seen) {
+			if (until > now) continue;
+			this.#seen.delete(seenKey);
+			const person = seenKey.slice(0, seenKey.indexOf("\n"));
+			const left = (this.#perPerson.get(person) ?? 1) - 1;
+			if (left > 0) this.#perPerson.set(person, left);
+			else this.#perPerson.delete(person);
 		}
 	}
 }

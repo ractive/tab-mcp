@@ -66,12 +66,16 @@ export interface GrantRemovedMessage {
 }
 export interface IdentityBoundMessage {
 	type: "identity.bound";
+	/** The `round` of the `identity` this answers. */
+	round?: number;
 }
 export interface ErrorMessage {
 	type: "error";
 	code: string;
 	message: string;
 	id?: string;
+	/** On `identity_refused`: the `round` of the `identity` it answers. */
+	round?: number;
 }
 export type RelayMessage =
 	| SessionMessage
@@ -116,7 +120,7 @@ export type TabMessage =
 	| { type: "pairing.stop" }
 	| { type: "grant.revoke"; grantId: string }
 	| { type: "grants.revokeAll" }
-	| { type: "identity"; assertion: string }
+	| { type: "identity"; assertion: string; round: number }
 	| { type: "identity.logout" }
 	| { type: "error"; code: string; message: string; id?: string };
 
@@ -212,7 +216,9 @@ export function parseRelayMessage(text: string): RelayMessage | undefined {
 					}
 				: undefined;
 		case "identity.bound":
-			return { type: "identity.bound" };
+			return typeof v["round"] === "number"
+				? { type: "identity.bound", round: v["round"] }
+				: { type: "identity.bound" };
 		case "error":
 			return str(v["code"]) ? (v as unknown as ErrorMessage) : undefined;
 		default:

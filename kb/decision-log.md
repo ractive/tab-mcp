@@ -987,7 +987,19 @@ and every `identity` gets exactly one answer (also `identity_refused` when the s
 fails), so a slow check can never bind a user after a later sign-out. An authorization
 code made by identity binding is exchanged only while the page is still bound to the
 same person. The library counts only the relay's answer to its newest assertion and
-gives up after `identityTimeoutMs` (15 s).
+gives up after `identityTimeoutMs` (15 s). The page numbers its assertions (`round`) and
+the relay echoes the number in its answer, so an answer that was lost (a frame dropped
+under backpressure, which the relay logs as `identity.answer_dropped`) or came late can
+never pass for the answer to a newer one (review of PR #13; an order-based match broke
+for good after one lost answer).
+
+The replay memory keeps at most 120 assertions per person (about two a second over its
+one-minute window) besides its relay-wide cap, so one signed-in user cannot fill it and
+get everyone else's refreshes refused; expired entries are swept from the whole map at
+most once a second. A JWKS fetch already running is awaited by every caller that comes
+meanwhile, so tabs reconnecting together after a restart, or a refresh during a key
+rotation, all get the keys; and responses are counted while they arrive, so a body
+without Content-Length is cut off at the 64 KiB limit (review of PR #13).
 
 ## DEC-077: The address is bound to (provider, subject); grants carry the subject
 

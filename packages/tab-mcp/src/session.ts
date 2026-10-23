@@ -52,7 +52,11 @@ export interface SessionHost {
 	/** The tab revokes every grant of its address ("New address"). */
 	revokeAll(session: TabSession): Promise<void>;
 	/** The page proves who its user is (DEC-076); answers the tab itself. */
-	bindIdentity(session: TabSession, assertion: string): Promise<void>;
+	bindIdentity(
+		session: TabSession,
+		assertion: string,
+		round?: number,
+	): Promise<void>;
 	/** The page's user signed out (DEC-078). */
 	signOut(session: TabSession): Promise<void>;
 	/** Pairing code lifetime (tests shorten it). */
@@ -292,7 +296,7 @@ export class TabSession {
 				return;
 			case "identity":
 				await this.#serialIdentity(() =>
-					this.#host.bindIdentity(this, msg.assertion),
+					this.#host.bindIdentity(this, msg.assertion, msg.round),
 				);
 				return;
 			case "identity.logout":

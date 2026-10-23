@@ -118,13 +118,13 @@ signed in to the page, proved by the web app's backend
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `identity` | T→R | `assertion` | A tab assertion for the page's signed-in user: a JWT of at most 8 192 bytes, `typ` `tab-mcp-identity+jwt`, `aud` this session's `address`, `exp` at most 60 s ahead, a single-use `jti`. Sent after `session` (every connection) and again after a sign-in. |
-| `identity.bound` | R→T | none | The assertion was accepted; the address is bound to this person for the session. |
+| `identity` | T→R | `assertion`, `round?` | A tab assertion for the page's signed-in user: a JWT of at most 8 192 bytes, `typ` `tab-mcp-identity+jwt`, `aud` this session's `address`, `exp` at most 60 s ahead, a single-use `jti`. Sent after `session` (every connection) and again after a sign-in. `round` (a non-negative integer) is the page's number for this assertion; the answer echoes it. |
+| `identity.bound` | R→T | `round?` | The assertion was accepted; the address is bound to this person for the session. `round` is the one of the `identity` it answers, when that had one. |
 | `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the address (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. |
 
 The relay handles `identity` and `identity.logout` one after another, in the order they
-came, and answers every `identity` exactly once, in that order. A refused assertion gets
-`error` `identity_refused` with the reason in `message`; the session stays, and the
+came, and answers every `identity` exactly once. A refused assertion gets `error`
+`identity_refused` with the reason in `message` (and the `round`); the session stays, and the
 binding it had ends (fail closed), with its requests in flight. Grants made by identity
 binding remember the person (as a hash of issuer and subject). An MCP request on such a
 grant, or any request on an `oidc` site, reaches the page only while it is bound to the

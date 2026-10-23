@@ -99,6 +99,15 @@ describe("parseTabMessage", () => {
 			ok: true,
 			message: { type: "identity", assertion: "a.b.c" },
 		});
+		// The page's round number, echoed in the answer (review of PR #13).
+		expect(ok({ type: "identity", assertion: "a.b.c", round: 7 })).toEqual({
+			ok: true,
+			message: { type: "identity", assertion: "a.b.c", round: 7 },
+		});
+		for (const round of [-1, 1.5, "7", 2 ** 53])
+			expect(ok({ type: "identity", assertion: "a.b.c", round }).ok).toBe(
+				false,
+			);
 		expect(ok({ type: "identity" }).ok).toBe(false);
 		expect(ok({ type: "identity", assertion: "" }).ok).toBe(false);
 		expect(ok({ type: "identity", assertion: "x".repeat(8193) }).ok).toBe(

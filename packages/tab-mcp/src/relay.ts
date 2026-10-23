@@ -30,6 +30,7 @@ import {
 	type GrantInfo,
 	MCP_PROTOCOL_VERSION,
 	PROTOCOL_VERSION_META_KEY,
+	type RelayMessage,
 	SUBPROTOCOL,
 } from "./protocol.ts";
 import { TabSession } from "./session.ts";
@@ -274,9 +275,25 @@ function startRelay(
 		 * `identity.logout`), so a slow check never lands after a later sign-out.
 		 * Always answers the tab once: `identity.bound` or `identity_refused`.
 		 */
-		async bindIdentity(session: TabSession, assertion: string): Promise<void> {
+		async bindIdentity(
+			session: TabSession,
+			assertion: string,
+			round?: number,
+		): Promise<void> {
 			const addressId = session.addressId;
 			if (addressId === undefined) return;
+			const echo = round === undefined ? {} : { round };
+			// The page waits for this answer; a dropped one (backpressure) is
+			// logged, and the page's timeout gives up on it (the round tells a late
+			// answer from a new one).
+			const answer = (message: RelayMessage) => {
+				if (!session.send(message)) {
+					logger.warn("identity.answer_dropped", {
+						address: shortAddress(addressId),
+						type: message.type,
+					});
+				}
+			};
 			const refuse = (reason: string, message: string) => {
 				// Fail closed: a refused assertion also ends an earlier binding,
 				// and the requests made under it.
@@ -288,7 +305,7 @@ function startRelay(
 					address: shortAddress(addressId),
 					reason,
 				});
-				session.send({ type: "error", code: "identity_refused", message });
+				answer({ type: "error", code: "identity_refused", message, ...echo });
 			};
 			if (session.site.pairing !== "oidc" || assertions === undefined) {
 				refuse("not_oidc", "this page's site does not use identity binding");
@@ -333,7 +350,7 @@ function startRelay(
 			}
 			if (!session.ready) return;
 			session.identity = key;
-			session.send({ type: "identity.bound" });
+			answer({ type: "identity.bound", ...echo });
 			logger.info("identity.bound", {
 				address: shortAddress(addressId),
 				changed,

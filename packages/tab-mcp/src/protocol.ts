@@ -109,12 +109,16 @@ export interface GrantRemovedMessage {
 /** The page's identity assertion was accepted (DEC-076). */
 export interface IdentityBoundMessage {
 	type: "identity.bound";
+	/** The `round` of the `identity` this answers, echoed when it had one. */
+	round?: number;
 }
 export interface ErrorMessage {
 	type: "error";
 	code: ErrorCode;
 	message: string;
 	id?: string;
+	/** On `identity_refused`: the `round` of the `identity` it answers, if it had one. */
+	round?: number;
 }
 export type RelayMessage =
 	| SessionMessage
@@ -195,6 +199,8 @@ export interface GrantsRevokeAllMessage {
 export interface IdentityMessage {
 	type: "identity";
 	assertion: string;
+	/** The page's number for this assertion, echoed in the answer (a lost answer cannot be mistaken for a later one). */
+	round?: number;
 }
 /** The page's user signed out: end every AI connection (DEC-078). */
 export interface IdentityLogoutMessage {
@@ -378,7 +384,16 @@ export function parseTabMessage(text: string): ParseResult {
 					`identity.assertion must be a JWT of at most ${MAX_JWT_BYTES} bytes`,
 				);
 			}
-			return { ok: true, message: { type, assertion } };
+			const round = v["round"];
+			if (
+				round !== undefined &&
+				!(Number.isSafeInteger(round) && (round as number) >= 0)
+			) {
+				return bad("identity.round must be a non-negative integer");
+			}
+			return round === undefined
+				? { ok: true, message: { type, assertion } }
+				: { ok: true, message: { type, assertion, round: round as number } };
 		}
 		case "grant.revoke": {
 			const grantId = v["grantId"];

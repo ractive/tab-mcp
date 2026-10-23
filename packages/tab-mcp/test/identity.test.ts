@@ -442,11 +442,17 @@ describe("identity binding: the page's state", () => {
 			);
 		}
 		const once = await provider.assertion("alice", address);
-		ctx.tab.send({ type: "identity", assertion: once });
-		await ctx.tab.next("identity.bound");
-		ctx.tab.send({ type: "identity", assertion: once });
-		const replay = (await ctx.tab.next("error")) as { code: string };
+		ctx.tab.send({ type: "identity", assertion: once, round: 41 });
+		// Every answer echoes the round it answers (review of PR #13).
+		const bound = (await ctx.tab.next("identity.bound")) as { round?: number };
+		expect(bound.round).toBe(41);
+		ctx.tab.send({ type: "identity", assertion: once, round: 42 });
+		const replay = (await ctx.tab.next("error")) as {
+			code: string;
+			round?: number;
+		};
 		expect(replay.code).toBe("identity_refused");
+		expect(replay.round).toBe(42);
 		expect(ctx.r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
 			"replayed",
 		);

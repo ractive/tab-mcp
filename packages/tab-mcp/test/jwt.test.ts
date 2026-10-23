@@ -9,6 +9,7 @@ import {
 	TabAssertionVerifier,
 } from "../src/identity.ts";
 import {
+	fetchJson,
 	type Jwk,
 	JwksCache,
 	JwtError,
@@ -192,6 +193,21 @@ describe("tab assertions (DEC-076)", () => {
 		);
 	});
 
+	test("one person cannot fill the replay cache for everyone (review of PR #13)", async () => {
+		const { verifier, make } = await setup();
+		const results: string[] = [];
+		for (let i = 0; i < 121; i++) {
+			results.push(await reason(verifier.verify(await make(), ADDRESS)));
+		}
+		// 120 in the window, then that person is busy...
+		expect(results.slice(0, 120).every((r) => r === "accepted")).toBe(true);
+		expect(results[120]).toBe("busy");
+		// ...and everyone else still gets through.
+		expect(
+			await reason(verifier.verify(await make({ sub: "bob" }), ADDRESS)),
+		).toBe("accepted");
+	});
+
 	test("wrong aud, iss, typ or sub are refused", async () => {
 		const { verifier, make } = await setup();
 		const check = async (claims: Record<string, unknown>, header = {}) =>
@@ -265,6 +281,76 @@ describe("JwksCache: stale keys on errors, no hammering", () => {
 			await expect(cache.keys("k1")).rejects.toThrow();
 			await expect(cache.keys("k1")).rejects.toThrow();
 			expect(hits).toBe(1);
+		} finally {
+			await server.stop(true);
+		}
+	});
+
+	test("callers during a fetch wait for it: a cold start and a key rotation (review of PR #13)", async () => {
+		const k1 = await signingKey("ES256", "k1");
+		const k2 = await signingKey("ES256", "k2");
+		let keys = [k1.publicJwk];
+		let hits = 0;
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: async () => {
+				hits++;
+				await Bun.sleep(200); // a slow JWKS endpoint
+				return Response.json({ keys });
+			},
+		});
+		let clock = 1_000_000;
+		const cache = new JwksCache(`http://127.0.0.1:${server.port}/jwks`, {
+			now: () => clock,
+		});
+		try {
+			// Many tabs after a restart: one fetch, every caller gets the key.
+			const cold = await Promise.all(
+				Array.from({ length: 5 }, () => cache.keys("k1")),
+			);
+			expect(cold.map((k) => k.length)).toEqual([1, 1, 1, 1, 1]);
+			expect(hits).toBe(1);
+			// The app rotates to k2: callers arriving during the refetch see it too.
+			keys = [k1.publicJwk, k2.publicJwk];
+			clock += 31_000;
+			const rotated = await Promise.all([cache.keys("k2"), cache.keys("k2")]);
+			expect(rotated.map((k) => k.length)).toEqual([1, 1]);
+			expect(hits).toBe(2);
+		} finally {
+			await server.stop(true);
+		}
+	});
+});
+
+describe("fetchJson: the size limit", () => {
+	test("a chunked body without Content-Length is cut off at the limit (review of PR #13)", async () => {
+		let sent = 0;
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: () =>
+				new Response(
+					new ReadableStream({
+						async pull(controller) {
+							if (sent >= 1024 * 1024) {
+								controller.close();
+								return;
+							}
+							sent += 16 * 1024;
+							controller.enqueue(new Uint8Array(16 * 1024).fill(32));
+							await Bun.sleep(1);
+						},
+					}),
+					{ headers: { "content-type": "application/json" } },
+				),
+		});
+		try {
+			await expect(
+				fetchJson(`http://127.0.0.1:${server.port}/big`, {}, 64 * 1024),
+			).rejects.toThrow("too large");
+			// It stopped reading soon after the limit, not at the end of the megabyte.
+			expect(sent).toBeLessThan(512 * 1024);
 		} finally {
 			await server.stop(true);
 		}

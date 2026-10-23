@@ -34,7 +34,7 @@ Depends on [iteration 3](/iterations/iteration-3-oauth.md)'s replaceable pairing
 - [x] Configuration (`TAB_MCP_IDENTITY=oidc` and provider settings) with validation; docs and threat model update
 - [x] Browser library: `identityAssertion` hook, `refreshIdentity()`, `signOut()`, no code in the dialog for `oidc`
 - [x] Tests with a local OIDC provider fixture; end-to-end with the MCP SDK client
-- [ ] Security review of the PR (self-review done; independent review in /review-pr)
+- [x] Security review of the PR (self-review; independent review by Claude and GLM on 2026-10-23: five findings, all fixed)
 
 ## Acceptance criteria
 

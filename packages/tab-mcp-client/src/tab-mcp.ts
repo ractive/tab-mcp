@@ -119,11 +119,6 @@ export class TabMcp extends EventTarget {
 	#identity: IdentityState = "none";
 	/** Incremented per identity request, so a late answer of an older one is dropped. */
 	#identityRound = 0;
-	/**
-	 * The round of each assertion sent on this connection, oldest first: the
-	 * relay answers them in order, so each answer belongs to the first one.
-	 */
-	#sentRounds: number[] = [];
 	readonly #identityTimeoutMs: number;
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
@@ -260,11 +255,12 @@ export class TabMcp extends EventTarget {
 							this.#setIdentity("none");
 							return;
 						}
-						if (connection?.send({ type: "identity", assertion }) !== true) {
+						if (
+							connection?.send({ type: "identity", assertion, round }) !== true
+						) {
 							this.#setIdentity("none");
 							return;
 						}
-						this.#sentRounds.push(round);
 						// No answer in time (an old relay, a lost message): give up.
 						setTimeout(() => {
 							if (round !== this.#identityRound || this.#identity !== "pending")
@@ -401,7 +397,6 @@ export class TabMcp extends EventTarget {
 		this.#session = undefined;
 		this.#setPairingCode(undefined);
 		this.#identityRound++;
-		this.#sentRounds = [];
 		this.#setIdentity("none");
 		this.#setState("disconnected");
 		if (wasConnected) this.#emit("disconnected", { reason, code: 1000 });
@@ -605,10 +600,11 @@ export class TabMcp extends EventTarget {
 			replaced: () => {
 				if (current()) this.#emit("replaced", null);
 			},
-			identityResult: (bound, message) => {
+			identityResult: (bound, round, message) => {
 				if (!current()) return;
-				// Only the answer to the newest assertion counts (review of PR #13).
-				if (this.#sentRounds.shift() !== this.#identityRound) return;
+				// Only the answer to the newest assertion counts: the relay echoes
+				// its round, so a lost or late answer cannot pass for a newer one.
+				if (round !== this.#identityRound) return;
 				if (bound) this.#setIdentity("bound");
 				else this.#setIdentity("refused", message ?? "");
 			},
@@ -621,7 +617,6 @@ export class TabMcp extends EventTarget {
 				this.#session = undefined;
 				this.#setPairingCode(undefined);
 				this.#identityRound++;
-				this.#sentRounds = [];
 				this.#setIdentity("none");
 				this.#setState("disconnected");
 				this.#emit("disconnected", { reason, code });
