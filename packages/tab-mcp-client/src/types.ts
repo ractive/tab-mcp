@@ -322,7 +322,9 @@ export interface TabMcpEventMap {
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
 	/**
 	 * Reconnecting by itself: the next attempt and when it starts, or `null`
-	 * when it stopped (connected again, or `disconnect()`).
+	 * when it stopped (connected again, `disconnect()`, or the relay refused
+	 * an attempt: then `error` says why just before, unless the attempt was
+	 * the page's own `connect()`, whose promise rejects).
 	 */
 	reconnecting: CustomEvent<ReconnectingInfo | null>;
 	/** An AI app called a tool (before any confirmation). */

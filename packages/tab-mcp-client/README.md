@@ -6,7 +6,7 @@ relay. The page connects to the relay and gets an address. The user adds that ad
 their AI app and types a pairing code from the page; the AI app then calls the page's
 tools while the tab stays open. Nothing is installed on the user's computer.
 
-**Status: 0.5.0.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.5.1.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
@@ -38,7 +38,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.5.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.5.1/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -152,7 +152,7 @@ event means it stopped, connected again or after `disconnect()`. Calling `connec
 meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
 another tab taking over the address (`replaced`), an expired or idle session, or a
 refusal by the relay, and an attempt the relay refuses stops it (an unreachable relay is
-tried again). `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
+tried again); the event `error` then says why, just before `reconnecting` turns `null`. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
 sets the waits (the last one repeats).
 
 The library does not connect on page load by itself. A page that offers something like

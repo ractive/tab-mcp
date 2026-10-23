@@ -295,6 +295,54 @@ test("a relay that refuses the reconnect attempt stops reconnecting (review of P
 	expect(seen.map((s) => s?.attempt ?? null)).toEqual([1, null]);
 });
 
+test("a refused attempt of its own says why with error, just before reconnecting turns null", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	const events: string[] = [];
+	t.addEventListener("error", (e) =>
+		events.push(`error: ${e.detail.error.message}`),
+	);
+	t.addEventListener("reconnecting", (e) =>
+		events.push(e.detail === null ? "null" : "waiting"),
+	);
+	relay.answerHello = false;
+	relay.close(4004);
+	await relay.next("hello");
+	const stopped = new Promise<void>((resolve) =>
+		t.addEventListener("reconnecting", (e) => {
+			if (e.detail === null) resolve();
+		}),
+	);
+	relay.send({
+		type: "error",
+		code: "origin_not_allowed",
+		message: "This origin is not allowed",
+	});
+	await stopped;
+	expect(events.slice(-2)).toEqual([
+		"error: The relay refused the connection: This origin is not allowed",
+		"null",
+	]);
+});
+
+test("a refused connect() while reconnecting rejects its promise and emits no error", async () => {
+	const t = await connected({ reconnect: { delaysMs: [60_000] } });
+	const errors: string[] = [];
+	t.addEventListener("error", (e) => errors.push(e.detail.error.message));
+	relay.answerHello = false;
+	relay.close(4004);
+	await nextEvent(t, "reconnecting");
+	const attempt = t.connect({ resume: true });
+	await relay.next("hello");
+	relay.send({
+		type: "error",
+		code: "origin_not_allowed",
+		message: "This origin is not allowed",
+	});
+	await expect(attempt).rejects.toThrow("This origin is not allowed");
+	expect(t.reconnecting).toBeUndefined();
+	expect(errors).toEqual([]);
+});
+
 test("a relay that ends the attempt with 1008 stops reconnecting; 4004 retries", async () => {
 	const t = await connected({ reconnect: { delaysMs: [10] } });
 	relay.answerHello = false;

@@ -368,7 +368,7 @@ export class TabMcp extends EventTarget {
 			return Promise.resolve(this.#session);
 		}
 		if (this.#connecting !== undefined) return this.#connecting;
-		if (this.#reconnecting !== undefined) return this.#attemptReconnect();
+		if (this.#reconnecting !== undefined) return this.#attemptReconnect(true);
 		const activation = (
 			globalThis.navigator as
 				| { userActivation?: { isActive: boolean } }
@@ -475,8 +475,11 @@ export class TabMcp extends EventTarget {
 		this.#emit("reconnecting", this.#reconnecting);
 	}
 
-	/** Make the next reconnect attempt now; on failure, schedule the one after. */
-	#attemptReconnect(): Promise<SessionInfo> {
+	/**
+	 * Make the next reconnect attempt now; on failure, schedule the one after.
+	 * `byPage`: from `connect()`, whose promise tells the page why it failed.
+	 */
+	#attemptReconnect(byPage = false): Promise<SessionInfo> {
 		clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = undefined;
 		if (this.#connecting !== undefined) return this.#connecting;
@@ -487,9 +490,16 @@ export class TabMcp extends EventTarget {
 			// Only what may get better: an unreachable relay (network), a
 			// heartbeat or a shutdown; a refusal stops it (DEC-082).
 			const reason = (error as { reason?: DisconnectReason } | null)?.reason;
-			if (reason === undefined || RECONNECT_REASONS.has(reason))
+			if (reason === undefined || RECONNECT_REASONS.has(reason)) {
 				this.#scheduleReconnect(info.reason, info.attempt + 1);
-			else this.#stopReconnecting();
+				return;
+			}
+			// No promise of the page's heard of it: say why, before `null`.
+			if (!byPage)
+				this.#emit("error", {
+					error: error instanceof Error ? error : new Error(String(error)),
+				});
+			this.#stopReconnecting();
 		});
 		return attempt;
 	}
