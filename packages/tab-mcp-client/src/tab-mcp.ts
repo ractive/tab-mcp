@@ -162,6 +162,8 @@ export class TabMcp extends EventTarget {
 	#reconnecting: ReconnectingInfo | undefined;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#unwatch: (() => void) | undefined;
+	/** The page's `connect()` waits on the running reconnect attempt: its promise tells it. */
+	#pageWaits = false;
 
 	constructor(options: TabMcpOptions) {
 		super();
@@ -367,8 +369,11 @@ export class TabMcp extends EventTarget {
 		if (this.#state === "connected" && this.#session !== undefined) {
 			return Promise.resolve(this.#session);
 		}
-		if (this.#connecting !== undefined) return this.#connecting;
-		if (this.#reconnecting !== undefined) return this.#attemptReconnect();
+		if (this.#connecting !== undefined) {
+			if (this.#reconnecting !== undefined) this.#pageWaits = true;
+			return this.#connecting;
+		}
+		if (this.#reconnecting !== undefined) return this.#attemptReconnect(true);
 		const activation = (
 			globalThis.navigator as
 				| { userActivation?: { isActive: boolean } }
@@ -475,21 +480,37 @@ export class TabMcp extends EventTarget {
 		this.#emit("reconnecting", this.#reconnecting);
 	}
 
-	/** Make the next reconnect attempt now; on failure, schedule the one after. */
-	#attemptReconnect(): Promise<SessionInfo> {
+	/**
+	 * Make the next reconnect attempt now; on failure, schedule the one after.
+	 * `byPage`: from `connect()`, whose promise tells the page why it failed.
+	 */
+	#attemptReconnect(byPage = false): Promise<SessionInfo> {
 		clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = undefined;
 		if (this.#connecting !== undefined) return this.#connecting;
 		const info = this.#reconnecting;
+		this.#pageWaits = byPage;
 		const attempt = this.#start();
 		attempt.catch((error: unknown) => {
+			const pageWaits = this.#pageWaits;
+			this.#pageWaits = false;
 			if (info === undefined || this.#reconnecting !== info) return;
 			// Only what may get better: an unreachable relay (network), a
 			// heartbeat or a shutdown; a refusal stops it (DEC-082).
 			const reason = (error as { reason?: DisconnectReason } | null)?.reason;
-			if (reason === undefined || RECONNECT_REASONS.has(reason))
+			if (reason === undefined || RECONNECT_REASONS.has(reason)) {
 				this.#scheduleReconnect(info.reason, info.attempt + 1);
-			else this.#stopReconnecting();
+				return;
+			}
+			// A refusal stops it. Without a connect() of the page's waiting on this
+			// attempt, nothing else tells the page why: `error` does, before `null`.
+			this.#stopReconnecting(
+				pageWaits
+					? undefined
+					: error instanceof Error
+						? error
+						: new Error(String(error)),
+			);
 		});
 		return attempt;
 	}
@@ -515,13 +536,19 @@ export class TabMcp extends EventTarget {
 		};
 	}
 
-	#stopReconnecting(): void {
+	/**
+	 * Stop reconnecting. `why` (a refusal) goes out as `error` before the
+	 * `null`, once the state is clear: a listener that calls `connect()` then
+	 * starts afresh, with the user-activation check.
+	 */
+	#stopReconnecting(why?: Error): void {
 		clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = undefined;
 		this.#unwatch?.();
 		this.#unwatch = undefined;
 		if (this.#reconnecting === undefined) return;
 		this.#reconnecting = undefined;
+		if (why !== undefined) this.#emit("error", { error: why });
 		this.#emit("reconnecting", null);
 	}
 

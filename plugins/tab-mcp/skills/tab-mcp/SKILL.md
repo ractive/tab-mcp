@@ -13,7 +13,7 @@ tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and gets an MCP address. 
 adds that address to their AI app and pairs it with a code shown in the page. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.5.0):
+Facts to keep in mind (version 0.5.1):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code works; VS Code, Cursor and Gemini CLI cannot connect.
@@ -30,7 +30,7 @@ Without a bundler, import the self-contained build from a CDN:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.5.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.5.1/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -119,7 +119,8 @@ network, a phone pausing the tab in the background, a relay restart), the librar
 connects again by itself: after 5, 10, 20 and 40 s, then every 60 s, and at once when the
 tab comes back to the front or the network returns. Do not write your own retry loop;
 show the property and event `reconnecting` (the next attempt, its number and time; once
-it stopped, the event carries `null` and the property is `undefined`). It never reconnects after `disconnect()`, a new address, another
+it stopped, the event carries `null` and the property is `undefined`; when the relay
+refused an attempt, `error` says why just before). It never reconnects after `disconnect()`, a new address, another
 tab taking over the address (`replaced`), an expired or idle session or a refusal by the
 relay, and a first `connect()` that fails is not retried (show the error and let the
 user try again). `reconnect: false`

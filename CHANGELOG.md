@@ -7,6 +7,16 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### [0.5.1][client-0.5.1] - 2026-10-23
+
+#### Fixed
+
+- When the relay refuses an attempt the library made by itself while reconnecting (from
+  its timer, or the tab coming back to the front), the event `error` now says why, just
+  before `reconnecting` turns `null`. Until now the page only saw `null` and could not
+  tell a refusal from a stop. An attempt made by the page's own `connect()` still
+  rejects its promise and emits no `error`.
+
 ### [0.5.0][client-0.5.0] - 2026-10-23
 
 #### Changed
@@ -243,6 +253,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
 
+[client-0.5.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.5.1
 [client-0.5.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.5.0
 [client-0.4.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.4.0
 [client-0.3.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.3.0
