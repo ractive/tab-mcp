@@ -2,12 +2,12 @@
 type: iteration
 title: "Iteration 9: React bindings for single-page apps"
 description: A React entry point of the browser library (`@ractive-ch/tab-mcp-client/react`) with a provider, state and tool hooks and a connect button, plus automatic reconnecting in the core library, for SPAs that have no server to host an MCP server.
-status: in-progress
+status: completed
 tags:
   - iteration
   - client
   - react
-timestamp: 2026-10-23T20:00:00+02:00
+timestamp: 2026-10-23T20:20:00+02:00
 ---
 
 # Iteration 9: React bindings for single-page apps
@@ -82,7 +82,7 @@ its own copy.
 
 ### Example and tests
 
-- `examples/react-todo/`: a Vite SPA, a todo list with tools to list, add and complete
+- `examples/react-todo/`: a single-page app (bundled with Bun instead of Vite, DEC-081), a todo list with tools to list, add and complete
   items, a confirmation on delete (`consequentialHint`). Built to static files; served
   by the example server in tests.
 - Unit tests of the hooks with happy-dom (already a dev dependency) and React's `act`,
@@ -97,7 +97,7 @@ its own copy.
 ### Docs
 
 README section "React", the plugin skill's React part (how an AI agent adds tab-mcp to a
-React SPA), CHANGELOG. Client release 0.3.0.
+React SPA), CHANGELOG. Client release 0.3.0 (shipped as 0.4.0, the reconnect fix in 0.5.1).
 
 ## Open questions
 
@@ -119,11 +119,11 @@ frameworks on demand. Reconnecting: DEC-082.
 - [x] Hook tests for React 18.3 and 19 (StrictMode, re-renders, unmount, error boundary, server rendering); bundle size of the React entry in `build.test.ts`
 - [x] `examples/react-todo` (Bun's bundler instead of Vite, DEC-081) and its end-to-end test in headless Chrome, including a relay restart
 - [x] README and CHANGELOG done; the plugin skill's React part with the release (the skill describes the published version); release the client (0.4.0: 0.3.0 is out)
-- [ ] saturnus: use the core reconnecting and drop its own
+- [x] saturnus: use the core reconnecting and drop its own (saturnus PR #216, 2026-10-23, with client 0.5.1: a refused attempt of the library's own now emits `error`, tab-mcp PR #25)
 
 ## Acceptance criteria
 
-- A Vite React SPA adds tab-mcp with the provider, one `useTool` per tool and a
+- A React SPA (bundled with Bun, DEC-081) adds tab-mcp with the provider, one `useTool` per tool and a
   `ConnectButton`, and an AI app pairs with it and uses its tools, also after the tab was
   in the background or the relay restarted.
 - StrictMode in development registers each tool once at a time and never throws
