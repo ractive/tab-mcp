@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-21T15:30:00+02:00
+timestamp: 2026-10-23T11:45:00+02:00
 ---
 
 # Decision log
@@ -281,6 +281,7 @@ which admits nobody. An open relay needs an explicit setting (`TAB_MCP_ALLOWED_O
 and logs a warning at start. The owner's hosted relay allows exactly `https://ractive.ch`
 (browsers send only the origin, not the path, so a path cannot be allowed). The calculator
 example runs against a local relay (`docker run ractive/tab-mcp`), not the hosted one.
+Amended by DEC-075: a copy of the calculator is published on ractive.ch.
 
 ## DEC-033: MCP 2026-07-28 only, CIMD only, one Claude header case (owner)
 
@@ -929,6 +930,18 @@ Decision:
 The log line keeps `reason: "page_not_open"` (status 200). Other 503s stay: a
 notification, a dropped send (`-31005`) and an unavailable token store (`-31008`). It is
 not proven that claude.ai behaves like Claude Code; the next test on a phone shows it.
+
+## DEC-075: Live examples on ractive.ch use the hosted relay (owner)
+
+The owner, 2026-10-23: the examples are also published as live pages on ractive.ch, so
+people can try tab-mcp without running anything, starting with the calculator at
+<https://ractive.ch/tab-mcp/calculator/>. They connect to the hosted relay
+`tab-mcp.ractive.ch`, which already allows `https://ractive.ch` (DEC-032), so the relay
+does not change. The pages live in the ractive.ch site repository (DEC-046: deployments
+stay outside this repository) and use the npm release of `@ractive-ch/tab-mcp-client`,
+not the workspace. `bun run example` in this repository still starts a local relay and
+never uses the hosted one. A live page served from localhost uses only a relay named in
+its localStorage, never the hosted one.
 
 # Citations
 
