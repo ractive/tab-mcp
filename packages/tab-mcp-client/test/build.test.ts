@@ -87,14 +87,19 @@ test("the build produces a package whose declarations type-check for a consumer"
 	>;
 	expect(pkg["exports"]).toEqual({
 		".": { types: "./index.d.ts", default: "./index.js" },
+		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	});
+	expect(pkg["peerDependencies"]).toEqual({ react: ">=18.3.0 <20" });
+	expect(pkg["peerDependenciesMeta"]).toEqual({ react: { optional: true } });
 	expect(pkg["dependencies"]).toEqual({
 		"@cfworker/json-schema": expect.any(String),
 	});
 	for (const file of [
 		"index.js",
 		"index.d.ts",
+		"react.js",
+		"react.d.ts",
 		"cdn/tab-mcp-client.min.js",
 		"LICENSE",
 		"AI_NOTICE",
@@ -118,6 +123,22 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(pkg["private"]).toBeUndefined();
 	const declarations = await Bun.file(join(dist, "index.d.ts")).text();
 	expect(declarations).not.toContain('.ts"');
+	// The React entry: "use client" first, the core entry and react as imports.
+	const reactEntry = await Bun.file(join(dist, "react.js")).text();
+	expect(reactEntry.startsWith('"use client";')).toBe(true);
+	const imports = [
+		...reactEntry.matchAll(/\bfrom\s*"([^"]+)"|\bimport\s*\(\s*"([^"]+)"/g),
+	].map((m) => m[1] ?? m[2]);
+	expect(new Set(imports)).toEqual(new Set(["react", "./index.js"]));
+	const cdnFiles = [...new Bun.Glob("cdn/*.js").scanSync(dist)];
+	expect(cdnFiles.some((f) => f.includes("react"))).toBe(false);
+	expect(
+		await Bun.file(join(dist, "cdn/tab-mcp-client.min.js")).text(),
+	).not.toContain("useSyncExternalStore");
+	const reactGz = Bun.gzipSync(new TextEncoder().encode(reactEntry)).length;
+	console.log(`react entry ${(reactGz / 1024).toFixed(1)} KB gzipped`);
+	expect(reactGz).toBeLessThanOrEqual(3 * 1024);
+	expect(await Bun.file(join(dist, "react.d.ts")).text()).not.toContain('.ts"');
 
 	await Bun.write(
 		join(consumer, "page.ts"),
@@ -133,6 +154,28 @@ mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
 `,
 	);
 	await Bun.write(
+		join(consumer, "app.ts"),
+		`import { createElement, type ReactElement } from "react";
+import { ConnectButton, TabMcpProvider, useTabMcp, useTabMcpState, useTool, useToolCalls, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
+import type { TabMcp } from "@ractive-ch/tab-mcp-client";
+function Tools(): ReactElement {
+	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, [1]);
+	const state: TabMcpSnapshot = useTabMcpState();
+	const mcp: TabMcp = useTabMcp();
+	const calls = useToolCalls({ limit: 5 });
+	return createElement("p", null, state.state, state.identity, state.reconnecting?.attempt, mcp.tools.length, calls[0]?.end?.outcome);
+}
+export const app: ReactElement = createElement(
+	TabMcpProvider,
+	{ relay: "https://relay.example", server: { name: "x", version: "1" }, reconnect: { delaysMs: [1000] } },
+	createElement(Tools),
+	createElement(ConnectButton, { className: "ai", children: (s: TabMcpSnapshot) => s.state }),
+);
+// @ts-expect-error: the provider needs a relay and a server, or a client
+export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x" });
+`,
+	);
+	await Bun.write(
 		join(consumer, "tsconfig.json"),
 		JSON.stringify({
 			compilerOptions: {
@@ -144,9 +187,13 @@ mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
 				strict: true,
 				noEmit: true,
 				skipLibCheck: false,
-				paths: { "@ractive-ch/tab-mcp-client": [join(dist, "index.d.ts")] },
+				paths: {
+					"@ractive-ch/tab-mcp-client": [join(dist, "index.d.ts")],
+					"@ractive-ch/tab-mcp-client/react": [join(dist, "react.d.ts")],
+					react: [join(root, "node_modules/@types/react")],
+				},
 			},
-			files: ["page.ts"],
+			files: ["page.ts", "app.ts"],
 		}),
 	);
 	const tsc = Bun.spawnSync(

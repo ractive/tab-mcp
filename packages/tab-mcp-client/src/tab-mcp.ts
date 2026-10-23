@@ -19,6 +19,7 @@ import type {
 	IdentityAssertionHandler,
 	IdentityState,
 	PairingCode,
+	ReconnectingInfo,
 	RegisterToolOptions,
 	ServerInfo,
 	SessionInfo,
@@ -30,6 +31,31 @@ import type {
 import { LIBRARY_NAME, VERSION } from "./version.ts";
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** The default waits before each reconnect attempt; the last one repeats. */
+const RECONNECT_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
+/** Reasons after which the library connects again by itself. */
+const RECONNECT_REASONS = new Set<DisconnectReason>([
+	"network",
+	"heartbeat",
+	"shutdown",
+]);
+
+function reconnectDelays(
+	option: TabMcpOptions["reconnect"],
+): readonly number[] | undefined {
+	if (option === false) return undefined;
+	if (option === undefined || option === true) return RECONNECT_DELAYS_MS;
+	const delays = option.delaysMs ?? RECONNECT_DELAYS_MS;
+	if (
+		!Array.isArray(delays) ||
+		delays.length === 0 ||
+		!delays.every((d) => typeof d === "number" && d >= 0 && d < 2 ** 31)
+	) {
+		throw new TypeError("TabMcp: reconnect.delaysMs: a non-empty list of ms");
+	}
+	return [...delays];
+}
 
 /** What the relay accepts as `hello.app.name` (protocol: session). */
 function isAppName(value: unknown): value is string {
@@ -117,6 +143,7 @@ export class TabMcp extends EventTarget {
 	readonly #secrets: SecretStore;
 	readonly #identityAssertion: IdentityAssertionHandler | undefined;
 	#identity: IdentityState = "none";
+	#identityMessage: string | undefined;
 	/** Incremented per identity request, so a late answer of an older one is dropped. */
 	#identityRound = 0;
 	readonly #identityTimeoutMs: number;
@@ -130,6 +157,11 @@ export class TabMcp extends EventTarget {
 	#connecting: Promise<SessionInfo> | undefined;
 	/** Incremented when a connection ends or is cancelled. */
 	#generation = 0;
+	/** Waits between reconnect attempts; `undefined`: reconnecting is off. */
+	readonly #reconnectDelays: readonly number[] | undefined;
+	#reconnecting: ReconnectingInfo | undefined;
+	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	#unwatch: (() => void) | undefined;
 
 	constructor(options: TabMcpOptions) {
 		super();
@@ -153,6 +185,7 @@ export class TabMcp extends EventTarget {
 		this.#confirmDelayMs = options.confirmDelayMs;
 		this.#identityAssertion = options.identityAssertion;
 		this.#identityTimeoutMs = options.identityTimeoutMs ?? 15_000;
+		this.#reconnectDelays = reconnectDelays(options.reconnect);
 		this.#secrets = new SecretStore(
 			options.storage,
 			options.storageKey ?? `tab-mcp:secret:${origin}`,
@@ -207,9 +240,22 @@ export class TabMcp extends EventTarget {
 		return this.#grants;
 	}
 
+	/**
+	 * While the library connects again by itself after the connection broke:
+	 * the next attempt and when it starts. `undefined` otherwise.
+	 */
+	get reconnecting(): ReconnectingInfo | undefined {
+		return this.#reconnecting;
+	}
+
 	/** Who the relay knows as the page's user (identity binding). */
 	get identity(): IdentityState {
 		return this.#identity;
+	}
+
+	/** Why the relay refused the identity, while `identity` is `refused`. */
+	get identityMessage(): string | undefined {
+		return this.#identityMessage;
 	}
 
 	/**
@@ -309,13 +355,14 @@ export class TabMcp extends EventTarget {
 	 * WebSocket, resolves with the session. Call it from a user action (a
 	 * click): where browsers track user activation it is refused otherwise,
 	 * unless `options.resume` says the user already chose to keep AI access on.
-	 * Never reconnects by itself.
+	 * While reconnecting (`reconnecting`), it makes the next attempt at once.
 	 */
 	connect(options: ConnectOptions = {}): Promise<SessionInfo> {
 		if (this.#state === "connected" && this.#session !== undefined) {
 			return Promise.resolve(this.#session);
 		}
 		if (this.#connecting !== undefined) return this.#connecting;
+		if (this.#reconnecting !== undefined) return this.#attemptReconnect();
 		const activation = (
 			globalThis.navigator as
 				| { userActivation?: { isActive: boolean } }
@@ -333,6 +380,10 @@ export class TabMcp extends EventTarget {
 				),
 			);
 		}
+		return this.#start();
+	}
+
+	#start(): Promise<SessionInfo> {
 		this.#setState("connecting");
 		const connecting = this.#open(this.#generation);
 		this.#connecting = connecting;
@@ -377,7 +428,8 @@ export class TabMcp extends EventTarget {
 	 * connecting. Call it from a user action.
 	 */
 	newAddress(): Promise<SessionInfo | undefined> {
-		const wasOn = this.#state !== "disconnected";
+		const wasOn =
+			this.#state !== "disconnected" || this.#reconnecting !== undefined;
 		if (this.#state === "connected")
 			this.#connection?.send({ type: "grants.revokeAll" });
 		this.#end("new_address");
@@ -387,6 +439,7 @@ export class TabMcp extends EventTarget {
 
 	/** Close the connection (or cancel connecting) and report it at once. */
 	#end(reason: DisconnectReason): void {
+		this.#stopReconnecting();
 		this.#generation++;
 		const connection = this.#connection;
 		const wasConnected = this.#state === "connected";
@@ -400,6 +453,70 @@ export class TabMcp extends EventTarget {
 		this.#setIdentity("none");
 		this.#setState("disconnected");
 		if (wasConnected) this.#emit("disconnected", { reason, code: 1000 });
+	}
+
+	/** Wait, then connect again (attempt `attempt`, from 1). */
+	#scheduleReconnect(reason: DisconnectReason, attempt: number): void {
+		const delays = this.#reconnectDelays;
+		if (delays === undefined) return;
+		const delay = delays[Math.min(attempt, delays.length) - 1] ?? 0;
+		clearTimeout(this.#reconnectTimer);
+		this.#reconnectTimer = setTimeout(() => {
+			this.#attemptReconnect().catch(() => {}); // the next one is scheduled
+		}, delay);
+		this.#watch();
+		this.#reconnecting = { reason, attempt, at: Date.now() + delay };
+		this.#emit("reconnecting", this.#reconnecting);
+	}
+
+	/** Make the next reconnect attempt now; on failure, schedule the one after. */
+	#attemptReconnect(): Promise<SessionInfo> {
+		clearTimeout(this.#reconnectTimer);
+		this.#reconnectTimer = undefined;
+		if (this.#connecting !== undefined) return this.#connecting;
+		const info = this.#reconnecting;
+		const attempt = this.#start();
+		attempt.catch((error: unknown) => {
+			if (info === undefined || this.#reconnecting !== info) return;
+			// Only what may get better: an unreachable relay (network), a
+			// heartbeat or a shutdown; a refusal stops it (DEC-082).
+			const reason = (error as { reason?: DisconnectReason } | null)?.reason;
+			if (reason === undefined || RECONNECT_REASONS.has(reason))
+				this.#scheduleReconnect(info.reason, info.attempt + 1);
+			else this.#stopReconnecting();
+		});
+		return attempt;
+	}
+
+	/** Back to the front, or online again: try at once instead of waiting. */
+	#watch(): void {
+		if (this.#unwatch !== undefined) return;
+		const g = globalThis as Partial<EventTarget>;
+		const doc = (globalThis as { document?: Document }).document;
+		const now = () => {
+			// Only while waiting: an attempt that is running is not doubled.
+			if (this.#reconnectTimer !== undefined)
+				this.#attemptReconnect().catch(() => {});
+		};
+		const visible = () => {
+			if (doc?.visibilityState !== "hidden") now();
+		};
+		doc?.addEventListener("visibilitychange", visible);
+		g.addEventListener?.("online", now);
+		this.#unwatch = () => {
+			doc?.removeEventListener("visibilitychange", visible);
+			g.removeEventListener?.("online", now);
+		};
+	}
+
+	#stopReconnecting(): void {
+		clearTimeout(this.#reconnectTimer);
+		this.#reconnectTimer = undefined;
+		this.#unwatch?.();
+		this.#unwatch = undefined;
+		if (this.#reconnecting === undefined) return;
+		this.#reconnecting = undefined;
+		this.#emit("reconnecting", null);
 	}
 
 	/** The pairing dialog opened: ask the relay for codes (DEC-028). */
@@ -498,6 +615,7 @@ export class TabMcp extends EventTarget {
 	#setIdentity(state: IdentityState, message?: string): void {
 		if (this.#identity === state && message === undefined) return;
 		this.#identity = state;
+		this.#identityMessage = state === "refused" ? message : undefined;
 		this.#emit(
 			"identitychange",
 			message === undefined ? { state } : { state, message },
@@ -523,6 +641,15 @@ export class TabMcp extends EventTarget {
 				.then(() => ask(request))
 				.then((allowed) => allowed === true);
 		}
+		return this.confirmInPage(request);
+	}
+
+	/**
+	 * The library's own confirmation: the dialog in the page with Allow,
+	 * Always allow and Deny (what runs without `onConfirm`). An `onConfirm`
+	 * may hand some calls to it. Resolves `false` where there is no document.
+	 */
+	confirmInPage(request: ConfirmRequest): Promise<boolean> {
 		const { grantId } = request.client;
 		if (this.#alwaysAllowed.has(grantId, request.tool.name))
 			return Promise.resolve(true);
@@ -576,6 +703,7 @@ export class TabMcp extends EventTarget {
 				const session = sessionInfo(m);
 				if (!current()) return session;
 				this.#session = session;
+				this.#stopReconnecting();
 				this.#setState("connected");
 				this.#setGrants([...m.grants]);
 				if (this.#pairing) this.#connection?.send({ type: "pairing.start" });
@@ -613,6 +741,9 @@ export class TabMcp extends EventTarget {
 			},
 			closed: (reason: DisconnectReason, code: number) => {
 				if (!current()) return;
+				// Any listener below may end it all (`disconnect()`, `newAddress()`):
+				// that bumps the generation, and then nothing is scheduled.
+				const generation = this.#generation;
 				this.#connection = undefined;
 				this.#session = undefined;
 				this.#setPairingCode(undefined);
@@ -620,6 +751,14 @@ export class TabMcp extends EventTarget {
 				this.#setIdentity("none");
 				this.#setState("disconnected");
 				this.#emit("disconnected", { reason, code });
+				// After the page heard of it: its listener may have connected or ended it.
+				if (
+					RECONNECT_REASONS.has(reason) &&
+					this.#generation === generation &&
+					this.#state === "disconnected" &&
+					this.#connecting === undefined
+				)
+					this.#scheduleReconnect(reason, 1);
 			},
 		};
 	}

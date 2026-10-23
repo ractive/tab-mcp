@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-23T16:00:00+02:00
+timestamp: 2026-10-23T20:00:00+02:00
 ---
 
 # Decision log
@@ -1090,6 +1090,95 @@ an AI app can do in a page, and <https://ractive.ch/tab-mcp/> lists the live exa
 `/tab-mcp/calculator/` redirects there. The calculator then left this repository's examples
 too (owner): it lives on in `test/e2e` as the page the end-to-end tests drive, and the
 README points to the live examples instead.
+
+## DEC-081: React bindings: provider plus hooks, a second entry of the client
+
+Iteration 9's open questions, decided while building it (can be challenged):
+
+- Provider plus hooks, not hooks only: tools are registered in many components, and one
+  `TabMcp` per tree needs a place to live. `<TabMcpProvider>` takes the `TabMcp` options
+  (or `client`, an instance of the page's own, which it then neither replaces nor
+  disconnects). The instance comes from the first render; a changed `relay` or
+  `server.name` makes a new one and warns (always, not only in development: the library
+  cannot see the page's build mode without a bundler), other changes are ignored, but
+  `onConfirm` and `identityAssertion` are read through a ref, so the latest closures
+  count. Both wrappers are installed whether or not the props are there on the first
+  render (review of PR #20), so a handler added or removed later counts too: without
+  `onConfirm` the wrapper calls the new public `confirmInPage()` (the library's own
+  dialog, which an `onConfirm` may also hand calls to), without `identityAssertion` it
+  answers `null`, which is what no hook means (on an `oidc` relay `identity` passes
+  through `pending` to `none`). The provider disconnects its own instance when it unmounts.
+- The plan said the instance is made on the client only. It is made on the server too
+  (during render), because the constructor touches no browser API and no storage, and
+  effects (registering, connecting) never run there; so `useTabMcp()` always returns a
+  `TabMcp` instead of `TabMcp | null` in every SPA. `useTabMcpState()` gives the server
+  and hydration a fixed `disconnected` snapshot; a test renders on the server with no
+  `window`/`document` and checks that storage is never read.
+- Next.js app router and Remix: only the `"use client"` note in the README, no example.
+  Other frameworks (Vue, Svelte, Solid): on demand; the core API works today.
+- The entry is `src/react.ts` without JSX (`createElement`), so it imports only `react`
+  and the core entry. The build makes it a separate file whose core import stays
+  external (`./index.js`): one `TabMcp` class for both entries, no copy of the core, no
+  lazy chunk loaded early (`build.test.ts` checks the imports and a 3 KB gzip budget).
+  `"use client"` is a build banner, because Bun moves a source directive below the
+  imports. The React entry is not in the CDN build.
+- `react` is an optional peer dependency `>=18.3.0 <20`. Peer dependencies are ranges by
+  nature, so they are the one exception to exact pins (DEC-004): `npm-pack.ts` checks
+  them against the expected range and requires `peerDependenciesMeta` to mark each
+  optional; dependencies stay exact.
+- `useTool` keys the registration on name, title, description, input schema and
+  annotations (JSON) plus optional `deps`; `execute` goes through a ref updated in
+  `useInsertionEffect` (no server warning in React 18, unlike `useLayoutEffect`). A
+  rejected registration (a duplicate name, an invalid tool) is thrown from the next
+  render, for an error boundary. `useToolCalls` lists calls since the component mounted
+  (per component, newest first), not a page-wide history. `ConnectButton` is always
+  `type="button"` and has `data-state` (`reconnecting` as a fourth value).
+- Tests run against React 19 and, in a second `bun test` process, against React 18.3:
+  the dev dependencies `react-18`/`react-dom-18` (npm aliases) and a preload that maps
+  `react` and `react-dom` to them with `mock.module` (also react-dom's own `react`, which
+  the isolated install links to 19).
+- `examples/react-todo` is bundled by Bun's HTML import and `bun build`, not Vite as the
+  plan said: the repository uses Bun's bundler (CLAUDE.md), and the example shows the
+  library, not a build tool. Its end-to-end test gives the AI app a token through the
+  relay's store instead of pairing in Chrome, which the end-to-end test in `test/e2e`
+  already covers.
+
+## DEC-082: Reconnecting in the core library
+
+`TabMcp` connects again by itself after a connection that was up ended with reason
+`network`, `heartbeat` or `shutdown`: after 5, 10, 20 and 40 s, then every 60 s, and at
+once on `visibilitychange` to visible or `online`. Every connection is user-started
+(`connect()` needs a user action or `resume`), so the option `reconnect` is on by default;
+`false` keeps the old behaviour, `{ delaysMs }` sets the waits (the last repeats).
+
+- No new `ConnectionState` value: pages switch exhaustively over `state`, and a new
+  member would break them. The getter `reconnecting` (`{ reason, attempt, at }` or
+  `undefined`) and the event `reconnecting` (that object, or `null` when it stops) say
+  it; `state` goes `disconnected` → `connecting` per attempt, as for a manual connect.
+- `connect()` while waiting makes the attempt at once (also without user activation:
+  the user started this connection). `disconnect()` stops reconnecting; `newAddress()`
+  while waiting connects with the new address. The attempt count starts over after a
+  successful connection.
+- The library schedules after emitting `disconnected`, and not when the page's own
+  listener already connected (pages like saturnus that reconnect themselves are not
+  doubled until they drop their copy), nor when a listener ended it all with
+  `disconnect()` or `newAddress()` (review of PR #20: the generation changed).
+- A failed attempt is retried only when it failed for a reason that may get better:
+  `network` (no WebSocket at all, a timeout, a lost chunk), `heartbeat` or `shutdown`.
+  `connection.ts` rejects `ready` with the reason (the close code while opening, the
+  relay's `error` as `policy` or `rate_limited`, a `bye`'s reason); anything else stops
+  reconnecting (review of PR #20). A page whose origin is no longer allowed is the one
+  refusal it cannot see: the relay refuses the upgrade, and the browser reports that as
+  1006 like an unreachable relay, so it keeps trying every 60 s. Bun reports a failed
+  handshake as 1002; both count as `network`.
+- Not after `replaced` (another tab owns the address), `expired`, `idle`, `closed` or a
+  refusal (`policy`, `too_large`, `rate_limited`): these do not get better by retrying,
+  or retrying would fight another tab.
+- A reconnect is a connect: `session` triggers the identity assertion again
+  (`identityAssertion`, relays that pair by `oidc`) and `pairing.start` when pairing is
+  on, as after a fresh connect.
+- Cost: the core grows by about 0.5 KB gzipped, to 5.0 KB with the review fixes (budget
+  5 KB, with a few bytes left: the next core feature has to raise it or trim).
 
 # Citations
 

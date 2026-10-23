@@ -18,6 +18,8 @@ export type {
 	JsonSchema,
 	Limits,
 	PairingCode,
+	ReconnectingInfo,
+	ReconnectOptions,
 	RegisterToolOptions,
 	SecretStorage,
 	ServerInfo,

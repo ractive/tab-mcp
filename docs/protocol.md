@@ -287,8 +287,10 @@ On any close the relay ends the session: pending HTTP requests get the answers i
 [When the page is not open](#when-the-page-is-not-open), listen streams end, and the
 pairing code becomes invalid. Grants and tokens stay: they belong to the address, not to
 the WebSocket. While no tab is connected, MCP requests with a valid token get "the page
-is not open". The library never
-reconnects on its own, because a session needs a user action.
+is not open". After a close with 4003 or 4004 (or `bye` `shutdown`) or a broken
+connection, the library opens a new session by itself with growing waits (5, 10, 20,
+40 s, then every 60 s), since the user already started this one; after the other
+reasons it waits for the user.
 
 ## Heartbeat
 

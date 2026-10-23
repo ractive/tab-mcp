@@ -134,6 +134,32 @@ export interface TabMcpOptions {
 	 * `identity` goes back to `none`, in milliseconds; default 15000.
 	 */
 	identityTimeoutMs?: number;
+	/**
+	 * Connect again by itself after the connection broke (reason `network`,
+	 * `heartbeat` or `shutdown`): after 5, 10, 20 and 40 seconds, then every
+	 * 60 seconds, and at once when the tab comes back to the front or the
+	 * network returns. On by default; `false` leaves it to the page.
+	 */
+	reconnect?: boolean | ReconnectOptions;
+}
+
+/** Options of reconnecting (`TabMcpOptions.reconnect`). */
+export interface ReconnectOptions {
+	/**
+	 * The waits before each attempt in milliseconds; the last one repeats.
+	 * Default `[5000, 10000, 20000, 40000, 60000]`.
+	 */
+	delaysMs?: readonly number[];
+}
+
+/** The library is reconnecting by itself (`reconnecting`). */
+export interface ReconnectingInfo {
+	/** Why the connection ended. */
+	reason: DisconnectReason;
+	/** The number of the next (or running) attempt, from 1. */
+	attempt: number;
+	/** When that attempt starts, in milliseconds since the epoch (`Date.now()`). */
+	at: number;
 }
 
 /** What the page's identity hook gets. */
@@ -203,7 +229,7 @@ export interface ConnectOptions {
 	/**
 	 * Connect without a user action, for a page whose user turned on something
 	 * like "Keep AI access on" earlier (with a click): e.g. on page load or
-	 * after a `disconnected` event. The library itself never reconnects.
+	 * after a `disconnected` event without `reconnect`.
 	 */
 	resume?: boolean;
 }
@@ -287,6 +313,11 @@ export interface TabMcpEventMap {
 	/** The relay accepted or refused the page's identity, or it was cleared. */
 	identitychange: CustomEvent<{ state: IdentityState; message?: string }>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
+	/**
+	 * Reconnecting by itself: the next attempt and when it starts, or `null`
+	 * when it stopped (connected again, or `disconnect()`).
+	 */
+	reconnecting: CustomEvent<ReconnectingInfo | null>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;
 	/** That call ended; also when the user declined it or the AI app cancelled it. */

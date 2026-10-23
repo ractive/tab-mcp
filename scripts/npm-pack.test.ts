@@ -46,8 +46,23 @@ test("the manifest check names what is wrong", () => {
 			directory: spec.workspace,
 		},
 		dependencies: { "@cfworker/json-schema": "4.1.1" },
+		peerDependencies: { react: ">=18.3.0 <20" },
+		peerDependenciesMeta: { react: { optional: true } },
 	};
 	expect(checkManifest(good, spec, "0.1.0-alpha.0")).toEqual([]);
+	// React is an optional peer with the tested range.
+	const required = checkManifest(
+		{ ...good, peerDependenciesMeta: undefined },
+		spec,
+		"0.1.0-alpha.0",
+	).join("\n");
+	expect(required).toContain("peerDependenciesMeta");
+	const wider = checkManifest(
+		{ ...good, peerDependencies: { react: "*" } },
+		spec,
+		"0.1.0-alpha.0",
+	).join("\n");
+	expect(wider).toContain("peerDependencies");
 	const bad = {
 		...good,
 		private: true,

@@ -30,6 +30,8 @@ export class StubRelay {
 	pairing: "code" | "oidc" | undefined;
 	/** Answer `hello` with a `session` (off: the test answers itself). */
 	answerHello = true;
+	/** Refuse WebSocket upgrades (503), like a relay that is down. */
+	refuse = false;
 	#socket: ServerWebSocket<undefined> | undefined;
 	readonly #waiters: {
 		match: (m: Message) => boolean;
@@ -41,11 +43,13 @@ export class StubRelay {
 			port: 0,
 			hostname: "127.0.0.1",
 			fetch: (req, srv) =>
-				srv.upgrade(req, {
-					headers: { "Sec-WebSocket-Protocol": "tab-mcp.v1" },
-				})
-					? undefined
-					: new Response("upgrade expected", { status: 400 }),
+				this.refuse
+					? new Response("down", { status: 503 })
+					: srv.upgrade(req, {
+								headers: { "Sec-WebSocket-Protocol": "tab-mcp.v1" },
+							})
+						? undefined
+						: new Response("upgrade expected", { status: 400 }),
 			websocket: {
 				open: (ws) => {
 					this.#socket = ws;
