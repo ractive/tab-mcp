@@ -250,8 +250,13 @@ describe("showConnectDialog", () => {
 			"123456",
 		);
 		expect(codeLine.textContent).toBe(
-			"When asked, enter the code 123456A new code appears every 2 minutes and after each use.",
+			"When asked, enter the code 123456 CopyA new code appears every 2 minutes and after each use.",
 		);
+		// Apps connected before the dialog opened do not count: no Done yet.
+		const done = byText(dialog, "Done");
+		const close = byText(dialog, "Close");
+		expect(done.hidden).toBe(true);
+		expect(close.hidden).toBe(false);
 
 		// A newly connected app is announced in the status line.
 		const added = nextEvent(mcp, "grantschange");
@@ -271,6 +276,8 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
 			"ChatGPT (chatgpt.com) is connected.",
 		);
+		expect(done.hidden).toBe(false);
+		expect(close.hidden).toBe(true);
 		relay.send({ type: "grant.removed", grantId: "g_2", reason: "revoked" });
 		await nextEvent(mcp, "grantschange");
 
@@ -285,14 +292,15 @@ describe("showConnectDialog", () => {
 			true,
 		);
 
-		byText(dialog, "Close").click();
+		done.click();
 		await closed;
 		expect(await relay.next("pairing.stop")).toEqual({ type: "pairing.stop" });
 		expect(doc.querySelector("dialog")).toBeNull();
 		expect(mcp.pairing).toBe(false);
 	});
 
-	test("Copy writes the address to the clipboard", async () => {
+	/** A clipboard that records what was written; returns the last text. */
+	function stubClipboard(): () => string {
 		let copied = "";
 		Object.defineProperty(window.navigator, "clipboard", {
 			value: {
@@ -302,13 +310,156 @@ describe("showConnectDialog", () => {
 			},
 			configurable: true,
 		});
+		return () => copied;
+	}
+
+	async function sendCode(code: string): Promise<void> {
+		const shown = nextEvent(mcp, "pairingcode");
+		relay.send({
+			type: "pairing.code",
+			code,
+			expiresAt: "2026-10-20T10:00:00.000Z",
+		});
+		await shown;
+	}
+
+	test("Copy writes the address to the clipboard", async () => {
+		const copied = stubClipboard();
 		const { dialog, session } = await open();
-		const copy = byText(dialog, "Copy");
+		const copy = dialog.querySelector(
+			".tab-mcp-address-copy",
+		) as HTMLButtonElement;
+		expect(copy).toBe(byText(dialog, "Copy"));
+		expect(copy.getAttribute("aria-label")).toBe("Copy address");
 		copy.click();
 		await Bun.sleep(0);
-		expect(copied).toBe(session.address);
+		expect(copied()).toBe(session.address);
 		expect(copy.textContent).toBe("Copied");
+		expect(copy.getAttribute("aria-label")).toBe("Copied address");
 		byText(dialog, "Close").click();
+	});
+
+	test("Copy next to the code copies the code shown, also after it changes", async () => {
+		const copied = stubClipboard();
+		const { dialog } = await open();
+		await sendCode("123456");
+		const codeLine = dialog.querySelector(".tab-mcp-code") as HTMLElement;
+		const copy = codeLine.querySelector(
+			"button.tab-mcp-code-copy",
+		) as HTMLButtonElement;
+		expect(copy.textContent).toBe("Copy");
+		expect(copy.getAttribute("aria-label")).toBe("Copy code");
+		// The code is plain text of its own, selectable in one go.
+		const value = codeLine.querySelector(".tab-mcp-code-value") as HTMLElement;
+		expect(value.childNodes.length).toBe(1);
+		expect(value.style.getPropertyValue("user-select")).toBe("all");
+		copy.click();
+		await Bun.sleep(0);
+		expect(copied()).toBe("123456");
+		expect(copy.textContent).toBe("Copied");
+		expect(copy.getAttribute("aria-label")).toBe("Copied code");
+
+		// A new code: the button is back to Copy and copies the new one.
+		await sendCode("654321");
+		expect(copy.textContent).toBe("Copy");
+		expect(copy.getAttribute("aria-label")).toBe("Copy code");
+		copy.click();
+		await Bun.sleep(0);
+		expect(copied()).toBe("654321");
+		expect(copy.textContent).toBe("Copied");
+		// The address's Copy is a separate button.
+		expect(byText(dialog, "Copy").className).toBe("tab-mcp-address-copy");
+		byText(dialog, "Close").click();
+	});
+
+	test("before an app connects: no Done, a small Close that says what closing does", async () => {
+		relay.grants = [];
+		const { dialog, closed, session } = await open();
+		await sendCode("123456");
+		const done = byText(dialog, "Done");
+		const close = byText(dialog, "Close");
+		expect(done.hidden).toBe(true);
+		expect(close.hidden).toBe(false);
+		expect(close.className).toBe("tab-mcp-close");
+		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
+		expect(note.hidden).toBe(false);
+		expect(note.textContent).toBe(
+			"Closing this stops the code. The address stays the same: to connect later, open this again from the page.",
+		);
+		// Close comes last: after the code, its Copy and the help.
+		const order = [
+			...dialog.querySelectorAll("input, button, summary"),
+		] as HTMLElement[];
+		expect(order.at(-1)).toBe(done);
+		expect(order.indexOf(close)).toBeGreaterThan(
+			order.indexOf(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement),
+		);
+		expect(order.indexOf(close)).toBeGreaterThan(
+			order.indexOf(dialog.querySelector("summary") as HTMLElement),
+		);
+		// The dialog starts at the address's Copy, not at Close.
+		expect(doc.activeElement).toBe(
+			dialog.querySelector(".tab-mcp-address-copy"),
+		);
+
+		// Escape closes a modal <dialog> without a return value, like this.
+		dialog.close();
+		await closed;
+		// What the note says: the code stops, the connection and address stay.
+		expect(await relay.next("pairing.stop")).toEqual({ type: "pairing.stop" });
+		expect(mcp.pairingCode).toBeUndefined();
+		expect(mcp.state).toBe("connected");
+		expect(mcp.address).toBe(session.address);
+
+		// Opened again from the page: the same address, a new code.
+		const again = showConnectDialog(mcp, Promise.resolve(session), doc);
+		await relay.next("pairing.start");
+		const reopened = doc.querySelector(
+			"dialog.tab-mcp-connect",
+		) as HTMLDialogElement;
+		expect((reopened.querySelector("input") as HTMLInputElement).value).toBe(
+			session.address,
+		);
+		byText(reopened, "Close").click();
+		await again;
+	});
+
+	test("once an app connects: Done replaces Close (and takes its focus) and closes", async () => {
+		relay.grants = [];
+		const { dialog, closed } = await open();
+		await relay.next("hello");
+		const done = byText(dialog, "Done");
+		const close = byText(dialog, "Close");
+		close.focus();
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({ type: "grant.added", grant: GRANT });
+		await added;
+		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
+			"Claude (claude.ai) is connected.",
+		);
+		expect(done.hidden).toBe(false);
+		expect(close.hidden).toBe(true);
+		expect(
+			(dialog.querySelector(".tab-mcp-close-note") as HTMLElement).hidden,
+		).toBe(true);
+		expect(doc.activeElement).toBe(done);
+
+		// A new address disconnects it: pairing starts over, so Close is back.
+		byText(dialog, "New address").click();
+		const connected = nextEvent(mcp, "connected");
+		byText(dialog, "Disconnect and get new address").click();
+		expect(done.hidden).toBe(true);
+		expect(close.hidden).toBe(false);
+		await relay.next("grants.revokeAll");
+		await connected;
+
+		const again = nextEvent(mcp, "grantschange");
+		relay.send({ type: "grant.added", grant: { ...GRANT, grantId: "g_3" } });
+		await again;
+		expect(done.hidden).toBe(false);
+		done.click();
+		await closed;
+		expect(doc.querySelector("dialog")).toBeNull();
 	});
 
 	test("a failed connection shows the reason in the dialog", async () => {

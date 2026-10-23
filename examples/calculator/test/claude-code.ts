@@ -169,7 +169,7 @@ try {
 	await clickButton(
 		page,
 		"dialog.tab-mcp-connect",
-		"Close",
+		"Done",
 		"!document.querySelector('dialog[open]')",
 	);
 	const token = pairing.provider.tokens()?.access_token;

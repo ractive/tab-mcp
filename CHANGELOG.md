@@ -7,6 +7,24 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- A Copy button next to the pairing code in the connect dialog, like the address's Copy
+  ("Copied" once copied). It copies the code shown at the time, and is back to "Copy"
+  when a new code appears. The code is plain, selectable text (one click selects it).
+
+#### Changed
+
+- The connect dialog has no prominent button under the code until an AI app connects:
+  only a small Close at the bottom (and Escape), next to a note that closing stops the
+  code while the address stays the same, and that the page can show it again. Once an
+  app connects in the dialog, a "Done" button replaces it. Pages and tests that click
+  "Close" after pairing should click "Done".
+- The connect dialog opens with the focus on the address's Copy instead of Close. The
+  two Copy buttons are labelled "Copy address" and "Copy code" for assistive technology.
+
 ### [0.2.0][client-0.2.0] - 2026-10-20
 
 #### Added

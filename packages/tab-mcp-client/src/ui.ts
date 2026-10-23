@@ -42,6 +42,37 @@ function button(
 	return node;
 }
 
+/**
+ * A Copy button for `value()`, read at click time. Shows "Copied" once the
+ * clipboard took it; without a clipboard (or when it refuses) `select()` puts
+ * the text in the selection for Ctrl+C instead. `noun` names it for assistive
+ * technology ("Copy code"), as the dialog has more than one Copy.
+ */
+function copyButton(
+	doc: Document,
+	noun: string,
+	value: () => string,
+	select: () => void,
+): { button: HTMLButtonElement; reset: () => void } {
+	const node = button(doc, "Copy", () => {
+		const done = () => {
+			node.textContent = "Copied";
+			node.setAttribute("aria-label", `Copied ${noun}`);
+		};
+		const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
+			?.clipboard;
+		if (clipboard !== undefined)
+			clipboard.writeText(value()).then(done, select);
+		else select();
+	});
+	const reset = () => {
+		node.textContent = "Copy";
+		node.setAttribute("aria-label", `Copy ${noun}`);
+	};
+	reset();
+	return { button: node, reset };
+}
+
 function newDialog(
 	doc: Document,
 	className: string,
@@ -210,8 +241,10 @@ function listOf(items: string[]): string {
 
 /**
  * The "Connect your AI app" dialog: the address with Copy and New address,
- * short instructions, the pairing code while the relay sends one, and the
- * connected apps with Disconnect. Pairing is on while it is open. New address
+ * short instructions, the pairing code (with Copy) while the relay sends one,
+ * and the connected apps with Disconnect. Pairing is on while it is open, so
+ * closing it ends the code; the connection and the address stay. Until an app
+ * connects, only a small Close (and Escape) close it; then a Done. New address
  * asks first when it would disconnect connected apps (`newAddress()` revokes
  * them).
  */
@@ -221,6 +254,9 @@ export function showConnectDialog(
 	doc: Document,
 ): Promise<void> {
 	const { dialog } = newDialog(doc, "tab-mcp-connect", "Connect your AI app");
+	// Focusable from script only, for the moment before the address is shown.
+	dialog.tabIndex = -1;
+	dialog.style.setProperty("outline", "none");
 	const status = el(doc, "p", {
 		className: "tab-mcp-status",
 		text: "Connecting…",
@@ -237,16 +273,13 @@ export function showConnectDialog(
 	address.readOnly = true;
 	address.style.setProperty("width", "100%");
 	address.style.setProperty("font-family", "var(--tab-mcp-mono, monospace)");
-	const copy = button(doc, "Copy", () => {
-		const done = () => {
-			copy.textContent = "Copied";
-		};
-		const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
-			?.clipboard;
-		if (clipboard !== undefined)
-			clipboard.writeText(address.value).then(done, () => address.select());
-		else address.select();
-	});
+	const { button: copy, reset: resetCopy } = copyButton(
+		doc,
+		"address",
+		() => address.value,
+		() => address.select(),
+	);
+	copy.className = "tab-mcp-address-copy";
 	const fresh = button(doc, "New address", () => askNewAddress());
 	fresh.className = "tab-mcp-new-address";
 	const addressBox = el(
@@ -293,12 +326,25 @@ export function showConnectDialog(
 	const code = el(doc, "strong", { className: "tab-mcp-code-value" });
 	code.style.setProperty("font-size", "var(--tab-mcp-code-size, 1.5em)");
 	code.style.setProperty("letter-spacing", "0.1em");
+	code.style.setProperty("font-family", "var(--tab-mcp-mono, monospace)");
+	// One click selects the whole code; it stays plain, selectable text.
+	code.style.setProperty("user-select", "all");
+	// Reads the code shown at click time, so a rotated code is copied as shown.
+	const { button: copyCode, reset: resetCopyCode } = copyButton(
+		doc,
+		"code",
+		() => code.textContent ?? "",
+		() => doc.getSelection()?.selectAllChildren(code),
+	);
+	copyCode.className = "tab-mcp-code-copy";
 	const codeLine = el(
 		doc,
 		"p",
 		{ className: "tab-mcp-code" },
 		"When asked, enter the code ",
 		code,
+		" ",
+		copyCode,
 		el(doc, "br"),
 		el(doc, "small", {
 			className: "tab-mcp-code-note",
@@ -325,8 +371,50 @@ export function showConnectDialog(
 		appList,
 	);
 
+	// Until an app connects in this dialog, closing it is not the next step:
+	// a small Close at the end, saying what closing does (the code stops, the
+	// address stays). Once one connects, a prominent Done replaces both.
+	const closeNote = el(doc, "small", {
+		className: "tab-mcp-close-note",
+		text: "Closing this stops the code. The address stays the same: to connect later, open this again from the page.",
+	});
 	const close = button(doc, "Close", () => dialog.close());
-	const actions = el(doc, "div", { className: "tab-mcp-actions" }, close);
+	close.className = "tab-mcp-close";
+	close.style.setProperty("font-size", "0.875em");
+	const done = button(doc, "Done", () => dialog.close());
+	done.className = "tab-mcp-done";
+	done.style.setProperty("font-weight", "bold");
+	done.hidden = true;
+	const actions = el(
+		doc,
+		"div",
+		{ className: "tab-mcp-actions" },
+		closeNote,
+		" ",
+		close,
+		done,
+	);
+	// The note on the left, the button at the far right, apart from the code.
+	actions.style.setProperty("display", "flex");
+	actions.style.setProperty("align-items", "center");
+	actions.style.setProperty("justify-content", "flex-end");
+	actions.style.setProperty("gap", "0.75rem");
+	actions.style.setProperty("margin-top", "1rem");
+	closeNote.style.setProperty("flex", "1");
+	// An app connected while this dialog is open (since the last new address).
+	let paired = false;
+	const setPaired = (value: boolean) => {
+		paired = value;
+		const focused = doc.activeElement;
+		closeNote.hidden = paired;
+		close.hidden = paired;
+		done.hidden = !paired;
+		// Focus never stays on a control that was just hidden.
+		if (paired && focused === close) done.focus();
+		if (!paired && focused === done) close.focus();
+	};
+	// The visible button that closes the dialog.
+	const closer = () => (paired ? done : close);
 
 	dialog.append(status, addressBox, confirmBox, codeLine, help, apps, actions);
 	addressBox.hidden = true;
@@ -353,6 +441,8 @@ export function showConnectDialog(
 		cancelNew.focus(); // the safe choice is the default
 	};
 	const getNewAddress = () => {
+		// The apps are disconnected: the next one has to pair again.
+		setPaired(false);
 		// Focus moves before the focused control is hidden.
 		close.focus();
 		confirmBox.hidden = true;
@@ -364,12 +454,12 @@ export function showConnectDialog(
 				renewing = false;
 				status.textContent =
 					"This is a new address. Add it to your AI app again.";
-				close.focus();
+				copy.focus();
 			},
 			(error: unknown) => {
 				renewing = false;
 				status.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}. Close this and connect again.`;
-				close.focus();
+				closer().focus();
 			},
 		);
 	};
@@ -381,7 +471,7 @@ export function showConnectDialog(
 			return;
 		}
 		address.value = session.address;
-		copy.textContent = "Copy";
+		resetCopy();
 		const appName = session.appName ?? mcp.appName;
 		if (!renewing)
 			status.textContent =
@@ -390,6 +480,8 @@ export function showConnectDialog(
 					: "This page is ready for your AI app.";
 		fresh.disabled = mcp.state !== "connected";
 		addressBox.hidden = false;
+		// Opened before the session was known: start at the address's Copy.
+		if (doc.activeElement === dialog) copy.focus();
 		help.hidden = false;
 		steps.replaceChildren(
 			...INSTRUCTIONS.map(([app, how]) =>
@@ -405,6 +497,8 @@ export function showConnectDialog(
 	};
 	const renderCode = () => {
 		const current = mcp.pairingCode;
+		// A new code is not copied yet.
+		if (code.textContent !== (current?.code ?? "")) resetCopyCode();
 		code.textContent = current?.code ?? "";
 		codeLine.hidden = current === undefined;
 	};
@@ -412,11 +506,19 @@ export function showConnectDialog(
 	apps.append(appsNote);
 	// Grants that were there when the dialog opened; a new one is announced.
 	const known = new Set(mcp.grants.map((g) => g.grantId));
+	// Grants that come with a (new) session were there before; only the ones
+	// added during a session are new connections.
+	let session = mcp.session;
 	const renderGrants = () => {
+		if (mcp.session !== session) {
+			session = mcp.session;
+			for (const grant of mcp.grants) known.add(grant.grantId);
+		}
 		for (const grant of mcp.grants) {
 			if (known.has(grant.grantId)) continue;
 			known.add(grant.grantId);
 			status.textContent = `${clientLabel(grant.client)} is connected.`;
+			if (!paired) setPaired(true);
 		}
 		const connected = mcp.state === "connected";
 		appList.replaceChildren(
@@ -490,6 +592,9 @@ export function showConnectDialog(
 			{ once: true },
 		);
 		dialog.showModal();
-		close.focus();
+		// Start at the address's Copy; until the address is there, at the
+		// dialog itself (its title is read out), not at Close.
+		if (!addressBox.hidden) copy.focus();
+		else dialog.focus();
 	});
 }
