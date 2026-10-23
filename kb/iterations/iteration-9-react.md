@@ -7,7 +7,7 @@ tags:
   - iteration
   - client
   - react
-timestamp: 2026-10-23T20:00:00+02:00
+timestamp: 2026-10-23T20:20:00+02:00
 ---
 
 # Iteration 9: React bindings for single-page apps
@@ -82,7 +82,7 @@ its own copy.
 
 ### Example and tests
 
-- `examples/react-todo/`: a Vite SPA, a todo list with tools to list, add and complete
+- `examples/react-todo/`: a single-page app (bundled with Bun instead of Vite, DEC-081), a todo list with tools to list, add and complete
   items, a confirmation on delete (`consequentialHint`). Built to static files; served
   by the example server in tests.
 - Unit tests of the hooks with happy-dom (already a dev dependency) and React's `act`,
@@ -97,7 +97,7 @@ its own copy.
 ### Docs
 
 README section "React", the plugin skill's React part (how an AI agent adds tab-mcp to a
-React SPA), CHANGELOG. Client release 0.3.0.
+React SPA), CHANGELOG. Client release 0.3.0 (shipped as 0.4.0, the reconnect fix in 0.5.1).
 
 ## Open questions
 
@@ -123,7 +123,7 @@ frameworks on demand. Reconnecting: DEC-082.
 
 ## Acceptance criteria
 
-- A Vite React SPA adds tab-mcp with the provider, one `useTool` per tool and a
+- A React SPA (bundled with Bun, DEC-081) adds tab-mcp with the provider, one `useTool` per tool and a
   `ConnectButton`, and an AI app pairs with it and uses its tools, also after the tab was
   in the background or the relay restarted.
 - StrictMode in development registers each tool once at a time and never throws
