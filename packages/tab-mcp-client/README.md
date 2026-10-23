@@ -6,7 +6,7 @@ relay. The page connects to the relay and gets an address. The user adds that ad
 their AI app and types a pairing code from the page; the AI app then calls the page's
 tools while the tab stays open. Nothing is installed on the user's computer.
 
-**Status: 0.4.0.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.5.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
@@ -38,7 +38,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.4.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.5.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -129,8 +129,12 @@ Until an app connects, the dialog offers no prominent button under the code: onl
 stays connected and the address stays the same, so calling `showConnectDialog()` again
 shows the same address with a new code.
 
-The address stays the same across visits: the library keeps a secret per relay in
-`localStorage`. "New address" in the dialog calls `newAddress()`, which disconnects every
+The address stays the same across visits: the library keeps a secret per relay and page
+in `localStorage`, under `tab-mcp:secret:<relay origin>:<server.name>`, so two pages of one
+site with different server names get different addresses (set `storageKey` to choose the
+key yourself). A secret that 0.4 or older kept under `tab-mcp:secret:<relay origin>` is
+moved to the new key on the first connect, so an existing page keeps its address; on a
+site with several pages the first one to connect keeps it, the others get new ones. "New address" in the dialog calls `newAddress()`, which disconnects every
 app and makes a new address; when apps are connected, the dialog asks first. The relay's
 sign-in page points users to it when someone else may be guessing codes. A page with its
 own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects

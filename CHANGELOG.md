@@ -7,6 +7,18 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### [0.5.0][client-0.5.0] - 2026-10-23
+
+#### Changed
+
+- The address secret's default storage key is `tab-mcp:secret:<relay origin>:<server.name>`
+  instead of `tab-mcp:secret:<relay origin>`, so two pages of one site with different
+  server names no longer share an address by accident. A secret under the old key is moved
+  to the new one on the first connect, so an existing page keeps its address; on a site
+  with several pages the first one to connect keeps it and the others get new addresses.
+  An explicit `storageKey` is used as given, without a move. `SecretStorage` may have a
+  `removeItem` (used for the move). The core grows to 5.1 KB gzipped (DEC-083).
+
 ### [0.4.0][client-0.4.0] - 2026-10-23
 
 #### Added
@@ -229,6 +241,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
 
+[client-0.5.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.5.0
 [client-0.4.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.4.0
 [client-0.3.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.3.0
 [client-0.2.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.2.0

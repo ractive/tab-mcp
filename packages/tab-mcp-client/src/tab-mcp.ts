@@ -186,10 +186,16 @@ export class TabMcp extends EventTarget {
 		this.#identityAssertion = options.identityAssertion;
 		this.#identityTimeoutMs = options.identityTimeoutMs ?? 15_000;
 		this.#reconnectDelays = reconnectDelays(options.reconnect);
-		this.#secrets = new SecretStore(
-			options.storage,
-			options.storageKey ?? `tab-mcp:secret:${origin}`,
-		);
+		// One address per relay and page (server name); the default of 0.4 and
+		// older, per relay only, is moved over once (DEC-083).
+		this.#secrets =
+			options.storageKey === undefined
+				? new SecretStore(
+						options.storage,
+						`tab-mcp:secret:${origin}:${server.name}`,
+						`tab-mcp:secret:${origin}`,
+					)
+				: new SecretStore(options.storage, options.storageKey);
 		this.#registry.onChange(() => {
 			const tools = this.tools;
 			this.#alwaysAllowed.keepTools(tools);

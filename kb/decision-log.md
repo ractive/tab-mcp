@@ -1180,6 +1180,26 @@ once on `visibilitychange` to visible or `online`. Every connection is user-star
 - Cost: the core grows by about 0.5 KB gzipped, to 5.0 KB with the review fixes (budget
   5 KB, with a few bytes left: the next core feature has to raise it or trim).
 
+## DEC-083: The address secret is kept per relay and page (owner)
+
+The owner, 2026-10-23. Until 0.4 the library kept the secret under
+`tab-mcp:secret:<relay origin>`, so every page of one origin that did not set `storageKey`
+shared one address: on ractive.ch the calculator and the diagram editor did, and an AI app
+paired with one got the other's tools. From 0.5 the default key is
+`tab-mcp:secret:<relay origin>:<server.name>`: `server.name` is required and names the
+page's MCP server, so it is the natural per-page part.
+
+A secret under the old key is moved once (read, written under the new key, the old key
+removed through `SecretStorage.removeItem` where the storage has it), so a site with one
+page, saturnus for example, keeps its address without a change. On a site with several
+pages the first page to connect keeps the old address and the others get new ones; two
+pages connecting at the same instant could both take it, which a reload of either does not
+undo but "New address" does. An explicit `storageKey` is used as given and never moved.
+
+The move costs about 80 bytes gzipped and takes the core to 5.1 KB; the budget in
+`build.test.ts` goes from 5 to 5.25 KB (DEC-082 said the next core feature would have to
+raise it).
+
 # Citations
 
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)

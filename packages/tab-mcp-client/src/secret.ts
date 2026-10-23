@@ -37,11 +37,18 @@ function defaultStorage(): SecretStorage | null {
 export class SecretStore {
 	readonly #storage: SecretStorage | null;
 	readonly #key: string;
+	/** A key the secret may still be under (the default of 0.4 and older). */
+	readonly #oldKey: string | undefined;
 	#memory: string | undefined;
 
-	constructor(storage: SecretStorage | null | undefined, key: string) {
+	constructor(
+		storage: SecretStorage | null | undefined,
+		key: string,
+		oldKey?: string,
+	) {
 		this.#storage = storage === undefined ? defaultStorage() : storage;
 		this.#key = key;
+		this.#oldKey = oldKey;
 	}
 
 	/** The current secret; storage first, so a rotation in another tab is seen. */
@@ -49,6 +56,16 @@ export class SecretStore {
 		let stored: string | null = null;
 		try {
 			stored = this.#storage?.getItem(this.#key) ?? null;
+			// Moved once from the old shared key: the first page that asks keeps
+			// the address, the old key is removed, so the next page gets its own.
+			if (!isSecret(stored) && this.#oldKey !== undefined) {
+				const old = this.#storage?.getItem(this.#oldKey) ?? null;
+				if (isSecret(old)) {
+					this.#storage?.setItem(this.#key, old);
+					this.#storage?.removeItem?.(this.#oldKey);
+					stored = old;
+				}
+			}
 		} catch {
 			// unreadable: use a page-lifetime secret
 		}

@@ -53,7 +53,7 @@ T→R is tab to relay, R→T is relay to tab.
 
 **The address secret.** `secret` makes the address stable across sessions. It is 32
 random bytes as base64url without padding (43 characters), kept by the library in the
-page's `localStorage` under `tab-mcp:secret:<relay origin>`. The relay derives the
+page's `localStorage` under `tab-mcp:secret:<relay origin>:<server name>`. The relay derives the
 address id as `base32(sha256(secret))`: SHA-256 over the secret's UTF-8 text, RFC 4648
 base32, lower case, no padding, 52 characters. The relay therefore stores nothing to
 recognise an address, and the address does not reveal the secret. A `hello` without a

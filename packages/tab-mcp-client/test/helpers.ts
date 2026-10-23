@@ -52,6 +52,9 @@ export class MemoryStorage implements SecretStorage {
 	setItem(key: string, value: string): void {
 		this.items.set(key, value);
 	}
+	removeItem(key: string): void {
+		this.items.delete(key);
+	}
 }
 
 export function newTab(
