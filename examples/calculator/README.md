@@ -15,12 +15,8 @@ The page registers four tools with `@ractive-ch/tab-mcp-client`:
 "Connect your AI app" opens the library's dialog with the address for your AI app and
 the pairing code. Connected apps are listed under the calculator, each with Disconnect.
 
-**Live:** <https://ractive.ch/tab-mcp/calculator/>, a copy of this page in the look of
-ractive.ch that connects to the hosted relay `tab-mcp.ractive.ch` (DEC-075). Its source is in
-the ractive.ch site repository.
-
-Run from this repository, the example only ever talks to a relay on your own machine,
-never to the hosted relay.
+The example only ever talks to a relay on your own machine, never to the hosted relay.
+For pages to try without running anything, see the README's live examples.
 
 ## Run it
 

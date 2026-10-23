@@ -17,7 +17,6 @@ Try it without installing anything. These pages connect to the hosted relay
 | Page | What your AI app can do there |
 |---|---|
 | [Diagram editor](https://ractive.ch/tab-mcp/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
-| [Calculator](https://ractive.ch/tab-mcp/calculator/) | press the keys of a pocket calculator and read its display ([source](examples/calculator)) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
 
 ## How it works

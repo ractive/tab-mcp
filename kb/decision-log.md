@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-23T11:45:00+02:00
+timestamp: 2026-10-23T16:00:00+02:00
 ---
 
 # Decision log
@@ -942,6 +942,12 @@ stay outside this repository) and use the npm release of `@ractive-ch/tab-mcp-cl
 not the workspace. `bun run example` in this repository still starts a local relay and
 never uses the hosted one. A live page served from localhost uses only a relay named in
 its localStorage, never the hosted one.
+
+Amended the same day (owner): the live calculator is removed again. It only showed that
+the plumbing works; the diagram editor at <https://ractive.ch/tab-mcp/diagram/> shows what
+an AI app can do in a page, and <https://ractive.ch/tab-mcp/> lists the live examples.
+`/tab-mcp/calculator/` redirects there. `examples/calculator` stays in this repository as
+the page the end-to-end tests drive.
 
 # Citations
 
