@@ -33,6 +33,7 @@ export class StubRelay {
 	/** Refuse WebSocket upgrades (503), like a relay that is down. */
 	refuse = false;
 	#socket: ServerWebSocket<undefined> | undefined;
+	#pings = 0;
 	readonly #waiters: {
 		match: (m: Message) => boolean;
 		resolve: (m: Message) => void;
@@ -106,6 +107,16 @@ export class StubRelay {
 		this.#socket?.send(
 			typeof message === "string" ? message : JSON.stringify(message),
 		);
+	}
+
+	/**
+	 * Resolves once the tab handled every message sent before: it answers a
+	 * ping only after them, as messages are handled in order.
+	 */
+	async settled(): Promise<void> {
+		const t = ++this.#pings;
+		this.send({ type: "ping", t });
+		await this.next("pong", (m) => m["t"] === t);
 	}
 
 	close(code: number, reason = ""): void {

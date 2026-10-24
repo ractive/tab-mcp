@@ -8,10 +8,14 @@ import {
 	McpServer,
 	createMcpHandler as sdkHandler,
 } from "@modelcontextprotocol/server";
-import { createMcpHandler, decodeHeaderValue } from "../src/mcp.ts";
+import {
+	compileTool,
+	createMcpHandler,
+	decodeHeaderValue,
+} from "../src/mcp.ts";
 import type { GrantRef } from "../src/protocol.ts";
-import { ToolRegistry } from "../src/registry.ts";
-import type { ConfirmRequest } from "../src/types.ts";
+import { type RegisteredTool, ToolRegistry } from "../src/registry.ts";
+import type { ConfirmRequest, JsonSchema, ToolCallEnd } from "../src/types.ts";
 import { rpc } from "./helpers.ts";
 
 const ADD_SCHEMA = {
@@ -664,6 +668,176 @@ describe("review fixes", () => {
 		const { message } = await outcome(res);
 		expect(message?.["result"]).toMatchObject({ isError: true });
 	}, 2000);
+
+	test("a result with an `invalid` key passes through as a result (iteration 13)", async () => {
+		const { registry, handler } = ours();
+		const ends: ToolCallEnd[] = [];
+		const observed = createMcpHandler({
+			tools: registry,
+			server: SERVER,
+			confirm: async () => true,
+			client: (g) => ({ grantId: g.grantId, id: g.clientId, host: "x" }),
+			observe: { start() {}, end: (e) => ends.push(e) },
+		});
+		const returned = {
+			content: [{ type: "text", text: "done" }],
+			invalid: "rows skipped",
+		};
+		registry.register({
+			name: "rows",
+			description: "Returns its own keys",
+			execute: () => returned,
+		});
+		for (const h of [handler, observed]) {
+			const { message } = await outcome(
+				await h.handle(
+					request({ name: "", body: rpc(1, "tools/call", { name: "rows" }) }),
+					{ grant: GRANT },
+				),
+			);
+			expect(message?.["error"]).toBeUndefined();
+			expect(message?.["result"]).toMatchObject(returned);
+		}
+		expect(ends.map((e) => e.outcome)).toEqual(["ok"]);
+	});
+
+	test("a schema the validator cannot use is an isError result, and the call ends (iteration 13)", async () => {
+		const registry = new ToolRegistry();
+		// Passes the registry's own check; the nested $id moves the $ref's base.
+		registry.register({
+			name: "nested",
+			description: "A $ref next to a nested $id",
+			inputSchema: {
+				type: "object",
+				properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } },
+				$defs: { s: { type: "string" } },
+			},
+			execute: () => "ran",
+		});
+		const started: number[] = [];
+		const ends: ToolCallEnd[] = [];
+		const handler = createMcpHandler({
+			tools: registry,
+			server: SERVER,
+			confirm: async () => true,
+			client: (g) => ({ grantId: g.grantId, id: g.clientId, host: "x" }),
+			observe: {
+				start: (c) => started.push(c.id),
+				end: (e) => ends.push(e),
+			},
+		});
+		for (const id of [1, 2]) {
+			const { message } = await outcome(
+				await handler.handle(
+					request({
+						name: "",
+						body: rpc(id, "tools/call", {
+							name: "nested",
+							arguments: { a: "x" },
+						}),
+					}),
+					{ grant: GRANT },
+				),
+			);
+			expect(message?.["result"]).toMatchObject({
+				isError: true,
+				content: [
+					{
+						type: "text",
+						text: expect.stringContaining(
+							'The input schema of tool nested cannot be used: $ref "#/$defs/s" does not resolve',
+						),
+					},
+				],
+			});
+		}
+		expect(ends.map((e) => [e.id, e.outcome])).toEqual(
+			started.map((id) => [id, "error"]),
+		);
+	});
+
+	test("compileTool: the validator's own check, once per tool (iteration 13)", () => {
+		const registry = new ToolRegistry();
+		const register = (name: string, inputSchema: JsonSchema) => {
+			registry.register({
+				name,
+				description: "d",
+				inputSchema,
+				execute: () => 0,
+			});
+			return registry.get(name) as RegisteredTool;
+		};
+		const good = register("good", {
+			type: "object",
+			$id: "https://x.example/s",
+			$defs: { s: { type: "string" } },
+			properties: { a: { $ref: "#/$defs/s" }, b: { $ref: "#" } },
+		});
+		expect(compileTool(good)).toBe(compileTool(good));
+		expect(compileTool(good)({ a: "x" }).valid).toBe(true);
+		expect(compileTool(good)({ a: 1 }).valid).toBe(false);
+		const bad = register("bad", {
+			type: "object",
+			properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } },
+			$defs: { s: { type: "string" } },
+		});
+		expect(() => compileTool(bad)).toThrow('$ref "#/$defs/s" does not resolve');
+		const duplicate = register("duplicate", {
+			type: "object",
+			$defs: {
+				a: { $id: "https://z.example/a" },
+				b: { $id: "https://z.example/a" },
+			},
+		});
+		expect(() => compileTool(duplicate)).toThrow(/Duplicate schema URI/);
+	});
+
+	test("a consequential tool removed while the user decides does not run (iteration 13)", async () => {
+		for (const replace of [false, true]) {
+			let answer!: (v: boolean) => void;
+			const { registry, handler } = ours(
+				() => new Promise((resolve) => (answer = resolve)),
+			);
+			const controller = new AbortController();
+			let runs = 0;
+			registry.register(
+				{
+					name: "wipe",
+					description: "Clears the memory",
+					annotations: { consequentialHint: true },
+					execute: () => {
+						runs++;
+						return "wiped";
+					},
+				},
+				{ signal: controller.signal },
+			);
+			const res = handler.handle(
+				request({ name: "", body: rpc(1, "tools/call", { name: "wipe" }) }),
+				{ grant: GRANT },
+			);
+			const pending = res.then(outcome);
+			await Bun.sleep(0);
+			controller.abort(); // e.g. its component unmounted
+			if (replace)
+				registry.register({
+					name: "wipe",
+					description: "Another tool under the same name",
+					annotations: { consequentialHint: true },
+					execute: () => {
+						runs++;
+						return "wiped";
+					},
+				});
+			answer(true);
+			const { message } = await pending;
+			expect(message?.["result"]).toMatchObject({
+				isError: true,
+				content: [{ type: "text", text: "The tool is no longer available" }],
+			});
+			expect(runs).toBe(0);
+		}
+	});
 
 	test("a failure outside the tool ends the stream with -32603", async () => {
 		const handler = createMcpHandler({

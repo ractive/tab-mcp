@@ -111,8 +111,10 @@ export interface TabMcpOptions {
 	/** Approves consequential tool calls; default: a dialog in the page. */
 	onConfirm?: ConfirmHandler;
 	/**
-	 * How long the default confirmation keeps "Allow" disabled after it opens,
-	 * in milliseconds: 750 by default, never less than 500.
+	 * How long the page must be visible and focused, with the default
+	 * confirmation open, before "Allow" can be clicked, in milliseconds: 750
+	 * by default, never less than 500. Leaving the page starts it again. The
+	 * constructor throws a `TypeError` for anything but a number of ms.
 	 */
 	confirmDelayMs?: number;
 	/**
@@ -137,8 +139,9 @@ export interface TabMcpOptions {
 	 */
 	identityAssertion?: IdentityAssertionHandler;
 	/**
-	 * How long to wait for the relay's answer to an assertion before
-	 * `identity` goes back to `none`, in milliseconds; default 15000.
+	 * How long to wait for an assertion and the relay's answer to it, from
+	 * when `identityAssertion` is asked, before `identity` goes back to
+	 * `none`, in milliseconds; default 15000.
 	 */
 	identityTimeoutMs?: number;
 	/**
