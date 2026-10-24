@@ -204,7 +204,7 @@ describe("2: a grant has an absolute end; refreshes cannot extend it forever", (
 	});
 });
 
-describe("3: per-IP limits count IPv6 by /64; open requests are capped, not evicted", () => {
+describe("3: per-IP limits count IPv6 by /64; open requests are capped per network", () => {
 	test("ipPrefixKey: IPv4 as is, IPv6 by /64, mapped IPv4 as IPv4", () => {
 		expect(ipPrefixKey("203.0.113.5")).toBe("203.0.113.5");
 		expect(ipPrefixKey("2001:db8:1:2::1")).toBe(
@@ -218,34 +218,46 @@ describe("3: per-IP limits count IPv6 by /64; open requests are capped, not evic
 
 	test("open authorization requests per /64 are capped; another /64 is not affected", async () => {
 		const { r, address } = await setup();
+		// A second page: one network holds at most 5 requests per address (DEC-088).
+		const second = new ScriptedTab(r.wsUrl);
+		tabs.push(second);
+		const other = (await second.connect()).address;
+		await second.startPairing();
 		for (let i = 1; i <= 10; i++) {
 			const page = await openPage(
 				browserAt(r, `2001:db8:1:2::${i}`),
 				r,
-				address,
+				i <= 5 ? address : other,
 			);
 			expect(page.status).toBe(200);
 		}
 		const same = await openPage(browserAt(r, "2001:db8:1:2::ffff"), r, address);
 		expect(same.status).toBe(429);
-		const other = await openPage(browserAt(r, "2001:db8:1:3::1"), r, address);
-		expect(other.status).toBe(200);
+		const elsewhere = await openPage(
+			browserAt(r, "2001:db8:1:3::1"),
+			r,
+			address,
+		);
+		expect(elsewhere.status).toBe(200);
 	});
 
-	test("open authorization requests per address are capped", async () => {
+	test("an address at its cap evicts the oldest request of the network holding the most (DEC-088)", async () => {
 		const { r, address } = await setup();
-		for (const prefix of ["2001:db8:a:1", "2001:db8:a:2"]) {
-			for (let i = 1; i <= 10; i++) {
-				const page = await openPage(
-					browserAt(r, `${prefix}::${i}`),
-					r,
-					address,
-				);
-				expect(page.status).toBe(200);
+		const pages: AuthorizePage[] = [];
+		for (const prefix of ["2001:db8:a:1", "2001:db8:a:2", "2001:db8:a:3"]) {
+			for (let i = 1; i <= 5; i++) {
+				const browser = browserAt(r, `${prefix}::${i}`);
+				pages.push(await openPage(browser, r, address));
 			}
 		}
-		const third = await openPage(browserAt(r, "2001:db8:a:3::1"), r, address);
-		expect(third.status).toBe(429);
+		const fourth = browserAt(r, "2001:db8:a:4::1");
+		for (let i = 0; i < 5; i++) {
+			expect((await openPage(fourth, r, address)).status).toBe(200);
+		}
+		// 20 open: the next one evicts, it is not refused.
+		const fifth = await openPage(browserAt(r, "2001:db8:a:5::1"), r, address);
+		expect(fifth.status).toBe(200);
+		expect(fifth.requestId).toBeDefined();
 	});
 
 	test("the token endpoint counts a /64 as one client", async () => {
