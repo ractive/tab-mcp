@@ -70,10 +70,15 @@ export class MemoryTokenStore implements TokenStore {
 		return r === undefined ? undefined : copy(r);
 	}
 
-	async markUsed(hash: string, now: number): Promise<boolean> {
+	async markUsed(
+		hash: string,
+		now: number,
+		keepUntil: number,
+	): Promise<boolean> {
 		const r = this.#records.get(hash);
 		if (r === undefined || r.usedAt !== undefined) return false;
 		r.usedAt = now;
+		r.expiresAt = Math.min(r.expiresAt, keepUntil);
 		return true;
 	}
 

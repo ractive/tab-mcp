@@ -48,6 +48,8 @@ const MAX_PENDING_PER_IP = 10;
 const MAX_PENDING_PER_ADDRESS = 20;
 /** One network's share of an address's open requests (DEC-088). */
 const MAX_PENDING_PER_ADDRESS_IP = 5;
+/** How long a used refresh token is kept to detect its reuse (DEC-091). */
+const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
@@ -209,6 +211,11 @@ export class AuthorizationServer {
 		refillPerSecond: 1 / 30,
 	});
 	readonly #tokenPerIp = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
+	/** Refreshes per grant: each leaves a row for the reuse window (DEC-091). */
+	readonly #refreshesPerGrant = new RateLimiter({
+		capacity: 20,
+		refillPerSecond: 1 / 60,
+	});
 
 	constructor(host: AuthorizationHost, testMode?: AuthorizationTestMode) {
 		this.#host = host;
@@ -1277,8 +1284,22 @@ ${cancel}
 				throw new OAuthError(400, "invalid_scope", "scope exceeds the grant");
 			}
 		}
+		if (!this.#refreshesPerGrant.take(record.grantId, now)) {
+			throw new OAuthError(
+				429,
+				"temporarily_unavailable",
+				"too many refreshes for this connection; try again in a minute",
+			);
+		}
 		// Atomic: of two refreshes with the same token only one gets here.
-		if (!(await this.#host.store.markUsed(hash, now))) {
+		// The used token is kept for the reuse window only (DEC-091).
+		if (
+			!(await this.#host.store.markUsed(
+				hash,
+				now,
+				now + REFRESH_REUSE_WINDOW_MS,
+			))
+		) {
 			await this.#reuseDetected(record);
 			throw invalid(
 				"the refresh token was already used; the connection was revoked",
@@ -1431,5 +1452,6 @@ ${cancel}
 		this.#guessesPerAddressIp.sweep(now);
 		this.#guessesPerAddress.sweep(now);
 		this.#tokenPerIp.sweep(now);
+		this.#refreshesPerGrant.sweep(now);
 	}
 }

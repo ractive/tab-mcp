@@ -156,12 +156,17 @@ export class SqliteTokenStore implements TokenStore {
 		return row === null ? undefined : toRecord(row);
 	}
 
-	async markUsed(hash: string, now: number): Promise<boolean> {
+	async markUsed(
+		hash: string,
+		now: number,
+		keepUntil: number,
+	): Promise<boolean> {
 		const result = this.#db
 			.query(
-				"UPDATE tokens SET used_at = $now WHERE hash = $hash AND used_at IS NULL",
+				`UPDATE tokens SET used_at = $now, expires_at = min(expires_at, $keep_until)
+				WHERE hash = $hash AND used_at IS NULL`,
 			)
-			.run({ hash, now });
+			.run({ hash, now, keep_until: keepUntil });
 		return result.changes === 1;
 	}
 

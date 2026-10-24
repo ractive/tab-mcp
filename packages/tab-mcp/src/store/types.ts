@@ -11,7 +11,8 @@
  * - `get` returns the record even when it is expired or used; the caller
  *   decides. It returns `undefined` after `revoke` or `deleteExpired` removed it.
  * - `markUsed` is atomic: for one hash, exactly one call ever returns `true`,
- *   even when several run at the same time.
+ *   even when several run at the same time; that call also cuts `expiresAt`
+ *   to its `keepUntil` (never extends it).
  * - `revoke` leaves a tombstone at least until `keepUntil`: until then `put` refuses
  *   (returns `false`, stores nothing) a record of a revoked grant, or of a
  *   grant of a revoked address created at or before the revocation. Checking
@@ -77,10 +78,17 @@ export interface TokenStore {
 	/** The record for a token hash, or `undefined`. */
 	get(hash: string): Promise<TokenRecord | undefined>;
 	/**
-	 * Mark a token as used at `now`. Returns `true` for the one call that marked
-	 * it, `false` if it was already used or does not exist. Must be atomic.
+	 * Mark a token as used at `now` and cut its `expiresAt` to `keepUntil`
+	 * if that is earlier (never later), in one step. Returns `true` for the
+	 * one call that marked it, `false` (changing nothing) if it was already
+	 * used or does not exist. Must be atomic.
+	 *
+	 * The relay keeps a used refresh token only to detect its reuse, for a
+	 * window (24 hours, DEC-091); the cut lets `deleteExpired` drop it then.
+	 * A store that ignores `keepUntil` stays correct but keeps every used
+	 * refresh token until its own expiry.
 	 */
-	markUsed(hash: string, now: number): Promise<boolean>;
+	markUsed(hash: string, now: number, keepUntil: number): Promise<boolean>;
 	/**
 	 * Delete every token of a grant or of an address and leave a tombstone
 	 * until `options.keepUntil`. Returns how many tokens were deleted.
