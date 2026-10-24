@@ -198,8 +198,22 @@ const child = Bun.spawn(
 	],
 	{ stdout: "inherit", stderr: "inherit" },
 );
-const code = await child.exited;
+// The suite takes seconds; a hung scenario must not hold up verify or CI.
+const LIMIT_MS = 5 * 60_000;
+let timer: ReturnType<typeof setTimeout> | undefined;
+const code = await Promise.race([
+	child.exited,
+	new Promise<number>((resolve) => {
+		timer = setTimeout(() => {
+			console.error(`conformance: no result after ${LIMIT_MS / 1000} s`);
+			child.kill();
+			resolve(1);
+		}, LIMIT_MS);
+	}),
+]);
+clearTimeout(timer);
 tab.disconnect();
 await proxy.stop(true);
 await r.stop();
-process.exit(code);
+// Killed by a signal (out of memory, a crash): no result, so a failure.
+process.exit(child.signalCode === null ? code : 1);
