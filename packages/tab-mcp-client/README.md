@@ -6,7 +6,7 @@ relay. The page connects to the relay and gets an address. The user adds that ad
 their AI app and types a pairing code from the page; the AI app then calls the page's
 tools while the tab stays open. Nothing is installed on the user's computer.
 
-**Status: 0.5.1.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.6.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
@@ -22,7 +22,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.3.1
+  ractive/tab-mcp:0.4.0
 ```
 
 For production, see
@@ -38,7 +38,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.5.1/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.6.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
