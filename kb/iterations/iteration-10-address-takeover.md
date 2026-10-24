@@ -111,5 +111,5 @@ step 1 naming identity binding as the protection.
 
 # Citations
 
-- [Threat model](../../docs/threat-model.md): asset 4, A4 and "Risks that remain"
+- [Threat model](https://github.com/ractive/tab-mcp/blob/main/docs/threat-model.md): asset 4, A4 and "Risks that remain"
 - [Decision log](../decision-log.md): DEC-083 (the address secret per relay and page), DEC-036 (any Origin on the MCP endpoint)
