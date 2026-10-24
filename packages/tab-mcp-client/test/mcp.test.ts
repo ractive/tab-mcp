@@ -214,6 +214,10 @@ const CASES: Case[] = [
 		},
 	},
 	{
+		name: "initialize in a 2026-07-28 envelope",
+		body: rpc(30, "initialize"),
+	},
+	{
 		name: "no _meta",
 		body: { jsonrpc: "2.0", id: 14, method: "tools/list", params: {} },
 	},

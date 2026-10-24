@@ -298,6 +298,20 @@ describe("MCP endpoint checks", () => {
 		});
 	});
 
+	test("an initialize in a 2026-07-28 envelope reaches the tab: 404 / -32601", async () => {
+		const r = relay();
+		const t = tab(r);
+		await t.connect();
+		const token = await tokenFor(r.store, t.addressId);
+		const res = await mcpPost(t.session?.address ?? "", rpc(1, "initialize"), {
+			token,
+		});
+		expect(res.status).toBe(404);
+		expect(((await res.json()) as { error: { code: number } }).error.code).toBe(
+			-32601,
+		);
+	});
+
 	test("an older version header gets -32022, a missing one -32020", async () => {
 		const r = relay();
 		const address = r.relay.addressFor(newSecret());

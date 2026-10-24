@@ -1,0 +1,42 @@
+# Known failures of the MCP conformance suite (2026-07-28 requirements)
+# against the relay and this library, for test/conformance.ts. A check that
+# starts passing fails the run until its entry is removed.
+
+server:
+  # The tab offers tools only (DEC-049): no resources, prompts or completion.
+  - completion-complete
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - sep-2164-resource-not-found # warnings: no resources, so -32601
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  - caching:sep-2549-prompts-list-caching-hints
+  - caching:sep-2549-resources-list-caching-hints
+  - caching:sep-2549-resources-templates-list-caching-hints
+  # A page's tool cannot send progress or log notifications, ask for input
+  # (InputRequiredResult) or require a client capability.
+  - tools-call-with-progress
+  - server-stateless:sep-2575-server-rejects-undeclared-capability
+  - server-stateless:sep-2575-missing-capability-http-400
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
+  - server-stateless:sep-2575-server-no-log-without-loglevel
+  - input-required-result-basic-elicitation
+  - input-required-result-basic-sampling
+  - input-required-result-basic-list-roots
+  - input-required-result-request-state
+  - input-required-result-multiple-input-requests
+  - input-required-result-multi-round
+  - input-required-result-missing-input-response
+  - input-required-result-non-tool-request
+  - input-required-result-result-type
+  - input-required-result-tampered-state
+  - input-required-result-capability-check
+  - input-required-result-ignore-extra-params
+  # The MCP endpoint accepts any Origin (DEC-036): tokens are bearer headers
+  # only, so a foreign origin can do nothing it could not do from a server.
+  - dns-rebinding-protection:localhost-host-rebinding-rejected

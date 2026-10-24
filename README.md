@@ -218,7 +218,8 @@ Requires [Bun](https://bun.sh) 1.4.
 
 ```sh
 bun install
-bun run verify     # Biome, type check, tests
+bun run verify     # Biome, type check, tests, MCP conformance suite
+bun run conformance  # only the official MCP conformance suite (relay and library)
 bun run fix        # format and apply safe lint fixes
 ```
 
