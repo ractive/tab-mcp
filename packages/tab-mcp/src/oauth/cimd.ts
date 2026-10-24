@@ -371,6 +371,31 @@ export class ClientMetadataFetcher {
 	}
 }
 
+/** Labels separated by dots, ending in a label of 2-63 letters: `claude.ai`, `x.co.uk`. */
+const DOMAIN_SHAPED =
+	/(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+\p{L}{2,63}(?![\p{L}\p{N}])/gu;
+
+/**
+ * Whether a name contains a domain-shaped token that is not the verified
+ * host, a subdomain of it or a parent of it (DEC-092). Compatibility forms
+ * and the ideographic full stops browsers read as dots count too.
+ */
+export function foreignDomain(name: string, hostname: string): boolean {
+	const host = hostname.toLowerCase();
+	const text = name
+		.normalize("NFKC")
+		.replace(/[。．｡]/g, ".")
+		.toLowerCase();
+	for (const [token] of text.matchAll(DOMAIN_SHAPED)) {
+		const own =
+			token === host ||
+			host.endsWith(`.${token}`) ||
+			token.endsWith(`.${host}`);
+		if (!own) return true;
+	}
+	return false;
+}
+
 /** Check a fetched document against the CIMD rules and what the relay supports. */
 export function validateDocument(
 	doc: unknown,
@@ -400,6 +425,12 @@ export function validateDocument(
 	if (/\(\s*[^()\s]*[a-z0-9-]\.[a-z]{2,}[^()]*\)/i.test(displayName(name))) {
 		throw invalid(
 			"The AI app's name contains a web address in parentheses, which this relay does not show.",
+		);
+	}
+	// "Claude · claude.ai" from evil.example reads the same way (DEC-092).
+	if (foreignDomain(displayName(name), url.hostname)) {
+		throw invalid(
+			"The AI app's name contains a web address other than its own, which this relay does not show.",
 		);
 	}
 	const uris = d["redirect_uris"];

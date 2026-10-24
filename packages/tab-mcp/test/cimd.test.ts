@@ -521,6 +521,56 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		);
 	});
 
+	test("audit finding 5: a name with another domain anywhere is refused", async () => {
+		for (const name of [
+			"Claude [claude.ai]",
+			"Claude · claude.ai",
+			"Claude from claude.ai",
+			"claude.ai",
+			"Claude claude.ai/connect",
+			"Claude — chatgpt.com",
+			"Claude claude。ai",
+			"Claude claude．ai",
+			"Claude ｃｌａｕｄｅ.ａｉ",
+			"Claude CLAUDE.AI",
+			"Claude via ai.example.evil",
+			"Claude via xai.example",
+		]) {
+			expect([name, await check(DOC(id, { client_name: name }))]).toEqual([
+				name,
+				"invalid_metadata",
+			]);
+		}
+	});
+
+	test("audit finding 5: the names of known AI apps, versions and the client's own domain pass", async () => {
+		for (const name of [
+			"Claude",
+			"Claude Code",
+			"ChatGPT",
+			"Codex",
+			"OpenAI Codex",
+			"Claude 3.5",
+			"Tool v1.2",
+			"Tool (v1.2)",
+			"Example AI from ai.example",
+			"ai.example",
+		]) {
+			expect([name, await check(DOC(id, { client_name: name }))]).toEqual([
+				name,
+				"accepted",
+			]);
+		}
+		// A subdomain of the verified host, or the host's parent, is the same owner.
+		const sub = "https://mcp.ai.example/client.json";
+		expect(await check(DOC(sub, { client_name: "AI · ai.example" }), sub)).toBe(
+			"accepted",
+		);
+		expect(
+			await check(DOC(id, { client_name: "AI · mcp.ai.example" }), id),
+		).toBe("accepted");
+	});
+
 	test("review finding 7: a name with a web address in parentheses is refused", async () => {
 		expect(await check(DOC(id, { client_name: "Claude (claude.ai)" }))).toBe(
 			"invalid_metadata",
