@@ -26,6 +26,7 @@ export const CloseCode = {
 	heartbeatLost: 4003,
 	shuttingDown: 4004,
 	replaced: 4005,
+	/** Reserved in the protocol (`rate_limited`); the relay does not send it yet. */
 	rateLimited: 4008,
 } as const;
 

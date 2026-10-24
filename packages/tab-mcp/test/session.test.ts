@@ -41,6 +41,7 @@ async function readySession(socket: FakeSocket, logs = new LogCapture()) {
 			publicUrl: () => "http://relay.test",
 			claimAddress: () => undefined,
 			released: () => {},
+			ready: () => {},
 			revokeGrant: async () => false,
 			revokeAll: async () => {},
 			bindIdentity: async () => {},

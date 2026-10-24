@@ -9,9 +9,16 @@ import { MCP_PROTOCOL_VERSION } from "./protocol.ts";
 
 /**
  * Why the page is not there: never came, went away mid-request, or is open
- * but nobody is signed in to it (identity binding, DEC-077).
+ * but nobody is signed in to it (identity binding, DEC-077). While the relay
+ * stops, `restarting` (the request never reached the page) or
+ * `restarting_gone` (it was in flight).
  */
-export type NotOpenPhase = "not_open" | "gone" | "signed_out";
+export type NotOpenPhase =
+	| "not_open"
+	| "gone"
+	| "signed_out"
+	| "restarting"
+	| "restarting_gone";
 
 /** What the relay says about itself in a stand-in `server/discover` result. */
 export interface RelayInfo {
@@ -43,13 +50,26 @@ export function signedOutText(appName: string | undefined): string {
 	return `The page is open, but nobody is signed in to it. Ask the user to sign in to ${pageName(appName)}, then try again.`;
 }
 
+/** The text while the relay stops: the AI app should try again, not send the user. */
+export function restartingText(): string {
+	return "The relay is restarting. Try again in a few seconds.";
+}
+
 function phaseText(phase: NotOpenPhase, appName: string | undefined): string {
+	if (phase === "restarting" || phase === "restarting_gone") {
+		return restartingText();
+	}
 	return phase === "signed_out" ? signedOutText(appName) : notOpenText(appName);
 }
 
 /** The text for a tool call whose page went away while it ran. */
 export function goneDuringCallText(appName: string | undefined): string {
 	return `The page closed while the tool was running, so it may or may not have finished. Ask the user to open ${pageName(appName)} and keep it in front (on a phone, in split screen), then check the result before trying again.`;
+}
+
+/** The text for a tool call that was running when the relay stopped. */
+export function restartedDuringCallText(): string {
+	return "The relay restarted while the tool was running, so it may or may not have finished. Check the result before trying again in a few seconds.";
 }
 
 /**
@@ -71,7 +91,9 @@ export function notOpenAnswer(
 		const text =
 			phase === "gone"
 				? goneDuringCallText(appName)
-				: phaseText(phase, appName);
+				: phase === "restarting_gone"
+					? restartedDuringCallText()
+					: phaseText(phase, appName);
 		return JSON.stringify({
 			jsonrpc: "2.0",
 			id,
@@ -110,7 +132,11 @@ export function notOpenAnswer(
 		id,
 		error: {
 			code:
-				phase === "gone" ? RelayErrorCode.tabGone : RelayErrorCode.pageNotOpen,
+				phase === "gone"
+					? RelayErrorCode.tabGone
+					: phase === "restarting" || phase === "restarting_gone"
+						? RelayErrorCode.restarting
+						: RelayErrorCode.pageNotOpen,
 			message: phaseText(phase, appName),
 		},
 	});

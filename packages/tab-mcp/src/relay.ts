@@ -19,8 +19,13 @@ import {
 import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
 import { ipPrefixKey } from "./ip.ts";
 import { JwtError, type KeySource } from "./jwt.ts";
-import { createLogger, type Logger, truncateIp } from "./log.ts";
-import { isRetryable, notOpenAnswer, type RelayInfo } from "./notopen.ts";
+import { createLogger, errorName, type Logger, truncateIp } from "./log.ts";
+import {
+	isRetryable,
+	type NotOpenPhase,
+	notOpenAnswer,
+	type RelayInfo,
+} from "./notopen.ts";
 import {
 	AuthorizationServer,
 	type AuthorizationTestMode,
@@ -48,6 +53,32 @@ const RETRY = Symbol("retry");
 
 /** The one mismatched header Claude sends today (claude-code #93290, DEC-033). */
 const CLAUDE_MISMATCHED_HEADER = "2025-11-25";
+
+/**
+ * Listen streams one grant may hold on a page at once: they have no request
+ * timer, so without a cap one AI app could take every concurrency slot.
+ */
+const MAX_LISTEN_STREAMS_PER_GRANT = 2;
+
+/**
+ * Bun closes a WebSocket whose frame is over `maxPayloadLength` (1009). Frames
+ * up to this many times the largest site limit get a `too_large` error instead
+ * and the session stays; they are refused by length, before parsing.
+ */
+const FRAME_HEADROOM = 4;
+
+/**
+ * Refusals of a tab assertion that say nothing about the user: the relay could
+ * not check (signing keys or store unavailable, an unexpected error).
+ */
+const TRANSIENT_REFUSALS = new Set([
+	"jwks_unavailable",
+	"store_unavailable",
+	"error",
+]);
+
+/** `Retry-After` (seconds) for answers that ask an AI app to try again soon. */
+const RETRY_AFTER_S = "5";
 
 /** Request headers forwarded to the tab (protocol: tunnelled MCP requests). */
 const FORWARDED_HEADERS = new Set([
@@ -204,8 +235,14 @@ function startRelay(
 	/** Requests waiting for their page, per address (DEC-074). */
 	const waiters = new Map<string, Set<(s: TabSession | undefined) => void>>();
 	let waitingCount = 0;
-	/** The app name of each address's last session, for "open <name>". */
-	const appNames = new Map<string, string>();
+	/**
+	 * Each address's last session: its app name, for "open <name>", and its
+	 * site's concurrency limit, for requests that wait for the page.
+	 */
+	const lastSeen = new Map<
+		string,
+		{ appName: string | undefined; maxConcurrentRequests: number }
+	>();
 	let claudeWorkarounds = 0;
 	let publicUrl = config.publicUrl ?? "";
 	/** Tab assertions (identity binding, DEC-076), when configured. */
@@ -296,10 +333,20 @@ function startRelay(
 			};
 			const refuse = (reason: string, message: string) => {
 				// Fail closed: a refused assertion also ends an earlier binding,
-				// and the requests made under it.
+				// and the requests made under it. When the relay could not check
+				// (keys or store unavailable), the AI app is told to try again,
+				// not to sign in again.
 				if (session.identity !== undefined) {
 					session.identity = undefined;
-					failPending(session, "The page's user is no longer signed in.");
+					if (TRANSIENT_REFUSALS.has(reason)) {
+						failPending(
+							session,
+							"The relay cannot check the page's user right now. Try again shortly.",
+							true,
+						);
+					} else {
+						failPending(session, "The page's user is no longer signed in.");
+					}
 				}
 				logger.info("identity.refused", {
 					address: shortAddress(addressId),
@@ -343,7 +390,7 @@ function startRelay(
 			} catch (error) {
 				logger.error("store.error", {
 					op: "identity",
-					message: error instanceof Error ? error.message : "unknown",
+					error: errorName(error),
 				});
 				refuse("store_unavailable", "the relay cannot check grants right now");
 				return;
@@ -383,10 +430,7 @@ function startRelay(
 				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
 			} catch (error) {
 				// The grants stay, but work only for a page bound to their person.
-				logger.error("store.error", {
-					op: "signOut",
-					message: error instanceof Error ? error.message : "unknown",
-				});
+				logger.error("store.error", { op: "signOut", error: errorName(error) });
 			}
 		},
 		claimAddress(session: TabSession): TabSession | undefined {
@@ -409,24 +453,46 @@ function startRelay(
 		ready(session: TabSession): void {
 			const id = session.addressId;
 			if (id === undefined) return;
-			if (session.appName !== undefined) {
-				appNames.delete(id);
-				appNames.set(id, session.appName);
-				// Bounded: forget the oldest names first.
-				if (appNames.size > config.maxSessions * 2) {
-					const oldest = appNames.keys().next().value;
-					if (oldest !== undefined) appNames.delete(oldest);
-				}
+			const appName = session.appName ?? lastSeen.get(id)?.appName;
+			lastSeen.delete(id);
+			lastSeen.set(id, {
+				appName,
+				maxConcurrentRequests: session.limits.maxConcurrentRequests,
+			});
+			// Bounded: forget the oldest addresses first.
+			if (lastSeen.size > config.maxSessions * 2) {
+				const oldest = lastSeen.keys().next().value;
+				if (oldest !== undefined) lastSeen.delete(oldest);
 			}
 			const waiting = waiters.get(id);
 			if (waiting !== undefined) for (const wake of [...waiting]) wake(session);
 		},
 	};
 
-	/** End a session's requests in flight; the page is told to stop them. */
-	function failPending(session: TabSession, message: string): void {
+	/**
+	 * End a session's requests in flight with `-31009`; the page is told to stop
+	 * them. 401 with `WWW-Authenticate`, or, when the relay could not check
+	 * (`transient`), 503 with `Retry-After`, so AI apps keep their tokens.
+	 */
+	function failPending(
+		session: TabSession,
+		message: string,
+		transient = false,
+	): void {
+		const addressId = session.addressId;
+		const headers: Record<string, string> = transient
+			? { "retry-after": RETRY_AFTER_S }
+			: addressId === undefined
+				? {}
+				: { "www-authenticate": wwwAuthenticate(addressId, true) };
 		for (const exchange of [...session.pending.values()]) {
-			exchange.fail(401, RelayErrorCode.signedOut, message, true);
+			exchange.fail(
+				transient ? 503 : 401,
+				RelayErrorCode.signedOut,
+				message,
+				true,
+				headers,
+			);
 		}
 	}
 
@@ -467,11 +533,13 @@ function startRelay(
 		}
 		const set = waiters.get(addressId) ?? new Set();
 		// A waiting request holds its body and a socket like a forwarded one: at
-		// most maxConcurrentRequests per address, maxSessions in all.
-		if (
-			set.size >= config.maxConcurrentRequests ||
-			waitingCount >= config.maxSessions
-		) {
+		// most maxConcurrentRequests per address (its site's, as far as known,
+		// so none gets 429 when the page comes), maxSessions in all.
+		const limit =
+			sessions.get(addressId)?.limits.maxConcurrentRequests ??
+			lastSeen.get(addressId)?.maxConcurrentRequests ??
+			config.maxConcurrentRequests;
+		if (set.size >= limit || waitingCount >= config.maxSessions) {
 			return Promise.resolve(undefined);
 		}
 		return new Promise((resolve) => {
@@ -615,10 +683,7 @@ function startRelay(
 		try {
 			record = await store.get(hashToken(token));
 		} catch (error) {
-			logger.error("store.error", {
-				op: "get",
-				message: error instanceof Error ? error.message : "unknown",
-			});
+			logger.error("store.error", { op: "get", error: errorName(error) });
 			return "unavailable";
 		}
 		if (
@@ -658,8 +723,12 @@ function startRelay(
 			const deadline = new Promise<"timeout">((resolve) => {
 				timer = setTimeout(() => resolve("timeout"), config.bodyTimeoutMs);
 			});
-			const result = await Promise.race([reading, deadline]);
-			clearTimeout(timer);
+			let result: ArrayBuffer | "timeout";
+			try {
+				result = await Promise.race([reading, deadline]);
+			} finally {
+				clearTimeout(timer);
+			}
 			if (result === "timeout") {
 				return rpcError(
 					408,
@@ -819,7 +888,7 @@ function startRelay(
 				rpcId,
 				RelayErrorCode.storeUnavailable,
 				"The relay cannot check tokens right now. Try again shortly.",
-				{ ...corsHeaders, "retry-after": "5" },
+				{ ...corsHeaders, "retry-after": RETRY_AFTER_S },
 			);
 		}
 		if (typeof auth === "string") {
@@ -875,12 +944,14 @@ function startRelay(
 		// our own timers (the page wait, the request timer) and keep-alives take
 		// over (Bun research, finding 1). Body reading and every unauthenticated
 		// path keep the idle timeout, so a stalled client cannot hold a socket.
+		// It is switched on again on every exit, while the response is still in
+		// progress: Bun ignores a timeout set once the response has finished.
+		const idle = (on: boolean) =>
+			server.timeout(req, on ? config.httpIdleTimeoutS : 0);
 		const usable = usableFor(auth.subject);
-		if (readySession(addressId, usable) === undefined && waitMs > 0) {
-			server.timeout(req, 0);
-		}
-		let retried = false;
-		for (;;) {
+
+		/** The page's session to forward to, or the answer when there is none. */
+		const admit = async (): Promise<TabSession | Response> => {
 			const found = await waitForPage(addressId, req.signal, waitMs, usable);
 			// The AI app may have gone while the body was read, the token checked
 			// or the page awaited: then forward nothing (the abort event has
@@ -928,7 +999,34 @@ function startRelay(
 					corsHeaders,
 				);
 			}
-			server.timeout(req, 0);
+			if (
+				isListen &&
+				session.listenStreams(auth.grantId) >= MAX_LISTEN_STREAMS_PER_GRANT
+			) {
+				logDone(429, method, { reason: "listen_streams" });
+				return rpcError(
+					429,
+					rpcId,
+					RelayErrorCode.overloaded,
+					"Too many listen streams at once for this AI app.",
+					corsHeaders,
+				);
+			}
+			return session;
+		};
+
+		if (readySession(addressId, usable) === undefined && waitMs > 0) {
+			idle(false);
+		}
+		let retried = false;
+		for (;;) {
+			const admitted = await admit();
+			if (admitted instanceof Response) {
+				idle(true);
+				return admitted;
+			}
+			const session = admitted;
+			idle(false);
 			let retry: () => void = () => {};
 			const retrying = new Promise<typeof RETRY>((resolve) => {
 				retry = () => resolve(RETRY);
@@ -936,7 +1034,6 @@ function startRelay(
 			const mayRetry =
 				!retried && waitMs > 0 && isRetryable(body.value["method"]);
 			const exchange = session.forward({
-				method: "POST",
 				headers,
 				body: body.text,
 				rpcId,
@@ -949,6 +1046,7 @@ function startRelay(
 				extraHeaders: corsHeaders,
 				onDone: (e: Exchange) => {
 					if (e.outcome === "page_gone_retry") return; // logged once, at the end
+					idle(true);
 					logDone(e.status, method, {
 						session: session.sessionId,
 						client: clientHostName,
@@ -965,7 +1063,7 @@ function startRelay(
 						body.value,
 						rpcId,
 						session.appName,
-						"gone",
+						stopping === undefined ? "gone" : "restarting_gone",
 						RELAY_INFO,
 					);
 					return answer === undefined
@@ -982,7 +1080,10 @@ function startRelay(
 		}
 	}
 
-	/** DEC-074: HTTP 200 and a JSON-RPC message, not an HTTP error status. */
+	/**
+	 * DEC-074: HTTP 200 and a JSON-RPC message, not an HTTP error status. While
+	 * the relay stops, the answer says it restarts (iteration 11, finding 5).
+	 */
 	function pageNotOpen(
 		value: Record<string, unknown>,
 		rpcId: RpcId | undefined,
@@ -996,31 +1097,42 @@ function startRelay(
 	): Response {
 		// Open but not signed in (identity binding) reads differently.
 		const open = sessions.get(addressId);
-		const phase =
-			open?.ready === true &&
-			open.identity === undefined &&
-			open.site.pairing === "oidc"
-				? "signed_out"
-				: "not_open";
+		const phase: NotOpenPhase =
+			stopping !== undefined
+				? "restarting"
+				: open?.ready === true &&
+						open.identity === undefined &&
+						open.site.pairing === "oidc"
+					? "signed_out"
+					: "not_open";
+		const reason = phase === "restarting" ? "restarting" : "page_not_open";
 		const answer = notOpenAnswer(
 			value,
 			rpcId,
-			open?.appName ?? appNames.get(addressId),
+			open?.appName ?? lastSeen.get(addressId)?.appName,
 			phase,
 			RELAY_INFO,
 		);
 		if (answer === undefined) {
 			// A notification: the spec requires an HTTP error status.
-			logDone(503, method, { reason: "page_not_open" });
-			return rpcError(
-				503,
-				rpcId,
-				RelayErrorCode.pageNotOpen,
-				"The page is not open.",
-				corsHeaders,
-			);
+			logDone(503, method, { reason });
+			return phase === "restarting"
+				? rpcError(
+						503,
+						rpcId,
+						RelayErrorCode.restarting,
+						"The relay is restarting.",
+						{ ...corsHeaders, "retry-after": RETRY_AFTER_S },
+					)
+				: rpcError(
+						503,
+						rpcId,
+						RelayErrorCode.pageNotOpen,
+						"The page is not open.",
+						corsHeaders,
+					);
 		}
-		logDone(200, method, { reason: "page_not_open" });
+		logDone(200, method, { reason });
 		return new Response(answer, {
 			status: 200,
 			headers: { ...corsHeaders, "content-type": "application/json" },
@@ -1133,7 +1245,7 @@ function startRelay(
 		fetch: () => new Response("Not found", { status: 404 }),
 		websocket: {
 			data: {} as WsData,
-			maxPayloadLength: largest * 4,
+			maxPayloadLength: largest * FRAME_HEADROOM,
 			backpressureLimit: config.backpressureLimitBytes,
 			closeOnBackpressureLimit: false,
 			idleTimeout: 120,
@@ -1175,7 +1287,7 @@ function startRelay(
 			.catch((error: unknown) =>
 				logger.error("store.error", {
 					op: "deleteExpired",
-					message: error instanceof Error ? error.message : "unknown",
+					error: errorName(error),
 				}),
 			);
 	}, config.sweepIntervalMs);

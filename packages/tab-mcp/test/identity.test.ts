@@ -727,3 +727,93 @@ describe("identity binding: review of PR #13", () => {
 		).toThrow(/credentials/);
 	});
 });
+
+describe("identity binding: -31009 (iteration 11, finding 3)", () => {
+	/** A signed-in page that never answers, so a request stays waiting. */
+	async function silentSetup(
+		options: CreateRelayOptions = {},
+		hooks: RelayTestHooks = {},
+	): Promise<Ctx> {
+		const r = await relay(options, hooks);
+		const tab = new ScriptedTab(r.wsUrl, { onRequest: () => {} });
+		tabs.push(tab);
+		await tab.connect();
+		await signInTab(tab, "alice");
+		tab.send({ type: "pairing.start" });
+		return {
+			r,
+			tab,
+			address: tab.session?.address ?? "",
+			browser: new TestBrowser(r.url),
+		};
+	}
+
+	test("a refused assertion answers 401 with WWW-Authenticate", async () => {
+		const ctx = await silentSetup();
+		const token = await pairedToken(ctx);
+		const pending = mcpPost(ctx.address, add(), { token });
+		await ctx.tab.next("http.request");
+		const now = Math.floor(Date.now() / 1000);
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address, {
+				exp: now - 30,
+			}),
+		});
+		const res = await pending;
+		expect(res.status).toBe(401);
+		expect(res.headers.get("www-authenticate")).toContain(
+			'error="invalid_token"',
+		);
+		expect(res.headers.get("www-authenticate")).toContain("resource_metadata=");
+		expect(((await res.json()) as { error: { code: number } }).error.code).toBe(
+			-31009,
+		);
+	});
+
+	test("a store outage while binding answers 503 with Retry-After, not 401", async () => {
+		const store = new FlakyStore();
+		const ctx = await silentSetup({ store });
+		const token = await pairedToken(ctx);
+		const pending = mcpPost(ctx.address, add(), { token });
+		await ctx.tab.next("http.request");
+		store.failing = true;
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address),
+		});
+		const res = await pending;
+		expect(res.status).toBe(503);
+		expect(res.headers.get("retry-after")).not.toBeNull();
+		expect(res.headers.get("www-authenticate")).toBeNull();
+		expect(((await res.json()) as { error: { code: number } }).error.code).toBe(
+			-31009,
+		);
+	});
+
+	test("keys that cannot be fetched answer 503 with Retry-After, not 401", async () => {
+		const cache = new JwksCache(provider.relayConfig().assertionJwksUrl);
+		let failing = false;
+		const keys: KeySource = {
+			keys: async (kid) => {
+				if (failing) throw new Error("JWKS unreachable");
+				return cache.keys(kid);
+			},
+		};
+		const ctx = await silentSetup({}, { assertionKeys: keys });
+		const token = await pairedToken(ctx);
+		const pending = mcpPost(ctx.address, add(), { token });
+		await ctx.tab.next("http.request");
+		failing = true;
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address),
+		});
+		const res = await pending;
+		expect(res.status).toBe(503);
+		expect(res.headers.get("retry-after")).not.toBeNull();
+		expect(ctx.r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
+			"jwks_unavailable",
+		);
+	});
+});
