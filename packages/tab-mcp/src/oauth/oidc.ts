@@ -182,6 +182,12 @@ export class OidcPairing implements PairingMethod {
 	readonly #jwks: JwksCache;
 	/** state → flow; insertion order is expiry order. */
 	readonly #flows = new Map<string, Flow>();
+	/**
+	 * Pending request → its one flow's state (DEC-090): a new Connect
+	 * replaces the earlier sign-in, so flows are bounded by the pending
+	 * requests, which are capped per network and per address.
+	 */
+	readonly #flowOf = new Map<string, string>();
 	/** Requests that met a mismatch: the next sign-in asks for the account again. */
 	readonly #mismatched = new Set<string>();
 
@@ -237,7 +243,7 @@ export class OidcPairing implements PairingMethod {
 	async check(
 		target: PairingTarget,
 		_form: URLSearchParams,
-		_admit: () => boolean,
+		admit: () => boolean,
 		context?: PairingContext,
 	): Promise<PairingResult> {
 		if (!target.pairingOpen) {
@@ -265,7 +271,17 @@ export class OidcPairing implements PairingMethod {
 		} catch (error) {
 			return this.#unavailable(error);
 		}
+		// A sign-in could pair: charged like a code guess (DEC-061, DEC-090).
+		if (!admit()) {
+			return {
+				ok: false,
+				message:
+					"Too many attempts for this page. Wait a few minutes and try again.",
+				reason: "rate_limited",
+			};
+		}
 		this.#sweep();
+		this.#dropFlow(context.requestId);
 		if (this.#flows.size >= MAX_FLOWS) {
 			return {
 				ok: false,
@@ -277,6 +293,7 @@ export class OidcPairing implements PairingMethod {
 		const state = random(24);
 		const nonce = random(24);
 		const verifier = random(32);
+		this.#flowOf.set(context.requestId, state);
 		this.#flows.set(state, {
 			requestId: context.requestId,
 			browserId: context.browserId,
@@ -324,6 +341,7 @@ export class OidcPairing implements PairingMethod {
 		}
 		this.#flows.delete(state); // single use
 		const requestId = flow.requestId;
+		this.#flowOf.delete(requestId);
 		const fail = (reason: string, message: string) => ({
 			requestId,
 			result: { ok: false as const, message, reason },
@@ -496,11 +514,26 @@ export class OidcPairing implements PairingMethod {
 		};
 	}
 
+	/** The pending request ended: drop its sign-in and its mismatch mark. */
+	forget(requestId: string): void {
+		this.#dropFlow(requestId);
+		this.#mismatched.delete(requestId);
+	}
+
+	#dropFlow(requestId: string): void {
+		const state = this.#flowOf.get(requestId);
+		if (state !== undefined) this.#flows.delete(state);
+		this.#flowOf.delete(requestId);
+	}
+
 	#sweep(): void {
 		const now = Date.now();
 		for (const [state, flow] of this.#flows) {
 			if (flow.expiresAt > now) break;
 			this.#flows.delete(state);
+			if (this.#flowOf.get(flow.requestId) === state) {
+				this.#flowOf.delete(flow.requestId);
+			}
 		}
 	}
 }

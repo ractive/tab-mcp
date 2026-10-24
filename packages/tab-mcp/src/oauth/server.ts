@@ -633,6 +633,7 @@ export class AuthorizationServer {
 		};
 		dec(this.#pendingPerIp, p.ip);
 		dec(this.#pendingPerAddress, p.addressId);
+		for (const method of Object.values(this.#methods)) method?.forget?.(p.id);
 	}
 
 	/**

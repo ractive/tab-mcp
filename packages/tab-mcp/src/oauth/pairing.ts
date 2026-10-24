@@ -63,6 +63,8 @@ export interface PairingMethod {
 	prepare?(): Promise<void>;
 	/** Extra origins the page's form may lead to (CSP `form-action`). */
 	formTargets?(): readonly string[];
+	/** The pending request ended (paired, cancelled, expired, evicted): drop its state. */
+	forget?(requestId: string): void;
 	/** The answer of a method that redirected (`/authorize/callback`). */
 	callback?(
 		params: URLSearchParams,
