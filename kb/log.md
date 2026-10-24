@@ -1,5 +1,10 @@
 # Log
 
+## 2026-10-24
+
+- Relay 0.3.1 released and deployed (modern-envelope initialize 404/-32601); Codex recorded in docs/compatibility.md
+- Codebase review (architecture, auth, relay, library, CI); iteration 10 planned for the stolen address secret
+
 ## 2026-10-23
 
 - Iteration 9 on iter-9/react: `@ractive-ch/tab-mcp-client/react` (provider, useTabMcp, useTabMcpState with identity and reconnecting, useTool, useToolCalls, ConnectButton; optional peer react >=18.3.0 <20, tested with React 18.3 and 19), reconnecting in the core (5, 10, 20, 40, then 60 s; at once on visibility or online), examples/react-todo with a Chrome e2e including a relay restart; DEC-081, DEC-082; skill, release and saturnus still open

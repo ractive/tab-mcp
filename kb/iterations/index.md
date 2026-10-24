@@ -4,6 +4,7 @@
 
 ## iteration
 
+* [Iteration 10: a stolen address secret](iteration-10-address-takeover.md) - What someone who copies a page's address secret can do, said plainly in the docs; a page that is taken over says so and offers a new address; and whether a backend-signed address claim is worth building.
 * [Iteration 1: protocol and relay core](iteration-1-relay-core.md) - The relay's tab WebSocket, stable addresses, the token store, the HTTP tunnel with limits, timeouts and keep-alives, and the health endpoint, tested with a scripted tab and the MCP SDK client.
 * [Iteration 2: browser library](iteration-2-client-library.md) - The tab-side library: a small eager core with WebMCP-style registerTool, and on connect() the lazily loaded connection and MCP handler, pairing UI and consequential-tool confirmation.
 * [Iteration 3: OAuth authorization server with pairing](iteration-3-oauth.md) - Our own authorization server: metadata, CIMD client validation, pairing codes typed on the authorize page, token endpoint with PKCE and rotating refresh tokens, revocation, spec tests, conformance runs and a security review.
