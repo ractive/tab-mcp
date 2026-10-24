@@ -72,6 +72,14 @@ export function truncateIp(ip: string): string {
 }
 
 /**
+ * An error for a log line: its name only. Messages can carry request data,
+ * and a custom store's can hold token hashes or a connection string.
+ */
+export function errorName(error: unknown): string {
+	return error instanceof Error ? error.name : typeof error;
+}
+
+/**
  * Defence in depth (DEC-047). The relay catches errors per message and per
  * request; anything that still escapes is logged, never silently fatal:
  * - an unhandled promise rejection is logged and the relay keeps running, so one
@@ -86,13 +94,11 @@ export function installCrashLogging(
 	logger: Logger,
 	exit: (code: number) => void = (code) => process.exit(code),
 ): () => void {
-	const name = (error: unknown) =>
-		error instanceof Error ? error.name : typeof error;
 	const onRejection = (error: unknown) => {
-		logger.error("process.unhandled_rejection", { error: name(error) });
+		logger.error("process.unhandled_rejection", { error: errorName(error) });
 	};
 	const onException = (error: unknown) => {
-		logger.error("process.uncaught_exception", { error: name(error) });
+		logger.error("process.uncaught_exception", { error: errorName(error) });
 		exit(1);
 	};
 	process.on("unhandledRejection", onRejection);

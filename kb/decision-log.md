@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-23T20:00:00+02:00
+timestamp: 2026-10-24T22:00:00+02:00
 ---
 
 # Decision log
@@ -1236,6 +1236,63 @@ The first run found one real defect, fixed with this decision: the relay answere
 method the server does not have, which the transport answers with 404 and `-32601`. The
 relay now forwards it and the library answers that, as the MCP TypeScript SDK does. An
 old-style `initialize` still gets 400 and `-32022`.
+
+## DEC-085: Relay request path hardening
+
+2026-10-24, iteration 11 (findings 1 to 9 of the review of the relay's request path). The
+choices the plan left open:
+
+- **Listen answers are event streams.** A streamed answer to `subscriptions/listen` with
+  any other content type is a protocol error (`-31007`, `http.cancel`), whether the tab or
+  the relay started the stream. Only a listen request's event stream is exempt from
+  `maxBodyBytes`; a buffered (wrapped) body never is. A chunk before
+  `http.response.start` on a relay-started stream is a protocol error too: it used to be
+  written to the AI app as raw text. `exchange.ts` now has one state type instead of four
+  flags, which is where the hole hid.
+- **The idle timeout comes back on every exit.** Measured with Bun 1.4.3:
+  `server.timeout(req, n)` applies while the response is in progress (before the handler
+  returns, or before a streamed body is closed, also synchronously right after
+  `controller.close()`), and is silently ignored once the response has finished (one
+  microtask after the close is already too late). So the relay restores it before
+  returning any answer that is not forwarded, and in the exchange's `onDone`, which runs
+  synchronously when the exchange ends. The admission step (wait, identity, size,
+  concurrency) is pulled out of `handleMcp` so there is one place for the restore.
+- **`-31009` transient variant.** A refused assertion, a sign-out or another person: 401
+  with `WWW-Authenticate` (`error="invalid_token"`). When the relay could not check
+  (`jwks_unavailable`, `store_unavailable`, an unexpected `error`): 503 with
+  `Retry-After`, same code, so clients keep their tokens. The binding still ends in both
+  cases (fail closed). Review of PR #30: the session remembers that the last refusal was
+  transient (`identityUnchecked`, cleared when an assertion is bound or the user signs
+  out), and while nobody is bound new requests get the same 503 after the usual page wait
+  instead of the signed-out answer, which would send the user to sign in for a relay-side
+  outage. Nothing reaches the page meanwhile. A full relay-wide replay cache is its own
+  reason, `relay_busy`, and transient; one person's full share stays `busy`, a refusal.
+- **Waiting requests use the last seen site limit** of the address, kept in the bounded
+  map that already held the app name; an address not seen since the start uses the
+  instance's. No re-check on wake: the cap alone keeps more from waiting than can run.
+- **Shutdown answers keep the page-not-open shape** (HTTP 200, a tool result for
+  `tools/call`, a stand-in for `server/discover`), with the text "The relay is
+  restarting" and a new code `-31010`, not 503: dual-era clients take an HTTP error as an
+  old server (DEC-074). A notification, waiting or already sent to the page, gets 503 with
+  `-31010` and `Retry-After`. `stop()` sets a flag before it ends the sessions, since
+  their requests end synchronously inside it. A `tools/call` that was
+  in flight says the result should be checked.
+- **Listen streams: 2 per grant and session**, a constant, not a setting. A per-grant share
+  of `maxConcurrentRequests` was the alternative; listen streams are the only requests
+  without a request timer, so capping them is enough, and 2 lets a client open a new
+  stream while its old one closes.
+- **Store errors log `error` (the name) only**, for the built-in stores too, as
+  `installCrashLogging` already does (`errorName` in `log.ts`).
+- **Tab frames are refused by length before parsing**; the error's `id` comes from a
+  match on the first 256 characters. The factor of 4 on `maxPayloadLength` stays, named
+  `FRAME_HEADROOM` and documented: frames a little over the limit get `too_large` and the
+  session stays, bigger ones close with 1009.
+- Dead parameters: `ForwardInput.method` is gone (always `POST`), `SessionHost.ready` is
+  required. `CloseCode.rateLimited` stays: 4008 is reserved in the protocol and the client
+  library maps it.
+
+Left for the owner: session-slot protection (finding 10) and the address id in the `/tab`
+URL (architecture F9).
 
 # Citations
 

@@ -10,7 +10,7 @@ import {
 	RelayErrorCode,
 	type RpcId,
 } from "./exchange.ts";
-import type { Logger } from "./log.ts";
+import { errorName, type Logger } from "./log.ts";
 import { PairingCodes } from "./oauth/pairing.ts";
 import {
 	type ByeReason,
@@ -19,7 +19,6 @@ import {
 	type GrantInfo,
 	type GrantRef,
 	type Limits,
-	type ParseResult,
 	parseTabMessage,
 	type RelayMessage,
 	type TabMessage,
@@ -46,7 +45,7 @@ export interface SessionHost {
 	/** Called once when a session is over. */
 	released(session: TabSession): void;
 	/** Called once when a session is ready for MCP requests (DEC-074). */
-	ready?(session: TabSession): void;
+	ready(session: TabSession): void;
 	/** The tab pressed Disconnect for one app; false if the grant is not this address's. */
 	revokeGrant(session: TabSession, grantId: string): Promise<boolean>;
 	/** The tab revokes every grant of its address ("New address"). */
@@ -63,8 +62,8 @@ export interface SessionHost {
 	readonly pairingCodeTtlMs?: number;
 }
 
+/** One MCP request for the tab: always `POST /mcp` (protocol: tunnelled MCP requests). */
 export interface ForwardInput {
-	method: string;
 	headers: Record<string, string>;
 	body: string;
 	rpcId: RpcId | undefined;
@@ -98,12 +97,12 @@ function clientHost(clientId: string): string {
 	}
 }
 
-/** The request id a parsed frame refers to, if any. */
-function messageId(parsed: ParseResult): string | undefined {
-	if ("message" in parsed) {
-		return "id" in parsed.message ? parsed.message.id : undefined;
-	}
-	return parsed.id;
+/**
+ * The request id of a frame too large to parse, from a cheap match at its
+ * start (the tab library sends `type` and `id` first); `undefined` if absent.
+ */
+function frameId(data: string): string | undefined {
+	return /"id"\s*:\s*"([^"\\]{1,64})"/.exec(data.slice(0, 256))?.[1];
 }
 
 /** One tab's WebSocket session, from open to close. */
@@ -125,7 +124,14 @@ export class TabSession {
 	 * (DEC-077); `undefined` while nobody is signed in.
 	 */
 	identity: string | undefined;
+	/**
+	 * The last assertion could not be checked (keys or store unavailable): while
+	 * nobody is bound, AI apps are told to try again rather than to sign in.
+	 */
+	identityUnchecked = false;
 	readonly pending: Map<string, Exchange> = new Map();
+	/** The grant of each pending listen stream (a cap per grant). */
+	readonly #listenGrants = new Map<string, string>();
 
 	readonly #ws: SocketLike;
 	readonly #host: SessionHost;
@@ -211,10 +217,10 @@ export class TabSession {
 			this.#protocolError("bad_message", "binary frames are not allowed");
 			return;
 		}
-		const tooLarge = Buffer.byteLength(data) > this.limits.maxMessageBytes;
-		const parsed = parseTabMessage(data);
-		if (tooLarge) {
-			const id = messageId(parsed);
+		// Refused by length before parsing: a page of a site with a small limit
+		// must not make the relay parse frames up to the largest site's.
+		if (Buffer.byteLength(data) > this.limits.maxMessageBytes) {
+			const id = frameId(data);
 			this.#sendError("too_large", "message exceeds maxMessageBytes", id);
 			const exchange = id === undefined ? undefined : this.pending.get(id);
 			exchange?.fail(
@@ -225,6 +231,7 @@ export class TabSession {
 			);
 			return;
 		}
+		const parsed = parseTabMessage(data);
 		if (!parsed.ok) {
 			if (this.#state === "new") {
 				this.#protocolError("bad_message", parsed.error);
@@ -377,7 +384,7 @@ export class TabSession {
 		} catch (error) {
 			this.#host.logger.error("store.error", {
 				op: "listGrants",
-				message: error instanceof Error ? error.message : "unknown",
+				error: errorName(error),
 			});
 		}
 		if (this.#state !== "hello") return; // closed meanwhile
@@ -417,7 +424,7 @@ export class TabSession {
 			library: `${library.name}@${library.version}`,
 			replaced: replaced !== undefined,
 		});
-		this.#host.ready?.(this);
+		this.#host.ready(this);
 	}
 
 	/**
@@ -451,6 +458,13 @@ export class TabSession {
 		this.send({ type: "ping", t: Date.now() });
 	}
 
+	/** The listen streams one grant has open on this session. */
+	listenStreams(grantId: string): number {
+		let n = 0;
+		for (const g of this.#listenGrants.values()) if (g === grantId) n++;
+		return n;
+	}
+
 	/** Tunnel one MCP request to the tab. Resolves with the AI app's response. */
 	forward(input: ForwardInput): Exchange {
 		this.#lastRequestAt = Date.now();
@@ -473,16 +487,18 @@ export class TabSession {
 			},
 			onDone: (e) => {
 				this.pending.delete(id);
+				this.#listenGrants.delete(id);
 				this.#lastRequestAt = Date.now();
 				input.onDone(e);
 			},
 			...(input.pageGone === undefined ? {} : { pageGone: input.pageGone }),
 		});
 		this.pending.set(id, exchange);
+		if (input.isListen) this.#listenGrants.set(id, input.grant.grantId);
 		const sent = this.send({
 			type: "http.request",
 			id,
-			method: input.method,
+			method: "POST",
 			path: "/mcp",
 			headers: input.headers,
 			body: input.body,

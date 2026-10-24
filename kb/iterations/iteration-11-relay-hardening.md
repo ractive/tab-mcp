@@ -1,9 +1,9 @@
 ---
 type: iteration
 title: "Iteration 11: relay request path hardening"
-status: planned
+status: in-progress
 description: "Fixes from the 2026-10-24 review of the relay's request path and sessions (packages/tab-mcp/src/relay.ts, exchange.ts, session.ts): an unbounded listen stream, idle timeouts that never come back, 401 without WWW-Authenticate, limits, shutdown answers, log hygiene."
-timestamp: 2026-10-24T21:00:00+02:00
+timestamp: 2026-10-24T22:00:00+02:00
 tags: [iteration, security, relay]
 ---
 # Iteration 11: relay request path hardening
@@ -108,17 +108,17 @@ few clients.
 
 ## Tasks
 
-- [ ] 1: listen streams must be event streams; `#wrapped` bounded; test with a JSON-answered listen
-- [ ] 2: idle timeout restored after every authenticated request; raw-socket test
-- [ ] 3: `WWW-Authenticate` on `-31009`; 503 for transient refusals; `docs/protocol.md`
-- [ ] 4: per-site cap on waiting requests
-- [ ] 5: shutdown answer is "restarting", not "page not open"
-- [ ] 6: per-grant cap on concurrency or on listen streams
-- [ ] 7: error names only in logs
-- [ ] 8: tab frames refused by length before parsing; the factor of 4 documented or dropped
-- [ ] 9: `clearTimeout` in `finally`
+- [x] 1: listen streams must be event streams; `#wrapped` bounded; test with a JSON-answered listen
+- [x] 2: idle timeout restored after every authenticated request; raw-socket test
+- [x] 3: `WWW-Authenticate` on `-31009`; 503 for transient refusals; `docs/protocol.md`
+- [x] 4: per-site cap on waiting requests
+- [x] 5: shutdown answer is "restarting", not "page not open"
+- [x] 6: per-grant cap on concurrency or on listen streams
+- [x] 7: error names only in logs
+- [x] 8: tab frames refused by length before parsing; the factor of 4 documented or dropped
+- [x] 9: `clearTimeout` in `finally`
 - [ ] 10: decide and implement session-slot protection; document it
-- [ ] Refactors: `handleMcp` admission step, exchange state type, dead parameters
+- [x] Refactors: `handleMcp` admission step, exchange state type, dead parameters
 - [ ] Decision on the address id in the `/tab` URL (F9), and on `/healthz` checking the store
 - [ ] Changelog, relay release, deploy
 

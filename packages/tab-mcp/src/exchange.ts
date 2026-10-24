@@ -22,6 +22,7 @@ export const RelayErrorCode = {
 	badResponse: -31007,
 	storeUnavailable: -31008,
 	signedOut: -31009,
+	restarting: -31010,
 } as const;
 
 export type CancelReason = "client_closed" | "timeout" | "error";
@@ -29,10 +30,21 @@ export type CancelReason = "client_closed" | "timeout" | "error";
 /**
  * What to do when the page goes away mid-request (DEC-074): send the request
  * to the page again once it is back (only while nothing was sent to the AI
- * app), or answer with this JSON-RPC message at HTTP 200 (`undefined` for a
- * notification: then 503).
+ * app), answer with this JSON-RPC message at HTTP 200, or fail with this
+ * error (no body and no error: 503, `-31003`).
  */
-export type PageGoneReply = { retry: true } | { retry: false; body?: string };
+export type PageGoneReply =
+	| { retry: true }
+	| { retry: false; body?: string }
+	| {
+			retry: false;
+			error: {
+				status: number;
+				code: number;
+				message: string;
+				headers: Record<string, string>;
+			};
+	  };
 
 export interface ExchangeOptions {
 	id: string;
@@ -97,6 +109,28 @@ export function rpcErrorBody(
 	return JSON.stringify({ jsonrpc: "2.0", id: rpcId ?? null, error });
 }
 
+/**
+ * Where an exchange is. While `waiting` nothing was sent to the AI app.
+ * `tab_stream`: the tab's `http.response.start` was passed on. The relay may
+ * start the event stream itself (`relay_stream`, DEC-039); the tab's response
+ * then becomes events: a tab event stream passes through (`relay_passed`), any
+ * other streamed body is buffered and sent as one event (`relay_wrapped`).
+ */
+type State =
+	| "waiting"
+	| "tab_stream"
+	| "relay_stream"
+	| "relay_passed"
+	| "relay_wrapped"
+	| "done";
+
+/** States in which the tab sent `http.response.start`. */
+const TAB_STARTED: ReadonlySet<State> = new Set([
+	"tab_stream",
+	"relay_passed",
+	"relay_wrapped",
+]);
+
 export class Exchange {
 	readonly id: string;
 	readonly isListen: boolean;
@@ -110,15 +144,11 @@ export class Exchange {
 
 	readonly #options: ExchangeOptions;
 	#resolve!: (response: Response) => void;
-	#state: "waiting" | "streaming" | "done" = "waiting";
-	/** The relay started the stream; a tab `http.response` becomes one event. */
-	#relayStarted = false;
-	/** The tab sent `http.response.start`: only chunks and the end may follow. */
-	#tabStarted = false;
-	/** Buffer a non-SSE streamed body to send it as one event. */
-	#wrap = false;
+	#state: State = "waiting";
+	/** The buffered body in `relay_wrapped`. */
 	#wrapped = "";
 	#controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+	/** The last write to the AI app ended an SSE event (or nothing was sent). */
 	#atBoundary = true;
 	/** Response body bytes received from the tab so far. */
 	#bodyBytes = 0;
@@ -153,7 +183,7 @@ export class Exchange {
 
 	/** A complete response from the tab. */
 	onResponse(msg: HttpResponseMessage): void {
-		if (this.#tabStarted) {
+		if (TAB_STARTED.has(this.#state)) {
 			this.#badResponse("http.response after http.response.start");
 			return;
 		}
@@ -175,7 +205,7 @@ export class Exchange {
 			}
 			this.#respond(response, msg.status);
 			this.#finish("ok");
-		} else if (this.#state === "streaming" && this.#relayStarted) {
+		} else if (this.#state === "relay_stream") {
 			if (!this.#account(msg.body)) return;
 			if (msg.body !== "") this.#write(sseEvent(msg.body));
 			this.#finish("ok");
@@ -183,11 +213,18 @@ export class Exchange {
 	}
 
 	onStart(msg: HttpResponseStartMessage): void {
-		if (this.#tabStarted) {
+		if (this.#state === "done") return;
+		if (TAB_STARTED.has(this.#state)) {
 			this.#badResponse("http.response.start sent twice");
 			return;
 		}
-		this.#tabStarted = true;
+		// A listen stream has no total limit, so it must be an event stream: any
+		// other body would be buffered or passed on without bound.
+		const eventStream = isEventStream(msg.headers);
+		if (this.isListen && !eventStream) {
+			this.#badResponse("a listen response must be an event stream");
+			return;
+		}
 		if (this.#state === "waiting") {
 			if (NULL_BODY_STATUSES.has(msg.status)) {
 				this.#badResponse(`status ${msg.status} cannot be streamed`);
@@ -200,22 +237,26 @@ export class Exchange {
 				this.#badResponse("the response headers are invalid");
 				return;
 			}
-			this.#openStream(msg.status, headers);
-		} else if (this.#state === "streaming" && this.#relayStarted) {
-			this.#wrap = !isEventStream(msg.headers);
+			this.#openStream(msg.status, headers, "tab_stream");
+		} else {
+			this.#state = eventStream ? "relay_passed" : "relay_wrapped";
 		}
 	}
 
 	onChunk(data: string): void {
-		if (this.#state !== "streaming") return;
+		if (!this.#streaming) return;
+		if (this.#state === "relay_stream") {
+			this.#badResponse("http.response.chunk before http.response.start");
+			return;
+		}
 		if (!this.#account(data)) return;
-		if (this.#wrap) this.#wrapped += data;
+		if (this.#state === "relay_wrapped") this.#wrapped += data;
 		else this.#write(data);
 	}
 
 	onEnd(): void {
-		if (this.#state !== "streaming") return;
-		if (this.#wrap && this.#wrapped !== "")
+		if (!this.#streaming) return;
+		if (this.#state === "relay_wrapped" && this.#wrapped !== "")
 			this.#write(sseEvent(this.#wrapped));
 		this.#finish("ok");
 	}
@@ -241,6 +282,11 @@ export class Exchange {
 		if (reply?.retry === true && waiting) {
 			clearTimeout(this.#startTimer);
 			this.#finish("page_gone_retry");
+			return;
+		}
+		if (reply !== undefined && "error" in reply) {
+			const e = reply.error;
+			this.fail(e.status, e.code, e.message, false, e.headers);
 			return;
 		}
 		const body = reply?.retry === false ? reply.body : undefined;
@@ -277,10 +323,14 @@ export class Exchange {
 		code: number,
 		message: string,
 		cancelTab: boolean,
+		headers: Record<string, string> = {},
 	): void {
 		if (this.#state === "done") return;
 		if (this.#state === "waiting") {
-			this.#respond(this.#errorResponse(status, code, message), status);
+			this.#respond(
+				this.#errorResponse(status, code, message, headers),
+				status,
+			);
 		} else if (this.#atBoundary && this.#options.rpcId !== undefined) {
 			this.#write(sseEvent(rpcErrorBody(this.#options.rpcId, code, message)));
 		}
@@ -303,12 +353,16 @@ export class Exchange {
 	}
 
 	/**
-	 * Count response bytes from the tab; past `maxBodyBytes` (listen streams
-	 * excepted) fail with 502 / -31006 and cancel the tab. False when failed.
+	 * Count response bytes from the tab; past `maxBodyBytes` fail with 502 /
+	 * -31006 and cancel the tab. False when failed. Only a listen request's
+	 * event stream is exempt; a buffered body is always bounded.
 	 */
 	#account(data: string): boolean {
 		this.#bodyBytes += Buffer.byteLength(data);
-		if (this.isListen || this.#bodyBytes <= this.#options.maxBodyBytes) {
+		const unbounded =
+			this.isListen &&
+			(this.#state === "tab_stream" || this.#state === "relay_passed");
+		if (unbounded || this.#bodyBytes <= this.#options.maxBodyBytes) {
 			return true;
 		}
 		this.fail(
@@ -333,14 +387,18 @@ export class Exchange {
 
 	#startRelayStream(): void {
 		if (this.#state !== "waiting") return;
-		this.#relayStarted = true;
 		this.#openStream(
 			200,
 			this.#headers({ "content-type": "text/event-stream" }),
+			"relay_stream",
 		);
 	}
 
-	#openStream(status: number, headers: Headers): void {
+	#openStream(
+		status: number,
+		headers: Headers,
+		state: "tab_stream" | "relay_stream",
+	): void {
 		// Bounded queue: if the AI app stops reading, desiredSize goes negative
 		// once maxBodyBytes are queued, and the exchange ends (see #write).
 		const stream = new ReadableStream<Uint8Array>(
@@ -366,17 +424,13 @@ export class Exchange {
 			this.#badResponse("the response could not be built");
 			return;
 		}
-		this.#state = "streaming";
+		this.#state = state;
 		this.#respond(response, status);
 		this.#scheduleKeepAlive();
 	}
 
 	#write(text: string): void {
-		if (
-			this.#state !== "streaming" ||
-			this.#controller === undefined ||
-			text === ""
-		)
+		if (!this.#streaming || this.#controller === undefined || text === "")
 			return;
 		try {
 			this.#controller.enqueue(encoder.encode(text));
@@ -396,17 +450,21 @@ export class Exchange {
 		this.#scheduleKeepAlive();
 	}
 
+	/** The AI app's response is a stream that is still open. */
+	get #streaming(): boolean {
+		return this.#state !== "waiting" && this.#state !== "done";
+	}
+
 	/** A keep-alive comment `keepAliveMs` after the last write, at a boundary. */
 	#scheduleKeepAlive(): void {
 		clearTimeout(this.#keepAliveTimer);
-		if (this.#state !== "streaming" || this.#wrap) {
-			if (this.#state === "streaming") {
-				this.#keepAliveTimer = setTimeout(() => {
-					// While buffering a wrapped body nothing has been forwarded since
-					// the last boundary, so a comment is safe.
-					this.#write(": keep-alive\n\n");
-				}, this.#options.keepAliveMs);
-			}
+		if (!this.#streaming) return;
+		if (this.#state === "relay_wrapped") {
+			this.#keepAliveTimer = setTimeout(() => {
+				// While buffering a wrapped body nothing has been forwarded since
+				// the last boundary, so a comment is safe.
+				this.#write(": keep-alive\n\n");
+			}, this.#options.keepAliveMs);
 			return;
 		}
 		this.#keepAliveTimer = setTimeout(() => {
@@ -423,8 +481,14 @@ export class Exchange {
 		return headers;
 	}
 
-	#errorResponse(status: number, code: number, message: string): Response {
+	#errorResponse(
+		status: number,
+		code: number,
+		message: string,
+		extra: Record<string, string>,
+	): Response {
 		const headers = this.#headers({ "content-type": "application/json" });
+		for (const [k, v] of Object.entries(extra)) headers.set(k, v);
 		return new Response(rpcErrorBody(this.#options.rpcId, code, message), {
 			status,
 			headers,
@@ -439,7 +503,7 @@ export class Exchange {
 
 	#finish(outcome: string, closeStream = true): void {
 		if (this.#state === "done") return;
-		const wasStreaming = this.#state === "streaming";
+		const wasStreaming = this.#streaming;
 		this.#state = "done";
 		this.outcome = outcome;
 		clearTimeout(this.#startTimer);
