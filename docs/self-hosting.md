@@ -53,7 +53,7 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
   -e TAB_MCP_TRUST_PROXY=x-real-ip \
-  ractive/tab-mcp:0.3.0
+  ractive/tab-mcp:0.3.1
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
@@ -67,7 +67,7 @@ machine (see [below](#behind-a-reverse-proxy-or-cdn)). The image:
 - has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead
   (see [Health checks](#health-checks-and-monitoring)).
 
-`docker run --rm ractive/tab-mcp:0.3.0 --version` prints the version, `--help` the
+`docker run --rm ractive/tab-mcp:0.3.1 --version` prints the version, `--help` the
 settings. A setting the relay cannot use stops it at start with
 `tab-mcp: configuration error: …` and exit code 2; read the container log if it does not
 come up.
@@ -77,7 +77,7 @@ With Docker Compose:
 ```yaml
 services:
   tab-mcp:
-    image: ractive/tab-mcp:0.3.0
+    image: ractive/tab-mcp:0.3.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -106,7 +106,7 @@ again after an upgrade.
 
   ```sh
   sudo install -d -o 65532 -g 65532 -m 0700 /srv/tab-mcp
-  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.3.0
+  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.3.1
   ```
 
 - **Platform volumes** (container hosts, Kubernetes) are sometimes mounted owned by
@@ -364,7 +364,7 @@ container platform or a server, check these settings for the relay's hostname:
 `GET /healthz` answers `200` with
 
 ```json
-{"status":"ok","version":"0.3.0","counters":{"claudeHeaderWorkaround":0}}
+{"status":"ok","version":"0.3.1","counters":{"claudeHeaderWorkaround":0}}
 ```
 
 and `Cache-Control: no-store`. It needs no token and touches no page. Use it:

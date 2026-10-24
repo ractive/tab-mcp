@@ -15,6 +15,7 @@ An app that cannot do both cannot connect.
 | Claude Code, headless (`claude -p --mcp-config … --strict-mcp-config`) | 2.1.296 | 2026-10-20 | `aebc41f` | bearer token in `"headers": {"Authorization": "Bearer ${TABMCP_TOKEN}"}`, obtained by the SDK client's OAuth flow | works: "Use the calculator to compute 12*12" pressed the keys and the page showed 144 (`bun run e2e:claude`) |
 | Claude Code with `MCP_PROTOCOL_NEGOTIATION=legacy` | 2.1.296 | 2026-10-20 | `aebc41f` | bearer token as above | refused as intended: its `initialize` gets HTTP 400 with JSON-RPC error `-32022` "Unsupported protocol version: 2025-11-25", `supported: ["2026-07-28"]`; the server shows as failed and no tool runs |
 | claude.ai custom connector, model Fable 5.1 | web app as of 2026-10-20 | 2026-10-20 | relay `relay-v0.1.0`, client `client-v0.1.0` (`711dda5`) | full OAuth flow against the hosted relay https://tab-mcp.ractive.ch: CIMD, the pairing code typed on `/authorize` | works: on https://ractive.ch/saturnus/app/ (HP 48GX) "Draw a graph for sin(x)*x in RAD" set the mode, EQ and PPAR and showed the plot, then "draw axes" ran `DRAX` (owner's run). The pairing survived a relay restart (bunny, 2026-10-20): after the page connected again, the same chat used the calculator without signing in again |
+| Codex desktop, with `mcp_2026_07_28 = true` under `[features]` in `~/.codex/config.toml` | 0.163 | 2026-10-23 | relay `relay-v0.3.0`, client `client-v0.5.0` and `client-v0.5.1` | full OAuth flow against the hosted relay: CIMD; on https://tab-mcp-login.ractive.ch/ Google sign-in at the relay (identity binding), on https://ractive.ch/saturnus/app/ the pairing code | works (owner's run): the sign-in example's notes tools ran, and signing in with a different Google account was refused; on saturnus the calculator's tools ran. Without the feature flag the sign-in succeeds but no tools appear. Codex loads tools when a chat starts, so the chat must start after pairing, and each page needs its own `[mcp_servers.<name>]` entry, since each page has its own relay address |
 
 ## Pending
 
@@ -39,7 +40,7 @@ These need a manual run.
 | VS Code / GitHub Copilot | speaks only MCP 2025-11-25, with no 2026-07-28 support |
 | Cursor | has no CIMD support (only dynamic client registration) |
 | Gemini CLI | supports neither 2026-07-28 (its SDK is on 2025-06-18) nor CIMD |
-| Codex CLI (default settings) | uses the older protocol unless `mcp_2026_07_28 = true` is set; untested with that flag |
+| Codex (default settings) | uses the older protocol unless `mcp_2026_07_28 = true` is set; with it Codex works (see Tested) |
 
 They stay unsupported until they support both 2026-07-28 and CIMD. This list is
 re-checked with each release.
