@@ -160,7 +160,12 @@ the grants of the previous one and ends their requests in flight.
   streams, CORS headers).
 - A response must end within `requestTimeoutMs` (300 s by default), except for
   `subscriptions/listen` (recognised by `mcp-method`), which may stay open for the
-  session's lifetime. Streams count against `maxConcurrentRequests`.
+  session's lifetime. Streams count against `maxConcurrentRequests`. One grant may hold
+  at most 2 listen streams on a page at once; a third gets 429 (`-31004`), so one AI app
+  cannot take every slot of the page.
+- A streamed answer to `subscriptions/listen` must be an event stream
+  (`content-type: text/event-stream`): it has no total size limit. Any other content type
+  is a protocol error (`bad_message`, `-31007`, `http.cancel`).
 - The library answers `tools/call` with an event stream that starts at once. Other
   methods may answer with one `http.response`.
 - If the tab has not started a response within `keepAliveMs` (20 s) for a request with a
@@ -174,7 +179,8 @@ the grants of the previous one and ends their requests in flight.
   bytes forwarded so far end with a blank line). The tab never sends keep-alives.
 - A request gets either one `http.response`, or one `http.response.start` followed by
   any number of `http.response.chunk` and one `http.response.end`. An `http.response`
-  after `http.response.start`, or a second `http.response.start`, is a protocol error:
+  after `http.response.start`, a second `http.response.start`, or a chunk before
+  `http.response.start` once the relay started the event stream, is a protocol error:
   the relay answers `error` `bad_message` with the `id`, fails the request (`-31007`) and
   sends `http.cancel`.
 - `http.cancel` aborts the tab's `Request.signal`; the tab sends nothing more for that
@@ -204,10 +210,12 @@ see [When the page is not open](#when-the-page-is-not-open).
 | `-31003` | 200 | The page closed its connection while the request was in flight. |
 | `-31004` | 429 | Too many concurrent requests for this page. |
 | `-31005` | 503 | The WebSocket send was dropped under backpressure. |
-| `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; listen streams excepted). |
+| `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; the event stream of a `subscriptions/listen` excepted). |
 | `-31007` | 502 | The page sent an invalid response (malformed message, a header value that is not an RFC 9110 field value, a body with status 204, 205 or 304). |
 | `-31008` | 503 | The token store is unavailable. Sent with `Retry-After`, so clients keep their tokens. |
-| `-31009` | 401 | The page's user signed out or changed while the request was in flight (identity binding). |
+| `-31009` | 401 | The page's user signed out or changed while the request was in flight, or the page's new assertion was refused (identity binding). Sent with `WWW-Authenticate` (`error="invalid_token"`). |
+| `-31009` | 503 | The same, when the relay could not check the page's assertion (signing keys or token store unavailable). Sent with `Retry-After`, so clients keep their tokens. |
+| `-31010` | 200 | The relay is restarting (see [When the page is not open](#when-the-page-is-not-open)). |
 
 The relay notices that an AI app closed a streamed response when it next writes to it,
 so at the latest after one keep-alive interval. It then sends `http.cancel`.
@@ -216,7 +224,8 @@ Before a request reaches the tab, the relay checks, in this order: the method (P
 else 405), the body size and JSON (413, 400), the `MCP-Protocol-Version` header (400 with
 JSON-RPC error `-32022` naming the supported version `2026-07-28`, or `-32020` when the
 header is missing), the bearer token for this address (401 with `WWW-Authenticate`), that
-that the tab is online (see below) and the concurrency limit (429, `-31004`). An unknown
+that the tab is online (see below), the concurrency limit and, for
+`subscriptions/listen`, the listen streams of the grant (429, `-31004`). An unknown
 address and an address whose tab is offline look the same without a token, so addresses
 cannot be probed.
 
@@ -226,7 +235,8 @@ Phones pause a tab in the background, so "not open" is often brief. A request wi
 token for an address without a connected tab waits up to `TAB_MCP_PAGE_WAIT_S` (10 s by
 default; 0 turns it off) for the page's session and is then forwarded as usual. The wait
 ends when the AI app closes its request. At most `maxConcurrentRequests` requests wait per
-address and at most `maxSessions` in all; beyond that the relay answers at once.
+address (the limit of the page's site, as far as the relay has seen the page since it
+started) and at most `maxSessions` in all; beyond that the relay answers at once.
 `server/discover` does not wait: clients use it as a quick protocol-version probe.
 
 If the page does not come, the relay answers with **HTTP 200** and a JSON-RPC message,
@@ -240,6 +250,13 @@ old handshake, which this relay refuses (DEC-074).
 | `server/discover` | A stand-in result: `supportedVersions: ["2026-07-28"]`, `capabilities: {"tools": {"listChanged": true}}`, the text above as `instructions`, `ttlMs: 0`, `cacheScope: "private"`, `serverInfo` `tab-mcp`. |
 | any other request (`tools/list`, `subscriptions/listen`, …) | A JSON-RPC error `-31001` with the text above. For `tools/list` this keeps the AI app's last tool list; an empty list would replace it. |
 | a notification (no `id`) | HTTP 503 with error `-31001`: the spec requires an error status for a notification the server cannot accept. |
+
+While the relay shuts down (a deploy), requests that wait for the page or are in flight
+get the same kinds of answers with the text "The relay is restarting. Try again in a few
+seconds." and code `-31010` instead of `-31001`, so the model does not ask the user to
+open the page. A `tools/call` that was in flight gets a tool result saying the relay
+restarted while the tool was running and the result should be checked. A notification
+gets HTTP 503 with `-31010` and `Retry-After`.
 
 If the page closes its connection while a request waits for its answer, a `tools/list`
 waits for the page once more and is sent again. A `tools/call` is never sent twice, since
@@ -262,7 +279,7 @@ optional and names the request the error concerns.
 | `bad_message` | both | Not JSON, missing fields, a binary frame, a malformed `secret`. |
 | `unknown_type` | both | Message type not understood, but an answer was expected. |
 | `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's; the error has no `id`. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
-| `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. |
+| `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | Reserved: the tab sent too much, and the relay may close with 4008. The relay does not send it yet. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
 
@@ -309,6 +326,7 @@ WebSocket protocol pings, so proxies keep the connection open.
 | Request timeout | 300 s | relay (504 and `http.cancel`; keep-alives throughout) |
 | Keep-alive interval | 20 s | relay |
 | Concurrent requests per session | 8 | relay (429) |
+| Listen streams per grant and session | 2 | relay (429) |
 | Idle timeout | 60 min | relay (close 4002) |
 | Session lifetime | 12 h | relay (close 4001) |
 | Sessions per IP / in total | 5 / 500 | relay (HTTP 429 on upgrade) |

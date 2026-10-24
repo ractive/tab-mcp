@@ -144,6 +144,41 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Fixed
+
+- A page that answered `subscriptions/listen` with a stream that is not an event stream
+  made the relay buffer it without limit. A listen answer must now be an event stream;
+  any other content type fails the request with `-31007` and cancels it in the page. A
+  chunk before `http.response.start` on a stream the relay started is refused the same
+  way.
+- After an authenticated MCP request the connection kept no idle timeout, so a token
+  holder could keep any number of idle sockets open. The relay now restores the
+  idle timeout (`httpIdleTimeoutS`, 30 s) when a request ends, however it ends.
+- `-31009` (the page's user signed out or changed mid-request) now comes with
+  `WWW-Authenticate`, as a 401 must. When the relay could not check the page's sign-in
+  (signing keys or token store unavailable), the answer is 503 with `Retry-After`
+  instead, so AI apps keep their tokens.
+- Requests waiting for a page are capped by the page's own site limit
+  (`maxConcurrentRequests`), as far as the relay has seen the page, instead of the
+  instance's. Before, more could wait than the page could take, and the rest got 429
+  when it came.
+- While the relay shuts down, AI apps are told "The relay is restarting. Try again in a
+  few seconds." (code `-31010`; a notification gets 503 with `Retry-After`) instead of
+  being asked to open the page.
+- Store errors are logged with the error's name only (`error`), never its message, which
+  a custom store may fill with token hashes or a connection string.
+- A page message over the site's `maxMessageBytes` is refused by its length before it is
+  parsed.
+- The request body timer is cleared when reading the body fails.
+
+#### Changed
+
+- One grant (one AI app) may hold at most 2 `subscriptions/listen` streams on a page at
+  once; a third gets 429 with `-31004`. Listen streams have no request timer, so one AI
+  app could otherwise take every request slot of the page.
+
 ### [0.3.1][relay-0.3.1] - 2026-10-24
 
 #### Fixed

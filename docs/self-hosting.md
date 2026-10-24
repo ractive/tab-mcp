@@ -385,7 +385,7 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 
 | Event | Meaning |
 |---|---|
-| `store.error` | The token store failed while running (disk full, file removed). MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. A store that cannot be opened at all stops the relay at start instead (`process.uncaught_exception`, see [The data volume](#the-data-volume)). |
+| `store.error` | The token store failed while running (disk full, file removed). The line names the operation (`op`) and the error's name (`error`), never its message, which can carry token hashes or a connection string. MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. A store that cannot be opened at all stops the relay at start instead (`process.uncaught_exception`, see [The data volume](#the-data-volume)). |
 | `relay.no_origins` | No page is allowed; every page is refused. A missing or misspelled setting. |
 | `relay.open_relay` | `TAB_MCP_ALLOWED_ORIGINS=*` is set. |
 | `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`. Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. |
