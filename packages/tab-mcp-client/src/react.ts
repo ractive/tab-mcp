@@ -18,7 +18,6 @@ import {
 	useContext,
 	useEffect,
 	useInsertionEffect,
-	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -172,9 +171,7 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 	const own = props.client === undefined ? props : undefined;
 	const relay = own?.relay;
 	const serverName = own?.server?.name;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: only the relay and the server name make a new instance
-	const mcp = useMemo((): TabMcp => {
-		if (props.client !== undefined) return props.client;
+	const create = (): TabMcp => {
 		const {
 			children: _,
 			client: __,
@@ -198,7 +195,25 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 				handlers().identityAssertion?.(request) ?? null,
 		});
 		return instance;
-	}, [props.client, relay, serverName]);
+	};
+	// In state, not in `useMemo`, which React may discard and run again. A
+	// changed relay or server name replaces it while rendering, as React
+	// recommends for state that follows props.
+	const [state, setState] = useState(() =>
+		own === undefined ? undefined : { relay, serverName, mcp: create() },
+	);
+	let current = state;
+	if (own === undefined) {
+		current = undefined;
+	} else if (
+		current === undefined ||
+		current.relay !== relay ||
+		current.serverName !== serverName
+	) {
+		current = { relay, serverName, mcp: create() };
+	}
+	if (current !== state) setState(current);
+	const mcp = props.client ?? (current as { mcp: TabMcp }).mcp;
 
 	const previous = useRef<TabMcp | undefined>(undefined);
 	useEffect(() => {
