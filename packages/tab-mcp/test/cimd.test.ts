@@ -372,14 +372,27 @@ describe("threat model A3: SSRF guards", () => {
 		const reasons: string[] = [];
 		for (let i = 0; i < 40; i++)
 			reasons.push(await reason(f.get(`https://x${i}.evil.example/c.json`)));
-		expect(reasons.slice(0, 5).every((r) => r === "fetch_failed")).toBe(true);
-		expect(reasons.slice(5).every((r) => r === "rate_limited")).toBe(true);
+		// The domain allows 15 (review of PR 32: more than one host's 5).
+		expect(reasons.slice(0, 15).every((r) => r === "fetch_failed")).toBe(true);
+		expect(reasons.slice(15).every((r) => r === "rate_limited")).toBe(true);
 		// The refused fetches took nothing from the global bucket.
-		for (let i = 0; i < 25; i++) {
+		for (let i = 0; i < 15; i++) {
 			expect(await reason(f.get(`https://d${i}.example/c.json`))).toBe(
 				"accepted",
 			);
 		}
+	});
+
+	test("review of PR 32: one host cannot use up its domain's limit for the others", async () => {
+		const { f } = fetcher(() => new Response("{}", { status: 500 }));
+		const reasons: string[] = [];
+		for (let i = 0; i < 8; i++)
+			reasons.push(await reason(f.get(`https://evil.co.uk/c${i}.json`)));
+		expect(reasons.slice(0, 5).every((r) => r === "fetch_failed")).toBe(true);
+		expect(reasons.slice(5).every((r) => r === "rate_limited")).toBe(true);
+		expect(await reason(f.get("https://shop.co.uk/client.json"))).toBe(
+			"fetch_failed",
+		);
 	});
 
 	test("audit finding 2: a fetch the global limit refuses leaves the domain's tokens", async () => {
@@ -571,6 +584,38 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		).toBe("accepted");
 	});
 
+	test("review of PR 32: combining marks and variation selectors do not hide a domain", async () => {
+		for (const name of [
+			"Claude · claude.a︀i",
+			"Claude · claude.a̲i",
+			"Claude · claude.a\u{E0100}i",
+			"Claude · ćlaude.ai",
+			// The parentheses rule (DEC-065) reads the same text.
+			"Example (ai.e̲xample)",
+		]) {
+			expect([name, await check(DOC(id, { client_name: name }))]).toEqual([
+				name,
+				"invalid_metadata",
+			]);
+		}
+	});
+
+	test("review of PR 32: an internationalised client may name its own domain", async () => {
+		const idn = "https://xn--bcher-kva.example/client.json";
+		expect(
+			await check(DOC(idn, { client_name: "Bücher · bücher.example" }), idn),
+		).toBe("accepted");
+		expect(
+			await check(
+				DOC(idn, { client_name: "Bücher · xn--bcher-kva.example" }),
+				idn,
+			),
+		).toBe("accepted");
+		expect(
+			await check(DOC(id, { client_name: "Bücher · bücher.example" })),
+		).toBe("invalid_metadata");
+	});
+
 	test("review finding 7: a name with a web address in parentheses is refused", async () => {
 		expect(await check(DOC(id, { client_name: "Claude (claude.ai)" }))).toBe(
 			"invalid_metadata",
@@ -625,6 +670,11 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 			"\u00AD",
 			"\u3164",
 			"\u115F",
+			// Variation selectors (review of PR 32).
+			"\uFE00",
+			"\uFE0F",
+			"\u{E0100}",
+			"\u{E01EF}",
 		]) {
 			expect(displayName(`Cl${invisible}aude`)).toBe("Claude");
 		}

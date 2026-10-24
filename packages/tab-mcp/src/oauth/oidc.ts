@@ -170,12 +170,15 @@ export interface OidcPairingOptions {
 	publicUrl: () => string;
 	logger: Logger;
 	development: boolean;
+	/** At most this many open sign-ins (tests lower it). */
+	maxFlows?: number;
 }
 
 /** The identity-binding pairing method. */
 export class OidcPairing implements PairingMethod {
 	readonly kind = "oidc" as const;
 	readonly #config: OidcConfig;
+	readonly #maxFlows: number;
 	readonly #publicUrl: () => string;
 	readonly #logger: Logger;
 	readonly #discovery: ProviderDiscovery;
@@ -193,6 +196,7 @@ export class OidcPairing implements PairingMethod {
 
 	constructor(options: OidcPairingOptions) {
 		this.#config = options.config;
+		this.#maxFlows = options.maxFlows ?? MAX_FLOWS;
 		this.#publicUrl = options.publicUrl;
 		this.#logger = options.logger;
 		this.#discovery = new ProviderDiscovery(
@@ -271,23 +275,24 @@ export class OidcPairing implements PairingMethod {
 		} catch (error) {
 			return this.#unavailable(error);
 		}
-		// A sign-in could pair: charged like a code guess (DEC-061, DEC-090).
+		this.#sweep();
+		this.#dropFlow(context.requestId);
+		if (this.#flows.size >= this.#maxFlows) {
+			return {
+				ok: false,
+				message:
+					"Too many sign-ins are open right now. Wait a few minutes and try again.",
+				reason: "busy",
+			};
+		}
+		// A sign-in could pair: charged like a code guess (DEC-061, DEC-090),
+		// and only once one can start.
 		if (!admit()) {
 			return {
 				ok: false,
 				message:
 					"Too many attempts for this page. Wait a few minutes and try again.",
 				reason: "rate_limited",
-			};
-		}
-		this.#sweep();
-		this.#dropFlow(context.requestId);
-		if (this.#flows.size >= MAX_FLOWS) {
-			return {
-				ok: false,
-				message:
-					"Too many sign-ins are open right now. Wait a few minutes and try again.",
-				reason: "busy",
 			};
 		}
 		const state = random(24);

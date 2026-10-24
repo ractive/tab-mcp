@@ -133,6 +133,23 @@ describe("1: knowing an address does not keep its owner off /authorize", () => {
 		expect(done.status).toBe(303);
 	});
 
+	test("review of PR 32: with equal shares the network that came last loses, not the owner who came first", async () => {
+		const { r, tab, address } = await setup();
+		const code = await tab.startPairing();
+		const owner = browserAt(r, "198.51.100.7");
+		const ownerPage = await openPage(owner, r, address);
+		await openPage(owner, r, address);
+		for (let n = 0; n < 9; n++) {
+			const attacker = browserAt(r, `203.0.113.${n + 10}`);
+			await openPage(attacker, r, address);
+			await openPage(attacker, r, address);
+		}
+		// 20 open, two per network: the next one evicts.
+		await openPage(browserAt(r, "203.0.113.50"), r, address);
+		const done = await owner.submit(ownerPage, { action: "connect", code });
+		expect(done.status).toBe(303);
+	});
+
 	test("one network that reloads past its share of an address loses its own oldest request", async () => {
 		const { r, tab, address } = await setup();
 		await tab.startPairing();

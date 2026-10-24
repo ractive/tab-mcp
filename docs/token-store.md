@@ -121,6 +121,9 @@ Every store must give these guarantees. The relay's security depends on them.
   window, so a client that refreshes often does not leave 30 days of rows behind. A replay
   inside the window still revokes the grant; after it, the token is unknown and refused
   without ending the grant. A store that ignores `keepUntil` stays correct, but grows.
+  Tokens used before the relay passed `keepUntil` (0.3 and earlier) keep their full
+  expiry; cut them once to `usedAt` + 24 hours, as the SQLite store does when it opens
+  an older file, or let them expire.
 - **Revocation is final.** `revoke` leaves a tombstone at least until `keepUntil`. Until
   then `put` refuses a record of a revoked grant, and a record of a grant of a revoked
   address if the grant was created at or before the revocation (`grantCreatedAt <=` the

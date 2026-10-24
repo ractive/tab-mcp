@@ -1367,10 +1367,15 @@ and lock its owner out of `/authorize` for good. Now:
   browser before the dialog.
 - One network (IP prefix, DEC-061) holds at most 5 requests per address; a sixth drops
   that network's own oldest one. At 20 per address the next request drops the oldest
-  request of the network holding the most, not the address's oldest overall: the owner
-  usually has one request, so a flood from up to 19 networks never evicts it. The
-  attacker can still push it out with 20 or more networks while the dialog is open,
-  which is the trade DEC-061 made for guesses too; "New address" ends it.
+  request of the network holding the most, not the address's oldest overall. A tie goes
+  to the network whose first request came last (review of PR 32: breaking it toward the
+  first network evicted the owner, who usually comes first, with 2 requests against 9
+  networks of 2). So the owner's request goes only if the owner's network holds more
+  than every other, or ties with them and arrived last of all: a request that arrives
+  into a full address is the next to go. An attacker who keeps the address full from
+  many networks while the dialog is open can therefore still push out a request the
+  owner opens after the flood began, though not one opened before it; this is the trade
+  DEC-061 made for guesses too, and "New address" ends it.
 - Per network overall (10) and in total (10 000) the caps still refuse: that only
   affects the network that fills them.
 
@@ -1389,12 +1394,19 @@ claude.ai's document out of the first-in-first-out cache.
   would need either a dependency or a vendored copy with an update routine. It is also
   not stricter here: under the PSL every `*.pages.dev` or `*.github.io` project is its
   own registrable domain, so an attacker with free subdomain hosting still gets one
-  bucket per project, while the last two labels group them all. The cost of the simple
-  rule is collateral only: clients under a multi-label public suffix (`co.uk`,
-  `pages.dev`) share one bucket of 5, then 1 every 5 s, with each other, for uncached
-  fetches only. None of the known AI apps (claude.ai, chatgpt.com, openai.com) is under
-  one. A heuristic such as "three labels when the TLD has two letters" was rejected: an
-  attacker picks a domain that the heuristic splits.
+  bucket per project, while the last two labels group them all. A heuristic such as
+  "three labels when the TLD has two letters" was rejected: an attacker picks a domain
+  that the heuristic splits.
+- The cost is a denial-of-service risk for specific hosts, not only "stricter" limits
+  (review of PR 32): every client under a multi-label public suffix (`co.uk`, `com.au`,
+  `pages.dev`) shares one domain bucket, so an attacker with a wildcard under that
+  suffix (`*.evil.co.uk`) can keep the uncached fetches of every other client under it
+  refused. Cached documents keep working (at least 5 minutes, usually an hour). To make
+  this need many hosts, each host also has its own bucket (5, then 1 every 5 s) and the
+  domain bucket is three times larger (15, then 3 every 5 s): one host alone cannot
+  empty its domain. None of the known AI apps (claude.ai, chatgpt.com, openai.com) is
+  under such a suffix; an operator who expects one can list it in
+  `TAB_MCP_CLIENT_ID_HOSTS`, which refuses other hosts before any limit is charged.
 - The domain's token is taken only after the global limiter admits the fetch
   (`RateLimiter.available` checks without taking). The other order would let refusals
   of one domain drain the global bucket, which is the attack itself.
@@ -1420,7 +1432,9 @@ signed-in user with an IPv6 /48 could post Connect for one pending request from 
   request already ends the multiplication.
 - `check` calls `admit()` before it starts a sign-in, so Connect clicks share the guess
   limits (10 per address and network, then 1 a minute; 30 per address): starting a
-  sign-in is the oidc method's "answer that could be right" (DEC-061).
+  sign-in is the oidc method's "answer that could be right" (DEC-061). It is called
+  after the capacity check, so "Too many sign-ins are open" (now 429, like the other
+  refusals for load) charges nothing (review of PR 32).
 
 ## DEC-091: A used refresh token is kept 24 hours; refreshes per grant are limited
 
@@ -1439,6 +1453,10 @@ per network.
   (fewer parameters), stays correct, and only keeps rows longer. The conformance suite
   checks the cut and that it never extends. The Redis sketch in the guide was updated
   and run against Redis 7.4.
+- Rows used before the upgrade: the SQLite store's schema version 4 cuts every used
+  refresh token to `used_at` + 24 hours once, when it opens an older file (review of
+  PR 32). A custom store that keeps them only loses the space until they expire; the
+  changelog says how to do the same.
 - The plan's optional cap is in: 20 refreshes per grant, then 1 a minute, answered
   `429 temporarily_unavailable` before the token is marked used. A client refreshes
   about once an hour of use, so this binds only a misbehaving or hostile client, and it
@@ -1452,10 +1470,18 @@ heading read "Connect Claude · claude.ai from evil.example". Of the two fixes o
 refuse such names rather than move the host first: the host is already in the heading
 and title, and the look-alike name would still stand alone in the body text.
 
-- A name is refused if, after NFKC, with the ideographic full stops (U+3002, U+FF0E,
-  U+FF61) read as dots and in lower case, it contains a domain-shaped token (labels
-  separated by dots, ending in a label of 2-63 letters) that is not the verified host, a
-  subdomain of it, or a parent of it. "Example AI from ai.example" from `ai.example`
+- A name is refused if, after NFKC, without combining marks, with the ideographic full
+  stops (U+3002, U+FF0E, U+FF61) read as dots and in lower case, it contains a
+  domain-shaped token (labels separated by dots, ending in a label of 2-63 letters)
+  whose ASCII (punycode) form is not the verified host, a subdomain of it, or a parent
+  of it. Marks are dropped because "claude.a̲i" or a variation selector after the
+  `a` displays as "claude.ai" (review of PR 32); the parentheses check reads the same
+  text, and the shown name loses variation selectors too, so what is shown is what was
+  checked. The ASCII form lets "Bücher · bücher.example" name its own
+  `xn--bcher-kva.example`.
+- A domain spelled with words ("claude dot ai", "claude(dot)ai") passes. Normalising
+  words would refuse ordinary names; the verified host in the heading is the defence
+  there, as for any self-declared name. "Example AI from ai.example" from `ai.example`
   passes; so do "Claude", "Claude Code", "ChatGPT", "Codex" and versions like "v1.2".
 - Risk: a real client whose name has a dotted product name ending in letters, such as
   "Next.js helper" or "Socket.IO tools", is refused, because `js` and `io` look like

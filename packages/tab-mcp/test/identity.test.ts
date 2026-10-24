@@ -890,6 +890,24 @@ describe("identity binding: audit of 2026-10-24, finding 3", () => {
 		);
 	});
 
+	test("review of PR 32: a busy refusal is 429 and charges no guess", async () => {
+		const ctx = await setup({}, "alice", { oidcMaxFlows: 1 });
+		provider.signedInAs = "alice";
+		const first = await openAuthorize(ctx);
+		expect(
+			(await ctx.browser.submit(first.page, { action: "connect" })).status,
+		).toBe(303);
+		const other = { ...ctx, browser: new TestBrowser(ctx.r.url) };
+		const second = await openAuthorize(other);
+		for (let i = 0; i < 11; i++) {
+			const res = await other.browser.submit(second.page, {
+				action: "connect",
+			});
+			expect(res.status).toBe(429);
+			expect(res.html).toContain("Too many sign-ins are open");
+		}
+	});
+
 	test("Connect clicks are charged like guesses: one network is stopped after 10", async () => {
 		const ctx = await setup();
 		provider.signedInAs = "alice";

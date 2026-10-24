@@ -79,6 +79,8 @@ export interface AuthorizationTestMode {
 	authCodeTtlMs?: number;
 	/** Replace the pairing methods (a stub method proves the server needs no codes). */
 	pairingMethods?: Partial<Record<PairingKind, PairingMethod>>;
+	/** A smaller cap on open OIDC sign-ins. */
+	oidcMaxFlows?: number;
 }
 
 interface AuthorizationRequest {
@@ -231,6 +233,9 @@ export class AuthorizationServer {
 							publicUrl: () => host.publicUrl(),
 							logger: host.logger,
 							development: host.config.development,
+							...(testMode?.oidcMaxFlows === undefined
+								? {}
+								: { maxFlows: testMode.oidcMaxFlows }),
 						}),
 					}),
 			...testMode?.pairingMethods,
@@ -627,9 +632,12 @@ export class AuthorizationServer {
 			return;
 		}
 		if (count < MAX_PENDING_PER_ADDRESS) return;
+		// Networks come in order of their first request: `>=` breaks a tie
+		// toward the one that came last, so an equal flood never evicts the
+		// owner who was there first (review of PR 32).
 		let most: Pending[] = [];
 		for (const list of byIp.values()) {
-			if (list.length > most.length) most = list;
+			if (list.length >= most.length) most = list;
 		}
 		if (most[0] !== undefined) this.#dropPending(most[0]);
 	}
@@ -791,7 +799,9 @@ ${intro}
 				pending,
 				browser.id,
 				result.message,
-				result.reason === "rate_limited" ? 429 : 400,
+				result.reason === "rate_limited" || result.reason === "busy"
+					? 429
+					: 400,
 			);
 		}
 

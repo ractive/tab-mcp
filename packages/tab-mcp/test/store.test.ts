@@ -21,6 +21,51 @@ tokenStoreConformance(
 	() => new SqliteTokenStore(join(dir, `t${++n}.db`)),
 );
 
+test("review of PR 32: opening a version 3 file cuts used refresh tokens to the 24-hour window", async () => {
+	const path = join(dir, "v3.db");
+	const day = 86_400_000;
+	const used = 1_800_000_000_000;
+	const store = new SqliteTokenStore(path);
+	const base = {
+		grantId: "g1",
+		addressId: "a1",
+		clientId: "c",
+		clientName: "C",
+		scopes: ["tools"],
+		grantCreatedAt: 1,
+		issuedAt: 1,
+	};
+	await store.put({
+		...base,
+		hash: "used",
+		kind: "refresh",
+		expiresAt: used + 30 * day,
+		usedAt: used,
+	});
+	await store.put({
+		...base,
+		hash: "live",
+		kind: "refresh",
+		expiresAt: used + 30 * day,
+	});
+	await store.put({
+		...base,
+		hash: "soon",
+		kind: "refresh",
+		expiresAt: used + 1000,
+		usedAt: used,
+	});
+	await store.close();
+	const db = new Database(path, { strict: true });
+	db.run("PRAGMA user_version = 3");
+	db.close();
+	const reopened = new SqliteTokenStore(path);
+	expect((await reopened.get("used"))?.expiresAt).toBe(used + day);
+	expect((await reopened.get("live"))?.expiresAt).toBe(used + 30 * day);
+	expect((await reopened.get("soon"))?.expiresAt).toBe(used + 1000);
+	await reopened.close();
+});
+
 test("a version 2 SQLite file gains the subject column and keeps its tokens", async () => {
 	const path = join(dir, "v2.db");
 	const old = new Database(path, { create: true, strict: true });
