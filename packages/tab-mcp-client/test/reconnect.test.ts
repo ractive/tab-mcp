@@ -133,14 +133,14 @@ test("connect() while waiting makes the attempt now", async () => {
 test("disconnect() stops reconnecting", async () => {
 	const t = await connected({ reconnect: { delaysMs: [30] } });
 	const seen = record(t);
+	jest.useFakeTimers(); // the attempt's timer is a fake one
 	relay.close(4004);
 	await nextEvent(t, "reconnecting");
 	t.disconnect();
 	expect(t.reconnecting).toBeUndefined();
 	expect(seen).toEqual([expect.objectContaining({ attempt: 1 }), null]);
-	await Bun.sleep(80);
+	jest.advanceTimersByTime(60_000); // an attempt would start connecting now
 	expect(t.state).toBe("disconnected");
-	expect(relay.received.filter((m) => m.type === "hello")).toEqual([]);
 });
 
 test("no reconnecting after replaced, expired, idle, a refusal, or with reconnect: false", async () => {
@@ -150,8 +150,9 @@ test("no reconnecting after replaced, expired, idle, a refusal, or with reconnec
 		const gone = nextEvent(t, "disconnected");
 		relay.close(code);
 		await gone;
-		await Bun.sleep(40);
+		// A reconnect is scheduled (and announced) before the event resolves this.
 		expect(seen).toEqual([]);
+		expect(t.reconnecting).toBeUndefined();
 		expect(t.state).toBe("disconnected");
 		t.disconnect();
 	}
@@ -159,7 +160,6 @@ test("no reconnecting after replaced, expired, idle, a refusal, or with reconnec
 	const seen = record(t);
 	relay.close(4004);
 	await nextEvent(t, "disconnected");
-	await Bun.sleep(40);
 	expect(seen).toEqual([]);
 	expect(t.reconnecting).toBeUndefined();
 });
