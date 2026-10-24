@@ -17,15 +17,17 @@ parallel with iterations 11 to 13.
 ## Findings and fixes
 
 1. **Medium: the `release` environment has no required reviewer** (its only rule is the
-   tag branch policy; `can_admins_bypass` is true). `release.yml:18-22` says the
+   tag branch policy; `can_admins_bypass` is true). `release.yml:20-22` says the
    environment needs the owner's approval; it does not since the pause of 2026-10-20
    (`kb/operations/npm-publishing.md`). Fix: turn the reviewer back on with the command in
    that doc, or correct the comment and give the pause an end date.
 2. **Medium: `DOCKERHUB_TOKEN` is a repository secret** (the environment has none;
    `kb/operations/release-secrets.md:20`). Every workflow can read it, including one added
-   on a branch by anyone with write access. Fix: move `DOCKERHUB_TOKEN` and
-   `DOCKERHUB_USERNAME` into the `release` environment; only `relay-image-publish` uses
-   them. Update `release-secrets.md`.
+   on a branch by anyone with write access. Fix: move the secret `DOCKERHUB_TOKEN` into
+   the `release` environment; only `relay-image-publish` uses it. The variables
+   `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN_EXPIRES` stay at repository level
+   (`token-expiry.yml` has no environment and reads the expiry). Update
+   `release-secrets.md`.
 3. **Medium: Dependabot alerts and security updates are off; SHA pinning is not
    enforced** (`dependabot_security_updates: disabled`, `vulnerability-alerts` 404;
    `actions/permissions`: `sha_pinning_required: false`, `allowed_actions: all`). Fix:
@@ -40,14 +42,14 @@ parallel with iterations 11 to 13.
    deliberate bump move it.
 6. **Low: no job timeouts** (no `timeout-minutes` anywhere; a hung step runs six hours).
    Fix: a timeout per job.
-7. **Low: source maps ship in the Docker image and the npm tarballs** (`Dockerfile:28`
+7. **Low: source maps ship in the Docker image and the npm tarballs** (`Dockerfile:29`
    copies `main.js.map`; `scripts/npm-pack.ts` lists `*.js.map`). The source is public, so
    this is size only. Decide: keep in npm (useful for debugging), drop from the image.
 
 ## Tasks
 
 - [ ] 1: release approval back on, or comment and pause note corrected (owner)
-- [ ] 2: Docker Hub secrets moved into the `release` environment (owner approves); `release-secrets.md`
+- [ ] 2: the secret `DOCKERHUB_TOKEN` moved into the `release` environment (owner approves); `release-secrets.md`
 - [ ] 3: Dependabot alerts and security updates on; SHA pinning required (owner approves)
 - [ ] 4: Chrome in `client-pack`
 - [ ] 5: Chrome version pinned in CI and release

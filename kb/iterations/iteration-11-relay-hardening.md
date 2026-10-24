@@ -20,7 +20,7 @@ before it.
 ## Findings and fixes
 
 1. **High: a listen stream started by the relay buffers non-event-stream chunks without
-   limit** (`exchange.ts:213-218`, `#wrapped += data`; `exchange.ts:303-315`, `#account`
+   limit** (`exchange.ts:213-218`, `#wrapped += data`; `exchange.ts:309-311`, `#account`
    is true for every listen stream). An AI app sends `subscriptions/listen`; after
    `keepAliveMs` the relay starts the event stream; the page answers
    `http.response.start` with `content-type: application/json` and then sends chunks
@@ -37,12 +37,15 @@ before it.
    exchange's `onDone`; first check that Bun applies a timeout set on a finished
    response's socket.
 3. **Low-medium: `-31009` answers 401 without `WWW-Authenticate`** (`relay.ts:427-431`
-   `failPending` → `exchange.ts:446-452` `#errorResponse`). RFC 9110 §15.5.2 requires
+   `failPending` → `exchange.ts:426-432` `#errorResponse`). RFC 9110 §15.5.2 requires
    the header, and MCP clients treat 401 as "authorize again". On the refused-assertion
    and `store_unavailable` paths the grants are not revoked, so a passing JWKS or store
    outage can make clients drop valid tokens, which the relay avoids elsewhere on purpose
    (`relay.ts:815`). Fix: add `wwwAuthenticate(addressId, true)`; answer the transient
    paths (`error`, `store_unavailable`) with 503 and `Retry-After` instead of 401.
+   `failPending(session, message)` does not know the reason today: give it a status (or
+   the reason), with `refuse()` passing 503 for `error` and `store_unavailable`, and
+   document the transient variant of `-31009`.
    Update `docs/protocol.md:210`.
 4. **Low: the cap on waiting requests per address uses the instance limit**
    (`relay.ts:472` checks `config.maxConcurrentRequests`, forwarding checks
@@ -59,8 +62,8 @@ before it.
    app with 8 `subscriptions/listen` streams, which have no request timer, gives every
    other app of that page 429. Fix: a per-grant share, or a small separate cap on listen
    streams per grant.
-7. **Low: store errors are logged with `error.message`** (`relay.ts:344`, `386`,
-   `618-621`, `1175-1179`; `session.ts:343-346`), against `log.ts:82` (names only,
+7. **Low: store errors are logged with `error.message`** (`relay.ts:346`, `388`,
+   `620`, `1178`; `session.ts:378-381`), against `log.ts:82` (names only,
    messages can carry request data). A custom store's message can hold token hashes,
    address ids or a connection string. Fix: log `error.name`, or the message only for the
    built-in stores.
@@ -87,7 +90,7 @@ before it.
 - `exchange.ts`: replace the flags `#relayStarted`, `#tabStarted`, `#wrap`,
   `#atBoundary` next to `#state` with one explicit state type (finding 1 hid in their
   combinations).
-- Frames in the `hello` state are dropped silently (`session.ts:290`), `bye` included;
+- Frames in the `hello` state are dropped silently (`session.ts:278`), `bye` included;
   document the contract or handle `bye`.
 - Dead or constant parameters: `ForwardInput.method` (always POST), the path (always
   `/mcp`), `SessionHost.ready?` (optional but always given), `CloseCode.rateLimited`

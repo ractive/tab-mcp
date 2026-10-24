@@ -79,7 +79,8 @@ that the paired apps then talk to the holder.
   `replaced`) can be told apart from an impostor. The library could use a
   `BroadcastChannel` per relay and page: a tab that is replaced and hears from a sibling
   tab of the same page that it took over the address knows the cause is harmless and
-  shows the plain "Opened in another tab" text instead. Decide during implementation.
+  shows "Opened in another tab" instead. Both texts are new: the default UI has no
+  `replaced` handling today. Decide during implementation.
 - Optional, decide in review: `newAddress({ onLogout: true })` or a documented pattern
   for pages that log users out, rather than new API.
 
@@ -117,7 +118,7 @@ step 1 naming identity binding as the protection.
 - [ ] Docs: advice for page authors (client README, skill) and operators (`docs/self-hosting.md`)
 - [ ] Docs: grants follow the browser profile on code-paired pages (F3); README says when a backend MCP server fits better
 - [ ] Library: the default UI explains `replaced` and offers "New address"; test with a second session claiming the address
-- [ ] Library: decide on telling a sibling tab from an impostor (`BroadcastChannel`); implement or record why not
+- [ ] Library: decide on telling a sibling tab from an impostor (`BroadcastChannel`); if yes, the "Opened in another tab" text for that case; otherwise record why not
 - [ ] Step 3: owner decision on the backend-signed address claim, recorded as a DEC; design and tasks added here if it goes ahead
 - [ ] Changelog, release of the client if it changed
 

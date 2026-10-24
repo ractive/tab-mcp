@@ -37,7 +37,7 @@ same time. Releases as a client patch or minor version.
    the threat model that consent per tool is the page's, not the relay's (one `tools`
    scope covers every tool).
 4. **Low: a tool result with an `invalid` key becomes a JSON-RPC error**
-   (`src/mcp.ts:357-366`, `src/mapping.ts:78-79`). `{content: [...], invalid: "rows
+   (detected in `src/mcp.ts:357-360`; `src/mapping.ts:78-79` passes the key through). `{content: [...], invalid: "rows
    skipped"}` is sent as `-32602` while `toolcallend` reports "ok". Fix: a tagged union
    from `runTool` (`{kind: "invalid"}` or `{kind: "result"}`).
 5. **Low: registration accepts a schema the validator throws on**
@@ -51,7 +51,7 @@ same time. Releases as a client patch or minor version.
    (`src/mcp.ts:295-318`). A `useTool` component unmounts while the dialog is open, the
    user clicks Allow, `execute` runs. Fix: after `confirm`, check
    `tools.get(tool.name) === tool`, else answer "The tool is no longer available".
-7. **Low: two connect dialogs at once** (`src/tab-mcp.ts:556-570`, `src/ui.ts:604`, `619`,
+7. **Low: two connect dialogs at once** (`src/tab-mcp.ts:586-597`, pairing at `561-566`, `src/ui.ts:604`, `619`,
    `src/react.ts:382`). `showConnectDialog` awaits the UI chunk before `showModal()` with
    no guard, so a double-click on `ConnectButton` opens two; pairing is one boolean, so
    closing either stops the code for both. Fix: one in-flight dialog promise per `TabMcp`,
@@ -63,7 +63,7 @@ same time. Releases as a client patch or minor version.
    (`src/tab-mcp.ts:295-324`). `identityTimeoutMs` starts only after the assertion is
    sent. Fix: start it when the hook is called.
 10. **Low: the README `onConfirm` example shows only the self-declared name**
-    (`README.md:106`, `client.name ?? client.host`). Fix: show name and verified host, as
+    (`README.md:106-107`, `client.name ?? client.host`). Fix: show name and verified host, as
     `clientLabel` in `ui.ts` does.
 
 ## Code quality
