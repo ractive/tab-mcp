@@ -53,6 +53,16 @@ export class RateLimiter {
 		return true;
 	}
 
+	/** Whether `take` would succeed for `key` now; takes nothing. */
+	available(key: string, now: number = Date.now()): boolean {
+		const bucket = this.#buckets.get(key);
+		if (bucket === undefined) return this.#capacity >= 1;
+		const elapsed = Math.max(0, now - bucket.updatedAt) / 1000;
+		return (
+			Math.min(this.#capacity, bucket.tokens + elapsed * this.#refill) >= 1
+		);
+	}
+
 	/** Drop buckets that are full again (nothing to remember). */
 	sweep(now: number = Date.now()): void {
 		for (const [key, b] of this.#buckets) {

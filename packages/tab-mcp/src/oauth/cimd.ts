@@ -7,7 +7,7 @@
  * against SSRF (threat model A3): https only, default port, no credentials,
  * the host resolved first and every address checked to be public, no
  * redirects, 5 s, 64 KiB, `application/json`, results cached and fetches per
- * host rate-limited.
+ * domain and in total rate-limited.
  */
 
 import { isLoopbackHost, isPublicIp, parseIpv4, parseIpv6 } from "../ip.ts";
@@ -116,10 +116,22 @@ function isIpLiteral(hostname: string): boolean {
 	return parseIpv4(h) !== undefined || parseIpv6(h) !== undefined;
 }
 
+/**
+ * The key fetches are limited under (DEC-089): the last two labels of a host
+ * name, so `*.evil.example` is one key however many subdomains it has; an IP
+ * literal as is. Without the Public Suffix List, clients under a multi-label
+ * suffix (`co.uk`, `pages.dev`) share one key: stricter, never looser.
+ */
+export function limitKey(hostname: string): string {
+	const h = hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+	if (isIpLiteral(h)) return h;
+	return h.split(".").slice(-2).join(".");
+}
+
 /** Fetches, validates and caches Client ID Metadata Documents. */
 export class ClientMetadataFetcher {
 	readonly #cache = new Map<string, { meta: ClientMetadata; until: number }>();
-	readonly #perHost = new RateLimiter({ capacity: 5, refillPerSecond: 0.2 });
+	readonly #perDomain = new RateLimiter({ capacity: 5, refillPerSecond: 0.2 });
 	/** All fetches together: many attacker-owned hosts cannot add up (DEC-061). */
 	readonly #global = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
 	readonly #allowedHosts: readonly string[];
@@ -147,8 +159,16 @@ export class ClientMetadataFetcher {
 		const url = this.#checkUrl(clientId);
 		const now = this.#now();
 		const cached = this.#cache.get(clientId);
-		if (cached !== undefined && cached.until > now) return cached.meta;
-		if (!this.#perHost.take(url.host, now)) {
+		if (cached !== undefined && cached.until > now) {
+			// Least recently used first: a hit moves the entry to the end.
+			this.#cache.delete(clientId);
+			this.#cache.set(clientId, cached);
+			return cached.meta;
+		}
+		// Per domain, and only charged once the global limit admits the
+		// fetch: refusals of one domain cost the others nothing (DEC-089).
+		const key = limitKey(url.hostname);
+		if (!this.#perDomain.available(key, now)) {
 			throw new ClientMetadataError(
 				"rate_limited",
 				"Too many requests for this AI app's details. Try again in a minute.",
@@ -160,13 +180,14 @@ export class ClientMetadataFetcher {
 				"The relay is busy. Try again in a minute.",
 			);
 		}
+		this.#perDomain.take(key, now);
 		const address = await this.#vettedAddress(url);
 		const { meta, ttlMs } = await this.#fetchDocument(url, clientId, address);
+		this.#cache.delete(clientId);
 		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
 			const oldest = this.#cache.keys().next().value;
 			if (oldest !== undefined) this.#cache.delete(oldest);
 		}
-		this.#cache.delete(clientId);
 		this.#cache.set(clientId, { meta, until: now + ttlMs });
 		return meta;
 	}

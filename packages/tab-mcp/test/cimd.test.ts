@@ -8,6 +8,7 @@ import {
 	ClientMetadataError,
 	ClientMetadataFetcher,
 	displayName,
+	limitKey,
 	redirectUriMatches,
 } from "../src/oauth/cimd.ts";
 import { type CimdServer, startCimdServer } from "./oauth-helpers.ts";
@@ -39,7 +40,7 @@ function original(url: string, init?: RequestInit): string {
 function fetcher(
 	responder: (url: string) => Response,
 	addresses: string[] = ["93.184.216.34"],
-	options: { allowedHosts?: string[] } = {},
+	options: { allowedHosts?: string[]; now?: () => number } = {},
 ) {
 	const calls: string[] = [];
 	const pinned: Pinned[] = [];
@@ -351,6 +352,87 @@ describe("threat model A3: SSRF guards", () => {
 			reasons.push(await reason(f.get(`https://ai.example/c${i}.json`)));
 		expect(reasons.slice(0, 5).every((r) => r === "fetch_failed")).toBe(true);
 		expect(reasons.slice(5)).toEqual(["rate_limited", "rate_limited"]);
+	});
+
+	test("audit finding 2: limitKey is the last two labels, or the IP literal", () => {
+		expect(limitKey("x1.evil.example")).toBe("evil.example");
+		expect(limitKey("claude.ai")).toBe("claude.ai");
+		expect(limitKey("a.b.example.co.uk")).toBe("co.uk");
+		expect(limitKey("evil.example.")).toBe("evil.example");
+		expect(limitKey("93.184.216.34")).toBe("93.184.216.34");
+		expect(limitKey("[2001:db8::1]")).toBe("2001:db8::1");
+	});
+
+	test("audit finding 2: wildcard subdomains share their domain's limit and do not drain the global one", async () => {
+		const { f } = fetcher((url) =>
+			url.includes("evil.example")
+				? new Response("{}", { status: 500 })
+				: Response.json(DOC(url)),
+		);
+		const reasons: string[] = [];
+		for (let i = 0; i < 40; i++)
+			reasons.push(await reason(f.get(`https://x${i}.evil.example/c.json`)));
+		expect(reasons.slice(0, 5).every((r) => r === "fetch_failed")).toBe(true);
+		expect(reasons.slice(5).every((r) => r === "rate_limited")).toBe(true);
+		// The refused fetches took nothing from the global bucket.
+		for (let i = 0; i < 25; i++) {
+			expect(await reason(f.get(`https://d${i}.example/c.json`))).toBe(
+				"accepted",
+			);
+		}
+	});
+
+	test("audit finding 2: a fetch the global limit refuses leaves the domain's tokens", async () => {
+		const clock = { t: 1_800_000_000_000 };
+		const { f } = fetcher(
+			() => new Response("{}", { status: 500 }),
+			undefined,
+			{
+				now: () => clock.t,
+			},
+		);
+		for (let i = 0; i < 30; i++)
+			await reason(f.get(`https://h${i}.example/c.json`));
+		for (let i = 0; i < 5; i++) {
+			expect(await reason(f.get(`https://ai.example/${i}.json`))).toBe(
+				"rate_limited",
+			);
+		}
+		clock.t += 5000; // the global bucket gets 5 back, the domain's only 1
+		const reasons: string[] = [];
+		for (let i = 0; i < 5; i++)
+			reasons.push(await reason(f.get(`https://ai.example/${i}.json`)));
+		expect(reasons.every((r) => r === "fetch_failed")).toBe(true);
+	});
+});
+
+describe("audit finding 2: the cache evicts the least recently used entry", () => {
+	const ok = (url: string) => Response.json(DOC(url));
+	/** Fill the cache with 1000 other clients, one second apart (the global limit refills 1/s). */
+	async function fill(
+		f: ClientMetadataFetcher,
+		clock: { t: number },
+		from = 0,
+		count = 1000,
+	) {
+		for (let i = from; i < from + count; i++) {
+			clock.t += 1000;
+			expect(await reason(f.get(`https://c${i}.example/c.json`))).toBe(
+				"accepted",
+			);
+		}
+	}
+
+	test("an entry in use stays cached while 1000 others come and go", async () => {
+		const clock = { t: 1_800_000_000_000 };
+		const { f, calls } = fetcher(ok, undefined, { now: () => clock.t });
+		const claude = "https://claude.ai/oauth/claude-code-client-metadata";
+		await f.get(claude);
+		await fill(f, clock, 0, 999);
+		await f.get(claude); // a hit: now the most recently used
+		await fill(f, clock, 999, 500);
+		await f.get(claude);
+		expect(calls.filter((c) => c === claude)).toHaveLength(1);
 	});
 });
 
