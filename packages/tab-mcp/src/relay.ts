@@ -715,7 +715,16 @@ function startRelay(
 		rpcId: RpcId | undefined,
 	): Response | { forwardVersion: string } {
 		const header = req.headers.get("mcp-protocol-version");
-		if (body["method"] === "initialize") {
+		// An initialize in a 2026-07-28 envelope is an ordinary request for a
+		// method the tab does not have: forwarded, so the tab answers 404 and
+		// -32601 like any removed method.
+		if (
+			body["method"] === "initialize" &&
+			!(
+				header === MCP_PROTOCOL_VERSION &&
+				metaVersion(body) === MCP_PROTOCOL_VERSION
+			)
+		) {
 			const params = body["params"] as Record<string, unknown> | undefined;
 			const requested =
 				typeof params?.["protocolVersion"] === "string"

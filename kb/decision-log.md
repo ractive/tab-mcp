@@ -1205,8 +1205,41 @@ The copy costs about 80 bytes gzipped and takes the core to 5.1 KB; the budget i
 `build.test.ts` goes from 5 to 5.25 KB (DEC-082 said the next core feature would have to
 raise it).
 
+## DEC-084: The official MCP conformance suite in verify and CI
+
+2026-10-24, the owner asked whether the implementation follows the 2026-07-28
+specification, and for the suite in CI if it is cheap. It is: about 2 seconds.
+`bun run conformance` (part of `bun run verify`, so of CI) runs
+`@modelcontextprotocol/conformance` (pinned, 0.2.0-alpha.12) with
+`--requirements 2026-07-28`, the frozen set of scenarios that revision requires. The target
+is an in-process relay and this library in Bun with the suite's fixture tools (text, image,
+audio, embedded resource, mixed content, error, JSON Schema 2020-12, a tool-list change),
+behind a local proxy that adds the access token, since the suite has no option for one.
+
+`packages/tab-mcp-client/test/conformance-baseline.yaml` lists the known failures, each
+with its reason. A new failure, or a listed one that starts passing, fails the run. Known
+failures:
+
+- Features a page does not offer (DEC-049): resources, prompts, completion, progress and
+  log notifications, input requests (MRTR) and required client capabilities.
+- `Origin` on the MCP endpoint (DEC-036): the transport says a server MUST answer 403 to a
+  present, invalid `Origin`. The relay accepts any, because tokens are bearer headers only
+  and a public relay has no ambient authority to protect from DNS rebinding. It stays a
+  documented deviation.
+
+Not scored for 2026-07-28 and so not in the baseline: the tasks extension and the pending
+scenarios (`x-mcp-header` validation, which DEC-033's research rules out for tab tools).
+
+The first run found one real defect, fixed with this decision: the relay answered every
+`initialize` with 400 and `-32022` before forwarding (DEC-040). An `initialize` in a
+2026-07-28 envelope (header and `_meta` both 2026-07-28) is an ordinary request for a
+method the server does not have, which the transport answers with 404 and `-32601`. The
+relay now forwards it and the library answers that, as the MCP TypeScript SDK does. An
+old-style `initialize` still gets 400 and `-32022`.
+
 # Citations
 
+- [MCP conformance suite](https://github.com/modelcontextprotocol/conformance)
 - [MCP 2026-07-28 research](/research/mcp-2026-07-28-spec.md)
 - [MCP versioning: backward compatibility](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning#backward-compatibility-with-initialization-based-versions)
 - [MCP Streamable HTTP: backward compatibility](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#backward-compatibility)

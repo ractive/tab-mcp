@@ -144,6 +144,16 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Fixed
+
+- An `initialize` request in a 2026-07-28 envelope (the `MCP-Protocol-Version: 2026-07-28`
+  header and `_meta`) now reaches the page, which answers 404 with `-32601` (method not
+  found), as the Streamable HTTP transport requires for a method the server does not
+  have. Until now the relay answered 400 with `-32022`. An old-style `initialize`
+  (2025-11-25 and earlier) still gets 400 with `-32022` and the supported version.
+
 ### [0.3.0][relay-0.3.0] - 2026-10-23
 
 #### Added
