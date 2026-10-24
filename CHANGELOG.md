@@ -216,12 +216,46 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - A page message over the site's `maxMessageBytes` is refused by its length before it is
   parsed.
 - The request body timer is cleared when reading the body fails.
+- A `client_id` that is not a URL is logged as `(not a URL)` instead of with its text.
 
 #### Changed
 
 - One grant (one AI app) may hold at most 2 `subscriptions/listen` streams on a page at
   once; a third gets 429 with `-31004`. Listen streams have no request timer, so one AI
   app could otherwise take every request slot of the page.
+- `TokenStore.markUsed(hash, now, keepUntil)`: the relay passes now + 24 hours, and the
+  store lowers the token's `expiresAt` to it in the same atomic step, so `deleteExpired`
+  removes a used refresh token after one day instead of keeping it for its full 30
+  days. A replay inside that window still revokes the grant; a later one is refused
+  without revoking. Custom token stores should do the same (the conformance suite checks
+  it; a store that ignores the argument keeps working but grows); the SQL and Redis
+  sketches in the token store guide show how. The SQLite store (schema version 4) also
+  cuts refresh tokens used before the upgrade to `used_at` + 24 hours when it opens the
+  file; a custom store can do the same once, for example
+  `UPDATE tokens SET expires_at = least(expires_at, used_at + 86400000) WHERE kind = 'refresh' AND used_at IS NOT NULL`,
+  or leave them to expire (DEC-091).
+- `/authorize` keeps a connection request only while the page's "Connect your AI app"
+  dialog is open; otherwise it shows "Open “Connect your AI app” first" with Try again.
+  An address holds at most 20 requests, 5 per network; past that the oldest request of
+  the network holding the most is dropped instead of answering 429 (on a tie, of the
+  network that came last). Someone who knows an address can no longer keep its owner
+  from connecting by filling it, and a flood cannot push out a request the owner opened
+  before it began (DEC-088).
+- Client metadata fetches are limited per host (5, then 1 every 5 s) and per domain (the
+  last two labels of the host: 15, then 3 every 5 s), so wildcard subdomains share one
+  limit; a fetch the overall limit refuses no longer uses up the host's or domain's
+  allowance, and the cache drops the least recently used document instead of the
+  oldest (DEC-089).
+- With identity binding, a connection request has one sign-in at a time: a new Connect
+  replaces the earlier one, and each Connect that starts a sign-in counts against the
+  same limits as a code guess. "Too many sign-ins are open" is answered with 429 and
+  charges nothing (DEC-090).
+- Refreshes are limited per connection: 20, then 1 a minute (`429`,
+  `temporarily_unavailable`), which does not use up the refresh token (DEC-091).
+- A client name that contains a domain other than the client's own host, such as
+  "Claude · claude.ai" from `evil.example`, is refused like one with a web address in
+  parentheses. Both checks ignore combining marks, and shown names lose variation
+  selectors; an internationalised client may name its own domain in Unicode (DEC-092).
 
 ### [0.3.1][relay-0.3.1] - 2026-10-24
 

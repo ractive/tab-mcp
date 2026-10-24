@@ -8,6 +8,7 @@ import {
 	ClientMetadataError,
 	ClientMetadataFetcher,
 	displayName,
+	limitKey,
 	redirectUriMatches,
 } from "../src/oauth/cimd.ts";
 import { type CimdServer, startCimdServer } from "./oauth-helpers.ts";
@@ -39,7 +40,7 @@ function original(url: string, init?: RequestInit): string {
 function fetcher(
 	responder: (url: string) => Response,
 	addresses: string[] = ["93.184.216.34"],
-	options: { allowedHosts?: string[] } = {},
+	options: { allowedHosts?: string[]; now?: () => number } = {},
 ) {
 	const calls: string[] = [];
 	const pinned: Pinned[] = [];
@@ -352,6 +353,100 @@ describe("threat model A3: SSRF guards", () => {
 		expect(reasons.slice(0, 5).every((r) => r === "fetch_failed")).toBe(true);
 		expect(reasons.slice(5)).toEqual(["rate_limited", "rate_limited"]);
 	});
+
+	test("audit finding 2: limitKey is the last two labels, or the IP literal", () => {
+		expect(limitKey("x1.evil.example")).toBe("evil.example");
+		expect(limitKey("claude.ai")).toBe("claude.ai");
+		expect(limitKey("a.b.example.co.uk")).toBe("co.uk");
+		expect(limitKey("evil.example.")).toBe("evil.example");
+		expect(limitKey("93.184.216.34")).toBe("93.184.216.34");
+		expect(limitKey("[2001:db8::1]")).toBe("2001:db8::1");
+	});
+
+	test("audit finding 2: wildcard subdomains share their domain's limit and do not drain the global one", async () => {
+		const { f } = fetcher((url) =>
+			url.includes("evil.example")
+				? new Response("{}", { status: 500 })
+				: Response.json(DOC(url)),
+		);
+		const reasons: string[] = [];
+		for (let i = 0; i < 40; i++)
+			reasons.push(await reason(f.get(`https://x${i}.evil.example/c.json`)));
+		// The domain allows 15 (review of PR 32: more than one host's 5).
+		expect(reasons.slice(0, 15).every((r) => r === "fetch_failed")).toBe(true);
+		expect(reasons.slice(15).every((r) => r === "rate_limited")).toBe(true);
+		// The refused fetches took nothing from the global bucket.
+		for (let i = 0; i < 15; i++) {
+			expect(await reason(f.get(`https://d${i}.example/c.json`))).toBe(
+				"accepted",
+			);
+		}
+	});
+
+	test("review of PR 32: one host cannot use up its domain's limit for the others", async () => {
+		const { f } = fetcher(() => new Response("{}", { status: 500 }));
+		const reasons: string[] = [];
+		for (let i = 0; i < 8; i++)
+			reasons.push(await reason(f.get(`https://evil.co.uk/c${i}.json`)));
+		expect(reasons.slice(0, 5).every((r) => r === "fetch_failed")).toBe(true);
+		expect(reasons.slice(5).every((r) => r === "rate_limited")).toBe(true);
+		expect(await reason(f.get("https://shop.co.uk/client.json"))).toBe(
+			"fetch_failed",
+		);
+	});
+
+	test("audit finding 2: a fetch the global limit refuses leaves the domain's tokens", async () => {
+		const clock = { t: 1_800_000_000_000 };
+		const { f } = fetcher(
+			() => new Response("{}", { status: 500 }),
+			undefined,
+			{
+				now: () => clock.t,
+			},
+		);
+		for (let i = 0; i < 30; i++)
+			await reason(f.get(`https://h${i}.example/c.json`));
+		for (let i = 0; i < 5; i++) {
+			expect(await reason(f.get(`https://ai.example/${i}.json`))).toBe(
+				"rate_limited",
+			);
+		}
+		clock.t += 5000; // the global bucket gets 5 back, the domain's only 1
+		const reasons: string[] = [];
+		for (let i = 0; i < 5; i++)
+			reasons.push(await reason(f.get(`https://ai.example/${i}.json`)));
+		expect(reasons.every((r) => r === "fetch_failed")).toBe(true);
+	});
+});
+
+describe("audit finding 2: the cache evicts the least recently used entry", () => {
+	const ok = (url: string) => Response.json(DOC(url));
+	/** Fill the cache with 1000 other clients, one second apart (the global limit refills 1/s). */
+	async function fill(
+		f: ClientMetadataFetcher,
+		clock: { t: number },
+		from = 0,
+		count = 1000,
+	) {
+		for (let i = from; i < from + count; i++) {
+			clock.t += 1000;
+			expect(await reason(f.get(`https://c${i}.example/c.json`))).toBe(
+				"accepted",
+			);
+		}
+	}
+
+	test("an entry in use stays cached while 1000 others come and go", async () => {
+		const clock = { t: 1_800_000_000_000 };
+		const { f, calls } = fetcher(ok, undefined, { now: () => clock.t });
+		const claude = "https://claude.ai/oauth/claude-code-client-metadata";
+		await f.get(claude);
+		await fill(f, clock, 0, 999);
+		await f.get(claude); // a hit: now the most recently used
+		await fill(f, clock, 999, 500);
+		await f.get(claude);
+		expect(calls.filter((c) => c === claude)).toHaveLength(1);
+	});
 });
 
 describe("CIMD §4 / MCP client registration: the document", () => {
@@ -439,6 +534,88 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		);
 	});
 
+	test("audit finding 5: a name with another domain anywhere is refused", async () => {
+		for (const name of [
+			"Claude [claude.ai]",
+			"Claude · claude.ai",
+			"Claude from claude.ai",
+			"claude.ai",
+			"Claude claude.ai/connect",
+			"Claude — chatgpt.com",
+			"Claude claude。ai",
+			"Claude claude．ai",
+			"Claude ｃｌａｕｄｅ.ａｉ",
+			"Claude CLAUDE.AI",
+			"Claude via ai.example.evil",
+			"Claude via xai.example",
+		]) {
+			expect([name, await check(DOC(id, { client_name: name }))]).toEqual([
+				name,
+				"invalid_metadata",
+			]);
+		}
+	});
+
+	test("audit finding 5: the names of known AI apps, versions and the client's own domain pass", async () => {
+		for (const name of [
+			"Claude",
+			"Claude Code",
+			"ChatGPT",
+			"Codex",
+			"OpenAI Codex",
+			"Claude 3.5",
+			"Tool v1.2",
+			"Tool (v1.2)",
+			"Example AI from ai.example",
+			"ai.example",
+		]) {
+			expect([name, await check(DOC(id, { client_name: name }))]).toEqual([
+				name,
+				"accepted",
+			]);
+		}
+		// A subdomain of the verified host, or the host's parent, is the same owner.
+		const sub = "https://mcp.ai.example/client.json";
+		expect(await check(DOC(sub, { client_name: "AI · ai.example" }), sub)).toBe(
+			"accepted",
+		);
+		expect(
+			await check(DOC(id, { client_name: "AI · mcp.ai.example" }), id),
+		).toBe("accepted");
+	});
+
+	test("review of PR 32: combining marks and variation selectors do not hide a domain", async () => {
+		for (const name of [
+			"Claude · claude.a︀i",
+			"Claude · claude.a̲i",
+			"Claude · claude.a\u{E0100}i",
+			"Claude · ćlaude.ai",
+			// The parentheses rule (DEC-065) reads the same text.
+			"Example (ai.e̲xample)",
+		]) {
+			expect([name, await check(DOC(id, { client_name: name }))]).toEqual([
+				name,
+				"invalid_metadata",
+			]);
+		}
+	});
+
+	test("review of PR 32: an internationalised client may name its own domain", async () => {
+		const idn = "https://xn--bcher-kva.example/client.json";
+		expect(
+			await check(DOC(idn, { client_name: "Bücher · bücher.example" }), idn),
+		).toBe("accepted");
+		expect(
+			await check(
+				DOC(idn, { client_name: "Bücher · xn--bcher-kva.example" }),
+				idn,
+			),
+		).toBe("accepted");
+		expect(
+			await check(DOC(id, { client_name: "Bücher · bücher.example" })),
+		).toBe("invalid_metadata");
+	});
+
 	test("review finding 7: a name with a web address in parentheses is refused", async () => {
 		expect(await check(DOC(id, { client_name: "Claude (claude.ai)" }))).toBe(
 			"invalid_metadata",
@@ -493,6 +670,11 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 			"\u00AD",
 			"\u3164",
 			"\u115F",
+			// Variation selectors (review of PR 32).
+			"\uFE00",
+			"\uFE0F",
+			"\u{E0100}",
+			"\u{E01EF}",
 		]) {
 			expect(displayName(`Cl${invisible}aude`)).toBe("Claude");
 		}

@@ -9,7 +9,9 @@ import type {
 	TokenStore,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
+/** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
+const REUSE_WINDOW_MS = 86_400_000;
 
 interface Row {
 	hash: string;
@@ -103,6 +105,14 @@ export class SqliteTokenStore implements TokenStore {
 			this.#db.run(
 				"CREATE INDEX IF NOT EXISTS tokens_expires ON tokens (expires_at)",
 			);
+			// Version 4: refresh tokens used before the upgrade get the reuse
+			// window that markUsed now gives (DEC-091), so they go too.
+			this.#db
+				.query(
+					`UPDATE tokens SET expires_at = min(expires_at, used_at + $window)
+					WHERE kind = 'refresh' AND used_at IS NOT NULL`,
+				)
+				.run({ window: REUSE_WINDOW_MS });
 			this.#db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 		})();
 	}
@@ -156,12 +166,17 @@ export class SqliteTokenStore implements TokenStore {
 		return row === null ? undefined : toRecord(row);
 	}
 
-	async markUsed(hash: string, now: number): Promise<boolean> {
+	async markUsed(
+		hash: string,
+		now: number,
+		keepUntil: number,
+	): Promise<boolean> {
 		const result = this.#db
 			.query(
-				"UPDATE tokens SET used_at = $now WHERE hash = $hash AND used_at IS NULL",
+				`UPDATE tokens SET used_at = $now, expires_at = min(expires_at, $keep_until)
+				WHERE hash = $hash AND used_at IS NULL`,
 			)
-			.run({ hash, now });
+			.run({ hash, now, keep_until: keepUntil });
 		return result.changes === 1;
 	}
 

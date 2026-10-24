@@ -81,7 +81,7 @@ interface RevokeOptions {
 interface TokenStore {
   put(record: TokenRecord): Promise<boolean>;
   get(hash: string): Promise<TokenRecord | undefined>;
-  markUsed(hash: string, now: number): Promise<boolean>;
+  markUsed(hash: string, now: number, keepUntil: number): Promise<boolean>;
   revoke(selector: RevokeSelector, options: RevokeOptions): Promise<number>;
   listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
   deleteExpired(now: number): Promise<number>;
@@ -97,7 +97,7 @@ epoch.
 |---|---|
 | `put` | Insert the record, or replace the record with the same `hash`. Return `false` and store nothing if the grant was revoked (see tombstones below). |
 | `get` | Return the record for a hash, also when it is expired or used: the relay decides what that means. Return `undefined` once `revoke` or `deleteExpired` removed it. Changing the returned object must not change the store. |
-| `markUsed` | Set `usedAt` to `now` if it is not set yet. Return `true` only for the call that set it; `false` if it was already used or does not exist. |
+| `markUsed` | Set `usedAt` to `now` if it is not set yet, and in the same step lower `expiresAt` to `keepUntil` if that is earlier (never raise it). Return `true` only for the call that set it; `false`, changing nothing, if it was already used or does not exist. |
 | `revoke` | Delete every token of the grant or of the address, leave a tombstone until `keepUntil`, and return how many tokens were deleted. |
 | `listGrants` | The grants of an address that still have a usable token at `now` (an unexpired access token, or an unexpired and unused refresh token), oldest grant first. The page uses it to list connected apps. |
 | `deleteExpired` | Delete every record with `expiresAt <= now` and every tombstone whose `keepUntil` has passed. Return how many records were deleted. The relay calls it every 10 minutes. |
@@ -115,6 +115,15 @@ Every store must give these guarantees. The relay's security depends on them.
   this: of two refreshes with the same token, one wins and the other counts as reuse,
   which revokes the grant. Use a conditional update ("set `usedAt` where it is null") or
   a script, never a read followed by a write.
+- **Used refresh tokens are kept for a day, not a month.** The relay keeps a used refresh
+  token only to notice if it comes back, and passes `keepUntil` = now + 24 hours to
+  `markUsed`. Lowering `expiresAt` to it lets `deleteExpired` remove the row after that
+  window, so a client that refreshes often does not leave 30 days of rows behind. A replay
+  inside the window still revokes the grant; after it, the token is unknown and refused
+  without ending the grant. A store that ignores `keepUntil` stays correct, but grows.
+  Tokens used before the relay passed `keepUntil` (0.3 and earlier) keep their full
+  expiry; cut them once to `usedAt` + 24 hours, as the SQLite store does when it opens
+  an older file, or let them expire.
 - **Revocation is final.** `revoke` leaves a tombstone at least until `keepUntil`. Until
   then `put` refuses a record of a revoked grant, and a record of a grant of a revoked
   address if the grant was created at or before the revocation (`grantCreatedAt <=` the
@@ -159,8 +168,8 @@ tests expect to start empty.
 
 This store uses Bun's built-in Redis client. Every write runs as one Lua script, which
 Redis executes atomically, so the guarantees hold across processes. It passed the
-conformance suite with Redis 7.0 when it was written; the store interface has not changed
-since. It is a starting point, not
+conformance suite with Redis 7.0 when it was written, and again with Redis 7.4 after
+`markUsed` gained `keepUntil`. It is a starting point, not
 a supported package: it assumes a single Redis node (the scripts touch keys they do not
 declare, which Redis Cluster does not allow), and `listGrants` reads tokens one by one.
 
@@ -217,9 +226,12 @@ local raw = redis.call('GET', key)
 if not raw then return 0 end
 local r = cjson.decode(raw)
 if r.usedAt then return 0 end
+local exp = math.min(r.expiresAt, tonumber(ARGV[4]))
 -- Patch the JSON text instead of re-encoding it: cjson would turn an
 -- empty scopes array into an object.
-redis.call('SET', key, string.sub(raw, 1, -2) .. ',"usedAt":' .. ARGV[3] .. '}')
+local text = string.gsub(raw, '"expiresAt":%d+', '"expiresAt":' .. string.format('%d', exp), 1)
+redis.call('SET', key, string.sub(text, 1, -2) .. ',"usedAt":' .. ARGV[3] .. '}')
+redis.call('ZADD', ARGV[1] .. 'exp', exp, ARGV[2])
 return 1`;
 
 const REVOKE = `${DROP}
@@ -283,8 +295,12 @@ export class RedisTokenStore implements TokenStore {
 		return raw === null ? undefined : JSON.parse(raw);
 	}
 
-	async markUsed(hash: string, now: number): Promise<boolean> {
-		return (await this.#eval(MARK_USED, hash, now)) === 1;
+	async markUsed(
+		hash: string,
+		now: number,
+		keepUntil: number,
+	): Promise<boolean> {
+		return (await this.#eval(MARK_USED, hash, now, keepUntil)) === 1;
 	}
 
 	async revoke(
@@ -346,9 +362,10 @@ Map the methods like this:
   row. Use a transaction level that keeps a concurrent `revoke` from slipping in between
   (SQLite's write lock does it; in PostgreSQL use `SERIALIZABLE`, or lock the
   tombstone row).
-- `markUsed`: `UPDATE tokens SET used_at = $now WHERE hash = $hash AND used_at IS NULL`,
-  and return whether one row changed. With Prisma, `updateMany` with
-  `where: { hash, usedAt: null }` and check that `count` is 1.
+- `markUsed`: `UPDATE tokens SET used_at = $now, expires_at = min(expires_at, $keep_until)
+  WHERE hash = $hash AND used_at IS NULL` (`least` in PostgreSQL), and return whether one
+  row changed. With Prisma, which cannot take the minimum in `updateMany`, run that
+  statement with `$executeRaw` and check that it returns 1.
 - `revoke`: in one transaction, upsert the tombstone (keep the later `at` and
   `keep_until`) and delete the matching tokens.
 - `deleteExpired`: delete tokens with `expires_at <= now` and tombstones with

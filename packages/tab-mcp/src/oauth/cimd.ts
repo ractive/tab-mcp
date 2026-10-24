@@ -7,7 +7,7 @@
  * against SSRF (threat model A3): https only, default port, no credentials,
  * the host resolved first and every address checked to be public, no
  * redirects, 5 s, 64 KiB, `application/json`, results cached and fetches per
- * host rate-limited.
+ * domain and in total rate-limited.
  */
 
 import { isLoopbackHost, isPublicIp, parseIpv4, parseIpv6 } from "../ip.ts";
@@ -71,9 +71,11 @@ async function defaultLookup(hostname: string): Promise<string[]> {
 
 /**
  * Invisible characters that are not format characters (`Cf`): Hangul and
- * other fillers, the braille blank, combining grapheme joiner.
+ * other fillers, the braille blank, combining grapheme joiner, variation
+ * selectors.
  */
-const INVISIBLE = /[\u034F\u115F\u1160\u17B4\u17B5\u2800\u3164\uFFA0]/gu;
+const INVISIBLE =
+	/[\u034F\u115F\u1160\u17B4\u17B5\u2800\u3164\uFFA0]|\p{Variation_Selector}/gu;
 
 /**
  * Clean a self-declared name for display: control and line/paragraph
@@ -116,10 +118,25 @@ function isIpLiteral(hostname: string): boolean {
 	return parseIpv4(h) !== undefined || parseIpv6(h) !== undefined;
 }
 
+/**
+ * The key fetches are limited under (DEC-089): the last two labels of a host
+ * name, so `*.evil.example` is one key however many subdomains it has; an IP
+ * literal as is. Without the Public Suffix List, clients under a multi-label
+ * suffix (`co.uk`, `pages.dev`) share one key, so many hosts there can slow
+ * the others' uncached fetches; one host alone cannot (its own limit is lower).
+ */
+export function limitKey(hostname: string): string {
+	const h = hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+	if (isIpLiteral(h)) return h;
+	return h.split(".").slice(-2).join(".");
+}
+
 /** Fetches, validates and caches Client ID Metadata Documents. */
 export class ClientMetadataFetcher {
 	readonly #cache = new Map<string, { meta: ClientMetadata; until: number }>();
 	readonly #perHost = new RateLimiter({ capacity: 5, refillPerSecond: 0.2 });
+	/** Three hosts' worth: one host alone cannot use up its domain (DEC-089). */
+	readonly #perDomain = new RateLimiter({ capacity: 15, refillPerSecond: 0.6 });
 	/** All fetches together: many attacker-owned hosts cannot add up (DEC-061). */
 	readonly #global = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
 	readonly #allowedHosts: readonly string[];
@@ -147,8 +164,19 @@ export class ClientMetadataFetcher {
 		const url = this.#checkUrl(clientId);
 		const now = this.#now();
 		const cached = this.#cache.get(clientId);
-		if (cached !== undefined && cached.until > now) return cached.meta;
-		if (!this.#perHost.take(url.host, now)) {
+		if (cached !== undefined && cached.until > now) {
+			// Least recently used first: a hit moves the entry to the end.
+			this.#cache.delete(clientId);
+			this.#cache.set(clientId, cached);
+			return cached.meta;
+		}
+		// Per host and per domain, and only charged once the global limit
+		// admits the fetch: refusals cost the others nothing (DEC-089).
+		const key = limitKey(url.hostname);
+		if (
+			!this.#perHost.available(url.host, now) ||
+			!this.#perDomain.available(key, now)
+		) {
 			throw new ClientMetadataError(
 				"rate_limited",
 				"Too many requests for this AI app's details. Try again in a minute.",
@@ -160,13 +188,15 @@ export class ClientMetadataFetcher {
 				"The relay is busy. Try again in a minute.",
 			);
 		}
+		this.#perHost.take(url.host, now);
+		this.#perDomain.take(key, now);
 		const address = await this.#vettedAddress(url);
 		const { meta, ttlMs } = await this.#fetchDocument(url, clientId, address);
+		this.#cache.delete(clientId);
 		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
 			const oldest = this.#cache.keys().next().value;
 			if (oldest !== undefined) this.#cache.delete(oldest);
 		}
-		this.#cache.delete(clientId);
 		this.#cache.set(clientId, { meta, until: now + ttlMs });
 		return meta;
 	}
@@ -350,6 +380,50 @@ export class ClientMetadataFetcher {
 	}
 }
 
+/** Labels separated by dots, ending in a label of 2-63 letters: `claude.ai`, `x.co.uk`. */
+const DOMAIN_SHAPED =
+	/(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+\p{L}{2,63}(?![\p{L}\p{N}])/gu;
+
+/**
+ * A name as the address checks read it: compatibility forms folded (NFKC),
+ * combining marks removed, so "claude.a̲i" reads "claude.ai", the
+ * ideographic full stops browsers read as dots made dots, lower case.
+ */
+function comparable(name: string): string {
+	return name
+		.normalize("NFKC")
+		.replace(/\p{M}/gu, "")
+		.replace(/[。．｡]/g, ".")
+		.toLowerCase();
+}
+
+/** A host name in its ASCII (punycode) form, as `URL` gives it. */
+function asciiHost(token: string): string {
+	try {
+		return new URL(`https://${token}/`).hostname;
+	} catch {
+		return token;
+	}
+}
+
+/**
+ * Whether a name contains a domain-shaped token that is not the verified
+ * host, a subdomain of it or a parent of it (DEC-092). Internationalised
+ * names are compared in their ASCII form, as the host is.
+ */
+export function foreignDomain(name: string, hostname: string): boolean {
+	const host = hostname.toLowerCase();
+	for (const [match] of comparable(name).matchAll(DOMAIN_SHAPED)) {
+		const token = asciiHost(match);
+		const own =
+			token === host ||
+			host.endsWith(`.${token}`) ||
+			token.endsWith(`.${host}`);
+		if (!own) return true;
+	}
+	return false;
+}
+
 /** Check a fetched document against the CIMD rules and what the relay supports. */
 export function validateDocument(
 	doc: unknown,
@@ -376,9 +450,19 @@ export function validateDocument(
 		throw invalid("The AI app's details have no client_name.");
 	}
 	// "Claude (claude.ai)" from evil.example would read like a verified host.
-	if (/\(\s*[^()\s]*[a-z0-9-]\.[a-z]{2,}[^()]*\)/i.test(displayName(name))) {
+	if (
+		/\(\s*[^()\s]*[a-z0-9-]\.[a-z]{2,}[^()]*\)/i.test(
+			comparable(displayName(name)),
+		)
+	) {
 		throw invalid(
 			"The AI app's name contains a web address in parentheses, which this relay does not show.",
+		);
+	}
+	// "Claude · claude.ai" from evil.example reads the same way (DEC-092).
+	if (foreignDomain(displayName(name), url.hostname)) {
+		throw invalid(
+			"The AI app's name contains a web address other than its own, which this relay does not show.",
 		);
 	}
 	const uris = d["redirect_uris"];

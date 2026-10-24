@@ -46,6 +46,10 @@ const MAX_PENDING = 10_000;
 /** Open authorization requests per IP (prefix) and per address (DEC-061). */
 const MAX_PENDING_PER_IP = 10;
 const MAX_PENDING_PER_ADDRESS = 20;
+/** One network's share of an address's open requests (DEC-088). */
+const MAX_PENDING_PER_ADDRESS_IP = 5;
+/** How long a used refresh token is kept to detect its reuse (DEC-091). */
+const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
@@ -75,6 +79,8 @@ export interface AuthorizationTestMode {
 	authCodeTtlMs?: number;
 	/** Replace the pairing methods (a stub method proves the server needs no codes). */
 	pairingMethods?: Partial<Record<PairingKind, PairingMethod>>;
+	/** A smaller cap on open OIDC sign-ins. */
+	oidcMaxFlows?: number;
 }
 
 interface AuthorizationRequest {
@@ -207,6 +213,11 @@ export class AuthorizationServer {
 		refillPerSecond: 1 / 30,
 	});
 	readonly #tokenPerIp = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
+	/** Refreshes per grant: each leaves a row for the reuse window (DEC-091). */
+	readonly #refreshesPerGrant = new RateLimiter({
+		capacity: 20,
+		refillPerSecond: 1 / 60,
+	});
 
 	constructor(host: AuthorizationHost, testMode?: AuthorizationTestMode) {
 		this.#host = host;
@@ -222,6 +233,9 @@ export class AuthorizationServer {
 							publicUrl: () => host.publicUrl(),
 							logger: host.logger,
 							development: host.config.development,
+							...(testMode?.oidcMaxFlows === undefined
+								? {}
+								: { maxFlows: testMode.oidcMaxFlows }),
 						}),
 					}),
 			...testMode?.pairingMethods,
@@ -460,7 +474,10 @@ export class AuthorizationServer {
 			if (error instanceof ClientMetadataError) {
 				this.#host.logger.info("oauth.client_refused", {
 					reason: error.reason,
-					host: hostOf(clientId).slice(0, 100),
+					// Not the text itself: it is anyone's choice.
+					host: URL.canParse(clientId)
+						? hostOf(clientId).slice(0, 100)
+						: "(not a URL)",
 				});
 				return this.#errorPage(400, error.message);
 			}
@@ -518,8 +535,11 @@ export class AuthorizationServer {
 			return fail("invalid_scope", `the only scope is "${SCOPE}"`);
 		}
 
-		// No connected tab: nothing to pair with, so nothing is kept (DEC-061).
-		if (this.#host.session(addressId) === undefined) {
+		// No connected tab, or its dialog is closed: nothing to pair with, so
+		// nothing is kept (DEC-061, DEC-088). Pairing needs the dialog open
+		// anyway, so a stranger who knows the address cannot fill its slots.
+		const session = this.#host.session(addressId);
+		if (session === undefined || !session.pairingOpen) {
 			return this.#offlinePage(
 				client,
 				`/authorize${new URL(req.url).search}`,
@@ -529,10 +549,10 @@ export class AuthorizationServer {
 					"access_denied",
 					"the user cancelled the connection",
 				),
+				session !== undefined,
 			);
 		}
-		const method =
-			this.#methods[this.#host.session(addressId)?.site.pairing ?? "code"];
+		const method = this.#methods[session.site.pairing];
 		if (method?.prepare !== undefined) {
 			try {
 				await method.prepare();
@@ -550,14 +570,14 @@ export class AuthorizationServer {
 		this.#sweepPending();
 		if (
 			this.#pending.size >= MAX_PENDING ||
-			(this.#pendingPerIp.get(ip) ?? 0) >= MAX_PENDING_PER_IP ||
-			(this.#pendingPerAddress.get(addressId) ?? 0) >= MAX_PENDING_PER_ADDRESS
+			(this.#pendingPerIp.get(ip) ?? 0) >= MAX_PENDING_PER_IP
 		) {
 			return this.#errorPage(
 				429,
 				"Too many connection requests are open right now. Wait a few minutes and try again.",
 			);
 		}
+		this.#makeRoom(addressId, ip);
 		const pending: Pending = {
 			id: random(24),
 			expiresAt: Date.now() + PENDING_TTL_MS,
@@ -590,6 +610,38 @@ export class AuthorizationServer {
 		);
 	}
 
+	/**
+	 * An address at its caps evicts instead of refusing (DEC-088): a network
+	 * past its share loses its own oldest request; a full address loses the
+	 * oldest request of the network holding the most, so a flood from a few
+	 * networks does not push out the owner's one request.
+	 */
+	#makeRoom(addressId: string, ip: string): void {
+		const count = this.#pendingPerAddress.get(addressId) ?? 0;
+		if (count < MAX_PENDING_PER_ADDRESS_IP) return;
+		const byIp = new Map<string, Pending[]>();
+		for (const p of this.#pending.values()) {
+			if (p.addressId !== addressId) continue;
+			const list = byIp.get(p.ip);
+			if (list === undefined) byIp.set(p.ip, [p]);
+			else list.push(p);
+		}
+		const own = byIp.get(ip) ?? [];
+		if (own.length >= MAX_PENDING_PER_ADDRESS_IP) {
+			if (own[0] !== undefined) this.#dropPending(own[0]);
+			return;
+		}
+		if (count < MAX_PENDING_PER_ADDRESS) return;
+		// Networks come in order of their first request: `>=` breaks a tie
+		// toward the one that came last, so an equal flood never evicts the
+		// owner who was there first (review of PR 32).
+		let most: Pending[] = [];
+		for (const list of byIp.values()) {
+			if (list.length >= most.length) most = list;
+		}
+		if (most[0] !== undefined) this.#dropPending(most[0]);
+	}
+
 	#dropPending(p: Pending): void {
 		if (!this.#pending.delete(p.id)) return;
 		const dec = (map: Map<string, number>, key: string) => {
@@ -599,28 +651,35 @@ export class AuthorizationServer {
 		};
 		dec(this.#pendingPerIp, p.ip);
 		dec(this.#pendingPerAddress, p.addressId);
+		for (const method of Object.values(this.#methods)) method?.forget?.(p.id);
 	}
 
-	/** The tab is not connected: try again by loading the page again. */
+	/**
+	 * The tab is not connected, or (`connected`) its dialog is closed: try
+	 * again by loading the page again.
+	 */
 	#offlinePage(
 		client: ClientMetadata,
 		retryUrl: string,
 		cancelUrl: string,
-		error?: string,
+		connected = false,
 	): Response {
-		const errorHtml =
-			error === undefined
-				? ""
-				: `<p class="error" role="alert">${escapeHtml(error)}</p>`;
-		const body = `<h1>Open the page first</h1>
-${errorHtml}
-<p><strong>${escapeHtml(client.name)}</strong> (${escapeHtml(client.host)}) wants to use the tools of a web page, but that page is not open right now.</p>
-<p>Open the page, click “Connect your AI app”, then try again here.</p>
+		const who = `<strong>${escapeHtml(client.name)}</strong> (${escapeHtml(client.host)})`;
+		const title = connected
+			? "Open “Connect your AI app” first"
+			: "Open the page first";
+		const intro = connected
+			? `<p>${who} wants to use the tools of a web page, but that page is not connecting right now.</p>
+<p>In the page, click “Connect your AI app”, then try again here.</p>`
+			: `<p>${who} wants to use the tools of a web page, but that page is not open right now.</p>
+<p>Open the page, click “Connect your AI app”, then try again here.</p>`;
+		const body = `<h1>${title}</h1>
+${intro}
 <div class="actions">
 <a class="button primary" href="${escapeHtml(retryUrl)}">Try again</a>
 <a class="button" href="${escapeHtml(cancelUrl)}">Cancel</a>
 </div>`;
-		return this.#page(200, "Open the page first", body);
+		return this.#page(200, title, body);
 	}
 
 	/** POST `/authorize`: the pairing form (connect, cancel, try again). */
@@ -740,7 +799,9 @@ ${errorHtml}
 				pending,
 				browser.id,
 				result.message,
-				result.reason === "rate_limited" ? 429 : 400,
+				result.reason === "rate_limited" || result.reason === "busy"
+					? 429
+					: 400,
 			);
 		}
 
@@ -1236,8 +1297,22 @@ ${cancel}
 				throw new OAuthError(400, "invalid_scope", "scope exceeds the grant");
 			}
 		}
+		if (!this.#refreshesPerGrant.take(record.grantId, now)) {
+			throw new OAuthError(
+				429,
+				"temporarily_unavailable",
+				"too many refreshes for this connection; try again in a minute",
+			);
+		}
 		// Atomic: of two refreshes with the same token only one gets here.
-		if (!(await this.#host.store.markUsed(hash, now))) {
+		// The used token is kept for the reuse window only (DEC-091).
+		if (
+			!(await this.#host.store.markUsed(
+				hash,
+				now,
+				now + REFRESH_REUSE_WINDOW_MS,
+			))
+		) {
 			await this.#reuseDetected(record);
 			throw invalid(
 				"the refresh token was already used; the connection was revoked",
@@ -1390,5 +1465,6 @@ ${cancel}
 		this.#guessesPerAddressIp.sweep(now);
 		this.#guessesPerAddress.sweep(now);
 		this.#tokenPerIp.sweep(now);
+		this.#refreshesPerGrant.sweep(now);
 	}
 }

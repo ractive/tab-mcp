@@ -100,20 +100,46 @@ export function tokenStoreConformance(
 		test("markUsed succeeds once, then fails", async () => {
 			const r = record({ kind: "refresh" });
 			await store.put(r);
-			expect(await store.markUsed(r.hash, now + 1)).toBe(true);
-			expect(await store.markUsed(r.hash, now + 2)).toBe(false);
+			expect(await store.markUsed(r.hash, now + 1, r.expiresAt)).toBe(true);
+			expect(await store.markUsed(r.hash, now + 2, r.expiresAt)).toBe(false);
 			expect((await store.get(r.hash))?.usedAt).toBe(now + 1);
 		});
 
+		test("markUsed cuts expiresAt to keepUntil, so deleteExpired drops the used token then", async () => {
+			const r = record({ kind: "refresh", expiresAt: now + 30 * 86_400_000 });
+			await store.put(r);
+			expect(await store.markUsed(r.hash, now, now + 86_400_000)).toBe(true);
+			const used = await store.get(r.hash);
+			expect(used?.usedAt).toBe(now);
+			expect(used?.expiresAt).toBe(now + 86_400_000);
+			await store.deleteExpired(now + 86_400_000 - 1);
+			expect(await store.get(r.hash)).toBeDefined();
+			await store.deleteExpired(now + 86_400_000);
+			expect(await store.get(r.hash)).toBeUndefined();
+		});
+
+		test("markUsed never extends expiresAt, and a failed call changes nothing", async () => {
+			const r = record({ kind: "refresh", expiresAt: now + 1000 });
+			await store.put(r);
+			expect(await store.markUsed(r.hash, now, now + 86_400_000)).toBe(true);
+			expect((await store.get(r.hash))?.expiresAt).toBe(now + 1000);
+			expect(await store.markUsed(r.hash, now + 1, now + 10)).toBe(false);
+			const got = await store.get(r.hash);
+			expect(got?.expiresAt).toBe(now + 1000);
+			expect(got?.usedAt).toBe(now);
+		});
+
 		test("markUsed of an unknown hash fails", async () => {
-			expect(await store.markUsed("nope", now)).toBe(false);
+			expect(await store.markUsed("nope", now, now + 1000)).toBe(false);
 		});
 
 		test("concurrent markUsed calls: exactly one wins", async () => {
 			const r = record({ kind: "refresh" });
 			await store.put(r);
 			const results = await Promise.all(
-				Array.from({ length: 10 }, (_, i) => store.markUsed(r.hash, now + i)),
+				Array.from({ length: 10 }, (_, i) =>
+					store.markUsed(r.hash, now + i, r.expiresAt),
+				),
 			);
 			expect(results.filter(Boolean)).toHaveLength(1);
 		});

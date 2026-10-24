@@ -866,3 +866,58 @@ describe("identity binding: -31009 (iteration 11, finding 3)", () => {
 		);
 	});
 });
+
+describe("identity binding: audit of 2026-10-24, finding 3", () => {
+	test("one sign-in per connection request: a new Connect replaces the earlier one", async () => {
+		const ctx = await setup();
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const first = await ctx.browser.submit(flow.page, { action: "connect" });
+		const second = await ctx.browser.submit(flow.page, { action: "connect" });
+		expect(first.status).toBe(303);
+		expect(second.status).toBe(303);
+		const stale = await ctx.browser.open(
+			await provider.signIn(first.location ?? ""),
+		);
+		expect(stale.status).toBe(400);
+		expect(stale.html).toContain("expired or was already used");
+		const done = await ctx.browser.open(
+			await provider.signIn(second.location ?? ""),
+		);
+		expect(done.status).toBe(303);
+		expect(new URL(done.location ?? "").searchParams.get("code")).not.toBe(
+			null,
+		);
+	});
+
+	test("review of PR 32: a busy refusal is 429 and charges no guess", async () => {
+		const ctx = await setup({}, "alice", { oidcMaxFlows: 1 });
+		provider.signedInAs = "alice";
+		const first = await openAuthorize(ctx);
+		expect(
+			(await ctx.browser.submit(first.page, { action: "connect" })).status,
+		).toBe(303);
+		const other = { ...ctx, browser: new TestBrowser(ctx.r.url) };
+		const second = await openAuthorize(other);
+		for (let i = 0; i < 11; i++) {
+			const res = await other.browser.submit(second.page, {
+				action: "connect",
+			});
+			expect(res.status).toBe(429);
+			expect(res.html).toContain("Too many sign-ins are open");
+		}
+	});
+
+	test("Connect clicks are charged like guesses: one network is stopped after 10", async () => {
+		const ctx = await setup();
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const statuses: number[] = [];
+		for (let i = 0; i < 11; i++) {
+			const res = await ctx.browser.submit(flow.page, { action: "connect" });
+			statuses.push(res.status);
+		}
+		expect(statuses.slice(0, 10).every((s) => s === 303)).toBe(true);
+		expect(statuses[10]).toBe(429);
+	});
+});

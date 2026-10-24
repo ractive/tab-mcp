@@ -60,6 +60,13 @@ From a shared screenshot, a chat log or over the user's shoulder.
 - An attacker on many networks can use up the per-address allowance and make the owner
   wait. "New address" in the page ends that, because the attacker does not learn the new
   address. Per-IP limits count an IPv6 /64 as one network.
+- `/authorize` opens a connection request only while the dialog is open, and an address
+  holds at most 20, at most 5 per network. Past that the oldest request of the network
+  holding the most is dropped (on a tie, of the network that came last), so knowing an
+  address is not enough to keep its owner from connecting. Left over: an attacker who
+  keeps the address full from many networks can push out a request the owner opens
+  after the flood began; "New address" ends it. With identity binding, each request has one sign-in at a time, and
+  each Connect that starts one counts like a guess.
 - Without a token, every address looks the same: no 404 for unknown addresses, so
   addresses cannot be probed.
 - "New address" in the page revokes the old address's connections and replaces the
@@ -87,8 +94,14 @@ From a shared screenshot, a chat log or over the user's shoulder.
   page with a link back instead of being redirected, so the relay cannot be used as an
   open redirector. Only the user's own Cancel redirects at once.
 - Shown names lose invisible and format characters. Names with a web address in
-  parentheses are refused, because they would look like the verified host.
-- An operator can limit which AI apps may connect with `TAB_MCP_CLIENT_ID_HOSTS`.
+  parentheses are refused, because they would look like the verified host, and so are
+  names with any domain other than the client's own host ("Claude · claude.ai" from
+  `evil.example`), also when combining marks or look-alike dots hide it. A domain
+  spelled in words ("claude dot ai") still passes; the verified host in the heading is
+  the defence there.
+- "Verified host" means only that the document was served from that host over HTTPS;
+  any host qualifies. An operator can limit which AI apps may connect with
+  `TAB_MCP_CLIENT_ID_HOSTS`.
 
 ### A3: Server-side request forgery through client metadata fetches
 
@@ -104,8 +117,13 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 - no redirects, a 5 second timeout, a 64 KiB limit, `application/json` only;
 - responses are cached as their `Cache-Control` says (at least 5 minutes, at most 24
   hours);
-- fetches are rate-limited per host (5, then 1 every 5 seconds) and overall (30, then 1 a
-  second);
+- fetches are rate-limited per host (5, then 1 every 5 seconds), per domain (the last
+  two labels of the host, so subdomains share one limit: 15, then 3 every 5 seconds) and
+  overall (30, then 1 a second); a fetch the overall limit refuses costs its host and
+  domain nothing, and the cache drops the least recently used document first. Left
+  over: all clients under a multi-label suffix such as `co.uk` or `pages.dev` share one
+  domain limit, so an attacker with many hosts there can keep their uncached fetches
+  refused;
 - every failure from resolving to parsing shows the same message, so the page cannot be
   used to probe what answers where.
 
@@ -118,8 +136,9 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   outlive the grant's absolute end, 90 days after pairing. Reusing an old refresh token
   revokes the whole grant: that cuts off the thief and the victim alike and shows the
   theft. Marking a refresh token as used is atomic, so of two racing refreshes exactly one
-  wins and the other counts as reuse. A refresh token presented by another client id is
-  refused without revoking.
+  wins and the other counts as reuse. A used refresh token is kept for 24 hours to detect
+  that; replayed later, it is unknown and refused without revoking. A refresh token
+  presented by another client id is refused without revoking.
 - Revocation leaves a tombstone in the store, and the store refuses new tokens for a
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.
 - Disconnect in the page revokes at once. "New address" revokes all grants of the old
@@ -177,8 +196,8 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 ### A8: Denial of service
 
 In-memory rate limits cover `/authorize` page loads and posts per IP, code guesses per
-address and network and per address, `/token` and `/revoke` per IP, and metadata fetches
-per host and overall. IPv4 counts per address, IPv6 per /64. Sessions are limited per IP
+address and network and per address, `/token` and `/revoke` per IP, refreshes per grant,
+and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /64. Sessions are limited per IP
 on `/tab`, and concurrent requests per session on the MCP endpoint. Requests waiting for
 a page that is not open are limited per address and in total, and only a valid token for
 that address makes a request wait. Pending

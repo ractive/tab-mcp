@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-24T22:00:00+02:00
+timestamp: 2026-10-24T23:00:00+02:00
 ---
 
 # Decision log
@@ -1351,6 +1351,143 @@ sequence with a zero-width joiner or a variation selector is shown with escapes;
 the honest view in a security dialog. The names of the AI app and the tool are in
 `<bdi dir="ltr">`, so a right-to-left name cannot reorder the sentence around it, and the
 client's name and host are escaped the same way, in case a relay does not strip them.
+
+## DEC-088: Connection requests only while the page is connecting; evict at the caps
+
+From the security audit of 2026-10-24 (finding 1), iteration 12. DEC-061 kept a pending
+authorization for any address with a connected tab and refused with 429 past 20 per
+address. Anyone who knew an address (A1) could therefore keep it full from two networks
+and lock its owner out of `/authorize` for good. Now:
+
+- `GET /authorize` opens a request only while the session's `pairingOpen` is true (the
+  code method's codes are on, or the oidc page's dialog is open). Otherwise it keeps
+  nothing and shows "Open “Connect your AI app” first" with Try again (the same URL) and
+  Cancel, like the page for a tab that is not connected. Pairing needs the dialog open
+  anyway, so this costs the owner nothing but a reload when the AI app opened the
+  browser before the dialog.
+- One network (IP prefix, DEC-061) holds at most 5 requests per address; a sixth drops
+  that network's own oldest one. At 20 per address the next request drops the oldest
+  request of the network holding the most, not the address's oldest overall. A tie goes
+  to the network whose first request came last (review of PR 32: breaking it toward the
+  first network evicted the owner, who usually comes first, with 2 requests against 9
+  networks of 2). So the owner's request goes only if the owner's network holds more
+  than every other, or ties with them and arrived last of all: a request that arrives
+  into a full address is the next to go. An attacker who keeps the address full from
+  many networks while the dialog is open can therefore still push out a request the
+  owner opens after the flood began, though not one opened before it; this is the trade
+  DEC-061 made for guesses too, and "New address" ends it.
+- Per network overall (10) and in total (10 000) the caps still refuse: that only
+  affects the network that fills them.
+
+This replaces DEC-061's "refused with 429 instead of evicting others' requests" for the
+per-address cap.
+
+## DEC-089: Client metadata fetches limited per domain, the cache least recently used
+
+From the audit (finding 2). The per-host limit keyed on `url.host`, so a wildcard DNS
+entry gave every client id a fresh bucket, two networks kept the global bucket empty and
+every uncached real client got "The relay is busy"; 1000 subdomains also pushed
+claude.ai's document out of the first-in-first-out cache.
+
+- The per-host limit is now keyed on the last two labels of the host name (an IP literal
+  as is). We weighed the Public Suffix List: it is over 200 KB, changes every few days, and
+  would need either a dependency or a vendored copy with an update routine. It is also
+  not stricter here: under the PSL every `*.pages.dev` or `*.github.io` project is its
+  own registrable domain, so an attacker with free subdomain hosting still gets one
+  bucket per project, while the last two labels group them all. A heuristic such as
+  "three labels when the TLD has two letters" was rejected: an attacker picks a domain
+  that the heuristic splits.
+- The cost is a denial-of-service risk for specific hosts, not only "stricter" limits
+  (review of PR 32): every client under a multi-label public suffix (`co.uk`, `com.au`,
+  `pages.dev`) shares one domain bucket, so an attacker with a wildcard under that
+  suffix (`*.evil.co.uk`) can keep the uncached fetches of every other client under it
+  refused. Cached documents keep working (at least 5 minutes, usually an hour). To make
+  this need many hosts, each host also has its own bucket (5, then 1 every 5 s) and the
+  domain bucket is three times larger (15, then 3 every 5 s): one host alone cannot
+  empty its domain. None of the known AI apps (claude.ai, chatgpt.com, openai.com) is
+  under such a suffix; an operator who expects one can list it in
+  `TAB_MCP_CLIENT_ID_HOSTS`, which refuses other hosts before any limit is charged.
+- The domain's token is taken only after the global limiter admits the fetch
+  (`RateLimiter.available` checks without taking). The other order would let refusals
+  of one domain drain the global bucket, which is the attack itself.
+- The cache moves an entry to the end on a hit and evicts the least recently used
+  entry. The plan also asked never to evict hosts in `TAB_MCP_CLIENT_ID_HOSTS`: with the
+  list set, no other host is fetched or cached at all, so a stranger cannot evict a
+  listed host's document; there is nothing to add. If the list ever stops being an
+  allow-list (the owner's open question of finding 6), this needs revisiting.
+
+## DEC-090: One OIDC sign-in per connection request, charged like a guess
+
+From the audit (finding 3). Every Connect on an oidc site added a flow under a new
+`state` and never dropped the earlier ones; the CSRF token is not bound to the IP, so a
+signed-in user with an IPv6 /48 could post Connect for one pending request from many
+/64s and fill all 10 000 flows, blocking identity pairing relay-wide.
+
+- A pending request has at most one flow: a new Connect drops the earlier flow (its
+  callback then says the sign-in expired), and a request that ends (paired, cancelled,
+  expired, evicted) drops its flow through the new optional `PairingMethod.forget`.
+  Flows are therefore bounded by pending requests, which are capped per network,
+  per address and in total (DEC-088). A separate per-IP cap on flows would add nothing:
+  the IP that posts Connect is not the one that opened the request, and one flow per
+  request already ends the multiplication.
+- `check` calls `admit()` before it starts a sign-in, so Connect clicks share the guess
+  limits (10 per address and network, then 1 a minute; 30 per address): starting a
+  sign-in is the oidc method's "answer that could be right" (DEC-061). It is called
+  after the capacity check, so "Too many sign-ins are open" (now 429, like the other
+  refusals for load) charges nothing (review of PR 32).
+
+## DEC-091: A used refresh token is kept 24 hours; refreshes per grant are limited
+
+From the audit (finding 4). Reuse detection kept every used refresh token until its own
+expiry, 30 days: one grant refreshing at the `/token` rate added about 86 000 rows a day
+per network.
+
+- `TokenStore.markUsed(hash, now, keepUntil)` lowers `expiresAt` to `keepUntil` in the
+  same atomic step (never raises it); the relay passes now + 24 hours, and
+  `deleteExpired` drops the row after that. Inside the window a replay still revokes the
+  grant (the theft signal of DEC-029). After it the token is unknown, refused as
+  `invalid_grant` without revoking: a thief who waits a day with a token the client
+  already rotated gets nothing, but the owner is not warned. A thief who races the
+  client, the case detection is for, shows up within hours, not days.
+- It is a contract change, not a new method: a store written for 0.3 still type-checks
+  (fewer parameters), stays correct, and only keeps rows longer. The conformance suite
+  checks the cut and that it never extends. The Redis sketch in the guide was updated
+  and run against Redis 7.4.
+- Rows used before the upgrade: the SQLite store's schema version 4 cuts every used
+  refresh token to `used_at` + 24 hours once, when it opens an older file (review of
+  PR 32). A custom store that keeps them only loses the space until they expire; the
+  changelog says how to do the same.
+- The plan's optional cap is in: 20 refreshes per grant, then 1 a minute, answered
+  `429 temporarily_unavailable` before the token is marked used. A client refreshes
+  about once an hour of use, so this binds only a misbehaving or hostile client, and it
+  bounds the rows one grant can leave in the window to about 1 500.
+
+## DEC-092: Client names with another domain are refused
+
+From the audit (finding 5). DEC-065 refused only a web address in parentheses, so
+"Claude [claude.ai]", "Claude · claude.ai" or "Claude from claude.ai" passed and the
+heading read "Connect Claude · claude.ai from evil.example". Of the two fixes offered we
+refuse such names rather than move the host first: the host is already in the heading
+and title, and the look-alike name would still stand alone in the body text.
+
+- A name is refused if, after NFKC, without combining marks, with the ideographic full
+  stops (U+3002, U+FF0E, U+FF61) read as dots and in lower case, it contains a
+  domain-shaped token (labels separated by dots, ending in a label of 2-63 letters)
+  whose ASCII (punycode) form is not the verified host, a subdomain of it, or a parent
+  of it. Marks are dropped because "claude.a̲i" or a variation selector after the
+  `a` displays as "claude.ai" (review of PR 32); the parentheses check reads the same
+  text, and the shown name loses variation selectors too, so what is shown is what was
+  checked. The ASCII form lets "Bücher · bücher.example" name its own
+  `xn--bcher-kva.example`.
+- A domain spelled with words ("claude dot ai", "claude(dot)ai") passes. Normalising
+  words would refuse ordinary names; the verified host in the heading is the defence
+  there, as for any self-declared name. "Example AI from ai.example" from `ai.example`
+  passes; so do "Claude", "Claude Code", "ChatGPT", "Codex" and versions like "v1.2".
+- Risk: a real client whose name has a dotted product name ending in letters, such as
+  "Next.js helper" or "Socket.IO tools", is refused, because `js` and `io` look like
+  top-level domains and there is no list of real TLDs here. No known AI app is named
+  like that. If one appears, a short exception list is the fix, not a looser pattern.
+- The parentheses rule of DEC-065 stays as it is, also for the client's own domain.
 
 # Citations
 

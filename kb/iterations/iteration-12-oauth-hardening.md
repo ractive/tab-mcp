@@ -1,9 +1,9 @@
 ---
 type: iteration
 title: "Iteration 12: authorization server hardening"
-status: planned
+status: in-progress
 description: "Fixes from the 2026-10-24 security audit of the relay's OAuth, CIMD, OIDC and token store code: an owner locked out of /authorize, CIMD rate limits per registrable domain, OIDC flows per request, refresh-token retention, look-alike client names, small doc items."
-timestamp: 2026-10-24T21:00:00+02:00
+timestamp: 2026-10-24T23:00:00+02:00
 tags: [iteration, security, relay, oauth]
 ---
 # Iteration 12: authorization server hardening
@@ -74,14 +74,31 @@ suite and `docs/token-store.md` with it.
 
 ## Tasks
 
-- [ ] 1: pending requests only while pairing is open; evict oldest at the cap; test that the owner is not locked out
-- [ ] 2: CIMD limit per registrable domain, LRU cache, listed hosts never evicted, limiter order
-- [ ] 3: one OIDC flow per pending request; per-IP cap; `admit` used
-- [ ] 4: used refresh tokens kept only for the reuse window; store contract, conformance suite and `docs/token-store.md`
-- [ ] 5: domain-shaped names refused (or host first); tests
+- [x] 1: pending requests only while pairing is open; evict oldest at the cap; test that the owner is not locked out
+- [x] 2: CIMD limit per registrable domain, LRU cache, listed hosts never evicted, limiter order
+- [x] 3: one OIDC flow per pending request; per-IP cap; `admit` used
+- [x] 4: used refresh tokens kept only for the reuse window; store contract, conformance suite and `docs/token-store.md`
+- [x] 5: domain-shaped names refused (or host first); tests
 - [ ] 6: `TAB_MCP_CLIENT_ID_HOSTS` in "Before you go live"; decide on marking unlisted hosts
-- [ ] HSTS line in `docs/self-hosting.md`; no raw `client_id` in logs
+- [x] HSTS line in `docs/self-hosting.md`; no raw `client_id` in logs
 - [ ] Changelog, relay release, deploy
+
+## Progress
+
+Decisions DEC-088 (finding 1), DEC-089 (2), DEC-090 (3), DEC-091 (4) and DEC-092 (5).
+
+- 1: one network holds at most 5 requests per address; at 20 the oldest request of the
+  network holding the most is evicted, rather than the address's oldest (DEC-088).
+- 2: the last two labels, not the Public Suffix List (DEC-089). "Listed hosts never
+  evicted" needs no code while the list is an allow-list: no other host is cached.
+- 3: the per-IP cap comes from binding flows to pending requests, which are capped per
+  network (DEC-090).
+- 4: also a cap of 20 refreshes per grant, then 1 a minute (DEC-091).
+- 5: names with a foreign domain are refused; the host stays where it was (DEC-092).
+- 6: the documentation half is done (`docs/self-hosting.md`, "Before you go live", and
+  the threat model). Open for the owner: whether the pairing page marks hosts outside
+  `TAB_MCP_CLIENT_ID_HOSTS`.
+- Changelog: entries under "Unreleased"; the relay release and deploy are still to do.
 
 # Citations
 
