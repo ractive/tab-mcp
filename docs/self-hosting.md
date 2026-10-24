@@ -120,10 +120,11 @@ again after an upgrade.
   `tab-mcp.db-shm` next to it. Keep the three together, on a local disk: SQLite's locking
   does not work reliably on network file systems (NFS, SMB).
 - The file is small. It holds one row per token: each refresh adds an access and a
-  refresh token, and a used refresh token stays until it expires (30 days), so that its
-  reuse can be detected. An AI app in daily use refreshes about once an hour of use, so
-  it has a few hundred rows of a few hundred bytes each. That is an estimate, not a
-  measurement: on the order of 100 KiB per busy AI app, much less for occasional ones.
+  refresh token, and a used refresh token stays for 24 hours, so that its reuse can be
+  detected. An AI app in daily use refreshes about once an hour of use, so it has a few
+  dozen rows of a few hundred bytes each; the relay allows a connection 20 refreshes,
+  then 1 a minute. That is an estimate, not a measurement: on the order of 10 KiB per
+  busy AI app, much less for occasional ones.
   The smallest volume your platform offers is plenty.
 - It holds no usable tokens (only SHA-256 hashes), but it does list which AI apps are
   connected to which address. Keep it private (`0700` above).
@@ -237,7 +238,9 @@ kinds of traffic:
 or CDN and redirect `http:` to `https:`. The relay builds its addresses and OAuth issuer
 from `TAB_MCP_PUBLIC_URL`, not from the `Host` header, so a second hostname pointing at
 the same relay does not work for pairing. The hop from the proxy to the relay can be
-plain HTTP on a private network or the loopback interface.
+plain HTTP on a private network or the loopback interface. The relay sends no
+`Strict-Transport-Security` header; let the proxy or CDN that terminates TLS add it
+(for example `max-age=31536000`).
 
 ### WebSockets
 
@@ -548,6 +551,12 @@ Magic Containers with a pull zone):
 - `TAB_MCP_ALLOWED_ORIGINS` or `TAB_MCP_SITES` lists your pages, and nothing else. Read
   the [open-relay warning](configuration.md#open-relay) before you use `*`.
 - `TAB_MCP_PUBLIC_URL` is `https:` and matches what users see; `http:` redirects to it.
+- `TAB_MCP_CLIENT_ID_HOSTS` lists the hosts of the AI apps you expect, for example
+  `claude.ai` for Claude and Claude Code. Left empty, any HTTPS host counts as an AI app,
+  and the pairing page shows a host like `claude-connect.pages.dev` as plainly as
+  `claude.ai`. To find another app's host, connect it once and read `client` in the
+  relay's `oauth.paired` log line, or `host` in `oauth.client_refused` once the list is
+  set.
 - The relay's port is reachable only through the proxy or CDN, and
   `TAB_MCP_TRUST_PROXY` matches the proxy's header.
 - `/data` is a volume that survives recreating the container, writable by uid 65532.
