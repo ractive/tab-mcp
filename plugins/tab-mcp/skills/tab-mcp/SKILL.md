@@ -159,8 +159,10 @@ await mcp.registerTool({
 ```
 
 The page then asks before every call: a dialog names the AI app and shows the arguments,
-"Don't allow" has the focus, and "Allow" stays disabled for 750 ms. A refusal becomes an
-error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
+"Don't allow" has the focus, and "Allow" turns on only after the page has been visible and
+focused for 750 ms with the dialog open (leaving the page starts the wait again).
+Invisible and direction-changing characters in the arguments are shown as `\uXXXX`. A
+refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
 pass `onConfirm: (request) => boolean | Promise<boolean>` to `TabMcp`. `request` has
 `tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts. Without `onConfirm` and without a `document`,
 calls are declined.
