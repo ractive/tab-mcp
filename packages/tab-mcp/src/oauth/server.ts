@@ -469,7 +469,10 @@ export class AuthorizationServer {
 			if (error instanceof ClientMetadataError) {
 				this.#host.logger.info("oauth.client_refused", {
 					reason: error.reason,
-					host: hostOf(clientId).slice(0, 100),
+					// Not the text itself: it is anyone's choice.
+					host: URL.canParse(clientId)
+						? hostOf(clientId).slice(0, 100)
+						: "(not a URL)",
 				});
 				return this.#errorPage(400, error.message);
 			}

@@ -231,3 +231,23 @@ describe("4: a used refresh token is kept only for the reuse window", () => {
 		expect((await r.store.get(hashToken(token)))?.usedAt).toBeUndefined();
 	});
 });
+
+describe("small items", () => {
+	test("a client_id that is not a URL is not written to the log", async () => {
+		const { r, address } = await setup();
+		const junk = "evil-text-for-the-log";
+		const page = await browserAt(r, "198.51.100.7").open(
+			authorizeUrl(r.url, {
+				client_id: junk,
+				redirect_uri: REDIRECT,
+				code_challenge: pkce().challenge,
+				resource: address,
+			}),
+		);
+		expect(page.status).toBe(400);
+		const refused = r.logs.events("oauth.client_refused");
+		expect(refused).toHaveLength(1);
+		expect(refused[0]?.["host"]).toBe("(not a URL)");
+		expect(r.logs.lines.join("\n")).not.toContain(junk);
+	});
+});
