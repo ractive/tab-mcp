@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { TabMcp } from "../src/tab-mcp.ts";
-import { newTab } from "./helpers.ts";
+import { newTab, nextEvent } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
 let relay: StubRelay;
@@ -28,7 +28,7 @@ test("an answer to an assertion sent before signOut() is ignored", async () => {
 	expect(tab.signOut()).toBe(true);
 	await relay.next("identity.logout");
 	relay.send({ type: "identity.bound", round: sent["round"] }); // the answer to the old assertion
-	await Bun.sleep(50);
+	await relay.settled();
 	expect(tab.identity).toBe("none");
 });
 
@@ -49,7 +49,7 @@ test("only the answer to the newest assertion counts", async () => {
 		message: "old",
 		round: first["round"],
 	});
-	await Bun.sleep(50);
+	await relay.settled();
 	expect(tab.identity).toBe("pending");
 	relay.send({ type: "identity.bound", round: latest["round"] });
 	expect(await second).toBe(true);
@@ -70,7 +70,7 @@ test("refreshIdentity() gives up when the relay never answers", async () => {
 	// A late answer of a given-up round is dropped.
 	relay.send({ type: "identity.bound", round: first["round"] });
 	relay.send({ type: "identity.bound", round: second["round"] });
-	await Bun.sleep(50);
+	await relay.settled();
 	expect(tab.identity).toBe("none");
 });
 
@@ -81,7 +81,7 @@ test("after a lost answer, the next assertion still binds (review of PR #13)", a
 	});
 	await tab.connect({ resume: true });
 	await relay.next("identity"); // its answer is lost
-	await Bun.sleep(150);
+	if (tab.identity !== "none") await nextEvent(tab, "identitychange");
 	expect(tab.identity).toBe("none");
 	const again = tab.refreshIdentity();
 	const sent = await relay.next("identity");
@@ -99,6 +99,23 @@ test("an answer without the newest round never counts", async () => {
 	await tab.connect({ resume: true });
 	await relay.next("identity");
 	relay.send({ type: "identity.bound" });
-	await Bun.sleep(50);
+	await relay.settled();
 	expect(tab.identity).toBe("pending");
+});
+
+test("the timeout also covers an identityAssertion that never settles (iteration 13)", async () => {
+	tab = newTab(relay.url, {
+		identityAssertion: () => new Promise<string>(() => {}),
+		identityTimeoutMs: 100,
+	});
+	const gaveUp = new Promise<void>((resolve) =>
+		tab?.addEventListener("identitychange", (e) => {
+			if (e.detail.state === "none") resolve();
+		}),
+	);
+	await tab.connect({ resume: true });
+	expect(tab.identity).toBe("pending");
+	await gaveUp;
+	expect(tab.identity).toBe("none");
+	expect(relay.received.filter((m) => m.type === "identity")).toEqual([]);
 });

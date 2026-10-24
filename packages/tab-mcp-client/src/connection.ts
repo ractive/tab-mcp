@@ -14,6 +14,9 @@ import {
 } from "./protocol.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
+/** For the core: compiles the schemas once this chunk (and the validator) is loaded. */
+export { compileRegistry } from "./mcp.ts";
+
 /** How long `connect()` waits for the relay's `session`. */
 const CONNECT_TIMEOUT_MS = 15_000;
 

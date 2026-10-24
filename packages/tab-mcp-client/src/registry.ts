@@ -51,6 +51,7 @@ function resolvePointer(root: unknown, pointer: string): unknown {
  * What the validator (loaded only on `connect()`) would throw on later, found
  * now so that a bad schema fails registration: patterns that are not
  * regular expressions, and `$ref`s that do not resolve inside the schema.
+ * Without `$id`s; once the validator is loaded, it checks too (`setCompiler`).
  */
 function schemaProblem(root: unknown): string | undefined {
 	const anchors = new Set<string>();
@@ -153,9 +154,13 @@ export function validateTool(tool: Tool): RegisteredTool {
 	};
 }
 
+/** The validator's check of a schema: throws a `TypeError` naming the problem. */
+export type SchemaCompiler = (tool: RegisteredTool) => void;
+
 export class ToolRegistry {
 	readonly #tools = new Map<string, RegisteredTool>();
 	readonly #listeners = new Set<() => void>();
+	#compile: SchemaCompiler | undefined;
 
 	/**
 	 * Register a tool; throws `TypeError` for an invalid tool and an
@@ -171,17 +176,26 @@ export class ToolRegistry {
 				"InvalidStateError",
 			);
 		}
+		this.#compile?.(registered);
 		this.#tools.set(registered.name, registered);
-		signal?.addEventListener(
-			"abort",
-			() => {
-				if (this.#tools.get(registered.name) === registered) {
-					this.#tools.delete(registered.name);
-					this.#changed();
-				}
-			},
-			{ once: true },
-		);
+		signal?.addEventListener("abort", () => this.remove(registered), {
+			once: true,
+		});
+		this.#changed();
+	}
+
+	/**
+	 * The validator is loaded: from now on each schema is compiled when it is
+	 * registered, and a tool it refuses is refused (DEC-086).
+	 */
+	setCompiler(compile: SchemaCompiler): void {
+		this.#compile ??= compile;
+	}
+
+	/** Unregister this tool, if it still is. */
+	remove(tool: RegisteredTool): void {
+		if (this.#tools.get(tool.name) !== tool) return;
+		this.#tools.delete(tool.name);
 		this.#changed();
 	}
 

@@ -99,21 +99,49 @@ function newDialog(
 	return { dialog, heading };
 }
 
+/**
+ * Characters that are invisible or change the direction of the text around
+ * them: format characters (bidi controls and isolates, zero-width ones, tags),
+ * the other default-ignorable ones (fillers, variation selectors), private-use
+ * and unassigned code points, C1 controls, and line and paragraph separators.
+ */
+const INVISIBLE =
+	/[\p{Cf}\p{Default_Ignorable_Code_Point}\p{Co}\p{Cn}\u0080-\u009F\u2028\u2029]/gu;
+
+/** Each such character as `\uXXXX` (a pair for one beyond U+FFFF), as JSON would write it. */
+function visible(text: string): string {
+	return text.replace(INVISIBLE, (ch) => {
+		let escaped = "";
+		for (let i = 0; i < ch.length; i++)
+			escaped += `\\u${ch.charCodeAt(i).toString(16).toUpperCase().padStart(4, "0")}`;
+		return escaped;
+	});
+}
+
 function clientLabel(client: ToolCallClient | Grant["client"]): string {
-	const host = client.host || client.id;
+	const host = visible(client.host || client.id);
 	return client.name !== undefined && client.name !== ""
-		? `${client.name} (${host})`
+		? `${visible(client.name)} (${host})`
 		: host;
+}
+
+/** A name in a sentence, isolated so that it cannot reorder the words around it. */
+function name(doc: Document, text: string): HTMLElement {
+	const node = el(doc, "bdi", { text });
+	node.dir = "ltr";
+	return node;
 }
 
 /**
  * The arguments as text, in full: what the user approves must be visible.
- * (The relay caps a request at 1 MiB, so this stays bounded.) `undefined`
- * when they cannot be shown, and then "Allow" is not offered.
+ * (The relay caps a request at 1 MiB, so this stays bounded.) Invisible and
+ * direction characters are shown as escapes, so the text is still JSON for
+ * the same arguments; the tool gets them unchanged. `undefined` when they
+ * cannot be shown, and then "Allow" is not offered.
  */
 function showArguments(args: Record<string, unknown>): string | undefined {
 	try {
-		return JSON.stringify(args, null, 2);
+		return visible(JSON.stringify(args, null, 2));
 	} catch {
 		return undefined;
 	}
@@ -126,24 +154,34 @@ export const MIN_ALLOW_DELAY_MS = 500;
 /** The user's answer: "always" allows this tool for this AI app from now on. */
 export type ConfirmAnswer = "allow" | "always" | "deny";
 
+/** `allowDelayMs` as a usable delay: the default unless a number of ms, never below the floor. */
+function allowDelay(ms: number | undefined): number {
+	const value =
+		typeof ms === "number" && Number.isFinite(ms) && ms < 2 ** 31
+			? ms
+			: ALLOW_DELAY_MS;
+	return Math.max(MIN_ALLOW_DELAY_MS, value);
+}
+
 /**
  * Ask whether a consequential tool may run. "Allow" and "Always allow" stay
- * disabled for `allowDelayMs` (default 750, at least 500) after the dialog
- * opens, so a click meant for the page cannot approve. Everything else
- * (Don't allow, Escape, an aborted call) is "deny".
+ * disabled until the page has been visible and focused for `allowDelayMs`
+ * (default 750, at least 500) while the dialog is open, so a click meant for
+ * the page, or the click that brings the tab or window back, cannot approve.
+ * Leaving the page disables them again. Everything else (Don't allow,
+ * Escape, an aborted call) is "deny".
  */
 export function confirmDialog(
 	request: ConfirmRequest,
 	doc: Document,
 	options: { allowDelayMs?: number } = {},
 ): Promise<ConfirmAnswer> {
-	const delay = Math.max(
-		MIN_ALLOW_DELAY_MS,
-		options.allowDelayMs ?? ALLOW_DELAY_MS,
-	);
+	const delay = allowDelay(options.allowDelayMs);
 	if (request.signal.aborted) return Promise.resolve("deny");
 	const title = request.tool.title ?? request.tool.name;
-	const { dialog } = newDialog(doc, "tab-mcp-confirm", `Allow ${title}?`);
+	const { dialog, heading } = newDialog(doc, "tab-mcp-confirm", "");
+	heading.append("Allow ", name(doc, title), "?");
+	const client = clientLabel(request.client);
 	const deny = button(doc, "Don't allow", () => dialog.close("deny"));
 	const allow = button(doc, "Allow", () => {
 		if (!allow.disabled) dialog.close("allow");
@@ -163,10 +201,16 @@ export function confirmDialog(
 		" ",
 		always,
 	);
-	const alwaysNote = el(doc, "p", {
-		className: "tab-mcp-always-note",
-		text: `Always allow: ${title} runs without asking for ${clientLabel(request.client)} until you reload this page or disconnect it.`,
-	});
+	const alwaysNote = el(
+		doc,
+		"p",
+		{ className: "tab-mcp-always-note" },
+		"Always allow: ",
+		name(doc, title),
+		" runs without asking for ",
+		name(doc, client),
+		" until you reload this page or disconnect it.",
+	);
 	const shown = showArguments(request.arguments);
 	const args = el(doc, "pre", {
 		className: "tab-mcp-arguments",
@@ -178,14 +222,21 @@ export function confirmDialog(
 		always.hidden = true;
 		alwaysNote.hidden = true;
 	}
+	args.dir = "ltr";
 	args.style.setProperty("white-space", "pre-wrap");
 	args.style.setProperty("max-height", "12rem");
 	args.style.setProperty("overflow", "auto");
 	args.hidden = Object.keys(request.arguments).length === 0;
 	dialog.append(
-		el(doc, "p", {
-			text: `${clientLabel(request.client)} wants to run ${title}.`,
-		}),
+		el(
+			doc,
+			"p",
+			{},
+			name(doc, client),
+			" wants to run ",
+			name(doc, title),
+			".",
+		),
 		el(doc, "p", {
 			className: "tab-mcp-description",
 			text: request.tool.description,
@@ -195,14 +246,40 @@ export function confirmDialog(
 		alwaysNote,
 	);
 	doc.body.append(dialog);
+	const view = doc.defaultView;
 	return new Promise((resolve) => {
 		const onAbort = () => dialog.close("deny");
 		request.signal.addEventListener("abort", onAbort, { once: true });
 		let timer: ReturnType<typeof setTimeout> | undefined;
+		// The delay counts only while the user can see the page: tools are
+		// called while the user is in the AI app, so the dialog often opens in
+		// a background tab or window. Any change starts it again from zero (DEC-087).
+		const arm = (event?: Event) => {
+			clearTimeout(timer);
+			timer = undefined;
+			allow.disabled = true;
+			always.disabled = true;
+			if (
+				event?.type === "blur" ||
+				doc.visibilityState === "hidden" ||
+				!doc.hasFocus()
+			)
+				return;
+			timer = setTimeout(() => {
+				allow.disabled = false;
+				always.disabled = false;
+			}, delay);
+		};
+		doc.addEventListener("visibilitychange", arm);
+		view?.addEventListener("focus", arm);
+		view?.addEventListener("blur", arm);
 		dialog.addEventListener(
 			"close",
 			() => {
 				clearTimeout(timer);
+				doc.removeEventListener("visibilitychange", arm);
+				view?.removeEventListener("focus", arm);
+				view?.removeEventListener("blur", arm);
 				request.signal.removeEventListener("abort", onAbort);
 				const value = dialog.returnValue;
 				dialog.remove();
@@ -213,10 +290,7 @@ export function confirmDialog(
 		dialog.showModal();
 		deny.focus(); // the safe choice is the default
 		// Counted from when the dialog is shown, not from when it was built.
-		timer = setTimeout(() => {
-			allow.disabled = false;
-			always.disabled = false;
-		}, delay);
+		arm();
 	});
 }
 

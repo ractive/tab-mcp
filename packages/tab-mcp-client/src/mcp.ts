@@ -9,7 +9,12 @@
  * tests compare the two.
  */
 
-import { Validator } from "@cfworker/json-schema";
+import {
+	dereference,
+	type OutputUnit,
+	type Schema,
+	validate as validateSchema,
+} from "@cfworker/json-schema";
 import {
 	ANNOTATIONS_META_KEY,
 	type CallToolResult,
@@ -19,7 +24,7 @@ import {
 	toCallToolResult,
 } from "./mapping.ts";
 import type { GrantRef } from "./protocol.ts";
-import type { RegisteredTool } from "./registry.ts";
+import type { RegisteredTool, ToolRegistry } from "./registry.ts";
 import type {
 	ConfirmRequest,
 	ServerInfo,
@@ -63,6 +68,81 @@ export interface McpHandlerOptions {
 
 /** Tool call ids, unique in the page. */
 let lastCallId = 0;
+
+/** Checks arguments against a tool's input schema. */
+export type ArgumentValidator = (args: unknown) => {
+	valid: boolean;
+	errors: OutputUnit[];
+};
+
+const compiled = new WeakMap<RegisteredTool, ArgumentValidator>();
+
+/**
+ * The validator of a tool's input schema, built once per tool. Throws what
+ * the validator would throw at call time: a `$ref` that does not resolve
+ * (the validator resolves one only when an argument reaches it, against the
+ * base of the nearest `$id`), an `$id` that is not a URL, a duplicate one.
+ * `compileRegistry` makes the registry call it at registration (DEC-086).
+ */
+export function compileTool(tool: RegisteredTool): ArgumentValidator {
+	const known = compiled.get(tool);
+	if (known !== undefined) return known;
+	const schema = tool.inputSchema as Schema;
+	let lookup: Record<string, Schema | boolean>;
+	try {
+		lookup = dereference(schema);
+	} catch (error) {
+		// Only the first line: the validator appends the URIs it knows.
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(message.split("\n")[0]);
+	}
+	for (const node of Object.values(lookup)) {
+		if (typeof node !== "object" || node.$ref === undefined) continue;
+		const absolute = (node as { __absolute_ref__?: string }).__absolute_ref__;
+		if (lookup[absolute ?? node.$ref] === undefined)
+			throw new Error(`$ref ${JSON.stringify(node.$ref)} does not resolve`);
+	}
+	const validator: ArgumentValidator = (args) =>
+		validateSchema(args, schema, "2020-12", lookup, false);
+	compiled.set(tool, validator);
+	return validator;
+}
+
+function schemaError(name: string, error: unknown, suffix = ""): TypeError {
+	const message = error instanceof Error ? error.message : String(error);
+	return new TypeError(
+		`registerTool: the inputSchema of ${name}: ${message}${suffix}`,
+	);
+}
+
+/**
+ * The validator is loaded (on `connect()`): compile the schemas of the tools
+ * registered so far, before any AI app lists them, and from now on at
+ * registration, so that `registerTool` rejects a schema the validator cannot
+ * use. A tool registered before that it refuses is unregistered; the errors
+ * are for the page's `error` event.
+ */
+export function compileRegistry(registry: ToolRegistry): TypeError[] {
+	const refused: TypeError[] = [];
+	for (const tool of registry.list()) {
+		try {
+			compileTool(tool);
+		} catch (error) {
+			registry.remove(tool);
+			refused.push(
+				schemaError(tool.name, error, "; the tool was unregistered"),
+			);
+		}
+	}
+	registry.setCompiler((tool) => {
+		try {
+			compileTool(tool);
+		} catch (error) {
+			throw schemaError(tool.name, error);
+		}
+	});
+	return refused;
+}
 
 /** A deep copy for an event; the value itself when it cannot be cloned. */
 function copy<T>(value: T): T {
@@ -197,7 +277,6 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	const { tools, server } = options;
 	const serverInfo: Json = { name: server.name, version: server.version };
 	if (server.title !== undefined) serverInfo["title"] = server.title;
-	const validators = new WeakMap<RegisteredTool, Validator>();
 	const listeners = new Set<{
 		id: Id;
 		send(message: unknown): void;
@@ -219,12 +298,14 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	}
 
 	function validate(tool: RegisteredTool, args: Json): string | undefined {
-		let validator = validators.get(tool);
-		if (validator === undefined) {
-			validator = new Validator(tool.inputSchema as never, "2020-12", false);
-			validators.set(tool, validator);
+		let outcome: ReturnType<ArgumentValidator>;
+		try {
+			outcome = compileTool(tool)(args);
+		} catch (error) {
+			// Refused at registration through `TabMcp`; this is for any other registry.
+			const message = error instanceof Error ? error.message : String(error);
+			return `The input schema of tool ${tool.name} cannot be used: ${message}`;
 		}
-		const outcome = validator.validate(args);
 		if (outcome.valid) return undefined;
 		const detail = outcome.errors
 			.filter((e) => e.keyword !== "properties" && e.keyword !== "$ref")
@@ -247,19 +328,32 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		});
 	}
 
+	/**
+	 * A call's outcome: a JSON-RPC error (`invalid`) or a result. Tagged, so
+	 * that a result's own keys never decide which (a tool may return any).
+	 */
+	type RunOutcome =
+		| { kind: "invalid"; message: string }
+		| { kind: "result"; result: CallToolResult };
+
+	const invalidParams = (message: string): RunOutcome => ({
+		kind: "invalid",
+		message,
+	});
+
 	async function runTool(
 		params: Json,
 		signal: AbortSignal,
 		grant: GrantRef,
-	): Promise<CallToolResult | { invalid: string }> {
+	): Promise<RunOutcome> {
 		const name = params["name"];
 		if (typeof name !== "string")
-			return { invalid: "Invalid params: name must be a string" };
+			return invalidParams("Invalid params: name must be a string");
 		const tool = tools.get(name);
-		if (tool === undefined) return { invalid: `Tool ${name} not found` };
+		if (tool === undefined) return invalidParams(`Tool ${name} not found`);
 		const raw = params["arguments"] ?? {};
 		if (!isObject(raw))
-			return { invalid: "Invalid params: arguments must be an object" };
+			return invalidParams("Invalid params: arguments must be an object");
 		const client = options.client(grant);
 		// Copies: a listener cannot change what the tool gets or the AI app receives.
 		const call: ToolCallStart = {
@@ -271,16 +365,22 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		if (tool.title !== undefined) call.title = tool.title;
 		const started = Date.now();
 		options.observe?.start(call);
-		const [outcome, res] = await decideAndRun(tool, raw, signal, client);
-		options.observe?.end({
-			id: call.id,
-			tool: tool.name,
-			client: { ...client },
-			outcome,
-			result: copy(res),
-			durationMs: Date.now() - started,
-		});
-		return res;
+		// Every start has its end, also when something fails outside the tool.
+		let outcome: ToolCallOutcome = "error";
+		let res: CallToolResult = errorResult("Internal error");
+		try {
+			[outcome, res] = await decideAndRun(tool, raw, signal, client);
+		} finally {
+			options.observe?.end({
+				id: call.id,
+				tool: tool.name,
+				client: { ...client },
+				outcome,
+				result: copy(res),
+				durationMs: Date.now() - started,
+			});
+		}
+		return { kind: "result", result: res };
 	}
 
 	/** Validate, confirm and run one call. */
@@ -313,6 +413,10 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 				];
 		}
 		if (signal.aborted) return ["cancelled", errorResult("Cancelled")];
+		// Unregistered (or replaced) while the user was asked: not the tool
+		// the user allowed, or one the page still offers.
+		if (tools.get(tool.name) !== tool)
+			return ["error", errorResult("The tool is no longer available")];
 		let res: CallToolResult;
 		try {
 			res = toCallToolResult(await tool.execute(raw, { signal, client }));
@@ -357,13 +461,13 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 				runTool(params, signal, grant).then(
 					(outcome) =>
 						finish(
-							typeof outcome["invalid"] === "string"
+							outcome.kind === "invalid"
 								? {
 										jsonrpc: "2.0",
 										id,
-										error: { code: -32602, message: outcome["invalid"] },
+										error: { code: -32602, message: outcome.message },
 									}
-								: result(id, outcome as CallToolResult),
+								: result(id, outcome.result),
 						),
 					() =>
 						finish({

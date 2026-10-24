@@ -65,8 +65,9 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	console.log(
 		`core ${(coreGz / 1024).toFixed(1)} KB gzipped, connection ${(connection / 1024).toFixed(1)} KB gzipped`,
 	);
-	// 5.25 KB since the per-page secret key (DEC-083); 5 KB before.
-	expect(coreGz).toBeLessThanOrEqual(5.25 * 1024);
+	// 5.5 KB since the fixes of iteration 13 (DEC-086); 5.25 KB since the
+	// per-page secret key (DEC-083); 5 KB before.
+	expect(coreGz).toBeLessThanOrEqual(5.5 * 1024);
 	expect(connection).toBeLessThanOrEqual(100 * 1024);
 	for (const code of files.values()) {
 		expect(code).not.toMatch(/\bfrom\s*"node:|\bBun\./);

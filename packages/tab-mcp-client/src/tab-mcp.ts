@@ -57,6 +57,28 @@ function reconnectDelays(
 	return [...delays];
 }
 
+/** A delay option: `undefined`, or a whole wait `setTimeout` can keep (below 2^31 ms). */
+function delayOption(name: string, value: unknown): number | undefined {
+	if (value === undefined) return undefined;
+	if (
+		typeof value !== "number" ||
+		!Number.isFinite(value) ||
+		value < 0 ||
+		value >= 2 ** 31
+	) {
+		throw new TypeError(`TabMcp: ${name} must be a number of milliseconds`);
+	}
+	return value;
+}
+
+/** A grant as the page sees it: frozen, so a page cannot change what decides Always allow. */
+function frozenGrant(grant: Grant): Grant {
+	return Object.freeze({
+		...grant,
+		client: Object.freeze({ ...grant.client }),
+	});
+}
+
 /** What the relay accepts as `hello.app.name` (protocol: session). */
 function isAppName(value: unknown): value is string {
 	return (
@@ -149,7 +171,7 @@ export class TabMcp extends EventTarget {
 	readonly #identityTimeoutMs: number;
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
-	#grants: Grant[] = [];
+	#grants: readonly Grant[] = Object.freeze([]);
 	readonly #alwaysAllowed = new AlwaysAllowed();
 	#pairing = false;
 	#pairingCode: PairingCode | undefined;
@@ -164,6 +186,8 @@ export class TabMcp extends EventTarget {
 	#unwatch: (() => void) | undefined;
 	/** The page's `connect()` waits on the running reconnect attempt: its promise tells it. */
 	#pageWaits = false;
+	/** The open "Connect your AI app" dialog: one at a time. */
+	#connectDialog: { doc: Document; shown: Promise<void> } | undefined;
 
 	constructor(options: TabMcpOptions) {
 		super();
@@ -184,9 +208,13 @@ export class TabMcp extends EventTarget {
 		this.#server = { ...server };
 		this.#appName = appName;
 		this.#onConfirm = options.onConfirm;
-		this.#confirmDelayMs = options.confirmDelayMs;
+		this.#confirmDelayMs = delayOption(
+			"confirmDelayMs",
+			options.confirmDelayMs,
+		);
 		this.#identityAssertion = options.identityAssertion;
-		this.#identityTimeoutMs = options.identityTimeoutMs ?? 15_000;
+		this.#identityTimeoutMs =
+			delayOption("identityTimeoutMs", options.identityTimeoutMs) ?? 15_000;
 		this.#reconnectDelays = reconnectDelays(options.reconnect);
 		// One address per relay and page (server name); the default of 0.4 and
 		// older, per relay only, is moved over once (DEC-083).
@@ -243,7 +271,7 @@ export class TabMcp extends EventTarget {
 		return this.#session?.appName ?? this.#appName;
 	}
 
-	/** The AI apps connected to this address. */
+	/** The AI apps connected to this address (frozen; a new array when they change). */
 	get grants(): readonly Grant[] {
 		return this.#grants;
 	}
@@ -285,10 +313,18 @@ export class TabMcp extends EventTarget {
 		const round = ++this.#identityRound;
 		const connection = this.#connection;
 		this.#setIdentity("pending");
+		// No answer in time, from the hook or the relay (an old relay, a lost
+		// message, a hook that never settles): give up.
+		const timer = setTimeout(() => {
+			if (round !== this.#identityRound || this.#identity !== "pending") return;
+			this.#identityRound++; // a late answer is dropped
+			this.#setIdentity("none");
+		}, this.#identityTimeoutMs);
 		return new Promise<boolean>((resolve) => {
 			const settle = (event: TabMcpEventMap["identitychange"]) => {
 				if (event.detail.state === "pending") return;
 				this.removeEventListener("identitychange", settle);
+				clearTimeout(timer);
 				resolve(event.detail.state === "bound");
 			};
 			this.addEventListener("identitychange", settle);
@@ -311,17 +347,8 @@ export class TabMcp extends EventTarget {
 						}
 						if (
 							connection?.send({ type: "identity", assertion, round }) !== true
-						) {
+						)
 							this.#setIdentity("none");
-							return;
-						}
-						// No answer in time (an old relay, a lost message): give up.
-						setTimeout(() => {
-							if (round !== this.#identityRound || this.#identity !== "pending")
-								return;
-							this.#identityRound++; // a late answer is dropped
-							this.#setIdentity("none");
-						}, this.#identityTimeoutMs);
 					},
 					(error: unknown) => {
 						if (round !== this.#identityRound) return;
@@ -413,7 +440,10 @@ export class TabMcp extends EventTarget {
 	}
 
 	async #open(generation: number): Promise<SessionInfo> {
-		const { openConnection } = await import("./connection.ts");
+		const { openConnection, compileRegistry } = await import("./connection.ts");
+		// The validator is loaded: it checks the schemas from now on (DEC-086).
+		for (const error of compileRegistry(this.#registry))
+			this.#emit("error", { error });
 		if (generation !== this.#generation) {
 			throw new DOMException("The connection was cancelled", "AbortError");
 		}
@@ -580,20 +610,37 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Open the default "Connect your AI app" dialog; connects first if needed
-	 * (call it from a click). Resolves when the dialog closes. Pages with their
+	 * (call it from a click). Resolves when the dialog closes. One dialog at
+	 * a time (they would share one pairing): while it is open, a call for the
+	 * same document opens no second one and resolves with it, and a call for
+	 * another document rejects with an `InvalidStateError`. Pages with their
 	 * own UI use the events and methods instead.
 	 */
-	async showConnectDialog(
-		options: { document?: Document } = {},
-	): Promise<void> {
+	showConnectDialog(options: { document?: Document } = {}): Promise<void> {
+		const doc = options.document ?? globalThis.document;
+		const open = this.#connectDialog;
+		if (open !== undefined) {
+			return open.doc === doc
+				? open.shown
+				: Promise.reject(
+						new DOMException(
+							"showConnectDialog: the dialog is already open in another document",
+							"InvalidStateError",
+						),
+					);
+		}
+		const shown = this.#showConnectDialog(doc).finally(() => {
+			if (this.#connectDialog?.shown === shown) this.#connectDialog = undefined;
+		});
+		this.#connectDialog = { doc, shown };
+		return shown;
+	}
+
+	async #showConnectDialog(doc: Document): Promise<void> {
 		const connecting = this.connect();
 		connecting.catch(() => {}); // the dialog shows the error
 		const { showConnectDialog } = await import("./ui.ts");
-		await showConnectDialog(
-			this,
-			connecting,
-			options.document ?? globalThis.document,
-		);
+		await showConnectDialog(this, connecting, doc);
 	}
 
 	override addEventListener<K extends keyof TabMcpEventMap>(
@@ -661,10 +708,10 @@ export class TabMcp extends EventTarget {
 		this.#emit("pairingcode", code ?? null);
 	}
 
-	#setGrants(grants: Grant[]): void {
-		this.#grants = grants;
+	#setGrants(grants: readonly Grant[]): void {
+		this.#grants = Object.freeze(grants.map(frozenGrant));
 		this.#alwaysAllowed.keepGrants(grants.map((g) => g.grantId));
-		this.#emit("grantschange", { grants });
+		this.#emit("grantschange", { grants: this.#grants });
 	}
 
 	#confirm(request: ConfirmRequest): Promise<boolean> {

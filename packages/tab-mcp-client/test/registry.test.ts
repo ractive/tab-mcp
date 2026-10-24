@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { compileRegistry } from "../src/mcp.ts";
 import { ToolRegistry } from "../src/registry.ts";
 import { TabMcp } from "../src/tab-mcp.ts";
 import type { Tool } from "../src/types.ts";
@@ -99,6 +100,53 @@ describe("ToolRegistry (WebMCP rules)", () => {
 			}),
 		);
 		expect(r.get("good")).toBeDefined();
+	});
+
+	test("once the validator is loaded, it checks the schemas too, also of tools registered before (iteration 13)", () => {
+		const r = new ToolRegistry();
+		// The core's own check passes these; the nested $id moves the $ref's base.
+		const nested = {
+			type: "object",
+			properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } },
+			$defs: { s: { type: "string" } },
+		};
+		const duplicate = {
+			type: "object",
+			$defs: {
+				a: { $id: "https://z.example/a" },
+				b: { $id: "https://z.example/a" },
+			},
+		};
+		r.register(tool({ name: "early_bad", inputSchema: nested }));
+		r.register(tool({ name: "early_good" }));
+		let changes = 0;
+		r.onChange(() => changes++);
+		const refused = compileRegistry(r);
+		expect(refused.map((e) => [e.name, e.message])).toEqual([
+			[
+				"TypeError",
+				'registerTool: the inputSchema of early_bad: $ref "#/$defs/s" does not resolve; the tool was unregistered',
+			],
+		]);
+		expect(r.list().map((t) => t.name)).toEqual(["early_good"]);
+		expect(changes).toBe(1);
+		expect(() =>
+			r.register(tool({ name: "late_bad", inputSchema: nested })),
+		).toThrow(
+			new TypeError(
+				'registerTool: the inputSchema of late_bad: $ref "#/$defs/s" does not resolve',
+			),
+		);
+		expect(() =>
+			r.register(tool({ name: "late_dup", inputSchema: duplicate })),
+		).toThrow(
+			new TypeError(
+				'registerTool: the inputSchema of late_dup: Duplicate schema URI "https://z.example/a".',
+			),
+		);
+		r.register(tool({ name: "late_good" }));
+		expect(r.list().map((t) => t.name)).toEqual(["early_good", "late_good"]);
+		expect(compileRegistry(r)).toEqual([]);
 	});
 
 	test("keeps a copy of the schema", () => {
