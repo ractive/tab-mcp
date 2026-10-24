@@ -1294,7 +1294,7 @@ choices the plan left open:
 Left for the owner: session-slot protection (finding 10) and the address id in the `/tab`
 URL (architecture F9).
 
-## DEC-087: Input schemas are compiled by the validator once it is loaded
+## DEC-086: Input schemas are compiled by the validator once it is loaded
 
 2026-10-24, iteration 13 (finding 5 of the browser library review). The core checks a
 schema at registration with its own walk (`schemaProblem`: patterns, `$ref`s by pointer or
@@ -1322,10 +1322,10 @@ handler still catches a compile failure (for a registry used without `TabMcp`) a
 outside the tool.
 
 The fixes of iteration 13 (this one, the frozen `grants`, one connect dialog, the delay
-options, the identity timeout) take the core from 5.1 to 5.3 KB gzipped; the budget in
+options, the identity timeout) take the core from 5.1 to 5.4 KB gzipped; the budget in
 `build.test.ts` goes from 5.25 to 5.5 KB.
 
-## DEC-088: The confirmation counts its delay only while the user sees the page
+## DEC-087: The confirmation counts its delay only while the user sees the page
 
 2026-10-24, iteration 13 (findings 1 and 2 of the browser library review). Tools are
 called while the user is in the AI app, so the confirmation of a consequential tool

@@ -187,7 +187,7 @@ export class TabMcp extends EventTarget {
 	/** The page's `connect()` waits on the running reconnect attempt: its promise tells it. */
 	#pageWaits = false;
 	/** The open "Connect your AI app" dialog: one at a time. */
-	#connectDialog: Promise<void> | undefined;
+	#connectDialog: { doc: Document; shown: Promise<void> } | undefined;
 
 	constructor(options: TabMcpOptions) {
 		super();
@@ -441,7 +441,7 @@ export class TabMcp extends EventTarget {
 
 	async #open(generation: number): Promise<SessionInfo> {
 		const { openConnection, compileRegistry } = await import("./connection.ts");
-		// The validator is loaded: it checks the schemas from now on (DEC-087).
+		// The validator is loaded: it checks the schemas from now on (DEC-086).
 		for (const error of compileRegistry(this.#registry))
 			this.#emit("error", { error });
 		if (generation !== this.#generation) {
@@ -610,28 +610,37 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Open the default "Connect your AI app" dialog; connects first if needed
-	 * (call it from a click). Resolves when the dialog closes. While it is
-	 * open, another call opens no second one and resolves with it. Pages with
-	 * their own UI use the events and methods instead.
+	 * (call it from a click). Resolves when the dialog closes. One dialog at
+	 * a time (they would share one pairing): while it is open, a call for the
+	 * same document opens no second one and resolves with it, and a call for
+	 * another document rejects with an `InvalidStateError`. Pages with their
+	 * own UI use the events and methods instead.
 	 */
 	showConnectDialog(options: { document?: Document } = {}): Promise<void> {
-		if (this.#connectDialog !== undefined) return this.#connectDialog;
-		const shown = this.#showConnectDialog(options).finally(() => {
-			if (this.#connectDialog === shown) this.#connectDialog = undefined;
+		const doc = options.document ?? globalThis.document;
+		const open = this.#connectDialog;
+		if (open !== undefined) {
+			return open.doc === doc
+				? open.shown
+				: Promise.reject(
+						new DOMException(
+							"showConnectDialog: the dialog is already open in another document",
+							"InvalidStateError",
+						),
+					);
+		}
+		const shown = this.#showConnectDialog(doc).finally(() => {
+			if (this.#connectDialog?.shown === shown) this.#connectDialog = undefined;
 		});
-		this.#connectDialog = shown;
+		this.#connectDialog = { doc, shown };
 		return shown;
 	}
 
-	async #showConnectDialog(options: { document?: Document }): Promise<void> {
+	async #showConnectDialog(doc: Document): Promise<void> {
 		const connecting = this.connect();
 		connecting.catch(() => {}); // the dialog shows the error
 		const { showConnectDialog } = await import("./ui.ts");
-		await showConnectDialog(
-			this,
-			connecting,
-			options.document ?? globalThis.document,
-		);
+		await showConnectDialog(this, connecting, doc);
 	}
 
 	override addEventListener<K extends keyof TabMcpEventMap>(

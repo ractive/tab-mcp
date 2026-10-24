@@ -142,4 +142,32 @@ describe("with a relay", () => {
 			await window.happyDOM.close();
 		}
 	});
+
+	test("showConnectDialog() for another document while one is open rejects (review of PR #31)", async () => {
+		const window = new Window({ url: "https://page.example/" });
+		const other = new Window({ url: "https://page.example/frame" });
+		const doc = window.document as unknown as Document;
+		const otherDoc = other.document as unknown as Document;
+		try {
+			const first = tab.showConnectDialog({ document: doc });
+			const elsewhere = tab.showConnectDialog({ document: otherDoc });
+			const error = await elsewhere.then(
+				() => undefined,
+				(e: unknown) => e as DOMException,
+			);
+			expect(error?.name).toBe("InvalidStateError");
+			expect(error?.message).toMatch(/already open in another document/);
+			await relay.next("pairing.start");
+			await Bun.sleep(0);
+			expect(doc.querySelectorAll("dialog").length).toBe(1);
+			expect(otherDoc.querySelectorAll("dialog").length).toBe(0);
+			// The same document, given or as the default, reuses the open one.
+			const same = tab.showConnectDialog({ document: doc });
+			(doc.querySelector("dialog") as HTMLDialogElement).close();
+			await Promise.all([first, same]);
+		} finally {
+			await window.happyDOM.close();
+			await other.happyDOM.close();
+		}
+	});
 });

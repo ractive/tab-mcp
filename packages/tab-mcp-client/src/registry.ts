@@ -186,7 +186,7 @@ export class ToolRegistry {
 
 	/**
 	 * The validator is loaded: from now on each schema is compiled when it is
-	 * registered, and a tool it refuses is refused (DEC-087).
+	 * registered, and a tool it refuses is refused (DEC-086).
 	 */
 	setCompiler(compile: SchemaCompiler): void {
 		this.#compile ??= compile;

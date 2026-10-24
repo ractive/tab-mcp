@@ -97,7 +97,7 @@ same time. Releases as a client patch or minor version.
 ## Progress
 
 2026-10-24: findings 1, 2 and 4 to 10 and the code-quality items fixed, with tests
-(DEC-087, DEC-088). Open: finding 3 (the owner's decision), the release and the vendored
+(DEC-086, DEC-087). Open: finding 3 (the owner's decision), the release and the vendored
 copies. Not done: the optional state type for `#connecting`, `#reconnecting`,
 `#pageWaits` and `#generation` (not low risk enough for this change). The sleeps named
 above are gone (a ping as a barrier, a fake clock, or no wait where the scheduling is

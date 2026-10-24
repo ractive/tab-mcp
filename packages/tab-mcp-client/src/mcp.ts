@@ -82,7 +82,7 @@ const compiled = new WeakMap<RegisteredTool, ArgumentValidator>();
  * the validator would throw at call time: a `$ref` that does not resolve
  * (the validator resolves one only when an argument reaches it, against the
  * base of the nearest `$id`), an `$id` that is not a URL, a duplicate one.
- * `compileRegistry` makes the registry call it at registration (DEC-087).
+ * `compileRegistry` makes the registry call it at registration (DEC-086).
  */
 export function compileTool(tool: RegisteredTool): ArgumentValidator {
 	const known = compiled.get(tool);

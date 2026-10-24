@@ -145,7 +145,8 @@ Until an app connects, the dialog offers no prominent button under the code: onl
 "Close" at the bottom (and Escape). Closing it stops the code (`stopPairing()`); the page
 stays connected and the address stays the same, so calling `showConnectDialog()` again
 shows the same address with a new code. While the dialog is open, calling it again (a
-double click) opens no second one; the call resolves when that one closes.
+double click) opens no second one; the call resolves when that one closes. A call for another
+`document` (an iframe's, say) while it is open rejects with an `InvalidStateError`.
 
 The address stays the same across visits: the library keeps a secret per relay and page
 in `localStorage`, under `tab-mcp:secret:<relay origin>:<server.name>`, so two pages of one

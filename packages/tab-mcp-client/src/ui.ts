@@ -253,7 +253,7 @@ export function confirmDialog(
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		// The delay counts only while the user can see the page: tools are
 		// called while the user is in the AI app, so the dialog often opens in
-		// a background tab or window. Any change starts it again from zero (DEC-088).
+		// a background tab or window. Any change starts it again from zero (DEC-087).
 		const arm = (event?: Event) => {
 			clearTimeout(timer);
 			timer = undefined;
