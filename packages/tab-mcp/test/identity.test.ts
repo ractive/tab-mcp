@@ -816,4 +816,53 @@ describe("identity binding: -31009 (iteration 11, finding 3)", () => {
 			"jwks_unavailable",
 		);
 	});
+
+	test("after a transient refusal a retry is told to try again, not to sign in (review of PR #30)", async () => {
+		const cache = new JwksCache(provider.relayConfig().assertionJwksUrl);
+		let failing = false;
+		const keys: KeySource = {
+			keys: async (kid) => {
+				if (failing) throw new Error("JWKS unreachable");
+				return cache.keys(kid);
+			},
+		};
+		const ctx = await silentSetup({ pageWaitMs: 200 }, { assertionKeys: keys });
+		const token = await pairedToken(ctx);
+		failing = true;
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address),
+		});
+		await ctx.tab.next("error");
+		const res = await mcpPost(ctx.address, add(), { token });
+		expect(res.status).toBe(503);
+		expect(res.headers.get("retry-after")).not.toBeNull();
+		const text = await res.text();
+		expect(text).toContain('"code":-31009');
+		expect(text).not.toContain("sign in");
+		// Fail closed: nothing reached the page for the unverified user.
+		expect(ctx.tab.received.some((m) => m.type === "http.request")).toBe(false);
+		// Once the keys are back, the page binds again and requests go through.
+		failing = false;
+		await signInTab(ctx.tab, "alice");
+		void mcpPost(ctx.address, add(), { token });
+		await ctx.tab.next("http.request");
+	});
+
+	test("a full relay-wide replay cache is transient: 503, not 401 (review of PR #30)", async () => {
+		const ctx = await silentSetup({}, { maxSeenAssertions: 1 });
+		const token = await pairedToken(ctx);
+		const pending = mcpPost(ctx.address, add(), { token });
+		await ctx.tab.next("http.request");
+		ctx.tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", ctx.address),
+		});
+		const res = await pending;
+		expect(res.status).toBe(503);
+		expect(res.headers.get("retry-after")).not.toBeNull();
+		expect(ctx.r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
+			"relay_busy",
+		);
+	});
 });

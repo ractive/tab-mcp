@@ -54,10 +54,17 @@ export class TabAssertionVerifier {
 	/** Entries in `#seen` per person. */
 	readonly #perPerson = new Map<string, number>();
 	#sweptAt = Number.NEGATIVE_INFINITY;
+	readonly #maxSeen: number;
 
-	constructor(oidc: OidcConfig, keys?: KeySource) {
+	/** `maxSeen` replaces `MAX_SEEN_JTI` (tests only). */
+	constructor(
+		oidc: OidcConfig,
+		keys?: KeySource,
+		maxSeen: number = MAX_SEEN_JTI,
+	) {
 		this.#oidc = oidc;
 		this.#keys = keys ?? new JwksCache(oidc.assertionJwksUrl);
+		this.#maxSeen = maxSeen;
 	}
 
 	/**
@@ -118,8 +125,15 @@ export class TabAssertionVerifier {
 			throw new JwtError("replayed", "the assertion was already used");
 		}
 		const mine = this.#perPerson.get(key) ?? 0;
-		if (mine >= MAX_JTI_PER_PERSON || this.#seen.size >= MAX_SEEN_JTI) {
+		if (mine >= MAX_JTI_PER_PERSON) {
 			throw new JwtError("busy", "too many assertions at once");
+		}
+		// Full for everyone: says nothing about this person (a transient refusal).
+		if (this.#seen.size >= this.#maxSeen) {
+			throw new JwtError(
+				"relay_busy",
+				"the relay is checking too many assertions; try again shortly",
+			);
 		}
 		this.#seen.set(seenKey, exp + CLOCK_LEEWAY_MS);
 		this.#perPerson.set(key, mine + 1);
@@ -132,7 +146,7 @@ export class TabAssertionVerifier {
 	 * second, and always when it is full.
 	 */
 	#sweep(now: number): void {
-		if (now - this.#sweptAt < 1000 && this.#seen.size < MAX_SEEN_JTI) return;
+		if (now - this.#sweptAt < 1000 && this.#seen.size < this.#maxSeen) return;
 		this.#sweptAt = now;
 		for (const [seenKey, until] of this.#seen) {
 			if (until > now) continue;

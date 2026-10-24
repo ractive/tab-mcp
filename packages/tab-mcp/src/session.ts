@@ -124,6 +124,11 @@ export class TabSession {
 	 * (DEC-077); `undefined` while nobody is signed in.
 	 */
 	identity: string | undefined;
+	/**
+	 * The last assertion could not be checked (keys or store unavailable): while
+	 * nobody is bound, AI apps are told to try again rather than to sign in.
+	 */
+	identityUnchecked = false;
 	readonly pending: Map<string, Exchange> = new Map();
 	/** The grant of each pending listen stream (a cap per grant). */
 	readonly #listenGrants = new Map<string, string>();

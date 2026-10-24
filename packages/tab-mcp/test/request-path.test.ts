@@ -328,6 +328,20 @@ describe("5: during shutdown AI apps are told the relay restarts", () => {
 		expect(await res.text()).toContain("-31010");
 		await stopping;
 	});
+
+	test("a notification in flight when the relay stops gets 503 with -31010 and Retry-After (review of PR #30)", async () => {
+		const r = relay();
+		const { t, address, token } = await connected(r, () => {}); // never answers
+		const { id: _id, ...notification } = rpc(1, "notifications/x");
+		const pending = mcpPost(address, notification, { token });
+		await t.next("http.request");
+		const stopping = r.relay.stop();
+		const res = await pending;
+		expect(res.status).toBe(503);
+		expect(res.headers.get("retry-after")).not.toBeNull();
+		expect(await res.text()).toContain('"code":-31010');
+		await stopping;
+	});
 });
 
 describe("6: one AI app cannot hold every slot of a page with listen streams", () => {

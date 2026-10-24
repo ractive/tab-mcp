@@ -30,10 +30,21 @@ export type CancelReason = "client_closed" | "timeout" | "error";
 /**
  * What to do when the page goes away mid-request (DEC-074): send the request
  * to the page again once it is back (only while nothing was sent to the AI
- * app), or answer with this JSON-RPC message at HTTP 200 (`undefined` for a
- * notification: then 503).
+ * app), answer with this JSON-RPC message at HTTP 200, or fail with this
+ * error (no body and no error: 503, `-31003`).
  */
-export type PageGoneReply = { retry: true } | { retry: false; body?: string };
+export type PageGoneReply =
+	| { retry: true }
+	| { retry: false; body?: string }
+	| {
+			retry: false;
+			error: {
+				status: number;
+				code: number;
+				message: string;
+				headers: Record<string, string>;
+			};
+	  };
 
 export interface ExchangeOptions {
 	id: string;
@@ -271,6 +282,11 @@ export class Exchange {
 		if (reply?.retry === true && waiting) {
 			clearTimeout(this.#startTimer);
 			this.#finish("page_gone_retry");
+			return;
+		}
+		if (reply !== undefined && "error" in reply) {
+			const e = reply.error;
+			this.fail(e.status, e.code, e.message, false, e.headers);
 			return;
 		}
 		const body = reply?.retry === false ? reply.body : undefined;

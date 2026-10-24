@@ -214,7 +214,7 @@ see [When the page is not open](#when-the-page-is-not-open).
 | `-31007` | 502 | The page sent an invalid response (malformed message, a header value that is not an RFC 9110 field value, a body with status 204, 205 or 304). |
 | `-31008` | 503 | The token store is unavailable. Sent with `Retry-After`, so clients keep their tokens. |
 | `-31009` | 401 | The page's user signed out or changed while the request was in flight, or the page's new assertion was refused (identity binding). Sent with `WWW-Authenticate` (`error="invalid_token"`). |
-| `-31009` | 503 | The same, when the relay could not check the page's assertion (signing keys or token store unavailable). Sent with `Retry-After`, so clients keep their tokens. |
+| `-31009` | 503 | The same, when the relay could not check the page's assertion (signing keys or token store unavailable, or its replay cache full). New requests get this answer too, after the usual wait for the page, until an assertion is checked; nothing reaches the page meanwhile. Sent with `Retry-After`, so clients keep their tokens. |
 | `-31010` | 200 | The relay is restarting (see [When the page is not open](#when-the-page-is-not-open)). |
 
 The relay notices that an AI app closed a streamed response when it next writes to it,

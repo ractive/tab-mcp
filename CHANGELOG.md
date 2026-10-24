@@ -158,15 +158,16 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   idle timeout (`httpIdleTimeoutS`, 30 s) when a request ends, however it ends.
 - `-31009` (the page's user signed out or changed mid-request) now comes with
   `WWW-Authenticate`, as a 401 must. When the relay could not check the page's sign-in
-  (signing keys or token store unavailable), the answer is 503 with `Retry-After`
-  instead, so AI apps keep their tokens.
+  (signing keys or token store unavailable, or its replay cache full), the answer is 503
+  with `Retry-After` instead, so AI apps keep their tokens, and new requests get the same
+  answer until the page's next assertion is checked, rather than "ask the user to sign in".
 - Requests waiting for a page are capped by the page's own site limit
   (`maxConcurrentRequests`), as far as the relay has seen the page, instead of the
   instance's. Before, more could wait than the page could take, and the rest got 429
   when it came.
 - While the relay shuts down, AI apps are told "The relay is restarting. Try again in a
-  few seconds." (code `-31010`; a notification gets 503 with `Retry-After`) instead of
-  being asked to open the page.
+  few seconds." (code `-31010`; a notification, also one already sent to the page, gets 503
+  with `Retry-After`) instead of being asked to open the page.
 - Store errors are logged with the error's name only (`error`), never its message, which
   a custom store may fill with token hashes or a connection string.
 - A page message over the site's `maxMessageBytes` is refused by its length before it is

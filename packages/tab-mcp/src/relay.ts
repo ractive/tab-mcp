@@ -74,8 +74,13 @@ const FRAME_HEADROOM = 4;
 const TRANSIENT_REFUSALS = new Set([
 	"jwks_unavailable",
 	"store_unavailable",
+	"relay_busy",
 	"error",
 ]);
+
+/** The text for requests that cannot be checked against the page's user. */
+const UNCHECKED_TEXT =
+	"The relay cannot check the page's user right now. Try again shortly.";
 
 /** `Retry-After` (seconds) for answers that ask an AI app to try again soon. */
 const RETRY_AFTER_S = "5";
@@ -131,6 +136,8 @@ export interface RelayTestHooks extends AuthorizationTestMode {
 	pairingCodeTtlMs?: number;
 	/** Keys for tab assertions instead of fetching the JWKS URL. */
 	assertionKeys?: KeySource;
+	/** A smaller relay-wide replay cache for tab assertions. */
+	maxSeenAssertions?: number;
 }
 
 interface Body {
@@ -249,7 +256,11 @@ function startRelay(
 	const assertions =
 		config.oidc === undefined
 			? undefined
-			: new TabAssertionVerifier(config.oidc, hooks?.assertionKeys);
+			: new TabAssertionVerifier(
+					config.oidc,
+					hooks?.assertionKeys,
+					hooks?.maxSeenAssertions,
+				);
 
 	const corsHeaders: Record<string, string> = config.cors
 		? {
@@ -335,15 +346,13 @@ function startRelay(
 				// Fail closed: a refused assertion also ends an earlier binding,
 				// and the requests made under it. When the relay could not check
 				// (keys or store unavailable), the AI app is told to try again,
-				// not to sign in again.
+				// not to sign in again, until an assertion is checked.
+				const transient = TRANSIENT_REFUSALS.has(reason);
+				session.identityUnchecked = transient;
 				if (session.identity !== undefined) {
 					session.identity = undefined;
-					if (TRANSIENT_REFUSALS.has(reason)) {
-						failPending(
-							session,
-							"The relay cannot check the page's user right now. Try again shortly.",
-							true,
-						);
+					if (transient) {
+						failPending(session, UNCHECKED_TEXT, true);
 					} else {
 						failPending(session, "The page's user is no longer signed in.");
 					}
@@ -397,6 +406,7 @@ function startRelay(
 			}
 			if (!session.ready) return;
 			session.identity = key;
+			session.identityUnchecked = false;
 			answer({ type: "identity.bound", ...echo });
 			logger.info("identity.bound", {
 				address: shortAddress(addressId),
@@ -419,6 +429,7 @@ function startRelay(
 			// First the binding and the requests in flight: they end even if the
 			// store fails below.
 			session.identity = undefined;
+			session.identityUnchecked = false;
 			failPending(session, "The page's user signed out.");
 			try {
 				const grants = await store.listGrants(addressId, Date.now());
@@ -528,7 +539,7 @@ function startRelay(
 	): Promise<TabSession | undefined | "aborted"> {
 		const now = readySession(addressId, usable);
 		if (now !== undefined) return Promise.resolve(now);
-		if (waitMs === 0 || stopping !== undefined) {
+		if (waitMs === 0 || closing) {
 			return Promise.resolve(undefined);
 		}
 		const set = waiters.get(addressId) ?? new Set();
@@ -1063,12 +1074,22 @@ function startRelay(
 						body.value,
 						rpcId,
 						session.appName,
-						stopping === undefined ? "gone" : "restarting_gone",
+						closing ? "restarting_gone" : "gone",
 						RELAY_INFO,
 					);
-					return answer === undefined
+					if (answer !== undefined) return { retry: false, body: answer };
+					// A notification: an HTTP error, which says "restarting" too.
+					return !closing
 						? { retry: false }
-						: { retry: false, body: answer };
+						: {
+								retry: false,
+								error: {
+									status: 503,
+									code: RelayErrorCode.restarting,
+									message: "The relay is restarting.",
+									headers: { "retry-after": RETRY_AFTER_S },
+								},
+							};
 				},
 			});
 			const onAbort = () => exchange.clientClosed();
@@ -1097,14 +1118,26 @@ function startRelay(
 	): Response {
 		// Open but not signed in (identity binding) reads differently.
 		const open = sessions.get(addressId);
-		const phase: NotOpenPhase =
-			stopping !== undefined
-				? "restarting"
-				: open?.ready === true &&
-						open.identity === undefined &&
-						open.site.pairing === "oidc"
-					? "signed_out"
-					: "not_open";
+		if (
+			!closing &&
+			open?.ready === true &&
+			open.identity === undefined &&
+			open.identityUnchecked
+		) {
+			// The relay could not check the page's user: not the user's errand.
+			logDone(503, method, { reason: "identity_unchecked" });
+			return rpcError(503, rpcId, RelayErrorCode.signedOut, UNCHECKED_TEXT, {
+				...corsHeaders,
+				"retry-after": RETRY_AFTER_S,
+			});
+		}
+		const phase: NotOpenPhase = closing
+			? "restarting"
+			: open?.ready === true &&
+					open.identity === undefined &&
+					open.site.pairing === "oidc"
+				? "signed_out"
+				: "not_open";
 		const reason = phase === "restarting" ? "restarting" : "page_not_open";
 		const answer = notOpenAnswer(
 			value,
@@ -1274,6 +1307,8 @@ function startRelay(
 	});
 
 	let stopping: Promise<void> | undefined;
+	/** Set at once by `stop()`, before the sessions end (their requests read it). */
+	let closing = false;
 	const port = server.port ?? config.port;
 	if (publicUrl === "") publicUrl = `http://localhost:${port}`;
 
@@ -1324,6 +1359,7 @@ function startRelay(
 			return allSessions.size;
 		},
 		stop() {
+			closing = true;
 			stopping ??= (async () => {
 				clearInterval(sweep);
 				for (const set of [...waiters.values()]) {
