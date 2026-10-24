@@ -1,5 +1,5 @@
 /** The default dialogs in a DOM (happy-dom, passed in; no globals touched). */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { TabMcp } from "../src/index.ts";
 import type { ConfirmRequest, Grant, SessionInfo } from "../src/types.ts";
@@ -175,6 +175,213 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		expect(Date.now() - started).toBeGreaterThanOrEqual(490);
 		allow.click();
 		expect(await answer).toBe("allow");
+	});
+});
+
+describe("confirmDialog: only while the user sees the page (iteration 13)", () => {
+	// The tab may be in the background or another window may have the focus
+	// when an AI app calls: the delay counts only while the page is visible
+	// and focused, and starts again when the user comes back.
+	let hidden: boolean;
+	let focused: boolean;
+	beforeEach(() => {
+		hidden = false;
+		focused = true;
+		Object.defineProperty(doc, "visibilityState", {
+			configurable: true,
+			get: () => (hidden ? "hidden" : "visible"),
+		});
+		Object.defineProperty(doc, "hidden", {
+			configurable: true,
+			get: () => hidden,
+		});
+		Object.defineProperty(doc, "hasFocus", {
+			configurable: true,
+			value: () => focused,
+		});
+		jest.useFakeTimers();
+	});
+	afterEach(() => {
+		jest.useRealTimers();
+	});
+	const show = () => {
+		hidden = false;
+		doc.dispatchEvent(new window.Event("visibilitychange") as unknown as Event);
+	};
+	const hide = () => {
+		hidden = true;
+		doc.dispatchEvent(new window.Event("visibilitychange") as unknown as Event);
+	};
+	const focus = () => {
+		focused = true;
+		window.dispatchEvent(new window.Event("focus"));
+	};
+	const blur = () => {
+		focused = false;
+		window.dispatchEvent(new window.Event("blur"));
+	};
+
+	test("opened in a hidden tab: Allow waits for the tab to be shown, then the full delay", async () => {
+		hidden = true;
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const allow = byText(doc, "Allow");
+		const always = byText(doc, "Always allow");
+		jest.advanceTimersByTime(60_000);
+		expect(allow.disabled).toBe(true);
+		expect(always.disabled).toBe(true);
+		allow.click(); // the click that brings the tab forward
+		expect((doc.querySelector("dialog") as HTMLDialogElement).open).toBe(true);
+		show();
+		jest.advanceTimersByTime(599);
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(1);
+		expect(allow.disabled).toBe(false);
+		expect(always.disabled).toBe(false);
+		allow.click();
+		expect(await answer).toBe("allow");
+	});
+
+	test("opened while another window has the focus: the delay starts on focus", async () => {
+		focused = false;
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const allow = byText(doc, "Allow");
+		jest.advanceTimersByTime(60_000);
+		expect(allow.disabled).toBe(true);
+		focus();
+		jest.advanceTimersByTime(599);
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(1);
+		expect(allow.disabled).toBe(false);
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe("deny");
+	});
+
+	test("leaving the page disables Allow again; coming back starts the delay again", async () => {
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const allow = byText(doc, "Allow");
+		const always = byText(doc, "Always allow");
+		jest.advanceTimersByTime(600);
+		expect(allow.disabled).toBe(false);
+		blur();
+		expect(allow.disabled).toBe(true);
+		expect(always.disabled).toBe(true);
+		focus();
+		jest.advanceTimersByTime(599);
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(1);
+		expect(allow.disabled).toBe(false);
+		// Hidden half-way through the delay: it starts over when shown.
+		hide();
+		expect(allow.disabled).toBe(true);
+		show();
+		jest.advanceTimersByTime(300);
+		hide();
+		show();
+		jest.advanceTimersByTime(599);
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(1);
+		expect(always.disabled).toBe(false);
+		always.click();
+		expect(await answer).toBe("always");
+	});
+
+	test("once closed, it no longer follows the page", async () => {
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const allow = byText(doc, "Allow");
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe("deny");
+		blur();
+		focus();
+		jest.advanceTimersByTime(600);
+		expect(allow.disabled).toBe(true);
+		expect(jest.getTimerCount()).toBe(0);
+	});
+});
+
+describe("confirmDialog: what the arguments look like (iteration 13)", () => {
+	test("invisible and direction characters are shown as escapes; the arguments are unchanged", async () => {
+		const to = "evil\u202Emoc.elpmaxe@ecila";
+		const args = {
+			to,
+			zw: "a\u200Bb\u2060c\uFEFF",
+			isolate: "\u2066x\u2069",
+			tag: "\u{E0041}",
+			private: "\uE000",
+			c1: "\u0085",
+			line: "a\u2028b",
+			"key\u202E": 1,
+		};
+		const copy = structuredClone(args);
+		const answer = confirmDialog({ ...question(), arguments: args }, doc);
+		const text = doc.querySelector("dialog pre")?.textContent ?? "";
+		expect(text).toContain('"to": "evil\\u202Emoc.elpmaxe@ecila"');
+		expect(text).toContain('"zw": "a\\u200Bb\\u2060c\\uFEFF"');
+		expect(text).toContain('"isolate": "\\u2066x\\u2069"');
+		expect(text).toContain('"tag": "\\uDB40\\uDC41"');
+		expect(text).toContain('"private": "\\uE000"');
+		expect(text).toContain('"c1": "\\u0085"');
+		expect(text).toContain('"line": "a\\u2028b"');
+		expect(text).toContain('"key\\u202E": 1');
+		expect(text).not.toMatch(/[\p{Cf}\p{Co}\u0080-\u009F\u2028]/u);
+		// What is shown is still JSON for the same arguments.
+		expect(JSON.parse(text)).toEqual(copy);
+		expect(args).toEqual(copy);
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe("deny");
+	});
+
+	test("ordinary text, emoji and other scripts are shown as they are", async () => {
+		const answer = confirmDialog(
+			{ ...question(), arguments: { note: "Grüße, 東京, مرحبا 🙂" } },
+			doc,
+		);
+		expect(doc.querySelector("dialog pre")?.textContent).toContain(
+			'"note": "Grüße, 東京, مرحبا 🙂"',
+		);
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe("deny");
+	});
+
+	test("the names of the app and the tool are isolated left to right", async () => {
+		const answer = confirmDialog(
+			{
+				...question(),
+				client: { ...question().client, name: "\u202EedualC" },
+			},
+			doc,
+		);
+		const dialog = doc.querySelector("dialog") as HTMLDialogElement;
+		const names = [...dialog.querySelectorAll("bdi")].map((b) => [
+			b.getAttribute("dir"),
+			b.textContent,
+		]);
+		expect(names).toContainEqual(["ltr", "Clear memory"]);
+		expect(names).toContainEqual(["ltr", "\\u202EedualC (claude.ai)"]);
+		expect(dialog.querySelector("pre")?.getAttribute("dir")).toBe("ltr");
+		expect(dialog.textContent).not.toContain("\u202E");
+		byText(doc, "Don't allow").click();
+		expect(await answer).toBe("deny");
+	});
+});
+
+describe("confirmDialog: the delay option (iteration 13)", () => {
+	test("a delay that is not a number of ms falls back to the default", async () => {
+		for (const allowDelayMs of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			2 ** 31,
+		]) {
+			const started = Date.now();
+			const answer = confirmDialog(question(), doc, { allowDelayMs });
+			const allow = byText(doc, "Allow");
+			await Bun.sleep(20);
+			expect(allow.disabled).toBe(true);
+			await enabled(allow);
+			expect(Date.now() - started).toBeGreaterThanOrEqual(740);
+			expect(Date.now() - started).toBeLessThan(5_000);
+			allow.click();
+			expect(await answer).toBe("allow");
+		}
 	});
 });
 

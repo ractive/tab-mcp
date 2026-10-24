@@ -227,3 +227,55 @@ test.skipIf(chrome === undefined)(
 	},
 	60_000,
 );
+
+test.skipIf(chrome === undefined)(
+	"a confirmation opened in a background tab waits until the tab is in front again (iteration 13)",
+	async () => {
+		const b = browser as Browser;
+		await page.goto(`http://127.0.0.1:${server.port}/`);
+		await page.eval(
+			"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })",
+		);
+		// Another tab in front: the AI app's, say.
+		const other = await b.newPage();
+		try {
+			expect(await page.eval("document.visibilityState")).toBe("hidden");
+			await page.eval(`(() => {
+				window.answer = mcp.confirmInPage({
+					tool: { name: "clear_memory", description: "Clears the memory" },
+					arguments: {},
+					client: { grantId: "g_1", id: "https://client.example/c.json", host: "client.example" },
+					signal: new AbortController().signal,
+				});
+			})()`);
+			// Well past the 750 ms, still disabled while the tab is in the background.
+			const stillDisabled = await page.eval<boolean[]>(
+				`new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-confirm'); d ? setTimeout(() => r([...d.querySelectorAll('button')].filter((x) => x.textContent !== "Don't allow").map((x) => x.disabled)), 1500) : setTimeout(w, 10); }; w(); })`,
+			);
+			expect(stillDisabled).toEqual([true, true]);
+			// Back in front: the full delay from then on.
+			const timing = page.eval<{ visible: boolean; waited: number }>(
+				`new Promise((resolve) => {
+					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow');
+					let shownAt;
+					document.addEventListener('visibilitychange', () => { shownAt ??= performance.now(); });
+					new MutationObserver((_, o) => {
+						if (allow.disabled) return;
+						o.disconnect();
+						const waited = performance.now() - shownAt;
+						allow.click();
+						resolve({ visible: document.visibilityState === 'visible', waited });
+					}).observe(allow, { attributes: true });
+				})`,
+			);
+			await b.send("Target.activateTarget", { targetId: page.targetId });
+			const { visible, waited } = await timing;
+			expect(visible).toBe(true);
+			expect(waited).toBeGreaterThanOrEqual(700);
+			expect(await page.eval("window.answer")).toBe(true);
+		} finally {
+			await other.close();
+		}
+	},
+	30_000,
+);
