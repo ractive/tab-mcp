@@ -1294,6 +1294,64 @@ choices the plan left open:
 Left for the owner: session-slot protection (finding 10) and the address id in the `/tab`
 URL (architecture F9).
 
+## DEC-087: Input schemas are compiled by the validator once it is loaded
+
+2026-10-24, iteration 13 (finding 5 of the browser library review). The core checks a
+schema at registration with its own walk (`schemaProblem`: patterns, `$ref`s by pointer or
+anchor), because the validator, `@cfworker/json-schema`, is in the chunk that `connect()`
+loads (DEC-035) and the core must stay small and free of it. That walk does not follow
+`$id`: a `$ref` next to a nested `$id` resolves against the `$id`'s base, the walk accepts
+it, and the validator throws `Unresolved $ref` at call time. That throw was outside every
+`try`: each call answered `-32603`, the validator was never cached, and the `toolcall`
+had no `toolcallend`.
+
+The validator's own check runs where the validator is: `compileRegistry`, in the lazy
+chunk, runs when `connect()` has loaded it. It dereferences each schema (which throws for
+an `$id` that is not a URL or a duplicate one) and resolves every `$ref` in the lookup it
+builds, which is what validation would do later, only for all of them at once. A
+validator is kept per registered tool, so a call compiles nothing. From then on the
+registry calls it in `registerTool`, which rejects such a schema with a `TypeError` like
+any other bad schema; a tool registered before `connect()` whose schema it refuses is
+unregistered and reported with the event `error`, before the session starts and so before
+any AI app lists it. Compiling is linear in the schema's size and synchronous, so
+`registerTool` stays as fast as before for normal schemas; it never waits for the chunk.
+Loading the validator in `registerTool` would have made registration wait for the
+network, and a tool that only fails after `connect()` is the price of a small core. The
+handler still catches a compile failure (for a registry used without `TabMcp`) as an
+`isError` result, and every `toolcall` has its `toolcallend`, also when something fails
+outside the tool.
+
+The fixes of iteration 13 (this one, the frozen `grants`, one connect dialog, the delay
+options, the identity timeout) take the core from 5.1 to 5.3 KB gzipped; the budget in
+`build.test.ts` goes from 5.25 to 5.5 KB.
+
+## DEC-088: The confirmation counts its delay only while the user sees the page
+
+2026-10-24, iteration 13 (findings 1 and 2 of the browser library review). Tools are
+called while the user is in the AI app, so the confirmation of a consequential tool
+usually opens in a tab or window in the background. The 750 ms of `confirmDelayMs` ran
+from `showModal()`, so it was over by the time the user came back, and the click that
+brought the window forward could land on "Allow". Now "Allow" and "Always allow" stay
+disabled while `document.visibilityState` is `hidden` or `document.hasFocus()` is false,
+and are enabled only after the page has been visible and focused for the full delay.
+`visibilitychange` and the window's `focus` and `blur` start the wait again from zero
+(a `blur` disables at once). Re-arming on every such event only ever delays "Allow",
+which is the safe direction. A page embedded in a frame waits until the user is in the
+frame. Tested in happy-dom with a fake clock and in headless Chrome, where a second
+target hides the page and `Target.activateTarget` brings it back.
+
+The arguments are shown as JSON in which every character that is invisible or changes the
+direction of the text is written as `\uXXXX` (two for one beyond U+FFFF): `\p{Cf}` (bidi
+controls and isolates, zero-width characters, tags), the other default-ignorable code
+points (fillers, variation selectors), `\p{Co}`, `\p{Cn}`, the C1 controls and U+2028 and
+U+2029, which `JSON.stringify` leaves as they are. These characters occur only inside JSON
+strings, where the escape means the same character, so the text shown is still JSON for
+exactly the arguments the tool gets; the arguments themselves are never changed. An emoji
+sequence with a zero-width joiner or a variation selector is shown with escapes; that is
+the honest view in a security dialog. The names of the AI app and the tool are in
+`<bdi dir="ltr">`, so a right-to-left name cannot reorder the sentence around it, and the
+client's name and host are escaped the same way, in case a relay does not strip them.
+
 # Citations
 
 - [MCP conformance suite](https://github.com/modelcontextprotocol/conformance)

@@ -7,6 +7,48 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Fixed
+
+- The confirmation's "Allow" and "Always allow" can be clicked only once the page has been
+  visible and focused for `confirmDelayMs` with the dialog open. Until now the 750 ms ran
+  from when the dialog opened, usually in a tab in the background, so the click that
+  brought the tab forward could approve the call. Leaving the page disables both again;
+  coming back starts the wait again (DEC-088).
+- The confirmation shows characters that are invisible or change the text direction
+  (U+202E, U+2066-2069, zero-width characters, tags, private-use and unassigned code
+  points, C1 controls) in the arguments as `\uXXXX` escapes, so an AI app cannot make
+  `"evil‮moc.elpmaxe@ecila"` read as another address. The text is still JSON for the
+  same arguments, and the tool gets them unchanged. The names of the AI app and the tool
+  are isolated left to right (`<bdi dir="ltr">`) (DEC-088).
+- A tool result with a key `invalid` is passed through as a result; it was sent as a
+  JSON-RPC error `-32602` while `toolcallend` said `ok`.
+- A schema that passes `registerTool` but that the validator cannot use (a `$ref` next to a
+  nested `$id`) no longer makes every call fail with `-32603` and a `toolcall` without its
+  `toolcallend`. Once `connect()` has loaded the validator, it compiles each schema at
+  registration: `registerTool` rejects such a schema with a `TypeError`, and a tool
+  registered before `connect()` with one is unregistered and reported in the event `error`.
+  Every `toolcall` now has its `toolcallend` (DEC-087).
+- A consequential tool that is unregistered (or replaced under the same name) while the
+  user is asked no longer runs when the user allows it: the AI app gets the error result
+  "The tool is no longer available".
+- `showConnectDialog()` while its dialog is open (a double click on the button) opens no
+  second dialog; the call resolves when the open one closes. Two dialogs shared one
+  pairing, so closing either stopped the code of both.
+- `confirmDelayMs: NaN` turned the delay off. The constructor now throws a `TypeError` for
+  a `confirmDelayMs` or `identityTimeoutMs` that is not a number of milliseconds (finite,
+  0 or more, below 2^31).
+- `identityTimeoutMs` now counts from when `identityAssertion` is asked, so an assertion
+  that never comes no longer leaves `identity` at `pending` for good.
+
+#### Changed
+
+- `grants` (and the `grants` of the event `grantschange`) is a frozen array of frozen
+  grants, the same array until the grants change. Pages that changed it in place get a
+  `TypeError` in strict mode.
+- The core grows to 5.3 KB gzipped (DEC-087).
+
 ### [0.5.1][client-0.5.1] - 2026-10-23
 
 #### Fixed

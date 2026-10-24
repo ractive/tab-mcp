@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 13: browser library fixes"
-status: planned
+status: in-progress
 description: "Fixes from the 2026-10-24 review of the browser library: the Allow delay in a background tab, argument spoofing with direction characters, Always allow, result and schema edge cases, a tool removed during its confirmation, two connect dialogs, React provider stability."
 timestamp: 2026-10-24T21:00:00+02:00
 tags: [iteration, security, client]
@@ -81,18 +81,27 @@ same time. Releases as a client patch or minor version.
 
 ## Tasks
 
-- [ ] 1: Allow delay counts only while the page is visible and focused
-- [ ] 2: invisible and direction characters shown escaped in the confirmation
+- [x] 1: Allow delay counts only while the page is visible and focused
+- [x] 2: invisible and direction characters shown escaped in the confirmation
 - [ ] 3: decide on Always allow (opt-in or narrower); threat model sentence on consent scope
-- [ ] 4: tagged outcome from `runTool`
-- [ ] 5: schema compiled at registration; `end` always fires
-- [ ] 6: tool re-checked after confirmation
-- [ ] 7: one connect dialog at a time
-- [ ] 8: `confirmDelayMs` validated
-- [ ] 9: identity timeout starts with the hook
-- [ ] 10: README example shows the host
-- [ ] Code quality items and the missing tests
+- [x] 4: tagged outcome from `runTool`
+- [x] 5: schema compiled at registration; `end` always fires
+- [x] 6: tool re-checked after confirmation
+- [x] 7: one connect dialog at a time
+- [x] 8: `confirmDelayMs` validated
+- [x] 9: identity timeout starts with the hook
+- [x] 10: README example shows the host
+- [x] Code quality items and the missing tests
 - [ ] Changelog, client release, vendored copies (ractive.ch examples, saturnus) updated
+
+## Progress
+
+2026-10-24: findings 1, 2 and 4 to 10 and the code-quality items fixed, with tests
+(DEC-087, DEC-088). Open: finding 3 (the owner's decision), the release and the vendored
+copies. Not done: the optional state type for `#connecting`, `#reconnecting`,
+`#pageWaits` and `#generation` (not low risk enough for this change). The sleeps named
+above are gone (a ping as a barrier, a fake clock, or no wait where the scheduling is
+synchronous); three others in `reconnect.test.ts`, not named by the review, stay.
 
 # Citations
 

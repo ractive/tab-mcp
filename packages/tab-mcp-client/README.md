@@ -78,7 +78,11 @@ Importing the library loads only a small core; `connect()` loads the rest.
 
 - `name` (1-128 characters of `A-Z a-z 0-9 _ - .`), `title`, `description` (not empty);
 - `inputSchema`: a JSON Schema with `"type": "object"`. Arguments are checked against it
-  before `execute` runs;
+  before `execute` runs. `registerTool` rejects a schema the validator cannot use (a
+  pattern that is not a regular expression, a `$ref` that does not resolve). The
+  validator itself is loaded by `connect()`: from then on it checks each schema at
+  registration too, and a tool registered earlier whose schema it refuses (for example a
+  `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
 - `execute(input, { signal, client })`: runs the tool. `signal` aborts when the AI app
   gives up; `client` names the caller (`id`, verified `host`, declared `name`). Return a
   string (one text block), an MCP result with a `content` array (passed through), or any
@@ -96,15 +100,28 @@ Mark tools that change or delete something with `consequentialHint: true`. The p
 asks the user before every call ("Allow", "Always allow" or "Don't allow"), showing the AI
 app and the arguments. "Always allow" lets that tool run without asking for that AI app
 until the page is reloaded or the app is disconnected. A refusal reaches the AI app as an
-error result. Pass `onConfirm` to ask in your own UI (it is asked every time; remember
-answers there if you want to):
+error result, and so does a call whose tool was removed while the user was asked.
+
+Tools are called while the user is in the AI app, so the dialog often opens in a tab in
+the background. "Allow" and "Always allow" can be clicked only once the page has been
+visible and focused for `confirmDelayMs` (750 ms) with the dialog open; leaving the page
+disables them and coming back starts the wait again, so the click that brings the page
+forward cannot approve. Characters that are invisible or change the text direction (such
+as U+202E) are shown in the arguments as `\uXXXX`, so the AI app cannot make them look
+like something else; the tool gets the arguments unchanged.
+
+Pass `onConfirm` to ask in your own UI (it is asked every time; remember answers there if
+you want to). Show the verified `client.host` next to the name the AI app declares, as the
+library's dialog does, since anyone can declare any name:
 
 ```ts
 const mcp = new TabMcp({
   relay: "https://relay.example",
   server: { name: "calculator", version: "1.0.0" },
-  onConfirm: ({ tool, arguments: args, client, signal }) =>
-    myDialog.ask(`${client.name ?? client.host} wants to run ${tool.name}.`, args, signal),
+  onConfirm: ({ tool, arguments: args, client, signal }) => {
+    const app = client.name ? `${client.name} (${client.host})` : client.host;
+    return myDialog.ask(`${app} wants to run ${tool.name}.`, args, signal);
+  },
 });
 ```
 
@@ -127,7 +144,8 @@ handles only some calls itself.
 Until an app connects, the dialog offers no prominent button under the code: only a small
 "Close" at the bottom (and Escape). Closing it stops the code (`stopPairing()`); the page
 stays connected and the address stays the same, so calling `showConnectDialog()` again
-shows the same address with a new code.
+shows the same address with a new code. While the dialog is open, calling it again (a
+double click) opens no second one; the call resolves when that one closes.
 
 The address stays the same across visits: the library keeps a secret per relay and page
 in `localStorage`, under `tab-mcp:secret:<relay origin>:<server.name>`, so two pages of one
@@ -187,7 +205,7 @@ await mcp.refreshIdentity();
 
 The library asks the function after every connect. `identity` (`none`, `pending`,
 `bound`, `refused`, with the reason in `identityMessage`) and the event
-`identitychange` tell you whether the relay accepted it; without an answer within `identityTimeoutMs` (15 s) it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
+`identitychange` tell you whether the relay accepted it; when the function or the relay does not answer within `identityTimeoutMs` (15 s, counted from when the function is asked), it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
 than the page."
 
 ### Your own UI
