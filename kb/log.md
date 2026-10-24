@@ -3,7 +3,7 @@
 ## 2026-10-24
 
 - Relay 0.3.1 released and deployed (modern-envelope initialize 404/-32601); Codex recorded in docs/compatibility.md
-- Codebase review (architecture, auth, relay, library, CI); iteration 10 planned for the stolen address secret
+- Codebase review (architecture, auth, relay, library, CI): iterations 10 (stolen address secret), 11 (relay), 12 (authorization server), 13 (browser library), 14 (CI and settings) planned
 
 ## 2026-10-23
 

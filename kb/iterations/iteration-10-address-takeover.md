@@ -8,7 +8,10 @@ tags: [iteration, security]
 ---
 # Iteration 10: a stolen address secret
 
-From the codebase review of 2026-10-24 (architecture finding F1, related F2 and F4).
+From the codebase review of 2026-10-24 (architecture finding F1, related F2, F3 and F4;
+F4 itself is fixed in iteration 11). The other findings of that review are planned in
+iterations 11 (relay), 12 (authorization server), 13 (browser library) and 14 (CI and
+settings).
 Owner, 2026-10-24: do the three steps below in their own iteration; plan first,
 implement later.
 
@@ -56,6 +59,14 @@ that the paired apps then talk to the holder.
   accounts, use identity binding; run the page on its own origin; keep third-party
   scripts off it; call `newAddress()` when the page's user logs out on a shared device.
 - `docs/self-hosting.md`, "Before you go live": the same advice for operators.
+- Threat model A1/A4 and the client README (architecture F3): on a code-paired page,
+  grants follow the browser profile, not the person. On a shared profile, or a web app
+  with accounts that pairs by code, the next user of the page gets the AI apps the
+  previous one paired. Advise identity binding, or `newAddress()` on logout.
+- README (architecture review, main idea): say when tab-mcp is the wrong tool. If a
+  page's state lives on its server, an MCP server on that backend is the better answer;
+  tab-mcp is for state that lives only in the browser, and for acting as the signed-in
+  user in their open tab.
 
 ### 2. Library
 
@@ -104,6 +115,7 @@ step 1 naming identity binding as the protection.
 - [ ] Docs: threat model asset 4, A4 and remaining risks rewritten; version line updated
 - [ ] Docs: the origin on `/authorize` described as reported, not verified (`SECURITY.md`, threat model)
 - [ ] Docs: advice for page authors (client README, skill) and operators (`docs/self-hosting.md`)
+- [ ] Docs: grants follow the browser profile on code-paired pages (F3); README says when a backend MCP server fits better
 - [ ] Library: the default UI explains `replaced` and offers "New address"; test with a second session claiming the address
 - [ ] Library: decide on telling a sibling tab from an impostor (`BroadcastChannel`); implement or record why not
 - [ ] Step 3: owner decision on the backend-signed address claim, recorded as a DEC; design and tasks added here if it goes ahead
