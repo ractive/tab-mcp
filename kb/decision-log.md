@@ -825,7 +825,7 @@ digest equals the smoke-tested one, so the published bytes are the tested bytes,
 attestations included. No build cache is used: the build takes seconds and a shared cache
 could carry pull-request content into a release.
 
-## DEC-070: The token-expiry check fails a monthly run; the release only warns
+## DEC-070: The token-expiry check fails a monthly run; the release only warns (superseded by DEC-102)
 
 `scripts/token-expiry.ts` reads `DOCKERHUB_TOKEN_EXPIRES` (the day the token stops
 working). The monthly workflow `token-expiry.yml` fails when the date is 30 days away or
@@ -1512,15 +1512,23 @@ From the review of 2026-10-24 (iteration 14). Owner, 2026-10-25:
   commit SHA (all of them already were).
 - The `release` environment keeps no required reviewer for now; it admits only release
   tags. The header of `release.yml` says so.
-- `DOCKERHUB_TOKEN` stays a repository secret until the owner sets it again as a secret
-  of the `release` environment: a secret cannot be read back, so moving it means
-  entering the token anew (`kb/operations/release-secrets.md`).
+- `DOCKERHUB_TOKEN` becomes a secret of the `release` environment: a secret cannot be
+  read back, so the owner entered the token anew (done 2026-10-25,
+  `kb/operations/release-secrets.md`).
 - Chrome for Testing is pinned to one version in `ci.yml` and `release.yml`
   (`CHROME_VERSION`) and bumped on purpose; `client-pack` installs it like
   `relay-pack`, so the browser tests of a client release no longer depend on the
-  runner image; every job has a time limit (20 minutes, 5 for the token check).
+  runner image; every job has a time limit (20 minutes).
 - The image keeps `main.js.map`: the source is public, and the map turns a stack trace
   in the log into file and line.
+
+## DEC-102: No Docker Hub token expiry check (owner)
+
+Owner, 2026-10-25: the Docker Hub token in the `release` environment has no expiry date,
+so the expiry warning of DEC-070 goes: the workflow `token-expiry.yml`,
+`scripts/token-expiry.ts` with its test, the warning step of the release's image job and
+the repository variable `DOCKERHUB_TOKEN_EXPIRES`. A revoked token still shows as a
+failed Docker login in the release (`kb/operations/release-secrets.md`).
 
 # Citations
 

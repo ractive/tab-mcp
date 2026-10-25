@@ -274,8 +274,8 @@ the client only). Then:
    tokens".
 
 5. Prepare the image registries (once):
-   - Docker Hub: the repository variable `DOCKERHUB_USERNAME` (`ractive`), the secret
-     `DOCKERHUB_TOKEN` and the variable `DOCKERHUB_TOKEN_EXPIRES` as in
+   - Docker Hub: the repository variable `DOCKERHUB_USERNAME` (`ractive`) and the secret
+     `DOCKERHUB_TOKEN` of the `release` environment as in
      [release credentials](/operations/release-secrets.md). Create the repository
      `ractive/tab-mcp` on hub.docker.com as public beforehand; a push would otherwise
      create it with the account's default visibility.
@@ -295,7 +295,7 @@ the client only). Then:
 
    Approve the run's `release` environment (asked for `relay-publish` and then
    `relay-image-publish`). `relay-publish` finds the version on npm with the same integrity
-   and skips; `relay-image-publish` checks the token expiry, then pushes the smoke-tested
+   and skips; `relay-image-publish` pushes the smoke-tested
    archive from `relay-image` as `ractive/tab-mcp:0.1.0-alpha.0` and `ghcr.io/ractive/tab-mcp:0.1.0-alpha.0` for
    linux/amd64 and linux/arm64 with provenance and SBOM. Afterwards make the ghcr.io
    package public (step 5).

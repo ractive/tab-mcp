@@ -2,6 +2,7 @@
 
 ## 2026-10-25
 
+- Iteration 14 completed: `DOCKERHUB_TOKEN` in the `release` environment (a token without expiry), the Docker Hub expiry check removed; DEC-102
 - Iteration 11 on iter-11/multi-instance: the address id in the `/tab` URL (`?a=`, checked against the secret, close 4009), the id on every request that needs the address's instance, "Running several instances" in docs/self-hosting.md, `/healthz` checks the token store; DEC-097 (session slots deferred), DEC-098, DEC-099
 - Iteration 10 and iteration 13 finding 3 on iter-10/address-takeover: docs on a stolen address secret and the reported origin, `replaced` with `detail.sibling` from a BroadcastChannel and a notice in the default UI, `newAddress()` takes a taken-over address back first, "Always allow" opt-in (`alwaysAllow`); DEC-094 (no backend-signed address claim), DEC-095, DEC-096; client release open
 

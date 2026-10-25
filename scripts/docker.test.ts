@@ -28,7 +28,7 @@ test("Dockerfile, workflows and @types/bun name the same Bun version", async () 
 		new RegExp(`^oven/bun:${bun}-distroless@sha256:[0-9a-f]{64}$`),
 	);
 
-	for (const workflow of ["ci.yml", "release.yml", "token-expiry.yml"]) {
+	for (const workflow of ["ci.yml", "release.yml"]) {
 		const text = await read(`.github/workflows/${workflow}`);
 		const versions = [
 			...text.matchAll(/(?:BUN_VERSION|bun-version):\s*"?([0-9.]+)"?/g),
