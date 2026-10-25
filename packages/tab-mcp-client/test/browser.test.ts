@@ -263,7 +263,8 @@ test.skipIf(chrome === undefined)(
 			const stillDisabled = await page.eval<boolean[]>(
 				`new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-confirm'); d ? setTimeout(() => r([...d.querySelectorAll('button')].filter((x) => x.textContent !== "Don't allow").map((x) => x.disabled)), 1500) : setTimeout(w, 10); }; w(); })`,
 			);
-			expect(stillDisabled).toEqual([true, true]);
+			// Allow only: Always allow is opt-in (DEC-096).
+			expect(stillDisabled).toEqual([true]);
 			// Back in front: the full delay from then on.
 			const timing = page.eval<{ visible: boolean; waited: number }>(
 				`new Promise((resolve) => {
@@ -286,6 +287,32 @@ test.skipIf(chrome === undefined)(
 			expect(await page.eval("window.answer")).toBe(true);
 		} finally {
 			await other.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(chrome === undefined)(
+	"a second tab of the page takes over: the first hears it on its BroadcastChannel (iteration 10)",
+	async () => {
+		const b = browser as Browser;
+		const ready =
+			"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })";
+		await page.goto(`http://127.0.0.1:${server.port}/`);
+		await page.eval(ready);
+		await page.eval("mcp.connect({ resume: true }).then(() => true)");
+		const replaced = page.eval<{ sibling: boolean }>(
+			"new Promise((r) => mcp.addEventListener('replaced', (e) => r(e.detail), { once: true }))",
+		);
+		const second = await b.newPage();
+		try {
+			await second.goto(`http://127.0.0.1:${server.port}/`);
+			await second.eval(ready);
+			await second.eval("mcp.connect({ resume: true }).then(() => true)");
+			expect(await replaced).toEqual({ sibling: true });
+			await second.eval("mcp.disconnect()");
+		} finally {
+			await second.close();
 		}
 	},
 	30_000,

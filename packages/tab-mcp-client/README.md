@@ -97,10 +97,16 @@ added and removed tools.
 ### Consequential tools
 
 Mark tools that change or delete something with `consequentialHint: true`. The page then
-asks the user before every call ("Allow", "Always allow" or "Don't allow"), showing the AI
-app and the arguments. "Always allow" lets that tool run without asking for that AI app
-until the page is reloaded or the app is disconnected. A refusal reaches the AI app as an
-error result, and so does a call whose tool was removed while the user was asked.
+asks the user before every call ("Don't allow" or "Allow"), showing the AI app and the
+arguments. A refusal reaches the AI app as an error result, and so does a call whose tool
+was removed while the user was asked.
+
+`alwaysAllow: true` adds "Always allow", which lets that tool run without asking for that
+AI app until the page is reloaded or the app is disconnected. It is off by default: it
+lifts the only brake at run time, which is what a prompt injection needs, and the relay
+cannot help, since its one OAuth scope (`tools`) covers every tool of the page. Consent
+per tool is the page's. Turn it on only for tools whose calls the user need not check one
+by one.
 
 Tools are called while the user is in the AI app, so the dialog often opens in a tab in
 the background. "Allow" and "Always allow" can be clicked only once the page has been
@@ -170,6 +176,64 @@ sign-in page points users to it when someone else may be guessing codes. A page 
 own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects
 again; while the page is closed, they get "the page is not open".
 
+When another tab or program connects with the same address, it takes the address over:
+the page gets the event `replaced`, then `disconnected` with reason `replaced`, and does
+not reconnect by itself. Tabs of the same page announce on a `BroadcastChannel` (per relay
+and storage key; it carries neither the secret nor the address) when they claim the
+address, so `replaced` says which it probably was:
+
+- `event.detail.sibling` is `true`: a tab of the same page in this browser announced it
+  within the last 10 seconds (when nothing was heard yet, the library waits up to a
+  second for it, so `replaced` may come a second after the takeover). The usual cause,
+  and harmless. Once the page has opened the
+  default dialog, the library shows "Opened in another tab".
+- `false`: nobody announced it (or the browser has no `BroadcastChannel`). It may be a
+  program with a copy of the address secret, and the AI apps paired with the address now
+  talk to it. The library shows "Another tab or program took over this page" with "New
+  address". `newAddress()` after `replaced` first connects with the old address again, so
+  the relay disconnects those apps, then makes a new address and connects; the dialog
+  then opens to add it to the AI apps again.
+
+The default dialog closes when the page is replaced, and the notice appears also when the
+dialog is closed, but only once the page has opened the dialog: a page that connects on
+load with `connect({ resume: true })` and never opens it shows its own message. A page
+with its own UI shows the same from `replaced`:
+
+```ts
+mcp.addEventListener("replaced", (e) => {
+  if (e.detail.sibling) showNote("Opened in another tab.");
+  else showWarning("Another tab or program took over this page's address.", {
+    action: "New address",
+    onClick: () => mcp.newAddress(), // from the click
+  });
+});
+```
+
+Script on the page's origin can post on the channel and make a takeover look like a
+sibling; such script can read the secret anyway, so `sibling` is a hint, not a proof.
+
+### Keeping the address safe
+
+Whoever has the address secret can take over the page's address from anywhere, and the
+AI apps paired with it then send their arguments to them and get their tool descriptions
+and results, until the page gets a new address. They get no token and cannot pair a new
+app without a code. Script on your origin (cross-site scripting, a compromised
+third-party script, another page on the same origin) or access to the device can copy it
+([threat model](https://github.com/ractive/tab-mcp/blob/main/docs/threat-model.md), A4).
+
+- For a page with user accounts, use [identity binding](#identity-binding-no-code): a
+  copied secret then gets nothing, since a session needs a fresh assertion from your
+  backend.
+- Run the page on its own origin, not a shared one such as `*.github.io`, and keep
+  third-party scripts off it.
+- On a page that pairs by code, grants follow the browser profile, not the person: on a
+  shared profile, or in a web app with accounts that pairs by code, the next user of the
+  page gets the AI apps the previous one paired. Call `newAddress()` when the user logs
+  out, or use identity binding.
+- The page origin that the relay's sign-in page shows is what the page's browser
+  reported; a program can claim any origin. Do not tell users it proves which page they
+  pair with.
+
 When the connection breaks (reason `network`, `heartbeat` or `shutdown`: a dropped
 network, a phone pausing the tab in the background, a relay restart), the library
 connects again by itself: after 5, 10, 20 and 40 seconds, then every 60 seconds, and at
@@ -223,7 +287,8 @@ Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()
 `startPairing()` and `stopPairing()` (codes come only while pairing is on),
 `revoke(grantId)`, the properties `state`, `address`, `pairingCode`, `grants`,
 `reconnecting` and `tools`, and the events `statechange`, `connected`, `disconnected`,
-`pairingcode`, `grantschange`, `reconnecting`, `toolschange`, `replaced` and `error`. For an activity log, `toolcall`
+`pairingcode`, `grantschange`, `reconnecting`, `toolschange`, `replaced` (with
+`detail.sibling`, see above) and `error`. For an activity log, `toolcall`
 and `toolcallend` report every call by an AI app: its id, tool, arguments and AI app as it
 starts, then its outcome (`ok`, `error`, `declined` or `cancelled`), result and duration.
 
@@ -276,14 +341,17 @@ rule with two classes, such as `.tab-mcp-dialog .tab-mcp-primary` (0,2,0), wins 
 of them. A page rule of one element and one pseudo-class still changes a property that the
 dialogs set only in their base rules (for example `button:hover { padding: 0 }`). Write
 overrides outside cascade layers: the dialogs' rules are not in a layer, so they win over
-any layered rule. Both dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
+any layered rule. All dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
 `.tab-mcp-connect` (with `.tab-mcp-status`, `.tab-mcp-address`, `.tab-mcp-code`,
 `.tab-mcp-code-value`, `.tab-mcp-help`, `.tab-mcp-apps`, `.tab-mcp-app`,
 `.tab-mcp-new-address-question`, `.tab-mcp-actions`), the confirmation is
 `.tab-mcp-confirm` (with `.tab-mcp-description`, `.tab-mcp-arguments`,
 `.tab-mcp-always-note`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
-`.tab-mcp-always`). Buttons are `.tab-mcp-primary` (the one next step: Copy the
-address, Done, and "Don't allow", the safe choice), `.tab-mcp-danger` (Disconnect and
+`.tab-mcp-always`, with `alwaysAllow`), and the notice after `replaced` is
+`.tab-mcp-replaced` (with `.tab-mcp-description`, `.tab-mcp-status`, and the buttons
+`.tab-mcp-replaced-close` and `.tab-mcp-new-address`). Buttons are `.tab-mcp-primary` (the one
+next step: Copy the address, Done, "Don't allow", the safe choice, and the notice's "New
+address", or its "Close" after a sibling tab), `.tab-mcp-danger` (Disconnect and
 "Disconnect and get new address") or plain; every Copy button is also `.tab-mcp-copy`, and
 the Disconnect buttons in the apps list are `.tab-mcp-disconnect`. For example:
 

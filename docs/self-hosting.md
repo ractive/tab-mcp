@@ -793,3 +793,14 @@ Magic Containers with a pull zone):
 - Your users get a privacy notice: every tool argument and result passes through the
   relay, which does not log or store them. The
   [privacy notice template](privacy-template.md) is a starting point.
+- The pages you list keep their address secret safe: whoever copies it out of
+  `localStorage` (script on the page's origin, an extension, a shared computer) can take
+  over the address, and the AI apps paired with it then talk to them
+  ([threat model](threat-model.md), A4). Sites with user accounts pair by
+  [identity binding](configuration.md#identity-binding), so a copied secret gets nothing.
+  Each page runs on its own origin (not a shared one such as `*.github.io`), without
+  third-party scripts, and calls `newAddress()` when its user logs out on a shared
+  device.
+- The page origin on the pairing page is what the page's browser reported. A program can
+  claim any origin, including one you list, so the list keeps other websites off your
+  relay but does not prove to a user which page they pair with.

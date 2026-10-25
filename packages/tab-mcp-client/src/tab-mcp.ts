@@ -161,8 +161,13 @@ export class TabMcp extends EventTarget {
 	readonly #appName: string | undefined;
 	readonly #onConfirm: ConfirmHandler | undefined;
 	readonly #confirmDelayMs: number | undefined;
+	readonly #alwaysAllow: boolean;
 	readonly #relayUrl: string;
 	readonly #secrets: SecretStore;
+	/** The channel of the tabs that share the secret (DEC-095). */
+	readonly #tabs: string | undefined;
+	/** Replaced since the last session: `newAddress()` takes the address back first. */
+	#takenOver = false;
 	readonly #identityAssertion: IdentityAssertionHandler | undefined;
 	#identity: IdentityState = "none";
 	#identityMessage: string | undefined;
@@ -212,20 +217,24 @@ export class TabMcp extends EventTarget {
 			"confirmDelayMs",
 			options.confirmDelayMs,
 		);
+		this.#alwaysAllow = options.alwaysAllow === true;
 		this.#identityAssertion = options.identityAssertion;
 		this.#identityTimeoutMs =
 			delayOption("identityTimeoutMs", options.identityTimeoutMs) ?? 15_000;
 		this.#reconnectDelays = reconnectDelays(options.reconnect);
 		// One address per relay and page (server name); the default of 0.4 and
 		// older, per relay only, is moved over once (DEC-083).
-		this.#secrets =
-			options.storageKey === undefined
-				? new SecretStore(
-						options.storage,
-						`tab-mcp:secret:${origin}:${encodeURIComponent(server.name)}`,
-						`tab-mcp:secret:${origin}`,
-					)
-				: new SecretStore(options.storage, options.storageKey);
+		const key =
+			options.storageKey ??
+			`tab-mcp:secret:${origin}:${encodeURIComponent(server.name)}`;
+		this.#secrets = new SecretStore(
+			options.storage,
+			key,
+			options.storageKey === undefined ? `tab-mcp:secret:${origin}` : undefined,
+		);
+		// Tabs that share the secret share this channel; with `storage: null`
+		// every tab has an address of its own (DEC-095).
+		this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
 		this.#registry.onChange(() => {
 			const tools = this.tools;
 			this.#alwaysAllowed.keepTools(tools);
@@ -469,16 +478,23 @@ export class TabMcp extends EventTarget {
 	/**
 	 * A new address: revokes every connected app of the old one (while
 	 * connected), makes a new secret, and connects again if it was connected or
-	 * connecting. Call it from a user action.
+	 * connecting. After `replaced`, it first connects with the old address
+	 * again, so that the relay disconnects the apps that now talk to whoever
+	 * took it over (DEC-095), then connects with the new one. Call it from a
+	 * user action.
 	 */
 	newAddress(): Promise<SessionInfo | undefined> {
+		// A session that starts clears #takenOver, so this runs once.
+		if (this.#takenOver && this.#state !== "connected")
+			return this.connect({ resume: true }).then(() => this.newAddress());
 		const wasOn =
 			this.#state !== "disconnected" || this.#reconnecting !== undefined;
 		if (this.#state === "connected")
 			this.#connection?.send({ type: "grants.revokeAll" });
 		this.#end("new_address");
 		this.#secrets.rotate();
-		return wasOn ? this.connect() : Promise.resolve(undefined);
+		// It was on: the user chose that already, as for a reconnect.
+		return wasOn ? this.connect({ resume: true }) : Promise.resolve(undefined);
 	}
 
 	/** Close the connection (or cancel connecting) and report it at once. */
@@ -728,8 +744,9 @@ export class TabMcp extends EventTarget {
 	}
 
 	/**
-	 * The library's own confirmation: the dialog in the page with Allow,
-	 * Always allow and Deny (what runs without `onConfirm`). An `onConfirm`
+	 * The library's own confirmation: the dialog in the page with Don't allow
+	 * and Allow, and Always allow with `alwaysAllow: true` (what runs without
+	 * `onConfirm`). An `onConfirm`
 	 * may hand some calls to it. Resolves `false` where there is no document.
 	 */
 	confirmInPage(request: ConfirmRequest): Promise<boolean> {
@@ -741,11 +758,10 @@ export class TabMcp extends EventTarget {
 		const delay = this.#confirmDelayMs;
 		return import("./ui.ts")
 			.then((ui) =>
-				ui.confirmDialog(
-					request,
-					doc,
-					delay === undefined ? {} : { allowDelayMs: delay },
-				),
+				ui.confirmDialog(request, doc, {
+					allowDelayMs: delay,
+					alwaysAllow: this.#alwaysAllow,
+				}),
 			)
 			.then((answer) => {
 				// Only while the grant is still there: a revoked app gets nothing.
@@ -766,6 +782,7 @@ export class TabMcp extends EventTarget {
 			registry: this.#registry,
 			server: this.#server,
 			appName: this.#appName,
+			tabs: this.#tabs,
 			library: { name: LIBRARY_NAME, version: VERSION },
 			confirm: (request) => this.#confirm(request),
 			// Both always, even from a connection that is no longer current: a
@@ -786,6 +803,7 @@ export class TabMcp extends EventTarget {
 				const session = sessionInfo(m);
 				if (!current()) return session;
 				this.#session = session;
+				this.#takenOver = false;
 				this.#stopReconnecting();
 				this.#setState("connected");
 				this.#setGrants([...m.grants]);
@@ -808,8 +826,10 @@ export class TabMcp extends EventTarget {
 				if (!current()) return;
 				this.#setGrants(this.#grants.filter((g) => g.grantId !== grantId));
 			},
-			replaced: () => {
-				if (current()) this.#emit("replaced", null);
+			replaced: (detail) => {
+				if (!current()) return;
+				this.#takenOver = true;
+				this.#emit("replaced", detail);
 			},
 			identityResult: (bound, round, message) => {
 				if (!current()) return;

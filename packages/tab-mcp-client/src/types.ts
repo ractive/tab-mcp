@@ -118,6 +118,14 @@ export interface TabMcpOptions {
 	 */
 	confirmDelayMs?: number;
 	/**
+	 * Offer "Always allow" in the default confirmation: it lets a tool run
+	 * without asking for one AI app until the page is reloaded or the app is
+	 * disconnected. Off by default (DEC-096): the confirmation then shows only
+	 * "Don't allow" and "Allow", and every call asks. Turn it on only for
+	 * tools whose calls the user does not need to check one by one.
+	 */
+	alwaysAllow?: boolean;
+	/**
 	 * Where the address secret lives; default `localStorage`. `null` keeps it
 	 * only for the page's lifetime (a new address on every visit).
 	 */
@@ -277,6 +285,21 @@ export interface DisconnectDetail {
 	code: number;
 }
 
+/** The `replaced` event: who took over the page's address. */
+export interface ReplacedDetail {
+	/**
+	 * `true`: a tab of the same page in this browser said, just before, that it
+	 * took over the address; the usual, harmless cause ("Opened in another
+	 * tab"). `false`: no such tab was heard (or the browser has no
+	 * `BroadcastChannel`), so it may be a program with a copy of the address
+	 * secret, and the AI apps paired with the address now talk to it. Offer
+	 * `newAddress()`, which takes the address back and disconnects them
+	 * (DEC-095). Script on the page's origin can make a takeover look like a
+	 * sibling, so `true` is a hint, not a proof.
+	 */
+	sibling: boolean;
+}
+
 /** A tool call from an AI app as it starts (the `toolcall` event). */
 export interface ToolCallStart {
 	/** Unique in this page; `toolcallend` carries the same id. */
@@ -313,8 +336,11 @@ export interface TabMcpEventMap {
 	statechange: CustomEvent<{ state: ConnectionState }>;
 	connected: CustomEvent<SessionInfo>;
 	disconnected: CustomEvent<DisconnectDetail>;
-	/** Another tab took over this address; `disconnected` follows. */
-	replaced: CustomEvent<null>;
+	/**
+	 * Another tab, or a program with this page's address secret, took over
+	 * the address; `disconnected` follows. `sibling` says which it probably was.
+	 */
+	replaced: CustomEvent<ReplacedDetail>;
 	/** Something went wrong outside a pending promise (e.g. a relay error message). */
 	error: CustomEvent<{ error: Error }>;
 	/** A new pairing code, or `null` when there is none (any more). */

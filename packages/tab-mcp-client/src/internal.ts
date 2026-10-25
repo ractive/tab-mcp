@@ -10,6 +10,7 @@ import type {
 	DisconnectReason,
 	Grant,
 	PairingCode,
+	ReplacedDetail,
 	ServerInfo,
 	SessionInfo,
 	ToolCallClient,
@@ -22,6 +23,11 @@ export interface ConnectionHost {
 	readonly registry: ToolRegistry;
 	readonly server: ServerInfo;
 	readonly appName: string | undefined;
+	/**
+	 * The `BroadcastChannel` of the tabs that share this page's secret
+	 * (DEC-095); `undefined` when the secret is not shared (`storage: null`).
+	 */
+	readonly tabs: string | undefined;
 	/** Sent in `hello`. */
 	readonly library: { name: string; version: string };
 	/** Ask the user about a consequential tool call. */
@@ -36,7 +42,8 @@ export interface ConnectionHost {
 	pairingCode(code: PairingCode): void;
 	grantAdded(grant: Grant): void;
 	grantRemoved(grantId: string): void;
-	replaced(): void;
+	/** Another tab or program took over the address (reported once, before `closed`). */
+	replaced(detail: ReplacedDetail): void;
 	/** The relay accepted the page's identity assertion, or refused it. */
 	/** The relay's answer to the `identity` with this `round` (undefined from a relay that does not echo it). */
 	identityResult(

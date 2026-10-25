@@ -126,6 +126,73 @@ export function* pieces(text: string, max: number): Generator<string> {
 	}
 }
 
+/**
+ * How long after a sibling tab's claim a `replaced` counts as caused by it
+ * (DEC-095). The claim goes out just before that tab's `hello`, so the old
+ * tab hears it about a round trip to the relay before its `bye`.
+ */
+export const SIBLING_WINDOW_MS = 10_000;
+
+/**
+ * How long a replaced tab that heard no claim yet waits for one before it
+ * reports `replaced`: a channel message can arrive after the relay's `bye`
+ * (in Chrome with a relay on the same machine, it did).
+ */
+export const SIBLING_GRACE_MS = 1_000;
+
+/**
+ * The tabs of one page (same relay, same secret) tell each other on a
+ * `BroadcastChannel` when they claim the address, so that a replaced tab can
+ * tell a sibling from an impostor. Nothing else goes on it: no secret, no
+ * address. Without `BroadcastChannel` nothing is heard, and every `replaced`
+ * counts as unknown.
+ */
+function siblingTabs(name: string | undefined): {
+	claim(): void;
+	/** `true` once a claim was heard in the window, `false` after the grace. */
+	heard(): Promise<boolean>;
+	close(): void;
+} {
+	let channel: BroadcastChannel | undefined;
+	let at = Number.NEGATIVE_INFINITY;
+	let onClaim: (() => void) | undefined;
+	try {
+		if (name !== undefined && typeof BroadcastChannel === "function") {
+			channel = new BroadcastChannel(name);
+			channel.onmessage = (event: MessageEvent) => {
+				if ((event.data as { type?: unknown } | null)?.type !== "claim") return;
+				at = Date.now();
+				onClaim?.();
+			};
+		}
+	} catch {
+		channel = undefined; // e.g. an opaque origin
+	}
+	return {
+		claim() {
+			try {
+				channel?.postMessage({ type: "claim" });
+			} catch {
+				// closed or not allowed: the other tab counts it as unknown
+			}
+		},
+		heard() {
+			if (Date.now() - at <= SIBLING_WINDOW_MS) return Promise.resolve(true);
+			if (channel === undefined) return Promise.resolve(false);
+			return new Promise((resolve) => {
+				const timer = setTimeout(() => resolve(false), SIBLING_GRACE_MS);
+				onClaim = () => {
+					clearTimeout(timer);
+					resolve(true);
+				};
+			});
+		},
+		close() {
+			channel?.close();
+		},
+	};
+}
+
 /** Open the WebSocket and run the session. */
 export function openConnection(
 	host: ConnectionHost,
@@ -139,6 +206,7 @@ export function openConnection(
 	let maxChunk = 64 * 1024;
 	let heartbeat: ReturnType<typeof setTimeout> | undefined;
 	let heartbeatMs = 0;
+	const siblings = siblingTabs(host.tabs);
 
 	let resolveReady!: (session: SessionInfo) => void;
 	let rejectReady!: (error: Error) => void;
@@ -215,8 +283,19 @@ export function openConnection(
 				byeReason ??
 				CLOSE_REASONS[code] ??
 				(code === 1006 ? "network" : "closed");
+			if (reason === "replaced") {
+				// A claim that comes a moment after the `bye` still counts: both
+				// events wait for it, or for the grace (DEC-095).
+				void siblings.heard().then((sibling) => {
+					siblings.close();
+					host.replaced({ sibling });
+					host.closed(reason, code);
+				});
+				return;
+			}
 			host.closed(reason, code);
 		}
+		siblings.close();
 	}
 
 	async function tunnel(msg: HttpRequestMessage): Promise<void> {
@@ -378,7 +457,6 @@ export function openConnection(
 				return;
 			case "bye":
 				byeReason = BYE_REASONS[message.reason] ?? "closed";
-				if (byeReason === "replaced") host.replaced();
 				return;
 			case "error":
 				if (message.code === "identity_refused") {
@@ -415,6 +493,8 @@ export function openConnection(
 			secret,
 		};
 		if (host.appName !== undefined) hello.app = { name: host.appName };
+		// Before the hello: the tab this one replaces hears it first.
+		siblings.claim();
 		send(hello);
 	});
 	ws.addEventListener("message", (event: MessageEvent) => {

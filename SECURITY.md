@@ -37,9 +37,14 @@ honest.
 
 - Connect only pages you trust. The relay's pairing page names the page's origin (for
   example `https://ractive.ch`) and the AI app that is connecting. Check both before you
-  type the code.
+  type the code. The origin is what the page's browser reported when it connected; a
+  program that is not a browser can claim any origin. It tells you which page you connect
+  only when the code comes from a page you opened yourself.
 - Type a pairing code only for an AI app you started yourself, and never read the code
   out to anyone.
+- If a page says that another tab or program took over its address and you did not open
+  it elsewhere, choose "New address": someone may have copied the page's address, and
+  your AI apps would talk to them.
 - Disconnect AI apps you no longer use, in the page's "Connect your AI app" dialog.
 
 A relay accepts pages only from the origins its operator lists. This keeps other

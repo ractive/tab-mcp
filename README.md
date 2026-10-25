@@ -49,6 +49,14 @@ Try it without installing anything. These pages connect to the hosted relay
 The relay sees tool arguments and results but does not log or store them. It stores
 only hashes of tokens. More in the [threat model](docs/threat-model.md).
 
+## When to use something else
+
+tab-mcp is for state that lives only in the browser (a drawing, an emulator, a form being
+filled in), and for acting as the signed-in user in their open tab. If a page's state
+lives on its server, an MCP server on that backend is the better answer: it works while
+no tab is open, needs no relay in between, and can check who calls with the site's own
+accounts.
+
 ## Quick start for users
 
 You need a page that offers tab-mcp, such as the [live diagram editor](https://ractive.ch/tab-mcp/examples/diagram/).

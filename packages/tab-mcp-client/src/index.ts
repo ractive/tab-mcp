@@ -21,6 +21,7 @@ export type {
 	ReconnectingInfo,
 	ReconnectOptions,
 	RegisterToolOptions,
+	ReplacedDetail,
 	SecretStorage,
 	ServerInfo,
 	SessionInfo,

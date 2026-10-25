@@ -325,8 +325,81 @@ describe("disconnect", () => {
 		const replaced = nextEvent(first, "replaced");
 		const gone = nextEvent<DisconnectDetail>(first, "disconnected");
 		await tab({ storage }).connect();
-		await replaced;
+		// The new tab announced on the page's BroadcastChannel (DEC-095).
+		expect((await replaced).detail).toEqual({ sibling: true });
 		expect((await gone).detail).toEqual({ reason: "replaced", code: 4005 });
+	});
+
+	/** A program with a copied secret: `hello` over a plain WebSocket, no tab. */
+	async function impostor(secret: string): Promise<WebSocket> {
+		const ws = new WebSocket(
+			`${r.url.replace("http", "ws")}/tab`,
+			"tab-mcp.v1",
+		);
+		await new Promise((resolve) => ws.addEventListener("open", resolve));
+		const session = new Promise((resolve) =>
+			ws.addEventListener("message", resolve, { once: true }),
+		);
+		ws.send(
+			JSON.stringify({
+				type: "hello",
+				library: { name: "impostor", version: "1.0.0" },
+				page: { title: "" },
+				secret,
+			}),
+		);
+		await session;
+		return ws;
+	}
+
+	test("a program with the copied secret replaces the tab: sibling false (iteration 10)", async () => {
+		const storage = new MemoryStorage();
+		const t = tab({ storage });
+		await t.connect();
+		const replaced = nextEvent(t, "replaced");
+		const ws = await impostor([...storage.items.values()][0] as string);
+		try {
+			expect((await replaced).detail).toEqual({ sibling: false });
+		} finally {
+			ws.close();
+		}
+	});
+
+	test("without BroadcastChannel, a second tab counts as unknown: sibling false", async () => {
+		const g = globalThis as { BroadcastChannel?: unknown };
+		const saved = g.BroadcastChannel;
+		delete g.BroadcastChannel;
+		try {
+			const storage = new MemoryStorage();
+			const first = tab({ storage });
+			await first.connect();
+			const replaced = nextEvent(first, "replaced");
+			await tab({ storage }).connect();
+			expect((await replaced).detail).toEqual({ sibling: false });
+		} finally {
+			g.BroadcastChannel = saved;
+		}
+	});
+
+	test("newAddress() after a takeover takes the address back and disconnects its apps (iteration 10)", async () => {
+		const storage = new MemoryStorage();
+		const t = tab({ storage });
+		const { address } = await t.connect();
+		const token = await tokenFor(r.store, address);
+		const replaced = nextEvent(t, "replaced");
+		const ws = await impostor([...storage.items.values()][0] as string);
+		try {
+			await replaced;
+			expect(t.state).toBe("disconnected");
+			const renewed = await t.newAddress();
+			expect(renewed?.address).not.toBe(address);
+			expect(t.state).toBe("connected");
+			// The app paired with the old address no longer reaches anyone.
+			const res = await mcpPost(address, rpc(1, "tools/list"), { token });
+			expect(res.status).toBe(401);
+		} finally {
+			ws.close();
+		}
 	});
 
 	test("newAddress() connects again with a new address", async () => {

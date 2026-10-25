@@ -3,7 +3,7 @@ type: iteration
 title: "Iteration 13: browser library fixes"
 status: in-progress
 description: "Fixes from the 2026-10-24 review of the browser library: the Allow delay in a background tab, argument spoofing with direction characters, Always allow, result and schema edge cases, a tool removed during its confirmation, two connect dialogs, React provider stability."
-timestamp: 2026-10-24T21:00:00+02:00
+timestamp: 2026-10-25T18:00:00+02:00
 tags: [iteration, security, client]
 ---
 # Iteration 13: browser library fixes
@@ -36,6 +36,9 @@ same time. Releases as a client patch or minor version.
    author (an option like `alwaysAllow: true`), or keep it with a shorter scope. Say in
    the threat model that consent per tool is the page's, not the relay's (one `tools`
    scope covers every tool).
+   **Decided (owner, 2026-10-25): opt-in** ([DEC-096](../decision-log.md)): the option
+   `alwaysAllow`, default off; the confirmation then shows "Don't allow" and "Allow"
+   only. Done with iteration 10.
 4. **Low: a tool result with an `invalid` key becomes a JSON-RPC error**
    (detected in `src/mcp.ts:357-360`; `src/mapping.ts:78-79` passes the key through). `{content: [...], invalid: "rows
    skipped"}` is sent as `-32602` while `toolcallend` reports "ok". Fix: a tagged union
@@ -83,7 +86,7 @@ same time. Releases as a client patch or minor version.
 
 - [x] 1: Allow delay counts only while the page is visible and focused
 - [x] 2: invisible and direction characters shown escaped in the confirmation
-- [ ] 3: decide on Always allow (opt-in or narrower); threat model sentence on consent scope
+- [x] 3: decide on Always allow (opt-in or narrower); threat model sentence on consent scope
 - [x] 4: tagged outcome from `runTool`
 - [x] 5: schema compiled at registration; `end` always fires
 - [x] 6: tool re-checked after confirmation
@@ -102,6 +105,9 @@ copies. Not done: the optional state type for `#connecting`, `#reconnecting`,
 `#pageWaits` and `#generation` (not low risk enough for this change). The sleeps named
 above are gone (a ping as a barrier, a fake clock, or no wait where the scheduling is
 synchronous); three others in `reconnect.test.ts`, not named by the review, stay.
+
+2026-10-25: finding 3 done, "Always allow" opt-in (DEC-096), in the PR of iteration 10.
+Open: the release and the vendored copies.
 
 # Citations
 

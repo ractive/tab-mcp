@@ -239,6 +239,8 @@ loadConfig()
 						"press_keys and take the result from its answer; the user sees every key.",
 				},
 				appName: "Calculator",
+				// The test page offers "Always allow" (opt-in, DEC-096).
+				alwaysAllow: true,
 			});
 			await registerTools(mcp);
 			showAccess(mcp);

@@ -1689,3 +1689,83 @@ whether the token store answers, not only that the process runs.
   The guide says to use it for readiness and alerts: restarting the relay rarely helps a
   store that is down and ends every tab session, so a liveness probe should allow several
   minutes of failures.
+
+## DEC-094: No backend-signed address claim (owner)
+
+Owner, 2026-10-25, on step 3 of iteration 10. The architecture review of 2026-10-24
+suggested a "proof of page": the site's backend signs a short JWT for the address, the
+relay accepts a claim of the address only with it, and `/authorize` shows the origin as
+verified only then. Not built.
+
+- Without a signed-in user it proves nothing. The backend cannot tell its own page from
+  a program calling the same endpoint (CORS binds browsers only), so an endpoint that
+  signs for anyone signs for an impostor too, and for an attacker's own address shown as
+  "verified". It would not make the origin on `/authorize` trustworthy (architecture F2)
+  either.
+- With a signed-in user it can work (the backend keeps or derives the secret per user and
+  signs a single-use claim per `hello`), but identity binding (DEC-075 onwards) already
+  gives most of it: a bound session needs a fresh assertion from the backend, and a copied
+  secret gets nothing. The only case left is "the AI app pairs with the code, yet the
+  address is tied to the site's backend", for sites with accounts whose AI app users do
+  not sign in. That does not justify a second signing flow next to identity binding.
+- Instead, the docs name identity binding as the protection for pages with accounts, and
+  say plainly what a copied secret gives (threat model, asset 4 and A4) and that the
+  origin on `/authorize` is reported, not verified (threat model A11, `SECURITY.md`).
+
+## DEC-095: A replaced tab tells a sibling tab from an impostor (owner)
+
+Owner, 2026-10-25 (iteration 10). The newest session for an address wins, so a second tab
+of the same page and a program with a copied secret both end the page's session with
+`replaced`. The first is the usual, harmless cause; the second means every paired AI app
+now talks to the impostor.
+
+- Tabs that share the secret share a `BroadcastChannel` named after the secret's storage
+  key (`<key>#tabs`: relay origin and server name, or `storageKey`). A connection posts
+  `{ type: "claim" }` just before its `hello`, and listens while it is open. Nothing else
+  goes on the channel: never the secret or the address. With `storage: null` every tab
+  has its own address, so there is no channel.
+- A replaced connection that heard a claim within 10 seconds reports
+  `replaced` with `detail: { sibling: true }`, else `{ sibling: false }`. Without
+  `BroadcastChannel` nothing is heard: unknown counts as `false`, so the page warns. A
+  replaced connection that heard no claim yet waits up to 1 second for one before it
+  reports `replaced` and then `disconnected`: in headless Chrome with the relay on the
+  same machine, the claim sometimes arrived after the `bye`. A takeover by someone else
+  is therefore reported a second late. The detail used to be `null`; listeners that
+  ignore it work as before.
+- The default UI, once the page has opened the connect dialog, closes that dialog and
+  shows a notice: "Opened in another tab" for a sibling, otherwise "Another tab or
+  program took over this page" with "New address". A page that never opened the dialog
+  (its own UI, or `connect({ resume: true })` only) gets no notice from the library; it
+  has the event.
+- `newAddress()` after `replaced` first connects with the old secret, which takes the
+  address back from the impostor, so that `grants.revokeAll` reaches the relay and the
+  apps paired with the old address are cut off; then it rotates the secret and connects
+  again. Before, it only rotated the secret while disconnected, and the paired apps kept
+  talking to the impostor. Its reconnect is `connect({ resume: true })`, since it runs
+  after the takeover's round trip, when the user activation may have expired.
+- What it does not protect: script on the page's origin can post a claim and make a
+  takeover look harmless. Such script can read the secret and change the page anyway, so
+  the channel gives it nothing new. A page with a `storage` that tabs do not share (say
+  `sessionStorage`) shares the channel without sharing the address, so a sibling that
+  connects within 10 seconds of an unrelated takeover makes it look harmless.
+- Size: the channel code is in the lazily loaded connection chunk, the notice in the UI
+  chunk. The core grew by 88 bytes gzipped (5 519 to 5 607 of 5 632), for the channel
+  name, the `alwaysAllow` option and `newAddress()`; the connection chunk by 239 bytes
+  (12 331 to 12 570), the UI chunk by 494 (6 178 to 6 672).
+
+## DEC-096: "Always allow" is opt-in (owner)
+
+Owner, 2026-10-25, on finding 3 of iteration 13 (architecture F5). "Always allow" in the
+default confirmation let a consequential tool run without asking for one AI app until a
+reload or a disconnect. It lifts the only brake at run time, which is what a prompt
+injection needs, and the relay cannot add one: its single OAuth scope `tools` covers
+every tool of the page, so consent per tool is the page's.
+
+- New option `alwaysAllow` on `TabMcp` (and so on `TabMcpProvider`), default `false`. The
+  confirmation then shows only "Don't allow" and "Allow"; with `true` it shows "Always
+  allow" and its note as before (same scope: per AI app and tool, until a reload or a
+  disconnect).
+- A narrower scope instead of opt-in (a time limit, a number of calls) was not chosen: it
+  would still be on for every page by default, and a page that wants it can turn it on.
+- A visible change for pages that relied on it; the changelog says so. The test page of
+  `test/e2e` turns it on, so its end-to-end test still covers it.

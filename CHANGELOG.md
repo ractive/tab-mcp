@@ -9,8 +9,29 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ### Unreleased
 
+#### Changed
+
+- **Visible change: "Always allow" is opt-in** (DEC-096). The default confirmation now
+  shows only "Don't allow" and "Allow", so every call of a consequential tool asks.
+  `alwaysAllow: true` on `TabMcp` (or `TabMcpProvider`) brings "Always allow" back.
+  It lifted the only brake at run time for a tool until a reload, which is what a prompt
+  injection needs.
+- `replaced` carries `detail: { sibling }` (was `null`): `true` when a tab of the same
+  page in this browser announced on a `BroadcastChannel` that it took over the address,
+  `false` when nobody did (or without `BroadcastChannel`), which may be a program with a
+  copy of the address secret (DEC-095). The channel carries neither the secret nor the
+  address. Listeners that ignore the detail work as before.
+- `newAddress()` after `replaced` first connects with the old address again, so the
+  relay disconnects the AI apps that talk to whoever took it over, then connects with a
+  new address. It also no longer needs a fresh user action for the reconnect when the
+  page was connected.
+
 #### Added
 
+- The default UI says when the page loses its address, once the page has opened the
+  connect dialog: "Opened in another tab" after a sibling tab, otherwise a warning that
+  another tab or program took over this page, with "New address" (the dialog
+  `.tab-mcp-replaced`). The connect dialog closes then.
 - The WebSocket URL carries the address id: `wss://<relay>/tab?a=<id>`, never the
   secret. The library computes the id from the secret with Web Crypto before it opens
   the socket, so a load balancer in front of several relay instances can route the page
