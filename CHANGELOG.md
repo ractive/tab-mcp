@@ -269,6 +269,16 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Added
+
+- An icon: `/favicon.ico` (16, 32 and 48 px), `/favicon.svg` and
+  `/apple-touch-icon.png`, linked from the index and the sign-in pages. AI apps show it
+  for a connector where they showed a placeholder (Claude Desktop showed "@"). It is the
+  relay's, the same for every page; `scripts/favicon.ts` renders it from
+  `scripts/favicon.svg`.
+
 ### [0.5.0][relay-0.5.0] - 2026-10-25
 
 #### Added

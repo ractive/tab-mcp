@@ -960,7 +960,32 @@ describe("health and index", () => {
 		const index = await fetch(`${r.relay.url}/`);
 		expect(index.headers.get("content-type")).toContain("text/html");
 		expect(index.headers.get("cache-control")).toBe("public, max-age=3600");
+		expect(await index.text()).toContain(
+			'<link rel="icon" href="/favicon.svg"',
+		);
 		expect((await fetch(`${r.relay.url}/nope`)).status).toBe(404);
+	});
+
+	test("the icon: favicon.ico, favicon.svg and apple-touch-icon.png", async () => {
+		const r = relay();
+		const get = (path: string) => fetch(`${r.relay.url}${path}`);
+		const ico = await get("/favicon.ico");
+		expect(ico.headers.get("content-type")).toBe("image/x-icon");
+		// ICONDIR: reserved 0, type 1 (icon), three images.
+		expect([...new Uint8Array(await ico.arrayBuffer()).slice(0, 6)]).toEqual([
+			0, 0, 1, 0, 3, 0,
+		]);
+		const svg = await get("/favicon.svg");
+		expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+		expect(svg.headers.get("content-security-policy")).toBe(
+			"default-src 'none'",
+		);
+		expect(await svg.text()).toStartWith("<svg ");
+		const png = await get("/apple-touch-icon.png");
+		expect(png.headers.get("content-type")).toBe("image/png");
+		expect([...new Uint8Array(await png.arrayBuffer()).slice(1, 4)]).toEqual([
+			0x50, 0x4e, 0x47,
+		]);
 	});
 });
 
