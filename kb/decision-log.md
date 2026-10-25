@@ -1532,5 +1532,5 @@ properties.
   confirmation "Don't allow" (the focused, safe choice), not Allow.
 - Inline styles stay only where they matter without the stylesheet: the arguments wrap
   (also long words) and scroll, and the code is selected as a whole.
-- The stylesheet lives in the lazily loaded UI chunk (3.8 KB to 5.3 KB gzipped); the
+- The stylesheet lives in the lazily loaded UI chunk (3.8 KB to 5.7 KB gzipped, with the help's commands and Codex); the
   core is unchanged.

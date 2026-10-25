@@ -98,8 +98,9 @@ What happens:
    report user activation refuse `connect()` outside a user action, so never call it on
    page load.
 2. The "Connect your AI app" dialog shows the address
-   (`https://<relay>/a/<id>/mcp`), Copy and New address buttons, steps for Claude, ChatGPT and Claude
-   Code, and a 6-digit code. The code is valid for 2 minutes and is replaced by itself.
+   (`https://<relay>/a/<id>/mcp`), Copy and New address buttons, steps for Claude, ChatGPT, Claude
+   Code and Codex (the two commands with a Copy each, named by `server.name`; Codex's first
+   turns on its feature `mcp_2026_07_28`), and a 6-digit code. The code is valid for 2 minutes and is replaced by itself.
 3. The user adds the address to the AI app, for example
    `claude mcp add --transport http notes <address>` and then `/mcp` → Authenticate in
    Claude Code.

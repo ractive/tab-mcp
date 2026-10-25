@@ -3,7 +3,13 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { TabMcp } from "../src/index.ts";
 import type { ConfirmRequest, Grant, SessionInfo } from "../src/types.ts";
-import { confirmDialog, DIALOG_CSS, showConnectDialog } from "../src/ui.ts";
+import {
+	confirmDialog,
+	DIALOG_CSS,
+	instructions,
+	shellQuote,
+	showConnectDialog,
+} from "../src/ui.ts";
 import { newTab, nextEvent } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
@@ -549,6 +555,31 @@ describe("showConnectDialog", () => {
 		await shown;
 	}
 
+	test("each command in the help has a Copy that copies it whole (dialog design)", async () => {
+		const copied = stubClipboard();
+		const connecting = mcp.connect();
+		const closed = showConnectDialog(mcp, connecting, doc, "My notes");
+		const session = await connecting;
+		await relay.next("pairing.start");
+		const dialog = doc.querySelector("dialog.tab-mcp-connect") as HTMLElement;
+		const copies = [
+			...dialog.querySelectorAll(".tab-mcp-command-copy"),
+		] as HTMLButtonElement[];
+		expect(copies.map((b) => b.getAttribute("aria-label"))).toEqual([
+			"Copy Claude Code command",
+			"Copy Codex command",
+		]);
+		(copies[1] as HTMLButtonElement).click();
+		await Bun.sleep(0);
+		// The page's server name, quoted for the shell.
+		expect(copied()).toBe(
+			`codex features enable mcp_2026_07_28\ncodex mcp add "My notes" --url ${session.address}`,
+		);
+		expect(copies[1]?.textContent).toBe("Copied");
+		byText(dialog, "Close").click();
+		await closed;
+	});
+
 	test("Copy writes the address to the clipboard", async () => {
 		const copied = stubClipboard();
 		const { dialog, session } = await open();
@@ -923,16 +954,21 @@ describe("showConnectDialog", () => {
 		])
 			expect(has(plain, "tab-mcp-primary")).toBe(false);
 		// Both Copy buttons take the same room as "Copy" and "Copied".
-		expect(dialog.querySelectorAll("button.tab-mcp-copy").length).toBe(2);
+		expect(dialog.querySelectorAll("button.tab-mcp-copy").length).toBe(4);
 		// What disconnects apps is marked.
 		expect(has(".tab-mcp-disconnect", "tab-mcp-danger")).toBe(true);
 		expect(has(".tab-mcp-new-address-confirm", "tab-mcp-danger")).toBe(true);
 		const app = dialog.querySelector(".tab-mcp-apps li .tab-mcp-app");
 		expect(app?.textContent).toBe("Claude (claude.ai) connected ");
-		// The command for Claude Code is set apart, with the address in it.
-		expect(dialog.querySelector(".tab-mcp-help code")?.textContent).toBe(
+		// Each command is a block with its own Copy; the server name defaults to "tools".
+		expect(
+			[...dialog.querySelectorAll(".tab-mcp-help .tab-mcp-command pre")].map(
+				(p) => p.textContent,
+			),
+		).toEqual([
 			`claude mcp add --transport http tools ${session.address}`,
-		);
+			`codex features enable mcp_2026_07_28\ncodex mcp add tools --url ${session.address}`,
+		]);
 		expect(
 			[...dialog.querySelectorAll(".tab-mcp-help strong")].map(
 				(s) => s.textContent,
@@ -941,7 +977,14 @@ describe("showConnectDialog", () => {
 			"Claude (claude.ai and the desktop app):",
 			"ChatGPT:",
 			"Claude Code:",
+			"Codex:",
 		]);
+		expect(dialog.querySelector(".tab-mcp-command-note")?.textContent).toBe(
+			"Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; codex features disable mcp_2026_07_28 turns it off.",
+		);
+		expect(
+			dialog.querySelector(".tab-mcp-command-note code")?.textContent,
+		).toBe("codex features disable mcp_2026_07_28");
 		// No inline styles but the one that keeps the code selectable as a whole.
 		const styled = [...dialog.querySelectorAll("[style]")] as HTMLElement[];
 		expect(styled.map((e) => e.className)).toEqual(["tab-mcp-code-value"]);
@@ -1029,5 +1072,34 @@ describe("the dialogs' stylesheet (dialog design)", () => {
 		expect(used.size).toBeGreaterThan(10);
 		const missing = [...used].filter((name) => !readme.includes(`\`${name}\``));
 		expect(missing).toEqual([]);
+	});
+});
+
+describe("the commands in the help (dialog design)", () => {
+	test("shellQuote: plain words stay, others are quoted for every shell where it can", () => {
+		expect(shellQuote("tools")).toBe("tools");
+		expect(shellQuote("https://relay.example/a/abc/mcp")).toBe(
+			"https://relay.example/a/abc/mcp",
+		);
+		expect(shellQuote("My notes")).toBe('"My notes"');
+		expect(shellQuote("a&b")).toBe('"a&b"');
+		expect(shellQuote("$HOME")).toBe("'$HOME'");
+		expect(shellQuote("it's $x")).toBe("'it'\\''s $x'");
+		expect(shellQuote('say "hi"')).toBe("'say \"hi\"'");
+	});
+
+	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {
+		const codex = instructions("calc", "https://relay.example/a/x/mcp").find(
+			([app]) => app === "Codex",
+		);
+		expect(codex?.[2]).toBe(
+			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp",
+		);
+		const claudeCode = instructions("$x", "https://r.example/a/x/mcp").find(
+			([app]) => app === "Claude Code",
+		);
+		expect(claudeCode?.[2]).toBe(
+			"claude mcp add --transport http '$x' https://r.example/a/x/mcp",
+		);
 	});
 });

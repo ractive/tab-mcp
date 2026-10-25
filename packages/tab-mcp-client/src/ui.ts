@@ -113,6 +113,9 @@ padding: var(--tab-mcp-padding, clamp(1rem, 5vw, 1.5rem)); box-shadow: var(--tab
 .tab-mcp-help :where(ul) { margin-top: 0.75rem; gap: 0.75rem; }
 .tab-mcp-help :where(li) { overflow-wrap: anywhere; }
 .tab-mcp-help :where(strong) { display: block; font-weight: 600; }
+.tab-mcp-command { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 0.5rem; margin-top: 0.375rem; }
+.tab-mcp-command > :where(pre) { flex: 1 1 16rem; min-width: 0; margin: 0; padding: 0.5rem 0.625rem; font: 0.8125em / 1.5 var(--_tab-mcp-mono); white-space: pre-wrap; word-break: break-all; background: var(--_tab-mcp-surface); border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-command-note { display: block; margin-top: 0.375rem; }
 .tab-mcp-help :where(code) { font: 0.875em var(--_tab-mcp-mono); padding: 0.125em 0.375em; background: var(--_tab-mcp-surface); border-radius: 0.25rem; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .tab-mcp-apps :where(li) { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-app { min-width: 0; overflow-wrap: anywhere; }
@@ -431,18 +434,53 @@ export function confirmDialog(
 	});
 }
 
-/** Per AI app: its name, what to do, and a command to run (with the address). */
-const INSTRUCTIONS: [string, string, string?][] = [
-	[
-		"Claude (claude.ai and the desktop app)",
-		"Settings → Connectors → Add custom connector, then paste the address.",
-	],
-	[
-		"ChatGPT",
-		"Settings → Apps and connectors → Advanced settings: turn on developer mode, then Create and paste the address.",
-	],
-	["Claude Code", "Run:", "claude mcp add --transport http tools ADDRESS"],
-];
+/**
+ * `s` as one shell word: as it is when every character means itself in POSIX
+ * shells, PowerShell and cmd.exe; else in double quotes when it has none of
+ * " $ ` \ ! % (the same word in all three); else, POSIX only, in single
+ * quotes, a single quote inside as '\''.
+ */
+export function shellQuote(s: string): string {
+	if (/^[A-Za-z0-9_./:-]+$/.test(s)) return s;
+	if (!/["$`\\!%]/.test(s)) return `"${s}"`;
+	return `'${s.replaceAll("'", "'\\''")}'`;
+}
+
+/** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
+const CODEX_FEATURE = "mcp_2026_07_28";
+
+/**
+ * Per AI app: its name, what to do, a command to run (one per line), and a
+ * note after it, alternating text and code. `name` is the page's server name.
+ */
+export function instructions(
+	name: string,
+	address: string,
+): [string, string, string?, string[]?][] {
+	const n = shellQuote(name);
+	const a = shellQuote(address);
+	return [
+		[
+			"Claude (claude.ai and the desktop app)",
+			"Settings → Connectors → Add custom connector, then paste the address.",
+		],
+		[
+			"ChatGPT",
+			"Settings → Apps and connectors → Advanced settings: turn on developer mode, then Create and paste the address.",
+		],
+		["Claude Code", "Run:", `claude mcp add --transport http ${n} ${a}`],
+		[
+			"Codex",
+			"Run:",
+			`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}`,
+			[
+				"Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
+				`codex features disable ${CODEX_FEATURE}`,
+				" turns it off.",
+			],
+		],
+	];
+}
 
 /** "A and B", "A, B and C". */
 function listOf(items: string[]): string {
@@ -464,6 +502,7 @@ export function showConnectDialog(
 	mcp: TabMcp,
 	connecting: Promise<SessionInfo>,
 	doc: Document,
+	serverName = "tools",
 ): Promise<void> {
 	const { dialog } = newDialog(doc, "tab-mcp-connect", "Connect your AI app");
 	// Focusable from script only, for the moment before the address is shown.
@@ -721,22 +760,49 @@ export function showConnectDialog(
 		if (doc.activeElement === dialog) copy.focus();
 		help.hidden = false;
 		steps.replaceChildren(
-			...INSTRUCTIONS.map(([app, how, command]) =>
-				el(
-					doc,
-					"li",
-					{},
-					el(doc, "strong", { text: `${app}:` }),
-					` ${how}`,
-					...(command === undefined
-						? []
-						: [
-								" ",
-								el(doc, "code", {
-									text: command.replace("ADDRESS", session.address),
-								}),
-							]),
-				),
+			...instructions(serverName, session.address).map(
+				([app, how, command, note]) => {
+					const item = el(
+						doc,
+						"li",
+						{},
+						el(doc, "strong", { text: `${app}:` }),
+						` ${how}`,
+					);
+					if (command !== undefined) {
+						// A block with its own Copy, like the code.
+						const text = el(doc, "pre", { text: command });
+						text.dir = "ltr";
+						const { button: copyCommand } = copyButton(
+							doc,
+							`${app} command`,
+							() => text.textContent ?? "",
+							() => doc.getSelection()?.selectAllChildren(text),
+							"tab-mcp-command-copy",
+						);
+						item.append(
+							el(
+								doc,
+								"div",
+								{ className: "tab-mcp-command" },
+								text,
+								copyCommand,
+							),
+						);
+					}
+					if (note !== undefined)
+						item.append(
+							el(
+								doc,
+								"small",
+								{ className: "tab-mcp-command-note" },
+								...note.map((part, i) =>
+									i % 2 === 1 ? el(doc, "code", { text: part }) : part,
+								),
+							),
+						);
+					return item;
+				},
 			),
 		);
 	};

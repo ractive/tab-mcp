@@ -133,8 +133,12 @@ handles only some calls itself.
 1. The user clicks your button. `showConnectDialog()` connects (call it from the click
    handler: browsers that report user activation refuse `connect()` without one) and
    opens the "Connect your AI app" dialog.
-2. The dialog shows the address and short instructions for Claude, ChatGPT and Claude
-   Code. The user adds the address to their AI app.
+2. The dialog shows the address and short instructions for Claude, ChatGPT, Claude Code
+   and Codex; the commands for Claude Code and Codex name the server by its `server.name`
+   and each has a Copy. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
+   revision, so its command turns that on first (for all of Codex's MCP servers;
+   `codex features disable mcp_2026_07_28` turns it off). The user adds the address to
+   their AI app.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
    code with a Copy button, which the user types or pastes there. The code changes every
    2 minutes and after each use.

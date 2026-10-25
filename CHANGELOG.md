@@ -14,7 +14,7 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 - The default dialogs have a designed look: the title, then the one next step as the
   primary button (Copy the address; Done once an app is connected; "Don't allow" in the
   confirmation), the pairing code large in its own box, the steps per AI app one below
-  the other with the Claude Code command in monospace, Disconnect buttons marked, visible
+  the other, Disconnect buttons marked, visible
   focus rings, and the arguments wrapped (also long words) and scrolling. The look comes
   from a constructed stylesheet (no CSP exception), uses
   system colours and the page's `color-scheme` (light and dark), fits 360 px, and does
@@ -27,6 +27,12 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   Each rule has the specificity of one class: the page's rules for elements do not change
   the dialogs, a page rule with two classes (`.tab-mcp-dialog .tab-mcp-primary`) does.
   Until now most values were inline styles that only the custom properties could change.
+- The help ("How do I add it?") shows each command as a block with its own Copy, and has
+  steps for Codex: `codex features enable mcp_2026_07_28`, which Codex 0.163 needs for the
+  relay's MCP revision (for all its MCP servers; `codex features disable mcp_2026_07_28`
+  turns it off), then `codex mcp add <name> --url <address>`. The commands for Claude Code
+  and Codex name the server by the page's `server.name` (was always `tools`), quoted for
+  the shell.
 - The pairing code is `2em` by default (was `1.5em`), the default border is the text
   colour at 22 % (was `GrayText`), the default radius `0.75rem` (was `0.5rem`).
 

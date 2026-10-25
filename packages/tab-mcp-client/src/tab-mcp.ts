@@ -640,7 +640,7 @@ export class TabMcp extends EventTarget {
 		const connecting = this.connect();
 		connecting.catch(() => {}); // the dialog shows the error
 		const { showConnectDialog } = await import("./ui.ts");
-		await showConnectDialog(this, connecting, doc);
+		await showConnectDialog(this, connecting, doc, this.#server.name);
 	}
 
 	override addEventListener<K extends keyof TabMcpEventMap>(
