@@ -273,6 +273,10 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 #### Added
 
+- AI apps whose Client ID Metadata Document prefers another token endpoint auth method
+  but lists `none` in `token_endpoint_auth_methods_supported` are accepted (DEC-104).
+  ChatGPT's connectors (`https://chatgpt.com/oauth/client.json`, `private_key_jwt` with
+  `["none", "private_key_jwt"]`) were refused at `/authorize`.
 - An icon: `/favicon.ico` (16, 32 and 48 px), `/favicon.svg` and
   `/apple-touch-icon.png`, linked from the index and the sign-in pages. AI apps show it
   for a connector where they showed a placeholder (Claude Desktop showed "@"). It is the

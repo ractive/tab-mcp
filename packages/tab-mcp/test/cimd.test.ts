@@ -523,6 +523,31 @@ describe("CIMD §4 / MCP client registration: the document", () => {
 		expect(
 			await check(DOC(id, { token_endpoint_auth_method: undefined })),
 		).toBe("accepted");
+		// ChatGPT prefers private_key_jwt but lists "none" (DEC-104).
+		expect(
+			await check(
+				DOC(id, {
+					token_endpoint_auth_method: "private_key_jwt",
+					token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+				}),
+			),
+		).toBe("accepted");
+		expect(
+			await check(
+				DOC(id, {
+					token_endpoint_auth_method: "private_key_jwt",
+					token_endpoint_auth_methods_supported: ["private_key_jwt"],
+				}),
+			),
+		).toBe("invalid_metadata");
+		expect(
+			await check(
+				DOC(id, {
+					token_endpoint_auth_method: "private_key_jwt",
+					token_endpoint_auth_methods_supported: "none",
+				}),
+			),
+		).toBe("invalid_metadata");
 		expect(await check(DOC(id, { client_secret: "s" }))).toBe(
 			"invalid_metadata",
 		);

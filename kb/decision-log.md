@@ -665,7 +665,8 @@ dot segments, upper-case hosts, an explicit default port and other aliases witho
 special cases; it needs `https:`, a path, the default port, no credentials or fragment.
 IP literals and every address the host resolves to must be public. The document needs
 `client_id` equal to the URL, `client_name` and 1-20 `redirect_uris` (absolute, no
-fragment, not `javascript:`/`data:`); `token_endpoint_auth_method` absent or `none`; no
+fragment, not `javascript:`/`data:`); `token_endpoint_auth_method` absent or `none` (or, since DEC-104, `none` listed in
+`token_endpoint_auth_methods_supported`); no
 `client_secret`; `grant_types` and `response_types`, if present, allow the code flow.
 Caching: `max-age` clamped to 5 minutes-24 hours, `no-store`/`no-cache` 5 minutes, no
 header 1 hour; at most 1000 documents. Fetches per host: 5, then 1 every 5 s. The name
@@ -1538,6 +1539,26 @@ Owner, 2026-10-25: the budget for the library's core (what a page loads on impor
 leaves about 500 B. The budget stays a tripwire, not a target: a change that crosses it
 moves code into the connection or UI chunk, or raises the budget with a decision here.
 Larger budgets (7 or 10 KB) were offered and declined as too loose to catch anything.
+
+## DEC-104: An AI app that lists "none" among its methods is accepted (owner)
+
+Owner, 2026-10-25. ChatGPT's own connectors (chatgpt.com, run on OpenAI's servers) failed
+at `/authorize`: its Client ID Metadata Document at `https://chatgpt.com/oauth/client.json`
+says `token_endpoint_auth_method: "private_key_jwt"` (with `jwks_uri`), and the relay
+accepted only `none` (DEC-059). The same document lists
+`token_endpoint_auth_methods_supported: ["none", "private_key_jwt"]`, a field RFC 7591
+does not define for clients but which says the app can also do `none`.
+
+- The relay accepts a document whose `token_endpoint_auth_method` is something else when
+  that list (an array) contains `none`. The relay's metadata offers only `none`, so the
+  app should use it at `/token`; `/token` still refuses `client_assertion` and
+  `client_secret`, so an app that signs anyway fails there with `invalid_client`.
+- Security is unchanged: such an app is a public client like the others (PKCE, the
+  pairing code or the identity binding, exact redirect URIs).
+- Not chosen for now: verifying `private_key_jwt` (fetching the app's JWKS, checking an
+  RS256 `client_assertion` with `iss`, `sub`, `aud`, `exp` and a one-time `jti`). It
+  would prove that a token request comes from OpenAI, at the cost of a new signature path
+  at `/token`. Revisit if ChatGPT insists on signing.
 
 # Citations
 
