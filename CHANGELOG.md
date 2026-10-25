@@ -9,8 +9,39 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ### Unreleased
 
+#### Changed
+
+- **Visible change: "Always allow" is opt-in** (DEC-096). The default confirmation now
+  shows only "Don't allow" and "Allow", so every call of a consequential tool asks.
+  `alwaysAllow: true` on `TabMcp` (or `TabMcpProvider`) brings "Always allow" back.
+  It lifted the only brake at run time for a tool until a reload, which is what a prompt
+  injection needs.
+- `replaced` carries `detail: { sibling }` (was `null`): `true` when a tab of the same
+  page in this browser said on a `BroadcastChannel` that the relay accepted its session
+  for the address, `false` when none did (or without `BroadcastChannel`), which may be a
+  program with a copy of the address secret (DEC-095). The channel carries neither the
+  secret nor the address. Listeners that ignore the detail work as before.
+- **Order of events when replaced:** the session ends at the relay's `bye`;
+  `disconnected` (reason `replaced`) comes at once, and `replaced` after it, up to a
+  second later while the library waits to hear from a sibling tab. Before, `replaced`
+  came first.
+- `newAddress()` after `replaced` (from the event, during that second, or later) takes
+  the address back first: it connects with the old secret and `hello.revokeAll`, so the
+  relay revokes the AI apps that talk to whoever took it over in the same step, and
+  makes the new address only once the relay confirmed it (no grants left). Taken over
+  again before that, it rejects (`reason: "replaced"`), keeps the old secret, and a retry
+  takes it back again. Against a relay of 0.4 or older, which ignores the field, it sends
+  `grants.revokeAll` and waits until every grant is gone. It no longer needs a fresh user
+  action for the reconnect when the page was connected.
+- The tools allowed with "Always allow" are kept in the lazily loaded UI chunk, which
+  makes the core smaller.
+
 #### Added
 
+- The default UI says when the page loses its address, once the page has opened the
+  connect dialog: "Opened in another tab" after a sibling tab, otherwise a warning that
+  another tab or program took over this page, with "New address" (the dialog
+  `.tab-mcp-replaced`). The connect dialog closes then.
 - The WebSocket URL carries the address id: `wss://<relay>/tab?a=<id>`, never the
   secret. The library computes the id from the secret with Web Crypto before it opens
   the socket, so a load balancer in front of several relay instances can route the page
@@ -242,6 +273,12 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 #### Added
 
+- `hello.revokeAll: true` (DEC-095): the relay revokes every grant of the address as it
+  hands the address to this session, before its `session` answer, which then lists no
+  grants. A page takes its address back with it after a takeover; before, its
+  `grants.revokeAll` came after the `session` and was lost when whoever held the secret
+  claimed the address again first. Anything but a boolean in the field is refused with
+  `bad_message`.
 - Several instances behind one public URL (DEC-098). The address id is now reachable
   from every request that needs the instance holding the address, so a load balancer
   can route by it: `/tab?a=<id>` (new, sent by the client library from 0.8),

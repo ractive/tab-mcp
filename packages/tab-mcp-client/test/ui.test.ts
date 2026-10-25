@@ -97,7 +97,7 @@ describe("confirmDialog", () => {
 	});
 
 	test("Don't allow stands out as the safe choice; the arguments wrap and scroll (dialog design)", async () => {
-		const answer = confirmDialog(question(), doc);
+		const answer = confirmDialog(question(), doc, { alwaysAllow: true });
 		const dialog = doc.querySelector(
 			"dialog.tab-mcp-confirm",
 		) as HTMLDialogElement;
@@ -134,7 +134,7 @@ describe("confirmDialog", () => {
 
 describe("confirmDialog: Always allow", () => {
 	test('waits like Allow, says how long it lasts, and resolves "always"', async () => {
-		const answer = confirmDialog(question(), doc);
+		const answer = confirmDialog(question(), doc, { alwaysAllow: true });
 		const dialog = doc.querySelector(
 			"dialog.tab-mcp-confirm",
 		) as HTMLDialogElement;
@@ -148,6 +148,111 @@ describe("confirmDialog: Always allow", () => {
 		await enabled(always);
 		always.click();
 		expect(await answer).toBe("always");
+	});
+
+	test("off by default: only Don't allow and Allow, no note (iteration 13, DEC-096)", async () => {
+		const answer = confirmDialog(question(), doc);
+		const dialog = doc.querySelector(
+			"dialog.tab-mcp-confirm",
+		) as HTMLDialogElement;
+		expect(buttons(dialog).map((b) => b.textContent)).toEqual([
+			"Don't allow",
+			"Allow",
+		]);
+		expect(dialog.querySelector(".tab-mcp-always-note")).toBeNull();
+		expect(dialog.textContent).not.toContain("Always");
+		byText(dialog, "Don't allow").click();
+		expect(await answer).toBe("deny");
+	});
+
+	test("TabMcp remembers it per grant and tool; a removed grant or tool asks again", async () => {
+		const g = globalThis as { document?: Document | undefined };
+		const saved = g.document;
+		g.document = doc;
+		const relay = new StubRelay();
+		relay.grants = [
+			{
+				grantId: "g_1",
+				client: {
+					id: "https://claude.ai/c.json",
+					name: "Claude",
+					host: "claude.ai",
+				},
+				createdAt: "2026-10-19T20:00:00.000Z",
+			},
+		];
+		const mcp = newTab(relay.url, { alwaysAllow: true });
+		const tool = new AbortController();
+		await mcp.registerTool(
+			{ name: "clear_memory", description: "Clears", execute: () => "ok" },
+			{ signal: tool.signal },
+		);
+		const dialog = () =>
+			new Promise<HTMLDialogElement>((resolve) => {
+				const poll = () => {
+					const found = doc.querySelector("dialog.tab-mcp-confirm");
+					if (found !== null) resolve(found as HTMLDialogElement);
+					else setTimeout(poll, 1);
+				};
+				poll();
+			});
+		try {
+			await mcp.connect();
+			const first = mcp.confirmInPage(question());
+			const always = byText(await dialog(), "Always allow");
+			await enabled(always);
+			always.click();
+			expect(await first).toBe(true);
+			// Asked no more for that grant and tool.
+			expect(await mcp.confirmInPage(question())).toBe(true);
+			// The grant goes: asked again.
+			relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+			await relay.settled();
+			relay.send({ type: "grant.added", grant: relay.grants[0] });
+			await relay.settled();
+			const again = mcp.confirmInPage(question());
+			byText(await dialog(), "Don't allow").click();
+			expect(await again).toBe(false);
+		} finally {
+			tool.abort();
+			mcp.disconnect();
+			await relay.stop();
+			g.document = saved;
+		}
+	});
+
+	test("TabMcp offers it only with alwaysAllow: true (DEC-096)", async () => {
+		const g = globalThis as { document?: Document | undefined };
+		const saved = g.document;
+		g.document = doc;
+		try {
+			for (const [options, offered] of [
+				[{}, false],
+				[{ alwaysAllow: false }, false],
+				[{ alwaysAllow: true }, true],
+			] as const) {
+				const mcp = newTab("http://127.0.0.1:9", options);
+				const answer = mcp.confirmInPage(question());
+				const dialog = await new Promise<HTMLDialogElement>((resolve) => {
+					const poll = () => {
+						const found = doc.querySelector("dialog.tab-mcp-confirm");
+						if (found !== null) resolve(found as HTMLDialogElement);
+						else setTimeout(poll, 1);
+					};
+					poll();
+				});
+				expect({
+					options,
+					offered: buttons(dialog).some(
+						(b) => b.textContent === "Always allow",
+					),
+				}).toEqual({ options, offered });
+				byText(dialog, "Don't allow").click();
+				expect(await answer).toBe(false);
+			}
+		} finally {
+			g.document = saved;
+		}
 	});
 });
 
@@ -169,7 +274,9 @@ describe("confirmDialog safety (review of PR #2)", () => {
 	test("arguments that cannot be shown offer neither Allow nor Always allow", async () => {
 		const loop: Record<string, unknown> = {};
 		loop["self"] = loop;
-		const answer = confirmDialog({ ...question(), arguments: loop }, doc);
+		const answer = confirmDialog({ ...question(), arguments: loop }, doc, {
+			alwaysAllow: true,
+		});
 		expect(byText(doc, "Allow").hidden).toBe(true);
 		expect(byText(doc, "Always allow").hidden).toBe(true);
 		byText(doc, "Don't allow").click();
@@ -249,7 +356,10 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 
 	test("opened in a hidden tab: Allow waits for the tab to be shown, then the full delay", async () => {
 		hidden = true;
-		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const answer = confirmDialog(question(), doc, {
+			allowDelayMs: 600,
+			alwaysAllow: true,
+		});
 		const allow = byText(doc, "Allow");
 		const always = byText(doc, "Always allow");
 		jest.advanceTimersByTime(60_000);
@@ -283,7 +393,10 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 	});
 
 	test("leaving the page disables Allow again; coming back starts the delay again", async () => {
-		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const answer = confirmDialog(question(), doc, {
+			allowDelayMs: 600,
+			alwaysAllow: true,
+		});
 		const allow = byText(doc, "Allow");
 		const always = byText(doc, "Always allow");
 		jest.advanceTimersByTime(600);
@@ -1141,6 +1254,142 @@ describe("the dialogs' stylesheet (dialog design)", () => {
 		expect(used.size).toBeGreaterThan(10);
 		const missing = [...used].filter((name) => !readme.includes(`\`${name}\``));
 		expect(missing).toEqual([]);
+	});
+});
+
+describe("replaced: the page's address taken over (iteration 10, DEC-095)", () => {
+	let relay: StubRelay;
+	let mcp: TabMcp;
+	/** The page's channel: its storage key plus `#tabs`. */
+	let channelName: string;
+
+	beforeEach(() => {
+		relay = new StubRelay();
+		mcp = newTab(relay.url);
+		channelName = `tab-mcp:secret:${relay.url}:test-page#tabs`;
+	});
+	afterEach(async () => {
+		mcp.disconnect();
+		await relay.stop();
+	});
+
+	/** The element once it is in the document (polling; the dialogs open asynchronously). */
+	function waitFor(selector: string): Promise<HTMLElement> {
+		return new Promise((resolve) => {
+			const poll = () => {
+				const found = doc.querySelector(selector);
+				if (found !== null) resolve(found as HTMLElement);
+				else setTimeout(poll, 1);
+			};
+			poll();
+		});
+	}
+
+	async function openThenReplace(sibling: boolean): Promise<HTMLDialogElement> {
+		const connecting = mcp.connect();
+		const closed = showConnectDialog(mcp, connecting, doc);
+		await connecting;
+		await relay.next("pairing.start");
+		if (sibling) {
+			// A sibling tab says its session started (`claimed`).
+			const announce = new BroadcastChannel(channelName);
+			const listener = new BroadcastChannel(channelName);
+			const delivered = new Promise((r) => {
+				listener.onmessage = r;
+			});
+			announce.postMessage({ type: "claimed" });
+			await delivered;
+			announce.close();
+			listener.close();
+		}
+		const gone = nextEvent(mcp, "disconnected");
+		relay.send({ type: "bye", reason: "replaced" });
+		relay.close(4005, "replaced");
+		await gone;
+		await closed; // the connect dialog gives way to the notice
+		expect(doc.querySelector("dialog.tab-mcp-connect")).toBeNull();
+		return (await waitFor("dialog.tab-mcp-replaced")) as HTMLDialogElement;
+	}
+
+	test("nobody announced it: a warning that another tab or program took over, with New address", async () => {
+		const replaced = openThenReplace(false);
+		const secret = (await relay.next("hello"))["secret"];
+		const notice = await replaced;
+		expect(notice.open).toBe(true);
+		expect(notice.querySelector("h2")?.textContent).toBe(
+			"Another tab or program took over this page",
+		);
+		expect(notice.textContent).toContain("someone may have copied its address");
+		expect(buttons(notice).map((b) => b.textContent)).toEqual([
+			"Close",
+			"New address",
+		]);
+		expect(doc.activeElement?.textContent).toBe("New address");
+		byText(notice, "New address").click();
+		// Back on the old address first, so the relay disconnects its apps.
+		expect((await relay.next("hello"))["secret"]).toBe(secret);
+		expect(await relay.next("grants.revokeAll")).toEqual({
+			type: "grants.revokeAll",
+		});
+		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
+		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
+		// Then the connect dialog, to add the new address to the AI apps.
+		const connect = await waitFor("dialog.tab-mcp-connect");
+		await relay.next("pairing.start");
+		expect(doc.querySelector("dialog.tab-mcp-replaced")).toBeNull();
+		(connect as HTMLDialogElement).close();
+	});
+
+	test("taken over again during New address: the notice says so and New address works again (review of PR 39)", async () => {
+		const notice = await openThenReplace(false);
+		relay.answerHello = false;
+		byText(notice, "New address").click();
+		expect(
+			await relay.next("hello", (m) => m["revokeAll"] === true),
+		).toBeDefined();
+		relay.send({ type: "bye", reason: "replaced" });
+		relay.close(4005, "replaced");
+		const status = notice.querySelector(".tab-mcp-status") as HTMLElement;
+		await new Promise<void>((resolve) => {
+			const poll = () =>
+				status.textContent?.startsWith("It was taken over again")
+					? resolve()
+					: setTimeout(poll, 1);
+			poll();
+		});
+		expect(status.textContent).toBe(
+			"It was taken over again before its AI apps were disconnected. Try again.",
+		);
+		expect(byText(notice, "New address").disabled).toBe(false);
+		expect(notice.open).toBe(true);
+	});
+
+	test("a sibling tab announced it: 'Opened in another tab', nothing to do", async () => {
+		const notice = await openThenReplace(true);
+		expect(notice.querySelector("h2")?.textContent).toBe(
+			"Opened in another tab",
+		);
+		expect(buttons(notice).map((b) => b.textContent)).toEqual(["Close"]);
+		byText(notice, "Close").click();
+		expect(doc.querySelector("dialog.tab-mcp-replaced")).toBeNull();
+		expect(mcp.state).toBe("disconnected");
+	});
+
+	test("the channel carries neither the secret nor the address", async () => {
+		const seen: unknown[] = [];
+		const spy = new BroadcastChannel(channelName);
+		spy.onmessage = (e) => seen.push(e.data);
+		try {
+			const session = await mcp.connect();
+			const secret = (await relay.next("hello"))["secret"] as string;
+			await relay.settled();
+			expect(seen).toEqual([{ type: "claimed" }]);
+			const text = JSON.stringify(seen);
+			expect(text).not.toContain(secret);
+			expect(text).not.toContain(session.address);
+		} finally {
+			spy.close();
+		}
 	});
 });
 

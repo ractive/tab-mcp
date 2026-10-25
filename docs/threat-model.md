@@ -1,8 +1,9 @@
 # Threat model
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
-relay `@ractive-ch/tab-mcp` and browser library `@ractive-ch/tab-mcp-client`
-0.1.0. To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+relay `@ractive-ch/tab-mcp` 0.4.0 and browser library `@ractive-ch/tab-mcp-client` 0.7.0,
+with the changes listed under "Unreleased" in the changelog. To report a vulnerability,
+see [SECURITY.md](../SECURITY.md).
 
 ## How it works, in short
 
@@ -21,7 +22,9 @@ and answers. See the [protocol](protocol.md) for the details.
    open, for up to 1 hour. A refresh token gives new access tokens for up to 30 days, and
    never beyond 90 days after pairing.
 4. **The address secret** in the page's `localStorage`. Whoever has it can take over the
-   address, but not the tokens of apps already connected.
+   address from anywhere: the AI apps already paired with it then talk to them instead of
+   the page, until the page gets a new address (A4). They get no token and cannot pair a
+   new app without a code.
 5. **The token store** (a SQLite file by default): token hashes and grant details.
 6. **The user's attention:** pairing dialogs and confirmations must not be spammed or
    confusing.
@@ -73,6 +76,11 @@ From a shared screenshot, a chat log or over the user's shoulder.
   secret.
 - Left over: a user who reads the code out to someone else, or types it for an AI app an
   attacker started. The pairing page names the AI app and the page origin.
+- On a page that pairs by code, grants follow the browser profile, not the person: the
+  address secret is in the profile's `localStorage`, and the relay knows nobody else. On
+  a shared profile, or in a web app with accounts that pairs by code, the next user of the
+  page gets the AI apps the previous one paired. Use identity binding (A12) for such
+  pages, or call `newAddress()` when the user logs out.
 
 ### A2: A malicious or impersonating AI app (OAuth client)
 
@@ -153,6 +161,51 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   come from a few shared addresses (all claude.ai users from Anthropic's).
 - The relay never forwards the `Authorization` header to the page.
 
+**A stolen address secret.** The page keeps its address secret in `localStorage`, one
+per relay and page. Whoever has the secret can send `hello` with it from anywhere, with
+any `Origin`, and the newest session for an address wins: the page gets `replaced` and
+does not reconnect by itself.
+
+- **Who can get it:** script on the page's origin (cross-site scripting, a compromised
+  third-party script or dependency, another page on the same origin, such as other pages
+  of the same site or a shared `*.github.io` origin), or access to the device or browser
+  profile (malware, an extension with access to the page, a shared computer). A network
+  attacker cannot (TLS); the relay operator sees it anyway.
+- **What the holder gets:** every AI app already paired with the address talks to them
+  instead of the page. They see every argument the AI app sends, which can carry data
+  from the chat. They write the tool descriptions and results, so they can put
+  instructions into the user's AI session, which may have other tools (mail, files,
+  code). That is the real damage; fake results for the page's own tools are minor next to
+  it.
+- **What the holder does not get:** no token (tokens stay with the AI apps, the store
+  keeps only hashes), no new AI app without a code the page shows, and nothing at all on
+  a page that pairs by identity binding, where a session needs a fresh assertion from the
+  site's backend (A12).
+- **How long it lasts:** after the XSS is fixed, the page is closed or the script is
+  removed, until the page gets a new address. "New address" first takes the address back
+  with the old secret and `hello.revokeAll`, so the relay revokes the grants of the old
+  address in the same step as it hands the address back; whoever claims it again right
+  after gets no grant back. Only once the relay confirmed it (no grants in `session`)
+  does the page make the new address; taken over again first, the page says so and the
+  user tries again.
+- **What the page sees:** the library tells a takeover by a second tab of the same page
+  from one by someone else. Tabs that share the secret say on a `BroadcastChannel` (per
+  relay origin and storage key, never the secret or the address) when the relay accepted
+  their session; a tab whose `hello` failed says nothing. A replaced tab that heard a
+  sibling within 10 seconds (waiting up to a second for it) reports `sibling: true` and
+  the default UI shows "Opened in another tab". Otherwise, and in browsers without
+  `BroadcastChannel`, it warns that another tab or program took over and offers "New
+  address". A message on the channel from script on the page's origin can make a
+  takeover look harmless, but such script can read the secret and change the page
+  anyway, so the channel adds no new attacker. With a `storage` other than
+  `localStorage` that tabs do not share (say `sessionStorage`), a sibling that connects
+  within those 10 seconds can make an unrelated takeover look harmless.
+- **What helps:** identity binding for pages with user accounts; the page on its own
+  origin, without third-party scripts; `newAddress()` on logout on a shared device.
+  A backend-signed claim of the address was considered and not built (DEC-094): without a
+  signed-in user it proves nothing, and with one, identity binding already gives most of
+  it.
+
 ### A5: Other websites using someone's relay
 
 - Pages may connect only from allowed origins, and the list is empty by default. An open
@@ -168,6 +221,11 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 - Read-only and harmless tools run directly. Tools marked `consequentialHint` ask in the
   page before each run, showing the AI app and the arguments. The page's question does
   not depend on the AI app.
+- Consent per tool is the page's, not the relay's: the relay has one OAuth scope,
+  `tools`, which covers every tool of the page. "Always allow" in the page's confirmation
+  is off unless the page turns it on (`alwaysAllow: true`, DEC-096), since it lifts the
+  only brake at run time for that tool and AI app until the page is reloaded or the app
+  disconnected, which is what a prompt injection needs.
 - Annotations reach the AI app as MCP hints (`readOnlyHint`, `destructiveHint`), so the
   AI app can ask too.
 - Tools marked `untrustedContentHint` are announced with `openWorldHint: true` and the
@@ -220,15 +278,21 @@ operator should tell users this in a privacy notice.
 page's tool descriptions and results reach the model. A page can describe a tool in
 misleading ways, or return text that steers the model. tab-mcp cannot judge a page's
 honesty. The pairing page names the page's origin so that the user knows whom they
-trust. The closed origin list keeps other sites from borrowing a relay's domain to look
+trust; that origin is what the page's browser reported, and a program can claim any
+(A11). The closed origin list keeps other sites from borrowing a relay's domain to look
 trustworthy.
 
 ### A11: Several sites on one relay
 
-- One relay may serve several sites, each configured by origin. The relay verifies the
-  origin from the browser's `Origin` header. The app name a page sends is its own claim
-  and is not verified, so the pairing page shows the name next to the verified origin:
-  "saturnus on `https://ractive.ch`".
+- One relay may serve several sites, each configured by origin. The relay takes the
+  origin from the `Origin` header of the page's WebSocket and checks it against the
+  list. The app name a page sends is its own claim, so the pairing page shows the name
+  next to the origin: "saturnus on `https://ractive.ch`".
+- **The origin on the pairing page is reported, not verified.** A browser sends the
+  page's true origin, but a program can claim any origin, including a listed one, and
+  then shows its own code under that origin. The origin tells the user which page
+  connected only when the code came from a page they opened themselves. Only identity
+  binding (A12) ties a session to the site's backend.
 - Pages on the same origin can claim each other's names. That is acceptable: they share
   a trust domain anyway (same-origin pages can read each other's `localStorage`).
 - A configured site `name` replaces the page's claim.
@@ -304,12 +368,21 @@ each default.
 - Users who give the pairing code to someone else, or type it for an AI app they did not
   start.
 - A page that misleads the AI app (A10).
-- Whoever copies the address secret out of `localStorage`, for example with a script
-  injected into the page, can take over the address while the page is closed. Without a
-  token they can call nothing, but they can pair a new app if the user then types a code
-  for them. Pages must keep cross-site scripting out, as for any session secret.
+- Whoever copies the address secret (script on the page's origin, or access to the
+  device or browser profile) can take over the address, also while the page is open. The
+  AI apps paired with it then send their arguments to them and get their tool
+  descriptions and results, which can steer the user's AI session; this lasts until the
+  page gets a new address. They get no token and cannot pair a new app without a code.
+  The page says that its address was taken over and offers a new one, but cannot prevent
+  it; identity binding does (A4, A12). Pages must keep cross-site scripting out, as for
+  any session secret.
+- The page origin shown at pairing is what the page's browser reported; a program can
+  claim any origin (A11).
+- On a page that pairs by code, the next user of the same browser profile gets the AI
+  apps the previous one paired (A1).
 - A model can be steered by content (prompt injection) into calling tools the user did
-  not intend. The page's confirmation covers consequential tools only.
+  not intend. The page's confirmation covers consequential tools only, and consent per
+  tool is the page's: one `tools` scope covers every tool (A6).
 - AI app names are self-declared; only hosts are verified.
 - The relay accepts one known client bug: the header `MCP-Protocol-Version: 2025-11-25`
   with a body that declares `2026-07-28`. It is limited to this exact pair.

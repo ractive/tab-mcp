@@ -19,6 +19,9 @@ Facts to keep in mind (version 0.7.0):
   Metadata Documents. Claude Code works; VS Code, Cursor and Gemini CLI cannot connect.
   claude.ai and ChatGPT need a relay with a public HTTPS address.
 - The page needs a relay that allows its origin; run one (section 6).
+- tab-mcp fits state that lives only in the browser, and acting as the signed-in user in
+  their open tab. If the state lives on the site's server, suggest an MCP server on that
+  backend instead: it works without an open tab and without a relay.
 
 ## 1. Install the client
 
@@ -138,7 +141,18 @@ a click.
 For a custom UI, use `connect()`, `startPairing()`/`stopPairing()` (codes come only while
 pairing is on), `revoke(grantId)`, `disconnect()`, the properties `address`,
 `pairingCode` and `grants`, and the events `connected`, `disconnected`, `pairingcode`,
-`grantschange`, `statechange`, `reconnecting` and `error`.
+`grantschange`, `statechange`, `reconnecting`, `replaced` and `error`.
+
+When another tab or program takes over the address, the page gets `disconnected` (reason
+`replaced`) and then, up to a second later, `replaced`. Once the page has opened the
+default dialog, the library says so itself: "Opened in another tab" when a tab of the
+same page said on its `BroadcastChannel` that its session started, otherwise a warning
+with "New address". A custom UI does the same with `event.detail.sibling`: `true` is the
+usual, harmless second tab; `false` means it may be a program with a copy of the address
+secret, which the paired AI apps now talk to, so offer a "New address" button that calls
+`mcp.newAddress()`. It takes the address back with the relay revoking those apps in the
+same step, then connects with a new address; if it rejects with `reason: "replaced"`, the
+address was taken over again first: say so and let the user try again.
 
 **Sign-in instead of a code** (a relay that pairs by `oidc`): see
 [references/sign-in.md](references/sign-in.md). **React** single-page apps: see
@@ -162,8 +176,12 @@ await mcp.registerTool({
 The page then asks before every call: a dialog names the AI app and shows the arguments,
 "Don't allow" has the focus, and "Allow" turns on only after the page has been visible and
 focused for 750 ms with the dialog open (leaving the page starts the wait again).
-Invisible and direction-changing characters in the arguments are shown as `\uXXXX`. A
-refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
+Invisible and direction-changing characters in the arguments are shown as `\uXXXX`. The
+dialog offers "Don't allow" and "Allow"; "Always allow" (that tool runs without asking for
+that AI app until a reload or a disconnect) appears only with `alwaysAllow: true` on
+`TabMcp`. Leave it off unless the user really need not check each call: it lifts the only
+brake on a prompt injection, and the relay's one `tools` scope covers every tool, so
+consent per tool is the page's. A refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
 pass `onConfirm: (request) => boolean | Promise<boolean>` to `TabMcp`. `request` has
 `tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts. Without `onConfirm` and without a `document`,
 calls are declined.
@@ -176,7 +194,17 @@ Keep these; do not work around them.
   without the user's opt-in.
 - Relays must be `https:`; `http:` works only for `localhost`, `127.0.0.1` and `[::1]`.
 - Keep XSS out of the page and do not log or expose the secret under
-  `tab-mcp:secret:<relay origin>:<server name>`: whoever has it can take over the address.
+  `tab-mcp:secret:<relay origin>:<server name>`: whoever has it can take over the address,
+  and the AI apps paired with it then talk to them until the page gets a new address.
+  Run the page on its own origin (not a shared one such as `*.github.io`) and keep
+  third-party scripts off it.
+- For a page with user accounts, use identity binding
+  ([references/sign-in.md](references/sign-in.md)): a copied secret then gets nothing.
+  On a page that pairs by code, grants follow the browser profile, not the person, so the
+  next user of a shared browser gets the AI apps the previous one paired: call
+  `mcp.newAddress()` when the user logs out.
+- The page origin on the relay's pairing page is what the browser reported; a program
+  can claim any origin. Do not tell users it proves which page they pair with.
 - Tools act with the user's rights in the page. Expose only what the user may do anyway,
   and nothing that leaks other users' data.
 - Connecting an AI app means trusting the page. Describe tools honestly; tool text and

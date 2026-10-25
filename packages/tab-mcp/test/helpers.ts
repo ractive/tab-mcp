@@ -86,6 +86,8 @@ export interface TabOptions {
 	onRequest?: RequestHandler;
 	/** The app name sent in hello. */
 	app?: string;
+	/** `hello.revokeAll`: take the address back and revoke its grants (DEC-095). */
+	revokeAll?: boolean;
 }
 
 /** A scripted (non-browser) tab: Bun's WebSocket plus the SDK handler. */
@@ -144,6 +146,9 @@ export class ScriptedTab {
 			...(this.#options.app === undefined
 				? {}
 				: { app: { name: this.#options.app } }),
+			...(this.#options.revokeAll === undefined
+				? {}
+				: { revokeAll: this.#options.revokeAll }),
 			secret: this.secret,
 		});
 		const m = await this.next("session");

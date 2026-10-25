@@ -1,9 +1,9 @@
 ---
 type: iteration
 title: "Iteration 10: a stolen address secret"
-status: planned
+status: in-progress
 description: What someone who copies a page's address secret can do, said plainly in the docs; a page that is taken over says so and offers a new address; and whether a backend-signed address claim is worth building.
-timestamp: 2026-10-24T20:30:00+02:00
+timestamp: 2026-10-25T18:00:00+02:00
 tags: [iteration, security]
 ---
 # Iteration 10: a stolen address secret
@@ -84,6 +84,13 @@ that the paired apps then talk to the holder.
 - Optional, decide in review: `newAddress({ onLogout: true })` or a documented pattern
   for pages that log users out, rather than new API.
 
+**Decided (owner, 2026-10-25): yes, with a `BroadcastChannel`** ([DEC-095](../decision-log.md)).
+Tabs that share the secret post a claim on a channel named after the secret's storage
+key just before their `hello`; `replaced` carries `detail: { sibling }`; the default UI
+shows "Opened in another tab" or the warning with "New address"; `newAddress()` after a
+takeover first takes the address back so that the relay revokes its apps. For logout, a
+documented pattern (call `newAddress()`), no new API.
+
 ### 3. A backend-signed address claim (decide before building)
 
 The review's suggestion was a "proof of page": the site's backend signs a short JWT for
@@ -111,16 +118,34 @@ Before implementing step 3, decide whether that case is worth a second signing f
 to identity binding. If not, record the decision (DEC) and close step 3 with the docs of
 step 1 naming identity binding as the protection.
 
+**Decided (owner, 2026-10-25): not built** ([DEC-094](../decision-log.md)). The case
+left over (code pairing, address tied to the backend, for sites with accounts) does not
+justify a second signing flow next to identity binding; the docs of step 1 name identity
+binding as the protection for pages with accounts.
+
 ## Tasks
 
-- [ ] Docs: threat model asset 4, A4 and remaining risks rewritten; version line updated
-- [ ] Docs: the origin on `/authorize` described as reported, not verified (`SECURITY.md`, threat model)
-- [ ] Docs: advice for page authors (client README, skill) and operators (`docs/self-hosting.md`)
-- [ ] Docs: grants follow the browser profile on code-paired pages (F3); README says when a backend MCP server fits better
-- [ ] Library: the default UI explains `replaced` and offers "New address"; test with a second session claiming the address
-- [ ] Library: decide on telling a sibling tab from an impostor (`BroadcastChannel`); if yes, the "Opened in another tab" text for that case; otherwise record why not
-- [ ] Step 3: owner decision on the backend-signed address claim, recorded as a DEC; design and tasks added here if it goes ahead
+- [x] Docs: threat model asset 4, A4 and remaining risks rewritten; version line updated
+- [x] Docs: the origin on `/authorize` described as reported, not verified (`SECURITY.md`, threat model)
+- [x] Docs: advice for page authors (client README, skill) and operators (`docs/self-hosting.md`)
+- [x] Docs: grants follow the browser profile on code-paired pages (F3); README says when a backend MCP server fits better
+- [x] Library: the default UI explains `replaced` and offers "New address"; test with a second session claiming the address
+- [x] Library: decide on telling a sibling tab from an impostor (`BroadcastChannel`); if yes, the "Opened in another tab" text for that case; otherwise record why not
+- [x] Step 3: owner decision on the backend-signed address claim, recorded as a DEC; design and tasks added here if it goes ahead
 - [ ] Changelog, release of the client if it changed
+
+## Progress
+
+2026-10-25: steps 1 and 2 done, step 3 decided against (DEC-094, DEC-095), in one PR with
+iteration 13's finding 3 (DEC-096). Tests: a second tab and a program with the copied
+secret against the real relay, `newAddress()` after a takeover revoking the old
+address's token, the notice in the default UI, the channel's content, two Chrome tabs.
+Open: the client release (not part of this PR).
+
+Review of PR 39: the take-back is atomic on the relay (`hello.revokeAll`, confirmed by an
+empty `session.grants`; a fallback for older relays), the session ends at the `bye` and
+only the `replaced` detail waits, and a sibling counts only once its session started
+(`claimed`). Both packages change: the relay release is open too.
 
 # Citations
 

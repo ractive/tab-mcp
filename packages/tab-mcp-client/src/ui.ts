@@ -7,6 +7,7 @@
  * methods of `TabMcp` instead.
  */
 
+import { AlwaysAllowed } from "./always-allowed.ts";
 import type { TabMcp } from "./tab-mcp.ts";
 import type {
 	ConfirmRequest,
@@ -291,17 +292,18 @@ function allowDelay(ms: number | undefined): number {
 }
 
 /**
- * Ask whether a consequential tool may run. "Allow" and "Always allow" stay
- * disabled until the page has been visible and focused for `allowDelayMs`
- * (default 750, at least 500) while the dialog is open, so a click meant for
- * the page, or the click that brings the tab or window back, cannot approve.
- * Leaving the page disables them again. Everything else (Don't allow,
- * Escape, an aborted call) is "deny".
+ * Ask whether a consequential tool may run. "Always allow" is offered only
+ * with `alwaysAllow` (DEC-096). "Allow" and "Always allow" stay disabled
+ * until the page has been visible and focused for `allowDelayMs` (default
+ * 750, at least 500) while the dialog is open, so a click meant for the page,
+ * or the click that brings the tab or window back, cannot approve. Leaving
+ * the page disables them again. Everything else (Don't allow, Escape, an
+ * aborted call) is "deny".
  */
 export function confirmDialog(
 	request: ConfirmRequest,
 	doc: Document,
-	options: { allowDelayMs?: number } = {},
+	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean } = {},
 ): Promise<ConfirmAnswer> {
 	const delay = allowDelay(options.allowDelayMs);
 	if (request.signal.aborted) return Promise.resolve("deny");
@@ -325,16 +327,8 @@ export function confirmDialog(
 		},
 		"tab-mcp-allow",
 	);
-	const always = button(
-		doc,
-		"Always allow",
-		() => {
-			if (!always.disabled) dialog.close("always");
-		},
-		"tab-mcp-always",
-	);
-	allow.disabled = true;
-	always.disabled = true;
+	// The approving buttons: Allow, and Always allow when the page offers it.
+	const approve = [allow];
 	const actions = el(
 		doc,
 		"div",
@@ -342,19 +336,36 @@ export function confirmDialog(
 		deny,
 		" ",
 		allow,
-		" ",
-		always,
 	);
-	const alwaysNote = el(
-		doc,
-		"p",
-		{ className: "tab-mcp-always-note" },
-		"Always allow: ",
-		name(doc, title),
-		" runs without asking for ",
-		name(doc, client),
-		" until you reload this page or disconnect it.",
-	);
+	const extra: HTMLElement[] = [];
+	if (options.alwaysAllow === true) {
+		const always = button(
+			doc,
+			"Always allow",
+			() => {
+				if (!always.disabled) dialog.close("always");
+			},
+			"tab-mcp-always",
+		);
+		approve.push(always);
+		actions.append(" ", always);
+		extra.push(
+			el(
+				doc,
+				"p",
+				{ className: "tab-mcp-always-note" },
+				"Always allow: ",
+				name(doc, title),
+				" runs without asking for ",
+				name(doc, client),
+				" until you reload this page or disconnect it.",
+			),
+		);
+	}
+	const enable = (on: boolean) => {
+		for (const b of approve) b.disabled = !on;
+	};
+	enable(false);
 	const shown = showArguments(request.arguments);
 	const args = el(doc, "pre", {
 		className: "tab-mcp-arguments",
@@ -362,9 +373,7 @@ export function confirmDialog(
 			shown ?? "The arguments cannot be shown, so this call cannot be allowed.",
 	});
 	if (shown === undefined) {
-		allow.hidden = true;
-		always.hidden = true;
-		alwaysNote.hidden = true;
+		for (const node of [...approve, ...extra]) node.hidden = true;
 	}
 	args.dir = "ltr";
 	// Inline, so the arguments stay readable in full without the stylesheet:
@@ -393,7 +402,7 @@ export function confirmDialog(
 		}),
 		args,
 		actions,
-		alwaysNote,
+		...extra,
 	);
 	doc.body.append(dialog);
 	const view = doc.defaultView;
@@ -407,18 +416,14 @@ export function confirmDialog(
 		const arm = (event?: Event) => {
 			clearTimeout(timer);
 			timer = undefined;
-			allow.disabled = true;
-			always.disabled = true;
+			enable(false);
 			if (
 				event?.type === "blur" ||
 				doc.visibilityState === "hidden" ||
 				!doc.hasFocus()
 			)
 				return;
-			timer = setTimeout(() => {
-				allow.disabled = false;
-				always.disabled = false;
-			}, delay);
+			timer = setTimeout(() => enable(true), delay);
 		};
 		doc.addEventListener("visibilitychange", arm);
 		view?.addEventListener("focus", arm);
@@ -441,6 +446,44 @@ export function confirmDialog(
 		deny.focus(); // the safe choice is the default
 		// Counted from when the dialog is shown, not from when it was built.
 		arm();
+	});
+}
+
+/** The tools a user chose "Always allow" for, per `TabMcp`. */
+const allowedAlways = new WeakMap<TabMcp, AlwaysAllowed>();
+
+/**
+ * `TabMcp.confirmInPage`: the confirmation, and the tools allowed always. An
+ * entry goes when its grant goes or its tool is unregistered, so a re-paired
+ * app or a new tool under the same name is asked again.
+ */
+export function confirmInPage(
+	mcp: TabMcp,
+	request: ConfirmRequest,
+	doc: Document,
+	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean },
+): Promise<boolean> {
+	const { grantId } = request.client;
+	const tool = request.tool.name;
+	if (allowedAlways.get(mcp)?.has(grantId, tool)) return Promise.resolve(true);
+	return confirmDialog(request, doc, options).then((answer) => {
+		// Only while the grant is still there: a revoked app gets nothing.
+		if (answer === "always" && mcp.grants.some((g) => g.grantId === grantId)) {
+			let allowed = allowedAlways.get(mcp);
+			if (allowed === undefined) {
+				const kept = new AlwaysAllowed();
+				mcp.addEventListener("grantschange", (e) =>
+					kept.keepGrants(e.detail.grants.map((g) => g.grantId)),
+				);
+				mcp.addEventListener("toolschange", (e) =>
+					kept.keepTools(e.detail.tools),
+				);
+				allowedAlways.set(mcp, kept);
+				allowed = kept;
+			}
+			allowed.add(grantId, tool);
+		}
+		return answer !== "deny";
 	});
 }
 
@@ -532,6 +575,103 @@ function listOf(items: string[]): string {
 		: `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 }
 
+/** The document of the connect dialog per `TabMcp`, once it was opened. */
+const watched = new WeakMap<TabMcp, Document>();
+
+/**
+ * Once a page has opened the connect dialog, the default UI also says when
+ * the page loses its address (`replaced`), in that dialog's document.
+ */
+function watchReplaced(mcp: TabMcp, doc: Document): void {
+	const known = watched.has(mcp);
+	watched.set(mcp, doc);
+	if (known) return;
+	mcp.addEventListener("replaced", (event) => {
+		const current = watched.get(mcp);
+		// Not when the page already went on (a New address or connect since).
+		if (current !== undefined && mcp.state === "disconnected")
+			replacedNotice(mcp, current, event.detail.sibling);
+	});
+}
+
+/**
+ * Says that the page lost its address (`replaced`, DEC-095). A sibling tab
+ * that announced it: "Opened in another tab", nothing to do. Otherwise a
+ * warning that another tab or program took over, with "New address", which
+ * takes the address back, disconnects its apps, connects with a new one and
+ * opens the connect dialog to add it to the AI apps again.
+ */
+export function replacedNotice(
+	mcp: TabMcp,
+	doc: Document,
+	sibling: boolean,
+): void {
+	(
+		doc.querySelector("dialog.tab-mcp-replaced") as HTMLDialogElement | null
+	)?.close();
+	const { dialog } = newDialog(
+		doc,
+		"tab-mcp-replaced",
+		sibling
+			? "Opened in another tab"
+			: "Another tab or program took over this page",
+	);
+	const status = el(doc, "p", { className: "tab-mcp-status" });
+	status.setAttribute("role", "status");
+	status.hidden = true;
+	const close = button(
+		doc,
+		"Close",
+		() => dialog.close(),
+		"tab-mcp-replaced-close",
+		sibling ? "primary" : undefined,
+	);
+	const actions = el(doc, "div", { className: "tab-mcp-actions" }, close);
+	let first = close;
+	if (!sibling) {
+		const fresh = button(
+			doc,
+			"New address",
+			() => {
+				fresh.disabled = true;
+				status.hidden = false;
+				status.textContent = "Getting a new address…";
+				mcp.newAddress().then(
+					() => {
+						dialog.close();
+						mcp.showConnectDialog({ document: doc }).catch(() => {});
+					},
+					(error: unknown) => {
+						fresh.disabled = false;
+						status.textContent =
+							(error as { reason?: unknown } | null)?.reason === "replaced"
+								? "It was taken over again before its AI apps were disconnected. Try again."
+								: `Could not connect: ${error instanceof Error ? error.message : String(error)}. Try again, or close this.`;
+					},
+				);
+			},
+			"tab-mcp-new-address",
+			"primary",
+		);
+		actions.append(" ", fresh);
+		first = fresh;
+	}
+	dialog.append(
+		el(doc, "p", {
+			className: "tab-mcp-description",
+			text: sibling
+				? "This page is open in another tab, and your AI apps now use that one. To use them here, connect this page again."
+				: "Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or browser, someone may have copied its address. A new address disconnects every AI app from the old one; then add the new address to your AI apps again.",
+		}),
+		status,
+		actions,
+	);
+	dialog.addEventListener("close", () => dialog.remove(), { once: true });
+	doc.body.append(dialog);
+	dialog.showModal();
+	first.focus();
+}
+
 /**
  * The "Connect your AI app" dialog: the address with Copy and New address,
  * short instructions, the pairing code (with Copy) while the relay sends one,
@@ -539,7 +679,8 @@ function listOf(items: string[]): string {
  * closing it ends the code; the connection and the address stay. Until an app
  * connects, only a small Close (and Escape) close it; then a Done. New address
  * asks first when it would disconnect connected apps (`newAddress()` revokes
- * them).
+ * them). When the page loses its address (`replaced`), this dialog closes and
+ * `replacedNotice` says why, from then on also while it is closed.
  */
 export function showConnectDialog(
 	mcp: TabMcp,
@@ -954,10 +1095,14 @@ export function showConnectDialog(
 		renderCode();
 	};
 
+	// The address was taken over: the notice says so instead of this dialog.
+	const onReplaced = () => dialog.close();
+	watchReplaced(mcp, doc);
 	mcp.addEventListener("pairingcode", renderCode);
 	mcp.addEventListener("grantschange", renderGrants);
 	mcp.addEventListener("connected", onConnected);
 	mcp.addEventListener("disconnected", onDisconnected);
+	mcp.addEventListener("replaced", onReplaced);
 	doc.body.append(dialog);
 	mcp.startPairing();
 	renderGrants();
@@ -979,6 +1124,7 @@ export function showConnectDialog(
 				mcp.removeEventListener("grantschange", renderGrants);
 				mcp.removeEventListener("connected", onConnected);
 				mcp.removeEventListener("disconnected", onDisconnected);
+				mcp.removeEventListener("replaced", onReplaced);
 				dialog.remove();
 				resolve();
 			},
