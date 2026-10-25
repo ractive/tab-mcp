@@ -284,7 +284,8 @@ any layered rule. Both dialogs are `dialog.tab-mcp-dialog`; the connect dialog i
 `.tab-mcp-always-note`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
 `.tab-mcp-always`). Buttons are `.tab-mcp-primary` (the one next step: Copy the
 address, Done, and "Don't allow", the safe choice), `.tab-mcp-danger` (Disconnect and
-"Disconnect and get new address") or plain. For example:
+"Disconnect and get new address") or plain; every Copy button is also `.tab-mcp-copy`, and
+the Disconnect buttons in the apps list are `.tab-mcp-disconnect`. For example:
 
 ```css
 :root {
