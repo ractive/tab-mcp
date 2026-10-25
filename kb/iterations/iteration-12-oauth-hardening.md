@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 12: authorization server hardening"
-status: in-progress
+status: completed
 description: "Fixes from the 2026-10-24 security audit of the relay's OAuth, CIMD, OIDC and token store code: an owner locked out of /authorize, CIMD rate limits per registrable domain, OIDC flows per request, refresh-token retention, look-alike client names, small doc items."
 timestamp: 2026-10-24T23:00:00+02:00
 tags: [iteration, security, relay, oauth]
@@ -79,9 +79,9 @@ suite and `docs/token-store.md` with it.
 - [x] 3: one OIDC flow per pending request; per-IP cap; `admit` used
 - [x] 4: used refresh tokens kept only for the reuse window; store contract, conformance suite and `docs/token-store.md`
 - [x] 5: domain-shaped names refused (or host first); tests
-- [ ] 6: `TAB_MCP_CLIENT_ID_HOSTS` in "Before you go live"; decide on marking unlisted hosts
+- [x] 6: `TAB_MCP_CLIENT_ID_HOSTS` in "Before you go live"; unlisted hosts are not marked (owner, DEC-100)
 - [x] HSTS line in `docs/self-hosting.md`; no raw `client_id` in logs
-- [ ] Changelog, relay release, deploy
+- [x] Changelog, relay release, deploy (relay 0.4.0, deployed 2026-10-25)
 
 ## Progress
 

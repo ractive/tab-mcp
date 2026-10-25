@@ -21,6 +21,16 @@ Start here when a publication fails with an authentication error.
 | `DOCKERHUB_USERNAME` | repository variable | `ractive` |
 | `DOCKERHUB_TOKEN_EXPIRES` | repository variable | `2027-10-19` |
 
+Planned (DEC-101): `DOCKERHUB_TOKEN` becomes a secret of the `release` environment, so
+only the release jobs can read it. A secret cannot be read back, so the token has to be
+entered again (the current one, or a new one created as below):
+
+1. `gh secret set DOCKERHUB_TOKEN --repo ractive/tab-mcp --env release` and paste the
+   token at the prompt.
+2. `gh secret delete DOCKERHUB_TOKEN --repo ractive/tab-mcp` (the repository secret).
+3. Change the table above to "secret of the `release` environment". The variables stay
+   at repository level: `token-expiry.yml` has no environment and reads the expiry.
+
 - Created: 2026-10-19.
 - **Expires: 2027-10-19 00:00:00** (valid 2026-10-19 → 2027-10-19).
 - Symptom when expired: the Docker login or push step of the release workflow fails with

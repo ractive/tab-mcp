@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 14: CI, release and repository settings"
-status: planned
+status: in-progress
 description: "Fixes from the 2026-10-24 supply-chain review: the Docker Hub token in the release environment, the release approval, Dependabot alerts and SHA pinning, Chrome in the client release job, pinned Chrome, job timeouts, source maps."
 timestamp: 2026-10-24T21:00:00+02:00
 tags: [iteration, security, ci]
@@ -48,13 +48,15 @@ parallel with iterations 11 to 13.
 
 ## Tasks
 
-- [ ] 1: release approval back on, or comment and pause note corrected (owner)
-- [ ] 2: the secret `DOCKERHUB_TOKEN` moved into the `release` environment (owner approves); `release-secrets.md`
-- [ ] 3: Dependabot alerts and security updates on; SHA pinning required (owner approves)
-- [ ] 4: Chrome in `client-pack`
-- [ ] 5: Chrome version pinned in CI and release
-- [ ] 6: `timeout-minutes` on every job
-- [ ] 7: decide on source maps in the image
+- [x] Ruleset on `main`: pull requests only, `verify` required (DEC-101)
+
+- [x] 1: release approval stays off for now (owner); the comment in `release.yml` corrected (DEC-101)
+- [ ] 2 (owner, needs the token entered again): the secret `DOCKERHUB_TOKEN` moved into the `release` environment (owner approves); `release-secrets.md`
+- [x] 3: Dependabot alerts and security updates on; SHA pinning required (owner approves)
+- [x] 4: Chrome in `client-pack`
+- [x] 5: Chrome version pinned in CI and release
+- [x] 6: `timeout-minutes` on every job
+- [x] 7: source maps stay in the image (DEC-101)
 
 # Citations
 

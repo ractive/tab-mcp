@@ -18,8 +18,8 @@
 # - Bootstrap and publish refuse a commit that is not on main. That guards
 #   against mistakes, not against someone who can push a tag: the workflow
 #   file at the tagged commit runs. Only the owner may create release tags
-#   (tag ruleset), and the `release` environment needs the owner's approval
-#   (kb/operations/npm-publishing.md).
+#   (tag ruleset). The `release` environment admits only release tags; its
+#   required reviewer is off for now (kb/operations/npm-publishing.md).
 # - The image is pushed only after the relay's npm publication succeeded (or
 #   was skipped as identical), so the npm checks (version, tag) also hold for
 #   the image. The pushed image is the smoke-tested OCI archive, byte for
@@ -76,10 +76,14 @@ env:
   NPM_VERSION: 12.2.0
   NODE_VERSION: "24"
   BUN_VERSION: 1.4.3
+  # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
+  # it on purpose (the same version as in ci.yml).
+  CHROME_VERSION: "156.0.8078.47"
 
 jobs:
   plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions: {}
     outputs:
       package: ${{ steps.plan.outputs.package }}
@@ -153,6 +157,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.package == 'client' || needs.plan.outputs.package == 'all'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:
@@ -183,8 +188,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm install --global "npm@$NPM_VERSION"
       - run: bun install --frozen-lockfile
+      # The browser tests in verify need Chrome; ci.yml runs verify on pull requests.
+      - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        if: github.event_name != 'pull_request'
+        id: chrome
+        with:
+          chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun run verify
-        if: github.event_name != 'pull_request' # ci.yml runs it on pull requests
+        if: github.event_name != 'pull_request'
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: bun run build
         working-directory: packages/tab-mcp-client
       - id: pack
@@ -245,6 +258,7 @@ jobs:
     needs: [plan, client-pack]
     if: needs.plan.outputs.package == 'client' && needs.plan.outputs.mode == 'bootstrap'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -281,6 +295,7 @@ jobs:
     needs: [plan, client-pack]
     if: needs.plan.outputs.package == 'client' && needs.plan.outputs.mode == 'publish'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release
     permissions:
       contents: read
@@ -313,6 +328,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.package == 'relay' || needs.plan.outputs.package == 'all'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:
@@ -348,7 +364,7 @@ jobs:
         if: github.event_name != 'pull_request'
         id: chrome
         with:
-          chrome-version: stable
+          chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun run verify
         if: github.event_name != 'pull_request'
         env:
@@ -418,6 +434,7 @@ jobs:
     needs: [plan, relay-pack]
     if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'bootstrap'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -453,6 +470,7 @@ jobs:
     needs: [plan, relay-pack, relay-image]
     if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'publish'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release
     permissions:
       contents: read
@@ -489,6 +507,7 @@ jobs:
     needs: [plan, relay-pack]
     if: needs.plan.outputs.package == 'relay' || needs.plan.outputs.package == 'all'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     outputs:
@@ -573,6 +592,7 @@ jobs:
     needs: [plan, relay-pack, relay-image, relay-publish]
     if: needs.plan.outputs.package == 'relay' && needs.plan.outputs.mode == 'publish'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release
     permissions:
       contents: read

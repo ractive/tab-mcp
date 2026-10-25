@@ -1489,6 +1489,39 @@ and title, and the look-alike name would still stand alone in the body text.
   like that. If one appears, a short exception list is the fix, not a looser pattern.
 - The parentheses rule of DEC-065 stays as it is, also for the client's own domain.
 
+## DEC-100: The pairing page does not mark unknown AI app hosts (owner)
+
+The audit's architecture finding F6: any HTTPS host that serves a valid client metadata
+document counts as "verified", so a host like `claude-connect.pages.dev` looks as
+trustworthy as `claude.ai` on `/authorize`. The option was a built-in list of known AI
+app hosts and a note on the pairing page for any other host. Owner, 2026-10-25: no.
+People use many different AI tools, and a list would mostly warn about legitimate ones
+and need constant upkeep. The verified host stays in the heading and title (DEC-065),
+look-alike names are refused (DEC-092), and an operator who wants a closed set uses
+`TAB_MCP_CLIENT_ID_HOSTS`, which `docs/self-hosting.md` lists under "Before you go live".
+
+## DEC-101: CI and repository settings after the supply-chain review (owner)
+
+From the review of 2026-10-24 (iteration 14). Owner, 2026-10-25:
+
+- `main` is protected by the ruleset "main": no deletion, no force push, changes only
+  through a pull request (merge commits only), and the `verify` check of `ci.yml` must
+  pass. Repository admins can bypass it only when merging a pull request, not by
+  pushing. This would have stopped PR #34, which was merged before its last CI run.
+- Dependabot alerts and security updates are on; GitHub Actions must be pinned by full
+  commit SHA (all of them already were).
+- The `release` environment keeps no required reviewer for now; it admits only release
+  tags. The header of `release.yml` says so.
+- `DOCKERHUB_TOKEN` stays a repository secret until the owner sets it again as a secret
+  of the `release` environment: a secret cannot be read back, so moving it means
+  entering the token anew (`kb/operations/release-secrets.md`).
+- Chrome for Testing is pinned to one version in `ci.yml` and `release.yml`
+  (`CHROME_VERSION`) and bumped on purpose; `client-pack` installs it like
+  `relay-pack`, so the browser tests of a client release no longer depend on the
+  runner image; every job has a time limit (20 minutes, 5 for the token check).
+- The image keeps `main.js.map`: the source is public, and the map turns a stack trace
+  in the log into file and line.
+
 # Citations
 
 - [MCP conformance suite](https://github.com/modelcontextprotocol/conformance)
