@@ -1589,7 +1589,7 @@ coordinate instances, and no distributed store is built.
   size budget. Without Web Crypto (a page on plain `http:` other than localhost) or if
   it fails, the URL has no id: a single relay accepts that, only a load balancer cannot
   route it.
-- **Checks:** a malformed `a` (not 52 characters of `[a-z2-7]`) or a repeated one gets
+- **Checks:** a malformed `a` (not literally 52 characters of `[a-z2-7]`; percent-encoding is refused so that the relay and a load balancer read the same id, review of PR 38) or a repeated one gets
   HTTP 400 `bad_address` before the upgrade. In `hello`, an id that is not the one of
   the secret gets `error` `address_mismatch` and close 4009 (new), before the address is
   claimed, so the address's open session is not replaced and no session opens. The
@@ -1647,8 +1647,11 @@ whether the token store answers, not only that the process runs.
   `health.store` carries the error's name or `timeout`.
 - `/healthz` needs no token, so a flood must not become store load: one probe at a time,
   and its answer is reused for a second. While a read that missed its deadline still
-  hangs, no new one starts (the answer stays `store_timeout`), so a hung store holds at
-  most one read.
+  hangs, a new one starts only every 30 seconds (the answer meanwhile is
+  `store_timeout`): a store that lost one command, for example during a reconnect, is
+  healthy again within 30 s, and one that hangs for good holds one more pending read per
+  30 s (review of PR 38; the first version waited for the lost read forever). A store
+  that throws synchronously counts as `store_unavailable`, like a rejected read.
 - 503 rather than 200 with a flag, because platforms and load balancers read the status.
   The guide says to use it for readiness and alerts: restarting the relay rarely helps a
   store that is down and ends every tab session, so a liveness probe should allow several

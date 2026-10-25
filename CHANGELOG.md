@@ -251,7 +251,7 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   load balancer that reads the `/token` body). It also needs a shared token store.
   "Running several instances" in the self-hosting guide has what is per instance, what
   needs a shared store, and routing rules for nginx, Caddy and HAProxy.
-- `/tab?a=` is checked: a malformed or repeated `a` gets HTTP 400 `bad_address` before
+- `/tab?a=` is checked: a malformed, percent-encoded or repeated `a` gets HTTP 400 `bad_address` before
   the upgrade; an id that is not the one of the secret in `hello` gets `error`
   `address_mismatch` and close code 4009, and no session opens. The parameter is
   optional: libraries up to 0.7 send none and keep working with a single relay. The

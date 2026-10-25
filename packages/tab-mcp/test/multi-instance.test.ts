@@ -5,6 +5,8 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { addressIdFromSecret, newSecret } from "../src/address.ts";
+import { createLogger } from "../src/log.ts";
+import { createTestRelay } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenRecord } from "../src/store/types.ts";
 import {
@@ -17,10 +19,13 @@ import {
 
 const relays: TestRelay[] = [];
 const tabs: ScriptedTab[] = [];
+const stops: (() => Promise<void>)[] = [];
 afterEach(async () => {
 	for (const t of tabs.splice(0)) if (t.ws.readyState <= 1) t.close();
 	for (const r of relays.splice(0)) await r.stop();
+	for (const stop of stops.splice(0)) await stop();
 });
+const quietLogger = createLogger("error", () => {});
 
 function relay(options: Parameters<typeof startRelay>[0] = {}): TestRelay {
 	const r = startRelay(options);
@@ -119,6 +124,12 @@ describe("the address id in the /tab URL", () => {
 			"?a=nope",
 			`?a=${id.toUpperCase()}`,
 			`?a=${id}&a=${id}`,
+			// Percent-encoded: decodes to a valid id, but a load balancer
+			// matching the literal id would route it elsewhere (review of PR 38).
+			`?a=${[...id].map((c) => `%${c.charCodeAt(0).toString(16)}`).join("")}`,
+			`?a=%61${id.slice(1)}`,
+			`?%61=${id}`,
+			`?a=${id}&%61=${id}`,
 		]) {
 			const res = await handshake(r, query);
 			expect(res.status).toBe(400);
@@ -205,5 +216,53 @@ describe("/healthz checks the token store", () => {
 		);
 		expect(answers.every((a) => a.status === 200)).toBe(true);
 		expect(store.gets - before).toBe(1);
+	});
+
+	test("one read that never settles does not make the instance unhealthy for good (review of PR 38)", async () => {
+		const store = new FlakyStore();
+		store.mode = "hang";
+		const r = createTestRelay(
+			{
+				development: true,
+				port: 0,
+				host: "127.0.0.1",
+				allowedOrigins: [ORIGIN],
+				store,
+				logger: quietLogger,
+			},
+			{ healthRetryMs: 1500 },
+		);
+		stops.push(() => r.stop());
+		expect((await fetch(`${r.url}/healthz`)).status).toBe(503);
+		// The store recovers, but the first read is lost for good.
+		store.mode = "ok";
+		const gets = store.gets;
+		await Bun.sleep(1100);
+		// Still inside the retry window: no new read yet.
+		expect((await fetch(`${r.url}/healthz`)).status).toBe(503);
+		expect(store.gets).toBe(gets);
+		await Bun.sleep(600);
+		const res = await fetch(`${r.url}/healthz`);
+		expect(res.status).toBe(200);
+		expect(store.gets).toBe(gets + 1);
+	});
+
+	test("a store that throws synchronously: 503, and later probes run again (review of PR 38)", async () => {
+		const store = new FlakyStore();
+		let throwNow = true;
+		const get = store.get.bind(store);
+		store.get = (hash: string) => {
+			if (throwNow) throw new TypeError("sync");
+			return get(hash);
+		};
+		const r = relay({ store });
+		const first = await fetch(`${r.relay.url}/healthz`);
+		expect(first.status).toBe(503);
+		expect(((await first.json()) as { reason: string }).reason).toBe(
+			"store_unavailable",
+		);
+		throwNow = false;
+		await Bun.sleep(1100);
+		expect((await fetch(`${r.relay.url}/healthz`)).status).toBe(200);
 	});
 });

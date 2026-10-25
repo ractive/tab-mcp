@@ -507,6 +507,15 @@ relay.example.com {
 HAProxy can read the `/token` body, so it routes every request in the table:
 
 ```haproxy
+defaults
+    mode http
+    timeout connect 5s
+    timeout http-request 10s
+    timeout client 360s
+    timeout server 360s
+    # WebSockets (/tab) stay open for hours
+    timeout tunnel 1h
+
 frontend relay
     mode http
     bind :443 ssl crt /etc/haproxy/relay.pem
@@ -522,7 +531,6 @@ backend relays
     mode http
     balance hash var(txn.address)
     hash-type consistent
-    timeout tunnel 1h
     server r1 10.0.0.11:8080
     server r2 10.0.0.12:8080
 ```
@@ -554,9 +562,10 @@ store fails or does not answer in time, it answers `503`:
 
 `reason` is `store_unavailable` (the store threw) or `store_timeout` (no answer within
 a second). The answer never carries the store's error; the log line `health.store` has
-its name (`error`, or `timeout`). One probe runs at a time, its result is reused for a
-second, and no new probe starts while a timed-out one still hangs, so a flood of
-`/healthz` does not reach the store. While the store fails, MCP
+its name (`error`, or `timeout`). One probe runs at a time and its result is reused for
+a second, so a flood of `/healthz` does not reach the store. After a timeout, while
+that read still hangs, the next read is tried after 30 seconds (until then the answer
+stays `store_timeout`). While the store fails, MCP
 requests get 503 too, so AI apps keep their tokens and retry; tab sessions stay open.
 
 A `503` means that the process runs but cannot check tokens. Restarting rarely fixes
@@ -566,9 +575,12 @@ of failures before it restarts the container.
 
 Use it:
 
-- as the platform's start and liveness probe (HTTP GET, expect 200). The image answered
-  `/healthz` within half a second of `docker run` in our test; a liveness probe every 30 seconds with 3 failures allowed
-  is plenty;
+- as the platform's start and readiness probe (HTTP GET, expect 200). The image
+  answered `/healthz` within half a second of `docker run` in our test. Since `/healthz`
+  includes the token store, a liveness probe on it restarts the relay when the store is
+  down, which ends every tab session and does not bring the store back: give a liveness
+  probe a long window (for example every 30 seconds with 20 failures allowed, 10
+  minutes), or probe liveness with a plain TCP check of the port;
 - after a deploy, to check `version` against the release you meant to run. Ask the
   container directly or through a path without a cache, not only through the CDN (see
   [Lessons](#lessons-from-a-cdn-deployment));

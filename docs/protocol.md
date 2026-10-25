@@ -24,7 +24,7 @@ AI app ──HTTPS POST /a/{id}/mcp──▶ relay ──WebSocket /tab (tab-mcp
   same instance ([self-hosting](self-hosting.md#running-several-instances)). It is
   optional: without it (`wss://<relay>/tab`, libraries before 0.8 and pages without Web
   Crypto) one relay works as before, but a load balancer cannot route the session. A
-  value that is not 52 characters of `[a-z2-7]`, or `a` given twice, gets HTTP 400 with
+  value that is not literally 52 characters of `[a-z2-7]` (a percent-encoded name or value is refused, so the relay reads the id exactly as a load balancer matching the URL does), or `a` given twice, gets HTTP 400 with
   `{"error":"bad_address"}` and no upgrade. If the id is not the one derived from the
   `secret` in `hello`, the relay answers `error` `address_mismatch` and closes with 4009;
   no session opens and an open session of either address stays. Other query parameters
