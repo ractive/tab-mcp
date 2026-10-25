@@ -8,9 +8,15 @@ on:
 permissions:
   contents: read
 
+env:
+  # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
+  # it on purpose (the same version as in release.yml).
+  CHROME_VERSION: "156.0.8078.47"
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -23,7 +29,7 @@ jobs:
       - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
         id: chrome
         with:
-          chrome-version: stable
+          chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun install --frozen-lockfile
       - run: bun run verify
         env:
