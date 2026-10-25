@@ -133,8 +133,16 @@ handles only some calls itself.
 1. The user clicks your button. `showConnectDialog()` connects (call it from the click
    handler: browsers that report user activation refuse `connect()` without one) and
    opens the "Connect your AI app" dialog.
-2. The dialog shows the address and short instructions for Claude, ChatGPT and Claude
-   Code. The user adds the address to their AI app.
+2. The dialog shows the address and short instructions for Claude, ChatGPT, Claude Code
+   and Codex. The commands for Claude Code and Codex each have a Copy. They name the
+   server by a label made from `server.name` that every shell reads as one plain word:
+   lower case, letters without marks, each run of other characters as `-`, at most 40
+   characters, `tools` if nothing is left ("Bücher" gives `bucher`). The address goes
+   into a command only if it has nothing but plain URL characters; otherwise the help
+   shows the steps without commands. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
+   revision, so its command turns that on first (for all of Codex's MCP servers;
+   `codex features disable mcp_2026_07_28` turns it off). The user adds the address to
+   their AI app.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
    code with a Copy button, which the user types or pastes there. The code changes every
    2 minutes and after each use.
@@ -226,10 +234,66 @@ mcp.addEventListener("toolcallend", (e) => {
 });
 ```
 
-The default dialogs take their
-colours and sizes from `--tab-mcp-*` CSS custom properties (`--tab-mcp-font`,
-`--tab-mcp-color`, `--tab-mcp-background`, `--tab-mcp-border`, `--tab-mcp-radius`, …)
-and need no CSP exception.
+### Styling the default dialogs
+
+The default dialogs bring their own stylesheet, a constructed stylesheet added to
+`document.adoptedStyleSheets`, so a strict CSP needs no `style-src` exception. It uses
+the page's font and system colours, and follows the page's `color-scheme`: declare
+`color-scheme: light dark` (or `<meta name="color-scheme" content="light dark">`) and the
+dialogs are dark in dark mode. They fit a 360 px wide screen, and they open without
+animation when the user prefers reduced motion.
+
+To adjust single values, set these custom properties on `:root` or on `.tab-mcp-dialog`:
+
+| Property | Default | |
+| --- | --- | --- |
+| `--tab-mcp-font` | `inherit` | font shorthand |
+| `--tab-mcp-color` | `CanvasText` | text |
+| `--tab-mcp-background` | `Canvas` | background |
+| `--tab-mcp-muted` | the text colour at 72 % | secondary text |
+| `--tab-mcp-surface` | the text colour at 6 % | the code box, the address, the arguments |
+| `--tab-mcp-accent` | the text colour | background of the primary button |
+| `--tab-mcp-accent-text` | the background colour | text of the primary button |
+| `--tab-mcp-danger` | dark red, light red in dark mode | Disconnect buttons |
+| `--tab-mcp-focus` | the text colour | focus ring |
+| `--tab-mcp-border` | `1px solid` the text colour at 22 % | border of the dialog |
+| `--tab-mcp-radius` | `0.75rem` | corners of the dialog (buttons and boxes: 60 % of it) |
+| `--tab-mcp-padding` | `clamp(1rem, 5vw, 1.5rem)` | |
+| `--tab-mcp-max-width` | `34rem` | |
+| `--tab-mcp-shadow` | `0 1rem 3rem rgb(0 0 0 / 0.3)` | |
+| `--tab-mcp-backdrop` | `rgb(0 0 0 / 0.4)` | behind the dialog |
+| `--tab-mcp-title-size` | `1.25em` | |
+| `--tab-mcp-mono` | `ui-monospace, …, monospace` | the address, the code, the arguments |
+| `--tab-mcp-code-size` | `2em` | the pairing code |
+| `--tab-mcp-arguments-height` | `12rem` | the arguments scroll beyond this |
+
+For more, write CSS for the class names. Each of the dialogs' rules has the specificity
+of one class, so the page's rules for elements (`button { … }`, a reset's
+`* { border-width: 0 }`) do not change them. The rules for hover, focus and disabled, and
+for the primary and danger buttons, have one class and two elements (0,1,2), so the page's
+`button:hover`, `button:focus` or `button:disabled` (0,1,1) do not change those either. A
+rule with two classes, such as `.tab-mcp-dialog .tab-mcp-primary` (0,2,0), wins over all
+of them. A page rule of one element and one pseudo-class still changes a property that the
+dialogs set only in their base rules (for example `button:hover { padding: 0 }`). Write
+overrides outside cascade layers: the dialogs' rules are not in a layer, so they win over
+any layered rule. Both dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
+`.tab-mcp-connect` (with `.tab-mcp-status`, `.tab-mcp-address`, `.tab-mcp-code`,
+`.tab-mcp-code-value`, `.tab-mcp-help`, `.tab-mcp-apps`, `.tab-mcp-app`,
+`.tab-mcp-new-address-question`, `.tab-mcp-actions`), the confirmation is
+`.tab-mcp-confirm` (with `.tab-mcp-description`, `.tab-mcp-arguments`,
+`.tab-mcp-always-note`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
+`.tab-mcp-always`). Buttons are `.tab-mcp-primary` (the one next step: Copy the
+address, Done, and "Don't allow", the safe choice), `.tab-mcp-danger` (Disconnect and
+"Disconnect and get new address") or plain. For example:
+
+```css
+:root {
+  --tab-mcp-accent: #1f5fbf;
+  --tab-mcp-accent-text: #fff;
+  --tab-mcp-radius: 0.5rem;
+}
+.tab-mcp-dialog .tab-mcp-primary { text-transform: uppercase; }
+```
 
 ## React
 

@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { TabMcp } from "../src/index.ts";
 import type { ConfirmRequest, Grant, SessionInfo } from "../src/types.ts";
-import { confirmDialog, showConnectDialog } from "../src/ui.ts";
+import {
+	commandAddress,
+	commandName,
+	confirmDialog,
+	DIALOG_CSS,
+	instructions,
+	showConnectDialog,
+} from "../src/ui.ts";
 import { newTab, nextEvent } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
@@ -87,6 +94,25 @@ describe("confirmDialog", () => {
 		allow.click();
 		expect(await answer).toBe("allow");
 		expect(doc.querySelector("dialog")).toBeNull();
+	});
+
+	test("Don't allow stands out as the safe choice; the arguments wrap and scroll (dialog design)", async () => {
+		const answer = confirmDialog(question(), doc);
+		const dialog = doc.querySelector(
+			"dialog.tab-mcp-confirm",
+		) as HTMLDialogElement;
+		const deny = byText(dialog, "Don't allow");
+		expect([...deny.classList]).toEqual(["tab-mcp-deny", "tab-mcp-primary"]);
+		expect([...byText(dialog, "Allow").classList]).toEqual(["tab-mcp-allow"]);
+		expect([...byText(dialog, "Always allow").classList]).toEqual([
+			"tab-mcp-always",
+		]);
+		const args = dialog.querySelector("pre") as HTMLElement;
+		expect(args.style.getPropertyValue("white-space")).toBe("pre-wrap");
+		expect(args.style.getPropertyValue("overflow-wrap")).toBe("anywhere");
+		expect(args.style.getPropertyValue("overflow")).toBe("auto");
+		deny.click();
+		expect(await answer).toBe("deny");
 	});
 
 	test("Don't allow, Escape (close without a value) and an aborted call resolve deny", async () => {
@@ -530,6 +556,72 @@ describe("showConnectDialog", () => {
 		await shown;
 	}
 
+	test("each command in the help has a Copy that copies it whole (dialog design)", async () => {
+		const copied = stubClipboard();
+		const connecting = mcp.connect();
+		const closed = showConnectDialog(mcp, connecting, doc, "My notes");
+		const session = await connecting;
+		await relay.next("pairing.start");
+		const dialog = doc.querySelector("dialog.tab-mcp-connect") as HTMLElement;
+		const copies = [
+			...dialog.querySelectorAll(".tab-mcp-command-copy"),
+		] as HTMLButtonElement[];
+		expect(copies.map((b) => b.getAttribute("aria-label"))).toEqual([
+			"Copy Claude Code command",
+			"Copy Codex command",
+		]);
+		(copies[1] as HTMLButtonElement).click();
+		await Bun.sleep(0);
+		// The page's server name, quoted for the shell.
+		expect(copied()).toBe(
+			`codex features enable mcp_2026_07_28\ncodex mcp add my-notes --url ${session.address}`,
+		);
+		expect(copies[1]?.textContent).toBe("Copied");
+		byText(dialog, "Close").click();
+		await closed;
+	});
+
+	test("what Copy did is announced: copied, or selected for Ctrl+C (review of PR 34)", async () => {
+		const copied = stubClipboard();
+		const { dialog } = await open();
+		await sendCode("123456");
+		const live = dialog.querySelector(".tab-mcp-announce") as HTMLElement;
+		expect(live.getAttribute("aria-live")).toBe("polite");
+		expect(live.textContent).toBe("");
+		(dialog.querySelector(".tab-mcp-address-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(copied()).not.toBe("");
+		expect(live.textContent).toBe("Address copied");
+		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(live.textContent).toBe("Code copied");
+		// The same message again is announced again.
+		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(live.textContent?.trim()).toBe("Code copied");
+		expect(live.textContent).not.toBe("Code copied");
+		(dialog.querySelector(".tab-mcp-command-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(live.textContent).toBe("Claude Code command copied");
+		// No clipboard: the text is selected, and that is said.
+		Object.defineProperty(window.navigator, "clipboard", {
+			value: undefined,
+			configurable: true,
+		});
+		(dialog.querySelector(".tab-mcp-address-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(live.textContent).toBe("Selected: copy it with Ctrl+C or ⌘C");
+		// The clipboard refuses: the same.
+		Object.defineProperty(window.navigator, "clipboard", {
+			value: { writeText: () => Promise.reject(new Error("denied")) },
+			configurable: true,
+		});
+		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(live.textContent?.trim()).toBe("Selected: copy it with Ctrl+C or ⌘C");
+		byText(dialog, "Close").click();
+	});
+
 	test("Copy writes the address to the clipboard", async () => {
 		const copied = stubClipboard();
 		const { dialog, session } = await open();
@@ -575,7 +667,9 @@ describe("showConnectDialog", () => {
 		expect(copied()).toBe("654321");
 		expect(copy.textContent).toBe("Copied");
 		// The address's Copy is a separate button.
-		expect(byText(dialog, "Copy").className).toBe("tab-mcp-address-copy");
+		expect(
+			byText(dialog, "Copy").classList.contains("tab-mcp-address-copy"),
+		).toBe(true);
 		byText(dialog, "Close").click();
 	});
 
@@ -587,7 +681,7 @@ describe("showConnectDialog", () => {
 		const close = byText(dialog, "Close");
 		expect(done.hidden).toBe(true);
 		expect(close.hidden).toBe(false);
-		expect(close.className).toBe("tab-mcp-close");
+		expect(close.classList.contains("tab-mcp-close")).toBe(true);
 		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
 		expect(note.hidden).toBe(false);
 		expect(note.textContent).toBe(
@@ -882,5 +976,257 @@ describe("showConnectDialog", () => {
 			(dialog.querySelector(".tab-mcp-address") as HTMLElement).hidden,
 		).toBe(true);
 		byText(dialog, "Close").click();
+	});
+
+	test("the look: one primary step, Disconnect marked, Copy that keeps its width (dialog design)", async () => {
+		const { dialog, session } = await open();
+		await sendCode("123456");
+		const has = (selector: string, kind: string) =>
+			(dialog.querySelector(selector) as HTMLElement).classList.contains(kind);
+		// Copying the address is the next step; Done once an app connected.
+		expect(has(".tab-mcp-address-copy", "tab-mcp-primary")).toBe(true);
+		expect(has(".tab-mcp-done", "tab-mcp-primary")).toBe(true);
+		expect(
+			dialog.querySelectorAll(".tab-mcp-primary:not([hidden])").length,
+		).toBe(1);
+		for (const plain of [
+			".tab-mcp-code-copy",
+			".tab-mcp-new-address",
+			".tab-mcp-close",
+		])
+			expect(has(plain, "tab-mcp-primary")).toBe(false);
+		// Both Copy buttons take the same room as "Copy" and "Copied".
+		expect(dialog.querySelectorAll("button.tab-mcp-copy").length).toBe(4);
+		// What disconnects apps is marked.
+		expect(has(".tab-mcp-disconnect", "tab-mcp-danger")).toBe(true);
+		expect(has(".tab-mcp-new-address-confirm", "tab-mcp-danger")).toBe(true);
+		const app = dialog.querySelector(".tab-mcp-apps li .tab-mcp-app");
+		expect(app?.textContent).toBe("Claude (claude.ai) connected ");
+		// Each command is a block with its own Copy; the server name defaults to "tools".
+		expect(
+			[...dialog.querySelectorAll(".tab-mcp-help .tab-mcp-command pre")].map(
+				(p) => p.textContent,
+			),
+		).toEqual([
+			`claude mcp add --transport http tools ${session.address}`,
+			`codex features enable mcp_2026_07_28\ncodex mcp add tools --url ${session.address}`,
+		]);
+		expect(
+			[...dialog.querySelectorAll(".tab-mcp-help strong")].map(
+				(s) => s.textContent,
+			),
+		).toEqual([
+			"Claude (claude.ai and the desktop app):",
+			"ChatGPT:",
+			"Claude Code:",
+			"Codex:",
+		]);
+		expect(dialog.querySelector(".tab-mcp-command-note")?.textContent).toBe(
+			"Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; codex features disable mcp_2026_07_28 turns it off.",
+		);
+		expect(
+			dialog.querySelector(".tab-mcp-command-note code")?.textContent,
+		).toBe("codex features disable mcp_2026_07_28");
+		// No inline styles but those that keep the announcements out of sight and the code selectable as a whole.
+		const styled = [...dialog.querySelectorAll("[style]")] as HTMLElement[];
+		expect(styled.map((e) => e.className)).toEqual([
+			"tab-mcp-code-value",
+			"tab-mcp-announce",
+		]);
+		byText(dialog, "Close").click();
+	});
+});
+
+describe("the dialogs' stylesheet (dialog design)", () => {
+	test("one constructed stylesheet for every dialog, next to the page's own", async () => {
+		const Sheet = window.CSSStyleSheet as unknown as typeof CSSStyleSheet;
+		const page = new Sheet();
+		doc.adoptedStyleSheets = [page];
+		const first = confirmDialog(question(), doc);
+		expect(doc.adoptedStyleSheets.length).toBe(2);
+		expect(doc.adoptedStyleSheets[0]).toBe(page);
+		const ours = doc.adoptedStyleSheets[1];
+		(doc.querySelector("dialog") as HTMLDialogElement).close();
+		await first;
+		// Again: the same sheet, not a second one.
+		const second = confirmDialog(question(), doc);
+		expect(doc.adoptedStyleSheets).toEqual([page, ours as CSSStyleSheet]);
+		(doc.querySelector("dialog") as HTMLDialogElement).close();
+		await second;
+		// The page replaced the list: it is added again.
+		doc.adoptedStyleSheets = [page];
+		const third = confirmDialog(question(), doc);
+		expect(doc.adoptedStyleSheets).toEqual([page, ours as CSSStyleSheet]);
+		(doc.querySelector("dialog") as HTMLDialogElement).close();
+		await third;
+	});
+
+	test("every selector weighs one class; states and fills one class and two elements (review of PR 34)", () => {
+		// The selectors of every rule, without the at-rules and keyframes.
+		const css = DIALOG_CSS.replace(
+			/@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*[^}]*\}/g,
+			"",
+		)
+			.replace(/@media[^{]*\{/g, "")
+			.replace(/\{[^}]*\}/g, "\n");
+		const selectors = css
+			.split("\n")
+			.map((s) => s.trim())
+			.filter((s) => s !== "" && s !== "}");
+		expect(selectors.length).toBeGreaterThan(40);
+		/** [classes, elements]: :where() weighs nothing; nested parentheses one level deep. */
+		const weight = (part: string): [number, number] => {
+			const rest = part.replace(/:where\((?:[^()]|\([^()]*\))*\)/g, "");
+			const classes =
+				rest.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):(?!:)[\w-]+/g)?.length ?? 0;
+			const bare = rest.replace(/\.[\w-]+|\[[^\]]*\]|::?[\w-]+/g, "");
+			const elements =
+				(bare.match(/(?:^|[\s>+~])[a-z][\w-]*/g)?.length ?? 0) +
+				(rest.match(/::[\w-]+/g)?.length ?? 0);
+			return [classes, elements];
+		};
+		for (const selector of selectors) {
+			expect(selector).not.toContain("#");
+			// Outside :where(), nothing that adds weight of its own.
+			expect(
+				selector.replace(/:where\((?:[^()]|\([^()]*\))*\)/g, ""),
+			).not.toMatch(/:is\(|:not\(|:has\(/);
+			for (const part of selector.split(/,(?![^(]*\))/)) {
+				const [classes, elements] = weight(part);
+				const state =
+					/:hover|:focus|:disabled|\.tab-mcp-primary|\.tab-mcp-danger/.test(
+						part,
+					);
+				expect({ part, classes, elements }).toEqual({
+					part,
+					classes: 1,
+					// One element at most (a pseudo-element); two for states and fills.
+					elements: state ? 2 : expect.any(Number),
+				});
+				if (!state) expect(elements).toBeLessThanOrEqual(1);
+			}
+		}
+		// Above `button:hover` (0,1,1), below two classes (0,2,0).
+		expect(
+			weight("html dialog.tab-mcp-dialog :where(button:disabled)"),
+		).toEqual([1, 2]);
+	});
+
+	test("hidden stays hidden, a closed dialog stays closed, motion only when the user allows it", () => {
+		expect(DIALOG_CSS).toContain(
+			".tab-mcp-dialog :where([hidden]) { display: none !important; }",
+		);
+		// Display is set only while open, so a closed <dialog> stays hidden.
+		expect(DIALOG_CSS).not.toMatch(/\.tab-mcp-dialog\s*\{[^}]*display:/);
+		expect(DIALOG_CSS).toContain(
+			".tab-mcp-dialog:where([open]) { display: flex;",
+		);
+		const animations = [...DIALOG_CSS.matchAll(/animation:/g)].length;
+		expect(animations).toBe(1);
+		expect(DIALOG_CSS).toMatch(
+			/@media \(prefers-reduced-motion: no-preference\) \{[^}]*animation:/,
+		);
+		expect(DIALOG_CSS).toContain(":focus-visible");
+	});
+
+	test("every --tab-mcp-* custom property the dialogs read is in the README", async () => {
+		const root = new URL("..", import.meta.url).pathname;
+		const source = await Bun.file(`${root}src/ui.ts`).text();
+		const readme = await Bun.file(`${root}README.md`).text();
+		const used = new Set(
+			[...source.matchAll(/var\((--tab-mcp-[a-z-]+)/g)].map((m) => m[1]),
+		);
+		expect(used.size).toBeGreaterThan(10);
+		const missing = [...used].filter((name) => !readme.includes(`\`${name}\``));
+		expect(missing).toEqual([]);
+	});
+});
+
+describe("the commands in the help (dialog design, review of PR 34)", () => {
+	test("the name in a command is a label every shell reads as one plain word", () => {
+		const cases: [string, string][] = [
+			["tools", "tools"],
+			["My notes", "my-notes"],
+			["Bücher", "bucher"],
+			["ｃａｌｃ", "calc"],
+			["a\nb", "a-b"],
+			["a\rb", "a-b"],
+			["‘x’ “y”", "x-y"],
+			["a & calc & b", "a-calc-b"],
+			["a | calc", "a-calc"],
+			["$HOME", "home"],
+			["`calc`", "calc"],
+			["%PATH%", "path"],
+			["a^b", "a-b"],
+			["x' ; calc ; 'y$", "x-calc-y"],
+			["'$ & calc & '", "calc"],
+			["-rf", "rf"],
+			["--url=evil", "url-evil"],
+			["my_tools-2", "my_tools-2"],
+			["", "tools"],
+			["!!!", "tools"],
+			["日本語", "tools"],
+			["a".repeat(60), "a".repeat(40)],
+			[`${"a".repeat(39)} b`, "a".repeat(39)],
+		];
+		for (const [name, label] of cases)
+			expect({ name, label: commandName(name) }).toEqual({ name, label });
+	});
+
+	test("an address goes into a command only when every character is plain", () => {
+		expect(commandAddress("https://relay.example/a/abc234/mcp")).toBe(
+			"https://relay.example/a/abc234/mcp",
+		);
+		expect(commandAddress("http://127.0.0.1:8080/a/x/mcp")).toBe(
+			"http://127.0.0.1:8080/a/x/mcp",
+		);
+		expect(commandAddress("http://[::1]:8080/a/x/mcp")).toBe(
+			"http://[::1]:8080/a/x/mcp",
+		);
+		for (const unsafe of [
+			"https://relay.example/a/x/mcp?q=1&calc",
+			"https://relay.example/a/$(calc)/mcp",
+			"https://relay.example/a/x%0Acalc/mcp",
+			"https://relay.example/a/'x'/mcp",
+			"https://relay.example/a/x/mcp#frag",
+			"https://user:pw@relay.example/a/x/mcp",
+			"ftp://relay.example/a/x/mcp",
+			"not an address",
+		])
+			expect({ unsafe, command: commandAddress(unsafe) }).toEqual({
+				unsafe,
+				command: undefined,
+			});
+	});
+
+	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {
+		const codex = instructions("calc", "https://relay.example/a/x/mcp").find(
+			([app]) => app === "Codex",
+		);
+		expect(codex?.[2]).toBe(
+			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp",
+		);
+		const claudeCode = instructions(
+			"x' ; calc ; 'y$",
+			"https://r.example/a/x/mcp",
+		).find(([app]) => app === "Claude Code");
+		expect(claudeCode?.[2]).toBe(
+			"claude mcp add --transport http x-calc-y https://r.example/a/x/mcp",
+		);
+	});
+
+	test("with an address that is not plain, no commands: only the steps", () => {
+		const steps = instructions("calc", "https://relay.example/a/x/mcp?a=1&b");
+		expect(steps.every(([, , command]) => command === undefined)).toBe(true);
+		expect(steps.map(([app]) => app)).toEqual([
+			"Claude (claude.ai and the desktop app)",
+			"ChatGPT",
+			"Claude Code",
+			"Codex",
+		]);
+		const text = steps.map(([, how]) => how).join(" ");
+		expect(text).toContain("claude mcp add");
+		expect(text).toContain("mcp_2026_07_28");
+		expect(text).not.toContain("calc");
 	});
 });

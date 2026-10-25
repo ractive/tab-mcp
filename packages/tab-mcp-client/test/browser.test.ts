@@ -45,6 +45,13 @@ window.ready = true;
 </script>
 </body></html>`;
 
+/** A page's own rules for buttons in a state, one pseudo-class each (review of PR 34). */
+const HOST_STYLE = `<style>
+button:hover { background: rgb(255, 0, 0); color: rgb(0, 255, 0); }
+button:focus { outline: none; }
+button:disabled { opacity: 1; }
+</style>`;
+
 let relay: TestRelay;
 let server: ReturnType<typeof Bun.serve>;
 let browser: Browser | undefined;
@@ -68,10 +75,14 @@ beforeAll(async () => {
 		hostname: "127.0.0.1",
 		fetch: (req) => {
 			const path = new URL(req.url).pathname;
-			if (path === "/") {
-				return new Response(PAGE.replace("RELAY", JSON.stringify(relay.url)), {
-					headers: { "content-type": "text/html; charset=utf-8" },
-				});
+			if (path === "/" || path === "/host") {
+				const page = PAGE.replace("RELAY", JSON.stringify(relay.url));
+				return new Response(
+					path === "/host"
+						? page.replace("</head>", `${HOST_STYLE}</head>`)
+						: page,
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				);
 			}
 			const js = files.get(path);
 			return js === undefined
@@ -276,6 +287,75 @@ test.skipIf(chrome === undefined)(
 		} finally {
 			await other.close();
 		}
+	},
+	30_000,
+);
+
+test.skipIf(chrome === undefined)(
+	"a page's rules for button:hover, :focus and :disabled do not change the dialogs (review of PR 34)",
+	async () => {
+		await page.goto(`http://127.0.0.1:${server.port}/host`);
+		await page.eval(
+			"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })",
+		);
+		await page.send("Target.activateTarget", { targetId: page.targetId });
+		await page.eval(`(() => {
+			window.answer = mcp.confirmInPage({
+				tool: { name: "clear_memory", description: "Clears the memory" },
+				arguments: {},
+				client: { grantId: "g_1", id: "https://client.example/c.json", host: "client.example" },
+				signal: new AbortController().signal,
+			});
+		})()`);
+		const style = (selector: string) =>
+			page.eval<{
+				opacity: string;
+				background: string;
+				color: string;
+				outline: string;
+			}>(
+				`(() => { const s = getComputedStyle(document.querySelector(${JSON.stringify(selector)})); return { opacity: s.opacity, background: s.backgroundColor, color: s.color, outline: s.outlineStyle }; })()`,
+			);
+		await page.eval(
+			"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-confirm') ? r(true) : setTimeout(w, 10)); w(); })",
+		);
+		// A disabled Allow still looks disabled.
+		expect((await style(".tab-mcp-allow")).opacity).toBe("0.45");
+		// The focused "Don't allow" keeps its focus ring.
+		expect(
+			await page.eval(
+				"document.activeElement.matches('.tab-mcp-deny:focus-visible')",
+			),
+		).toBe(true);
+		expect((await style(".tab-mcp-deny")).outline).toBe("solid");
+		// Hovered, the buttons keep their own colours.
+		const hover = async (selector: string) => {
+			const box = await page.eval<{ x: number; y: number }>(
+				`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+			);
+			await page.send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				x: box.x,
+				y: box.y,
+			});
+			expect(
+				await page.eval(
+					`document.querySelector(${JSON.stringify(selector)}).matches(":hover")`,
+				),
+			).toBe(true);
+			return style(selector);
+		};
+		const primary = await hover(".tab-mcp-deny");
+		expect(primary.background).not.toBe("rgb(255, 0, 0)");
+		expect(primary.color).not.toBe("rgb(0, 255, 0)");
+		await page.eval(
+			"new Promise((r) => { const w = () => (document.querySelector('.tab-mcp-allow').disabled ? setTimeout(w, 10) : r(true)); w(); })",
+		);
+		const plain = await hover(".tab-mcp-allow");
+		expect(plain.background).not.toBe("rgb(255, 0, 0)");
+		expect(plain.color).not.toBe("rgb(0, 255, 0)");
+		await page.press("Escape");
+		expect(await page.eval("window.answer")).toBe(false);
 	},
 	30_000,
 );
