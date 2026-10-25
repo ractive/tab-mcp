@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-24T23:00:00+02:00
+timestamp: 2026-10-25T12:00:00+02:00
 ---
 
 # Decision log
@@ -1502,3 +1502,35 @@ and title, and the look-alike name would still stand alone in the body text.
 - [Bun runtime and publishing research](/research/bun-runtime-and-publishing.md)
 - [bunny.net research](/research/bunny-magic-containers.md)
 - [WebMCP registerTool](/research/webmcp-register-tool.md)
+
+## DEC-093: The default dialogs are styled by a constructed stylesheet
+
+The owner asked for nicer default dialogs. Inline CSSOM styles (DEC-054) cannot express
+hover, `:focus-visible`, `::backdrop`, media queries (360 px, `prefers-reduced-motion`)
+or "hidden stays hidden", and a page could change them only through the custom
+properties.
+
+- The look is one constructed stylesheet (`DIALOG_CSS` in `ui.ts`), adopted once per
+  document into `document.adoptedStyleSheets` next to the page's own sheets. Constructed
+  stylesheets are not subject to `style-src`, so a strict CSP still needs no exception
+  (checked in headless Chrome with `style-src 'self'`: no violation, rules applied).
+  Where they are not supported, the dialogs keep the browser's default look.
+- Every selector has the specificity of one class (the rest in `:where()`), and the
+  rules are not in a cascade layer. A layer was tried first and dropped: any unlayered
+  rule of the page would win, so a common reset (`* { border-width: 0 }`,
+  `button { background-color: transparent }`) or a page's own `button { … }` took the
+  primary button's fill and every border. With one class, element rules of the page do
+  not reach in, and a page rule with two classes (`.tab-mcp-dialog .tab-mcp-primary`)
+  wins. A page that writes its overrides inside a layer loses to the dialogs' rules; the
+  README says to write them outside layers.
+- `--tab-mcp-*` custom properties change single values; the library never declares them,
+  only reads them with a default, so a value on `:root` reaches the dialog. Internal
+  values are `--_tab-mcp-*`.
+- Neutral defaults: system colours (`Canvas`, `CanvasText`) and mixes of the text
+  colour, so the dialogs follow the page's `color-scheme`; the primary button is the
+  text colour filled. One primary per state: Copy the address, Done, and in the
+  confirmation "Don't allow" (the focused, safe choice), not Allow.
+- Inline styles stay only where they matter without the stylesheet: the arguments wrap
+  (also long words) and scroll, and the code is selected as a whole.
+- The stylesheet lives in the lazily loaded UI chunk (3.8 KB to 5.3 KB gzipped); the
+  core is unchanged.

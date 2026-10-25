@@ -1,8 +1,9 @@
 /**
  * The default UI, loaded on demand: the "Connect your AI app" dialog
  * (DEC-028) and the confirmation of consequential tools. Plain `<dialog>`
- * elements, no styles beyond a few CSS custom properties (`--tab-mcp-*`), all
- * text set with `textContent`. Pages with their own UI use the events and
+ * elements, all text set with `textContent`, styled by one constructed
+ * stylesheet (`DIALOG_CSS`) that pages adjust through `--tab-mcp-*` custom
+ * properties or their own CSS. Pages with their own UI use the events and
  * methods of `TabMcp` instead.
  */
 
@@ -31,15 +32,128 @@ function el<K extends keyof HTMLElementTagNameMap>(
 	return node;
 }
 
+/**
+ * A button. `className` is its own class; `kind` marks the one next step
+ * (`tab-mcp-primary`) or one that disconnects (`tab-mcp-danger`); without
+ * one it is a plain, outlined button.
+ */
 function button(
 	doc: Document,
 	text: string,
 	onClick: () => void,
+	className?: string,
+	kind?: "primary" | "danger",
 ): HTMLButtonElement {
 	const node = el(doc, "button", { text });
 	node.type = "button";
+	if (className !== undefined) node.classList.add(className);
+	if (kind !== undefined) node.classList.add(`tab-mcp-${kind}`);
 	node.addEventListener("click", onClick);
 	return node;
+}
+
+/**
+ * The look of both dialogs. Every selector has the specificity of one class
+ * (the rest is in `:where()`): rules of the page for elements, such as
+ * `button { … }` or a reset's `* { border-width: 0 }`, do not change the
+ * dialogs, while a rule with two classes, such as
+ * `.tab-mcp-dialog .tab-mcp-primary`, wins over these. The `--tab-mcp-*`
+ * custom properties (on `:root` or on `.tab-mcp-dialog`) change single
+ * values; the library only reads them. The defaults use system colours and the
+ * page's `color-scheme`, so the dialogs follow its light or dark scheme. The
+ * `--_tab-mcp-*` properties are internal. Order matters among equals.
+ */
+export const DIALOG_CSS = `.tab-mcp-dialog {
+--_tab-mcp-fg: var(--tab-mcp-color, CanvasText);
+--_tab-mcp-bg: var(--tab-mcp-background, Canvas);
+--_tab-mcp-muted: var(--tab-mcp-muted, color-mix(in srgb, var(--_tab-mcp-fg) 72%, transparent));
+--_tab-mcp-line: color-mix(in srgb, var(--_tab-mcp-fg) 22%, transparent);
+--_tab-mcp-surface: var(--tab-mcp-surface, color-mix(in srgb, var(--_tab-mcp-fg) 6%, transparent));
+--_tab-mcp-danger: var(--tab-mcp-danger, light-dark(#b3261e, #ffb4ab));
+--_tab-mcp-mono: var(--tab-mcp-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+--_tab-mcp-small-radius: calc(var(--tab-mcp-radius, 0.75rem) * 0.6);
+box-sizing: border-box; width: calc(100% - 2rem); max-width: var(--tab-mcp-max-width, 34rem); max-height: calc(100% - 2rem); overflow: auto;
+font: var(--tab-mcp-font, inherit); line-height: 1.5; color: var(--_tab-mcp-fg); background: var(--_tab-mcp-bg);
+border: var(--tab-mcp-border, 1px solid var(--_tab-mcp-line)); border-radius: var(--tab-mcp-radius, 0.75rem);
+padding: var(--tab-mcp-padding, clamp(1rem, 5vw, 1.5rem)); box-shadow: var(--tab-mcp-shadow, 0 1rem 3rem rgb(0 0 0 / 0.3));
+}
+.tab-mcp-dialog::backdrop { background: var(--tab-mcp-backdrop, rgb(0 0 0 / 0.4)); }
+.tab-mcp-dialog:where([open]) { display: flex; flex-direction: column; gap: 1rem; }
+.tab-mcp-dialog:where([open]) > * { flex-shrink: 0; }
+.tab-mcp-dialog :where([hidden]) { display: none !important; }
+.tab-mcp-dialog:where(:focus) { outline: none; }
+.tab-mcp-dialog :where(*) { box-sizing: border-box; }
+.tab-mcp-dialog :where(h2, h3, p, ul, li, pre) { margin: 0; }
+.tab-mcp-dialog :where(h2) { font-size: var(--tab-mcp-title-size, 1.25em); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
+.tab-mcp-dialog :where(h3) { font-size: 0.875em; font-weight: 600; color: var(--_tab-mcp-muted); margin-bottom: 0.5rem; }
+.tab-mcp-dialog :where(small) { font-size: 0.875em; }
+.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note) { color: var(--_tab-mcp-muted); }
+.tab-mcp-dialog :where(:focus-visible) { outline: 2px solid var(--tab-mcp-focus, var(--_tab-mcp-fg)); outline-offset: 2px; }
+.tab-mcp-dialog :where(button) { font: inherit; font-size: 0.9375em; line-height: 1.25; min-height: 2.5rem; padding: 0.5rem 1rem; margin: 0; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: var(--_tab-mcp-small-radius); background: transparent; color: inherit; cursor: pointer; }
+.tab-mcp-dialog :where(button:hover:not(:disabled)) { background: color-mix(in srgb, currentColor 8%, transparent); }
+.tab-mcp-dialog :where(button:disabled) { opacity: 0.45; cursor: not-allowed; }
+.tab-mcp-primary { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); color: var(--tab-mcp-accent-text, var(--_tab-mcp-bg)); border-color: transparent; font-weight: 600; }
+.tab-mcp-primary:where(:hover:not(:disabled)) { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); opacity: 0.85; }
+.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-mix(in srgb, currentColor 45%, transparent); }
+.tab-mcp-copy { min-width: 6em; }
+.tab-mcp-close { font-size: 0.875em; }
+.tab-mcp-status { margin-top: -0.5rem; }
+.tab-mcp-description:where(:empty) { display: none; }
+.tab-mcp-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.tab-mcp-address { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.tab-mcp-address :where(label) { flex-basis: 100%; font-weight: 600; }
+.tab-mcp-address :where(input) { flex: 1 1 12rem; min-width: 0; min-height: 2.5rem; margin: 0; padding: 0.5rem 0.625rem; font: 0.875em var(--_tab-mcp-mono); text-overflow: ellipsis; color: inherit; background: var(--_tab-mcp-surface); border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-code { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.25rem 1rem; padding: 1rem; background: var(--_tab-mcp-surface); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-code > :where(span) { font-weight: 600; }
+.tab-mcp-code :where(br) { display: none; }
+.tab-mcp-code :where(small) { grid-column: 1 / -1; }
+.tab-mcp-code-value { display: block; font: 700 var(--tab-mcp-code-size, 2em) / 1.2 var(--_tab-mcp-mono); letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.tab-mcp-help :where(summary) { width: fit-content; cursor: pointer; }
+.tab-mcp-dialog :where(.tab-mcp-help ul, .tab-mcp-apps ul) { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
+.tab-mcp-help :where(ul) { margin-top: 0.75rem; gap: 0.75rem; }
+.tab-mcp-help :where(li) { overflow-wrap: anywhere; }
+.tab-mcp-help :where(strong) { display: block; font-weight: 600; }
+.tab-mcp-help :where(code) { font: 0.875em var(--_tab-mcp-mono); padding: 0.125em 0.375em; background: var(--_tab-mcp-surface); border-radius: 0.25rem; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.tab-mcp-apps :where(li) { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-app { min-width: 0; overflow-wrap: anywhere; }
+.tab-mcp-apps-note { margin-top: 0.5rem; }
+.tab-mcp-new-address-question { display: grid; gap: 0.75rem; padding: 1rem; border: 1px solid color-mix(in srgb, var(--_tab-mcp-danger) 50%, transparent); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-connect > :where(.tab-mcp-actions) { gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--_tab-mcp-line); }
+.tab-mcp-close-note { flex: 1 1 12rem; }
+.tab-mcp-confirm :where(p bdi) { font-weight: 600; }
+.tab-mcp-arguments { box-sizing: content-box; font: 0.875em / 1.45 var(--_tab-mcp-mono); padding: 0.75rem; background: var(--_tab-mcp-surface); border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-always-note { font-size: 0.875em; }
+@media (max-width: 30rem) { .tab-mcp-actions > :where(button) { flex: 1 1 auto; } .tab-mcp-connect > :where(.tab-mcp-actions) > :where(button) { flex: 0 0 auto; } }
+@media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } }
+@media (forced-colors: active) { .tab-mcp-primary { border-color: ButtonText; } }
+@keyframes tab-mcp-in { from { opacity: 0; transform: translateY(0.5rem); } }
+`;
+
+const sheets = new WeakMap<Document, CSSStyleSheet>();
+
+/**
+ * Adopts `DIALOG_CSS` into the document once, next to the page's own adopted
+ * sheets. A constructed stylesheet needs no `style-src` exception under a
+ * strict CSP. Where constructed stylesheets are not supported, the dialogs
+ * keep the browser's default look and work the same.
+ */
+function adoptStyles(doc: Document): void {
+	try {
+		let sheet = sheets.get(doc);
+		if (sheet === undefined) {
+			const Sheet = (doc.defaultView as (Window & typeof globalThis) | null)
+				?.CSSStyleSheet;
+			if (Sheet === undefined || !Array.isArray(doc.adoptedStyleSheets)) return;
+			sheet = new Sheet();
+			sheet.replaceSync(DIALOG_CSS);
+			sheets.set(doc, sheet);
+		}
+		// The page may have replaced the list since.
+		if (!doc.adoptedStyleSheets.includes(sheet))
+			doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+	} catch {
+		// Not supported: the default look.
+	}
 }
 
 /**
@@ -53,18 +167,28 @@ function copyButton(
 	noun: string,
 	value: () => string,
 	select: () => void,
+	className: string,
+	kind?: "primary",
 ): { button: HTMLButtonElement; reset: () => void } {
-	const node = button(doc, "Copy", () => {
-		const done = () => {
-			node.textContent = "Copied";
-			node.setAttribute("aria-label", `Copied ${noun}`);
-		};
-		const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
-			?.clipboard;
-		if (clipboard !== undefined)
-			clipboard.writeText(value()).then(done, select);
-		else select();
-	});
+	const node = button(
+		doc,
+		"Copy",
+		() => {
+			const done = () => {
+				node.textContent = "Copied";
+				node.setAttribute("aria-label", `Copied ${noun}`);
+			};
+			const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
+				?.clipboard;
+			if (clipboard !== undefined)
+				clipboard.writeText(value()).then(done, select);
+			else select();
+		},
+		className,
+		kind,
+	);
+	// The same width for "Copy" and "Copied": nothing moves.
+	node.classList.add("tab-mcp-copy");
 	const reset = () => {
 		node.textContent = "Copy";
 		node.setAttribute("aria-label", `Copy ${noun}`);
@@ -83,18 +207,8 @@ function newDialog(
 		className: `tab-mcp-dialog ${className}`,
 	});
 	dialog.setAttribute("aria-labelledby", `${id}-title`);
-	// CSSOM properties are allowed under a strict CSP (no inline style attribute).
-	const style = dialog.style;
-	style.setProperty("max-width", "var(--tab-mcp-max-width, 34rem)");
-	style.setProperty("font", "var(--tab-mcp-font, inherit)");
-	style.setProperty("color", "var(--tab-mcp-color, CanvasText)");
-	style.setProperty("background", "var(--tab-mcp-background, Canvas)");
-	style.setProperty("border", "var(--tab-mcp-border, 1px solid GrayText)");
-	style.setProperty("border-radius", "var(--tab-mcp-radius, 0.5rem)");
-	style.setProperty("padding", "var(--tab-mcp-padding, 1rem 1.25rem)");
+	adoptStyles(doc);
 	const heading = el(doc, "h2", { id: `${id}-title`, text: title });
-	heading.style.setProperty("margin-top", "0");
-	heading.style.setProperty("font-size", "var(--tab-mcp-title-size, 1.25em)");
 	dialog.append(heading);
 	return { dialog, heading };
 }
@@ -182,13 +296,30 @@ export function confirmDialog(
 	const { dialog, heading } = newDialog(doc, "tab-mcp-confirm", "");
 	heading.append("Allow ", name(doc, title), "?");
 	const client = clientLabel(request.client);
-	const deny = button(doc, "Don't allow", () => dialog.close("deny"));
-	const allow = button(doc, "Allow", () => {
-		if (!allow.disabled) dialog.close("allow");
-	});
-	const always = button(doc, "Always allow", () => {
-		if (!always.disabled) dialog.close("always");
-	});
+	// The safe choice is the default: focused, and the one that stands out.
+	const deny = button(
+		doc,
+		"Don't allow",
+		() => dialog.close("deny"),
+		"tab-mcp-deny",
+		"primary",
+	);
+	const allow = button(
+		doc,
+		"Allow",
+		() => {
+			if (!allow.disabled) dialog.close("allow");
+		},
+		"tab-mcp-allow",
+	);
+	const always = button(
+		doc,
+		"Always allow",
+		() => {
+			if (!always.disabled) dialog.close("always");
+		},
+		"tab-mcp-always",
+	);
 	allow.disabled = true;
 	always.disabled = true;
 	const actions = el(
@@ -223,8 +354,14 @@ export function confirmDialog(
 		alwaysNote.hidden = true;
 	}
 	args.dir = "ltr";
+	// Inline, so the arguments stay readable in full without the stylesheet:
+	// wrapped (also a long word, at 360 px), scrolling when long.
 	args.style.setProperty("white-space", "pre-wrap");
-	args.style.setProperty("max-height", "12rem");
+	args.style.setProperty("overflow-wrap", "anywhere");
+	args.style.setProperty(
+		"max-height",
+		"var(--tab-mcp-arguments-height, 12rem)",
+	);
 	args.style.setProperty("overflow", "auto");
 	args.hidden = Object.keys(request.arguments).length === 0;
 	dialog.append(
@@ -294,7 +431,8 @@ export function confirmDialog(
 	});
 }
 
-const INSTRUCTIONS: [string, string][] = [
+/** Per AI app: its name, what to do, and a command to run (with the address). */
+const INSTRUCTIONS: [string, string, string?][] = [
 	[
 		"Claude (claude.ai and the desktop app)",
 		"Settings → Connectors → Add custom connector, then paste the address.",
@@ -303,7 +441,7 @@ const INSTRUCTIONS: [string, string][] = [
 		"ChatGPT",
 		"Settings → Apps and connectors → Advanced settings: turn on developer mode, then Create and paste the address.",
 	],
-	["Claude Code", "Run: claude mcp add --transport http tools ADDRESS"],
+	["Claude Code", "Run:", "claude mcp add --transport http tools ADDRESS"],
 ];
 
 /** "A and B", "A, B and C". */
@@ -330,7 +468,6 @@ export function showConnectDialog(
 	const { dialog } = newDialog(doc, "tab-mcp-connect", "Connect your AI app");
 	// Focusable from script only, for the moment before the address is shown.
 	dialog.tabIndex = -1;
-	dialog.style.setProperty("outline", "none");
 	const status = el(doc, "p", {
 		className: "tab-mcp-status",
 		text: "Connecting…",
@@ -345,17 +482,21 @@ export function showConnectDialog(
 		className: "tab-mcp-address-input",
 	});
 	address.readOnly = true;
-	address.style.setProperty("width", "100%");
-	address.style.setProperty("font-family", "var(--tab-mcp-mono, monospace)");
+	// Copying the address is the first step: the primary button.
 	const { button: copy, reset: resetCopy } = copyButton(
 		doc,
 		"address",
 		() => address.value,
 		() => address.select(),
+		"tab-mcp-address-copy",
+		"primary",
 	);
-	copy.className = "tab-mcp-address-copy";
-	const fresh = button(doc, "New address", () => askNewAddress());
-	fresh.className = "tab-mcp-new-address";
+	const fresh = button(
+		doc,
+		"New address",
+		() => askNewAddress(),
+		"tab-mcp-new-address",
+	);
 	const addressBox = el(
 		doc,
 		"div",
@@ -375,10 +516,13 @@ export function showConnectDialog(
 		confirmBox.hidden = true;
 		fresh.focus();
 	});
-	const confirmNew = button(doc, "Disconnect and get new address", () =>
-		getNewAddress(),
+	const confirmNew = button(
+		doc,
+		"Disconnect and get new address",
+		() => getNewAddress(),
+		"tab-mcp-new-address-confirm",
+		"danger",
 	);
-	confirmNew.className = "tab-mcp-new-address-confirm";
 	const confirmBox = el(
 		doc,
 		"div",
@@ -397,10 +541,8 @@ export function showConnectDialog(
 	confirmBox.setAttribute("aria-labelledby", confirmId);
 	confirmBox.hidden = true;
 
+	// Large, in a monospace font: a new code takes the same room.
 	const code = el(doc, "strong", { className: "tab-mcp-code-value" });
-	code.style.setProperty("font-size", "var(--tab-mcp-code-size, 1.5em)");
-	code.style.setProperty("letter-spacing", "0.1em");
-	code.style.setProperty("font-family", "var(--tab-mcp-mono, monospace)");
 	// One click selects the whole code; it stays plain, selectable text.
 	code.style.setProperty("user-select", "all");
 	code.style.setProperty("-webkit-user-select", "all");
@@ -410,8 +552,8 @@ export function showConnectDialog(
 		"code",
 		() => code.textContent ?? "",
 		() => doc.getSelection()?.selectAllChildren(code),
+		"tab-mcp-code-copy",
 	);
-	copyCode.className = "tab-mcp-code-copy";
 	// Only the sentence with the code is announced when the code changes,
 	// not its Copy button's "Copied".
 	const codeSentence = el(doc, "span", {}, "When asked, enter the code ", code);
@@ -460,12 +602,14 @@ export function showConnectDialog(
 		className: "tab-mcp-close-note",
 		text: "Closing this stops the code. The address stays the same: to connect later, open this again from the page.",
 	});
-	const close = button(doc, "Close", () => dialog.close());
-	close.className = "tab-mcp-close";
-	close.style.setProperty("font-size", "0.875em");
-	const done = button(doc, "Done", () => dialog.close());
-	done.className = "tab-mcp-done";
-	done.style.setProperty("font-weight", "bold");
+	const close = button(doc, "Close", () => dialog.close(), "tab-mcp-close");
+	const done = button(
+		doc,
+		"Done",
+		() => dialog.close(),
+		"tab-mcp-done",
+		"primary",
+	);
 	done.hidden = true;
 	const actions = el(
 		doc,
@@ -477,12 +621,6 @@ export function showConnectDialog(
 		done,
 	);
 	// The note on the left, the button at the far right, apart from the code.
-	actions.style.setProperty("display", "flex");
-	actions.style.setProperty("align-items", "center");
-	actions.style.setProperty("justify-content", "flex-end");
-	actions.style.setProperty("gap", "0.75rem");
-	actions.style.setProperty("margin-top", "1rem");
-	closeNote.style.setProperty("flex", "1");
 	// An app connected while this dialog is open (since the last new address),
 	// and still connected: the grants that made it so.
 	let paired = false;
@@ -583,13 +721,21 @@ export function showConnectDialog(
 		if (doc.activeElement === dialog) copy.focus();
 		help.hidden = false;
 		steps.replaceChildren(
-			...INSTRUCTIONS.map(([app, how]) =>
+			...INSTRUCTIONS.map(([app, how, command]) =>
 				el(
 					doc,
 					"li",
 					{},
-					el(doc, "strong", { text: app }),
-					`: ${how.replace("ADDRESS", session.address)}`,
+					el(doc, "strong", { text: `${app}:` }),
+					` ${how}`,
+					...(command === undefined
+						? []
+						: [
+								" ",
+								el(doc, "code", {
+									text: command.replace("ADDRESS", session.address),
+								}),
+							]),
 				),
 			),
 		);
@@ -631,16 +777,25 @@ export function showConnectDialog(
 		const connected = mcp.state === "connected";
 		appList.replaceChildren(
 			...mcp.grants.map((grant) => {
-				const disconnect = button(doc, "Disconnect", () => {
-					if (!mcp.revoke(grant.grantId)) renderGrants();
-				});
+				const disconnect = button(
+					doc,
+					"Disconnect",
+					() => {
+						if (!mcp.revoke(grant.grantId)) renderGrants();
+					},
+					"tab-mcp-disconnect",
+					"danger",
+				);
 				// Only the relay can revoke, so only while connected.
 				disconnect.disabled = !connected;
 				return el(
 					doc,
 					"li",
 					{},
-					`${clientLabel(grant.client)} connected `,
+					el(doc, "span", {
+						className: "tab-mcp-app",
+						text: `${clientLabel(grant.client)} connected `,
+					}),
 					disconnect,
 				);
 			}),
