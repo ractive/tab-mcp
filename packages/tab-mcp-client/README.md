@@ -134,8 +134,12 @@ handles only some calls itself.
    handler: browsers that report user activation refuse `connect()` without one) and
    opens the "Connect your AI app" dialog.
 2. The dialog shows the address and short instructions for Claude, ChatGPT, Claude Code
-   and Codex; the commands for Claude Code and Codex name the server by its `server.name`
-   and each has a Copy. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
+   and Codex. The commands for Claude Code and Codex each have a Copy. They name the
+   server by a label made from `server.name` that every shell reads as one plain word:
+   lower case, letters without marks, each run of other characters as `-`, at most 40
+   characters, `tools` if nothing is left ("Bücher" gives `bucher`). The address goes
+   into a command only if it has nothing but plain URL characters; otherwise the help
+   shows the steps without commands. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
    revision, so its command turns that on first (for all of Codex's MCP servers;
    `codex features disable mcp_2026_07_28` turns it off). The user adds the address to
    their AI app.
@@ -265,9 +269,14 @@ To adjust single values, set these custom properties on `:root` or on `.tab-mcp-
 
 For more, write CSS for the class names. Each of the dialogs' rules has the specificity
 of one class, so the page's rules for elements (`button { … }`, a reset's
-`* { border-width: 0 }`) do not change them, and a rule with two classes, such as
-`.tab-mcp-dialog .tab-mcp-primary`, wins over them. Write such rules outside cascade
-layers: the dialogs' rules are not in a layer, so they win over any layered rule. Both dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
+`* { border-width: 0 }`) do not change them. The rules for hover, focus and disabled, and
+for the primary and danger buttons, have one class and two elements (0,1,2), so the page's
+`button:hover`, `button:focus` or `button:disabled` (0,1,1) do not change those either. A
+rule with two classes, such as `.tab-mcp-dialog .tab-mcp-primary` (0,2,0), wins over all
+of them. A page rule of one element and one pseudo-class still changes a property that the
+dialogs set only in their base rules (for example `button:hover { padding: 0 }`). Write
+overrides outside cascade layers: the dialogs' rules are not in a layer, so they win over
+any layered rule. Both dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
 `.tab-mcp-connect` (with `.tab-mcp-status`, `.tab-mcp-address`, `.tab-mcp-code`,
 `.tab-mcp-code-value`, `.tab-mcp-help`, `.tab-mcp-apps`, `.tab-mcp-app`,
 `.tab-mcp-new-address-question`, `.tab-mcp-actions`), the confirmation is

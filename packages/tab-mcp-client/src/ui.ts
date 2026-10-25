@@ -54,10 +54,13 @@ function button(
 
 /**
  * The look of both dialogs. Every selector has the specificity of one class
- * (the rest is in `:where()`): rules of the page for elements, such as
+ * (the rest is in `:where()`), so rules of the page for elements, such as
  * `button { … }` or a reset's `* { border-width: 0 }`, do not change the
- * dialogs, while a rule with two classes, such as
- * `.tab-mcp-dialog .tab-mcp-primary`, wins over these. The `--tab-mcp-*`
+ * dialogs. The rules for states (hover, focus, disabled) and the primary
+ * and danger buttons add two elements (`html dialog.…`, `html button.…`),
+ * so `button:hover`, `button:focus` or `button:disabled` of the page do not
+ * either. A rule with two classes, such as `.tab-mcp-dialog .tab-mcp-primary`,
+ * wins over all of them. The `--tab-mcp-*`
  * custom properties (on `:root` or on `.tab-mcp-dialog`) change single
  * values; the library only reads them. The defaults use system colours and the
  * page's `color-scheme`, so the dialogs follow its light or dark scheme. The
@@ -81,20 +84,20 @@ padding: var(--tab-mcp-padding, clamp(1rem, 5vw, 1.5rem)); box-shadow: var(--tab
 .tab-mcp-dialog:where([open]) { display: flex; flex-direction: column; gap: 1rem; }
 .tab-mcp-dialog:where([open]) > * { flex-shrink: 0; }
 .tab-mcp-dialog :where([hidden]) { display: none !important; }
-.tab-mcp-dialog:where(:focus) { outline: none; }
+html dialog.tab-mcp-dialog:where(:focus) { outline: none; }
 .tab-mcp-dialog :where(*) { box-sizing: border-box; }
 .tab-mcp-dialog :where(h2, h3, p, ul, li, pre) { margin: 0; }
 .tab-mcp-dialog :where(h2) { font-size: var(--tab-mcp-title-size, 1.25em); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
 .tab-mcp-dialog :where(h3) { font-size: 0.875em; font-weight: 600; color: var(--_tab-mcp-muted); margin-bottom: 0.5rem; }
 .tab-mcp-dialog :where(small) { font-size: 0.875em; }
 .tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note) { color: var(--_tab-mcp-muted); }
-.tab-mcp-dialog :where(:focus-visible) { outline: 2px solid var(--tab-mcp-focus, var(--_tab-mcp-fg)); outline-offset: 2px; }
+html dialog.tab-mcp-dialog :where(:focus-visible) { outline: 2px solid var(--tab-mcp-focus, var(--_tab-mcp-fg)); outline-offset: 2px; }
 .tab-mcp-dialog :where(button) { font: inherit; font-size: 0.9375em; line-height: 1.25; min-height: 2.5rem; padding: 0.5rem 1rem; margin: 0; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: var(--_tab-mcp-small-radius); background: transparent; color: inherit; cursor: pointer; }
-.tab-mcp-dialog :where(button:hover:not(:disabled)) { background: color-mix(in srgb, currentColor 8%, transparent); }
-.tab-mcp-dialog :where(button:disabled) { opacity: 0.45; cursor: not-allowed; }
-.tab-mcp-primary { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); color: var(--tab-mcp-accent-text, var(--_tab-mcp-bg)); border-color: transparent; font-weight: 600; }
-.tab-mcp-primary:where(:hover:not(:disabled)) { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); opacity: 0.85; }
-.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-mix(in srgb, currentColor 45%, transparent); }
+html dialog.tab-mcp-dialog :where(button:hover:not(:disabled)) { color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); }
+html dialog.tab-mcp-dialog :where(button:disabled) { opacity: 0.45; cursor: not-allowed; }
+html button.tab-mcp-primary { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); color: var(--tab-mcp-accent-text, var(--_tab-mcp-bg)); border-color: transparent; font-weight: 600; }
+html button.tab-mcp-primary:where(:hover:not(:disabled)) { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); opacity: 0.85; }
+html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-mix(in srgb, currentColor 45%, transparent); }
 .tab-mcp-copy { min-width: 6em; }
 .tab-mcp-close { font-size: 0.875em; }
 .tab-mcp-status { margin-top: -0.5rem; }
@@ -128,7 +131,7 @@ padding: var(--tab-mcp-padding, clamp(1rem, 5vw, 1.5rem)); box-shadow: var(--tab
 .tab-mcp-always-note { font-size: 0.875em; }
 @media (max-width: 30rem) { .tab-mcp-actions > :where(button) { flex: 1 1 auto; } .tab-mcp-connect > :where(.tab-mcp-actions) > :where(button) { flex: 0 0 auto; } }
 @media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } }
-@media (forced-colors: active) { .tab-mcp-primary { border-color: ButtonText; } }
+@media (forced-colors: active) { html button.tab-mcp-primary { border-color: ButtonText; } }
 @keyframes tab-mcp-in { from { opacity: 0; transform: translateY(0.5rem); } }
 `;
 
@@ -163,13 +166,15 @@ function adoptStyles(doc: Document): void {
  * A Copy button for `value()`, read at click time. Shows "Copied" once the
  * clipboard took it; without a clipboard (or when it refuses) `select()` puts
  * the text in the selection for Ctrl+C instead. `noun` names it for assistive
- * technology ("Copy code"), as the dialog has more than one Copy.
+ * technology ("Copy code"), as the dialog has more than one Copy; `announce`
+ * says what happened ("Code copied", or that the text is selected).
  */
 function copyButton(
 	doc: Document,
 	noun: string,
 	value: () => string,
 	select: () => void,
+	announce: (text: string) => void,
 	className: string,
 	kind?: "primary",
 ): { button: HTMLButtonElement; reset: () => void } {
@@ -180,12 +185,17 @@ function copyButton(
 			const done = () => {
 				node.textContent = "Copied";
 				node.setAttribute("aria-label", `Copied ${noun}`);
+				announce(`${noun[0]?.toUpperCase()}${noun.slice(1)} copied`);
+			};
+			const selected = () => {
+				select();
+				announce("Selected: press Ctrl+C to copy");
 			};
 			const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
 				?.clipboard;
 			if (clipboard !== undefined)
-				clipboard.writeText(value()).then(done, select);
-			else select();
+				clipboard.writeText(value()).then(done, selected);
+			else selected();
 		},
 		className,
 		kind,
@@ -435,15 +445,39 @@ export function confirmDialog(
 }
 
 /**
- * `s` as one shell word: as it is when every character means itself in POSIX
- * shells, PowerShell and cmd.exe; else in double quotes when it has none of
- * " $ ` \ ! % (the same word in all three); else, POSIX only, in single
- * quotes, a single quote inside as '\''.
+ * The server's name as a label that every shell (POSIX shells, PowerShell,
+ * cmd.exe) reads as one plain word, so it needs no quoting: letters without
+ * their marks ("Bücher" → "bucher"), lower case, each run of anything but
+ * a-z, 0-9, _ and - as one "-", no "-" at either end (no option), at most 40
+ * characters; "tools" when nothing is left. The page names its server, but
+ * the command runs in the user's shell: nothing of the name may be quoted
+ * text (review of PR 34).
  */
-export function shellQuote(s: string): string {
-	if (/^[A-Za-z0-9_./:-]+$/.test(s)) return s;
-	if (!/["$`\\!%]/.test(s)) return `"${s}"`;
-	return `'${s.replaceAll("'", "'\\''")}'`;
+export function commandName(name: string): string {
+	const label = name
+		.normalize("NFKD")
+		.replace(/\p{M}/gu, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/-{2,}/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 40)
+		.replace(/-+$/, "");
+	return label === "" ? "tools" : label;
+}
+
+/**
+ * The address for a command, only when all of it is plain in every shell
+ * (http or https, letters, digits and . : [ ] / _ ~ -); else `undefined`, and
+ * the help shows the steps without commands. The relay's addresses are.
+ */
+export function commandAddress(address: string): string | undefined {
+	try {
+		const href = new URL(address).href;
+		return /^https?:\/\/[A-Za-z0-9.:[\]/_~-]+$/.test(href) ? href : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
@@ -456,9 +490,9 @@ const CODEX_FEATURE = "mcp_2026_07_28";
 export function instructions(
 	name: string,
 	address: string,
-): [string, string, string?, string[]?][] {
-	const n = shellQuote(name);
-	const a = shellQuote(address);
+): [string, string, (string | undefined)?, string[]?][] {
+	const n = commandName(name);
+	const a = commandAddress(address);
 	return [
 		[
 			"Claude (claude.ai and the desktop app)",
@@ -468,11 +502,20 @@ export function instructions(
 			"ChatGPT",
 			"Settings → Apps and connectors → Advanced settings: turn on developer mode, then Create and paste the address.",
 		],
-		["Claude Code", "Run:", `claude mcp add --transport http ${n} ${a}`],
+		a === undefined
+			? ["Claude Code", "Add the address with claude mcp add --transport http."]
+			: ["Claude Code", "Run:", `claude mcp add --transport http ${n} ${a}`],
 		[
 			"Codex",
-			"Run:",
-			`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}`,
+			...((a === undefined
+				? [
+						`Run codex features enable ${CODEX_FEATURE}, then add the address with codex mcp add --url.`,
+						undefined,
+					]
+				: [
+						"Run:",
+						`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}`,
+					]) as [string, string | undefined]),
 			[
 				"Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
 				`codex features disable ${CODEX_FEATURE}`,
@@ -512,6 +555,22 @@ export function showConnectDialog(
 		text: "Connecting…",
 	});
 	status.setAttribute("role", "status");
+	// What a Copy did, for assistive technology only; out of sight, also
+	// without the stylesheet. The same message twice is still a change.
+	const live = el(doc, "span", { className: "tab-mcp-announce" });
+	live.setAttribute("aria-live", "polite");
+	for (const [property, value] of [
+		["position", "absolute"],
+		["width", "1px"],
+		["height", "1px"],
+		["overflow", "hidden"],
+		["clip-path", "inset(50%)"],
+		["white-space", "nowrap"],
+	])
+		live.style.setProperty(property as string, value as string);
+	const announce = (text: string) => {
+		live.textContent = live.textContent === text ? `${text}\u00a0` : text;
+	};
 
 	const addressId = `tab-mcp-${++counter}-address`;
 	const label = el(doc, "label", { text: "Add this address to your AI app:" });
@@ -527,6 +586,7 @@ export function showConnectDialog(
 		"address",
 		() => address.value,
 		() => address.select(),
+		announce,
 		"tab-mcp-address-copy",
 		"primary",
 	);
@@ -591,6 +651,7 @@ export function showConnectDialog(
 		"code",
 		() => code.textContent ?? "",
 		() => doc.getSelection()?.selectAllChildren(code),
+		announce,
 		"tab-mcp-code-copy",
 	);
 	// Only the sentence with the code is announced when the code changes,
@@ -691,6 +752,7 @@ export function showConnectDialog(
 		help,
 		apps,
 		actions,
+		live,
 	);
 	addressBox.hidden = true;
 	codeLine.hidden = true;
@@ -778,6 +840,7 @@ export function showConnectDialog(
 							`${app} command`,
 							() => text.textContent ?? "",
 							() => doc.getSelection()?.selectAllChildren(text),
+							announce,
 							"tab-mcp-command-copy",
 						);
 						item.append(

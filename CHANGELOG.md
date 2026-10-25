@@ -24,15 +24,24 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   `--tab-mcp-backdrop`, `--tab-mcp-arguments-height`) and class names on the buttons
   (`.tab-mcp-primary`, `.tab-mcp-danger`, `.tab-mcp-deny`, `.tab-mcp-allow`,
   `.tab-mcp-always`, `.tab-mcp-disconnect`, `.tab-mcp-copy`), all listed in the README.
-  Each rule has the specificity of one class: the page's rules for elements do not change
-  the dialogs, a page rule with two classes (`.tab-mcp-dialog .tab-mcp-primary`) does.
+  Each rule has the specificity of one class, and the rules for hover, focus, disabled
+  and the primary and danger buttons have one class and two elements. So the page's rules
+  for elements, and for an element in a state (`button:hover`, `button:focus`,
+  `button:disabled`), do not change those rules. A page rule with two classes
+  (`.tab-mcp-dialog .tab-mcp-primary`) does.
   Until now most values were inline styles that only the custom properties could change.
 - The help ("How do I add it?") shows each command as a block with its own Copy, and has
   steps for Codex: `codex features enable mcp_2026_07_28`, which Codex 0.163 needs for the
   relay's MCP revision (for all its MCP servers; `codex features disable mcp_2026_07_28`
   turns it off), then `codex mcp add <name> --url <address>`. The commands for Claude Code
-  and Codex name the server by the page's `server.name` (was always `tools`), quoted for
-  the shell.
+  and Codex name the server by a label made from the page's `server.name` (was always
+  `tools`). The label is safe in every shell without quoting: lower case, letters without
+  marks, each run of other characters as `-`, no `-` at either end, at most 40 characters,
+  `tools` if empty. The help shows commands only for an address made of plain URL
+  characters, and plain steps otherwise.
+- The connect dialog says what each Copy did in a polite live region ("Address copied",
+  "Code copied", "Claude Code command copied", or "Selected: press Ctrl+C to copy" when
+  the clipboard is not available).
 - The pairing code is `2em` by default (was `1.5em`), the default border is the text
   colour at 22 % (was `GrayText`), the default radius `0.75rem` (was `0.5rem`).
 
