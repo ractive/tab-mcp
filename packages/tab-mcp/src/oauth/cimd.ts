@@ -486,7 +486,7 @@ export function validateDocument(
 		!(Array.isArray(supported) && supported.includes("none"))
 	) {
 		throw invalid(
-			'The AI app must use token_endpoint_auth_method "none" with this relay.',
+			'The AI app must use token_endpoint_auth_method "none" with this relay, or list "none" in token_endpoint_auth_methods_supported.',
 		);
 	}
 	const grants = d["grant_types"];
