@@ -16,6 +16,7 @@ import {
 	type RpcId,
 	rpcErrorBody,
 } from "./exchange.ts";
+import { APPLE_TOUCH_ICON, FAVICON_ICO, FAVICON_SVG } from "./icons.ts";
 import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
 import { ipPrefixKey } from "./ip.ts";
 import { JwtError, type KeySource } from "./jwt.ts";
@@ -234,12 +235,25 @@ function metaVersion(body: Record<string, unknown>): unknown {
 
 const INDEX_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tab-mcp relay</title></head>
+<title>tab-mcp relay</title>
+<link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"></head>
 <body><h1>tab-mcp relay</h1>
 <p>This server relays AI apps' MCP requests to tools offered by web pages open in a browser tab.
 It does not log request contents. Source and documentation:
 <a href="https://github.com/ractive/tab-mcp">github.com/ractive/tab-mcp</a>.</p>
 </body></html>`;
+
+function icon(body: string | Uint8Array<ArrayBuffer>, type: string): Response {
+	return new Response(body, {
+		headers: {
+			"content-type": type,
+			"content-security-policy": "default-src 'none'",
+			"x-content-type-options": "nosniff",
+			"cache-control": "public, max-age=86400",
+		},
+	});
+}
 
 /** Start a relay. Returns once the server listens. */
 export function createRelay(options: CreateRelayOptions = {}): Relay {
@@ -1359,11 +1373,17 @@ function startRelay(
 						headers: {
 							"content-type": "text/html; charset=utf-8",
 							"content-security-policy":
-								"default-src 'none'; frame-ancestors 'none'",
+								"default-src 'none'; img-src 'self'; frame-ancestors 'none'",
 							"x-content-type-options": "nosniff",
 							"cache-control": "public, max-age=3600",
 						},
 					}),
+			},
+			// The relay's icon, for the AI apps' connector lists and browser tabs.
+			"/favicon.ico": { GET: () => icon(FAVICON_ICO, "image/x-icon") },
+			"/favicon.svg": { GET: () => icon(FAVICON_SVG, "image/svg+xml") },
+			"/apple-touch-icon.png": {
+				GET: () => icon(APPLE_TOUCH_ICON, "image/png"),
 			},
 			"/tab": (req, srv) => handleTab(req, srv),
 			"/.well-known/oauth-authorization-server": {
