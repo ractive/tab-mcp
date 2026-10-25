@@ -1530,6 +1530,15 @@ so the expiry warning of DEC-070 goes: the workflow `token-expiry.yml`,
 the repository variable `DOCKERHUB_TOKEN_EXPIRES`. A revoked token still shows as a
 failed Docker login in the release (`kb/operations/release-secrets.md`).
 
+## DEC-103: The core's size budget is 6 KB gzipped (owner)
+
+Owner, 2026-10-25: the budget for the library's core (what a page loads on import, before
+`connect()`) in `build.test.ts` goes from 5.5 to 6 KB gzipped. Client 0.8.0's core is
+5.4 KB (5,486 B), 146 B under the old budget, so the next fix would have hit it; 6 KB
+leaves about 500 B. The budget stays a tripwire, not a target: a change that crosses it
+moves code into the connection or UI chunk, or raises the budget with a decision here.
+Larger budgets (7 or 10 KB) were offered and declined as too loose to catch anything.
+
 # Citations
 
 - [MCP conformance suite](https://github.com/modelcontextprotocol/conformance)
