@@ -8,7 +8,7 @@ description: >-
 tags:
   - protocol
   - design
-timestamp: 2026-10-20T01:34:00+02:00
+timestamp: 2026-10-25T18:00:00+02:00
 ---
 
 # Tab↔relay protocol, version 1
@@ -27,6 +27,9 @@ tab implementations would follow.
 
 - URL: `wss://<relay>/tab`. The relay refuses the upgrade (HTTP 403, no upgrade) unless the
   `Origin` header is on its allow-list (DEC-032; default empty = nobody).
+- Since DEC-098 the URL carries the address id, `/tab?a=<id>`, for load balancers;
+  optional; malformed → 400 `bad_address`, not the secret's → `error` `address_mismatch`
+  and close 4009. `docs/protocol.md` is the normative text.
 - Version negotiation: the tab offers the WebSocket subprotocol `tab-mcp.v1`
   (`Sec-WebSocket-Protocol`). The relay accepts it or refuses the upgrade with HTTP 426 and
   a JSON body `{"error":"unsupported_protocol","supported":["tab-mcp.v1"]}`. A future
@@ -210,6 +213,7 @@ status and a JSON-RPC error body, as the MCP handler produced it.
 | 4004 | Relay shutting down. |
 | 4005 | Replaced by a newer session for the same address. |
 | 4008 | Rate limited. |
+| 4009 | The URL's address id is not the secret's (DEC-098). |
 
 On any close the relay ends the session: pending HTTP requests get the page-not-open
 answers of DEC-074 (a `tools/list` waits for the page once more), listen streams end, the pairing code becomes invalid. Grants and tokens stay

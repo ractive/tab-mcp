@@ -120,10 +120,51 @@ export interface Relay {
 	stop(): Promise<void>;
 }
 
+/** What `/healthz` says about the token store (DEC-099). */
+type StoreHealth = "ok" | "store_unavailable" | "store_timeout";
+/** How long the health probe waits for the store. */
+const HEALTH_STORE_TIMEOUT_MS = 1000;
+/** How long a probe's answer is reused. */
+const HEALTH_REUSE_MS = 1000;
+/** While an earlier read hangs, how long before a new one is tried. */
+const HEALTH_HUNG_RETRY_MS = 30_000;
+/** A store key no token ever has (a token's hash is of `tmcp_…`). */
+const HEALTH_PROBE_HASH = hashToken("tab-mcp /healthz probe");
+
+/**
+ * The `a` parameter of a `/tab` query, read from the raw text: `undefined`
+ * when absent, `false` when malformed or repeated. Only the literal id
+ * counts, never a percent-encoded one, so the relay agrees with a load
+ * balancer that matches the URL as sent (review of PR 38).
+ */
+function rawAddressParam(search: string): string | undefined | false {
+	let found: string | undefined;
+	for (const pair of search.replace(/^\?/, "").split("&")) {
+		if (pair === "") continue;
+		const eq = pair.indexOf("=");
+		const rawName = eq < 0 ? pair : pair.slice(0, eq);
+		let name: string;
+		try {
+			name = decodeURIComponent(rawName.replaceAll("+", " "));
+		} catch {
+			continue; // not ours: other parameters are ignored
+		}
+		if (name !== "a") continue;
+		const value = eq < 0 ? "" : pair.slice(eq + 1);
+		if (rawName !== "a" || found !== undefined || !isAddressId(value)) {
+			return false;
+		}
+		found = value;
+	}
+	return found;
+}
+
 interface WsData {
 	ip: string;
 	origin: string;
 	site: Site;
+	/** The address id the URL named (`/tab?a=`, DEC-098). */
+	address?: string;
 	session?: TabSession;
 }
 
@@ -138,6 +179,8 @@ export interface RelayTestHooks extends AuthorizationTestMode {
 	assertionKeys?: KeySource;
 	/** A smaller relay-wide replay cache for tab assertions. */
 	maxSeenAssertions?: number;
+	/** How long `/healthz` waits before a new read while one hangs. */
+	healthRetryMs?: number;
 }
 
 interface Body {
@@ -650,6 +693,14 @@ function startRelay(
 				supported: [SUBPROTOCOL],
 			});
 		}
+		// The address id for a load balancer to route by (DEC-098). Optional
+		// (libraries before 0.8 do not send it); checked against the secret
+		// in hello. Never the secret itself: URLs end up in access logs.
+		const address = rawAddressParam(new URL(req.url).search);
+		if (address === false) {
+			logger.info("tab.refused", { reason: "bad_address" });
+			return json(400, { error: "bad_address" });
+		}
 		const realIp = clientIp(req, server);
 		// Counted per /64 for IPv6 (DEC-061): one subscriber owns a whole /64.
 		const ip = ipPrefixKey(realIp);
@@ -667,7 +718,12 @@ function startRelay(
 		}
 		perIp.set(ip, count + 1);
 		const ok = server.upgrade(req, {
-			data: { ip, origin: origin ?? "", site },
+			data: {
+				ip,
+				origin: origin ?? "",
+				site,
+				...(address === undefined ? {} : { address }),
+			},
 			headers: { "Sec-WebSocket-Protocol": SUBPROTOCOL },
 		});
 		if (ok) return undefined;
@@ -1198,6 +1254,71 @@ function startRelay(
 
 	const postOnly = () =>
 		new Response(null, { status: 405, headers: { allow: "POST, OPTIONS" } });
+
+	/**
+	 * Whether the token store answers (DEC-099): one cheap read of a hash that
+	 * never exists, with a deadline. One probe at a time, and its answer is
+	 * reused for a second, so a flood of `/healthz` does not reach the store.
+	 * While a read that missed its deadline still hangs, a new one starts only
+	 * every `healthRetryMs` (30 s): a store that lost one command recovers, and
+	 * a hung store holds at most one read per window.
+	 */
+	const healthRetryMs = hooks?.healthRetryMs ?? HEALTH_HUNG_RETRY_MS;
+	let probe: Promise<StoreHealth> | undefined;
+	let probed: { at: number; result: StoreHealth } | undefined;
+	let hungReads = 0;
+	let lastHungAt = 0;
+	async function runProbe(): Promise<StoreHealth> {
+		let timer: Timer | undefined;
+		const deadline = new Promise<"store_timeout">((resolve) => {
+			timer = setTimeout(
+				() => resolve("store_timeout"),
+				HEALTH_STORE_TIMEOUT_MS,
+			);
+		});
+		// Inside a promise chain, so a store that throws synchronously is a
+		// failed probe like any other.
+		const read = Promise.resolve()
+			.then(() => store.get(HEALTH_PROBE_HASH))
+			.then(() => "ok" as const);
+		read.catch(() => {}); // a late rejection after the deadline
+		try {
+			const result = await Promise.race([read, deadline]);
+			if (result === "store_timeout") {
+				logger.warn("health.store", { error: "timeout" });
+				hungReads++;
+				lastHungAt = Date.now();
+				const settled = () => {
+					hungReads--;
+				};
+				read.then(settled, settled);
+			}
+			return result;
+		} catch (error) {
+			logger.warn("health.store", { error: errorName(error) });
+			return "store_unavailable";
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	function storeHealth(): Promise<StoreHealth> {
+		if (probe !== undefined) return probe;
+		const now = Date.now();
+		if (probed !== undefined && now - probed.at < HEALTH_REUSE_MS) {
+			return Promise.resolve(probed.result);
+		}
+		if (hungReads > 0 && now - lastHungAt < healthRetryMs) {
+			return Promise.resolve("store_timeout");
+		}
+		const current = runProbe().catch((): StoreHealth => "store_unavailable");
+		probe = current;
+		void current.then((result) => {
+			probed = { at: Date.now(), result };
+			if (probe === current) probe = undefined;
+		});
+		return current;
+	}
+
 	const largest = largestMessageBytes(config);
 	const ipOf = (req: Request, srv: Server<WsData>) =>
 		ipPrefixKey(clientIp(req, srv));
@@ -1211,8 +1332,17 @@ function startRelay(
 			"/healthz": {
 				// no-store: a CDN in front caches answers without cache headers
 				// (bunny for 30 days), and a deploy check would read the old version.
-				GET: () =>
-					json(
+				GET: async () => {
+					const store = await storeHealth();
+					if (store !== "ok") {
+						// A reason code only: never the store's error (DEC-099).
+						return json(
+							503,
+							{ status: "unhealthy", reason: store, version: VERSION },
+							{ "cache-control": "no-store" },
+						);
+					}
+					return json(
 						200,
 						{
 							status: "ok",
@@ -1220,7 +1350,8 @@ function startRelay(
 							counters: { claudeHeaderWorkaround: claudeWorkarounds },
 						},
 						{ "cache-control": "no-store" },
-					),
+					);
+				},
 			},
 			"/": {
 				GET: () =>
@@ -1291,6 +1422,7 @@ function startRelay(
 					ws.data.origin,
 					ws.data.site,
 					host,
+					ws.data.address,
 				);
 				ws.data.session = session;
 				allSessions.add(session);

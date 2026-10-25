@@ -13,8 +13,10 @@ the `TokenStore` interface, for example one backed by Redis, PostgreSQL or Prism
 page describes the interface, the guarantees a store must give, and how to check a store
 with the conformance suite.
 
-A shared store does not let you run several relays for one address. Tab sessions live in
-the relay's memory, so each public address needs exactly one relay process.
+A shared store alone does not let you run several relays for one address: tab sessions
+live in the relay's memory. With a load balancer that sends every request of one address
+to the same instance it does; see
+[Running several instances](self-hosting.md#running-several-instances).
 
 ## Using your own store
 

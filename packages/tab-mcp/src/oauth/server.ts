@@ -773,6 +773,7 @@ ${intro}
 		const result = await method.check(session, form, admit, {
 			requestId: pending.id,
 			browserId: browser.id,
+			addressId: pending.addressId,
 		});
 		if (result.ok === "redirect") {
 			this.#host.logger.info("oauth.pairing_redirect", {
@@ -815,7 +816,9 @@ ${intro}
 		result: Extract<PairingResult, { ok: true }>,
 	): Response {
 		this.#dropPending(pending);
-		const code = random(32);
+		// The address id first, so a load balancer that reads the `/token` body
+		// can route the exchange to this instance, which holds the code (DEC-098).
+		const code = `${pending.addressId}.${random(32)}`;
 		if (this.#codes.size >= MAX_CODES) this.#sweepCodes(true);
 		const { id: _id, expiresAt: _expires, ip: _ip, ...request } = pending;
 		this.#codes.set(hashToken(code), {
@@ -973,7 +976,7 @@ ${intro}
 ${errorHtml}
 <p>${clientLabel} wants to use the tools of a web page, but that page is not open right now.</p>
 <p>Open the page, click “Connect your AI app”, then try again here.</p>
-<form method="post" action="/authorize">
+<form method="post" action="/authorize?a=${pending.addressId}">
 ${hidden}
 <div class="actions">
 <button type="submit" class="primary" name="action" value="retry">Try again</button>
@@ -1008,7 +1011,7 @@ ${cancel}
 <p>You're connecting ${clientLabel} to ${target}.</p>
 <p>${escapeHtml(client.name)} can then use this page's tools while the page is open. You can disconnect it in the page at any time.</p>
 ${errorHtml}
-<form method="post" action="/authorize">
+<form method="post" action="/authorize?a=${pending.addressId}">
 ${hidden}
 ${method.render(session)}
 <div class="actions">

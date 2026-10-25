@@ -113,6 +113,11 @@ export class TabSession {
 	/** The site this session's origin belongs to (DEC-045). */
 	readonly site: Site;
 	readonly openedAt: number = Date.now();
+	/**
+	 * The address id the `/tab` URL named (`?a=`, DEC-098), checked against
+	 * the secret in `hello`; `undefined` for libraries that do not send it.
+	 */
+	readonly expectedAddress: string | undefined;
 	/** Set once `hello` was accepted. */
 	addressId: string | undefined;
 	/** The app name `/authorize` shows: the site's name, else the page's claim. */
@@ -152,12 +157,14 @@ export class TabSession {
 		origin: string,
 		site: Site,
 		host: SessionHost,
+		expectedAddress?: string,
 	) {
 		this.#ws = ws;
 		this.ip = ip;
 		this.origin = origin;
 		this.site = site;
 		this.#host = host;
+		this.expectedAddress = expectedAddress;
 		this.codes = new PairingCodes(
 			(code, expiresAt) => {
 				this.send({
@@ -353,9 +360,25 @@ export class TabSession {
 			);
 			return;
 		}
+		const addressId = addressIdFromSecret(secret);
+		if (
+			this.expectedAddress !== undefined &&
+			this.expectedAddress !== addressId
+		) {
+			// A load balancer routed this socket by the URL's id (DEC-098): a
+			// session for another address must not open on this instance.
+			// Nothing was claimed, so the address's real session stays.
+			this.#host.logger.warn("tab.refused", { reason: "address_mismatch" });
+			this.#sendError(
+				"address_mismatch",
+				"the address id in the URL is not the one of the secret",
+			);
+			this.end(CloseCode.addressMismatch, "address mismatch");
+			return;
+		}
 		clearTimeout(this.#helloTimer);
 		this.#state = "hello";
-		this.addressId = addressIdFromSecret(secret);
+		this.addressId = addressId;
 		this.appName = this.site.name ?? appName;
 		const replaced = this.#host.claimAddress(this);
 		if (replaced !== undefined) {

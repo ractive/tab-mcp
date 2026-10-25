@@ -440,18 +440,21 @@ export class TabMcp extends EventTarget {
 	}
 
 	async #open(generation: number): Promise<SessionInfo> {
-		const { openConnection, compileRegistry } = await import("./connection.ts");
+		const { openConnection, compileRegistry, addressIdOf, withAddress } =
+			await import("./connection.ts");
 		// The validator is loaded: it checks the schemas from now on (DEC-086).
 		for (const error of compileRegistry(this.#registry))
 			this.#emit("error", { error });
+		const secret = this.#secrets.get();
+		const address = await addressIdOf(secret);
 		if (generation !== this.#generation) {
 			throw new DOMException("The connection was cancelled", "AbortError");
 		}
 		const ref: { connection?: ConnectionHandle } = {};
 		const connection = openConnection(
 			this.#host(ref),
-			this.#relayUrl,
-			this.#secrets.get(),
+			withAddress(this.#relayUrl, address),
+			secret,
 		);
 		ref.connection = connection;
 		this.#connection = connection;

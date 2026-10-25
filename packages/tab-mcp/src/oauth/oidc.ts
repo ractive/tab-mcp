@@ -295,7 +295,10 @@ export class OidcPairing implements PairingMethod {
 				reason: "rate_limited",
 			};
 		}
-		const state = random(24);
+		// The provider sends the state back to /authorize/callback, whose URL is
+		// fixed: the address id in front lets a load balancer route the callback
+		// to this instance, which holds the flow (DEC-098).
+		const state = `${context.addressId}.${random(24)}`;
 		const nonce = random(24);
 		const verifier = random(32);
 		this.#flowOf.set(context.requestId, state);

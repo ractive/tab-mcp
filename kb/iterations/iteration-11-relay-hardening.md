@@ -3,7 +3,7 @@ type: iteration
 title: "Iteration 11: relay request path hardening"
 status: in-progress
 description: "Fixes from the 2026-10-24 review of the relay's request path and sessions (packages/tab-mcp/src/relay.ts, exchange.ts, session.ts): an unbounded listen stream, idle timeouts that never come back, 401 without WWW-Authenticate, limits, shutdown answers, log hygiene."
-timestamp: 2026-10-24T22:00:00+02:00
+timestamp: 2026-10-25T18:00:00+02:00
 tags: [iteration, security, relay]
 ---
 # Iteration 11: relay request path hardening
@@ -117,9 +117,9 @@ few clients.
 - [x] 7: error names only in logs
 - [x] 8: tab frames refused by length before parsing; the factor of 4 documented or dropped
 - [x] 9: `clearTimeout` in `finally`
-- [ ] 10: decide and implement session-slot protection; document it
+- [ ] 10: decide and implement session-slot protection; document it (deferred, DEC-097; documented as a known limit in `docs/self-hosting.md`)
 - [x] Refactors: `handleMcp` admission step, exchange state type, dead parameters
-- [ ] Decision on the address id in the `/tab` URL (F9), and on `/healthz` checking the store
+- [x] Decision on the address id in the `/tab` URL (F9), and on `/healthz` checking the store: both built (DEC-098, DEC-099)
 - [ ] Changelog, relay release, deploy
 
 # Citations
