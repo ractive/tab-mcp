@@ -23,6 +23,8 @@ export interface PairingTarget {
 export interface PairingContext {
 	requestId: string;
 	browserId: string;
+	/** The address being paired: the routing key of the return trip (DEC-098). */
+	addressId: string;
 }
 
 export type PairingResult =

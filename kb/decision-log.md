@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-25T12:00:00+02:00
+timestamp: 2026-10-25T18:00:00+02:00
 ---
 
 # Decision log
@@ -1547,3 +1547,109 @@ properties.
   (also long words) and scroll, and the code is selected as a whole.
 - The stylesheet lives in the lazily loaded UI chunk (3.8 KB to 6.0 KB gzipped, with the help's commands, Codex and the review fixes of PR 34); the
   core is unchanged.
+
+## DEC-097: Session-slot protection is deferred
+
+Owner decision of 2026-10-25, on iteration 11 finding 10 (architecture F4). `/tab`
+admits any client that sends an allowed `Origin` and a well-formed secret. A browser
+cannot forge `Origin`, any other program can. With 500 slots per instance and 5 per IPv4
+address or IPv6 /64, a program on about 100 /64s holds every slot with idle WebSockets,
+and real pages get `too_many_sessions`. It is a few hundred quiet connections, not a
+flood, so a CDN in front does not see it.
+
+- Not fixed now. The two candidate fixes, for when it is taken up:
+  1. a quota per site (a share of `maxSessions` per configured site, so forged origins
+     of one site cannot take the slots of another; it does not help a relay with one
+     site);
+  2. when the instance is full, evict the oldest session that never paired and has no
+     grants, instead of refusing the newcomer (a real page that is paired or has grants
+     is never evicted; an attacker's idle sockets are the first to go, but the attacker
+     can keep reconnecting, so it turns a lockout into churn).
+- Documented as a known limit in `docs/self-hosting.md` ("Known limit: session slots"),
+  with what an operator can do meanwhile (watch `tab.refused` `max_sessions`, block
+  networks at the proxy, lower the per-IP limit). Iteration 11 task 10 stays open.
+
+## DEC-098: The address id in the `/tab` URL, for several instances
+
+Owner decision of 2026-10-25 on the architecture note of iteration 11 (F9): carry the
+address id (never the secret) in the tab's URL, so that others can run several relay
+instances behind a load balancer that routes by address. The relay still does not
+coordinate instances, and no distributed store is built.
+
+- **URL shape: `/tab?a=<id>`**, not `/tab/<id>`. A query parameter is naturally optional
+  (libraries up to 0.7 send none), keeps the one route `/tab` that every proxy rule, CDN
+  path rule and the WebSocket docs name, and nginx (`$request_uri`), Caddy
+  (`{query.a}`) and HAProxy (`url_param(a)`) read it without rewriting. A path segment
+  would need a second route and would not have been optional for proxies matching
+  `location = /tab`. The cost: a CDN that routes by path only cannot route `/tab`; the
+  edge-function route works for those.
+- **How the library gets the id:** the derivation (DEC-027, `base32(sha256(secret))`) is
+  public, so the library computes it with `crypto.subtle.digest` before it opens the
+  socket. It lives in the lazily loaded chunk (`address.ts`), so the core stays within its
+  size budget. Without Web Crypto (a page on plain `http:` other than localhost) or if
+  it fails, the URL has no id: a single relay accepts that, only a load balancer cannot
+  route it.
+- **Checks:** a malformed `a` (not 52 characters of `[a-z2-7]`) or a repeated one gets
+  HTTP 400 `bad_address` before the upgrade. In `hello`, an id that is not the one of
+  the secret gets `error` `address_mismatch` and close 4009 (new), before the address is
+  claimed, so the address's open session is not replaced and no session opens. The
+  check is routing integrity, not security: an id is not a credential. Without it a
+  session for one address could sit on the instance of another, where its MCP requests
+  never arrive. The library maps 4009 to `policy` (not retried): only a bug causes it.
+- **Old clients:** the parameter stays optional at least until relay 1.0; the changelog
+  will announce it a release ahead if it ever becomes required.
+- **The id on every request that needs the address's instance**, where it was cheap:
+  - `/a/<id>/mcp` and `GET /authorize` (`resource`) already had it;
+  - the pairing form now posts to `/authorize?a=<id>` (the relay ignores the parameter;
+    the pending request is found by `request_id` as before);
+  - the OIDC `state` is `<id>.<random>`: the provider sends it back to the fixed
+    `/authorize/callback`, whose redirect URI cannot vary. The provider sees the address
+    id; that is acceptable, since the id is not secret (it is the MCP URL the user gives
+    away) and the provider is the site's own sign-in;
+  - the authorization code is `<id>.<random>`: codes live in memory for 60 s and the
+    code grant reads the page's session (identity binding), so the exchange must reach
+    the issuing instance. It is in the form body, so only a load balancer that reads the
+    body (HAProxy `req.body_param`, an edge worker, OpenResty, Envoy) can route it; nginx
+    and Caddy cannot. A code is single-use and bound to PKCE, so the prefix costs nothing.
+  - Not carried: access and refresh tokens. A leaked token would then name its address;
+    refreshes and revocations work on any instance with a shared store.
+- **What is per process, and what routing does to it:** tab sessions, waiting requests,
+  the last site seen per address, pending authorizations and the form's CSRF secret,
+  pairing codes, OIDC flows and codes all belong to one address and work per instance
+  once routed. The `jti` replay cache works too: an assertion's audience is one address,
+  so a replay elsewhere is refused by `aud`. Per-address rate limits work; per-network and
+  per-grant limits become per instance (up to N times the allowance). CIMD, provider and
+  JWKS caches are per instance. Grants and token hashes need a shared `TokenStore`
+  (embedding the relay; the SQLite file cannot be shared). A revocation on another
+  instance (`/revoke`, refresh reuse) reaches the page's list of apps only on its next
+  connect; the tokens stop at once.
+- **Operations:** a consistent hash; no failover for routed requests (a tab that moved
+  to a stand-in stays there when its instance returns, and its AI app's requests go to
+  the original); after changing the set of instances, restart each once so open
+  WebSockets follow the new hash. Examples for nginx, Caddy and HAProxy in
+  `docs/self-hosting.md`, "Running several instances". Not tested against a real load
+  balancer in this repository; the configurations are written from the products' docs.
+- **Not done, for later:** routing `/token` by URL would need a per-address issuer
+  (`https://<relay>/a/<id>` with its own `token_endpoint`), which changes the issuer of
+  every grant and every client's stored metadata. Keeping codes in the token store would
+  let any instance exchange them, but the identity check still reads the page's session
+  and every custom store would need a new record kind.
+
+## DEC-099: `/healthz` checks the token store
+
+Owner decision of 2026-10-25 (iteration 11 architecture note): `/healthz` should say
+whether the token store answers, not only that the process runs.
+
+- One read of a key no token has (`hashToken("tab-mcp /healthz probe")`), with a
+  one-second deadline. Failure is `503` with
+  `{"status":"unhealthy","reason":"store_unavailable"|"store_timeout","version":…}` and
+  `no-store`; never the error, whose message can carry a connection string. The log line
+  `health.store` carries the error's name or `timeout`.
+- `/healthz` needs no token, so a flood must not become store load: one probe at a time,
+  and its answer is reused for a second. While a read that missed its deadline still
+  hangs, no new one starts (the answer stays `store_timeout`), so a hung store holds at
+  most one read.
+- 503 rather than 200 with a flag, because platforms and load balancers read the status.
+  The guide says to use it for readiness and alerts: restarting the relay rarely helps a
+  store that is down and ends every tab session, so a liveness probe should allow several
+  minutes of failures.

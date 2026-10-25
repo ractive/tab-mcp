@@ -1,5 +1,9 @@
 # Log
 
+## 2026-10-25
+
+- Iteration 11 on iter-11/multi-instance: the address id in the `/tab` URL (`?a=`, checked against the secret, close 4009), the id on every request that needs the address's instance, "Running several instances" in docs/self-hosting.md, `/healthz` checks the token store; DEC-097 (session slots deferred), DEC-098, DEC-099
+
 ## 2026-10-24
 
 - Relay 0.3.1 released and deployed (modern-envelope initialize 404/-32601); Codex recorded in docs/compatibility.md

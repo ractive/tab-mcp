@@ -90,6 +90,7 @@ test.each([
 	[4002, "idle"],
 	[4003, "heartbeat"],
 	[4008, "rate_limited"],
+	[4009, "policy"],
 	[1008, "policy"],
 	[3999, "closed"],
 ])("close code %d means %s", async (code, reason) => {
@@ -148,6 +149,24 @@ describe("errors", () => {
 		await expect(t.connect()).rejects.toThrow(
 			/refused the connection: secret must be/,
 		);
+		expect(t.state).toBe("disconnected");
+	});
+
+	test("address_mismatch and close 4009 reject connect() as policy, not retried (DEC-098)", async () => {
+		relay.answerHello = false;
+		void relay.next("hello").then(() => {
+			relay.send({
+				type: "error",
+				code: "address_mismatch",
+				message: "the address id in the URL is not the one of the secret",
+			});
+			relay.close(4009, "address mismatch");
+		});
+		const error = (await t.connect().catch((e: unknown) => e)) as Error & {
+			reason?: string;
+		};
+		expect(error.message).toContain("address id in the URL");
+		expect(error.reason).toBe("policy");
 		expect(t.state).toBe("disconnected");
 	});
 });

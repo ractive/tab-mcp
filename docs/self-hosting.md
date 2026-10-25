@@ -14,6 +14,7 @@ to tell your users. Every setting is listed in [configuration](configuration.md)
 - [Settings for production](#settings-for-production)
 - [Without Docker](#without-docker)
 - [Behind a reverse proxy or CDN](#behind-a-reverse-proxy-or-cdn)
+- [Running several instances](#running-several-instances)
 - [Health checks and monitoring](#health-checks-and-monitoring)
 - [Resource limits](#resource-limits)
 - [Operations](#operations): backups, upgrades, rollback, restarts
@@ -30,13 +31,14 @@ hashes in a SQLite file. Run **exactly one instance** per public address:
 - The SQLite file is local to that process. Two processes on one file, or two copies of
   the file, would disagree about which tokens are valid.
 
-So there is no horizontal scaling: no autoscaling beyond one, no second region, no
-deploy that runs the old and the new container side by side. A
-[shared token store](token-store.md) (Redis, PostgreSQL) keeps grants outside the
-process, but it does not change the first point: tab sessions still live in one
-process, so one address still needs one relay. A shared store helps when the relay's
-disk is not durable, not to run more relays. One instance serves 500 tab sessions by
-default (`TAB_MCP_MAX_SESSIONS`); for more, run a second relay with its own public URL.
+So with the Docker image as it is there is no horizontal scaling: no autoscaling, no
+second region, no deploy that runs the old and the new container side by side. One
+instance serves 500 tab sessions by default (`TAB_MCP_MAX_SESSIONS`). For more, either
+run a second relay with its own public URL, or run several instances behind one URL
+with a load balancer that routes by the address id and a
+[shared token store](token-store.md): see
+[Running several instances](#running-several-instances). A shared store alone, without
+that routing, does not help: tab sessions still live in one process.
 
 ## Docker
 
@@ -362,6 +364,178 @@ container platform or a server, check these settings for the relay's hostname:
   id). Shorten or anonymise the IPs if the CDN offers it, and name these logs in your
   privacy notice.
 
+## Running several instances
+
+Several relay processes can serve one public URL if every request for one address
+reaches the same process (DEC-098). The relay does not coordinate its instances: the
+load balancer does the work, by a hash of the **address id**, the 52 characters of
+`[a-z2-7]` in the MCP URL `https://<relay>/a/<id>/mcp`. Each instance then holds the
+tab sessions, pairing requests and sign-ins of its share of the addresses. You need:
+
+1. **The same configuration on every instance**, above all `TAB_MCP_PUBLIC_URL` (it is
+   the OAuth issuer and part of every address), the sites and origins, and the OIDC
+   settings.
+2. **A shared token store.** Grants and token hashes must be the same for every
+   instance: a refresh or revocation can reach any of them. The built-in SQLite file
+   cannot be shared; embed the relay in your own Bun program and pass a
+   [`TokenStore`](token-store.md) backed by Redis, PostgreSQL or similar. The Docker
+   image has no such store, so it runs one instance per public URL.
+3. **A load balancer that routes by the address id**, with a consistent hash, as below.
+
+### Where the address id is
+
+| Request | Address id | Needs the address's instance |
+|---|---|---|
+| `GET /tab?a=<id>` (WebSocket) | query `a` (client library 0.8 and later) | yes: the tab session lives there |
+| `POST /a/<id>/mcp` | path | yes: forwarded to that session |
+| `GET /authorize?…&resource=https://<relay>/a/<id>/mcp` | query `resource` (often percent-encoded) | yes: it checks the session and keeps the pending request |
+| `POST /authorize?a=<id>` (the pairing form) | query `a` | yes: the pending request, its CSRF token, the pairing code or the code guesses |
+| `GET /authorize/callback?state=<id>.<random>&code=…` (OIDC sites) | `state` up to the first `.` | yes: the sign-in in progress |
+| `POST /token` with `grant_type=authorization_code` | form body: `code` up to the first `.` (also `resource`, if the client sends it) | yes: authorization codes are kept in memory, and the identity check reads the session |
+| `POST /token` with `grant_type=refresh_token`, `POST /revoke` | none | no, with a shared store (see below) |
+| `/.well-known/…`, `/healthz`, `/`, `/authorize.css` | none | no |
+
+What lives in each process, and what routing by the id does to it:
+
+| State | Kept | With routing by address id |
+|---|---|---|
+| Tab sessions, MCP requests waiting for a page, the last site seen per address | memory | works: `/tab` and `/a/<id>/mcp` reach the same instance |
+| Pending `/authorize` requests, the pairing form's CSRF secret | memory | works: `GET` and `POST /authorize` reach the same instance |
+| Pairing codes | the tab session | works |
+| OIDC sign-ins in progress | memory | works: the callback's `state` carries the id |
+| Authorization codes | memory, 60 s | works only if the load balancer reads the `/token` body (HAProxy below; nginx and Caddy cannot) |
+| Used `jti` of tab assertions (replay cache) | memory | works: an assertion's audience is one address, so a replay can only be used at that address's instance |
+| Rate limits per address (code guesses, sign-ins) | memory | works: one instance counts them |
+| Rate limits per network (`/authorize` views and posts, `/token`, sessions per IP) and per grant (refreshes) | memory | per instance: with N instances a network or grant gets up to N times the allowance |
+| CIMD documents, provider metadata, JWKS | memory cache | per instance; each fetches on its own |
+| Grants, access and refresh token hashes | token store | needs the shared store |
+
+Refreshes and revocations work on any instance with a shared store: the store's atomic
+`markUsed` still catches a reused refresh token. But the page's list of connected apps
+is updated only by the instance that holds the page: a revocation on another instance
+(`/revoke`, a reused refresh token) shows in the page after it reconnects. The revoked
+tokens stop working at once, since they are gone from the shared store.
+
+### Rules for the load balancer
+
+- **A consistent hash of the address id**, so that adding or removing an instance moves
+  only a share of the addresses. Requests without an id can go to any instance.
+- **No failover for routed requests.** If an address's instance is down, its requests
+  should fail, not go to another instance: a tab that connects to a stand-in stays there
+  when the original returns, and the AI app's requests then reach the original, where no
+  page is. The library reconnects by itself (5 s, 10 s, … 60 s) and finds its instance
+  once it is back. In nginx, `max_fails=0` and `proxy_next_upstream off`; in HAProxy, no
+  `option redispatch`.
+- **After changing the set of instances, restart every instance once**, one at a time.
+  Open WebSockets stay where they are; a restart (close code 4004) makes their pages
+  reconnect through the new hash.
+- **Do not trust a client's routing header.** The examples below set it themselves and
+  remove any that came in. The relay ignores it; the worst a forged one does is send
+  that request to the wrong instance.
+- **The address id is not secret** (it is in the MCP URL the user gives the AI app), but
+  it is personal data in your access logs, like the paths `/a/<id>/mcp` already are.
+
+### nginx
+
+nginx cannot read a request body for routing, so authorization codes are exchanged only
+if `/token` reaches the instance that issued the code; elsewhere the AI app gets
+`invalid_grant` and the user has to pair again. Route `/token` through something that
+reads the body's `code` (HAProxy as below, OpenResty, Envoy, an edge worker).
+Everything else:
+
+```nginx
+# The address id of a request (DEC-098); empty when the request has none.
+map $request_uri $tab_mcp_address {
+    default "";
+    "~^/tab\?(?:.*&)?a=(?<id>[a-z2-7]{52})(?:&|$)" $id;
+    "~^/a/(?<id>[a-z2-7]{52})/mcp" $id;
+    "~^/authorize\?(?:.*&)?a=(?<id>[a-z2-7]{52})(?:&|$)" $id;
+    "~^/authorize/callback\?(?:.*&)?state=(?<id>[a-z2-7]{52})\." $id;
+    "~^/authorize\?(?:.*&)?resource=[^&]*(?:/|%2[Ff])a(?:/|%2[Ff])(?<id>[a-z2-7]{52})(?:/|%2[Ff])mcp" $id;
+}
+
+upstream tab_mcp {
+    hash $tab_mcp_address consistent;
+    server 10.0.0.11:8080 max_fails=0;
+    server 10.0.0.12:8080 max_fails=0;
+}
+```
+
+In the `location /` of the [nginx example](#nginx), use `proxy_pass http://tab_mcp;`
+and add `proxy_next_upstream off;`.
+
+### Caddy
+
+Caddy has no matcher for the body either (same limit for `/token` as nginx). It hashes a
+request header, which it sets from the URL first:
+
+```caddyfile
+relay.example.com {
+    @tab {
+        path /tab
+        query a=*
+    }
+    @form {
+        path /authorize
+        query a=*
+    }
+    @mcp path_regexp mcp ^/a/([a-z2-7]{52})/mcp$
+    @authorize {
+        path /authorize
+        vars_regexp res {query.resource} /a/([a-z2-7]{52})/mcp$
+    }
+    @callback {
+        path /authorize/callback
+        vars_regexp st {query.state} ^([a-z2-7]{52})\.
+    }
+    route {
+        request_header -X-Tab-Mcp-Address
+        request_header @tab X-Tab-Mcp-Address {query.a}
+        request_header @form X-Tab-Mcp-Address {query.a}
+        request_header @mcp X-Tab-Mcp-Address {re.mcp.1}
+        request_header @authorize X-Tab-Mcp-Address {re.res.1}
+        request_header @callback X-Tab-Mcp-Address {re.st.1}
+        reverse_proxy 10.0.0.11:8080 10.0.0.12:8080 {
+            lb_policy header X-Tab-Mcp-Address
+        }
+    }
+}
+```
+
+### HAProxy
+
+HAProxy can read the `/token` body, so it routes every request in the table:
+
+```haproxy
+frontend relay
+    mode http
+    bind :443 ssl crt /etc/haproxy/relay.pem
+    option http-buffer-request
+    http-request set-var(txn.address) url_param(a) if { path /tab } || { path /authorize }
+    http-request set-var(txn.address) path,field(3,/) if { path_beg /a/ }
+    http-request set-var(txn.address) url_param(state),field(1,.) if { path /authorize/callback }
+    http-request set-var(txn.address) url_param(resource),url_dec,field(5,/) if { path /authorize } !{ var(txn.address) -m found }
+    http-request set-var(txn.address) req.body_param(code),field(1,.) if { path /token }
+    default_backend relays
+
+backend relays
+    mode http
+    balance hash var(txn.address)
+    hash-type consistent
+    timeout tunnel 1h
+    server r1 10.0.0.11:8080
+    server r2 10.0.0.12:8080
+```
+
+`field(5,/)` takes the id from `https://<relay>/a/<id>/mcp`; if your public URL has a
+path, count its segments too. `balance hash` needs HAProxy 2.6 or later.
+
+### A CDN or cloud load balancer
+
+Any that can hash on a value taken from the path or a query parameter can route
+everything except the code exchange; an edge function or worker that reads the body can
+route that too. Check the [CDN settings](#a-cdn-in-front) as well.
+
 ## Health checks and monitoring
 
 `GET /healthz` answers `200` with
@@ -370,7 +544,27 @@ container platform or a server, check these settings for the relay's hostname:
 {"status":"ok","version":"0.4.0","counters":{"claudeHeaderWorkaround":0}}
 ```
 
-and `Cache-Control: no-store`. It needs no token and touches no page. Use it:
+and `Cache-Control: no-store`. It needs no token and touches no page. It does read the
+token store once (a key that never exists) and waits at most one second for it. If the
+store fails or does not answer in time, it answers `503`:
+
+```json
+{"status":"unhealthy","reason":"store_unavailable","version":"0.4.0"}
+```
+
+`reason` is `store_unavailable` (the store threw) or `store_timeout` (no answer within
+a second). The answer never carries the store's error; the log line `health.store` has
+its name (`error`, or `timeout`). One probe runs at a time, its result is reused for a
+second, and no new probe starts while a timed-out one still hangs, so a flood of
+`/healthz` does not reach the store. While the store fails, MCP
+requests get 503 too, so AI apps keep their tokens and retry; tab sessions stay open.
+
+A `503` means that the process runs but cannot check tokens. Restarting rarely fixes
+that (a full disk, a database that is down) and ends every tab session, so use it for
+readiness and alerts. If your platform only has a liveness probe, allow several minutes
+of failures before it restarts the container.
+
+Use it:
 
 - as the platform's start and liveness probe (HTTP GET, expect 200). The image answered
   `/healthz` within half a second of `docker run` in our test; a liveness probe every 30 seconds with 3 failures allowed
@@ -381,8 +575,9 @@ and `Cache-Control: no-store`. It needs no token and touches no page. Use it:
 - from an external uptime monitor through the public URL, so a broken certificate, DNS
   record or CDN setting shows up too.
 
-`/healthz` says that the process answers. It does not say that pages can connect or AI
-apps can pair: after changing the proxy or CDN, connect a page and pair an AI app once.
+`/healthz` says that the process answers and its token store responds. It does not say
+that pages can connect or AI apps can pair: after changing the proxy or CDN, connect a
+page and pair an AI app once.
 
 The logs are JSON lines on stdout. Events worth an alert or a look:
 
@@ -391,7 +586,8 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 | `store.error` | The token store failed while running (disk full, file removed). The line names the operation (`op`) and the error's name (`error`), never its message, which can carry token hashes or a connection string. MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. A store that cannot be opened at all stops the relay at start instead (`process.uncaught_exception`, see [The data volume](#the-data-volume)). |
 | `relay.no_origins` | No page is allowed; every page is refused. A missing or misspelled setting. |
 | `relay.open_relay` | `TAB_MCP_ALLOWED_ORIGINS=*` is set. |
-| `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`. Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. |
+| `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`, `bad_address` (a malformed `?a=`), `address_mismatch` (the URL's address id is not the secret's). Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. Many `max_sessions` refusals while few real pages are open may be the attack in [Known limit: session slots](#known-limit-session-slots). |
+| `health.store` | The `/healthz` probe of the token store failed (`error` is the error's name, or `timeout`). |
 | `oauth.refresh_reuse` | An old refresh token was used again, so the relay revoked that grant. A sign of a stolen token, or of a client that lost its newest token. |
 
 ## Resource limits
@@ -414,6 +610,23 @@ worst case of the defaults is therefore several GiB; ordinary traffic is far bel
   tokens every 10 minutes.
 - Against volumetric attacks, rely on the CDN or proxy in front; the relay's own limits
   protect it from single clients, not from a flood.
+
+### Known limit: session slots
+
+The relay admits a tab session for any client that sends an allowed `Origin` and a
+well-formed secret. A browser cannot forge `Origin`, but any other program can. With the
+defaults, `TAB_MCP_MAX_SESSIONS` (500) slots and `TAB_MCP_MAX_SESSIONS_PER_IP` (5) per
+IPv4 address or IPv6 /64, a program on about 100 IPv6 /64s can hold every slot with idle
+WebSockets, and real pages get `too_many_sessions` (HTTP 429, logged as `tab.refused`
+`max_sessions`). It is a handful of quiet connections, not a flood, so a CDN does not see
+it. The fix (a quota per site, or evicting the oldest session that never paired and has
+no grants when the instance is full) is deferred (DEC-097). Until then:
+
+- watch for `tab.refused` with `max_sessions` while your own pages are few;
+- if it happens, block the networks at the proxy or CDN, or lower
+  `TAB_MCP_MAX_SESSIONS_PER_IP` (which also limits real users behind one address);
+- with [several instances](#running-several-instances), each instance has its own 500
+  slots, which raises the cost of the attack but does not remove it.
 
 ## Operations
 

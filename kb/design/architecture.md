@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-21T18:00:00+02:00
+timestamp: 2026-10-25T18:00:00+02:00
 ---
 
 # tab-mcp architecture
@@ -50,7 +50,7 @@ for why.
 
 | Path | Method | Purpose |
 |---|---|---|
-| `/tab` | GET (WebSocket upgrade) | tab sessions |
+| `/tab?a={id}` | GET (WebSocket upgrade) | tab sessions; `a` (the address id, optional, DEC-098) is checked against the secret in `hello` |
 | `/a/{id}/mcp` | POST, OPTIONS | the MCP endpoint of one address; GET/DELETE answer 405 |
 | `/.well-known/oauth-protected-resource/a/{id}/mcp` | GET | RFC 9728 metadata for that address |
 | `/.well-known/oauth-authorization-server` | GET | RFC 8414 metadata (issuer = relay origin) |
@@ -58,7 +58,7 @@ for why.
 | `/authorize.css` | GET | the pairing page's stylesheet (the page has no scripts; DEC-057) |
 | `/token` | POST | authorization code + PKCE → tokens; refresh token rotation |
 | `/revoke` | POST | RFC 7009 token revocation |
-| `/healthz` | GET | health (`{"status":"ok","version":"…","counters":{"claudeHeaderWorkaround":n}}`) |
+| `/healthz` | GET | health (`{"status":"ok","version":"…","counters":{"claudeHeaderWorkaround":n}}`); 503 with a reason when the token store does not answer (DEC-099) |
 | `/` | GET | short HTML page: what this relay is, link to the privacy notice |
 
 The metadata endpoints, `/token`, `/revoke` and the MCP endpoint send CORS headers without
@@ -70,9 +70,10 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 
 1. The page registers tools with the library (`registerTool(tool, { signal })`, WebMCP
    shape) and shows a "Connect your AI tool" button. Only the small core is loaded.
-2. On click, `connect()` loads the connection and MCP handler (dynamic import), opens
-   `wss://relay/tab` with subprotocol `tab-mcp.v1`. The relay checks `Origin` against its
-   allow-list and the session limits.
+2. On click, `connect()` loads the connection and MCP handler (dynamic import), computes
+   the address id from the secret with Web Crypto, and opens `wss://relay/tab?a=<id>`
+   with subprotocol `tab-mcp.v1` (DEC-098). The relay checks `Origin` against its
+   allow-list, that `a` (if given) has the form of an address id, and the session limits.
 3. The tab sends `hello` with the address secret from `localStorage` (DEC-027). The relay
    derives the address id `base32(sha256(secret))`, replaces an older session of the same
    address (it gets `bye` `replaced`), and answers `session` with the address
@@ -153,13 +154,31 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 
 ## What lives where
 
-- **Relay memory:** tab sessions, pairing codes, pending authorizations, CIMD cache,
-  rate-limit buckets. A relay restart ends all sessions (pages show "disconnected").
+- **Relay memory:** tab sessions, pairing codes, pending authorizations, OIDC sign-ins in
+  progress, authorization codes, the `jti` replay cache, CIMD and JWKS caches, rate-limit
+  buckets. A relay restart ends all sessions (pages show "disconnected").
 - **Token store** (SQLite file by default): grants and SHA-256 hashes of access and refresh
   tokens, with client id and name, address id, scopes and expiry. Survives restarts.
 - **Page `localStorage`:** the address secret. "New address" replaces it.
 - **Never stored or logged by the relay:** request and response bodies, tool names,
   arguments, results, tokens, codes and secrets (tokens only as hashes in the store).
+
+## Several instances
+
+The relay does not coordinate instances (DEC-098). Several processes serve one public
+URL when a load balancer sends every request of one address to the same process, by a
+consistent hash of the address id, and the token store is shared. The id is reachable
+from every request that needs the address's instance: `/tab?a=<id>`, `/a/<id>/mcp`,
+`GET /authorize` (`resource`), the pairing form's post `/authorize?a=<id>`, the OIDC
+callback (`state` = `<id>.<random>`) and the code exchange at `/token` (`code` =
+`<id>.<random>`, in the body). With routing, everything kept in memory above works per
+instance, because it belongs to one address: the `jti` cache too, since an assertion's
+audience is one address. Per-network and per-grant rate limits and the caches become
+per instance. Refreshes and `/revoke` work on any instance with the shared store; only
+the page's list of apps is updated late when a revocation lands elsewhere. Routed
+requests must not fail over to another instance, and after the set of instances changes
+every instance is restarted once, so open WebSockets follow the new hash. What an
+operator configures: `docs/self-hosting.md`, "Running several instances".
 
 ## Configuration (relay)
 

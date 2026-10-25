@@ -18,7 +18,17 @@ AI app ──HTTPS POST /a/{id}/mcp──▶ relay ──WebSocket /tab (tab-mcp
 
 ## Connection
 
-- URL: `wss://<relay>/tab`.
+- URL: `wss://<relay>/tab?a=<address id>`. The query parameter `a` is the session's
+  address id (see [the address secret](#session)), never the secret. It lets a load
+  balancer in front of several relay instances send every request of one address to the
+  same instance ([self-hosting](self-hosting.md#running-several-instances)). It is
+  optional: without it (`wss://<relay>/tab`, libraries before 0.8 and pages without Web
+  Crypto) one relay works as before, but a load balancer cannot route the session. A
+  value that is not 52 characters of `[a-z2-7]`, or `a` given twice, gets HTTP 400 with
+  `{"error":"bad_address"}` and no upgrade. If the id is not the one derived from the
+  `secret` in `hello`, the relay answers `error` `address_mismatch` and closes with 4009;
+  no session opens and an open session of either address stays. Other query parameters
+  are ignored.
 - The relay checks the `Origin` header against its allow-list first (empty by default).
   An origin that is not on it gets HTTP 403 with `{"error":"origin_not_allowed"}` and no
   upgrade.
@@ -57,7 +67,9 @@ page's `localStorage` under `tab-mcp:secret:<relay origin>:<server name>`. The r
 address id as `base32(sha256(secret))`: SHA-256 over the secret's UTF-8 text, RFC 4648
 base32, lower case, no padding, 52 characters. The relay therefore stores nothing to
 recognise an address, and the address does not reveal the secret. A `hello` without a
-well-formed `secret` gets `error` `bad_message` and close 1008.
+well-formed `secret` gets `error` `bad_message` and close 1008. The derivation is public,
+so the tab computes the id for the URL itself (the library uses Web Crypto,
+`crypto.subtle.digest("SHA-256", …)`, before it opens the WebSocket).
 
 If a session with the same address is already connected, the new one replaces it: the
 old tab gets `bye` with reason `replaced` and close 4005.
@@ -282,6 +294,7 @@ optional and names the request the error concerns.
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | Reserved: the tab sent too much, and the relay may close with 4008. The relay does not send it yet. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
+| `address_mismatch` | relay | The address id in the URL (`/tab?a=`) is not the one of the `secret` in `hello`. Followed by close 4009. A tab bug: the library computes both from one secret. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with
 an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
@@ -299,6 +312,7 @@ an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
 | 4004 | The relay is shutting down. |
 | 4005 | Replaced by a newer session for the same address. |
 | 4008 | Rate limited (reserved, see `rate_limited`). |
+| 4009 | The URL's address id is not the secret's (`address_mismatch`). The library treats it as `policy` and does not reconnect by itself. |
 
 On any close the relay ends the session: pending HTTP requests get the answers in
 [When the page is not open](#when-the-page-is-not-open), listen streams end, and the

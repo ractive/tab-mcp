@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { addressIdFromSecret } from "@ractive-ch/tab-mcp";
+import { addressIdOf } from "../src/address.ts";
 import { base64url, isSecret, newSecret, SecretStore } from "../src/secret.ts";
 import { MemoryStorage, newTab } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
@@ -125,6 +126,46 @@ test("TabMcp keys the secret by relay origin and the URI-encoded server name; an
 		// No copy from the old default when the page names its key.
 		expect(own.items.get("mine")).not.toBe(shared);
 		expect(own.items.has(`tab-mcp:secret:${origin}#moved`)).toBe(false);
+	} finally {
+		await relay.stop();
+	}
+});
+
+test("addressIdOf is the relay's derivation, computed with Web Crypto (DEC-098)", async () => {
+	for (let i = 0; i < 20; i++) {
+		const secret = newSecret();
+		expect(await addressIdOf(secret)).toBe(addressIdFromSecret(secret));
+	}
+});
+
+test("addressIdOf is undefined without Web Crypto (an insecure context) or when it fails", async () => {
+	const secret = newSecret();
+	expect(await addressIdOf(secret, null)).toBeUndefined();
+	const broken = {
+		digest: () => Promise.reject(new Error("NotSupportedError")),
+	} as unknown as SubtleCrypto;
+	expect(await addressIdOf(secret, broken)).toBeUndefined();
+});
+
+test("the /tab URL carries the address id of the secret in hello, never the secret (DEC-098)", async () => {
+	const relay = new StubRelay();
+	try {
+		const t = newTab(relay.url, { storage: new MemoryStorage() });
+		await t.connect();
+		const hello = await relay.next("hello");
+		const secret = String(hello["secret"]);
+		const url = new URL(relay.urls.at(-1) ?? "");
+		expect(url.pathname).toBe("/tab");
+		expect(url.searchParams.getAll("a")).toEqual([addressIdFromSecret(secret)]);
+		expect(url.href).not.toContain(secret);
+		// New address: the next connection names the new id.
+		await t.newAddress();
+		const second = await relay.next("hello");
+		expect(second["secret"]).not.toBe(secret);
+		expect(new URL(relay.urls.at(-1) ?? "").searchParams.get("a")).toBe(
+			addressIdFromSecret(String(second["secret"])),
+		);
+		t.disconnect();
 	} finally {
 		await relay.stop();
 	}

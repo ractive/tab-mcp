@@ -921,3 +921,39 @@ describe("identity binding: audit of 2026-10-24, finding 3", () => {
 		expect(statuses[10]).toBe(429);
 	});
 });
+
+describe("several instances: the address id on every pairing request (DEC-098)", () => {
+	test("the form posts to /authorize?a=<id>, the provider's state and the code start with the id", async () => {
+		const ctx = await setup();
+		const id = ctx.tab.addressId;
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		expect(flow.page.html).toContain(
+			`<form method="post" action="/authorize?a=${id}">`,
+		);
+		expect(flow.page.html).not.toContain('action="/authorize"');
+		const done = await connectThroughProvider(ctx, flow);
+		const state = provider.authorizeRequests.at(-1)?.get("state") ?? "";
+		expect(state.startsWith(`${id}.`)).toBe(true);
+		expect(state.length).toBeGreaterThan(id.length + 20);
+		expect(done.status).toBe(303);
+		const code = new URL(done.location ?? "").searchParams.get("code") ?? "";
+		expect(code.startsWith(`${id}.`)).toBe(true);
+		expect(code.length).toBeGreaterThan(id.length + 40);
+		await tokenFrom(ctx, done.location ?? "", flow.verifier);
+	});
+
+	test("the 'Open the page first' form carries the id too", async () => {
+		const ctx = await setup();
+		const id = ctx.tab.addressId;
+		const flow = await openAuthorize(ctx);
+		ctx.tab.close();
+		await ctx.tab.closed;
+		await waitFor(() => ctx.r.relay.sessionCount === 0, "the tab to go");
+		const page = await ctx.browser.submit(flow.page, { action: "retry" });
+		expect(page.html).toContain("Open the page first");
+		expect(page.html).toContain(
+			`<form method="post" action="/authorize?a=${id}">`,
+		);
+	});
+});

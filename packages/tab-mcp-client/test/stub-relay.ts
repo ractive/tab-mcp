@@ -22,6 +22,8 @@ type Message = Record<string, unknown> & { type: string };
 export class StubRelay {
 	readonly server: Server<undefined>;
 	readonly received: Message[] = [];
+	/** The URL of every request (the WebSocket handshakes). */
+	readonly urls: string[] = [];
 	/** UTF-8 size of every frame the tab sent. */
 	readonly frameBytes: number[] = [];
 	limits: Limits = STUB_LIMITS;
@@ -43,14 +45,16 @@ export class StubRelay {
 		this.server = Bun.serve({
 			port: 0,
 			hostname: "127.0.0.1",
-			fetch: (req, srv) =>
-				this.refuse
+			fetch: (req, srv) => {
+				this.urls.push(req.url);
+				return this.refuse
 					? new Response("down", { status: 503 })
 					: srv.upgrade(req, {
 								headers: { "Sec-WebSocket-Protocol": "tab-mcp.v1" },
 							})
 						? undefined
-						: new Response("upgrade expected", { status: 400 }),
+						: new Response("upgrade expected", { status: 400 });
+			},
 			websocket: {
 				open: (ws) => {
 					this.#socket = ws;

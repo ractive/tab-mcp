@@ -14,6 +14,8 @@ import {
 } from "./protocol.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
+/** For the core: the address id in the `/tab` URL (DEC-098). */
+export { addressIdOf, withAddress } from "./address.ts";
 /** For the core: compiles the schemas once this chunk (and the validator) is loaded. */
 export { compileRegistry } from "./mcp.ts";
 
@@ -30,6 +32,8 @@ const CLOSE_REASONS: Record<number, DisconnectReason> = {
 	4004: "shutdown",
 	4005: "replaced",
 	4008: "rate_limited",
+	/** The URL's address id is not the secret's (DEC-098): retrying cannot help. */
+	4009: "policy",
 };
 
 const BYE_REASONS: Record<string, DisconnectReason> = {

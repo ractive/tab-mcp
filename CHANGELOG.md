@@ -7,6 +7,19 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- The WebSocket URL carries the address id: `wss://<relay>/tab?a=<id>`, never the
+  secret. The library computes the id from the secret with Web Crypto before it opens
+  the socket, so a load balancer in front of several relay instances can route the page
+  by it (see self-hosting, "Running several instances"). Where Web Crypto is missing (a
+  page on plain `http:` other than localhost) the URL has no id, which a single relay
+  accepts. The hashing is in the lazily loaded chunk; the core is unchanged.
+- Close code 4009 (`address_mismatch`: the URL's id is not the secret's) is reported as
+  `policy` and not retried.
+
 ### [0.7.0][client-0.7.0] - 2026-10-25
 
 #### Changed
@@ -224,6 +237,35 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Added
+
+- Several instances behind one public URL (DEC-098). The address id is now reachable
+  from every request that needs the instance holding the address, so a load balancer
+  can route by it: `/tab?a=<id>` (new, sent by the client library from 0.8),
+  `/a/<id>/mcp`, `GET /authorize` (its `resource`), the pairing form's post (now
+  `/authorize?a=<id>`), the identity provider's return to `/authorize/callback` (the
+  `state` starts with `<id>.`), and the authorization code (starts with `<id>.`, for a
+  load balancer that reads the `/token` body). It also needs a shared token store.
+  "Running several instances" in the self-hosting guide has what is per instance, what
+  needs a shared store, and routing rules for nginx, Caddy and HAProxy.
+- `/tab?a=` is checked: a malformed or repeated `a` gets HTTP 400 `bad_address` before
+  the upgrade; an id that is not the one of the secret in `hello` gets `error`
+  `address_mismatch` and close code 4009, and no session opens. The parameter is
+  optional: libraries up to 0.7 send none and keep working with a single relay. The
+  relay will accept `/tab` without `a` at least until 1.0, and this changelog will say
+  so a release ahead if that ever changes.
+- `/healthz` reads the token store (one key, one-second deadline, one probe at a time,
+  its answer reused for a second) and answers 503
+  `{"status":"unhealthy","reason":"store_unavailable"|"store_timeout"}` when the store
+  fails, never with the store's error (DEC-099). Logged as `health.store`.
+
+#### Changed
+
+- Authorization codes and the `state` sent to the identity provider are longer: the
+  address id, a dot, and the random part as before. They stay opaque to clients.
 
 ### [0.4.0][relay-0.4.0] - 2026-10-24
 
