@@ -41,7 +41,10 @@ export const APPLE_TOUCH_ICON: Uint8Array<ArrayBuffer> = new Uint8Array(
 	Buffer.from("${await b64("touch.png")}", "base64"),
 );
 `;
-	await Bun.write(join(here, "../src/icons.ts"), out);
+	const target = join(here, "../src/icons.ts");
+	await Bun.write(target, out);
+	// The repository's formatting, so `bun run verify` passes as written.
+	await $`bunx biome format --write ${target}`.quiet();
 } finally {
 	await rm(dir, { recursive: true, force: true });
 }
