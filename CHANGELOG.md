@@ -269,7 +269,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.5.1][relay-0.5.1] - 2026-10-25
 
 #### Added
 
@@ -518,6 +518,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.5.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.5.1
 [relay-0.5.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.5.0
 [relay-0.4.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.4.0
 [relay-0.3.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.3.1
