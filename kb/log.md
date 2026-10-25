@@ -2,6 +2,7 @@
 
 ## 2026-10-25
 
+- Iteration 6 completed: Claude Desktop, ChatGPT for Mac (Codex inside, with its flag) and ChatGPT on the web (after relay 0.5.1, DEC-104) work; relay 0.5.1 released and deployed (icon, DEC-104)
 - The core's size budget raised to 6 KB gzipped (DEC-103)
 - Iterations 11 and 13 completed: relay 0.5.0 deployed; client 0.8.0 in the ractive.ch examples, the sign-in page and saturnus (PR 234); session slots deferred (DEC-097)
 - Iteration 14 completed: `DOCKERHUB_TOKEN` in the `release` environment (a token without expiry), the Docker Hub expiry check removed; DEC-102
