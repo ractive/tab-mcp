@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 10: a stolen address secret"
-status: in-progress
+status: completed
 description: What someone who copies a page's address secret can do, said plainly in the docs; a page that is taken over says so and offers a new address; and whether a backend-signed address claim is worth building.
 timestamp: 2026-10-25T18:00:00+02:00
 tags: [iteration, security]
@@ -132,7 +132,7 @@ binding as the protection for pages with accounts.
 - [x] Library: the default UI explains `replaced` and offers "New address"; test with a second session claiming the address
 - [x] Library: decide on telling a sibling tab from an impostor (`BroadcastChannel`); if yes, the "Opened in another tab" text for that case; otherwise record why not
 - [x] Step 3: owner decision on the backend-signed address claim, recorded as a DEC; design and tasks added here if it goes ahead
-- [ ] Changelog, release of the client if it changed
+- [x] Changelog, release of the client if it changed (relay 0.5.0 and client 0.8.0, 2026-10-25)
 
 ## Progress
 
