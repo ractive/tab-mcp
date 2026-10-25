@@ -15,6 +15,7 @@ import {
 	type Schema,
 	validate as validateSchema,
 } from "@cfworker/json-schema";
+import { cleanIcons } from "./icons.ts";
 import {
 	ANNOTATIONS_META_KEY,
 	type CallToolResult,
@@ -277,6 +278,8 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	const { tools, server } = options;
 	const serverInfo: Json = { name: server.name, version: server.version };
 	if (server.title !== undefined) serverInfo["title"] = server.title;
+	const icons = cleanIcons(server.icons ?? []);
+	if (icons.length > 0) serverInfo["icons"] = icons;
 	const listeners = new Set<{
 		id: Id;
 		send(message: unknown): void;

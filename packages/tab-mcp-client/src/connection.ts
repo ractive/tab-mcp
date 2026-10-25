@@ -3,6 +3,7 @@
  * HTTP tunnel and the MCP handler. Loaded by `TabMcp.connect()`.
  */
 
+import { pageIcons } from "./icons.ts";
 import type { ConnectionHandle, ConnectionHost } from "./internal.ts";
 import { createMcpHandler } from "./mcp.ts";
 import {
@@ -234,7 +235,8 @@ export function openConnection(
 
 	const handler = createMcpHandler({
 		tools: host.registry,
-		server: host.server,
+		// Without `icons`, the page's own <link rel="icon">, read now.
+		server: { ...host.server, icons: host.server.icons ?? pageIcons() },
 		confirm: (request) => host.confirm(request),
 		client: (grant) => host.clientFor(grant),
 		observe: {

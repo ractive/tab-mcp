@@ -344,6 +344,51 @@ describe("conformance with the SDK's createMcpHandler", () => {
 	}
 });
 
+describe("icons", () => {
+	test("server/discover sends the server's icons, cleaned; none when empty", async () => {
+		const discover = async (icons?: { src: string }[]) => {
+			const handler = createMcpHandler({
+				tools: new ToolRegistry(),
+				server: {
+					name: "probe",
+					version: "1.2.3",
+					...(icons ? { icons } : {}),
+				},
+				confirm: async () => true,
+				client: (g) => ({
+					grantId: g.grantId,
+					id: g.clientId,
+					host: "a.example",
+				}),
+			});
+			const out = await outcome(
+				await handler.handle(
+					request({ name: "", body: rpc(1, "server/discover") }),
+					{
+						grant: GRANT,
+					},
+				),
+			);
+			const result = out.message?.["result"] as {
+				_meta: Record<string, unknown>;
+			};
+			return result._meta["io.modelcontextprotocol/serverInfo"];
+		};
+		expect(
+			await discover([
+				{ src: "https://example.test/icon.png" },
+				{ src: "file:///x" },
+			]),
+		).toEqual({
+			name: "probe",
+			version: "1.2.3",
+			icons: [{ src: "https://example.test/icon.png" }],
+		});
+		expect(await discover([])).toEqual({ name: "probe", version: "1.2.3" });
+		expect(await discover()).toEqual({ name: "probe", version: "1.2.3" });
+	});
+});
+
 describe("results", () => {
 	test("server/discover and tools/list carry the 2026-07-28 fields", async () => {
 		const { handler } = ours();

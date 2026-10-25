@@ -93,6 +93,11 @@ test.skipIf(chrome === undefined)(
 			address,
 			await tokenFor(relay.store, address),
 		);
+		// The page's <link rel="icon"> reaches the AI app as serverInfo.icons.
+		expect(client.getServerVersion()?.icons?.[0]).toMatchObject({
+			src: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/.*\.svg$/),
+			mimeType: "image/svg+xml",
+		});
 		// One useTool per tool: each tool once (StrictMode: react.test.tsx).
 		const { tools } = await client.listTools();
 		expect(tools.map((t) => t.name).sort()).toEqual([

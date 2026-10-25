@@ -3,7 +3,8 @@
 Which AI apps work with tab-mcp, as tested. tab-mcp speaks only the stateless MCP
 revision 2026-07-28 and registers AI apps only through OAuth Client ID Metadata
 Documents (CIMD), with no dynamic client registration and no older protocol revision.
-An app that cannot do both cannot connect.
+An app that cannot do both cannot connect. How to add a page to each app:
+[connecting an AI app](connecting.md).
 
 "Revision" is the tab-mcp commit that was tested.
 
