@@ -15,6 +15,7 @@ test("the page's icon links become serverInfo icons", () => {
 		<link rel="apple-touch-icon" href="https://cdn.example/touch.png">
 		<link rel="stylesheet" href="/style.css">
 		<link rel="icon" href="javascript:alert(1)">
+		<link rel="icon" href="">
 	`);
 	expect(pageIcons(doc)).toEqual([
 		{
@@ -44,13 +45,15 @@ test("given icons are cleaned: http(s) or data:image only, valid fields, at most
 			},
 			{ src: "data:image/png;base64,AAAA" },
 			{ src: "data:text/html,<script>" },
+			{ src: "data:image/svg+xml,<svg onload='x()'/>" },
+			{ src: `data:image/png;base64,${"A".repeat(20_000)}` },
 			{ src: "file:///etc/passwd" },
 			{
 				src: "https://a.example/x",
 				mimeType: "text/html",
 				theme: "blue" as "dark",
 			},
-			{ src: `https://a.example/${"x".repeat(70_000)}` },
+			{ src: `https://a.example/${"x".repeat(3000)}` },
 		]),
 	).toEqual([
 		{

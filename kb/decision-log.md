@@ -1568,8 +1568,12 @@ tab-mcp the page is the server. `ServerInfo.icons` (MCP `Icon`) is sent in `serv
 Without it the library reads the page's `<link rel="icon">` and
 `<link rel="apple-touch-icon">` when it connects (`href` resolved, `type` as
 `mimeType`, `sizes`, a `prefers-color-scheme` media query as `theme`); `[]` sends none.
-Kept: at most 8 icons, `http(s):` or `data:image/` sources up to 64 KiB, valid fields
-only; reading the document never fails a connection. The code is in the connection
+Kept: at most 8 icons, `http(s):` URLs up to 2 KiB or raster `data:` URIs (PNG, JPEG,
+GIF, WebP, ICO) up to 16 KiB; no inline SVG, which an AI app might put into its own page;
+valid fields only; links with an empty `href` skipped; only in `server/discover` (every
+result carries `serverInfo`); reading the document never fails a connection. URLs on
+`localhost` are sent as they are: only a local AI app can load them, and a page could
+name any URL anyway. The code is in the connection
 chunk. Whether an AI app shows the icon is the app's choice: not yet seen in ChatGPT or
 Claude.
 

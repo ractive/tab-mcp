@@ -63,7 +63,8 @@ Then run `/mcp` in Claude Code and choose Authenticate.
 
 ## When it does not work
 
-- **"The page is not open":** the page's tab is closed, asleep or disconnected.
+- **The AI app or the sign-in says the page is not open:** its tab is closed, asleep or
+  disconnected.
   Open it and click "Connect your AI app" again.
 - **"That code has expired":** take the current code from the page.
 - **Signed in, but no tools appear (Codex, ChatGPT for Mac):** the feature above is off.

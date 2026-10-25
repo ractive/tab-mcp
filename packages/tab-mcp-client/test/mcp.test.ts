@@ -385,6 +385,33 @@ describe("icons", () => {
 			icons: [{ src: "https://example.test/icon.png" }],
 		});
 		expect(await discover([])).toEqual({ name: "probe", version: "1.2.3" });
+		// Not in other results: tools/list carries serverInfo without them.
+		const handler = createMcpHandler({
+			tools: new ToolRegistry(),
+			server: {
+				name: "probe",
+				version: "1.2.3",
+				icons: [{ src: "https://example.test/i.png" }],
+			},
+			confirm: async () => true,
+			client: (g) => ({
+				grantId: g.grantId,
+				id: g.clientId,
+				host: "a.example",
+			}),
+		});
+		const list = await outcome(
+			await handler.handle(request({ name: "", body: rpc(2, "tools/list") }), {
+				grant: GRANT,
+			}),
+		);
+		const meta = (list.message?.["result"] ?? {}) as {
+			_meta?: Record<string, unknown>;
+		};
+		expect(meta._meta?.["io.modelcontextprotocol/serverInfo"]).toEqual({
+			name: "probe",
+			version: "1.2.3",
+		});
 		expect(await discover()).toEqual({ name: "probe", version: "1.2.3" });
 	});
 });

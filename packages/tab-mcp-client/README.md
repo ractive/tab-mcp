@@ -75,8 +75,9 @@ Importing the library loads only a small core; `connect()` loads the rest.
 `instructions`, and `icons`. Without `icons`, the page's own `<link rel="icon">` and
 `<link rel="apple-touch-icon">` are sent, so an AI app that shows icons can show the
 page's for its connector. `icons: [{ src, mimeType?, sizes?, theme? }]` (MCP's `Icon`)
-sets them instead, `icons: []` sends none. At most 8, `https:` (or `http:`) URLs or
-`data:image/` URIs.
+sets them instead, `icons: []` sends none. At most 8: `https:` (or `http:`) URLs, or
+PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go only in
+`server/discover`. An icon on `localhost` reaches only an AI app on the same computer.
 
 ### Tools
 
