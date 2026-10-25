@@ -618,7 +618,9 @@ describe("showConnectDialog", () => {
 		});
 		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).click();
 		await Bun.sleep(0);
-		expect(live.textContent?.trim()).toBe("Selected: copy it with Ctrl+C or ⌘C");
+		expect(live.textContent?.trim()).toBe(
+			"Selected: copy it with Ctrl+C or ⌘C",
+		);
 		byText(dialog, "Close").click();
 	});
 
