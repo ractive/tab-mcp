@@ -1,12 +1,12 @@
 ---
 type: operations
 title: "Release credentials and how to renew them"
-description: Which secrets and variables the release workflow uses, when they expire, and the steps to renew them when a publication fails.
+description: Which secrets and variables the release workflow uses and the steps to renew them when a publication fails.
 tags:
   - release
   - operations
   - secrets
-timestamp: 2026-10-20T07:10:00+02:00
+timestamp: 2026-10-25T16:45:00+02:00
 ---
 
 # Release credentials and how to renew them
@@ -17,40 +17,25 @@ Start here when a publication fails with an authentication error.
 
 | Name | Kind | Value |
 |---|---|---|
-| `DOCKERHUB_TOKEN` | repository secret (GitHub Actions) | Docker Hub personal access token, description "tab-mcp GitHub Actions", permission Read & Write |
+| `DOCKERHUB_TOKEN` | secret of the `release` environment (GitHub Actions) | Docker Hub personal access token, description "tab-mcp GitHub Actions", permission Read & Write, no expiry |
 | `DOCKERHUB_USERNAME` | repository variable | `ractive` |
-| `DOCKERHUB_TOKEN_EXPIRES` | repository variable | `2027-10-19` |
 
-Planned (DEC-101): `DOCKERHUB_TOKEN` becomes a secret of the `release` environment, so
-only the release jobs can read it. A secret cannot be read back, so the token has to be
-entered again (the current one, or a new one created as below):
+Only the jobs in the `release` environment can read the token (DEC-101); it moved there
+on 2026-10-25, and the repository secret was deleted.
 
-1. `gh secret set DOCKERHUB_TOKEN --repo ractive/tab-mcp --env release` and paste the
-   token at the prompt.
-2. `gh secret delete DOCKERHUB_TOKEN --repo ractive/tab-mcp` (the repository secret).
-3. Change the table above to "secret of the `release` environment". The variables stay
-   at repository level: `token-expiry.yml` has no environment and reads the expiry.
-
-- Created: 2026-10-19.
-- **Expires: 2027-10-19 00:00:00** (valid 2026-10-19 → 2027-10-19).
-- Symptom when expired: the Docker login or push step of the release workflow fails with
-  an authentication error (`unauthorized` / `incorrect username or password`).
-- Early warning: the workflow `token-expiry.yml` runs on the first of every month and
-  fails when `DOCKERHUB_TOKEN_EXPIRES` is 30 days away or less, or not set; the release's
-  image job warns then and fails once the date has passed (DEC-070). Run it by hand with
-  `gh workflow run token-expiry.yml --repo ractive/tab-mcp` after a renewal.
+- Created: 2026-10-25, without an expiry date, so there is no expiry check (DEC-102).
+- Symptom when it stops working (revoked, or the account changed): the Docker login or
+  push step of the release workflow fails with an authentication error (`unauthorized` /
+  `incorrect username or password`).
 
 ### Renewal
 
 1. hub.docker.com → avatar → Account settings → Personal access tokens → Generate new
-   token, description "tab-mcp GitHub Actions", permission Read & Write, one-year expiry.
-2. `gh secret set DOCKERHUB_TOKEN --repo ractive/tab-mcp` and paste the token at the
-   prompt (it is not echoed; never pass it as an argument or put it in a file).
-3. `gh variable set DOCKERHUB_TOKEN_EXPIRES --repo ractive/tab-mcp --body YYYY-MM-DD`
-   with the new expiry date.
-4. Delete the old token on Docker Hub.
-5. Update the expiry date in this note and commit.
-6. Re-run the failed release job.
+   token, description "tab-mcp GitHub Actions", permission Read & Write.
+2. `gh secret set DOCKERHUB_TOKEN --repo ractive/tab-mcp --env release` and paste the
+   token at the prompt (it is not echoed; never pass it as an argument or put it in a file).
+3. Delete the old token on Docker Hub.
+4. Re-run the failed release job.
 
 ## npm
 

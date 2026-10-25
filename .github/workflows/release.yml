@@ -41,7 +41,6 @@ on:
       - "packages/tab-mcp/**"
       - "scripts/npm-*"
       - "scripts/docker-*"
-      - "scripts/token-expiry*"
       - "Dockerfile"
       - ".dockerignore"
       - "package.json"
@@ -609,10 +608,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm install --global "npm@$NPM_VERSION"
-      - name: Docker Hub token expiry
-        env:
-          DOCKERHUB_TOKEN_EXPIRES: ${{ vars.DOCKERHUB_TOKEN_EXPIRES }}
-        run: bun scripts/token-expiry.ts --mode warn
       - id: tags
         name: Image tags
         env:
