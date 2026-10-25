@@ -15,6 +15,7 @@ import {
 	type Schema,
 	validate as validateSchema,
 } from "@cfworker/json-schema";
+import { cleanIcons } from "./icons.ts";
 import {
 	ANNOTATIONS_META_KEY,
 	type CallToolResult,
@@ -277,6 +278,11 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	const { tools, server } = options;
 	const serverInfo: Json = { name: server.name, version: server.version };
 	if (server.title !== undefined) serverInfo["title"] = server.title;
+	// The icons only in server/discover: every other result carries
+	// serverInfo too, and the app needs them once.
+	const icons = cleanIcons(server.icons ?? []);
+	const discoverInfo: Json =
+		icons.length > 0 ? { ...serverInfo, icons } : serverInfo;
 	const listeners = new Set<{
 		id: Id;
 		send(message: unknown): void;
@@ -289,11 +295,11 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		[META_SERVER_INFO]: serverInfo,
 	});
 
-	function result(id: Id, value: Json): Json {
+	function result(id: Id, value: Json, meta: Json = resultMeta()): Json {
 		return {
 			jsonrpc: "2.0",
 			id,
-			result: { ...value, resultType: "complete", _meta: resultMeta() },
+			result: { ...value, resultType: "complete", _meta: meta },
 		};
 	}
 
@@ -789,7 +795,10 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 					discover["instructions"] = server.instructions;
 				discover["ttlMs"] = 0;
 				discover["cacheScope"] = "private";
-				return json(200, result(id, discover));
+				return json(
+					200,
+					result(id, discover, { [META_SERVER_INFO]: discoverInfo }),
+				);
 			}
 			case "tools/list":
 				return json(

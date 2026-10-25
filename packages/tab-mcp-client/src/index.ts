@@ -12,6 +12,7 @@ export type {
 	DisconnectDetail,
 	DisconnectReason,
 	Grant,
+	Icon,
 	IdentityAssertionHandler,
 	IdentityAssertionRequest,
 	IdentityState,

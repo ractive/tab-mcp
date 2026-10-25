@@ -7,6 +7,23 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- `server.icons` (MCP `Icon`: `src`, `mimeType`, `sizes`, `theme`), sent in
+  `serverInfo` for the AI app's connector list (DEC-105). Without it, the page's
+  `<link rel="icon">` and `<link rel="apple-touch-icon">` are sent; `[]` sends none.
+  At most 8: `http(s):` URLs, or raster `data:` URIs up to 16 KiB (no inline SVG); only
+  in `server/discover`. In the connection chunk: the core does not grow.
+- The connect dialog's help links to the new guide
+  [connecting an AI app](https://github.com/ractive/tab-mcp/blob/main/docs/connecting.md).
+
+#### Changed
+
+- The dialog's ChatGPT line: chatgpt.com's Plugins, and the Mac app's MCP servers (which
+  are Codex's and need its `mcp_2026_07_28` feature). Developer mode is gone.
+
 ### [0.8.0][client-0.8.0] - 2026-10-25
 
 #### Changed

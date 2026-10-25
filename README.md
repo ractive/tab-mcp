@@ -67,16 +67,19 @@ You need a page that offers tab-mcp, such as the [live diagram editor](https://r
      in Claude Code and choose Authenticate.
    - **Claude (claude.ai and the desktop app):** Settings → Connectors → Add custom
      connector, then paste the address.
-   - **ChatGPT:** Settings → Apps and connectors → Advanced settings, turn on developer
-     mode, then Create and paste the address.
+   - **ChatGPT:** on chatgpt.com, open [Plugins](https://chatgpt.com/plugins) and add an
+     MCP server with the address.
+
+   Step by step for each app, and what to do when it fails:
+   [connecting an AI app](docs/connecting.md).
 3. Your browser opens the relay's page "Connect … from …". Check the AI app and the
    page's address, then type the code shown in the page.
 4. Ask your AI app to use the page. To stop, click Disconnect in the page, or close the
    tab.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
-relay with a public HTTPS address. claude.ai works; Claude Desktop and ChatGPT have not
-been tested yet. See [compatibility](docs/compatibility.md).
+relay with a public HTTPS address. All three work; see
+[compatibility](docs/compatibility.md).
 
 **Connecting an AI app to a page means trusting that page.** The page decides what its
 tools do and how they are described. Connect only pages you trust, and type a code only

@@ -523,6 +523,9 @@ export function commandAddress(address: string): string | undefined {
 	}
 }
 
+/** The guide for every AI app (docs/connecting.md). */
+const GUIDE = "https://github.com/ractive/tab-mcp/blob/main/docs/connecting.md";
+
 /** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
 const CODEX_FEATURE = "mcp_2026_07_28";
 
@@ -543,7 +546,7 @@ export function instructions(
 		],
 		[
 			"ChatGPT",
-			"Settings → Apps and connectors → Advanced settings: turn on developer mode, then Create and paste the address.",
+			"On chatgpt.com: Plugins, add an MCP server with the address. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP; it needs the Codex feature below.",
 		],
 		a === undefined
 			? ["Claude Code", "Add the address with claude mcp add --transport http."]
@@ -819,12 +822,19 @@ export function showConnectDialog(
 	});
 
 	const steps = el(doc, "ul");
+	const guide = el(doc, "a", {
+		text: "Step by step, and what to do when it fails",
+	});
+	guide.href = GUIDE;
+	guide.target = "_blank";
+	guide.rel = "noopener noreferrer";
 	const help = el(
 		doc,
 		"details",
 		{ className: "tab-mcp-help" },
 		el(doc, "summary", { text: "How do I add it?" }),
 		steps,
+		el(doc, "p", { className: "tab-mcp-guide" }, guide),
 	);
 
 	const appList = el(doc, "ul");

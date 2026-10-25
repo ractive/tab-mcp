@@ -72,11 +72,30 @@ export interface RegisterToolOptions {
 	exposedTo?: string[];
 }
 
+/** An icon the AI app may show for the page (MCP `Icon`). */
+export interface Icon {
+	/** An `https:` (or `http:`) URL or a `data:image/…` URI. */
+	src: string;
+	/** For example `"image/png"` or `"image/svg+xml"`. */
+	mimeType?: string;
+	/** `"48x48"`, `"any"` for SVG, …; absent: any size. */
+	sizes?: string[];
+	/** The background the icon is drawn for. */
+	theme?: "light" | "dark";
+}
+
 /** What the page's MCP server says about itself in `server/discover`. */
 export interface ServerInfo {
 	name: string;
 	version: string;
 	title?: string;
+	/**
+	 * Icons the AI app may show for this page's connector. Default: the
+	 * page's `<link rel="icon">` and `<link rel="apple-touch-icon">`, read
+	 * when it connects; `[]` sends none. At most 8, `http(s):` or
+	 * `data:image/` only.
+	 */
+	icons?: Icon[];
 	/** Instructions for the model, e.g. how the tools fit together. */
 	instructions?: string;
 }

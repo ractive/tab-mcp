@@ -1560,6 +1560,23 @@ does not define for clients but which says the app can also do `none`.
   would prove that a token request comes from OpenAI, at the cost of a new signature path
   at `/token`. Revisit if ChatGPT insists on signing.
 
+## DEC-105: The page's icons go to the AI app; the default is its `<link rel="icon">` (owner)
+
+Owner, 2026-10-25. AI apps showed a placeholder for tab-mcp connectors. The relay's
+favicon (0.5.1) is one for every page; MCP's `serverInfo.icons` is per server, and in
+tab-mcp the page is the server. `ServerInfo.icons` (MCP `Icon`) is sent in `server/discover`.
+Without it the library reads the page's `<link rel="icon">` and
+`<link rel="apple-touch-icon">` when it connects (`href` resolved, `type` as
+`mimeType`, `sizes`, a `prefers-color-scheme` media query as `theme`); `[]` sends none.
+Kept: at most 8 icons, `http(s):` URLs up to 2 KiB or raster `data:` URIs (PNG, JPEG,
+GIF, WebP, ICO) up to 16 KiB; no inline SVG, which an AI app might put into its own page;
+valid fields only; links with an empty `href` skipped; only in `server/discover` (every
+result carries `serverInfo`); reading the document never fails a connection. URLs on
+`localhost` are sent as they are: only a local AI app can load them, and a page could
+name any URL anyway. The code is in the connection
+chunk. Whether an AI app shows the icon is the app's choice: not yet seen in ChatGPT or
+Claude.
+
 # Citations
 
 - [MCP conformance suite](https://github.com/modelcontextprotocol/conformance)
