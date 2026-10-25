@@ -142,6 +142,11 @@ secret against the real relay, `newAddress()` after a takeover revoking the old
 address's token, the notice in the default UI, the channel's content, two Chrome tabs.
 Open: the client release (not part of this PR).
 
+Review of PR 39: the take-back is atomic on the relay (`hello.revokeAll`, confirmed by an
+empty `session.grants`; a fallback for older relays), the session ends at the `bye` and
+only the `replaced` detail waits, and a sibling counts only once its session started
+(`claimed`). Both packages change: the relay release is open too.
+
 # Citations
 
 - [Threat model](https://github.com/ractive/tab-mcp/blob/main/docs/threat-model.md): asset 4, A4 and "Risks that remain"

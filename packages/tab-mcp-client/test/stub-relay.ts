@@ -34,6 +34,10 @@ export class StubRelay {
 	answerHello = true;
 	/** Refuse WebSocket upgrades (503), like a relay that is down. */
 	refuse = false;
+	/** Ignore `hello.revokeAll` like a relay of 0.4 or older (grants listed anyway). */
+	ignoreRevokeAll = false;
+	/** Every socket in the order they opened (`send` and `close` use the newest). */
+	readonly sockets: ServerWebSocket<undefined>[] = [];
 	#socket: ServerWebSocket<undefined> | undefined;
 	#pings = 0;
 	readonly #waiters: {
@@ -58,6 +62,7 @@ export class StubRelay {
 			websocket: {
 				open: (ws) => {
 					this.#socket = ws;
+					this.sockets.push(ws);
 				},
 				message: (ws, data) => {
 					this.frameBytes.push(Buffer.byteLength(String(data)));
@@ -72,7 +77,10 @@ export class StubRelay {
 								appName: (m["app"] as { name?: string } | undefined)?.name,
 								expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
 								limits: this.limits,
-								grants: this.grants,
+								grants:
+									m["revokeAll"] === true && !this.ignoreRevokeAll
+										? []
+										: this.grants,
 								...(this.pairing === undefined
 									? {}
 									: { pairing: this.pairing }),

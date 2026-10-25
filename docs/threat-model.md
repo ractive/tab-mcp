@@ -183,13 +183,17 @@ does not reconnect by itself.
   site's backend (A12).
 - **How long it lasts:** after the XSS is fixed, the page is closed or the script is
   removed, until the page gets a new address. "New address" first takes the address back
-  with the old secret, so the relay revokes the grants of the old address, then connects
-  with a new one.
+  with the old secret and `hello.revokeAll`, so the relay revokes the grants of the old
+  address in the same step as it hands the address back; whoever claims it again right
+  after gets no grant back. Only once the relay confirmed it (no grants in `session`)
+  does the page make the new address; taken over again first, the page says so and the
+  user tries again.
 - **What the page sees:** the library tells a takeover by a second tab of the same page
-  from one by someone else. Tabs that share the secret announce on a `BroadcastChannel`
-  (per relay origin and storage key, never the secret or the address) when they claim the
-  address; a replaced tab that heard a sibling within 10 seconds reports `sibling: true`
-  and the default UI shows "Opened in another tab". Otherwise, and in browsers without
+  from one by someone else. Tabs that share the secret say on a `BroadcastChannel` (per
+  relay origin and storage key, never the secret or the address) when the relay accepted
+  their session; a tab whose `hello` failed says nothing. A replaced tab that heard a
+  sibling within 10 seconds (waiting up to a second for it) reports `sibling: true` and
+  the default UI shows "Opened in another tab". Otherwise, and in browsers without
   `BroadcastChannel`, it warns that another tab or program took over and offers "New
   address". A message on the channel from script on the page's origin can make a
   takeover look harmless, but such script can read the secret and change the page

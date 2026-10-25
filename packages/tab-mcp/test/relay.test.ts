@@ -139,6 +139,45 @@ describe("tab WebSocket", () => {
 		await tab(r).connect();
 	});
 
+	test("hello.revokeAll takes the address back with its grants revoked: the session lists none (DEC-095)", async () => {
+		const r = relay();
+		const secret = newSecret();
+		const impostor = tab(r, { secret });
+		const first = await impostor.connect();
+		const token = await tokenFor(r.store, addressIdFromSecret(secret));
+		expect(
+			(await mcpPost(first.address, rpc(1, "tools/list"), { token })).status,
+		).toBe(200);
+		const owner = tab(r, { secret, revokeAll: true });
+		const session = await owner.connect();
+		expect(session.grants).toEqual([]);
+		expect(await impostor.next("bye")).toEqual({
+			type: "bye",
+			reason: "replaced",
+		});
+		expect(
+			(await mcpPost(session.address, rpc(2, "tools/list"), { token })).status,
+		).toBe(401);
+		expect(
+			await r.store.listGrants(addressIdFromSecret(secret), Date.now()),
+		).toEqual([]);
+	});
+
+	test("hello.revokeAll must be a boolean", async () => {
+		const r = relay();
+		const t = tab(r);
+		await t.opened;
+		t.send({
+			type: "hello",
+			library: { name: "x", version: "1" },
+			page: { title: "" },
+			secret: newSecret(),
+			revokeAll: "yes",
+		});
+		expect((await t.next("error")).type).toBe("error");
+		expect((await t.closed).code).toBe(1008);
+	});
+
 	test("the global session limit applies", async () => {
 		const r = relay({ maxSessions: 1 });
 		await tab(r).connect();

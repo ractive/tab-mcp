@@ -4,7 +4,6 @@
  * connection and the MCP handler with a dynamic `import()`.
  */
 
-import { AlwaysAllowed } from "./always-allowed.ts";
 import type { ConnectionHandle, ConnectionHost } from "./internal.ts";
 import type { GrantRef, SessionMessage } from "./protocol.ts";
 import { ToolRegistry } from "./registry.ts";
@@ -177,7 +176,6 @@ export class TabMcp extends EventTarget {
 	#state: ConnectionState = "disconnected";
 	#session: SessionInfo | undefined;
 	#grants: readonly Grant[] = Object.freeze([]);
-	readonly #alwaysAllowed = new AlwaysAllowed();
 	#pairing = false;
 	#pairingCode: PairingCode | undefined;
 	#connection: ConnectionHandle | undefined;
@@ -235,11 +233,9 @@ export class TabMcp extends EventTarget {
 		// Tabs that share the secret share this channel; with `storage: null`
 		// every tab has an address of its own (DEC-095).
 		this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
-		this.#registry.onChange(() => {
-			const tools = this.tools;
-			this.#alwaysAllowed.keepTools(tools);
-			this.#emit("toolschange", { tools });
-		});
+		this.#registry.onChange(() =>
+			this.#emit("toolschange", { tools: this.tools }),
+		);
 	}
 
 	/**
@@ -430,9 +426,9 @@ export class TabMcp extends EventTarget {
 		return this.#start();
 	}
 
-	#start(): Promise<SessionInfo> {
+	#start(revokeAll?: boolean): Promise<SessionInfo> {
 		this.#setState("connecting");
-		const connecting = this.#open(this.#generation);
+		const connecting = this.#open(this.#generation, revokeAll);
 		this.#connecting = connecting;
 		connecting.then(
 			() => {
@@ -448,7 +444,7 @@ export class TabMcp extends EventTarget {
 		return connecting;
 	}
 
-	async #open(generation: number): Promise<SessionInfo> {
+	async #open(generation: number, revokeAll?: boolean): Promise<SessionInfo> {
 		const { openConnection, compileRegistry, addressIdOf, withAddress } =
 			await import("./connection.ts");
 		// The validator is loaded: it checks the schemas from now on (DEC-086).
@@ -464,6 +460,7 @@ export class TabMcp extends EventTarget {
 			this.#host(ref),
 			withAddress(this.#relayUrl, address),
 			secret,
+			revokeAll,
 		);
 		ref.connection = connection;
 		this.#connection = connection;
@@ -484,15 +481,30 @@ export class TabMcp extends EventTarget {
 	 * user action.
 	 */
 	newAddress(): Promise<SessionInfo | undefined> {
-		// A session that starts clears #takenOver, so this runs once.
-		if (this.#takenOver && this.#state !== "connected")
-			return this.connect({ resume: true }).then(() => this.newAddress());
+		if (this.#takenOver) {
+			// `hello.revokeAll`: the relay revokes as it hands the address back, and
+			// the connection resolves only once no grant is left. Taken over again
+			// first: reject, keep the secret, so that a retry takes it back again.
+			this.#end("new_address");
+			return this.#start(true).then(
+				() => this.#renew(true),
+				(error: unknown) => {
+					this.#takenOver = true;
+					throw error;
+				},
+			);
+		}
+		return this.#renew(false);
+	}
+
+	#renew(on: boolean): Promise<SessionInfo | undefined> {
 		const wasOn =
-			this.#state !== "disconnected" || this.#reconnecting !== undefined;
+			on || this.#state !== "disconnected" || this.#reconnecting !== undefined;
 		if (this.#state === "connected")
 			this.#connection?.send({ type: "grants.revokeAll" });
 		this.#end("new_address");
 		this.#secrets.rotate();
+		this.#takenOver = false; // nobody else has the new secret
 		// It was on: the user chose that already, as for a reconnect.
 		return wasOn ? this.connect({ resume: true }) : Promise.resolve(undefined);
 	}
@@ -729,7 +741,6 @@ export class TabMcp extends EventTarget {
 
 	#setGrants(grants: readonly Grant[]): void {
 		this.#grants = Object.freeze(grants.map(frozenGrant));
-		this.#alwaysAllowed.keepGrants(grants.map((g) => g.grantId));
 		this.#emit("grantschange", { grants: this.#grants });
 	}
 
@@ -750,34 +761,22 @@ export class TabMcp extends EventTarget {
 	 * may hand some calls to it. Resolves `false` where there is no document.
 	 */
 	confirmInPage(request: ConfirmRequest): Promise<boolean> {
-		const { grantId } = request.client;
-		if (this.#alwaysAllowed.has(grantId, request.tool.name))
-			return Promise.resolve(true);
 		const doc = globalThis.document as Document | undefined;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
-		const delay = this.#confirmDelayMs;
-		return import("./ui.ts")
-			.then((ui) =>
-				ui.confirmDialog(request, doc, {
-					allowDelayMs: delay,
-					alwaysAllow: this.#alwaysAllow,
-				}),
-			)
-			.then((answer) => {
-				// Only while the grant is still there: a revoked app gets nothing.
-				if (
-					answer === "always" &&
-					this.#grants.some((g) => g.grantId === grantId)
-				)
-					this.#alwaysAllowed.add(grantId, request.tool.name);
-				return answer !== "deny";
-			});
+		// The tools allowed always live in the UI chunk too: only it adds them.
+		return import("./ui.ts").then((ui) =>
+			ui.confirmInPage(this, request, doc, {
+				allowDelayMs: this.#confirmDelayMs,
+				alwaysAllow: this.#alwaysAllow,
+			}),
+		);
 	}
 
 	/** The callbacks of one connection; once it is not current they are ignored. */
 	#host(ref: { connection?: ConnectionHandle }): ConnectionHost {
 		const current = () =>
 			ref.connection !== undefined && this.#connection === ref.connection;
+		let replacedHere = false;
 		return {
 			registry: this.#registry,
 			server: this.#server,
@@ -826,10 +825,10 @@ export class TabMcp extends EventTarget {
 				if (!current()) return;
 				this.#setGrants(this.#grants.filter((g) => g.grantId !== grantId));
 			},
+			// After `closed`, so no longer current: only a connection that was
+			// current when it was replaced reports it.
 			replaced: (detail) => {
-				if (!current()) return;
-				this.#takenOver = true;
-				this.#emit("replaced", detail);
+				if (replacedHere) this.#emit("replaced", detail);
 			},
 			identityResult: (bound, round, message) => {
 				if (!current()) return;
@@ -844,6 +843,9 @@ export class TabMcp extends EventTarget {
 			},
 			closed: (reason: DisconnectReason, code: number) => {
 				if (!current()) return;
+				// Taken over: `newAddress()` takes it back first, whatever runs by
+				// then (review of PR 39).
+				if (reason === "replaced") this.#takenOver = replacedHere = true;
 				// Any listener below may end it all (`disconnect()`, `newAddress()`):
 				// that bumps the generation, and then nothing is scheduled.
 				const generation = this.#generation;

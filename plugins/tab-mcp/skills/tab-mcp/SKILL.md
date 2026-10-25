@@ -143,14 +143,16 @@ pairing is on), `revoke(grantId)`, `disconnect()`, the properties `address`,
 `pairingCode` and `grants`, and the events `connected`, `disconnected`, `pairingcode`,
 `grantschange`, `statechange`, `reconnecting`, `replaced` and `error`.
 
-When another tab or program takes over the address, the page gets `replaced` (then
-`disconnected`). Once the page has opened the default dialog, the library says so itself:
-"Opened in another tab" when a tab of the same page announced it on its
-`BroadcastChannel`, otherwise a warning with "New address". A custom UI does the same
-with `event.detail.sibling`: `true` is the usual, harmless second tab; `false` means it
-may be a program with a copy of the address secret, which the paired AI apps now talk to,
-so offer a "New address" button that calls `mcp.newAddress()` (it takes the address back,
-disconnects those apps and connects with a new address).
+When another tab or program takes over the address, the page gets `disconnected` (reason
+`replaced`) and then, up to a second later, `replaced`. Once the page has opened the
+default dialog, the library says so itself: "Opened in another tab" when a tab of the
+same page said on its `BroadcastChannel` that its session started, otherwise a warning
+with "New address". A custom UI does the same with `event.detail.sibling`: `true` is the
+usual, harmless second tab; `false` means it may be a program with a copy of the address
+secret, which the paired AI apps now talk to, so offer a "New address" button that calls
+`mcp.newAddress()`. It takes the address back with the relay revoking those apps in the
+same step, then connects with a new address; if it rejects with `reason: "replaced"`, the
+address was taken over again first: say so and let the user try again.
 
 **Sign-in instead of a code** (a relay that pairs by `oidc`): see
 [references/sign-in.md](references/sign-in.md). **React** single-page apps: see

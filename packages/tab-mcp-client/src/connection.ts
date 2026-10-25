@@ -127,29 +127,30 @@ export function* pieces(text: string, max: number): Generator<string> {
 }
 
 /**
- * How long after a sibling tab's claim a `replaced` counts as caused by it
- * (DEC-095). The claim goes out just before that tab's `hello`, so the old
- * tab hears it about a round trip to the relay before its `bye`.
+ * How long after a sibling tab's `claimed` a `replaced` counts as caused by
+ * it (DEC-095). That tab posts it when the relay accepted its session, which
+ * is when the relay ended this one.
  */
 export const SIBLING_WINDOW_MS = 10_000;
 
 /**
- * How long a replaced tab that heard no claim yet waits for one before it
- * reports `replaced`: a channel message can arrive after the relay's `bye`
- * (in Chrome with a relay on the same machine, it did).
+ * How long a replaced tab that heard no `claimed` yet waits for one before it
+ * reports `replaced`: the sibling's session and this tab's `bye` leave the
+ * relay at about the same time, so the message usually comes after the `bye`.
  */
 export const SIBLING_GRACE_MS = 1_000;
 
 /**
  * The tabs of one page (same relay, same secret) tell each other on a
- * `BroadcastChannel` when they claim the address, so that a replaced tab can
- * tell a sibling from an impostor. Nothing else goes on it: no secret, no
- * address. Without `BroadcastChannel` nothing is heard, and every `replaced`
- * counts as unknown.
+ * `BroadcastChannel` when the relay accepted their claim of the address
+ * (`claimed`, once their `session` arrived), so that a replaced tab can tell
+ * a sibling from an impostor. A sibling whose `hello` failed says nothing.
+ * Nothing else goes on the channel: no secret, no address. Without
+ * `BroadcastChannel` nothing is heard, and every `replaced` counts as unknown.
  */
 function siblingTabs(name: string | undefined): {
-	claim(): void;
-	/** `true` once a claim was heard in the window, `false` after the grace. */
+	claimed(): void;
+	/** `true` once `claimed` was heard in the window, `false` after the grace. */
 	heard(): Promise<boolean>;
 	close(): void;
 } {
@@ -160,7 +161,8 @@ function siblingTabs(name: string | undefined): {
 		if (name !== undefined && typeof BroadcastChannel === "function") {
 			channel = new BroadcastChannel(name);
 			channel.onmessage = (event: MessageEvent) => {
-				if ((event.data as { type?: unknown } | null)?.type !== "claim") return;
+				if ((event.data as { type?: unknown } | null)?.type !== "claimed")
+					return;
 				at = Date.now();
 				onClaim?.();
 			};
@@ -169,9 +171,9 @@ function siblingTabs(name: string | undefined): {
 		channel = undefined; // e.g. an opaque origin
 	}
 	return {
-		claim() {
+		claimed() {
 			try {
-				channel?.postMessage({ type: "claim" });
+				channel?.postMessage({ type: "claimed" });
 			} catch {
 				// closed or not allowed: the other tab counts it as unknown
 			}
@@ -193,11 +195,16 @@ function siblingTabs(name: string | undefined): {
 	};
 }
 
-/** Open the WebSocket and run the session. */
+/**
+ * Open the WebSocket and run the session. `revokeAll`: take the address back
+ * (DEC-095); `ready` resolves only once the relay has no grant of the address
+ * left, and rejects if the session ends first.
+ */
 export function openConnection(
 	host: ConnectionHost,
 	url: string,
 	secret: string,
+	revokeAll = false,
 ): ConnectionHandle {
 	const ws = new WebSocket(url, SUBPROTOCOL);
 	const inflight = new Map<string, AbortController>();
@@ -207,6 +214,12 @@ export function openConnection(
 	let heartbeat: ReturnType<typeof setTimeout> | undefined;
 	let heartbeatMs = 0;
 	const siblings = siblingTabs(host.tabs);
+	/**
+	 * Taking the address back from a relay that ignored `hello.revokeAll` (0.4
+	 * and older): the grants still to go after `grants.revokeAll`, and the
+	 * session to resolve with then.
+	 */
+	let revoking: { left: Set<string>; session: SessionInfo } | undefined;
 
 	let resolveReady!: (session: SessionInfo) => void;
 	let rejectReady!: (error: Error) => void;
@@ -283,17 +296,23 @@ export function openConnection(
 				byeReason ??
 				CLOSE_REASONS[code] ??
 				(code === 1006 ? "network" : "closed");
+			// The grants of a taken-back address did not all go (DEC-095).
+			rejectReady(
+				refused(
+					"The address was taken over again before its AI apps were disconnected.",
+					reason,
+				),
+			);
+			// Over at once; only the detail of `replaced` waits for a sibling's
+			// `claimed`, which comes a moment after the `bye` (DEC-095).
+			host.closed(reason, code);
 			if (reason === "replaced") {
-				// A claim that comes a moment after the `bye` still counts: both
-				// events wait for it, or for the grace (DEC-095).
 				void siblings.heard().then((sibling) => {
 					siblings.close();
 					host.replaced({ sibling });
-					host.closed(reason, code);
 				});
 				return;
 			}
-			host.closed(reason, code);
 		}
 		siblings.close();
 	}
@@ -412,7 +431,19 @@ export function openConnection(
 				clearTimeout(connectTimer);
 				heartbeatMs = message.limits.heartbeatMs;
 				armHeartbeat();
-				resolveReady(host.sessionStarted(message));
+				siblings.claimed();
+				const session = host.sessionStarted(message);
+				if (revokeAll && message.grants.length > 0) {
+					// A relay that ignored hello.revokeAll: revoke now, and wait until
+					// it has removed every grant.
+					revoking = {
+						left: new Set(message.grants.map((g) => g.grantId)),
+						session,
+					};
+					send({ type: "grants.revokeAll" });
+					return;
+				}
+				resolveReady(session);
 			} else if (message.type === "error") {
 				fail(
 					refused(
@@ -451,12 +482,16 @@ export function openConnection(
 				return;
 			case "grant.removed":
 				host.grantRemoved(message.grantId);
+				revoking?.left.delete(message.grantId);
+				if (revoking?.left.size === 0) resolveReady(revoking.session);
 				return;
 			case "identity.bound":
 				host.identityResult(true, message.round);
 				return;
 			case "bye":
 				byeReason = BYE_REASONS[message.reason] ?? "closed";
+				// Taken over: over at once, not when the socket closes (review of PR 39).
+				if (byeReason === "replaced") finish(4005);
 				return;
 			case "error":
 				if (message.code === "identity_refused") {
@@ -493,8 +528,7 @@ export function openConnection(
 			secret,
 		};
 		if (host.appName !== undefined) hello.app = { name: host.appName };
-		// Before the hello: the tab this one replaces hears it first.
-		siblings.claim();
+		if (revokeAll) hello.revokeAll = true;
 		send(hello);
 	});
 	ws.addEventListener("message", (event: MessageEvent) => {

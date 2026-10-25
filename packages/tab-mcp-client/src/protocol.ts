@@ -98,6 +98,8 @@ export type TabMessage =
 			page: { title: string };
 			app?: { name: string };
 			secret: string;
+			/** Take the address back: the relay revokes its grants as it claims it (DEC-095). */
+			revokeAll?: true;
 	  }
 	| { type: "pong"; t: number }
 	| { type: "bye"; reason: string }

@@ -165,6 +165,62 @@ describe("confirmDialog: Always allow", () => {
 		expect(await answer).toBe("deny");
 	});
 
+	test("TabMcp remembers it per grant and tool; a removed grant or tool asks again", async () => {
+		const g = globalThis as { document?: Document | undefined };
+		const saved = g.document;
+		g.document = doc;
+		const relay = new StubRelay();
+		relay.grants = [
+			{
+				grantId: "g_1",
+				client: {
+					id: "https://claude.ai/c.json",
+					name: "Claude",
+					host: "claude.ai",
+				},
+				createdAt: "2026-10-19T20:00:00.000Z",
+			},
+		];
+		const mcp = newTab(relay.url, { alwaysAllow: true });
+		const tool = new AbortController();
+		await mcp.registerTool(
+			{ name: "clear_memory", description: "Clears", execute: () => "ok" },
+			{ signal: tool.signal },
+		);
+		const dialog = () =>
+			new Promise<HTMLDialogElement>((resolve) => {
+				const poll = () => {
+					const found = doc.querySelector("dialog.tab-mcp-confirm");
+					if (found !== null) resolve(found as HTMLDialogElement);
+					else setTimeout(poll, 1);
+				};
+				poll();
+			});
+		try {
+			await mcp.connect();
+			const first = mcp.confirmInPage(question());
+			const always = byText(await dialog(), "Always allow");
+			await enabled(always);
+			always.click();
+			expect(await first).toBe(true);
+			// Asked no more for that grant and tool.
+			expect(await mcp.confirmInPage(question())).toBe(true);
+			// The grant goes: asked again.
+			relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+			await relay.settled();
+			relay.send({ type: "grant.added", grant: relay.grants[0] });
+			await relay.settled();
+			const again = mcp.confirmInPage(question());
+			byText(await dialog(), "Don't allow").click();
+			expect(await again).toBe(false);
+		} finally {
+			tool.abort();
+			mcp.disconnect();
+			await relay.stop();
+			g.document = saved;
+		}
+	});
+
 	test("TabMcp offers it only with alwaysAllow: true (DEC-096)", async () => {
 		const g = globalThis as { document?: Document | undefined };
 		const saved = g.document;
@@ -1235,13 +1291,13 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		await connecting;
 		await relay.next("pairing.start");
 		if (sibling) {
-			// A sibling tab announces its claim before its hello reaches the relay.
+			// A sibling tab says its session started (`claimed`).
 			const announce = new BroadcastChannel(channelName);
 			const listener = new BroadcastChannel(channelName);
 			const delivered = new Promise((r) => {
 				listener.onmessage = r;
 			});
-			announce.postMessage({ type: "claim" });
+			announce.postMessage({ type: "claimed" });
 			await delivered;
 			announce.close();
 			listener.close();
@@ -1284,6 +1340,30 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		(connect as HTMLDialogElement).close();
 	});
 
+	test("taken over again during New address: the notice says so and New address works again (review of PR 39)", async () => {
+		const notice = await openThenReplace(false);
+		relay.answerHello = false;
+		byText(notice, "New address").click();
+		expect(
+			await relay.next("hello", (m) => m["revokeAll"] === true),
+		).toBeDefined();
+		relay.send({ type: "bye", reason: "replaced" });
+		relay.close(4005, "replaced");
+		const status = notice.querySelector(".tab-mcp-status") as HTMLElement;
+		await new Promise<void>((resolve) => {
+			const poll = () =>
+				status.textContent?.startsWith("It was taken over again")
+					? resolve()
+					: setTimeout(poll, 1);
+			poll();
+		});
+		expect(status.textContent).toBe(
+			"It was taken over again before its AI apps were disconnected. Try again.",
+		);
+		expect(byText(notice, "New address").disabled).toBe(false);
+		expect(notice.open).toBe(true);
+	});
+
 	test("a sibling tab announced it: 'Opened in another tab', nothing to do", async () => {
 		const notice = await openThenReplace(true);
 		expect(notice.querySelector("h2")?.textContent).toBe(
@@ -1303,7 +1383,7 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 			const session = await mcp.connect();
 			const secret = (await relay.next("hello"))["secret"] as string;
 			await relay.settled();
-			expect(seen).toEqual([{ type: "claim" }]);
+			expect(seen).toEqual([{ type: "claimed" }]);
 			const text = JSON.stringify(seen);
 			expect(text).not.toContain(secret);
 			expect(text).not.toContain(session.address);

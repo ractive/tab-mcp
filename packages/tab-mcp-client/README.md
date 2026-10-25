@@ -177,22 +177,28 @@ own UI calls `newAddress()` from a click. Connected apps keep working after a re
 again; while the page is closed, they get "the page is not open".
 
 When another tab or program connects with the same address, it takes the address over:
-the page gets the event `replaced`, then `disconnected` with reason `replaced`, and does
-not reconnect by itself. Tabs of the same page announce on a `BroadcastChannel` (per relay
-and storage key; it carries neither the secret nor the address) when they claim the
-address, so `replaced` says which it probably was:
+the page gets `disconnected` with reason `replaced` at once, then the event `replaced`,
+and does not reconnect by itself. Tabs of the same page say on a `BroadcastChannel` (per
+relay and storage key; it carries neither the secret nor the address) when the relay
+accepted their session, so `replaced` says which it probably was:
 
-- `event.detail.sibling` is `true`: a tab of the same page in this browser announced it
-  within the last 10 seconds (when nothing was heard yet, the library waits up to a
-  second for it, so `replaced` may come a second after the takeover). The usual cause,
-  and harmless. Once the page has opened the
-  default dialog, the library shows "Opened in another tab".
-- `false`: nobody announced it (or the browser has no `BroadcastChannel`). It may be a
-  program with a copy of the address secret, and the AI apps paired with the address now
-  talk to it. The library shows "Another tab or program took over this page" with "New
-  address". `newAddress()` after `replaced` first connects with the old address again, so
-  the relay disconnects those apps, then makes a new address and connects; the dialog
-  then opens to add it to the AI apps again.
+- `event.detail.sibling` is `true`: a tab of the same page in this browser said so within
+  the last 10 seconds. That message usually comes just after the takeover, so the
+  library waits up to a second for it, and `replaced` may come that much after
+  `disconnected`. The usual cause, and harmless. Once the page has opened the default
+  dialog, the library shows "Opened in another tab".
+- `false`: none did (or the browser has no `BroadcastChannel`). It may be a program with
+  a copy of the address secret, and the AI apps paired with the address now talk to it.
+  The library shows "Another tab or program took over this page" with "New address".
+
+After a takeover, `newAddress()` (from the `replaced` listener, before it, or later)
+first takes the address back: it connects with the old secret and asks the relay to
+revoke every grant of the address in the same step (`hello.revokeAll`), and makes the new
+address only once the relay confirmed that no grant is left. If the address is taken
+over again before that, it rejects with an error whose `reason` is `"replaced"` and keeps
+the old secret, so calling it again takes it back again. Against a relay of 0.4 or older
+it sends `grants.revokeAll` and waits until every grant is gone. Then it connects with
+the new address; the default notice opens the connect dialog to add it to the AI apps.
 
 The default dialog closes when the page is replaced, and the notice appears also when the
 dialog is closed, but only once the page has opened the dialog: a page that connects on

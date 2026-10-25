@@ -365,6 +365,62 @@ describe("disconnect", () => {
 		}
 	});
 
+	test("an impostor that claims the address again the moment it gets bye: the old apps are still cut off (review of PR 39)", async () => {
+		const storage = new MemoryStorage();
+		const t = tab({ storage });
+		const { address } = await t.connect();
+		const token = await tokenFor(r.store, address);
+		const secret = [...storage.items.values()][0] as string;
+		// A spare socket, open before it is needed, so its hello goes out at once.
+		const sockets: WebSocket[] = [];
+		const spare = async () => {
+			const ws = new WebSocket(
+				`${r.url.replace("http", "ws")}/tab`,
+				"tab-mcp.v1",
+			);
+			sockets.push(ws);
+			await new Promise((resolve) => ws.addEventListener("open", resolve));
+			return ws;
+		};
+		const hello = JSON.stringify({
+			type: "hello",
+			library: { name: "impostor", version: "1.0.0" },
+			page: { title: "" },
+			secret,
+		});
+		let next = await spare();
+		const claim = (ws: WebSocket) => {
+			ws.addEventListener("message", (e) => {
+				if (!String(e.data).includes('"bye"')) return;
+				const now = next;
+				claim(now); // at once, from the spare
+				void spare().then((ws) => {
+					next = ws;
+				});
+			});
+			ws.send(hello);
+		};
+		const replaced = nextEvent(t, "replaced");
+		const first = next;
+		next = await spare();
+		claim(first);
+		try {
+			await replaced;
+			for (let attempt = 0; attempt < 3; attempt++) {
+				const outcome = await t.newAddress().then(
+					() => "renewed",
+					(error: { reason?: string }) => error.reason,
+				);
+				if (outcome === "renewed") break;
+				expect(outcome).toBe("replaced");
+			}
+			const res = await mcpPost(address, rpc(1, "tools/list"), { token });
+			expect(res.status).toBe(401);
+		} finally {
+			for (const ws of sockets) ws.close();
+		}
+	});
+
 	test("without BroadcastChannel, a second tab counts as unknown: sibling false", async () => {
 		const g = globalThis as { BroadcastChannel?: unknown };
 		const saved = g.BroadcastChannel;

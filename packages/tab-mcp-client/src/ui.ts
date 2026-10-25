@@ -7,6 +7,7 @@
  * methods of `TabMcp` instead.
  */
 
+import { AlwaysAllowed } from "./always-allowed.ts";
 import type { TabMcp } from "./tab-mcp.ts";
 import type {
 	ConfirmRequest,
@@ -448,6 +449,44 @@ export function confirmDialog(
 	});
 }
 
+/** The tools a user chose "Always allow" for, per `TabMcp`. */
+const allowedAlways = new WeakMap<TabMcp, AlwaysAllowed>();
+
+/**
+ * `TabMcp.confirmInPage`: the confirmation, and the tools allowed always. An
+ * entry goes when its grant goes or its tool is unregistered, so a re-paired
+ * app or a new tool under the same name is asked again.
+ */
+export function confirmInPage(
+	mcp: TabMcp,
+	request: ConfirmRequest,
+	doc: Document,
+	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean },
+): Promise<boolean> {
+	const { grantId } = request.client;
+	const tool = request.tool.name;
+	if (allowedAlways.get(mcp)?.has(grantId, tool)) return Promise.resolve(true);
+	return confirmDialog(request, doc, options).then((answer) => {
+		// Only while the grant is still there: a revoked app gets nothing.
+		if (answer === "always" && mcp.grants.some((g) => g.grantId === grantId)) {
+			let allowed = allowedAlways.get(mcp);
+			if (allowed === undefined) {
+				const kept = new AlwaysAllowed();
+				mcp.addEventListener("grantschange", (e) =>
+					kept.keepGrants(e.detail.grants.map((g) => g.grantId)),
+				);
+				mcp.addEventListener("toolschange", (e) =>
+					kept.keepTools(e.detail.tools),
+				);
+				allowedAlways.set(mcp, kept);
+				allowed = kept;
+			}
+			allowed.add(grantId, tool);
+		}
+		return answer !== "deny";
+	});
+}
+
 /**
  * The server's name as a label that every shell (POSIX shells, PowerShell,
  * cmd.exe) reads as one plain word, so it needs no quoting: letters without
@@ -549,7 +588,8 @@ function watchReplaced(mcp: TabMcp, doc: Document): void {
 	if (known) return;
 	mcp.addEventListener("replaced", (event) => {
 		const current = watched.get(mcp);
-		if (current !== undefined)
+		// Not when the page already went on (a New address or connect since).
+		if (current !== undefined && mcp.state === "disconnected")
 			replacedNotice(mcp, current, event.detail.sibling);
 	});
 }
@@ -603,7 +643,10 @@ export function replacedNotice(
 					},
 					(error: unknown) => {
 						fresh.disabled = false;
-						status.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}. Try again, or close this.`;
+						status.textContent =
+							(error as { reason?: unknown } | null)?.reason === "replaced"
+								? "It was taken over again before its AI apps were disconnected. Try again."
+								: `Could not connect: ${error instanceof Error ? error.message : String(error)}. Try again, or close this.`;
 					},
 				);
 			},

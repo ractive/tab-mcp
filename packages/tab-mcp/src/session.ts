@@ -286,7 +286,12 @@ export class TabSession {
 				this.#protocolError("bad_message", "hello expected");
 				return;
 			}
-			await this.#hello(msg.secret, msg.library, msg.app?.name);
+			await this.#hello(
+				msg.secret,
+				msg.library,
+				msg.app?.name,
+				msg.revokeAll === true,
+			);
 			return;
 		}
 		if (this.#state === "hello") return; // still answering hello
@@ -352,6 +357,7 @@ export class TabSession {
 		secret: string,
 		library: { name: string; version: string },
 		appName: string | undefined,
+		revokeAll = false,
 	): Promise<void> {
 		if (!isWellFormedSecret(secret)) {
 			this.#protocolError(
@@ -387,6 +393,21 @@ export class TabSession {
 				"replaced by a newer session",
 				"replaced",
 			);
+		}
+		if (revokeAll) {
+			// The page takes its address back (DEC-095): every grant goes in the
+			// same step as the claim, whatever claims the address next, and the
+			// `session` below lists none, which confirms it to the page.
+			try {
+				await this.#host.revokeAll(this);
+			} catch (error) {
+				this.#host.logger.error("store.error", {
+					op: "revokeAll",
+					error: errorName(error),
+				});
+				this.end(CloseCode.policyViolation, "could not revoke the grants");
+				return;
+			}
 		}
 
 		let grants: GrantInfo[] = [];

@@ -338,7 +338,9 @@ export interface TabMcpEventMap {
 	disconnected: CustomEvent<DisconnectDetail>;
 	/**
 	 * Another tab, or a program with this page's address secret, took over
-	 * the address; `disconnected` follows. `sibling` says which it probably was.
+	 * the address. It follows `disconnected` (reason `replaced`), up to a second
+	 * later while the library listens for a sibling tab. `sibling` says which it
+	 * probably was.
 	 */
 	replaced: CustomEvent<ReplacedDetail>;
 	/** Something went wrong outside a pending promise (e.g. a relay error message). */

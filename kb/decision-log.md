@@ -1721,37 +1721,52 @@ now talks to the impostor.
 
 - Tabs that share the secret share a `BroadcastChannel` named after the secret's storage
   key (`<key>#tabs`: relay origin and server name, or `storageKey`). A connection posts
-  `{ type: "claim" }` just before its `hello`, and listens while it is open. Nothing else
-  goes on the channel: never the secret or the address. With `storage: null` every tab
-  has its own address, so there is no channel.
-- A replaced connection that heard a claim within 10 seconds reports
-  `replaced` with `detail: { sibling: true }`, else `{ sibling: false }`. Without
-  `BroadcastChannel` nothing is heard: unknown counts as `false`, so the page warns. A
-  replaced connection that heard no claim yet waits up to 1 second for one before it
-  reports `replaced` and then `disconnected`: in headless Chrome with the relay on the
-  same machine, the claim sometimes arrived after the `bye`. A takeover by someone else
-  is therefore reported a second late. The detail used to be `null`; listeners that
-  ignore it work as before.
+  `{ type: "claimed" }` once the relay's `session` arrived, and listens while it is open.
+  Nothing else goes on the channel: never the secret or the address. With
+  `storage: null` every tab has its own address, so there is no channel. The first
+  version posted a `claim` at the WebSocket open, before the relay accepted anything, so
+  a sibling whose `hello` then failed (rate limited, a dead socket) made a takeover in the
+  next 10 seconds look harmless (review of PR 39); a sibling now speaks only once it holds
+  the address.
+- A replaced connection that heard `claimed` within 10 seconds reports `replaced` with
+  `detail: { sibling: true }`, else `{ sibling: false }`. Without `BroadcastChannel`
+  nothing is heard: unknown counts as `false`, so the page warns. The sibling's `session`
+  and this tab's `bye` leave the relay together, so the message usually comes after the
+  `bye`: a connection that heard none yet waits up to 1 second for it. Only the event
+  waits: the session ends at the `bye` itself, `disconnected` comes at once and
+  `newAddress()` sees the takeover from then on, so nothing in that second talks to a dead
+  socket (review of PR 39). `replaced` therefore comes after `disconnected`. The detail
+  used to be `null`; listeners that ignore it work as before.
 - The default UI, once the page has opened the connect dialog, closes that dialog and
   shows a notice: "Opened in another tab" for a sibling, otherwise "Another tab or
   program took over this page" with "New address". A page that never opened the dialog
   (its own UI, or `connect({ resume: true })` only) gets no notice from the library; it
   has the event.
-- `newAddress()` after `replaced` first connects with the old secret, which takes the
-  address back from the impostor, so that `grants.revokeAll` reaches the relay and the
-  apps paired with the old address are cut off; then it rotates the secret and connects
-  again. Before, it only rotated the secret while disconnected, and the paired apps kept
-  talking to the impostor. Its reconnect is `connect({ resume: true })`, since it runs
-  after the takeover's round trip, when the user activation may have expired.
-- What it does not protect: script on the page's origin can post a claim and make a
+- `newAddress()` after a takeover (whenever the last session ended `replaced` and none
+  started since, whatever the state) first takes the address back with the old secret and
+  the new `hello.revokeAll`: the relay revokes every grant of the address in the same
+  step as it hands the address over, before it lists the grants for `session`, which
+  then lists none. Only that confirmation lets the page rotate the secret. The first
+  version sent `grants.revokeAll` after the `session`; an impostor that claims the
+  address again the moment it gets `bye` won that race whenever it was nearer the relay,
+  the frame was dropped with the ended session, and the page rotated and reported success
+  with the hijacked grants alive (review of PR 39). Taken over again before the
+  confirmation, `newAddress()` rejects with `reason: "replaced"`, keeps the secret, and
+  the next call takes it back again; the notice says so. A relay of 0.4 or older ignores
+  the field and lists the grants: the page then sends `grants.revokeAll` and resolves only
+  once a `grant.removed` came for each, rejecting if the session ends first. Its
+  reconnect is `connect({ resume: true })`, since it runs after round trips, when the
+  user activation may have expired.
+- What it does not protect: script on the page's origin can post `claimed` and make a
   takeover look harmless. Such script can read the secret and change the page anyway, so
   the channel gives it nothing new. A page with a `storage` that tabs do not share (say
   `sessionStorage`) shares the channel without sharing the address, so a sibling that
   connects within 10 seconds of an unrelated takeover makes it look harmless.
 - Size: the channel code is in the lazily loaded connection chunk, the notice in the UI
-  chunk. The core grew by 88 bytes gzipped (5 519 to 5 607 of 5 632), for the channel
-  name, the `alwaysAllow` option and `newAddress()`; the connection chunk by 239 bytes
-  (12 331 to 12 570), the UI chunk by 494 (6 178 to 6 672).
+  chunk. To make room in the core, the tools allowed with "Always allow" moved to the UI
+  chunk too (only its dialog adds them; it prunes them on `grantschange` and
+  `toolschange`). Against main with DEC-098 (core 5 556, connection 12 580, UI 6 178
+  bytes gzipped): core 5 486 of 5 632, connection 12 974, UI 6 989.
 
 ## DEC-096: "Always allow" is opt-in (owner)
 

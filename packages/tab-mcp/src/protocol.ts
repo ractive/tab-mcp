@@ -153,6 +153,12 @@ export interface HelloMessage {
 	/** Self-declared app name (DEC-045), unverified. */
 	app?: { name: string };
 	secret: string;
+	/**
+	 * Revoke every grant of the address as the session claims it, before the
+	 * `session` answer (which then lists none): a page taking its address back
+	 * from whoever took it over (DEC-095).
+	 */
+	revokeAll?: boolean;
 }
 export interface PongMessage {
 	type: "pong";
@@ -319,6 +325,10 @@ export function parseTabMessage(text: string): ParseResult {
 			if (app !== undefined && (!isObject(app) || !isAppName(app["name"]))) {
 				return bad(`hello.app.name must be 1-${MAX_APP_NAME} characters`);
 			}
+			const revokeAll = v["revokeAll"];
+			if (revokeAll !== undefined && typeof revokeAll !== "boolean") {
+				return bad("hello.revokeAll must be a boolean");
+			}
 			const hello: HelloMessage = {
 				type,
 				library: { name: library["name"], version: library["version"] },
@@ -328,6 +338,7 @@ export function parseTabMessage(text: string): ParseResult {
 			if (isObject(app) && isAppName(app["name"])) {
 				hello.app = { name: app["name"] };
 			}
+			if (revokeAll === true) hello.revokeAll = true;
 			return { ok: true, message: hello };
 		}
 		case "pong": {
