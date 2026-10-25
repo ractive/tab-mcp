@@ -38,7 +38,7 @@
     },
     "packages/tab-mcp-client": {
       "name": "@ractive-ch/tab-mcp-client",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "dependencies": {
         "@cfworker/json-schema": "4.1.1",
       },
