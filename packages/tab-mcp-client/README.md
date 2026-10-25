@@ -6,7 +6,7 @@ relay. The page connects to the relay and gets an address. The user adds that ad
 their AI app and types a pairing code from the page; the AI app then calls the page's
 tools while the tab stays open. Nothing is installed on the user's computer.
 
-**Status: 0.6.0.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.7.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
@@ -38,7 +38,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.6.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.7.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -284,7 +284,8 @@ any layered rule. Both dialogs are `dialog.tab-mcp-dialog`; the connect dialog i
 `.tab-mcp-always-note`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
 `.tab-mcp-always`). Buttons are `.tab-mcp-primary` (the one next step: Copy the
 address, Done, and "Don't allow", the safe choice), `.tab-mcp-danger` (Disconnect and
-"Disconnect and get new address") or plain. For example:
+"Disconnect and get new address") or plain; every Copy button is also `.tab-mcp-copy`, and
+the Disconnect buttons in the apps list are `.tab-mcp-disconnect`. For example:
 
 ```css
 :root {
