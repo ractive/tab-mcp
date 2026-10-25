@@ -189,7 +189,7 @@ function copyButton(
 			};
 			const selected = () => {
 				select();
-				announce("Selected: press Ctrl+C to copy");
+				announce("Selected: copy it with Ctrl+C or ⌘C");
 			};
 			const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
 				?.clipboard;

@@ -610,7 +610,7 @@ describe("showConnectDialog", () => {
 		});
 		(dialog.querySelector(".tab-mcp-address-copy") as HTMLElement).click();
 		await Bun.sleep(0);
-		expect(live.textContent).toBe("Selected: press Ctrl+C to copy");
+		expect(live.textContent).toBe("Selected: copy it with Ctrl+C or ⌘C");
 		// The clipboard refuses: the same.
 		Object.defineProperty(window.navigator, "clipboard", {
 			value: { writeText: () => Promise.reject(new Error("denied")) },
@@ -618,7 +618,7 @@ describe("showConnectDialog", () => {
 		});
 		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).click();
 		await Bun.sleep(0);
-		expect(live.textContent?.trim()).toBe("Selected: press Ctrl+C to copy");
+		expect(live.textContent?.trim()).toBe("Selected: copy it with Ctrl+C or ⌘C");
 		byText(dialog, "Close").click();
 	});
 

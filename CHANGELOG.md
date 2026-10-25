@@ -40,7 +40,7 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   `tools` if empty. The help shows commands only for an address made of plain URL
   characters, and plain steps otherwise.
 - The connect dialog says what each Copy did in a polite live region ("Address copied",
-  "Code copied", "Claude Code command copied", or "Selected: press Ctrl+C to copy" when
+  "Code copied", "Claude Code command copied", or "Selected: copy it with Ctrl+C or ⌘C" when
   the clipboard is not available).
 - The pairing code is `2em` by default (was `1.5em`), the default border is the text
   colour at 22 % (was `GrayText`), the default radius `0.75rem` (was `0.5rem`).
