@@ -26,7 +26,7 @@ What stays here, generic and secret-free:
 - [-] ~~An example OpenTofu module for bunny.net Magic Containers in `examples/deploy-bunny/`~~ Dropped by the owner (2026-10-21): too specific; the deployment docs cover bunny.net generically
 - [x] Operations notes: backups of the SQLite file, upgrading between versions, what a restart does to sessions and tokens (`docs/self-hosting.md`, "Operations": backups, upgrading, rollback, restarts, ending every connection)
 - [x] Privacy template: what an operator should tell users (what passes through the relay, what is stored) (`docs/privacy-template.md`)
-- [ ] Manual compatibility checks against the deployed relay (moved from iteration 4): claude.ai custom connector, Claude Desktop, ChatGPT developer mode; record app, version, date, revision, auth and result in `docs/compatibility.md`. The claude.ai custom connector (2026-10-20), Codex (2026-10-23) and Claude Desktop (2026-10-25) are recorded there already, all work; ChatGPT needs the owner's account
+- [ ] Manual compatibility checks against the deployed relay (moved from iteration 4): claude.ai custom connector, Claude Desktop, ChatGPT developer mode; record app, version, date, revision, auth and result in `docs/compatibility.md`. The claude.ai custom connector (2026-10-20), Codex (2026-10-23), Claude Desktop and ChatGPT for Mac (2026-10-25, Codex inside, with Codex's feature flag) are recorded there already, all work; ChatGPT on the web (developer mode, OpenAI's servers) is not yet run
 
 # Citations
 
