@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 13: browser library fixes"
-status: in-progress
+status: completed
 description: "Fixes from the 2026-10-24 review of the browser library: the Allow delay in a background tab, argument spoofing with direction characters, Always allow, result and schema edge cases, a tool removed during its confirmation, two connect dialogs, React provider stability."
 timestamp: 2026-10-25T18:00:00+02:00
 tags: [iteration, security, client]
@@ -95,7 +95,7 @@ same time. Releases as a client patch or minor version.
 - [x] 9: identity timeout starts with the hook
 - [x] 10: README example shows the host
 - [x] Code quality items and the missing tests
-- [ ] Changelog, client release, vendored copies (ractive.ch examples, saturnus) updated
+- [x] Changelog, client release, vendored copies (ractive.ch examples, saturnus) updated
 
 ## Progress
 
@@ -108,6 +108,10 @@ synchronous); three others in `reconnect.test.ts`, not named by the review, stay
 
 2026-10-25: finding 3 done, "Always allow" opt-in (DEC-096), in the PR of iteration 10.
 Open: the release and the vendored copies.
+
+2026-10-25: client 0.8.0 released (with iteration 10). The ractive.ch examples and the
+sign-in page serve it (ractive.ch PR 49, the edge script applied with a saved plan);
+saturnus vendors it (saturnus PR 234, deployed with the "Web page" workflow). Done.
 
 # Citations
 
