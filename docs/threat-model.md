@@ -1,7 +1,7 @@
 # Threat model
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
-relay `@ractive-ch/tab-mcp` 0.5.1 and browser library `@ractive-ch/tab-mcp-client` 0.8.0.
+relay `@ractive-ch/tab-mcp` 0.5.1 and browser library `@ractive-ch/tab-mcp-client` 0.9.0.
 To report a vulnerability,
 see [SECURITY.md](../SECURITY.md).
 

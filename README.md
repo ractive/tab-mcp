@@ -211,11 +211,11 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 
 ## Status
 
-**0.8.0**. Until 1.0, a new minor version can still change
+**0.9.0**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelog](CHANGELOG.md) says what changed.
 
 - Released: relay `@ractive-ch/tab-mcp` 0.5.1 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.8.0, on the npm tag `latest`.
+  `@ractive-ch/tab-mcp-client` 0.9.0, on the npm tag `latest`.
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
   through OAuth Client ID Metadata Documents. Claude Code works (tested headless with a
   token; its interactive sign-in is not tested yet), and so do claude.ai and Codex (with its
