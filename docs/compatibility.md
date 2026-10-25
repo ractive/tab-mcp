@@ -19,13 +19,13 @@ An app that cannot do both cannot connect.
 | Codex desktop, with `mcp_2026_07_28 = true` under `[features]` in `~/.codex/config.toml` | 0.163 | 2026-10-23 | relay `relay-v0.3.0`, client `client-v0.5.0` and `client-v0.5.1` | full OAuth flow against the hosted relay: CIMD; on https://tab-mcp-login.ractive.ch/ Google sign-in at the relay (identity binding), on https://ractive.ch/saturnus/app/ the pairing code | works (owner's run): the sign-in example's notes tools ran, and signing in with a different Google account was refused; on saturnus the calculator's tools ran. Without the feature flag the sign-in succeeds but no tools appear. Codex loads tools when a chat starts, so the chat must start after pairing, and each page needs its own `[mcp_servers.<name>]` entry, since each page has its own relay address |
 | ChatGPT for Mac (Codex inside; it keeps its MCP servers in `~/.codex/config.toml`), with `mcp_2026_07_28 = true` under `[features]` there | 26.1016.62342 | 2026-10-25 | relay `relay-v0.5.0`, client `client-v0.8.0` (todo example) | Settings → Plugins → MCPs → Add → custom MCP, type Streamable HTTP, the address; then Authenticate: full OAuth flow with Codex's CIMD client id `https://chatgpt.com/oauth/codex/client.json`, the relay's `/authorize` shows "Connect Codex from chatgpt.com", the pairing code, the redirect to a loopback port on 127.0.0.1 | works (owner's run): the todo example's tools ran. The feature flag is required, as for Codex: without it the sign-in succeeds but no tools appear |
 
+| ChatGPT on the web (chatgpt.com, apps added under https://chatgpt.com/plugins; the connector runs on OpenAI's servers) | web app as of 2026-10-25 | 2026-10-25 | relay `relay-v0.5.1`, client `client-v0.8.0` | full OAuth flow against the hosted relay: CIMD client id `https://chatgpt.com/oauth/client.json`, which prefers `private_key_jwt` and lists `["none", "private_key_jwt"]`; the relay accepts it since 0.5.1 (DEC-104) and ChatGPT then uses `none`; the pairing code on `/authorize` | works (owner's run): the page's tools ran. Relay 0.5.0 and older refused it at `/authorize` ("must use token_endpoint_auth_method \"none\"") |
 ## Pending
 
 These need a manual run.
 
 | App | Why pending |
 |---|---|
-| ChatGPT on the web, developer mode (connectors run on OpenAI's servers, unlike the desktop app above) | OpenAI's servers connect; the hosted relay https://tab-mcp.ractive.ch is up since 2026-10-20, not yet tried. |
 | Claude Code, interactive (`claude mcp add --transport http`, then `/mcp` → Authenticate with its CIMD client id) | This works with a local relay, but someone has to type the pairing code into the browser during the sign-in. Not yet run by hand. Iteration 3 completed `/authorize` in Firefox with Claude Code's published client metadata document, but not the whole sign-in from Claude Code. |
 
 ## Known issues in supported apps
