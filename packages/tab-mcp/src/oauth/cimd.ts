@@ -474,10 +474,19 @@ export function validateDocument(
 	) {
 		throw invalid("The AI app's details have no valid redirect_uris.");
 	}
+	// The method the app will use; an app that prefers another but lists
+	// "none" among the methods it supports (ChatGPT: private_key_jwt, with
+	// ["none", "private_key_jwt"]) uses "none" here, the only one this
+	// relay's metadata offers (DEC-104).
 	const method = d["token_endpoint_auth_method"];
-	if (method !== undefined && method !== "none") {
+	const supported = d["token_endpoint_auth_methods_supported"];
+	if (
+		method !== undefined &&
+		method !== "none" &&
+		!(Array.isArray(supported) && supported.includes("none"))
+	) {
 		throw invalid(
-			'The AI app must use token_endpoint_auth_method "none" with this relay.',
+			'The AI app must use token_endpoint_auth_method "none" with this relay, or list "none" in token_endpoint_auth_methods_supported.',
 		);
 	}
 	const grants = d["grant_types"];
