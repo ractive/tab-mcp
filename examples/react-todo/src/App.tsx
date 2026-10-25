@@ -17,12 +17,18 @@ const SERVER = {
 	name: "todo",
 	version: "1.0.0",
 	instructions:
-		"A todo list in the user's browser tab. list_todos first to get the ids; complete_todo and delete_todo take one.",
+		"A todo list in the user's browser tab. list_todos first to get the ids; complete_todo takes one, delete_todos one or more (delete several in one call).",
 };
 
 export function App(props: { relay: string; todos: TodoList }) {
 	return (
-		<TabMcpProvider relay={props.relay} server={SERVER} appName="Todo">
+		// alwaysAllow: the confirmation offers "Always allow" (off by default).
+		<TabMcpProvider
+			relay={props.relay}
+			server={SERVER}
+			appName="Todo"
+			alwaysAllow
+		>
 			<main>
 				<header>
 					<h1>Todo</h1>
@@ -93,11 +99,26 @@ function Todos({ todos }: { todos: TodoList }) {
 		execute: ({ id }) => todos.complete(String(id)),
 	});
 	useTool({
-		name: "delete_todo",
-		description: "Delete a todo; the user confirms it in the page",
-		inputSchema: ID,
+		name: "delete_todos",
+		description:
+			"Delete one or more todos by their ids, in one call; the user confirms it in the page once",
+		inputSchema: {
+			type: "object",
+			properties: {
+				ids: {
+					type: "array",
+					items: { type: "string" },
+					minItems: 1,
+					maxItems: 200,
+				},
+			},
+			required: ["ids"],
+			additionalProperties: false,
+		},
 		annotations: { consequentialHint: true, destructiveHint: true },
-		execute: ({ id }) => todos.remove(String(id)),
+		execute: ({ ids }) => ({
+			deleted: todos.removeAll((ids as unknown[]).map(String)),
+		}),
 	});
 
 	const submit = (event: FormEvent) => {

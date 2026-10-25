@@ -43,6 +43,14 @@ export class TodoList {
 		return todo;
 	}
 
+	/** Remove several at once (all or none): one confirmation for "delete all". */
+	removeAll(ids: readonly string[]): Todo[] {
+		const gone = [...new Set(ids)].map((id) => this.#find(id));
+		const drop = new Set(gone.map((t) => t.id));
+		this.#set(this.#items.filter((t) => !drop.has(t.id)));
+		return gone;
+	}
+
 	#find(id: string): Todo {
 		const todo = this.#items.find((t) => t.id === id);
 		if (todo === undefined) throw new Error(`No todo with id ${id}`);
