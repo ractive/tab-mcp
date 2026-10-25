@@ -2,6 +2,7 @@
 
 ## 2026-10-25
 
+- The core's size budget raised to 6 KB gzipped (DEC-103)
 - Iterations 11 and 13 completed: relay 0.5.0 deployed; client 0.8.0 in the ractive.ch examples, the sign-in page and saturnus (PR 234); session slots deferred (DEC-097)
 - Iteration 14 completed: `DOCKERHUB_TOKEN` in the `release` environment (a token without expiry), the Docker Hub expiry check removed; DEC-102
 - Iteration 11 on iter-11/multi-instance: the address id in the `/tab` URL (`?a=`, checked against the secret, close 4009), the id on every request that needs the address's instance, "Running several instances" in docs/self-hosting.md, `/healthz` checks the token store; DEC-097 (session slots deferred), DEC-098, DEC-099
