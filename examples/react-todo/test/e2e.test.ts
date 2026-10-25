@@ -98,11 +98,12 @@ test.skipIf(chrome === undefined)(
 		expect(tools.map((t) => t.name).sort()).toEqual([
 			"add_todo",
 			"complete_todo",
-			"delete_todo",
+			"delete_todos",
 			"list_todos",
 		]);
 		expect(
-			tools.find((t) => t.name === "delete_todo")?.annotations?.destructiveHint,
+			tools.find((t) => t.name === "delete_todos")?.annotations
+				?.destructiveHint,
 		).toBe(true);
 
 		const added = json(
@@ -127,11 +128,15 @@ test.skipIf(chrome === undefined)(
 			`document.querySelector('.todos li[data-id="${added.id}"]').classList.contains('done')`,
 		);
 
-		// Deleting asks the user in the page first.
+		// Deleting asks the user in the page first, offering Always allow.
 		const deleting = client.callTool({
-			name: "delete_todo",
-			arguments: { id: added.id },
+			name: "delete_todos",
+			arguments: { ids: [added.id] },
 		});
+		await waitFor(
+			page,
+			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].some((b) => b.textContent === 'Always allow')",
+		);
 		await waitFor(
 			page,
 			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow' && !b.disabled)",

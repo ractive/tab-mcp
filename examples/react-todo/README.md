@@ -5,8 +5,9 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
 
 - `TabMcpProvider` around the app (`src/App.tsx`),
 - one `useTool` per tool where the list lives: `list_todos`, `add_todo`,
-  `complete_todo`, and `delete_todo`, which the user confirms in the page
-  (`consequentialHint`),
+  `complete_todo`, and `delete_todos` (one or more ids in one call, so "delete all" asks
+  once), which the user confirms in the page (`consequentialHint`); `alwaysAllow` on
+  the provider adds "Always allow" to that question,
 - `ConnectButton` for the "Connect your AI app" dialog, `useTabMcpState` for the status
   line and `useToolCalls` for "The AI's calls".
 
