@@ -7,7 +7,7 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
-### Unreleased
+### [0.9.1][client-0.9.1] - 2026-10-26
 
 #### Changed
 
@@ -533,6 +533,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
 
+[client-0.9.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.9.1
 [client-0.9.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.9.0
 [client-0.8.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.8.0
 [client-0.7.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.7.0
