@@ -11,8 +11,8 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 #### Changed
 
-- The guide (`connecting.md`) says what to do on a phone or tablet: the browser
-  pauses pages that are not on screen.
+- The guide (`connecting.md`): on a phone or tablet the browser pauses pages that
+  are not on screen; on Android, use split screen.
 
 ### [0.9.1][client-0.9.1] - 2026-10-26
 
