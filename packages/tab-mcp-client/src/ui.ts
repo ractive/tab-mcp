@@ -112,9 +112,12 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-code :where(br) { display: none; }
 .tab-mcp-code :where(small) { grid-column: 1 / -1; }
 .tab-mcp-code-value { display: block; font: 700 var(--tab-mcp-code-size, 2em) / 1.2 var(--_tab-mcp-mono); letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
-.tab-mcp-help :where(summary) { width: fit-content; cursor: pointer; }
+.tab-mcp-help { border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-help :where(summary) { padding: 0.75rem 1rem; font-weight: 600; cursor: pointer; }
+.tab-mcp-help > :where(:not(summary)) { margin-inline: 1rem; }
+.tab-mcp-help > :where(:last-child:not(summary)) { margin-bottom: 1rem; }
 .tab-mcp-dialog :where(.tab-mcp-help ul, .tab-mcp-apps ul) { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
-.tab-mcp-help :where(ul) { margin-top: 0.75rem; gap: 0.75rem; }
+.tab-mcp-help :where(ul) { margin-top: 0.25rem; margin-bottom: 0.75rem; gap: 0.75rem; }
 .tab-mcp-help :where(li) { overflow-wrap: anywhere; }
 .tab-mcp-help :where(strong) { display: block; font-weight: 600; }
 .tab-mcp-command { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 0.5rem; margin-top: 0.375rem; }
@@ -523,8 +526,8 @@ export function commandAddress(address: string): string | undefined {
 	}
 }
 
-/** The guide for every AI app (docs/connecting.md). */
-const GUIDE = "https://github.com/ractive/tab-mcp/blob/main/docs/connecting.md";
+/** The guide for every AI app (docs/connecting.md, on ractive.ch). */
+const GUIDE = "https://ractive.ch/tab-mcp/connect/";
 
 /** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
 const CODEX_FEATURE = "mcp_2026_07_28";
