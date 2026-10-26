@@ -271,16 +271,20 @@ const key = "my-page:ai-on";
 mcp.addEventListener("statechange", () => {
   if (mcp.state === "connected") localStorage.setItem(key, "1");
 });
-turnOffButton.onclick = () => {
-  localStorage.removeItem(key);
-  mcp.disconnect();
-};
+// Turned off by the user (`disconnect()`): stay off after the next reload.
+mcp.addEventListener("disconnected", (e) => {
+  if (e.detail.reason === "user") localStorage.removeItem(key);
+});
+turnOffButton.onclick = () => mcp.disconnect();
 // On load: connect without a click if the user turned it on before.
-if (localStorage.getItem(key) === "1") mcp.connect({ resume: true }).catch(() => {});
+if (localStorage.getItem(key) === "1") {
+  mcp.connect({ resume: true }).catch((error) => showNote(`AI access is off: ${error.message}`));
+}
 ```
 
-`resume: true` lets `connect()` run without a click. Offer a way to turn it off: the
-ractive.ch examples do it this way.
+`resume: true` lets `connect()` run without a click. Offer a way to turn it off. With
+two tabs of the page open, the newer one takes the address over: listen for `replaced`
+(above) to tell the older tab why it went off.
 
 ### Identity binding (no code)
 
