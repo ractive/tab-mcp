@@ -7,6 +7,13 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Removed
+
+- `connecting.md` from the package: the guide's only source is now
+  https://ractive.ch/tab-mcp/connect/.
+
 ### [0.9.1][client-0.9.1] - 2026-10-26
 
 #### Changed
