@@ -7,6 +7,13 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Changed
+
+- The connect dialog's "How do I add it?" is a bordered, bold row across the dialog,
+  not a line of plain text, so it is easier to find.
+
 ### [0.9.0][client-0.9.0] - 2026-10-25
 
 #### Added

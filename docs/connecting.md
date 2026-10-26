@@ -8,7 +8,8 @@ server" or "plugin" in the app's settings. Which apps work at all:
 Every app needs the same two things from the page:
 
 1. In the page, click "Connect your AI app" and copy the **address**
-   (`https://…/a/…/mcp`). Keep the page open: the AI app reaches it only while it is.
+   (`https://…/a/…/mcp`). Keep the page and this dialog open until the app shows it
+   is connected: the code works only while the dialog is open.
 2. When the app asks you to sign in, your browser opens the relay's page
    "Connect … from …". Type the **6-digit code** the page shows (it changes every
    2 minutes) and click Connect.
@@ -63,9 +64,11 @@ Then run `/mcp` in Claude Code and choose Authenticate.
 
 ## When it does not work
 
-- **The AI app or the sign-in says the page is not open:** its tab is closed, asleep or
-  disconnected.
-  Open it and click "Connect your AI app" again.
+- **"Open “Connect your AI app” first" during the sign-in:** the page's dialog is
+  closed, or its tab is closed or asleep. Click "Connect your AI app" in the page, then
+  Try again.
+- **The AI app says the page is not open:** its tab is closed, asleep or disconnected.
+  Open it; the address stays the same.
 - **"That code has expired":** take the current code from the page.
 - **Signed in, but no tools appear (Codex, ChatGPT for Mac):** the feature above is off.
 - **"This connection cannot be made":** the app's sign-in is not supported; the page
