@@ -71,6 +71,10 @@ Then run `/mcp` in Claude Code and choose Authenticate.
   Try again.
 - **The AI app says the page is not open:** its tab is closed, asleep or disconnected.
   Open it; the address stays the same.
+- **On a phone or tablet:** the browser pauses pages that are not on screen, so the AI
+  app cannot reach the page while you use the AI app. On Android, put the browser and
+  the AI app side by side in split screen. On an iPad, Split View may work; an iPhone
+  has no split screen (not tested on either).
 - **"That code has expired":** take the current code from the page.
 - **Signed in, but no tools appear (Codex, ChatGPT for Mac):** the feature above is off.
 - **"This connection cannot be made":** the app's sign-in is not supported; the page

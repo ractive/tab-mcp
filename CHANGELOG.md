@@ -7,6 +7,13 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Changed
+
+- The guide (`connecting.md`) says what to do on a phone or tablet: the browser
+  pauses pages that are not on screen.
+
 ### [0.9.1][client-0.9.1] - 2026-10-26
 
 #### Changed
