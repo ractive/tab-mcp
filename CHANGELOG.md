@@ -13,6 +13,8 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 - The connect dialog's "How do I add it?" is a bordered, bold row across the dialog,
   not a line of plain text, so it is easier to find.
+- The help's guide link goes to https://ractive.ch/tab-mcp/connect/, not GitHub. The
+  package ships the guide as `connecting.md`.
 
 ### [0.9.0][client-0.9.0] - 2026-10-25
 

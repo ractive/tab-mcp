@@ -1,9 +1,9 @@
 # Connecting an AI app
 
-How to add a page's tab-mcp address to an AI app, as tested on 2026-10-25. AI apps
+How to add a page's tab-mcp address to an AI app. AI apps
 change their menus often: if a step no longer matches, look for "connector", "MCP
 server" or "plugin" in the app's settings. Which apps work at all:
-[compatibility](compatibility.md).
+[compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 Every app needs the same two things from the page:
 
@@ -56,6 +56,8 @@ its own address, so each needs its own entry.
 
 ## Claude Code
 
+As of Claude Code 2.1.308 on 2026-10-26.
+
 ```sh
 claude mcp add --transport http <name> <address>
 ```
@@ -72,4 +74,4 @@ Then run `/mcp` in Claude Code and choose Authenticate.
 - **"That code has expired":** take the current code from the page.
 - **Signed in, but no tools appear (Codex, ChatGPT for Mac):** the feature above is off.
 - **"This connection cannot be made":** the app's sign-in is not supported; the page
-  says why. Check [compatibility](compatibility.md).
+  says why. Check [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).

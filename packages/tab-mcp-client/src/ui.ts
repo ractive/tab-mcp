@@ -526,8 +526,8 @@ export function commandAddress(address: string): string | undefined {
 	}
 }
 
-/** The guide for every AI app (docs/connecting.md). */
-const GUIDE = "https://github.com/ractive/tab-mcp/blob/main/docs/connecting.md";
+/** The guide for every AI app (docs/connecting.md, on ractive.ch). */
+const GUIDE = "https://ractive.ch/tab-mcp/connect/";
 
 /** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
 const CODEX_FEATURE = "mcp_2026_07_28";
