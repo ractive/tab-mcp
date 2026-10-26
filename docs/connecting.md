@@ -8,7 +8,7 @@ server" or "plugin" in the app's settings. Which apps work at all:
 Every app needs the same two things from the page:
 
 1. In the page, click "Connect your AI app" and copy the **address**
-   (`https://…/a/…/mcp`). Keep the page and this dialog open until the app shows it
+   (`https://…/a/…/mcp`). Keep the page and the dialog open until the app shows it
    is connected: the code works only while the dialog is open.
 2. When the app asks you to sign in, your browser opens the relay's page
    "Connect … from …". Type the **6-digit code** the page shows (it changes every
