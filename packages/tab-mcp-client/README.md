@@ -260,8 +260,31 @@ refusal by the relay, and an attempt the relay refuses stops it (an unreachable 
 tried again); the event `error` then says why, just before `reconnecting` turns `null`. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
 sets the waits (the last one repeats).
 
-The library does not connect on page load by itself. A page that offers something like
-"Keep AI access on" can call `connect({ resume: true })` on load.
+### Keeping AI access on after a reload
+
+The library does not connect on page load by itself, so after a reload the page is off
+until the user clicks Connect again; its AI apps stay paired but cannot reach it. To keep
+AI access on, remember the user's choice and connect on load:
+
+```ts
+const key = "my-page:ai-on";
+mcp.addEventListener("statechange", () => {
+  if (mcp.state === "connected") localStorage.setItem(key, "1");
+});
+// Turned off by the user (`disconnect()`): stay off after the next reload.
+mcp.addEventListener("disconnected", (e) => {
+  if (e.detail.reason === "user") localStorage.removeItem(key);
+});
+turnOffButton.onclick = () => mcp.disconnect();
+// On load: connect without a click if the user turned it on before.
+if (localStorage.getItem(key) === "1") {
+  mcp.connect({ resume: true }).catch((error) => showNote(`AI access is off: ${error.message}`));
+}
+```
+
+`resume: true` lets `connect()` run without a click. Offer a way to turn it off. With
+two tabs of the page open, the newer one takes the address over: listen for `replaced`
+(above) to tell the older tab why it went off.
 
 ### Identity binding (no code)
 
