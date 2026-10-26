@@ -6,9 +6,9 @@
  *   connection and the UI stay separate chunks loaded by `connect()`;
  * - `dist/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
  * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`;
- * - `dist/package.json`, README, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt,
- *   connecting.md (the guide; ractive.ch renders it at /tab-mcp/connect/)
- *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
+ * - `dist/package.json`, README, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
+ *   (the CDN build bundles `@cfworker/json-schema`), connecting.md (the
+ *   guide; ractive.ch renders it at /tab-mcp/connect/): the directory to pack.
  *
  * Prints the gzipped sizes of the core and the lazily loaded chunks.
  */
