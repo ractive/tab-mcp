@@ -66,7 +66,6 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"LICENSE",
 			"README.md",
 			"THIRD-PARTY-NOTICES.txt",
-			"connecting.md",
 			"package.json",
 			"index.js",
 			"index.js.map",
