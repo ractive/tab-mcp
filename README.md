@@ -54,7 +54,7 @@ sequenceDiagram
         Page->>You: ask first
         You-->>Page: allow
     end
-    Page-->>Relay: http.response with the tool's result
+    Page-->>Relay: the tool's result, streamed over the WebSocket
     Relay-->>App: the result
 
     Note over You,App: 5. Close the tab
