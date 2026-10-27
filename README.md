@@ -23,11 +23,12 @@ Try it without installing anything. These pages connect to the hosted relay
 ## How it works
 
 <!-- Mermaid source (https://mermaid.js.org): GitHub draws it. Edit the text; try changes
-     at https://mermaid.live. Keep it in step with the numbered steps below. -->
+     at https://mermaid.live. Keep it in step with the numbered steps below and with the
+     copy on https://ractive.ch/tab-mcp/ (src/tab-mcp/how-it-works.mmd in ractive.ch). -->
 ```mermaid
 sequenceDiagram
     actor You
-    participant Page as Web page in your tab<br/>(@ractive-ch/tab-mcp-client)
+    participant Page as Web page in your tab<br/>(tab-mcp-client)
     participant Relay as tab-mcp relay
     participant App as AI app<br/>(Claude, ChatGPT, Claude Code)
 
@@ -47,7 +48,7 @@ sequenceDiagram
 
     Note over You,App: 4. Call a tool
     App->>Relay: POST /a/{id}/mcp with the token: tools/call
-    Note over Relay: checks the token and limits,<br/>knows no tools, stores no arguments
+    Note over Relay: checks the token and limits, knows no tools, stores no arguments
     Relay->>Page: http.request over the WebSocket
     opt the tool changes something
         Page->>You: ask first
