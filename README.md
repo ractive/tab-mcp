@@ -22,17 +22,46 @@ Try it without installing anything. These pages connect to the hosted relay
 
 ## How it works
 
-```text
- AI app (Claude, ChatGPT, Claude Code)
-   │  HTTPS: MCP requests to https://relay.example.com/a/<id>/mcp, with a token
-   │  OAuth sign-in: you type the page's code on the relay's /authorize page
-   ▼
- tab-mcp relay: checks tokens and limits, forwards requests, knows no tools
-   ▲
-   │  WebSocket /tab (protocol tab-mcp.v1), opened when you click Connect;
-   │  requests go to the page, results come back
-   │
- Web page with @ractive-ch/tab-mcp-client, open in your browser tab
+<!-- Mermaid source (https://mermaid.js.org): GitHub draws it. Edit the text; try changes
+     at https://mermaid.live. Keep it in step with the numbered steps below and with the
+     copy on https://ractive.ch/tab-mcp/ (src/tab-mcp/how-it-works.mmd in ractive.ch). -->
+```mermaid
+sequenceDiagram
+    actor You
+    participant Page as Web page in your tab<br/>(tab-mcp-client)
+    participant Relay as tab-mcp relay
+    participant App as AI app<br/>(Claude, ChatGPT, Claude Code)
+
+    Note over You,App: 1. Connect the page
+    You->>Page: click "Connect your AI app"
+    Page->>Relay: WebSocket /tab (tab-mcp.v1)
+    Relay-->>Page: address /a/{id}/mcp and a 6-digit code
+    Page-->>You: show the address and the code
+
+    Note over You,App: 2-3. Pair the AI app
+    You->>App: add the address
+    App->>You: open the relay's /authorize page in your browser
+    You->>Relay: check the AI app and the page, type the code
+    Relay-->>App: token for this address
+    Relay-->>Page: grant.added
+    Page-->>You: list the AI app as connected, with Disconnect
+
+    Note over You,App: 4. Call a tool
+    App->>Relay: POST /a/{id}/mcp with the token: tools/call
+    Note over Relay: checks the token and limits, knows no tools, stores no arguments
+    Relay->>Page: http.request over the WebSocket
+    opt the tool changes something
+        Page->>You: ask first
+        You-->>Page: allow
+    end
+    Page-->>Relay: the tool's result, streamed over the WebSocket
+    Relay-->>App: the result
+
+    Note over You,App: 5. Close the tab
+    You->>Page: close the tab
+    Page--xRelay: WebSocket closed
+    App->>Relay: tools/call with the token
+    Relay-->>App: "The page is not open" (the AI app stays paired)
 ```
 
 1. You click "Connect your AI app" in the page. The page opens a WebSocket to the relay
