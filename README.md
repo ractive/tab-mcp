@@ -9,6 +9,13 @@ apps work) and type a code that the page shows. The AI app then calls the page's
 through the relay while the tab stays open. Nothing has to be installed on your
 computer.
 
+<!-- The GIF lives on ractive.ch (static/tab-mcp/demo/ in ractive.ch), not in this
+     repository; the link leads to the video there. -->
+[![The diagram editor is connected to Claude Desktop with its address and the code it shows; Claude then lists the page's tools and calls them](https://ractive.ch/tab-mcp/demo/tab-mcp-demo.gif)](https://ractive.ch/tab-mcp/#demo)
+
+The demo: the [diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) connected to
+Claude Desktop, then Claude calling the page's tools (45 s; waiting cut, Claude's work sped up).
+
 ## Live examples
 
 Try it without installing anything. These pages connect to the hosted relay
