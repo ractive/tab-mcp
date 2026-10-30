@@ -14,7 +14,7 @@ computer.
 [![The diagram editor is connected to Claude Desktop with its address and the code it shows; Claude then lists the page's tools and calls them](https://ractive.ch/tab-mcp/demo/tab-mcp-demo.gif)](https://ractive.ch/tab-mcp/#demo)
 
 The demo: the [diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) connected to
-Claude Desktop, then Claude using its tools (45 s; waiting cut, Claude's work sped up).
+Claude Desktop, then Claude calling the page's tools (45 s; waiting cut, Claude's work sped up).
 
 ## Live examples
 
