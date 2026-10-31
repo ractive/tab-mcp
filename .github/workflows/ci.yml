@@ -11,7 +11,7 @@ permissions:
 env:
   # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
   # it on purpose (the same version as in release.yml).
-  CHROME_VERSION: "156.0.8078.47"
+  CHROME_VERSION: "156.0.8078.80"
 
 jobs:
   verify:
@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.3
+          bun-version: 1.4.4
       # The browser tests (the client's and the calculator e2e) need Chrome;
       # in CI they fail instead of skipping without it.
       - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0

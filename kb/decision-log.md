@@ -36,6 +36,8 @@ real user, integrated in a separate later project.
 
 Bun 1.4.3, TypeScript 7.0.2 (`bun check`), Biome 2.5.15; latest versions pinned exactly;
 Bun built-ins before packages; no Node-only packages where Bun has a built-in.
+The versions are those of 2026-10-19; the current pins are in `package.json`, the
+workflows and the Dockerfile, which the dependency updates move together.
 
 ## DEC-005: Only MCP 2026-07-28 (owner)
 

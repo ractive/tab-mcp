@@ -5,7 +5,7 @@ bundler build (index.js and its chunks) does not include it; it is installed
 as a dependency instead.
 
 ------------------------------------------------------------------------------
-@cfworker/json-schema 4.1.1
+@cfworker/json-schema 4.1.4
 https://github.com/cfworker/cfworker
 ------------------------------------------------------------------------------
 

@@ -28,7 +28,7 @@ Rules:
   only if a doc you write makes a kb sentence wrong.
 - Writing style: /mnt/session/uploads/writing-style.md (plain English, short sentences,
   no marketing words). Apply it to every file you write.
-- Install Bun 1.4.3 with `npm install -g bun@1.4.3`, then `bun install --frozen-lockfile`.
+- Install Bun 1.4.4 with `npm install -g bun@1.4.4`, then `bun install --frozen-lockfile`.
   `bun run verify` must pass before you finish (browser tests skip without Chrome; that is
   expected).
 - Commit with `git -c user.name="James Bergamin" -c user.email=james@ractive.ch commit`,

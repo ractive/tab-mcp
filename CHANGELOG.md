@@ -14,6 +14,11 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 - `connecting.md` from the package: the guide's only source is now
   https://ractive.ch/tab-mcp/connect/.
 
+#### Changed
+
+- The CDN build bundles `@cfworker/json-schema` 4.1.4 (was 4.1.1); the dependency is
+  pinned to it.
+
 ### [0.9.1][client-0.9.1] - 2026-10-26
 
 #### Changed
@@ -356,6 +361,8 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - A `client_assertion` at `/token` or `/revoke` is checked instead of refused. A public
   client that sends one gets `invalid_client` (401) rather than 400. `client_secret` and
   HTTP Basic are still refused.
+- Bun 1.4.4: the Docker image runs on it (was 1.4.3), and the npm package needs Bun
+  1.4.4 or newer, the version CI tests.
 
 #### Fixed
 

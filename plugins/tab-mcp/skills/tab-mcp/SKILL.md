@@ -2,7 +2,7 @@
 name: tab-mcp
 description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP-style registerTool or "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
-compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.3+ or Docker.
+compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.4+ or Docker.
 ---
 
 # Add tab-mcp to a web app
@@ -238,7 +238,7 @@ can reach the relay directly, or they can pick their own IP and get around the p
 limits.
 
 Without Docker: `bun add --global @ractive-ch/tab-mcp`, then `tab-mcp` with the same
-variables (Bun 1.4.3+). Run one relay process per public address. The reverse proxy must
+variables (Bun 1.4.4+). Run one relay process per public address. The reverse proxy must
 forward WebSockets on `/tab`, must not buffer event streams on `/a/…/mcp`, and must allow
 requests of up to 300 s. The relay starts event streams after 20 s, which keeps 60 s
 first-byte limits of CDNs happy. Health check: `GET /healthz`.
