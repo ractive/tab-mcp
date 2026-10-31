@@ -55,6 +55,7 @@ interface TokenRecord {
   expiresAt: number;
   usedAt?: number;        // refresh tokens: when it was exchanged
   subject?: string;       // identity binding: hash of the person the grant was made for
+  clientAuth?: "private_key_jwt"; // the grant needs the AI app's client assertion
 }
 
 interface GrantSummary {
@@ -74,6 +75,12 @@ unchanged (and leave the key out when it was not set). A store that drops it doe
 break anything open: the relay then refuses every request of such a grant as a
 mismatch. The conformance suite checks the round trip.
 
+`clientAuth` is set on grants made or refreshed with a `private_key_jwt` client
+assertion (DEC-106): their refresh tokens are refused without one. Store it and return
+it unchanged too, including on used refresh tokens. Here a store that drops it **does**
+break something open: the grant's refresh tokens then work without the AI app's key. The
+conformance suite checks the round trip.
+
 ```ts
 interface RevokeOptions {
   now: number;
@@ -87,6 +94,7 @@ interface TokenStore {
   revoke(selector: RevokeSelector, options: RevokeOptions): Promise<number>;
   listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
   deleteExpired(now: number): Promise<number>;
+  claimNonce?(key: string, expiresAt: number, now: number): Promise<boolean>;
   close?(): Promise<void>;
 }
 ```
@@ -102,7 +110,8 @@ epoch.
 | `markUsed` | Set `usedAt` to `now` if it is not set yet, and in the same step lower `expiresAt` to `keepUntil` if that is earlier (never raise it). Return `true` only for the call that set it; `false`, changing nothing, if it was already used or does not exist. |
 | `revoke` | Delete every token of the grant or of the address, leave a tombstone until `keepUntil`, and return how many tokens were deleted. |
 | `listGrants` | The grants of an address that still have a usable token at `now` (an unexpired access token, or an unexpired and unused refresh token), oldest grant first. The page uses it to list connected apps. |
-| `deleteExpired` | Delete every record with `expiresAt <= now` and every tombstone whose `keepUntil` has passed. Return how many records were deleted. The relay calls it every 10 minutes. |
+| `deleteExpired` | Delete every record with `expiresAt <= now` and every tombstone whose `keepUntil` has passed. Return how many records were deleted. The relay calls it every 10 minutes. It should also drop `claimNonce` entries whose `expiresAt` has passed. |
+| `claimNonce` | Optional (DEC-106): remember `key` (a hash of an AI app's client id and the `jti` of its client assertion) until `expiresAt`. Return `true` for the one call that recorded it, `false` while it is remembered; an entry with `expiresAt <= now` counts as absent. Atomic like `markUsed` (Redis `SET key 1 PXAT expiresAt NX`, SQL `INSERT … ON CONFLICT DO UPDATE … WHERE expires_at <= now`). Without it the relay keeps used `jti`s in its own memory: correct for one instance, but with several a replayed assertion is not noticed on another instance. `expiresAt` is at most about six minutes ahead, and each instance writes at most 10 000 live entries per AI app host, so the table stays small. |
 | `close` | Optional: release connections or file handles. |
 
 ## Guarantees
@@ -174,6 +183,9 @@ conformance suite with Redis 7.0 when it was written, and again with Redis 7.4 a
 `markUsed` gained `keepUntil`. It is a starting point, not
 a supported package: it assumes a single Redis node (the scripts touch keys they do not
 declare, which Redis Cluster does not allow), and `listGrants` reads tokens one by one.
+It keeps records as JSON, so `clientAuth` round-trips. It has no `claimNonce`; with
+several instances add one: `(await this.redis.send("SET", [this.prefix + "nonce:" + key,
+"1", "PXAT", String(expiresAt), "NX"])) === "OK"` (Redis expires the key by itself).
 
 ```ts
 // redis-token-store.ts
@@ -371,7 +383,12 @@ Map the methods like this:
 - `revoke`: in one transaction, upsert the tombstone (keep the later `at` and
   `keep_until`) and delete the matching tokens.
 - `deleteExpired`: delete tokens with `expires_at <= now` and tombstones with
-  `keep_until <= now`.
+  `keep_until <= now` (and nonces with `expires_at <= now`).
+- `claimNonce`, if you run several instances: a third table `nonces` (`key` primary
+  key, `expires_at`) and `INSERT INTO nonces VALUES ($key, $expires_at) ON CONFLICT (key)
+  DO UPDATE SET expires_at = excluded.expires_at WHERE nonces.expires_at <= $now`;
+  return whether one row changed.
+- `client_auth`: a nullable text column on `tokens` for `clientAuth`.
 
 The built-in `SqliteTokenStore` in the
 [relay's source](../packages/tab-mcp/src/store/sqlite.ts) follows exactly this plan and

@@ -95,7 +95,8 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 5. The AI app reads the protected-resource metadata (`resource` = the address,
    `authorization_servers` = [relay origin]) and the authorization-server metadata
    (`client_id_metadata_document_supported: true`, `code_challenge_methods_supported:
-   ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`,
+   ["S256"]`, `token_endpoint_auth_methods_supported: ["none", "private_key_jwt"]`
+   (DEC-106),
    `authorization_response_iss_parameter_supported: true`, `grant_types_supported:
    ["authorization_code", "refresh_token"]`).
 6. The AI app opens `/authorize?response_type=code&client_id=<its CIMD URL>&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…&resource=<address>&scope=tools`
@@ -112,7 +113,8 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
    attempts. On success the relay redirects to `redirect_uri?code=…&state=…&iss=<relay
    origin>`; "Cancel" redirects with `error=access_denied`.
 10. The AI app calls `/token` with the code, `code_verifier`, `redirect_uri`, `client_id`
-    and `resource`. The relay checks PKCE S256, single use, 60 s code lifetime and that all
+    and `resource`, and a `private_key_jwt` client also with a signed `client_assertion`
+    (DEC-106). The relay checks PKCE S256, single use, 60 s code lifetime and that all
     values match, then creates a grant bound to the address and issues an access token
     (1 h) and a refresh token (30 days) (DEC-029). The tab receives `grant.added` and
     shows "<client> connected" with a Disconnect button.

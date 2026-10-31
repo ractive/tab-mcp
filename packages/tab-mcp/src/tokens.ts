@@ -40,6 +40,8 @@ export interface GrantInput {
 	grantCreatedAt?: number;
 	/** The hashed identity of an identity-bound grant (DEC-077). */
 	subject?: string;
+	/** Refreshes need a client assertion (DEC-106). */
+	clientAuth?: "private_key_jwt";
 }
 
 /**
@@ -78,9 +80,10 @@ export async function issueAccessToken(
  */
 export async function issueTokenPair(
 	store: TokenStore,
-	grant: Required<Omit<GrantInput, "scopes" | "subject">> & {
+	grant: Required<Omit<GrantInput, "scopes" | "subject" | "clientAuth">> & {
 		scopes: string[];
 		subject?: string;
+		clientAuth?: "private_key_jwt";
 	},
 	options: {
 		accessTtlMs: number;
@@ -103,6 +106,7 @@ export async function issueTokenPair(
 		grantCreatedAt: grant.grantCreatedAt,
 		issuedAt: now,
 		...(grant.subject === undefined ? {} : { subject: grant.subject }),
+		...(grant.clientAuth === undefined ? {} : { clientAuth: grant.clientAuth }),
 	};
 	const accessExpires = Math.min(
 		now + options.accessTtlMs,

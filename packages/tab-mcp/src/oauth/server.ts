@@ -8,24 +8,37 @@
  *   relaxed), `resource` bound to one address (RFC 8707), `iss` in every
  *   response (RFC 9207), and the pairing step of the address's site (DEC-042);
  * - `/token` for the authorization code and rotating refresh tokens (DEC-029);
+ * - client authentication `none` or `private_key_jwt` (DEC-106);
  * - `/revoke` (RFC 7009).
  */
 
 import { timingSafeEqual } from "node:crypto";
 import { isAddressId, shortAddress } from "../address.ts";
 import type { PairingKind, RelayConfig, Site } from "../config.ts";
+import { JWT_ALGORITHMS, JwtError } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import type { GrantInfo } from "../protocol.ts";
 import { RateLimiter } from "../ratelimit.ts";
+import { NonceSet } from "../store/memory.ts";
 import type { TokenRecord, TokenStore } from "../store/types.ts";
 import { hashToken, issueTokenPair, newId } from "../tokens.ts";
 import {
 	type CimdTestMode,
+	type ClientAuth,
 	type ClientMetadata,
 	ClientMetadataError,
 	ClientMetadataFetcher,
+	isTransient,
 	redirectUriMatches,
 } from "./cimd.ts";
+import {
+	assertionSubject,
+	CLIENT_ASSERTION_TYPE,
+	ClientKeySets,
+	NonceQuota,
+	quotaKey,
+	verifyClientAssertion,
+} from "./client-auth.ts";
 import { AUTHORIZE_CSS, escapeHtml, pageHeaders, renderPage } from "./html.ts";
 import { OidcPairing } from "./oidc.ts";
 import {
@@ -53,6 +66,15 @@ const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
+/**
+ * Live client assertion ids per AI app host (`quotaKey`), and in all, on one instance
+ * (DEC-106). An assertion is usable for at most five minutes (plus leeway),
+ * so a host's share allows about 30 token requests a second.
+ */
+const MAX_NONCES_PER_HOST = 10_000;
+const MAX_NONCES = 100_000;
+/** The one text of every client authentication failure; the reason is logged. */
+const CLIENT_AUTH_FAILED = "client authentication failed";
 
 /** A tab session as the authorization server sees it. */
 export interface AuthorizeSession extends PairingTarget {
@@ -106,6 +128,22 @@ interface IssuedCode extends AuthorizationRequest {
 	grantId?: string;
 	/** The binding key the grant is made for (identity binding, DEC-077). */
 	subject?: string;
+}
+
+/** The client of a token or revocation request (DEC-106). */
+interface RequestClient {
+	clientId: string;
+	/** It proved itself with a valid `private_key_jwt` assertion. */
+	assertion: boolean;
+}
+
+/**
+ * Whether a client must authenticate for every code: `private_key_jwt`
+ * without `none` among its methods. With `none` listed (DEC-104) a grant may
+ * start public; one made with an assertion stays bound to it (DEC-106).
+ */
+function assertionRequired(auth: ClientAuth): boolean {
+	return auth.method === "private_key_jwt" && !auth.publicAllowed;
 }
 
 class OAuthError extends Error {
@@ -177,10 +215,21 @@ function hostOf(url: string): string {
 	}
 }
 
+/** A client id's host for the log; not the text itself: it is anyone's choice. */
+function logHost(clientId: string | undefined): string {
+	return clientId !== undefined && URL.canParse(clientId)
+		? hostOf(clientId).slice(0, 100)
+		: "(not a URL)";
+}
+
 /** The OAuth endpoints and pages, mounted by the relay. */
 export class AuthorizationServer {
 	readonly #host: AuthorizationHost;
 	readonly #cimd: ClientMetadataFetcher;
+	readonly #clientKeys: ClientKeySets;
+	/** Used client assertion ids when the store has no `claimNonce` (per instance). */
+	readonly #nonces = new NonceSet();
+	readonly #nonceQuota = new NonceQuota(MAX_NONCES_PER_HOST, MAX_NONCES);
 	/** Insertion order is expiry order (one lifetime for all), so sweeps stop early. */
 	readonly #pending = new Map<string, Pending>();
 	readonly #pendingPerIp = new Map<string, number>();
@@ -245,6 +294,8 @@ export class AuthorizationServer {
 			logger: host.logger,
 			...(testMode?.cimd === undefined ? {} : { testMode: testMode.cimd }),
 		});
+		const cimd = this.#cimd;
+		this.#clientKeys = new ClientKeySets((url) => cimd.fetchJwks(url));
 	}
 
 	get #issuer(): string {
@@ -320,8 +371,10 @@ export class AuthorizationServer {
 				response_modes_supported: ["query"],
 				grant_types_supported: ["authorization_code", "refresh_token"],
 				code_challenge_methods_supported: ["S256"],
-				token_endpoint_auth_methods_supported: ["none"],
-				revocation_endpoint_auth_methods_supported: ["none"],
+				token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+				token_endpoint_auth_signing_alg_values_supported: JWT_ALGORITHMS,
+				revocation_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+				revocation_endpoint_auth_signing_alg_values_supported: JWT_ALGORITHMS,
 				scopes_supported: [SCOPE],
 				client_id_metadata_document_supported: true,
 				authorization_response_iss_parameter_supported: true,
@@ -1046,6 +1099,8 @@ ${cancel}
 				"refresh_token",
 				"resource",
 				"scope",
+				"client_assertion",
+				"client_assertion_type",
 			]);
 			if ("duplicate" in p) {
 				throw new OAuthError(
@@ -1054,15 +1109,14 @@ ${cancel}
 					`${p.duplicate} was sent more than once`,
 				);
 			}
-			const clientId = p["client_id"];
-			if (clientId === undefined) {
-				throw new OAuthError(400, "invalid_request", "client_id is required");
-			}
+			const client = await this.#authenticateClient(p, [
+				`${this.#issuer}/token`,
+			]);
 			let body: Record<string, unknown>;
 			if (p["grant_type"] === "authorization_code") {
-				body = await this.#codeGrant(p, clientId);
+				body = await this.#codeGrant(p, client);
 			} else if (p["grant_type"] === "refresh_token") {
-				body = await this.#refreshGrant(p, clientId);
+				body = await this.#refreshGrant(p, client);
 			} else if (p["grant_type"] === undefined) {
 				throw new OAuthError(400, "invalid_request", "grant_type is required");
 			} else {
@@ -1107,7 +1161,11 @@ ${cancel}
 		);
 	}
 
-	/** Form parameters of a token or revocation request (client auth `none` only). */
+	/**
+	 * Form parameters of a token or revocation request. Client secrets, in
+	 * the body or as HTTP Basic, are refused: the methods are `none` and
+	 * `private_key_jwt` (DEC-106).
+	 */
 	async #formParams(req: Request): Promise<URLSearchParams> {
 		const type = (req.headers.get("content-type") ?? "").split(";")[0]?.trim();
 		if (type !== "application/x-www-form-urlencoded") {
@@ -1122,7 +1180,7 @@ ${cancel}
 			throw new OAuthError(
 				401,
 				"invalid_client",
-				"client authentication is not supported (token_endpoint_auth_method none)",
+				"HTTP authentication is not supported (token_endpoint_auth_method none or private_key_jwt)",
 			);
 		}
 		const text = await this.#readForm(req);
@@ -1130,20 +1188,145 @@ ${cancel}
 			throw new OAuthError(413, "invalid_request", "the request is too large");
 		}
 		const params = new URLSearchParams(text);
-		if (params.has("client_secret") || params.has("client_assertion")) {
+		if (params.has("client_secret")) {
 			throw new OAuthError(
 				400,
 				"invalid_client",
-				"client authentication is not supported (token_endpoint_auth_method none)",
+				"client secrets are not supported (token_endpoint_auth_method none or private_key_jwt)",
 			);
 		}
 		return params;
 	}
 
+	/**
+	 * The client of a token or revocation request (RFC 7521 §4.2, DEC-106).
+	 * Without an assertion it is the `client_id` of a public client, which
+	 * the grant checks. With one, the assertion is verified against the
+	 * client's current metadata, with `aud` the issuer or one of `endpoints`;
+	 * `client_id` may then be left out (the assertion's `sub` names it).
+	 */
+	async #authenticateClient(
+		p: Record<string, string | undefined>,
+		endpoints: readonly string[],
+	): Promise<RequestClient> {
+		const assertion = p["client_assertion"];
+		const type = p["client_assertion_type"];
+		if (assertion === undefined && type === undefined) {
+			const clientId = p["client_id"];
+			if (clientId === undefined) {
+				throw new OAuthError(400, "invalid_request", "client_id is required");
+			}
+			return { clientId, assertion: false };
+		}
+		if (assertion === undefined || type === undefined) {
+			throw new OAuthError(
+				400,
+				"invalid_request",
+				"client_assertion and client_assertion_type go together",
+			);
+		}
+		const clientId = p["client_id"] ?? assertionSubject(assertion);
+		if (type !== CLIENT_ASSERTION_TYPE) {
+			throw this.#clientAuthFailed(clientId, "assertion_type");
+		}
+		if (clientId === undefined) {
+			throw this.#clientAuthFailed(clientId, "no_client_id");
+		}
+		let client: ClientMetadata;
+		try {
+			// A recent copy if the host cannot be reached right now (DEC-106).
+			client = await this.#cimd.get(clientId, { allowStale: true });
+		} catch (error) {
+			if (!(error instanceof ClientMetadataError)) throw error;
+			const reason = `metadata_${error.reason}`;
+			// A private address answers like an unreachable one, so these
+			// endpoints do not tell where a name points (review of PR 65).
+			throw isTransient(error) || error.reason === "private_address"
+				? this.#clientAuthUnavailable(clientId, reason)
+				: this.#clientAuthFailed(clientId, reason);
+		}
+		if (client.auth.method !== "private_key_jwt") {
+			throw this.#clientAuthFailed(clientId, "not_private_key_jwt");
+		}
+		const domain = quotaKey(clientId);
+		try {
+			await verifyClientAssertion(assertion, {
+				clientId,
+				auth: client.auth,
+				keys: this.#clientKeys.for(client.auth.jwksUri),
+				audiences: [this.#issuer, ...endpoints],
+				claimNonce: (key, until, now) =>
+					this.#claimNonce(clientId, domain, key, until, now),
+				now: Date.now(),
+			});
+		} catch (error) {
+			if (!(error instanceof JwtError)) throw error;
+			// The keys could not be loaded: that says nothing about the client.
+			throw error.reason === "jwks_unavailable"
+				? this.#clientAuthUnavailable(clientId, error.reason)
+				: this.#clientAuthFailed(clientId, error.reason);
+		}
+		return { clientId, assertion: true };
+	}
+
+	/** `invalid_client` (401) with one text for every reason, which goes to the log. */
+	#clientAuthFailed(clientId: string | undefined, reason: string): OAuthError {
+		this.#host.logger.info("oauth.client_auth_failed", {
+			client: logHost(clientId),
+			reason,
+		});
+		return new OAuthError(401, "invalid_client", CLIENT_AUTH_FAILED);
+	}
+
+	/**
+	 * `temporarily_unavailable` (503, with Retry-After) when the client's
+	 * metadata or keys cannot be had right now, or its share of the replay
+	 * store is full: the client is not told its credentials are bad, so it
+	 * keeps its grant and tries again (DEC-106).
+	 */
+	#clientAuthUnavailable(clientId: string, reason: string): OAuthError {
+		this.#host.logger.warn("oauth.client_auth_unavailable", {
+			client: logHost(clientId),
+			reason,
+		});
+		return new OAuthError(
+			503,
+			"temporarily_unavailable",
+			"the client cannot be authenticated right now; try again shortly",
+		);
+	}
+
+	/**
+	 * The replay store for assertion ids: the token store's, shared by every
+	 * instance; else this process's memory. Either way one AI app host
+	 * holds at most its share of live entries on this instance (DEC-106).
+	 */
+	async #claimNonce(
+		clientId: string,
+		domain: string,
+		key: string,
+		until: number,
+		now: number,
+	): Promise<boolean> {
+		if (this.#nonceQuota.sweep(now)) this.#nonces.sweep(now);
+		const refusal = this.#nonceQuota.refusal(domain, now);
+		if (refusal !== undefined) {
+			throw this.#clientAuthUnavailable(clientId, `nonces_${refusal}`);
+		}
+		const store = this.#host.store;
+		const claimed =
+			store.claimNonce === undefined
+				? this.#nonces.claim(key, until, now)
+				: await store.claimNonce(key, until, now);
+		if (claimed) this.#nonceQuota.add(domain, until);
+		return claimed;
+	}
+
 	async #codeGrant(
 		p: Record<string, string | undefined>,
-		clientId: string,
+		client: RequestClient,
 	): Promise<Record<string, unknown>> {
+		const clientId = client.clientId;
 		const code = p["code"];
 		const redirectUri = p["redirect_uri"];
 		const verifier = p["code_verifier"];
@@ -1162,6 +1345,15 @@ ${cancel}
 		const issued = this.#codes.get(key);
 		const invalid = (why: string) => new OAuthError(400, "invalid_grant", why);
 		if (issued === undefined) throw invalid("the code is not valid");
+		// Before anything changes: another client (even one with a valid
+		// assertion of its own), or this one without its key, neither burns
+		// the code nor revokes what it produced (DEC-106).
+		if (!constantTimeEqual(clientId, issued.client.clientId)) {
+			throw invalid("the code was issued to another client");
+		}
+		if (assertionRequired(issued.client.auth) && !client.assertion) {
+			throw this.#clientAuthFailed(clientId, "assertion_required");
+		}
 		if (issued.used) {
 			// RFC 6749 §4.1.2: a code used twice revokes what it produced.
 			if (issued.grantId !== undefined) {
@@ -1175,9 +1367,6 @@ ${cancel}
 		}
 		issued.used = true; // a failed check below burns the code too
 		if (issued.expiresAt <= Date.now()) throw invalid("the code has expired");
-		if (!constantTimeEqual(clientId, issued.client.clientId)) {
-			throw invalid("the code was issued to another client");
-		}
 		if (redirectUri !== issued.redirectUri) {
 			throw invalid("redirect_uri does not match the authorization request");
 		}
@@ -1217,6 +1406,8 @@ ${cancel}
 				scopes: issued.scopes,
 				grantCreatedAt: now,
 				...(issued.subject === undefined ? {} : { subject: issued.subject }),
+				// Made with the client's key: its refreshes need it too (DEC-106).
+				...(client.assertion ? { clientAuth: "private_key_jwt" as const } : {}),
 			},
 			{
 				accessTtlMs: config.accessTokenTtlMs,
@@ -1260,8 +1451,9 @@ ${cancel}
 
 	async #refreshGrant(
 		p: Record<string, string | undefined>,
-		clientId: string,
+		client: RequestClient,
 	): Promise<Record<string, unknown>> {
+		const clientId = client.clientId;
 		const token = p["refresh_token"];
 		if (token === undefined) {
 			throw new OAuthError(400, "invalid_request", "refresh_token is required");
@@ -1274,6 +1466,12 @@ ${cancel}
 		}
 		if (!constantTimeEqual(clientId, record.clientId)) {
 			throw invalid("the refresh token was issued to another client");
+		}
+		// A grant bound to the client's key is never redeemed as a public
+		// client; checked before reuse detection, so a stolen token alone
+		// cannot revoke the grant either (DEC-106).
+		if (record.clientAuth === "private_key_jwt" && !client.assertion) {
+			throw this.#clientAuthFailed(clientId, "assertion_required");
 		}
 		const now = Date.now();
 		if (record.expiresAt <= now) throw invalid("the refresh token has expired");
@@ -1331,6 +1529,11 @@ ${cancel}
 				scopes: record.scopes,
 				grantCreatedAt: record.grantCreatedAt,
 				...(record.subject === undefined ? {} : { subject: record.subject }),
+				// Once bound, always bound; a public grant refreshed with the
+				// client's key becomes bound (DEC-106).
+				...(record.clientAuth === "private_key_jwt" || client.assertion
+					? { clientAuth: "private_key_jwt" as const }
+					: {}),
 			},
 			{
 				accessTtlMs: this.#host.config.accessTokenTtlMs,
@@ -1386,7 +1589,13 @@ ${cancel}
 				);
 			}
 			const params = await this.#formParams(req);
-			const p = single(params, ["token", "client_id", "token_type_hint"]);
+			const p = single(params, [
+				"token",
+				"client_id",
+				"token_type_hint",
+				"client_assertion",
+				"client_assertion_type",
+			]);
 			if ("duplicate" in p) {
 				throw new OAuthError(
 					400,
@@ -1395,14 +1604,16 @@ ${cancel}
 				);
 			}
 			const token = p["token"];
-			const clientId = p["client_id"];
-			if (token === undefined || clientId === undefined) {
-				throw new OAuthError(
-					400,
-					"invalid_request",
-					"token and client_id are required",
-				);
+			if (token === undefined) {
+				throw new OAuthError(400, "invalid_request", "token is required");
 			}
+			// An assertion, if sent, must be valid; a public grant's tokens are
+			// revoked without one, a bound grant's only with one (RFC 7009 §2.1,
+			// DEC-106).
+			const client = await this.#authenticateClient(p, [
+				`${this.#issuer}/revoke`,
+				`${this.#issuer}/token`,
+			]);
 			const record = await this.#host.store.get(hashToken(token));
 			// RFC 7009 §2.2: an unknown token is not an error.
 			if (record === undefined)
@@ -1410,12 +1621,16 @@ ${cancel}
 					status: 200,
 					headers: { ...this.#cors(), ...noStore },
 				});
-			if (!constantTimeEqual(clientId, record.clientId)) {
+			if (!constantTimeEqual(client.clientId, record.clientId)) {
 				throw new OAuthError(
 					400,
 					"invalid_client",
 					"the token was issued to another client",
 				);
+			}
+			// A stolen token of a bound grant does not end it either.
+			if (record.clientAuth === "private_key_jwt" && !client.assertion) {
+				throw this.#clientAuthFailed(client.clientId, "assertion_required");
 			}
 			// The grant is the connection: revoking either token ends it.
 			await this.#revokeGrant(record.addressId, record.grantId, "revoked");
@@ -1469,5 +1684,6 @@ ${cancel}
 		this.#guessesPerAddress.sweep(now);
 		this.#tokenPerIp.sweep(now);
 		this.#refreshesPerGrant.sweep(now);
+		this.#nonces.sweep(now);
 	}
 }

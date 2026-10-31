@@ -97,6 +97,43 @@ export function tokenStoreConformance(
 			expect(unbound !== undefined && "subject" in unbound).toBe(false);
 		});
 
+		test("the client authentication binding round-trips (DEC-106)", async () => {
+			const bound = record({
+				grantId: "g_key",
+				kind: "refresh",
+				clientAuth: "private_key_jwt",
+			});
+			const plain = record({ grantId: "g_public", kind: "refresh" });
+			await store.put(bound);
+			await store.put(plain);
+			expect(await store.get(bound.hash)).toEqual(bound);
+			const got = await store.get(plain.hash);
+			expect(got !== undefined && "clientAuth" in got).toBe(false);
+			expect(await store.markUsed(bound.hash, now, now + 1000)).toBe(true);
+			expect((await store.get(bound.hash))?.clientAuth).toBe("private_key_jwt");
+		});
+
+		test("claimNonce, if implemented: once until it expires, then again (DEC-106)", async () => {
+			if (store.claimNonce === undefined) return;
+			expect(await store.claimNonce("n1", now + 1000, now)).toBe(true);
+			expect(await store.claimNonce("n1", now + 5000, now + 1)).toBe(false);
+			expect(await store.claimNonce("n2", now + 1000, now)).toBe(true);
+			// Expired, whether or not deleteExpired has run yet.
+			expect(await store.claimNonce("n1", now + 9000, now + 1000)).toBe(true);
+			expect(await store.claimNonce("n1", now + 9000, now + 2000)).toBe(false);
+			await store.deleteExpired(now + 9000);
+			expect(await store.claimNonce("n1", now + 20_000, now + 9000)).toBe(true);
+		});
+
+		test("claimNonce, if implemented: of concurrent calls exactly one wins", async () => {
+			if (store.claimNonce === undefined) return;
+			const claim = store.claimNonce.bind(store);
+			const results = await Promise.all(
+				Array.from({ length: 10 }, () => claim("race", now + 1000, now)),
+			);
+			expect(results.filter(Boolean)).toHaveLength(1);
+		});
+
 		test("markUsed succeeds once, then fails", async () => {
 			const r = record({ kind: "refresh" });
 			await store.put(r);

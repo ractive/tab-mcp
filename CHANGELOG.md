@@ -309,10 +309,66 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 ### Unreleased
 
+#### Added
+
+- `private_key_jwt` client authentication at `/token` and `/revoke` (RFC 7523,
+  DEC-106), for ChatGPT's connectors. The server metadata lists
+  `["none", "private_key_jwt"]` and the accepted signing algorithms (RS, PS and ES
+  256/384/512, EdDSA; never `none` or HMAC). A Client ID Metadata Document that uses it
+  needs a `jwks_uri` on the host of its client id; an inline `jwks` is not accepted. If
+  its keys cannot be used (no or another `jwks_uri`, `jwks` beside it, an algorithm the
+  relay does not verify) and it lists `none`, it is a public client, as in 0.5.1
+  (DEC-104), and the relay logs `oauth.cimd_auth_fallback`. The JWKS is fetched with the
+  metadata fetch's SSRF guards and rate limits, and cached. An assertion needs a key of
+  that JWKS by `kid`, `iss` and `sub` equal to the client id, `aud` the issuer or the
+  endpoint's URL, `exp` at most an hour ahead, use within five minutes of `iat` (without
+  `iat`, `exp` at most five minutes ahead; 30 s leeway), and a `jti` that is never
+  accepted twice while the assertion is usable. A failed check is `invalid_client` (HTTP
+  401), logged as `oauth.client_auth_failed`. When the document or keys cannot be loaded
+  right now (also a `kid` the keys lack that could not be looked for again yet, and a
+  client id on a private address), the answer is 503 `temporarily_unavailable` with
+  `Retry-After`, logged as `oauth.client_auth_unavailable`, and `/token` and `/revoke`
+  use the last good document for up to an hour past its cache lifetime. Known clients'
+  document refreshes and key fetches have their own fetch budgets, a failed fetch is
+  answered again for a minute per client id, and the document and key caches give one
+  domain at most 100 of their 1000 places, so requests for made-up client ids cannot
+  push a real AI app out.
+- Not yet tried against ChatGPT: an assertion without `iat` whose `exp` is more than
+  five minutes ahead is refused, and so is a reused assertion (single-use `jti`).
+- A grant made or refreshed with a client assertion is bound to it: its refresh tokens
+  are refused without one, and so is revoking it, so a stolen refresh token can neither
+  be redeemed as a public client nor end the grant. A client whose document does not
+  list `none` needs an assertion for every code. One that lists `none` (ChatGPT) can
+  still connect as a public client, as since 0.5.1 (DEC-104). Grants from earlier
+  versions stay public.
+- `TokenStore.claimNonce(key, expiresAt, now)`, optional: remembers used assertion ids,
+  atomically, so instances that share a store share them. The memory and SQLite stores
+  have it; without it the relay keeps them in its own memory, per instance. Either way
+  one AI app host may hold at most 10 000 live entries per instance (then 503 for that
+  host only). A
+  `TokenRecord` can carry `clientAuth: "private_key_jwt"`, which a store must keep
+  unchanged. The conformance suite checks both. The SQLite store upgrades its file to
+  schema version 5 when it opens it (a `nonces` table, a `client_auth` column, and a
+  `meta` table whose `min_reader_version` makes later relays refuse a file a newer
+  release marked as needing more).
+- **Rolling back unbinds grants.** A relay older than this release opens the upgraded
+  SQLite file without complaint and drops `client_auth` when it writes, so
+  `private_key_jwt` grants come back unbound (public). Do not roll back, or accept that;
+  and run the same version on every instance that shares a store.
+
 #### Changed
 
+- A `client_assertion` at `/token` or `/revoke` is checked instead of refused. A public
+  client that sends one gets `invalid_client` (401) rather than 400. `client_secret` and
+  HTTP Basic are still refused.
 - Bun 1.4.4: the Docker image runs on it (was 1.4.3), and the npm package needs Bun
   1.4.4 or newer, the version CI tests.
+
+#### Fixed
+
+- A code presented by another client id no longer uses the code up, and a used one no
+  longer revokes its grant: the client id is checked first. Before, anyone who saw a
+  code could make it fail for the AI app it was issued to.
 
 ### [0.5.1][relay-0.5.1] - 2026-10-25
 

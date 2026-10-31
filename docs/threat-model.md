@@ -110,6 +110,18 @@ From a shared screenshot, a chat log or over the user's shoulder.
 - "Verified host" means only that the document was served from that host over HTTPS;
   any host qualifies. An operator can limit which AI apps may connect with
   `TAB_MCP_CLIENT_ID_HOSTS`.
+- An AI app may authenticate at `/token` with `private_key_jwt` (DEC-106): a JWT signed
+  with a key it publishes at the `jwks_uri` of its document, which must be on the client
+  id's own host. The relay accepts only asymmetric algorithms, each tied to its key type,
+  takes keys only from that JWKS (never from the token's header), and requires `iss` and
+  `sub` equal to the client id, `aud` naming the relay, `exp` at most an hour ahead, use
+  within five minutes of `iat`, and a `jti` it has not seen. This proves the request
+  comes from whoever controls the client id's host; it says no more about who that is
+  than the verified host does. Client secrets are refused. A document whose keys the
+  relay cannot use but that lists `none` is a public client (DEC-104).
+- Another client cannot spend a code it did not get: the code's client id is checked
+  before the code is used up or its reuse revokes anything, so a leaked code presented
+  with a valid assertion for the attacker's own client changes nothing.
 
 ### A3: Server-side request forgery through client metadata fetches
 
@@ -135,6 +147,35 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 - every failure from resolving to parsing shows the same message, so the page cannot be
   used to probe what answers where.
 
+The `jwks_uri` of a `private_key_jwt` client is fetched under the same guards and limits
+(also `application/jwk-set+json`), and only on the host of the client id, so it reaches
+no host the metadata fetch could not. It is fetched when a token or revocation request
+carries a client assertion, cached 10 minutes, and fetched again for an unknown key id at
+most every 5 seconds (at most every 30 seconds after a failure). Anyone can send token
+requests for made-up client ids, so the protection of AI apps that already have grants
+is layered (DEC-106):
+
+- a failed or refused fetch, a key id the relay could not look for yet, and a client id
+  on a private address all answer 503 (try again) at `/token` and `/revoke`, never
+  `invalid_client`, so a client keeps its grant;
+- documents the relay already holds are refreshed from their own budget, and keys are
+  fetched from another, so requests for unknown client ids cannot use up either, and
+  key fetches (anyone can cause one every 5 seconds with a made-up key id) cannot use up
+  document refreshes; a failed fetch is answered again for a minute per client id, so
+  made-up paths on a real host cost one fetch each per minute;
+- `/token` and `/revoke` use the last good document for up to an hour past its cache
+  lifetime, and the old keys for an hour after a failed key fetch;
+- the caches of documents and keys give each domain at most 100 of their 1000 places,
+  and a new entry pushes out the least recently used of the domain that holds the most.
+
+What is left: an attacker can still delay such a client. Made-up key ids for a real
+client keep that client's key budget near empty, so a key rotation may be seen a few
+attempts late; with about 17 registrable domains of its own it can use up the totals of
+the known-client budgets; with about 1000 it can push a rarely used client out of the
+caches; and a relay that has just started knows no client, so made-up ids on a real AI
+app's host can keep that app's first fetch waiting. Each of these gives the AI app 503s,
+which it retries, not a lost grant, unless they last longer than the grace hour.
+
 ### A4: Token theft and replay
 
 - Tokens are 256-bit random values. The store keeps only their SHA-256 hashes, so a stolen
@@ -147,6 +188,17 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   wins and the other counts as reuse. A used refresh token is kept for 24 hours to detect
   that; replayed later, it is unknown and refused without revoking. A refresh token
   presented by another client id is refused without revoking.
+- A grant made or refreshed with a `private_key_jwt` client assertion is bound to it
+  (DEC-106): its refresh tokens are refused without a valid assertion, before reuse is
+  checked, and `/revoke` refuses its tokens without one, so a stolen refresh token alone
+  can neither be redeemed nor end the grant; the thief also needs the AI app's private
+  key. A client whose document lists only `private_key_jwt` needs an assertion for every
+  code too. One that also lists `none` (ChatGPT) can still make public grants, which are
+  as exposed as any public client's. Each assertion's `jti` is accepted once while the
+  assertion is usable (at most five minutes); with several instances that holds across
+  them only with a store that implements `claimNonce`. Anyone can be a client, so each
+  AI app host may hold only its share of the replay store (10 000 live entries per
+  instance); one that fills it gets 503 alone.
 - Revocation leaves a tombstone in the store, and the store refuses new tokens for a
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.
 - Disconnect in the page revokes at once. "New address" revokes all grants of the old

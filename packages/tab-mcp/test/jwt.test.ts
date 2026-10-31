@@ -254,7 +254,8 @@ describe("JwksCache: stale keys on errors, no hammering", () => {
 			expect(hits).toBe(2);
 			clock += 10_000; // within 30 s of the failure: no new attempt
 			expect(await cache.keys("k1")).toHaveLength(1);
-			expect(await cache.keys("other")).toHaveLength(0);
+			// An unknown kid that cannot be looked for: unavailable, not "no key".
+			await expect(cache.keys("other")).rejects.toThrow();
 			expect(hits).toBe(2);
 			clock += 21_000;
 			expect(await cache.keys("k1")).toHaveLength(1);
@@ -264,6 +265,35 @@ describe("JwksCache: stale keys on errors, no hammering", () => {
 		} finally {
 			await server.stop(true);
 		}
+	});
+
+	test("review of PR 65: a new kid is looked for after 5 s; throttled, it is unavailable, never 'no key'", async () => {
+		const k1 = await signingKey("ES256", "k1");
+		const k2 = await signingKey("ES256", "k2");
+		let keys = [k1.publicJwk];
+		let hits = 0;
+		let clock = 1_000_000;
+		const cache = new JwksCache("https://keys.example/jwks", {
+			now: () => clock,
+			load: async () => {
+				hits++;
+				return { keys };
+			},
+		});
+		expect(await cache.keys("k1")).toHaveLength(1);
+		keys = [k1.publicJwk, k2.publicJwk]; // the app rotates
+		clock += 2_000; // too soon to fetch again
+		await expect(cache.keys("k2")).rejects.toThrow();
+		const jwt = await signJwt(k2, { sub: "x" });
+		expect(await reason(verifyJwt(jwt, cache))).toBe("jwks_unavailable");
+		expect(hits).toBe(1);
+		clock += 4_000; // past the 5 s floor: fetched again, found
+		expect(await cache.keys("k2")).toHaveLength(1);
+		expect(hits).toBe(2);
+		// Fetched just now and still unknown: that key does not exist.
+		clock += 6_000;
+		expect(await cache.keys("nope")).toHaveLength(0);
+		expect(hits).toBe(3);
 	});
 
 	test("with no keys yet a failure throws, and the next call does not fetch again at once", async () => {

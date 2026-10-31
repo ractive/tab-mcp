@@ -47,6 +47,14 @@ export interface TokenRecord {
 	 * makes every request of such a grant fail as a mismatch.
 	 */
 	subject?: string;
+	/**
+	 * Client authentication binding (DEC-106): `private_key_jwt` when the
+	 * grant was made or refreshed with a client assertion; its refresh tokens
+	 * then need one too. Must be stored and returned unchanged: a store that
+	 * drops it lets such a grant's refresh tokens be redeemed without the
+	 * client's key.
+	 */
+	clientAuth?: "private_key_jwt";
 }
 
 /** One connected AI app of an address. */
@@ -102,6 +110,15 @@ export interface TokenStore {
 	listGrants(addressId: string, now: number): Promise<GrantSummary[]>;
 	/** Delete every record with `expiresAt <= now` and tombstones past `keepUntil`. Returns how many records. */
 	deleteExpired(now: number): Promise<number>;
+	/**
+	 * Optional (DEC-106): remember a one-time value (the hash of a client
+	 * assertion's client id and `jti`) until `expiresAt`. Returns `true` for
+	 * the one call that recorded it, `false` while it is remembered; an entry
+	 * with `expiresAt <= now` counts as absent. Must be atomic, like
+	 * `markUsed`. `deleteExpired` should drop expired entries. Without it the
+	 * relay remembers them in its own memory, which is per instance.
+	 */
+	claimNonce?(key: string, expiresAt: number, now: number): Promise<boolean>;
 	/** Release resources (database handles). Optional. */
 	close?(): Promise<void>;
 }

@@ -66,7 +66,29 @@ test("review of PR 32: opening a version 3 file cuts used refresh tokens to the 
 	await reopened.close();
 });
 
-test("a version 2 SQLite file gains the subject column and keeps its tokens", async () => {
+test("review of PR 65: the file records the oldest relay schema that may open it, and a newer value is refused", async () => {
+	const path = join(dir, "min-reader.db");
+	const store = new SqliteTokenStore(path);
+	await store.close();
+	const db = new Database(path, { strict: true });
+	expect(
+		db.query("SELECT value FROM meta WHERE key = 'min_reader_version'").get(),
+	).toEqual({ value: 5 });
+	// A later release marks the file as needing schema 6.
+	db.run("UPDATE meta SET value = 6 WHERE key = 'min_reader_version'");
+	db.close();
+	expect(() => new SqliteTokenStore(path)).toThrow(/needs a newer relay/);
+	// Opening never lowers it.
+	const again = new Database(path, { strict: true });
+	expect(
+		again
+			.query("SELECT value FROM meta WHERE key = 'min_reader_version'")
+			.get(),
+	).toEqual({ value: 6 });
+	again.close();
+});
+
+test("a version 2 SQLite file gains the subject and client_auth columns and keeps its tokens", async () => {
 	const path = join(dir, "v2.db");
 	const old = new Database(path, { create: true, strict: true });
 	old.run(`CREATE TABLE revocations (
@@ -93,5 +115,14 @@ test("a version 2 SQLite file gains the subject column and keeps its tokens", as
 		subject: "k",
 	});
 	expect((await store.get("h2"))?.subject).toBe("k");
+	// Version 5 (DEC-106): the binding and the nonce table.
+	await store.put({
+		...(got as NonNullable<typeof got>),
+		hash: "h3",
+		clientAuth: "private_key_jwt",
+	});
+	expect((await store.get("h3"))?.clientAuth).toBe("private_key_jwt");
+	expect(await store.claimNonce("n", 2000, 1000)).toBe(true);
+	expect(await store.claimNonce("n", 2000, 1001)).toBe(false);
 	await store.close();
 });
