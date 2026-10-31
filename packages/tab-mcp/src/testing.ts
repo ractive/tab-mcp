@@ -24,8 +24,9 @@ export interface TestRelay {
 
 /**
  * Start a relay in this process on a free port of 127.0.0.1, in development
- * mode, open to every page origin, with a memory store and no log output.
- * `options` override any of that. For tests only: it accepts any origin.
+ * mode, open to every page origin, with a memory store and no log output
+ * (unless `logger` or `logLevel` is given). `options` override any of that.
+ * For tests only: it accepts any origin.
  */
 export function startTestRelay(
 	options: Omit<CreateRelayOptions, "store"> & { store?: TokenStore } = {},
@@ -36,7 +37,9 @@ export function startTestRelay(
 		port: 0,
 		host: "127.0.0.1",
 		allowedOrigins: "*",
-		logger: createLogger("error", () => {}),
+		...(options.logger === undefined && options.logLevel === undefined
+			? { logger: createLogger("error", () => {}) }
+			: {}),
 		...options,
 		store,
 	});

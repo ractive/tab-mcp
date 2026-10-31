@@ -334,11 +334,14 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   `tokenFor()` (a token for a page's MCP address, written into the store as if an AI app
   had paired), for end-to-end tests of a page's tools.
 
-#### Fixed
+#### Changed
 
-- In development without `TAB_MCP_PUBLIC_URL`, the addresses use the loopback address
-  the relay listens on (`127.0.0.1` or `[::1]`) instead of always `localhost`, so they
-  match the URL the page was given.
+- In development without `TAB_MCP_PUBLIC_URL`, the public URL is the loopback address
+  the relay listens on (`127.0.0.1` or `[::1]`) instead of always `localhost`, so the
+  addresses match the URL the page was given. The issuer, the addresses and the sign-in
+  callback move with it: AI apps that saved a `localhost` address must add it again, and
+  an identity provider needs the new callback. `TAB_MCP_PUBLIC_URL=http://localhost:<port>`
+  keeps the old URLs.
 
 ### [0.6.0][relay-0.6.0] - 2026-10-31
 

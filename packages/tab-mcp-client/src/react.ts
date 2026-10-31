@@ -264,7 +264,7 @@ export function useTabMcpState(): TabMcpSnapshot {
  * one of `deps`. A duplicate name or an invalid tool is thrown from the
  * component's next render, for an error boundary.
  */
-export function useTool<Input = Record<string, unknown>>(
+export function useTool<Input extends object = Record<string, unknown>>(
 	tool: Tool<Input>,
 	deps: DependencyList = EMPTY,
 ): void {

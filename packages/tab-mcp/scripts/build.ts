@@ -4,7 +4,8 @@
  *
  * - `dist/main.js` (the `tab-mcp` command, `#!/usr/bin/env bun`),
  *   `dist/index.js` (`createRelay`, the stores, the types) and
- *   `dist/testing.js` (the `TokenStore` conformance suite): `bun build
+ *   `dist/testing.js` (the `TokenStore` conformance suite, and `startTestRelay`
+ *   and `tokenFor`, which bundle their own copy of the relay): `bun build
  *   --target=bun`, one self-contained file each (the relay has no runtime
  *   dependencies; `bun:*` modules stay imports);
  * - `dist/**\/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;

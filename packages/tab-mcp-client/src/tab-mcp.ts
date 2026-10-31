@@ -243,7 +243,7 @@ export class TabMcp extends EventTarget {
 	 * aborting `options.signal` unregisters it. Rejects with a `TypeError` for
 	 * an invalid tool and an `InvalidStateError` for a duplicate name.
 	 */
-	registerTool<Input = Record<string, unknown>>(
+	registerTool<Input extends object = Record<string, unknown>>(
 		tool: Tool<Input>,
 		options: RegisterToolOptions = {},
 	): Promise<void> {

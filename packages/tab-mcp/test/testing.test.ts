@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { createLogger } from "../src/log.ts";
 import { developmentUrl } from "../src/relay.ts";
 import { startTestRelay, type TestRelay, tokenFor } from "../src/testing.ts";
 import { mcpPost } from "./helpers.ts";
@@ -40,4 +41,15 @@ test("game feedback 4: tokenFor refuses something that is not an MCP address", a
 	await expect(tokenFor(relay.store, `${relay.url}/mcp`)).rejects.toThrow(
 		TypeError,
 	);
+});
+
+test("review of PR 68: startTestRelay is quiet by default, and a logger of its own gets the lines", async () => {
+	const lines: string[] = [];
+	relay = startTestRelay({
+		logger: createLogger("debug", (l) => lines.push(l)),
+	});
+	await fetch(`${relay.url}/healthz`);
+	await relay.stop();
+	relay = undefined;
+	expect(lines.length).toBeGreaterThan(0);
 });

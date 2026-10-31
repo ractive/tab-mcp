@@ -703,6 +703,10 @@ test("game feedback 8: useTool and registerTool take the input's type", () => {
 		});
 		return null;
 	}
+	// review of PR 68: the input is always a JSON object, so a primitive is refused.
+	// @ts-expect-error string does not satisfy `object`
+	const wrong: Tool<string> | undefined = undefined;
+	expect(wrong).toBeUndefined();
 	expect(typeof Adder).toBe("function");
 	expect(add.execute({ a: 1, b: 2 }, {} as never)).toBe(3);
 });

@@ -116,7 +116,7 @@ the interface, its guarantees and a Redis example.
 
 For end-to-end tests under `bun test`, `startTestRelay()` runs a relay in the test
 process (127.0.0.1, a free port, development mode, every page origin allowed, a memory
-store, no log output; options override any of that), and `tokenFor()` writes a token for
+store, no log output unless `logger` or `logLevel` is given; options override any of that), and `tokenFor()` writes a token for
 a page's MCP address into its store, as if an AI app had paired:
 
 ```ts
