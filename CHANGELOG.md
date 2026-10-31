@@ -307,7 +307,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.6.0][relay-0.6.0] - 2026-10-31
 
 #### Added
 
@@ -351,7 +351,7 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   schema version 5 when it opens it (a `nonces` table, a `client_auth` column, and a
   `meta` table whose `min_reader_version` makes later relays refuse a file a newer
   release marked as needing more).
-- **Rolling back unbinds grants.** A relay older than this release opens the upgraded
+- **Rolling back unbinds grants.** A relay older than 0.6.0 opens the upgraded
   SQLite file without complaint and drops `client_auth` when it writes, so
   `private_key_jwt` grants come back unbound (public). Do not roll back, or accept that;
   and run the same version on every instance that shares a store.
@@ -621,6 +621,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.6.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.6.0
 [relay-0.5.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.5.1
 [relay-0.5.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.5.0
 [relay-0.4.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.4.0

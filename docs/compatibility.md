@@ -32,7 +32,7 @@ An app that cannot do both cannot connect. How to add a page to each app:
 ## Client authentication
 
 AI apps authenticate at `/token` with `none` (public clients, PKCE) or, since the
-relay release after 0.5.1, with `private_key_jwt` (DEC-106): a JWT signed with a key
+relay 0.6.0, with `private_key_jwt` (DEC-106): a JWT signed with a key
 the app publishes at the `jwks_uri` of its Client ID Metadata Document, which must be
 on the same host as the client id. `client_secret_*` is not supported: a CIMD client has
 nowhere to keep a secret.
