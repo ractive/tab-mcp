@@ -46,6 +46,18 @@ useless without OpenAI's key. Because ChatGPT lists `none`, a connection without
 signature still works, as before. Not yet checked against ChatGPT itself: the row above
 is from relay 0.5.1.
 
+Two of the relay's rules could refuse a client that signs, and neither has been tried
+against ChatGPT:
+
+- an assertion without `iat` whose `exp` is more than five minutes ahead (with `iat`,
+  `exp` may be up to an hour ahead, but the assertion is usable for five minutes from
+  `iat`);
+- a library that reuses one assertion for its whole lifetime: each `jti` is accepted
+  once.
+
+Either shows as `invalid_client` at `/token`, with the reason `lifetime` or `replayed`
+in the relay's log (`oauth.client_auth_failed`).
+
 ## Not supported
 
 | App | Why |

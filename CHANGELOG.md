@@ -320,9 +320,16 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   `iat`, `exp` at most five minutes ahead; 30 s leeway), and a `jti` that is never
   accepted twice while the assertion is usable. A failed check is `invalid_client` (HTTP
   401), logged as `oauth.client_auth_failed`. When the document or keys cannot be loaded
-  right now, the answer is 503 `temporarily_unavailable` with `Retry-After`, logged as
-  `oauth.client_auth_unavailable`, and `/token` and `/revoke` use the last good document
-  for up to an hour past its cache lifetime.
+  right now (also a `kid` the keys lack that could not be looked for again yet, and a
+  client id on a private address), the answer is 503 `temporarily_unavailable` with
+  `Retry-After`, logged as `oauth.client_auth_unavailable`, and `/token` and `/revoke`
+  use the last good document for up to an hour past its cache lifetime. Known clients'
+  document refreshes and key fetches have their own fetch budgets, a failed fetch is
+  answered again for a minute per client id, and the document and key caches give one
+  domain at most 100 of their 1000 places, so requests for made-up client ids cannot
+  push a real AI app out.
+- Not yet tried against ChatGPT: an assertion without `iat` whose `exp` is more than
+  five minutes ahead is refused, and so is a reused assertion (single-use `jti`).
 - A grant made or refreshed with a client assertion is bound to it: its refresh tokens
   are refused without one, and so is revoking it, so a stolen refresh token can neither
   be redeemed as a public client nor end the grant. A client whose document does not
@@ -332,11 +339,17 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - `TokenStore.claimNonce(key, expiresAt, now)`, optional: remembers used assertion ids,
   atomically, so instances that share a store share them. The memory and SQLite stores
   have it; without it the relay keeps them in its own memory, per instance. Either way
-  one AI app domain may hold at most 10 000 live entries per instance (then 503 for that
-  domain only). A
+  one AI app host may hold at most 10 000 live entries per instance (then 503 for that
+  host only). A
   `TokenRecord` can carry `clientAuth: "private_key_jwt"`, which a store must keep
   unchanged. The conformance suite checks both. The SQLite store upgrades its file to
-  schema version 5 when it opens it (a `nonces` table, a `client_auth` column).
+  schema version 5 when it opens it (a `nonces` table, a `client_auth` column, and a
+  `meta` table whose `min_reader_version` makes later relays refuse a file a newer
+  release marked as needing more).
+- **Rolling back unbinds grants.** A relay older than this release opens the upgraded
+  SQLite file without complaint and drops `client_auth` when it writes, so
+  `private_key_jwt` grants come back unbound (public). Do not roll back, or accept that;
+  and run the same version on every instance that shares a store.
 
 #### Changed
 

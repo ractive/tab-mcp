@@ -372,9 +372,11 @@ load balancer does the work, by a hash of the **address id**, the 52 characters 
 `[a-z2-7]` in the MCP URL `https://<relay>/a/<id>/mcp`. Each instance then holds the
 tab sessions, pairing requests and sign-ins of its share of the addresses. You need:
 
-1. **The same configuration on every instance**, above all `TAB_MCP_PUBLIC_URL` (it is
-   the OAuth issuer and part of every address), the sites and origins, and the OIDC
-   settings.
+1. **The same configuration and the same relay version on every instance**, above all
+   `TAB_MCP_PUBLIC_URL` (it is the OAuth issuer and part of every address), the sites
+   and origins, and the OIDC settings. Upgrade all instances together: an older relay on
+   the same store may not keep what a newer one stores (for example the `clientAuth` of
+   `private_key_jwt` grants, DEC-106), and a grant it refreshes loses it.
 2. **A shared token store.** Grants and token hashes must be the same for every
    instance: a refresh or revocation can reach any of them. The built-in SQLite file
    cannot be shared; embed the relay in your own Bun program and pass a
@@ -696,6 +698,15 @@ deleted at the next sweep. Keep backups as private as the file itself.
 
 Stop the old container before the new one starts: two relays on one SQLite file at the
 same time are not supported (see [One instance](#one-instance)).
+
+**Rolling back.** Keep the backup from step 2 if you might go back. A relay may change
+the file when it opens it, and an older one does not always notice: a relay from before
+`private_key_jwt` (0.5.1 and older) opens a file the newer one upgraded and drops
+`client_auth` from every token it writes, so grants AI apps made with a client assertion
+(ChatGPT, DEC-106) come back unbound, redeemable without the AI app's key. Restore the
+backup instead, or accept that those grants become public. From the `private_key_jwt`
+release on, the file records the oldest relay version that may open it, and a relay
+refuses a file marked as needing a newer one.
 
 Relay and browser library (`@ractive-ch/tab-mcp-client`) are released on their own. The
 changelog says when a release of one needs a new version of the other.

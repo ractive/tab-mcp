@@ -51,6 +51,11 @@ the new `client-auth.ts`), `jwt.ts`, `tokens.ts` and `store/`.
 - [x] Review of PR 65, 4: replay store shares per AI app domain; usable five minutes from `iat`; sweeps at most once a second
 - [x] Review of PR 65, 5: `/revoke` of a bound grant needs the client's assertion
 - [x] Review of PR 65, 6: `jwks_uri` stored only in the form the relay fetches (test-mode leniency only in test mode)
+- [x] Second review, 1: an unknown `kid` that could not be looked for is `jwks_unavailable` (503), looked for again after 5 s; failed fetches answered again for 60 s per client id; own budgets for known clients' refreshes and for keys
+- [x] Second review, 2: document and key caches give one domain at most 100 of 1000 places, and push out the largest domain's entries first
+- [x] Second review, 3: `private_address` is 503 at `/token` and `/revoke`, like an unreachable host
+- [x] Second review, 4: replay shares per full host (IPv6 literals by /64)
+- [x] Second review, 5: rollback and mixed versions documented; `min_reader_version` in the SQLite file for later releases
 
 ## Progress
 
@@ -65,16 +70,20 @@ DEC-106 holds every decision. In short:
 - **Inline `jwks`:** not accepted.
 - **Replay store:** the token store's optional `claimNonce`, shared by instances that
   share a store; without it, per-instance memory. Either way at most 10 000 live entries
-  per AI app domain per instance.
+  per AI app host per instance.
 - **Lifetime:** `exp` at most an hour ahead, 30 s leeway. ChatGPT's real lifetime is not
   known; a shorter cap would risk refusing it. But an assertion is usable only within
   five minutes of its `iat` (review of PR 65), which bounds the replay store.
 - **Unavailable is not invalid:** a metadata or key fetch that fails for a transient
   reason is 503, and `/token` and `/revoke` fall back to the last good document for an
-  hour.
+  hour. Requests for made-up client ids cannot use up the fetch budgets or the caches of
+  clients the relay already holds (second review).
+- **Rollback:** an older relay drops `client_auth` from the SQLite file, unbinding
+  grants; documented, and guarded for later releases with `min_reader_version`.
 
 Not done here: a run against ChatGPT itself (it needs the relay deployed), the relay
-release and the deploy (owner).
+release and the deploy (owner). Two rules could refuse ChatGPT and are untried: an
+assertion without `iat` with `exp` more than five minutes ahead, and a reused assertion.
 
 # Citations
 

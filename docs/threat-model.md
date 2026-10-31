@@ -151,10 +151,30 @@ The `jwks_uri` of a `private_key_jwt` client is fetched under the same guards an
 (also `application/jwk-set+json`), and only on the host of the client id, so it reaches
 no host the metadata fetch could not. It is fetched when a token or revocation request
 carries a client assertion, cached 10 minutes, and fetched again for an unknown key id at
-most every 30 seconds. Because the fetch limits are shared with unauthenticated requests,
-a failed or refused fetch at `/token` and `/revoke` answers 503 (try again), never
-`invalid_client`, and those endpoints use the last good document for up to an hour past
-its cache lifetime; so using up the limits cannot cut off grants that already exist.
+most every 5 seconds (at most every 30 seconds after a failure). Anyone can send token
+requests for made-up client ids, so the protection of AI apps that already have grants
+is layered (DEC-106):
+
+- a failed or refused fetch, a key id the relay could not look for yet, and a client id
+  on a private address all answer 503 (try again) at `/token` and `/revoke`, never
+  `invalid_client`, so a client keeps its grant;
+- documents the relay already holds are refreshed from their own budget, and keys are
+  fetched from another, so requests for unknown client ids cannot use up either, and
+  key fetches (anyone can cause one every 5 seconds with a made-up key id) cannot use up
+  document refreshes; a failed fetch is answered again for a minute per client id, so
+  made-up paths on a real host cost one fetch each per minute;
+- `/token` and `/revoke` use the last good document for up to an hour past its cache
+  lifetime, and the old keys for an hour after a failed key fetch;
+- the caches of documents and keys give each domain at most 100 of their 1000 places,
+  and a new entry pushes out the least recently used of the domain that holds the most.
+
+What is left: an attacker can still delay such a client. Made-up key ids for a real
+client keep that client's key budget near empty, so a key rotation may be seen a few
+attempts late; with about 17 registrable domains of its own it can use up the totals of
+the known-client budgets; with about 1000 it can push a rarely used client out of the
+caches; and a relay that has just started knows no client, so made-up ids on a real AI
+app's host can keep that app's first fetch waiting. Each of these gives the AI app 503s,
+which it retries, not a lost grant, unless they last longer than the grace hour.
 
 ### A4: Token theft and replay
 
@@ -177,7 +197,7 @@ its cache lifetime; so using up the limits cannot cut off grants that already ex
   as exposed as any public client's. Each assertion's `jti` is accepted once while the
   assertion is usable (at most five minutes); with several instances that holds across
   them only with a store that implements `claimNonce`. Anyone can be a client, so each
-  AI app domain may hold only its share of the replay store (10 000 live entries per
+  AI app host may hold only its share of the replay store (10 000 live entries per
   instance); one that fills it gets 503 alone.
 - Revocation leaves a tombstone in the store, and the store refuses new tokens for a
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.

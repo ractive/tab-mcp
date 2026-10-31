@@ -1639,8 +1639,10 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   ignored. `client_secret` (body or HTTP Basic) stays refused.
 - **Not the client's fault: 503** (review of PR 65). When the client's document cannot be
   fetched for a transient reason (`rate_limited`, `fetch_failed`, `unresolvable`,
-  `too_large`), its JWKS cannot be loaded (`jwks_unavailable`), or its share of the
-  replay store is full, the answer is `temporarily_unavailable`, HTTP 503 with
+  `too_large`; and at these two endpoints `private_address`, so they do not tell whether
+  a name points to a private address), its JWKS cannot be loaded (`jwks_unavailable`,
+  also for a `kid` the keys did not have and that could not be looked for again yet), or
+  its share of the replay store is full, the answer is `temporarily_unavailable`, HTTP 503 with
   `Retry-After: 10`, logged as `oauth.client_auth_unavailable`. A 401 would tell the AI
   app its credentials are bad, and it would drop the connection; and the CIMD fetch
   limits are shared with unauthenticated requests, so a 401 there would let anyone cut
@@ -1652,6 +1654,32 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   by a busy or briefly unreachable host. `/authorize` always wants a current document. A
   document the host now answers with something unacceptable is dropped, not served
   stale.
+- **Keeping known clients' documents and keys** (second review of PR 65). Anyone can send
+  token requests for made-up client ids, and each one used to cost the real host's
+  fetch budget, so a rotation of ChatGPT's key could get 401 for every bound grant:
+  - an unknown `kid` is looked for again 5 s after a good fetch (30 s after a failed
+    one); when it could not be looked for (throttled, failed, rate-limited) the answer is
+    `jwks_unavailable` (503), and only a `kid` missing from keys fetched for that very
+    request is `key` (401). This applies to the identity JWKS too;
+  - a failed fetch is answered again for 60 s per client id (at most 1000 remembered;
+    fetches are rate-limited, so few are live), so made-up paths cost one fetch each per
+    minute;
+  - refreshing a document the relay holds (within its lifetime plus the grace hour) and
+    fetching keys each have their own budget, with the same per-host and per-domain
+    shares as new ids and a higher total (100, then 10 a second): requests for unknown
+    ids cannot use them up, and key fetches (anyone can cause one per 5 s with a made-up
+    `kid`) cannot use up document refreshes;
+  - the document and key caches (1000 each) give one domain (the last two labels) at most
+    100 places; when full, a new entry pushes out a dead one (a document past its grace)
+    or else the least recently used of the domain that holds the most, so one party's
+    documents push out their own instead of a live client's grace.
+
+  What is left: a few attempts' delay before a rotated key is seen while made-up `kid`s
+  keep a client's key budget low; about 17 registrable domains use up a known-client
+  total; about 1000 push a rarely used client out of the caches (ties go by least recent
+  use); and a freshly started relay knows no client, so its first fetch of a real host
+  competes with made-up ids. All of these are 503s, not lost grants, unless they outlast
+  the grace hour.
 - **Binding.** The method a grant is made with binds it. A grant made or refreshed with a
   valid assertion is stored with `clientAuth: "private_key_jwt"`; its refresh tokens are
   refused without an assertion, checked right after the client id and before expiry and
@@ -1680,12 +1708,18 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   key adds entries. The memory and SQLite stores implement it (SQLite schema version 5:
   a `nonces` table and the `client_auth` column); instances that share a store share the
   replay store. Anyone can be a client by publishing a document, so each instance lets
-  one AI app domain (the last two labels of its host, as the CIMD limits count) hold at
-  most 10 000 live entries, 100 000 in all, whatever the store; past its share a domain
-  gets 503 and the others go on (review of PR 65: one global cap let one self-hosted
-  client lock every `private_key_jwt` client out). With the five-minute window a
-  domain's share is about 30 token requests a second per instance. Expired entries are
-  counted out at most once a second. A store without `claimNonce` falls back to the
+  one AI app host hold at most 10 000 live entries, 100 000 in all, whatever the store;
+  past its share a host gets 503 and the others go on (review of PR 65: one global cap
+  let one self-hosted client lock every `private_key_jwt` client out). The share is per
+  full host name, an IPv4 literal as is and an IPv6 literal by its /64 (second review:
+  keyed by the last two labels, every client under `github.io`, `pages.dev` or `co.uk`
+  shared one share, while every IPv6 address got its own). What is left: a party with
+  wildcard DNS gets a share per subdomain, so the total can be filled with ten hosts; but
+  filling 100 000 entries within their five minutes takes about 300 IP addresses, given
+  the token endpoint's per-IP limit, and it gives everyone 503, not a lost grant. With the
+  five-minute window a host's share is about 30 token requests a second per instance.
+  Expired entries are counted out at most once a second. A store without `claimNonce`
+  falls back to the
   relay's memory, within the same shares, which is per instance: there a replay at
   another instance within the assertion's lifetime gets through the `jti` check, but still
   needs a valid code (per instance as well) or an unused refresh token (atomic
@@ -1693,6 +1727,21 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   custom store. `clientAuth` must be stored and returned unchanged; a store that drops it
   lets the grant's refresh tokens be used without the key, so the conformance suite
   checks the round trip.
+- **Rolling back, and mixed versions** (second review of PR 65). A relay before this
+  release opens the version 5 SQLite file (it checks only for version 4 or newer), and
+  its insert drops `client_auth`: every grant it refreshes comes back unbound. That
+  cannot be changed in released versions, so the changelog and `docs/self-hosting.md` say
+  it: rolling back unbinds `private_key_jwt` grants, and all instances on one store run
+  the same version. From this release on, the file's `meta` table holds
+  `min_reader_version` (5 now, never lowered), and a relay refuses a file whose value is
+  above its own schema version, so a later release that adds such a column can make
+  older relays refuse the file instead of losing data.
+- **Compatibility, not yet tried against ChatGPT.** Two rules could refuse a real client:
+  an assertion without `iat` whose `exp` is more than five minutes ahead, and a library
+  that reuses one assertion for its whole lifetime (the single-use `jti`; RFC 7523 allows
+  the server to refuse a reused `jti`, and OpenID Connect Core requires `jti` to be
+  unique). If ChatGPT does either, its token requests get 401 `invalid_client` (reasons
+  `lifetime` and `replayed` in the log).
 - **Cost.** `/token` and `/revoke` now fetch a client's metadata and JWKS when a request
   carries an assertion; both are cached, rate-limited with the CIMD fetches, and the
   per-IP token limit applies first.
