@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 16: feedback from the comparis game"
-status: in-progress
+status: completed
 description: "Fixes and developer-experience changes from integrating the React client into the comparis office game: dialog centring under CSS resets, the development public URL, a 'connection lost' label, published test helpers, typed tool inputs, and README sections."
 timestamp: 2026-10-31T22:00:00+01:00
 tags: [iteration, client, relay, react, docs]
@@ -45,4 +45,4 @@ relay allows the game's origin since 2026-10-31 (ractive.ch PR 73, with
 - [x] `Tool<Input>` and the generic `registerTool` and `useTool`, with a type test
 - [x] READMEs: user action, label function, `useState` tools, typed input, testing
 - [x] CHANGELOG (client and relay, Unreleased), DEC-107
-- [ ] Review, merge; client 0.10.0 and relay 0.6.1 releases on the owner's word
+- [x] Review, merge; client 0.10.0 and relay 0.6.1 releases on the owner's word

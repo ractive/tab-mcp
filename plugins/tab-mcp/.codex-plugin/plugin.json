@@ -1,6 +1,6 @@
 {
 	"name": "tab-mcp",
-	"version": "0.9.1",
+	"version": "0.10.0",
 	"description": "Add tab-mcp to a web app: offer a page's functions as MCP tools to AI apps through a tab-mcp relay.",
 	"author": {
 		"name": "ractive",
