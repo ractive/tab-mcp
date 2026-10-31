@@ -177,7 +177,7 @@ refused and logged as `tab.refused` with reason `origin`.
 
 ## Without Docker
 
-The relay is also on npm as `@ractive-ch/tab-mcp`. It needs [Bun](https://bun.sh) 1.4.3
+The relay is also on npm as `@ractive-ch/tab-mcp`. It needs [Bun](https://bun.sh) 1.4.4
 or newer; it does not run on Node.js.
 
 ```sh
