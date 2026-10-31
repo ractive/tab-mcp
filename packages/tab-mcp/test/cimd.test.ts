@@ -82,6 +82,7 @@ describe("CIMD §3: the client_id URL", () => {
 			name: "Example AI",
 			host: "ai.example",
 			redirectUris: ["https://ai.example/callback"],
+			auth: { method: "none" },
 		});
 	});
 

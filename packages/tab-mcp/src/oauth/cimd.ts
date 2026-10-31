@@ -7,10 +7,12 @@
  * against SSRF (threat model A3): https only, default port, no credentials,
  * the host resolved first and every address checked to be public, no
  * redirects, 5 s, 64 KiB, `application/json`, results cached and fetches per
- * domain and in total rate-limited.
+ * domain and in total rate-limited. A `private_key_jwt` client's `jwks_uri`
+ * is fetched under the same rules (DEC-106).
  */
 
 import { isLoopbackHost, isPublicIp, parseIpv4, parseIpv6 } from "../ip.ts";
+import { isAlgorithm, JWT_ALGORITHMS, type JwtAlgorithm } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import { RateLimiter } from "../ratelimit.ts";
 
@@ -23,6 +25,23 @@ export interface ClientMetadata {
 	/** Host of the client id URL: the verified part. */
 	host: string;
 	redirectUris: string[];
+	/** How the client authenticates at `/token` (DEC-104, DEC-106). */
+	auth: ClientAuth;
+}
+
+/**
+ * `none`: a public client. `private_key_jwt`: it signs a client assertion
+ * with a key from `jwksUri`; `publicAllowed` when its document also lists
+ * `none` (DEC-104), so a grant may start without one (DEC-106).
+ */
+export type ClientAuth = { method: "none" } | PrivateKeyJwtAuth;
+
+export interface PrivateKeyJwtAuth {
+	method: "private_key_jwt";
+	jwksUri: string;
+	/** `token_endpoint_auth_signing_alg` if the document names one, else all. */
+	algorithms: readonly JwtAlgorithm[];
+	publicAllowed: boolean;
 }
 
 /** Why a client id was refused; `message` is plain English for the page. */
@@ -170,8 +189,43 @@ export class ClientMetadataFetcher {
 			this.#cache.set(clientId, cached);
 			return cached.meta;
 		}
-		// Per host and per domain, and only charged once the global limit
-		// admits the fetch: refusals cost the others nothing (DEC-089).
+		this.#admit(url, now);
+		const address = await this.#vettedAddress(url);
+		const response = await this.#fetchJson(url, address, ["application/json"]);
+		const meta = validateDocument(response.doc, clientId, url);
+		const ttlMs = cacheMs(response.cacheControl);
+		this.#cache.delete(clientId);
+		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
+			const oldest = this.#cache.keys().next().value;
+			if (oldest !== undefined) this.#cache.delete(oldest);
+		}
+		this.#cache.set(clientId, { meta, until: now + ttlMs });
+		return meta;
+	}
+
+	/**
+	 * A client's JWKS document, under the CIMD fetch's SSRF rules and rate
+	 * limits (DEC-106). `validateDocument` checked `jwksUri` (https, the
+	 * client id's host); this checks it again before any network use. Not
+	 * cached here: `JwksCache` does that. Throws `ClientMetadataError`.
+	 */
+	async fetchJwks(jwksUri: string): Promise<unknown> {
+		const url = this.#checkJwksUri(jwksUri);
+		this.#admit(url, this.#now());
+		const address = await this.#vettedAddress(url);
+		const response = await this.#fetchJson(url, address, [
+			"application/json",
+			"application/jwk-set+json",
+		]);
+		return response.doc;
+	}
+
+	/**
+	 * Charge a fetch to its host, its domain and the global limit; per host
+	 * and per domain only once the global limit admits it, so refusals cost
+	 * the others nothing (DEC-089).
+	 */
+	#admit(url: URL, now: number): void {
 		const key = limitKey(url.hostname);
 		if (
 			!this.#perHost.available(url.host, now) ||
@@ -190,15 +244,29 @@ export class ClientMetadataFetcher {
 		}
 		this.#perHost.take(url.host, now);
 		this.#perDomain.take(key, now);
-		const address = await this.#vettedAddress(url);
-		const { meta, ttlMs } = await this.#fetchDocument(url, clientId, address);
-		this.#cache.delete(clientId);
-		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
-			const oldest = this.#cache.keys().next().value;
-			if (oldest !== undefined) this.#cache.delete(oldest);
+	}
+
+	#checkJwksUri(jwksUri: string): URL {
+		const url = parseJwksUri(jwksUri, this.#testMode !== undefined);
+		if (url === undefined) {
+			throw new ClientMetadataError(
+				"invalid_jwks_uri",
+				"The AI app's jwks_uri is not accepted.",
+			);
 		}
-		this.#cache.set(clientId, { meta, until: now + ttlMs });
-		return meta;
+		if (
+			this.#allowedHosts.length > 0 &&
+			!this.#allowedHosts.includes(url.host)
+		) {
+			throw new ClientMetadataError(
+				"host_not_allowed",
+				`This relay does not accept AI apps from ${url.host}.`,
+			);
+		}
+		if (isIpLiteral(url.hostname) && !this.#addressAllowed(url.hostname)) {
+			throw this.#notLoaded("private_address", url);
+		}
+		return url;
 	}
 
 	/** The URL rules of the CIMD draft plus our SSRF rules, before any network use. */
@@ -294,16 +362,17 @@ export class ClientMetadataFetcher {
 		);
 	}
 
-	async #fetchDocument(
+	/** GET a JSON document from the vetted address; one of `types` only. */
+	async #fetchJson(
 		url: URL,
-		clientId: string,
 		address: string,
-	): Promise<{ meta: ClientMetadata; ttlMs: number }> {
+		types: readonly string[],
+	): Promise<{ doc: unknown; cacheControl: string | null }> {
 		const fail = (detail: string) =>
 			this.#notLoaded("fetch_failed", url, detail);
 		// Connect to the vetted address; Host and the TLS server name stay the
 		// original host, so the certificate is checked against it.
-		const pinned = new URL(clientId);
+		const pinned = new URL(url.href);
 		pinned.hostname = address.includes(":") ? `[${address}]` : address;
 		const hostname = url.hostname.replace(/^\[|\]$/g, "");
 		const tls =
@@ -337,7 +406,9 @@ export class ClientMetadataFetcher {
 				.split(";")[0]
 				?.trim()
 				.toLowerCase();
-			if (type !== "application/json") throw fail("not_json");
+			if (type === undefined || !types.includes(type)) {
+				throw fail("not_json");
+			}
 			const text = await this.#readLimited(response, url);
 			let doc: unknown;
 			try {
@@ -345,8 +416,7 @@ export class ClientMetadataFetcher {
 			} catch {
 				throw fail("bad_json");
 			}
-			const meta = validateDocument(doc, clientId, url);
-			return { meta, ttlMs: cacheMs(response.headers.get("cache-control")) };
+			return { doc, cacheControl: response.headers.get("cache-control") };
 		} finally {
 			if (!response.bodyUsed) response.body?.cancel().catch(() => {});
 		}
@@ -474,21 +544,7 @@ export function validateDocument(
 	) {
 		throw invalid("The AI app's details have no valid redirect_uris.");
 	}
-	// The method the app will use; an app that prefers another but lists
-	// "none" among the methods it supports (ChatGPT: private_key_jwt, with
-	// ["none", "private_key_jwt"]) uses "none" here, the only one this
-	// relay's metadata offers (DEC-104).
-	const method = d["token_endpoint_auth_method"];
-	const supported = d["token_endpoint_auth_methods_supported"];
-	if (
-		method !== undefined &&
-		method !== "none" &&
-		!(Array.isArray(supported) && supported.includes("none"))
-	) {
-		throw invalid(
-			'The AI app must use token_endpoint_auth_method "none" with this relay, or list "none" in token_endpoint_auth_methods_supported.',
-		);
-	}
+	const auth = clientAuth(d, url, invalid);
 	const grants = d["grant_types"];
 	if (
 		grants !== undefined &&
@@ -510,7 +566,101 @@ export function validateDocument(
 		name: displayName(name),
 		host: url.host,
 		redirectUris: uris as string[],
+		auth,
 	};
+}
+
+/**
+ * How the client authenticates at `/token` (DEC-104, DEC-106):
+ *
+ * - `none` or no method: a public client;
+ * - `private_key_jwt` with a `jwks_uri` on the client id's own host; an
+ *   inline `jwks` is not accepted (one key path, rotated through the JWKS
+ *   cache); `token_endpoint_auth_signing_alg`, if given, must be one the
+ *   relay verifies and is then the only one accepted;
+ * - any other method, or `private_key_jwt` without a `jwks_uri`: accepted as
+ *   a public client only when `token_endpoint_auth_methods_supported` lists
+ *   `none` (DEC-104), else refused. `client_secret_*` never authenticates.
+ */
+function clientAuth(
+	d: Record<string, unknown>,
+	url: URL,
+	invalid: (message: string) => ClientMetadataError,
+): ClientAuth {
+	const method = d["token_endpoint_auth_method"];
+	const supported = d["token_endpoint_auth_methods_supported"];
+	const listsNone = Array.isArray(supported) && supported.includes("none");
+	if (method === undefined || method === "none") return { method: "none" };
+	const jwksUri = d["jwks_uri"];
+	if (method === "private_key_jwt" && jwksUri !== undefined) {
+		if (d["jwks"] !== undefined) {
+			// RFC 7591 §2: the two must not both be present.
+			throw invalid("The AI app's details have both jwks and jwks_uri.");
+		}
+		// The scheme and host (with its port) of the client id, which passed
+		// the stricter client id rules: the keys are the verified host's own.
+		const parsed =
+			typeof jwksUri === "string" ? parseJwksUri(jwksUri, true) : undefined;
+		if (
+			parsed === undefined ||
+			parsed.protocol !== url.protocol ||
+			parsed.host !== url.host
+		) {
+			throw invalid(
+				"The AI app's jwks_uri must be an https:// URL on the host of its client_id.",
+			);
+		}
+		return {
+			method: "private_key_jwt",
+			jwksUri: parsed.href,
+			algorithms: signingAlgorithms(d, invalid),
+			publicAllowed: listsNone,
+		};
+	}
+	if (listsNone) return { method: "none" };
+	throw invalid(
+		method === "private_key_jwt"
+			? "The AI app uses private_key_jwt but publishes no jwks_uri (an inline jwks is not accepted)."
+			: 'The AI app must use token_endpoint_auth_method "none" or "private_key_jwt" with this relay, or list "none" in token_endpoint_auth_methods_supported.',
+	);
+}
+
+/** The algorithms a client's assertion may use: the one it names, or all. */
+function signingAlgorithms(
+	d: Record<string, unknown>,
+	invalid: (message: string) => ClientMetadataError,
+): readonly JwtAlgorithm[] {
+	const alg = d["token_endpoint_auth_signing_alg"];
+	if (alg === undefined) return JWT_ALGORITHMS;
+	if (!isAlgorithm(alg)) {
+		throw invalid(
+			"The AI app's token_endpoint_auth_signing_alg is not one this relay accepts.",
+		);
+	}
+	return [alg];
+}
+
+/**
+ * A `jwks_uri` as the relay accepts it: an absolute `https:` URL (`http:`
+ * only in test mode) of at most 2048 characters, in canonical form, without
+ * credentials or fragment, on the default port (any port in test mode).
+ */
+function parseJwksUri(value: string, test: boolean): URL | undefined {
+	if (value.length > MAX_CLIENT_ID_LENGTH) return undefined;
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return undefined;
+	}
+	const scheme =
+		url.protocol === "https:" || (test && url.protocol === "http:");
+	if (!scheme || url.href !== value) return undefined;
+	if (url.username !== "" || url.password !== "" || url.hash !== "") {
+		return undefined;
+	}
+	if (url.port !== "" && !test) return undefined;
+	return url;
 }
 
 /** A private-use URI scheme in reverse-domain form (RFC 8252 §7.1), e.g. `com.example.app:`. */

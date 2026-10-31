@@ -147,7 +147,7 @@ function spec(alg: JwtAlgorithm): AlgorithmSpec {
 	}
 }
 
-function isAlgorithm(v: unknown): v is JwtAlgorithm {
+export function isAlgorithm(v: unknown): v is JwtAlgorithm {
 	return (JWT_ALGORITHMS as readonly unknown[]).includes(v);
 }
 
@@ -250,18 +250,27 @@ export class HttpJsonError extends Error {
 export class JwksCache implements KeySource {
 	readonly #url: () => Promise<string>;
 	readonly #now: () => number;
+	readonly #load: (url: string) => Promise<unknown>;
 	#keys: Jwk[] = [];
 	#fetchedAt = 0;
 	#attemptedAt = Number.NEGATIVE_INFINITY;
 	#lastError: Error | undefined;
 	#inflight: Promise<void> | undefined;
 
+	/**
+	 * `load` fetches the document; the default suits an operator-configured
+	 * URL. A URL a client chose needs the SSRF-guarded fetch (DEC-106).
+	 */
 	constructor(
 		url: string | (() => Promise<string>),
-		options: { now?: () => number } = {},
+		options: {
+			now?: () => number;
+			load?: (url: string) => Promise<unknown>;
+		} = {},
 	) {
 		this.#url = typeof url === "string" ? () => Promise.resolve(url) : url;
 		this.#now = options.now ?? Date.now;
+		this.#load = options.load ?? ((u) => fetchJson(u));
 	}
 
 	async keys(kid: string | undefined): Promise<Jwk[]> {
@@ -292,7 +301,7 @@ export class JwksCache implements KeySource {
 		this.#inflight ??= (async () => {
 			this.#attemptedAt = this.#now();
 			try {
-				const doc = await fetchJson(await this.#url());
+				const doc = await this.#load(await this.#url());
 				const keys = (doc as { keys?: unknown } | null)?.keys;
 				if (!Array.isArray(keys)) throw new Error("a JWKS needs keys");
 				this.#keys = keys.filter(

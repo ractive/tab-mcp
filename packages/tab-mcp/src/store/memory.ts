@@ -47,9 +47,45 @@ export function summarizeGrants(
 	);
 }
 
+/**
+ * One-time values (client assertion `jti`s, DEC-106) until their expiry, in
+ * process memory: `TokenStore.claimNonce` for the memory store, and the
+ * relay's own fallback for stores without it.
+ */
+export class NonceSet {
+	readonly #until = new Map<string, number>();
+
+	get size(): number {
+		return this.#until.size;
+	}
+
+	claim(key: string, expiresAt: number, now: number): boolean {
+		const until = this.#until.get(key);
+		if (until !== undefined && until > now) return false;
+		this.#until.set(key, expiresAt);
+		return true;
+	}
+
+	sweep(now: number): number {
+		let n = 0;
+		for (const [key, until] of this.#until) {
+			if (until <= now) {
+				this.#until.delete(key);
+				n++;
+			}
+		}
+		return n;
+	}
+
+	clear(): void {
+		this.#until.clear();
+	}
+}
+
 /** Tokens in process memory; everything is lost on restart. */
 export class MemoryTokenStore implements TokenStore {
 	readonly #records = new Map<string, TokenRecord>();
+	readonly #nonces = new NonceSet();
 	/** Revoked grants: grant id → keep until. */
 	readonly #revokedGrants = new Map<string, number>();
 	/** Revoked addresses: address id → { at, keep until }. */
@@ -119,6 +155,7 @@ export class MemoryTokenStore implements TokenStore {
 		for (const [id, t] of this.#revokedAddresses) {
 			if (t.until <= now) this.#revokedAddresses.delete(id);
 		}
+		this.#nonces.sweep(now);
 		let n = 0;
 		for (const [hash, r] of this.#records) {
 			if (r.expiresAt <= now) {
@@ -129,7 +166,16 @@ export class MemoryTokenStore implements TokenStore {
 		return n;
 	}
 
+	async claimNonce(
+		key: string,
+		expiresAt: number,
+		now: number,
+	): Promise<boolean> {
+		return this.#nonces.claim(key, expiresAt, now);
+	}
+
 	async close(): Promise<void> {
+		this.#nonces.clear();
 		this.#records.clear();
 		this.#revokedGrants.clear();
 		this.#revokedAddresses.clear();

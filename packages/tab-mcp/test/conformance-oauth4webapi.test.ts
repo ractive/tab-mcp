@@ -14,6 +14,7 @@ import {
 	startOAuthRelay,
 	TestBrowser,
 } from "./oauth-helpers.ts";
+import { signingKey } from "./oidc-fixture.ts";
 
 let cimd: CimdServer;
 let clientId: string;
@@ -206,6 +207,124 @@ test("discovery, authorization code + PKCE + iss, refresh rotation, reuse detect
 		(
 			await mcpPost(session.address, rpc(5, "tools/list"), {
 				token: second.access_token,
+			})
+		).status,
+	).toBe(401);
+}, 20_000);
+
+test("private_key_jwt (DEC-106): oauth4webapi's client assertions at /token and /revoke", async () => {
+	const key = await signingKey("ES256", "conf-1");
+	const pkjwtId = cimd.serve(
+		"/oauth4webapi-pkjwt.json",
+		cimd.document(`${cimd.origin}/oauth4webapi-pkjwt.json`, {
+			client_name: "oauth4webapi private_key_jwt",
+			redirect_uris: ["http://127.0.0.1/callback"],
+			token_endpoint_auth_method: "private_key_jwt",
+			token_endpoint_auth_signing_alg: "ES256",
+			jwks_uri: cimd.serve("/oauth4webapi-jwks.json", {
+				keys: [key.publicJwk],
+			}),
+		}),
+	);
+	r = startOAuthRelay(cimd);
+	const tab = new ScriptedTab(r.wsUrl, { app: "conformance" });
+	tabs.push(tab);
+	const session = await tab.connect();
+	const pairingCode = await tab.startPairing();
+	const issuer = new URL(r.url);
+	const as = await oauth.processDiscoveryResponse(
+		issuer,
+		await oauth.discoveryRequest(issuer, { algorithm: "oauth2", ...insecure }),
+	);
+	expect(as.token_endpoint_auth_methods_supported).toContain("private_key_jwt");
+	const client: oauth.Client = { client_id: pkjwtId };
+	const clientAuth = oauth.PrivateKeyJwt({ key: key.privateKey, kid: key.kid });
+	const verifier = oauth.generateRandomCodeVerifier();
+	const state = oauth.generateRandomState();
+	const authorizationUrl = new URL(as.authorization_endpoint ?? "");
+	for (const [k, v] of Object.entries({
+		client_id: pkjwtId,
+		redirect_uri: REDIRECT,
+		response_type: "code",
+		code_challenge: await oauth.calculatePKCECodeChallenge(verifier),
+		code_challenge_method: "S256",
+		state,
+		scope: "tools",
+		resource: session.address,
+	})) {
+		authorizationUrl.searchParams.set(k, v);
+	}
+	const browser = new TestBrowser(r.url);
+	const page = await browser.open(authorizationUrl.href);
+	const done = await browser.submit(page, {
+		action: "connect",
+		code: pairingCode,
+	});
+	const tokens = await oauth.processAuthorizationCodeResponse(
+		as,
+		client,
+		await oauth.authorizationCodeGrantRequest(
+			as,
+			client,
+			clientAuth,
+			oauth.validateAuthResponse(
+				as,
+				client,
+				new URL(done.location ?? ""),
+				state,
+			),
+			REDIRECT,
+			verifier,
+			insecure,
+		),
+	);
+	// The grant is bound: a refresh as a public client is refused (401
+	// invalid_client, which oauth4webapi reports as a challenge).
+	const unauthenticated = await oauth.refreshTokenGrantRequest(
+		as,
+		client,
+		oauth.None(),
+		tokens.refresh_token ?? "",
+		insecure,
+	);
+	expect(unauthenticated.status).toBe(401);
+	expect(await unauthenticated.clone().json()).toMatchObject({
+		error: "invalid_client",
+	});
+	await expect(
+		oauth.processRefreshTokenResponse(as, client, unauthenticated),
+	).rejects.toBeInstanceOf(oauth.WWWAuthenticateChallengeError);
+	const refreshed = await oauth.processRefreshTokenResponse(
+		as,
+		client,
+		await oauth.refreshTokenGrantRequest(
+			as,
+			client,
+			clientAuth,
+			tokens.refresh_token ?? "",
+			insecure,
+		),
+	);
+	expect(
+		(
+			await mcpPost(session.address, rpc(1, "tools/list"), {
+				token: refreshed.access_token,
+			})
+		).status,
+	).toBe(200);
+	await oauth.processRevocationResponse(
+		await oauth.revocationRequest(
+			as,
+			client,
+			clientAuth,
+			refreshed.refresh_token ?? "",
+			insecure,
+		),
+	);
+	expect(
+		(
+			await mcpPost(session.address, rpc(2, "tools/list"), {
+				token: refreshed.access_token,
 			})
 		).status,
 	).toBe(401);

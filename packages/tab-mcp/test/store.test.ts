@@ -66,7 +66,7 @@ test("review of PR 32: opening a version 3 file cuts used refresh tokens to the 
 	await reopened.close();
 });
 
-test("a version 2 SQLite file gains the subject column and keeps its tokens", async () => {
+test("a version 2 SQLite file gains the subject and client_auth columns and keeps its tokens", async () => {
 	const path = join(dir, "v2.db");
 	const old = new Database(path, { create: true, strict: true });
 	old.run(`CREATE TABLE revocations (
@@ -93,5 +93,14 @@ test("a version 2 SQLite file gains the subject column and keeps its tokens", as
 		subject: "k",
 	});
 	expect((await store.get("h2"))?.subject).toBe("k");
+	// Version 5 (DEC-106): the binding and the nonce table.
+	await store.put({
+		...(got as NonNullable<typeof got>),
+		hash: "h3",
+		clientAuth: "private_key_jwt",
+	});
+	expect((await store.get("h3"))?.clientAuth).toBe("private_key_jwt");
+	expect(await store.claimNonce("n", 2000, 1000)).toBe(true);
+	expect(await store.claimNonce("n", 2000, 1001)).toBe(false);
 	await store.close();
 });

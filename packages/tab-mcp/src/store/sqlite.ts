@@ -9,7 +9,7 @@ import type {
 	TokenStore,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 /** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
 const REUSE_WINDOW_MS = 86_400_000;
 
@@ -26,6 +26,7 @@ interface Row {
 	expires_at: number;
 	used_at: number | null;
 	subject: string | null;
+	client_auth: string | null;
 }
 
 function toRecord(row: Row): TokenRecord {
@@ -43,6 +44,8 @@ function toRecord(row: Row): TokenRecord {
 	};
 	if (row.used_at !== null) record.usedAt = row.used_at;
 	if (row.subject !== null) record.subject = row.subject;
+	if (row.client_auth === "private_key_jwt")
+		record.clientAuth = "private_key_jwt";
 	return record;
 }
 
@@ -87,7 +90,8 @@ export class SqliteTokenStore implements TokenStore {
 				issued_at INTEGER NOT NULL,
 				expires_at INTEGER NOT NULL,
 				used_at INTEGER,
-				subject TEXT
+				subject TEXT,
+				client_auth TEXT
 			) STRICT`);
 			// Version 3: the subject of identity-bound grants (DEC-077).
 			const columns = this.#db.query("PRAGMA table_info(tokens)").all() as {
@@ -96,6 +100,15 @@ export class SqliteTokenStore implements TokenStore {
 			if (!columns.some((c) => c.name === "subject")) {
 				this.#db.run("ALTER TABLE tokens ADD COLUMN subject TEXT");
 			}
+			// Version 5: the client authentication binding of a grant, and the
+			// used client assertion ids (DEC-106).
+			if (!columns.some((c) => c.name === "client_auth")) {
+				this.#db.run("ALTER TABLE tokens ADD COLUMN client_auth TEXT");
+			}
+			this.#db.run(`CREATE TABLE IF NOT EXISTS nonces (
+				key TEXT PRIMARY KEY,
+				expires_at INTEGER NOT NULL
+			) STRICT`);
 			this.#db.run(
 				"CREATE INDEX IF NOT EXISTS tokens_grant ON tokens (grant_id)",
 			);
@@ -139,9 +152,11 @@ export class SqliteTokenStore implements TokenStore {
 		this.#db
 			.query(
 				`INSERT OR REPLACE INTO tokens (hash, kind, grant_id, address_id, client_id,
-				client_name, scopes, grant_created_at, issued_at, expires_at, used_at, subject)
+				client_name, scopes, grant_created_at, issued_at, expires_at, used_at, subject,
+				client_auth)
 				VALUES ($hash, $kind, $grant_id, $address_id, $client_id, $client_name,
-				$scopes, $grant_created_at, $issued_at, $expires_at, $used_at, $subject)`,
+				$scopes, $grant_created_at, $issued_at, $expires_at, $used_at, $subject,
+				$client_auth)`,
 			)
 			.run({
 				hash: r.hash,
@@ -156,6 +171,7 @@ export class SqliteTokenStore implements TokenStore {
 				expires_at: r.expiresAt,
 				used_at: r.usedAt ?? null,
 				subject: r.subject ?? null,
+				client_auth: r.clientAuth ?? null,
 			});
 	}
 
@@ -227,9 +243,26 @@ export class SqliteTokenStore implements TokenStore {
 		this.#db
 			.query("DELETE FROM revocations WHERE keep_until <= $now")
 			.run({ now });
+		this.#db.query("DELETE FROM nonces WHERE expires_at <= $now").run({ now });
 		return this.#db
 			.query("DELETE FROM tokens WHERE expires_at <= $now")
 			.run({ now }).changes;
+	}
+
+	/** One statement: inserted, or an expired entry replaced; a live one stays. */
+	async claimNonce(
+		key: string,
+		expiresAt: number,
+		now: number,
+	): Promise<boolean> {
+		const result = this.#db
+			.query(
+				`INSERT INTO nonces (key, expires_at) VALUES ($key, $expires_at)
+				ON CONFLICT (key) DO UPDATE SET expires_at = excluded.expires_at
+				WHERE nonces.expires_at <= $now`,
+			)
+			.run({ key, expires_at: expiresAt, now });
+		return result.changes === 1;
 	}
 
 	async close(): Promise<void> {

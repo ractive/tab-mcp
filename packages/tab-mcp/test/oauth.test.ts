@@ -242,8 +242,20 @@ describe("RFC 8414: authorization server metadata", () => {
 			"refresh_token",
 		]);
 		expect(m["code_challenge_methods_supported"]).toEqual(["S256"]);
-		// claude.ai uses CIMD only with both of these (AI app support research).
-		expect(m["token_endpoint_auth_methods_supported"]).toEqual(["none"]);
+		// claude.ai uses CIMD only with both of these (AI app support research);
+		// private_key_jwt for ChatGPT, asymmetric algorithms only (DEC-106).
+		expect(m["token_endpoint_auth_methods_supported"]).toEqual([
+			"none",
+			"private_key_jwt",
+		]);
+		const algs = m["token_endpoint_auth_signing_alg_values_supported"];
+		expect(algs).toContain("RS256");
+		expect(algs).not.toContain("none");
+		expect(algs).not.toContain("HS256");
+		expect(m["revocation_endpoint_auth_methods_supported"]).toEqual([
+			"none",
+			"private_key_jwt",
+		]);
 		expect(m["client_id_metadata_document_supported"]).toBe(true);
 		expect(m["authorization_response_iss_parameter_supported"]).toBe(true);
 		expect(m["scopes_supported"]).toEqual(["tools"]);
