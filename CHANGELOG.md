@@ -302,6 +302,38 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Added
+
+- `private_key_jwt` client authentication at `/token` and `/revoke` (RFC 7523,
+  DEC-106), for ChatGPT's connectors. The server metadata lists
+  `["none", "private_key_jwt"]` and the accepted signing algorithms (RS, PS and ES
+  256/384/512, EdDSA; never `none` or HMAC). A Client ID Metadata Document that uses it
+  needs a `jwks_uri` on the host of its client id; an inline `jwks` is not accepted. The
+  JWKS is fetched with the metadata fetch's SSRF guards and rate limits, and cached. An
+  assertion needs a key of that JWKS by `kid`, `iss` and `sub` equal to the client id,
+  `aud` the issuer or the endpoint's URL, `exp` at most an hour ahead (30 s leeway), and
+  a `jti` that is never accepted twice before its `exp`. Every failure is
+  `invalid_client` (HTTP 401); the reason is logged as `oauth.client_auth_failed`.
+- A grant made or refreshed with a client assertion is bound to it: its refresh tokens
+  are refused without one, so a stolen refresh token cannot be redeemed as a public
+  client. A client whose document does not list `none` needs an assertion for every
+  code. One that lists `none` (ChatGPT) can still connect as a public client, as since
+  0.5.1 (DEC-104). Grants from earlier versions stay public.
+- `TokenStore.claimNonce(key, expiresAt, now)`, optional: remembers used assertion ids,
+  atomically, so instances that share a store share them. The memory and SQLite stores
+  have it; without it the relay keeps them in its own memory, per instance. A
+  `TokenRecord` can carry `clientAuth: "private_key_jwt"`, which a store must keep
+  unchanged. The conformance suite checks both. The SQLite store upgrades its file to
+  schema version 5 when it opens it (a `nonces` table, a `client_auth` column).
+
+#### Changed
+
+- A `client_assertion` at `/token` or `/revoke` is checked instead of refused. A public
+  client that sends one gets `invalid_client` (401) rather than 400. `client_secret` and
+  HTTP Basic are still refused.
+
 ### [0.5.1][relay-0.5.1] - 2026-10-25
 
 #### Added

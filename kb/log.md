@@ -1,5 +1,9 @@
 # Log
 
+## 2026-10-31
+
+- Iteration 15 on iter-15/private-key-jwt: `private_key_jwt` client authentication at `/token` and `/revoke` (RFC 7523) for ChatGPT's connectors, grants bound to the method they were made with, `TokenStore.claimNonce` for single-use `jti`s; DEC-106; relay release open
+
 ## 2026-10-25
 
 - Iteration 6 completed: Claude Desktop, ChatGPT for Mac (Codex inside, with its flag) and ChatGPT on the web (after relay 0.5.1, DEC-104) work; relay 0.5.1 released and deployed (icon, DEC-104)

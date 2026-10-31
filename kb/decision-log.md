@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-25T18:00:00+02:00
+timestamp: 2026-10-31T12:00:00+01:00
 ---
 
 # Decision log
@@ -666,7 +666,8 @@ special cases; it needs `https:`, a path, the default port, no credentials or fr
 IP literals and every address the host resolves to must be public. The document needs
 `client_id` equal to the URL, `client_name` and 1-20 `redirect_uris` (absolute, no
 fragment, not `javascript:`/`data:`); `token_endpoint_auth_method` absent or `none` (or, since DEC-104, `none` listed in
-`token_endpoint_auth_methods_supported`); no
+`token_endpoint_auth_methods_supported`; since DEC-106, `private_key_jwt` with a
+`jwks_uri` on its own host); no
 `client_secret`; `grant_types` and `response_types`, if present, allow the code flow.
 Caching: `max-age` clamped to 5 minutes-24 hours, `no-store`/`no-cache` 5 minutes, no
 header 1 hour; at most 1000 documents. Fetches per host: 5, then 1 every 5 s. The name
@@ -1560,6 +1561,9 @@ does not define for clients but which says the app can also do `none`.
   would prove that a token request comes from OpenAI, at the cost of a new signature path
   at `/token`. Revisit if ChatGPT insists on signing.
 
+**Amended by DEC-106:** the relay now verifies `private_key_jwt`; a document that lists
+`none` still gets the public path described here.
+
 ## DEC-105: The page's icons go to the AI app; the default is its `<link rel="icon">` (owner)
 
 Owner, 2026-10-25. AI apps showed a placeholder for tab-mcp connectors. The relay's
@@ -1576,6 +1580,89 @@ result carries `serverInfo`); reading the document never fails a connection. URL
 name any URL anyway. The code is in the connection
 chunk. Whether an AI app shows the icon is the app's choice: not yet seen in ChatGPT or
 Claude.
+
+## DEC-106: `private_key_jwt` client authentication, and grants bound to it
+
+Iteration 15, 2026-10-31. Revisits the option DEC-104 deferred: ChatGPT's connectors
+(`https://chatgpt.com/oauth/client.json`: `token_endpoint_auth_method: "private_key_jwt"`,
+`token_endpoint_auth_signing_alg: "RS256"`, `jwks_uri: https://chatgpt.com/oauth/jwks.json`,
+and `["none", "private_key_jwt"]`) prefer to sign their token requests. Written without a
+JOSE library, on `jwt.ts` (DEC-031, DEC-076).
+
+- **Metadata.** `token_endpoint_auth_methods_supported` and
+  `revocation_endpoint_auth_methods_supported` are `["none", "private_key_jwt"]` (`none`
+  stays first: claude.ai uses CIMD only with it); the `…_signing_alg_values_supported`
+  lists are `jwt.ts`'s algorithms (RS, PS, ES 256/384/512, EdDSA), never `none` or HMAC.
+- **Which documents.** `private_key_jwt` needs a `jwks_uri` with the client id's scheme
+  and host (port included), canonical, no credentials or fragment. Same host, because the
+  host is the only verified thing about a client (A2) and it keeps the JWKS fetch on hosts
+  the CIMD rules already admit (`TAB_MCP_CLIENT_ID_HOSTS` included). The JWKS is fetched
+  with the CIMD fetch's SSRF rules (resolve, public addresses only, pinned address, no
+  redirects, 5 s, 64 KiB, `application/json` or `application/jwk-set+json`) and charged
+  to its rate limits, then cached like the identity JWKS (10 minutes, an unknown `kid`
+  again after 30 s, the last good keys for an hour after a failure), at most 1000 sets.
+  `token_endpoint_auth_signing_alg`, if present, must be one of those algorithms and is
+  then the only one accepted. **An inline `jwks` is not accepted:** one key path, keys
+  rotated through the JWKS cache rather than the CIMD cache (up to 24 hours), and `jwks`
+  with `jwks_uri` is refused (RFC 7591 §2). A document without a usable `jwks_uri`, or
+  with any other method, is accepted as public only when it lists `none` (DEC-104);
+  otherwise it is refused at `/authorize`.
+- **The checks** (RFC 7523 §3, OpenID Connect Core §9): `client_assertion_type`
+  `urn:ietf:params:oauth:client-assertion-type:jwt-bearer` with `client_assertion`
+  (one without the other is `invalid_request`); `client_id` may be left out (RFC 7521
+  §4.2), the assertion's `sub` then names the client, whose metadata is fetched (cached)
+  as at `/authorize`; signature with a key of that client's JWKS chosen by `kid` (without
+  a `kid` only an unambiguous key), the algorithm tied to the key type, `jwk`/`jku`/`x5u`
+  in the header ignored, no `crit`; `typ` absent, `JWT` or `client-authentication+jwt`
+  (draft-ietf-oauth-rfc7523bis), so other typed tokens are refused; `iss` = `sub` = the
+  client id; `aud` (a string or an array) contains the issuer or the endpoint's URL
+  (`/token`; at `/revoke` also `/revoke`); `exp` required, not past and at most an hour
+  ahead; `iat` and `nbf`, if given, not in the future; 30 s leeway on all three; `jti`
+  required (1-256 characters) and single-use until `exp` + leeway. An hour, not a minute:
+  it is the ceiling Okta sets and the lifetime common libraries default to, ChatGPT's own
+  is unknown, and the single-use `jti` makes the length matter only for the replay store.
+  `aud` takes the token endpoint as well as the issuer for compatibility; the
+  rfc7523bis "audience injection" concern is bounded by the single-use `jti` and by every
+  grant still needing its code with PKCE or its single-use refresh token.
+- **Failures** are `invalid_client`, HTTP 401 (with the `WWW-Authenticate` every 401 of
+  the token endpoint carries), one text for every reason ("client authentication
+  failed"); the reason goes to the log as `oauth.client_auth_failed` with the client's
+  host. A client whose document says `none` and sends an assertion anyway is refused, not
+  ignored. `client_secret` (body or HTTP Basic) stays refused.
+- **Binding.** The method a grant is made with binds it. A grant made or refreshed with a
+  valid assertion is stored with `clientAuth: "private_key_jwt"`; its refresh tokens are
+  refused without an assertion, checked right after the client id and before expiry and
+  reuse detection, so a stolen refresh token alone can neither be redeemed as a public
+  client nor revoke the grant. A client whose document does not list `none` needs an
+  assertion for every code too, checked before the code is marked used. A client that
+  lists `none` (ChatGPT) may still exchange a code, and refresh such a grant, as a public
+  client: the binding starts with the first request it signs, and never goes back. Chosen
+  over "the document's method is required for every code", which is stricter, because an
+  AI app that read the relay's metadata before this release (it said only `none`) and
+  keeps it would then fail every new connection with `invalid_client`; and the downgrade
+  it allows needs the code and its PKCE verifier, which only the AI app's own redirect
+  receives. Grants made before this release have no `clientAuth` and stay public. A grant
+  bound to a key whose client later drops `private_key_jwt` cannot be refreshed (its
+  assertions are refused), so the user connects again. `/revoke` accepts an assertion and
+  then requires it to be valid, but needs none: whoever holds a token can only end the
+  grant.
+- **Replay store and several instances.** `TokenStore` gains an optional
+  `claimNonce(key, expiresAt, now)`: atomic insert-if-absent, an expired entry counting
+  as absent, dropped by `deleteExpired`. The key is SHA-256 over the client id and the
+  `jti`, recorded only after every other check passed, so only the holder of the client's
+  key adds entries. The memory and SQLite stores implement it (SQLite schema version 5:
+  a `nonces` table and the `client_auth` column); instances that share a store share the
+  replay store. A store without it falls back to the relay's memory (at most 100 000
+  entries, then `temporarily_unavailable`), which is per instance: there a replay at
+  another instance within the assertion's lifetime gets through the `jti` check, but still
+  needs a valid code (per instance as well) or an unused refresh token (atomic
+  `markUsed` in the shared store). Adding a required method would have broken every
+  custom store. `clientAuth` must be stored and returned unchanged; a store that drops it
+  lets the grant's refresh tokens be used without the key, so the conformance suite
+  checks the round trip.
+- **Cost.** `/token` and `/revoke` now fetch a client's metadata and JWKS when a request
+  carries an assertion; both are cached, rate-limited with the CIMD fetches, and the
+  per-IP token limit applies first.
 
 # Citations
 

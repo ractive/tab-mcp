@@ -405,10 +405,11 @@ What lives in each process, and what routing by the id does to it:
 | OIDC sign-ins in progress | memory | works: the callback's `state` carries the id |
 | Authorization codes | memory, 60 s | works only if the load balancer reads the `/token` body (HAProxy below; nginx and Caddy cannot) |
 | Used `jti` of tab assertions (replay cache) | memory | works: an assertion's audience is one address, so a replay can only be used at that address's instance |
+| Used `jti` of AI apps' client assertions (`private_key_jwt`, DEC-106) | token store (`claimNonce`), else memory | shared with a store that has `claimNonce`; without it per instance, so a replay at another instance is not noticed (it still needs a valid code or an unused refresh token) |
 | Rate limits per address (code guesses, sign-ins) | memory | works: one instance counts them |
 | Rate limits per network (`/authorize` views and posts, `/token`, sessions per IP) and per grant (refreshes) | memory | per instance: with N instances a network or grant gets up to N times the allowance |
-| CIMD documents, provider metadata, JWKS | memory cache | per instance; each fetches on its own |
-| Grants, access and refresh token hashes | token store | needs the shared store |
+| CIMD documents, provider metadata, JWKS (also AI apps' JWKS) | memory cache | per instance; each fetches on its own |
+| Grants, access and refresh token hashes, and whether a grant needs a client assertion | token store | needs the shared store |
 
 Refreshes and revocations work on any instance with a shared store: the store's atomic
 `markUsed` still catches a reused refresh token. But the page's list of connected apps

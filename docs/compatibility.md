@@ -20,6 +20,7 @@ An app that cannot do both cannot connect. How to add a page to each app:
 | Codex desktop, with `mcp_2026_07_28 = true` under `[features]` in `~/.codex/config.toml` | 0.163 | 2026-10-23 | relay `relay-v0.3.0`, client `client-v0.5.0` and `client-v0.5.1` | full OAuth flow against the hosted relay: CIMD; on https://tab-mcp-login.ractive.ch/ Google sign-in at the relay (identity binding), on https://ractive.ch/saturnus/app/ the pairing code | works (owner's run): the sign-in example's notes tools ran, and signing in with a different Google account was refused; on saturnus the calculator's tools ran. Without the feature flag the sign-in succeeds but no tools appear. Codex loads tools when a chat starts, so the chat must start after pairing, and each page needs its own `[mcp_servers.<name>]` entry, since each page has its own relay address |
 | ChatGPT for Mac (Codex inside; it keeps its MCP servers in `~/.codex/config.toml`), with `mcp_2026_07_28 = true` under `[features]` there | 26.1016.62342 | 2026-10-25 | relay `relay-v0.5.0`, client `client-v0.8.0` (todo example) | Settings → Plugins → MCPs → Add → custom MCP, type Streamable HTTP, the address; then Authenticate: full OAuth flow with Codex's CIMD client id `https://chatgpt.com/oauth/codex/client.json`, the relay's `/authorize` shows "Connect Codex from chatgpt.com", the pairing code, the redirect to a loopback port on 127.0.0.1 | works (owner's run): the todo example's tools ran. The feature flag is required, as for Codex: without it the sign-in succeeds but no tools appear |
 | ChatGPT on the web (chatgpt.com, apps added under https://chatgpt.com/plugins; the connector runs on OpenAI's servers) | web app as of 2026-10-25 | 2026-10-25 | relay `relay-v0.5.1`, client `client-v0.8.0` | full OAuth flow against the hosted relay: CIMD client id `https://chatgpt.com/oauth/client.json`, which prefers `private_key_jwt` and lists `["none", "private_key_jwt"]`; the relay accepts it since 0.5.1 (DEC-104) and ChatGPT then uses `none`; the pairing code on `/authorize` | works (owner's run): the page's tools ran. Relay 0.5.0 and older refused it at `/authorize` ("must use token_endpoint_auth_method \"none\"") |
+| oauth4webapi (panva) with `PrivateKeyJwt` (ES256) | 3.8.8 | 2026-10-31 | `1f83740` | CIMD client id with `token_endpoint_auth_method: "private_key_jwt"` and a `jwks_uri`; client assertions at `/token` and `/revoke` (DEC-106) | works: code exchange, refresh and revocation with assertions; a refresh of the bound grant as a public client gets `invalid_client` (`packages/tab-mcp/test/conformance-oauth4webapi.test.ts`, part of CI) |
 | Claude Code, interactive (`claude mcp add --transport http todo <address>`, then `/mcp` → Authenticate) | 2.1.308 | 2026-10-26 | relay `relay-v0.5.1`, client `client-v0.9.0` (todo example) | full OAuth flow against the hosted relay with Claude Code's CIMD client id `https://claude.ai/oauth/claude-code-client-metadata`: the relay's `/authorize` shows "Connect Claude Code from claude.ai", the pairing code, the redirect to a loopback port | works (owner's run): the todo example's tools ran. The page's "Connect your AI app" dialog must stay open until the sign-in finishes; otherwise `/authorize` says the page is not connecting |
 
 ## Known issues in supported apps
@@ -27,6 +28,23 @@ An app that cannot do both cannot connect. How to add a page to each app:
 - Claude Desktop and Claude Code via claude.ai connectors send the header
   `MCP-Protocol-Version: 2025-11-25` with a 2026-07-28 request body (claude-code #93290).
   The relay accepts exactly this case and counts it in `/healthz`.
+
+## Client authentication
+
+AI apps authenticate at `/token` with `none` (public clients, PKCE) or, since the
+relay release after 0.5.1, with `private_key_jwt` (DEC-106): a JWT signed with a key
+the app publishes at the `jwks_uri` of its Client ID Metadata Document, which must be
+on the same host as the client id. `client_secret_*` is not supported: a CIMD client has
+nowhere to keep a secret.
+
+ChatGPT on the web (`https://chatgpt.com/oauth/client.json`) prefers `private_key_jwt`
+(RS256, `jwks_uri: https://chatgpt.com/oauth/jwks.json`) and also lists `none`. Up to
+relay 0.5.1 the relay offered only `none`, and ChatGPT used it. With `private_key_jwt`
+in the relay's metadata ChatGPT is expected to sign its token requests; a connection
+made with a signature then needs one for every refresh, so a stolen refresh token is
+useless without OpenAI's key. Because ChatGPT lists `none`, a connection without a
+signature still works, as before. Not yet checked against ChatGPT itself: the row above
+is from relay 0.5.1.
 
 ## Not supported
 

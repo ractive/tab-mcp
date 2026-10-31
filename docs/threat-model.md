@@ -110,6 +110,14 @@ From a shared screenshot, a chat log or over the user's shoulder.
 - "Verified host" means only that the document was served from that host over HTTPS;
   any host qualifies. An operator can limit which AI apps may connect with
   `TAB_MCP_CLIENT_ID_HOSTS`.
+- An AI app may authenticate at `/token` with `private_key_jwt` (DEC-106): a JWT signed
+  with a key it publishes at the `jwks_uri` of its document, which must be on the client
+  id's own host. The relay accepts only asymmetric algorithms, each tied to its key type,
+  takes keys only from that JWKS (never from the token's header), and requires `iss` and
+  `sub` equal to the client id, `aud` naming the relay, `exp` at most an hour ahead and a
+  `jti` it has not seen. This proves the request comes from whoever controls the client
+  id's host; it says no more about who that is than the verified host does. Client
+  secrets are refused.
 
 ### A3: Server-side request forgery through client metadata fetches
 
@@ -135,6 +143,12 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 - every failure from resolving to parsing shows the same message, so the page cannot be
   used to probe what answers where.
 
+The `jwks_uri` of a `private_key_jwt` client is fetched under the same guards and limits
+(also `application/jwk-set+json`), and only on the host of the client id, so it reaches
+no host the metadata fetch could not. It is fetched when a token or revocation request
+carries a client assertion, cached 10 minutes, and fetched again for an unknown key id at
+most every 30 seconds.
+
 ### A4: Token theft and replay
 
 - Tokens are 256-bit random values. The store keeps only their SHA-256 hashes, so a stolen
@@ -147,6 +161,14 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   wins and the other counts as reuse. A used refresh token is kept for 24 hours to detect
   that; replayed later, it is unknown and refused without revoking. A refresh token
   presented by another client id is refused without revoking.
+- A grant made or refreshed with a `private_key_jwt` client assertion is bound to it
+  (DEC-106): its refresh tokens are refused without a valid assertion, before reuse is
+  checked, so a stolen refresh token alone can neither be redeemed nor revoke the grant;
+  the thief also needs the AI app's private key. A client whose document lists only
+  `private_key_jwt` needs an assertion for every code too. One that also lists `none`
+  (ChatGPT) can still make public grants, which are as exposed as any public client's.
+  Each assertion's `jti` is accepted once until its `exp`; with several instances that
+  holds across them only with a store that implements `claimNonce`.
 - Revocation leaves a tombstone in the store, and the store refuses new tokens for a
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.
 - Disconnect in the page revokes at once. "New address" revokes all grants of the old
