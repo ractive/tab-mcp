@@ -99,6 +99,12 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
 - `annotations`: `readOnlyHint`, `consequentialHint`, `untrustedContentHint`, and the
   MCP hints `destructiveHint`, `idempotentHint`, `openWorldHint`.
 
+In TypeScript, `Tool<Input>` types the `input` of `execute`, and `registerTool` and
+`useTool` infer it from the tool or take it explicitly
+(`registerTool<{ a: number; b: number }>(…)`); without it, `input` is a
+`Record<string, unknown>`. The library checks the arguments against `inputSchema`, not
+against the type, so keep the two in step.
+
 Abort the `signal` to remove the tool. AI apps that listen for changes learn about
 added and removed tools.
 
@@ -146,7 +152,10 @@ handles only some calls itself.
 
 1. The user clicks your button. `showConnectDialog()` connects (call it from the click
    handler: browsers that report user activation refuse `connect()` without one) and
-   opens the "Connect your AI app" dialog.
+   opens the "Connect your AI app" dialog. A script's `element.click()` has no user
+   activation, so tests and browser automation see "connect() must be called from a
+   user action"; a click through Playwright or the DevTools protocol has one, and
+   `connect({ resume: true })` skips the check.
 2. The dialog shows the address and short instructions for Claude, ChatGPT, Claude Code
    and Codex. The commands for Claude Code and Codex each have a Copy. They name the
    server by a label made from `server.name` that every shell reads as one plain word:
@@ -451,20 +460,61 @@ function TodoList() {
   `deps`. StrictMode's double mount registers it once at a time. A duplicate name or an
   invalid tool is thrown from the component's render, for an error boundary. Tools that
   read state right after another tool changed it should read it from a store (as the
-  example does), not from a render's props.
+  example does) or a ref ([Tools in a `useState` app](#tools-in-a-usestate-app)), not
+  from a render's props.
 - `useToolCalls({ limit })` lists the AI app's tool calls since the component mounted,
   newest first (default 20), each with its `end` (outcome, result, duration) once over.
-- `<ConnectButton>` calls `showConnectDialog()`. Its label follows the state ("Connect
-  your AI app", "Connecting…", "Reconnecting…", "AI app connected"); `children` (a node,
-  or a function of the state) and the usual button props replace or style it, and
-  `data-state` (`disconnected`, `connecting`, `connected`, `reconnecting`) is there for
-  CSS. An `onClick` that calls `preventDefault()` keeps the dialog closed.
+- `<ConnectButton>` calls `showConnectDialog()`, so it needs a real click (see
+  [Connecting and pairing](#connecting-and-pairing)). Its label follows the state
+  ("Connect your AI app", "Connecting…", "Reconnecting…", "AI app connected"), and
+  "Connection lost, retrying…" once three reconnect attempts have failed; a click then
+  tries again at once. `children` replaces the label: a node, or a function of the state
+  from `useTabMcpState()`, such as
+  `{(s) => (s.grants.length > 0 ? "Claude is playing" : "Let Claude play")}`. The usual
+  button props style it, and `data-state` (`disconnected`, `connecting`, `connected`,
+  `reconnecting`) is there for CSS. An `onClick` that calls `preventDefault()` keeps the
+  dialog closed.
+
+### Tools in a `useState` app
+
+A tool that changes the page's state and returns the result needs the state as it is
+after the change, but `setState` only schedules the next render. Keep the current value
+in a ref next to the state, and change both through one function that the page's own UI
+uses too:
+
+```tsx
+function Game() {
+  const [game, setGame] = useState(newGame);
+  const current = useRef(game);
+  const update = (change: (g: GameState) => GameState) => {
+    current.current = change(current.current);
+    setGame(current.current);
+    return current.current;
+  };
+  useTool<{ card: string }>({
+    name: "play_card",
+    description: "Play a card from the hand",
+    inputSchema: { type: "object", properties: { card: { type: "string" } }, required: ["card"] },
+    // play() throws for a move that is not allowed: the AI app gets the message.
+    execute: ({ card }) => summary(update((g) => play(g, card))),
+  });
+  return <Board game={game} onPlay={(card) => update((g) => play(g, card))} />;
+}
+```
+
+Two calls in a row then each see the other's change, before React renders. Wrap the
+`setGame` in `flushSync` (from `react-dom`) only if the tool has to read the rendered DOM.
+A store outside React (as in the todo example) works as well.
 
 The module starts with `"use client"`, so React Server Components frameworks (Next.js's
 app router) render the provider on the client; it never connects or touches storage on
 the server. The CDN build does not include the React bindings: a page that loads tab-mcp
 from a CDN uses the core API. [examples/react-todo](https://github.com/ractive/tab-mcp/tree/main/examples/react-todo)
 is a complete todo app.
+
+For end-to-end tests of a page's tools, `@ractive-ch/tab-mcp/testing` (the relay's
+package) starts a relay in the test process and issues a token for the page's address
+without pairing; see the relay's [README](https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp#testing-a-pages-tools).
 
 ## Security
 

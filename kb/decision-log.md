@@ -2010,3 +2010,21 @@ every tool of the page, so consent per tool is the page's.
   would still be on for every page by default, and a page that wants it can turn it on.
 - A visible change for pages that relied on it; the changelog says so. The test page of
   `test/e2e` turns it on, so its end-to-end test still covers it.
+
+## DEC-107: No development pairing endpoint; tests pair in-process (owner)
+
+Owner, 2026-10-31, on item 5 of the comparis game feedback
+([research/feedback-comparis-game.md](research/feedback-comparis-game.md)): a page's
+end-to-end tests wanted a token for its address without a person typing the pairing code.
+
+- No endpoint that turns an address and a pairing code into a token, not even behind a
+  development setting. The token would belong to no AI app (no CIMD client id), and it
+  would skip the consent page, PKCE and the binding that refresh, revocation and
+  `private_key_jwt` (DEC-106) rely on: a second way to issue tokens in the production
+  image, one setting away from being on.
+- Tests run the relay in their own process instead: `@ractive-ch/tab-mcp/testing`
+  exports `startTestRelay()` and `tokenFor()`, which writes a token into the relay's
+  store as if an AI app had paired (iteration 16).
+- A command that pairs against a running relay through the real OAuth flow (a published
+  client metadata document with a loopback redirect, the code read from the page) needs
+  no relay change; it is built only if someone needs it.

@@ -16,6 +16,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { TabMcp } from "../src/index.ts";
 import {
 	ConnectButton,
+	connectLabel,
 	TabMcpProvider,
 	type TabMcpSnapshot,
 	type ToolCallRecord,
@@ -663,4 +664,45 @@ test("an onConfirm added after the first render is used; without one, the page's
 	} finally {
 		await relay.stop();
 	}
+});
+
+test("game feedback 3: the default label says the connection is lost after three failed attempts", () => {
+	const snapshot = (attempt: number): TabMcpSnapshot => ({
+		state: "disconnected",
+		address: undefined,
+		session: undefined,
+		grants: [],
+		pairingCode: undefined,
+		identity: "none",
+		identityMessage: undefined,
+		reconnecting: { reason: "network", attempt, at: 0 },
+		tools: [],
+	});
+	expect(connectLabel(snapshot(1))).toBe("Reconnecting…");
+	expect(connectLabel(snapshot(3))).toBe("Reconnecting…");
+	expect(connectLabel(snapshot(4))).toBe("Connection lost, retrying…");
+});
+
+test("game feedback 8: useTool and registerTool take the input's type", () => {
+	const add: Tool<{ a: number; b: number }> = {
+		name: "add",
+		description: "Add two numbers",
+		inputSchema: {
+			type: "object",
+			properties: { a: { type: "number" }, b: { type: "number" } },
+			required: ["a", "b"],
+		},
+		execute: ({ a, b }) => a + b,
+	};
+	function Adder() {
+		useTool(add);
+		useTool<{ text: string }>({
+			name: "echo",
+			description: "Echo the text",
+			execute: ({ text }) => text.toUpperCase(),
+		});
+		return null;
+	}
+	expect(typeof Adder).toBe("function");
+	expect(add.execute({ a: 1, b: 2 }, {} as never)).toBe(3);
 });

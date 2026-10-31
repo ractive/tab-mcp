@@ -5,43 +5,15 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import {
-	createLogger,
-	createRelay,
-	MemoryTokenStore,
-	type Relay,
-	type TokenStore,
-} from "@ractive-ch/tab-mcp";
+	startTestRelay as startRelay,
+	type TestRelay,
+	tokenFor,
+} from "@ractive-ch/tab-mcp/testing";
 import { TabMcp } from "../src/index.ts";
 import type { SecretStorage, TabMcpOptions } from "../src/types.ts";
 
-export interface TestRelay {
-	relay: Relay;
-	store: TokenStore;
-	url: string;
-	stop(): Promise<void>;
-}
-
-/** An in-process relay on a free port, open to any origin (Bun sends none). */
-export function startRelay(
-	options: Parameters<typeof createRelay>[0] = {},
-): TestRelay {
-	const store = new MemoryTokenStore();
-	const relay = createRelay({
-		development: true,
-		port: 0,
-		host: "127.0.0.1",
-		allowedOrigins: "*",
-		store,
-		logger: createLogger("error", () => {}),
-		...options,
-	});
-	return {
-		relay,
-		store,
-		url: `http://127.0.0.1:${relay.port}`,
-		stop: () => relay.stop(),
-	};
-}
+/** The published test relay and token helper (`@ractive-ch/tab-mcp/testing`). */
+export { startRelay, type TestRelay, tokenFor };
 
 /** A `localStorage` stand-in. */
 export class MemoryStorage implements SecretStorage {
@@ -71,46 +43,6 @@ export function newTab(
 		storage: new MemoryStorage(),
 		...options,
 	});
-}
-
-function hashToken(token: string): string {
-	return new Bun.CryptoHasher("sha256")
-		.update(token)
-		.digest()
-		.toBase64({ alphabet: "base64url", omitPadding: true });
-}
-
-/**
- * Issue an access token for an address through the relay's public
- * `TokenStore` interface, for tests about the tunnel rather than OAuth
- * (the OAuth flow itself: oauth-e2e.test.ts).
- */
-export async function tokenFor(
-	store: TokenStore,
-	address: string,
-	client = {
-		id: "https://client.example/cimd.json",
-		name: "Test client",
-		grantId: "g_test",
-	},
-): Promise<string> {
-	const addressId = /\/a\/([a-z2-7]{52})\/mcp$/.exec(address)?.[1];
-	if (addressId === undefined) throw new Error(`not an address: ${address}`);
-	const token = `tmcp_at_${crypto.getRandomValues(new Uint8Array(32)).toBase64({ alphabet: "base64url", omitPadding: true })}`;
-	const now = Date.now();
-	await store.put({
-		hash: hashToken(token),
-		kind: "access",
-		grantId: client.grantId,
-		addressId,
-		clientId: client.id,
-		clientName: client.name,
-		scopes: ["tools"],
-		grantCreatedAt: now,
-		issuedAt: now,
-		expiresAt: now + 3_600_000,
-	});
-	return token;
 }
 
 /** An SDK client pinned to 2026-07-28 with a bearer token. */

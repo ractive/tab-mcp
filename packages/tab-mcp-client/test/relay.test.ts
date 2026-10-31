@@ -69,7 +69,7 @@ describe("connect", () => {
 		expect(t.connect()).toBe(pending); // one connection at a time
 		const session = await pending;
 		expect(session.address).toMatch(
-			/^http:\/\/localhost:\d+\/a\/[a-z2-7]{52}\/mcp$/,
+			/^http:\/\/127\.0\.0\.1:\d+\/a\/[a-z2-7]{52}\/mcp$/,
 		);
 		expect((await connected).detail).toEqual(session);
 		expect(t.state).toBe("connected");

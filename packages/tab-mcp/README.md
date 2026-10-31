@@ -112,6 +112,25 @@ tokenStoreConformance("MyTokenStore", () => new MyTokenStore());
 [Token store](https://github.com/ractive/tab-mcp/blob/main/docs/token-store.md) explains
 the interface, its guarantees and a Redis example.
 
+### Testing a page's tools
+
+For end-to-end tests under `bun test`, `startTestRelay()` runs a relay in the test
+process (127.0.0.1, a free port, development mode, every page origin allowed, a memory
+store, no log output; options override any of that), and `tokenFor()` writes a token for
+a page's MCP address into its store, as if an AI app had paired:
+
+```ts
+import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+
+const relay = startTestRelay();
+// The page connects with `relay: relay.url`; its address is `session.address`.
+const token = await tokenFor(relay.store, address);
+// Any MCP client, with the header `Authorization: Bearer ${token}`.
+await relay.stop();
+```
+
+It is for tests only: it accepts every origin and skips pairing.
+
 ## Security
 
 Connecting an AI app to a page means trusting that page, as with any MCP server. The

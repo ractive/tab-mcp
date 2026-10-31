@@ -9,6 +9,24 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ### Unreleased
 
+#### Added
+
+- `Tool<Input>` types `execute`'s input; `registerTool` and `useTool` infer it or take it
+  explicitly. Without it, `input` stays a `Record<string, unknown>`.
+- README: tools that change `useState` state, the user-action rule next to
+  `ConnectButton`, its label function, and end-to-end tests with
+  `@ractive-ch/tab-mcp/testing`.
+
+#### Changed
+
+- `ConnectButton`'s default label says "Connection lost, retrying…" once three reconnect
+  attempts have failed, instead of "Reconnecting…" for as long as it tries.
+
+#### Fixed
+
+- The dialogs set `margin: auto`, so they stay centred on pages whose CSS reset sets
+  `margin: 0` on every element (Tailwind's preflight).
+
 #### Removed
 
 - `connecting.md` from the package: the guide's only source is now
@@ -306,6 +324,21 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Added
+
+- `@ractive-ch/tab-mcp/testing` exports `startTestRelay()` (a relay in the test process:
+  127.0.0.1, a free port, development mode, every origin, a memory store) and
+  `tokenFor()` (a token for a page's MCP address, written into the store as if an AI app
+  had paired), for end-to-end tests of a page's tools.
+
+#### Fixed
+
+- In development without `TAB_MCP_PUBLIC_URL`, the addresses use the loopback address
+  the relay listens on (`127.0.0.1` or `[::1]`) instead of always `localhost`, so they
+  match the URL the page was given.
 
 ### [0.6.0][relay-0.6.0] - 2026-10-31
 
