@@ -73,7 +73,7 @@ concurrency:
 
 env:
   NPM_VERSION: 12.2.1
-  NODE_VERSION: "24"
+  NODE_VERSION: "26"
   BUN_VERSION: 1.4.4
   # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
   # it on purpose (the same version as in ci.yml).
