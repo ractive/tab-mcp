@@ -264,7 +264,10 @@ export function useTabMcpState(): TabMcpSnapshot {
  * one of `deps`. A duplicate name or an invalid tool is thrown from the
  * component's next render, for an error boundary.
  */
-export function useTool(tool: Tool, deps: DependencyList = EMPTY): void {
+export function useTool<Input extends object = Record<string, unknown>>(
+	tool: Tool<Input>,
+	deps: DependencyList = EMPTY,
+): void {
 	const mcp = useTabMcp();
 	const latest = useRef(tool);
 	useInsertionEffect(() => {
@@ -287,7 +290,8 @@ export function useTool(tool: Tool, deps: DependencyList = EMPTY): void {
 			.registerTool(
 				{
 					...fields,
-					execute: (input, options) => latest.current.execute(input, options),
+					execute: (input: Input, options) =>
+						latest.current.execute(input, options),
 				},
 				{ signal: controller.signal },
 			)
@@ -352,13 +356,19 @@ export interface ConnectButtonProps
 	children?: ReactNode | ((state: TabMcpSnapshot) => ReactNode);
 }
 
+/** Failed reconnect attempts after which the default label says the connection is lost. */
+const LOST_AFTER_ATTEMPTS = 3;
+
 /** The default label of `ConnectButton`. */
 export function connectLabel(state: TabMcpSnapshot): string {
 	if (state.state === "connected" && state.grants.length > 0)
 		return state.grants.length === 1
 			? "AI app connected"
 			: `${state.grants.length} AI apps connected`;
-	if (state.reconnecting !== undefined) return "Reconnecting…";
+	if (state.reconnecting !== undefined)
+		return state.reconnecting.attempt > LOST_AFTER_ATTEMPTS
+			? "Connection lost, retrying…"
+			: "Reconnecting…";
 	if (state.state === "connecting") return "Connecting…";
 	return "Connect your AI app";
 }

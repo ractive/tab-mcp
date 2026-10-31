@@ -66,7 +66,8 @@ than 0.
 | `TAB_MCP_TAB_ASSERTION_JWKS_URL` | none | The URL of the public keys (JWKS) that sign those assertions. Required for `oidc`. |
 
 `NODE_ENV=development` is for local testing only. It allows an `http:` public URL and,
-without `TAB_MCP_PUBLIC_URL`, uses `http://localhost:<port>`. The Docker image sets
+without `TAB_MCP_PUBLIC_URL`, uses `http://localhost:<port>`, or
+`http://127.0.0.1:<port>` or `http://[::1]:<port>` when `TAB_MCP_HOST` is that address. The Docker image sets
 `NODE_ENV=production`.
 
 The browser library refuses `http:` relays except on `localhost`, `127.0.0.1` and

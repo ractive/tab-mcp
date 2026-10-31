@@ -2,6 +2,7 @@
 
 ## 2026-10-31
 
+- Iteration 16 on iter-16/game-feedback: the comparis game's feedback (dialog centring under CSS resets, the development public URL, 'Connection lost, retrying…', startTestRelay and tokenFor in @ractive-ch/tab-mcp/testing, Tool<Input>, README sections); DEC-107 (no development pairing endpoint); the hosted relay allows the game's origin (ractive.ch PR 73)
 - Iteration 15 on iter-15/private-key-jwt: `private_key_jwt` client authentication at `/token` and `/revoke` (RFC 7523) for ChatGPT's connectors, grants bound to the method they were made with, `TokenStore.claimNonce` for single-use `jti`s; DEC-106; relay release open
 
 ## 2026-10-25

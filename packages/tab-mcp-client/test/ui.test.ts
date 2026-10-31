@@ -1227,6 +1227,10 @@ describe("the dialogs' stylesheet (dialog design)", () => {
 		).toEqual([1, 2]);
 	});
 
+	test("game feedback 1: the dialog centres itself, also under a CSS reset that sets margin: 0", () => {
+		expect(DIALOG_CSS).toMatch(/\.tab-mcp-dialog \{[^}]*\bmargin: auto;/);
+	});
+
 	test("hidden stays hidden, a closed dialog stays closed, motion only when the user allows it", () => {
 		expect(DIALOG_CSS).toContain(
 			".tab-mcp-dialog :where([hidden]) { display: none !important; }",

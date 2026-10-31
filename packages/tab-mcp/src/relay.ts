@@ -107,6 +107,17 @@ export interface CreateRelayOptions
 	logger?: Logger;
 }
 
+/**
+ * The public URL in development without `publicUrl`: the loopback address the
+ * relay listens on, so the addresses match the URL the page was given;
+ * `localhost` for any other host (`0.0.0.0`, `::`, a name).
+ */
+export function developmentUrl(host: string, port: number): string {
+	if (host === "127.0.0.1") return `http://127.0.0.1:${port}`;
+	if (host === "::1" || host === "[::1]") return `http://[::1]:${port}`;
+	return `http://localhost:${port}`;
+}
+
 export interface Relay {
 	/** The external origin (issuer and address base). */
 	readonly url: string;
@@ -1462,7 +1473,7 @@ function startRelay(
 	/** Set at once by `stop()`, before the sessions end (their requests read it). */
 	let closing = false;
 	const port = server.port ?? config.port;
-	if (publicUrl === "") publicUrl = `http://localhost:${port}`;
+	if (publicUrl === "") publicUrl = developmentUrl(config.host, port);
 
 	const sweep = setInterval(() => {
 		auth.sweep();

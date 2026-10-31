@@ -76,7 +76,7 @@ export const DIALOG_CSS = `.tab-mcp-dialog {
 --_tab-mcp-danger: var(--tab-mcp-danger, light-dark(#b3261e, #ffb4ab));
 --_tab-mcp-mono: var(--tab-mcp-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 --_tab-mcp-small-radius: calc(var(--tab-mcp-radius, 0.75rem) * 0.6);
-box-sizing: border-box; width: calc(100% - 2rem); max-width: var(--tab-mcp-max-width, 34rem); max-height: calc(100% - 2rem); overflow: auto;
+box-sizing: border-box; margin: auto; width: calc(100% - 2rem); max-width: var(--tab-mcp-max-width, 34rem); max-height: calc(100% - 2rem); overflow: auto;
 font: var(--tab-mcp-font, inherit); line-height: 1.5; color: var(--_tab-mcp-fg); background: var(--_tab-mcp-bg);
 border: var(--tab-mcp-border, 1px solid var(--_tab-mcp-line)); border-radius: var(--tab-mcp-radius, 0.75rem);
 padding: var(--tab-mcp-padding, clamp(1rem, 5vw, 1.5rem)); box-shadow: var(--tab-mcp-shadow, 0 1rem 3rem rgb(0 0 0 / 0.3));

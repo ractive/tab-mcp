@@ -47,8 +47,12 @@ export interface ToolExecuteOptions {
 	client: ToolCallClient;
 }
 
-/** A tool in the WebMCP shape (`document.modelContext.registerTool`). */
-export interface Tool {
+/**
+ * A tool in the WebMCP shape (`document.modelContext.registerTool`). `Input`
+ * types `execute`'s first argument; the library checks the arguments against
+ * `inputSchema` before it calls `execute`, so keep the two in step.
+ */
+export interface Tool<Input extends object = Record<string, unknown>> {
 	/** 1–128 characters of `A–Z a–z 0–9 _ - .`. */
 	name: string;
 	title?: string;
@@ -57,10 +61,7 @@ export interface Tool {
 	/** JSON Schema of the input object; defaults to `{ "type": "object" }`. */
 	inputSchema?: JsonSchema;
 	/** Runs the tool. Its return value becomes the result (DEC-023). */
-	execute: (
-		input: Record<string, unknown>,
-		options: ToolExecuteOptions,
-	) => unknown;
+	execute: (input: Input, options: ToolExecuteOptions) => unknown;
 	annotations?: ToolAnnotations;
 }
 
