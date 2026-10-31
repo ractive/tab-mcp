@@ -219,7 +219,7 @@ Local development (a page on `http://localhost:3000`):
 docker run --rm -p 8080:8080 -e NODE_ENV=development \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
-  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.5.1
+  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.6.0
 ```
 
 Production: name the image version (pre-releases have no `latest` tag), keep `/data` on
@@ -229,7 +229,7 @@ a volume, and put the relay behind TLS:
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.5.1
+  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.6.0
 ```
 
 `x-real-ip` fits an nginx proxy that sets `X-Real-IP $remote_addr`; behind Caddy use
