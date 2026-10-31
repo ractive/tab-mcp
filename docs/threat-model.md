@@ -114,10 +114,14 @@ From a shared screenshot, a chat log or over the user's shoulder.
   with a key it publishes at the `jwks_uri` of its document, which must be on the client
   id's own host. The relay accepts only asymmetric algorithms, each tied to its key type,
   takes keys only from that JWKS (never from the token's header), and requires `iss` and
-  `sub` equal to the client id, `aud` naming the relay, `exp` at most an hour ahead and a
-  `jti` it has not seen. This proves the request comes from whoever controls the client
-  id's host; it says no more about who that is than the verified host does. Client
-  secrets are refused.
+  `sub` equal to the client id, `aud` naming the relay, `exp` at most an hour ahead, use
+  within five minutes of `iat`, and a `jti` it has not seen. This proves the request
+  comes from whoever controls the client id's host; it says no more about who that is
+  than the verified host does. Client secrets are refused. A document whose keys the
+  relay cannot use but that lists `none` is a public client (DEC-104).
+- Another client cannot spend a code it did not get: the code's client id is checked
+  before the code is used up or its reuse revokes anything, so a leaked code presented
+  with a valid assertion for the attacker's own client changes nothing.
 
 ### A3: Server-side request forgery through client metadata fetches
 
@@ -147,7 +151,10 @@ The `jwks_uri` of a `private_key_jwt` client is fetched under the same guards an
 (also `application/jwk-set+json`), and only on the host of the client id, so it reaches
 no host the metadata fetch could not. It is fetched when a token or revocation request
 carries a client assertion, cached 10 minutes, and fetched again for an unknown key id at
-most every 30 seconds.
+most every 30 seconds. Because the fetch limits are shared with unauthenticated requests,
+a failed or refused fetch at `/token` and `/revoke` answers 503 (try again), never
+`invalid_client`, and those endpoints use the last good document for up to an hour past
+its cache lifetime; so using up the limits cannot cut off grants that already exist.
 
 ### A4: Token theft and replay
 
@@ -163,12 +170,15 @@ most every 30 seconds.
   presented by another client id is refused without revoking.
 - A grant made or refreshed with a `private_key_jwt` client assertion is bound to it
   (DEC-106): its refresh tokens are refused without a valid assertion, before reuse is
-  checked, so a stolen refresh token alone can neither be redeemed nor revoke the grant;
-  the thief also needs the AI app's private key. A client whose document lists only
-  `private_key_jwt` needs an assertion for every code too. One that also lists `none`
-  (ChatGPT) can still make public grants, which are as exposed as any public client's.
-  Each assertion's `jti` is accepted once until its `exp`; with several instances that
-  holds across them only with a store that implements `claimNonce`.
+  checked, and `/revoke` refuses its tokens without one, so a stolen refresh token alone
+  can neither be redeemed nor end the grant; the thief also needs the AI app's private
+  key. A client whose document lists only `private_key_jwt` needs an assertion for every
+  code too. One that also lists `none` (ChatGPT) can still make public grants, which are
+  as exposed as any public client's. Each assertion's `jti` is accepted once while the
+  assertion is usable (at most five minutes); with several instances that holds across
+  them only with a store that implements `claimNonce`. Anyone can be a client, so each
+  AI app domain may hold only its share of the replay store (10 000 live entries per
+  instance); one that fills it gets 503 alone.
 - Revocation leaves a tombstone in the store, and the store refuses new tokens for a
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.
 - Disconnect in the page revokes at once. "New address" revokes all grants of the old

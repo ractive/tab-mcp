@@ -1594,7 +1594,8 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   stays first: claude.ai uses CIMD only with it); the `…_signing_alg_values_supported`
   lists are `jwt.ts`'s algorithms (RS, PS, ES 256/384/512, EdDSA), never `none` or HMAC.
 - **Which documents.** `private_key_jwt` needs a `jwks_uri` with the client id's scheme
-  and host (port included), canonical, no credentials or fragment. Same host, because the
+  and host (port included), canonical, no credentials or fragment, in the form the relay
+  fetches (`http:` and other ports only in the test mode). Same host, because the
   host is the only verified thing about a client (A2) and it keeps the JWKS fetch on hosts
   the CIMD rules already admit (`TAB_MCP_CLIENT_ID_HOSTS` included). The JWKS is fetched
   with the CIMD fetch's SSRF rules (resolve, public addresses only, pinned address, no
@@ -1604,9 +1605,12 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   `token_endpoint_auth_signing_alg`, if present, must be one of those algorithms and is
   then the only one accepted. **An inline `jwks` is not accepted:** one key path, keys
   rotated through the JWKS cache rather than the CIMD cache (up to 24 hours), and `jwks`
-  with `jwks_uri` is refused (RFC 7591 §2). A document without a usable `jwks_uri`, or
-  with any other method, is accepted as public only when it lists `none` (DEC-104);
-  otherwise it is refused at `/authorize`.
+  with `jwks_uri` is refused (RFC 7591 §2). A document whose keys the relay cannot use
+  (no `jwks_uri`, one on another host or not canonical, `jwks` beside it, an algorithm it
+  does not verify), or with any other method, is accepted as public when it lists `none`,
+  as relay 0.5.1 did (DEC-104), and the fallback is logged (`oauth.cimd_auth_fallback`
+  with the reason); otherwise it is refused at `/authorize` (review of PR 65: the first
+  version refused these with `none` listed).
 - **The checks** (RFC 7523 §3, OpenID Connect Core §9): `client_assertion_type`
   `urn:ietf:params:oauth:client-assertion-type:jwt-bearer` with `client_assertion`
   (one without the other is `invalid_request`); `client_id` may be left out (RFC 7521
@@ -1617,10 +1621,14 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   (draft-ietf-oauth-rfc7523bis), so other typed tokens are refused; `iss` = `sub` = the
   client id; `aud` (a string or an array) contains the issuer or the endpoint's URL
   (`/token`; at `/revoke` also `/revoke`); `exp` required, not past and at most an hour
-  ahead; `iat` and `nbf`, if given, not in the future; 30 s leeway on all three; `jti`
-  required (1-256 characters) and single-use until `exp` + leeway. An hour, not a minute:
-  it is the ceiling Okta sets and the lifetime common libraries default to, ChatGPT's own
-  is unknown, and the single-use `jti` makes the length matter only for the replay store.
+  ahead; `iat`, if given, not in the future and at most five minutes old, and without
+  `iat` `exp` at most five minutes ahead; `nbf`, if given, passed; 30 s leeway on all;
+  `jti` required (1-256 characters) and single-use while the assertion is usable: until
+  `min(exp, iat + 5 min)` + leeway. An hour for `exp`: it is the ceiling Okta sets and a
+  lifetime libraries default to, and ChatGPT's own is unknown, so a shorter `exp` limit
+  could refuse it. Five minutes from `iat` (review of PR 65): a client signs just before
+  it sends, so the window costs no client anything, and it bounds how long a `jti` is
+  remembered (5 minutes plus leeway instead of an hour), whatever `exp` says.
   `aud` takes the token endpoint as well as the issuer for compatibility; the
   rfc7523bis "audience injection" concern is bounded by the single-use `jti` and by every
   grant still needing its code with PKCE or its single-use refresh token.
@@ -1629,12 +1637,30 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   failed"); the reason goes to the log as `oauth.client_auth_failed` with the client's
   host. A client whose document says `none` and sends an assertion anyway is refused, not
   ignored. `client_secret` (body or HTTP Basic) stays refused.
+- **Not the client's fault: 503** (review of PR 65). When the client's document cannot be
+  fetched for a transient reason (`rate_limited`, `fetch_failed`, `unresolvable`,
+  `too_large`), its JWKS cannot be loaded (`jwks_unavailable`), or its share of the
+  replay store is full, the answer is `temporarily_unavailable`, HTTP 503 with
+  `Retry-After: 10`, logged as `oauth.client_auth_unavailable`. A 401 would tell the AI
+  app its credentials are bad, and it would drop the connection; and the CIMD fetch
+  limits are shared with unauthenticated requests, so a 401 there would let anyone cut
+  off bound grants. A missing document (HTTP 404) is `fetch_failed` too, so it gets 503
+  as well; the relay cannot tell an outage from a removal. In addition the token and
+  revocation endpoints are served the last good document for up to an hour after its
+  cache lifetime when a fresh fetch fails transiently or is rate-limited (as `JwksCache`
+  does for keys; `oauth.cimd_stale`), so an AI app that already has grants is not cut off
+  by a busy or briefly unreachable host. `/authorize` always wants a current document. A
+  document the host now answers with something unacceptable is dropped, not served
+  stale.
 - **Binding.** The method a grant is made with binds it. A grant made or refreshed with a
   valid assertion is stored with `clientAuth: "private_key_jwt"`; its refresh tokens are
   refused without an assertion, checked right after the client id and before expiry and
   reuse detection, so a stolen refresh token alone can neither be redeemed as a public
   client nor revoke the grant. A client whose document does not list `none` needs an
-  assertion for every code too, checked before the code is marked used. A client that
+  assertion for every code too. For every client, the code's client id is compared
+  first, in constant time, before the code is marked used or its reuse revokes anything
+  (review of PR 65: the first version compared it after, so another client with a valid
+  assertion of its own could burn a leaked code or revoke its grant). A client that
   lists `none` (ChatGPT) may still exchange a code, and refresh such a grant, as a public
   client: the binding starts with the first request it signs, and never goes back. Chosen
   over "the document's method is required for every code", which is stricter, because an
@@ -1643,17 +1669,24 @@ JOSE library, on `jwt.ts` (DEC-031, DEC-076).
   it allows needs the code and its PKCE verifier, which only the AI app's own redirect
   receives. Grants made before this release have no `clientAuth` and stay public. A grant
   bound to a key whose client later drops `private_key_jwt` cannot be refreshed (its
-  assertions are refused), so the user connects again. `/revoke` accepts an assertion and
-  then requires it to be valid, but needs none: whoever holds a token can only end the
-  grant.
+  assertions are refused), so the user connects again. `/revoke` checks an assertion if
+  one is sent; a public grant's tokens are revoked without one, a bound grant's only with
+  one for that client (RFC 7009 §2.1; review of PR 65: the first version let a stolen
+  refresh token and the public `client_id` end a bound grant).
 - **Replay store and several instances.** `TokenStore` gains an optional
   `claimNonce(key, expiresAt, now)`: atomic insert-if-absent, an expired entry counting
   as absent, dropped by `deleteExpired`. The key is SHA-256 over the client id and the
   `jti`, recorded only after every other check passed, so only the holder of the client's
   key adds entries. The memory and SQLite stores implement it (SQLite schema version 5:
   a `nonces` table and the `client_auth` column); instances that share a store share the
-  replay store. A store without it falls back to the relay's memory (at most 100 000
-  entries, then `temporarily_unavailable`), which is per instance: there a replay at
+  replay store. Anyone can be a client by publishing a document, so each instance lets
+  one AI app domain (the last two labels of its host, as the CIMD limits count) hold at
+  most 10 000 live entries, 100 000 in all, whatever the store; past its share a domain
+  gets 503 and the others go on (review of PR 65: one global cap let one self-hosted
+  client lock every `private_key_jwt` client out). With the five-minute window a
+  domain's share is about 30 token requests a second per instance. Expired entries are
+  counted out at most once a second. A store without `claimNonce` falls back to the
+  relay's memory, within the same shares, which is per instance: there a replay at
   another instance within the assertion's lifetime gets through the `jti` check, but still
   needs a valid code (per instance as well) or an unused refresh token (atomic
   `markUsed` in the shared store). Adding a required method would have broken every

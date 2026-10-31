@@ -45,6 +45,12 @@ the new `client-auth.ts`), `jwt.ts`, `tokens.ts` and `store/`.
 - [x] Tests: `test/private-key-jwt.test.ts`; oauth4webapi's `PrivateKeyJwt` in the conformance run
 - [x] DEC-106; DEC-059 and DEC-104 point to it
 - [x] Changelog, `docs/compatibility.md`, `docs/token-store.md`, `docs/self-hosting.md`, `docs/threat-model.md`, `kb/design/architecture.md`
+- [x] Review of PR 65, 1: the code's client id is compared before the code is used or revokes anything
+- [x] Review of PR 65, 2: unusable `private_key_jwt` keys fall back to `none` when it is listed (DEC-104), logged
+- [x] Review of PR 65, 3: transient metadata and key failures are 503 with Retry-After; `/token` and `/revoke` use the last good document for an hour
+- [x] Review of PR 65, 4: replay store shares per AI app domain; usable five minutes from `iat`; sweeps at most once a second
+- [x] Review of PR 65, 5: `/revoke` of a bound grant needs the client's assertion
+- [x] Review of PR 65, 6: `jwks_uri` stored only in the form the relay fetches (test-mode leniency only in test mode)
 
 ## Progress
 
@@ -58,9 +64,14 @@ DEC-106 holds every decision. In short:
   metadata (only `none`) is not locked out; its first signed request binds the grant.
 - **Inline `jwks`:** not accepted.
 - **Replay store:** the token store's optional `claimNonce`, shared by instances that
-  share a store; without it, per-instance memory.
+  share a store; without it, per-instance memory. Either way at most 10 000 live entries
+  per AI app domain per instance.
 - **Lifetime:** `exp` at most an hour ahead, 30 s leeway. ChatGPT's real lifetime is not
-  known; a shorter cap would risk refusing it.
+  known; a shorter cap would risk refusing it. But an assertion is usable only within
+  five minutes of its `iat` (review of PR 65), which bounds the replay store.
+- **Unavailable is not invalid:** a metadata or key fetch that fails for a transient
+  reason is 503, and `/token` and `/revoke` fall back to the last good document for an
+  hour.
 
 Not done here: a run against ChatGPT itself (it needs the relay deployed), the relay
 release and the deploy (owner).
