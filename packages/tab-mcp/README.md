@@ -17,7 +17,7 @@ for which apps work.
 
 ## Run it
 
-The relay needs [Bun](https://bun.sh) 1.4.3 or newer. It does not run on Node.js.
+The relay needs [Bun](https://bun.sh) 1.4.4 or newer. It does not run on Node.js.
 
 ```sh
 bun add --global @ractive-ch/tab-mcp

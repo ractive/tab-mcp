@@ -311,8 +311,8 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 #### Changed
 
-- The Docker image runs on Bun 1.4.4 (was 1.4.3). The npm package still needs Bun
-  1.4.3 or newer.
+- Bun 1.4.4: the Docker image runs on it (was 1.4.3), and the npm package needs Bun
+  1.4.4 or newer, the version CI tests.
 
 ### [0.5.1][relay-0.5.1] - 2026-10-25
 

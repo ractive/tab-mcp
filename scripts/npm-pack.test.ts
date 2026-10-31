@@ -45,7 +45,7 @@ test("the manifest check names what is wrong", () => {
 			url: "git+https://github.com/ractive/tab-mcp.git",
 			directory: spec.workspace,
 		},
-		dependencies: { "@cfworker/json-schema": "4.1.1" },
+		dependencies: { "@cfworker/json-schema": "4.1.4" },
 		peerDependencies: { react: ">=18.3.0 <20" },
 		peerDependenciesMeta: { react: { optional: true } },
 	};

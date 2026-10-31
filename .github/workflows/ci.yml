@@ -11,7 +11,7 @@ permissions:
 env:
   # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
   # it on purpose (the same version as in release.yml).
-  CHROME_VERSION: "156.0.8078.47"
+  CHROME_VERSION: "156.0.8078.80"
 
 jobs:
   verify:
