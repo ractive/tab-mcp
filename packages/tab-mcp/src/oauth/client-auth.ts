@@ -6,6 +6,7 @@
  * algorithms only, each tied to its key type, keys never from the header).
  */
 
+import { ipPrefixKey } from "../ip.ts";
 import {
 	audiences,
 	decodeJwt,
@@ -16,7 +17,8 @@ import {
 	verifyJwt,
 } from "../jwt.ts";
 import { hashToken } from "../tokens.ts";
-import type { PrivateKeyJwtAuth } from "./cimd.ts";
+import { limitKey, type PrivateKeyJwtAuth } from "./cimd.ts";
+import { DomainCache } from "./domain-cache.ts";
 
 /** The only `client_assertion_type` (RFC 7523 §2.2). */
 export const CLIENT_ASSERTION_TYPE =
@@ -38,6 +40,7 @@ export const CLIENT_ASSERTION_MAX_AGE_MS: number = 5 * 60_000;
 export const CLIENT_ASSERTION_LEEWAY_MS = 30_000;
 const MAX_JTI = 256;
 const MAX_KEY_SETS = 1000;
+const MAX_KEY_SETS_PER_DOMAIN = 100;
 const SWEEP_INTERVAL_MS = 1000;
 /**
  * `typ` values accepted, compared case-insensitively (RFC 7515 §4.1.9):
@@ -163,11 +166,21 @@ function checkTimes(payload: Record<string, unknown>, now: number): number {
 }
 
 /**
- * The replay store's live entries per AI app domain on this instance
- * (DEC-106; the domain as the CIMD rate limits count it). Anyone can be a
- * client by publishing a document, so one domain may fill only its own
- * share, whatever the store; the total bounds memory. Expired entries are
- * dropped at most once a second.
+ * The key a client's replay share is counted under (review of PR 65): its
+ * full host name, so clients under one shared suffix (`github.io`,
+ * `pages.dev`, `co.uk`) do not share one; an IPv4 literal as is, an IPv6
+ * literal by its /64, which one party usually holds whole.
+ */
+export function quotaKey(clientId: string): string {
+	return ipPrefixKey(new URL(clientId).hostname.replace(/\.$/, ""));
+}
+
+/**
+ * The replay store's live entries per AI app host on this instance
+ * (DEC-106, keyed by `quotaKey`). Anyone can be a client by publishing a
+ * document, so one host may fill only its own share, whatever the store;
+ * the total bounds memory. Expired entries are dropped at most once a
+ * second.
  */
 export class NonceQuota {
 	readonly #until = new Map<string, number[]>();
@@ -214,12 +227,16 @@ export class NonceQuota {
 
 /**
  * One `JwksCache` per client `jwks_uri` (10 minutes, an unknown `kid`
- * fetched again at most every 30 s, the last good keys for an hour after a
- * failure), loaded with the SSRF-guarded fetch; least recently used dropped
- * past 1000.
+ * fetched again after 5 s, the last good keys for an hour after a failure),
+ * loaded with the SSRF-guarded fetch. At most 1000, 100 per domain; a new
+ * one pushes out the least recently used of the domain that holds the most,
+ * so one party's many documents push out their own keys (review of PR 65).
  */
 export class ClientKeySets {
-	readonly #sets = new Map<string, JwksCache>();
+	readonly #sets = new DomainCache<JwksCache>(
+		MAX_KEY_SETS,
+		MAX_KEY_SETS_PER_DOMAIN,
+	);
 	readonly #load: (url: string) => Promise<unknown>;
 	readonly #now: () => number;
 
@@ -232,17 +249,11 @@ export class ClientKeySets {
 	}
 
 	for(jwksUri: string): KeySource {
-		let set = this.#sets.get(jwksUri);
-		if (set !== undefined) {
-			this.#sets.delete(jwksUri);
-		} else {
-			set = new JwksCache(jwksUri, { load: this.#load, now: this.#now });
-			if (this.#sets.size >= MAX_KEY_SETS) {
-				const oldest = this.#sets.keys().next().value;
-				if (oldest !== undefined) this.#sets.delete(oldest);
-			}
-		}
-		this.#sets.set(jwksUri, set);
+		const known = this.#sets.get(jwksUri);
+		if (known !== undefined) return known;
+		const set = new JwksCache(jwksUri, { load: this.#load, now: this.#now });
+		const domain = limitKey(new URL(jwksUri).hostname);
+		this.#sets.set(jwksUri, domain, set, this.#now());
 		return set;
 	}
 }

@@ -21,6 +21,7 @@ import {
 	CLIENT_ASSERTION_TYPE,
 	NonceQuota,
 	nonceKey,
+	quotaKey,
 } from "../src/oauth/client-auth.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenStore } from "../src/store/types.ts";
@@ -367,22 +368,32 @@ describe("review of PR 65: a recent document when the fetch fails (DEC-106)", ()
 	};
 	const setup = () => {
 		let now = 1_800_000_000_000;
-		let answer: () => Response = () =>
+		let answer: (url: string) => Response = () =>
 			Response.json(doc, { headers: { "cache-control": "max-age=300" } });
 		const logs = new LogCapture();
+		const calls: string[] = [];
 		const f = new ClientMetadataFetcher({
 			lookup: async () => ["93.184.216.34"],
-			fetch: (async () => answer()) as unknown as typeof fetch,
+			fetch: (async (u: string, init?: RequestInit) => {
+				// The URL meant: the pinned address with its Host put back.
+				const host = (init?.headers as Record<string, string> | undefined)?.[
+					"host"
+				];
+				const meant = `https://${host}${new URL(u).pathname}`;
+				calls.push(meant);
+				return answer(meant);
+			}) as unknown as typeof fetch,
 			logger: logs.logger,
 			now: () => now,
 		});
 		return {
 			f,
 			logs,
+			calls,
 			at: (t: number) => {
 				now = 1_800_000_000_000 + t;
 			},
-			answer: (a: () => Response) => {
+			answer: (a: (url: string) => Response) => {
 				answer = a;
 			},
 		};
@@ -420,9 +431,88 @@ describe("review of PR 65: a recent document when the fetch fails (DEC-106)", ()
 			"invalid_metadata",
 		);
 		s.answer(() => new Response("down", { status: 503 }));
+		s.at(10 * 60_000 + 61_000); // past the failure cache
 		expect(await reason(s.f.get(id, { allowStale: true }))).toBe(
 			"fetch_failed",
 		);
+	});
+
+	test("review of PR 65: a failed fetch is answered again for a minute, per client id", async () => {
+		const s = setup();
+		s.answer(() => new Response("nope", { status: 404 }));
+		const missing = "https://ai.example/missing.json";
+		expect(await reason(s.f.get(missing))).toBe("fetch_failed");
+		expect(await reason(s.f.get(missing))).toBe("fetch_failed");
+		expect(s.calls).toHaveLength(1);
+		s.at(61_000);
+		expect(await reason(s.f.get(missing))).toBe("fetch_failed");
+		expect(s.calls).toHaveLength(2);
+	});
+
+	test("review of PR 65: requests for unknown client ids cannot use up a known client's refreshes and keys", async () => {
+		const s = setup();
+		s.answer((url) =>
+			url.endsWith("/client.json")
+				? Response.json(doc, { headers: { "cache-control": "max-age=300" } })
+				: url.endsWith("/jwks.json")
+					? Response.json({ keys: [] })
+					: new Response("nope", { status: 404 }),
+		);
+		await s.f.get(id);
+		s.at(6 * 60_000); // the document has expired
+		// Made-up paths on the same host use up its budget for new ids...
+		const results: string[] = [];
+		for (let i = 0; i < 8; i++) {
+			results.push(await reason(s.f.get(`https://ai.example/x${i}.json`)));
+		}
+		expect(results).toContain("rate_limited");
+		// ...but the known client's refresh and its keys still load fresh.
+		const before = s.calls.length;
+		expect(await reason(s.f.get(id))).toBe("accepted");
+		expect(await s.f.fetchJwks("https://ai.example/jwks.json")).toEqual({
+			keys: [],
+		});
+		expect(s.calls.slice(before)).toEqual([
+			"https://ai.example/client.json",
+			"https://ai.example/jwks.json",
+		]);
+	});
+
+	test("review of PR 65: key fetches (which anyone can cause with a made-up kid) cannot use up a client's document refreshes", async () => {
+		const s = setup();
+		s.answer((url) =>
+			url.endsWith("/client.json")
+				? Response.json(doc, { headers: { "cache-control": "max-age=300" } })
+				: Response.json({ keys: [] }),
+		);
+		await s.f.get(id);
+		s.at(6 * 60_000);
+		const results: string[] = [];
+		for (let i = 0; i < 7; i++) {
+			results.push(await reason(s.f.fetchJwks("https://ai.example/jwks.json")));
+		}
+		expect(results).toContain("rate_limited");
+		expect(await reason(s.f.get(id))).toBe("accepted");
+	});
+
+	test("review of PR 65: one party's many documents push out their own, not a live client's", async () => {
+		const s = setup();
+		s.answer((url) =>
+			Response.json(
+				{ ...doc, client_id: url, token_endpoint_auth_method: "none" },
+				{ headers: { "cache-control": "max-age=86400" } },
+			),
+		);
+		await s.f.get(id);
+		// 1100 documents on one attacker domain, the clock moving so the fetch
+		// limits refill.
+		for (let i = 0; i < 1100; i++) {
+			s.at((i + 1) * 5_000);
+			await s.f.get(`https://h${i}.evil.example/c.json`);
+		}
+		const before = s.calls.length;
+		await s.f.get(id);
+		expect(s.calls.length).toBe(before); // still cached: no fetch
 	});
 
 	test("the fallback to none is logged with its reason", async () => {
@@ -442,6 +532,21 @@ describe("review of PR 65: a recent document when the fetch fails (DEC-106)", ()
 });
 
 describe("review of PR 65: replay store shares per AI app domain (DEC-106)", () => {
+	test("review of PR 65: shares are per full host; an IPv6 literal by its /64, IPv4 as is", () => {
+		expect(quotaKey("https://alice.github.io/c.json")).toBe("alice.github.io");
+		expect(quotaKey("https://bob.github.io/c.json")).toBe("bob.github.io");
+		expect(quotaKey("https://chatgpt.com/oauth/client.json")).toBe(
+			"chatgpt.com",
+		);
+		expect(quotaKey("https://[2001:db8:1:2::1]/c.json")).toBe(
+			quotaKey("https://[2001:db8:1:2:ffff::9]/c.json"),
+		);
+		expect(quotaKey("https://[2001:db8:1:2::1]/c.json")).not.toBe(
+			quotaKey("https://[2001:db8:1:3::1]/c.json"),
+		);
+		expect(quotaKey("https://93.184.216.34/c.json")).toBe("93.184.216.34");
+	});
+
 	test("a full domain is refused alone; others go on until the total is full", () => {
 		const q = new NonceQuota(2, 3);
 		const now = 1000;
@@ -651,13 +756,18 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 		);
 		// Without a kid, two RSA keys fit: ambiguous, refused.
 		const noKid = await assertion(r, strictId, {}, { kid: undefined });
-		const unknownKid = await assertion(r, strictId, {}, { kid: "nope" });
-		for (const token of [embedded, noKid, unknownKid]) {
+		for (const token of [embedded, noKid]) {
 			expect(await error(await probe(r, strictId, auth(token)))).toEqual(
 				UNAUTHENTICATED,
 			);
 		}
-		expect(reasons(r)).toEqual(["signature", "key", "key"]);
+		expect(reasons(r)).toEqual(["signature", "key"]);
+		// An unknown kid right after the keys were fetched: they may have been
+		// rotated since, so try again (503), not "your key is wrong" (401).
+		const unknownKid = await assertion(r, strictId, {}, { kid: "nope" });
+		const res = await probe(r, strictId, auth(unknownKid));
+		expect(await error(res)).toEqual(UNAVAILABLE);
+		expect(unavailable(r)).toEqual(["jwks_unavailable"]);
 		// The kid picks the key: k2 signs as k2.
 		const k2 = await assertion(r, strictId, {}, {}, rsa2);
 		expect(await error(await probe(r, strictId, auth(k2)))).toEqual(
@@ -791,6 +901,15 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 			"jwks_unavailable",
 			"metadata_fetch_failed",
 		]);
+		expect(reasons(r)).toEqual([]);
+	});
+
+	test("review of PR 65: a client id on a private address answers like an unreachable one (503)", async () => {
+		const r = relay();
+		const privateId = "https://10.0.0.1/client.json";
+		const res = await probe(r, privateId, auth(await assertion(r, privateId)));
+		expect(await error(res)).toEqual(UNAVAILABLE);
+		expect(unavailable(r)).toEqual(["metadata_private_address"]);
 		expect(reasons(r)).toEqual([]);
 	});
 

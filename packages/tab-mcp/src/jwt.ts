@@ -25,6 +25,8 @@ export const MAX_JWT_BYTES = 8192;
 const MAX_JWKS_BYTES = 65_536;
 const JWKS_TTL_MS = 10 * 60_000;
 const JWKS_REFETCH_MS = 30_000;
+/** An unknown kid after a good fetch: a rotation is looked for this soon. */
+const UNKNOWN_KID_REFETCH_MS = 5_000;
 /** How long the last good keys are served while the JWKS cannot be fetched. */
 const JWKS_GRACE_MS = 60 * 60_000;
 const FETCH_TIMEOUT_MS = 5_000;
@@ -243,9 +245,11 @@ export class HttpJsonError extends Error {
 
 /**
  * A JWKS URL, cached 10 minutes, fetched again for an unknown kid at most every
- * 30 s. After a failed fetch the last good keys are served for up to an hour
+ * 5 s. After a failed fetch the last good keys are served for up to an hour
  * (an outage must not refuse every token at once), and the next attempt waits
- * the same 30 s, so a dead endpoint is not hit (and waited for) on every check.
+ * 30 s, so a dead endpoint is not hit (and waited for) on every check. An
+ * unknown kid that could not be looked for again throws (the keys are
+ * unavailable) rather than answering "no such key".
  */
 export class JwksCache implements KeySource {
 	readonly #url: () => Promise<string>;
@@ -274,14 +278,21 @@ export class JwksCache implements KeySource {
 	}
 
 	async keys(kid: string | undefined): Promise<Jwk[]> {
+		const entered = this.#now();
 		// A fetch already running answers everyone who asks meanwhile (many tabs
 		// after a relay restart, a new kid during a rotation): without waiting,
-		// they would find the 30 s throttle set and read the old (or no) keys.
+		// they would find the throttle set and read the old (or no) keys.
 		if (this.#inflight !== undefined) await this.#inflight.catch(() => {});
 		const now = this.#now();
 		const stale = now - this.#fetchedAt >= JWKS_TTL_MS;
-		const unknown = kid !== undefined && !this.#keys.some((k) => k.kid === kid);
-		if ((stale || unknown) && now - this.#attemptedAt >= JWKS_REFETCH_MS) {
+		const unknown = kid !== undefined && !this.#has(kid);
+		// An unknown kid may be a rotation: after a good fetch it may look again
+		// soon; after a failed one it waits the full 30 s.
+		const floor =
+			unknown && this.#lastError === undefined
+				? UNKNOWN_KID_REFETCH_MS
+				: JWKS_REFETCH_MS;
+		if ((stale || unknown) && now - this.#attemptedAt >= floor) {
 			try {
 				await this.#refresh();
 			} catch (error) {
@@ -292,9 +303,21 @@ export class JwksCache implements KeySource {
 			// Nothing usable: no keys yet, or keys past their grace period.
 			throw this.#lastError ?? new Error("the JWKS could not be loaded");
 		}
-		return kid === undefined
-			? this.#keys
-			: this.#keys.filter((k) => k.kid === kid);
+		if (kid === undefined) return this.#keys;
+		// Unknown, and the keys were not fetched again for this call (throttled
+		// or failed): the key may exist and not be loaded yet, so this is "the
+		// keys could not be loaded", not "no such key" (review of PR 65).
+		if (!this.#has(kid) && this.#fetchedAt < entered) {
+			throw (
+				this.#lastError ??
+				new Error("an unknown key id; the JWKS was fetched too recently")
+			);
+		}
+		return this.#keys.filter((k) => k.kid === kid);
+	}
+
+	#has(kid: string): boolean {
+		return this.#keys.some((k) => k.kid === kid);
 	}
 
 	#refresh(): Promise<void> {

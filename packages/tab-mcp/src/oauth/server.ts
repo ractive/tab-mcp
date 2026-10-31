@@ -29,7 +29,6 @@ import {
 	ClientMetadataError,
 	ClientMetadataFetcher,
 	isTransient,
-	limitKey,
 	redirectUriMatches,
 } from "./cimd.ts";
 import {
@@ -37,6 +36,7 @@ import {
 	CLIENT_ASSERTION_TYPE,
 	ClientKeySets,
 	NonceQuota,
+	quotaKey,
 	verifyClientAssertion,
 } from "./client-auth.ts";
 import { AUTHORIZE_CSS, escapeHtml, pageHeaders, renderPage } from "./html.ts";
@@ -67,11 +67,11 @@ const MAX_CODES = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
 /**
- * Live client assertion ids per AI app domain, and in all, on one instance
+ * Live client assertion ids per AI app host (`quotaKey`), and in all, on one instance
  * (DEC-106). An assertion is usable for at most five minutes (plus leeway),
- * so a domain's share allows about 30 token requests a second.
+ * so a host's share allows about 30 token requests a second.
  */
-const MAX_NONCES_PER_DOMAIN = 10_000;
+const MAX_NONCES_PER_HOST = 10_000;
 const MAX_NONCES = 100_000;
 /** The one text of every client authentication failure; the reason is logged. */
 const CLIENT_AUTH_FAILED = "client authentication failed";
@@ -229,7 +229,7 @@ export class AuthorizationServer {
 	readonly #clientKeys: ClientKeySets;
 	/** Used client assertion ids when the store has no `claimNonce` (per instance). */
 	readonly #nonces = new NonceSet();
-	readonly #nonceQuota = new NonceQuota(MAX_NONCES_PER_DOMAIN, MAX_NONCES);
+	readonly #nonceQuota = new NonceQuota(MAX_NONCES_PER_HOST, MAX_NONCES);
 	/** Insertion order is expiry order (one lifetime for all), so sweeps stop early. */
 	readonly #pending = new Map<string, Pending>();
 	readonly #pendingPerIp = new Map<string, number>();
@@ -1239,14 +1239,16 @@ ${cancel}
 		} catch (error) {
 			if (!(error instanceof ClientMetadataError)) throw error;
 			const reason = `metadata_${error.reason}`;
-			throw isTransient(error)
+			// A private address answers like an unreachable one, so these
+			// endpoints do not tell where a name points (review of PR 65).
+			throw isTransient(error) || error.reason === "private_address"
 				? this.#clientAuthUnavailable(clientId, reason)
 				: this.#clientAuthFailed(clientId, reason);
 		}
 		if (client.auth.method !== "private_key_jwt") {
 			throw this.#clientAuthFailed(clientId, "not_private_key_jwt");
 		}
-		const domain = limitKey(new URL(clientId).hostname);
+		const domain = quotaKey(clientId);
 		try {
 			await verifyClientAssertion(assertion, {
 				clientId,
@@ -1296,7 +1298,7 @@ ${cancel}
 
 	/**
 	 * The replay store for assertion ids: the token store's, shared by every
-	 * instance; else this process's memory. Either way one AI app's domain
+	 * instance; else this process's memory. Either way one AI app host
 	 * holds at most its share of live entries on this instance (DEC-106).
 	 */
 	async #claimNonce(

@@ -10,6 +10,16 @@ import type {
 } from "./types.ts";
 
 const SCHEMA_VERSION = 5;
+/**
+ * The oldest schema a relay must know to use a file of this version safely,
+ * kept in the file's `meta` table (review of PR 65). A relay refuses a file
+ * whose value is above its own `SCHEMA_VERSION`: a later release that adds
+ * a column an older relay would drop raises it, and older relays from this
+ * one on refuse to open that file rather than quietly lose the column.
+ * Relays before this one do not read it: one of them drops `client_auth`
+ * (DEC-106), so bound grants come back unbound.
+ */
+const MIN_READER_VERSION = 5;
 /** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
 const REUSE_WINDOW_MS = 86_400_000;
 
@@ -61,7 +71,37 @@ export class SqliteTokenStore implements TokenStore {
 		this.#db = new Database(path, { create: true, strict: true });
 		this.#db.run("PRAGMA busy_timeout = 5000");
 		if (path !== ":memory:") this.#db.run("PRAGMA journal_mode = WAL");
+		this.#checkReader();
 		this.#migrate();
+		this.#db.run(`CREATE TABLE IF NOT EXISTS meta (
+			key TEXT PRIMARY KEY,
+			value INTEGER NOT NULL
+		) STRICT`);
+		this.#db
+			.query(
+				`INSERT INTO meta (key, value) VALUES ('min_reader_version', $v)
+				ON CONFLICT (key) DO UPDATE SET value = max(value, excluded.value)`,
+			)
+			.run({ v: MIN_READER_VERSION });
+	}
+
+	/** Refuse a file that a newer relay marked as needing at least its schema. */
+	#checkReader(): void {
+		const table = this.#db
+			.query(
+				"SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
+			)
+			.get();
+		if (table === null) return;
+		const row = this.#db
+			.query("SELECT value FROM meta WHERE key = 'min_reader_version'")
+			.get() as { value: number } | null;
+		if (row !== null && row.value > SCHEMA_VERSION) {
+			this.#db.close();
+			throw new Error(
+				`the token store file needs a newer relay (schema ${row.value}; this relay knows ${SCHEMA_VERSION})`,
+			);
+		}
 	}
 
 	#migrate(): void {

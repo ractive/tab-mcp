@@ -15,6 +15,7 @@ import { isLoopbackHost, isPublicIp, parseIpv4, parseIpv6 } from "../ip.ts";
 import { isAlgorithm, JWT_ALGORITHMS, type JwtAlgorithm } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import { RateLimiter } from "../ratelimit.ts";
+import { DomainCache } from "./domain-cache.ts";
 
 /** What the relay needs to know about a client. */
 export interface ClientMetadata {
@@ -112,6 +113,15 @@ const MIN_CACHE_MS = 5 * 60_000;
 const DEFAULT_CACHE_MS = 60 * 60_000;
 const MAX_CACHE_MS = 24 * 60 * 60_000;
 const MAX_CACHE_ENTRIES = 1000;
+/** One domain's share of the cache (`DomainCache`, review of PR 65). */
+const MAX_CACHE_PER_DOMAIN = 100;
+/**
+ * A failed fetch is remembered this long per client id (review of PR 65), so
+ * made-up paths on a real AI app's host cost one fetch a minute each, not
+ * one per request.
+ */
+const FAILURE_CACHE_MS = 60_000;
+const MAX_FAILURES = 1000;
 
 async function defaultLookup(hostname: string): Promise<string[]> {
 	const records = await Bun.dns.lookup(hostname, {});
@@ -180,14 +190,48 @@ export function limitKey(hostname: string): string {
 	return h.split(".").slice(-2).join(".");
 }
 
+/** Per host and per domain as for new client ids; a higher total. */
+function knownBudget(): {
+	perHost: RateLimiter;
+	perDomain: RateLimiter;
+	global: RateLimiter;
+} {
+	return {
+		perHost: new RateLimiter({ capacity: 5, refillPerSecond: 0.2 }),
+		perDomain: new RateLimiter({ capacity: 15, refillPerSecond: 0.6 }),
+		global: new RateLimiter({ capacity: 100, refillPerSecond: 10 }),
+	};
+}
+
 /** Fetches, validates and caches Client ID Metadata Documents. */
 export class ClientMetadataFetcher {
-	readonly #cache = new Map<string, { meta: ClientMetadata; until: number }>();
+	/** Kept past its lifetime for the stale grace; dead after it. */
+	readonly #cache = new DomainCache<{ meta: ClientMetadata; until: number }>(
+		MAX_CACHE_ENTRIES,
+		MAX_CACHE_PER_DOMAIN,
+		(entry, now) => entry.until + STALE_GRACE_MS <= now,
+	);
+	/** Failed fetches per client id, answered again for a minute (insertion order is expiry order). */
+	readonly #failures = new Map<
+		string,
+		{ error: ClientMetadataError; until: number }
+	>();
 	readonly #perHost = new RateLimiter({ capacity: 5, refillPerSecond: 0.2 });
 	/** Three hosts' worth: one host alone cannot use up its domain (DEC-089). */
 	readonly #perDomain = new RateLimiter({ capacity: 15, refillPerSecond: 0.6 });
 	/** All fetches together: many attacker-owned hosts cannot add up (DEC-061). */
 	readonly #global = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
+	/**
+	 * The same limits again, twice, for clients already known (review of PR
+	 * 65): refreshing a cached document, and fetching keys. Requests for
+	 * client ids nobody has seen, which anyone can send, cannot use these
+	 * up; key fetches (an unknown kid may look again every 5 s, so anyone
+	 * can make a real client's keys be fetched) cannot use up its document
+	 * refreshes. The totals are higher: the per-host and per-domain shares
+	 * are what keep one party from taking them.
+	 */
+	readonly #refreshes = knownBudget();
+	readonly #keys = knownBudget();
 	readonly #allowedHosts: readonly string[];
 	readonly #logger: Logger | undefined;
 	readonly #timeoutMs: number;
@@ -222,21 +266,16 @@ export class ClientMetadataFetcher {
 	): Promise<ClientMetadata> {
 		const url = this.#checkUrl(clientId);
 		const now = this.#now();
+		// A hit moves the entry to the end: least recently used goes first.
 		const cached = this.#cache.get(clientId);
-		if (cached !== undefined) {
-			// Least recently used first: a hit moves the entry to the end.
-			this.#cache.delete(clientId);
-			this.#cache.set(clientId, cached);
-			if (cached.until > now) return cached.meta;
-		}
+		if (cached !== undefined && cached.until > now) return cached.meta;
+		const known = cached !== undefined && now < cached.until + STALE_GRACE_MS;
 		const stale =
-			options.allowStale === true &&
-			cached !== undefined &&
-			now < cached.until + STALE_GRACE_MS
-				? cached.meta
-				: undefined;
+			options.allowStale === true && known ? cached?.meta : undefined;
 		try {
-			return await this.#refresh(clientId, url, now);
+			const failed = this.#failures.get(clientId);
+			if (failed !== undefined && failed.until > now) throw failed.error;
+			return await this.#refresh(clientId, url, now, known);
 		} catch (error) {
 			const transient =
 				error instanceof ClientMetadataError && isTransient(error);
@@ -256,37 +295,66 @@ export class ClientMetadataFetcher {
 		clientId: string,
 		url: URL,
 		now: number,
+		known: boolean,
 	): Promise<ClientMetadata> {
-		this.#admit(url, now);
-		const address = await this.#vettedAddress(url);
-		const response = await this.#fetchJson(url, address, ["application/json"]);
-		const meta = validateDocument(response.doc, clientId, url, {
-			test: this.#testMode !== undefined,
-			onFallback: (reason) =>
-				this.#logger?.info("oauth.cimd_auth_fallback", {
-					host: url.host,
-					reason,
-				}),
-		});
-		const ttlMs = cacheMs(response.cacheControl);
-		this.#cache.delete(clientId);
-		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
-			const oldest = this.#cache.keys().next().value;
-			if (oldest !== undefined) this.#cache.delete(oldest);
+		this.#admit(url, now, known ? "refresh" : "new");
+		let meta: ClientMetadata;
+		let ttlMs: number;
+		try {
+			const address = await this.#vettedAddress(url);
+			const response = await this.#fetchJson(url, address, [
+				"application/json",
+			]);
+			meta = validateDocument(response.doc, clientId, url, {
+				test: this.#testMode !== undefined,
+				onFallback: (reason) =>
+					this.#logger?.info("oauth.cimd_auth_fallback", {
+						host: url.host,
+						reason,
+					}),
+			});
+			ttlMs = cacheMs(response.cacheControl);
+		} catch (error) {
+			if (error instanceof ClientMetadataError) {
+				this.#rememberFailure(clientId, error, now);
+			}
+			throw error;
 		}
-		this.#cache.set(clientId, { meta, until: now + ttlMs });
+		this.#failures.delete(clientId);
+		this.#cache.set(
+			clientId,
+			limitKey(url.hostname),
+			{ meta, until: now + ttlMs },
+			now,
+		);
 		return meta;
+	}
+
+	/** At most 1000, oldest first; fetches are rate-limited, so few are live. */
+	#rememberFailure(
+		clientId: string,
+		error: ClientMetadataError,
+		now: number,
+	): void {
+		this.#failures.delete(clientId);
+		if (this.#failures.size >= MAX_FAILURES) {
+			const oldest = this.#failures.keys().next().value;
+			if (oldest !== undefined) this.#failures.delete(oldest);
+		}
+		this.#failures.set(clientId, { error, until: now + FAILURE_CACHE_MS });
 	}
 
 	/**
 	 * A client's JWKS document, under the CIMD fetch's SSRF rules and rate
 	 * limits (DEC-106). `validateDocument` checked `jwksUri` (https, the
 	 * client id's host); this checks it again before any network use. Not
-	 * cached here: `JwksCache` does that. Throws `ClientMetadataError`.
+	 * cached here: `JwksCache` does that. Only a document that was fetched
+	 * and accepted names a `jwksUri`, so this is charged to the budget of
+	 * known clients. Throws `ClientMetadataError`.
 	 */
 	async fetchJwks(jwksUri: string): Promise<unknown> {
 		const url = this.#checkJwksUri(jwksUri);
-		this.#admit(url, this.#now());
+		this.#admit(url, this.#now(), "keys");
 		const address = await this.#vettedAddress(url);
 		const response = await this.#fetchJson(url, address, [
 			"application/json",
@@ -298,27 +366,35 @@ export class ClientMetadataFetcher {
 	/**
 	 * Charge a fetch to its host, its domain and the global limit; per host
 	 * and per domain only once the global limit admits it, so refusals cost
-	 * the others nothing (DEC-089).
+	 * the others nothing (DEC-089). `budget`: new client ids, refreshes of
+	 * known ones, or keys (review of PR 65).
 	 */
-	#admit(url: URL, now: number): void {
+	#admit(url: URL, now: number, budget: "new" | "refresh" | "keys"): void {
+		const { perHost, perDomain, global } =
+			budget === "refresh"
+				? this.#refreshes
+				: budget === "keys"
+					? this.#keys
+					: {
+							perHost: this.#perHost,
+							perDomain: this.#perDomain,
+							global: this.#global,
+						};
 		const key = limitKey(url.hostname);
-		if (
-			!this.#perHost.available(url.host, now) ||
-			!this.#perDomain.available(key, now)
-		) {
+		if (!perHost.available(url.host, now) || !perDomain.available(key, now)) {
 			throw new ClientMetadataError(
 				"rate_limited",
 				"Too many requests for this AI app's details. Try again in a minute.",
 			);
 		}
-		if (!this.#global.take("all", now)) {
+		if (!global.take("all", now)) {
 			throw new ClientMetadataError(
 				"rate_limited",
 				"The relay is busy. Try again in a minute.",
 			);
 		}
-		this.#perHost.take(url.host, now);
-		this.#perDomain.take(key, now);
+		perHost.take(url.host, now);
+		perDomain.take(key, now);
 	}
 
 	#checkJwksUri(jwksUri: string): URL {
