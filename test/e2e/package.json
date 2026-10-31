@@ -6,7 +6,7 @@
 		"@ractive-ch/tab-mcp-client": "workspace:*"
 	},
 	"devDependencies": {
-		"@modelcontextprotocol/client": "2.3.1",
+		"@modelcontextprotocol/client": "2.4.0",
 		"@ractive-ch/tab-mcp": "workspace:*"
 	}
 }

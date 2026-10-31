@@ -14,6 +14,11 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 - `connecting.md` from the package: the guide's only source is now
   https://ractive.ch/tab-mcp/connect/.
 
+#### Changed
+
+- The CDN build bundles `@cfworker/json-schema` 4.1.4 (was 4.1.1); the dependency is
+  pinned to it.
+
 ### [0.9.1][client-0.9.1] - 2026-10-26
 
 #### Changed
@@ -301,6 +306,13 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Changed
+
+- The Docker image runs on Bun 1.4.4 (was 1.4.3). The npm package still needs Bun
+  1.4.3 or newer.
 
 ### [0.5.1][relay-0.5.1] - 2026-10-25
 

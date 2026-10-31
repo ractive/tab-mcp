@@ -17,7 +17,7 @@
 # in SQLite at /data/tab-mcp.db. A named volume inherits /data's owner; a
 # host directory mounted there must be writable by uid 65532.
 
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.3-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349437206c6b0b7422373 AS build
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a AS build
 WORKDIR /src
 COPY LICENSE AI_NOTICE ./
 COPY packages/tab-mcp/package.json packages/tab-mcp/
@@ -28,7 +28,7 @@ RUN bun packages/tab-mcp/scripts/build.ts --no-declarations \
  && mkdir -p /out/app /out/data \
  && cp packages/tab-mcp/dist/main.js packages/tab-mcp/dist/main.js.map LICENSE AI_NOTICE /out/app/
 
-FROM oven/bun:1.4.3-distroless@sha256:1aaa515018b0b37d95dbdebd55d1b7f37ad258a6289ba63e4bc3b9c9e3038697
+FROM oven/bun:1.4.4-distroless@sha256:153a951ae40106e125898103e6e990ee0f38e6aee7f561029e26cf9fbed23470
 LABEL org.opencontainers.image.title="tab-mcp" \
       org.opencontainers.image.description="Relay that lets AI apps call the MCP tools of a web page open in a browser tab" \
       org.opencontainers.image.source="https://github.com/ractive/tab-mcp" \

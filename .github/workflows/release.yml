@@ -74,7 +74,7 @@ concurrency:
 env:
   NPM_VERSION: 12.2.0
   NODE_VERSION: "24"
-  BUN_VERSION: 1.4.3
+  BUN_VERSION: 1.4.4
   # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
   # it on purpose (the same version as in ci.yml).
   CHROME_VERSION: "156.0.8078.47"
@@ -644,12 +644,12 @@ jobs:
           actual=$(tar -xOf "$ARCHIVE" index.json | jq -r '.manifests[0].digest')
           echo "archive $actual, smoke-tested $DIGEST"
           test "$actual" = "$DIGEST"
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: docker.io
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
