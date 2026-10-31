@@ -55,7 +55,7 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
   -e TAB_MCP_TRUST_PROXY=x-real-ip \
-  ractive/tab-mcp:0.6.0
+  ractive/tab-mcp:0.6.1
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
@@ -69,7 +69,7 @@ machine (see [below](#behind-a-reverse-proxy-or-cdn)). The image:
 - has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead
   (see [Health checks](#health-checks-and-monitoring)).
 
-`docker run --rm ractive/tab-mcp:0.6.0 --version` prints the version, `--help` the
+`docker run --rm ractive/tab-mcp:0.6.1 --version` prints the version, `--help` the
 settings. A setting the relay cannot use stops it at start with
 `tab-mcp: configuration error: …` and exit code 2; read the container log if it does not
 come up.
@@ -79,7 +79,7 @@ With Docker Compose:
 ```yaml
 services:
   tab-mcp:
-    image: ractive/tab-mcp:0.6.0
+    image: ractive/tab-mcp:0.6.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -108,7 +108,7 @@ again after an upgrade.
 
   ```sh
   sudo install -d -o 65532 -g 65532 -m 0700 /srv/tab-mcp
-  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.6.0
+  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.6.1
   ```
 
 - **Platform volumes** (container hosts, Kubernetes) are sometimes mounted owned by
@@ -552,7 +552,7 @@ route that too. Check the [CDN settings](#a-cdn-in-front) as well.
 `GET /healthz` answers `200` with
 
 ```json
-{"status":"ok","version":"0.6.0","counters":{"claudeHeaderWorkaround":0}}
+{"status":"ok","version":"0.6.1","counters":{"claudeHeaderWorkaround":0}}
 ```
 
 and `Cache-Control: no-store`. It needs no token and touches no page. It does read the
@@ -560,7 +560,7 @@ token store once (a key that never exists) and waits at most one second for it. 
 store fails or does not answer in time, it answers `503`:
 
 ```json
-{"status":"unhealthy","reason":"store_unavailable","version":"0.6.0"}
+{"status":"unhealthy","reason":"store_unavailable","version":"0.6.1"}
 ```
 
 `reason` is `store_unavailable` (the store threw) or `store_timeout` (no answer within
@@ -701,12 +701,12 @@ same time are not supported (see [One instance](#one-instance)).
 
 **Rolling back.** Keep the backup from step 2 if you might go back. A relay may change
 the file when it opens it, and an older one does not always notice: a relay from before
-`private_key_jwt` (older than 0.6.0) opens a file the newer one upgraded and drops
+`private_key_jwt` opens a file the newer one upgraded and drops
 `client_auth` from every token it writes, so grants AI apps made with a client assertion
 (ChatGPT, DEC-106) come back unbound, redeemable without the AI app's key. Restore the
-backup instead, or accept that those grants become public. From 0.6.0
-on, the file records the oldest relay version that may open it, and a relay
-refuses a file marked as needing a newer one.
+backup instead, or accept that those grants become public. Since the release that
+added `private_key_jwt` (see the changelog), the file records the oldest relay version
+that may open it, and a relay refuses a file marked as needing a newer one.
 
 Relay and browser library (`@ractive-ch/tab-mcp-client`) are released on their own. The
 changelog says when a release of one needs a new version of the other.
