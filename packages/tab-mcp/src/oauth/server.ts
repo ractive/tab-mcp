@@ -28,13 +28,15 @@ import {
 	type ClientMetadata,
 	ClientMetadataError,
 	ClientMetadataFetcher,
+	isTransient,
+	limitKey,
 	redirectUriMatches,
 } from "./cimd.ts";
 import {
 	assertionSubject,
 	CLIENT_ASSERTION_TYPE,
-	type ClaimNonce,
 	ClientKeySets,
+	NonceQuota,
 	verifyClientAssertion,
 } from "./client-auth.ts";
 import { AUTHORIZE_CSS, escapeHtml, pageHeaders, renderPage } from "./html.ts";
@@ -64,7 +66,12 @@ const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
-/** Used client assertion ids kept in memory, for a store without `claimNonce`. */
+/**
+ * Live client assertion ids per AI app domain, and in all, on one instance
+ * (DEC-106). An assertion is usable for at most five minutes (plus leeway),
+ * so a domain's share allows about 30 token requests a second.
+ */
+const MAX_NONCES_PER_DOMAIN = 10_000;
 const MAX_NONCES = 100_000;
 /** The one text of every client authentication failure; the reason is logged. */
 const CLIENT_AUTH_FAILED = "client authentication failed";
@@ -208,6 +215,13 @@ function hostOf(url: string): string {
 	}
 }
 
+/** A client id's host for the log; not the text itself: it is anyone's choice. */
+function logHost(clientId: string | undefined): string {
+	return clientId !== undefined && URL.canParse(clientId)
+		? hostOf(clientId).slice(0, 100)
+		: "(not a URL)";
+}
+
 /** The OAuth endpoints and pages, mounted by the relay. */
 export class AuthorizationServer {
 	readonly #host: AuthorizationHost;
@@ -215,6 +229,7 @@ export class AuthorizationServer {
 	readonly #clientKeys: ClientKeySets;
 	/** Used client assertion ids when the store has no `claimNonce` (per instance). */
 	readonly #nonces = new NonceSet();
+	readonly #nonceQuota = new NonceQuota(MAX_NONCES_PER_DOMAIN, MAX_NONCES);
 	/** Insertion order is expiry order (one lifetime for all), so sweeps stop early. */
 	readonly #pending = new Map<string, Pending>();
 	readonly #pendingPerIp = new Map<string, number>();
@@ -1219,26 +1234,35 @@ ${cancel}
 		}
 		let client: ClientMetadata;
 		try {
-			client = await this.#cimd.get(clientId);
+			// A recent copy if the host cannot be reached right now (DEC-106).
+			client = await this.#cimd.get(clientId, { allowStale: true });
 		} catch (error) {
 			if (!(error instanceof ClientMetadataError)) throw error;
-			throw this.#clientAuthFailed(clientId, `metadata_${error.reason}`);
+			const reason = `metadata_${error.reason}`;
+			throw isTransient(error)
+				? this.#clientAuthUnavailable(clientId, reason)
+				: this.#clientAuthFailed(clientId, reason);
 		}
 		if (client.auth.method !== "private_key_jwt") {
 			throw this.#clientAuthFailed(clientId, "not_private_key_jwt");
 		}
+		const domain = limitKey(new URL(clientId).hostname);
 		try {
 			await verifyClientAssertion(assertion, {
 				clientId,
 				auth: client.auth,
 				keys: this.#clientKeys.for(client.auth.jwksUri),
 				audiences: [this.#issuer, ...endpoints],
-				claimNonce: this.#claimNonce,
+				claimNonce: (key, until, now) =>
+					this.#claimNonce(clientId, domain, key, until, now),
 				now: Date.now(),
 			});
 		} catch (error) {
 			if (!(error instanceof JwtError)) throw error;
-			throw this.#clientAuthFailed(clientId, error.reason);
+			// The keys could not be loaded: that says nothing about the client.
+			throw error.reason === "jwks_unavailable"
+				? this.#clientAuthUnavailable(clientId, error.reason)
+				: this.#clientAuthFailed(clientId, error.reason);
 		}
 		return { clientId, assertion: true };
 	}
@@ -1246,35 +1270,55 @@ ${cancel}
 	/** `invalid_client` (401) with one text for every reason, which goes to the log. */
 	#clientAuthFailed(clientId: string | undefined, reason: string): OAuthError {
 		this.#host.logger.info("oauth.client_auth_failed", {
-			// Not the text itself: it is anyone's choice.
-			client:
-				clientId !== undefined && URL.canParse(clientId)
-					? hostOf(clientId).slice(0, 100)
-					: "(not a URL)",
+			client: logHost(clientId),
 			reason,
 		});
 		return new OAuthError(401, "invalid_client", CLIENT_AUTH_FAILED);
 	}
 
 	/**
-	 * The replay store for assertion ids: the token store's, shared by every
-	 * instance; else this process's memory, capped.
+	 * `temporarily_unavailable` (503, with Retry-After) when the client's
+	 * metadata or keys cannot be had right now, or its share of the replay
+	 * store is full: the client is not told its credentials are bad, so it
+	 * keeps its grant and tries again (DEC-106).
 	 */
-	readonly #claimNonce: ClaimNonce = async (key, expiresAt, now) => {
+	#clientAuthUnavailable(clientId: string, reason: string): OAuthError {
+		this.#host.logger.warn("oauth.client_auth_unavailable", {
+			client: logHost(clientId),
+			reason,
+		});
+		return new OAuthError(
+			503,
+			"temporarily_unavailable",
+			"the client cannot be authenticated right now; try again shortly",
+		);
+	}
+
+	/**
+	 * The replay store for assertion ids: the token store's, shared by every
+	 * instance; else this process's memory. Either way one AI app's domain
+	 * holds at most its share of live entries on this instance (DEC-106).
+	 */
+	async #claimNonce(
+		clientId: string,
+		domain: string,
+		key: string,
+		until: number,
+		now: number,
+	): Promise<boolean> {
+		if (this.#nonceQuota.sweep(now)) this.#nonces.sweep(now);
+		const refusal = this.#nonceQuota.refusal(domain, now);
+		if (refusal !== undefined) {
+			throw this.#clientAuthUnavailable(clientId, `nonces_${refusal}`);
+		}
 		const store = this.#host.store;
-		if (store.claimNonce !== undefined) {
-			return store.claimNonce(key, expiresAt, now);
-		}
-		if (this.#nonces.size >= MAX_NONCES) this.#nonces.sweep(now);
-		if (this.#nonces.size >= MAX_NONCES) {
-			throw new OAuthError(
-				503,
-				"temporarily_unavailable",
-				"the relay is checking too many client assertions; try again shortly",
-			);
-		}
-		return this.#nonces.claim(key, expiresAt, now);
-	};
+		const claimed =
+			store.claimNonce === undefined
+				? this.#nonces.claim(key, until, now)
+				: await store.claimNonce(key, until, now);
+		if (claimed) this.#nonceQuota.add(domain, until);
+		return claimed;
+	}
 
 	async #codeGrant(
 		p: Record<string, string | undefined>,
@@ -1299,8 +1343,12 @@ ${cancel}
 		const issued = this.#codes.get(key);
 		const invalid = (why: string) => new OAuthError(400, "invalid_grant", why);
 		if (issued === undefined) throw invalid("the code is not valid");
-		// Before anything changes: without the client's key a request neither
-		// burns the code nor revokes what it produced (DEC-106).
+		// Before anything changes: another client (even one with a valid
+		// assertion of its own), or this one without its key, neither burns
+		// the code nor revokes what it produced (DEC-106).
+		if (!constantTimeEqual(clientId, issued.client.clientId)) {
+			throw invalid("the code was issued to another client");
+		}
 		if (assertionRequired(issued.client.auth) && !client.assertion) {
 			throw this.#clientAuthFailed(clientId, "assertion_required");
 		}
@@ -1317,9 +1365,6 @@ ${cancel}
 		}
 		issued.used = true; // a failed check below burns the code too
 		if (issued.expiresAt <= Date.now()) throw invalid("the code has expired");
-		if (!constantTimeEqual(clientId, issued.client.clientId)) {
-			throw invalid("the code was issued to another client");
-		}
 		if (redirectUri !== issued.redirectUri) {
 			throw invalid("redirect_uri does not match the authorization request");
 		}
@@ -1560,9 +1605,10 @@ ${cancel}
 			if (token === undefined) {
 				throw new OAuthError(400, "invalid_request", "token is required");
 			}
-			// An assertion, if sent, must be valid; revoking needs none (a
-			// holder of the token could only end the grant).
-			const { clientId } = await this.#authenticateClient(p, [
+			// An assertion, if sent, must be valid; a public grant's tokens are
+			// revoked without one, a bound grant's only with one (RFC 7009 §2.1,
+			// DEC-106).
+			const client = await this.#authenticateClient(p, [
 				`${this.#issuer}/revoke`,
 				`${this.#issuer}/token`,
 			]);
@@ -1573,12 +1619,16 @@ ${cancel}
 					status: 200,
 					headers: { ...this.#cors(), ...noStore },
 				});
-			if (!constantTimeEqual(clientId, record.clientId)) {
+			if (!constantTimeEqual(client.clientId, record.clientId)) {
 				throw new OAuthError(
 					400,
 					"invalid_client",
 					"the token was issued to another client",
 				);
+			}
+			// A stolen token of a bound grant does not end it either.
+			if (record.clientAuth === "private_key_jwt" && !client.assertion) {
+				throw this.#clientAuthFailed(client.clientId, "assertion_required");
 			}
 			// The grant is the connection: revoking either token ends it.
 			await this.#revokeGrant(record.addressId, record.grantId, "revoked");

@@ -17,11 +17,15 @@ import {
 	ClientMetadataFetcher,
 	validateDocument,
 } from "../src/oauth/cimd.ts";
-import { CLIENT_ASSERTION_TYPE, nonceKey } from "../src/oauth/client-auth.ts";
+import {
+	CLIENT_ASSERTION_TYPE,
+	NonceQuota,
+	nonceKey,
+} from "../src/oauth/client-auth.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenStore } from "../src/store/types.ts";
 import { hashToken } from "../src/tokens.ts";
-import { ScriptedTab, waitFor } from "./helpers.ts";
+import { LogCapture, ScriptedTab, waitFor } from "./helpers.ts";
 import {
 	authorizeUrl,
 	type CimdServer,
@@ -172,7 +176,13 @@ function reasons(r: OAuthTestRelay): unknown[] {
 	return r.logs.events("oauth.client_auth_failed").map((e) => e["reason"]);
 }
 
+/** The reasons logged when a client could not be checked right now. */
+function unavailable(r: OAuthTestRelay): unknown[] {
+	return r.logs.events("oauth.client_auth_unavailable").map((e) => e["reason"]);
+}
+
 const UNAUTHENTICATED = { status: 401, error: "invalid_client" };
+const UNAVAILABLE = { status: 503, error: "temporarily_unavailable" };
 /** The assertion passed; the made-up refresh token did not. */
 const AUTHENTICATED = { status: 400, error: "invalid_grant" };
 
@@ -279,6 +289,201 @@ describe("CIMD: which documents may use private_key_jwt", () => {
 			}),
 		).toBe("public");
 		expect(check({ token_endpoint_auth_method: "none" })).toBe("public");
+	});
+
+	test("review of PR 65: keys the relay cannot use fall back to none when it is listed (DEC-104), and say why", () => {
+		const cases: [Json, string][] = [
+			[{ jwks_uri: "https://other.example/jwks.json" }, "bad_jwks_uri"],
+			[{ jwks_uri: "https://AI.example/jwks.json" }, "bad_jwks_uri"],
+			[{ jwks_uri: "http://ai.example/jwks.json" }, "bad_jwks_uri"],
+			[{ jwks: { keys: [] } }, "jwks_and_jwks_uri"],
+			[{ token_endpoint_auth_signing_alg: "HS256" }, "signing_alg"],
+			[{ jwks_uri: undefined }, "no_jwks_uri"],
+			[
+				{ token_endpoint_auth_method: "client_secret_basic" },
+				"unsupported_method",
+			],
+		];
+		for (const [extra, why] of cases) {
+			const doc: Json = {
+				...base,
+				token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+				...extra,
+			};
+			for (const [k, v] of Object.entries(doc)) {
+				if (v === undefined) delete doc[k];
+			}
+			const reasons: string[] = [];
+			const meta = validateDocument(doc, id, url, {
+				onFallback: (r) => reasons.push(r),
+			});
+			expect([extra, meta.auth.method, reasons]).toEqual([
+				extra,
+				"none",
+				[why],
+			]);
+			// Without none listed, the same document is refused.
+			delete doc["token_endpoint_auth_methods_supported"];
+			expect(() => validateDocument(doc, id, url)).toThrow(ClientMetadataError);
+		}
+		// A usable document does not fall back.
+		const quiet: string[] = [];
+		validateDocument({ ...base }, id, url, {
+			onFallback: (r) => quiet.push(r),
+		});
+		expect(quiet).toEqual([]);
+	});
+
+	test("review of PR 65: jwks_uri takes http and a port only in test mode, as the fetch does", () => {
+		const cases: [string, string][] = [
+			["http://ai.example/client.json", "http://ai.example/jwks.json"],
+			[
+				"https://ai.example:8443/client.json",
+				"https://ai.example:8443/jwks.json",
+			],
+		];
+		for (const [clientId, jwksUri] of cases) {
+			const doc = { ...base, client_id: clientId, jwks_uri: jwksUri };
+			const u = new URL(clientId);
+			expect(() => validateDocument(doc, clientId, u)).toThrow(
+				ClientMetadataError,
+			);
+			const meta = validateDocument(doc, clientId, u, { test: true });
+			expect(meta.auth.method === "private_key_jwt" && meta.auth.jwksUri).toBe(
+				jwksUri,
+			);
+		}
+	});
+});
+
+describe("review of PR 65: a recent document when the fetch fails (DEC-106)", () => {
+	const id = "https://ai.example/client.json";
+	const doc = {
+		client_id: id,
+		client_name: "Example AI",
+		redirect_uris: ["https://ai.example/cb"],
+		token_endpoint_auth_method: "private_key_jwt",
+		jwks_uri: "https://ai.example/jwks.json",
+	};
+	const setup = () => {
+		let now = 1_800_000_000_000;
+		let answer: () => Response = () =>
+			Response.json(doc, { headers: { "cache-control": "max-age=300" } });
+		const logs = new LogCapture();
+		const f = new ClientMetadataFetcher({
+			lookup: async () => ["93.184.216.34"],
+			fetch: (async () => answer()) as unknown as typeof fetch,
+			logger: logs.logger,
+			now: () => now,
+		});
+		return {
+			f,
+			logs,
+			at: (t: number) => {
+				now = 1_800_000_000_000 + t;
+			},
+			answer: (a: () => Response) => {
+				answer = a;
+			},
+		};
+	};
+	const reason = async (p: Promise<unknown>): Promise<string> => {
+		try {
+			await p;
+			return "accepted";
+		} catch (e) {
+			if (e instanceof ClientMetadataError) return e.reason;
+			throw e;
+		}
+	};
+
+	test("allowStale serves the last good copy for an hour after it expires, on a transient failure only", async () => {
+		const s = setup();
+		await s.f.get(id);
+		s.answer(() => new Response("down", { status: 503 }));
+		s.at(10 * 60_000); // expired after 5 minutes
+		expect(await reason(s.f.get(id))).toBe("fetch_failed");
+		expect((await s.f.get(id, { allowStale: true })).clientId).toBe(id);
+		expect(s.logs.events("oauth.cimd_stale")).toHaveLength(1);
+		s.at(5 * 60_000 + 60 * 60_000 + 1); // past the grace
+		expect(await reason(s.f.get(id, { allowStale: true }))).toBe(
+			"fetch_failed",
+		);
+	});
+
+	test("a document that became invalid is not served stale, and is forgotten", async () => {
+		const s = setup();
+		await s.f.get(id);
+		s.at(10 * 60_000);
+		s.answer(() => Response.json({ ...doc, client_id: "https://x.example/c" }));
+		expect(await reason(s.f.get(id, { allowStale: true }))).toBe(
+			"invalid_metadata",
+		);
+		s.answer(() => new Response("down", { status: 503 }));
+		expect(await reason(s.f.get(id, { allowStale: true }))).toBe(
+			"fetch_failed",
+		);
+	});
+
+	test("the fallback to none is logged with its reason", async () => {
+		const s = setup();
+		s.answer(() =>
+			Response.json({
+				...doc,
+				jwks_uri: "https://other.example/jwks.json",
+				token_endpoint_auth_methods_supported: ["none", "private_key_jwt"],
+			}),
+		);
+		expect((await s.f.get(id)).auth.method).toBe("none");
+		expect(s.logs.events("oauth.cimd_auth_fallback")).toEqual([
+			expect.objectContaining({ host: "ai.example", reason: "bad_jwks_uri" }),
+		]);
+	});
+});
+
+describe("review of PR 65: replay store shares per AI app domain (DEC-106)", () => {
+	test("a full domain is refused alone; others go on until the total is full", () => {
+		const q = new NonceQuota(2, 3);
+		const now = 1000;
+		q.add("evil.example", now + 60_000);
+		q.add("evil.example", now + 60_000);
+		expect(q.refusal("evil.example", now)).toBe("domain_full");
+		expect(q.refusal("chatgpt.com", now)).toBeUndefined();
+		q.add("chatgpt.com", now + 60_000);
+		expect(q.refusal("claude.ai", now)).toBe("full");
+	});
+
+	test("expired entries are dropped, at most once a second", () => {
+		const q = new NonceQuota(1, 10);
+		expect(q.sweep(0)).toBe(true);
+		q.add("a.example", 500);
+		expect(q.refusal("a.example", 600)).toBe("domain_full"); // swept at 0 only
+		expect(q.sweep(999)).toBe(false);
+		expect(q.refusal("a.example", 1000)).toBeUndefined();
+	});
+
+	test("the store is asked to remember a jti for five minutes from iat, not until a far exp", async () => {
+		const inner = new MemoryTokenStore();
+		const asked: number[] = [];
+		const store: TokenStore = {
+			put: (r) => inner.put(r),
+			get: (h) => inner.get(h),
+			markUsed: (h, n, k) => inner.markUsed(h, n, k),
+			revoke: (s, o) => inner.revoke(s, o),
+			listGrants: (a, n) => inner.listGrants(a, n),
+			deleteExpired: (n) => inner.deleteExpired(n),
+			claimNonce: (k, until, n) => {
+				asked.push(until);
+				return inner.claimNonce(k, until, n);
+			},
+		};
+		const r = relay(store);
+		const now = Math.floor(Date.now() / 1000);
+		const token = await assertion(r, strictId, { iat: now, exp: now + 3600 });
+		expect(await error(await probe(r, strictId, auth(token)))).toEqual(
+			AUTHENTICATED,
+		);
+		expect(asked).toEqual([(now + 5 * 60) * 1000 + 30_000]);
 	});
 });
 
@@ -511,6 +716,10 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 			{ jti: undefined },
 			{ jti: "" },
 			{ jti: "j".repeat(257) },
+			// Review of PR 65: usable five minutes from iat, or with exp that
+			// close when there is no iat.
+			{ iat: now - 6 * 60 },
+			{ iat: undefined, exp: now + 10 * 60 },
 		];
 		for (const claims of cases) {
 			const token = await assertion(r, strictId, claims);
@@ -528,12 +737,17 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 			"jti",
 			"jti",
 			"jti",
+			"too_old",
+			"lifetime",
 		]);
-		// Within the leeway, and the full hour, are fine.
+		// Within the leeway, the full hour with a fresh iat, and five minutes
+		// without iat are fine.
 		for (const claims of [
 			{ exp: now - 10 },
 			{ exp: now + 3600 },
 			{ iat: now + 10, nbf: now + 10 },
+			{ iat: now - 4 * 60 },
+			{ iat: undefined, exp: now + 4 * 60 },
 		]) {
 			const token = await assertion(r, strictId, claims);
 			expect(await error(await probe(r, strictId, auth(token)))).toEqual(
@@ -565,22 +779,39 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 		expect(until).toBe(false);
 	});
 
-	test("JWKS fetch failure, a public client's assertion, and a bad assertion type: invalid_client", async () => {
+	test("review of PR 65: a JWKS or metadata fetch failure is 503 with Retry-After, not invalid_client", async () => {
 		const r = relay();
-		const broken = await assertion(r, brokenId);
+		const broken = await probe(r, brokenId, auth(await assertion(r, brokenId)));
+		expect(await error(broken)).toEqual(UNAVAILABLE);
+		expect(broken.headers.get("retry-after")).toBe("10");
+		const missing = `${cimd.origin}/missing.json`;
+		const gone = await probe(r, missing, auth(await assertion(r, missing)));
+		expect(await error(gone)).toEqual(UNAVAILABLE);
+		expect(unavailable(r)).toEqual([
+			"jwks_unavailable",
+			"metadata_fetch_failed",
+		]);
+		expect(reasons(r)).toEqual([]);
+	});
+
+	test("review of PR 65: the CIMD fetch budget used up is 503 (rate_limited), not invalid_client", async () => {
+		const r = relay();
+		// Unknown client ids on the fixture's host use up its fetch allowance.
+		for (let i = 0; i < 6; i++) {
+			const id = `${cimd.origin}/missing-${i}.json`;
+			const res = await probe(r, id, auth(await assertion(r, id)));
+			expect(await error(res)).toEqual(UNAVAILABLE);
+		}
+		expect(unavailable(r)).toContain("metadata_rate_limited");
+		expect(reasons(r)).toEqual([]);
+	});
+
+	test("a public client's assertion and a bad assertion type: invalid_client", async () => {
+		const r = relay();
 		const publicOne = await assertion(r, publicId);
-		const unknownClient = await assertion(r, `${cimd.origin}/missing.json`);
-		expect(await error(await probe(r, brokenId, auth(broken)))).toEqual(
-			UNAUTHENTICATED,
-		);
 		expect(await error(await probe(r, publicId, auth(publicOne)))).toEqual(
 			UNAUTHENTICATED,
 		);
-		expect(
-			await error(
-				await probe(r, `${cimd.origin}/missing.json`, auth(unknownClient)),
-			),
-		).toEqual(UNAUTHENTICATED);
 		const wrongType = await probe(r, strictId, {
 			client_assertion_type:
 				"urn:ietf:params:oauth:client-assertion-type:saml2-bearer",
@@ -588,12 +819,7 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 		});
 		expect(await error(wrongType)).toEqual(UNAUTHENTICATED);
 		expect(wrongType.headers.get("www-authenticate")).not.toBeNull();
-		expect(reasons(r)).toEqual([
-			"jwks_unavailable",
-			"not_private_key_jwt",
-			"metadata_fetch_failed",
-			"assertion_type",
-		]);
+		expect(reasons(r)).toEqual(["not_private_key_jwt", "assertion_type"]);
 		// Half of the pair is a malformed request; a garbage token is a failed one.
 		expect(
 			await error(
@@ -809,16 +1035,66 @@ describe("DEC-106: a grant is bound to the method it was made with", () => {
 		await refreshToken(await refresh(f, publicId, rt));
 	});
 
-	test("an assertion for another client does not redeem this client's code", async () => {
+	test("review of PR 65: another client's valid assertion neither burns a code nor revokes its grant", async () => {
 		const f = await flow();
-		const a = await authorize(f, strictId);
-		const res = await exchange(
-			f,
-			dualId,
-			a,
-			auth(await assertion(f.r, dualId)),
+		// Strict, ChatGPT-shaped and public victims; the attacker signs as dualId
+		// (or, for the dual victim, as strictId), whose keys it holds.
+		for (const [victim, attacker] of [
+			[strictId, dualId],
+			[dualId, strictId],
+			[publicId, dualId],
+		] as const) {
+			const a = await authorize(f, victim);
+			const steal = async () =>
+				exchange(f, attacker, a, auth(await assertion(f.r, attacker)));
+			expect(await error(await steal())).toEqual({
+				status: 400,
+				error: "invalid_grant",
+			});
+			// Not burnt: the real client still redeems it.
+			const extra =
+				victim === publicId ? {} : auth(await assertion(f.r, victim));
+			const rt = await refreshToken(await exchange(f, victim, a, extra));
+			// Presented again by the attacker: refused, and nothing is revoked.
+			expect(await error(await steal())).toEqual({
+				status: 400,
+				error: "invalid_grant",
+			});
+			const again =
+				victim === publicId ? {} : auth(await assertion(f.r, victim));
+			await refreshToken(await refresh(f, victim, rt, again));
+		}
+		expect(f.tab.received.filter((m) => m.type === "grant.removed")).toEqual(
+			[],
 		);
-		expect(await error(res)).toEqual({ status: 400, error: "invalid_grant" });
+	});
+
+	test("review of PR 65: /revoke of a bound grant needs the client's assertion", async () => {
+		const f = await flow();
+		const a = await authorize(f, dualId);
+		const rt = await refreshToken(
+			await exchange(f, dualId, a, auth(await assertion(f.r, dualId))),
+		);
+		// A stolen refresh token with the public client_id ends nothing.
+		const stolen = await postForm(`${f.r.url}/revoke`, {
+			token: rt,
+			client_id: dualId,
+		});
+		expect(await error(stolen)).toEqual(UNAUTHENTICATED);
+		expect(reasons(f.r)).toEqual(["assertion_required"]);
+		const next = await refreshToken(
+			await refresh(f, dualId, rt, auth(await assertion(f.r, dualId))),
+		);
+		// A public grant is still revoked with the client_id alone.
+		const b = await authorize(f, publicId);
+		const publicRt = await refreshToken(await exchange(f, publicId, b));
+		const plain = await postForm(`${f.r.url}/revoke`, {
+			token: publicRt,
+			client_id: publicId,
+		});
+		expect(plain.status).toBe(200);
+		expect(await f.r.store.get(hashToken(publicRt))).toBeUndefined();
+		expect(await binding(f, next)).toBe("private_key_jwt");
 	});
 
 	test("/revoke: an assertion is optional, but must be valid if sent", async () => {

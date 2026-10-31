@@ -22,15 +22,23 @@ import type { PrivateKeyJwtAuth } from "./cimd.ts";
 export const CLIENT_ASSERTION_TYPE =
 	"urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 /**
- * Longest an assertion may live from now: an hour, the ceiling other
- * authorization servers set (Okta) and the lifetime common libraries default
- * to. Its `jti` is single-use, so the length only bounds the replay store.
+ * Latest `exp` accepted: an hour ahead, the ceiling other authorization
+ * servers set (Okta) and a lifetime libraries default to; ChatGPT's own is
+ * not known, so a shorter `exp` limit could refuse it.
  */
 export const CLIENT_ASSERTION_MAX_LIFETIME_MS: number = 60 * 60_000;
+/**
+ * How long an assertion is usable (DEC-106): five minutes from its `iat`,
+ * or, without `iat`, `exp` at most five minutes ahead. A client signs just
+ * before it sends, so this costs no client anything, and it bounds how long
+ * a `jti` must be remembered whatever `exp` says.
+ */
+export const CLIENT_ASSERTION_MAX_AGE_MS: number = 5 * 60_000;
 /** Clock leeway for `exp`, `iat` and `nbf`. */
 export const CLIENT_ASSERTION_LEEWAY_MS = 30_000;
 const MAX_JTI = 256;
 const MAX_KEY_SETS = 1000;
+const SWEEP_INTERVAL_MS = 1000;
 /**
  * `typ` values accepted, compared case-insensitively (RFC 7515 §4.1.9):
  * none, `JWT`, or the explicit type of draft-ietf-oauth-rfc7523bis. Others
@@ -102,40 +110,106 @@ export async function verifyClientAssertion(
 	if (!audiences(payload).some((a) => check.audiences.includes(a))) {
 		throw new JwtError("aud", "the assertion is not for this relay");
 	}
-	const exp = checkTimes(payload, check.now);
+	const usableUntil = checkTimes(payload, check.now);
 	const jti = payload["jti"];
 	if (typeof jti !== "string" || jti === "" || jti.length > MAX_JTI) {
 		throw new JwtError("jti", "the assertion needs a jti");
 	}
 	const key = nonceKey(check.clientId, jti);
-	const until = exp + CLIENT_ASSERTION_LEEWAY_MS;
-	if (!(await check.claimNonce(key, until, check.now))) {
+	if (!(await check.claimNonce(key, usableUntil, check.now))) {
 		throw new JwtError("replayed", "the assertion was already used");
 	}
 }
 
-/** `exp` required, live and at most an hour ahead; `iat` and `nbf` if given. Returns `exp` in ms. */
+/**
+ * `exp` required, live and at most an hour ahead; `iat`, if given, not in
+ * the future and at most five minutes old, else `exp` at most five minutes
+ * ahead; `nbf`, if given, passed. Returns when the assertion stops being
+ * usable (leeway included): how long its `jti` must be remembered.
+ */
 function checkTimes(payload: Record<string, unknown>, now: number): number {
+	const leeway = CLIENT_ASSERTION_LEEWAY_MS;
 	const exp = numericDate(payload, "exp");
 	if (exp === undefined) throw new JwtError("exp", "the assertion has no exp");
-	if (exp <= now - CLIENT_ASSERTION_LEEWAY_MS) {
+	if (exp <= now - leeway) {
 		throw new JwtError("expired", "the assertion has expired");
 	}
-	if (
-		exp >
-		now + CLIENT_ASSERTION_MAX_LIFETIME_MS + CLIENT_ASSERTION_LEEWAY_MS
-	) {
+	if (exp > now + CLIENT_ASSERTION_MAX_LIFETIME_MS + leeway) {
 		throw new JwtError("lifetime", "the assertion lives longer than an hour");
 	}
 	const iat = numericDate(payload, "iat");
-	if (iat !== undefined && iat > now + CLIENT_ASSERTION_LEEWAY_MS) {
-		throw new JwtError("iat", "the assertion was issued in the future");
+	let end = exp;
+	if (iat === undefined) {
+		if (exp > now + CLIENT_ASSERTION_MAX_AGE_MS + leeway) {
+			throw new JwtError(
+				"lifetime",
+				"an assertion without iat may live five minutes",
+			);
+		}
+	} else {
+		if (iat > now + leeway) {
+			throw new JwtError("iat", "the assertion was issued in the future");
+		}
+		if (iat + CLIENT_ASSERTION_MAX_AGE_MS <= now - leeway) {
+			throw new JwtError("too_old", "the assertion was issued too long ago");
+		}
+		end = Math.min(exp, iat + CLIENT_ASSERTION_MAX_AGE_MS);
 	}
 	const nbf = numericDate(payload, "nbf");
-	if (nbf !== undefined && nbf > now + CLIENT_ASSERTION_LEEWAY_MS) {
+	if (nbf !== undefined && nbf > now + leeway) {
 		throw new JwtError("nbf", "the assertion is not valid yet");
 	}
-	return exp;
+	return end + leeway;
+}
+
+/**
+ * The replay store's live entries per AI app domain on this instance
+ * (DEC-106; the domain as the CIMD rate limits count it). Anyone can be a
+ * client by publishing a document, so one domain may fill only its own
+ * share, whatever the store; the total bounds memory. Expired entries are
+ * dropped at most once a second.
+ */
+export class NonceQuota {
+	readonly #until = new Map<string, number[]>();
+	readonly #perDomain: number;
+	readonly #max: number;
+	#total = 0;
+	#sweptAt = Number.NEGATIVE_INFINITY;
+
+	constructor(perDomain: number, max: number) {
+		this.#perDomain = perDomain;
+		this.#max = max;
+	}
+
+	/** Why `domain` may not add an entry now, or `undefined` if it may. */
+	refusal(domain: string, now: number): "domain_full" | "full" | undefined {
+		this.sweep(now);
+		if ((this.#until.get(domain)?.length ?? 0) >= this.#perDomain) {
+			return "domain_full";
+		}
+		return this.#total >= this.#max ? "full" : undefined;
+	}
+
+	add(domain: string, until: number): void {
+		const list = this.#until.get(domain);
+		if (list === undefined) this.#until.set(domain, [until]);
+		else list.push(until);
+		this.#total++;
+	}
+
+	/** Drops expired entries; returns whether it ran (at most once a second). */
+	sweep(now: number): boolean {
+		if (now - this.#sweptAt < SWEEP_INTERVAL_MS) return false;
+		this.#sweptAt = now;
+		this.#total = 0;
+		for (const [domain, list] of this.#until) {
+			const live = list.filter((until) => until > now);
+			if (live.length === 0) this.#until.delete(domain);
+			else this.#until.set(domain, live);
+			this.#total += live.length;
+		}
+		return true;
+	}
 }
 
 /**

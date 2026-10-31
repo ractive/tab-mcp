@@ -75,6 +75,36 @@ export interface ClientMetadataFetcherOptions {
 	now?: () => number;
 }
 
+/** How `validateDocument` reads a document. */
+export interface DocumentOptions {
+	/** Test mode: a `jwks_uri` may use `http:` and any port, like the client id. */
+	test?: boolean;
+	/** A `private_key_jwt` document fell back to `none` (DEC-104), and why. */
+	onFallback?: (reason: string) => void;
+}
+
+/**
+ * Failures that say nothing about the client, only that its document could
+ * not be had right now: worth a retry, and a reason to serve a recent copy.
+ */
+const TRANSIENT_REASONS = new Set([
+	"rate_limited",
+	"fetch_failed",
+	"unresolvable",
+	"too_large",
+]);
+
+export function isTransient(error: ClientMetadataError): boolean {
+	return TRANSIENT_REASONS.has(error.reason);
+}
+
+/**
+ * How long past its cache lifetime a document is still served to the token
+ * and revocation endpoints when a fresh fetch fails transiently (DEC-106):
+ * the hour `JwksCache` gives keys.
+ */
+const STALE_GRACE_MS = 60 * 60_000;
+
 const MAX_CLIENT_ID_LENGTH = 2048;
 const MAX_NAME_LENGTH = 64;
 const MAX_REDIRECT_URIS = 20;
@@ -178,21 +208,66 @@ export class ClientMetadataFetcher {
 		this.#now = options.now ?? Date.now;
 	}
 
-	/** The client's metadata, from the cache or freshly fetched. Throws `ClientMetadataError`. */
-	async get(clientId: string): Promise<ClientMetadata> {
+	/**
+	 * The client's metadata, from the cache or freshly fetched. Throws
+	 * `ClientMetadataError`. With `allowStale` (the token and revocation
+	 * endpoints, DEC-106) a document up to an hour past its cache lifetime is
+	 * served when the fresh fetch fails transiently or is rate-limited, so a
+	 * busy or briefly unreachable host does not cut off apps that already
+	 * have grants. `/authorize` always wants a current document.
+	 */
+	async get(
+		clientId: string,
+		options: { allowStale?: boolean } = {},
+	): Promise<ClientMetadata> {
 		const url = this.#checkUrl(clientId);
 		const now = this.#now();
 		const cached = this.#cache.get(clientId);
-		if (cached !== undefined && cached.until > now) {
+		if (cached !== undefined) {
 			// Least recently used first: a hit moves the entry to the end.
 			this.#cache.delete(clientId);
 			this.#cache.set(clientId, cached);
-			return cached.meta;
+			if (cached.until > now) return cached.meta;
 		}
+		const stale =
+			options.allowStale === true &&
+			cached !== undefined &&
+			now < cached.until + STALE_GRACE_MS
+				? cached.meta
+				: undefined;
+		try {
+			return await this.#refresh(clientId, url, now);
+		} catch (error) {
+			const transient =
+				error instanceof ClientMetadataError && isTransient(error);
+			// A document the host now answers with something unacceptable is
+			// not kept as a fallback either.
+			if (!transient) this.#cache.delete(clientId);
+			if (stale === undefined || !transient) throw error;
+			this.#logger?.info("oauth.cimd_stale", {
+				host: url.host,
+				reason: error.reason,
+			});
+			return stale;
+		}
+	}
+
+	async #refresh(
+		clientId: string,
+		url: URL,
+		now: number,
+	): Promise<ClientMetadata> {
 		this.#admit(url, now);
 		const address = await this.#vettedAddress(url);
 		const response = await this.#fetchJson(url, address, ["application/json"]);
-		const meta = validateDocument(response.doc, clientId, url);
+		const meta = validateDocument(response.doc, clientId, url, {
+			test: this.#testMode !== undefined,
+			onFallback: (reason) =>
+				this.#logger?.info("oauth.cimd_auth_fallback", {
+					host: url.host,
+					reason,
+				}),
+		});
 		const ttlMs = cacheMs(response.cacheControl);
 		this.#cache.delete(clientId);
 		if (this.#cache.size >= MAX_CACHE_ENTRIES) {
@@ -499,6 +574,7 @@ export function validateDocument(
 	doc: unknown,
 	clientId: string,
 	url: URL,
+	options: DocumentOptions = {},
 ): ClientMetadata {
 	const invalid = (message: string) =>
 		new ClientMetadataError("invalid_metadata", message);
@@ -544,7 +620,7 @@ export function validateDocument(
 	) {
 		throw invalid("The AI app's details have no valid redirect_uris.");
 	}
-	const auth = clientAuth(d, url, invalid);
+	const auth = clientAuth(d, url, options, invalid);
 	const grants = d["grant_types"];
 	if (
 		grants !== undefined &&
@@ -578,66 +654,99 @@ export function validateDocument(
  *   inline `jwks` is not accepted (one key path, rotated through the JWKS
  *   cache); `token_endpoint_auth_signing_alg`, if given, must be one the
  *   relay verifies and is then the only one accepted;
- * - any other method, or `private_key_jwt` without a `jwks_uri`: accepted as
- *   a public client only when `token_endpoint_auth_methods_supported` lists
- *   `none` (DEC-104), else refused. `client_secret_*` never authenticates.
+ * - any other method, or `private_key_jwt` whose keys the relay cannot use
+ *   (no `jwks_uri`, one elsewhere or not canonical, `jwks` beside it, an
+ *   algorithm it does not verify): accepted as a public client only when
+ *   `token_endpoint_auth_methods_supported` lists `none` (DEC-104), else
+ *   refused. `client_secret_*` never authenticates.
  */
 function clientAuth(
 	d: Record<string, unknown>,
 	url: URL,
+	options: DocumentOptions,
 	invalid: (message: string) => ClientMetadataError,
 ): ClientAuth {
 	const method = d["token_endpoint_auth_method"];
 	const supported = d["token_endpoint_auth_methods_supported"];
 	const listsNone = Array.isArray(supported) && supported.includes("none");
 	if (method === undefined || method === "none") return { method: "none" };
-	const jwksUri = d["jwks_uri"];
-	if (method === "private_key_jwt" && jwksUri !== undefined) {
-		if (d["jwks"] !== undefined) {
-			// RFC 7591 §2: the two must not both be present.
-			throw invalid("The AI app's details have both jwks and jwks_uri.");
-		}
-		// The scheme and host (with its port) of the client id, which passed
-		// the stricter client id rules: the keys are the verified host's own.
-		const parsed =
-			typeof jwksUri === "string" ? parseJwksUri(jwksUri, true) : undefined;
-		if (
-			parsed === undefined ||
-			parsed.protocol !== url.protocol ||
-			parsed.host !== url.host
-		) {
-			throw invalid(
-				"The AI app's jwks_uri must be an https:// URL on the host of its client_id.",
-			);
-		}
-		return {
-			method: "private_key_jwt",
-			jwksUri: parsed.href,
-			algorithms: signingAlgorithms(d, invalid),
-			publicAllowed: listsNone,
-		};
-	}
-	if (listsNone) return { method: "none" };
-	throw invalid(
+	const checked: KeysOrProblem =
 		method === "private_key_jwt"
-			? "The AI app uses private_key_jwt but publishes no jwks_uri (an inline jwks is not accepted)."
-			: 'The AI app must use token_endpoint_auth_method "none" or "private_key_jwt" with this relay, or list "none" in token_endpoint_auth_methods_supported.',
-	);
+			? privateKeyJwt(d, url, options.test === true)
+			: {
+					problem: "unsupported_method",
+					message:
+						'The AI app must use token_endpoint_auth_method "none" or "private_key_jwt" with this relay, or list "none" in token_endpoint_auth_methods_supported.',
+				};
+	if ("jwksUri" in checked) {
+		return { method: "private_key_jwt", ...checked, publicAllowed: listsNone };
+	}
+	// Any problem with the method falls back to "none" when it is listed,
+	// as in relay 0.5.1 (DEC-104); the caller logs why.
+	if (listsNone) {
+		options.onFallback?.(checked.problem);
+		return { method: "none" };
+	}
+	throw invalid(checked.message);
 }
 
-/** The algorithms a client's assertion may use: the one it names, or all. */
-function signingAlgorithms(
+type KeysOrProblem =
+	| { jwksUri: string; algorithms: readonly JwtAlgorithm[] }
+	| { problem: string; message: string };
+
+/**
+ * A `private_key_jwt` document's keys: a `jwks_uri` with the client id's
+ * scheme and host (port included), in the form the relay fetches it, and
+ * the algorithms. Or what is wrong with them.
+ */
+function privateKeyJwt(
 	d: Record<string, unknown>,
-	invalid: (message: string) => ClientMetadataError,
-): readonly JwtAlgorithm[] {
-	const alg = d["token_endpoint_auth_signing_alg"];
-	if (alg === undefined) return JWT_ALGORITHMS;
-	if (!isAlgorithm(alg)) {
-		throw invalid(
-			"The AI app's token_endpoint_auth_signing_alg is not one this relay accepts.",
-		);
+	url: URL,
+	test: boolean,
+): KeysOrProblem {
+	const jwksUri = d["jwks_uri"];
+	if (jwksUri === undefined) {
+		return {
+			problem: "no_jwks_uri",
+			message:
+				"The AI app uses private_key_jwt but publishes no jwks_uri (an inline jwks is not accepted).",
+		};
 	}
-	return [alg];
+	if (d["jwks"] !== undefined) {
+		// RFC 7591 §2: the two must not both be present.
+		return {
+			problem: "jwks_and_jwks_uri",
+			message: "The AI app's details have both jwks and jwks_uri.",
+		};
+	}
+	// The scheme and host of the client id, which passed the client id rules:
+	// the keys are the verified host's own.
+	const parsed =
+		typeof jwksUri === "string" ? parseJwksUri(jwksUri, test) : undefined;
+	if (
+		parsed === undefined ||
+		parsed.protocol !== url.protocol ||
+		parsed.host !== url.host
+	) {
+		return {
+			problem: "bad_jwks_uri",
+			message:
+				"The AI app's jwks_uri must be an https:// URL on the host of its client_id.",
+		};
+	}
+	const alg = d["token_endpoint_auth_signing_alg"];
+	if (alg !== undefined && !isAlgorithm(alg)) {
+		return {
+			problem: "signing_alg",
+			message:
+				"The AI app's token_endpoint_auth_signing_alg is not one this relay accepts.",
+		};
+	}
+	// Only the one it names, or all the relay verifies.
+	return {
+		jwksUri: parsed.href,
+		algorithms: alg === undefined ? JWT_ALGORITHMS : [alg],
+	};
 }
 
 /**
