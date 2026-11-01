@@ -67,7 +67,7 @@ Notes from adding `@ractive-ch/tab-mcp-client` 0.9.1 (React) to a Vite + React 1
 10. **How does a page get onto the hosted relay's allowed origins?**
     `tab-mcp.ractive.ch` rejects origins it does not know ("Could not connect to the relay (refused, unreachable, or this page's origin is not allowed)"). The message is clear, but the README does not say how a project gets its origin allowed, or whether the hosted relay is meant for third-party pages at all.
     *Suggestion:* one paragraph in the README: who can use the hosted relay, and how to ask.
-    *Status (2026-10-31):* `https://comparis-the-game.b-cdn.net` is being added to `tab-mcp.ractive.ch`'s allowed origins in ractive.ch PR #73. The relay refuses the origin until that PR is merged and applied.
+    *Status (2026-11-02):* done. `https://comparis-the-game.b-cdn.net` is on `tab-mcp.ractive.ch`'s allowed origins since ractive.ch PR #73, as a one-off. The README's "Live examples" now says the hosted relay is run for ractive.ch's examples, not as a service for other pages, and that other pages run their own relay.
 
 ## Worked well
 
