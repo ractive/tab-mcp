@@ -27,6 +27,11 @@ Try it without installing anything. These pages connect to the hosted relay
 | [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); its source is [examples/react-todo](examples/react-todo) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
 
+The hosted relay runs these examples and is not open to other pages: it refuses
+their origins ("this page's origin is not allowed"). For your own page, run your own
+relay, as in [Quick start for page authors](#quick-start-for-page-authors) for
+development and [Self-hosting](#self-hosting) for production.
+
 ## How it works
 
 <!-- Mermaid source (https://mermaid.js.org): GitHub draws it. Edit the text; try changes
