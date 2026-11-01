@@ -27,10 +27,12 @@ Try it without installing anything. These pages connect to the hosted relay
 | [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); its source is [examples/react-todo](examples/react-todo) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
 
-The hosted relay runs these examples and is not open to other pages: it refuses
-their origins ("this page's origin is not allowed"). For your own page, run your own
-relay, as in [Quick start for page authors](#quick-start-for-page-authors) for
-development and [Self-hosting](#self-hosting) for production.
+The hosted relay is run for ractive.ch's examples, not as a service for other pages.
+It refuses every origin it does not list, and the page then shows "Could not connect
+to the relay (refused, unreachable, or this page's origin is not allowed)." For your
+own page, run your own relay, as in
+[Quick start for page authors](#quick-start-for-page-authors) for development and
+[Self-hosting](#self-hosting) for production.
 
 ## How it works
 
@@ -177,7 +179,7 @@ the page then asks the user before each call. The
 [client README](packages/tab-mcp-client/README.md) covers the whole API; the
 [live examples](https://ractive.ch/tab-mcp/) show what pages can offer.
 
-There is no public relay for other sites: run your own (next section).
+There is no public relay for other sites: run your own ([Self-hosting](#self-hosting)).
 
 ### Agent skill
 
