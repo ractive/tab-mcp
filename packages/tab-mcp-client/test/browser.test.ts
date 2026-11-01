@@ -142,7 +142,9 @@ test.skipIf(chrome === undefined)(
 			pairing: boolean;
 			status: string;
 		}>(
-			"(() => { const d = document.querySelector('dialog.tab-mcp-connect'); return { open: d.open, address: d.querySelector('input').value, pairing: mcp.pairing, status: d.querySelector('.tab-mcp-status').textContent }; })()",
+			// `connected` fires before the dialog is built (its chunk loads after
+			// connect()), so wait for it to be open instead of reading it at once.
+			"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-connect'); if (d === null || !d.open) return setTimeout(w, 10); r({ open: d.open, address: d.querySelector('input').value, pairing: mcp.pairing, status: d.querySelector('.tab-mcp-status').textContent }); }; w(); })",
 		);
 		expect(dialog).toEqual({
 			open: true,
