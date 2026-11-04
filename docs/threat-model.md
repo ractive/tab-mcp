@@ -350,6 +350,18 @@ trustworthy.
 - A configured site `name` replaces the page's claim.
 - Sites on one relay share one operator, one store and one log. A project that needs
   separation runs its own relay.
+- **A browser extension is a site too** (DEC-108): its pages send
+  `Origin: chrome-extension://<id>`. No website can send that origin, since browsers set
+  `Origin` themselves, so listing an extension admits that extension's pages in a
+  browser and no website. Its content scripts are not among them: their requests carry
+  the origin of the website they run in, so an extension connects from one of its own
+  pages, such as a side panel. An unpacked extension keeps its id only with a `key` in
+  its manifest, and that key is public: anyone can load other code under the same id in
+  their own browser. So the id keeps websites and other extensions out; it does not prove
+  who wrote the code a user installed. A program can claim the origin like any other
+  (above). The pairing page names such a page "the
+  browser extension `chrome-extension://<id>`". Firefox and Safari give every
+  installation its own id, so the relay refuses their schemes in its lists.
 
 ### A12: Identity binding (sites with `pairing: "oidc"`)
 

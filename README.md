@@ -174,6 +174,10 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
 
 4. Open your page on `http://localhost:3000`, click the button and connect an AI app.
 
+A Chrome or Edge extension can offer tools the same way, from its side panel or another
+page of its own; the relay then lists `chrome-extension://<id>` (see
+[browser extensions](docs/configuration.md#browser-extensions)).
+
 Mark tools that change or delete things with `annotations: { consequentialHint: true }`:
 the page then asks the user before each call. The
 [client README](packages/tab-mcp-client/README.md) covers the whole API; the

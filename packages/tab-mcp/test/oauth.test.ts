@@ -490,6 +490,19 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		);
 	});
 
+	test("an extension's page is named as a browser extension (DEC-108)", async () => {
+		const ext = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+		const ctx = await setup(
+			{ allowedOrigins: [], sites: [{ origin: ext, name: "Overmark" }] },
+			{},
+			{ origin: ext },
+		);
+		const page = await open(ctx);
+		expect(page.html).toContain(
+			`to <strong>Overmark</strong> on the browser extension <span class="origin">${ext}</span>.`,
+		);
+	});
+
 	test("the tab offline: 'Open the page first' with Try again; it works once the tab is back", async () => {
 		const r = startOAuthRelay(cimd);
 		current = r;

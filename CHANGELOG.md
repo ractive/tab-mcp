@@ -325,6 +325,18 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Added
+
+- Browser extensions as pages: `TAB_MCP_ALLOWED_ORIGINS` and `TAB_MCP_SITES` accept a
+  Chrome or Edge extension's origin, `chrome-extension://<id>` (the 32-letter id, a to p;
+  written in lower case, a trailing slash dropped), so an extension can offer tools from
+  one of its own pages, such as its side panel. The pairing page names it "the browser
+  extension `chrome-extension://<id>`". `moz-extension://` and `safari-web-extension://`
+  are refused at start with the reason (every installation has its own id); other
+  schemes as before. See "Browser extensions" in docs/configuration.md (DEC-108).
+
 ### [0.6.1][relay-0.6.1] - 2026-11-01
 
 #### Added

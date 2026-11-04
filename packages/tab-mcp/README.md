@@ -56,7 +56,7 @@ The most important:
 | Variable | Default | Meaning |
 |---|---|---|
 | `TAB_MCP_PUBLIC_URL` | required | the relay's public origin; `https:` outside development |
-| `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | comma-separated page origins; `*` makes an open relay (read the warning in the docs first) |
+| `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | comma-separated page origins, including Chrome and Edge extensions (`chrome-extension://<id>`); `*` makes an open relay (read the warning in the docs first) |
 | `TAB_MCP_SITES` | empty | JSON array of sites with their own app name or limits |
 | `TAB_MCP_STORE` | `sqlite` | `sqlite` or `memory` |
 | `TAB_MCP_SQLITE_PATH` | `tab-mcp.db` | the SQLite file for grants and token hashes |

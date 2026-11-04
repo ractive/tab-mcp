@@ -14,7 +14,12 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { isAddressId, shortAddress } from "../address.ts";
-import type { PairingKind, RelayConfig, Site } from "../config.ts";
+import {
+	isExtensionOrigin,
+	type PairingKind,
+	type RelayConfig,
+	type Site,
+} from "../config.ts";
 import { JWT_ALGORITHMS, JwtError } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import type { GrantInfo } from "../protocol.ts";
@@ -1048,11 +1053,14 @@ ${cancel}
 		}
 		targets.push(...(method.formTargets?.() ?? []));
 		// A browser always sends an Origin; only a non-browser tab on an open
-		// relay has none.
+		// relay has none. An extension's page is named as one (DEC-108).
+		const origin = `<span class="origin">${escapeHtml(session.origin)}</span>`;
 		const page =
 			session.origin === ""
 				? "a page that did not say where it runs"
-				: `<span class="origin">${escapeHtml(session.origin)}</span>`;
+				: isExtensionOrigin(session.origin)
+					? `the browser extension ${origin}`
+					: origin;
 		const target =
 			session.appName === undefined
 				? `tools from ${page}`
