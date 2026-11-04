@@ -141,10 +141,22 @@ describe("extension origins (DEC-108)", () => {
 			"chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba",
 		);
 		expect(isExtensionOrigin(ext)).toBe(true);
-		expect(isExtensionOrigin("moz-extension://0f1e2d3c-4b5a-6978")).toBe(true);
-		expect(isExtensionOrigin("safari-web-extension://0F1E2D3C")).toBe(true);
+		expect(
+			isExtensionOrigin("moz-extension://0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b"),
+		).toBe(true);
+		expect(
+			isExtensionOrigin(
+				"safari-web-extension://0F1E2D3C-4B5A-6978-8A9B-0C1D2E3F4A5B",
+			),
+		).toBe(true);
 		expect(isExtensionOrigin("https://ractive.ch")).toBe(false);
 		expect(isExtensionOrigin("chrome-extension://")).toBe(false);
+		// What a non-browser client could send to an open relay.
+		expect(isExtensionOrigin("chrome-extension://x")).toBe(false);
+		expect(isExtensionOrigin("safari-web-extension://Your Bank Support")).toBe(
+			false,
+		);
+		expect(isExtensionOrigin("moz-extension://0f1e2d3c-4b5a-6978")).toBe(false);
 	});
 
 	test("malformed ids, paths and other extension schemes are refused", () => {

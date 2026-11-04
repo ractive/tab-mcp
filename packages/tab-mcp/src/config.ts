@@ -208,7 +208,12 @@ export function normalizeOrigin(value: string): string {
  * schemes. For wording only; `normalizePageOrigin` decides what may be listed.
  */
 export function isExtensionOrigin(origin: string): boolean {
-	return /^(?:chrome|moz|safari-web)-extension:\/\/./.test(origin);
+	// Only what a browser sends: Chrome's 32 letters a–p, Firefox's and
+	// Safari's UUIDs. A made-up origin from a non-browser client must not be
+	// called a browser extension on the pairing page.
+	return /^(?:chrome-extension:\/\/[a-p]{32}|(?:moz|safari-web)-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(
+		origin,
+	);
 }
 
 /**
