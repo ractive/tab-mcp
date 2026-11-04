@@ -106,9 +106,13 @@ extension `chrome-extension://…`" rather than only the id:
 TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Overmark"}]'
 ```
 
-- **Use a stable id.** An extension from the Chrome Web Store has one id everywhere. An
-  unpacked extension gets an id from its folder path, unless its `manifest.json` has a
-  `key`: set one, or every installation has another id and the relay refuses it.
+- **Use a stable id, one per store.** An extension from a store has the same id on every
+  installation from that store, but each store gives its own: the Chrome Web Store one,
+  Microsoft Edge Add-ons another. An extension published in both needs both origins
+  listed, one site per id with the same name (Edge users who install from the Chrome Web
+  Store get its id). An unpacked extension gets an id from its folder path, unless its
+  `manifest.json` has a `key`: set one, or every installation has another id and the
+  relay refuses it.
 - **Connect from an extension page, not a content script.** A content script's requests
   carry the origin of the website it runs in, so the relay would see that website.
 - **Chrome and Edge only.** Firefox (`moz-extension://`) and Safari

@@ -141,8 +141,10 @@ describe("extension origins (DEC-108)", () => {
 			"chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba",
 		);
 		expect(isExtensionOrigin(ext)).toBe(true);
-		expect(isExtensionOrigin(`${ext}/`)).toBe(false);
+		expect(isExtensionOrigin("moz-extension://0f1e2d3c-4b5a-6978")).toBe(true);
+		expect(isExtensionOrigin("safari-web-extension://0F1E2D3C")).toBe(true);
 		expect(isExtensionOrigin("https://ractive.ch")).toBe(false);
+		expect(isExtensionOrigin("chrome-extension://")).toBe(false);
 	});
 
 	test("malformed ids, paths and other extension schemes are refused", () => {

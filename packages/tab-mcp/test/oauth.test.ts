@@ -503,6 +503,15 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		);
 	});
 
+	test("on an open relay, a Firefox extension is named as one too", async () => {
+		const moz = "moz-extension://0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+		const ctx = await setup({ allowedOrigins: "*" }, {}, { origin: moz });
+		const page = await open(ctx);
+		expect(page.html).toContain(
+			`to tools from the browser extension <span class="origin">${moz}</span>`,
+		);
+	});
+
 	test("the tab offline: 'Open the page first' with Try again; it works once the tab is back", async () => {
 		const r = startOAuthRelay(cimd);
 		current = r;

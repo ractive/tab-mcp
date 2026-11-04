@@ -2049,8 +2049,11 @@ its tools through tab-mcp from its side panel. The relay accepted only `http:` a
   that wants them anyway is an open relay (`*`).
 - A content script is not an extension page: its requests carry the website's origin.
   Extensions connect from a side panel or another page of their own; the docs say so.
+- Each store gives an extension its own id (Chrome Web Store, Edge Add-ons): an
+  extension in both is two sites with the same name.
 - The pairing page calls such a page "the browser extension `chrome-extension://<id>`"
   (after the site's name when one is configured), since the id alone means nothing to a
-  user.
+  user; on an open relay the same wording names `moz-extension://` and
+  `safari-web-extension://` pages.
 - Identity binding stays allowed for an extension's site; it needs a backend that signs
   tab assertions for the extension's user, so `code` is the usual choice.

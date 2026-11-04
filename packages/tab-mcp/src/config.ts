@@ -202,12 +202,13 @@ export function normalizeOrigin(value: string): string {
 	return url.origin;
 }
 
-/** A Chrome or Edge extension's origin: the scheme and the 32-letter id (a–p). */
-const EXTENSION_ORIGIN = /^chrome-extension:\/\/([a-p]{32})$/;
-
-/** Whether an origin is a Chrome or Edge extension's (`chrome-extension://<id>`). */
+/**
+ * Whether an origin is a browser extension's: Chrome's and Edge's
+ * `chrome-extension://`, and on an open relay also Firefox's and Safari's
+ * schemes. For wording only; `normalizePageOrigin` decides what may be listed.
+ */
 export function isExtensionOrigin(origin: string): boolean {
-	return EXTENSION_ORIGIN.test(origin);
+	return /^(?:chrome|moz|safari-web)-extension:\/\/./.test(origin);
 }
 
 /**
