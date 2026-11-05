@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 17: browser extensions as pages"
-status: in-progress
+status: completed
 description: "The relay accepts a Chrome or Edge extension's origin (chrome-extension://<id>) in TAB_MCP_ALLOWED_ORIGINS and TAB_MCP_SITES, so an extension can offer tools from its side panel; other extension schemes are refused with a reason."
 timestamp: 2026-11-04T12:00:00+01:00
 tags: [iteration, relay, extension, docs]
@@ -38,4 +38,4 @@ configuration (`normalizeOrigin`). DEC-108 has the reasons.
 - [x] A tab session with `Origin: chrome-extension://<id>` accepted, another id refused
 - [x] Pairing page wording for an extension, with a test
 - [x] docs/configuration.md, docs/threat-model.md, CHANGELOG (relay, Unreleased), DEC-108
-- [ ] Review; merge and a relay release on the owner's word
+- [x] Review; merged (PR #72) and released as relay 0.7.0 on the owner's word
