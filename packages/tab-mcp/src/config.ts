@@ -202,6 +202,52 @@ export function normalizeOrigin(value: string): string {
 	return url.origin;
 }
 
+/**
+ * Whether an origin is a browser extension's: Chrome's and Edge's
+ * `chrome-extension://`, and on an open relay also Firefox's and Safari's
+ * schemes. For wording only; `normalizePageOrigin` decides what may be listed.
+ */
+export function isExtensionOrigin(origin: string): boolean {
+	// Only what a browser sends: Chrome's 32 letters a–p, Firefox's and
+	// Safari's UUIDs. A made-up origin from a non-browser client must not be
+	// called a browser extension on the pairing page.
+	return /^(?:chrome-extension:\/\/[a-p]{32}|(?:moz|safari-web)-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(
+		origin,
+	);
+}
+
+/**
+ * Normalise a page origin, or throw: a web origin (`normalizeOrigin`), or a
+ * Chrome or Edge extension's `chrome-extension://<id>`, in lower case without
+ * a trailing slash, as Chrome sends it in `Origin` (DEC-108). Firefox and
+ * Safari give every installation of an extension its own id, so no list can
+ * name them.
+ */
+export function normalizePageOrigin(value: string): string {
+	const trimmed = value.trim();
+	const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed)?.[1]?.toLowerCase();
+	if (scheme === "chrome-extension") {
+		const id = /^chrome-extension:\/\/([a-p]{32})\/?$/i.exec(trimmed)?.[1];
+		if (id === undefined) {
+			throw new ConfigError(
+				`not an extension origin (chrome-extension:// and the 32-letter extension id, a to p): ${value}`,
+			);
+		}
+		return `chrome-extension://${id.toLowerCase()}`;
+	}
+	if (scheme === "moz-extension" || scheme === "safari-web-extension") {
+		throw new ConfigError(
+			`only Chrome and Edge extensions can be listed (Firefox and Safari give every installation its own id): ${value}`,
+		);
+	}
+	if (scheme !== undefined && scheme !== "http" && scheme !== "https") {
+		throw new ConfigError(
+			`a page origin must be http, https or chrome-extension: ${value}`,
+		);
+	}
+	return normalizeOrigin(value);
+}
+
 /** Fill in defaults and validate. Throws `ConfigError` on bad values. */
 export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	const config: RelayConfig = { ...DEFAULT_CONFIG, ...input };
@@ -219,7 +265,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	}
 
 	if (config.allowedOrigins !== "*") {
-		config.allowedOrigins = config.allowedOrigins.map(normalizeOrigin);
+		config.allowedOrigins = config.allowedOrigins.map(normalizePageOrigin);
 	}
 	config.sites = config.sites.map((site) => validateSite(site));
 	const seen = new Set(
@@ -328,7 +374,7 @@ function validateSite(input: unknown): SiteConfig {
 	if (typeof site["origin"] !== "string") {
 		throw new ConfigError("a site needs an origin");
 	}
-	const out: SiteConfig = { origin: normalizeOrigin(site["origin"]) };
+	const out: SiteConfig = { origin: normalizePageOrigin(site["origin"]) };
 	if (site["name"] !== undefined) {
 		if (!isAppName(site["name"])) {
 			throw new ConfigError(

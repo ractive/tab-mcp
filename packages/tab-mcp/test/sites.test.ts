@@ -201,3 +201,50 @@ describe("sessions", () => {
 		expect(res.status).toBe(403);
 	});
 });
+
+describe("extension origins (DEC-108)", () => {
+	const ext = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+	const other = "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba";
+
+	test("a listed extension opens a session; the session carries its origin", async () => {
+		const r = relay({ allowedOrigins: [`${ext}/`] });
+		const t = new ScriptedTab(r.wsUrl, { origin: ext, app: "Overmark" });
+		tabs.push(t);
+		const s = await t.connect();
+		expect(s.origin).toBe(ext);
+		expect(s.appName).toBe("Overmark");
+	});
+
+	test("a configured extension site gets its name", async () => {
+		const r = relay({
+			allowedOrigins: [],
+			sites: [
+				{
+					origin: "chrome-extension://ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP",
+					name: "Overmark",
+				},
+			],
+		});
+		const t = new ScriptedTab(r.wsUrl, { origin: ext, app: "pretender" });
+		tabs.push(t);
+		expect((await t.connect()).appName).toBe("Overmark");
+	});
+
+	test("another extension, and a page of the web, are refused", async () => {
+		const r = relay({ allowedOrigins: [ext] });
+		for (const origin of [other, `${ext}/`, "https://page.example"]) {
+			const res = await fetch(`http://127.0.0.1:${r.relay.port}/tab`, {
+				headers: { origin, "sec-websocket-protocol": "tab-mcp.v1" },
+			});
+			expect(res.status).toBe(403);
+		}
+		expect(siteFor(r.relay.config, other)).toBeUndefined();
+	});
+
+	test("an open relay admits extensions", async () => {
+		const r = relay({ allowedOrigins: "*" });
+		const t = new ScriptedTab(r.wsUrl, { origin: other });
+		tabs.push(t);
+		expect((await t.connect()).origin).toBe(other);
+	});
+});

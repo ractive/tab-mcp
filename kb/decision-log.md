@@ -2028,3 +2028,32 @@ end-to-end tests wanted a token for its address without a person typing the pair
 - A command that pairs against a running relay through the real OAuth flow (a published
   client metadata document with a loopback redirect, the code read from the page) needs
   no relay change; it is built only if someone needs it.
+
+## DEC-108: Chrome and Edge extensions are pages (`chrome-extension://<id>`)
+
+2026-11-04, iteration 17. Overmark, an annotation extension in its own repository, offers
+its tools through tab-mcp from its side panel. The relay accepted only `http:` and
+`https:` origins in its lists, so an extension could connect only to an open relay
+(`TAB_MCP_ALLOWED_ORIGINS=*`).
+
+- `TAB_MCP_ALLOWED_ORIGINS` and `TAB_MCP_SITES` accept `chrome-extension://<id>`, the id
+  being 32 letters a to p, stored in lower case without a trailing slash: what Chrome
+  sends in `Origin` from an extension page. The header is compared exactly, as for
+  websites. The public URL stays `http:`/`https:`.
+- Websites cannot send that origin, so listing an extension admits its pages and no
+  website, the same protection a website's origin gives. The id is no proof of the
+  publisher: an unpacked extension keeps a stable id only through a public `key` in its
+  manifest, which anyone can reuse in their own browser.
+- `moz-extension://` and `safari-web-extension://` are refused with the reason: Firefox
+  and Safari give every installation its own id, so a list cannot name them. A relay
+  that wants them anyway is an open relay (`*`).
+- A content script is not an extension page: its requests carry the website's origin.
+  Extensions connect from a side panel or another page of their own; the docs say so.
+- Each store gives an extension its own id (Chrome Web Store, Edge Add-ons): an
+  extension in both is two sites with the same name.
+- The pairing page calls such a page "the browser extension `chrome-extension://<id>`"
+  (after the site's name when one is configured), since the id alone means nothing to a
+  user; on an open relay the same wording names `moz-extension://` and
+  `safari-web-extension://` pages.
+- Identity binding stays allowed for an extension's site; it needs a backend that signs
+  tab assertions for the extension's user, so `code` is the usual choice.

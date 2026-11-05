@@ -22,8 +22,9 @@ TAB_MCP_ALLOWED_ORIGINS=https://app.example.com
 - `TAB_MCP_PUBLIC_URL` is the address AI apps and browsers use to reach the relay. The
   relay builds the MCP addresses (`https://relay.example.com/a/<id>/mcp`) and its OAuth
   issuer from it. It must be `https:` unless `NODE_ENV=development`.
-- `TAB_MCP_ALLOWED_ORIGINS` lists the web pages that may connect. Without it the relay
-  starts, logs `relay.no_origins` and refuses every page.
+- `TAB_MCP_ALLOWED_ORIGINS` lists the web pages that may connect, and browser extensions
+  (see [Browser extensions](#browser-extensions)). Without it the relay starts, logs
+  `relay.no_origins` and refuses every page.
 
 ## All variables
 
@@ -35,7 +36,7 @@ than 0.
 | `TAB_MCP_PUBLIC_URL` | required | External origin of the relay, e.g. `https://relay.example.com`. Only the origin counts: no path, query or credentials. `https:` unless `NODE_ENV=development`. |
 | `TAB_MCP_PORT` | `8080` | Port to listen on. |
 | `TAB_MCP_HOST` | `0.0.0.0` | Address to listen on. |
-| `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | Comma-separated page origins (`https://app.example.com`) allowed to open tab sessions with the default limits. `*` admits any website (an open relay, see below). |
+| `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | Comma-separated page origins (`https://app.example.com`, or a Chrome or Edge extension's `chrome-extension://<id>`, see [Browser extensions](#browser-extensions)) allowed to open tab sessions with the default limits. `*` admits any website and any extension (an open relay, see below). |
 | `TAB_MCP_SITES` | empty | JSON array of sites with their own app name or limits (see [Sites](#sites)). A site listed here needs no entry in `TAB_MCP_ALLOWED_ORIGINS`; an origin may appear in only one of the two. |
 | `TAB_MCP_CLIENT_ID_HOSTS` | empty: any AI app | Comma-separated hosts whose AI apps may connect, compared exactly with the host of the app's client id URL. For example `claude.ai` admits Claude Code, whose client id is `https://claude.ai/oauth/claude-code-client-metadata`. An app that authenticates with `private_key_jwt` (ChatGPT) publishes its keys on the same host, so the list covers them too (DEC-106). |
 | `TAB_MCP_TRUST_PROXY` | `none` | Where the client IP for rate limits comes from: `none` (the TCP peer), `x-real-ip`, or `x-forwarded-for` (its last entry, the one your proxy added). Set it only behind a proxy that sets the header; otherwise clients can choose their own IP. |
@@ -85,13 +86,42 @@ Each site is an object with these keys:
 
 | Key | Meaning |
 |---|---|
-| `origin` | The page origin. Required. |
+| `origin` | The page origin: `https://…`, `http://…`, or `chrome-extension://<id>` for an extension. Required. |
 | `name` | The app name the pairing page shows (1-64 characters). Without it the page's own `appName` is shown, which the page declares itself. |
 | `pairing` | `code` (the code shown in the page) or `oidc` (identity binding). Without it the site uses `TAB_MCP_IDENTITY`. |
 | `limits` | Overrides of the instance limits, in milliseconds and bytes: `maxMessageBytes`, `maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`, `idleTimeoutMs`, `sessionLifetimeMs`, `heartbeatMs`. |
 
 Unknown keys stop the relay at start. With `TAB_MCP_ALLOWED_ORIGINS=*`, configured sites
 keep their settings and every other origin gets the defaults.
+
+## Browser extensions
+
+A Chrome or Edge extension can offer tools too: the library runs in one of the
+extension's own pages, such as its side panel, and the relay sees that page's origin,
+`chrome-extension://` followed by the extension's 32-letter id (DEC-108). List it like a
+website, best as a site with a name, so the pairing page says "Overmark on the browser
+extension `chrome-extension://…`" rather than only the id:
+
+```sh
+TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Overmark"}]'
+```
+
+- **Use a stable id, one per store.** An extension from a store has the same id on every
+  installation from that store, but each store gives its own: the Chrome Web Store one,
+  Microsoft Edge Add-ons another. An extension published in both needs both origins
+  listed, one site per id with the same name (Edge users who install from the Chrome Web
+  Store get its id). An unpacked extension gets an id from its folder path, unless its
+  `manifest.json` has a `key`: set one, or every installation has another id and the
+  relay refuses it.
+- **Connect from an extension page, not a content script.** A content script's requests
+  carry the origin of the website it runs in, so the relay would see that website.
+- **Chrome and Edge only.** Firefox (`moz-extension://`) and Safari
+  (`safari-web-extension://`) give every installation of an extension its own id, so no
+  list can name them; the relay refuses those schemes at start. On a relay of your own,
+  `TAB_MCP_ALLOWED_ORIGINS=*` admits them anyway (see [Open relay](#open-relay)).
+- **Pairing.** Pair by code. Identity binding (`pairing: "oidc"`) works only if a backend
+  signs tab assertions for the extension's user (see [Identity binding](#identity-binding)),
+  which an extension usually does not have.
 
 ## Why the defaults are safe
 
@@ -199,6 +229,14 @@ A local relay for development, with tokens in memory:
 ```sh
 NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 TAB_MCP_STORE=memory tab-mcp
+```
+
+A local relay for an extension under development, whose `manifest.json` has a `key`:
+
+```sh
+NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 TAB_MCP_STORE=memory \
+  TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Overmark"}]' \
+  tab-mcp
 ```
 
 See [self-hosting](self-hosting.md) for Docker and reverse proxies.

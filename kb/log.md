@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-04
+
+- Iteration 17 on relay/extension-origins: the relay accepts Chrome and Edge extension origins (`chrome-extension://<id>`) in TAB_MCP_ALLOWED_ORIGINS and TAB_MCP_SITES, refuses moz-extension and safari-web-extension with a reason, and names an extension on the pairing page; DEC-108; for Overmark
+
 ## 2026-10-31
 
 - Iteration 16 on iter-16/game-feedback: the comparis game's feedback (dialog centring under CSS resets, the development public URL, 'Connection lost, retrying…', startTestRelay and tokenFor in @ractive-ch/tab-mcp/testing, Tool<Input>, README sections); DEC-107 (no development pairing endpoint); the hosted relay allows the game's origin (ractive.ch PR 73)
