@@ -2143,3 +2143,22 @@ turns WebMCP on with an origin trial token, and that a tool it registers is the 
 - **Tests**: Chrome for Testing has WebMCP behind `--enable-features=WebMCP`, headless
   included; `test/webmcp-spike/webmcp.test.ts` keeps the findings as a canary, so a
   Chrome change shows.
+
+## DEC-114: The extension is a small WebMCP bridge; recipes are dropped (owner)
+
+2026-11-08. Tools an AI app builds for a site (recipes, iterations 21 and 22) are dropped,
+with the reading and acting tools they needed. A recipe only pays off for tasks that come
+back on the same site, or for AI apps other than Claude: for everything else, an agent in
+the browser does the job (Claude in Chrome), and guides for it, such as SiteSkills'
+per-site `SKILL.md` files of selectors and flows, give most of a recipe's benefit without
+an extension.
+
+- The extension is the WebMCP bridge only: the skeleton with `page_info` (iteration 19),
+  the bridge (iteration 20), the release (iteration 23). It matters only on sites that
+  turn WebMCP on; it is an early entry for when WebMCP spreads.
+- DEC-110 (Overmark's matcher copied) and DEC-111 (recipes, never code) lapse with the
+  recipes. The iteration files 21 and 22 are removed; git history keeps them.
+- Whether an AI app may give a site tools through user scripts (`chrome.userScripts`),
+  code the extension did not ship, is an experiment of its own (iteration 24); DEC-111's
+  reasons (the Chrome Web Store's rule on remote code, steps the user can judge) are the
+  bar it has to clear.

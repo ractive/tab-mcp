@@ -17,9 +17,9 @@ tags: [iteration, extension, release]
    Store, as Overmark's `publish.yml` does (a pinned public action, the store's OAuth
    credentials as secrets of a protected environment in this repository).
 3. **Store listing**: name "tab-mcp for Chrome", the descriptor, screenshots, the
-   permissions and why each is needed, review notes (no remote code: recipes are data
-   validated against a fixed list of steps; DEC-111).
-4. **Privacy policy**: what is stored (recipes, settings, in the browser), what leaves the
+   permissions and why each is needed, review notes (no remote code: the extension only
+   lists and calls the tools a page registered itself with WebMCP).
+4. **Privacy policy**: what is stored (settings, in the browser), what leaves the
    browser (only what the user's AI app asks for, through the relay the user chose).
 5. **Docs** on `ractive.ch/tab-mcp` (in the ractive.ch repository): the two ways to use
    tab-mcp, built into a site or the extension for any site; setup with the hosted relay.
