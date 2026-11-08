@@ -56,15 +56,16 @@ AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-cli
 
 - `activeTab`, `scripting`, `sidePanel`, `storage`.
 - Host access is optional (`<all_urls>` in `optional_host_permissions`): without it the
-  extension runs on a tab only after a click on its icon, as Overmark does. "Allow on all
-  sites" asks for it.
+  extension runs on a tab only after a click on its icon, as Overmark does, and only on
+  that page until it navigates. "Allow on all sites" asks for it; the content script is
+  then registered for every page.
 - No remote code.
 
 ## Tools the AI app gets
 
 | Tool | Kind | What it does |
 |---|---|---|
-| `page_info` | read | Address, title and whether the page has WebMCP on (iteration 19) |
+| `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
 | `webmcp_tools` | read | The page's own WebMCP tools (iteration 20) |
 | `page.<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call |
 
@@ -73,7 +74,9 @@ AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-cli
 - **The page's hints can lie.** Every result is marked untrusted; every tool not marked
   read-only asks the user in the side panel each time, naming the page's origin.
 - **Prompt injection.** Page tool results reach the AI app; they are marked untrusted,
-  and the AI app decides what to do with them, as with any tool.
+  and the AI app decides what to do with them, as with any tool. The tools' names,
+  descriptions and schemas are the page's words too, and no hint can mark them in a tool
+  list: descriptions are cut to a limit and start with the page's origin (iteration 20).
 - **A forged `document.modelContext`.** The content script sees the native object only;
   a page that replaces it in its own world fools only itself (iteration 18).
 

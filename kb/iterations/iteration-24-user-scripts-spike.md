@@ -19,19 +19,25 @@ tab-mcp and worth it. It is a spike: a research note and a decision, not a featu
 
 1. **Chrome.** Which Chrome has `chrome.userScripts` and what the user must turn on (the
    "Allow User Scripts" switch per extension, Developer mode before it); `register`,
-   `execute`, `configureWorld`; the `USER_SCRIPT` world and the main world; whether Chrome
-   for Testing has it, headless included, so CI can test it.
+   `execute`, `configureWorld`; the `USER_SCRIPT` world and the main world; whether
+   `document.modelContext` is there in the `USER_SCRIPT` world (iteration 18 tried only
+   the isolated and main worlds); whether Chrome for Testing has it, headless included,
+   so CI can test it.
 2. **The Chrome Web Store.** Whether an extension that runs scripts an AI app wrote for
    the user is allowed, or only scripts the user writes or installs; what the listing and
    the review must say.
 3. **Tools.** How a script's functions reach the AI app: messages from the user script
    world to the extension (`runtime.sendMessage` with `messaging` in `configureWorld`),
    registered in the side panel with `tab-mcp-client`; or WebMCP (`registerTool` from the
-   script, then bridged as in iteration 20).
+   script, then bridged as in iteration 20). A tool registered with WebMCP is the page's
+   (iteration 18, research §4, DEC-113): the page sees it and can call it with inputs of
+   its choosing, and `getTools()` does not say who registered it, so the bridge would
+   offer it as an untrusted page tool among the page's own.
 4. **Safety.** The script runs with the user's session on the site, and page text reaches
    the AI app that writes it (prompt injection). What the user sees before allowing a
    script (the code, a summary), whether a script may make requests to other origins
-   (the `USER_SCRIPT` world's CSP), how scripts are bound to their site and turned off.
+   (the `USER_SCRIPT` world's CSP), how scripts are bound to their site and turned off;
+   whether the page can call or see a script's tools on each path of question 3.
 5. **Worth.** Against Claude in Chrome with site guides: does a script give anything they
    do not (speed, no model in the loop, any MCP app)?
 
@@ -43,8 +49,10 @@ tab-mcp and worth it. It is a spike: a research note and a decision, not a featu
       for a test page and offers its functions as tools (both paths of question 3)
 - [ ] An automated run with Chrome for Testing, as `test/webmcp-spike/` does
 - [ ] Research note `research/user-scripts.md`
-- [ ] A decision: whether user scripts go into the extension, and how; DEC-111's reasons
-      (no remote code, steps the user can read) are the bar
+- [ ] A decision: whether user scripts go into the extension, and how. The bar is
+      DEC-111's reasons as DEC-114 words them: whether the Chrome Web Store's rule on
+      remote code allows it through `chrome.userScripts`, and whether the user can judge
+      what a script does before allowing it
 
 ## Out of scope
 

@@ -3,7 +3,7 @@ type: iteration
 title: "Iteration 19: the extension's skeleton"
 status: planned
 description: "packages/tab-mcp-extension: an MV3 extension whose side panel connects to a tab-mcp relay and offers one read-only tool about the tab in front (page_info, with whether the page has WebMCP on); build, test harness and CI after Overmark's."
-timestamp: 2026-11-08T20:00:00+01:00
+timestamp: 2026-11-08T23:30:00+01:00
 tags: [iteration, extension]
 ---
 # Iteration 19: the extension's skeleton
@@ -19,13 +19,18 @@ each part of this; its code is the model.
    npm), depending on `@ractive-ch/tab-mcp-client` from the workspace.
 2. **Manifest V3**: side panel, background service worker, content script injected on a
    click on the icon (`activeTab` + `scripting`); optional host access for "Allow on all
-   sites"; no remote code.
+   sites"; no remote code. Without host access a click grants only that page: after a
+   navigation or on another tab the content script is not there until the next click,
+   and `page_info` says so. With host access the content script is registered for every
+   page (`scripting.registerContentScripts`), so it follows navigations and tab switches.
 3. **Side panel**: relay address (default the hosted relay), Connect, the connection
    state, pairing through the library's dialog, Stop; the tab in front and whether the
    extension may run there.
 4. **One tool**, read-only and marked `untrustedContentHint`: `page_info` for the tab in
-   front (address, title, language, whether `document.modelContext` is there, that is
-   whether the page has WebMCP on). A tab the extension may not run on answers with the
+   front: address, title, language, whether WebMCP is available on the page
+   (`document.modelContext` is there: the page's origin trial token, or the user's flag,
+   which makes it available on every page) and how many tools the page registered
+   (`getTools().length`), so "available" and "offers tools" stay apart. A tab the extension may not run on answers with the
    reason and how to allow it. Reading or acting on pages beyond that is not planned
    (DEC-114).
 5. **Build** after Overmark's `scripts/build.ts`: a test build (manifest key for a stable
@@ -43,7 +48,8 @@ each part of this; its code is the model.
 
 - [ ] Package, manifest, build script with test and store outputs, icons
 - [ ] Side panel with connect, pairing, state; the tool registered through the library
-- [ ] Content script answering `page_info`
+- [ ] Content script answering `page_info`; registered for every page with host access,
+      injected on a click without it; end-to-end cases for a navigation and a tab switch
 - [ ] End-to-end harness after Overmark's and the spike's; store-package test
 - [ ] CI path filter; `bun run verify` and the type checks include the package
 - [ ] README; review; merged on the owner's word

@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-11-08T20:00:00+01:00
+timestamp: 2026-11-08T23:30:00+01:00
 ---
 
 # Decision log
@@ -2075,6 +2075,9 @@ app builds for a site.
   relay and client releases stay as they are. Its end-to-end tests run in CI only when
   the extension or the client changed.
 
+**Partly superseded by DEC-114**: the extension is the WebMCP bridge only; it does not run
+tools an AI app builds.
+
 ## DEC-110: Overmark's element matcher is copied, not shared, for now (owner)
 
 2026-11-08. Recipes find elements again after a site changes, as Overmark's marks do.
@@ -2083,6 +2086,8 @@ element types and their tests) is copied from `ractive/overmark` into the extens
 each file naming its source and commit. The copy is published here under MIT. The two
 copies will drift; a shared package can replace them later if keeping them in step
 costs more than it saves.
+
+**Superseded by DEC-114** (recipes dropped; no matcher is copied).
 
 ## DEC-111: Tools an AI app builds are recipes, never code
 
@@ -2099,6 +2104,9 @@ runs it; nothing the AI app writes is ever run as JavaScript.
 - Generic acting tools (`click`, `fill`) are not offered on their own: every action on a
   page is a step of a recipe the user can read first.
 
+**Superseded by DEC-114** (recipes dropped). Its reasons are the bar for user scripts
+(iteration 24).
+
 ## DEC-112: WebMCP access from an extension is tested first (owner)
 
 2026-11-08. Whether an extension can list and call a page's WebMCP tools
@@ -2107,6 +2115,8 @@ from the page's own world, and register tools for a page, is not settled by the 
 Iteration 18 tests it before the extension is built, and its decision (DEC-113) shapes
 the bridge (iteration 20) and whether recipes are also registered through WebMCP
 (iteration 22).
+
+Recipes and iteration 22 were dropped later (DEC-114).
 
 ## DEC-113: The WebMCP bridge runs in the content script; recipes are not registered through WebMCP
 
@@ -2143,6 +2153,8 @@ turns WebMCP on with an origin trial token, and that a tool it registers is the 
 - **Tests**: Chrome for Testing has WebMCP behind `--enable-features=WebMCP`, headless
   included; `test/webmcp-spike/webmcp.test.ts` keeps the findings as a canary, so a
   Chrome change shows.
+
+Recipes were dropped altogether later (DEC-114).
 
 ## DEC-114: The extension is a small WebMCP bridge; recipes are dropped (owner)
 
