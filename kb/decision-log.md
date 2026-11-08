@@ -2174,3 +2174,19 @@ an extension.
   code the extension did not ship, is an experiment of its own (iteration 24); DEC-111's
   reasons (the Chrome Web Store's rule on remote code, steps the user can judge) are the
   bar it has to clear.
+
+## DEC-115: The client library also registers its tools with WebMCP (owner)
+
+2026-11-08. Where the browser has WebMCP, `tab-mcp-client` registers each tool a page
+gives it also with `document.modelContext.registerTool()` (iteration 25), so agents in
+the browser can use a tab-mcp page without extra work. MCP Apps does the same for app
+tools since ext-apps#829, and agents that read `document.modelContext` are arriving
+([adoption](/research/webmcp-adoption.md)).
+
+- Calls through WebMCP get the same argument check and the same confirmation of
+  consequential tools as calls from AI apps; the confirmation says the caller is an agent
+  in the browser.
+- On by default, `webmcp: false` turns it off. The owner asked for the feature; the
+  default is the plan's and open to the owner.
+- Only a native `document.modelContext` is mirrored into; a name the page already
+  registered there keeps the page's tool.

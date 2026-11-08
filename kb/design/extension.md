@@ -23,8 +23,11 @@ script reaches them on the native `document.modelContext`, in the top frame (ite
 DEC-113). That is all it does: a small bridge (DEC-114).
 
 - It works only on sites that turn WebMCP on themselves (origin trial token) or for users
-  who turned on the flag; the extension cannot turn it on for a page. Few sites do today:
-  the bridge is an early entry for when WebMCP spreads.
+  who turned on the flag; the extension cannot turn it on for a page. Many do, mostly
+  through platforms: about 1% of Chrome page loads register tools, 13,000 of the top
+  300k sites (Shopify storefronts above all), while agents that call them are still rare
+  ([adoption](/research/webmcp-adoption.md)). The bridge brings those tools to AI apps
+  outside the browser.
 - Tools an AI app builds for a site (recipes) were planned and dropped: guides for
   agents in the browser (Claude in Chrome with site guides such as SiteSkills) give most
   of their benefit without an extension (DEC-114).
