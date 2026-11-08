@@ -3,7 +3,7 @@ type: iteration
 title: "Iteration 23: releasing tab-mcp for Chrome"
 status: planned
 description: "The Chrome Web Store listing, privacy policy and review notes, a release workflow on extension-v* tags that publishes the store package, and the documentation on ractive.ch/tab-mcp."
-timestamp: 2026-11-08T20:00:00+01:00
+timestamp: 2026-11-08T23:30:00+01:00
 tags: [iteration, extension, release]
 ---
 # Iteration 23: releasing tab-mcp for Chrome
@@ -17,12 +17,14 @@ tags: [iteration, extension, release]
    Store, as Overmark's `publish.yml` does (a pinned public action, the store's OAuth
    credentials as secrets of a protected environment in this repository).
 3. **Store listing**: name "tab-mcp for Chrome", the descriptor, screenshots, the
-   permissions and why each is needed, review notes (no remote code: recipes are data
-   validated against a fixed list of steps; DEC-111).
-4. **Privacy policy**: what is stored (recipes, settings, in the browser), what leaves the
+   permissions and why each is needed, review notes (no remote code: the extension only
+   lists and calls the tools a page registered itself with WebMCP).
+4. **Privacy policy**: what is stored (settings, in the browser), what leaves the
    browser (only what the user's AI app asks for, through the relay the user chose).
 5. **Docs** on `ractive.ch/tab-mcp` (in the ractive.ch repository): the two ways to use
-   tab-mcp, built into a site or the extension for any site; setup with the hosted relay.
+   tab-mcp, built into a site, or the extension for sites that offer WebMCP tools; that
+   WebMCP is on only where a site takes part in Chrome's origin trial or the user turned
+   on the flag (the listing says so too); setup with the hosted relay.
 6. **CHANGELOG** for the extension.
 
 ## Tasks

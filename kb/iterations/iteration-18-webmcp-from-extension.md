@@ -35,7 +35,7 @@ decision, not a feature.
 4. **Registering from the extension.** Can the content script, or a main-world script,
    call `registerTool()` so the page's `getTools()` lists the extension's tool? Would the
    browser's own agent see it? (This decides whether saved recipes can also be offered
-   through WebMCP, iteration 22.)
+   through WebMCP, iteration 22; recipes were dropped later, DEC-114.)
 5. **Edges.** Tools in a cross-origin iframe; a tool unregistered (its signal aborted)
    during a call; an `execute` that never answers; a page without WebMCP; a page that
    replaces `document.modelContext` with its own object (polyfill or forgery).

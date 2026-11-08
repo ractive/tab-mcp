@@ -4,6 +4,7 @@
 
 - Planned tab-mcp for Chrome, a browser extension in this repository ([design](/design/extension.md)): iteration 18 tests whether an extension can reach a page's WebMCP tools, 19 the skeleton with reading tools, 20 the WebMCP bridge, 21 recipes (tools an AI app builds for a site, Overmark's matcher copied in), 22 managing them, 23 the release; DEC-109 to DEC-112
 - Iteration 18 on spike/webmcp-from-extension: a content script reaches a page's WebMCP tools on the native `document.modelContext` in Chrome 156 (flag, or the page's origin trial token) and can register tools the page sees; test page, test extension and a canary in `test/webmcp-spike/`; [research](/research/webmcp-from-extension.md); DEC-113
+- The extension is cut to a small WebMCP bridge (iterations 19, 20, 23); recipes (iterations 21, 22) dropped; iteration 24 added, an experiment with user scripts; DEC-114
 
 ## 2026-11-04
 
