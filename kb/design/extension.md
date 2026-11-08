@@ -24,8 +24,9 @@ DEC-113). That is all it does: a small bridge (DEC-114).
 
 - It works only on sites that turn WebMCP on themselves (origin trial token) or for users
   who turned on the flag; the extension cannot turn it on for a page. Many do, mostly
-  through platforms: about 1% of Chrome page loads register tools, 13,000 of the top
-  300k sites (Shopify storefronts above all), while agents that call them are still rare
+  through platforms: about 1% of Chrome page loads register tools, and a crawl of the
+  Tranco top 300k and public lists found about 13,000 sites with tools (1.7% of the top
+  100k; Shopify storefronts above all), while agents that call them are still rare
   ([adoption](/research/webmcp-adoption.md)). The bridge brings those tools to AI apps
   outside the browser.
 - Tools an AI app builds for a site (recipes) were planned and dropped: guides for
