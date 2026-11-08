@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 18: can an extension reach a page's WebMCP tools?"
-status: planned
+status: completed
 description: "A spike before the extension is built: a test page registers WebMCP tools, and a test extension tries to list and call them from a content script, from a script in the page's own world, and to register tools of its own; the findings decide the WebMCP bridge (iteration 20)."
 timestamp: 2026-11-08T20:00:00+01:00
 tags: [iteration, extension, webmcp, research]
@@ -44,20 +44,20 @@ decision, not a feature.
 
 ## Tasks
 
-- [ ] Find how to enable WebMCP in Chrome and in Chrome for Testing; write it down with
+- [x] Find how to enable WebMCP in Chrome and in Chrome for Testing; write it down with
       the version numbers
-- [ ] A test page (`test/webmcp-spike/page.html`) that registers three tools: one
+- [x] A test page (`test/webmcp-spike/page.html`) that registers three tools: one
       read-only, one consequential, one with `outputSchema`; one more registered after a
       second, to see `toolchange`
-- [ ] A minimal MV3 test extension (`test/webmcp-spike/extension/`) that tries questions
+- [x] A minimal MV3 test extension (`test/webmcp-spike/extension/`) that tries questions
       2 to 4 from both worlds and reports what it saw
-- [ ] An automated run of both with the project's Chrome for Testing (the way Overmark's
+- [x] An automated run of both with the project's Chrome for Testing (the way Overmark's
       end-to-end harness loads an extension); the polyfill case by hand if needed
-- [ ] Research note `research/webmcp-from-extension.md`: what works, from where, in which
+- [x] Research note `research/webmcp-from-extension.md`: what works, from where, in which
       Chrome, with the exact calls; what does not
-- [ ] A decision (DEC-113): how the bridge reaches the tools, or that it waits, and
+- [x] A decision (DEC-113): how the bridge reaches the tools, or that it waits, and
       whether recipes are also registered through WebMCP; iteration 20 and 22 adjusted
-- [ ] Keep the automated run as a canary test if it is cheap, so a Chrome change shows
+- [x] Keep the automated run as a canary test if it is cheap, so a Chrome change shows
 
 ## Out of scope
 
@@ -67,6 +67,16 @@ The extension itself (iteration 19), any tools offered to AI apps, and Firefox o
 
 The research note answers questions 1 to 4 for Chrome stable and Chrome for Testing, with
 the calls that work, and DEC-113 says how iteration 20 proceeds.
+
+## Outcome
+
+A content script is enough: it lists and calls the page's tools on the native
+`document.modelContext`, gets `toolchange`, and can register tools of its own, which the
+page can then call too. Chrome 156 has WebMCP behind `--enable-features=WebMCP` (or the
+`chrome://flags` entry, or the page's origin trial token), checks no input and drops
+`outputSchema` ([research](/research/webmcp-from-extension.md), DEC-113). The spike stays
+in `test/webmcp-spike/` (pages in `pages/`, served through the DevTools Protocol on
+made-up https origins) with `webmcp.test.ts` as the canary.
 
 # Citations
 

@@ -2,24 +2,28 @@
 type: iteration
 title: "Iteration 20: a page's WebMCP tools for AI apps"
 status: planned
-description: "When the page in front registers WebMCP tools, the extension offers them to the connected AI app through the relay: listed, called, kept in step with toolchange, results marked untrusted, consequential calls confirmed. Built as DEC-113 (iteration 18) decides."
+description: "When the page in front registers WebMCP tools, the extension offers them to the connected AI app through the relay, reached from its content script (DEC-113): listed, called with a timeout, kept in step with toolchange, results marked untrusted, consequential calls confirmed."
 timestamp: 2026-11-08T20:00:00+01:00
 tags: [iteration, extension, webmcp]
 ---
 # Iteration 20: a page's WebMCP tools for AI apps
 
 A page that registers tools with WebMCP offers them only to agents in the browser. The
-extension passes them on to AI apps outside it ([design](/design/extension.md)). How it
-reaches the tools (content script or a script in the page's world) is what iteration 18
-finds out; this plan assumes it can, and is adjusted or put off by DEC-113.
+extension passes them on to AI apps outside it ([design](/design/extension.md)). It
+reaches them from its content script, on the native `document.modelContext` (DEC-113,
+[research](/research/webmcp-from-extension.md)).
 
 ## Scope
 
 1. `webmcp_tools` (read-only): the page's tools with names, descriptions and schemas.
 2. Each page tool is also offered as a tool of its own, named `page.<name>` so it cannot
-   clash with the extension's tools; its schemas pass through, its annotations map to
-   the library's (the same names: `readOnlyHint`, `untrustedContentHint`,
-   `consequentialHint`). Calling it calls `executeTool()` with the call's abort signal.
+   clash with the extension's tools; its `inputSchema` passes through (the library
+   validates arguments against it; Chrome does not), its annotations map to the
+   library's (the same names: `readOnlyHint`, `untrustedContentHint`,
+   `consequentialHint`). Chrome 156 gives no `outputSchema`. Calling it calls
+   `executeTool()` with the call's abort signal and a timeout (Chrome has none); the
+   string it returns becomes one text block, or the content blocks of the MCP result it
+   encodes (`@mcp-b/global` pages).
 3. The list follows `toolchange` and the tab in front: switching tabs or navigating
    replaces the page tools; a call to a tool that is gone says so.
 4. **Trust.** A page's hints can lie (the draft says so). Every result is marked
@@ -28,16 +32,20 @@ finds out; this plan assumes it can, and is adjusted or put off by DEC-113.
    read-only, which harms only that page's own user session, as the page's JavaScript
    could anyway.
 5. Limits on the number of tools, schema size and result size, as the library has.
+6. The top frame only. Tools of cross-origin frames, and pages with only the
+   `@mcp-b/global` polyfill (no native WebMCP), are out of scope (DEC-113).
 
 ## Tasks
 
-- [ ] Reach the tools as DEC-113 says (content script, or a main-world script and a
-      message channel the page cannot forge answers on)
+- [ ] Reach the tools from the content script (DEC-113); a page that replaces
+      `document.modelContext` in its own world changes nothing (test)
 - [ ] `webmcp_tools`; the `page.<name>` tools; `toolchange` and tab changes
-- [ ] Mapping of results (text, structured content) and errors; abort on cancel
+- [ ] Mapping of results (a string: one text block; the JSON of an MCP result: its
+      content blocks) and errors; timeout; abort on cancel
 - [ ] Confirmation and untrusted marking; tests that a page's forged hints change neither
 - [ ] End-to-end: a test page with WebMCP tools, an MCP client through the relay calls
-      them; skipped where Chrome for Testing lacks WebMCP, with the reason
+      them; Chrome for Testing with `--enable-features=WebMCP`, as `test/webmcp-spike/`
+      does
 - [ ] Docs; review; merged on the owner's word
 
 # Citations

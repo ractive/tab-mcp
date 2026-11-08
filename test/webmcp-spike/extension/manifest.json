@@ -1,0 +1,24 @@
+{
+	"manifest_version": 3,
+	"name": "WebMCP spike",
+	"version": "0.0.1",
+	"description": "Iteration 18: can an extension reach a page's WebMCP tools? A test extension, never published.",
+	"permissions": ["scripting"],
+	"host_permissions": ["https://spike.test/*", "https://other.test/*"],
+	"background": { "service_worker": "background.js" },
+	"content_scripts": [
+		{
+			"matches": ["https://spike.test/*", "https://other.test/*"],
+			"js": ["probe.js", "isolated.js"],
+			"run_at": "document_start",
+			"all_frames": true
+		},
+		{
+			"matches": ["https://spike.test/*", "https://other.test/*"],
+			"js": ["main.js"],
+			"run_at": "document_start",
+			"all_frames": true,
+			"world": "MAIN"
+		}
+	]
+}
