@@ -6,6 +6,7 @@
 - Iteration 18 on spike/webmcp-from-extension: a content script reaches a page's WebMCP tools on the native `document.modelContext` in Chrome 156 (flag, or the page's origin trial token) and can register tools the page sees; test page, test extension and a canary in `test/webmcp-spike/`; [research](/research/webmcp-from-extension.md); DEC-113
 - The extension is cut to a small WebMCP bridge (iterations 19, 20, 23); recipes (iterations 21, 22) dropped; iteration 24 added, an experiment with user scripts; DEC-114
 - WebMCP adoption researched ([research](/research/webmcp-adoption.md)); iteration 25 planned: the client library can also register its tools with WebMCP (opt-in, consequential tools only when named); iteration 20 treats page tool lists as advisory; DEC-115
+- Iteration 19 on iter-19/extension-skeleton: packages/tab-mcp-extension with the side panel, page_info, the build (development key outside the repository), unit and end-to-end tests (real icon clicks, test relay, MCP client) and a CI filter; relay 0.7.0 deployed to tab-mcp.ractive.ch and the development build's id allowed there (ractive.ch#85)
 
 ## 2026-11-04
 

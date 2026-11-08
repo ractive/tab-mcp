@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tab-mcp for Chrome</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header>
+	<img src="../../assets/icons/icon-32.png" alt="" width="20" height="20">
+	<h1>tab-mcp for Chrome</h1>
+</header>
+
+<section aria-labelledby="ai-heading">
+	<h2 id="ai-heading">AI app</h2>
+	<p id="state" role="status">Off</p>
+	<p id="address-line" hidden>Address: <code id="address"></code></p>
+	<p id="problem" class="problem" hidden></p>
+	<div class="buttons">
+		<button id="connect" type="button">Connect your AI app</button>
+		<button id="stop" type="button" hidden>Stop</button>
+	</div>
+</section>
+
+<section aria-labelledby="tab-heading">
+	<h2 id="tab-heading">Tab in front</h2>
+	<p id="tab-url" class="url">–</p>
+	<p id="tab-access"></p>
+	<div class="buttons">
+		<button id="allow-all" type="button">Allow on all sites</button>
+		<button id="disallow-all" type="button" hidden>Stop allowing on all sites</button>
+	</div>
+</section>
+
+<section aria-labelledby="relay-heading">
+	<h2 id="relay-heading">Relay</h2>
+	<form id="relay-form">
+		<label for="relay">Address</label>
+		<input id="relay" name="relay" type="url" spellcheck="false" autocomplete="off">
+		<button type="submit">Save</button>
+	</form>
+	<p id="relay-problem" class="problem" hidden></p>
+</section>
+
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

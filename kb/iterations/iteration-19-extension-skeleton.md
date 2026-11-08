@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 19: the extension's skeleton"
-status: planned
+status: completed
 description: "packages/tab-mcp-extension: an MV3 extension whose side panel connects to a tab-mcp relay and offers one read-only tool about the tab in front (page_info, with whether the page has WebMCP on); build, test harness and CI after Overmark's."
 timestamp: 2026-11-08T23:30:00+01:00
 tags: [iteration, extension]
@@ -19,9 +19,9 @@ each part of this; its code is the model.
    npm), depending on `@ractive-ch/tab-mcp-client` from the workspace.
 2. **Manifest V3**: side panel, background service worker, content script injected on a
    click on the icon (`activeTab` + `scripting`); optional host access for "Allow on all
-   sites"; no remote code. Without host access a click grants only that page: after a
-   navigation or on another tab the content script is not there until the next click,
-   and `page_info` says so. With host access the content script is registered for every
+   sites"; no remote code. Without host access a click grants that tab for its site:
+   after a navigation to another site, or on another tab, the extension may not read it
+   until the next click there, and `page_info` says so. With host access the content script is registered for every
    page (`scripting.registerContentScripts`), so it follows navigations and tab switches.
 3. **Side panel**: relay address (default the hosted relay), Connect, the connection
    state, pairing through the library's dialog, Stop; the tab in front and whether the
@@ -46,13 +46,32 @@ each part of this; its code is the model.
 
 ## Tasks
 
-- [ ] Package, manifest, build script with test and store outputs, icons
-- [ ] Side panel with connect, pairing, state; the tool registered through the library
-- [ ] Content script answering `page_info`; registered for every page with host access,
+- [x] Package, manifest, build script with test and store outputs, icons
+- [x] Side panel with connect, pairing, state; the tool registered through the library
+- [x] Content script answering `page_info`; registered for every page with host access,
       injected on a click without it; end-to-end cases for a navigation and a tab switch
-- [ ] End-to-end harness after Overmark's and the spike's; store-package test
-- [ ] CI path filter; `bun run verify` and the type checks include the package
-- [ ] README; review; merged on the owner's word
+- [x] End-to-end harness after Overmark's and the spike's; store-package test
+- [x] CI path filter; `bun run verify` and the type checks include the package
+- [x] README; review; merged on the owner's word
+
+## Outcome
+
+`packages/tab-mcp-extension`: the build (development build with the owner's key, kept in
+`~/.config/tab-mcp/extension-key.txt` and not in the repository; test build; store
+package), the service worker, the content script, the side panel with `page_info`, 12
+unit tests and 7 end-to-end tests (test build and store package, real icon clicks, a
+relay in the test process, an MCP client). The development build connects to the hosted
+relay (`test/hosted.ts`). Found on the way:
+
+- Chrome keeps the `activeTab` grant across navigations within the same site in that tab;
+  only another site needs a new click. Without a grant Chrome hides the tab's address
+  from the extension, so the refusal cannot say which page it is.
+- A click on the icon right after the extension is installed is lost until its service
+  worker has run; the harness waits for it.
+- Attaching the DevTools Protocol's request interception to the side panel answers its
+  own files too; the harness serves only the test pages.
+- The side panel, an extension page, reaches a relay on 127.0.0.1 even where Chrome's
+  pages cannot (the command sandbox of a coding agent), so the end-to-end tests run there.
 
 ## Out of scope
 
