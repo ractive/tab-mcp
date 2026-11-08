@@ -7,42 +7,50 @@
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<header>
-	<img src="../../assets/icons/icon-32.png" alt="" width="20" height="20">
-	<h1>tab-mcp for Chrome</h1>
-</header>
+<main>
+	<section class="card" aria-labelledby="ai-heading">
+		<h2 id="ai-heading" class="label">AI app</h2>
+		<p id="state" class="state" data-state="off" role="status">
+			<span class="dot" aria-hidden="true"></span><span id="state-text">Off</span>
+		</p>
+		<div id="address-line" class="address" hidden>
+			<code id="address" title=""></code>
+			<button id="copy" type="button" class="quiet small">Copy</button>
+		</div>
+		<p id="problem" class="problem" hidden></p>
+		<div class="buttons">
+			<button id="connect" type="button" class="primary">Connect your AI app</button>
+			<button id="stop" type="button" class="quiet" hidden>Turn off</button>
+		</div>
+	</section>
 
-<section aria-labelledby="ai-heading">
-	<h2 id="ai-heading">AI app</h2>
-	<p id="state" role="status">Off</p>
-	<p id="address-line" hidden>Address: <code id="address"></code></p>
-	<p id="problem" class="problem" hidden></p>
-	<div class="buttons">
-		<button id="connect" type="button">Connect your AI app</button>
-		<button id="stop" type="button" hidden>Stop</button>
-	</div>
-</section>
+	<section class="card" aria-labelledby="tab-heading">
+		<h2 id="tab-heading" class="label">This tab</h2>
+		<p id="tab-title" class="tab-title">–</p>
+		<p id="tab-host" class="muted"></p>
+		<p id="tab-badges" class="badges"></p>
+		<p id="tab-access" class="muted"></p>
+		<ul id="tools" class="tools" aria-label="The page's WebMCP tools"></ul>
+		<div class="buttons">
+			<button id="allow-all" type="button" hidden>Allow on all sites</button>
+		</div>
+		<p id="allowed-all" class="muted small" hidden>
+			Allowed on all sites. <button id="disallow-all" type="button" class="link">Stop</button>
+		</p>
+	</section>
 
-<section aria-labelledby="tab-heading">
-	<h2 id="tab-heading">Tab in front</h2>
-	<p id="tab-url" class="url">–</p>
-	<p id="tab-access"></p>
-	<div class="buttons">
-		<button id="allow-all" type="button">Allow on all sites</button>
-		<button id="disallow-all" type="button" hidden>Stop allowing on all sites</button>
-	</div>
-</section>
-
-<section aria-labelledby="relay-heading">
-	<h2 id="relay-heading">Relay</h2>
-	<form id="relay-form">
-		<label for="relay">Address</label>
-		<input id="relay" name="relay" type="url" spellcheck="false" autocomplete="off">
-		<button type="submit">Save</button>
-	</form>
-	<p id="relay-problem" class="problem" hidden></p>
-</section>
-
+	<details class="settings">
+		<summary>Settings</summary>
+		<form id="relay-form">
+			<label for="relay">Relay</label>
+			<div class="field">
+				<input id="relay" name="relay" type="url" spellcheck="false" autocomplete="off">
+				<button type="submit">Save</button>
+			</div>
+		</form>
+		<p id="relay-problem" class="problem" hidden></p>
+	</details>
+</main>
 <script type="module" src="./main.ts"></script>
 </body>
 </html>

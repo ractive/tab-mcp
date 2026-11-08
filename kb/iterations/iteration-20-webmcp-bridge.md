@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 20: a page's WebMCP tools for AI apps"
-status: planned
+status: in-progress
 description: "When the page in front registers WebMCP tools, the extension offers them to the connected AI app through the relay, reached from its content script (DEC-113): listed, called with a timeout, kept in step with toolchange, results marked untrusted, consequential calls confirmed."
 timestamp: 2026-11-08T23:45:00+01:00
 tags: [iteration, extension, webmcp]
@@ -53,18 +53,32 @@ reaches them from its content script, on the native `document.modelContext` (DEC
 
 ## Tasks
 
-- [ ] Reach the tools from the content script (DEC-113); a page that replaces
+- [x] Reach the tools from the content script (DEC-113); a page that replaces
       `document.modelContext` in its own world changes nothing (test)
-- [ ] `webmcp_tools`; the `page.<name>` tools; `toolchange` and tab changes
-- [ ] Mapping of results (a string: one text block; the JSON of an MCP result: its
+- [x] `webmcp_tools`; the `page.<name>` tools; `toolchange` and tab changes
+- [x] Mapping of results (a string: one text block; the JSON of an MCP result: its
       content blocks) and errors; timeout; abort on cancel
-- [ ] Confirmation and untrusted marking; tests that a page's forged hints change neither
-- [ ] End-to-end: a test page with WebMCP tools, an MCP client through the relay calls
+- [x] Confirmation and untrusted marking; tests that a page's forged hints change neither
+- [x] End-to-end: a test page with WebMCP tools, an MCP client through the relay calls
       them; Chrome for Testing with `--enable-features=WebMCP`, as `test/webmcp-spike/`
       does
-- [ ] Threat model (`kb/design/threat-model.md`): the extension, page-written tool
+- [x] Threat model (`kb/design/threat-model.md`): the extension, page-written tool
       metadata, results, consequential calls
 - [ ] Docs; review; merged on the owner's word
+
+## Outcome
+
+The bridge in `packages/tab-mcp-extension/src/sidepanel/bridge.ts`: the content script
+lists, calls and cancels the page's tools on the native object and reports `toolchange`
+(and its own start, after an icon click); the side panel registers a `page.<name>` tool
+per page tool in its `TabMcp` and replaces them when the tab, the page or its list
+changes. Limits: 64 tools, descriptions 1000 characters after `From <origin>: `, titles
+100, schemas 16 KB, results 100,000 characters, calls 60 s. The side panel is redesigned
+(connection with its state, the tab with its tools marked "reads" or "asks first",
+Settings), and the connector carries the extension's icon. 15 unit tests for the bridge;
+16 end-to-end tests, among them Allow and decline in the side panel, a cancellation
+reaching the page, `toolchange` without a navigation and a forged
+`document.modelContext`. Threat model: A13.
 
 # Citations
 

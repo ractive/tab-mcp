@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-10-21T18:00:00+02:00
+timestamp: 2026-11-09T02:00:00+01:00
 ---
 
 # Security model and threat model
@@ -195,6 +195,39 @@ pairing page names the page's origin so the user knows whom they trust. The clos
 list (DEC-032) keeps other sites from borrowing a hosted relay's domain to look
 trustworthy. `SECURITY.md` says this plainly.
 
+### A13: The browser extension and the pages it bridges (iterations 19 and 20)
+
+tab-mcp for Chrome ([design](/design/extension.md)) offers the WebMCP tools of the page
+in front to the user's AI app. That page did not choose the relay or the AI app: the user
+did, by connecting the extension.
+
+- **The page is untrusted, all of it.** Tool names, titles, descriptions and schemas
+  reach the AI app's tool list, where no hint can mark them; a description can carry
+  instructions. Descriptions start with the page's origin (`From https://…:`) and are cut
+  to 1000 characters, titles to 100; schemas over 16 KB and more than 64 tools are left
+  out. Every result is marked untrusted (`untrustedContentHint`, mapped to MCP's
+  `openWorldHint`) and cut to 100,000 characters.
+- **Hints can lie.** A tool the page marks read-only runs without asking; anything else
+  asks the user in the side panel every time, naming the page's origin in the tool's
+  description. A page can only mark its own tools read-only, so a lie harms that page's
+  own user session, which its scripts could reach anyway.
+- **Arguments are checked by the library** against the page's schema before the call;
+  Chrome does not check them. Calls time out after 60 s and pass on the AI app's
+  cancellation.
+- **A forged `document.modelContext`** in the page's world does not reach the content
+  script, which sees only the browser's own object (iteration 18). Only the extension's
+  own pages talk to the content script.
+- **Which page.** Without host access the extension reads a tab only after a click on its
+  icon there, and only on that origin. With "Allow on all sites" it reads every page in
+  front: the AI app then gets the tools of whatever site the user looks at, each call to
+  a tool not marked read-only still confirmed.
+- **The extension's id** is the relay origin `chrome-extension://<id>`. The development
+  build's key is kept out of the public repository, so nobody else can load an extension
+  with the id the hosted relay allows; the Chrome Web Store keeps its own key.
+- **The confirmation's focus rule.** The library arms "Allow" only after the side panel
+  has been visible and focused for 750 ms, so the user usually clicks into the panel
+  first; the page's scripts cannot reach the panel at all.
+
 ### Identity binding
 
 With [identity binding](/design/identity-binding.md) the AI app acts with exactly the
@@ -228,6 +261,8 @@ DEC-079.
 - The AI app's model can be steered by content (prompt injection) into calling tools the
   user did not intend; page-side confirmation covers consequential tools only.
 - Client-declared names are self-asserted; only hosts are verified.
+- With the browser extension, a page's tool metadata and results reach the AI app as the
+  page wrote them (cut, prefixed, marked); a read-only claim is the page's (A13).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay
   accepts; it is limited to one exact version pair.
 

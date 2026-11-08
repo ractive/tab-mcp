@@ -1,22 +1,78 @@
 <!doctype html>
-<html lang="de-CH">
+<html lang="de-CH" data-tab-mcp-webmcp="mirrored_tool">
 <head>
 <meta charset="utf-8">
 <title>Page with WebMCP tools</title>
 </head>
 <body>
-<p>Registers two WebMCP tools.</p>
+<p>Registers WebMCP tools for the extension's end-to-end tests.</p>
 <script>
 	"use strict";
-	for (const name of ["get_greeting", "place_order"])
-		document.modelContext?.registerTool({
-			name,
-			description: `The test page's ${name}.`,
-			inputSchema: { type: "object" },
-			async execute() {
-				return name;
-			},
-		});
+	window.calls = [];
+	window.aborted = false;
+	const register = (tool) => document.modelContext?.registerTool(tool);
+	register({
+		name: "get_greeting",
+		title: "Greeting",
+		description: "Greets a name.",
+		inputSchema: {
+			type: "object",
+			properties: { name: { type: "string" } },
+			required: ["name"],
+		},
+		annotations: { readOnlyHint: true },
+		async execute({ name }) {
+			window.calls.push(["get_greeting", name]);
+			return `Hello, ${name}!`;
+		},
+	});
+	register({
+		name: "place_order",
+		description: "Places an order. Changes things.",
+		inputSchema: {
+			type: "object",
+			properties: { item: { type: "string" } },
+			required: ["item"],
+		},
+		async execute({ item }) {
+			window.calls.push(["place_order", item]);
+			return { ordered: item };
+		},
+	});
+	register({
+		name: "mcp_result",
+		description: "Answers with an MCP result, as @mcp-b/global pages do.",
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: true },
+		async execute() {
+			return { content: [{ type: "text", text: "from an MCP result" }] };
+		},
+	});
+	register({
+		name: "slow_tool",
+		description: "Answers after ten seconds, unless the call is cancelled.",
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: true },
+		execute(_input, { signal }) {
+			return new Promise((resolve) => {
+				const timer = setTimeout(() => resolve("slow done"), 10_000);
+				signal.addEventListener("abort", () => {
+					clearTimeout(timer);
+					window.aborted = true;
+				});
+			});
+		},
+	});
+	// A tool a tab-mcp page mirrors (iteration 25): listed in <html>, left out.
+	register({
+		name: "mirrored_tool",
+		description: "Mirrored from tab-mcp.",
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: true },
+		async execute() {
+			return "mirrored";
+		},
+	});
 </script>
 </body>
 </html>

@@ -106,14 +106,24 @@ describe("pageInfo", () => {
 
 describe("page_info", () => {
 	test("read-only, untrusted, and answers for the tab in front", async () => {
-		const [tool] = createTools({
-			current: async () => ({ id: 7, url: "https://example.com/", title: "" }),
-			page: async (tab) => ({
-				url: tab.url,
-				title: "From the page",
-				webmcp: { available: false, tools: 0 },
+		const [tool] = createTools(
+			{
+				current: async () => ({
+					id: 7,
+					url: "https://example.com/",
+					title: "",
+				}),
+				page: async (tab) => ({
+					url: tab.url,
+					title: "From the page",
+					webmcp: { available: false, tools: 0 },
+				}),
+			},
+			() => ({
+				state: { available: false, tools: [], mirrored: [] },
+				refresh: async () => {},
 			}),
-		});
+		);
 		expect(tool?.name).toBe("page_info");
 		expect(tool?.annotations).toEqual({
 			readOnlyHint: true,
