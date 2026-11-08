@@ -104,6 +104,45 @@ test.skipIf(chrome === undefined)(
 );
 
 test.skipIf(chrome === undefined)(
+	"toolchange reaches the content script, and an abort rejects the call",
+	async () => {
+		// One event per registration, the late tool's included.
+		expect(
+			(await page.eval<number[]>("spike.toolchanges()", isolated)).length,
+		).toBeGreaterThanOrEqual(6);
+		expect(
+			await page.eval(
+				`spike.probe("call", { name: "hang_tool", cancelAfterMs: 100 })`,
+				isolated,
+			),
+		).toMatchObject({ ok: false, error: expect.stringMatching(/^AbortError/) });
+	},
+);
+
+test.skipIf(chrome === undefined)(
+	"a page replacing document.modelContext does not fool the content script",
+	async () => {
+		const forged = await openPage(browser as Browser, `${pageUrl}?forge`);
+		try {
+			const report = await forged.page.eval<Report>(
+				`spike.probe("report")`,
+				forged.isolated,
+			);
+			expect(report.native).toBe(true);
+			// The page registered its tools on its forgery: the native list is empty.
+			expect(report.tools).toEqual([]);
+			expect(
+				await forged.page.eval(
+					"document.modelContext.getTools().then((tools) => tools.map((t) => t.name))",
+				),
+			).toEqual(["forged_tool"]);
+		} finally {
+			await forged.page.close();
+		}
+	},
+);
+
+test.skipIf(chrome === undefined)(
 	"a tool the content script registers is the page's to list and call",
 	async () => {
 		expect(
@@ -116,5 +155,24 @@ test.skipIf(chrome === undefined)(
 			"document.modelContext.getTools().then((tools) => tools.map((t) => t.name))",
 		);
 		expect(listed).toContain("canary_tool");
+		// The page calls it, and it runs in the content script.
+		const result = await page.eval<string>(
+			`document.modelContext.getTools().then((tools) => document.modelContext.executeTool(tools.find((t) => t.name === "canary_tool"), { from: "page" }))`,
+		);
+		expect(JSON.parse(result)).toEqual({
+			registeredIn: "isolated",
+			ranIn: "isolated",
+			input: { from: "page" },
+		});
+		// A name already taken, either way round, is refused.
+		expect(
+			await page.eval(
+				`spike.probe("register", { name: "get_greeting" })`,
+				isolated,
+			),
+		).toMatchObject({
+			ok: false,
+			error: "InvalidStateError: Duplicate tool name",
+		});
 	},
 );

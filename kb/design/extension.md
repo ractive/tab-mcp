@@ -23,8 +23,9 @@ The extension brings the same to any site the user allows, in two ways:
 1. **A page's own WebMCP tools.** A page that registers tools with
    `document.modelContext.registerTool()` (WebMCP, in a Chrome origin trial since Chrome 149)
    offers them only to agents in the browser. The extension offers them to AI apps outside
-   the browser, through the relay, if an extension can reach them at all; iteration 18 finds
-   out (DEC-112).
+   the browser, through the relay. Its content script reaches them on the native
+   `document.modelContext`, in the top frame; pages with only the `@mcp-b/global`
+   polyfill are not bridged (iteration 18, DEC-113).
 2. **Tools an AI app builds for a site.** The AI app reads the page, writes a tool as a
    recipe (inputs, then steps such as "fill the field labelled Postleitzahl, click
    Prämien berechnen, read the result"), tries it, and the user saves it. The extension
@@ -42,7 +43,7 @@ AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-cli
                            content script in the tab
                            ├─ reads the page (outline, elements)
                            ├─ runs recipes (copied matcher finds elements again)
-                           └─ bridges WebMCP tools (getTools / executeTool), if possible
+                           └─ bridges WebMCP tools (getTools / executeTool, DEC-113)
 ```
 
 - The side panel is an extension page: it connects to the relay with origin

@@ -81,13 +81,18 @@ below was observed in Chrome for Testing 156.0.8078.80 (the version CI pins) wit
   with input the page chose. Any agent that sees the page's tools sees it too. The
   browser's own agent was not tested; DevTools (which reads the same per-document list
   through its `WebMCP` domain) sees it.
+- Names are one list per document: whoever registers a name first keeps it. The
+  extension registering a name the page holds, and the page registering a name the
+  extension holds, both fail with `InvalidStateError: Duplicate tool name`.
+- A `getTools()` entry does not say who registered it; the extension has to remember the
+  names it registered to tell its own tools from the page's.
 
 ## 5. Edges
 
 | Case | What happened |
 |---|---|
 | Tool unregistered during a call | The call finished ("slow done" after 2 s); the tool was gone from `getTools()` afterwards |
-| `execute` never answers | No timeout from Chrome (still pending after 2 s); the caller needs its own |
+| `execute` never answers | Still pending after 30 s: no timeout of Chrome's own that short; the caller needs its own |
 | Caller aborts its signal | `executeTool` rejects with `AbortError` at once; the page's `execute` sees its signal abort just after |
 | No WebMCP | `document.modelContext` is `undefined` in both worlds |
 | Page replaces `document.modelContext` (own property on `document`) | Only main-world code is fooled (`executeScript` MAIN included). The isolated world still has the native object, which lists only what was registered on it; a main-world script that kept the native object at `document_start` still has it |
@@ -102,6 +107,9 @@ world.
 
 - **With WebMCP on** it wraps the native object and registers there: the content script
   lists and calls the page's tools as with native WebMCP.
+- Its tools return MCP results (`{ content: [{ type: "text", text }] }`), so
+  `executeTool()` gives the JSON encoding of one:
+  `'{"content":[{"type":"text","text":"from the polyfill page"}]}'`.
 - **Without WebMCP** its tools exist only in the page's world: the content script sees no
   `document.modelContext`; `executeScript` in the main world lists and calls them, on an
   object the page controls.
@@ -112,7 +120,10 @@ world.
   channel through the page, so a page cannot forge the object or the answers.
 - It has to bring what Chrome leaves out: a timeout and abort for calls, input
   validation against `inputSchema`, and a result mapping from a string (no
-  `outputSchema`, so no structured content).
+  `outputSchema`, so no structured content; a string that is the JSON of an MCP result,
+  as polyfill pages give, is one to unwrap).
+- It has to leave out the tools the extension registered itself, or recipes registered
+  through WebMCP come back as page tools.
 - Frames: tools of cross-origin frames are reachable from a content script in that frame
   (`all_frames`) when the page allows `tools` there; the top page's list does not have
   them.

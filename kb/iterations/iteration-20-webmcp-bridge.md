@@ -22,7 +22,8 @@ reaches them from its content script, on the native `document.modelContext` (DEC
    library's (the same names: `readOnlyHint`, `untrustedContentHint`,
    `consequentialHint`). Chrome 156 gives no `outputSchema`. Calling it calls
    `executeTool()` with the call's abort signal and a timeout (Chrome has none); the
-   string it returns becomes one text block.
+   string it returns becomes one text block, or the content blocks of the MCP result it
+   encodes (`@mcp-b/global` pages).
 3. The list follows `toolchange` and the tab in front: switching tabs or navigating
    replaces the page tools; a call to a tool that is gone says so.
 4. **Trust.** A page's hints can lie (the draft says so). Every result is marked
@@ -31,7 +32,9 @@ reaches them from its content script, on the native `document.modelContext` (DEC
    read-only, which harms only that page's own user session, as the page's JavaScript
    could anyway.
 5. Limits on the number of tools, schema size and result size, as the library has.
-6. The top frame only. Tools of cross-origin frames, and pages with only the
+6. Tools the extension registered itself (recipes through WebMCP, iteration 22) are
+   left out: the content script keeps their names (DEC-113).
+7. The top frame only. Tools of cross-origin frames, and pages with only the
    `@mcp-b/global` polyfill (no native WebMCP), are out of scope (DEC-113).
 
 ## Tasks
@@ -39,7 +42,9 @@ reaches them from its content script, on the native `document.modelContext` (DEC
 - [ ] Reach the tools from the content script (DEC-113); a page that replaces
       `document.modelContext` in its own world changes nothing (test)
 - [ ] `webmcp_tools`; the `page.<name>` tools; `toolchange` and tab changes
-- [ ] Mapping of results (a string: one text block) and errors; timeout; abort on cancel
+- [ ] Mapping of results (a string: one text block; the JSON of an MCP result: its
+      content blocks) and errors; timeout; abort on cancel
+- [ ] The extension's own registrations are not bridged (test with a registered recipe)
 - [ ] Confirmation and untrusted marking; tests that a page's forged hints change neither
 - [ ] End-to-end: a test page with WebMCP tools, an MCP client through the relay calls
       them; Chrome for Testing with `--enable-features=WebMCP`, as `test/webmcp-spike/`

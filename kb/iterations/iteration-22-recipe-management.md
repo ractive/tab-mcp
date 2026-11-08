@@ -26,7 +26,9 @@ Recipes the AI app saved are the user's: they see them, keep them working, and s
    `document.modelContext.registerTool()` from the content script, so agents in the
    browser can use them too (DEC-113). Off by default, a switch per site: the page itself
    can call them as well, so a consequential recipe still asks in the side panel on
-   every run, whoever calls it.
+   every run, whoever calls it. A recipe whose name the page already holds is not
+   registered (the first name wins) and stays offered through the relay; the bridge
+   (iteration 20) does not offer registered recipes again as page tools.
 
 ## Tasks
 

@@ -48,7 +48,12 @@ let polyfill: Uint8Array | undefined;
 export async function serve(url: string): Promise<Served> {
 	const { origin, pathname, searchParams } = new URL(url);
 	if (url === POLYFILL) {
-		polyfill ??= new Uint8Array(await (await fetch(POLYFILL)).arrayBuffer());
+		if (polyfill === undefined) {
+			const response = await fetch(POLYFILL);
+			if (!response.ok)
+				throw new Error(`${POLYFILL} answered ${response.status}`);
+			polyfill = new Uint8Array(await response.arrayBuffer());
+		}
 		return {
 			status: 200,
 			headers: {
@@ -135,12 +140,28 @@ export async function launch(
 }
 
 /** Open the test page and wait until its late tool is registered. */
+/**
+ * page.html is ready when its log says the late tool is registered (on the
+ * native object or a forgery), or that WebMCP is off.
+ */
+const PAGE_READY = `/late_tool|WebMCP is off/.test(document.getElementById("log")?.textContent ?? "")`;
+/** polyfill.html is ready when its tool is listed. */
+const POLYFILL_READY = `Promise.resolve(document.modelContext?.getTools()).then((tools) => (tools ?? []).length > 0)`;
+
+/**
+ * Open a test page and wait until `ready` (evaluated in the page's world) is
+ * true, up to 10 s: by default until page.html's late tool is registered.
+ */
 export async function openPage(
 	browser: Browser,
 	url: string,
+	ready = PAGE_READY,
 ): Promise<{ page: Page; isolated: World }> {
 	const page = await browser.newPage(url);
-	await Bun.sleep(1300);
+	for (let waited = 0; !(await page.eval<boolean>(ready)); waited += 100) {
+		if (waited >= 10_000) throw new Error(`${url} was not ready in 10 s`);
+		await Bun.sleep(100);
+	}
 	return { page, isolated: await page.isolatedWorld(EXTENSION_NAME) };
 }
 
@@ -266,6 +287,14 @@ async function main(): Promise<void> {
 				fromExecuteScriptMain: await worker.eval(
 					`spike.execute(${js(pageUrl)}, "MAIN", "register", { name: "ext_main_tool" })`,
 				),
+				// A name the page already holds, and the page taking one of ours.
+				pageNameFromIsolated: await page.eval(
+					`spike.probe("register", { name: "get_greeting" })`,
+					isolated,
+				),
+				pageTakesExtensionName: await page.eval(
+					`document.modelContext.registerTool({ name: "ext_isolated_tool", description: "The page's.", inputSchema: { type: "object" }, execute: async () => "page" }).then(() => "registered", (e) => \`\${e.name}: \${e.message}\`)`,
+				),
 			};
 			await Bun.sleep(300);
 			report["register"] = {
@@ -298,8 +327,9 @@ async function main(): Promise<void> {
 						tools: { name: string }[];
 					}
 				).tools.map((t) => t.name),
+				// Long enough to see a timeout of Chrome's own, if it had one.
 				hangWithTimeout: await page.eval(
-					`webmcpProbe("call", { name: "hang_tool", timeoutMs: 2000 })`,
+					`webmcpProbe("call", { name: "hang_tool", timeoutMs: 30000 })`,
 					isolated,
 				),
 				hangCancelled: await page.eval(
@@ -422,7 +452,11 @@ async function main(): Promise<void> {
 			] as const) {
 				const launched = await launch(binary, [...args]);
 				try {
-					const { page, isolated } = await openPage(launched.browser, url);
+					const { page, isolated } = await openPage(
+						launched.browser,
+						url,
+						POLYFILL_READY,
+					);
 					polyfill[label] = {
 						main: await page.eval(inMain(`webmcpProbe("report")`)),
 						isolated: await page.eval(`spike.probe("report")`, isolated),

@@ -165,24 +165,41 @@ export class Browser {
 					l(msg.method, msg.params ?? {}, msg.sessionId);
 			}
 		});
+		// A closed connection (Chrome gone) fails every call still waiting.
+		ws.addEventListener("close", () => {
+			for (const p of this.#pending.values())
+				p.reject(new Error("the DevTools connection closed"));
+			this.#pending.clear();
+		});
 		if (serve)
 			this.on((method, params, sessionId) => {
 				if (method !== "Fetch.requestPaused") return;
 				const { url } = params["request"] as { url: string };
+				const requestId = params["requestId"];
 				void (async () => {
-					const served = await serve(url);
-					await this.send(
-						"Fetch.fulfillRequest",
-						{
-							requestId: params["requestId"],
-							responseCode: served.status,
-							responseHeaders: Object.entries(served.headers ?? {}).map(
-								([name, value]) => ({ name, value }),
-							),
-							body: Buffer.from(served.body).toString("base64"),
-						},
-						sessionId,
-					);
+					try {
+						const served = await serve(url);
+						await this.send(
+							"Fetch.fulfillRequest",
+							{
+								requestId,
+								responseCode: served.status,
+								responseHeaders: Object.entries(served.headers ?? {}).map(
+									([name, value]) => ({ name, value }),
+								),
+								body: Buffer.from(served.body).toString("base64"),
+							},
+							sessionId,
+						);
+					} catch (error) {
+						// The page sees a failed request instead of waiting forever.
+						console.error(`serving ${url} failed: ${error}`);
+						await this.send(
+							"Fetch.failRequest",
+							{ requestId, errorReason: "Failed" },
+							sessionId,
+						).catch(() => {});
+					}
 				})();
 			});
 	}
@@ -199,61 +216,71 @@ export class Browser {
 					browser: { enabled_labs_experiments: options.labs },
 				}),
 			);
-		const proc = Bun.spawn(
-			[
-				binary,
-				"--headless=new",
-				"--remote-debugging-port=0",
-				`--user-data-dir=${profile}`,
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--disable-gpu",
-				"--disable-background-networking",
-				// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
-				"--use-mock-keychain",
-				"--password-store=basic",
-				...(options.extension
-					? [
-							`--disable-extensions-except=${options.extension}`,
-							`--load-extension=${options.extension}`,
-						]
-					: ["--disable-extensions"]),
-				...(options.args ?? []),
-				...(process.platform === "linux" ? ["--no-sandbox"] : []),
-				"about:blank",
-			],
-			{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
-		);
-		const endpoint = await new Promise<string>((resolve, reject) => {
-			const timer = setTimeout(
-				() => reject(new Error("Chrome did not start")),
-				20_000,
+		let proc: Subprocess<"ignore", "ignore", "pipe"> | undefined;
+		try {
+			proc = Bun.spawn(
+				[
+					binary,
+					"--headless=new",
+					"--remote-debugging-port=0",
+					`--user-data-dir=${profile}`,
+					"--no-first-run",
+					"--no-default-browser-check",
+					"--disable-gpu",
+					"--disable-background-networking",
+					// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
+					"--use-mock-keychain",
+					"--password-store=basic",
+					...(options.extension
+						? [
+								`--disable-extensions-except=${options.extension}`,
+								`--load-extension=${options.extension}`,
+							]
+						: ["--disable-extensions"]),
+					...(options.args ?? []),
+					...(process.platform === "linux" ? ["--no-sandbox"] : []),
+					"about:blank",
+				],
+				{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
 			);
-			void (async () => {
-				const decoder = new TextDecoder();
-				let text = "";
-				for await (const chunk of proc.stderr) {
-					text += decoder.decode(chunk, { stream: true });
-					const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
-					if (m?.[1] !== undefined) {
-						clearTimeout(timer);
-						resolve(m[1]);
-						return;
+			const started = proc;
+			const endpoint = await new Promise<string>((resolve, reject) => {
+				const timer = setTimeout(
+					() => reject(new Error("Chrome did not start")),
+					20_000,
+				);
+				void (async () => {
+					const decoder = new TextDecoder();
+					let text = "";
+					for await (const chunk of started.stderr) {
+						text += decoder.decode(chunk, { stream: true });
+						const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
+						if (m?.[1] !== undefined) {
+							clearTimeout(timer);
+							resolve(m[1]);
+							return;
+						}
 					}
-				}
-				reject(new Error(`Chrome exited: ${text.slice(-500)}`));
-			})();
-		});
-		const ws = new WebSocket(endpoint);
-		await new Promise<void>((resolve, reject) => {
-			ws.addEventListener("open", () => resolve(), { once: true });
-			ws.addEventListener(
-				"error",
-				() => reject(new Error("CDP connection failed")),
-				{ once: true },
-			);
-		});
-		return new Browser(proc, profile, ws, options.serve);
+					reject(new Error(`Chrome exited: ${text.slice(-500)}`));
+				})();
+			});
+			const ws = new WebSocket(endpoint);
+			await new Promise<void>((resolve, reject) => {
+				ws.addEventListener("open", () => resolve(), { once: true });
+				ws.addEventListener(
+					"error",
+					() => reject(new Error("CDP connection failed")),
+					{ once: true },
+				);
+			});
+			return new Browser(proc, profile, ws, options.serve);
+		} catch (error) {
+			// No Browser to close: kill what started and remove the profile here.
+			proc?.kill("SIGKILL");
+			await proc?.exited;
+			rmSync(profile, { recursive: true, force: true });
+			throw error;
+		}
 	}
 
 	send(
@@ -439,10 +466,24 @@ export class Page extends Target {
 			await send("Runtime.runIfWaitingForDebugger");
 	}
 
+	/** Close the tab. */
+	async close(): Promise<void> {
+		await this.browser.send("Target.closeTarget", { targetId: this.targetId });
+	}
+
 	async goto(url: string): Promise<void> {
 		const loaded = this.browser.event("Page.loadEventFired", this.sessionId);
 		await this.send("Page.navigate", { url });
-		await loaded;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		await Promise.race([
+			loaded,
+			new Promise((_, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`${url} did not load in 15 s`)),
+					15_000,
+				);
+			}),
+		]).finally(() => clearTimeout(timer));
 	}
 
 	/**

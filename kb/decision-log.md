@@ -2120,9 +2120,14 @@ turns WebMCP on with an origin trial token, and that a tool it registers is the 
   its own world cannot forge the object or the answers the bridge sees.
 - **What Chrome leaves out, the bridge brings**: `page.<name>` tools are registered with
   the page's `inputSchema`, so `tab-mcp-client` validates arguments (Chrome does not);
-  each call has a timeout (Chrome has none) and passes the AI app's cancel on as the
-  abort signal; the string `executeTool()` returns becomes one text block, marked
-  untrusted. No `structuredContent`: Chrome 156 drops `outputSchema`.
+  each call has a timeout (none of Chrome's own showed in 30 s) and passes the AI app's
+  cancel on as the abort signal. The string `executeTool()` returns becomes one text
+  block, marked untrusted; a string that is the JSON of an MCP result (`{"content":
+  [...]}`, what `@mcp-b/global` pages return) is unwrapped into its content blocks. No
+  `structuredContent`: Chrome 156 drops `outputSchema`.
+- **The bridge leaves out the extension's own tools.** `getTools()` does not say who
+  registered a tool, so the content script keeps the names it registered (recipes,
+  iteration 22) and drops them from what it bridges.
 - **Top frame first.** Tools of a cross-origin frame are in that frame's own list only
   (when the page gives it `allow="tools"`), so reaching them needs the content script in
   every frame; that waits until a page needs it.
@@ -2133,7 +2138,10 @@ turns WebMCP on with an origin trial token, and that a tool it registers is the 
   there. The page itself, and every agent in the browser, can then call them with inputs
   of its choosing. A recipe acts on its own site only, which the page's scripts could do
   anyway, and a consequential recipe still asks in the side panel on every run, whoever
-  calls it. Off by default, a switch per site.
+  calls it. Off by default, a switch per site. Names are one list per document and
+  the first to register keeps a name: a recipe whose name the page already holds is not
+  registered through WebMCP (it stays offered through the relay), and the page cannot
+  take a name a recipe holds.
 - **Tests**: Chrome for Testing has WebMCP behind `--enable-features=WebMCP`, headless
   included; `test/webmcp-spike/webmcp.test.ts` keeps the findings as a canary, so a
   Chrome change shows.
