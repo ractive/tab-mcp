@@ -21,6 +21,8 @@ const $ = <T extends HTMLElement>(id: string) =>
 const tabs: TabBridge = { current: tabInFront, page: askPage };
 
 let mcp: TabMcp | undefined;
+/** The relay `mcp` uses. */
+let currentRelay: string | undefined;
 let listening = new AbortController();
 
 function connection(relay: string): TabMcp {
@@ -55,7 +57,9 @@ function showState(): void {
 	const address = mcp?.address;
 	$("address-line").hidden = address === undefined;
 	$("address").textContent = address ?? "";
-	$("stop").hidden = !connected && state !== "connecting";
+	// Also while retrying, so the user can stop the retries.
+	$("stop").hidden =
+		!connected && state !== "connecting" && mcp?.reconnecting === undefined;
 	$("connect").textContent = connected
 		? "Show address and pairing"
 		: "Connect your AI app";
@@ -104,35 +108,55 @@ function watch(target: TabMcp): void {
 	);
 }
 
+/**
+ * Use `relay` from now on. The connection to the one before is ended
+ * whatever its state (connected, connecting or waiting to retry): left
+ * retrying, it would connect again unseen.
+ */
 async function useRelay(relay: string): Promise<void> {
 	const before = mcp;
 	mcp = connection(relay);
+	currentRelay = relay;
 	watch(mcp);
-	if (before !== undefined && before.state !== "disconnected")
-		await before.disconnect();
+	await before?.disconnect();
 	showState();
+	// For the end-to-end tests: which relay the panel uses now.
+	document.documentElement.dataset["relay"] = relay;
 }
 
-// The tab in front and whether the extension may read it.
+let shownTab = 0;
+
+// The tab in front and whether the extension may read it. A call that a
+// later one overtook shows nothing: its tab may no longer be in front.
 async function showTab(): Promise<void> {
+	const call = ++shownTab;
+	const show = (url: string, access: string) => {
+		if (call !== shownTab) return;
+		$("tab-url").textContent = url;
+		$("tab-access").textContent = access;
+	};
 	const all = await chrome.permissions.contains(ALL_SITES);
+	if (call !== shownTab) return;
 	$("allow-all").hidden = all;
 	$("disallow-all").hidden = !all;
+	let tab: Awaited<ReturnType<typeof tabInFront>>;
 	try {
-		const tab = await tabInFront();
-		$("tab-url").textContent = tab.url || "(no address)";
-		try {
-			const page = await askPage(tab);
-			$("tab-access").textContent = page.webmcp.available
-				? `Readable. WebMCP: ${page.webmcp.tools} tool${page.webmcp.tools === 1 ? "" : "s"}.`
-				: "Readable. No WebMCP on this page.";
-		} catch (error) {
-			$("tab-access").textContent =
-				error instanceof Error ? error.message : String(error);
-		}
+		tab = await tabInFront();
 	} catch {
-		$("tab-url").textContent = "–";
-		$("tab-access").textContent = "";
+		show("–", "");
+		return;
+	}
+	const url = tab.url || "(no address)";
+	try {
+		const page = await askPage(tab);
+		show(
+			url,
+			page.webmcp.available
+				? `Readable. WebMCP: ${page.webmcp.tools} tool${page.webmcp.tools === 1 ? "" : "s"}.`
+				: "Readable. No WebMCP on this page.",
+		);
+	} catch (error) {
+		show(url, error instanceof Error ? error.message : String(error));
 	}
 }
 
@@ -146,7 +170,11 @@ $("connect").addEventListener("click", () => {
 		);
 });
 
-$("stop").addEventListener("click", () => void mcp?.disconnect());
+$("stop").addEventListener("click", () => {
+	// "disconnected" fires only for a connection that was up: say it here.
+	void saveAiOn(false);
+	void mcp?.disconnect();
+});
 
 $("allow-all").addEventListener("click", () => {
 	// From the click: Chrome asks the user.
@@ -170,12 +198,19 @@ $("relay-form").addEventListener("submit", (event) => {
 	$("relay-problem").hidden = problem === undefined;
 	$("relay-problem").textContent = problem ?? "";
 	if (problem !== undefined) return;
-	void saveRelay(value).then(() => useRelay(value));
+	if (value === currentRelay) return;
+	// AI access was on for the relay before, not for this one: the user
+	// connects to it with a click.
+	void saveAiOn(false)
+		.then(() => saveRelay(value))
+		.then(() => useRelay(value));
 });
 
 chrome.tabs.onActivated.addListener(() => void showTab());
-chrome.tabs.onUpdated.addListener((_id, change) => {
-	if (change.status === "complete" || change.url !== undefined) void showTab();
+chrome.tabs.onUpdated.addListener((_id, change, tab) => {
+	// Only the active tabs: a tab loading behind them changes nothing shown.
+	if (tab.active && (change.status === "complete" || change.url !== undefined))
+		void showTab();
 });
 chrome.permissions.onAdded.addListener(() => void showTab());
 chrome.permissions.onRemoved.addListener(() => void showTab());

@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  # The changed files of a pull request (the extension's e2e filter below).
-  pull-requests: read
 
 env:
   # Chrome for Testing, pinned so a Chrome release cannot change a run; bump
@@ -33,19 +31,6 @@ jobs:
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun install --frozen-lockfile
-      # The extension's end-to-end tests run on a pull request only when the
-      # extension or the client changed, so relay-only PRs stay fast; on main
-      # always. A failed lookup stops the job rather than skip them unseen.
-      - name: Skip the extension's end-to-end tests if it is not touched
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          files="$(gh pr diff "$PR" --name-only -R "$GITHUB_REPOSITORY")"
-          if ! grep -qE '^packages/(tab-mcp-extension|tab-mcp-client)/' <<<"$files"; then
-            echo "TAB_MCP_EXTENSION_E2E=skip" >> "$GITHUB_ENV"
-          fi
       - run: bun run verify
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}

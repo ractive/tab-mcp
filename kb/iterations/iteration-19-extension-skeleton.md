@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 19: the extension's skeleton"
-status: completed
+status: in-progress
 description: "packages/tab-mcp-extension: an MV3 extension whose side panel connects to a tab-mcp relay and offers one read-only tool about the tab in front (page_info, with whether the page has WebMCP on); build, test harness and CI after Overmark's."
 timestamp: 2026-11-08T23:30:00+01:00
 tags: [iteration, extension]
@@ -19,9 +19,9 @@ each part of this; its code is the model.
    npm), depending on `@ractive-ch/tab-mcp-client` from the workspace.
 2. **Manifest V3**: side panel, background service worker, content script injected on a
    click on the icon (`activeTab` + `scripting`); optional host access for "Allow on all
-   sites"; no remote code. Without host access a click grants that tab for its site:
-   after a navigation to another site, or on another tab, the extension may not read it
-   until the next click there, and `page_info` says so. With host access the content script is registered for every
+   sites"; no remote code. Without host access a click grants that tab for its origin:
+   after a navigation to another origin (another subdomain too), or on another tab, the
+   extension may not read it until the next click there, and `page_info` says so. With host access the content script is registered for every
    page (`scripting.registerContentScripts`), so it follows navigations and tab switches.
 3. **Side panel**: relay address (default the hosted relay), Connect, the connection
    state, pairing through the library's dialog, Stop; the tab in front and whether the
@@ -39,8 +39,9 @@ each part of this; its code is the model.
    `test/webmcp-spike/` (pages served through the DevTools Protocol, WebMCP turned on
    with `--enable-features=WebMCP`): the test build, and the store package with real icon
    clicks. A relay from `@ractive-ch/tab-mcp/testing` and an MCP client call the tool.
-7. **CI**: the extension's end-to-end tests only when `packages/tab-mcp-extension/**` or
-   the client changed, so relay-only PRs stay fast.
+7. **CI**: the extension's end-to-end tests run on every change. They take a few
+   seconds, and a path filter would miss what they depend on (the relay, the pinned
+   Chrome, dependencies); the plan had one, the review dropped it.
 8. **Docs**: README of the package; how to load it unpacked; the relay's
    `TAB_MCP_ALLOWED_ORIGINS` entry for its id (DEC-108).
 
@@ -51,8 +52,8 @@ each part of this; its code is the model.
 - [x] Content script answering `page_info`; registered for every page with host access,
       injected on a click without it; end-to-end cases for a navigation and a tab switch
 - [x] End-to-end harness after Overmark's and the spike's; store-package test
-- [x] CI path filter; `bun run verify` and the type checks include the package
-- [x] README; review; merged on the owner's word
+- [x] `bun run verify` and the type checks include the package (no CI path filter)
+- [ ] README; review; merged on the owner's word
 
 ## Outcome
 
@@ -63,8 +64,8 @@ unit tests and 7 end-to-end tests (test build and store package, real icon click
 relay in the test process, an MCP client). The development build connects to the hosted
 relay (`test/hosted.ts`). Found on the way:
 
-- Chrome keeps the `activeTab` grant across navigations within the same site in that tab;
-  only another site needs a new click. Without a grant Chrome hides the tab's address
+- Chrome keeps the `activeTab` grant across navigations on the same origin in that tab;
+  another origin needs a new click, another subdomain of the same site too. Without a grant Chrome hides the tab's address
   from the extension, so the refusal cannot say which page it is.
 - A click on the icon right after the extension is installed is lost until its service
   worker has run; the harness waits for it.

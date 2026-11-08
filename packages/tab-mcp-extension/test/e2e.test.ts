@@ -2,17 +2,15 @@
  * End to end: the extension in Chrome for Testing, its side panel opened by
  * a real click on the icon and connected to a relay in this process, and an
  * MCP client (as the AI app) calling `page_info`. Pages are served through the
- * DevTools Protocol on https://site.test and https://other.test; WebMCP is on
- * (`--enable-features=WebMCP`).
+ * DevTools Protocol on https://site.test, https://www.site.test and
+ * https://other.test; WebMCP is on (`--enable-features=WebMCP`).
  *
  * The test build has host access, so the content script follows navigations
  * and tab switches; the store package has none and works on a tab only after
- * a click on the icon there, until the page changes.
+ * a click on the icon there, until the tab goes to another origin.
  *
  * Needs Chrome for Testing 156 or newer (`CHROME_PATH`, or Puppeteer's or
- * Playwright's cache) and a relay Chrome can reach on 127.0.0.1: required in
- * CI unless `TAB_MCP_EXTENSION_E2E=skip` (CI sets it when neither the
- * extension nor the client changed), skipped elsewhere without Chrome.
+ * Playwright's cache): required in CI, skipped elsewhere without it.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -39,12 +37,13 @@ import {
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
+/** Same site as SITE, another origin. */
+const SUBDOMAIN = "https://www.site.test";
 
-const skipped = process.env["TAB_MCP_EXTENSION_E2E"] === "skip";
-const found = skipped ? undefined : findChromeForTesting();
+const found = findChromeForTesting();
 const chrome =
 	found !== undefined && chromeMajor(found) >= 156 ? found : undefined;
-if (chrome === undefined && !skipped && process.env["CI"])
+if (chrome === undefined && process.env["CI"])
 	throw new Error(
 		"Chrome for Testing 156 or newer is needed for the extension's end-to-end tests in CI",
 	);
@@ -54,7 +53,7 @@ async function serve(url: string): Promise<Served> {
 	const name = pathname.slice(1);
 	const file = Bun.file(join(import.meta.dir, "pages", name));
 	if (
-		(origin !== SITE && origin !== OTHER) ||
+		![SITE, OTHER, SUBDOMAIN].includes(origin) ||
 		!/^[a-z]+\.html$/.test(name) ||
 		!(await file.exists())
 	)
@@ -115,8 +114,9 @@ async function start(
 			`document.getElementById("relay").value = ${JSON.stringify(relay.url)}`,
 		);
 		await panel.click(`#relay-form button[type=submit]`);
+		// The panel marks the relay it switched to (after saving it).
 		await panel.waitFor(
-			`document.getElementById("relay").value === ${JSON.stringify(relay.url)}`,
+			`document.documentElement.dataset.relay === ${JSON.stringify(relay.url)}`,
 		);
 		await panel.click("#connect");
 		const address = await panel.waitFor<string>(
@@ -228,11 +228,22 @@ describe.skipIf(chrome === undefined)(
 			});
 		});
 
-		test("on the same site after a navigation too (Chrome keeps the grant)", async () => {
+		test("on the same origin after a navigation too (Chrome keeps the grant)", async () => {
 			await tab.goto(`${SITE}/webmcp.html`);
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${SITE}/webmcp.html`,
 				webmcp: { available: true, tools: 2 },
+			});
+		});
+
+		test("another origin of the same site needs a click too", async () => {
+			await tab.goto(`${SUBDOMAIN}/plain.html`);
+			const refused = await pageInfo(stack);
+			expect(refused.isError).toBe(true);
+			expect(refused.content[0]?.text).toContain("may not read this tab yet");
+			await stack.browser.clickIcon(tab);
+			expect((await pageInfo(stack)).structuredContent).toMatchObject({
+				url: `${SUBDOMAIN}/plain.html`,
 			});
 		});
 

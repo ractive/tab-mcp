@@ -61,7 +61,8 @@ AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-cli
 - `activeTab`, `scripting`, `sidePanel`, `storage`.
 - Host access is optional (`<all_urls>` in `optional_host_permissions`): without it the
   extension runs on a tab only after a click on its icon, as Overmark does, and only for
-  that site in that tab (Chrome keeps the grant across navigations within the site). "Allow on all sites" asks for it; the content script is
+  that origin in that tab (Chrome keeps the grant across navigations on the same origin,
+  not to another subdomain). "Allow on all sites" asks for it; the content script is
   then registered for every page.
 - No remote code.
 

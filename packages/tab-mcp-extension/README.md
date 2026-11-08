@@ -23,7 +23,8 @@ bun run build            # in packages/tab-mcp-extension: writes dist/
 Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 
 - Click the extension's icon on a tab: the side panel opens, and the extension may read
-  that tab (and other pages of the same site in it) until you go to another site there.
+  that tab, also after navigations on the same origin, until the tab goes to another
+  origin (`www.example.com` is another origin than `example.com`).
   "Allow on all sites" in the side panel lets it read every tab without a click.
 - "Connect your AI app" connects to the relay and shows the address for your AI app and a
   pairing code, as on any page with tab-mcp. The relay address is under "Relay".
@@ -55,7 +56,7 @@ key in its manifest, or, without one, from the folder it was loaded from.
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info` across navigations and tab
   switches. Pages are served through the DevTools Protocol on made-up https origins.
-  CI runs them on a pull request only when the extension or the client changed.
+  They take a few seconds and run in CI on every change.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
 
