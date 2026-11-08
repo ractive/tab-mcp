@@ -22,16 +22,19 @@ Recipes the AI app saved are the user's: they see them, keep them working, and s
 4. **Export and import**: a file with one or more recipes. An imported recipe is shown
    step by step and stays off until the user turns it on; its texts are whoever wrote the
    file's (untrusted).
-5. **WebMCP**: if DEC-113 says an extension can register tools for a page, saved recipes
-   are also registered with `document.modelContext.registerTool()`, so agents in the
-   browser can use them too.
+5. **WebMCP**: saved recipes can also be registered with
+   `document.modelContext.registerTool()` from the content script, so agents in the
+   browser can use them too (DEC-113). Off by default, a switch per site: the page itself
+   can call them as well, so a consequential recipe still asks in the side panel on
+   every run, whoever calls it.
 
 ## Tasks
 
 - [ ] Side panel list, details, rename, on/off, delete
 - [ ] Broken state from the runner; shown to the user and the AI app
 - [ ] Export and import with validation; imports off until turned on
-- [ ] Registration through WebMCP if allowed, with a test
+- [ ] Registration through WebMCP behind the per-site switch, with a test that a call
+      from the page runs the recipe and a consequential one waits for the side panel
 - [ ] Unit and end-to-end tests; review; merged on the owner's word
 
 # Citations

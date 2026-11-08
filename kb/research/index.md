@@ -11,6 +11,7 @@
 * [Identity binding: research findings](identity-binding-research-needed.md) - The five questions for identity binding answered from primary sources — identity providers as MCP authorization servers, assertion standards, AI apps with third-party authorization servers, pairwise subjects and logout — and what they mean for the design.
 * [MCP 2026-07-28: stateless Streamable HTTP and authorization](mcp-2026-07-28-spec.md) - What a stateless 2026-07-28-only MCP endpoint and its OAuth authorization server must implement, read from the spec source.
 * [MCP TypeScript SDK v2 (2.3.1): what it gives tab-mcp](mcp-typescript-sdk-v2.md) - Packages, the stateless createMcpHandler, browser and Bun spikes, auth helpers, and what we take versus write.
+* [WebMCP from a Chrome extension (Chrome 156)](webmcp-from-extension.md) - Iteration 18's spike: a content script reaches a page's WebMCP tools on the native document.modelContext (list, call, toolchange), also when the page turns WebMCP on with an origin trial token; it can register tools the page sees; how to turn WebMCP on, frames, forgery, edges and the @mcp-b/global polyfill.
 * [WebMCP registerTool shape](webmcp-register-tool.md) - The WebMCP draft's tool registration API that the browser library mirrors.
 
 <!-- okf:index:end -->

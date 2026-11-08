@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebMCP spike polyfill page</title>
+<!-- @mcp-b/global 6.0.3: installs over (wraps) the native document.modelContext, or a polyfill without it. -->
+<script src="https://unpkg.com/@mcp-b/global@6.0.3/dist/index.iife.js"
+	integrity="sha384-MjmUqfRCVKBDYdxv/Rlj1fc1tRkKQdtCI04fbUUMgSL8uJf1ydjQep7E4G43bnQn"
+	crossorigin="anonymous"></script>
+</head>
+<body>
+<p>Registers <code>poly_tool</code> through <code>@mcp-b/global</code>.</p>
+<script>
+	"use strict";
+	document.modelContext
+		.registerTool({
+			name: "poly_tool",
+			description: "Registered through @mcp-b/global.",
+			inputSchema: { type: "object", properties: {} },
+			async execute() {
+				return { content: [{ type: "text", text: "from the polyfill page" }] };
+			},
+		})
+		.then(
+			() => console.log("[page] registered poly_tool"),
+			(error) => console.log(`[page] registerTool failed: ${error}`),
+		);
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebMCP spike frame</title>
+</head>
+<body>
+<p>A frame that registers <code>frame_tool</code>; <code>?expose=&lt;origin&gt;</code>
+exposes it to that origin.</p>
+<script>
+	"use strict";
+	const expose = new URLSearchParams(location.search).get("expose");
+	const mc = document.modelContext;
+	if (mc)
+		mc.registerTool(
+			{
+				name: "frame_tool",
+				description: "Registered in a frame.",
+				inputSchema: { type: "object" },
+				annotations: { readOnlyHint: true },
+				async execute() {
+					return `from ${location.origin}`;
+				},
+			},
+			expose ? { exposedTo: [expose] } : {},
+		).then(
+			() => console.log("[frame] registered frame_tool"),
+			(error) => console.log(`[frame] registerTool failed: ${error}`),
+		);
+	else console.log("[frame] no document.modelContext");
+</script>
+</body>
+</html>

@@ -2107,3 +2107,33 @@ from the page's own world, and register tools for a page, is not settled by the 
 Iteration 18 tests it before the extension is built, and its decision (DEC-113) shapes
 the bridge (iteration 20) and whether recipes are also registered through WebMCP
 (iteration 22).
+
+## DEC-113: The WebMCP bridge runs in the content script; recipes may be registered through WebMCP
+
+2026-11-08. Iteration 18's spike ([research](/research/webmcp-from-extension.md)) found
+that in Chrome 156 a content script reaches a page's tools on the native
+`document.modelContext` (`getTools()`, `executeTool()`, `toolchange`), also when the page
+turns WebMCP on with an origin trial token, and that a tool it registers is the page's.
+
+- **The bridge (iteration 20) uses the content script only**: no main-world script and
+  no message channel through the page. A page that replaces `document.modelContext` in
+  its own world cannot forge the object or the answers the bridge sees.
+- **What Chrome leaves out, the bridge brings**: `page.<name>` tools are registered with
+  the page's `inputSchema`, so `tab-mcp-client` validates arguments (Chrome does not);
+  each call has a timeout (Chrome has none) and passes the AI app's cancel on as the
+  abort signal; the string `executeTool()` returns becomes one text block, marked
+  untrusted. No `structuredContent`: Chrome 156 drops `outputSchema`.
+- **Top frame first.** Tools of a cross-origin frame are in that frame's own list only
+  (when the page gives it `allow="tools"`), so reaching them needs the content script in
+  every frame; that waits until a page needs it.
+- **Pages with only the polyfill** (`@mcp-b/global` without native WebMCP) are not
+  bridged: their tools exist only in the page's world, on an object the page controls.
+  With native WebMCP on, the polyfill registers on the native object and works.
+- **Recipes through WebMCP (iteration 22)**: registered from the content script, they run
+  there. The page itself, and every agent in the browser, can then call them with inputs
+  of its choosing. A recipe acts on its own site only, which the page's scripts could do
+  anyway, and a consequential recipe still asks in the side panel on every run, whoever
+  calls it. Off by default, a switch per site.
+- **Tests**: Chrome for Testing has WebMCP behind `--enable-features=WebMCP`, headless
+  included; `test/webmcp-spike/webmcp.test.ts` keeps the findings as a canary, so a
+  Chrome change shows.

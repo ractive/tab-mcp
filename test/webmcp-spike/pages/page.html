@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebMCP spike page</title>
+</head>
+<body>
+<h1>WebMCP spike page</h1>
+<p>Registers tools with <code>document.modelContext</code> for the extension to find.
+Query: <code>?forge</code> replaces <code>document.modelContext</code> with the page's own
+object first; <code>?frame=&lt;url&gt;</code> embeds that page; <code>?allow</code> gives
+the frame <code>allow="tools"</code>.</p>
+<pre id="log"></pre>
+<script>
+	"use strict";
+	const query = new URLSearchParams(location.search);
+	const log = (line) => {
+		document.getElementById("log").textContent += `${line}\n`;
+		console.log(`[page] ${line}`);
+	};
+
+	// What every execute saw: the harness reads it to tell who ran.
+	window.spikeCalls = [];
+
+	if (query.has("forge")) {
+		// A forgery (or a polyfill that installs over the native object): an own
+		// property on document shadows Document.prototype.modelContext, in this
+		// world only.
+		const forged = {
+			async getTools() {
+				return [
+					{
+						name: "forged_tool",
+						description: "The page's own object answered",
+						inputSchema: { type: "object" },
+						annotations: {},
+					},
+				];
+			},
+			async executeTool() {
+				return JSON.stringify({ forged: true });
+			},
+			async registerTool(tool) {
+				log(`forged registerTool(${tool.name})`);
+			},
+			addEventListener() {},
+		};
+		Object.defineProperty(document, "modelContext", {
+			value: forged,
+			configurable: true,
+		});
+		log("document.modelContext forged");
+	}
+
+	const mc = document.modelContext;
+	if (!mc) {
+		log("no document.modelContext: WebMCP is off");
+	} else {
+		const registrations = new Map();
+		const register = async (tool) => {
+			const controller = new AbortController();
+			registrations.set(tool.name, controller);
+			await mc.registerTool(tool, { signal: controller.signal });
+			log(`registered ${tool.name}`);
+		};
+		// For the harness: unregister a tool by aborting its registration signal.
+		window.spikeUnregister = (name) => registrations.get(name)?.abort();
+
+		const ran = (name, input, options) => {
+			window.spikeCalls.push({ name, input, hasSignal: !!options?.signal });
+			log(`execute ${name} ${JSON.stringify(input)}`);
+		};
+
+		mc.addEventListener?.("toolchange", () => log("toolchange (page)"));
+
+		register({
+			name: "get_greeting",
+			title: "Greeting",
+			description: "Returns a greeting for a name. Read-only.",
+			inputSchema: {
+				type: "object",
+				properties: { name: { type: "string" } },
+				required: ["name"],
+			},
+			annotations: { readOnlyHint: true },
+			async execute(input, options) {
+				ran("get_greeting", input, options);
+				return `Hello, ${input.name}!`;
+			},
+		});
+		register({
+			name: "place_order",
+			title: "Place order",
+			description: "Places an order for an item. Consequential.",
+			inputSchema: {
+				type: "object",
+				properties: { item: { type: "string" }, quantity: { type: "integer" } },
+				required: ["item"],
+			},
+			annotations: { consequentialHint: true },
+			async execute(input, options) {
+				ran("place_order", input, options);
+				return { ordered: input.item, quantity: input.quantity ?? 1 };
+			},
+		});
+		register({
+			name: "get_weather",
+			title: "Weather",
+			description: "Returns the weather for a city, structured.",
+			inputSchema: {
+				type: "object",
+				properties: { city: { type: "string" } },
+				required: ["city"],
+			},
+			outputSchema: {
+				type: "object",
+				properties: {
+					city: { type: "string" },
+					celsius: { type: "number" },
+				},
+				required: ["city", "celsius"],
+			},
+			annotations: { readOnlyHint: true },
+			async execute(input, options) {
+				ran("get_weather", input, options);
+				return { city: input.city, celsius: 21 };
+			},
+		});
+		// For the edges: one that takes two seconds, one that never answers.
+		register({
+			name: "slow_tool",
+			description: "Answers after two seconds.",
+			inputSchema: { type: "object" },
+			async execute(input, options) {
+				ran("slow_tool", input, options);
+				await new Promise((resolve) => setTimeout(resolve, 2000));
+				return "slow done";
+			},
+		});
+		register({
+			name: "hang_tool",
+			description: "Never answers.",
+			inputSchema: { type: "object" },
+			execute(input, options) {
+				ran("hang_tool", input, options);
+				options?.signal?.addEventListener("abort", () =>
+					log("hang_tool saw its signal abort"),
+				);
+				return new Promise(() => {});
+			},
+		});
+		setTimeout(
+			() =>
+				register({
+					name: "late_tool",
+					description: "Registered a second after load.",
+					inputSchema: { type: "object" },
+					async execute(input, options) {
+						ran("late_tool", input, options);
+						return "late";
+					},
+				}),
+			1000,
+		);
+	}
+
+	const frame = query.get("frame");
+	if (frame) {
+		const iframe = document.createElement("iframe");
+		iframe.src = frame;
+		if (query.has("allow")) iframe.allow = "tools";
+		document.body.append(iframe);
+	}
+</script>
+</body>
+</html>
