@@ -41,11 +41,6 @@
 	}
 }
 
-/* `hidden` wins over the display rules below. */
-[hidden] {
-	display: none !important;
-}
-
 /* Chrome's style sheet for extension pages sets the body's font size to 75%. */
 body {
 	margin: 0;
@@ -297,4 +292,9 @@ input {
 	border: 1px solid var(--line);
 	background: var(--card);
 	color: var(--fg);
+}
+
+/* Last and one step more specific: `hidden` wins over the display rules above. */
+html [hidden] {
+	display: none;
 }
