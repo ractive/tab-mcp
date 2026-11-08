@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+<meta charset="utf-8">
+<title>Page with WebMCP tools</title>
+</head>
+<body>
+<p>Registers two WebMCP tools.</p>
+<script>
+	"use strict";
+	for (const name of ["get_greeting", "place_order"])
+		document.modelContext?.registerTool({
+			name,
+			description: `The test page's ${name}.`,
+			inputSchema: { type: "object" },
+			async execute() {
+				return name;
+			},
+		});
+</script>
+</body>
+</html>
