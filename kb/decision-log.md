@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-10-31T12:00:00+01:00
+timestamp: 2026-11-08T20:00:00+01:00
 ---
 
 # Decision log
@@ -2057,3 +2057,53 @@ its tools through tab-mcp from its side panel. The relay accepted only `http:` a
   `safari-web-extension://` pages.
 - Identity binding stays allowed for an extension's site; it needs a backend that signs
   tab assertions for the extension's user, so `code` is the usual choice.
+
+## DEC-109: The browser extension "tab-mcp for Chrome" lives in this repository (owner)
+
+2026-11-08. A Chrome extension brings tab-mcp to sites that do not build it in
+([design](/design/extension.md)): it bridges a page's WebMCP tools and runs tools an AI
+app builds for a site.
+
+- Name: **tab-mcp for Chrome**. It is the other half of tab-mcp (the library for sites
+  that build it in), so it carries the same name; "for Chrome" keeps it apart from the
+  library and from the unrelated "Tabs MCP" extension in the store.
+- No domain of its own: the docs are at `ractive.ch/tab-mcp`.
+- Package `packages/tab-mcp-extension` in this workspace, private on npm, using
+  `tab-mcp-client` from the workspace, so a change to the client and the extension is one
+  pull request tested together.
+- Its own version and tags (`extension-v<version>`), published to the Chrome Web Store;
+  relay and client releases stay as they are. Its end-to-end tests run in CI only when
+  the extension or the client changed.
+
+## DEC-110: Overmark's element matcher is copied, not shared, for now (owner)
+
+2026-11-08. Recipes find elements again after a site changes, as Overmark's marks do.
+The matcher (`match.ts`, `candidates.ts`, `element.ts`, `classes.ts`, `shadow.ts`, the
+element types and their tests) is copied from `ractive/overmark` into the extension,
+each file naming its source and commit. The copy is published here under MIT. The two
+copies will drift; a shared package can replace them later if keeping them in step
+costs more than it saves.
+
+## DEC-111: Tools an AI app builds are recipes, never code
+
+2026-11-08. A tool the AI app builds for a site is a JSON recipe: inputs and steps from a
+fixed list (`fill`, `select`, `check`, `click`, `press`, `wait`, `read`, `scroll`,
+`navigate` on the same origin), with element targets found by the matcher. The extension
+runs it; nothing the AI app writes is ever run as JavaScript.
+
+- The Chrome Web Store forbids remotely hosted code in Manifest V3 extensions; code an
+  AI app writes at run time would be exactly that.
+- A recipe runs with the user's session on the site. Steps from a fixed list can be shown
+  in words before the user saves a recipe or runs a consequential one; generated code
+  could not be judged that way.
+- Generic acting tools (`click`, `fill`) are not offered on their own: every action on a
+  page is a step of a recipe the user can read first.
+
+## DEC-112: WebMCP access from an extension is tested first (owner)
+
+2026-11-08. Whether an extension can list and call a page's WebMCP tools
+(`document.modelContext.getTools()` and `executeTool()`), from its content script or
+from the page's own world, and register tools for a page, is not settled by the draft.
+Iteration 18 tests it before the extension is built, and its decision (DEC-113) shapes
+the bridge (iteration 20) and whether recipes are also registered through WebMCP
+(iteration 22).

@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-08
+
+- Planned tab-mcp for Chrome, a browser extension in this repository ([design](/design/extension.md)): iteration 18 tests whether an extension can reach a page's WebMCP tools, 19 the skeleton with reading tools, 20 the WebMCP bridge, 21 recipes (tools an AI app builds for a site, Overmark's matcher copied in), 22 managing them, 23 the release; DEC-109 to DEC-112
+
 ## 2026-11-04
 
 - Iteration 17 on relay/extension-origins: the relay accepts Chrome and Edge extension origins (`chrome-extension://<id>`) in TAB_MCP_ALLOWED_ORIGINS and TAB_MCP_SITES, refuses moz-extension and safari-web-extension with a reason, and names an extension on the pairing page; DEC-108; for Overmark
