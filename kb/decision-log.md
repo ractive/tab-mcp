@@ -2108,7 +2108,7 @@ Iteration 18 tests it before the extension is built, and its decision (DEC-113) 
 the bridge (iteration 20) and whether recipes are also registered through WebMCP
 (iteration 22).
 
-## DEC-113: The WebMCP bridge runs in the content script; recipes may be registered through WebMCP
+## DEC-113: The WebMCP bridge runs in the content script; recipes are not registered through WebMCP
 
 2026-11-08. Iteration 18's spike ([research](/research/webmcp-from-extension.md)) found
 that in Chrome 156 a content script reaches a page's tools on the native
@@ -2125,23 +2125,21 @@ turns WebMCP on with an origin trial token, and that a tool it registers is the 
   block, marked untrusted; a string that is the JSON of an MCP result (`{"content":
   [...]}`, what `@mcp-b/global` pages return) is unwrapped into its content blocks. No
   `structuredContent`: Chrome 156 drops `outputSchema`.
-- **The bridge leaves out the extension's own tools.** `getTools()` does not say who
-  registered a tool, so the content script keeps the names it registered (recipes,
-  iteration 22) and drops them from what it bridges.
 - **Top frame first.** Tools of a cross-origin frame are in that frame's own list only
   (when the page gives it `allow="tools"`), so reaching them needs the content script in
   every frame; that waits until a page needs it.
 - **Pages with only the polyfill** (`@mcp-b/global` without native WebMCP) are not
   bridged: their tools exist only in the page's world, on an object the page controls.
   With native WebMCP on, the polyfill registers on the native object and works.
-- **Recipes through WebMCP (iteration 22)**: registered from the content script, they run
-  there. The page itself, and every agent in the browser, can then call them with inputs
-  of its choosing. A recipe acts on its own site only, which the page's scripts could do
-  anyway, and a consequential recipe still asks in the side panel on every run, whoever
-  calls it. Off by default, a switch per site. Names are one list per document and
-  the first to register keeps a name: a recipe whose name the page already holds is not
-  registered through WebMCP (it stays offered through the relay), and the page cannot
-  take a name a recipe holds.
+- **Recipes are not registered through WebMCP, for now (owner).** The content script
+  could register them (they would run there), but then the page itself can run them
+  with inputs of its choosing, and its scripts see their names, descriptions and inputs:
+  that the user has the extension, and which tools they built for the site. The gain is
+  small: only agents inside the browser would use them, and the AI app gets recipes
+  through the relay anyway. If in-browser agents become common, it can come back as an
+  option per site. Names are one list per document and the first to register keeps a
+  name (both ways fail with `InvalidStateError`), which such an option would have to
+  handle.
 - **Tests**: Chrome for Testing has WebMCP behind `--enable-features=WebMCP`, headless
   included; `test/webmcp-spike/webmcp.test.ts` keeps the findings as a canary, so a
   Chrome change shows.

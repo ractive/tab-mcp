@@ -122,15 +122,15 @@ world.
   validation against `inputSchema`, and a result mapping from a string (no
   `outputSchema`, so no structured content; a string that is the JSON of an MCP result,
   as polyfill pages give, is one to unwrap).
-- It has to leave out the tools the extension registered itself, or recipes registered
-  through WebMCP come back as page tools.
 - Frames: tools of cross-origin frames are reachable from a content script in that frame
   (`all_frames`) when the page allows `tools` there; the top page's list does not have
   them.
 - Pages that use only the polyfill, without native WebMCP, are out of reach without
   trusting the page's world.
 - Recipes registered through WebMCP would run in the content script but could be called
-  by the page itself (and every in-browser agent) with inputs of its choosing.
+  by the page itself (and every in-browser agent) with inputs of its choosing, and the
+  page would see their names, descriptions and inputs; the extension would also have to
+  leave its own tools out of what it bridges.
 
 # Citations
 

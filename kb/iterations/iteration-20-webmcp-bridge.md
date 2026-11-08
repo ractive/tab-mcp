@@ -32,9 +32,7 @@ reaches them from its content script, on the native `document.modelContext` (DEC
    read-only, which harms only that page's own user session, as the page's JavaScript
    could anyway.
 5. Limits on the number of tools, schema size and result size, as the library has.
-6. Tools the extension registered itself (recipes through WebMCP, iteration 22) are
-   left out: the content script keeps their names (DEC-113).
-7. The top frame only. Tools of cross-origin frames, and pages with only the
+6. The top frame only. Tools of cross-origin frames, and pages with only the
    `@mcp-b/global` polyfill (no native WebMCP), are out of scope (DEC-113).
 
 ## Tasks
@@ -44,7 +42,6 @@ reaches them from its content script, on the native `document.modelContext` (DEC
 - [ ] `webmcp_tools`; the `page.<name>` tools; `toolchange` and tab changes
 - [ ] Mapping of results (a string: one text block; the JSON of an MCP result: its
       content blocks) and errors; timeout; abort on cancel
-- [ ] The extension's own registrations are not bridged (test with a registered recipe)
 - [ ] Confirmation and untrusted marking; tests that a page's forged hints change neither
 - [ ] End-to-end: a test page with WebMCP tools, an MCP client through the relay calls
       them; Chrome for Testing with `--enable-features=WebMCP`, as `test/webmcp-spike/`
