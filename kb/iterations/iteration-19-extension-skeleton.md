@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 19: the extension's skeleton"
-status: in-progress
+status: completed
 description: "packages/tab-mcp-extension: an MV3 extension whose side panel connects to a tab-mcp relay and offers one read-only tool about the tab in front (page_info, with whether the page has WebMCP on); build, test harness and CI after Overmark's."
 timestamp: 2026-11-08T23:30:00+01:00
 tags: [iteration, extension]
@@ -53,7 +53,7 @@ each part of this; its code is the model.
       injected on a click without it; end-to-end cases for a navigation and a tab switch
 - [x] End-to-end harness after Overmark's and the spike's; store-package test
 - [x] `bun run verify` and the type checks include the package (no CI path filter)
-- [ ] README; review; merged on the owner's word
+- [x] README; review; merged on the owner's word
 
 ## Outcome
 
