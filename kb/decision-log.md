@@ -2174,3 +2174,24 @@ an extension.
   code the extension did not ship, is an experiment of its own (iteration 24); DEC-111's
   reasons (the Chrome Web Store's rule on remote code, steps the user can judge) are the
   bar it has to clear.
+
+## DEC-115: The client library can also register its tools with WebMCP (owner)
+
+2026-11-08. When a page asks for it (`webmcp: true`), `tab-mcp-client` registers its tools
+also with `document.modelContext.registerTool()` where the browser has native WebMCP
+(iteration 25), so agents in the browser can use them. MCP Apps' SDK does the same for
+the tools of its views since ext-apps#829; agents that read `document.modelContext` are
+arriving ([adoption](/research/webmcp-adoption.md)).
+
+- **Off by default.** Mirroring makes the page's read-only tools answer every in-browser
+  caller without pairing; a page should choose that. The owner asked for the feature; the
+  default follows the review of the plan and is open to the owner.
+- **Consequential tools only when named.** An agent in the browser often drives the tab
+  it calls into and can click Allow in the page's own dialog, so that confirmation is
+  weaker against it than against a remote AI app. A consequential tool is mirrored only
+  when its registration says `webmcp: true`. "Always allow" never applies to WebMCP
+  callers.
+- WebMCP calls get the same argument check as AI app calls, and the caller type says
+  which of the two it is.
+- Only the native object is used (through `Document.prototype`'s getter, not a
+  polyfill's own property); a name already taken keeps its owner.

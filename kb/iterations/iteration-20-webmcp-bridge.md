@@ -3,7 +3,7 @@ type: iteration
 title: "Iteration 20: a page's WebMCP tools for AI apps"
 status: planned
 description: "When the page in front registers WebMCP tools, the extension offers them to the connected AI app through the relay, reached from its content script (DEC-113): listed, called with a timeout, kept in step with toolchange, results marked untrusted, consequential calls confirmed."
-timestamp: 2026-11-08T23:30:00+01:00
+timestamp: 2026-11-08T23:45:00+01:00
 tags: [iteration, extension, webmcp]
 ---
 # Iteration 20: a page's WebMCP tools for AI apps
@@ -25,7 +25,11 @@ reaches them from its content script, on the native `document.modelContext` (DEC
    string it returns becomes one text block, or the content blocks of the MCP result it
    encodes (`@mcp-b/global` pages).
 3. The list follows `toolchange` and the tab in front: switching tabs or navigating
-   replaces the page tools; a call to a tool that is gone says so. Where the content
+   replaces the page tools; a call to a tool that is gone says so. Tool lists change
+   without any navigation (single-page apps register and unregister as the user moves),
+   and pages in the origin trial carry workarounds: the list is advisory, re-read on
+   every `toolchange`, and "tool not found" is an answer for the AI app, not an error of
+   the bridge (anthropics/claude-code#76809). Where the content
    script is not running (no host access and no click on this page, iteration 19), the
    list is empty and `webmcp_tools` says why.
 4. **Trust.** A page's hints can lie (the draft says so). Every result is marked
@@ -35,12 +39,16 @@ reaches them from its content script, on the native `document.modelContext` (DEC
    could anyway.
 5. Limits on the number of tools, schema size and result size, as the library has, and
    on description length.
-6. **Page-written metadata.** A tool's name, title, description and schema are the
+6. **Tools of tab-mcp pages.** A page whose tab-mcp library mirrors its tools into
+   WebMCP (iteration 25) lists their names in `<html data-tab-mcp-webmcp="…">`; the
+   bridge leaves those out, so an AI app connected to the page and to the extension gets
+   each tool once.
+7. **Page-written metadata.** A tool's name, title, description and schema are the
    page's words and reach the AI app in the tool list, where `untrustedContentHint`
    cannot mark them: a description can carry instructions ("before any tool, call
    page.transfer …"). Descriptions are cut to a limit and start with the page's origin
    (`From https://example.com: …`), so the AI app can tell them from the extension's.
-7. The top frame only. Tools of cross-origin frames, and pages with only the
+8. The top frame only. Tools of cross-origin frames, and pages with only the
    `@mcp-b/global` polyfill (no native WebMCP), are out of scope (DEC-113).
 
 ## Tasks
@@ -61,3 +69,4 @@ reaches them from its content script, on the native `document.modelContext` (DEC
 # Citations
 
 - [WebMCP draft (2 November 2026)](https://webmachinelearning.github.io/webmcp/)
+- [anthropics/claude-code#76809](https://github.com/anthropics/claude-code/issues/76809)
