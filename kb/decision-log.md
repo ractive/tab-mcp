@@ -2195,3 +2195,18 @@ arriving ([adoption](/research/webmcp-adoption.md)).
   which of the two it is.
 - Only the native object is used (through `Document.prototype`'s getter, not a
   polyfill's own property); a name already taken keeps its owner.
+
+## DEC-116: The extension's connection lives in an offscreen document (owner)
+
+2026-11-09. The connection to the AI app (`TabMcp`, the bridge) moves from the side panel
+into an offscreen document, so it stays while the side panel is closed (iteration 26). The
+side panel becomes a view and the place for settings.
+
+- A tool that asks first asks in the side panel when it is open, else in a Chrome
+  notification with Allow and Don't allow; no answer before the call's timeout is Don't
+  allow. Read-only and "allowed" tools run as before.
+- The offscreen document has only `chrome.runtime`: tab calls go through the service
+  worker. Connecting still starts with a click in the side panel (the library's user
+  activation); after a browser restart it reconnects if the user left AI access on.
+- Which offscreen reason passes the Chrome Web Store's review, and how long a WebSocket
+  lives there, are settled first in the iteration.

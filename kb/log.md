@@ -2,6 +2,7 @@
 
 ## 2026-11-09
 
+- Iteration 20 merged (tab-mcp#79): the bridge works with Claude after renaming page tools to page_<name>; "Always allow" and per-site "allowed" tools; iteration 26 planned: the connection in an offscreen document, confirmations by notification when the side panel is closed; DEC-116
 - Iteration 20 on iter-20/webmcp-bridge: the WebMCP bridge (page.<name> tools, webmcp_tools, toolchange, confirmation of tools not marked read-only, timeout, cancellation, limits), the side panel redesigned, the connector's icon; threat model A13
 
 ## 2026-11-08
