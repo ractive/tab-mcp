@@ -206,14 +206,25 @@ did, by connecting the extension.
   instructions. Descriptions start with the page's origin (`From https://…:`) and are cut
   to 1000 characters, titles to 100; schemas over 16 KB and more than 64 tools are left
   out. Every result is marked untrusted (`untrustedContentHint`, mapped to MCP's
-  `openWorldHint`) and cut to 100,000 characters.
+  `openWorldHint`); its text, all blocks together, is cut to 100,000 characters, with at
+  most 32 blocks and 1 MB per image. `webmcp_tools` lists names cut to 128 characters
+  and descriptions with the same origin prefix.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user in the side panel every time, naming the page's origin in the tool's
   description. A page can only mark its own tools read-only, so a lie harms that page's
   own user session, which its scripts could reach anyway.
+- **A call runs only where its tool was listed.** Each page's content script has its
+  own id; a call carries it and the read-only claim its tool was offered with, and the
+  content script refuses if the tab navigated since or the claim changed. So a page
+  cannot offer a "read-only" tool and then navigate the tab to a site whose tool of that
+  name changes things.
 - **Arguments are checked by the library** against the page's schema before the call;
-  Chrome does not check them. Calls time out after 60 s and pass on the AI app's
-  cancellation.
+  Chrome does not check them. The schema's `pattern` and `patternProperties` are left
+  out, so a page's catastrophic regular expression cannot freeze the panel. Calls end
+  for the AI app after 60 s or on its cancellation even if the page never answers.
+- **Flooding.** The content script reports `toolchange` at most every 250 ms, sends at
+  most 256 tools with names cut to 256 and texts to 4000 characters, and drops schemas
+  over 16 KB; the bridge reads one list at a time and lists at most 64 tools.
 - **A forged `document.modelContext`** in the page's world does not reach the content
   script, which sees only the browser's own object (iteration 18). Only the extension's
   own pages talk to the content script.

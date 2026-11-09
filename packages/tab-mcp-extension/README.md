@@ -14,6 +14,7 @@ Not published yet; load it unpacked.
 | `page_info` | The tab in front: address, title, language, whether WebMCP is available on the page and how many tools it registered. Read-only; its text is the page's own (untrusted). |
 | `webmcp_tools` | The page's WebMCP tools: each one's `page.<name>`, title, description, whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
 | `page.<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. |
+| `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page.<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
 
 The page's tools are the page's word:
 
@@ -21,10 +22,16 @@ The page's tools are the page's word:
   https://shop.example: …`), cut to 1000 characters; titles to 100.
 - A tool the page marks read-only runs at once; every other one asks you in the side
   panel each time (the library's dialog: click into the panel, then Allow).
-- Arguments are checked against the tool's schema before the call; a call that the page
-  does not answer in 60 s is cancelled, and cancelling in the AI app cancels it in the
-  page. Results are marked untrusted and cut to 100,000 characters; a page that answers
-  with an MCP result (as `@mcp-b/global` pages do) gets its text and image blocks through.
+- A call runs only on the page its tool was listed from, and only if the tool still
+  makes the read-only claim it was offered with; after a navigation, or a tool that
+  changed, the AI app is told to list the tools again.
+- Arguments are checked against the tool's schema before the call (without the schema's
+  regular expressions, which a page could make freeze the panel; the page checks those
+  itself). A call that the page does not answer in 60 s ends for the AI app, also when
+  the page is stuck; cancelling in the AI app cancels it in the page. Results are marked
+  untrusted; their text, all blocks together, is cut to 100,000 characters. A page that
+  answers with an MCP result (as `@mcp-b/global` pages do) gets its text blocks and up
+  to 1 MB per image through, at most 32 blocks.
 - Left out: tools with a name that would not fit as `page.<name>`, a schema that is no
   object schema or over 16 KB, more than 64 tools, and tools a tab-mcp page offers itself
   (listed in `<html data-tab-mcp-webmcp>`).

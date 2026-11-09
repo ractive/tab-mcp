@@ -127,13 +127,14 @@ export async function askTools(tab: TargetTab): Promise<PageTools> {
 }
 
 /**
- * Call the page's tool `name` in `tab` (only the content script already
- * there: a call does not inject it). Aborting `signal` cancels the call in
- * the page.
+ * Call a page tool in tab `tabId` (only the content script already there: a
+ * call does not inject it). The content script runs it only on the page it
+ * was listed from (`target.documentId`), with the claim it was offered with.
+ * Aborting `signal` cancels the call in the page.
  */
 export async function callInTab(
 	tabId: number,
-	name: string,
+	target: { documentId: string; name: string; readOnly: boolean },
 	input: unknown,
 	signal: AbortSignal,
 ): Promise<CallResult> {
@@ -145,7 +146,9 @@ export async function callInTab(
 		const response = (await send(tabId, {
 			type: "webmcp-call",
 			callId,
-			name,
+			documentId: target.documentId,
+			name: target.name,
+			readOnly: target.readOnly,
 			input,
 		})) as CallResult | undefined;
 		return (

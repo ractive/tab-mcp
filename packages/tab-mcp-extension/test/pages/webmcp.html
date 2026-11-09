@@ -54,6 +54,7 @@
 		inputSchema: { type: "object" },
 		annotations: { readOnlyHint: true },
 		execute(_input, { signal }) {
+			window.slowStarted = true;
 			return new Promise((resolve) => {
 				const timer = setTimeout(() => resolve("slow done"), 10_000);
 				signal.addEventListener("abort", () => {

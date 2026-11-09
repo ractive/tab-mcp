@@ -34,6 +34,23 @@ interface RegisteredTool {
 	annotations?: Record<string, unknown>;
 }
 
+/**
+ * This page's id: a content script runs once per document, so a call that
+ * carries another id was listed from another page (the tab navigated since).
+ */
+export const DOCUMENT_ID: string = crypto.randomUUID();
+
+/** At most this many tools are sent, names and descriptions cut to these lengths. */
+const SEND_TOOLS = 256;
+const SEND_NAME = 256;
+const SEND_TEXT = 4000;
+const SEND_SCHEMA_BYTES = 16 * 1024;
+/** At most this many mirrored names are read from `<html>`, each this long. */
+const SEND_MIRRORED = 256;
+
+const cutText = (text: string, max: number) =>
+	text.length > max ? text.slice(0, max) : text;
+
 const contextOf = (doc: Document) =>
 	(doc as Document & { modelContext?: ModelContext }).modelContext;
 
@@ -65,21 +82,33 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 /** The names a tab-mcp page mirrors into WebMCP (iteration 25), from `<html>`. */
 export function mirroredNames(doc: Document = document): string[] {
 	const listed = doc.documentElement.getAttribute("data-tab-mcp-webmcp") ?? "";
-	return listed.split(/[\s,]+/).filter((name) => name !== "");
+	return listed
+		.split(/[\s,]+/)
+		.filter((name) => name !== "")
+		.slice(0, SEND_MIRRORED)
+		.map((name) => cutText(name, SEND_NAME));
 }
 
 const hint = (annotations: Record<string, unknown> | undefined, key: string) =>
 	annotations?.[key] === true;
 
-/** The page's tools, as plain data, without the ones it mirrors from tab-mcp. */
-export async function pageTools(doc: Document = document): Promise<PageTools> {
+/**
+ * The page's tools, as plain data, without the ones it mirrors from tab-mcp;
+ * capped, so a page cannot make the message (or the panel) big.
+ */
+export async function pageTools(
+	doc: Document = document,
+	documentId: string = DOCUMENT_ID,
+): Promise<PageTools> {
 	const context = contextOf(doc);
 	const mirrored = mirroredNames(doc);
 	const base = {
 		url: doc.location.href,
 		origin: doc.location.origin,
+		documentId,
 		available: context !== undefined,
 		mirrored,
+		more: 0,
 	};
 	if (context === undefined) return { ...base, tools: [] };
 	let listed: RegisteredTool[];
@@ -89,18 +118,29 @@ export async function pageTools(doc: Document = document): Promise<PageTools> {
 		return { ...base, tools: [], error: message(error) };
 	}
 	const tools: PageTool[] = [];
+	let more = 0;
 	for (const tool of listed) {
 		if (mirrored.includes(tool.name)) continue;
+		if (tools.length >= SEND_TOOLS) {
+			more++;
+			continue;
+		}
 		const annotations = tool.annotations;
+		let schema: { inputSchema?: unknown; schemaTooBig?: true } = {};
+		if (tool.inputSchema !== undefined) {
+			const json = JSON.stringify(tool.inputSchema) ?? "";
+			schema =
+				json.length > SEND_SCHEMA_BYTES
+					? { schemaTooBig: true }
+					: { inputSchema: tool.inputSchema };
+		}
 		tools.push({
-			name: String(tool.name),
+			name: cutText(String(tool.name), SEND_NAME),
 			...(typeof tool.title === "string" && tool.title !== ""
-				? { title: tool.title }
+				? { title: cutText(tool.title, SEND_TEXT) }
 				: {}),
-			description: String(tool.description ?? ""),
-			...(tool.inputSchema !== undefined
-				? { inputSchema: tool.inputSchema }
-				: {}),
+			description: cutText(String(tool.description ?? ""), SEND_TEXT),
+			...schema,
 			annotations: {
 				readOnlyHint: hint(annotations, "readOnlyHint"),
 				consequentialHint: hint(annotations, "consequentialHint"),
@@ -108,19 +148,32 @@ export async function pageTools(doc: Document = document): Promise<PageTools> {
 			},
 		});
 	}
-	return { ...base, tools };
+	return { ...base, tools, more };
 }
 
 /** Calls still running, by call id, to cancel them. */
 const running = new Map<string, AbortController>();
 
-/** Run the page's tool `name`; "not found" if the page no longer has it. */
+/**
+ * Run the page's tool `name`, if it is still what was offered: listed from
+ * this very page (`documentId`) with the same read-only claim. Otherwise
+ * "gone": a tool must never run on another page than the one it was offered
+ * for, nor without the confirmation its first claim would have needed.
+ */
 export async function callTool(
-	name: string,
+	call: { documentId: string; name: string; readOnly: boolean },
 	input: unknown,
 	signal: AbortSignal,
 	doc: Document = document,
+	documentId: string = DOCUMENT_ID,
 ): Promise<CallResult> {
+	const { name } = call;
+	if (call.documentId !== documentId)
+		return {
+			ok: false,
+			error: "The page in the tab changed since its tools were listed.",
+			gone: true,
+		};
 	const context = contextOf(doc);
 	if (context === undefined)
 		return { ok: false, error: "WebMCP is not on in this page.", gone: true };
@@ -129,6 +182,12 @@ export async function callTool(
 		return {
 			ok: false,
 			error: `The page has no tool ${name} (any more).`,
+			gone: true,
+		};
+	if (hint(tool.annotations, "readOnlyHint") !== call.readOnly)
+		return {
+			ok: false,
+			error: `The page changed what tool ${name} does since it was listed.`,
 			gone: true,
 		};
 	try {
@@ -151,7 +210,7 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 			const controller = new AbortController();
 			running.set(request.callId, controller);
 			try {
-				return await callTool(request.name, request.input, controller.signal);
+				return await callTool(request, request.input, controller.signal);
 			} finally {
 				running.delete(request.callId);
 			}
@@ -191,11 +250,18 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	// Tell the side panel when the page's tools change, also without a
 	// navigation (single-page apps), and once now: injected at a click, the
 	// script is the first moment the panel may read them.
-	const changed = () => {
+	// At most every 250 ms, the last change included: a page firing
+	// `toolchange` in a loop costs one message per 250 ms.
+	let waiting: ReturnType<typeof setTimeout> | undefined;
+	const send = () => {
+		waiting = undefined;
 		const event: ContentEvent = { type: "webmcp-changed" };
 		chrome.runtime.sendMessage(event).catch(() => {
 			// No side panel open.
 		});
+	};
+	const changed = () => {
+		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
 	changed();

@@ -75,7 +75,11 @@ function connection(relay: string): TabMcp {
 		{ current: tabInFront, list: askTools, call: callInTab },
 		() => showTools(),
 	);
-	for (const tool of createTools(tabs, () => pageTools))
+	for (const tool of createTools(
+		tabs,
+		() => pageTools,
+		(request) => created.confirmInPage(request),
+	))
 		void created.registerTool(tool);
 	bridge?.stop();
 	bridge = pageTools;
@@ -297,12 +301,16 @@ $("stop").addEventListener("click", () => {
 $("copy").addEventListener("click", () => {
 	const address = mcp?.address;
 	if (address === undefined) return;
-	void navigator.clipboard.writeText(address).then(() => {
-		$("copy").textContent = "Copied";
-		setTimeout(() => {
-			$("copy").textContent = "Copy";
-		}, 1500);
-	});
+	navigator.clipboard.writeText(address).then(
+		() => {
+			$("copy").textContent = "Copied";
+			setTimeout(() => {
+				$("copy").textContent = "Copy";
+			}, 1500);
+		},
+		// Not focused, or not allowed: the address is shown whole to copy by hand.
+		() => showProblem(`Copy did not work. The address: ${address}`),
+	);
 });
 
 $("allow-all").addEventListener("click", () => {

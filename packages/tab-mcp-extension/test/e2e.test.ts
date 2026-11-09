@@ -181,6 +181,9 @@ async function waitForTools(
 	}
 }
 
+/** The extension's own tools, sorted. */
+const OWN_TOOLS = ["page_info", "webmcp_call", "webmcp_tools"];
+
 const PAGE_TOOLS = [
 	"page.get_greeting",
 	"page.mcp_result",
@@ -218,9 +221,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {
-		const names = await waitForTools(stack, (n) => n.length >= 6);
+		const names = await waitForTools(stack, (n) => n.length >= 7);
 		// mirrored_tool is the page's tab-mcp mirror: left out.
-		expect(names).toEqual(["page_info", "webmcp_tools", ...PAGE_TOOLS].sort());
+		expect(names).toEqual([...OWN_TOOLS, ...PAGE_TOOLS].sort());
 		const { tools } = await stack.client.listTools();
 		const byName = (name: string) => tools.find((t) => t.name === name);
 		expect(byName("page_info")?.annotations?.readOnlyHint).toBe(true);
@@ -293,6 +296,25 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		);
 	});
 
+	test("webmcp_call calls a page tool by name, with the same confirmation", async () => {
+		const read = await call(stack, "webmcp_call", {
+			name: "get_greeting",
+			arguments: { name: "Bo" },
+		});
+		expect(read.content).toEqual([{ type: "text", text: "Hello, Bo!" }]);
+		const bad = await call(stack, "webmcp_call", {
+			name: "get_greeting",
+			arguments: { name: 7 },
+		});
+		expect(bad.isError).toBe(true);
+		const ordered = call(stack, "webmcp_call", {
+			name: "place_order",
+			arguments: { item: "cake" },
+		});
+		await answerInPanel(stack, "Allow");
+		expect((await ordered).content[0]?.text).toContain("cake");
+	});
+
 	test("cancelling a call cancels it in the page", async () => {
 		const controller = new AbortController();
 		const slow = call(
@@ -301,7 +323,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			{},
 			{ signal: controller.signal },
 		);
-		await Bun.sleep(300);
+		// Once the page's tool runs: aborted earlier, it would never start.
+		await tab.waitFor("window.slowStarted");
 		controller.abort();
 		await slow.catch(() => undefined);
 		await tab.waitFor("window.aborted");
@@ -338,10 +361,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			title: "Plain page",
 			webmcp: { available: true, tools: 0 },
 		});
-		expect(await waitForTools(stack, (n) => n.length === 2)).toEqual([
-			"page_info",
-			"webmcp_tools",
-		]);
+		expect(await waitForTools(stack, (n) => n.length === 3)).toEqual(OWN_TOOLS);
 	});
 
 	test("it follows a tab switch, tools included", async () => {
@@ -414,7 +434,7 @@ describe.skipIf(chrome === undefined)(
 			expect(listed.structuredContent?.["error"]).toContain(
 				"may not read this tab yet",
 			);
-			expect(await toolNames(stack)).toEqual(["page_info", "webmcp_tools"]);
+			expect(await toolNames(stack)).toEqual(OWN_TOOLS);
 			await stack.browser.clickIcon(tab);
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${OTHER}/webmcp.html`,

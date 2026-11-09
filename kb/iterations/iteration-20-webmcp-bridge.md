@@ -75,10 +75,16 @@ per page tool in its `TabMcp` and replaces them when the tab, the page or its li
 changes. Limits: 64 tools, descriptions 1000 characters after `From <origin>: `, titles
 100, schemas 16 KB, results 100,000 characters, calls 60 s. The side panel is redesigned
 (connection with its state, the tab with its tools marked "reads" or "asks first",
-Settings), and the connector carries the extension's icon. 15 unit tests for the bridge;
-16 end-to-end tests, among them Allow and decline in the side panel, a cancellation
-reaching the page, `toolchange` without a navigation and a forged
-`document.modelContext`. Threat model: A13.
+Settings), and the connector carries the extension's icon.
+
+The owner's first try showed that Claude reads a connector's tool list once: `page.<name>`
+tools that come with a later tab do not reach it. `webmcp_call` calls a page tool by name
+with the same rules, for such AI apps. The review added: calls bound to the page they
+were listed from and to the read-only claim (a page could otherwise offer a read-only
+tool and navigate the tab to a site with a consequential one of that name), calls that
+end even when the page is stuck, refreshes that run one at a time, the page's regular
+expressions left out of validation, and budgets for everything the page sends. Tests:
+bridge and content script units, 17 end-to-end tests. Threat model: A13.
 
 # Citations
 
