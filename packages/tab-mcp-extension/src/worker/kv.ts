@@ -51,7 +51,15 @@ export async function openKv(name = DATABASE): Promise<Kv> {
 		},
 		set(entries) {
 			const s = store("readwrite");
-			for (const [key, value] of Object.entries(entries)) s.put(value, key);
+			try {
+				for (const [key, value] of Object.entries(entries)) s.put(value, key);
+			} catch (error) {
+				// A value IndexedDB cannot clone throws here, after earlier puts:
+				// abort so all or none of the entries land (the migration's marker
+				// must not land without its entries).
+				s.transaction.abort();
+				return Promise.reject(error);
+			}
 			return finished(s.transaction);
 		},
 		remove(key) {
@@ -72,8 +80,11 @@ export function memoryKv(initial: Record<string, unknown> = {}): Kv & {
 		get: async (key) => data.get(key),
 		all: async () => Object.fromEntries(data),
 		async set(entries) {
-			for (const [key, value] of Object.entries(entries))
-				data.set(key, structuredClone(value));
+			// Clone all first, as IndexedDB's transaction is all or nothing.
+			const cloned = Object.entries(entries).map(
+				([key, value]) => [key, structuredClone(value)] as const,
+			);
+			for (const [key, value] of cloned) data.set(key, value);
 		},
 		async remove(key) {
 			data.delete(key);

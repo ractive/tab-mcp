@@ -439,6 +439,14 @@ describe("allowed tools", () => {
 });
 
 describe("the settings in IndexedDB", () => {
+	test("a write is all or nothing: a value that cannot be cloned stores none", async () => {
+		const kv = memoryKv({ relay: "https://relay" });
+		await expect(
+			kv.set({ aiOn: true, [MIGRATED]: 1, bad: () => {} }),
+		).rejects.toThrow();
+		expect(await kv.all()).toEqual({ relay: "https://relay" });
+	});
+
 	test("the address secret: loaded once, read from memory, written through", async () => {
 		const kv = memoryKv({
 			"tab-mcp:secret:https://relay:tab-mcp-for-chrome": "s1",
