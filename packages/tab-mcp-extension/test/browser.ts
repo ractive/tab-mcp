@@ -354,9 +354,12 @@ export class Browser {
 		return `exit code ${this.#proc.exitCode}, signal ${this.#proc.signalCode}`;
 	}
 
-	/** Click the extension's icon on a tab, as a person would (with `activeTab`). */
-	async clickIcon(tab: Page): Promise<void> {
-		if (this.extensionId === undefined) throw new Error("no extension loaded");
+	/**
+	 * Click an extension's icon (the one loaded at launch unless `id` says
+	 * another) on a tab, as a person would (with `activeTab`).
+	 */
+	async clickIcon(tab: Page, id = this.extensionId): Promise<void> {
+		if (id === undefined) throw new Error("no extension loaded");
 		// As a person would: on the tab in front. The action wants the tab's
 		// "tab" target, not its page's.
 		await tab.activate();
@@ -365,7 +368,7 @@ export class Browser {
 			(t) => t.type === "tab" && t.url === url,
 		);
 		await this.send("Extensions.triggerAction", {
-			id: this.extensionId,
+			id,
 			targetId: target.targetId,
 		});
 	}

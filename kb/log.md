@@ -2,6 +2,7 @@
 
 ## 2026-11-09
 
+- ext/panel-clarity: the icon opens the side panel over another extension's panel for the tab (`sidePanel.open` with the tab; `openPanelOnActionClick` would lose `activeTab`); the "AI app" card shows the next step (an "AI access" switch, "Turn on AI access", the address and code at once with no app paired, "+ Add another AI app", Disconnect asks first, the address only while pairing); notifications offer Allow and Always allow, declining is closing them; threat model A13
 - Iteration 26 on iter-26/background-connection: the extension's connection lives in its service worker (the spike: the relay's heartbeat keeps it running, no offscreen document; DEC-116), stays with the side panel closed and comes back after a restart; the side panel is a view over a checked port with its own pairing; questions in the panel of the tab's focused window or as Chrome notifications, Always allow of its own, a 60 s limit, a badge on the icon; permissions `notifications` and `alarms`; threat model A13
 - Iteration 20 merged (tab-mcp#79): the bridge works with Claude after renaming page tools to page_<name>; "Always allow" and per-site "allowed" tools; iteration 26 planned: the connection out of the side panel (service worker or offscreen document), questions by notification when the side panel is closed; DEC-116
 - Iteration 20 on iter-20/webmcp-bridge: the WebMCP bridge (page.<name> tools, webmcp_tools, toolchange, confirmation of tools not marked read-only, timeout, cancellation, limits), the side panel redesigned, the connector's icon; threat model A13

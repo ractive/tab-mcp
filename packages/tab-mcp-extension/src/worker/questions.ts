@@ -2,10 +2,11 @@
  * The questions of tools that ask first, now that the connection has no page
  * of its own to ask in (DEC-116). A question shows in every open side panel;
  * unless a side panel is open in the focused window of the tab the call acts
- * on, it also goes out as a Chrome notification. The first answer counts;
- * nobody answering within the time limit, or the AI app cancelling, is Don't
- * allow. Each notification carries its call: a click answers only that call,
- * and a click on a call that is already settled is dropped.
+ * on, it also goes out as a Chrome notification, with Allow and Always allow:
+ * closing it, a click on its body, nobody answering within the time limit or
+ * the AI app cancelling is Don't allow. The first answer counts. Each
+ * notification carries its call: a click answers only that call, and a click
+ * on a call that is already settled is dropped.
  */
 
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
@@ -14,14 +15,17 @@ import { allowable } from "./allowed.ts";
 
 /** A question nobody answers in this time is Don't allow. */
 export const QUESTION_TIMEOUT_MS = 60_000;
-/** An Allow this soon after a notification showed does not count. */
+/** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
 /** The arguments shown in the panel, and in a notification, are cut to this. */
 export const MAX_ARGS = 4000;
 export const MAX_ARGS_NOTIFICATION = 150;
 
-/** The buttons of a notification, in order: Don't allow first. */
-export const NOTIFICATION_BUTTONS = ["Don't allow", "Allow"] as const;
+/**
+ * The buttons of a notification, in order. Don't allow is closing it (or a
+ * click on its body): Chrome gives a notification at most two buttons.
+ */
+export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -41,6 +45,8 @@ export interface NotificationText {
 	title: string;
 	message: string;
 	contextMessage: string;
+	/** Allow, and Always allow where it is offered (a page of an http(s) site). */
+	buttons: string[];
 }
 
 const INVISIBLE =
@@ -105,6 +111,9 @@ export function notificationText(
 		contextMessage: site
 			? `On ${site} · tab-mcp for Chrome`
 			: "tab-mcp for Chrome",
+		buttons: view.always
+			? [...NOTIFICATION_BUTTONS]
+			: [NOTIFICATION_BUTTONS[0]],
 	};
 }
 
@@ -230,21 +239,27 @@ export class Questions {
 		return undefined;
 	}
 
-	/** A button of notification `id`: 0 Don't allow, 1 Allow. */
+	/**
+	 * A button of notification `id`: 0 Allow, 1 Always allow (only where it
+	 * is offered; elsewhere it counts as nothing).
+	 */
 	notificationButton(id: string, index: number): void {
 		const pending = this.#byNotification(id);
 		if (pending === undefined) return; // settled, or an older notification
-		if (index !== 1) {
-			pending.settle("deny");
-			return;
-		}
+		const answer: Answer | undefined =
+			index === 0
+				? "allow"
+				: index === 1 && pending.view.always
+					? "always"
+					: undefined;
+		if (answer === undefined) return;
 		if (this.#host.now() - pending.shownAt < NOTIFICATION_GUARD_MS) {
 			// Too soon to be read: show it again rather than take it.
 			this.#notify(pending);
 			this.#host.clear(id);
 			return;
 		}
-		pending.settle("allow");
+		pending.settle(answer);
 	}
 
 	/** A click on the notification's body, or its closing: Don't allow. */

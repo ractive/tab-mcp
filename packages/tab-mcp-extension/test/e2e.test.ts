@@ -187,8 +187,6 @@ async function start(
 			`document.getElementById("address").textContent`,
 			15_000,
 		);
-		// Done with the address and code, as a user would be.
-		await panel.click("#pair-done");
 		const worker = await browser.serviceWorker(browser.extensionId as string);
 		const client = await mcpClient(relay, address);
 		return {
@@ -605,7 +603,7 @@ describe.skipIf(chrome === undefined)(
 			const id = await newNotification(stack);
 			// After the guard against an Allow that came too soon.
 			await Bun.sleep(600);
-			await clickNotification(stack, id, 1);
+			await clickNotification(stack, id, 0);
 			const result = await asked;
 			expect(result.isError).toBeFalsy();
 			expect(result.content[0]?.text).toContain("handed");
@@ -619,11 +617,19 @@ describe.skipIf(chrome === undefined)(
 			expect(await badge()).toBe("on");
 		});
 
-		test("with the panel closed a question is a notification: Allow, Don't allow, late clicks", async () => {
+		test("with the panel closed a question is a notification: Allow, closing it, late clicks, Always allow", async () => {
 			const denied = call(stack, "page_place_order", { item: "no" });
 			const first = await newNotification(stack);
 			expect(await badge()).toBe("?");
-			await clickNotification(stack, first, 0);
+			expect(
+				await stack.worker.eval(
+					`chrome.notifications.getAll().then((all) => Object.keys(all).length)`,
+				),
+			).toBe(1);
+			// Don't allow is closing it (or a click on its body).
+			await stack.worker.eval(
+				`tabMcpNotificationDismissed(${JSON.stringify(first)})`,
+			);
 			const no = await denied;
 			expect(no.isError).toBe(true);
 			expect(
@@ -633,11 +639,20 @@ describe.skipIf(chrome === undefined)(
 			const allowed = call(stack, "page_place_order", { item: "yes" });
 			const second = await newNotification(stack, [first]);
 			await Bun.sleep(600);
-			await clickNotification(stack, first, 1);
+			await clickNotification(stack, first, 0);
 			await Bun.sleep(200);
 			expect(await notifications(stack)).toEqual([second]);
-			await clickNotification(stack, second, 1);
+			await clickNotification(stack, second, 0);
 			expect((await allowed).content[0]?.text).toContain("yes");
+			// Always allow: the next call of the tool runs without asking.
+			const always = call(stack, "page_place_order", { item: "always" });
+			const third = await newNotification(stack, [first, second]);
+			await Bun.sleep(600);
+			await clickNotification(stack, third, 1);
+			expect((await always).isError).toBeFalsy();
+			const again = await call(stack, "page_place_order", { item: "again" });
+			expect(again.content[0]?.text).toContain("again");
+			expect(await notifications(stack)).toEqual([]);
 		});
 
 		test("reopening the panel shows the same connection", async () => {
@@ -699,11 +714,30 @@ describe.skipIf(chrome === undefined)(
 
 		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
 			await stack.panel.click("#connect");
+			// The AI app (the test's client) is paired by now: the card lists it
+			// and keeps the address out of sight until "+ Add another AI app".
 			await stack.panel.waitFor(
-				`document.getElementById("state").dataset.state !== "off" && document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
+				`document.getElementById("state").dataset.state === "on"`,
 				15_000,
 			);
+			expect(
+				await stack.panel.eval(
+					`[document.getElementById("state-text").textContent, document.getElementById("pairing").hidden, document.getElementById("add-app").hidden, document.querySelector("#grants button")?.textContent]`,
+				),
+			).toEqual(["Connected · Test client", true, false, "Disconnect"]);
+			await stack.panel.click("#add-app");
+			await stack.panel.waitFor(
+				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)} && !document.getElementById("pair-done").hidden`,
+			);
 			await stack.panel.click("#pair-done");
+			await stack.panel.waitFor(`document.getElementById("pairing").hidden`);
+			// Disconnect asks first: one click only arms it.
+			await stack.panel.click("#grants button");
+			expect(
+				await stack.panel.eval(
+					`document.querySelector("#grants button").textContent`,
+				),
+			).toBe("Disconnect? Click again");
 			// Another program with a copy of the address secret takes it over.
 			const secrets = await stack.worker.eval<Record<string, string>>(
 				`chrome.storage.local.get(null).then((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith("tab-mcp:secret:"))))`,
@@ -854,7 +888,7 @@ describe.skipIf(chrome === undefined || !process.env["TAB_MCP_E2E_IDLE"])(
 				expect(result.isError).toBeFalsy();
 				// Off: nothing keeps the worker; Chrome stops it after 30 s idle.
 				stack.panel = await openPanel(stack.browser, stack.tab);
-				await stack.panel.click("#stop");
+				await stack.panel.click("#ai-switch");
 				await stack.panel.waitFor(
 					`document.getElementById("state").dataset.state === "off"`,
 				);
@@ -930,6 +964,36 @@ describe.skipIf(chrome === undefined)(
 				webmcp: { available: true, tools: 5 },
 			});
 			// After the click its tools are offered (the content script says so).
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		});
+
+		test("a click shows the panel over another extension's panel for the tab, and gives the tab's tools", async () => {
+			const { browser } = stack;
+			const { id: other } = (await browser.send("Extensions.loadUnpacked", {
+				path: join(import.meta.dir, "other-extension"),
+			})) as { id: string };
+			await (await browser.serviceWorker(other)).eval("true");
+			// A new tab, so no click has granted anything there yet.
+			const page = await browser.newPage(`${SITE}/webmcp.html`);
+			/** Whether the panel at `url` is the one on screen. */
+			const shown = async (url: string) => {
+				const target = await browser.waitForTarget((t) => t.url === url);
+				return (await browser.attach(target.targetId)).eval<string>(
+					"document.visibilityState",
+				);
+			};
+			const otherPanel = `chrome-extension://${other}/panel.html`;
+			await browser.clickIcon(page, other);
+			await stack.panel.waitFor(`document.visibilityState === "hidden"`);
+			expect(await shown(otherPanel)).toBe("visible");
+			// Chrome kept the other panel when ours was opened for the window only.
+			await browser.clickIcon(page);
+			await stack.panel.waitFor(`document.visibilityState === "visible"`);
+			expect(await shown(otherPanel)).toBe("hidden");
+			expect((await pageInfo(stack)).structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html`,
+				webmcp: { available: true, tools: 5 },
+			});
 			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 		});
 	},

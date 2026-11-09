@@ -257,8 +257,12 @@ did, by connecting the extension.
   a long title cannot push the site out, and the arguments (invisible, blank and
   direction characters, every space but U+0020 and the blank letters such as U+2800
   and U+3164, written as `\uXXXX`);
-  Don't allow is the first button, an Allow within 500 ms of showing does not count (it
-  shows again), and a click on the body or closing it is Don't allow. Each notification
+  its buttons are Allow and Always allow (the same per-AI-app, per-tool memory as the
+  panel's; only Allow where Always allow is not offered). There is no Don't allow
+  button: Chrome allows two, and declining is closing the notification, a click on its
+  body or letting the 60 s run out, so every way out of it that is not one of the two
+  buttons denies. A click on either button within 500 ms of showing does not count (it
+  shows again), so a click meant for something that was there before cannot allow. Each notification
   carries its call: a click answers only that call, and one on a call already answered,
   timed out or cancelled is dropped, never taken for another. A notification is outside
   any page, so a page cannot cover or click it; another program on the computer could

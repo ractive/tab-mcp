@@ -67,6 +67,13 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   tab the call acts on, else in a Chrome notification; the extension asks, not the
   library (iteration 26).
 
+A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
+With the window only, Chrome resolved the call and showed nothing when another
+extension had a panel of its own open for the tab (Claude in Chrome's);
+`openPanelOnActionClick` shows the panel over it too, but then the click grants no
+`activeTab` (both seen in Chrome for Testing 156, 2026-11-09, and in an end-to-end test
+with a second extension).
+
 ## Permissions
 
 - `activeTab`, `scripting`, `sidePanel`, `storage`, `notifications` (questions while the

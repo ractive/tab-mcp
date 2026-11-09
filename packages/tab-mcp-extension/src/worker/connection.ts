@@ -492,8 +492,10 @@ export class Connection {
 				await chrome.notifications.create(id, {
 					type: "basic",
 					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-					...text,
-					buttons: [{ title: "Don't allow" }, { title: "Allow" }],
+					title: text.title,
+					message: text.message,
+					contextMessage: text.contextMessage,
+					buttons: text.buttons.map((title) => ({ title })),
 					requireInteraction: true,
 					priority: 2,
 				});
