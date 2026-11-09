@@ -4,8 +4,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { PanelState } from "../src/protocol.ts";
+import type { PanelState, TabView } from "../src/protocol.ts";
 import {
+	allowAllView,
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
@@ -112,5 +113,57 @@ describe("the card's clicks", () => {
 			checked: true,
 			intent: undefined,
 		});
+	});
+});
+
+describe("Allow all", () => {
+	const tab = (tools: TabView["tools"], canAllow = true): TabView => ({
+		title: "Shop",
+		host: "shop.example",
+		access: "",
+		origin: "https://shop.example",
+		tools,
+		mirrored: 0,
+		canAllow,
+	});
+	const order = { name: "order", readOnly: false, allowed: false };
+	const pay = { name: "pay", readOnly: false, allowed: false };
+	const read = { name: "read", readOnly: true, allowed: false };
+	const broken = {
+		name: "broken",
+		readOnly: false,
+		allowed: false,
+		problem: "too long",
+	};
+
+	test("for the listed tools that ask first, not read-only or left-out ones", () => {
+		expect(allowAllView(tab([order, pay, read, broken]))).toEqual({
+			shown: true,
+			label: "Allow all",
+			names: ["order", "pay"],
+			on: true,
+		});
+	});
+
+	test("some allowed: still Allow all; all allowed: Ask for all", () => {
+		expect(allowAllView(tab([{ ...order, allowed: true }, pay])).label).toBe(
+			"Allow all",
+		);
+		expect(
+			allowAllView(
+				tab([{ ...order, allowed: true }, { ...pay, allowed: true }, read]),
+			),
+		).toEqual({
+			shown: true,
+			label: "Ask for all",
+			names: ["order", "pay"],
+			on: false,
+		});
+	});
+
+	test("hidden where tools cannot be allowed, or none asks first", () => {
+		expect(allowAllView(tab([order], false)).shown).toBe(false);
+		expect(allowAllView(tab([read, broken])).shown).toBe(false);
+		expect(allowAllView(undefined).shown).toBe(false);
 	});
 });

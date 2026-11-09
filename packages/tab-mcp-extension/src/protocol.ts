@@ -37,6 +37,11 @@ export type PanelCommand =
 	| { type: "new-address" }
 	| { type: "set-relay"; relay: string }
 	| { type: "set-allowed"; origin: string; name: string; on: boolean }
+	/**
+	 * "Allow all" (or "Ask for all") for the tools listed on `origin`: the
+	 * worker takes only the names it offers there itself.
+	 */
+	| { type: "set-allowed-all"; origin: string; names: string[]; on: boolean }
 	| { type: "answer"; id: string; answer: Answer };
 
 /** A connected AI app. */
@@ -162,6 +167,9 @@ export function isContentEvent(
 
 const isString = (value: unknown): value is string => typeof value === "string";
 
+/** At most this many names in "Allow all" (the bridge lists at most 64 tools). */
+const MAX_NAMES = 64;
+
 /** A panel command, checked; `undefined` for anything else. */
 export function parseCommand(message: unknown): PanelCommand | undefined {
 	if (typeof message !== "object" || message === null) return undefined;
@@ -199,6 +207,19 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 						type: "set-allowed",
 						origin: m["origin"],
 						name: m["name"],
+						on: m["on"],
+					}
+				: undefined;
+		case "set-allowed-all":
+			return isString(m["origin"]) &&
+				Array.isArray(m["names"]) &&
+				m["names"].length <= MAX_NAMES &&
+				m["names"].every(isString) &&
+				typeof m["on"] === "boolean"
+				? {
+						type: "set-allowed-all",
+						origin: m["origin"],
+						names: [...(m["names"] as string[])],
 						on: m["on"],
 					}
 				: undefined;

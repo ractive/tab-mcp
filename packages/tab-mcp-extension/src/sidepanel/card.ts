@@ -5,7 +5,7 @@
  * app" as a link, which shows the address and code again.
  */
 
-import type { PanelState } from "../protocol.ts";
+import type { PanelState, TabView } from "../protocol.ts";
 
 const STATUS_TEXT: Record<PanelState["status"], string> = {
 	off: "AI access is off · paired apps stay paired",
@@ -81,4 +81,36 @@ export function switchShown(
 	if (intent === undefined || stateOn === intent.on || now >= intent.until)
 		return { checked: stateOn, intent: undefined };
 	return { checked: intent.on, intent };
+}
+
+/** "Allow all" over the tab's tool list, or why it is not there. */
+export interface AllowAllView {
+	shown: boolean;
+	label: "Allow all" | "Ask for all";
+	/** The tools it is for: listed, offered, not read-only. */
+	names: string[];
+	/** What a click asks for: allow them (true), or ask first again. */
+	on: boolean;
+}
+
+/**
+ * "Allow all" for the tools listed now on a site whose tools can be allowed;
+ * once they all are, "Ask for all". A tool the page adds later is not
+ * among them: it asks first.
+ */
+export function allowAllView(tab: TabView | undefined): AllowAllView {
+	const names = (tab?.tools ?? [])
+		.filter((t) => !t.readOnly && t.problem === undefined)
+		.map((t) => t.name);
+	const all =
+		names.length > 0 &&
+		(tab?.tools ?? []).every(
+			(t) => t.readOnly || t.problem !== undefined || t.allowed,
+		);
+	return {
+		shown: tab?.canAllow === true && names.length > 0,
+		label: all ? "Ask for all" : "Allow all",
+		names,
+		on: !all,
+	};
 }
