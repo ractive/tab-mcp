@@ -34,38 +34,80 @@ const finished = (transaction: IDBTransaction) =>
 		transaction.onabort = () => reject(transaction.error);
 	});
 
-/** The settings database of the extension, opened (and made the first time). */
-export async function openKv(name = DATABASE): Promise<Kv> {
+function openDatabase(name: string): Promise<IDBDatabase> {
 	const open = indexedDB.open(name, 1);
 	open.onupgradeneeded = () => open.result.createObjectStore(STORE);
-	const db = await done(open);
-	const store = (mode: IDBTransactionMode) =>
-		db.transaction(STORE, mode).objectStore(STORE);
+	return done(open);
+}
+
+/**
+ * The settings database of the extension, opened (and made the first time).
+ * The connection is held lazily: when Chrome closes it under the worker
+ * (`close`: the site data was cleared, the database deleted) or another
+ * connection asks for a new version (`versionchange`, answered by closing),
+ * the next call opens it again instead of using a dead handle.
+ */
+export async function openKv(name = DATABASE): Promise<Kv> {
+	let connection: Promise<IDBDatabase> | undefined;
+	const db = (): Promise<IDBDatabase> => {
+		if (connection === undefined) {
+			const opening = openDatabase(name).then((opened) => {
+				const forget = () => {
+					if (connection === opening) connection = undefined;
+				};
+				opened.onclose = forget;
+				opened.onversionchange = () => {
+					opened.close();
+					forget();
+				};
+				return opened;
+			});
+			// A failed open is not kept: the next call tries again.
+			opening.catch(() => {
+				if (connection === opening) connection = undefined;
+			});
+			connection = opening;
+		}
+		return connection;
+	};
+	const store = async (mode: IDBTransactionMode) => {
+		const opened = await db();
+		try {
+			return opened.transaction(STORE, mode).objectStore(STORE);
+		} catch (error) {
+			// Closing under us (InvalidStateError): once more, on a new one.
+			if ((error as DOMException).name !== "InvalidStateError") throw error;
+			if (connection !== undefined && (await connection) === opened)
+				connection = undefined;
+			return (await db()).transaction(STORE, mode).objectStore(STORE);
+		}
+	};
+	// Opened now, so a database that cannot be opened stops the start.
+	await db();
 	return {
-		get: (key) => done(store("readonly").get(key)),
+		get: async (key) => done((await store("readonly")).get(key)),
 		async all() {
-			const s = store("readonly");
+			const s = await store("readonly");
 			const [keys, values] = await Promise.all([
 				done(s.getAllKeys()),
 				done(s.getAll()),
 			]);
 			return Object.fromEntries(keys.map((k, i) => [String(k), values[i]]));
 		},
-		set(entries) {
-			const s = store("readwrite");
+		async set(entries) {
+			const s = await store("readwrite");
 			try {
 				for (const [key, value] of Object.entries(entries)) s.put(value, key);
 			} catch (error) {
 				// A value IndexedDB cannot clone throws here, after earlier puts:
-				// abort so all or none of the entries land (the migration's marker
-				// must not land without its entries).
+				// abort so all or none of the entries land.
 				s.transaction.abort();
-				return Promise.reject(error);
+				throw error;
 			}
 			return finished(s.transaction);
 		},
-		remove(key) {
-			const s = store("readwrite");
+		async remove(key) {
+			const s = await store("readwrite");
 			s.delete(key);
 			return finished(s.transaction);
 		},
@@ -94,7 +136,7 @@ export function memoryKv(initial: Record<string, unknown> = {}): Kv & {
 	};
 }
 
-/** The keys that used to be in `chrome.storage.local` (before IndexedDB). */
+/** The keys that used to be in `chrome.storage.local` (before IndexedDB): removed there, never read. */
 export function isSettingKey(key: string): boolean {
 	return (
 		key === "relay" ||
@@ -105,38 +147,23 @@ export function isSettingKey(key: string): boolean {
 	);
 }
 
-/** What the migration needs of `chrome.storage.local`. */
+/** What forgetting the old settings needs of `chrome.storage.local`. */
 export interface OldArea {
 	get(keys: null): Promise<Record<string, unknown>>;
 	remove(keys: string[]): Promise<void>;
 }
 
-/** In `kv` once the settings were moved: from then on nothing is taken from the old area. */
-export const MIGRATED = "migrated";
-
 /**
- * Move the settings from `chrome.storage.local` into `kv`, once: the moved
- * entries and the `MIGRATED` marker are written in one transaction, also when
- * there was nothing to move (a first start), then the old keys are removed.
- * After that nothing is ever taken from the old area again: where Chrome does
- * not keep content scripts out of it, one could write a relay or a secret
- * there for the next start to pick up. What setting keys are still found
- * there (a removal a crash cut short, or a content script's) are only
- * removed. A key already in `kv` is kept. Returns the keys moved.
+ * Remove every setting key from `chrome.storage.local`, on each start, and
+ * take none of them. Only the owner's development builds ever kept settings
+ * there, and they have moved. Importing them once behind a marker kept in
+ * the database it guards would import again whenever that database is lost
+ * (site data cleared, a forced close): where Chrome does not keep content
+ * scripts out of `chrome.storage.local`, one could have written a relay or a
+ * secret there for that start to pick up. Returns the keys removed.
  */
-export async function migrate(old: OldArea, kv: Kv): Promise<string[]> {
-	const done = (await kv.get(MIGRATED)) !== undefined;
-	const stored = await old.get(null);
-	const keys = Object.keys(stored).filter(isSettingKey);
-	if (done) {
-		if (keys.length > 0) await old.remove(keys);
-		return [];
-	}
-	const present = await kv.all();
-	const missing = Object.fromEntries(
-		keys.filter((k) => !(k in present)).map((k) => [k, stored[k]]),
-	);
-	await kv.set({ ...missing, [MIGRATED]: 1 });
+export async function forgetOldSettings(old: OldArea): Promise<string[]> {
+	const keys = Object.keys(await old.get(null)).filter(isSettingKey);
 	if (keys.length > 0) await old.remove(keys);
-	return Object.keys(missing);
+	return keys;
 }

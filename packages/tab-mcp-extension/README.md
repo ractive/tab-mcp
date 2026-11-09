@@ -99,7 +99,7 @@ when the icon shows "?". A question nobody answers in 60 s is Don't allow.
 | `activeTab` | Read the tab you click the icon on (its WebMCP tools), without access to other sites. |
 | `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
-| `storage` | Only to move the settings an earlier version kept in `chrome.storage.local`. The relay address, whether AI access is on, the tools allowed per site and the secret behind the connection's address are in IndexedDB, used by the service worker only, which content scripts (in the page's origin) cannot reach. The worker moves them there once, and closes `chrome.storage.local` to content scripts (`TRUSTED_CONTEXTS`) where Chrome allows it. |
+| `storage` | Only to remove what the owner's development builds kept in `chrome.storage.local` (removed on every start, never read as settings) and to close that area to content scripts (`TRUSTED_CONTEXTS`) where Chrome allows it. The relay address, whether AI access is on, the tools allowed per site and the secret behind the connection's address are in IndexedDB, used by the service worker only, which content scripts (in the page's origin) cannot reach. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
 | `<all_urls>` (optional) | Only after "Allow on all sites": read every tab without a click. |
