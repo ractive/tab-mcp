@@ -267,6 +267,35 @@ describe("questions", () => {
 		expect(await a).toBe("allow");
 	});
 
+	test("a notification is cleared only once Chrome has made it (a slow create)", async () => {
+		const host = fakeHost();
+		const events: string[] = [];
+		let finish = () => {};
+		host.notify = (id) => {
+			events.push(`create ${id}`);
+			return new Promise((resolve) => {
+				finish = () => {
+					events.push(`created ${id}`);
+					resolve();
+				};
+			});
+		};
+		host.clear = (id) => events.push(`clear ${id}`);
+		const questions = new Questions(host);
+		const controller = new AbortController();
+		const answer = questions.ask(request({}, controller.signal), { tabId: 7 });
+		await settle();
+		// The AI app cancels while create still runs.
+		controller.abort();
+		expect(await answer).toBe("deny");
+		await settle();
+		const id = events[0]?.slice("create ".length);
+		expect(events).toEqual([`create ${id}`]);
+		finish();
+		await settle();
+		expect(events).toEqual([`create ${id}`, `created ${id}`, `clear ${id}`]);
+	});
+
 	test("with the panel of the tab's focused window open, no notification; it goes out once the panel closes", async () => {
 		const host = fakeHost({ panel: true });
 		const questions = new Questions(host);
@@ -278,6 +307,8 @@ describe("questions", () => {
 		expect(host.shown.size).toBe(1);
 		questions.answer(questions.list[0]?.id as string, "always");
 		expect(await answer).toBe("always");
+		// Cleared once its create is done.
+		await settle();
 		expect(host.shown.size).toBe(0);
 	});
 

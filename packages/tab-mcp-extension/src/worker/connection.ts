@@ -92,6 +92,22 @@ async function iconsFor(): Promise<Icon[]> {
 	}
 }
 
+/**
+ * Close `chrome.storage.local` to content scripts (by default they may read
+ * and write it); `undefined` once done, else why not.
+ */
+async function closeStorage(): Promise<string | undefined> {
+	try {
+		await chrome.storage.local.setAccessLevel({
+			accessLevel: "TRUSTED_CONTEXTS",
+		});
+		return undefined;
+	} catch (error) {
+		console.error("tab-mcp: storage access level", error);
+		return `This Chrome cannot keep the extension's storage from web pages (${message(error)}), so tab-mcp for Chrome does not connect. Update Chrome.`;
+	}
+}
+
 /** Clear every notification of the extension. */
 async function clearNotifications(): Promise<void> {
 	try {
@@ -119,6 +135,8 @@ export class Connection {
 	#bridge: PageToolBridge;
 	#listening = new AbortController();
 	#problem: string | undefined;
+	/** Why the extension's storage is not closed to web pages: then it never connects. */
+	readonly #unsafe: string | undefined;
 	/** Taken over (kept in storage too, so it holds across worker restarts). */
 	#replaced: Replaced | undefined;
 	/** The takeover happened in this worker's life: the library knows of it. */
@@ -136,7 +154,9 @@ export class Connection {
 		allowed: AllowedTools,
 		relay: string,
 		replaced: Replaced | undefined,
+		unsafe: string | undefined,
 	) {
+		this.#unsafe = unsafe;
 		this.#storage = storage;
 		this.#icons = icons;
 		this.#allowed = allowed;
@@ -152,6 +172,10 @@ export class Connection {
 	 * address was not taken over meanwhile.
 	 */
 	static async start(): Promise<Connection> {
+		// Before anything is read: the storage holds the address secret and
+		// the tools allowed per site, which a page's renderer (through the
+		// content script) must neither read nor change.
+		const unsafe = await closeStorage();
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
@@ -163,7 +187,14 @@ export class Connection {
 			loadAiOn(),
 			loadReplaced(),
 		]);
-		const connection = new Connection(storage, icons, allowed, relay, replaced);
+		const connection = new Connection(
+			storage,
+			icons,
+			allowed,
+			relay,
+			replaced,
+			unsafe,
+		);
 		connection.#showBadge();
 		if (on && replaced === undefined) connection.#connect();
 		return connection;
@@ -290,6 +321,12 @@ export class Connection {
 	}
 
 	#connect(): void {
+		if (this.#unsafe !== undefined) {
+			// Fail closed: with the storage open to web pages, no connection.
+			this.#problem = this.#unsafe;
+			this.#changed();
+			return;
+		}
 		this.#problem = undefined;
 		// The extension's rule, not the library's: only the panel's button or
 		// a start with AI access left on gets here.
@@ -609,6 +646,7 @@ export class Connection {
 					: "off";
 		const address = mcp.address;
 		const code = mcp.pairingCode?.code;
+		const problem = this.#problem ?? this.#unsafe;
 		return {
 			relay: this.#relay,
 			status,
@@ -620,7 +658,7 @@ export class Connection {
 			})),
 			pairing: [...this.#panels].some((p) => p.pairing),
 			...(code !== undefined ? { code } : {}),
-			...(this.#problem !== undefined ? { problem: this.#problem } : {}),
+			...(problem !== undefined ? { problem } : {}),
 			...(this.#replaced !== undefined
 				? { replaced: { sibling: this.#replaced.sibling } }
 				: {}),

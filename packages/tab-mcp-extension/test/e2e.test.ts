@@ -344,6 +344,35 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
 	});
 
+	test("a content script can neither read nor write the extension's storage", async () => {
+		// The content script's world, where a page's compromised renderer
+		// would run its code with the extension's APIs.
+		const world = await tab.isolatedWorld("tab-mcp for Chrome");
+		const tries = await tab.eval<string[]>(
+			`(async () => {
+				const attempt = async (run) => {
+					try {
+						await run();
+						return "allowed";
+					} catch (error) {
+						return "refused: " + error.message;
+					}
+				};
+				return [
+					await attempt(() => chrome.storage.local.get(null)),
+					await attempt(() => chrome.storage.local.set({ allowedTools: { "https://evil.test": ["x"] } })),
+				];
+			})()`,
+			world,
+		);
+		expect(tries.every((t) => t.startsWith("refused"))).toBe(true);
+		expect(
+			await stack.worker.eval(
+				`chrome.storage.local.get("allowedTools").then((s) => s.allowedTools?.["https://evil.test"] ?? null)`,
+			),
+		).toBeNull();
+	});
+
 	test("page_info tells the page in front and its WebMCP tools", async () => {
 		const result = await pageInfo(stack);
 		expect(result.isError).toBeFalsy();

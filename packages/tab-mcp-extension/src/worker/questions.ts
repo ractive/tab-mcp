@@ -132,6 +132,8 @@ export class Questions {
 	readonly #timeoutMs: number;
 	readonly #pending = new Map<string, Pending>();
 	#shown = 0;
+	/** Each notification's `create`, until it is cleared. */
+	readonly #creating = new Map<string, Promise<void>>();
 
 	constructor(host: QuestionsHost, timeoutMs = QUESTION_TIMEOUT_MS) {
 		this.#host = host;
@@ -182,7 +184,7 @@ export class Questions {
 					clearTimeout(timer);
 					request.signal.removeEventListener("abort", cancelled);
 					if (pending.notification !== undefined)
-						this.#host.clear(pending.notification);
+						this.#clear(pending.notification);
 					this.#host.changed();
 					resolve(answer);
 				},
@@ -220,12 +222,28 @@ export class Questions {
 		const id = `${pending.view.id}:${++this.#shown}`;
 		pending.notification = id;
 		pending.shownAt = this.#host.now();
-		this.#host
-			.notify(id, notificationText(pending.view, pending.summary))
-			.catch((error: unknown) =>
-				// Notifications off for Chrome: the badge and the panel remain.
-				console.warn("tab-mcp: notification", error),
-			);
+		this.#creating.set(
+			id,
+			this.#host
+				.notify(id, notificationText(pending.view, pending.summary))
+				.catch((error: unknown) =>
+					// Notifications off for Chrome: the badge and the panel remain.
+					console.warn("tab-mcp: notification", error),
+				),
+		);
+	}
+
+	/**
+	 * Clear notification `id` once Chrome has made it: cleared while
+	 * `create` still runs, it would stay on screen with buttons that answer
+	 * nothing (`requireInteraction`).
+	 */
+	#clear(id: string): void {
+		const creating = this.#creating.get(id) ?? Promise.resolve();
+		void creating.then(() => {
+			this.#creating.delete(id);
+			this.#host.clear(id);
+		});
 	}
 
 	/** An answer from a side panel. */
@@ -256,7 +274,7 @@ export class Questions {
 		if (this.#host.now() - pending.shownAt < NOTIFICATION_GUARD_MS) {
 			// Too soon to be read: show it again rather than take it.
 			this.#notify(pending);
-			this.#host.clear(id);
+			this.#clear(id);
 			return;
 		}
 		pending.settle(answer);

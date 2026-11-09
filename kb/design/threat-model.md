@@ -281,6 +281,20 @@ did, by connecting the extension.
   another, so a stop is never overtaken by the connect before it. When the panel's
   questions move (one is answered), its Allow buttons and "asks first" switches stay off
   for 750 ms, so a second click lands on nothing that allows.
+- **The extension's storage is closed to web pages.** `chrome.storage.local` holds the
+  address secret, the tools allowed per site, the relay, whether AI access is on and the
+  takeover flag, and by default content scripts may read and write it: a page's
+  compromised renderer, running code in the content script's world, could read the
+  secret (and take the address over from anywhere) or allow its own tools. Every start
+  of the service worker first sets the area to `TRUSTED_CONTEXTS` (Chrome 102 and later,
+  checked in Chrome 156 by an end-to-end test from the content script's world), before
+  anything is read; if Chrome refuses, the extension does not connect and the panel
+  says why. The content script uses no storage. Not checked: whether Chrome keeps the
+  level between worker starts; if not, a content script that runs before the worker at
+  a browser start has that moment.
+- **Notifications cleared once made.** A notification is cleared (answered, timed out,
+  cancelled, shown again) only after its `create` has finished, so none stays on screen
+  with buttons that answer nothing.
 - **A takeover is kept (iteration 26).** After `replaced` the worker stores the fact and
   connects again neither at its next start nor on its alarm, so it does not take the
   address back and forth with whoever has the secret; the panel shows the notice until
