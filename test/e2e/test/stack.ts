@@ -260,6 +260,18 @@ export interface Pairing {
 	/** The dialog's visible closing buttons while the code was shown, then once paired. */
 	buttonsBefore: string[];
 	buttonsAfter: string[];
+	/** Elements taken out of the dialog between showing the code and the app connected. */
+	removed: string[];
+	/** Codes other than the entered one that were in view meanwhile. */
+	otherCodesInView: string[];
+	/** Once paired: the confirmation, the setup and where the focus is. */
+	after: {
+		success: boolean;
+		title: string;
+		setup: boolean;
+		toggle: string;
+		focus: string;
+	};
 }
 
 /** The texts of the visible buttons in the connect dialog's bottom row. */
@@ -291,6 +303,20 @@ export async function pair(
 		`(document.querySelector('${dialog} .tab-mcp-code-value')?.textContent ?? '').match(/^\\d{6}$/)?.[0]`,
 	);
 	const buttonsBefore = await dialogButtons(calculator);
+	// From here to "connected", what changes in the dialog: nothing may be
+	// taken out (rebuilt), and no other code may come into view.
+	await calculator.eval(`(() => {
+		const d = document.querySelector('${dialog}');
+		const seen = (window.__e2eDialog = { removed: [], codes: [] });
+		const look = () => {
+			const v = d.querySelector('.tab-mcp-code-value');
+			if (v.checkVisibility() && v.textContent !== ${JSON.stringify(code)} && !seen.codes.includes(v.textContent)) seen.codes.push(v.textContent);
+		};
+		new MutationObserver((records) => {
+			for (const r of records) for (const n of r.removedNodes) if (n.nodeType === 1) seen.removed.push(n.className || n.nodeName);
+			look();
+		}).observe(d, { childList: true, subtree: true, characterData: true, attributes: true });
+	})()`);
 
 	const provider = new TestProvider(clientId, stack.redirectUri);
 	const transport = new StreamableHTTPClientTransport(new URL(address), {
@@ -322,7 +348,30 @@ export async function pair(
 		`document.querySelector('${dialog} .tab-mcp-status')?.textContent.endsWith('is connected.')`,
 	);
 	const buttonsAfter = await dialogButtons(calculator);
-	return { address, provider, authorizeText, buttonsBefore, buttonsAfter };
+	const { removed, codes: otherCodesInView } = await calculator.eval<{
+		removed: string[];
+		codes: string[];
+	}>("window.__e2eDialog");
+	const after = await calculator.eval<Pairing["after"]>(`(() => {
+		const d = document.querySelector('${dialog}');
+		return {
+			success: d.querySelector('.tab-mcp-success').checkVisibility(),
+			title: d.querySelector('.tab-mcp-success-title').textContent,
+			setup: d.querySelector('.tab-mcp-setup').checkVisibility(),
+			toggle: d.querySelector('.tab-mcp-setup-toggle').getAttribute('aria-expanded'),
+			focus: document.activeElement?.textContent ?? '',
+		};
+	})()`);
+	return {
+		address,
+		provider,
+		authorizeText,
+		buttonsBefore,
+		buttonsAfter,
+		removed,
+		otherCodesInView,
+		after,
+	};
 }
 
 /** A connected SDK client using the pairing's tokens. */

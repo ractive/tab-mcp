@@ -7,6 +7,31 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- The connect dialog confirms a connected AI app at the top: a check mark, "Claude
+  (claude.ai) is connected" and what to do next, also announced to screen readers. It
+  shows the same when it opens while an app is connected. New styling hooks:
+  `--tab-mcp-success`, `.tab-mcp-success` (with `.tab-mcp-success-icon`,
+  `.tab-mcp-success-title`, `.tab-mcp-success-next`), `.tab-mcp-setup-toggle`,
+  `.tab-mcp-setup` and `.tab-mcp-code-used`.
+
+#### Changed
+
+- Once an app is connected, the connect dialog's address, code and help are behind
+  "Connect another app", closed, and Done is its primary button (also when the dialog
+  opens while an app is connected; before, Done showed only after an app paired in it).
+- After a code is entered, the dialog shows "Code used. Waiting for your AI app…" in its
+  place for up to 10 seconds instead of the next code, until the app connects.
+
+#### Fixed
+
+- The connect dialog no longer flickers when an app connects: it no longer shows the next
+  code before the app is connected, nor rebuilds its list of apps (a focused Disconnect
+  keeps the focus) or, on a reconnect with the same address, its help.
+
 ### [0.10.0][client-0.10.0] - 2026-11-01
 
 #### Added

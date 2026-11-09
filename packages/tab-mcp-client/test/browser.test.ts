@@ -208,6 +208,13 @@ test.skipIf(chrome === undefined)(
 		await page.eval(
 			"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps li') ? r(true) : setTimeout(w, 10)); w(); })",
 		);
+		// An app is connected: New address is behind "Connect another app".
+		expect(
+			await page.eval(
+				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-new-address').checkVisibility()",
+			),
+		).toBe(false);
+		await page.click("dialog.tab-mcp-connect .tab-mcp-setup-toggle");
 		await page.click("dialog.tab-mcp-connect .tab-mcp-new-address");
 		expect(
 			await page.eval<string>(

@@ -4,6 +4,7 @@ import { Window } from "happy-dom";
 import type { TabMcp } from "../src/index.ts";
 import type { ConfirmRequest, Grant, SessionInfo } from "../src/types.ts";
 import {
+	CODE_USED_WAIT_MS,
 	commandAddress,
 	commandName,
 	confirmDialog,
@@ -32,6 +33,9 @@ const byText = (root: ParentNode, text: string) => {
 	if (found === undefined) throw new Error(`no button ${text}`);
 	return found;
 };
+/** Whether the element is shown: neither it nor an ancestor is `hidden`. */
+const shown = (node: Element | null) =>
+	node !== null && node.closest("[hidden]") === null;
 
 /** Resolves once the button is enabled (event-driven, via MutationObserver). */
 function enabled(button: HTMLButtonElement): Promise<void> {
@@ -582,6 +586,29 @@ describe("showConnectDialog", () => {
 		expect((dialog.querySelector(".tab-mcp-code") as HTMLElement).hidden).toBe(
 			true,
 		);
+		// An app was connected when it opened: the connected state, the setup
+		// behind "Connect another app", Done.
+		const success = dialog.querySelector(".tab-mcp-success") as HTMLElement;
+		expect(shown(success)).toBe(true);
+		expect(success.textContent).toBe(
+			"Claude (claude.ai) is connectedYou can close this now and ask it to use the tools of this page.",
+		);
+		expect(dialog.getAttribute("aria-describedby")).toBe(success.id);
+		const toggle = byText(dialog, "Connect another app");
+		expect(shown(toggle)).toBe(true);
+		expect(toggle.getAttribute("aria-expanded")).toBe("false");
+		const setup = dialog.querySelector(".tab-mcp-setup") as HTMLElement;
+		expect(toggle.getAttribute("aria-controls")).toBe(setup.id);
+		expect(setup.hidden).toBe(true);
+		const done = byText(dialog, "Done");
+		const close = byText(dialog, "Close");
+		expect(done.hidden).toBe(false);
+		expect(close.hidden).toBe(true);
+		expect(doc.activeElement).toBe(done);
+		toggle.click();
+		expect(toggle.getAttribute("aria-expanded")).toBe("true");
+		expect(setup.hidden).toBe(false);
+		expect(doc.activeElement).toBe(done);
 
 		const code = nextEvent(mcp, "pairingcode");
 		relay.send({
@@ -598,13 +625,7 @@ describe("showConnectDialog", () => {
 		expect(codeLine.textContent).toBe(
 			"When asked, enter the code 123456 CopyA new code appears every 2 minutes and after each use.",
 		);
-		// Apps connected before the dialog opened do not count: no Done yet.
-		const done = byText(dialog, "Done");
-		const close = byText(dialog, "Close");
-		expect(done.hidden).toBe(true);
-		expect(close.hidden).toBe(false);
-
-		// A newly connected app is announced in the status line.
+		// A newly connected app is named and announced; the setup closes again.
 		const added = nextEvent(mcp, "grantschange");
 		relay.send({
 			type: "grant.added",
@@ -622,6 +643,14 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
 			"ChatGPT (chatgpt.com) is connected.",
 		);
+		expect(dialog.querySelector(".tab-mcp-success-title")?.textContent).toBe(
+			"ChatGPT (chatgpt.com) is connected",
+		);
+		expect(dialog.querySelector(".tab-mcp-announce")?.textContent).toBe(
+			"ChatGPT (chatgpt.com) is connected. You can close this now and ask it to use the tools of this page.",
+		);
+		expect(setup.hidden).toBe(true);
+		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		expect(done.hidden).toBe(false);
 		expect(close.hidden).toBe(true);
 		relay.send({ type: "grant.removed", grantId: "g_2", reason: "revoked" });
@@ -637,8 +666,14 @@ describe("showConnectDialog", () => {
 		expect((dialog.querySelector(".tab-mcp-apps") as HTMLElement).hidden).toBe(
 			true,
 		);
+		// None connected: the setup again, in full, with Close.
+		expect(shown(success)).toBe(false);
+		expect(shown(toggle)).toBe(false);
+		expect(setup.hidden).toBe(false);
+		expect(close.hidden).toBe(false);
+		expect(dialog.hasAttribute("aria-describedby")).toBe(false);
 
-		done.click();
+		close.click();
 		await closed;
 		expect(await relay.next("pairing.stop")).toEqual({ type: "pairing.stop" });
 		expect(doc.querySelector("dialog")).toBeNull();
@@ -659,15 +694,16 @@ describe("showConnectDialog", () => {
 		return () => copied;
 	}
 
-	async function sendCode(code: string): Promise<void> {
+	async function sendCode(
+		code: string,
+		expiresAt = "2026-10-20T10:00:00.000Z",
+	): Promise<void> {
 		const shown = nextEvent(mcp, "pairingcode");
-		relay.send({
-			type: "pairing.code",
-			code,
-			expiresAt: "2026-10-20T10:00:00.000Z",
-		});
+		relay.send({ type: "pairing.code", code, expiresAt });
 		await shown;
 	}
+	/** An expiry two minutes from now, as the relay sends with a fresh code. */
+	const inTwoMinutes = () => new Date(Date.now() + 120_000).toISOString();
 
 	test("each command in the help has a Copy that copies it whole (dialog design)", async () => {
 		const copied = stubClipboard();
@@ -924,6 +960,180 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
+	test("an app connects: the connected state in one change, no node made again, no new code in view (owner feedback)", async () => {
+		relay.grants = [];
+		const { dialog, closed } = await open();
+		await sendCode("111111", inTwoMinutes());
+		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
+		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
+		const success = dialog.querySelector(".tab-mcp-success") as HTMLElement;
+		const setup = dialog.querySelector(".tab-mcp-setup") as HTMLElement;
+		const toggle = byText(dialog, "Connect another app");
+		const done = byText(dialog, "Done");
+		expect(shown(value)).toBe(true);
+		expect(used.hidden).toBe(true);
+		expect(shown(success)).toBe(false);
+		expect(shown(toggle)).toBe(false);
+		expect(setup.hidden).toBe(false);
+		const before = [...dialog.querySelectorAll("*")];
+		const removed: Node[] = [];
+		const observer = new (
+			window.MutationObserver as unknown as typeof MutationObserver
+		)((records) => {
+			for (const record of records)
+				for (const node of record.removedNodes)
+					if (node.nodeType === 1) removed.push(node);
+		});
+		observer.observe(dialog, { childList: true, subtree: true });
+		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).focus();
+
+		// The code is entered: the relay sends the next one at once, long
+		// before the old one expires. The AI app connects a moment later.
+		await sendCode("222222", inTwoMinutes());
+		expect(shown(value)).toBe(false);
+		expect(shown(used)).toBe(true);
+		expect(used.textContent).toBe("Code used. Waiting for your AI app…");
+		expect(shown(dialog.querySelector(".tab-mcp-code-copy"))).toBe(false);
+		// Focus leaves the hidden Copy for the visible Close.
+		expect(doc.activeElement).toBe(byText(dialog, "Close"));
+		expect(dialog.querySelector(".tab-mcp-announce")?.textContent).toBe(
+			"Code used. Waiting for your AI app…",
+		);
+
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({ type: "grant.added", grant: GRANT });
+		await added;
+		// The confirmation leads; the setup, with the next code, is closed.
+		expect(shown(success)).toBe(true);
+		expect(dialog.querySelector(".tab-mcp-success-title")?.textContent).toBe(
+			"Claude (claude.ai) is connected",
+		);
+		expect(dialog.querySelector(".tab-mcp-success-next")?.textContent).toBe(
+			"You can close this now and ask it to use the tools of this page.",
+		);
+		expect(dialog.querySelector(".tab-mcp-announce")?.textContent).toBe(
+			"Claude (claude.ai) is connected. You can close this now and ask it to use the tools of this page.",
+		);
+		expect(dialog.getAttribute("aria-describedby")).toBe(success.id);
+		expect(shown(toggle)).toBe(true);
+		expect(toggle.getAttribute("aria-expanded")).toBe("false");
+		expect(setup.hidden).toBe(true);
+		expect(shown(dialog.querySelector(".tab-mcp-status"))).toBe(false);
+		expect(doc.activeElement).toBe(done);
+		// Opened again, the setup shows the next code, ready to use.
+		toggle.click();
+		expect(shown(value)).toBe(true);
+		expect(value.textContent).toBe("222222");
+		expect(used.hidden).toBe(true);
+
+		// Nothing was taken out and put back: the same nodes, only shown or hidden.
+		observer.disconnect();
+		expect(removed).toEqual([]);
+		expect(before.every((node) => node.isConnected)).toBe(true);
+		expect(doc.querySelectorAll("dialog")).toHaveLength(1);
+		done.click();
+		await closed;
+	});
+
+	test("a used code that no app follows: the next code shows after the wait", async () => {
+		relay.grants = [];
+		const { dialog } = await open();
+		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
+		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
+		// A code that replaces an expired one shows at once.
+		await sendCode("000000");
+		await sendCode("111111", inTwoMinutes());
+		expect(value.textContent).toBe("111111");
+		expect(used.hidden).toBe(true);
+		jest.useFakeTimers();
+		try {
+			await sendCode("222222", inTwoMinutes());
+			expect(shown(used)).toBe(true);
+			jest.advanceTimersByTime(CODE_USED_WAIT_MS - 1);
+			expect(shown(used)).toBe(true);
+			jest.advanceTimersByTime(1);
+			expect(used.hidden).toBe(true);
+			expect(shown(value)).toBe(true);
+			expect(value.textContent).toBe("222222");
+		} finally {
+			jest.useRealTimers();
+		}
+		byText(dialog, "Close").click();
+	});
+
+	test("opened while an app is connected: the connected state, focus on Done, the code behind the disclosure", async () => {
+		const { dialog } = await open();
+		await sendCode("123456", inTwoMinutes());
+		expect(shown(dialog.querySelector(".tab-mcp-success"))).toBe(true);
+		expect(shown(dialog.querySelector(".tab-mcp-code-value"))).toBe(false);
+		expect(shown(dialog.querySelector(".tab-mcp-address-input"))).toBe(false);
+		expect(shown(dialog.querySelector(".tab-mcp-help"))).toBe(false);
+		expect(shown(dialog.querySelector(".tab-mcp-close-note"))).toBe(false);
+		// The connected apps, with Disconnect, stay in view.
+		expect(shown(dialog.querySelector(".tab-mcp-apps"))).toBe(true);
+		expect(doc.activeElement).toBe(byText(dialog, "Done"));
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({
+			type: "grant.added",
+			grant: {
+				...GRANT,
+				grantId: "g_2",
+				client: {
+					id: "https://chatgpt.com/c.json",
+					name: "ChatGPT",
+					host: "chatgpt.com",
+				},
+			},
+		});
+		await added;
+		// Named: the one that connected here.
+		expect(dialog.querySelector(".tab-mcp-success-title")?.textContent).toBe(
+			"ChatGPT (chatgpt.com) is connected",
+		);
+		relay.send({ type: "grant.removed", grantId: "g_2", reason: "revoked" });
+		await nextEvent(mcp, "grantschange");
+		// The one that connected here is gone: the confirmation names who is left.
+		expect(dialog.querySelector(".tab-mcp-success-title")?.textContent).toBe(
+			"Claude (claude.ai) is connected",
+		);
+		byText(dialog, "Done").click();
+	});
+
+	test("the apps list keeps its items: a focused Disconnect keeps the focus, a removed one hands it on", async () => {
+		const { dialog } = await open();
+		const first = dialog.querySelector(".tab-mcp-apps li") as HTMLElement;
+		const disconnect = first.querySelector("button") as HTMLButtonElement;
+		disconnect.focus();
+		const added = nextEvent(mcp, "grantschange");
+		relay.send({
+			type: "grant.added",
+			grant: {
+				...GRANT,
+				grantId: "g_2",
+				client: {
+					id: "https://chatgpt.com/c.json",
+					name: "ChatGPT",
+					host: "chatgpt.com",
+				},
+			},
+		});
+		await added;
+		const items = [...dialog.querySelectorAll(".tab-mcp-apps li")];
+		expect(items).toHaveLength(2);
+		expect(items[0]).toBe(first);
+		expect(doc.activeElement).toBe(disconnect);
+		expect(dialog.querySelector(".tab-mcp-success-title")?.textContent).toBe(
+			"ChatGPT (chatgpt.com) is connected",
+		);
+
+		const removed = nextEvent(mcp, "grantschange");
+		relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+		await removed;
+		expect(first.isConnected).toBe(false);
+		expect(doc.activeElement).toBe(byText(dialog, "Done"));
+		byText(dialog, "Done").click();
+	});
+
 	test("a failed connection shows the reason in the dialog", async () => {
 		const offline = newTab("http://127.0.0.1:9");
 		const connecting = offline.connect();
@@ -940,6 +1150,7 @@ describe("showConnectDialog", () => {
 
 	test("New address asks first while apps are connected; Cancel keeps the address", async () => {
 		const { dialog, session } = await open();
+		byText(dialog, "Connect another app").click();
 		const fresh = byText(dialog, "New address");
 		expect(fresh.disabled).toBe(false);
 		const question = dialog.querySelector(
@@ -966,11 +1177,12 @@ describe("showConnectDialog", () => {
 		expect(relay.received.some((m) => m.type === "grants.revokeAll")).toBe(
 			false,
 		);
-		byText(dialog, "Close").click();
+		byText(dialog, "Done").click();
 	});
 
 	test("the New address question follows the connected apps while it is open", async () => {
 		const { dialog } = await open();
+		byText(dialog, "Connect another app").click();
 		const fresh = byText(dialog, "New address");
 		const question = dialog.querySelector(
 			".tab-mcp-new-address-question",
@@ -995,6 +1207,9 @@ describe("showConnectDialog", () => {
 		expect(question.querySelector("p")?.textContent).toBe(
 			"A new address disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page again, add the new address to them.",
 		);
+		// The setup stays open while the question is: the user is answering it.
+		expect(shown(question)).toBe(true);
+		expect(doc.activeElement?.textContent).toBe("Cancel");
 
 		for (const grantId of ["g_1", "g_2"]) {
 			const removed = nextEvent(mcp, "grantschange");
@@ -1021,6 +1236,10 @@ describe("showConnectDialog", () => {
 		];
 		const { dialog } = await open();
 		const hello = await relay.next("hello");
+		expect(dialog.querySelector(".tab-mcp-success")?.textContent).toBe(
+			"Claude (claude.ai) and ChatGPT (chatgpt.com) are connectedYou can close this now and ask them to use the tools of this page.",
+		);
+		byText(dialog, "Connect another app").click();
 		byText(dialog, "New address").click();
 		expect(
 			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
@@ -1098,16 +1317,18 @@ describe("showConnectDialog", () => {
 		await sendCode("123456");
 		const has = (selector: string, kind: string) =>
 			(dialog.querySelector(selector) as HTMLElement).classList.contains(kind);
-		// Copying the address is the next step; Done once an app connected.
-		expect(has(".tab-mcp-address-copy", "tab-mcp-primary")).toBe(true);
-		expect(has(".tab-mcp-done", "tab-mcp-primary")).toBe(true);
-		expect(
-			dialog.querySelectorAll(".tab-mcp-primary:not([hidden])").length,
-		).toBe(1);
+		const primary = () =>
+			[...dialog.querySelectorAll(".tab-mcp-primary")].filter(shown);
+		// An app is connected: Done is the next step, also with the setup open.
+		expect(primary()).toEqual([byText(dialog, "Done")]);
+		byText(dialog, "Connect another app").click();
+		expect(primary()).toEqual([byText(dialog, "Done")]);
+		expect(has(".tab-mcp-address-copy", "tab-mcp-primary")).toBe(false);
 		for (const plain of [
 			".tab-mcp-code-copy",
 			".tab-mcp-new-address",
 			".tab-mcp-close",
+			".tab-mcp-setup-toggle",
 		])
 			expect(has(plain, "tab-mcp-primary")).toBe(false);
 		// Both Copy buttons take the same room as "Copy" and "Copied".
@@ -1147,6 +1368,20 @@ describe("showConnectDialog", () => {
 		expect(styled.map((e) => e.className)).toEqual([
 			"tab-mcp-code-value",
 			"tab-mcp-announce",
+		]);
+		// The check mark is drawn inline, hidden from assistive technology.
+		const icon = dialog.querySelector(".tab-mcp-success svg") as Element;
+		expect(icon.getAttribute("class")).toBe("tab-mcp-success-icon");
+		expect(icon.getAttribute("aria-hidden")).toBe("true");
+		expect(icon.querySelector("path")?.getAttribute("stroke")).toBe(
+			"currentColor",
+		);
+
+		// None connected: copying the address is the next step.
+		relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+		await nextEvent(mcp, "grantschange");
+		expect(primary()).toEqual([
+			dialog.querySelector(".tab-mcp-address-copy") as Element,
 		]);
 		byText(dialog, "Close").click();
 	});
@@ -1240,11 +1475,16 @@ describe("the dialogs' stylesheet (dialog design)", () => {
 		expect(DIALOG_CSS).toContain(
 			".tab-mcp-dialog:where([open]) { display: flex;",
 		);
+		// Every animation (the dialog's, the check mark's) is in the one block
+		// for users who allow motion.
 		const animations = [...DIALOG_CSS.matchAll(/animation:/g)].length;
-		expect(animations).toBe(1);
-		expect(DIALOG_CSS).toMatch(
-			/@media \(prefers-reduced-motion: no-preference\) \{[^}]*animation:/,
-		);
+		expect(animations).toBe(2);
+		const motion =
+			/@media \(prefers-reduced-motion: no-preference\) \{((?:[^{}]*\{[^}]*\})*)[^}]*\}/.exec(
+				DIALOG_CSS,
+			)?.[1] ?? "";
+		expect([...motion.matchAll(/animation:/g)].length).toBe(animations);
+		expect(motion).toContain(".tab-mcp-success-icon { animation:");
 		expect(DIALOG_CSS).toContain(":focus-visible");
 	});
 

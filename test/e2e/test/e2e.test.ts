@@ -96,6 +96,18 @@ test.skipIf(chrome === undefined)(
 		expect(pairing.buttonsBefore).toEqual(["Close"]);
 		expect(pairing.buttonsAfter).toEqual(["Done"]);
 		const host = new URL(stack.cimd.origin).host;
+		// Once paired: the confirmation leads, the setup (with the next code)
+		// is closed, focus is on Done. On the way there, nothing was rebuilt
+		// and the next code never came into view (owner feedback).
+		expect(pairing.after).toEqual({
+			success: true,
+			title: `${CLIENT_NAME} (${host}) is connected`,
+			setup: false,
+			toggle: "false",
+			focus: "Done",
+		});
+		expect(pairing.removed).toEqual([]);
+		expect(pairing.otherCodesInView).toEqual([]);
 		expect(
 			await page.eval(
 				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps').textContent",
