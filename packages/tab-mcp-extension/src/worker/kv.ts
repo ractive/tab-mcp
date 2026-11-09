@@ -98,21 +98,32 @@ export interface OldArea {
 	remove(keys: string[]): Promise<void>;
 }
 
+/** In `kv` once the settings were moved: from then on nothing is taken from the old area. */
+export const MIGRATED = "migrated";
+
 /**
- * Move the settings from `chrome.storage.local` into `kv`, once. Crash-safe
- * and idempotent: the entries are written first, then removed from the old
- * area; one already in `kv` (from a migration a crash cut short) is kept, as
- * it may have changed since. Returns the keys moved.
+ * Move the settings from `chrome.storage.local` into `kv`, once: the moved
+ * entries and the `MIGRATED` marker are written in one transaction, also when
+ * there was nothing to move (a first start), then the old keys are removed.
+ * After that nothing is ever taken from the old area again: where Chrome does
+ * not keep content scripts out of it, one could write a relay or a secret
+ * there for the next start to pick up. What setting keys are still found
+ * there (a removal a crash cut short, or a content script's) are only
+ * removed. A key already in `kv` is kept. Returns the keys moved.
  */
 export async function migrate(old: OldArea, kv: Kv): Promise<string[]> {
+	const done = (await kv.get(MIGRATED)) !== undefined;
 	const stored = await old.get(null);
 	const keys = Object.keys(stored).filter(isSettingKey);
-	if (keys.length === 0) return [];
+	if (done) {
+		if (keys.length > 0) await old.remove(keys);
+		return [];
+	}
 	const present = await kv.all();
 	const missing = Object.fromEntries(
 		keys.filter((k) => !(k in present)).map((k) => [k, stored[k]]),
 	);
-	if (Object.keys(missing).length > 0) await kv.set(missing);
-	await old.remove(keys);
-	return keys;
+	await kv.set({ ...missing, [MIGRATED]: 1 });
+	if (keys.length > 0) await old.remove(keys);
+	return Object.keys(missing);
 }

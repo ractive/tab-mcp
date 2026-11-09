@@ -18,7 +18,7 @@ import {
 } from "../src/protocol.ts";
 import { allowable, isAllowed } from "../src/worker/allowed.ts";
 import { AlwaysAllowed } from "../src/worker/always.ts";
-import { memoryKv, migrate } from "../src/worker/kv.ts";
+import { MIGRATED, memoryKv, migrate } from "../src/worker/kv.ts";
 import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
@@ -496,11 +496,37 @@ describe("the settings in IndexedDB", () => {
 			].sort(),
 		);
 		const { somethingElse: _, ...settings } = OLD;
-		expect(Object.fromEntries(kv.data)).toEqual(settings);
+		// With the marker that it was done.
+		expect(Object.fromEntries(kv.data)).toEqual({
+			...settings,
+			[MIGRATED]: 1,
+		});
 		expect(old.data).toEqual({ somethingElse: 1 });
 		// Again: nothing left to move, nothing changes.
 		expect(await migrate(old, kv)).toEqual([]);
-		expect(Object.fromEntries(kv.data)).toEqual(settings);
+		expect(Object.fromEntries(kv.data)).toEqual({
+			...settings,
+			[MIGRATED]: 1,
+		});
+	});
+
+	test("once moved, never again: what a content script writes into chrome.storage.local is not taken", async () => {
+		const kv = memoryKv();
+		await migrate(oldArea({}), kv);
+		// A first start with nothing to move sets the marker too.
+		expect(kv.data.get(MIGRATED)).toBe(1);
+		// Where Chrome lets content scripts write the old area: a relay of
+		// theirs, AI access on, their own tools allowed, a secret.
+		const injected = oldArea({
+			relay: "https://evil.example",
+			aiOn: true,
+			allowedTools: { "https://evil.example": ["steal"] },
+			"tab-mcp:secret:https://evil.example:tab-mcp-for-chrome": "B".repeat(43),
+		});
+		expect(await migrate(injected, kv)).toEqual([]);
+		expect(Object.fromEntries(kv.data)).toEqual({ [MIGRATED]: 1 });
+		// Only removed from there.
+		expect(injected.data).toEqual({});
 	});
 
 	test("crash-safe: written before removed; a second run keeps what changed since", async () => {

@@ -289,9 +289,12 @@ did, by connecting the extension.
   a page's compromised renderer, running code in the content script's world, can neither
   read the secret (and take the address over from anywhere) nor allow its own tools.
   `chrome.storage.local`, where an earlier version kept them, is readable and writable
-  by content scripts by default: the worker moves what it finds there into IndexedDB at
-  its start (written first, then removed, so a crash loses nothing) and leaves it
-  empty. As an extra layer it also sets that area to `TRUSTED_CONTEXTS`; sources
+  by content scripts by default: the worker moves what it finds there into IndexedDB
+  once, at its first start with this version (the entries and a "migrated" marker in one
+  transaction, then removed from the old area, so a crash loses nothing). Every later
+  start takes nothing from there, only removes setting keys it finds: where Chrome lets
+  content scripts write the area, a relay or secret written there must not be picked up
+  (the extension would connect to that relay and send it the address secret). As an extra layer it also sets that area to `TRUSTED_CONTEXTS`; sources
   disagree on whether Chrome takes that for the local area (Chromium's API schema and
   MDN: session only; Chrome's guide: local too), an end-to-end test shows it in Chrome
   156, and nothing relies on it: a refusal is only logged. Whether the level outlasts a
