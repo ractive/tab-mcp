@@ -356,7 +356,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.8.0][relay-0.8.0] - 2026-11-09
 
 #### Added
 
@@ -364,6 +364,11 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   last code was entered), `locked` (5 wrong attempts) or `expired`. The page's dialog
   uses it to wait for the AI app after a code was used instead of showing the next code
   at once. Older clients ignore it.
+- When the same browser sends the `/authorize` form again for a request that already
+  paired (a double click, a page left open), the page names the AI app and says
+  "Already connected" once the app exchanged its code, else "Already sent" (start
+  again if the app does not show the connection), instead of "This connection request
+  has expired or was already used". Another browser still gets the error.
 
 ### [0.7.1][relay-0.7.1] - 2026-11-09
 
@@ -719,6 +724,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.8.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.8.0
 [relay-0.7.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.1
 [relay-0.7.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.0
 [relay-0.6.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.6.1
