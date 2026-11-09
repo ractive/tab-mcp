@@ -19,6 +19,9 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
   `.tab-mcp-setup` and `.tab-mcp-code-used`.
 - `PairingCode.reason` (`start`, `used`, `locked`, `expired`, type `PairingCodeReason`):
   why the relay sent the code, when it says so. A missing or unknown reason is left out.
+- `@ractive-ch/tab-mcp-client/visible`: `escapeInvisible(text)`, the escaping the
+  confirmation dialog uses for the arguments and the AI app's name, for pages (and tab-mcp
+  for Chrome) that ask in their own UI. An entry of its own, not in the core.
 
 #### Changed
 
@@ -32,6 +35,10 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 #### Fixed
 
+- The confirmation shows more characters as `\uXXXX` escapes: controls (C0 and C1 but
+  tab and line feed), every space but U+0020 (U+00A0, U+2007, U+3000…), the Braille blank
+  U+2800 and lone surrogates, beside the format, default-ignorable (variation selectors,
+  U+034F, the Hangul fillers), private-use and unassigned characters it escaped before.
 - The connect dialog no longer flickers when an app connects: it no longer shows the next
   code before the app is connected, nor rebuilds its list of apps (a focused Disconnect
   keeps the focus) or, on a reconnect with the same address, its help.

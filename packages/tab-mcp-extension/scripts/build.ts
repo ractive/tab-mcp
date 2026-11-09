@@ -114,7 +114,6 @@ export function createManifest(
 			"notifications",
 			"scripting",
 			"sidePanel",
-			"storage",
 		],
 		optional_host_permissions: ["<all_urls>"],
 		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
@@ -184,6 +183,13 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 		...(await bundle(
 			"src/sidepanel/index.html",
 			join(outdir, "sidepanel"),
+			"esm",
+			minify,
+		)),
+		// A question's own window, where the side panel could not open.
+		...(await bundle(
+			"src/question/index.html",
+			join(outdir, "question"),
 			"esm",
 			minify,
 		)),
