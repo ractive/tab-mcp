@@ -46,3 +46,33 @@ export async function loadAiOn(): Promise<boolean> {
 export async function saveAiOn(on: boolean): Promise<void> {
 	await chrome.storage.local.set({ [ON_KEY]: on });
 }
+
+const REPLACED_KEY = "replaced";
+
+/**
+ * Another tab or program took the address over (`replaced`): kept across
+ * worker restarts, so a restart does not take the address back by itself
+ * (and the two sides do not take it from each other every minute).
+ */
+export interface Replaced {
+	sibling: boolean;
+}
+
+export async function loadReplaced(): Promise<Replaced | undefined> {
+	const stored = (await chrome.storage.local.get(REPLACED_KEY))[REPLACED_KEY];
+	return typeof stored === "object" &&
+		stored !== null &&
+		typeof (stored as Replaced).sibling === "boolean"
+		? { sibling: (stored as Replaced).sibling }
+		: undefined;
+}
+
+export async function saveReplaced(
+	replaced: Replaced | undefined,
+): Promise<void> {
+	if (replaced === undefined) await chrome.storage.local.remove(REPLACED_KEY);
+	else
+		await chrome.storage.local.set({
+			[REPLACED_KEY]: { sibling: replaced.sibling },
+		});
+}

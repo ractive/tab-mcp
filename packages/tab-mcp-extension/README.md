@@ -24,7 +24,8 @@ The page's tools are the page's word:
   (see "Questions" below). "Always allow" stops asking for that tool, for that AI app on
   this page, until the page changes (navigation, reload, another tab). In the panel's
   list, a click on "asks first" turns the tool into "allowed" for that site (exact
-  origin), kept until you click it again.
+  origin), kept until you click it again. Both only for pages of an http(s) site: pages
+  with an opaque origin (`null`, such as sandboxed or `data:` pages) always ask.
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
   changed, the AI app is told to list the tools again.
@@ -64,15 +65,19 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 - The connection lives in the extension's service worker, not in the side panel: close
   the panel and AI access stays on, until "Turn off". It comes back by itself after a
   browser start, an update or a reload of the extension when you left it on. The icon
-  shows "on" while it is connected, "…" while it connects, "?" while a tool asks.
+  shows "on" while it is connected, "…" while it connects, "?" while a tool asks. If
+  another tab or program takes the address over, the extension does not take it back by
+  itself, also after a restart: the panel says so and offers "New address" (or Connect,
+  to take it back).
 
 ## Questions
 
 A tool that asks first asks in the side panel when the panel is open in the window of the
 tab the tool acts on and that window is in front: Allow and Always allow work once the
 panel has been in front for 750 ms, so the click that brings it forward cannot approve.
-Otherwise it asks in a Chrome notification, "Allow <tool> on <site>?", naming the AI app
-(its name and its verified host) and the arguments in short, with Don't allow first and
+Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
+cut to 60 characters) with "On <site>" below, naming the AI app (its name and its
+verified host) and the arguments in short, with Don't allow first and
 Allow second; an Allow within half a second of the notification showing does not count,
 and a click on the notification's body, or closing it, is Don't allow. A notification
 answers only its own call. Questions also show in every open side panel, so with

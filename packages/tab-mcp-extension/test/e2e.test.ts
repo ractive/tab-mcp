@@ -33,6 +33,7 @@ import {
 	type TestRelay,
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
+import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import {
 	Browser,
@@ -434,7 +435,10 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 
 	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
 		const toggle = `button[data-tool="place_order"]`;
-		await stack.panel.waitFor(`document.querySelector('${toggle}')`);
+		// Off for a moment after the last question went (the layout moved).
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}') && !document.querySelector('${toggle}').disabled`,
+		);
 		await stack.panel.click(toggle);
 		await stack.panel.waitFor(
 			`document.querySelector('${toggle}').textContent === "allowed"`,
@@ -542,13 +546,56 @@ describe.skipIf(chrome === undefined)(
 			stack.worker.eval<string>("chrome.action.getBadgeText({})");
 
 		test("a question in the panel of the tab's focused window sends no notification", async () => {
+			// Every notification the worker makes, also one cleared at once.
+			await stack.worker.eval(`(() => {
+				globalThis.e2eCreated = [];
+				const create = chrome.notifications.create.bind(chrome.notifications);
+				chrome.notifications.create = (...args) => {
+					globalThis.e2eCreated.push(args[0]);
+					return create(...args);
+				};
+			})()`);
 			const asked = call(stack, "page_place_order", { item: "panel" });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			expect(await badge()).toBe("?");
-			expect(await notifications(stack)).toEqual([]);
 			await answerInPanel(stack, "allow");
 			expect((await asked).isError).toBeFalsy();
 			expect(await badge()).toBe("on");
+			// Routed and answered: none was made.
+			expect(await stack.worker.eval("globalThis.e2eCreated")).toEqual([]);
+		});
+
+		test("when a question goes, what moves up under the pointer cannot allow at once", async () => {
+			const first = call(stack, "page_place_order", { item: "first" });
+			await stack.panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 1`,
+			);
+			const second = call(stack, "page_place_order", { item: "second" });
+			await stack.panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 2`,
+			);
+			await stack.panel.send("Emulation.setFocusEmulationEnabled", {
+				enabled: true,
+			});
+			const top = `document.querySelector('[data-question] button[data-answer="allow"]')`;
+			await stack.panel.waitFor(`!${top}.disabled`);
+			await stack.panel.eval(`${top}.id = "e2e-answer"`);
+			await stack.panel.click("#e2e-answer");
+			expect((await first).isError).toBeFalsy();
+			await stack.panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 1`,
+			);
+			// The question left, and the tools' switches, wait again.
+			expect(
+				await stack.panel.eval(
+					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), button.badge.toggle')].map((b) => b.disabled)`,
+				),
+			).toEqual([true, true, true]);
+			await stack.panel.waitFor(
+				`![...document.querySelectorAll("button.badge.toggle")].some((b) => b.disabled)`,
+			);
+			await answerInPanel(stack, "deny");
+			expect((await second).isError).toBe(true);
 		});
 
 		test("a panel closed during a question hands it to a notification", async () => {
@@ -608,6 +655,120 @@ describe.skipIf(chrome === undefined)(
 					`document.getElementById("tab-title").textContent`,
 				),
 			).toBe("Page with WebMCP tools");
+		});
+	},
+);
+
+describe.skipIf(chrome === undefined)(
+	"panel commands, and the address taken over",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start({ store: false }, `${SITE}/webmcp.html`);
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		const stored = <T>(key: string) =>
+			stack.worker.eval<T>(
+				`chrome.storage.local.get(${JSON.stringify(key)}).then((s) => s[${JSON.stringify(key)}] ?? null)`,
+			);
+
+		test("commands run one after another: a connect then a stop ends off, two allowed writes both hold", async () => {
+			await stack.panel.eval(`(async () => {
+				const port = chrome.runtime.connect({ name: "panel" });
+				port.postMessage({ type: "connect" });
+				port.postMessage({ type: "stop" });
+				for (const name of ["a", "b"])
+					port.postMessage({ type: "set-allowed", origin: "${SITE}", name, on: true });
+				await new Promise((resolve) => setTimeout(resolve, 1500));
+				port.disconnect();
+			})()`);
+			expect(await stored<boolean>("aiOn")).toBe(false);
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "off"`,
+			);
+			expect(
+				(await stored<Record<string, string[]>>("allowedTools"))[SITE],
+			).toEqual(["a", "b"]);
+		});
+
+		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
+			await stack.panel.click("#connect");
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state !== "off" && document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
+				15_000,
+			);
+			await stack.panel.click("#pair-done");
+			// Another program with a copy of the address secret takes it over.
+			const secrets = await stack.worker.eval<Record<string, string>>(
+				`chrome.storage.local.get(null).then((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith("tab-mcp:secret:"))))`,
+			);
+			const impostor = new TabMcp({
+				relay: stack.relay.url,
+				server: { name: "tab-mcp-for-chrome", version: "1.0.0" },
+				storage: {
+					getItem: (key) => secrets[key] ?? null,
+					setItem: () => {},
+				},
+			});
+			try {
+				expect((await impostor.connect({ resume: true })).address).toBe(
+					stack.address,
+				);
+				await stack.panel.waitFor(
+					`!document.getElementById("replaced").hidden`,
+				);
+				expect(await stored("replaced")).toEqual({ sibling: false });
+				// A notification a worker leaves behind answers nothing after it.
+				await stack.worker.eval(
+					`chrome.notifications.create("e2e-stale", { type: "basic", iconUrl: chrome.runtime.getURL("icons/icon-128.png"), title: "stale", message: "stale" })`,
+				);
+				// The extension restarts (an update, a reload).
+				await stack.browser.send("Extensions.loadUnpacked", {
+					path: stack.extension,
+				});
+				await Bun.sleep(1000);
+				stack.worker = await stack.browser.serviceWorker(
+					stack.browser.extensionId as string,
+				);
+				await stack.worker.eval("true");
+				// The alarm comes: still nothing taken back.
+				await stack.worker.eval(
+					`chrome.alarms.create("tab-mcp-keepup", { when: Date.now() + 50 })`,
+				);
+				await Bun.sleep(1500);
+				expect(impostor.state).toBe("connected");
+				expect(await notifications(stack)).toEqual([]);
+				// The panel shows the notice from what was kept.
+				stack.panel = await openPanel(stack.browser, stack.tab);
+				await stack.panel.waitFor(
+					`!document.getElementById("replaced").hidden`,
+				);
+				expect(
+					await stack.panel.eval(
+						`document.getElementById("state").dataset.state`,
+					),
+				).toBe("off");
+				// New address: the old one is taken back, then a new one made.
+				await stack.panel.click("#replaced-new-address");
+				const fresh = await stack.panel.waitFor<string>(
+					`(() => { const a = document.getElementById("address").textContent; return a && a !== ${JSON.stringify(stack.address)} && a; })()`,
+					15_000,
+				);
+				expect(fresh).not.toBe(stack.address);
+				expect(impostor.state).toBe("disconnected");
+				expect(await stored("replaced")).toBeNull();
+				expect(
+					await stack.panel.eval(`document.getElementById("replaced").hidden`),
+				).toBe(true);
+			} finally {
+				await impostor.disconnect();
+			}
 		});
 	},
 );

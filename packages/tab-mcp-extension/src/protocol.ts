@@ -56,6 +56,8 @@ export interface QuestionView {
 	origin?: string;
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
+	/** "Always allow" is offered (a page of an http(s) site). */
+	always: boolean;
 }
 
 /** A page tool as the panel lists it. */
@@ -78,6 +80,11 @@ export interface TabView {
 	access: string;
 	origin?: string;
 	tools: ToolView[];
+	/**
+	 * Its tools can be "allowed" (a page of an http(s) site; an opaque origin,
+	 * "null", would share one entry with every other).
+	 */
+	canAllow: boolean;
 	/** Tools the page's own tab-mcp connection offers, left out. */
 	mirrored: number;
 }

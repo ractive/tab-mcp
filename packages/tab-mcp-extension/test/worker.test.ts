@@ -16,6 +16,7 @@ import {
 	type PanelCommand,
 	parseCommand,
 } from "../src/protocol.ts";
+import { allowable, isAllowed } from "../src/worker/allowed.ts";
 import { AlwaysAllowed } from "../src/worker/always.ts";
 import {
 	NOTIFICATION_GUARD_MS,
@@ -175,7 +176,8 @@ describe("questions", () => {
 		await settle();
 		expect(questions.list).toHaveLength(1);
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
-		expect(text.title).toBe("Allow Place order on site.test?");
+		expect(text.title).toBe("Allow Place order?");
+		expect(text.contextMessage).toBe("On site.test · tab-mcp for Chrome");
 		expect(text.message).toBe(
 			'Claude (claude.ai) wants to run page_place_order: {"item":"tea"}',
 		);
@@ -287,26 +289,78 @@ describe("questions", () => {
 		expect(await questions.ask(request({}, gone.signal), {})).toBe("deny");
 	});
 
-	test("arguments and names show invisible and direction characters as \\u escapes", () => {
+	test("arguments and names show invisible, blank and direction characters as \\u escapes", () => {
 		expect(visible("pay‮evil​")).toBe("pay\\u202eevil\\u200b");
 		expect(visible("tag\u{E0041}")).toBe("tag\\u{e0041}");
-		expect(visible("plain äöü 😀")).toBe("plain äöü 😀");
+		// Every space but the plain one, and the blank letters.
+		expect(visible("a b c　d")).toBe("a\\u00a0b\\u2007c\\u3000d");
+		expect(visible("⠀ㅤᅟᅠﾠ")).toBe("\\u2800\\u3164\\u115f\\u1160\\uffa0");
+		expect(visible("plain text, äöü 😀")).toBe("plain text, äöü 😀");
+		// JSON's layout stays; a carriage return does not.
 		expect(visible('{\n\t"a": 1\r}')).toBe('{\n\t"a": 1\\u000d}');
-		const text = notificationText(
-			{
-				id: "q",
-				app: "Claude (claude.ai)",
-				host: "claude.ai",
-				tool: "page_x",
-				args: "{}",
-			},
-			"{}",
+	});
+
+	test("a notification's title cuts the page's title on its own; the site stays whole", () => {
+		const view = {
+			id: "q",
+			app: "Claude (claude.ai)",
+			host: "claude.ai",
+			tool: "page_x",
+			title: "A".repeat(200),
+			origin: "https://shop.example",
+			args: "{}",
+			always: true,
+		};
+		const text = notificationText(view, "{}");
+		expect(text.title).toBe(`Allow ${"A".repeat(59)}…?`);
+		expect(text.contextMessage).toBe("On shop.example · tab-mcp for Chrome");
+		expect(notificationText({ ...view, title: "Order" }, "{}").title).toBe(
+			"Allow Order?",
 		);
-		expect(text).toEqual({
+		const { origin: _, title: __, ...bare } = view;
+		expect(notificationText(bare, "{}")).toEqual({
 			title: "Allow page_x?",
 			message: "Claude (claude.ai) wants to run page_x.",
 			contextMessage: "tab-mcp for Chrome",
 		});
+	});
+
+	test("Always allow is offered only for a page of an http(s) site", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		for (const [origin, always] of [
+			["https://site.test", true],
+			["http://localhost:8080", true],
+			["null", false],
+			["file://", false],
+			["chrome-extension://abc", false],
+		] as const) {
+			const answer = questions.ask(request(), { tabId: 7, origin });
+			await settle();
+			const q = questions.list.at(-1);
+			expect(q?.always).toBe(always);
+			questions.answer(q?.id as string, "deny");
+			await answer;
+		}
+	});
+});
+
+describe("allowed tools", () => {
+	test("only for http(s) origins: an opaque origin (null) is never allowed", () => {
+		expect(allowable("https://site.test")).toBe(true);
+		expect(allowable("http://127.0.0.1:3000")).toBe(true);
+		for (const origin of [
+			"null",
+			"",
+			"file://",
+			"data:text/html,x",
+			"chrome-extension://abc",
+			"https://site.test/path",
+		])
+			expect(allowable(origin)).toBe(false);
+		const allowed = { null: ["t"], "https://site.test": ["t"] };
+		expect(isAllowed(allowed, "null", "t")).toBe(false);
+		expect(isAllowed(allowed, "https://site.test", "t")).toBe(true);
 	});
 });
 

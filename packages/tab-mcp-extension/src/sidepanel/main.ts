@@ -47,7 +47,18 @@ function send(command: PanelCommand): void {
  * a reload): connect again, which starts the worker.
  */
 function connect(): void {
-	const opened = chrome.runtime.connect({ name: PANEL_PORT });
+	let opened: chrome.runtime.Port;
+	try {
+		opened = chrome.runtime.connect({ name: PANEL_PORT });
+	} catch {
+		// The extension was updated, reloaded or removed: this panel belongs
+		// to the version before and can reach nothing any more.
+		port = undefined;
+		problem(
+			"tab-mcp for Chrome was updated or reloaded: close and open this panel again.",
+		);
+		return;
+	}
 	port = opened;
 	opened.onMessage.addListener((message: WorkerMessage) => {
 		if (message?.type === "state") show(message.state);
@@ -157,26 +168,43 @@ function question(q: QuestionView): HTMLElement {
 		});
 		return b;
 	};
-	buttons.append(
-		button("Don't allow", "deny"),
-		button("Allow", "allow", true),
-		button("Always allow", "always"),
-	);
-	const always = document.createElement("p");
-	always.className = "muted small";
-	always.textContent =
-		"Always allow: this tool runs without asking for this AI app, until the page changes.";
-	card.append(ask, tool, args, buttons, always);
+	buttons.append(button("Don't allow", "deny"), button("Allow", "allow", true));
+	card.append(ask, tool, args, buttons);
+	// Not for a page without a site of its own (an opaque origin).
+	if (q.always) {
+		buttons.append(button("Always allow", "always"));
+		const always = document.createElement("p");
+		always.className = "muted small";
+		always.textContent =
+			"Always allow: this tool runs without asking for this AI app, until the page changes.";
+		card.append(always);
+	}
 	return card;
 }
 
+/**
+ * Until when the panel's buttons that allow something stay off after its
+ * layout moved: a question that went away moves what was below it up, under
+ * the pointer, and a click meant for it must not land on an Allow or an
+ * "asks first" that came there.
+ */
+let movedUntil = 0;
+
 function showQuestions(questions: QuestionView[]): void {
 	const ids = new Set(questions.map((q) => q.id));
+	let removed = false;
 	for (const [id, { card }] of cards)
 		if (!ids.has(id)) {
 			card.remove();
 			cards.delete(id);
+			removed = true;
 		}
+	if (removed) {
+		const now = Date.now();
+		movedUntil = now + ALLOW_DELAY_MS;
+		// Every question left waits again, as if just shown.
+		for (const entry of cards.values()) entry.shownAt = now;
+	}
 	for (const q of questions)
 		if (!cards.has(q.id)) {
 			const card = question(q);
@@ -204,10 +232,14 @@ function arm(): void {
 		))
 			b.disabled = !ready;
 	}
+	for (const toggle of document.querySelectorAll<HTMLButtonElement>(
+		"button.badge.toggle",
+	))
+		toggle.disabled = now < movedUntil;
 }
 
 setInterval(() => {
-	if (cards.size > 0) arm();
+	if (cards.size > 0 || Date.now() < movedUntil + 200) arm();
 }, 100);
 for (const type of ["focus", "blur", "visibilitychange"])
 	window.addEventListener(type, arm);
@@ -233,13 +265,19 @@ function allowToggle(origin: string, tool: ToolView): HTMLElement {
 		: `Asks you before each call. Click to allow it on ${origin} without asking.`;
 	button.setAttribute("aria-pressed", String(on));
 	button.dataset["tool"] = tool.name;
-	button.addEventListener("click", () =>
-		send({ type: "set-allowed", origin, name: tool.name, on: !on }),
-	);
+	button.disabled = Date.now() < movedUntil;
+	button.addEventListener("click", () => {
+		if (!button.disabled)
+			send({ type: "set-allowed", origin, name: tool.name, on: !on });
+	});
 	return button;
 }
 
-function toolItem(origin: string, tool: ToolView): HTMLElement {
+function toolItem(
+	origin: string,
+	canAllow: boolean,
+	tool: ToolView,
+): HTMLElement {
 	const li = document.createElement("li");
 	const name = document.createElement("span");
 	name.className = "name";
@@ -262,7 +300,9 @@ function toolItem(origin: string, tool: ToolView): HTMLElement {
 			? badge("left out")
 			: tool.readOnly
 				? badge("reads", "reads")
-				: allowToggle(origin, tool),
+				: canAllow
+					? allowToggle(origin, tool)
+					: badge("asks first", "asks"),
 	);
 	return li;
 }
@@ -295,7 +335,9 @@ function showTab(s: PanelState): void {
 			? `${mirrored} more ${mirrored === 1 ? "comes" : "come"} from the page's own tab-mcp connection.`
 			: "");
 	$("tools").replaceChildren(
-		...(tab?.tools ?? []).map((tool) => toolItem(tab?.origin ?? "", tool)),
+		...(tab?.tools ?? []).map((tool) =>
+			toolItem(tab?.origin ?? "", tab?.canAllow === true, tool),
+		),
 	);
 }
 

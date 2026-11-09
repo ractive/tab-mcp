@@ -10,6 +10,7 @@
 
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import type { Answer, QuestionView } from "../protocol.ts";
+import { allowable } from "./allowed.ts";
 
 /** A question nobody answers in this time is Don't allow. */
 export const QUESTION_TIMEOUT_MS = 60_000;
@@ -42,17 +43,26 @@ export interface NotificationText {
 	contextMessage: string;
 }
 
+const INVISIBLE =
+	/(?![\t\n ])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}\u2800\u3164\u115F\u1160\uFFA0]/gu;
+
+/** The page's title of a tool in a notification's title is cut to this. */
+export const MAX_NOTIFICATION_TITLE = 60;
+
 const cut = (text: string, max: number) =>
 	text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
 /**
- * Characters that are invisible or turn the text's direction (U+202E, say)
- * written as `\uXXXX`, so the AI app cannot make the arguments look like
- * something else. The tool gets them unchanged.
+ * Characters that are invisible, blank or turn the text's direction (U+202E,
+ * say) written as `\uXXXX`, so the AI app cannot make the arguments look like
+ * something else: controls, format characters, line and paragraph
+ * separators, every space but the plain one (U+00A0, U+2007, U+3000…) and
+ * the blank letters (U+2800 Braille blank, U+3164, U+115F, U+1160, U+FFA0
+ * Hangul fillers). The tool gets them unchanged.
  */
 export function visible(text: string): string {
 	// Line breaks and tabs stay: in JSON they are only the layout.
-	return text.replace(/(?![\t\n])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => {
+	return text.replace(INVISIBLE, (c) => {
 		const code = c.codePointAt(0) ?? 0;
 		return code > 0xffff
 			? `\\u{${code.toString(16)}}`
@@ -75,20 +85,26 @@ function hostOf(origin: string | undefined): string | undefined {
 	}
 }
 
-/** A notification's text for a question. */
+/**
+ * A notification's text for a question. The page's title is cut on its own,
+ * so that however long it is, the site (the part that is verified) stays
+ * whole, in the context line.
+ */
 export function notificationText(
 	view: QuestionView,
 	summary: string,
 ): NotificationText {
-	const what = view.title ?? view.tool;
+	const what = cut(view.title ?? view.tool, MAX_NOTIFICATION_TITLE);
 	const site = hostOf(view.origin);
 	return {
-		title: cut(`Allow ${what}${site ? ` on ${site}` : ""}?`, 120),
+		title: `Allow ${what}?`,
 		message: cut(
 			`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
 			300,
 		),
-		contextMessage: "tab-mcp for Chrome",
+		contextMessage: site
+			? `On ${site} · tab-mcp for Chrome`
+			: "tab-mcp for Chrome",
 	};
 }
 
@@ -137,6 +153,7 @@ export class Questions {
 			...(request.tool.title ? { title: visible(request.tool.title) } : {}),
 			...(where.origin ? { origin: where.origin } : {}),
 			args: cut(json, MAX_ARGS),
+			always: where.origin !== undefined && allowable(where.origin),
 		};
 		const summary = cut(
 			visible(JSON.stringify(request.arguments) ?? "{}"),

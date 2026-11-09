@@ -238,6 +238,26 @@ interface Callable {
 	validator: Validator;
 }
 
+/** A page tool's schema and validator, or why it has none. */
+type Compiled =
+	| { schema: Record<string, unknown>; validator: Validator }
+	| { problem: string };
+
+function compile(tool: PageTool): Compiled {
+	const made = schemaFor(tool);
+	if ("problem" in made) return made;
+	try {
+		return {
+			schema: made.schema,
+			validator: new Validator(made.schema, "2020-12", false),
+		};
+	} catch (error) {
+		return {
+			problem: `its inputSchema cannot be used: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
 /** What makes two offers the same tool: re-register only when it changes. */
 const keyOf = (tabId: number, documentId: string, tool: PageTool) =>
 	JSON.stringify([tabId, documentId, tool]);
@@ -291,6 +311,8 @@ export class PageToolBridge {
 	>();
 	/** The page's offered tools by their page name, for `webmcp_call`. */
 	#callable = new Map<string, Callable>();
+	/** The schemas and validators of the last read, by `keyOf`. */
+	#compiled = new Map<string, Compiled>();
 	#state: BridgeState = { available: false, tools: [], mirrored: [] };
 	/** The refresh running, and whether another was asked for meanwhile. */
 	#running: Promise<void> | undefined;
@@ -426,6 +448,7 @@ export class PageToolBridge {
 		const offered: Offered[] = [];
 		const wanted: { name: string; key: string; tool: Tool }[] = [];
 		const callable = new Map<string, Callable>();
+		const compiled = new Map<string, Compiled>();
 		let more = tools.more;
 		for (const pageTool of tools.tools) {
 			if (offered.length >= MAX_TOOLS) {
@@ -454,18 +477,16 @@ export class PageToolBridge {
 				entry.problem = `its name becomes ${name}, as ${cut(clash.target.name, MAX_NAME)} does`;
 				continue;
 			}
-			const schema = schemaFor(pageTool);
-			if ("problem" in schema) {
-				entry.problem = schema.problem;
+			// The schema and its validator once per tool as offered, not on
+			// every refresh (each tab switch, each toolchange).
+			const key = keyOf(tab.id, tools.documentId, pageTool);
+			const made = this.#compiled.get(key) ?? compile(pageTool);
+			compiled.set(key, made);
+			if ("problem" in made) {
+				entry.problem = made.problem;
 				continue;
 			}
-			let validator: Validator;
-			try {
-				validator = new Validator(schema.schema, "2020-12", false);
-			} catch (error) {
-				entry.problem = `its inputSchema cannot be used: ${error instanceof Error ? error.message : String(error)}`;
-				continue;
-			}
+			const { schema, validator } = made;
 			entry.tool = name;
 			const item: Callable = {
 				tabId: tab.id,
@@ -476,14 +497,11 @@ export class PageToolBridge {
 				validator,
 			};
 			callable.set(pageTool.name, item);
-			wanted.push({
-				name,
-				key: keyOf(tab.id, tools.documentId, pageTool),
-				tool: this.#tool(item, name, schema.schema),
-			});
+			wanted.push({ name, key, tool: this.#tool(item, name, schema) });
 		}
 		this.#offer(wanted, offered);
 		this.#callable = callable;
+		this.#compiled = compiled;
 		this.#state = {
 			url: tools.url,
 			origin: tools.origin,

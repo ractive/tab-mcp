@@ -252,8 +252,11 @@ did, by connecting the extension.
   call acts on, the question is there, and Allow arms only after the panel has been
   visible and focused for 750 ms, so the click that brings it forward cannot approve;
   the page's scripts cannot reach the panel at all. Otherwise a Chrome notification asks.
-  It names the AI app by its verified host beside its declared name, the tool and its
-  site, and the arguments (invisible and direction characters written as `\uXXXX`);
+  It names the AI app by its verified host beside its declared name, the tool (the
+  page's title cut to 60 characters on its own) and, on a line of its own, its site, so
+  a long title cannot push the site out, and the arguments (invisible, blank and
+  direction characters, every space but U+0020 and the blank letters such as U+2800
+  and U+3164, written as `\uXXXX`);
   Don't allow is the first button, an Allow within 500 ms of showing does not count (it
   shows again), and a click on the body or closing it is Don't allow. Each notification
   carries its call: a click answers only that call, and one on a call already answered,
@@ -266,7 +269,16 @@ did, by connecting the extension.
   user left it on; it starts only from the panel's button. The icon's badge says "on"
   while connected, so the user sees it without opening the panel. Read-only and
   "allowed" tools run with nothing on screen, as they did with the panel open but not
-  looked at.
+  looked at. "Allowed" and Always allow exist only for http(s) origins: every opaque
+  origin is `null`, and one entry would cover them all. Panel commands run one after
+  another, so a stop is never overtaken by the connect before it. When the panel's
+  questions move (one is answered), its Allow buttons and "asks first" switches stay off
+  for 750 ms, so a second click lands on nothing that allows.
+- **A takeover is kept (iteration 26).** After `replaced` the worker stores the fact and
+  connects again neither at its next start nor on its alarm, so it does not take the
+  address back and forth with whoever has the secret; the panel shows the notice until
+  the user connects (taking it back) or makes a new address, which first takes the old
+  address back and revokes its grants while connected.
 
 ### Identity binding
 

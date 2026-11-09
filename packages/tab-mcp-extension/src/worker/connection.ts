@@ -25,9 +25,12 @@ import {
 import {
 	loadAiOn,
 	loadRelay,
+	loadReplaced,
+	type Replaced,
 	relayProblem,
 	saveAiOn,
 	saveRelay,
+	saveReplaced,
 } from "../relay.ts";
 import {
 	ALL_SITES,
@@ -39,6 +42,7 @@ import {
 } from "../tabs.ts";
 import {
 	type AllowedTools,
+	allowable,
 	isAllowed,
 	loadAllowed,
 	setAllowed,
@@ -86,6 +90,18 @@ async function iconsFor(): Promise<Icon[]> {
 	}
 }
 
+/** Clear every notification of the extension. */
+async function clearNotifications(): Promise<void> {
+	try {
+		const all = await chrome.notifications.getAll();
+		await Promise.all(
+			Object.keys(all).map((id) => chrome.notifications.clear(id)),
+		);
+	} catch {
+		// None to clear, or notifications not available.
+	}
+}
+
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
@@ -101,7 +117,12 @@ export class Connection {
 	#bridge: PageToolBridge;
 	#listening = new AbortController();
 	#problem: string | undefined;
-	#replaced: ReplacedDetail | undefined;
+	/** Taken over (kept in storage too, so it holds across worker restarts). */
+	#replaced: Replaced | undefined;
+	/** The takeover happened in this worker's life: the library knows of it. */
+	#replacedHere = false;
+	/** Panel commands, one after the other. */
+	#commands: Promise<void> = Promise.resolve();
 	#allSites = false;
 	#tab: TabView | undefined;
 	#tabRead = 0;
@@ -112,28 +133,37 @@ export class Connection {
 		icons: Icon[],
 		allowed: AllowedTools,
 		relay: string,
+		replaced: Replaced | undefined,
 	) {
 		this.#storage = storage;
 		this.#icons = icons;
 		this.#allowed = allowed;
 		this.#relay = relay;
+		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
 
-	/** The connection, connected again if the user left AI access on. */
+	/**
+	 * The connection, connected again if the user left AI access on and the
+	 * address was not taken over meanwhile.
+	 */
 	static async start(): Promise<Connection> {
-		const [storage, icons, allowed, relay, on] = await Promise.all([
+		// A previous worker's questions died with it: their notifications
+		// would answer nothing.
+		await clearNotifications();
+		const [storage, icons, allowed, relay, on, replaced] = await Promise.all([
 			CachedSecretStorage.load(chrome.storage.local),
 			iconsFor(),
 			loadAllowed(),
 			loadRelay(),
 			loadAiOn(),
+			loadReplaced(),
 		]);
-		const connection = new Connection(storage, icons, allowed, relay);
+		const connection = new Connection(storage, icons, allowed, relay, replaced);
 		connection.#showBadge();
-		if (on) connection.#connect();
+		if (on && replaced === undefined) connection.#connect();
 		return connection;
 	}
 
@@ -178,7 +208,10 @@ export class Connection {
 		if (tool !== undefined && isAllowed(this.#allowed, tool.origin, tool.name))
 			return true;
 		const { grantId } = request.client;
-		if (this.#always.has(grantId, request.tool.name)) return true;
+		// Always allow only for a page of a real site: opaque origins ("null")
+		// would all share one entry.
+		const always = tool !== undefined && allowable(tool.origin);
+		if (always && this.#always.has(grantId, request.tool.name)) return true;
 		const answer = await this.#questions.ask(
 			request,
 			tool === undefined ? {} : { tabId: tool.tabId, origin: tool.origin },
@@ -188,7 +221,8 @@ export class Connection {
 			throw new Error(
 				`The user was asked and did not answer within ${QUESTION_TIMEOUT_MS / 1000} s.`,
 			);
-		if (answer === "always") this.#always.add(grantId, request.tool.name);
+		if (answer === "always" && always)
+			this.#always.add(grantId, request.tool.name);
 		return answer !== "deny";
 	}
 
@@ -216,7 +250,7 @@ export class Connection {
 			"connected",
 			() => {
 				this.#problem = undefined;
-				this.#replaced = undefined;
+				void this.#setReplaced(undefined);
 				void this.#setAiOn(true);
 				this.#changed();
 			},
@@ -234,7 +268,9 @@ export class Connection {
 		mcp.addEventListener(
 			"replaced",
 			(event) => {
-				this.#replaced = (event as CustomEvent<ReplacedDetail>).detail;
+				const { sibling } = (event as CustomEvent<ReplacedDetail>).detail;
+				this.#replacedHere = true;
+				void this.#setReplaced({ sibling });
 				this.#changed();
 			},
 			{ signal },
@@ -261,6 +297,13 @@ export class Connection {
 		});
 	}
 
+	/** Taken over, or not any more: in memory and in storage. */
+	async #setReplaced(replaced: Replaced | undefined): Promise<void> {
+		this.#replaced = replaced;
+		if (replaced === undefined) this.#replacedHere = false;
+		await saveReplaced(replaced);
+	}
+
 	async #setAiOn(on: boolean): Promise<void> {
 		await saveAiOn(on);
 		if (on) await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
@@ -275,7 +318,7 @@ export class Connection {
 		const before = this.#mcp;
 		this.#bridge.stop();
 		this.#relay = relay;
-		this.#replaced = undefined;
+		await this.#setReplaced(undefined);
 		this.#problem = undefined;
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
@@ -293,9 +336,10 @@ export class Connection {
 
 	/** The worker woke for the alarm: connect if the connection is down. */
 	keepUp(): void {
-		void loadAiOn().then((on) => {
+		void Promise.all([loadAiOn(), loadReplaced()]).then(([on, replaced]) => {
 			if (
 				on &&
+				replaced === undefined &&
 				this.#mcp.state === "disconnected" &&
 				this.#mcp.reconnecting === undefined &&
 				this.#replaced === undefined
@@ -323,8 +367,17 @@ export class Connection {
 		this.#panels.add(panel);
 		const receive = (raw: unknown) => {
 			// Anything that is not a command is dropped.
+			// The rest run one after the other: a connect still waiting on
+			// storage must not end after the stop that came next, nor two
+			// "allowed" writes overlap.
 			const command = parseCommand(raw);
-			if (command !== undefined) void this.#command(panel, command);
+			if (command === undefined) return;
+			this.#commands = this.#commands
+				.then(() => this.#command(panel, command))
+				.catch((error: unknown) => {
+					this.#problem = message(error);
+					this.#changed();
+				});
 		};
 		for (const raw of early) receive(raw);
 		port.onMessage.addListener(receive);
@@ -344,7 +397,8 @@ export class Connection {
 				panel.windowId = command.windowId;
 				return;
 			case "connect":
-				this.#replaced = undefined;
+				// The user's click takes the address back.
+				await this.#setReplaced(undefined);
 				await this.#setAiOn(true);
 				this.#connect();
 				this.#changed();
@@ -365,12 +419,7 @@ export class Connection {
 				this.#mcp.revoke(command.grantId);
 				return;
 			case "new-address":
-				this.#replaced = undefined;
-				this.#mcp.newAddress().catch((error: unknown) => {
-					this.#problem = message(error);
-					this.#changed();
-				});
-				this.#changed();
+				await this.#newAddress();
 				return;
 			case "set-relay":
 				if (
@@ -396,6 +445,28 @@ export class Connection {
 				this.#questions.answer(command.id, command.answer);
 				return;
 		}
+	}
+
+	/**
+	 * A new address. After a takeover the library first takes the old address
+	 * back, so the relay disconnects the AI apps that now talk to whoever took
+	 * it (DEC-095), but only if the takeover happened in this worker's life:
+	 * a new worker's library knows nothing of it. Then the extension connects
+	 * with the old address itself, and the new address is made while
+	 * connected, which revokes every grant of the old one.
+	 */
+	async #newAddress(): Promise<void> {
+		const takeBack = this.#replaced !== undefined && !this.#replacedHere;
+		this.#problem = undefined;
+		this.#changed();
+		try {
+			if (takeBack) await this.#mcp.connect({ resume: true });
+			await this.#mcp.newAddress();
+			await this.#setReplaced(undefined);
+		} catch (error) {
+			this.#problem = message(error);
+		}
+		this.#changed();
 	}
 
 	/** Pairing stops once no panel's pairing view is open. */
@@ -450,6 +521,7 @@ export class Connection {
 				access: "",
 				tools: [],
 				mirrored: 0,
+				canAllow: false,
 			};
 			this.#changed();
 			return;
@@ -477,6 +549,7 @@ export class Connection {
 				},
 				access: "",
 				...(current && origin ? { origin } : {}),
+				canAllow: current && origin !== undefined && allowable(origin),
 				tools: current
 					? state.tools.map((t) => ({
 							name: t.name,
@@ -497,6 +570,7 @@ export class Connection {
 				access: message(error),
 				tools: [],
 				mirrored: 0,
+				canAllow: false,
 			};
 		}
 		if (read !== this.#tabRead) return;

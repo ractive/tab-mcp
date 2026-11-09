@@ -155,7 +155,7 @@ was asked and did not answer within 60 s.
       `dataset.relay` marker becomes a state the panel shows from the connection)
 - [x] Threat model (A13): who may send what, notifications as a place to ask, a
       connection on with no panel
-- [ ] Review; merged on the owner's word
+- [x] Review: 10 findings, all fixed on the branch; merged on the owner's word
 
 ## Out of scope
 
