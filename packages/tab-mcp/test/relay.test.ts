@@ -966,7 +966,9 @@ describe("health and index", () => {
 		);
 		const html = await index.text();
 		expect(html).toContain('<link rel="icon" href="/favicon.svg"');
-		expect(html).toContain('<link rel="stylesheet" href="/authorize.css">');
+		expect(html).toContain(
+			`<link rel="stylesheet" href="/authorize.css?v=${VERSION}">`,
+		);
 		expect(html).toContain('href="https://ractive.ch/tab-mcp/"');
 		expect(html).toContain(`Version ${VERSION}`);
 		expect((await fetch(`${r.relay.url}/nope`)).status).toBe(404);

@@ -1,8 +1,16 @@
+import { version } from "../../package.json" with { type: "json" };
+
 /**
  * Server-rendered HTML for `/authorize` (threat model A7): every value is
  * escaped, the page has no scripts, and its headers forbid framing, inline
  * code and foreign form targets.
  */
+
+/**
+ * The stylesheet's URL. The version in the query keeps a cached sheet from
+ * an older relay away from newer pages; routes match the path only.
+ */
+export const STYLESHEET: string = `/authorize.css?v=${version}`;
 
 const ESCAPES: Record<string, string> = {
 	"&": "&amp;",
@@ -17,7 +25,10 @@ export function escapeHtml(text: string): string {
 	return text.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 }
 
-/** The stylesheet at `/authorize.css` (`style-src 'self'`), also used by the relay's front page. */
+/**
+ * The stylesheet at `/authorize.css` (`style-src 'self'`). The rules under
+ * `.home` are for the relay's front page only.
+ */
 export const AUTHORIZE_CSS = `:root { color-scheme: light dark; --accent: #1d4ed8; --error: #b91c1c; }
 @media (prefers-color-scheme: dark) { :root { --accent: #93b4ff; --error: #fca5a5; } }
 * { box-sizing: border-box; }
@@ -36,22 +47,22 @@ button, .button { font: inherit; padding: 0.5rem 1.25rem; border-radius: 0.4rem;
 button.primary, .button.primary { background: var(--accent); color: Canvas; }
 button.secondary, .button:not(.primary) { background: transparent; color: var(--accent); }
 footer { margin-top: 2.5rem; font-size: 0.85rem; color: GrayText; }
-a { color: var(--accent); }
-.brand { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
-.brand img { border-radius: 12px; }
-.brand h1, .brand p { margin: 0; }
-.lead { font-size: 1.15rem; }
-.flow { display: flex; align-items: center; margin: 2rem 0; font-size: 0.95rem; }
-.node { flex: none; padding: 0.5rem 0.8rem; border: 2px solid GrayText; border-radius: 0.5rem; font-weight: 600; }
-.node.relay { background: var(--accent); border-color: var(--accent); color: Canvas; }
-.link { flex: 1; min-width: 4.5rem; position: relative; padding: 0 0.6rem 1.6rem; text-align: center; font-size: 0.8rem; line-height: 1.5; color: GrayText; }
-.link::before { content: ""; position: absolute; left: 0.4rem; right: 0.5rem; top: calc(50% - 1px); border-top: 2px solid GrayText; }
-.link::after { content: ""; position: absolute; right: 0.35rem; top: calc(50% - 5px); border: 5px solid transparent; border-left: 8px solid GrayText; border-right: 0; }
+.home a { color: var(--accent); }
+.home .brand { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+.home .brand img { border-radius: 12px; }
+.home .brand h1, .home .brand p { margin: 0; }
+.home .lead { font-size: 1.15rem; }
+.home .flow { display: flex; align-items: center; margin: 2rem 0; font-size: 0.95rem; }
+.home .node { flex: none; padding: 0.5rem 0.8rem; border: 2px solid GrayText; border-radius: 0.5rem; font-weight: 600; }
+.home .node.relay { background: var(--accent); border-color: var(--accent); color: Canvas; }
+.home .link { flex: 1; min-width: 4.5rem; position: relative; padding: 0 0.6rem 1.6rem; text-align: center; font-size: 0.8rem; line-height: 1.5; color: GrayText; }
+.home .link::before { content: ""; position: absolute; left: 0.4rem; right: 0.5rem; top: calc(50% - 1px); border-top: 2px solid GrayText; }
+.home .link::after { content: ""; position: absolute; right: 0.35rem; top: calc(50% - 5px); border: 5px solid transparent; border-left: 8px solid GrayText; border-right: 0; }
 @media (max-width: 30rem) {
-  .flow { flex-direction: column; align-items: flex-start; }
-  .link { min-width: 0; margin-left: 1rem; padding: 0.6rem 0 0.75rem 1.25rem; text-align: left; }
-  .link::before { left: 0; right: auto; top: 0.2rem; bottom: 0.6rem; border-top: 0; border-left: 2px solid GrayText; }
-  .link::after { left: -4px; right: auto; top: auto; bottom: 0.2rem; border: 5px solid transparent; border-top: 8px solid GrayText; border-bottom: 0; }
+  .home .flow { flex-direction: column; align-items: flex-start; }
+  .home .link { min-width: 0; margin-left: 1rem; padding: 0.6rem 0 0.75rem 1.25rem; text-align: left; }
+  .home .link::before { left: 0; right: auto; top: 0.2rem; bottom: 0.6rem; border-top: 0; border-left: 2px solid GrayText; }
+  .home .link::after { left: -4px; right: auto; top: auto; bottom: 0.2rem; border: 5px solid transparent; border-top: 8px solid GrayText; border-bottom: 0; }
 }
 `;
 
@@ -82,7 +93,7 @@ export function renderPage(title: string, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/authorize.css">
+<link rel="stylesheet" href="${STYLESHEET}">
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
