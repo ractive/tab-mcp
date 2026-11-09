@@ -417,11 +417,24 @@ button:disabled {
 	cursor: pointer;
 }
 
+/*
+ * The track and the knob from the same three sizes, so the knob sits flush
+ * at both ends. The track takes none of the text fields' input rules (flex,
+ * padding, border), which made it wider than the knob's travel.
+ */
 .switch input {
+	--track: 34px;
+	--knob: 16px;
+	--gap: 2px;
 	appearance: none;
+	flex: none;
+	box-sizing: border-box;
 	margin: 0;
-	width: 34px;
-	height: 20px;
+	padding: 0;
+	border: 0;
+	width: var(--track);
+	min-width: var(--track);
+	height: calc(var(--knob) + 2 * var(--gap));
 	border-radius: 999px;
 	background: var(--off);
 	position: relative;
@@ -432,10 +445,10 @@ button:disabled {
 .switch input::after {
 	content: "";
 	position: absolute;
-	top: 2px;
-	left: 2px;
-	width: 16px;
-	height: 16px;
+	top: var(--gap);
+	left: var(--gap);
+	width: var(--knob);
+	height: var(--knob);
 	border-radius: 50%;
 	background: #fff;
 	transition: transform 0.15s;
@@ -446,7 +459,7 @@ button:disabled {
 }
 
 .switch input:checked::after {
-	transform: translateX(14px);
+	transform: translateX(calc(var(--track) - var(--knob) - 2 * var(--gap)));
 }
 
 .switch input:focus-visible {
@@ -464,6 +477,27 @@ button:disabled {
 
 .pairing h3 {
 	margin: 0;
+}
+
+/* A connected app: a green dot, its name, its host. */
+.grants .app {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	min-width: 0;
+}
+
+.grants .dot {
+	background: var(--on);
+	align-self: center;
+}
+
+/* The tool list's header, with "Allow all" / "Ask for all". */
+.tools-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
 }
 
 /* Last and one step more specific: `hidden` wins over the display rules above. */

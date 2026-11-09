@@ -48,17 +48,28 @@ export function isAllowed(
  * Allow or stop allowing `name` on `origin`; returns the new state. An
  * origin that cannot be allowed (see `allowable`) changes nothing.
  */
-export async function setAllowed(
+export function setAllowed(
 	kv: Kv,
 	origin: string,
 	name: string,
 	on: boolean,
 ): Promise<AllowedTools> {
+	return setAllowedMany(kv, origin, [name], on);
+}
+
+/** Allow or stop allowing all of `toolNames` on `origin`, in one write. */
+export async function setAllowedMany(
+	kv: Kv,
+	origin: string,
+	toolNames: readonly string[],
+	on: boolean,
+): Promise<AllowedTools> {
 	const allowed = await loadAllowed(kv);
 	if (!allowable(origin)) return allowed;
 	const names = new Set(allowed[origin] ?? []);
-	if (on) names.add(name);
-	else names.delete(name);
+	for (const name of toolNames)
+		if (on) names.add(name);
+		else names.delete(name);
 	if (names.size > 0) allowed[origin] = [...names].sort();
 	else delete allowed[origin];
 	await kv.set({ [KEY]: allowed });

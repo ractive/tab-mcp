@@ -489,6 +489,104 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await ordered).content[0]?.text).toContain("cake");
 	});
 
+	test("the AI access switch: its knob sits flush at both ends, light and dark", async () => {
+		/**
+		 * The track's width, the knob's left and right gaps to its outer edge
+		 * (the knob is placed in the padding box, so a border or padding moves
+		 * it), and whether the track may grow (it took the text fields' rules:
+		 * a 1 px border, 8 px padding, flex: 1, so it could be wider than the
+		 * knob's travel).
+		 */
+		const gaps = () =>
+			stack.panel.eval<[number, number, number, string]>(`(() => {
+				const input = document.getElementById("ai-switch");
+				const style = getComputedStyle(input);
+				const width = input.getBoundingClientRect().width;
+				const knob = getComputedStyle(input, "::after");
+				const left =
+					parseFloat(style.borderLeftWidth) +
+					parseFloat(knob.left) +
+					new DOMMatrix(knob.transform === "none" ? "" : knob.transform).m41;
+				return [width, left, width - left - parseFloat(knob.width), style.flexGrow];
+			})()`);
+		for (const scheme of ["light", "dark"]) {
+			await stack.panel.send("Emulation.setEmulatedMedia", {
+				features: [{ name: "prefers-color-scheme", value: scheme }],
+			});
+			// On (connected): flush right, 2 px from the end, as off is left.
+			await stack.panel.waitFor(`document.getElementById("ai-switch").checked`);
+			await Bun.sleep(200); // the transition
+			expect(await gaps()).toEqual([34, 16, 2, "0"]);
+			const off = await stack.panel.eval<[number, number]>(`(() => {
+				const input = document.getElementById("ai-switch");
+				const knob = getComputedStyle(input, "::after");
+				return [parseFloat(knob.left), input.getBoundingClientRect().width];
+			})()`);
+			expect(off).toEqual([2, 34]);
+		}
+		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
+	});
+
+	test("Allow all and Ask for all, for the tools listed at the click only", async () => {
+		const head = `document.getElementById("allow-tools")`;
+		// Off for a moment after a question went (the layout moved).
+		await stack.panel.waitFor(
+			`!document.getElementById("tools-head").hidden && ${head}.textContent === "Allow all" && !${head}.disabled`,
+		);
+		await stack.panel.click("#allow-tools");
+		await stack.panel.waitFor(`${head}.textContent === "Ask for all"`);
+		expect(
+			await stack.panel.eval(
+				`document.querySelector('button[data-tool="place_order"]').textContent`,
+			),
+		).toBe("allowed");
+		const allowed = await call(stack, "page_place_order", { item: "all" });
+		expect(allowed.content[0]?.text).toContain("all");
+		// A tool the page registers later asks first.
+		await tab.eval(`document.modelContext.registerTool({
+			name: "late_order",
+			description: "Orders, registered later.",
+			inputSchema: { type: "object" },
+			async execute() { return "late order"; },
+		})`);
+		await waitForTools(stack, (n) => n.includes("page_late_order"));
+		const late = call(stack, "page_late_order");
+		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+		await answerInPanel(stack, "deny");
+		expect((await late).isError).toBe(true);
+		// Not all allowed any more: Allow all again takes the late one too.
+		await stack.panel.waitFor(
+			`${head}.textContent === "Allow all" && !${head}.disabled`,
+		);
+		await stack.panel.click("#allow-tools");
+		await stack.panel.waitFor(`${head}.textContent === "Ask for all"`);
+		expect((await call(stack, "page_late_order")).isError).toBeFalsy();
+		// Ask for all: every one asks first again.
+		await stack.panel.click("#allow-tools");
+		await stack.panel.waitFor(`${head}.textContent === "Allow all"`);
+		const asks = call(stack, "page_place_order", { item: "asks" });
+		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+		await answerInPanel(stack, "deny");
+		expect((await asks).isError).toBe(true);
+	});
+
+	test("Allow all takes only tools the worker offers on that origin", async () => {
+		await stack.panel.eval(`(async () => {
+			const port = chrome.runtime.connect({ name: "panel" });
+			port.postMessage({ type: "set-allowed-all", origin: "${SITE}", names: ["not_offered", "get_greeting"], on: true });
+			port.postMessage({ type: "set-allowed-all", origin: "${OTHER}", names: ["place_order"], on: true });
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			port.disconnect();
+		})()`);
+		const allowedTools = (await kvAll(stack.worker))["allowedTools"] as
+			| Record<string, string[]>
+			| undefined;
+		// Not a name it does not offer, not a read-only one, not another site.
+		expect(allowedTools?.[SITE] ?? []).not.toContain("not_offered");
+		expect(allowedTools?.[SITE] ?? []).not.toContain("get_greeting");
+		expect(allowedTools?.[OTHER]).toBeUndefined();
+	});
+
 	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
 		const toggle = `button[data-tool="place_order"]`;
 		// Off for a moment after the last question went (the layout moved).
@@ -721,7 +819,7 @@ describe.skipIf(chrome === undefined)(
 				`["on", "waiting"].includes(document.getElementById("state").dataset.state) && document.getElementById("state").dataset.state`,
 			);
 			const grants = await stack.panel.eval<string[]>(
-				`[...document.querySelectorAll("#grants li span:first-child")].map((s) => s.firstChild.textContent)`,
+				`[...document.querySelectorAll("#grants .app-name")].map((s) => s.textContent)`,
 			);
 			expect(grants).toEqual(status === "on" ? ["Test client"] : []);
 			// The same address: shown with the code (at once with no app paired,
@@ -821,6 +919,19 @@ describe.skipIf(chrome === undefined)(
 					`[document.getElementById("state-text").textContent, document.getElementById("pairing").hidden, document.getElementById("add-app").hidden, document.querySelector("#grants button")?.textContent]`,
 				),
 			).toEqual(["Connected · Test client", true, false, "Disconnect"]);
+			// The row shows the state (a green dot), Disconnect is a button
+			// with an outline, not grey text that reads as a state.
+			expect(
+				await stack.panel.eval(`(() => {
+					const dot = document.querySelector("#grants .app .dot");
+					const button = document.querySelector("#grants button");
+					return [
+						dot !== null && getComputedStyle(dot).backgroundColor !== "rgba(0, 0, 0, 0)",
+						button.classList.contains("quiet"),
+						getComputedStyle(button).borderTopStyle,
+					];
+				})()`),
+			).toEqual([true, false, "solid"]);
 			await stack.panel.click("#add-app");
 			await stack.panel.waitFor(
 				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)} && !document.getElementById("pair-done").hidden`,

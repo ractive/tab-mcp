@@ -16,7 +16,7 @@ import {
 	type PanelCommand,
 	parseCommand,
 } from "../src/protocol.ts";
-import { allowable, isAllowed } from "../src/worker/allowed.ts";
+import { allowable, isAllowed, setAllowedMany } from "../src/worker/allowed.ts";
 import { AlwaysAllowed } from "../src/worker/always.ts";
 import { MIGRATED, memoryKv, migrate } from "../src/worker/kv.ts";
 import {
@@ -44,6 +44,12 @@ const COMMANDS: PanelCommand[] = [
 	{ type: "new-address" },
 	{ type: "set-relay", relay: "https://relay.example" },
 	{ type: "set-allowed", origin: "https://site.test", name: "t", on: true },
+	{
+		type: "set-allowed-all",
+		origin: "https://site.test",
+		names: ["a", "b"],
+		on: true,
+	},
 	{ type: "answer", id: "q", answer: "allow" },
 ];
 
@@ -109,6 +115,14 @@ describe("who may send what", () => {
 			{ type: "revoke", grantId: 1 },
 			{ type: "set-relay" },
 			{ type: "set-allowed", origin: "o", name: "n" },
+			{ type: "set-allowed-all", origin: "o", names: "a", on: true },
+			{ type: "set-allowed-all", origin: "o", names: [1], on: true },
+			{
+				type: "set-allowed-all",
+				origin: "o",
+				names: Array.from({ length: 65 }, (_, i) => `t${i}`),
+				on: true,
+			},
 			{ type: "answer", id: "q", answer: "yes" },
 		])
 			expect(parseCommand(bad)).toBeUndefined();
@@ -543,6 +557,19 @@ describe("the settings in IndexedDB", () => {
 		await migrate(again, kv);
 		expect(kv.data.get("aiOn")).toBe(false);
 		expect(again.data).toEqual({ somethingElse: 1 });
+	});
+});
+
+describe("allowing all of a site's tools in one step", () => {
+	test("one write for several names, only for an http(s) origin", async () => {
+		const kv = memoryKv({ allowedTools: { "https://site.test": ["c"] } });
+		expect(
+			await setAllowedMany(kv, "https://site.test", ["a", "b"], true),
+		).toEqual({ "https://site.test": ["a", "b", "c"] });
+		expect(
+			await setAllowedMany(kv, "https://site.test", ["a", "b", "c"], false),
+		).toEqual({});
+		expect(await setAllowedMany(kv, "null", ["a"], true)).toEqual({});
 	});
 });
 

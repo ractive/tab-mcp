@@ -240,10 +240,13 @@ did, by connecting the extension.
   with the id the hosted relay allows; the Chrome Web Store keeps its own key.
 - **Who may send what (iteration 26).** The connection lives in the service worker,
   which content scripts in every granted tab can message too. Commands (connect, turn
-  off, pairing, disconnect an app, new address, the relay, "allowed", answers to
-  questions) come only over the side panel's named port, whose sender Chrome reports: an
+  off, pairing, disconnect an app, new address, the relay, "allowed", "Allow all",
+  answers to questions) come only over the side panel's named port, whose sender Chrome reports: an
   extension page of this extension at the panel's path, not in a tab; any other port is
-  closed at once, and a command that does not parse is dropped. The one message a
+  closed at once, and a command that does not parse is dropped. "Allow all" carries the
+  site and the tool names, at most 64, and the worker allows only those it offers on
+  that site itself, now, that are not read-only: names from the panel are not taken on
+  trust, and a tool the page registers later still asks first. The one message a
   content script may send is `webmcp-changed`, which only makes the bridge read the
   tools again. A compromised page can therefore not turn AI access on, allow a tool or
   answer a question; a compromised extension page could, but then the extension is

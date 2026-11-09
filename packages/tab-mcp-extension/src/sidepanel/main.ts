@@ -19,6 +19,7 @@ import {
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
 import {
+	allowAllView,
 	cardView,
 	confirms,
 	SWITCH_WAIT_MS,
@@ -100,7 +101,8 @@ function syncPairing(on: boolean): void {
 function disconnectButton(grant: PanelState["grants"][number]): HTMLElement {
 	const button = document.createElement("button");
 	button.type = "button";
-	button.className = "quiet small";
+	// An outlined button: plain grey text read as a state ("disconnected").
+	button.className = "small";
 	const armed = disconnectArmed.has(grant.grantId);
 	button.textContent = armed ? "Disconnect? Click again" : "Disconnect";
 	button.dataset["grant"] = grant.grantId;
@@ -148,15 +150,23 @@ function showConnection(s: PanelState): void {
 	$("grants").replaceChildren(
 		...s.grants.map((grant) => {
 			const li = document.createElement("li");
+			// The row says the state (a green dot: connected); the button acts.
+			const app = document.createElement("span");
+			app.className = "app";
+			const dot = document.createElement("span");
+			dot.className = "dot";
+			dot.setAttribute("aria-hidden", "true");
 			const name = document.createElement("span");
+			name.className = "app-name";
 			name.textContent = grant.name || grant.host;
+			app.append(dot, name);
 			if (grant.name) {
 				const host = document.createElement("span");
 				host.className = "host";
-				host.textContent = ` ${grant.host}`;
-				name.append(host);
+				host.textContent = grant.host;
+				app.append(" ", host);
 			}
-			li.append(name, disconnectButton(grant));
+			li.append(app, disconnectButton(grant));
 			return li;
 		}),
 	);
@@ -275,7 +285,7 @@ function arm(): void {
 			b.disabled = !ready;
 	}
 	for (const toggle of document.querySelectorAll<HTMLButtonElement>(
-		"button.badge.toggle",
+		"button.badge.toggle, #allow-tools",
 	))
 		toggle.disabled = now < movedUntil;
 }
@@ -382,6 +392,10 @@ function showTab(s: PanelState): void {
 		(mirrored
 			? `${mirrored} more ${mirrored === 1 ? "comes" : "come"} from the page's own tab-mcp connection.`
 			: "");
+	const allowAll = allowAllView(tab);
+	$("tools-head").hidden = !allowAll.shown;
+	$("allow-tools").textContent = allowAll.label;
+	($("allow-tools") as HTMLButtonElement).disabled = Date.now() < movedUntil;
 	$("tools").replaceChildren(
 		...(tab?.tools ?? []).map((tool) =>
 			toolItem(tab?.origin ?? "", tab?.canAllow === true, tool),
@@ -461,6 +475,19 @@ $("copy").addEventListener("click", () => copy($("copy"), state?.address));
 $("copy-code").addEventListener("click", () =>
 	copy($("copy-code"), state?.code),
 );
+
+$("allow-tools").addEventListener("click", () => {
+	const button = $("allow-tools") as HTMLButtonElement;
+	const tab = state?.tab;
+	const view = allowAllView(tab);
+	if (button.disabled || !view.shown || tab?.origin === undefined) return;
+	send({
+		type: "set-allowed-all",
+		origin: tab.origin,
+		names: view.names,
+		on: view.on,
+	});
+});
 
 $("allow-all").addEventListener("click", () => {
 	// From the click: Chrome asks the user. The worker hears of the change.
