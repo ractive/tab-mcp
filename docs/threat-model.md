@@ -358,7 +358,7 @@ trustworthy.
   the origin of the website they run in, so an extension runs the library from its
   service worker or one of its own pages (such as its side panel). A service worker
   stays alive while connected: the relay's heartbeat is WebSocket traffic, which keeps
-  it running in Chrome 116 and later. An unpacked extension keeps its id only with a `key` in
+  it running in Chrome 116 and later while the heartbeat is under 30 s. An unpacked extension keeps its id only with a `key` in
   its manifest, and that key is public: anyone can load other code under the same id in
   their own browser. So the id keeps websites and other extensions out; it does not prove
   who wrote the code a user installed. A program can claim the origin like any other
@@ -454,7 +454,9 @@ like any other, `chrome-extension://<id>` (A11).
   worker, which the extension's scripts in every page it may read can message. Commands
   (turning AI access on or off, pairing, disconnecting an AI app, a new address, the
   relay, allowing tools, answers to questions) are taken only from the extension's own
-  side panel, as Chrome reports the sender; anything else is dropped. "Allow all" allows
+  side panel, as Chrome reports the sender; anything else is dropped. Besides the panel,
+  only the buttons of the extension's own notifications answer questions (see
+  Questions). "Allow all" allows
   only the tools the extension itself offers on that site at that moment that are not
   read-only, so a tool the page registers later still asks. From a page, the one message
   accepted says that the page's tools changed. A compromised page can therefore not turn

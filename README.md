@@ -176,8 +176,10 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
 
 A Chrome or Edge extension can offer tools the same way, from its service worker or one
 of its own pages (such as its side panel); the relay's heartbeat keeps a service worker
-alive while it is connected (Chrome 116+). The relay then lists `chrome-extension://<id>`
-(see [browser extensions](docs/configuration.md#browser-extensions)).
+alive while it is connected (Chrome 116+, with the heartbeat under 30 s). In a service
+worker, pass `storage` and `onConfirm`: it has no `localStorage` and no document (see
+[browser extensions](docs/configuration.md#browser-extensions)). The relay then lists
+`chrome-extension://<id>`.
 
 Mark tools that change or delete things with `annotations: { consequentialHint: true }`:
 the page then asks the user before each call. The

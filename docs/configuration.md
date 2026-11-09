@@ -101,7 +101,13 @@ service worker or one of its own pages (such as its side panel), and the relay s
 extension's origin, `chrome-extension://` followed by its 32-letter id (DEC-108). A
 service worker stays alive while it is connected: the relay's heartbeat (`ping` every
 25 s by default, `heartbeatMs`) is WebSocket traffic, which keeps a service worker
-running in Chrome 116 and later. List it like a
+running in Chrome 116 and later, as long as `heartbeatMs` stays under 30 s (Chrome
+stops a worker after 30 s without events). A service worker has no `localStorage` and
+no document, so pass two options there: `storage`, a synchronous `SecretStorage` kept
+somewhere persistent (otherwise the address changes each time the worker starts), and
+`onConfirm`, a question of your own (otherwise every tool marked `consequentialHint` is
+refused). tab-mcp for Chrome keeps the secret in IndexedDB behind a cache and asks in
+its side panel or a notification. List it like a
 website, best as a site with a name, so the pairing page says "Overmark on the browser
 extension `chrome-extension://…`" rather than only the id:
 
