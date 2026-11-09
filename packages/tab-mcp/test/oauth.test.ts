@@ -1181,6 +1181,25 @@ describe("threat model A7: the /authorize page", () => {
 		).toBe(303);
 	});
 
+	test("the same browser sending a paired request's form again is told it was used", async () => {
+		const ctx = await setup();
+		const page = await open(ctx);
+		const code = await currentCode(ctx);
+		expect(
+			(await ctx.browser.submit(page, { action: "connect", code })).status,
+		).toBe(303);
+		const again = await ctx.browser.submit(page, { action: "connect", code });
+		expect(again.status).toBe(200);
+		expect(again.html).toContain("Already connected");
+		expect(again.html).toContain("was already used");
+		// Another browser with the same form learns nothing.
+		const stranger = new TestBrowser(ctx.r.url);
+		const foreign = await stranger.submit(page, { action: "connect", code });
+		expect(foreign.status).toBe(400);
+		expect(foreign.html).toContain("expired or was already used");
+		expect(foreign.html).not.toContain("Already connected");
+	});
+
 	test("an unknown or used request id is refused", async () => {
 		const ctx = await setup();
 		const page = await open(ctx);

@@ -69,6 +69,11 @@ const MAX_PENDING_PER_ADDRESS_IP = 5;
 /** How long a used refresh token is kept to detect its reuse (DEC-091). */
 const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
+/**
+ * Requests that paired, kept as long as their page could still be sent, so a
+ * second submit of the same form says it was used instead of "expired".
+ */
+const MAX_USED_REQUESTS = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
 /**
@@ -125,6 +130,12 @@ interface Pending extends AuthorizationRequest {
 	expiresAt: number;
 	/** The IP (prefix) key that opened it, for the per-IP cap. */
 	ip: string;
+}
+
+/** A request that paired: who it connected, until its page could no longer be sent. */
+interface UsedRequest {
+	expiresAt: number;
+	client: ClientMetadata;
 }
 
 interface IssuedCode extends AuthorizationRequest {
@@ -240,6 +251,8 @@ export class AuthorizationServer {
 	readonly #pendingPerIp = new Map<string, number>();
 	readonly #pendingPerAddress = new Map<string, number>();
 	readonly #codes = new Map<string, IssuedCode>();
+	/** Insertion order is expiry order, as for `#pending`. */
+	readonly #usedRequests = new Map<string, UsedRequest>();
 	readonly #authCodeTtlMs: number;
 	readonly #methods: Partial<Record<PairingKind, PairingMethod>>;
 	readonly #csrfSecret = random(32);
@@ -421,6 +434,21 @@ export class AuthorizationServer {
 			`<h1>This connection cannot be made</h1>
 <p role="alert">${escapeHtml(message)}</p>
 <p>Go back to your AI app and try again. If it keeps happening, the AI app may not work with this relay.</p>`,
+		);
+	}
+
+	/**
+	 * The same browser sent the form of a request that already paired (a
+	 * second click, the back button): say so instead of "expired".
+	 */
+	#usedPage(used: UsedRequest): Response {
+		const who = `<strong>${escapeHtml(used.client.name)}</strong> (${escapeHtml(used.client.host)})`;
+		return this.#page(
+			200,
+			"Already connected",
+			`<h1>Already connected</h1>
+<p>This connection request was already used: ${who} was connected to the page.</p>
+<p>You can close this page. If your AI app does not show the connection, start again from your AI app.</p>`,
 		);
 	}
 
@@ -766,15 +794,18 @@ ${intro}
 			return this.#errorPage(413, "The form was too large.");
 		}
 		const form = new URLSearchParams(text);
-		const pending = this.#pending.get(form.get("request_id") ?? "");
+		const requestId = form.get("request_id") ?? "";
+		const pending = this.#pending.get(requestId);
+		const browser = this.#browserId(req);
+		const csrf = form.get("csrf") ?? "";
 		if (pending === undefined || pending.expiresAt <= Date.now()) {
+			const used = this.#usedRequest(requestId, browser, csrf);
+			if (used !== undefined) return this.#usedPage(used);
 			return this.#errorPage(
 				400,
 				"This connection request has expired or was already used.",
 			);
 		}
-		const browser = this.#browserId(req);
-		const csrf = form.get("csrf") ?? "";
 		if (
 			browser.cookie !== undefined ||
 			!Bun.CSRF.verify(csrf, {
@@ -874,6 +905,7 @@ ${intro}
 		result: Extract<PairingResult, { ok: true }>,
 	): Response {
 		this.#dropPending(pending);
+		this.#rememberUsed(pending);
 		// The address id first, so a load balancer that reads the `/token` body
 		// can route the exchange to this instance, which holds the code (DEC-098).
 		const code = `${pending.addressId}.${random(32)}`;
@@ -1657,6 +1689,43 @@ ${cancel}
 	}
 
 	// Housekeeping
+
+	/** Note that `pending` paired, for as long as its page could still be sent. */
+	#rememberUsed(pending: Pending): void {
+		const now = Date.now();
+		for (const [id, used] of this.#usedRequests) {
+			if (used.expiresAt > now && this.#usedRequests.size < MAX_USED_REQUESTS)
+				break;
+			this.#usedRequests.delete(id);
+		}
+		this.#usedRequests.set(pending.id, {
+			expiresAt: pending.expiresAt,
+			client: pending.client,
+		});
+	}
+
+	/**
+	 * The request `id` paired, and this browser is the one its page was made
+	 * for (the form's token checks out); `undefined` otherwise.
+	 */
+	#usedRequest(
+		id: string,
+		browser: { id: string; cookie?: string },
+		csrf: string,
+	): UsedRequest | undefined {
+		const used = this.#usedRequests.get(id);
+		if (used === undefined || used.expiresAt <= Date.now()) return undefined;
+		if (
+			browser.cookie !== undefined ||
+			!Bun.CSRF.verify(csrf, {
+				secret: this.#csrfSecret,
+				sessionId: `${id}.${browser.id}`,
+				maxAge: PENDING_TTL_MS,
+			})
+		)
+			return undefined;
+		return used;
+	}
 
 	/** Drop expired requests; insertion order is expiry order, so stop at the first live one. */
 	#sweepPending(): void {
