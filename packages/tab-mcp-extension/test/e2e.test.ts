@@ -259,6 +259,9 @@ async function waitForTools(
 	}
 }
 
+/** Chrome's answer to a content script that uses the closed storage area. */
+const STORAGE_REFUSED = "Access to storage is not allowed from this context.";
+
 /** The extension's own tools, sorted. */
 const OWN_TOOLS = ["page_info", "webmcp_call", "webmcp_tools"];
 
@@ -286,6 +289,25 @@ async function answerInPanel(
 		`document.getElementById("e2e-answer")?.removeAttribute("id")`,
 	);
 }
+
+/** The worker's settings in its IndexedDB, read in the worker (`kv.ts`). */
+const kvAll = (worker: Worker) =>
+	worker.eval<Record<string, unknown>>(`new Promise((resolve, reject) => {
+		const open = indexedDB.open("tab-mcp");
+		open.onerror = () => reject(open.error);
+		open.onsuccess = () => {
+			const store = open.result.transaction("settings").objectStore("settings");
+			const keys = store.getAllKeys();
+			const values = store.getAll();
+			values.onsuccess = () =>
+				resolve(Object.fromEntries(keys.result.map((k, i) => [k, values.result[i]])));
+			values.onerror = () => reject(values.error);
+		};
+	})`);
+
+/** What is (still) in `chrome.storage.local`. */
+const localAll = (worker: Worker) =>
+	worker.eval<Record<string, unknown>>("chrome.storage.local.get(null)");
 
 /** The ids of the extension's notifications on screen. */
 const notifications = (stack: Stack) =>
@@ -342,6 +364,42 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(greeting?.description).toBe(`From ${SITE}: Greets a name.`);
 		expect(greeting?.annotations?.readOnlyHint).toBe(true);
 		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
+	});
+
+	test("a content script can neither read nor write the extension's storage", async () => {
+		// The content script's world, where a page's compromised renderer
+		// would run its code with the extension's APIs.
+		const world = await tab.isolatedWorld("tab-mcp for Chrome");
+		// The world is the content script's: it has the storage API.
+		expect(await tab.eval("typeof chrome.storage?.local?.get", world)).toBe(
+			"function",
+		);
+		const tries = await tab.eval<string[]>(
+			`(async () => {
+				const attempt = async (run) => {
+					try {
+						await run();
+						return "allowed";
+					} catch (error) {
+						return "refused: " + error.message;
+					}
+				};
+				return [
+					await attempt(() => chrome.storage.local.get(null)),
+					await attempt(() => chrome.storage.local.set({ allowedTools: { "https://evil.test": ["x"] } })),
+				];
+			})()`,
+			world,
+		);
+		// Chrome's own refusal, not some other error.
+		expect(tries).toEqual([
+			`refused: ${STORAGE_REFUSED}`,
+			`refused: ${STORAGE_REFUSED}`,
+		]);
+		expect(await localAll(stack.worker)).toEqual({});
+		// And the settings are in IndexedDB, in the extension's origin, which
+		// a content script (in the page's origin) cannot open at all.
+		expect(Object.keys(await kvAll(stack.worker))).toContain("relay");
 	});
 
 	test("page_info tells the page in front and its WebMCP tools", async () => {
@@ -728,10 +786,8 @@ describe.skipIf(chrome === undefined)(
 			await stack?.stop();
 		});
 
-		const stored = <T>(key: string) =>
-			stack.worker.eval<T>(
-				`chrome.storage.local.get(${JSON.stringify(key)}).then((s) => s[${JSON.stringify(key)}] ?? null)`,
-			);
+		const stored = async <T>(key: string) =>
+			((await kvAll(stack.worker))[key] ?? null) as T;
 
 		test("commands run one after another: a connect then a stop ends off, two allowed writes both hold", async () => {
 			await stack.panel.eval(`(async () => {
@@ -786,9 +842,11 @@ describe.skipIf(chrome === undefined)(
 				`document.querySelectorAll("#grants li").length === 0 && document.getElementById("state").dataset.state === "waiting"`,
 			);
 			// Another program with a copy of the address secret takes it over.
-			const secrets = await stack.worker.eval<Record<string, string>>(
-				`chrome.storage.local.get(null).then((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith("tab-mcp:secret:"))))`,
-			);
+			const secrets = Object.fromEntries(
+				Object.entries(await kvAll(stack.worker)).filter(([k]) =>
+					k.startsWith("tab-mcp:secret:"),
+				),
+			) as Record<string, string>;
 			const impostor = new TabMcp({
 				relay: stack.relay.url,
 				server: { name: "tab-mcp-for-chrome", version: "1.0.0" },
@@ -850,6 +908,76 @@ describe.skipIf(chrome === undefined)(
 			} finally {
 				await impostor.disconnect();
 			}
+		});
+
+		/** Reload the extension (an update): the worker starts again. */
+		async function restartWorker(): Promise<void> {
+			await stack.browser.send("Extensions.loadUnpacked", {
+				path: stack.extension,
+			});
+			await Bun.sleep(1000);
+			stack.worker = await stack.browser.serviceWorker(
+				stack.browser.extensionId as string,
+			);
+			await stack.worker.eval("true");
+		}
+
+		/** Wait until the worker has emptied chrome.storage.local. */
+		async function localEmptied(): Promise<void> {
+			const end = Date.now() + 10_000;
+			while (Object.keys(await localAll(stack.worker)).length > 0) {
+				if (Date.now() > end) throw new Error("chrome.storage.local stayed");
+				await Bun.sleep(100);
+			}
+		}
+
+		test("once moved to IndexedDB, nothing written into chrome.storage.local is taken", async () => {
+			const before = await kvAll(stack.worker);
+			expect(before["migrated"]).toBe(1);
+			// As a content script could, where Chrome lets it write the area.
+			await stack.worker.eval(
+				`chrome.storage.local.set(${JSON.stringify({
+					relay: "https://evil.example",
+					allowedTools: { "https://evil.example": ["steal"] },
+				})})`,
+			);
+			await restartWorker();
+			await localEmptied();
+			const after = await kvAll(stack.worker);
+			expect(after["relay"]).toBe(before["relay"]);
+			expect(after["allowedTools"]).toEqual(before["allowedTools"]);
+		});
+
+		test("settings an older version kept in chrome.storage.local move to IndexedDB, once", async () => {
+			// As before the move: no marker yet, the settings in the old area.
+			await stack.worker.eval(`new Promise((resolve, reject) => {
+				const open = indexedDB.open("tab-mcp");
+				open.onsuccess = () => {
+					const tx = open.result.transaction("settings", "readwrite");
+					tx.objectStore("settings").delete("migrated");
+					tx.oncomplete = () => { open.result.close(); resolve(true); };
+					tx.onerror = () => reject(tx.error);
+				};
+				open.onerror = () => reject(open.error);
+			})`);
+			const old = {
+				"tab-mcp:secret:https://old.test:tab-mcp-for-chrome": "A".repeat(43),
+				allowedTools: { "https://old.test": ["t"] },
+			};
+			await stack.worker.eval(
+				`chrome.storage.local.set(${JSON.stringify(old)})`,
+			);
+			const before = (await kvAll(stack.worker))["allowedTools"];
+			expect(before).toBeDefined();
+			await restartWorker();
+			await localEmptied();
+			const kv = await kvAll(stack.worker);
+			expect(kv["tab-mcp:secret:https://old.test:tab-mcp-for-chrome"]).toBe(
+				"A".repeat(43),
+			);
+			// One that was already in IndexedDB is newer: kept.
+			expect(kv["allowedTools"]).toEqual(before);
+			expect(kv["migrated"]).toBe(1);
 		});
 	},
 );

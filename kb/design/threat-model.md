@@ -281,6 +281,27 @@ did, by connecting the extension.
   another, so a stop is never overtaken by the connect before it. When the panel's
   questions move (one is answered), its Allow buttons and "asks first" switches stay off
   for 750 ms, so a second click lands on nothing that allows.
+- **The extension's settings are out of web pages' reach.** The address secret, the tools
+  allowed per site, the relay, whether AI access is on and the takeover flag are in
+  IndexedDB in the extension's own origin, opened by the service worker only (the side
+  panel asks the worker). A content script runs in the page's origin and cannot open
+  that database, in any Chrome version and from the first moment of a browser start, so
+  a page's compromised renderer, running code in the content script's world, can neither
+  read the secret (and take the address over from anywhere) nor allow its own tools.
+  `chrome.storage.local`, where an earlier version kept them, is readable and writable
+  by content scripts by default: the worker moves what it finds there into IndexedDB
+  once, at its first start with this version (the entries and a "migrated" marker in one
+  transaction, then removed from the old area, so a crash loses nothing). Every later
+  start takes nothing from there, only removes setting keys it finds: where Chrome lets
+  content scripts write the area, a relay or secret written there must not be picked up
+  (the extension would connect to that relay and send it the address secret). As an extra layer it also sets that area to `TRUSTED_CONTEXTS`; sources
+  disagree on whether Chrome takes that for the local area (Chromium's API schema and
+  MDN: session only; Chrome's guide: local too), an end-to-end test shows it in Chrome
+  156, and nothing relies on it: a refusal is only logged. Whether the level outlasts a
+  worker or browser restart no longer matters, as no secret is in that area.
+- **Notifications cleared once made.** A notification is cleared (answered, timed out,
+  cancelled, shown again) only after its `create` has finished, so none stays on screen
+  with buttons that answer nothing.
 - **A takeover is kept (iteration 26).** After `replaced` the worker stores the fact and
   connects again neither at its next start nor on its alarm, so it does not take the
   address back and forth with whoever has the secret; the panel shows the notice until
