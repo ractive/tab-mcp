@@ -219,6 +219,9 @@ export class Questions {
 
 	#notify(pending: Pending): void {
 		if (this.#pending.get(pending.view.id) !== pending) return;
+		// One notification per question: a panel that went away may have sent
+		// it out already while the question was still being routed.
+		if (pending.notification !== undefined) return;
 		const id = `${pending.view.id}:${++this.#shown}`;
 		pending.notification = id;
 		pending.shownAt = this.#host.now();
@@ -273,8 +276,9 @@ export class Questions {
 		if (answer === undefined) return;
 		if (this.#host.now() - pending.shownAt < NOTIFICATION_GUARD_MS) {
 			// Too soon to be read: show it again rather than take it.
-			this.#notify(pending);
+			delete pending.notification;
 			this.#clear(id);
+			this.#notify(pending);
 			return;
 		}
 		pending.settle(answer);

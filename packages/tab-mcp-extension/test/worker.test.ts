@@ -18,6 +18,7 @@ import {
 } from "../src/protocol.ts";
 import { allowable, isAllowed } from "../src/worker/allowed.ts";
 import { AlwaysAllowed } from "../src/worker/always.ts";
+import { memoryKv, migrate } from "../src/worker/kv.ts";
 import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
@@ -296,6 +297,27 @@ describe("questions", () => {
 		expect(events).toEqual([`create ${id}`, `created ${id}`, `clear ${id}`]);
 	});
 
+	test("a panel that goes away while a question is routed sends one notification, not two", async () => {
+		const host = fakeHost();
+		let inFocus: (focused: boolean) => void = () => {};
+		host.panelInFocus = () =>
+			new Promise((resolve) => {
+				inFocus = resolve;
+			});
+		const questions = new Questions(host);
+		const answer = questions.ask(request(), { tabId: 7 });
+		await settle();
+		// Routing waits on the window; meanwhile the panel is covered.
+		questions.panelClosed(3);
+		expect(host.shown.size).toBe(1);
+		inFocus(false);
+		await settle();
+		expect(host.shown.size).toBe(1);
+		host.advance(NOTIFICATION_GUARD_MS);
+		questions.notificationButton([...host.shown.keys()][0] as string, 0);
+		expect(await answer).toBe("allow");
+	});
+
 	test("with the panel of the tab's focused window open, no notification; it goes out once the panel closes", async () => {
 		const host = fakeHost({ panel: true });
 		const questions = new Questions(host);
@@ -416,19 +438,13 @@ describe("allowed tools", () => {
 	});
 });
 
-describe("the address secret in the worker", () => {
-	test("loaded once, read from memory, written through to storage", async () => {
-		const stored: Record<string, unknown> = {
+describe("the settings in IndexedDB", () => {
+	test("the address secret: loaded once, read from memory, written through", async () => {
+		const kv = memoryKv({
 			"tab-mcp:secret:https://relay:tab-mcp-for-chrome": "s1",
 			relay: "https://relay",
-		};
-		const area = {
-			get: async () => ({ ...stored }),
-			set: async (items: Record<string, unknown>) => {
-				Object.assign(stored, items);
-			},
-		};
-		const storage = await CachedSecretStorage.load(area);
+		});
+		const storage = await CachedSecretStorage.load(kv);
 		expect(
 			storage.getItem("tab-mcp:secret:https://relay:tab-mcp-for-chrome"),
 		).toBe("s1");
@@ -439,9 +455,68 @@ describe("the address secret in the worker", () => {
 			storage.getItem("tab-mcp:secret:https://other:tab-mcp-for-chrome"),
 		).toBe("s2");
 		await storage.written;
-		expect(stored["tab-mcp:secret:https://other:tab-mcp-for-chrome"]).toBe(
+		expect(kv.data.get("tab-mcp:secret:https://other:tab-mcp-for-chrome")).toBe(
 			"s2",
 		);
+	});
+
+	/** chrome.storage.local as the migration sees it. */
+	function oldArea(initial: Record<string, unknown>, failRemove = false) {
+		const data = { ...initial };
+		return {
+			data,
+			get: async () => ({ ...data }),
+			async remove(keys: string[]) {
+				if (failRemove) throw new Error("gone");
+				for (const key of keys) delete data[key];
+			},
+		};
+	}
+
+	const OLD = {
+		"tab-mcp:secret:https://relay:tab-mcp-for-chrome": "secret",
+		relay: "https://relay",
+		aiOn: true,
+		replaced: { sibling: false },
+		allowedTools: { "https://site.test": ["t"] },
+		somethingElse: 1,
+	};
+
+	test("the old settings move from chrome.storage.local, then go from there", async () => {
+		const old = oldArea(OLD);
+		const kv = memoryKv();
+		const moved = await migrate(old, kv);
+		expect(moved.sort()).toEqual(
+			[
+				"aiOn",
+				"allowedTools",
+				"relay",
+				"replaced",
+				"tab-mcp:secret:https://relay:tab-mcp-for-chrome",
+			].sort(),
+		);
+		const { somethingElse: _, ...settings } = OLD;
+		expect(Object.fromEntries(kv.data)).toEqual(settings);
+		expect(old.data).toEqual({ somethingElse: 1 });
+		// Again: nothing left to move, nothing changes.
+		expect(await migrate(old, kv)).toEqual([]);
+		expect(Object.fromEntries(kv.data)).toEqual(settings);
+	});
+
+	test("crash-safe: written before removed; a second run keeps what changed since", async () => {
+		const old = oldArea(OLD, true);
+		const kv = memoryKv();
+		await expect(migrate(old, kv)).rejects.toThrow("gone");
+		// Written, not removed: nothing lost.
+		expect(kv.data.get("tab-mcp:secret:https://relay:tab-mcp-for-chrome")).toBe(
+			"secret",
+		);
+		// The user turned AI access off meanwhile; the old value must not win.
+		await kv.set({ aiOn: false });
+		const again = oldArea(old.data);
+		await migrate(again, kv);
+		expect(kv.data.get("aiOn")).toBe(false);
+		expect(again.data).toEqual({ somethingElse: 1 });
 	});
 });
 

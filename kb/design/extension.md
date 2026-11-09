@@ -53,8 +53,9 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   origin. A WebSocket that carries messages keeps the worker running (Chrome 116), and
   the relay's heartbeat carries some every 25 s, so the connection stays while the side
   panel is closed; an alarm wakes the worker once a minute while AI access is on, and
-  every worker start connects again when the user left it on. The address secret is in
-  `chrome.storage.local` (the worker has no `localStorage`).
+  every worker start connects again when the user left it on. The address secret and the
+  settings are in IndexedDB in the extension's origin, used by the worker only, out of
+  content scripts' reach (threat model A13).
 - The tools the AI app sees are registered with `tab-mcp-client`'s `registerTool`; their
   `execute` sends a message to the content script of the tab in front (the active tab of
   the last focused normal window) and returns its answer. Overmark does the same in its

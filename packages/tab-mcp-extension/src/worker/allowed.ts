@@ -1,17 +1,19 @@
 /**
  * The page tools the user allowed to run without asking, per site: in the
  * side panel a tool's "asks first" turns into "allowed". Kept in the
- * extension's storage by exact origin and the page's tool name, so another
+ * worker's IndexedDB by exact origin and the page's tool name, so another
  * site's tool of the same name still asks.
  */
+
+import type { Kv } from "./kv.ts";
 
 const KEY = "allowedTools";
 
 /** Origin → the page's tool names allowed there. */
 export type AllowedTools = Record<string, string[]>;
 
-export async function loadAllowed(): Promise<AllowedTools> {
-	const stored = (await chrome.storage.local.get(KEY))[KEY];
+export async function loadAllowed(kv: Kv): Promise<AllowedTools> {
+	const stored = await kv.get(KEY);
 	return typeof stored === "object" && stored !== null
 		? (stored as AllowedTools)
 		: {};
@@ -47,17 +49,18 @@ export function isAllowed(
  * origin that cannot be allowed (see `allowable`) changes nothing.
  */
 export async function setAllowed(
+	kv: Kv,
 	origin: string,
 	name: string,
 	on: boolean,
 ): Promise<AllowedTools> {
-	const allowed = await loadAllowed();
+	const allowed = await loadAllowed(kv);
 	if (!allowable(origin)) return allowed;
 	const names = new Set(allowed[origin] ?? []);
 	if (on) names.add(name);
 	else names.delete(name);
 	if (names.size > 0) allowed[origin] = [...names].sort();
 	else delete allowed[origin];
-	await chrome.storage.local.set({ [KEY]: allowed });
+	await kv.set({ [KEY]: allowed });
 	return allowed;
 }

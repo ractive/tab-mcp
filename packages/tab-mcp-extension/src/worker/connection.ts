@@ -22,16 +22,7 @@ import {
 	type TabView,
 	type WorkerMessage,
 } from "../protocol.ts";
-import {
-	loadAiOn,
-	loadRelay,
-	loadReplaced,
-	type Replaced,
-	relayProblem,
-	saveAiOn,
-	saveRelay,
-	saveReplaced,
-} from "../relay.ts";
+import { relayProblem } from "../relay.ts";
 import {
 	ALL_SITES,
 	askPage,
@@ -49,12 +40,22 @@ import {
 } from "./allowed.ts";
 import { AlwaysAllowed } from "./always.ts";
 import { PageToolBridge } from "./bridge.ts";
+import { type Kv, migrate, openKv } from "./kv.ts";
 import {
 	QUESTION_TIMEOUT_MS,
 	Questions,
 	type QuestionsHost,
 } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
+import {
+	loadAiOn,
+	loadRelay,
+	loadReplaced,
+	type Replaced,
+	saveAiOn,
+	saveRelay,
+	saveReplaced,
+} from "./settings.ts";
 import { createTools, INSTRUCTIONS } from "./tools.ts";
 
 /** Wakes the worker while AI access is on, should the connection be down. */
@@ -93,18 +94,18 @@ async function iconsFor(): Promise<Icon[]> {
 }
 
 /**
- * Close `chrome.storage.local` to content scripts (by default they may read
- * and write it); `undefined` once done, else why not.
+ * Close `chrome.storage.local` to content scripts, which may read and write
+ * it by default. Only an extra layer: the settings are in IndexedDB, which
+ * content scripts cannot reach at all, and not every Chrome takes this for
+ * the local area, so a refusal is only logged.
  */
-async function closeStorage(): Promise<string | undefined> {
+async function restrictStorage(): Promise<void> {
 	try {
 		await chrome.storage.local.setAccessLevel({
 			accessLevel: "TRUSTED_CONTEXTS",
 		});
-		return undefined;
 	} catch (error) {
-		console.error("tab-mcp: storage access level", error);
-		return `This Chrome cannot keep the extension's storage from web pages (${message(error)}), so tab-mcp for Chrome does not connect. Update Chrome.`;
+		console.warn("tab-mcp: storage access level", error);
 	}
 }
 
@@ -135,8 +136,7 @@ export class Connection {
 	#bridge: PageToolBridge;
 	#listening = new AbortController();
 	#problem: string | undefined;
-	/** Why the extension's storage is not closed to web pages: then it never connects. */
-	readonly #unsafe: string | undefined;
+	readonly #kv: Kv;
 	/** Taken over (kept in storage too, so it holds across worker restarts). */
 	#replaced: Replaced | undefined;
 	/** The takeover happened in this worker's life: the library knows of it. */
@@ -154,9 +154,9 @@ export class Connection {
 		allowed: AllowedTools,
 		relay: string,
 		replaced: Replaced | undefined,
-		unsafe: string | undefined,
+		kv: Kv,
 	) {
-		this.#unsafe = unsafe;
+		this.#kv = kv;
 		this.#storage = storage;
 		this.#icons = icons;
 		this.#allowed = allowed;
@@ -172,20 +172,23 @@ export class Connection {
 	 * address was not taken over meanwhile.
 	 */
 	static async start(): Promise<Connection> {
-		// Before anything is read: the storage holds the address secret and
-		// the tools allowed per site, which a page's renderer (through the
-		// content script) must neither read nor change.
-		const unsafe = await closeStorage();
+		await restrictStorage();
+		// The settings live in IndexedDB, out of content scripts' reach; an
+		// older version kept them in chrome.storage.local: moved once.
+		const kv = await openKv();
+		await migrate(chrome.storage.local, kv).catch((error: unknown) =>
+			console.error("tab-mcp: moving the settings", error),
+		);
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
 		const [storage, icons, allowed, relay, on, replaced] = await Promise.all([
-			CachedSecretStorage.load(chrome.storage.local),
+			CachedSecretStorage.load(kv),
 			iconsFor(),
-			loadAllowed(),
-			loadRelay(),
-			loadAiOn(),
-			loadReplaced(),
+			loadAllowed(kv),
+			loadRelay(kv),
+			loadAiOn(kv),
+			loadReplaced(kv),
 		]);
 		const connection = new Connection(
 			storage,
@@ -193,7 +196,7 @@ export class Connection {
 			allowed,
 			relay,
 			replaced,
-			unsafe,
+			kv,
 		);
 		connection.#showBadge();
 		if (on && replaced === undefined) connection.#connect();
@@ -321,12 +324,6 @@ export class Connection {
 	}
 
 	#connect(): void {
-		if (this.#unsafe !== undefined) {
-			// Fail closed: with the storage open to web pages, no connection.
-			this.#problem = this.#unsafe;
-			this.#changed();
-			return;
-		}
 		this.#problem = undefined;
 		// The extension's rule, not the library's: only the panel's button or
 		// a start with AI access left on gets here.
@@ -340,11 +337,11 @@ export class Connection {
 	async #setReplaced(replaced: Replaced | undefined): Promise<void> {
 		this.#replaced = replaced;
 		if (replaced === undefined) this.#replacedHere = false;
-		await saveReplaced(replaced);
+		await saveReplaced(this.#kv, replaced);
 	}
 
 	async #setAiOn(on: boolean): Promise<void> {
-		await saveAiOn(on);
+		await saveAiOn(this.#kv, on);
 		if (on) await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 		else await chrome.alarms.clear(ALARM);
 	}
@@ -375,16 +372,18 @@ export class Connection {
 
 	/** The worker woke for the alarm: connect if the connection is down. */
 	keepUp(): void {
-		void Promise.all([loadAiOn(), loadReplaced()]).then(([on, replaced]) => {
-			if (
-				on &&
-				replaced === undefined &&
-				this.#mcp.state === "disconnected" &&
-				this.#mcp.reconnecting === undefined &&
-				this.#replaced === undefined
-			)
-				this.#connect();
-		});
+		void Promise.all([loadAiOn(this.#kv), loadReplaced(this.#kv)]).then(
+			([on, replaced]) => {
+				if (
+					on &&
+					replaced === undefined &&
+					this.#mcp.state === "disconnected" &&
+					this.#mcp.reconnecting === undefined &&
+					this.#replaced === undefined
+				)
+					this.#connect();
+			},
+		);
 	}
 
 	notificationButton(id: string, index: number): void {
@@ -475,11 +474,12 @@ export class Connection {
 				// AI access was on for the relay before, not for this one: the
 				// user connects to it with a click.
 				await this.#setAiOn(false);
-				await saveRelay(command.relay);
+				await saveRelay(this.#kv, command.relay);
 				await this.#useRelay(command.relay);
 				return;
 			case "set-allowed":
 				this.#allowed = await setAllowed(
+					this.#kv,
 					command.origin,
 					command.name,
 					command.on,
@@ -646,7 +646,7 @@ export class Connection {
 					: "off";
 		const address = mcp.address;
 		const code = mcp.pairingCode?.code;
-		const problem = this.#problem ?? this.#unsafe;
+		const problem = this.#problem;
 		return {
 			relay: this.#relay,
 			status,
