@@ -422,14 +422,17 @@ like any other, `chrome-extension://<id>` (A11).
 - **The page is untrusted, all of it.** Tool names, titles, descriptions and schemas
   reach the AI app's tool list, where no hint can mark them, and a description can carry
   instructions. Descriptions start with the page's origin (`From https://…:`) and are cut
-  to 1000 characters, titles to 100; schemas over 16 KB and tools beyond 64 are left out.
-  Every result is marked untrusted (`openWorldHint`); its text, all blocks together, is
+  to 1000 characters, titles to 100; schemas over 16 KB and tools beyond 64 are left out,
+  as is a tool whose name would become one of the extension's own (`info` as
+  `page_info`), so a page cannot stand in for them. Every result is marked untrusted
+  (`openWorldHint`); its text, all blocks together, is
   cut to 100,000 characters, with at most 32 blocks, each image up to 1 MB of base64
   (about 750 KB of image data).
 - **Hints can lie.** A tool the page marks read-only runs without asking; every other
   tool asks the user each time, naming the page's origin. "Always allow" stops the
-  questions for that tool, AI app and page until the page changes or the AI app is
-  disconnected; "allowed" in the side panel stops them for a tool of one exact http(s)
+  questions for that tool, AI app and page (that very page load: a reload or another tab
+  with a tool of the same name asks again, and an answer given after the page changed
+  under the question is not kept) until the page changes or the AI app is disconnected; "allowed" in the side panel stops them for a tool of one exact http(s)
   origin until the user takes it back. An allowed tool runs whatever the AI app, or a
   prompt injection steering it, asks of it. A page can mark only its own tools
   read-only, so a lie harms that page's own user session, which its scripts could reach
@@ -455,8 +458,9 @@ like any other, `chrome-extension://<id>` (A11).
   (turning AI access on or off, pairing, disconnecting an AI app, a new address, the
   relay, allowing tools, answers to questions) are taken only from the extension's own
   side panel, as Chrome reports the sender; anything else is dropped. Besides the panel,
-  only the buttons of the extension's own notifications answer questions (see
-  Questions). "Allow all" allows
+  only the buttons of the extension's own notifications and a question's own window,
+  which the extension opened for that one question and which can answer only it, answer
+  questions (see Questions). "Allow all" allows
   only the tools the extension itself offers on that site at that moment that are not
   read-only, so a tool the page registers later still asks. From a page, the one message
   accepted says that the page's tools changed. A compromised page can therefore not turn
@@ -466,9 +470,18 @@ like any other, `chrome-extension://<id>` (A11).
   the panel has been in front for 750 ms, so the click that brings it forward cannot
   approve, and the page's scripts cannot reach the panel. Otherwise a Chrome notification
   asks. It names the AI app (its declared name beside its verified host), the tool and,
-  on a line of its own, the page's site; its buttons are Allow and Always allow (where
-  Always allow is offered), and a click on the notification's body opens the full
-  question with all its arguments. Only those two buttons allow from a notification, and
+  on a line of its own, the page's site, and the arguments in short, saying so when they
+  are cut; its buttons are Allow and Always allow (where Always allow is offered, also
+  when the arguments are cut), and a click on the notification's body opens the full
+  question with all its arguments in the side panel of the tab's window, or in a small
+  window of its own where Chrome does not open the panel; the question waits there, its
+  60 s still running. Closing the notification is Don't allow, as is closing that
+  window. Invisible, blank and direction characters in the arguments and names are shown
+  as `\uXXXX`, with the same set as the client library's dialog (controls, format and
+  other default-ignorable characters such as variation selectors, private-use and
+  unassigned code points, every space but U+0020). In the side panel the page's site
+  and the page's title for the tool are on lines of their own, labelled. Only those two
+  buttons allow from a notification, and
   a click on one right after the notification appeared does not count, so a click meant
   for something that was there before cannot allow. Each notification answers only its
   own call. A notification is outside any page, so a page cannot cover or click it;
@@ -483,8 +496,8 @@ like any other, `chrome-extension://<id>` (A11).
   the extension's own origin and opened by the service worker only. The extension's
   scripts in a page run in that page's origin and cannot open that database, so a page
   whose renderer is compromised can neither read the secret (and take over the address
-  from anywhere, A4) nor allow its own tools. No setting is read from `chrome.storage`,
-  which those scripts can reach.
+  from anywhere, A4) nor allow its own tools. The extension asks for no `storage`
+  permission, so there is no `chrome.storage` area those scripts could read or write.
 - **A takeover is kept.** After another tab or program takes the address over, the
   extension does not take it back by itself, also after a restart, so it does not trade
   the address back and forth with whoever has the secret; the side panel says so and

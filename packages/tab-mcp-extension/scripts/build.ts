@@ -204,6 +204,7 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			join(outdir, "question"),
 			"esm",
 			minify,
+			sourcemap,
 		)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));
