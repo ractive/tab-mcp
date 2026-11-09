@@ -174,9 +174,12 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
 
 4. Open your page on `http://localhost:3000`, click the button and connect an AI app.
 
-A Chrome or Edge extension can offer tools the same way, from its side panel or another
-page of its own; the relay then lists `chrome-extension://<id>` (see
-[browser extensions](docs/configuration.md#browser-extensions)).
+A Chrome or Edge extension can offer tools the same way, from its service worker or one
+of its own pages (such as its side panel); the relay's heartbeat keeps a service worker
+alive while it is connected (Chrome 116+, with the heartbeat under 30 s). In a service
+worker, pass `storage` and `onConfirm`: it has no `localStorage` and no document (see
+[browser extensions](docs/configuration.md#browser-extensions)). The relay then lists
+`chrome-extension://<id>`.
 
 Mark tools that change or delete things with `annotations: { consequentialHint: true }`:
 the page then asks the user before each call. The
@@ -240,6 +243,7 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
+| `packages/tab-mcp-extension` | Chrome Web Store "tab-mcp for Chrome" (from `extension-v0.1.0`) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |

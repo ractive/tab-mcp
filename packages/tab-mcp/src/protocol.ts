@@ -2,7 +2,7 @@
  * The tab↔relay protocol, version 1 (`tab-mcp.v1`).
  *
  * One WebSocket per tab session; text frames with one JSON object each. The
- * normative description is `kb/design/protocol.md` (later `docs/protocol.md`).
+ * normative description is `docs/protocol.md`.
  */
 
 import { isAppName, MAX_APP_NAME, type PairingKind } from "./config.ts";

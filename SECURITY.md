@@ -9,8 +9,9 @@ issue, pull request or discussion for a security problem.
 
 In the report, give:
 
-- the package and version (`@ractive-ch/tab-mcp`, `@ractive-ch/tab-mcp-client`, or the
-  Docker image tag);
+- the package and version (`@ractive-ch/tab-mcp`, `@ractive-ch/tab-mcp-client`, the
+  Docker image tag, or the browser extension "tab-mcp for Chrome" with the version shown
+  at `chrome://extensions`);
 - what an attacker can do, and what they need first;
 - steps to reproduce, or a test.
 
@@ -26,6 +27,7 @@ comes as a new version, not as a patch to an older one.
 |---|---|---|
 | `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.8.0 | older versions |
 | `@ractive-ch/tab-mcp-client` (npm) | 0.10.0 | older versions |
+| tab-mcp for Chrome (Chrome Web Store) | 0.1.0 | older versions |
 
 ## Connecting an AI app to a page means trusting the page
 

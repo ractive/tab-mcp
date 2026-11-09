@@ -9,7 +9,7 @@ tags:
   - design
   - extension
   - webmcp
-timestamp: 2026-11-08T23:00:00+01:00
+timestamp: 2026-11-09T15:00:00+01:00
 ---
 
 # tab-mcp for Chrome: the browser extension
@@ -93,6 +93,7 @@ with a second extension).
 | `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
 | `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, whether it only reads, and why a tool is left out (iteration 20) |
 | `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20) |
+| `webmcp_call` | as the called tool | Calls a tool of the page in front by its WebMCP name, with the same rules (schema check, confirmation, the page it was listed from); for AI apps that read their tool list once (Claude, Codex), which never see the `page_<name>` tools of a later tab (iteration 20 review, `src/worker/tools.ts`) |
 
 The side panel shows the connection and its apps, the pairing view, questions, the tab in
 front with its tools ("reads", "asks first" or "allowed"), and the relay address under

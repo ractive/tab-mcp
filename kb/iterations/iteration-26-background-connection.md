@@ -8,7 +8,7 @@ description: >-
   while the panel is closed and comes back after a restart; the side panel becomes a
   view with its own pairing and question UI. A tool that asks first asks in the
   side panel of the tab's focused window, else in a Chrome notification.
-timestamp: 2026-11-09T03:00:00+01:00
+timestamp: 2026-11-09T15:00:00+01:00
 tags: [iteration, extension]
 ---
 # Iteration 26: the connection without the side panel
@@ -119,6 +119,11 @@ panel on screen.
    AI access is on; each start connects again (the restart test shows the same address
    coming back). The address changes once for whoever used the panel before: its secret
    was in the panel's `localStorage`, which the worker cannot read.
+   *Since 2026-11-09:* the secret and the settings (relay, AI access on, allowed tools,
+   the takeover flag) are no longer in `chrome.storage.local` but in IndexedDB in the
+   extension's own origin, opened by the service worker only, which content scripts
+   cannot reach (branches `ext/storage-hardening` and `ext/kv-atomic`; A13 in
+   [the threat model](/design/threat-model.md)).
 2. **Notifications**: in headless Chrome for Testing the API works as documented
    (`create` with two buttons and `requireInteraction`, `getAll`, `clear`), and the
    end-to-end tests answer through the same function a click calls. How they look and
