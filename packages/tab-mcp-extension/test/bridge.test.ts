@@ -27,11 +27,13 @@ import {
 } from "../src/sidepanel/bridge.ts";
 
 describe("names, descriptions, schemas", () => {
-	test("page tools are page.<name>; names that would not fit are not", () => {
-		expect(bridgedName("search")).toBe("page.search");
-		expect(bridgedName("a".repeat(123))).toBe(`page.${"a".repeat(123)}`);
-		expect(bridgedName("a".repeat(124))).toBeUndefined();
-		expect(bridgedName("with space")).toBeUndefined();
+	test("page tools are page_<name>, in names every AI app takes (Claude: no dots, 64)", () => {
+		expect(bridgedName("search")).toBe("page_search");
+		expect(bridgedName("dotted.name")).toBe("page_dotted_name");
+		expect(bridgedName("with space")).toBe("page_with_space");
+		expect(bridgedName("a".repeat(59))).toBe(`page_${"a".repeat(59)}`);
+		expect(bridgedName("a".repeat(60))).toBeUndefined();
+		expect(bridgedName("")).toBeUndefined();
 	});
 
 	test("descriptions start with the page's origin and are cut", () => {
@@ -224,19 +226,19 @@ describe("PageToolBridge", () => {
 		);
 		const bridge = new PageToolBridge(reg, chrome);
 		await bridge.refresh();
-		expect([...reg.tools.keys()].sort()).toEqual(["page.buy", "page.search"]);
-		expect(reg.tools.get("page.search")?.annotations).toEqual({
+		expect([...reg.tools.keys()].sort()).toEqual(["page_buy", "page_search"]);
+		expect(reg.tools.get("page_search")?.annotations).toEqual({
 			readOnlyHint: true,
 			consequentialHint: false,
 			untrustedContentHint: true,
 		});
 		// Not read-only: asks every time; untrusted whatever the page said.
-		expect(reg.tools.get("page.buy")?.annotations).toEqual({
+		expect(reg.tools.get("page_buy")?.annotations).toEqual({
 			readOnlyHint: false,
 			consequentialHint: true,
 			untrustedContentHint: true,
 		});
-		expect(reg.tools.get("page.search")?.description).toBe(
+		expect(reg.tools.get("page_search")?.description).toBe(
 			"From https://shop.example: The search tool.",
 		);
 		// The listed descriptions carry the origin too.
@@ -250,22 +252,22 @@ describe("PageToolBridge", () => {
 		const { state, chrome } = fakeChrome(page([pageTool("a"), pageTool("b")]));
 		const bridge = new PageToolBridge(reg, chrome);
 		await bridge.refresh();
-		const first = reg.tools.get("page.a");
+		const first = reg.tools.get("page_a");
 		state.page = page([pageTool("a"), pageTool("c", { description: "New." })]);
 		await bridge.refresh();
-		expect([...reg.tools.keys()].sort()).toEqual(["page.a", "page.c"]);
+		expect([...reg.tools.keys()].sort()).toEqual(["page_a", "page_c"]);
 		// An unchanged tool is not registered again.
-		expect(reg.tools.get("page.a")).toBe(first);
+		expect(reg.tools.get("page_a")).toBe(first);
 		state.page = page([pageTool("a", { description: "Changed." })]);
 		await bridge.refresh();
-		expect(reg.tools.get("page.a")?.description).toContain("Changed.");
+		expect(reg.tools.get("page_a")?.description).toContain("Changed.");
 		// The same names on another page (a navigation) are other tools.
-		const beforeNavigation = reg.tools.get("page.a");
+		const beforeNavigation = reg.tools.get("page_a");
 		state.page = page([pageTool("a", { description: "Changed." })], {
 			documentId: "doc-2",
 		});
 		await bridge.refresh();
-		expect(reg.tools.get("page.a")).not.toBe(beforeNavigation);
+		expect(reg.tools.get("page_a")).not.toBe(beforeNavigation);
 		state.page = new Error("tab-mcp for Chrome may not read this tab yet.");
 		await bridge.refresh();
 		expect(reg.tools.size).toBe(0);
@@ -273,7 +275,7 @@ describe("PageToolBridge", () => {
 	});
 
 	test("leaves out what cannot be offered, says why, and bounds what it lists", async () => {
-		const reg = registrar((tool) => tool.name === "page.refused");
+		const reg = registrar((tool) => tool.name === "page_refused");
 		const many = Array.from({ length: MAX_TOOLS + 2 }, (_, i) =>
 			pageTool(`t${i}`),
 		);
@@ -304,6 +306,15 @@ describe("PageToolBridge", () => {
 		expect(reg.tools.size).toBeLessThanOrEqual(MAX_TOOLS);
 	});
 
+	test("two page names that become one tool name: the second is left out", async () => {
+		const reg = registrar();
+		const { chrome } = fakeChrome(page([pageTool("a.b"), pageTool("a_b")]));
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		expect([...reg.tools.keys()]).toEqual(["page_a_b"]);
+		expect(bridge.state.tools[1]?.problem).toContain("page_a_b");
+	});
+
 	test("a call goes to the page the tool was listed from, with its claim", async () => {
 		const reg = registrar();
 		const { state, chrome } = fakeChrome(page([pageTool("search")]));
@@ -314,7 +325,7 @@ describe("PageToolBridge", () => {
 			value: JSON.stringify({ content: [{ type: "text", text: "found" }] }),
 		});
 		const result = await reg.tools
-			.get("page.search")
+			.get("page_search")
 			?.execute({ q: "tea" }, options());
 		expect(result).toEqual({ content: [{ type: "text", text: "found" }] });
 		expect(state.calls).toEqual([
@@ -331,7 +342,7 @@ describe("PageToolBridge", () => {
 		const { state, chrome } = fakeChrome(page([pageTool("search")]));
 		const bridge = new PageToolBridge(reg, chrome, () => {}, 50);
 		await bridge.refresh();
-		const tool = reg.tools.get("page.search");
+		const tool = reg.tools.get("page_search");
 		state.answer = async () => ({
 			ok: false,
 			error: "The page in the tab changed since its tools were listed.",
@@ -365,7 +376,7 @@ describe("PageToolBridge", () => {
 			});
 		const controller = new AbortController();
 		const running = reg.tools
-			.get("page.slow")
+			.get("page_slow")
 			?.execute({}, options(controller.signal));
 		controller.abort();
 		await expect(Promise.resolve(running)).rejects.toThrow("cancelled");
@@ -409,7 +420,7 @@ describe("PageToolBridge", () => {
 		release();
 		await Promise.all([first, second]);
 		expect(reads).toBe(2);
-		expect([...reg.tools.keys()]).toEqual(["page.new"]);
+		expect([...reg.tools.keys()]).toEqual(["page_new"]);
 		// A caller that asked meanwhile sees the state of the later read.
 		expect(bridge.state.tools.map((t) => t.name)).toEqual(["new"]);
 	});
@@ -469,7 +480,7 @@ describe("webmcp_call (by name)", () => {
 			bridge.callByName("buy", {}, options(), confirm(false)),
 		).rejects.toThrow("did not allow");
 		expect(state.calls).toEqual([]);
-		expect(asked[0]?.tool.name).toBe("page.buy");
+		expect(asked[0]?.tool.name).toBe("page_buy");
 		expect(asked[0]?.tool.description).toStartWith(
 			"From https://shop.example: ",
 		);

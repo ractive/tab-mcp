@@ -1,6 +1,6 @@
 /**
  * The WebMCP bridge (iteration 20): the tools the page in front registered
- * with WebMCP, offered to the AI app as `page.<name>` tools of the side
+ * with WebMCP, offered to the AI app as `page_<name>` tools of the side
  * panel's `TabMcp`, and through `webmcp_call` for AI apps that read their
  * tool list only once. The list follows the tab in front and the page's
  * `toolchange`; it is advisory (a page may drop a tool any time), so a call
@@ -28,7 +28,7 @@ export const MAX_TOOLS = 64;
 export const MAX_DESCRIPTION = 1000;
 /** A title is cut to this many characters. */
 export const MAX_TITLE = 100;
-/** A name shown (not offered: those must fit `page.<name>`) is cut to this. */
+/** A name shown (also one that does not fit `page_<name>`) is cut to this. */
 export const MAX_NAME = 128;
 /** A schema bigger than this (as JSON) leaves its tool out. */
 export const MAX_SCHEMA_BYTES = 16 * 1024;
@@ -40,13 +40,22 @@ export const MAX_IMAGE_BASE64 = 1024 * 1024;
 /** A call the page does not answer in this time is given up. */
 export const CALL_TIMEOUT_MS = 60_000;
 
-const PREFIX = "page.";
-const NAME = /^[A-Za-z0-9_.-]{1,128}$/;
+const PREFIX = "page_";
+/**
+ * Tool names every AI app takes: the Anthropic API allows only
+ * `^[a-zA-Z0-9_-]{1,64}$` and drops other tools without a word (MCP and
+ * WebMCP allow dots and 128 characters; Claude saw no `page_<name>` tool).
+ */
+const API_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** The AI app's name for page tool `name`, or `undefined` if it cannot have one. */
+/**
+ * The AI app's name for page tool `name`: `page_<name>`, characters other
+ * than letters, digits, `_` and `-` as `_`; `undefined` if it is longer than
+ * 64 characters.
+ */
 export function bridgedName(name: string): string | undefined {
-	const bridged = `${PREFIX}${name}`;
-	return NAME.test(name) && NAME.test(bridged) ? bridged : undefined;
+	const bridged = `${PREFIX}${name.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+	return name !== "" && API_NAME.test(bridged) ? bridged : undefined;
 }
 
 const cut = (text: string, max: number) =>
@@ -167,7 +176,7 @@ export function resultOf(value: string | null): unknown {
 export interface Offered {
 	/** The page's name, cut. */
 	name: string;
-	/** The AI app's name, `page.<name>`. */
+	/** The AI app's name, `page_<name>`. */
 	tool?: string;
 	title?: string;
 	/** The page's description after its origin, cut. */
@@ -336,8 +345,8 @@ export class PageToolBridge {
 
 	/**
 	 * `webmcp_call`: call the page's tool `name` (its page name) with the same
-	 * rules as its `page.<name>` tool, for AI apps that read their tool list
-	 * once and so do not see `page.<name>` tools that came later.
+	 * rules as its `page_<name>` tool, for AI apps that read their tool list
+	 * once and so do not see `page_<name>` tools that came later.
 	 */
 	async callByName(
 		name: string,
@@ -417,7 +426,14 @@ export class PageToolBridge {
 			offered.push(entry);
 			const name = bridgedName(pageTool.name);
 			if (name === undefined) {
-				entry.problem = "its name is too long or not allowed";
+				entry.problem = "its name is too long (page_<name> over 64 characters)";
+				continue;
+			}
+			const clash = [...callable.values()].find(
+				(c) => bridgedName(c.target.name) === name,
+			);
+			if (clash !== undefined) {
+				entry.problem = `its name becomes ${name}, as ${cut(clash.target.name, MAX_NAME)} does`;
 				continue;
 			}
 			const schema = schemaFor(pageTool);
@@ -496,7 +512,7 @@ export class PageToolBridge {
 		}
 	}
 
-	/** The `page.<name>` tool for a page tool. */
+	/** The `page_<name>` tool for a page tool. */
 	#tool(
 		callable: Callable,
 		name: string,

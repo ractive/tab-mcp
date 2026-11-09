@@ -185,10 +185,10 @@ async function waitForTools(
 const OWN_TOOLS = ["page_info", "webmcp_call", "webmcp_tools"];
 
 const PAGE_TOOLS = [
-	"page.get_greeting",
-	"page.mcp_result",
-	"page.place_order",
-	"page.slow_tool",
+	"page_get_greeting",
+	"page_mcp_result",
+	"page_place_order",
+	"page_slow_tool",
 ];
 
 /** Answer the library's confirmation in the side panel with `button`. */
@@ -227,10 +227,10 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		const { tools } = await stack.client.listTools();
 		const byName = (name: string) => tools.find((t) => t.name === name);
 		expect(byName("page_info")?.annotations?.readOnlyHint).toBe(true);
-		const greeting = byName("page.get_greeting");
+		const greeting = byName("page_get_greeting");
 		expect(greeting?.description).toBe(`From ${SITE}: Greets a name.`);
 		expect(greeting?.annotations?.readOnlyHint).toBe(true);
-		expect(byName("page.place_order")?.annotations?.readOnlyHint).toBe(false);
+		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
 	});
 
 	test("page_info tells the page in front and its WebMCP tools", async () => {
@@ -261,7 +261,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("a read-only tool runs at once, with the page's answer", async () => {
-		const result = await call(stack, "page.get_greeting", { name: "Ada" });
+		const result = await call(stack, "page_get_greeting", { name: "Ada" });
 		expect(result.isError).toBeFalsy();
 		expect(result.content).toEqual([{ type: "text", text: "Hello, Ada!" }]);
 		expect(await tab.eval("window.calls.at(-1)")).toEqual([
@@ -271,24 +271,24 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("arguments are checked against the page's schema (Chrome does not)", async () => {
-		const result = await call(stack, "page.get_greeting", { name: 42 });
+		const result = await call(stack, "page_get_greeting", { name: 42 });
 		expect(result.isError).toBe(true);
 		expect(await tab.eval("window.calls.length")).toBe(1);
 	});
 
 	test("an MCP result from the page passes as its content", async () => {
-		expect((await call(stack, "page.mcp_result")).content).toEqual([
+		expect((await call(stack, "page_mcp_result")).content).toEqual([
 			{ type: "text", text: "from an MCP result" },
 		]);
 	});
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
-		const allowed = call(stack, "page.place_order", { item: "tea" });
+		const allowed = call(stack, "page_place_order", { item: "tea" });
 		await answerInPanel(stack, "Allow");
 		const result = await allowed;
 		expect(result.isError).toBeFalsy();
 		expect(result.content[0]?.text).toContain("tea");
-		const declined = call(stack, "page.place_order", { item: "coffee" });
+		const declined = call(stack, "page_place_order", { item: "coffee" });
 		await answerInPanel(stack, "Don't allow");
 		expect((await declined).isError).toBe(true);
 		expect(await tab.eval("window.calls.map((c) => c[1])")).not.toContain(
@@ -319,7 +319,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		const controller = new AbortController();
 		const slow = call(
 			stack,
-			"page.slow_tool",
+			"page_slow_tool",
 			{},
 			{ signal: controller.signal },
 		);
@@ -338,8 +338,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			annotations: { readOnlyHint: true },
 			async execute() { return "late"; },
 		})`);
-		await waitForTools(stack, (n) => n.includes("page.late_tool"));
-		expect((await call(stack, "page.late_tool")).content).toEqual([
+		await waitForTools(stack, (n) => n.includes("page_late_tool"));
+		expect((await call(stack, "page_late_tool")).content).toEqual([
 			{ type: "text", text: "late" },
 		]);
 	});
@@ -347,10 +347,10 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	test("a page that replaces document.modelContext fools only itself", async () => {
 		await tab.goto(`${SITE}/forged.html`);
 		const names = await waitForTools(stack, (n) =>
-			n.includes("page.real_tool"),
+			n.includes("page_real_tool"),
 		);
-		expect(names).not.toContain("page.forged_tool");
-		expect(names).not.toContain("page.get_greeting");
+		expect(names).not.toContain("page_forged_tool");
+		expect(names).not.toContain("page_get_greeting");
 	});
 
 	test("it follows a navigation", async () => {
@@ -370,16 +370,16 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await pageInfo(stack)).structuredContent).toMatchObject({
 			url: `${OTHER}/webmcp.html`,
 		});
-		await waitForTools(stack, (n) => n.includes("page.get_greeting"));
+		await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 		const { tools } = await stack.client.listTools();
-		expect(tools.find((t) => t.name === "page.get_greeting")?.description).toBe(
+		expect(tools.find((t) => t.name === "page_get_greeting")?.description).toBe(
 			`From ${OTHER}: Greets a name.`,
 		);
 		await tab.activate();
 		expect((await pageInfo(stack)).structuredContent).toMatchObject({
 			url: `${SITE}/plain.html`,
 		});
-		await waitForTools(stack, (n) => !n.includes("page.get_greeting"));
+		await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
 	});
 });
 
@@ -441,7 +441,7 @@ describe.skipIf(chrome === undefined)(
 				webmcp: { available: true, tools: 5 },
 			});
 			// After the click its tools are offered (the content script says so).
-			await waitForTools(stack, (n) => n.includes("page.get_greeting"));
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 		});
 	},
 );

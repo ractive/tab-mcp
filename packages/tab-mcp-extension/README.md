@@ -12,9 +12,9 @@ Not published yet; load it unpacked.
 | Tool | What it does |
 |---|---|
 | `page_info` | The tab in front: address, title, language, whether WebMCP is available on the page and how many tools it registered. Read-only; its text is the page's own (untrusted). |
-| `webmcp_tools` | The page's WebMCP tools: each one's `page.<name>`, title, description, whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
-| `page.<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. |
-| `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page.<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
+| `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
+| `page_<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. |
+| `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page_<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
 
 The page's tools are the page's word:
 
@@ -32,7 +32,11 @@ The page's tools are the page's word:
   untrusted; their text, all blocks together, is cut to 100,000 characters. A page that
   answers with an MCP result (as `@mcp-b/global` pages do) gets its text blocks and up
   to 1 MB per image through, at most 32 blocks.
-- Left out: tools with a name that would not fit as `page.<name>`, a schema that is no
+- Names: `page_<name>`, other characters than letters, digits, `_` and `-` as `_`, at most
+  64 characters in all: the Anthropic API takes no other tool names, and Claude drops the
+  rest without a word.
+- Left out: tools whose `page_<name>` would be longer than 64 characters or the same as
+  another's, a schema that is no
   object schema or over 16 KB, more than 64 tools, and tools a tab-mcp page offers itself
   (listed in `<html data-tab-mcp-webmcp>`).
 - Only the top frame, and only the browser's own WebMCP: a page's replacement
