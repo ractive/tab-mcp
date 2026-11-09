@@ -27,6 +27,7 @@ import {
 	notOpenAnswer,
 	type RelayInfo,
 } from "./notopen.ts";
+import { STYLESHEET } from "./oauth/html.ts";
 import {
 	AuthorizationServer,
 	type AuthorizationTestMode,
@@ -244,16 +245,25 @@ function metaVersion(body: Record<string, unknown>): unknown {
 	return (meta as Record<string, unknown>)[PROTOCOL_VERSION_META_KEY];
 }
 
+const DOCS_URL = "https://ractive.ch/tab-mcp/";
+
 const INDEX_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tab-mcp relay</title>
+<link rel="stylesheet" href="${STYLESHEET}">
 <link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png"></head>
-<body><h1>tab-mcp relay</h1>
-<p>This server relays AI apps' MCP requests to tools offered by web pages open in a browser tab.
-It does not log request contents. Source and documentation:
-<a href="https://github.com/ractive/tab-mcp">github.com/ractive/tab-mcp</a>.</p>
-</body></html>`;
+<body><main class="home">
+<header class="brand"><img src="/favicon.svg" alt="" width="56" height="56">
+<div><h1>tab-mcp relay</h1><p class="help">Version ${VERSION}</p></div></header>
+<p class="lead">This server passes MCP requests from AI apps to the tools a web page offers in a browser tab.</p>
+<div class="flow" role="img" aria-label="An AI app sends MCP requests to the relay, which passes them over a WebSocket to the browser tab.">
+<span class="node">AI app</span><span class="link">MCP</span><span class="node relay">relay</span><span class="link">WebSocket</span><span class="node">browser tab</span>
+</div>
+<p>A page connects to the relay and gets an address of its own. An AI app added with that address can call the page's tools while the tab is open, once the person at the page has approved it. The relay does not log request contents.</p>
+<p class="actions"><a class="button primary" href="${DOCS_URL}">Documentation</a><a class="button" href="${DOCS_URL}connect/">Connect an AI app</a></p>
+<footer>Source code: <a href="https://github.com/ractive/tab-mcp">github.com/ractive/tab-mcp</a>. Status: <a href="/healthz">/healthz</a>.</footer>
+</main></body></html>`;
 
 function icon(body: string | Uint8Array<ArrayBuffer>, type: string): Response {
 	return new Response(body, {
@@ -1384,7 +1394,7 @@ function startRelay(
 						headers: {
 							"content-type": "text/html; charset=utf-8",
 							"content-security-policy":
-								"default-src 'none'; img-src 'self'; frame-ancestors 'none'",
+								"default-src 'none'; style-src 'self'; img-src 'self'; frame-ancestors 'none'",
 							"x-content-type-options": "nosniff",
 							"cache-control": "public, max-age=3600",
 						},
