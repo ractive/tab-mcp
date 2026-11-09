@@ -195,7 +195,7 @@ pairing page names the page's origin so the user knows whom they trust. The clos
 list (DEC-032) keeps other sites from borrowing a hosted relay's domain to look
 trustworthy. `SECURITY.md` says this plainly.
 
-### A13: The browser extension and the pages it bridges (iterations 19 and 20)
+### A13: The browser extension and the pages it bridges (iterations 19, 20 and 26)
 
 tab-mcp for Chrome ([design](/design/extension.md)) offers the WebMCP tools of the page
 in front to the user's AI app. That page did not choose the relay or the AI app: the user
@@ -210,9 +210,9 @@ did, by connecting the extension.
   most 32 blocks and 1 MB per image. `webmcp_tools` lists names cut to 128 characters
   and descriptions with the same origin prefix.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
-  asks the user in the side panel every time, naming the page's origin in the tool's
-  description. The user can stop the questions: "Always allow" in the dialog for that
-  tool on that page (forgotten when the page changes), or "allowed" in the panel for a
+  asks the user every time (see "Questions" below), naming the page's origin. The user
+  can stop the questions: "Always allow" for that tool, AI app and page (forgotten when
+  the page changes or the AI app is disconnected), or "allowed" in the panel for a
   tool of one exact origin (kept). An allowed tool runs whatever the AI app (or a prompt
   injection steering it) asks of it. A page can only mark its own tools read-only, so a lie harms that page's
   own user session, which its scripts could reach anyway.
@@ -223,7 +223,7 @@ did, by connecting the extension.
   name changes things.
 - **Arguments are checked by the library** against the page's schema before the call;
   Chrome does not check them. The schema's `pattern` and `patternProperties` are left
-  out, so a page's catastrophic regular expression cannot freeze the panel. Calls end
+  out, so a page's catastrophic regular expression cannot freeze the connection. Calls end
   for the AI app after 60 s or on its cancellation even if the page never answers.
 - **Flooding.** The content script reports `toolchange` at most every 250 ms, sends at
   most 256 tools with names cut to 256 and texts to 4000 characters, and drops schemas
@@ -238,9 +238,35 @@ did, by connecting the extension.
 - **The extension's id** is the relay origin `chrome-extension://<id>`. The development
   build's key is kept out of the public repository, so nobody else can load an extension
   with the id the hosted relay allows; the Chrome Web Store keeps its own key.
-- **The confirmation's focus rule.** The library arms "Allow" only after the side panel
-  has been visible and focused for 750 ms, so the user usually clicks into the panel
-  first; the page's scripts cannot reach the panel at all.
+- **Who may send what (iteration 26).** The connection lives in the service worker,
+  which content scripts in every granted tab can message too. Commands (connect, turn
+  off, pairing, disconnect an app, new address, the relay, "allowed", answers to
+  questions) come only over the side panel's named port, whose sender Chrome reports: an
+  extension page of this extension at the panel's path, not in a tab; any other port is
+  closed at once, and a command that does not parse is dropped. The one message a
+  content script may send is `webmcp-changed`, which only makes the bridge read the
+  tools again. A compromised page can therefore not turn AI access on, allow a tool or
+  answer a question; a compromised extension page could, but then the extension is
+  lost anyway.
+- **Questions (iteration 26).** With the panel open in the focused window of the tab the
+  call acts on, the question is there, and Allow arms only after the panel has been
+  visible and focused for 750 ms, so the click that brings it forward cannot approve;
+  the page's scripts cannot reach the panel at all. Otherwise a Chrome notification asks.
+  It names the AI app by its verified host beside its declared name, the tool and its
+  site, and the arguments (invisible and direction characters written as `\uXXXX`);
+  Don't allow is the first button, an Allow within 500 ms of showing does not count (it
+  shows again), and a click on the body or closing it is Don't allow. Each notification
+  carries its call: a click answers only that call, and one on a call already answered,
+  timed out or cancelled is dropped, never taken for another. A notification is outside
+  any page, so a page cannot cover or click it; another program on the computer could
+  click it, as it could click the panel. No answer in 60 s is Don't allow; with
+  notifications off (Focus, Do Not Disturb) the icon shows "?" and the panel asks.
+- **A connection with no panel on screen (iteration 26).** AI access stays on with the
+  panel closed and comes back after a browser start, an update or a reload when the
+  user left it on; it starts only from the panel's button. The icon's badge says "on"
+  while connected, so the user sees it without opening the panel. Read-only and
+  "allowed" tools run with nothing on screen, as they did with the panel open but not
+  looked at.
 
 ### Identity binding
 

@@ -1,7 +1,7 @@
 /**
  * The WebMCP bridge (iteration 20): the tools the page in front registered
- * with WebMCP, offered to the AI app as `page_<name>` tools of the side
- * panel's `TabMcp`, and through `webmcp_call` for AI apps that read their
+ * with WebMCP, offered to the AI app as `page_<name>` tools of the
+ * connection's `TabMcp`, and through `webmcp_call` for AI apps that read their
  * tool list only once. The list follows the tab in front and the page's
  * `toolchange`; it is advisory (a page may drop a tool any time), so a call
  * to a tool that is gone answers so instead of failing the bridge.
@@ -72,8 +72,8 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * A copy of `schema` without the keywords whose regular expressions the
- * validator would run in the side panel (`pattern`, `patternProperties`): a
- * page's catastrophic pattern would freeze the panel. The page still checks
+ * validator would run in the extension (`pattern`, `patternProperties`): a
+ * page's catastrophic pattern would freeze the connection. The page still checks
  * its own input as it likes.
  */
 function withoutPatterns(schema: unknown): unknown {
@@ -220,12 +220,12 @@ export interface BridgeChrome {
 	): Promise<CallResult>;
 }
 
-/** Where the bridged tools go: the side panel's `TabMcp`. */
+/** Where the bridged tools go: the connection's `TabMcp`. */
 export interface Registrar {
 	registerTool(tool: Tool, options: { signal: AbortSignal }): Promise<void>;
 }
 
-/** Asks the user (the library's dialog): `webmcp_call`'s confirmation. */
+/** Asks the user: `webmcp_call`'s confirmation. */
 export type Confirm = (request: ConfirmRequest) => Promise<boolean>;
 
 /** A tool of the page in front as the bridge keeps it, to call. */
@@ -314,13 +314,16 @@ export class PageToolBridge {
 		return this.#state;
 	}
 
-	/** The page tool behind an offered tool name (`page_<name>`): its site and name. */
+	/** The page tool behind an offered tool name (`page_<name>`): its tab, site and name. */
 	lookup(
 		toolName: string,
-	): { origin: string; name: string; readOnly: boolean } | undefined {
+	):
+		| { tabId: number; origin: string; name: string; readOnly: boolean }
+		| undefined {
 		for (const callable of this.#callable.values())
 			if (bridgedName(callable.target.name) === toolName)
 				return {
+					tabId: callable.tabId,
 					origin: callable.origin,
 					name: callable.target.name,
 					readOnly: callable.target.readOnly,
@@ -542,7 +545,7 @@ export class PageToolBridge {
 			inputSchema: schema,
 			annotations: {
 				readOnlyHint: callable.target.readOnly,
-				// Not read-only: the user confirms every call in the side panel.
+				// Not read-only: the user confirms every call.
 				consequentialHint: !callable.target.readOnly,
 				// Whatever it answers is the page's.
 				untrustedContentHint: true,

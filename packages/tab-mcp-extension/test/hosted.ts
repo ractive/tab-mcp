@@ -1,9 +1,9 @@
 /**
  * A check by hand against the hosted relay, not part of `bun test`: the
  * development build (the owner's key, so the id the relay allows) connects
- * from its side panel to https://tab-mcp.ractive.ch and shows the address and
- * a pairing code. Needs ~/.config/tab-mcp/extension-key.txt and Chrome for
- * Testing (CHROME_PATH).
+ * through its service worker to https://tab-mcp.ractive.ch, and the side
+ * panel shows the address and a pairing code. Needs
+ * ~/.config/tab-mcp/extension-key.txt and Chrome for Testing (CHROME_PATH).
  *
  *   bun packages/tab-mcp-extension/test/hosted.ts
  */
@@ -24,9 +24,16 @@ const browser = await Browser.launch(binary, { extension: outdir });
 try {
 	if (browser.extensionId !== built.id)
 		throw new Error(`loaded as ${browser.extensionId}, expected ${built.id}`);
-	const panel = await browser.newPage(
-		`chrome-extension://${built.id}/sidepanel/index.html`,
-		{ window: true },
+	// The real side panel: the worker takes commands only from it, not from
+	// its page opened as a tab.
+	const tab = await browser.newPage("https://example.com/");
+	await browser.clickIcon(tab);
+	const panel = await browser.attach(
+		(
+			await browser.waitForTarget(
+				(t) => t.url === `chrome-extension://${built.id}/sidepanel/index.html`,
+			)
+		).targetId,
 	);
 	await panel.waitFor(`document.getElementById("relay").value`);
 	console.log(
