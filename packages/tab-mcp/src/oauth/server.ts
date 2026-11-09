@@ -132,15 +132,21 @@ interface Pending extends AuthorizationRequest {
 	ip: string;
 }
 
-/** A request that paired: who it connected, until its page could no longer be sent. */
+/** A request that paired, until its page could no longer be sent. */
 interface UsedRequest {
 	expiresAt: number;
-	client: ClientMetadata;
+	/** The AI app's declared name and verified host, for the page. */
+	name: string;
+	host: string;
+	/** The app exchanged the request's code: it is connected. */
+	connected: boolean;
 }
 
 interface IssuedCode extends AuthorizationRequest {
 	expiresAt: number;
 	used: boolean;
+	/** The `/authorize` request it was issued for. */
+	requestId: string;
 	grantId?: string;
 	/** The binding key the grant is made for (identity binding, DEC-077). */
 	subject?: string;
@@ -251,7 +257,7 @@ export class AuthorizationServer {
 	readonly #pendingPerIp = new Map<string, number>();
 	readonly #pendingPerAddress = new Map<string, number>();
 	readonly #codes = new Map<string, IssuedCode>();
-	/** Insertion order is expiry order, as for `#pending`. */
+	/** Insertion order is pairing order, not expiry order: sweeps look at all. */
 	readonly #usedRequests = new Map<string, UsedRequest>();
 	readonly #authCodeTtlMs: number;
 	readonly #methods: Partial<Record<PairingKind, PairingMethod>>;
@@ -442,13 +448,24 @@ export class AuthorizationServer {
 	 * second click, the back button): say so instead of "expired".
 	 */
 	#usedPage(used: UsedRequest): Response {
-		const who = `<strong>${escapeHtml(used.client.name)}</strong> (${escapeHtml(used.client.host)})`;
+		const who = `<strong>${escapeHtml(used.name)}</strong> (${escapeHtml(used.host)})`;
+		if (used.connected) {
+			return this.#page(
+				200,
+				"Already connected",
+				`<h1>Already connected</h1>
+<p>This connection request was already used: ${who} is connected to the page.</p>
+<p>You can close this page.</p>`,
+			);
+		}
+		// Approved, but the app has not taken its code (yet): after a double
+		// click the browser drops the first answer, which carried it.
 		return this.#page(
 			200,
-			"Already connected",
-			`<h1>Already connected</h1>
-<p>This connection request was already used: ${who} was connected to the page.</p>
-<p>You can close this page. If your AI app does not show the connection, start again from your AI app.</p>`,
+			"Already sent",
+			`<h1>Already sent</h1>
+<p>This connection request was already approved and sent to ${who}.</p>
+<p>If your AI app does not show the connection, start again from your AI app.</p>`,
 		);
 	}
 
@@ -915,6 +932,7 @@ ${intro}
 			...request,
 			expiresAt: Date.now() + this.#authCodeTtlMs,
 			used: false,
+			requestId: pending.id,
 			...(result.subject === undefined ? {} : { subject: result.subject }),
 		});
 		this.#host.logger.info("oauth.paired", {
@@ -1460,6 +1478,8 @@ ${cancel}
 			// Revoked while the tokens were issued (code reuse, New address).
 			throw invalid("the connection was revoked");
 		}
+		const used = this.#usedRequests.get(issued.requestId);
+		if (used !== undefined) used.connected = true;
 		this.#host.logger.info("oauth.grant_created", {
 			address: shortAddress(issued.addressId),
 			client: issued.client.host,
@@ -1692,16 +1712,24 @@ ${cancel}
 
 	/** Note that `pending` paired, for as long as its page could still be sent. */
 	#rememberUsed(pending: Pending): void {
-		const now = Date.now();
-		for (const [id, used] of this.#usedRequests) {
-			if (used.expiresAt > now && this.#usedRequests.size < MAX_USED_REQUESTS)
-				break;
-			this.#usedRequests.delete(id);
-		}
+		if (this.#usedRequests.size >= MAX_USED_REQUESTS) this.#sweepUsed();
+		// Still full of live ones: the oldest pairing goes.
+		const oldest = this.#usedRequests.keys().next();
+		if (this.#usedRequests.size >= MAX_USED_REQUESTS && !oldest.done)
+			this.#usedRequests.delete(oldest.value);
 		this.#usedRequests.set(pending.id, {
 			expiresAt: pending.expiresAt,
-			client: pending.client,
+			name: pending.client.name,
+			host: pending.client.host,
+			connected: false,
 		});
+	}
+
+	#sweepUsed(): void {
+		const now = Date.now();
+		for (const [id, used] of this.#usedRequests) {
+			if (used.expiresAt <= now) this.#usedRequests.delete(id);
+		}
 	}
 
 	/**
@@ -1754,6 +1782,7 @@ ${cancel}
 	sweep(): void {
 		this.#sweepPending();
 		this.#sweepCodes();
+		this.#sweepUsed();
 		const now = Date.now();
 		this.#viewsPerIp.sweep(now);
 		this.#attemptsPerIp.sweep(now);

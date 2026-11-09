@@ -1181,23 +1181,41 @@ describe("threat model A7: the /authorize page", () => {
 		).toBe(303);
 	});
 
-	test("the same browser sending a paired request's form again is told it was used", async () => {
+	test("the same browser sending a paired request's form again: sent, then connected once the code is exchanged", async () => {
 		const ctx = await setup();
-		const page = await open(ctx);
+		const { verifier, challenge } = pkce();
+		const page = await ctx.browser.open(
+			authorizeUrl(ctx.r.url, {
+				client_id: clientId,
+				redirect_uri: REDIRECT,
+				code_challenge: challenge,
+				resource: ctx.address,
+			}),
+		);
 		const code = await currentCode(ctx);
-		expect(
-			(await ctx.browser.submit(page, { action: "connect", code })).status,
-		).toBe(303);
+		const first = await ctx.browser.submit(page, { action: "connect", code });
+		expect(first.status).toBe(303);
+		// A double click: the app has not taken its code, so not "connected".
+		const sent = await ctx.browser.submit(page, { action: "connect", code });
+		expect(sent.status).toBe(200);
+		expect(sent.html).toContain("Already sent");
+		expect(sent.html).not.toContain("Already connected");
+		const location = new URL(first.location ?? "");
+		const tokens = await exchange(ctx, {
+			code: location.searchParams.get("code") ?? "",
+			verifier,
+			location,
+		});
+		expect(tokens.status).toBe(200);
 		const again = await ctx.browser.submit(page, { action: "connect", code });
 		expect(again.status).toBe(200);
 		expect(again.html).toContain("Already connected");
-		expect(again.html).toContain("was already used");
 		// Another browser with the same form learns nothing.
 		const stranger = new TestBrowser(ctx.r.url);
 		const foreign = await stranger.submit(page, { action: "connect", code });
 		expect(foreign.status).toBe(400);
 		expect(foreign.html).toContain("expired or was already used");
-		expect(foreign.html).not.toContain("Already connected");
+		expect(foreign.html).not.toContain("Already");
 	});
 
 	test("an unknown or used request id is refused", async () => {
