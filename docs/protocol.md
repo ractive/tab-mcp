@@ -108,7 +108,7 @@ types the code on the relay's `/authorize` page when the AI app opens it.
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
 | `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this address gets `error` `unknown_id`. |
 | `grants.revokeAll` | T→R | none | Revoke every grant of this address (sent before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that run out (at the latest 90 days after pairing) are not announced. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that run out (at the latest 90 days after pairing) are not announced. The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
 
 A grant as the tab sees it:
 
@@ -225,7 +225,7 @@ see [When the page is not open](#when-the-page-is-not-open).
 | `-31006` | 502 | The page's response exceeded `maxMessageBytes` (one message) or `maxBodyBytes` (the whole body; the event stream of a `subscriptions/listen` excepted). |
 | `-31007` | 502 | The page sent an invalid response (malformed message, a header value that is not an RFC 9110 field value, a body with status 204, 205 or 304). |
 | `-31008` | 503 | The token store is unavailable. Sent with `Retry-After`, so clients keep their tokens. |
-| `-31009` | 401 | The page's user signed out or changed while the request was in flight, or the page's new assertion was refused (identity binding). Sent with `WWW-Authenticate` (`error="invalid_token"`). |
+| `-31009` | 401 | The request's grant was revoked while the request was in flight (also an open listen stream), the page's user signed out or changed while the request was in flight, or the page's new assertion was refused (identity binding). Sent with `WWW-Authenticate` (`error="invalid_token"`). A request still waiting for its page when its grant was revoked gets the ordinary 401 `invalid_token` instead. |
 | `-31009` | 503 | The same, when the relay could not check the page's assertion (signing keys or token store unavailable, or its replay cache full). New requests get this answer too, after the usual wait for the page, until an assertion is checked; nothing reaches the page meanwhile. Sent with `Retry-After`, so clients keep their tokens. |
 | `-31010` | 200 | The relay is restarting (see [When the page is not open](#when-the-page-is-not-open)). |
 

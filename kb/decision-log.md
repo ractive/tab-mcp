@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-11-08T23:30:00+01:00
+timestamp: 2026-11-09T15:00:00+01:00
 ---
 
 # Decision log
@@ -2222,3 +2222,58 @@ and the place for settings, pairing and questions.
 - Commands and the state go only over the side panel's own port, never from content
   scripts. AI access turns on only on the panel's command, or at a start when the user
   left it on.
+
+## DEC-117: Pre-release review fixes of the relay
+
+2026-11-09, branch relay/review-fixes, on the pre-release review of the relay before every
+user of the Chrome extension (one session held open while AI access is on) uses it.
+
+- **A revoked grant reaches nothing more.** A revocation (the page's Disconnect, "revoke
+  all", "New address", `/revoke`, refresh-token reuse, identity binding) ends the grant's
+  requests in flight and listen streams on the page's instance (401 / an error event with
+  `-31009`, `http.cancel` to the page). A request that waited for its page checks its
+  token in the store again before it is forwarded, and the instance remembers its own
+  revocations for two minutes and checks them right before every forward, so a request
+  authenticated a moment before the revocation does not slip through. Every exchange
+  carries its grant id.
+- **A grant dates from its authorization code.** `grantCreatedAt` is the code's issue time,
+  so the address tombstone of a later "New address" or "revoke all" refuses the code, also
+  when the revocation happened on another instance; those two also drop the address's
+  pending `/authorize` requests and codes. A sign-out leaves the pending requests, so the
+  browser is told that nobody is signed in.
+- **Pairing by whoever holds the secret is documented, not fixed.** The session holding an
+  address is the page to the relay, gets its pairing codes and can pair an AI app of its
+  own, which later reaches the real page. No relay mechanism; identity binding prevents
+  it (threat model A4).
+- **Session slots.** IPv6 sessions count per /64 and per /56 against the same
+  `maxSessionsPerIp`: one subscriber often has a /56, and the /64 count let it open 256
+  times the limit. A /56 shared by many users (some mobile networks) is treated like one
+  IPv4 address behind NAT. A session that never had a grant, never sent `pairing.start`,
+  never had its user signed in and never got a request is closed after
+  `unpairedIdleTimeoutMs` (10 minutes, `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S`) with `bye idle`
+  / 4002. Chosen over closing every unpaired session: a page waiting with its pairing
+  dialog open, or with a grant, is never closed early. A page with AI access on and
+  nothing paired that never opened the dialog is closed; the extension's alarm connects it
+  again within a minute, a web page shows it is disconnected (the library does not
+  reconnect after `idle`). It raises the cost of holding slots; a program that sends
+  `pairing.start` still holds them (DEC-097 stays open).
+- **The per-address guess cap fails closed.** Only wrong guesses are charged (a right
+  code is refunded). The per-address limiter drops only buckets that have refilled when
+  full (100 000 keys) and refuses new keys otherwise, so churning keys cannot reset a
+  drained bucket; its keys are addresses with a live code and an open request. The
+  per-address-and-network share keeps evict-oldest (review of PR 94): keyed by address
+  and /64, a single /48 could fill it, and failing closed there would refuse everyone's
+  first guess, while an evicted bucket only lets one network use more of an allowance
+  the per-address cap still limits. A full limiter sweeps again only once its earliest
+  bucket can be full.
+- **`/token` and `/revoke`: failures per IP, and a ceiling.** Failed requests (client
+  errors, not 503) per IP: 30, then 1/s; past that a failing request is answered 429, a
+  succeeding one never (review of PR 94: refunding successes still let stale tokens of a
+  shared egress block everyone's refreshes). Every request per IP, never refunded: 600,
+  then 20/s. Access tokens live an hour, so 20/s covers about 72 000 connected users of
+  one AI app per egress address; it bounds work and store writes, also a holder of many
+  grants rotating through them (`#refreshesPerGrant` keeps only 10 000 keys). Not keyed
+  by `client_id`: any request can name a well-known client's id and would use up its
+  allowance.
+- No defaults changed besides the new unpaired timeout; `maxSessionsPerIp` stays 5, and
+  `docs/self-hosting.md` says how to size the session limits for always-on users.

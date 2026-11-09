@@ -110,6 +110,13 @@ export interface RelayConfig {
 	requestTimeoutMs: number;
 	keepAliveMs: number;
 	idleTimeoutMs: number;
+	/**
+	 * A session that never had a grant, never started pairing, never had its
+	 * user signed in and never got an MCP request is closed after this long
+	 * (close code 4002), instead of `idleTimeoutMs`: it is no use to any AI
+	 * app, and such sessions are what fills the session slots (DEC-097).
+	 */
+	unpairedIdleTimeoutMs: number;
 	sessionLifetimeMs: number;
 	heartbeatMs: number;
 	helloTimeoutMs: number;
@@ -157,6 +164,7 @@ export const DEFAULT_CONFIG: Readonly<RelayConfig> = {
 	requestTimeoutMs: 300_000,
 	keepAliveMs: 20_000,
 	idleTimeoutMs: 3_600_000,
+	unpairedIdleTimeoutMs: 600_000,
 	sessionLifetimeMs: 43_200_000,
 	heartbeatMs: 25_000,
 	helloTimeoutMs: 10_000,
@@ -293,6 +301,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		"requestTimeoutMs",
 		"keepAliveMs",
 		"idleTimeoutMs",
+		"unpairedIdleTimeoutMs",
 		"sessionLifetimeMs",
 		"heartbeatMs",
 		"helloTimeoutMs",
@@ -694,6 +703,7 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 	set("requestTimeoutMs", seconds(env, "TAB_MCP_REQUEST_TIMEOUT_S"));
 	set("keepAliveMs", seconds(env, "TAB_MCP_KEEPALIVE_S"));
 	set("idleTimeoutMs", seconds(env, "TAB_MCP_IDLE_TIMEOUT_S"));
+	set("unpairedIdleTimeoutMs", seconds(env, "TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S"));
 	set("sessionLifetimeMs", seconds(env, "TAB_MCP_SESSION_LIFETIME_S"));
 	set("heartbeatMs", seconds(env, "TAB_MCP_HEARTBEAT_S"));
 	set("bodyTimeoutMs", seconds(env, "TAB_MCP_BODY_TIMEOUT_S"));
