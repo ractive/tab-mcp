@@ -50,3 +50,35 @@ export function cardView(state: PanelState, adding: boolean): CardView {
 		address: pairing ? (state.address ?? "") : "",
 	};
 }
+
+/** A confirming click this soon after the first one (a double click) counts as nothing. */
+export const CONFIRM_DELAY_MS = 750;
+
+/** Whether a second click, `now`, confirms a first one at `armedAt`. */
+export function confirms(armedAt: number, now: number): boolean {
+	return now - armedAt >= CONFIRM_DELAY_MS;
+}
+
+/** How long the switch shows the user's flip while waiting for the worker. */
+export const SWITCH_WAIT_MS = 10_000;
+
+/** The user's last flip of the AI access switch, until the state follows. */
+export interface SwitchIntent {
+	on: boolean;
+	until: number;
+}
+
+/**
+ * The switch as shown: the user's flip, until a state that matches it comes
+ * (a state sent before the connect or stop was done would flip it back) or
+ * the wait runs out.
+ */
+export function switchShown(
+	stateOn: boolean,
+	intent: SwitchIntent | undefined,
+	now: number,
+): { checked: boolean; intent: SwitchIntent | undefined } {
+	if (intent === undefined || stateOn === intent.on || now >= intent.until)
+		return { checked: stateOn, intent: undefined };
+	return { checked: intent.on, intent };
+}

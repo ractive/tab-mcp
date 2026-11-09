@@ -77,7 +77,9 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 ## Questions
 
 A tool that asks first asks in the side panel when the panel is open in the window of the
-tab the tool acts on and that window is in front: Allow and Always allow work once the
+tab the tool acts on, that window is in front, and the panel is not covered by another
+extension's panel for the tab (a question it shows goes out as a notification once it is
+covered): Allow and Always allow work once the
 panel has been in front for 750 ms, so the click that brings it forward cannot approve.
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site>" below, naming the AI app (its name and its

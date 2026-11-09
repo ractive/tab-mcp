@@ -22,6 +22,11 @@ export type Answer = "allow" | "always" | "deny";
 export type PanelCommand =
 	/** The panel opened in window `windowId`. */
 	| { type: "hello"; windowId: number }
+	/**
+	 * Whether the panel is on screen: another extension's panel for the tab
+	 * (Claude in Chrome's) can cover it while it stays open.
+	 */
+	| { type: "visible"; visible: boolean }
 	/** AI access on (the panel's button: the user's click). */
 	| { type: "connect" }
 	/** AI access off. */
@@ -165,6 +170,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "hello":
 			return Number.isInteger(m["windowId"])
 				? { type: "hello", windowId: m["windowId"] as number }
+				: undefined;
+		case "visible":
+			return typeof m["visible"] === "boolean"
+				? { type: "visible", visible: m["visible"] }
 				: undefined;
 		case "connect":
 		case "stop":

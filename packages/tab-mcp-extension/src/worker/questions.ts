@@ -268,8 +268,9 @@ export class Questions {
 	}
 
 	/**
-	 * The side panel of window `windowId` closed: its questions that showed
-	 * only there go out as notifications.
+	 * The side panel of window `windowId` closed, or another extension's
+	 * panel covered it: its questions that showed only there go out as
+	 * notifications.
 	 */
 	panelClosed(windowId: number): void {
 		for (const pending of this.#pending.values())

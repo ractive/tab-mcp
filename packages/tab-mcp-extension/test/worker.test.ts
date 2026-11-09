@@ -35,6 +35,7 @@ const contentScript = { id: ID, url: "https://site.test/page", tab: { id: 1 } };
 /** Every command there is, valid. */
 const COMMANDS: PanelCommand[] = [
 	{ type: "hello", windowId: 1 },
+	{ type: "visible", visible: false },
 	{ type: "connect" },
 	{ type: "stop" },
 	{ type: "pair", on: true },
@@ -103,6 +104,7 @@ describe("who may send what", () => {
 			{ type: "webmcp-changed" },
 			{ type: "hello", windowId: "1" },
 			{ type: "pair" },
+			{ type: "visible", visible: "no" },
 			{ type: "revoke", grantId: 1 },
 			{ type: "set-relay" },
 			{ type: "set-allowed", origin: "o", name: "n" },

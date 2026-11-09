@@ -5,7 +5,12 @@
 
 import { describe, expect, test } from "bun:test";
 import type { PanelState } from "../src/protocol.ts";
-import { cardView } from "../src/sidepanel/card.ts";
+import {
+	CONFIRM_DELAY_MS,
+	cardView,
+	confirms,
+	switchShown,
+} from "../src/sidepanel/card.ts";
 
 const base: PanelState = {
 	relay: "https://relay.example",
@@ -78,6 +83,34 @@ describe("the AI app card", () => {
 			addApp: false,
 			done: true,
 			address: ADDRESS,
+		});
+	});
+});
+
+describe("the card's clicks", () => {
+	test("the second click of a double click does not confirm Disconnect", () => {
+		expect(confirms(1000, 1000 + 120)).toBe(false);
+		expect(confirms(1000, 1000 + CONFIRM_DELAY_MS - 1)).toBe(false);
+		expect(confirms(1000, 1000 + CONFIRM_DELAY_MS)).toBe(true);
+	});
+
+	test("the switch keeps the user's flip until the state follows, or the wait ends", () => {
+		const intent = { on: true, until: 5000 };
+		// A state from before the connect: the switch stays on.
+		expect(switchShown(false, intent, 1000)).toEqual({ checked: true, intent });
+		// The state follows: the intent is done.
+		expect(switchShown(true, intent, 1200)).toEqual({
+			checked: true,
+			intent: undefined,
+		});
+		// It never followed: the state wins after the wait.
+		expect(switchShown(false, intent, 5000)).toEqual({
+			checked: false,
+			intent: undefined,
+		});
+		expect(switchShown(true, undefined, 0)).toEqual({
+			checked: true,
+			intent: undefined,
 		});
 	});
 });

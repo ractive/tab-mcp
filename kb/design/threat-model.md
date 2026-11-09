@@ -248,8 +248,10 @@ did, by connecting the extension.
   tools again. A compromised page can therefore not turn AI access on, allow a tool or
   answer a question; a compromised extension page could, but then the extension is
   lost anyway.
-- **Questions (iteration 26).** With the panel open in the focused window of the tab the
-  call acts on, the question is there, and Allow arms only after the panel has been
+- **Questions (iteration 26).** With the panel open and on screen in the focused window
+  of the tab the call acts on (not covered by another extension's panel for the tab,
+  which the panel reports as it changes; a covered panel hands its questions to
+  notifications), the question is there, and Allow arms only after the panel has been
   visible and focused for 750 ms, so the click that brings it forward cannot approve;
   the page's scripts cannot reach the panel at all. Otherwise a Chrome notification asks.
   It names the AI app by its verified host beside its declared name, the tool (the
@@ -266,7 +268,8 @@ did, by connecting the extension.
   carries its call: a click answers only that call, and one on a call already answered,
   timed out or cancelled is dropped, never taken for another. A notification is outside
   any page, so a page cannot cover or click it; another program on the computer could
-  click it, as it could click the panel. No answer in 60 s is Don't allow; with
+  click it, as it could click the panel. Disconnect asks first, and the second click of
+  a double click (within 750 ms) does not confirm it. No answer in 60 s is Don't allow; with
   notifications off (Focus, Do Not Disturb) the icon shows "?" and the panel asks.
 - **A connection with no panel on screen (iteration 26).** AI access stays on with the
   panel closed and comes back after a browser start, an update or a reload when the

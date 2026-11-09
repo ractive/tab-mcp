@@ -18,7 +18,13 @@ import {
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
-import { cardView } from "./card.ts";
+import {
+	cardView,
+	confirms,
+	SWITCH_WAIT_MS,
+	type SwitchIntent,
+	switchShown,
+} from "./card.ts";
 
 /** How long the panel must be visible and focused before Allow counts. */
 const ALLOW_DELAY_MS = 750;
@@ -35,7 +41,12 @@ let addingApp = false;
 /** What the worker was told: pairing on (codes come only then). */
 let pairing = false;
 /** Disconnect asks first: the apps whose button was clicked once. */
-const disconnectArmed = new Map<string, ReturnType<typeof setTimeout>>();
+const disconnectArmed = new Map<
+	string,
+	{ at: number; timer: ReturnType<typeof setTimeout> }
+>();
+/** The user's flip of the AI access switch, while the worker acts on it. */
+let switchIntent: SwitchIntent | undefined;
 /** "New address" with apps connected asks first: a second click makes it. */
 let newAddressArmed = false;
 
@@ -73,6 +84,7 @@ function connect(): void {
 		setTimeout(connect, 250);
 	});
 	if (windowId !== undefined) send({ type: "hello", windowId });
+	sendVisible();
 	if (pairing) send({ type: "pair", on: true });
 }
 
@@ -93,18 +105,20 @@ function disconnectButton(grant: PanelState["grants"][number]): HTMLElement {
 	button.textContent = armed ? "Disconnect? Click again" : "Disconnect";
 	button.dataset["grant"] = grant.grantId;
 	button.addEventListener("click", () => {
-		const timer = disconnectArmed.get(grant.grantId);
-		if (timer === undefined) {
+		const armed = disconnectArmed.get(grant.grantId);
+		if (armed === undefined) {
 			// Asks first: the app has to be added and paired again after.
-			disconnectArmed.set(
-				grant.grantId,
-				setTimeout(() => {
+			disconnectArmed.set(grant.grantId, {
+				at: Date.now(),
+				timer: setTimeout(() => {
 					disconnectArmed.delete(grant.grantId);
 					if (state) showConnection(state);
 				}, 4000),
-			);
+			});
 		} else {
-			clearTimeout(timer);
+			// The second click of a double click confirms nothing.
+			if (!confirms(armed.at, Date.now())) return;
+			clearTimeout(armed.timer);
 			disconnectArmed.delete(grant.grantId);
 			send({ type: "revoke", grantId: grant.grantId });
 		}
@@ -120,8 +134,10 @@ function showConnection(s: PanelState): void {
 	$("state").dataset["state"] = s.status;
 	$("state-text").textContent = view.stateText;
 	// Also while connecting or retrying, so the user can stop it.
-	($("ai-switch") as HTMLInputElement).checked = view.switchOn;
-	$("ai-switch").setAttribute("aria-checked", String(view.switchOn));
+	const shown = switchShown(view.switchOn, switchIntent, Date.now());
+	switchIntent = shown.intent;
+	($("ai-switch") as HTMLInputElement).checked = shown.checked;
+	$("ai-switch").setAttribute("aria-checked", String(shown.checked));
 	$("connect").hidden = !view.turnOn;
 	$("problem").hidden = s.problem === undefined;
 	$("problem").textContent = s.problem ?? "";
@@ -270,6 +286,12 @@ setInterval(() => {
 for (const type of ["focus", "blur", "visibilitychange"])
 	window.addEventListener(type, arm);
 
+/** Tell the worker whether the panel is on screen (not covered by another's). */
+function sendVisible(): void {
+	send({ type: "visible", visible: document.visibilityState === "visible" });
+}
+document.addEventListener("visibilitychange", sendVisible);
+
 // --- The tab in front ---
 
 function badge(text: string, kind = ""): HTMLElement {
@@ -409,6 +431,10 @@ function addApp(on: boolean): void {
 $("connect").addEventListener("click", () => send({ type: "connect" }));
 
 $("ai-switch").addEventListener("change", () => {
+	switchIntent = {
+		on: ($("ai-switch") as HTMLInputElement).checked,
+		until: Date.now() + SWITCH_WAIT_MS,
+	};
 	addingApp = false;
 	send({
 		type: ($("ai-switch") as HTMLInputElement).checked ? "connect" : "stop",

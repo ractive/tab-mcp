@@ -657,19 +657,59 @@ describe.skipIf(chrome === undefined)(
 
 		test("reopening the panel shows the same connection", async () => {
 			stack.panel = await openPanel(stack.browser, stack.tab);
+			// Connected all along: on (the test's AI app listed) or waiting
+			// for one, never connecting again.
+			const status = await stack.panel.waitFor<string>(
+				`["on", "waiting"].includes(document.getElementById("state").dataset.state) && document.getElementById("state").dataset.state`,
+			);
+			const grants = await stack.panel.eval<string[]>(
+				`[...document.querySelectorAll("#grants li span:first-child")].map((s) => s.firstChild.textContent)`,
+			);
+			expect(grants).toEqual(status === "on" ? ["Test client"] : []);
+			// The same address: shown with the code (at once with no app paired,
+			// else after "+ Add another AI app").
+			if (status === "on") await stack.panel.click("#add-app");
 			await stack.panel.waitFor(
 				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
 			);
-			expect(
-				await stack.panel.eval(
-					`document.getElementById("state").dataset.state`,
-				),
-			).not.toBe("off");
+			if (status === "on") await stack.panel.click("#pair-done");
 			expect(
 				await stack.panel.eval(
 					`document.getElementById("tab-title").textContent`,
 				),
 			).toBe("Page with WebMCP tools");
+		});
+
+		test("a panel covered by another extension's panel for the tab hands its questions to notifications", async () => {
+			const { browser } = stack;
+			const { id: other } = (await browser.send("Extensions.loadUnpacked", {
+				path: join(import.meta.dir, "other-extension"),
+			})) as { id: string };
+			await (await browser.serviceWorker(other)).eval("true");
+			// A new page: the Always allow of the test before is gone with it.
+			await stack.tab.goto(`${SITE}/webmcp.html`);
+			// webmcp_tools reads the page again: its tools are registered anew.
+			await call(stack, "webmcp_tools");
+			// Asked while our panel is on screen: there, no notification.
+			const first = call(stack, "page_place_order", { item: "covered" });
+			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+			expect(await notifications(stack)).toEqual([]);
+			// The other extension's panel for this tab covers ours.
+			await browser.clickIcon(stack.tab, other);
+			await stack.panel.waitFor(`document.visibilityState === "hidden"`);
+			const handed = await newNotification(stack);
+			await Bun.sleep(600);
+			await clickNotification(stack, handed, 0);
+			expect((await first).content[0]?.text).toContain("covered");
+			// Asked while covered: a notification at once.
+			const second = call(stack, "page_place_order", { item: "hidden" });
+			const asked = await newNotification(stack, [handed]);
+			await Bun.sleep(600);
+			await clickNotification(stack, asked, 0);
+			expect((await second).content[0]?.text).toContain("hidden");
+			// Ours in front again.
+			await browser.clickIcon(stack.tab);
+			await stack.panel.waitFor(`document.visibilityState === "visible"`);
 		});
 	},
 );
@@ -731,13 +771,20 @@ describe.skipIf(chrome === undefined)(
 			);
 			await stack.panel.click("#pair-done");
 			await stack.panel.waitFor(`document.getElementById("pairing").hidden`);
-			// Disconnect asks first: one click only arms it.
+			// Disconnect asks first: one click only arms it, and the second
+			// click of a double click does not confirm it.
+			await stack.panel.click("#grants button");
 			await stack.panel.click("#grants button");
 			expect(
 				await stack.panel.eval(
-					`document.querySelector("#grants button").textContent`,
+					`[document.querySelector("#grants button")?.textContent, document.querySelectorAll("#grants li").length]`,
 				),
-			).toBe("Disconnect? Click again");
+			).toEqual(["Disconnect? Click again", 1]);
+			await Bun.sleep(800);
+			await stack.panel.click("#grants button");
+			await stack.panel.waitFor(
+				`document.querySelectorAll("#grants li").length === 0 && document.getElementById("state").dataset.state === "waiting"`,
+			);
 			// Another program with a copy of the address secret takes it over.
 			const secrets = await stack.worker.eval<Record<string, string>>(
 				`chrome.storage.local.get(null).then((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith("tab-mcp:secret:"))))`,
