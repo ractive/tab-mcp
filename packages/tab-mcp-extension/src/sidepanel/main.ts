@@ -351,9 +351,9 @@ function refreshTab(): void {
 
 chrome.tabs.onActivated.addListener(refreshTab);
 chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-	// Only the active tabs: a tab loading behind them changes nothing shown.
-	if (tab.active && (change.status === "complete" || change.url !== undefined))
-		refreshTab();
+	// Only the active tabs, and only once a page has loaded: mid-navigation
+	// there is nothing to read, and the click's grant may be on its way out.
+	if (tab.active && change.status === "complete") refreshTab();
 });
 chrome.windows.onFocusChanged.addListener(refreshTab);
 chrome.permissions.onAdded.addListener(refreshTab);

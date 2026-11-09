@@ -99,6 +99,11 @@ export async function ask(
 	try {
 		response = await send(tab.id, request);
 	} catch {
+		// Only into a page that has loaded: during a navigation there is no
+		// page to put it in yet (and Chrome is changing what may be read).
+		const { status } = await chrome.tabs.get(tab.id);
+		if (status !== "complete")
+			throw new Error("The page in the tab is still loading; try again.");
 		try {
 			await injectInto(tab.id);
 		} catch {

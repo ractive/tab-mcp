@@ -111,7 +111,12 @@ async function start(
 		});
 		browser = await Browser.launch(chrome as string, {
 			extension: outdir,
-			args: ["--enable-features=WebMCP"],
+			args: [
+				"--enable-features=WebMCP",
+				...(process.env["CHROME_LOG"]
+					? ["--enable-logging=stderr", "--v=0"]
+					: []),
+			],
 			serve,
 		});
 		const tab = await browser.newPage(first);
