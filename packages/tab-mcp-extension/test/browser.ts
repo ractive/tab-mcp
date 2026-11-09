@@ -86,6 +86,11 @@ export interface LaunchOptions {
 	 * no network.
 	 */
 	serve?: Serve;
+	/**
+	 * The profile to use and keep (a restart of the same browser); by
+	 * default a new one, removed on `close()`.
+	 */
+	profile?: string;
 }
 
 interface ExecutionContext {
@@ -164,6 +169,7 @@ type ChromeProcess = Subprocess<"ignore", "ignore", "ignore">;
 export class Browser {
 	readonly #proc: ChromeProcess;
 	readonly #profile: string;
+	readonly #keepProfile: boolean;
 	readonly #transport: Transport;
 	readonly #pending = new Map<number, Pending>();
 	readonly #listeners = new Set<Listener>();
@@ -175,12 +181,14 @@ export class Browser {
 	private constructor(
 		proc: ChromeProcess,
 		profile: string,
+		keepProfile: boolean,
 		toChrome: number,
 		fromChrome: number,
 		serve: Serve | undefined,
 	) {
 		this.#proc = proc;
 		this.#profile = profile;
+		this.#keepProfile = keepProfile;
 		this.serve = serve;
 		this.#transport = pipe(
 			toChrome,
@@ -253,7 +261,9 @@ export class Browser {
 		binary: string,
 		options: LaunchOptions = {},
 	): Promise<Browser> {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-extension-"));
+		const profile =
+			options.profile ?? mkdtempSync(join(tmpdir(), "tab-mcp-extension-"));
+		const keepProfile = options.profile !== undefined;
 		let browser: Browser | undefined;
 		let proc: ChromeProcess | undefined;
 		try {
@@ -284,6 +294,7 @@ export class Browser {
 			browser = new Browser(
 				proc,
 				profile,
+				keepProfile,
 				toChrome as number,
 				fromChrome as number,
 				options.serve,
@@ -313,7 +324,7 @@ export class Browser {
 			else {
 				proc?.kill("SIGKILL");
 				await proc?.exited;
-				rmSync(profile, { recursive: true, force: true });
+				if (!keepProfile) rmSync(profile, { recursive: true, force: true });
 			}
 			throw error;
 		}
@@ -453,6 +464,19 @@ export class Browser {
 		return page;
 	}
 
+	/** The sessions on service workers, for `detachServiceWorkers()`. */
+	readonly #workerSessions = new Set<string>();
+
+	/**
+	 * Let go of every service worker this browser attached to: an attached
+	 * DevTools session keeps a worker running.
+	 */
+	async detachServiceWorkers(): Promise<void> {
+		for (const sessionId of this.#workerSessions)
+			await this.send("Target.detachFromTarget", { sessionId }).catch(() => {});
+		this.#workerSessions.clear();
+	}
+
 	/** The service worker of extension `id`, to call `chrome.*` from. */
 	async serviceWorker(id: string): Promise<Worker> {
 		const prefix = `chrome-extension://${id}/`;
@@ -468,6 +492,7 @@ export class Browser {
 					targetId: target.targetId,
 					flatten: true,
 				})) as { sessionId: string };
+				this.#workerSessions.add(sessionId);
 				const worker = new Worker(this, sessionId);
 				await worker.send("Runtime.enable");
 				return worker;
@@ -477,7 +502,15 @@ export class Browser {
 		throw new Error(`the service worker of ${id} did not start`);
 	}
 
-	async close(): Promise<void> {
+	#closed: Promise<void> | undefined;
+
+	/** Close Chrome; once closed, calling it again does nothing. */
+	close(): Promise<void> {
+		this.#closed ??= this.#close();
+		return this.#closed;
+	}
+
+	async #close(): Promise<void> {
 		try {
 			await Promise.race([this.send("Browser.close"), Bun.sleep(2000)]);
 		} catch {
@@ -488,7 +521,8 @@ export class Browser {
 		// Chrome is gone: its end of the pipe is shut, ours follow before the
 		// next launch can get the same descriptor numbers.
 		await this.#transport.close();
-		rmSync(this.#profile, { recursive: true, force: true });
+		if (!this.#keepProfile)
+			rmSync(this.#profile, { recursive: true, force: true });
 	}
 }
 

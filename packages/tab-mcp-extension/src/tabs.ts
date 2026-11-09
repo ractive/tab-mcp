@@ -1,5 +1,5 @@
 /**
- * Tabs: which one the side panel acts on, putting the content script into it,
+ * Tabs: which one the tools act on, putting the content script into it,
  * and asking it.
  */
 
@@ -33,21 +33,28 @@ export interface TargetTab {
 }
 
 /**
- * The tab in front: the active tab of the side panel's window, or, when the
- * panel is open as a tab of its own (or in a window without other tabs), the
- * most recently used active tab of a normal window that is not one of the
- * extension's own pages.
+ * The tab in front: the active tab of the last focused normal window (the
+ * connection runs in the service worker, which has no window of its own),
+ * or, when that is one of the extension's own pages or there is none, the
+ * most recently used active tab of a normal window that is not.
  */
 export async function tabInFront(): Promise<TargetTab> {
 	const own = chrome.runtime.getURL("");
 	const usable = (tab: chrome.tabs.Tab) =>
 		tab.id !== undefined && !(tab.url ?? "").startsWith(own);
-	const current = await chrome.windows.getCurrent();
-	const [inPanelWindow] = await chrome.tabs.query({
-		active: true,
-		windowId: current.id,
-	});
-	let tab = inPanelWindow && usable(inPanelWindow) ? inPanelWindow : undefined;
+	let tab: chrome.tabs.Tab | undefined;
+	try {
+		const focused = await chrome.windows.getLastFocused({
+			windowTypes: ["normal"],
+		});
+		const [active] = await chrome.tabs.query({
+			active: true,
+			windowId: focused.id,
+		});
+		if (active && usable(active)) tab = active;
+	} catch {
+		// No normal window: none in front.
+	}
 	if (tab === undefined) {
 		const candidates = (
 			await chrome.tabs.query({ active: true, windowType: "normal" })

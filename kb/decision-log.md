@@ -2205,6 +2205,16 @@ and the place for settings, pairing and questions.
 - Where: the service worker if a WebSocket keeps it alive (Chrome 116+) and the library
   runs there without a document; else an offscreen document. The iteration's spike
   decides.
+- Decided by the spike (2026-11-09): **the service worker**, no offscreen document. The
+  library runs there: its address secret in a write-through cache over
+  `chrome.storage.local` (`storage` option), `connect({ resume: true })`, no `document`
+  needed; the bundle, built without splitting, has no dynamic `import()` left, which a
+  service worker would refuse (a unit test checks it). The relay's heartbeat (a ping
+  every 25 s, answered) keeps the worker running on a quiet connection: with nothing
+  attached to it, Chrome 156 kept it 70 s and more while connected and stopped it within
+  70 s once AI access was off (`TAB_MCP_E2E_IDLE=1` in the end-to-end tests). An alarm
+  wakes it once a minute while AI access is on, should the connection be down after a
+  sleep. So no `offscreen` permission and no review question about its reason.
 - A tool that asks first asks in the side panel of the tab's window when it is open and
   focused, else in a Chrome notification; no answer in time is Don't allow. Read-only and
   "allowed" tools run as before. The extension asks itself: the library's dialog draws

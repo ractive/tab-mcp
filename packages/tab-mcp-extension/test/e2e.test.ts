@@ -33,6 +33,7 @@ import {
 	type TestRelay,
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
+import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import {
 	Browser,
@@ -40,6 +41,7 @@ import {
 	findChromeForTesting,
 	type Page,
 	type Served,
+	type Worker,
 } from "./browser.ts";
 
 // `bun run verify` runs these with Bun's default of 5 s a test: too short on
@@ -81,18 +83,85 @@ interface Stack {
 	relay: TestRelay;
 	/** The tab the icon was clicked on. */
 	tab: Page;
+	/** The side panel, while it is open. */
 	panel: Page;
+	/** The service worker, where the connection lives. */
+	worker: Worker;
+	address: string;
 	client: Client;
+	/** The unpacked build. */
+	extension: string;
 	stop(): Promise<void>;
+}
+
+const panelUrl = (browser: Browser) =>
+	`chrome-extension://${browser.extensionId}/sidepanel/index.html`;
+
+/** Click the icon on `tab` and attach to the side panel it opens. */
+async function openPanel(browser: Browser, tab: Page): Promise<Page> {
+	await browser.clickIcon(tab);
+	const panel = await browser.attach(
+		(await browser.waitForTarget((t) => t.url === panelUrl(browser))).targetId,
+	);
+	// The state from the worker has come once the relay is shown.
+	await panel.waitFor(`document.documentElement.dataset.relay`);
+	return panel;
+}
+
+/** Close the side panel (of the first window), as the user would. */
+async function closePanel(stack: Stack): Promise<void> {
+	await stack.worker.eval(
+		`chrome.windows.getLastFocused().then((w) => chrome.sidePanel.close({ windowId: w.id }))`,
+	);
+	const end = Date.now() + 10_000;
+	for (;;) {
+		const { targetInfos } = (await stack.browser.send("Target.getTargets")) as {
+			targetInfos: { url: string }[];
+		};
+		if (!targetInfos.some((t) => t.url === panelUrl(stack.browser))) return;
+		if (Date.now() > end) throw new Error("the side panel stayed open");
+		await Bun.sleep(100);
+	}
+}
+
+/** Set the relay in the panel's settings; resolves once the connection uses it. */
+async function setRelay(panel: Page, relay: string): Promise<void> {
+	// The relay address is under "Settings", closed at first.
+	await panel.eval(`document.querySelector("details.settings").open = true`);
+	await panel.eval(
+		`document.getElementById("relay").value = ${JSON.stringify(relay)}`,
+	);
+	// Saving needs no click of the user's; a click right after "Settings"
+	// opened could land before the layout settled.
+	await panel.eval(`document.getElementById("relay-form").requestSubmit()`);
+	// The panel marks the relay the connection (in the worker) uses.
+	await panel.waitFor(
+		`document.documentElement.dataset.relay === ${JSON.stringify(relay)}`,
+	);
+}
+
+/** An MCP client (the AI app) with a token for `address`. */
+async function mcpClient(relay: TestRelay, address: string): Promise<Client> {
+	const token = await tokenFor(relay.store, address);
+	const client = new Client(
+		{ name: "extension-e2e", version: "1.0.0" },
+		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+	);
+	await client.connect(
+		new StreamableHTTPClientTransport(new URL(address), {
+			requestInit: { headers: { authorization: `Bearer ${token}` } },
+		}),
+	);
+	return client;
 }
 
 /**
  * Chrome with a build of the extension, `first` open in a tab, the side panel
  * opened by a click on the icon there, set to the test relay and connected,
- * and an MCP client with a token for the panel's address.
+ * and an MCP client with a token for the connection's address.
  */
 async function start(
-	options: { store: boolean },
+	options: { store: boolean; profile?: string },
 	first: string,
 ): Promise<Stack> {
 	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-ext-"));
@@ -109,60 +178,48 @@ async function start(
 			outdir,
 			...(options.store ? { store: true } : { test: true, minify: false }),
 		});
-		browser = await Browser.launch(chrome as string, {
-			extension: outdir,
-			args: [
-				"--enable-features=WebMCP",
-				...(process.env["CHROME_LOG"]
-					? ["--enable-logging=stderr", "--v=0"]
-					: []),
-			],
-			serve,
-		});
+		browser = await launch(outdir, options.profile);
 		const tab = await browser.newPage(first);
-		await browser.clickIcon(tab);
-		const panelUrl = `chrome-extension://${browser.extensionId}/sidepanel/index.html`;
-		const panel = await browser.attach(
-			(await browser.waitForTarget((t) => t.url === panelUrl)).targetId,
-		);
-		await panel.waitFor(`document.getElementById("relay")?.value`);
-		// The relay address is under "Settings", closed at first.
-		await panel.eval(`document.querySelector("details.settings").open = true`);
-		await panel.eval(
-			`document.getElementById("relay").value = ${JSON.stringify(relay.url)}`,
-		);
-		// Saving needs no click of the user's; a click right after "Settings"
-		// opened could land before the layout settled.
-		await panel.eval(`document.getElementById("relay-form").requestSubmit()`);
-		// The panel marks the relay it switched to (after saving it).
-		await panel.waitFor(
-			`document.documentElement.dataset.relay === ${JSON.stringify(relay.url)}`,
-		);
+		const panel = await openPanel(browser, tab);
+		await setRelay(panel, relay.url);
 		await panel.click("#connect");
 		const address = await panel.waitFor<string>(
 			`document.getElementById("address").textContent`,
 			15_000,
 		);
-		// Done with the address and code: close the connect dialog, as a user
-		// would, so it does not cover the panel.
-		await panel.eval(
-			`document.querySelectorAll("dialog.tab-mcp-dialog").forEach((d) => d.close())`,
-		);
-		const token = await tokenFor(relay.store, address);
-		const client = new Client(
-			{ name: "extension-e2e", version: "1.0.0" },
-			{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
-		);
-		await client.connect(
-			new StreamableHTTPClientTransport(new URL(address), {
-				requestInit: { headers: { authorization: `Bearer ${token}` } },
-			}),
-		);
-		return { browser, relay, tab, panel, client, stop };
+		// Done with the address and code, as a user would be.
+		await panel.click("#pair-done");
+		const worker = await browser.serviceWorker(browser.extensionId as string);
+		const client = await mcpClient(relay, address);
+		return {
+			browser,
+			relay,
+			tab,
+			panel,
+			worker,
+			address,
+			client,
+			extension: outdir,
+			stop,
+		};
 	} catch (error) {
 		await stop();
 		throw error;
 	}
+}
+
+function launch(extension: string, profile?: string): Promise<Browser> {
+	return Browser.launch(chrome as string, {
+		extension,
+		args: [
+			"--enable-features=WebMCP",
+			...(process.env["CHROME_LOG"]
+				? ["--enable-logging=stderr", "--v=0"]
+				: []),
+		],
+		serve,
+		...(profile ? { profile } : {}),
+	});
 }
 
 interface CallResult {
@@ -214,20 +271,53 @@ const PAGE_TOOLS = [
 	"page_slow_tool",
 ];
 
-/** Answer the library's confirmation in the side panel with `button`. */
+/** Answer the newest question in the side panel with `answer`. */
 async function answerInPanel(
 	stack: Stack,
-	button: "Allow" | "Don't allow",
+	answer: "allow" | "always" | "deny",
 ): Promise<void> {
-	// The dialog arms "Allow" only while its page has focus.
+	// Allow counts only once the panel has been focused a while.
 	await stack.panel.send("Emulation.setFocusEmulationEnabled", {
 		enabled: true,
 	});
-	const selector = `(() => [...document.querySelectorAll("dialog.tab-mcp-dialog button")].find((b) => b.textContent.trim() === ${JSON.stringify(button)} && !b.disabled))()`;
-	await stack.panel.waitFor(`!!${selector}`, 10_000);
+	const selector = `[...document.querySelectorAll('[data-question] button[data-answer="${answer}"]')].at(-1)`;
+	await stack.panel.waitFor(`${selector} && !${selector}.disabled`, 10_000);
 	await stack.panel.eval(`${selector}.id = "e2e-answer"`);
 	await stack.panel.click("#e2e-answer");
+	await stack.panel.eval(
+		`document.getElementById("e2e-answer")?.removeAttribute("id")`,
+	);
 }
+
+/** The ids of the extension's notifications on screen. */
+const notifications = (stack: Stack) =>
+	stack.worker.eval<string[]>(
+		"chrome.notifications.getAll().then((all) => Object.keys(all))",
+	);
+
+/** Wait for a notification that is not one of `seen`; returns its id. */
+async function newNotification(
+	stack: Stack,
+	seen: string[] = [],
+): Promise<string> {
+	const end = Date.now() + 10_000;
+	for (;;) {
+		const id = (await notifications(stack)).find((n) => !seen.includes(n));
+		if (id !== undefined) return id;
+		if (Date.now() > end) throw new Error("no notification came");
+		await Bun.sleep(100);
+	}
+}
+
+/**
+ * Click button `index` of notification `id` (0 Don't allow, 1 Allow): the
+ * DevTools Protocol cannot click one, so the test calls the function the
+ * click's listener calls.
+ */
+const clickNotification = (stack: Stack, id: string, index: number) =>
+	stack.worker.eval(
+		`tabMcpNotificationButton(${JSON.stringify(id)}, ${index})`,
+	);
 
 describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	let stack: Stack;
@@ -307,17 +397,17 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
-		// "Always allow" is offered too (the library forgets it when the page
-		// changes, as the bridge then registers the tool anew).
+		// "Always allow" is offered too (forgotten when the page changes, as
+		// the bridge then registers the tool anew).
 		await stack.panel.waitFor(
-			`[...document.querySelectorAll("dialog.tab-mcp-dialog button")].some((b) => b.textContent.trim() === "Always allow")`,
+			`document.querySelector('[data-question] button[data-answer="always"]')`,
 		);
-		await answerInPanel(stack, "Allow");
+		await answerInPanel(stack, "allow");
 		const result = await allowed;
 		expect(result.isError).toBeFalsy();
 		expect(result.content[0]?.text).toContain("tea");
 		const declined = call(stack, "page_place_order", { item: "coffee" });
-		await answerInPanel(stack, "Don't allow");
+		await answerInPanel(stack, "deny");
 		expect((await declined).isError).toBe(true);
 		expect(await tab.eval("window.calls.map((c) => c[1])")).not.toContain(
 			"coffee",
@@ -339,13 +429,16 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			name: "place_order",
 			arguments: { item: "cake" },
 		});
-		await answerInPanel(stack, "Allow");
+		await answerInPanel(stack, "allow");
 		expect((await ordered).content[0]?.text).toContain("cake");
 	});
 
 	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
 		const toggle = `button[data-tool="place_order"]`;
-		await stack.panel.waitFor(`document.querySelector('${toggle}')`);
+		// Off for a moment after the last question went (the layout moved).
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}') && !document.querySelector('${toggle}').disabled`,
+		);
 		await stack.panel.click(toggle);
 		await stack.panel.waitFor(
 			`document.querySelector('${toggle}').textContent === "allowed"`,
@@ -362,7 +455,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			`document.querySelector('${toggle}').textContent === "asks first"`,
 		);
 		const asked = call(stack, "page_place_order", { item: "asked" });
-		await answerInPanel(stack, "Don't allow");
+		await answerInPanel(stack, "deny");
 		expect((await asked).isError).toBe(true);
 	});
 
@@ -433,6 +526,351 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
 	});
 });
+
+describe.skipIf(chrome === undefined)(
+	"the connection without the side panel",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start({ store: false }, `${SITE}/webmcp.html`);
+			await waitForTools(stack, (n) => n.includes("page_place_order"));
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		const badge = () =>
+			stack.worker.eval<string>("chrome.action.getBadgeText({})");
+
+		test("a question in the panel of the tab's focused window sends no notification", async () => {
+			// Every notification the worker makes, also one cleared at once.
+			await stack.worker.eval(`(() => {
+				globalThis.e2eCreated = [];
+				const create = chrome.notifications.create.bind(chrome.notifications);
+				chrome.notifications.create = (...args) => {
+					globalThis.e2eCreated.push(args[0]);
+					return create(...args);
+				};
+			})()`);
+			const asked = call(stack, "page_place_order", { item: "panel" });
+			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+			expect(await badge()).toBe("?");
+			await answerInPanel(stack, "allow");
+			expect((await asked).isError).toBeFalsy();
+			expect(await badge()).toBe("on");
+			// Routed and answered: none was made.
+			expect(await stack.worker.eval("globalThis.e2eCreated")).toEqual([]);
+		});
+
+		test("when a question goes, what moves up under the pointer cannot allow at once", async () => {
+			const first = call(stack, "page_place_order", { item: "first" });
+			await stack.panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 1`,
+			);
+			const second = call(stack, "page_place_order", { item: "second" });
+			await stack.panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 2`,
+			);
+			await stack.panel.send("Emulation.setFocusEmulationEnabled", {
+				enabled: true,
+			});
+			const top = `document.querySelector('[data-question] button[data-answer="allow"]')`;
+			await stack.panel.waitFor(`!${top}.disabled`);
+			await stack.panel.eval(`${top}.id = "e2e-answer"`);
+			await stack.panel.click("#e2e-answer");
+			expect((await first).isError).toBeFalsy();
+			await stack.panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 1`,
+			);
+			// The question left, and the tools' switches, wait again.
+			expect(
+				await stack.panel.eval(
+					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), button.badge.toggle')].map((b) => b.disabled)`,
+				),
+			).toEqual([true, true, true]);
+			await stack.panel.waitFor(
+				`![...document.querySelectorAll("button.badge.toggle")].some((b) => b.disabled)`,
+			);
+			await answerInPanel(stack, "deny");
+			expect((await second).isError).toBe(true);
+		});
+
+		test("a panel closed during a question hands it to a notification", async () => {
+			const asked = call(stack, "page_place_order", { item: "handed" });
+			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+			await closePanel(stack);
+			const id = await newNotification(stack);
+			// After the guard against an Allow that came too soon.
+			await Bun.sleep(600);
+			await clickNotification(stack, id, 1);
+			const result = await asked;
+			expect(result.isError).toBeFalsy();
+			expect(result.content[0]?.text).toContain("handed");
+			// Answered: the notification is gone.
+			expect(await notifications(stack)).toEqual([]);
+		});
+
+		test("with the panel closed the AI app still calls the page's tools", async () => {
+			const result = await call(stack, "page_get_greeting", { name: "Cy" });
+			expect(result.content).toEqual([{ type: "text", text: "Hello, Cy!" }]);
+			expect(await badge()).toBe("on");
+		});
+
+		test("with the panel closed a question is a notification: Allow, Don't allow, late clicks", async () => {
+			const denied = call(stack, "page_place_order", { item: "no" });
+			const first = await newNotification(stack);
+			expect(await badge()).toBe("?");
+			await clickNotification(stack, first, 0);
+			const no = await denied;
+			expect(no.isError).toBe(true);
+			expect(
+				await stack.tab.eval("window.calls.map((c) => c[1])"),
+			).not.toContain("no");
+			// A click on a notification whose call is settled answers nothing.
+			const allowed = call(stack, "page_place_order", { item: "yes" });
+			const second = await newNotification(stack, [first]);
+			await Bun.sleep(600);
+			await clickNotification(stack, first, 1);
+			await Bun.sleep(200);
+			expect(await notifications(stack)).toEqual([second]);
+			await clickNotification(stack, second, 1);
+			expect((await allowed).content[0]?.text).toContain("yes");
+		});
+
+		test("reopening the panel shows the same connection", async () => {
+			stack.panel = await openPanel(stack.browser, stack.tab);
+			await stack.panel.waitFor(
+				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
+			);
+			expect(
+				await stack.panel.eval(
+					`document.getElementById("state").dataset.state`,
+				),
+			).not.toBe("off");
+			expect(
+				await stack.panel.eval(
+					`document.getElementById("tab-title").textContent`,
+				),
+			).toBe("Page with WebMCP tools");
+		});
+	},
+);
+
+describe.skipIf(chrome === undefined)(
+	"panel commands, and the address taken over",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start({ store: false }, `${SITE}/webmcp.html`);
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		const stored = <T>(key: string) =>
+			stack.worker.eval<T>(
+				`chrome.storage.local.get(${JSON.stringify(key)}).then((s) => s[${JSON.stringify(key)}] ?? null)`,
+			);
+
+		test("commands run one after another: a connect then a stop ends off, two allowed writes both hold", async () => {
+			await stack.panel.eval(`(async () => {
+				const port = chrome.runtime.connect({ name: "panel" });
+				port.postMessage({ type: "connect" });
+				port.postMessage({ type: "stop" });
+				for (const name of ["a", "b"])
+					port.postMessage({ type: "set-allowed", origin: "${SITE}", name, on: true });
+				await new Promise((resolve) => setTimeout(resolve, 1500));
+				port.disconnect();
+			})()`);
+			expect(await stored<boolean>("aiOn")).toBe(false);
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "off"`,
+			);
+			expect(
+				(await stored<Record<string, string[]>>("allowedTools"))[SITE],
+			).toEqual(["a", "b"]);
+		});
+
+		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
+			await stack.panel.click("#connect");
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state !== "off" && document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
+				15_000,
+			);
+			await stack.panel.click("#pair-done");
+			// Another program with a copy of the address secret takes it over.
+			const secrets = await stack.worker.eval<Record<string, string>>(
+				`chrome.storage.local.get(null).then((all) => Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith("tab-mcp:secret:"))))`,
+			);
+			const impostor = new TabMcp({
+				relay: stack.relay.url,
+				server: { name: "tab-mcp-for-chrome", version: "1.0.0" },
+				storage: {
+					getItem: (key) => secrets[key] ?? null,
+					setItem: () => {},
+				},
+			});
+			try {
+				expect((await impostor.connect({ resume: true })).address).toBe(
+					stack.address,
+				);
+				await stack.panel.waitFor(
+					`!document.getElementById("replaced").hidden`,
+				);
+				expect(await stored("replaced")).toEqual({ sibling: false });
+				// A notification a worker leaves behind answers nothing after it.
+				await stack.worker.eval(
+					`chrome.notifications.create("e2e-stale", { type: "basic", iconUrl: chrome.runtime.getURL("icons/icon-128.png"), title: "stale", message: "stale" })`,
+				);
+				// The extension restarts (an update, a reload).
+				await stack.browser.send("Extensions.loadUnpacked", {
+					path: stack.extension,
+				});
+				await Bun.sleep(1000);
+				stack.worker = await stack.browser.serviceWorker(
+					stack.browser.extensionId as string,
+				);
+				await stack.worker.eval("true");
+				// The alarm comes: still nothing taken back.
+				await stack.worker.eval(
+					`chrome.alarms.create("tab-mcp-keepup", { when: Date.now() + 50 })`,
+				);
+				await Bun.sleep(1500);
+				expect(impostor.state).toBe("connected");
+				expect(await notifications(stack)).toEqual([]);
+				// The panel shows the notice from what was kept.
+				stack.panel = await openPanel(stack.browser, stack.tab);
+				await stack.panel.waitFor(
+					`!document.getElementById("replaced").hidden`,
+				);
+				expect(
+					await stack.panel.eval(
+						`document.getElementById("state").dataset.state`,
+					),
+				).toBe("off");
+				// New address: the old one is taken back, then a new one made.
+				await stack.panel.click("#replaced-new-address");
+				const fresh = await stack.panel.waitFor<string>(
+					`(() => { const a = document.getElementById("address").textContent; return a && a !== ${JSON.stringify(stack.address)} && a; })()`,
+					15_000,
+				);
+				expect(fresh).not.toBe(stack.address);
+				expect(impostor.state).toBe("disconnected");
+				expect(await stored("replaced")).toBeNull();
+				expect(
+					await stack.panel.eval(`document.getElementById("replaced").hidden`),
+				).toBe(true);
+			} finally {
+				await impostor.disconnect();
+			}
+		});
+	},
+);
+
+describe.skipIf(chrome === undefined)("a restart", () => {
+	test("the same profile connects again by itself, with the same address", async () => {
+		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-ext-profile-"));
+		let stack: Stack | undefined;
+		let again: Browser | undefined;
+		try {
+			stack = await start({ store: false, profile }, `${SITE}/plain.html`);
+			expect((await pageInfo(stack)).isError).toBeFalsy();
+			await stack.client.close();
+			await stack.browser.close();
+			// Chrome again, with the same profile and build; no click, no panel.
+			again = await launch(stack.extension, profile);
+			await again.newPage(`${SITE}/plain.html`);
+			const end = Date.now() + 20_000;
+			let client: Client | undefined;
+			while (client === undefined) {
+				client = await mcpClient(stack.relay, stack.address).catch(
+					() => undefined,
+				);
+				if (client === undefined) {
+					if (Date.now() > end)
+						throw new Error("the address did not answer after the restart");
+					await Bun.sleep(250);
+				}
+			}
+			const result = (await client.callTool({
+				name: "page_info",
+			})) as CallResult;
+			expect(result.structuredContent).toMatchObject({
+				url: `${SITE}/plain.html`,
+			});
+			await client.close();
+		} finally {
+			await again?.close();
+			await stack?.stop();
+			rmSync(profile, { recursive: true, force: true });
+		}
+	}, 90_000);
+});
+
+/**
+ * Whether the service worker keeps running on a quiet connection (only the
+ * relay's heartbeat), with nothing attached to it: DevTools keeps a worker
+ * alive, so the test lets go of it first. And, for comparison, that it stops
+ * once AI access is off. Over two minutes, so only with TAB_MCP_E2E_IDLE=1.
+ */
+describe.skipIf(chrome === undefined || !process.env["TAB_MCP_E2E_IDLE"])(
+	"the service worker on a quiet connection",
+	() => {
+		/** Whether the worker runs, without attaching to it. */
+		async function workerRuns(browser: Browser): Promise<boolean> {
+			const { targetInfos } = (await browser.send("Target.getTargets")) as {
+				targetInfos: { type: string; url: string }[];
+			};
+			return targetInfos.some(
+				(t) =>
+					t.type === "service_worker" &&
+					t.url.startsWith(`chrome-extension://${browser.extensionId}/`),
+			);
+		}
+
+		/** Whether the worker ran all through `ms`, looked at every 5 s. */
+		async function runsThrough(browser: Browser, ms: number): Promise<boolean> {
+			const end = Date.now() + ms;
+			while (Date.now() < end) {
+				if (!(await workerRuns(browser))) return false;
+				await Bun.sleep(5_000);
+			}
+			return workerRuns(browser);
+		}
+
+		test("it keeps running while connected, and stops once AI access is off", async () => {
+			const stack = await start({ store: false }, `${SITE}/webmcp.html`);
+			try {
+				await closePanel(stack);
+				await stack.browser.detachServiceWorkers();
+				expect(await runsThrough(stack.browser, 70_000)).toBe(true);
+				const result = await pageInfo(stack);
+				expect(result.isError).toBeFalsy();
+				// Off: nothing keeps the worker; Chrome stops it after 30 s idle.
+				stack.panel = await openPanel(stack.browser, stack.tab);
+				await stack.panel.click("#stop");
+				await stack.panel.waitFor(
+					`document.getElementById("state").dataset.state === "off"`,
+				);
+				stack.worker = await stack.browser.serviceWorker(
+					stack.browser.extensionId as string,
+				);
+				await closePanel(stack);
+				await stack.browser.detachServiceWorkers();
+				expect(await runsThrough(stack.browser, 70_000)).toBe(false);
+			} finally {
+				await stack.client.close();
+				await stack.stop();
+			}
+		}, 200_000);
+	},
+);
 
 describe.skipIf(chrome === undefined)(
 	"the store package (no host access)",

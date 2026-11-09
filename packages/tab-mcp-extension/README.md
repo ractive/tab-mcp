@@ -20,16 +20,17 @@ The page's tools are the page's word:
 
 - Their descriptions reach the AI app starting with the page's origin (`From
   https://shop.example: …`), cut to 1000 characters; titles to 100.
-- A tool the page marks read-only runs at once; every other one asks you in the side
-  panel each time (the library's dialog: click into the panel, then Allow). "Always
-  allow" in that dialog stops asking for that tool on this page until the page changes
-  (navigation, reload, another tab). In the panel's list, a click on "asks first" turns
-  the tool into "allowed" for that site (exact origin), kept until you click it again.
+- A tool the page marks read-only runs at once; every other one asks you each time
+  (see "Questions" below). "Always allow" stops asking for that tool, for that AI app on
+  this page, until the page changes (navigation, reload, another tab). In the panel's
+  list, a click on "asks first" turns the tool into "allowed" for that site (exact
+  origin), kept until you click it again. Both only for pages of an http(s) site: pages
+  with an opaque origin (`null`, such as sandboxed or `data:` pages) always ask.
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
   changed, the AI app is told to list the tools again.
 - Arguments are checked against the tool's schema before the call (without the schema's
-  regular expressions, which a page could make freeze the panel; the page checks those
+  regular expressions, which a page could make freeze the extension; the page checks those
   itself). A call that the page does not answer in 60 s ends for the AI app, also when
   the page is stuck; cancelling in the AI app cancels it in the page. Results are marked
   untrusted; their text, all blocks together, is cut to 100,000 characters. A page that
@@ -58,7 +59,42 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   origin (`www.example.com` is another origin than `example.com`).
   "Allow on all sites" in the side panel lets it read every tab without a click.
 - "Connect your AI app" connects to the relay and shows the address for your AI app and a
-  pairing code, as on any page with tab-mcp. The relay address is under "Relay".
+  pairing code; the [connect page](https://ractive.ch/tab-mcp/connect/) says how to add
+  the address in Claude, ChatGPT, Claude Code and Codex. The connected apps are listed
+  with Disconnect. The relay address is under "Settings".
+- The connection lives in the extension's service worker, not in the side panel: close
+  the panel and AI access stays on, until "Turn off". It comes back by itself after a
+  browser start, an update or a reload of the extension when you left it on. The icon
+  shows "on" while it is connected, "…" while it connects, "?" while a tool asks. If
+  another tab or program takes the address over, the extension does not take it back by
+  itself, also after a restart: the panel says so and offers "New address" (or Connect,
+  to take it back).
+
+## Questions
+
+A tool that asks first asks in the side panel when the panel is open in the window of the
+tab the tool acts on and that window is in front: Allow and Always allow work once the
+panel has been in front for 750 ms, so the click that brings it forward cannot approve.
+Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
+cut to 60 characters) with "On <site>" below, naming the AI app (its name and its
+verified host) and the arguments in short, with Don't allow first and
+Allow second; an Allow within half a second of the notification showing does not count,
+and a click on the notification's body, or closing it, is Don't allow. A notification
+answers only its own call. Questions also show in every open side panel, so with
+notifications off (Focus, Do Not Disturb, notifications off for Chrome) open the panel
+when the icon shows "?". A question nobody answers in 60 s is Don't allow.
+
+## Permissions
+
+| Permission | Why |
+|---|---|
+| `activeTab` | Read the tab you click the icon on (its WebMCP tools), without access to other sites. |
+| `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
+| `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
+| `storage` | The relay address, whether AI access is on, the tools allowed per site, and the secret behind the connection's address. |
+| `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
+| `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
+| `<all_urls>` (optional) | Only after "Allow on all sites": read every tab without a click. |
 
 WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
 you turn on `chrome://flags/#enable-webmcp-testing`.
@@ -83,13 +119,21 @@ key in its manifest, or, without one, from the folder it was loaded from.
 ## Tests
 
 - `test/unit.test.ts`: manifests, the key's id, reading a page, the tool, the refusals.
+- `test/worker.test.ts`: who may send the service worker what (only the side panel's
+  port gives commands; a content script can only say its page's tools changed), the
+  questions (notifications, the guard, late clicks, the panel, the time limit), the
+  address secret's storage, Always allow, a bundle without dynamic `import()`.
 - `test/bridge.test.ts`: the bridge's names, descriptions, schemas, results and how its
   tools follow the page.
 - `test/e2e.test.ts`: the test build and the store package in Chrome for Testing 156 or
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (confirmation in the panel, cancellation, `toolchange`, a forged
-  `document.modelContext`) across navigations and tab switches. Pages are served
+  `document.modelContext`) across navigations and tab switches; with the panel closed
+  (tools still run, questions as notifications, a panel closed during a question,
+  reopening it) and after a restart of the same profile (the same address connects
+  again by itself). `TAB_MCP_E2E_IDLE=1` adds a two-minute check that the service
+  worker keeps running on a quiet connection and stops once AI access is off. Pages are served
   through the DevTools Protocol on made-up https origins. They take a few seconds and
   run in CI on every change.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and

@@ -313,6 +313,93 @@ input {
 	color: var(--fg);
 }
 
+/* The connected AI apps, each with Disconnect. */
+.grants {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.grants:empty {
+	display: none;
+}
+
+.grants li {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	overflow-wrap: anywhere;
+}
+
+.grants .host {
+	color: var(--muted);
+	font-size: 12px;
+}
+
+.replaced {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 10px;
+	border-radius: 8px;
+	background: var(--asks-bg);
+	color: var(--asks-fg);
+}
+
+.code-line {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.code {
+	font-size: 22px;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+}
+
+/* A tool that asks first: on top, in the colours of "asks first". */
+.questions {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.questions:empty {
+	display: none;
+}
+
+.question {
+	border-color: var(--wait);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--wait) 25%, transparent);
+}
+
+.question .ask {
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+.question pre {
+	margin: 0;
+	max-height: 12em;
+	overflow: auto;
+	padding: 6px 8px;
+	border-radius: 8px;
+	background: var(--bg);
+	font-size: 12px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+button:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
 /* Last and one step more specific: `hidden` wins over the display rules above. */
 html [hidden] {
 	display: none;

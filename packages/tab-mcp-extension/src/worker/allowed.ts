@@ -17,21 +17,42 @@ export async function loadAllowed(): Promise<AllowedTools> {
 		: {};
 }
 
+/**
+ * Whether tools of `origin` may be allowed at all: only an http(s) origin
+ * names one site. Every opaque origin (a sandboxed frame, a data: page) is
+ * "null", and allowing a tool there would allow it on all of them.
+ */
+export function allowable(origin: string): boolean {
+	try {
+		const url = new URL(origin);
+		return (
+			(url.protocol === "https:" || url.protocol === "http:") &&
+			url.origin === origin
+		);
+	} catch {
+		return false;
+	}
+}
+
 export function isAllowed(
 	allowed: AllowedTools,
 	origin: string,
 	name: string,
 ): boolean {
-	return allowed[origin]?.includes(name) === true;
+	return allowable(origin) && allowed[origin]?.includes(name) === true;
 }
 
-/** Allow or stop allowing `name` on `origin`; returns the new state. */
+/**
+ * Allow or stop allowing `name` on `origin`; returns the new state. An
+ * origin that cannot be allowed (see `allowable`) changes nothing.
+ */
 export async function setAllowed(
 	origin: string,
 	name: string,
 	on: boolean,
 ): Promise<AllowedTools> {
 	const allowed = await loadAllowed();
+	if (!allowable(origin)) return allowed;
 	const names = new Set(allowed[origin] ?? []);
 	if (on) names.add(name);
 	else names.delete(name);

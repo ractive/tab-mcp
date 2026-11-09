@@ -40,29 +40,37 @@ Name: **tab-mcp for Chrome**; docs at `ractive.ch/tab-mcp`, no domain of its own
 ## How it fits tab-mcp
 
 ```text
-AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-client)
-                                        │  chrome.tabs.sendMessage
-                                        ▼
+AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp-client, the bridge)
+                                        │  chrome.tabs.sendMessage     ▲ port: state ▼ commands
+                                        ▼                              side panel (a view)
                            content script in the tab
                            └─ bridges WebMCP tools (getTools / executeTool, DEC-113)
 ```
 
-- The side panel is an extension page: it connects to the relay with origin
-  `chrome-extension://<id>`, which the relay accepts since 0.7.0 (DEC-108). A content
-  script cannot connect itself: its requests carry the website's origin.
-- The tools the AI app sees are registered in the side panel with `tab-mcp-client`'s
-  `registerTool`; their `execute` sends a message to the content script of the tab in
-  front and returns its answer. Overmark does the same today.
-- Pairing, grants, confirmations and the relay are tab-mcp's as they are. Consequential
-  tools ask the user each time in the side panel (the library's confirmation).
-
-Today the connection lives in the side panel and ends when it is closed; iteration 26
-moves it out (into the service worker, or an offscreen document), with questions by
-notification while the panel is closed (DEC-116).
+- The connection lives in the service worker (DEC-116, iteration 26): it connects to the
+  relay with origin `chrome-extension://<id>`, which the relay accepts since 0.7.0
+  (DEC-108). A content script cannot connect itself: its requests carry the website's
+  origin. A WebSocket that carries messages keeps the worker running (Chrome 116), and
+  the relay's heartbeat carries some every 25 s, so the connection stays while the side
+  panel is closed; an alarm wakes the worker once a minute while AI access is on, and
+  every worker start connects again when the user left it on. The address secret is in
+  `chrome.storage.local` (the worker has no `localStorage`).
+- The tools the AI app sees are registered with `tab-mcp-client`'s `registerTool`; their
+  `execute` sends a message to the content script of the tab in front (the active tab of
+  the last focused normal window) and returns its answer. Overmark does the same in its
+  side panel.
+- Pairing, grants and the relay are tab-mcp's as they are; the side panel shows them
+  with its own pairing view (the address, the code, the connected apps, New address),
+  since the library's dialog would draw into no page. Commands reach the worker only
+  over the panel's port (threat model A13).
+- Tools that ask first ask in the side panel when it is open in the focused window of the
+  tab the call acts on, else in a Chrome notification; the extension asks, not the
+  library (iteration 26).
 
 ## Permissions
 
-- `activeTab`, `scripting`, `sidePanel`, `storage`.
+- `activeTab`, `scripting`, `sidePanel`, `storage`, `notifications` (questions while the
+  panel is not in front), `alarms` (waking the worker while AI access is on).
 - Host access is optional (`<all_urls>` in `optional_host_permissions`): without it the
   extension runs on a tab only after a click on its icon, as Overmark does, and only for
   that origin in that tab (Chrome keeps the grant across navigations on the same origin,
@@ -78,13 +86,16 @@ notification while the panel is closed (DEC-116).
 | `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, whether it only reads, and why a tool is left out (iteration 20) |
 | `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20) |
 
-The side panel shows the connection, the tab in front with its tools ("reads" or "asks
-first"), and the relay address under Settings. The connector carries the extension's icon.
+The side panel shows the connection and its apps, the pairing view, questions, the tab in
+front with its tools ("reads", "asks first" or "allowed"), and the relay address under
+Settings. The icon's badge shows "on", "…" or "?" (a question waits). The connector
+carries the extension's icon.
 
 ## Risks and how the design meets them
 
 - **The page's hints can lie.** Every result is marked untrusted; every tool not marked
-  read-only asks the user in the side panel each time, naming the page's origin.
+  read-only asks the user each time (side panel or notification), naming the page's
+  origin.
 - **Prompt injection.** Page tool results reach the AI app; they are marked untrusted,
   and the AI app decides what to do with them, as with any tool. The tools' names,
   descriptions and schemas are the page's words too, and no hint can mark them in a tool

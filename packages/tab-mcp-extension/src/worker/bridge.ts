@@ -1,7 +1,7 @@
 /**
  * The WebMCP bridge (iteration 20): the tools the page in front registered
- * with WebMCP, offered to the AI app as `page_<name>` tools of the side
- * panel's `TabMcp`, and through `webmcp_call` for AI apps that read their
+ * with WebMCP, offered to the AI app as `page_<name>` tools of the
+ * connection's `TabMcp`, and through `webmcp_call` for AI apps that read their
  * tool list only once. The list follows the tab in front and the page's
  * `toolchange`; it is advisory (a page may drop a tool any time), so a call
  * to a tool that is gone answers so instead of failing the bridge.
@@ -72,8 +72,8 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * A copy of `schema` without the keywords whose regular expressions the
- * validator would run in the side panel (`pattern`, `patternProperties`): a
- * page's catastrophic pattern would freeze the panel. The page still checks
+ * validator would run in the extension (`pattern`, `patternProperties`): a
+ * page's catastrophic pattern would freeze the connection. The page still checks
  * its own input as it likes.
  */
 function withoutPatterns(schema: unknown): unknown {
@@ -220,12 +220,12 @@ export interface BridgeChrome {
 	): Promise<CallResult>;
 }
 
-/** Where the bridged tools go: the side panel's `TabMcp`. */
+/** Where the bridged tools go: the connection's `TabMcp`. */
 export interface Registrar {
 	registerTool(tool: Tool, options: { signal: AbortSignal }): Promise<void>;
 }
 
-/** Asks the user (the library's dialog): `webmcp_call`'s confirmation. */
+/** Asks the user: `webmcp_call`'s confirmation. */
 export type Confirm = (request: ConfirmRequest) => Promise<boolean>;
 
 /** A tool of the page in front as the bridge keeps it, to call. */
@@ -236,6 +236,26 @@ interface Callable {
 	title: string;
 	description: string;
 	validator: Validator;
+}
+
+/** A page tool's schema and validator, or why it has none. */
+type Compiled =
+	| { schema: Record<string, unknown>; validator: Validator }
+	| { problem: string };
+
+function compile(tool: PageTool): Compiled {
+	const made = schemaFor(tool);
+	if ("problem" in made) return made;
+	try {
+		return {
+			schema: made.schema,
+			validator: new Validator(made.schema, "2020-12", false),
+		};
+	} catch (error) {
+		return {
+			problem: `its inputSchema cannot be used: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
 }
 
 /** What makes two offers the same tool: re-register only when it changes. */
@@ -291,6 +311,8 @@ export class PageToolBridge {
 	>();
 	/** The page's offered tools by their page name, for `webmcp_call`. */
 	#callable = new Map<string, Callable>();
+	/** The schemas and validators of the last read, by `keyOf`. */
+	#compiled = new Map<string, Compiled>();
 	#state: BridgeState = { available: false, tools: [], mirrored: [] };
 	/** The refresh running, and whether another was asked for meanwhile. */
 	#running: Promise<void> | undefined;
@@ -314,13 +336,16 @@ export class PageToolBridge {
 		return this.#state;
 	}
 
-	/** The page tool behind an offered tool name (`page_<name>`): its site and name. */
+	/** The page tool behind an offered tool name (`page_<name>`): its tab, site and name. */
 	lookup(
 		toolName: string,
-	): { origin: string; name: string; readOnly: boolean } | undefined {
+	):
+		| { tabId: number; origin: string; name: string; readOnly: boolean }
+		| undefined {
 		for (const callable of this.#callable.values())
 			if (bridgedName(callable.target.name) === toolName)
 				return {
+					tabId: callable.tabId,
 					origin: callable.origin,
 					name: callable.target.name,
 					readOnly: callable.target.readOnly,
@@ -423,6 +448,7 @@ export class PageToolBridge {
 		const offered: Offered[] = [];
 		const wanted: { name: string; key: string; tool: Tool }[] = [];
 		const callable = new Map<string, Callable>();
+		const compiled = new Map<string, Compiled>();
 		let more = tools.more;
 		for (const pageTool of tools.tools) {
 			if (offered.length >= MAX_TOOLS) {
@@ -451,18 +477,16 @@ export class PageToolBridge {
 				entry.problem = `its name becomes ${name}, as ${cut(clash.target.name, MAX_NAME)} does`;
 				continue;
 			}
-			const schema = schemaFor(pageTool);
-			if ("problem" in schema) {
-				entry.problem = schema.problem;
+			// The schema and its validator once per tool as offered, not on
+			// every refresh (each tab switch, each toolchange).
+			const key = keyOf(tab.id, tools.documentId, pageTool);
+			const made = this.#compiled.get(key) ?? compile(pageTool);
+			compiled.set(key, made);
+			if ("problem" in made) {
+				entry.problem = made.problem;
 				continue;
 			}
-			let validator: Validator;
-			try {
-				validator = new Validator(schema.schema, "2020-12", false);
-			} catch (error) {
-				entry.problem = `its inputSchema cannot be used: ${error instanceof Error ? error.message : String(error)}`;
-				continue;
-			}
+			const { schema, validator } = made;
 			entry.tool = name;
 			const item: Callable = {
 				tabId: tab.id,
@@ -473,14 +497,11 @@ export class PageToolBridge {
 				validator,
 			};
 			callable.set(pageTool.name, item);
-			wanted.push({
-				name,
-				key: keyOf(tab.id, tools.documentId, pageTool),
-				tool: this.#tool(item, name, schema.schema),
-			});
+			wanted.push({ name, key, tool: this.#tool(item, name, schema) });
 		}
 		this.#offer(wanted, offered);
 		this.#callable = callable;
+		this.#compiled = compiled;
 		this.#state = {
 			url: tools.url,
 			origin: tools.origin,
@@ -542,7 +563,7 @@ export class PageToolBridge {
 			inputSchema: schema,
 			annotations: {
 				readOnlyHint: callable.target.readOnly,
-				// Not read-only: the user confirms every call in the side panel.
+				// Not read-only: the user confirms every call.
 				consequentialHint: !callable.target.readOnly,
 				// Whatever it answers is the page's.
 				untrustedContentHint: true,

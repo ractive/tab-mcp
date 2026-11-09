@@ -24,7 +24,7 @@ import {
 	PageToolBridge,
 	resultOf,
 	schemaFor,
-} from "../src/sidepanel/bridge.ts";
+} from "../src/worker/bridge.ts";
 
 describe("names, descriptions, schemas", () => {
 	test("page tools are page_<name>, in names every AI app takes (Claude: no dots, 64)", () => {

@@ -7,9 +7,9 @@ import { describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { createManifest, extensionId, mitText } from "../scripts/build.ts";
 import { callTool, pageInfo, pageTools } from "../src/content.ts";
-import { relayProblem } from "../src/sidepanel/relay.ts";
-import { createTools } from "../src/sidepanel/tools.ts";
+import { relayProblem } from "../src/relay.ts";
 import { noAccess } from "../src/tabs.ts";
+import { createTools } from "../src/worker/tools.ts";
 
 describe("manifest", () => {
 	test("the development build has the key and no host access", () => {
@@ -19,6 +19,8 @@ describe("manifest", () => {
 		expect(manifest["optional_host_permissions"]).toEqual(["<all_urls>"]);
 		expect(manifest["permissions"]).toEqual([
 			"activeTab",
+			"alarms",
+			"notifications",
 			"scripting",
 			"sidePanel",
 			"storage",

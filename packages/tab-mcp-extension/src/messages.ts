@@ -1,5 +1,6 @@
 /**
- * What the side panel and the content script say to each other.
+ * What the connection (in the service worker) and the content script say to
+ * each other.
  */
 
 /** The content script's file in the build, for `chrome.scripting`. */

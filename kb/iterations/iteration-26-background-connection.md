@@ -1,8 +1,13 @@
 ---
 type: iteration
 title: "Iteration 26: the connection without the side panel"
-status: planned
-description: "The connection to the AI app moves out of the side panel, into the service worker (if a WebSocket keeps it alive, Chrome 116+) or an offscreen document, so it stays while the panel is closed; the side panel becomes a view with its own pairing and confirmation UI. A tool that asks first asks in the side panel of the tab's window when it is open and focused, else in a Chrome notification."
+status: completed
+description: >-
+  The connection to the AI app moves out of the side panel into the service
+  worker (the relay's heartbeat keeps it running; no offscreen document), so it stays
+  while the panel is closed and comes back after a restart; the side panel becomes a
+  view with its own pairing and question UI. A tool that asks first asks in the
+  side panel of the tab's focused window, else in a Chrome notification.
 timestamp: 2026-11-09T03:00:00+01:00
 tags: [iteration, extension]
 ---
@@ -100,18 +105,47 @@ panel on screen.
 2. Notifications on macOS, Windows and Linux: buttons, how long they stay, what is shown
    when notifications are off.
 
+## Answers (2026-11-09)
+
+1. **The service worker holds** (DEC-116); no offscreen document. The library runs there
+   without a document: the address secret in a write-through cache over
+   `chrome.storage.local`, `connect({ resume: true })`, icons read with `fetch`; the
+   background bundle has no dynamic `import()` left (Bun inlines it without splitting; a
+   unit test checks it). With nothing attached over DevTools, Chrome 156 kept the worker
+   running for 70 s of a quiet connection (only the relay's heartbeat, a ping every 25 s
+   that the library answers) and stopped it within 70 s once AI access was off; the
+   check is in the end-to-end tests behind `TAB_MCP_E2E_IDLE=1`, since it takes two
+   minutes. For sleep and long idle times an alarm wakes the worker once a minute while
+   AI access is on; each start connects again (the restart test shows the same address
+   coming back). The address changes once for whoever used the panel before: its secret
+   was in the panel's `localStorage`, which the worker cannot read.
+2. **Notifications**: in headless Chrome for Testing the API works as documented
+   (`create` with two buttons and `requireInteraction`, `getAll`, `clear`), and the
+   end-to-end tests answer through the same function a click calls. How they look and
+   stay on macOS, Windows and Linux was not tested here: macOS shows Chrome's buttons
+   under the notification's "Options" and may file it in Notification Center, and with
+   notifications off `create` still succeeds without showing anything. That is why
+   questions also show in every open side panel and the icon shows "?": the user can
+   always answer there. To check by hand on the owner's Mac.
+
+The library's timeout message stays "The user declined" for `page_<name>` tools (the
+library answers that for every `false`); `webmcp_call` tells the AI app that the user
+was asked and did not answer within 60 s.
+
 ## Tasks
 
-- [ ] The spike; its answers in this file and DEC-116
-- [ ] The connection and the bridge in their new home; tab calls and events (directly in
+- [x] The spike; its answers in this file and DEC-116
+- [x] The connection and the bridge in their new home; tab calls and events (directly in
       the worker, or proxied for an offscreen document); restart on every worker start
       and on `onInstalled` when AI access was on
-- [ ] The panel's port, sender checks, the content scripts' one message; the unit test
-- [ ] The side panel as a view: state, commands, pairing of its own
-- [ ] Questions: allowed, Always allow, panel of the tab's window, notification, timeout;
+- [x] The panel's port, sender checks, the content scripts' one message; the unit test
+- [x] The side panel as a view: state, commands, pairing of its own
+- [x] Questions: allowed, Always allow, panel of the tab's window, notification, timeout;
       badge on the icon
-- [ ] Permissions (`notifications`, `offscreen` if used); README and store listing say why
-- [ ] End-to-end: the panel closed after connecting, the AI app still calls tools; a
+- [x] Permissions (`notifications`, `offscreen` if used); README and store listing say why
+      (`notifications` and `alarms`; the README's table is the store listing's source,
+      iteration 23)
+- [x] End-to-end: the panel closed after connecting, the AI app still calls tools; a
       question answered in the panel and one through the notification (the test calls the
       extension's own button handler in the service worker over the DevTools Protocol,
       with the id from `chrome.notifications.getAll()`; no test-only answer path in any
@@ -119,9 +153,9 @@ panel on screen.
       same state; a restart (the harness relaunches the same profile) reconnects the same
       address; a relay address set in the panel reaches the connection (the harness's
       `dataset.relay` marker becomes a state the panel shows from the connection)
-- [ ] Threat model (A13): who may send what, notifications as a place to ask, a
+- [x] Threat model (A13): who may send what, notifications as a place to ask, a
       connection on with no panel
-- [ ] Review; merged on the owner's word
+- [x] Review: 10 findings, all fixed on the branch; merged on the owner's word
 
 ## Out of scope
 
