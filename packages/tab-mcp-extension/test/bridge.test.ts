@@ -25,6 +25,7 @@ import {
 	resultOf,
 	schemaFor,
 } from "../src/worker/bridge.ts";
+import { createTools, OWN_TOOL_NAMES } from "../src/worker/tools.ts";
 
 describe("names, descriptions, schemas", () => {
 	test("page tools are page_<name>, in names every AI app takes (Claude: no dots, 64)", () => {
@@ -313,6 +314,79 @@ describe("PageToolBridge", () => {
 		await bridge.refresh();
 		expect([...reg.tools.keys()]).toEqual(["page_a_b"]);
 		expect(bridge.state.tools[1]?.problem).toContain("page_a_b");
+	});
+
+	test("a page tool whose name becomes one of the extension's own is left out, also from webmcp_call", async () => {
+		// The extension's own tools are those names.
+		const own = createTools(
+			{
+				current: async () => ({ id: 1, url: "", title: "" }),
+				page: async () => ({}) as never,
+			},
+			() => ({}) as never,
+		).map((t) => t.name);
+		expect(own.sort()).toEqual([...OWN_TOOL_NAMES].sort());
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(
+			page([pageTool("info", { annotations: {} }), pageTool("search")]),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		expect([...reg.tools.keys()]).toEqual(["page_search"]);
+		const info = bridge.state.tools.find((t) => t.name === "info");
+		expect(info?.tool).toBeUndefined();
+		expect(info?.problem).toContain("page_info");
+		expect(bridge.lookup("page_info")).toBeUndefined();
+		await expect(
+			bridge.callByName("info", {}, options(), async () => true),
+		).rejects.toThrow("not offered");
+		expect(state.calls).toEqual([]);
+	});
+
+	test("a tool the library refuses is not callable through webmcp_call either", async () => {
+		let refusals = 0;
+		const reg = registrar((tool) => {
+			if (tool.name !== "page_refused") return false;
+			refusals++;
+			return true;
+		});
+		const { state, chrome } = fakeChrome(
+			page([pageTool("refused"), pageTool("search")]),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		await Bun.sleep(0);
+		expect(bridge.lookup("page_refused")).toBeUndefined();
+		// Read again (webmcp_call refreshes first): not offered again.
+		await bridge.refresh();
+		expect(refusals).toBe(1);
+		expect(
+			bridge.state.tools.find((t) => t.name === "refused")?.problem,
+		).toContain("refused");
+		await expect(
+			bridge.callByName("refused", {}, options(), async () => true),
+		).rejects.toThrow("refused");
+		expect(state.calls).toEqual([]);
+		expect(
+			await bridge.callByName("search", {}, options(), async () => true),
+		).toBe("done");
+	});
+
+	test("lookup names the page a tool was listed from", async () => {
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(page([pageTool("buy")]));
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		expect(bridge.lookup("page_buy")).toEqual({
+			tabId: 1,
+			origin: "https://shop.example",
+			documentId: "doc-1",
+			name: "buy",
+			readOnly: true,
+		});
+		state.page = page([pageTool("buy")], { documentId: "doc-2" });
+		await bridge.refresh();
+		expect(bridge.lookup("page_buy")?.documentId).toBe("doc-2");
 	});
 
 	test("a call goes to the page the tool was listed from, with its claim", async () => {

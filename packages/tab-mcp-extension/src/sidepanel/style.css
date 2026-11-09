@@ -383,6 +383,16 @@ input {
 	overflow-wrap: anywhere;
 }
 
+.question .line {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.question .line-label {
+	font-weight: 600;
+}
+
+/* The arguments in full: long ones scroll. */
 .question pre {
 	margin: 0;
 	max-height: 12em;
@@ -534,4 +544,9 @@ button:disabled {
 /* Last and one step more specific: `hidden` wins over the display rules above. */
 html [hidden] {
 	display: none;
+}
+
+/* A question's own window: the arguments get the room there is. */
+.question-window .question pre {
+	max-height: 50vh;
 }

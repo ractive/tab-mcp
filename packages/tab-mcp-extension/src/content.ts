@@ -1,8 +1,8 @@
 /**
  * The content script, in the extension's isolated world of the tab's top
  * frame: injected at a click on the icon, or registered for every page with
- * host access. It answers the side panel about the page and its WebMCP tools
- * and calls them. In this world `document.modelContext` is the browser's own,
+ * host access. It answers the service worker (where the connection lives,
+ * DEC-116) about the page and its WebMCP tools and calls them. In this world `document.modelContext` is the browser's own,
  * whatever the page put on its own `document` (iteration 18).
  */
 
@@ -94,7 +94,7 @@ const hint = (annotations: Record<string, unknown> | undefined, key: string) =>
 
 /**
  * The page's tools, as plain data, without the ones it mirrors from tab-mcp;
- * capped, so a page cannot make the message (or the panel) big.
+ * capped, so a page cannot make the message (or the bridge's list) big.
  */
 export async function pageTools(
 	doc: Document = document,
@@ -237,7 +237,7 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	globalThis.tabMcpContentScript = true;
 	chrome.runtime.onMessage.addListener(
 		(request: ContentRequest, sender, sendResponse) => {
-			// Only the extension's own pages (the side panel) ask; a content
+			// Only the extension itself (its service worker) asks; a content
 			// script of this tab never sends to itself.
 			if (sender.id !== chrome.runtime.id || !REQUESTS.has(request?.type))
 				return false;
@@ -247,9 +247,9 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 			return true; // answers asynchronously
 		},
 	);
-	// Tell the side panel when the page's tools change, also without a
+	// Tell the service worker when the page's tools change, also without a
 	// navigation (single-page apps), and once now: injected at a click, the
-	// script is the first moment the panel may read them.
+	// script is the first moment the worker's bridge may read them.
 	// At most every 250 ms, the last change included: a page firing
 	// `toolchange` in a loop costs one message per 250 ms.
 	let waiting: ReturnType<typeof setTimeout> | undefined;
@@ -257,7 +257,7 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		waiting = undefined;
 		const event: ContentEvent = { type: "webmcp-changed" };
 		chrome.runtime.sendMessage(event).catch(() => {
-			// No side panel open.
+			// The service worker is not listening (stopping, or updated).
 		});
 	};
 	const changed = () => {

@@ -8,11 +8,10 @@
  */
 
 import {
-	type Answer,
 	PANEL_PORT,
 	type PanelCommand,
 	type PanelState,
-	type QuestionView,
+	type QuestionSummary,
 	type ToolView,
 	type WorkerMessage,
 } from "../protocol.ts";
@@ -24,8 +23,10 @@ import {
 	confirms,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
+	switchExpiry,
 	switchShown,
 } from "./card.ts";
+import { questionCard } from "./question.ts";
 
 /** How long the panel must be visible and focused before Allow counts. */
 const ALLOW_DELAY_MS = 750;
@@ -78,7 +79,8 @@ function connect(): void {
 	}
 	port = opened;
 	opened.onMessage.addListener((message: WorkerMessage) => {
-		if (message?.type === "state") show(message.state);
+		if (message?.type === "question-args") args.set(message.id, message.args);
+		else if (message?.type === "state") show(message.state);
 	});
 	opened.onDisconnect.addListener(() => {
 		if (port === opened) port = undefined;
@@ -151,6 +153,13 @@ function showConnection(s: PanelState): void {
 		"aria-label",
 		s.status === "on" ? "Connected AI apps" : "Paired AI apps",
 	);
+	// A keyboard user's focus stays on the app's Disconnect, which is made
+	// anew: the second Enter of the two-step Disconnect must find it.
+	const focused =
+		document.activeElement instanceof HTMLElement &&
+		document.activeElement.closest("#grants") !== null
+			? document.activeElement.dataset["grant"]
+			: undefined;
 	$("grants").replaceChildren(
 		...s.grants.map((grant) => {
 			const li = document.createElement("li");
@@ -176,6 +185,12 @@ function showConnection(s: PanelState): void {
 			return li;
 		}),
 	);
+	if (focused !== undefined)
+		$("grants")
+			.querySelector<HTMLButtonElement>(
+				`button[data-grant="${CSS.escape(focused)}"]`,
+			)
+			?.focus();
 	syncPairing(view.pairing);
 	$("pairing").hidden = !view.pairing;
 	$("add-app").hidden = !view.addApp;
@@ -196,49 +211,8 @@ function showConnection(s: PanelState): void {
 /** Since when the panel has been visible and focused, if it is. */
 let focusedSince: number | undefined;
 const cards = new Map<string, { card: HTMLElement; shownAt: number }>();
-
-function question(q: QuestionView): HTMLElement {
-	const card = document.createElement("section");
-	card.className = "card question";
-	card.dataset["question"] = q.id;
-	const ask = document.createElement("p");
-	ask.className = "ask";
-	const site = q.origin ? ` on ${q.origin}` : "";
-	ask.textContent = `${q.app} wants to run ${q.title ?? q.tool}${site}.`;
-	const tool = document.createElement("p");
-	tool.className = "muted small";
-	tool.textContent = `Tool ${q.tool}, with these arguments from the AI app:`;
-	const args = document.createElement("pre");
-	args.textContent = q.args;
-	const buttons = document.createElement("div");
-	buttons.className = "buttons";
-	const button = (text: string, answer: Answer, primary = false) => {
-		const b = document.createElement("button");
-		b.type = "button";
-		b.textContent = text;
-		b.dataset["answer"] = answer;
-		if (primary) b.className = "primary";
-		// Allow and Always allow only once the panel has been in front a while:
-		// the click that brings it forward cannot approve.
-		if (answer !== "deny") b.disabled = true;
-		b.addEventListener("click", () => {
-			if (!b.disabled) send({ type: "answer", id: q.id, answer });
-		});
-		return b;
-	};
-	buttons.append(button("Don't allow", "deny"), button("Allow", "allow", true));
-	card.append(ask, tool, args, buttons);
-	// Not for a page without a site of its own (an opaque origin).
-	if (q.always) {
-		buttons.append(button("Always allow", "always"));
-		const always = document.createElement("p");
-		always.className = "muted small";
-		always.textContent =
-			"Always allow: this tool runs without asking for this AI app, until the page changes.";
-		card.append(always);
-	}
-	return card;
-}
+/** Each question's arguments, sent once before the state that lists it. */
+const args = new Map<string, string>();
 
 /**
  * Until when the panel's buttons that allow something stay off after its
@@ -250,8 +224,9 @@ let movedUntil = 0;
 /** "Allow all" as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
-function showQuestions(questions: QuestionView[]): void {
+function showQuestions(questions: QuestionSummary[]): void {
 	const ids = new Set(questions.map((q) => q.id));
+	for (const id of args.keys()) if (!ids.has(id)) args.delete(id);
 	let removed = false;
 	for (const [id, { card }] of cards)
 		if (!ids.has(id)) {
@@ -267,7 +242,10 @@ function showQuestions(questions: QuestionView[]): void {
 	}
 	for (const q of questions)
 		if (!cards.has(q.id)) {
-			const card = question(q);
+			const card = questionCard(
+				{ ...q, args: args.get(q.id) ?? "" },
+				(answer) => send({ type: "answer", id: q.id, answer }),
+			);
 			$("questions").append(card);
 			cards.set(q.id, { card, shownAt: Date.now() });
 		}
@@ -474,10 +452,25 @@ function addApp(on: boolean): void {
 $("connect").addEventListener("click", () => send({ type: "connect" }));
 
 $("ai-switch").addEventListener("change", () => {
-	switchIntent = {
+	const intent: SwitchIntent = {
 		on: ($("ai-switch") as HTMLInputElement).checked,
 		until: Date.now() + SWITCH_WAIT_MS,
 	};
+	switchIntent = intent;
+	// No state may follow (a connect that failed at once): the switch shows
+	// the state again once the wait is over, not the flip for ever.
+	switchExpiry(
+		intent,
+		() => switchIntent,
+		() => {
+			if (state) showConnection(state);
+			else {
+				switchIntent = undefined;
+				($("ai-switch") as HTMLInputElement).checked = false;
+				$("ai-switch").setAttribute("aria-checked", "false");
+			}
+		},
+	);
 	addingApp = false;
 	send({
 		type: ($("ai-switch") as HTMLInputElement).checked ? "connect" : "stop",

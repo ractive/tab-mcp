@@ -12,15 +12,31 @@
  */
 
 import { CONTENT_SCRIPT, CONTENT_SCRIPT_ID } from "./messages.ts";
-import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
+import {
+	isContentEvent,
+	isPanelSender,
+	isQuestionSender,
+	PANEL_PORT,
+	QUESTION_PORT,
+	startProblem,
+	type WorkerMessage,
+} from "./protocol.ts";
+import { attachWhenStarted, Starter } from "./starter.ts";
 import { ALL_SITES, injectInto } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 
-const ready = Connection.start();
-ready.catch((error: unknown) => console.error("tab-mcp: start", error));
+// A start that fails (IndexedDB refused, say) is tried again by the next
+// event or panel; meanwhile a panel shows why.
+const connection = new Starter(() => Connection.start());
+const ready = () => {
+	const starting = connection.ready();
+	starting.catch((error: unknown) => console.error("tab-mcp: start", error));
+	return starting;
+};
+void ready().catch(() => {});
 
 const withConnection = (use: (connection: Connection) => void) =>
-	void ready.then(use, () => {});
+	void ready().then(use, () => {});
 
 chrome.action.onClicked.addListener((tab) => {
 	// `sidePanel.open` needs the click's user gesture: call it before any await.
@@ -97,6 +113,17 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
 });
 
 chrome.runtime.onConnect.addListener((port) => {
+	// A question's own window (a notification clicked where the side panel
+	// could not open): the connection checks that it opened that window.
+	if (
+		port.name === QUESTION_PORT &&
+		isQuestionSender(port.sender ?? {}, chrome.runtime.id)
+	) {
+		const c = connection.value;
+		if (c === undefined) port.disconnect();
+		else c.addQuestionWindow(port);
+		return;
+	}
 	if (
 		port.name !== PANEL_PORT ||
 		!isPanelSender(port.sender ?? {}, chrome.runtime.id)
@@ -104,30 +131,40 @@ chrome.runtime.onConnect.addListener((port) => {
 		port.disconnect();
 		return;
 	}
-	// Until the connection has started (a worker that just woke), keep what
-	// the panel says: Chrome hands a message only to the listeners there are.
-	const early: unknown[] = [];
-	const keep = (message: unknown) => void early.push(message);
-	let gone = false;
-	port.onMessage.addListener(keep);
-	port.onDisconnect.addListener(() => {
-		gone = true;
-	});
-	withConnection((c) => {
-		port.onMessage.removeListener(keep);
-		if (!gone) c.addPanel(port, early);
-	});
+	// Until the connection has started (a worker that just woke, or a start
+	// that failed), keep what the panel says: Chrome hands a message only to
+	// the listeners there are. Attached once any start succeeds.
+	attachWhenStarted<Connection, WorkerMessage>(
+		connection,
+		{
+			postMessage: (message) => port.postMessage(message),
+			onMessage: (listener) => {
+				port.onMessage.addListener(listener);
+				return () => port.onMessage.removeListener(listener);
+			},
+			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
+		},
+		(c, early) => c.addPanel(port, early),
+		(error) => ({ type: "state", state: startProblem(error) }),
+	);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
 	if (alarm.name === ALARM) withConnection((c) => c.keepUp());
 });
 
+// A window opened for a question, closed: Don't allow.
+chrome.windows.onRemoved.addListener((windowId) =>
+	connection.value?.windowRemoved(windowId),
+);
+
 /**
- * A notification's answer: its button Allow (0) or Always allow (1); a click
- * on its body or its closing is Don't allow. On the worker's global object
- * too, for the DevTools Protocol, which cannot click a notification: the
- * end-to-end tests answer through the same functions a click calls.
+ * A notification's answer: its button Allow (0) or Always allow (1); its
+ * closing is Don't allow; a click on its body shows the whole question (the
+ * side panel of the tab's window, else a window of its own). On the worker's
+ * global object too, for the DevTools Protocol, which cannot click a
+ * notification: the end-to-end tests answer through the same functions a
+ * click calls.
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));
@@ -135,10 +172,18 @@ function notificationButton(id: string, index: number): void {
 function notificationDismissed(id: string): void {
 	withConnection((c) => c.notificationDismissed(id));
 }
+function notificationClicked(id: string): void {
+	// At once, not after a promise: `sidePanel.open` needs Chrome's user
+	// gesture, which this event carries only until the first `await`. A
+	// worker that is still starting has no question of this notification:
+	// a start clears them all.
+	connection.value?.notificationClicked(id);
+}
 chrome.notifications.onButtonClicked.addListener(notificationButton);
-chrome.notifications.onClicked.addListener(notificationDismissed);
+chrome.notifications.onClicked.addListener(notificationClicked);
 chrome.notifications.onClosed.addListener(notificationDismissed);
 Object.assign(globalThis, {
 	tabMcpNotificationButton: notificationButton,
 	tabMcpNotificationDismissed: notificationDismissed,
+	tabMcpNotificationClicked: notificationClicked,
 });

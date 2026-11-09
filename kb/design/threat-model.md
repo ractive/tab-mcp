@@ -223,14 +223,20 @@ did, by connecting the extension.
   reach the AI app's tool list, where no hint can mark them; a description can carry
   instructions. Descriptions start with the page's origin (`From https://…:`) and are cut
   to 1000 characters, titles to 100; schemas over 16 KB and more than 64 tools are left
-  out. Every result is marked untrusted (`untrustedContentHint`, mapped to MCP's
+  out, as is a tool whose `page_<name>` equals one of the extension's own tools (`info`
+  as `page_info`): not offered and not callable through `webmcp_call`; a tool the
+  library refuses to register is not callable through `webmcp_call` either. Every
+  result is marked untrusted (`untrustedContentHint`, mapped to MCP's
   `openWorldHint`); its text, all blocks together, is cut to 100,000 characters, with at
   most 32 blocks and each image up to 1 MB of base64 (about 750 KB of image data). `webmcp_tools` lists names cut to 128 characters
   and descriptions with the same origin prefix.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user every time (see "Questions" below), naming the page's origin. The user
   can stop the questions: "Always allow" for that tool, AI app and page (forgotten when
-  the page changes or the AI app is disconnected), or "allowed" in the panel for a
+  the page changes or the AI app is disconnected; kept per grant, origin, the page's
+  document id and tool, and only if the tool looked up after the answer is still the one
+  asked about, so a navigation or another tab in front while the question is open gets
+  nothing from it), or "allowed" in the panel for a
   tool of one exact origin (kept). An allowed tool runs whatever the AI app (or a prompt
   injection steering it) asks of it. A page can only mark its own tools read-only, so a lie harms that page's
   own user session, which its scripts could reach anyway.
@@ -261,7 +267,9 @@ did, by connecting the extension.
   off, pairing, disconnect an app, new address, the relay, "allowed", "Allow all",
   answers to questions) come only over the side panel's named port, whose sender Chrome reports: an
   extension page of this extension at the panel's path, not in a tab; any other port is
-  closed at once, and a command that does not parse is dropped. "Allow all" carries the
+  closed at once, and a command that does not parse is dropped. The one other port is a
+  question's own window (`question/index.html`, in a tab): the worker takes it only from
+  a window it opened for one question, and it can only answer that question. "Allow all" carries the
   site and the tool names, at most 64, and the worker allows only those it offers on
   that site itself, now, that are not read-only: names from the panel are not taken on
   trust, and a tool the page registers later still asks first. "Ask for all" takes away
@@ -281,14 +289,33 @@ did, by connecting the extension.
   the page's scripts cannot reach the panel at all. Otherwise a Chrome notification asks.
   It names the AI app by its verified host beside its declared name, the tool (the
   page's title cut to 60 characters on its own) and, on a line of its own, its site, so
-  a long title cannot push the site out, and the arguments (invisible, blank and
-  direction characters, every space but U+0020 and the blank letters such as U+2800
-  and U+3164, written as `\uXXXX`);
-  its buttons are Allow and Always allow (the same per-AI-app, per-tool memory as the
-  panel's; only Allow where Always allow is not offered). There is no Don't allow
-  button: Chrome allows two, and declining is closing the notification, a click on its
-  body or letting the 60 s run out, so every way out of it that is not one of the two
-  buttons denies. A click on either button within 500 ms of showing does not count (it
+  a long title cannot push the site out, and the arguments cut to 150 characters,
+  saying so ("Arguments cut: click to see them in full."). Invisible, blank and
+  direction characters are written as `\uXXXX`, with the client library's set
+  (`escapeInvisible`, shared since ext/review-fixes): controls (C0 and C1 but tab and
+  line feed), format and other default-ignorable characters (variation selectors
+  U+FE00 to U+FE0F and U+E0100 to U+E01EF, U+034F, the Hangul fillers), private-use,
+  unassigned and lone surrogate code points, line and paragraph separators, every space
+  but U+0020 and U+2800.
+  Its buttons are Allow and Always allow (the same per-AI-app, per-page, per-tool memory
+  as the panel's; only Allow where Always allow is not offered), also when the arguments
+  are cut: the owner's decision, as the AI app's own chat shows the call and the full
+  arguments are a click away. A click on its body opens the whole question, the
+  arguments in full (scrollable), with Allow, Always allow and Don't allow: in the side
+  panel of the tab's window (`sidePanel.open` from `notifications.onClicked`, which
+  Chrome dispatches with a user gesture; called before any `await`), or, where Chrome
+  refuses that, in a small popup window of the extension's. The question stays pending
+  there with its 60 s running; the notification is cleared, and its closing after the
+  click answers nothing. Closing the notification, closing that popup window or letting
+  the 60 s run out is Don't allow. The end-to-end tests cannot give the gesture (the
+  DevTools Protocol's `userGesture` does not reach the worker's `sidePanel.open`), so
+  they cover the popup path; the side panel path rests on Chromium dispatching
+  `onClicked` with the gesture. In the panel and the popup, the site is on a line of
+  its own ("Site (verified)") and the page's title for the tool apart, labelled as the
+  page's. Each question's arguments go to a panel once, in a message of their own, not in
+  every state (several large ones in one state could pass Chrome's message limit and
+  leave the panel without any state); at most 5 questions of one AI app wait at once,
+  a further call of that app is declined without asking. A click on either button within 500 ms of showing does not count (it
   shows again), so a click meant for something that was there before cannot allow. Each notification
   carries its call: a click answers only that call, and one on a call already answered,
   timed out or cancelled is dropped, never taken for another. A notification is outside
@@ -313,20 +340,19 @@ did, by connecting the extension.
   that database, in any Chrome version and from the first moment of a browser start, so
   a page's compromised renderer, running code in the content script's world, can neither
   read the secret (and take the address over from anywhere) nor allow its own tools.
-  `chrome.storage.local`, where the owner's development builds kept them, is readable
-  and writable by content scripts by default. The worker never reads settings from
-  there, and leaves what is there alone (only the owner used those builds). Where Chrome lets
-  content scripts write that area, a relay or secret written there must never be picked
-  up (the extension would connect to that relay and send it the address secret). A
-  one-off import behind a "migrated" marker would not hold: the marker would live in the
-  database it guards, so a lost database (site data cleared, a forced close) would import
-  again. Only the owner's builds ever had settings there, and they have moved. The
-  worker's connection to the database is opened again when Chrome closes it under the
-  worker (a deletion, a version change), instead of being used dead. As an extra layer it also sets that area to `TRUSTED_CONTEXTS`; sources
-  disagree on whether Chrome takes that for the local area (Chromium's API schema and
-  MDN: session only; Chrome's guide: local too), an end-to-end test shows it in Chrome
-  156, and nothing relies on it: a refusal is only logged. Whether the level outlasts a
-  worker or browser restart no longer matters, as no secret is in that area.
+  The extension asks for no `storage` permission (ext/review-fixes): without it there is
+  no `chrome.storage` area at all, so nothing a content script could write there (where
+  the owner's development builds once kept the settings) can be picked up, and the
+  `TRUSTED_CONTEXTS` layer is gone with it; an end-to-end test checks that
+  `chrome.storage` is undefined in the content script's world and the worker. A one-off
+  import from that area was never kept: its "migrated" marker would live in the
+  database it guards. The worker's connection to the database is opened again when
+  Chrome closes it under the worker (a deletion, a version change), instead of being
+  used dead. A worker whose start fails (the database refused, say) keeps the error,
+  shows it in a panel that connects and tries the start again at the next event or
+  panel message, instead of leaving the panel silently dead; a panel that connected
+  while it failed is attached as soon as any start succeeds, and what it said meanwhile
+  is kept (at most 64 messages).
 - **Notifications cleared once made.** A notification is cleared (answered, timed out,
   cancelled, shown again) only after its `create` has finished, so none stays on screen
   with buttons that answer nothing.

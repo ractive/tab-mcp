@@ -91,6 +91,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(pkg["exports"]).toEqual({
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
+		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	});
 	expect(pkg["peerDependencies"]).toEqual({ react: ">=18.3.0 <20" });
@@ -103,6 +104,8 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"index.d.ts",
 		"react.js",
 		"react.d.ts",
+		"visible.js",
+		"visible.d.ts",
 		"cdn/tab-mcp-client.min.js",
 		"LICENSE",
 		"AI_NOTICE",

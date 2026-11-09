@@ -31,6 +31,9 @@ const common = {
 
 const npm = await Bun.build({
 	...common,
+	// `./visible` (the escaping the confirmation dialog uses) is an entry of
+	// its own, out of the core.
+	entrypoints: [entry, join(root, "src/visible.ts")],
 	outdir: dist,
 	sourcemap: "linked",
 	packages: "external",
@@ -95,6 +98,7 @@ const published = {
 	exports: {
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
+		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	},
 	types: "./index.d.ts",

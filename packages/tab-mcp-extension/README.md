@@ -43,8 +43,10 @@ The page's tools are the page's word:
 - Names: `page_<name>`, other characters than letters, digits, `_` and `-` as `_`, at most
   64 characters in all: the Anthropic API takes no other tool names, and Claude drops the
   rest without a word.
-- Left out: tools whose `page_<name>` would be longer than 64 characters or the same as
-  another's, a schema that is no
+- Left out: tools whose `page_<name>` would be longer than 64 characters, the same as
+  another's or the same as one of the extension's own tools (a page tool `info` would be
+  `page_info`), and tools the client library refuses (none of them can be called through
+  `webmcp_call` either), a schema that is no
   object schema or over 16 KB, more than 64 tools, and tools a tab-mcp page offers itself
   (listed in `<html data-tab-mcp-webmcp>`), once the library mirrors its tools into
   WebMCP (iteration 25); until then no tab-mcp page sets the attribute.
@@ -86,16 +88,30 @@ tab the tool acts on, that window is in front, and the panel is not covered by a
 extension's panel for the tab (a question it shows goes out as a notification once it is
 covered): Allow and Always allow work once the
 panel has been in front for 750 ms, so the click that brings it forward cannot approve.
+The panel's question names the AI app and the tool, then, each on a line of its own, the
+site the tool acts on ("Site (verified)") and the page's title for the tool ("Title (from
+the page)"), and the arguments in full (they scroll when long).
+
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site>" below, naming the AI app (its name and its
-verified host) and the arguments in short, with the buttons Allow and Always allow (the
-same memory as the panel's: this tool, this AI app, this page; only Allow for pages
-without a site of their own). Don't allow is closing the notification, a click on its
-body, or no answer in 60 s. A click on either button within half a second of the
-notification showing does not count (it shows again). A notification answers only its
-own call. Questions also show in every open side panel, so with
-notifications off (Focus, Do Not Disturb, notifications off for Chrome) open the panel
-when the icon shows "?". A question nobody answers in 60 s is Don't allow.
+verified host) and the arguments in short (cut to 150 characters; when they are cut, the
+notification says "Arguments cut: click to see them in full."), with the buttons Allow
+and Always allow, also when the arguments are cut (the same memory as the panel's: this
+tool, this AI app, this page; only Allow for pages without a site of their own). A click
+on the notification's body opens the whole question, the arguments in full, with Allow,
+Always allow and Don't allow: in the side panel of the tab's window, or, where Chrome
+does not open the panel, in a small window of its own (closing that window is Don't
+allow). The question waits there, its 60 s still running. Don't allow is closing the
+notification or no answer in 60 s. A click on either button within half a second of
+the notification showing does not count (it shows again). A notification answers only
+its own call. Questions also show in every open side panel, so with notifications off
+(Focus, Do Not Disturb, notifications off for Chrome) open the panel when the icon shows
+"?". A question nobody answers in 60 s is Don't allow. At most 5 questions of one AI app wait at
+once; a further call of that app is declined without asking, and the app is told why.
+
+"Always allow" holds for the tool on the page the question was about (its site and that
+very page load) and the AI app that asked; if the page changed while the question was
+open, the answer still counts for that call, but nothing is kept.
 
 ## Permissions
 
@@ -104,10 +120,14 @@ when the icon shows "?". A question nobody answers in 60 s is Don't allow.
 | `activeTab` | Read the tab you click the icon on (its WebMCP tools), without access to other sites. |
 | `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
-| `storage` | Only to close `chrome.storage.local` to content scripts (`TRUSTED_CONTEXTS`) where Chrome allows it; no settings are read from or kept there. The relay address, whether AI access is on, the tools allowed per site and the secret behind the connection's address are in IndexedDB, used by the service worker only, which content scripts (in the page's origin) cannot reach. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
 | `<all_urls>` (optional) | Only after "Allow on all sites": read every tab without a click. |
+
+No `storage` permission: the relay address, whether AI access is on, the tools allowed per
+site and the secret behind the connection's address are in IndexedDB, used by the service
+worker only, which content scripts (in the page's origin) cannot reach; there is no
+`chrome.storage` area for them to read or write.
 
 WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
 you turn on `chrome://flags/#enable-webmcp-testing`.
@@ -139,17 +159,19 @@ key in its manifest, or, without one, from the folder it was loaded from.
   while pairing), its clicks (Disconnect's double click, the switch) and "Allow all".
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
-  questions (notifications, the guard, late clicks, the panel, the time limit), the
-  address secret's storage, Always allow, a bundle without dynamic `import()`.
-- `test/bridge.test.ts`: the bridge's names, descriptions, schemas, results and how its
-  tools follow the page.
+  questions (notifications, the guard, late clicks, a click on the body, cut arguments,
+  the panel, the time limit), invisible characters, the address secret's storage, Always
+  allow per page (and not kept when the page changed during the question), a failed
+  start tried again, a bundle without dynamic `import()`.
+- `test/bridge.test.ts`: the bridge's names (also one that becomes the extension's own),
+  descriptions, schemas, results and how its tools follow the page.
 - `test/e2e.test.ts`: the test build and the store package in Chrome for Testing 156 or
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (confirmation in the panel, cancellation, `toolchange`, a forged
   `document.modelContext`) across navigations and tab switches; with the panel closed
-  (tools still run, questions as notifications, a panel closed during a question,
-  reopening it) and after a restart of the same profile (the same address connects
+  (tools still run, questions as notifications, a panel closed during a question, a click
+  on a notification's body opening the question's own window, reopening it) and after a restart of the same profile (the same address connects
   again by itself). `TAB_MCP_E2E_IDLE=1` adds a two-minute check that the service
   worker keeps running on a quiet connection and stops once AI access is off. Pages are served
   through the DevTools Protocol on made-up https origins. They take a few seconds and

@@ -259,9 +259,6 @@ async function waitForTools(
 	}
 }
 
-/** Chrome's answer to a content script that uses the closed storage area. */
-const STORAGE_REFUSED = "Access to storage is not allowed from this context.";
-
 /** The extension's own tools, sorted. */
 const OWN_TOOLS = ["page_info", "webmcp_call", "webmcp_tools"];
 
@@ -318,10 +315,6 @@ const kvAll = (worker: Worker) =>
 			};
 		};
 	})`);
-
-/** What is (still) in `chrome.storage.local`. */
-const localAll = (worker: Worker) =>
-	worker.eval<Record<string, unknown>>("chrome.storage.local.get(null)");
 
 /** The ids of the extension's notifications on screen. */
 const notifications = (stack: Stack) =>
@@ -380,39 +373,22 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
 	});
 
-	test("a content script can neither read nor write the extension's storage", async () => {
-		// The content script's world, where a page's compromised renderer
-		// would run its code with the extension's APIs.
+	test("there is no chrome.storage: the settings are where a content script cannot reach", async () => {
+		// No `storage` permission: no area a content script could read or
+		// write, in its world (where a page's compromised renderer would run
+		// its code with the extension's APIs) or in the worker.
+		expect(
+			await stack.worker.eval("chrome.runtime.getManifest().permissions"),
+		).not.toContain("storage");
 		const world = await tab.isolatedWorld("tab-mcp for Chrome");
-		// The world is the content script's: it has the storage API.
-		expect(await tab.eval("typeof chrome.storage?.local?.get", world)).toBe(
+		// The world is the content script's: it has the extension's runtime.
+		expect(await tab.eval("typeof chrome.runtime?.sendMessage", world)).toBe(
 			"function",
 		);
-		const tries = await tab.eval<string[]>(
-			`(async () => {
-				const attempt = async (run) => {
-					try {
-						await run();
-						return "allowed";
-					} catch (error) {
-						return "refused: " + error.message;
-					}
-				};
-				return [
-					await attempt(() => chrome.storage.local.get(null)),
-					await attempt(() => chrome.storage.local.set({ allowedTools: { "https://evil.test": ["x"] } })),
-				];
-			})()`,
-			world,
-		);
-		// Chrome's own refusal, not some other error.
-		expect(tries).toEqual([
-			`refused: ${STORAGE_REFUSED}`,
-			`refused: ${STORAGE_REFUSED}`,
-		]);
-		expect(await localAll(stack.worker)).toEqual({});
-		// And the settings are in IndexedDB, in the extension's origin, which
-		// a content script (in the page's origin) cannot open at all.
+		expect(await tab.eval("typeof chrome.storage", world)).toBe("undefined");
+		expect(await stack.worker.eval("typeof chrome.storage")).toBe("undefined");
+		// The settings are in IndexedDB, in the extension's origin, which a
+		// content script (in the page's origin) cannot open at all.
 		expect(Object.keys(await kvAll(stack.worker))).toContain("relay");
 	});
 
@@ -472,11 +448,30 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.waitFor(
 			`document.querySelector('[data-question] button[data-answer="always"]')`,
 		);
+		// The verified site on a line of its own, the page's title apart.
+		const [ask, ...lines] = await stack.panel.eval<string[]>(
+			`[...document.querySelectorAll("[data-question] p")].slice(0, 3).map((p) => p.textContent)`,
+		);
+		expect(ask).toEndWith(" wants to run page_place_order.");
+		expect(lines).toEqual([
+			`Site (verified) ${SITE}`,
+			"Title (from the page) place_order",
+		]);
 		await answerInPanel(stack, "allow");
 		const result = await allowed;
 		expect(result.isError).toBeFalsy();
 		expect(result.content[0]?.text).toContain("tea");
-		const declined = call(stack, "page_place_order", { item: "coffee" });
+		// Arguments longer than a panel ever cut them are there in full.
+		const long = `coffee ${"c".repeat(5000)}`;
+		const declined = call(stack, "page_place_order", { item: long });
+		await stack.panel.waitFor(`document.querySelector("[data-question] pre")`);
+		expect(
+			JSON.parse(
+				await stack.panel.eval<string>(
+					`document.querySelector("[data-question] pre").textContent`,
+				),
+			),
+		).toEqual({ item: long });
 		await answerInPanel(stack, "deny");
 		expect((await declined).isError).toBe(true);
 		expect(await tab.eval("window.calls.map((c) => c[1])")).not.toContain(
@@ -909,7 +904,7 @@ describe.skipIf(chrome === undefined)(
 					`chrome.notifications.getAll().then((all) => Object.keys(all).length)`,
 				),
 			).toBe(1);
-			// Don't allow is closing it (or a click on its body).
+			// Don't allow is closing it.
 			await stack.worker.eval(
 				`tabMcpNotificationDismissed(${JSON.stringify(first)})`,
 			);
@@ -936,6 +931,105 @@ describe.skipIf(chrome === undefined)(
 			const again = await call(stack, "page_place_order", { item: "again" });
 			expect(again.content[0]?.text).toContain("again");
 			expect(await notifications(stack)).toEqual([]);
+		});
+
+		test("a click on a notification's body shows the whole question; closing that window is Don't allow", async () => {
+			// A new page: the Always allow of the test before is gone with it.
+			await stack.tab.goto(`${SITE}/webmcp.html`);
+			await call(stack, "webmcp_tools");
+			// What the notifications say.
+			await stack.worker.eval(`(() => {
+				globalThis.e2eMessages = [];
+				const create = chrome.notifications.create.bind(chrome.notifications);
+				chrome.notifications.create = (id, options) => {
+					globalThis.e2eMessages.push(options.message);
+					return create(id, options);
+				};
+			})()`);
+			const item = `long ${"z".repeat(6000)} end`;
+			const asked = call(stack, "page_place_order", { item });
+			const id = await newNotification(stack);
+			const [text] = await stack.worker.eval<string[]>(
+				"globalThis.e2eMessages",
+			);
+			expect(text).toEndWith("Arguments cut: click to see them in full.");
+			// The DevTools Protocol gives no user gesture (Chrome gives one to a
+			// real click on a notification): sidePanel.open is refused here, so
+			// the question opens in a window of its own.
+			expect(
+				await stack.worker.eval(
+					`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.sidePanel.open({ tabId: t.id, windowId: t.windowId })).then(() => "opened", (e) => e.message)`,
+				),
+			).toContain("user gesture");
+			const questionUrl = `chrome-extension://${stack.browser.extensionId}/question/index.html`;
+			await stack.worker.eval(
+				`tabMcpNotificationClicked(${JSON.stringify(id)})`,
+			);
+			const popup = await stack.browser.attach(
+				(await stack.browser.waitForTarget((t) => t.url === questionUrl))
+					.targetId,
+			);
+			await popup.waitFor(`document.querySelector("[data-question] pre")`);
+			// The notification went; the question waits in the window, whole.
+			expect(await notifications(stack)).toEqual([]);
+			const shown = await popup.eval<string[]>(
+				`[...document.querySelectorAll("[data-question] p, [data-question] pre")].map((e) => e.textContent)`,
+			);
+			expect(shown).toContain(`Site (verified) ${SITE}`);
+			expect(shown).toContain("Title (from the page) place_order");
+			expect(JSON.parse(shown.find((t) => t.startsWith("{")) ?? "")).toEqual({
+				item,
+			});
+			// The arguments scroll.
+			expect(
+				await popup.eval(
+					`(() => { const pre = document.querySelector("[data-question] pre"); return pre.scrollHeight > pre.clientHeight && getComputedStyle(pre).overflowY; })()`,
+				),
+			).toBe("auto");
+			// Its closing after the click answers nothing: the question waits.
+			await stack.worker.eval(
+				`tabMcpNotificationDismissed(${JSON.stringify(id)})`,
+			);
+			await Bun.sleep(200);
+			expect(
+				await popup.eval(`document.querySelectorAll("[data-question]").length`),
+			).toBe(1);
+			expect(await stack.tab.eval("window.calls.length")).toBe(0);
+			await popup.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+			const allow = `document.querySelector('[data-question] button[data-answer="allow"]')`;
+			await popup.waitFor(`!${allow}.disabled`);
+			await popup.click(`[data-question] button[data-answer="allow"]`);
+			const result = await asked;
+			expect(result.isError).toBeFalsy();
+			expect(result.content[0]?.text).toContain("end");
+			// Answered: its window closes.
+			const end = Date.now() + 5000;
+			for (;;) {
+				const { targetInfos } = (await stack.browser.send(
+					"Target.getTargets",
+				)) as { targetInfos: { url: string }[] };
+				if (!targetInfos.some((t) => t.url === questionUrl)) break;
+				if (Date.now() > end) throw new Error("the question window stayed");
+				await Bun.sleep(100);
+			}
+			// Again, and the window closed by the user: Don't allow.
+			const declined = call(stack, "page_place_order", { item: "closed" });
+			const second = await newNotification(stack, [id]);
+			await stack.worker.eval(
+				`tabMcpNotificationClicked(${JSON.stringify(second)})`,
+			);
+			const target = await stack.browser.waitForTarget(
+				(t) => t.url === questionUrl,
+			);
+			const popup2 = await stack.browser.attach(target.targetId);
+			await popup2.waitFor(`document.querySelector("[data-question]")`);
+			await stack.browser.send("Target.closeTarget", {
+				targetId: target.targetId,
+			});
+			expect((await declined).isError).toBe(true);
+			expect(
+				await stack.tab.eval("window.calls.map((c) => c[1])"),
+			).not.toContain("closed");
 		});
 
 		test("reopening the panel shows the same connection", async () => {
@@ -1099,13 +1193,22 @@ describe.skipIf(chrome === undefined)(
 			// click of a double click does not confirm it.
 			await stack.panel.click("#grants button");
 			await stack.panel.click("#grants button");
+			// The list is drawn anew, and the focus stays on the app's button:
+			// a keyboard user's second Enter finds it.
 			expect(
 				await stack.panel.eval(
-					`[document.querySelector("#grants button")?.textContent, document.querySelectorAll("#grants li").length]`,
+					`[document.querySelector("#grants button")?.textContent, document.querySelectorAll("#grants li").length, document.activeElement === document.querySelector("#grants button")]`,
 				),
-			).toEqual(["Disconnect? Click again", 1]);
+			).toEqual(["Disconnect? Click again", 1, true]);
 			await Bun.sleep(800);
-			await stack.panel.click("#grants button");
+			for (const type of ["keyDown", "keyUp"])
+				await stack.panel.send("Input.dispatchKeyEvent", {
+					type,
+					key: "Enter",
+					code: "Enter",
+					windowsVirtualKeyCode: 13,
+					...(type === "keyDown" ? { text: "\r" } : {}),
+				});
 			await stack.panel.waitFor(
 				`document.querySelectorAll("#grants li").length === 0 && document.getElementById("state").dataset.state === "waiting"`,
 			);
@@ -1190,27 +1293,8 @@ describe.skipIf(chrome === undefined)(
 			await stack.worker.eval("true");
 		}
 
-		/** What a content script could write there, where Chrome lets it. */
-		const INJECTED = {
-			relay: "https://evil.example",
-			aiOn: true,
-			allowedTools: { "https://evil.example": ["steal"] },
-			"tab-mcp:secret:https://evil.example:tab-mcp-for-chrome": "B".repeat(43),
-		};
-
-		test("setting keys in chrome.storage.local are never taken", async () => {
-			const before = await kvAll(stack.worker);
-			await stack.worker.eval(
-				`chrome.storage.local.set(${JSON.stringify(INJECTED)})`,
-			);
-			await restartWorker();
-			// IndexedDB is as it was: none of them came in.
-			expect(await kvAll(stack.worker)).toEqual(before);
-			await stack.worker.eval("chrome.storage.local.clear()");
-		});
-
-		test("the database deleted under the worker: the next write opens it again, and nothing old comes in", async () => {
-			// The reload before closed the panel; the worker may have restarted.
+		test("the database deleted under the worker: the next write opens it again, and it holds across a start", async () => {
+			// The test before reloaded the extension: the worker may have restarted.
 			stack.worker = await stack.browser.serviceWorker(
 				stack.browser.extensionId as string,
 			);
@@ -1238,16 +1322,11 @@ describe.skipIf(chrome === undefined)(
 				kv = await kvAll(stack.worker);
 			}
 			expect(kv["allowedTools"]).toEqual({ [SITE]: ["place_order"] });
-			// With no settings at all, the next start still takes nothing old.
-			await stack.worker.eval(
-				`chrome.storage.local.set(${JSON.stringify(INJECTED)})`,
-			);
+			// It holds across the next start.
 			await restartWorker();
-			kv = await kvAll(stack.worker);
-			for (const key of Object.keys(INJECTED))
-				if (key !== "allowedTools") expect(kv[key]).toBeUndefined();
-			expect(kv["allowedTools"]).toEqual({ [SITE]: ["place_order"] });
-			await stack.worker.eval("chrome.storage.local.clear()");
+			expect((await kvAll(stack.worker))["allowedTools"]).toEqual({
+				[SITE]: ["place_order"],
+			});
 		});
 	},
 );

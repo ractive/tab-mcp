@@ -66,7 +66,11 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   over the panel's port (threat model A13).
 - Tools that ask first ask in the side panel when it is open in the focused window of the
   tab the call acts on, else in a Chrome notification; the extension asks, not the
-  library (iteration 26).
+  library (iteration 26). A click on a notification's body opens the whole question in
+  the side panel of the tab's window (`sidePanel.open` at once in `onClicked`, which
+  Chrome dispatches with a user gesture), else in a popup window of the extension's
+  (`question/index.html`, whose port may answer only the question of its window).
+  Always allow is kept per AI app, origin, document and tool (ext/review-fixes).
 
 A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
 With the window only, Chrome resolved the call and showed nothing when another
@@ -77,8 +81,10 @@ with a second extension).
 
 ## Permissions
 
-- `activeTab`, `scripting`, `sidePanel`, `storage`, `notifications` (questions while the
-  panel is not in front), `alarms` (waking the worker while AI access is on).
+- `activeTab`, `scripting`, `sidePanel`, `notifications` (questions while the panel is
+  not in front), `alarms` (waking the worker while AI access is on). No `storage`: the
+  settings are in IndexedDB, and without the permission content scripts have no
+  `chrome.storage` area at all (ext/review-fixes).
 - Host access is optional (`<all_urls>` in `optional_host_permissions`): without it the
   extension runs on a tab only after a click on its icon, as Overmark does, and only for
   that origin in that tab (Chrome keeps the grant across navigations on the same origin,

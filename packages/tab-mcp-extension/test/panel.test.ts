@@ -10,6 +10,8 @@ import {
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
+	type SwitchIntent,
+	switchExpiry,
 	switchShown,
 } from "../src/sidepanel/card.ts";
 
@@ -113,6 +115,33 @@ describe("the card's clicks", () => {
 			checked: true,
 			intent: undefined,
 		});
+	});
+});
+
+describe("the switch with no state to follow", () => {
+	test("the panel redraws once the flip has run out, if it is still the last one", () => {
+		const timers: { run: () => void; ms: number }[] = [];
+		const schedule = (run: () => void, ms: number) => timers.push({ run, ms });
+		const intent: SwitchIntent = { on: true, until: 11_000 };
+		let current: SwitchIntent | undefined = intent;
+		let redraws = 0;
+		switchExpiry(
+			intent,
+			() => current,
+			() => redraws++,
+			() => 1000,
+			schedule,
+		);
+		// At the end of the wait, not before.
+		expect(timers.map((t) => t.ms)).toEqual([10_000]);
+		timers[0]?.run();
+		expect(redraws).toBe(1);
+		// After the redraw the switch shows the state ("off": the connect failed).
+		expect(switchShown(false, intent, 11_000).checked).toBe(false);
+		// A newer flip meanwhile: the older timer does nothing.
+		current = { on: false, until: 20_000 };
+		timers[0]?.run();
+		expect(redraws).toBe(1);
 	});
 });
 

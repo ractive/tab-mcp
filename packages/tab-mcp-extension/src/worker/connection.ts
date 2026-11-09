@@ -19,6 +19,8 @@ import {
 	type PanelCommand,
 	type PanelState,
 	parseCommand,
+	parseQuestionAnswer,
+	QUESTION_PATH,
 	type TabView,
 	type WorkerMessage,
 } from "../protocol.ts";
@@ -41,12 +43,10 @@ import {
 } from "./allowed.ts";
 import { AlwaysAllowed } from "./always.ts";
 import { PageToolBridge } from "./bridge.ts";
+import { decide } from "./decide.ts";
 import { type Kv, openKv } from "./kv.ts";
-import {
-	QUESTION_TIMEOUT_MS,
-	Questions,
-	type QuestionsHost,
-} from "./questions.ts";
+import { QuestionWindows } from "./question-windows.ts";
+import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
@@ -70,6 +70,8 @@ interface Panel {
 	pairing: boolean;
 	/** On screen, as it last said (covered by another extension's panel: not). */
 	visible: boolean;
+	/** The questions whose arguments it got (they are sent once). */
+	argsSent: Set<string>;
 }
 
 /** The extension's icon for the AI app's connector list (a PNG `data:` URI). */
@@ -94,22 +96,6 @@ async function iconsFor(): Promise<Icon[]> {
 	}
 }
 
-/**
- * Close `chrome.storage.local` to content scripts, which may read and write
- * it by default. Only an extra layer: the settings are in IndexedDB, which
- * content scripts cannot reach at all, and not every Chrome takes this for
- * the local area, so a refusal is only logged.
- */
-async function restrictStorage(): Promise<void> {
-	try {
-		await chrome.storage.local.setAccessLevel({
-			accessLevel: "TRUSTED_CONTEXTS",
-		});
-	} catch (error) {
-		console.warn("tab-mcp: storage access level", error);
-	}
-}
-
 /** Clear every notification of the extension. */
 async function clearNotifications(): Promise<void> {
 	try {
@@ -131,6 +117,8 @@ export class Connection {
 	readonly #always = new AlwaysAllowed();
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
+	/** The windows opened for one question each. */
+	readonly #questionWindows: QuestionWindows;
 	#allowed: AllowedTools;
 	#relay: string;
 	#mcp: TabMcp;
@@ -164,6 +152,23 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		this.#questionWindows = new QuestionWindows({
+			create: async () =>
+				(
+					await chrome.windows.create({
+						url: chrome.runtime.getURL(QUESTION_PATH),
+						type: "popup",
+						width: 440,
+						height: 560,
+						focused: true,
+					})
+				)?.id,
+			remove: (windowId) =>
+				void chrome.windows.remove(windowId).catch(() => {}),
+			list: () => this.#questions.list,
+			answer: (id, answer) => this.#questions.answer(id, answer),
+			parse: parseQuestionAnswer,
+		});
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -173,9 +178,8 @@ export class Connection {
 	 * address was not taken over meanwhile.
 	 */
 	static async start(): Promise<Connection> {
-		await restrictStorage();
-		// The settings live in IndexedDB, out of content scripts' reach;
-		// chrome.storage.local is never read for them.
+		// The settings live in IndexedDB, out of content scripts' reach; the
+		// extension has no `storage` permission (no chrome.storage at all).
 		const kv = await openKv();
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
@@ -234,30 +238,19 @@ export class Connection {
 
 	/**
 	 * A tool that is not read-only: one the user allowed for its site runs,
-	 * as does one they chose Always allow for (this AI app, this page);
-	 * anything else asks.
+	 * as does one they chose Always allow for (this AI app, this page, this
+	 * tool); anything else asks.
 	 */
 	async #decide(request: ConfirmRequest): Promise<boolean> {
-		const tool = this.#bridge.lookup(request.tool.name);
-		if (tool !== undefined && isAllowed(this.#allowed, tool.origin, tool.name))
-			return true;
-		const { grantId } = request.client;
-		// Always allow only for a page of a real site: opaque origins ("null")
-		// would all share one entry.
-		const always = tool !== undefined && allowable(tool.origin);
-		if (always && this.#always.has(grantId, request.tool.name)) return true;
-		const answer = await this.#questions.ask(
+		return decide(
+			{
+				lookup: (name) => this.#bridge.lookup(name),
+				allowed: (origin, name) => isAllowed(this.#allowed, origin, name),
+				always: this.#always,
+				ask: (r, where) => this.#questions.ask(r, where),
+			},
 			request,
-			tool === undefined ? {} : { tabId: tool.tabId, origin: tool.origin },
 		);
-		if (answer === "timeout")
-			// The library declines; `webmcp_call` passes this on to the AI app.
-			throw new Error(
-				`The user was asked and did not answer within ${QUESTION_TIMEOUT_MS / 1000} s.`,
-			);
-		if (answer === "always" && always)
-			this.#always.add(grantId, request.tool.name);
-		return answer !== "deny";
 	}
 
 	#watch(mcp: TabMcp): void {
@@ -384,6 +377,64 @@ export class Connection {
 		);
 	}
 
+	/**
+	 * A click on a notification's body: called at once from Chrome's event,
+	 * so that `sidePanel.open` still has its user gesture.
+	 */
+	notificationClicked(id: string): void {
+		this.#questions.notificationClicked(id);
+	}
+
+	/** A window closed: one opened for a question is its Don't allow. */
+	windowRemoved(windowId: number): void {
+		this.#questionWindows.windowRemoved(windowId);
+	}
+
+	/**
+	 * Question `id`, whole: in the side panel of its tab's window (opened
+	 * now, while Chrome's event still counts as the user's gesture), or, if
+	 * that is refused or there is no tab, in a small window of its own.
+	 */
+	#showQuestion(
+		id: string,
+		tabId: number | undefined,
+		windowId: number | undefined,
+	): void {
+		const ownWindow = (error?: unknown) => {
+			if (error !== undefined)
+				console.warn("tab-mcp: side panel for a question", error);
+			this.#questionWindows.open(id).catch((error: unknown) =>
+				// The question stays in the panels and the badge says so.
+				console.warn("tab-mcp: question window", error),
+			);
+		};
+		if (tabId === undefined || windowId === undefined) {
+			ownWindow();
+			return;
+		}
+		// No await before this: the gesture would be gone.
+		chrome.sidePanel.open({ tabId, windowId }).then(
+			// The panel's Allow needs its window in front.
+			() =>
+				void chrome.windows.update(windowId, { focused: true }).catch(() => {}),
+			ownWindow,
+		);
+	}
+
+	/**
+	 * The port of a question window's page, its sender already checked: it
+	 * gets the question of the window it is in, and may answer that one only.
+	 */
+	addQuestionWindow(port: chrome.runtime.Port): void {
+		this.#questionWindows.addPort({
+			windowId: port.sender?.tab?.windowId,
+			postMessage: (message) => port.postMessage(message),
+			disconnect: () => port.disconnect(),
+			onMessage: (listener) => port.onMessage.addListener(listener),
+			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
+		});
+	}
+
 	notificationButton(id: string, index: number): void {
 		this.#questions.notificationButton(id, index);
 	}
@@ -399,7 +450,12 @@ export class Connection {
 	 * sent before the connection had started.
 	 */
 	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
-		const panel: Panel = { port, pairing: false, visible: true };
+		const panel: Panel = {
+			port,
+			pairing: false,
+			visible: true,
+			argsSent: new Set(),
+		};
 		this.#panels.add(panel);
 		const receive = (raw: unknown) => {
 			// Anything that is not a command is dropped.
@@ -575,6 +631,8 @@ export class Connection {
 				});
 			},
 			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
+			showQuestion: ({ id, tabId, windowId }) =>
+				this.#showQuestion(id, tabId, windowId),
 			changed: () => this.#changed(),
 			now: () => Date.now(),
 		};
@@ -689,7 +747,7 @@ export class Connection {
 				: {}),
 			allSites: this.#allSites,
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
-			questions: this.#questions.list,
+			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 		};
 	}
 
@@ -701,12 +759,22 @@ export class Connection {
 		queueMicrotask(() => {
 			this.#sending = false;
 			for (const panel of this.#panels) this.#send(panel);
+			this.#questionWindows.sync();
 		});
 	}
 
+	/**
+	 * The state to a panel. A question's arguments (up to the relay's 1 MiB
+	 * per request, more once escaped) go once per panel, each in a message
+	 * of its own before the state that first lists the question: repeated
+	 * in every state, a few large ones could pass Chrome's limit for one
+	 * message, and the panel would get no state at all.
+	 */
 	#send(panel: Panel): void {
-		const message: WorkerMessage = { type: "state", state: this.state };
 		try {
+			for (const args of argsToSend(this.#questions.list, panel.argsSent))
+				panel.port.postMessage(args);
+			const message: WorkerMessage = { type: "state", state: this.state };
 			panel.port.postMessage(message);
 		} catch {
 			// Closed meanwhile: its onDisconnect removes it.

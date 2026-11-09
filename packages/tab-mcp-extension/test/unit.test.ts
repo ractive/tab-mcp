@@ -23,7 +23,6 @@ describe("manifest", () => {
 			"notifications",
 			"scripting",
 			"sidePanel",
-			"storage",
 		]);
 	});
 

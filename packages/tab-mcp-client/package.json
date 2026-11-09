@@ -6,7 +6,8 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./react": "./src/react.ts"
+		"./react": "./src/react.ts",
+		"./visible": "./src/visible.ts"
 	},
 	"scripts": {
 		"build": "bun scripts/build.ts",

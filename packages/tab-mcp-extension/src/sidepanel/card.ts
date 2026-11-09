@@ -83,6 +83,25 @@ export function switchShown(
 	return { checked: intent.on, intent };
 }
 
+/**
+ * Call `redraw` once `intent` has run out, if it is still the user's last
+ * flip (`current()`): `switchShown` drops it only when it is asked again.
+ */
+export function switchExpiry(
+	intent: SwitchIntent,
+	current: () => SwitchIntent | undefined,
+	redraw: () => void,
+	now: () => number = Date.now,
+	schedule: (run: () => void, ms: number) => unknown = setTimeout,
+): void {
+	schedule(
+		() => {
+			if (current() === intent) redraw();
+		},
+		Math.max(0, intent.until - now()),
+	);
+}
+
 /** "Allow all" over the tab's tool list, or why it is not there. */
 export interface AllowAllView {
 	shown: boolean;

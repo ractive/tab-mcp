@@ -21,6 +21,7 @@ import type {
 } from "@ractive-ch/tab-mcp-client";
 import type { CallResult, PageTool, PageTools } from "../messages.ts";
 import type { TargetTab } from "../tabs.ts";
+import { OWN_TOOL_NAMES } from "./tools.ts";
 
 /** At most this many page tools are offered (and listed). */
 export const MAX_TOOLS = 64;
@@ -41,6 +42,8 @@ export const MAX_IMAGE_BASE64 = 1024 * 1024;
 export const CALL_TIMEOUT_MS = 60_000;
 
 const PREFIX = "page_";
+/** The extension's own tools: a page tool whose name becomes one is left out. */
+const OWN_TOOLS: ReadonlySet<string> = new Set(OWN_TOOL_NAMES);
 /**
  * Tool names every AI app takes: the Anthropic API allows only
  * `^[a-zA-Z0-9_-]{1,64}$` and drops other tools without a word (MCP and
@@ -228,6 +231,24 @@ export interface Registrar {
 /** Asks the user: `webmcp_call`'s confirmation. */
 export type Confirm = (request: ConfirmRequest) => Promise<boolean>;
 
+/** The page tool behind an offered tool name, as `lookup` gives it. */
+export interface LookedUp {
+	tabId: number;
+	origin: string;
+	/** The page in the tab it was listed from (the content script's id). */
+	documentId: string;
+	name: string;
+	readOnly: boolean;
+}
+
+/** Whether two lookups are the same tool of the same page in the same tab. */
+export const sameTool = (a: LookedUp, b: LookedUp): boolean =>
+	a.tabId === b.tabId &&
+	a.origin === b.origin &&
+	a.documentId === b.documentId &&
+	a.name === b.name &&
+	a.readOnly === b.readOnly;
+
 /** A tool of the page in front as the bridge keeps it, to call. */
 interface Callable {
 	tabId: number;
@@ -336,17 +357,17 @@ export class PageToolBridge {
 		return this.#state;
 	}
 
-	/** The page tool behind an offered tool name (`page_<name>`): its tab, site and name. */
-	lookup(
-		toolName: string,
-	):
-		| { tabId: number; origin: string; name: string; readOnly: boolean }
-		| undefined {
+	/**
+	 * The page tool behind an offered tool name (`page_<name>`): its tab,
+	 * site, page (`documentId`) and name.
+	 */
+	lookup(toolName: string): LookedUp | undefined {
 		for (const callable of this.#callable.values())
 			if (bridgedName(callable.target.name) === toolName)
 				return {
 					tabId: callable.tabId,
 					origin: callable.origin,
+					documentId: callable.target.documentId,
 					name: callable.target.name,
 					readOnly: callable.target.readOnly,
 				};
@@ -395,10 +416,16 @@ export class PageToolBridge {
 	): Promise<unknown> {
 		await this.refresh();
 		const callable = this.#callable.get(name);
-		if (callable === undefined)
-			throw new Error(
-				`The page in front offers no tool ${cut(name, MAX_NAME)}; webmcp_tools lists its tools.`,
+		if (callable === undefined) {
+			const left = this.#state.tools.find(
+				(t) => t.name === cut(name, MAX_NAME) && t.problem !== undefined,
 			);
+			throw new Error(
+				left === undefined
+					? `The page in front offers no tool ${cut(name, MAX_NAME)}; webmcp_tools lists its tools.`
+					: `The page's tool ${left.name} is not offered: ${left.problem}.`,
+			);
+		}
 		const input = args ?? {};
 		const checked = callable.validator.validate(input);
 		if (!checked.valid)
@@ -470,6 +497,12 @@ export class PageToolBridge {
 				entry.problem = "its name is too long (page_<name> over 64 characters)";
 				continue;
 			}
+			// `info` would become the extension's own page_info: not offered,
+			// nor callable through webmcp_call.
+			if (OWN_TOOLS.has(name)) {
+				entry.problem = `its name becomes ${name}, the extension's own tool`;
+				continue;
+			}
 			const clash = [...callable.values()].find(
 				(c) => bridgedName(c.target.name) === name,
 			);
@@ -532,16 +565,25 @@ export class PageToolBridge {
 			this.#registrar
 				.registerTool(tool, { signal: controller.signal })
 				.catch((error: unknown) => {
-					// The library refused it (its schema, say): not offered.
-					if (this.#registered.get(name)?.controller === controller)
-						this.#registered.delete(name);
+					// Unregistered since (a newer read): nothing to undo.
+					if (this.#registered.get(name)?.controller !== controller) return;
+					// The library refused it (its schema, say): not offered, and
+					// not callable through webmcp_call either. Kept as this tool's
+					// problem, so the next read neither offers it again nor makes
+					// it callable for a moment.
+					const problem = cut(
+						error instanceof Error ? error.message : String(error),
+						MAX_DESCRIPTION,
+					);
+					this.#registered.delete(name);
+					this.#compiled.set(key, { problem });
+					for (const [pageName, c] of this.#callable)
+						if (bridgedName(c.target.name) === name)
+							this.#callable.delete(pageName);
 					const entry = offered.find((o) => o.tool === name);
 					if (entry) {
 						delete entry.tool;
-						entry.problem = cut(
-							error instanceof Error ? error.message : String(error),
-							MAX_DESCRIPTION,
-						);
+						entry.problem = problem;
 						this.#changed();
 					}
 				});

@@ -17,6 +17,7 @@ import type {
 	SessionInfo,
 	ToolCallClient,
 } from "./types.ts";
+import { escapeInvisible } from "./visible.ts";
 
 let counter = 0;
 
@@ -242,24 +243,8 @@ function newDialog(
 	return { dialog, heading };
 }
 
-/**
- * Characters that are invisible or change the direction of the text around
- * them: format characters (bidi controls and isolates, zero-width ones, tags),
- * the other default-ignorable ones (fillers, variation selectors), private-use
- * and unassigned code points, C1 controls, and line and paragraph separators.
- */
-const INVISIBLE =
-	/[\p{Cf}\p{Default_Ignorable_Code_Point}\p{Co}\p{Cn}\u0080-\u009F\u2028\u2029]/gu;
-
-/** Each such character as `\uXXXX` (a pair for one beyond U+FFFF), as JSON would write it. */
-function visible(text: string): string {
-	return text.replace(INVISIBLE, (ch) => {
-		let escaped = "";
-		for (let i = 0; i < ch.length; i++)
-			escaped += `\\u${ch.charCodeAt(i).toString(16).toUpperCase().padStart(4, "0")}`;
-		return escaped;
-	});
-}
+/** Invisible, blank and direction characters as `\uXXXX` (`visible.ts`). */
+const visible = escapeInvisible;
 
 function clientLabel(client: ToolCallClient | Grant["client"]): string {
 	const host = visible(client.host || client.id);

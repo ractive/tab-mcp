@@ -2,28 +2,42 @@
  * The questions of tools that ask first, now that the connection has no page
  * of its own to ask in (DEC-116). A question shows in every open side panel;
  * unless a side panel is open in the focused window of the tab the call acts
- * on, it also goes out as a Chrome notification, with Allow and Always allow:
- * closing it, a click on its body, nobody answering within the time limit or
- * the AI app cancelling is Don't allow. The first answer counts. Each
- * notification carries its call: a click answers only that call, and a click
- * on a call that is already settled is dropped.
+ * on, it also goes out as a Chrome notification, with Allow and Always allow.
+ * A click on its body shows the whole question (the arguments in full) in
+ * the side panel of the tab's window, or in a window of its own, where it
+ * waits on; closing the notification, nobody answering within the time
+ * limit or the AI app cancelling is Don't allow. The first answer counts.
+ * Each notification carries its call: a click answers only that call, and a
+ * click on a call that is already settled is dropped.
  */
 
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
+import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import type { Answer, QuestionView } from "../protocol.ts";
 import { allowable } from "./allowed.ts";
 
 /** A question nobody answers in this time is Don't allow. */
 export const QUESTION_TIMEOUT_MS = 60_000;
+/**
+ * At most this many questions of one AI app wait at once; a call beyond
+ * them is declined without asking ("busy"), so an AI app cannot pile up
+ * questions (each with up to 1 MiB of arguments) faster than they are read.
+ */
+export const MAX_QUESTIONS_PER_APP = 5;
 /** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
-/** The arguments shown in the panel, and in a notification, are cut to this. */
-export const MAX_ARGS = 4000;
+/**
+ * The arguments in a notification are cut to this; the side panel and the
+ * question's window show them in full (the relay caps a request at 1 MiB).
+ */
 export const MAX_ARGS_NOTIFICATION = 150;
+/** What a notification says when it cut the arguments. */
+export const ARGS_CUT_NOTE = "Arguments cut: click to see them in full.";
 
 /**
- * The buttons of a notification, in order. Don't allow is closing it (or a
- * click on its body): Chrome gives a notification at most two buttons.
+ * The buttons of a notification, in order. Don't allow is closing it:
+ * Chrome gives a notification at most two buttons. A click on its body
+ * shows the whole question.
  */
 export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
 
@@ -36,6 +50,16 @@ export interface QuestionsHost {
 	/** Show notification `id`; rejects if it could not be shown. */
 	notify(id: string, text: NotificationText): Promise<void>;
 	clear(id: string): void;
+	/**
+	 * Show question `id` whole, for tab `tabId` in window `windowId`: called
+	 * at once from a click on a notification's body (the user gesture
+	 * `sidePanel.open` needs is only there before any `await`).
+	 */
+	showQuestion(where: {
+		id: string;
+		tabId: number | undefined;
+		windowId: number | undefined;
+	}): void;
 	/** The list of questions changed: tell the panels, set the badge. */
 	changed(): void;
 	now(): number;
@@ -49,9 +73,6 @@ export interface NotificationText {
 	buttons: string[];
 }
 
-const INVISIBLE =
-	/(?![\t\n ])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}\u2800\u3164\u115F\u1160\uFFA0]/gu;
-
 /** The page's title of a tool in a notification's title is cut to this. */
 export const MAX_NOTIFICATION_TITLE = 60;
 
@@ -61,20 +82,10 @@ const cut = (text: string, max: number) =>
 /**
  * Characters that are invisible, blank or turn the text's direction (U+202E,
  * say) written as `\uXXXX`, so the AI app cannot make the arguments look like
- * something else: controls, format characters, line and paragraph
- * separators, every space but the plain one (U+00A0, U+2007, U+3000…) and
- * the blank letters (U+2800 Braille blank, U+3164, U+115F, U+1160, U+FFA0
- * Hangul fillers). The tool gets them unchanged.
+ * something else: the client library's set (`escapeInvisible`), which the
+ * library's own confirmation uses too. The tool gets them unchanged.
  */
-export function visible(text: string): string {
-	// Line breaks and tabs stay: in JSON they are only the layout.
-	return text.replace(INVISIBLE, (c) => {
-		const code = c.codePointAt(0) ?? 0;
-		return code > 0xffff
-			? `\\u{${code.toString(16)}}`
-			: `\\u${code.toString(16).padStart(4, "0")}`;
-	});
-}
+export const visible: (text: string) => string = escapeInvisible;
 
 /** The AI app as a question names it: its declared name beside its verified host. */
 export function appName(client: ConfirmRequest["client"]): string {
@@ -99,15 +110,19 @@ function hostOf(origin: string | undefined): string | undefined {
 export function notificationText(
 	view: QuestionView,
 	summary: string,
+	argsCut = false,
 ): NotificationText {
 	const what = cut(view.title ?? view.tool, MAX_NOTIFICATION_TITLE);
 	const site = hostOf(view.origin);
+	// The note stays whole, however long the rest.
+	const note = argsCut ? `\n${ARGS_CUT_NOTE}` : "";
 	return {
 		title: `Allow ${what}?`,
-		message: cut(
-			`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
-			300,
-		),
+		message:
+			cut(
+				`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
+				300 - note.length,
+			) + note,
 		contextMessage: site
 			? `On ${site} · tab-mcp for Chrome`
 			: "tab-mcp for Chrome",
@@ -117,9 +132,32 @@ export function notificationText(
 	};
 }
 
+/**
+ * The `question-args` messages a panel still needs: the arguments of each
+ * waiting question it has not had, once. `sent` is updated: ids of questions
+ * that went are dropped, the ones returned are added.
+ */
+export function argsToSend(
+	questions: QuestionView[],
+	sent: Set<string>,
+): { type: "question-args"; id: string; args: string }[] {
+	const waiting = new Set(questions.map((q) => q.id));
+	for (const id of sent) if (!waiting.has(id)) sent.delete(id);
+	const messages = questions
+		.filter((q) => !sent.has(q.id))
+		.map((q) => ({ type: "question-args" as const, id: q.id, args: q.args }));
+	for (const m of messages) sent.add(m.id);
+	return messages;
+}
+
 interface Pending {
 	view: QuestionView;
+	/** The AI app's grant that asks. */
+	grantId: string;
 	summary: string;
+	/** The summary is cut: the notification says so. */
+	argsCut: boolean;
+	tabId: number | undefined;
 	windowId: number | undefined;
 	/** The notification showing it, if one does. */
 	notification?: string;
@@ -148,12 +186,17 @@ export class Questions {
 	/**
 	 * Ask whether `request` may run, for the page tool on `origin` in tab
 	 * `tabId`. Resolves with the first answer, `"timeout"` when nobody
-	 * answered in time, `"deny"` when the AI app cancelled.
+	 * answered in time, `"deny"` when the AI app cancelled, `"busy"` (without
+	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already.
 	 */
 	ask(
 		request: ConfirmRequest,
 		where: { tabId?: number; origin?: string },
-	): Promise<Answer | "timeout"> {
+	): Promise<Answer | "timeout" | "busy"> {
+		const { grantId } = request.client;
+		let open = 0;
+		for (const p of this.#pending.values()) if (p.grantId === grantId) open++;
+		if (open >= MAX_QUESTIONS_PER_APP) return Promise.resolve("busy");
 		const id = crypto.randomUUID();
 		const json = visible(JSON.stringify(request.arguments, null, 2) ?? "{}");
 		const view: QuestionView = {
@@ -163,19 +206,21 @@ export class Questions {
 			tool: request.tool.name,
 			...(request.tool.title ? { title: visible(request.tool.title) } : {}),
 			...(where.origin ? { origin: where.origin } : {}),
-			args: cut(json, MAX_ARGS),
+			// In full: what the user approves must be there to read.
+			args: json,
 			always: where.origin !== undefined && allowable(where.origin),
 		};
-		const summary = cut(
-			visible(JSON.stringify(request.arguments) ?? "{}"),
-			MAX_ARGS_NOTIFICATION,
-		);
+		const compact = visible(JSON.stringify(request.arguments) ?? "{}");
+		const summary = cut(compact, MAX_ARGS_NOTIFICATION);
 		return new Promise((resolve) => {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const cancelled = () => pending.settle("deny");
 			const pending: Pending = {
 				view,
+				grantId,
 				summary,
+				argsCut: summary !== compact,
+				tabId: where.tabId,
 				windowId: undefined,
 				shownAt: 0,
 				settle: (answer) => {
@@ -197,12 +242,13 @@ export class Questions {
 			timer = setTimeout(() => pending.settle("timeout"), this.#timeoutMs);
 			request.signal.addEventListener("abort", cancelled, { once: true });
 			this.#host.changed();
-			void this.#route(pending, where.tabId);
+			void this.#route(pending);
 		});
 	}
 
 	/** In the panel of the tab's focused window, or else in a notification too. */
-	async #route(pending: Pending, tabId: number | undefined): Promise<void> {
+	async #route(pending: Pending): Promise<void> {
+		const { tabId } = pending;
 		try {
 			pending.windowId =
 				tabId === undefined ? undefined : await this.#host.windowOf(tabId);
@@ -228,7 +274,10 @@ export class Questions {
 		this.#creating.set(
 			id,
 			this.#host
-				.notify(id, notificationText(pending.view, pending.summary))
+				.notify(
+					id,
+					notificationText(pending.view, pending.summary, pending.argsCut),
+				)
 				.catch((error: unknown) =>
 					// Notifications off for Chrome: the badge and the panel remain.
 					console.warn("tab-mcp: notification", error),
@@ -284,7 +333,25 @@ export class Questions {
 		pending.settle(answer);
 	}
 
-	/** A click on the notification's body, or its closing: Don't allow. */
+	/**
+	 * A click on notification `id`'s body: the question, whole, where the
+	 * host shows it (the side panel of the tab's window, or a window of its
+	 * own). It waits there, its time limit running on; the notification goes,
+	 * and closing it after the click answers nothing.
+	 */
+	notificationClicked(id: string): void {
+		const pending = this.#byNotification(id);
+		if (pending === undefined) return; // settled, or an older notification
+		delete pending.notification;
+		this.#clear(id);
+		this.#host.showQuestion({
+			id: pending.view.id,
+			tabId: pending.tabId,
+			windowId: pending.windowId,
+		});
+	}
+
+	/** Notification `id` closed (by the user, or Chrome): Don't allow. */
 	notificationDismissed(id: string): void {
 		this.#byNotification(id)?.settle("deny");
 	}
