@@ -15,6 +15,9 @@
 #   signs the tarball with GitHub OIDC provenance and uploads it for the
 #   owner's one-time manual `npm publish --provenance-file`; `publish`
 #   publishes like a release (run it on the release tag).
+# - A release `extension-v<version>` (tab-mcp for Chrome, Chrome Web Store)
+#   is a no-op: the plan job succeeds with package `none` and every other
+#   job is skipped.
 # - Bootstrap and publish refuse a commit that is not on main. That guards
 #   against mistakes, not against someone who can push a tag: the workflow
 #   file at the tagged commit runs. Only the owner may create release tags
@@ -107,7 +110,14 @@ jobs:
             case "$RELEASE_TAG" in
               client-v*) package=client; version=${RELEASE_TAG#client-v} ;;
               relay-v*) package=relay; version=${RELEASE_TAG#relay-v} ;;
-              *) echo "::error::release tag '$RELEASE_TAG' names no package (expected client-v<version> or relay-v<version>)"; exit 1 ;;
+              extension-v*)
+                # tab-mcp for Chrome has its own release path to the Chrome
+                # Web Store (kb/iterations/iteration-23-extension-release.md);
+                # nothing to publish here, so every other job is skipped.
+                echo "release $RELEASE_TAG is the extension's: nothing to publish to npm or Docker"
+                echo "package=none" >> "$GITHUB_OUTPUT"
+                exit 0 ;;
+              *) echo "::error::release tag '$RELEASE_TAG' names no package (expected client-v<version>, relay-v<version> or extension-v<version>)"; exit 1 ;;
             esac
             mode=publish
             release_tag=$RELEASE_TAG

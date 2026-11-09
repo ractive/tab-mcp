@@ -3,7 +3,7 @@ type: iteration
 title: "Iteration 25: tab-mcp tools also as WebMCP tools"
 status: planned
 description: "When a page asks for it, the client library registers its tools also with document.modelContext.registerTool() where the browser has WebMCP, so agents in the browser (ChatGPT's browser, Gemini in Chrome when it comes, extensions) can use the page's tools; consequential tools only when the page says so per tool, because an agent in the browser can answer the page's own confirmation."
-timestamp: 2026-11-08T23:59:00+01:00
+timestamp: 2026-11-09T15:00:00+01:00
 tags: [iteration, client, webmcp]
 ---
 # Iteration 25: tab-mcp tools also as WebMCP tools
@@ -92,7 +92,11 @@ Hence: off by default, and consequential tools stay out unless the page names th
       abort, failure handling and the one retry
 - [ ] The shared check-confirm-run function in the lazy chunk; the WebMCP `execute` stub
 - [ ] The caller union; `ui.ts`, React bindings, README, react-todo example, e2e
-- [ ] The `data-tab-mcp-webmcp` attribute; iteration 20 updated to read it
+- [ ] The library sets the `data-tab-mcp-webmcp` attribute on `<html>` with the tools it
+      mirrors
+- [x] The extension reads the attribute (iteration 20): `src/content.ts` leaves out the
+      tools it lists, so a tab-mcp page's tools do not reach the AI app twice; it takes
+      effect once the library sets it (checked 2026-11-09, `docs/pre-release`)
 - [ ] Unit tests with a fake native object; a browser test with Chrome for Testing and
       `--enable-features=WebMCP` (pages served as in `test/webmcp-spike/`): `getTools()`
       lists the mirrored tools and not the consequential ones (unless named); a call

@@ -234,7 +234,9 @@ test("docs and plugin manifests name only the current package versions", async (
 		(await Bun.file(join(repo, dir, "package.json")).json()).version as string;
 	const client = await version("packages/tab-mcp-client");
 	const relay = await version("packages/tab-mcp");
-	const current = new Set([client, relay]);
+	// tab-mcp for Chrome (Chrome Web Store), named in SECURITY.md and the docs.
+	const extension = await version("packages/tab-mcp-extension");
+	const current = new Set([client, relay, extension]);
 	const wrong: string[] = [];
 	for (const file of PINNED_FILES) {
 		const text = await Bun.file(join(repo, file)).text();

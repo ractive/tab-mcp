@@ -1,6 +1,6 @@
 /**
  * The tab↔relay protocol, version 1, as the tab speaks it
- * (`kb/design/protocol.md`). Internal: not part of the public API.
+ * (`docs/protocol.md`, normative). Internal: not part of the public API.
  */
 
 import type { Grant, Limits } from "./types.ts";

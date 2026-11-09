@@ -1,7 +1,8 @@
 # Threat model
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
-relay `@ractive-ch/tab-mcp` 0.8.0 and browser library `@ractive-ch/tab-mcp-client` 0.10.0.
+relay `@ractive-ch/tab-mcp` 0.8.0, browser library `@ractive-ch/tab-mcp-client` 0.10.0
+and the browser extension tab-mcp for Chrome 0.1.0 (Chrome Web Store, A13).
 To report a vulnerability,
 see [SECURITY.md](../SECURITY.md).
 
@@ -354,8 +355,10 @@ trustworthy.
   `Origin: chrome-extension://<id>`. No website can send that origin, since browsers set
   `Origin` themselves, so listing an extension admits that extension's pages in a
   browser and no website. Its content scripts are not among them: their requests carry
-  the origin of the website they run in, so an extension connects from one of its own
-  pages, such as a side panel. An unpacked extension keeps its id only with a `key` in
+  the origin of the website they run in, so an extension runs the library from its
+  service worker or one of its own pages (such as its side panel). A service worker
+  stays alive while connected: the relay's heartbeat is WebSocket traffic, which keeps
+  it running in Chrome 116 and later. An unpacked extension keeps its id only with a `key` in
   its manifest, and that key is public: anyone can load other code under the same id in
   their own browser. So the id keeps websites and other extensions out; it does not prove
   who wrote the code a user installed. A program can claim the origin like any other
@@ -409,6 +412,88 @@ who signed in at `/authorize` (an ID token).
   (see [configuration](configuration.md#identity-binding)); comparing an e-mail address
   instead is refused, because e-mail addresses change hands.
 
+### A13: tab-mcp for Chrome and the pages it bridges
+
+tab-mcp for Chrome, a browser extension, offers the WebMCP tools of the page in front to
+the user's AI app, through a relay. That page did not choose the relay or the AI app: the
+user did, by turning on AI access in the extension. To the relay the extension is a site
+like any other, `chrome-extension://<id>` (A11).
+
+- **The page is untrusted, all of it.** Tool names, titles, descriptions and schemas
+  reach the AI app's tool list, where no hint can mark them, and a description can carry
+  instructions. Descriptions start with the page's origin (`From https://…:`) and are cut
+  to 1000 characters, titles to 100; schemas over 16 KB and tools beyond 64 are left out.
+  Every result is marked untrusted (`openWorldHint`); its text, all blocks together, is
+  cut to 100,000 characters, with at most 32 blocks, each image up to 1 MB of base64
+  (about 750 KB of image data).
+- **Hints can lie.** A tool the page marks read-only runs without asking; every other
+  tool asks the user each time, naming the page's origin. "Always allow" stops the
+  questions for that tool, AI app and page until the page changes or the AI app is
+  disconnected; "allowed" in the side panel stops them for a tool of one exact http(s)
+  origin until the user takes it back. An allowed tool runs whatever the AI app, or a
+  prompt injection steering it, asks of it. A page can mark only its own tools
+  read-only, so a lie harms that page's own user session, which its scripts could reach
+  anyway.
+- **A call runs only where its tool was listed.** A call carries the id of the page its
+  tool was listed from and the read-only claim it was offered with; the extension
+  refuses it if the tab navigated since or the claim changed. So a page cannot offer a
+  "read-only" tool and then send the tab to a site whose tool of that name changes
+  things.
+- **Arguments are checked** against the page's schema before the call, without its
+  regular expressions, so a page's catastrophic pattern cannot freeze the connection. A
+  call ends for the AI app after 60 s or on its cancellation, even if the page never
+  answers. The page's tool changes are read at most every 250 ms, and the number and size
+  of what a page sends are capped.
+- **A forged `document.modelContext`** in the page's own scripts does not reach the
+  extension, which sees only the browser's own object.
+- **Which pages.** The extension asks for no host access at install. Without it, it
+  reads a tab only after a click on its icon there, and only on that origin. With "Allow
+  on all sites" it reads every page in front: the AI app then gets the tools of whatever
+  site the user looks at, each call to a tool not marked read-only still asked.
+- **Only the side panel gives commands.** The connection lives in the extension's service
+  worker, which the extension's scripts in every page it may read can message. Commands
+  (turning AI access on or off, pairing, disconnecting an AI app, a new address, the
+  relay, allowing tools, answers to questions) are taken only from the extension's own
+  side panel, as Chrome reports the sender; anything else is dropped. "Allow all" allows
+  only the tools the extension itself offers on that site at that moment that are not
+  read-only, so a tool the page registers later still asks. From a page, the one message
+  accepted says that the page's tools changed. A compromised page can therefore not turn
+  AI access on, allow a tool or answer a question.
+- **Questions.** When the side panel is open, on screen and in front in the window of the
+  tab the call acts on, the question is there: its Allow buttons take a click only after
+  the panel has been in front for 750 ms, so the click that brings it forward cannot
+  approve, and the page's scripts cannot reach the panel. Otherwise a Chrome notification
+  asks. It names the AI app (its declared name beside its verified host), the tool and,
+  on a line of its own, the page's site; its buttons are Allow and Always allow (where
+  Always allow is offered), and a click on the notification's body opens the full
+  question with all its arguments. Only those two buttons allow from a notification, and
+  a click on one right after the notification appeared does not count, so a click meant
+  for something that was there before cannot allow. Each notification answers only its
+  own call. A notification is outside any page, so a page cannot cover or click it;
+  another program on the computer could, as it could click the panel. No answer in 60 s
+  is Don't allow; with notifications off the icon shows "?" and the panel asks.
+- **AI access with no panel on screen.** AI access stays on with the panel closed and
+  comes back after a browser start, an update or a reload when the user left it on; it
+  is turned on only from the side panel. The icon shows "on" while connected. Read-only
+  and allowed tools run with nothing on screen.
+- **The extension's settings are out of web pages' reach.** The address secret, the
+  relay, the tools allowed per site and whether AI access is on are kept in IndexedDB in
+  the extension's own origin and opened by the service worker only. The extension's
+  scripts in a page run in that page's origin and cannot open that database, so a page
+  whose renderer is compromised can neither read the secret (and take over the address
+  from anywhere, A4) nor allow its own tools. No setting is read from `chrome.storage`,
+  which those scripts can reach.
+- **A takeover is kept.** After another tab or program takes the address over, the
+  extension does not take it back by itself, also after a restart, so it does not trade
+  the address back and forth with whoever has the secret; the side panel says so and
+  offers a new address.
+- **The extension's id.** The relay allows the extension by its origin. The Chrome Web
+  Store item's id comes from the store, which keeps its key; the store package carries no
+  key, no host access at install and no source maps. The key of the owner's development
+  build is kept out of the public repository, so nobody else can load an extension with
+  the id the hosted relay allows for it; a build without that key gets an id of its own,
+  which a relay must allow on its own.
+
 ## Safe defaults
 
 - No page origin is allowed until configured; `*` only explicitly, with a warning.
@@ -453,3 +538,6 @@ each default.
 
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
+- With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
+  "Always allow" or "allowed") does whatever the AI app asks of it, and another program on
+  the computer can click a notification or the side panel (A13).

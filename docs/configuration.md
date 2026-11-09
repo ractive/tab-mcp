@@ -96,9 +96,12 @@ keep their settings and every other origin gets the defaults.
 
 ## Browser extensions
 
-A Chrome or Edge extension can offer tools too: the library runs in one of the
-extension's own pages, such as its side panel, and the relay sees that page's origin,
-`chrome-extension://` followed by the extension's 32-letter id (DEC-108). List it like a
+A Chrome or Edge extension can offer tools too: the library runs in the extension's
+service worker or one of its own pages (such as its side panel), and the relay sees the
+extension's origin, `chrome-extension://` followed by its 32-letter id (DEC-108). A
+service worker stays alive while it is connected: the relay's heartbeat (`ping` every
+25 s by default, `heartbeatMs`) is WebSocket traffic, which keeps a service worker
+running in Chrome 116 and later. List it like a
 website, best as a site with a name, so the pairing page says "Overmark on the browser
 extension `chrome-extension://…`" rather than only the id:
 
