@@ -31,6 +31,9 @@ Configuration is read from environment variables:
   TAB_MCP_REQUEST_TIMEOUT_S   per MCP request (300)
   TAB_MCP_KEEPALIVE_S         SSE keep-alive interval (20)
   TAB_MCP_IDLE_TIMEOUT_S      close a tab session without MCP requests (3600)
+  TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S  close a tab session sooner that never had a grant,
+                              never started pairing, never signed in and never got
+                              an MCP request (600)
   TAB_MCP_SESSION_LIFETIME_S  absolute tab session lifetime (43200)
   TAB_MCP_HEARTBEAT_S         protocol ping interval (25)
   TAB_MCP_BODY_TIMEOUT_S      deadline for receiving an MCP request body (10)

@@ -18,7 +18,7 @@ import {
 } from "./exchange.ts";
 import { APPLE_TOUCH_ICON, FAVICON_ICO, FAVICON_SVG } from "./icons.ts";
 import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
-import { ipPrefixKey } from "./ip.ts";
+import { ipPrefixKey, ipSessionKeys } from "./ip.ts";
 import { JwtError, type KeySource } from "./jwt.ts";
 import { createLogger, errorName, type Logger, truncateIp } from "./log.ts";
 import {
@@ -61,6 +61,18 @@ const CLAUDE_MISMATCHED_HEADER = "2025-11-25";
  * timer, so without a cap one AI app could take every concurrency slot.
  */
 const MAX_LISTEN_STREAMS_PER_GRANT = 2;
+
+/**
+ * How long this instance remembers a revocation for requests that were
+ * authenticated before it and have not reached the page yet (a request that
+ * waited for its page checks its token again in the store anyway).
+ */
+const REVOCATION_MEMORY_MS = 120_000;
+/** At most this many remembered revocations of each kind (oldest go first). */
+const MAX_REMEMBERED_REVOCATIONS = 10_000;
+
+/** The answer to a request whose grant was revoked while it was in flight. */
+const REVOKED_TEXT = "The connection to this page was revoked.";
 
 /**
  * Bun closes a WebSocket whose frame is over `maxPayloadLength` (1009). Frames
@@ -173,7 +185,10 @@ function rawAddressParam(search: string): string | undefined | false {
 }
 
 interface WsData {
+	/** The first of `ipKeys`: the IP (prefix) key the session counts under. */
 	ip: string;
+	/** Every key of the per-IP session limit (`ipSessionKeys`). */
+	ipKeys: string[];
 	origin: string;
 	site: Site;
 	/** The address id the URL named (`/tab?a=`, DEC-098). */
@@ -317,6 +332,8 @@ function startRelay(
 	const sessions = new Map<string, TabSession>();
 	const allSessions = new Set<TabSession>();
 	const perIp = new Map<string, number>();
+	/** The per-IP keys each session counts under, released with it. */
+	const sessionIpKeys = new Map<TabSession, string[]>();
 	/** Requests waiting for their page, per address (DEC-074). */
 	const waiters = new Map<string, Set<(s: TabSession | undefined) => void>>();
 	let waitingCount = 0;
@@ -354,14 +371,93 @@ function startRelay(
 		return { now, keepUntil: now + config.grantLifetimeMs };
 	};
 
+	/**
+	 * Revocations on this instance, remembered for a while: a request that was
+	 * authenticated before one and has not been forwarded yet is refused
+	 * right before it would reach the page. Per grant (until when), and per
+	 * address (when: grants created up to then are revoked, as the store's
+	 * tombstone says).
+	 */
+	const revokedGrants = new Map<string, number>();
+	const revokedAddresses = new Map<string, { at: number; until: number }>();
+
+	function remember<V>(map: Map<string, V>, key: string, value: V): void {
+		map.delete(key);
+		map.set(key, value);
+		if (map.size <= MAX_REMEMBERED_REVOCATIONS) return;
+		const oldest = map.keys().next().value;
+		if (oldest !== undefined) map.delete(oldest);
+	}
+
+	function sweepRevocations(now: number): void {
+		for (const [id, until] of revokedGrants) {
+			if (until <= now) revokedGrants.delete(id);
+		}
+		for (const [id, a] of revokedAddresses) {
+			if (a.until <= now) revokedAddresses.delete(id);
+		}
+	}
+
+	/** Whether this token's grant was revoked on this instance lately. */
+	function revokedLately(record: TokenRecord): boolean {
+		const now = Date.now();
+		const until = revokedGrants.get(record.grantId);
+		if (until !== undefined && until > now) return true;
+		const address = revokedAddresses.get(record.addressId);
+		return (
+			address !== undefined &&
+			address.until > now &&
+			record.grantCreatedAt <= address.at
+		);
+	}
+
+	/**
+	 * Every grant of an address was revoked at `at` (New address, revoke all,
+	 * sign-out): remember it. With `dropRequests` (New address, revoke all)
+	 * the address's open authorization requests and codes go too, so none of
+	 * them makes a grant afterwards; after a sign-out they stay, to tell the
+	 * browser that nobody is signed in (a code is refused by the store's
+	 * tombstone, which dates from after it).
+	 */
+	function addressRevoked(
+		addressId: string,
+		at: number,
+		dropRequests: boolean,
+	): void {
+		remember(revokedAddresses, addressId, {
+			at,
+			until: at + REVOCATION_MEMORY_MS,
+		});
+		if (dropRequests) auth.addressRevoked(addressId);
+	}
+
+	/**
+	 * A grant ended: tell the page, and end the grant's requests in flight on
+	 * it, listen streams included; requests still on their way are refused
+	 * before they reach it.
+	 */
 	function grantRemoved(
 		addressId: string,
 		grantId: string,
 		reason: "revoked" | "reuse_detected" | "expired",
 	): void {
+		remember(revokedGrants, grantId, Date.now() + REVOCATION_MEMORY_MS);
 		const session = sessions.get(addressId);
-		if (session?.ready)
-			session.send({ type: "grant.removed", grantId, reason });
+		if (session === undefined) return;
+		if (session.ready) session.send({ type: "grant.removed", grantId, reason });
+		const ended = session.failGrant(
+			grantId,
+			401,
+			RelayErrorCode.signedOut,
+			REVOKED_TEXT,
+			{ "www-authenticate": wwwAuthenticate(addressId, true) },
+		);
+		if (ended > 0) {
+			logger.info("grant.requests_ended", {
+				address: shortAddress(addressId),
+				requests: ended,
+			});
+		}
 	}
 
 	const host = {
@@ -389,7 +485,9 @@ function startRelay(
 			const addressId = session.addressId;
 			if (addressId === undefined) return;
 			const grants = await store.listGrants(addressId, Date.now());
-			await store.revoke({ addressId }, revokeOptions());
+			const options = revokeOptions();
+			await store.revoke({ addressId }, options);
+			addressRevoked(addressId, options.now, true);
 			logger.info("oauth.revoked_all", {
 				address: shortAddress(addressId),
 				grants: grants.length,
@@ -511,7 +609,9 @@ function startRelay(
 			failPending(session, "The page's user signed out.");
 			try {
 				const grants = await store.listGrants(addressId, Date.now());
-				await store.revoke({ addressId }, revokeOptions());
+				const options = revokeOptions();
+				await store.revoke({ addressId }, options);
+				addressRevoked(addressId, options.now, false);
 				logger.info("identity.signed_out", {
 					address: shortAddress(addressId),
 					grants: grants.length,
@@ -537,7 +637,10 @@ function startRelay(
 			) {
 				sessions.delete(session.addressId);
 			}
-			releaseIp(session.ip);
+			for (const key of sessionIpKeys.get(session) ?? [session.ip]) {
+				releaseIp(key);
+			}
+			sessionIpKeys.delete(session);
 		},
 		ready(session: TabSession): void {
 			const id = session.addressId;
@@ -692,7 +795,7 @@ function startRelay(
 			},
 			grantAdded: (addressId: string, grant: GrantInfo) => {
 				const session = sessions.get(addressId);
-				if (session?.ready) session.send({ type: "grant.added", grant });
+				if (session?.ready) session.grantAdded(grant);
 			},
 			grantRemoved: (addressId, grantId, reason) =>
 				grantRemoved(
@@ -737,24 +840,26 @@ function startRelay(
 			return json(400, { error: "bad_address" });
 		}
 		const realIp = clientIp(req, server);
-		// Counted per /64 for IPv6 (DEC-061): one subscriber owns a whole /64.
-		const ip = ipPrefixKey(realIp);
+		// Counted per /64 and per /56 for IPv6 (DEC-061): one subscriber owns
+		// a whole /64, often a whole /56 (256 /64s).
+		const ipKeys = ipSessionKeys(realIp);
+		const ip = ipKeys[0] ?? realIp;
 		if (allSessions.size >= config.maxSessions) {
 			logger.warn("tab.refused", { reason: "max_sessions" });
 			return json(429, { error: "too_many_sessions" });
 		}
-		const count = perIp.get(ip) ?? 0;
-		if (count >= config.maxSessionsPerIp) {
+		if (ipKeys.some((k) => (perIp.get(k) ?? 0) >= config.maxSessionsPerIp)) {
 			logger.warn("tab.refused", {
 				reason: "max_sessions_per_ip",
 				ip: truncateIp(realIp),
 			});
 			return json(429, { error: "too_many_sessions" });
 		}
-		perIp.set(ip, count + 1);
+		for (const k of ipKeys) perIp.set(k, (perIp.get(k) ?? 0) + 1);
 		const ok = server.upgrade(req, {
 			data: {
 				ip,
+				ipKeys,
 				origin: origin ?? "",
 				site,
 				...(address === undefined ? {} : { address }),
@@ -762,7 +867,7 @@ function startRelay(
 			headers: { "Sec-WebSocket-Protocol": SUBPROTOCOL },
 		});
 		if (ok) return undefined;
-		releaseIp(ip);
+		for (const k of ipKeys) releaseIp(k);
 		return json(400, { error: "websocket_upgrade_expected" });
 	}
 
@@ -981,35 +1086,41 @@ function startRelay(
 			return version;
 		}
 
-		const auth = await authenticate(req, addressId);
-		if (auth === "unavailable") {
-			// Not the token's fault: a 401 would make clients drop valid tokens.
-			logDone(503, method, { reason: "store_unavailable" });
-			return rpcError(
-				503,
-				rpcId,
-				RelayErrorCode.storeUnavailable,
-				"The relay cannot check tokens right now. Try again shortly.",
-				{ ...corsHeaders, "retry-after": RETRY_AFTER_S },
-			);
-		}
-		if (typeof auth === "string") {
-			logDone(401, method);
+		/** The answer to a token that does not authenticate (now or after the wait). */
+		const refused = (
+			result: "missing" | "invalid" | "unavailable",
+			reason?: string,
+		): Response => {
+			if (result === "unavailable") {
+				// Not the token's fault: a 401 would make clients drop valid tokens.
+				logDone(503, method, { reason: "store_unavailable" });
+				return rpcError(
+					503,
+					rpcId,
+					RelayErrorCode.storeUnavailable,
+					"The relay cannot check tokens right now. Try again shortly.",
+					{ ...corsHeaders, "retry-after": RETRY_AFTER_S },
+				);
+			}
+			logDone(401, method, reason === undefined ? {} : { reason });
 			return json(
 				401,
 				{
 					error: "invalid_token",
 					error_description:
-						auth === "missing"
+						result === "missing"
 							? "Authorization required."
 							: "The access token is not valid.",
 				},
 				{
 					...corsHeaders,
-					"www-authenticate": wwwAuthenticate(addressId, auth === "invalid"),
+					"www-authenticate": wwwAuthenticate(addressId, result === "invalid"),
 				},
 			);
-		}
+		};
+
+		const auth = await authenticate(req, addressId);
+		if (typeof auth === "string") return refused(auth);
 
 		const headers: Record<string, string> = {};
 		for (const [k, v] of req.headers) {
@@ -1053,8 +1164,10 @@ function startRelay(
 		const usable = usableFor(auth.subject);
 
 		/** The page's session to forward to, or the answer when there is none. */
-		const admit = async (): Promise<TabSession | Response> => {
-			const found = await waitForPage(addressId, req.signal, waitMs, usable);
+		/** `resent`: the page went away mid-request and this sends it again. */
+		const admit = async (resent: boolean): Promise<TabSession | Response> => {
+			const waited = resent || readySession(addressId, usable) === undefined;
+			let found = await waitForPage(addressId, req.signal, waitMs, usable);
 			// The AI app may have gone while the body was read, the token checked
 			// or the page awaited: then forward nothing (the abort event has
 			// already fired and would not cancel the exchange, which would hold a
@@ -1062,6 +1175,18 @@ function startRelay(
 			if (found === "aborted" || req.signal.aborted) return closed();
 			if (found === undefined) {
 				return pageNotOpen(body.value, rpcId, addressId, logDone, method);
+			}
+			if (waited) {
+				// The token was checked before the wait (up to pageWaitMs): its
+				// grant may have been revoked meanwhile, also on another
+				// instance, or by the page that just connected (New address).
+				const again = await authenticate(req, addressId);
+				if (typeof again === "string") return refused(again, "revoked");
+				if (req.signal.aborted) return closed();
+				found = readySession(addressId, usable);
+				if (found === undefined) {
+					return pageNotOpen(body.value, rpcId, addressId, logDone, method);
+				}
 			}
 			const session = found;
 			// Identity binding: only the person the grant was made for (DEC-077).
@@ -1122,12 +1247,18 @@ function startRelay(
 		}
 		let retried = false;
 		for (;;) {
-			const admitted = await admit();
+			const admitted = await admit(retried);
 			if (admitted instanceof Response) {
 				idle(true);
 				return admitted;
 			}
 			const session = admitted;
+			// Revoked on this instance since the token was checked: refused
+			// here, in the same step as the forward (nothing can come between).
+			if (revokedLately(auth)) {
+				idle(true);
+				return refused("invalid", "revoked");
+			}
 			idle(false);
 			let retry: () => void = () => {};
 			const retrying = new Promise<typeof RETRY>((resolve) => {
@@ -1467,6 +1598,7 @@ function startRelay(
 				);
 				ws.data.session = session;
 				allSessions.add(session);
+				sessionIpKeys.set(session, ws.data.ipKeys);
 			},
 			message(ws: ServerWebSocket<WsData>, message: string | Buffer) {
 				ws.data.session?.handleFrame(
@@ -1487,6 +1619,7 @@ function startRelay(
 
 	const sweep = setInterval(() => {
 		auth.sweep();
+		sweepRevocations(Date.now());
 		store
 			.deleteExpired(Date.now())
 			.then((n) => {

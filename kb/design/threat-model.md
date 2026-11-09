@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-11-09T02:00:00+01:00
+timestamp: 2026-11-09T15:00:00+01:00
 ---
 
 # Security model and threat model
@@ -115,7 +115,13 @@ does not export and which refuses to run outside development (DEC-059).
 - Revocation leaves a tombstone in the store and `put` refuses tokens of a revoked grant
   atomically, so a refresh that races Disconnect cannot bring the grant back (DEC-063).
 - Disconnect in the page revokes at once; "New address" revokes all grants of the old
-  address.
+  address. A revocation also ends the grant's requests in flight and listen streams
+  (401 / an error event, `http.cancel` to the page), and a request authenticated before
+  but still waiting for its page re-checks its token before it is forwarded; the
+  instance also remembers its own revocations for two minutes and refuses such a request
+  right before the forward. A grant dates from its authorization code, so a code issued
+  before "New address" or "revoke all" is refused by the address tombstone, and those two
+  also drop the address's pending requests and codes (branch relay/review-fixes).
 - Tokens are useless while the tab is closed ("the page is not open", HTTP 200 with a
   JSON-RPC error or tool error after a bounded wait; DEC-074).
 - The relay never forwards the `Authorization` header to the tab.
@@ -126,8 +132,10 @@ does not export and which refuses to run outside development (DEC-059).
   `TAB_MCP_ALLOWED_ORIGINS=*` and logs a warning. The owner's hosted relay allows exactly
   `https://ractive.ch`. This stops other websites in a browser; a non-browser client can
   forge `Origin`, so it is abuse control, not a security boundary for users.
-- Limits: sessions per IP (5) and in total (500), message and body size (1 MiB), concurrent
-  requests per session (8), request timeout (300 s), idle timeout, session lifetime.
+- Limits: sessions per IP (5; IPv6 per /64 and per /56) and in total (500), message and
+  body size (1 MiB), concurrent requests per session (8), request timeout (300 s), idle
+  timeout (10 minutes for a session that never had a grant, started pairing, signed in or
+  got a request; else 1 hour), session lifetime.
 
 ### A6: The AI app (or a prompt injection) misuses the tools
 
@@ -161,8 +169,14 @@ does not export and which refuses to run outside development (DEC-059).
 
 In-memory token buckets: `/authorize` page loads and posts per IP, guesses per address
 and network and per address, `/token` and `/revoke` per IP, CIMD fetches per host and in
-total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64; session
-limits per IP for `/tab` and concurrent requests per session for the MCP endpoint; pending
+total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64. The guess limits fail
+closed when full (100 000 keys): a bucket that still counts something is never dropped,
+so churning keys cannot reset it; the cost is that filling them blocks pairing until they
+refill. `/token` and `/revoke` refund a request that succeeds, so only failures count per
+IP and one hosted AI app's users behind shared egress do not throttle each other; keying
+by `client_id` was rejected because any request can name a well-known one (DEC-117).
+Session limits per IP for `/tab` count IPv6 per /64 and per /56; concurrent requests per
+session for the MCP endpoint; pending
 authorizations and codes are bounded maps with expiry; WebSocket backpressure checked on every send (a dropped send fails the
 request instead of hanging); bounded maps with expiry sweeps. A single-instance relay can
 still be flooded; the CDN in front absorbs volumetric attacks.
@@ -345,9 +359,18 @@ DEC-079.
   start.
 - A page that misleads the AI app (A10).
 - Whoever copies the address secret out of `localStorage` (e.g. a script injected into the
-  page) can take over the address while the tab is closed and call nothing without a
-  token, but can pair a new app if the user then types a code. Pages must keep XSS out, as
-  for any session secret.
+  page) can take over the address, also while the page is open. To the relay that session
+  is the page, so the relay sends it the pairing codes and the holder can pair an AI app of
+  their own; that grant belongs to the address. When the owner's page later holds the
+  address again without having seen `replaced` (closed during the takeover, reloaded, the
+  extension reconnecting), the holder's AI app calls the real page's tools until it is
+  disconnected or the page gets a new address; the page lists it among its AI apps and
+  cannot tell it from the user's own. The relay does not prevent it (pre-release review of
+  2026-11-09: documented, no new relay mechanism, DEC-117); identity binding does. Pages must
+  keep XSS out, as for any session secret.
+- Session slots: the unpaired timeout and the /56 count raise the cost, but a program that
+  does what a real page does (start pairing) from enough networks (a free /48 tunnel has
+  256 /56s) still holds slots (DEC-097).
 - The AI app's model can be steered by content (prompt injection) into calling tools the
   user did not intend; page-side confirmation covers consequential tools only.
 - Client-declared names are self-asserted; only hosts are verified.

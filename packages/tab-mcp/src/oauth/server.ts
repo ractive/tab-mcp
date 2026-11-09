@@ -82,6 +82,8 @@ const MAX_STATE_LENGTH = 1024;
  * so a host's share allows about 30 token requests a second.
  */
 const MAX_NONCES_PER_HOST = 10_000;
+/** Keys each pairing-guess limit keeps; when full, new keys are refused. */
+const GUESS_LIMIT_KEYS = 100_000;
 const MAX_NONCES = 100_000;
 /** The one text of every client authentication failure; the reason is logged. */
 const CLIENT_AUTH_FAILED = "client authentication failed";
@@ -113,6 +115,8 @@ export interface AuthorizationTestMode {
 	pairingMethods?: Partial<Record<PairingKind, PairingMethod>>;
 	/** A smaller cap on open OIDC sign-ins. */
 	oidcMaxFlows?: number;
+	/** The clock of the AI apps' key sets (JWKS caching and refetching). */
+	clientKeysNow?: () => number;
 }
 
 interface AuthorizationRequest {
@@ -143,6 +147,11 @@ interface UsedRequest {
 }
 
 interface IssuedCode extends AuthorizationRequest {
+	/**
+	 * When the code was issued: the grant's creation time, so a revocation of
+	 * every grant of the address after it (its tombstone) refuses the code.
+	 */
+	issuedAt: number;
 	expiresAt: number;
 	used: boolean;
 	/** The `/authorize` request it was issued for. */
@@ -275,16 +284,31 @@ export class AuthorizationServer {
 	/**
 	 * Code guesses (well-formed, against an active code) per address and IP:
 	 * one network cannot use up an address's allowance alone (DEC-061).
+	 * Both guess limits fail closed when full: a drained bucket is never
+	 * dropped to make room, so churning through keys cannot reset it.
 	 */
 	readonly #guessesPerAddressIp = new RateLimiter({
 		capacity: 10,
 		refillPerSecond: 1 / 60,
+		maxKeys: GUESS_LIMIT_KEYS,
+		whenFull: "fail-closed",
 	});
 	/** Code guesses per address from everywhere: the brute-force cap (A1). */
 	readonly #guessesPerAddress = new RateLimiter({
 		capacity: 30,
 		refillPerSecond: 1 / 30,
+		maxKeys: GUESS_LIMIT_KEYS,
+		whenFull: "fail-closed",
 	});
+	/**
+	 * `/token` and `/revoke` per IP (prefix). A request that succeeds (a valid
+	 * code, refresh token or token to revoke of its client) gets its token
+	 * back: only failures are counted, so the users of one hosted AI app
+	 * behind a few shared IPs do not throttle each other, and a client that
+	 * sends what does not work is throttled by its network. Successes are
+	 * bounded per grant (`#refreshesPerGrant`) and by pairing (a code is
+	 * single-use).
+	 */
 	readonly #tokenPerIp = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
 	/** Refreshes per grant: each leaves a row for the reuse window (DEC-091). */
 	readonly #refreshesPerGrant = new RateLimiter({
@@ -319,7 +343,10 @@ export class AuthorizationServer {
 			...(testMode?.cimd === undefined ? {} : { testMode: testMode.cimd }),
 		});
 		const cimd = this.#cimd;
-		this.#clientKeys = new ClientKeySets((url) => cimd.fetchJwks(url));
+		this.#clientKeys = new ClientKeySets(
+			(url) => cimd.fetchJwks(url),
+			testMode?.clientKeysNow,
+		);
 	}
 
 	get #issuer(): string {
@@ -928,9 +955,11 @@ ${intro}
 		const code = `${pending.addressId}.${random(32)}`;
 		if (this.#codes.size >= MAX_CODES) this.#sweepCodes(true);
 		const { id: _id, expiresAt: _expires, ip: _ip, ...request } = pending;
+		const now = Date.now();
 		this.#codes.set(hashToken(code), {
 			...request,
-			expiresAt: Date.now() + this.#authCodeTtlMs,
+			issuedAt: now,
+			expiresAt: now + this.#authCodeTtlMs,
 			used: false,
 			requestId: pending.id,
 			...(result.subject === undefined ? {} : { subject: result.subject }),
@@ -1184,6 +1213,7 @@ ${cancel}
 					"only authorization_code and refresh_token are supported",
 				);
 			}
+			this.#tokenPerIp.refund(ip);
 			return this.#json(200, body, noStore);
 		} catch (error) {
 			return this.#oauthErrorResponse(error, noStore);
@@ -1451,6 +1481,9 @@ ${cancel}
 		}
 
 		const now = Date.now();
+		// The grant dates from the code, not from its exchange: a "New address"
+		// or "revoke all" in between leaves a tombstone that refuses it.
+		const createdAt = issued.issuedAt;
 		const grantId = newId("g");
 		issued.grantId = grantId;
 		const config = this.#host.config;
@@ -1462,7 +1495,7 @@ ${cancel}
 				clientId: issued.client.clientId,
 				clientName: issued.client.name,
 				scopes: issued.scopes,
-				grantCreatedAt: now,
+				grantCreatedAt: createdAt,
 				...(issued.subject === undefined ? {} : { subject: issued.subject }),
 				// Made with the client's key: its refreshes need it too (DEC-106).
 				...(client.assertion ? { clientAuth: "private_key_jwt" as const } : {}),
@@ -1470,12 +1503,12 @@ ${cancel}
 			{
 				accessTtlMs: config.accessTokenTtlMs,
 				refreshTtlMs: config.refreshTokenTtlMs,
-				grantEndsAt: now + config.grantLifetimeMs,
+				grantEndsAt: createdAt + config.grantLifetimeMs,
 				now,
 			},
 		);
 		if (tokens === undefined) {
-			// Revoked while the tokens were issued (code reuse, New address).
+			// Revoked after the code was issued (code reuse, New address).
 			throw invalid("the connection was revoked");
 		}
 		const used = this.#usedRequests.get(issued.requestId);
@@ -1491,7 +1524,7 @@ ${cancel}
 				name: issued.client.name,
 				host: issued.client.host,
 			},
-			createdAt: new Date(now).toISOString(),
+			createdAt: new Date(createdAt).toISOString(),
 		});
 		return this.#tokenBody(tokens, issued.scopes);
 	}
@@ -1694,6 +1727,7 @@ ${cancel}
 			}
 			// The grant is the connection: revoking either token ends it.
 			await this.#revokeGrant(record.addressId, record.grantId, "revoked");
+			this.#tokenPerIp.refund(ip);
 			this.#host.logger.info("oauth.revoked", {
 				address: shortAddress(record.addressId),
 				client: hostOf(record.clientId),
@@ -1709,6 +1743,20 @@ ${cancel}
 	}
 
 	// Housekeeping
+
+	/**
+	 * Every grant of `addressId` was revoked (New address, revoke all): its
+	 * open authorization requests and its codes go too, so none of them
+	 * makes a grant afterwards.
+	 */
+	addressRevoked(addressId: string): void {
+		for (const p of [...this.#pending.values()]) {
+			if (p.addressId === addressId) this.#dropPending(p);
+		}
+		for (const [key, c] of this.#codes) {
+			if (c.addressId === addressId) this.#codes.delete(key);
+		}
+	}
 
 	/** Note that `pending` paired, for as long as its page could still be sent. */
 	#rememberUsed(pending: Pending): void {

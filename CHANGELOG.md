@@ -356,6 +356,41 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### Unreleased
+
+#### Added
+
+- `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` (600): a tab session that never had a grant, never
+  started pairing, never had its user signed in and never got an MCP request is closed
+  after 10 minutes (`bye idle`, close code 4002) instead of after the hour of
+  `TAB_MCP_IDLE_TIMEOUT_S`. A page with its pairing dialog open or an AI app paired is
+  not affected. See "Sizing the session limits" in `docs/self-hosting.md`.
+
+#### Changed
+
+- IPv6 tab sessions count against `TAB_MCP_MAX_SESSIONS_PER_IP` per /64 and per /56; both
+  must stay under it. Before, one /56 (256 /64s) could open 256 times the limit.
+- `/token` and `/revoke` count only requests that fail against the per-IP limit (30,
+  then 1 a second): a request that succeeds gets its share back, so the users of one
+  hosted AI app behind shared addresses no longer throttle each other.
+
+#### Fixed
+
+- Security: revoking a grant (the page's Disconnect, "revoke all", "New address",
+  `/revoke`, refresh-token reuse, identity binding) now ends its requests in flight and
+  open listen streams (HTTP 401 or an error event, code `-31009`; the page gets
+  `http.cancel`). A request authenticated before the revocation and still waiting for its
+  page (up to `TAB_MCP_PAGE_WAIT_S`) checks its token again and is refused instead of
+  being forwarded to the page.
+- Security: an authorization code issued before "New address" (`hello.revokeAll`) or
+  "revoke all" no longer makes a working grant when it is exchanged afterwards. The
+  grant dates from the code's issue time, so the address's tombstone refuses it (also
+  after a revocation on another instance), and both now drop the address's open
+  authorization requests and codes.
+- Security: the pairing-code guess limits no longer forget a drained bucket to make room
+  when full, so cycling through many keys cannot reset an address's allowance; while
+  they are full of buckets that still count, new keys are refused.
+
 ### [0.8.0][relay-0.8.0] - 2026-11-09
 
 #### Added

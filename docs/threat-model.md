@@ -202,7 +202,17 @@ which it retries, not a lost grant, unless they last longer than the grace hour.
 - Revocation leaves a tombstone in the store, and the store refuses new tokens for a
   revoked grant atomically. A refresh that races Disconnect cannot bring the grant back.
 - Disconnect in the page revokes at once. "New address" revokes all grants of the old
-  address.
+  address. A revocation also ends what the grant has under way: its requests in flight
+  and open listen streams end (HTTP 401 or an error event, and the page is told to stop
+  them), and a request that was authenticated before but is still waiting for its page
+  checks its token again before it is forwarded, so it does not reach the page either.
+  A grant's creation time is that of its authorization code, so a code issued before
+  "New address" or "revoke all" makes no grant afterwards; the relay also drops the
+  address's open authorization requests and codes then. With several instances, a
+  request in flight on the page's instance ends only when the revocation happens there
+  (the page's Disconnect, "New address"); after a revocation on another instance
+  (`/revoke`) a request already forwarded runs to its end, a listen stream until the
+  page's session ends.
 - Tokens are useless while the page is closed: requests get "the page is not open" (HTTP
   200 with a JSON-RPC error or tool error, after waiting up to `TAB_MCP_PAGE_WAIT_S` for
   the page). Waiting requests are bounded per address and in total, only requests
@@ -229,15 +239,33 @@ does not reconnect by itself.
   instructions into the user's AI session, which may have other tools (mail, files,
   code). That is the real damage; fake results for the page's own tools are minor next to
   it.
-- **What the holder does not get:** no token (tokens stay with the AI apps, the store
-  keeps only hashes), no new AI app without a code the page shows, and nothing at all on
-  a page that pairs by identity binding, where a session needs a fresh assertion from the
-  site's backend (A12).
+- **They can also pair an AI app of their own, and it outlasts the takeover.** To the
+  relay, the session that holds the address *is* the page: when it starts pairing, the
+  relay sends the pairing codes to it, so the holder can connect any AI app they control,
+  with the code they were sent. That grant belongs to the address, not to the session.
+  When the owner's page connects again later without having seen `replaced` (it was
+  closed during the takeover, is reloaded, or the browser extension reconnects on its
+  own), the relay hands the address back to it, and the holder's AI app then calls the
+  **real page's tools**, with the page's data and the user's signed-in state, until that
+  grant is disconnected or the page gets a new address. Consequential tools still ask in
+  the page before each run (A6); everything else runs. The page lists the AI app among
+  its connected apps (by the name and host the app declared at pairing), which is the
+  only sign of it.
+- **What the holder does not get:** no token of the AI apps the user paired (tokens stay
+  with the AI apps, the store keeps only hashes), and nothing at all on a page that pairs
+  by identity binding: a session needs a fresh assertion from the site's backend to take
+  requests, and pairing needs a sign-in as the page's user (A12).
 - **How long it lasts:** after the XSS is fixed, the page is closed or the script is
-  removed, until the page gets a new address. "New address" first takes the address back
+  removed, until the page gets a new address, and an AI app the holder paired lasts until
+  it is disconnected or the page gets a new address (a grant ends 90 days after pairing at
+  the latest). "New address" first takes the address back
   with the old secret and `hello.revokeAll`, so the relay revokes the grants of the old
   address in the same step as it hands the address back; whoever claims it again right
-  after gets no grant back. Only once the relay confirmed it (no grants in `session`)
+  after gets no grant back. Requests already on their way under a revoked grant are
+  refused before they reach the page, requests in flight and open listen streams of the
+  grant end, and authorization codes the address was given before are void, so a pairing
+  the holder finished just before does not become a grant either. Only once the relay
+  confirmed it (no grants in `session`)
   does the page make the new address; taken over again first, the page says so and the
   user tries again.
 - **What the page sees:** the library tells a takeover by a second tab of the same page
@@ -264,8 +292,9 @@ does not reconnect by itself.
   relay needs `TAB_MCP_ALLOWED_ORIGINS=*` and logs a warning at start. This stops other
   websites in a browser. A non-browser client can fake `Origin`, so the list controls
   abuse; it is not a security boundary for users.
-- Limits: sessions per IP (5) and in total (500), message and body size (1 MiB),
-  concurrent requests per session (8), request timeout (300 seconds), idle timeout and
+- Limits: sessions per IP (5; IPv6 per /64 and per /56) and in total (500), message and
+  body size (1 MiB), concurrent requests per session (8), request timeout (300 seconds),
+  a short idle timeout for sessions nobody paired with (10 minutes), idle timeout and
   session lifetime.
 
 ### A6: The AI app, or a prompt injection, misuses the tools
@@ -307,8 +336,29 @@ does not reconnect by itself.
 
 In-memory rate limits cover `/authorize` page loads and posts per IP, code guesses per
 address and network and per address, `/token` and `/revoke` per IP, refreshes per grant,
-and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /64. Sessions are limited per IP
-on `/tab`, and concurrent requests per session on the MCP endpoint. Requests waiting for
+and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /64.
+
+- The code-guess limits never forget a bucket that still counts something to make room:
+  when their maps are full (100 000 keys each), new keys are refused until buckets have
+  refilled, so cycling through many keys cannot reset an address's allowance. The price
+  is that someone who fills those maps (it takes well-formed guesses against live codes
+  of many addresses, from many networks) blocks pairing on the instance until they
+  refill, at most 15 minutes after they stop.
+- `/token` and `/revoke` count only what fails: a request that succeeds (a valid code,
+  refresh token or token to revoke of its client) gets its share back. The users of one
+  hosted AI app, who come from a few shared addresses, therefore do not throttle each
+  other, while a network that sends what does not work is stopped after 30 failures
+  (then one a second). Successes are bounded per grant (refreshes) and by pairing (codes
+  are single-use). The limit is not keyed by `client_id`, which any request can name: that
+  would let anyone use up a well-known AI app's allowance.
+
+Sessions are limited per IP
+on `/tab` (an IPv6 /64 and its /56 must each stay under the limit, since one subscriber
+often gets a whole /56), and concurrent requests per session on the MCP endpoint. A
+session that never had a grant, never started pairing, never had its user signed in and
+never got a request is closed after 10 minutes (`TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S`). Any
+program that sends an allowed `Origin` can still hold session slots, from enough
+networks, by doing what a real page does (see [self-hosting](self-hosting.md#known-limit-session-slots)). Requests waiting for
 a page that is not open are limited per address and in total, and only a valid token for
 that address makes a request wait. Pending
 authorizations and codes live in bounded maps that expire. Every WebSocket send is
@@ -436,9 +486,13 @@ each default.
   device or browser profile) can take over the address, also while the page is open. The
   AI apps paired with it then send their arguments to them and get their tool
   descriptions and results, which can steer the user's AI session; this lasts until the
-  page gets a new address. They get no token and cannot pair a new app without a code.
-  The page says that its address was taken over and offers a new one, but cannot prevent
-  it; identity binding does (A4, A12). Pages must keep cross-site scripting out, as for
+  page gets a new address. The relay sends them the pairing codes like to any page, so
+  they can also pair an AI app of their own; once the owner's page holds the address
+  again (reconnected without having seen the takeover), that AI app calls the real
+  page's tools until it is disconnected or the page gets a new address. The page lists it
+  among its connected AI apps and cannot tell it from one the user paired. The page says
+  that its address was taken over when it sees it happen and offers a new one, but cannot
+  prevent it; identity binding does (A4, A12). Pages must keep cross-site scripting out, as for
   any session secret.
 - The page origin shown at pairing is what the page's browser reported; a program can
   claim any origin (A11).
