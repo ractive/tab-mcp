@@ -93,6 +93,9 @@ export class Browser {
 				"--disable-gpu",
 				"--disable-extensions",
 				"--disable-background-networking",
+				// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
+				"--use-mock-keychain",
+				"--password-store=basic",
 				...(process.platform === "linux" ? ["--no-sandbox"] : []),
 				"about:blank",
 			],
