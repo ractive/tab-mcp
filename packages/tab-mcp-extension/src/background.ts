@@ -24,8 +24,17 @@ const withConnection = (use: (connection: Connection) => void) =>
 
 chrome.action.onClicked.addListener((tab) => {
 	// `sidePanel.open` needs the click's user gesture: call it before any await.
+	// With the tab, not only the window: over another extension's panel for
+	// this tab (Claude in Chrome's, say), `open({ windowId })` resolves and
+	// shows nothing. The panel stays the global one, for every tab without a
+	// panel of its own. (`openPanelOnActionClick` would show it too, but then
+	// the click grants no `activeTab`.)
 	void chrome.sidePanel
-		.open({ windowId: tab.windowId })
+		.open(
+			tab.id === undefined
+				? { windowId: tab.windowId }
+				: { tabId: tab.id, windowId: tab.windowId },
+		)
 		.catch((error: unknown) => console.warn("tab-mcp: side panel", error));
 	if (tab.id !== undefined)
 		void injectInto(tab.id)
@@ -115,7 +124,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 /**
- * A notification's answer: its button Don't allow (0) or Allow (1); a click
+ * A notification's answer: its button Allow (0) or Always allow (1); a click
  * on its body or its closing is Don't allow. On the worker's global object
  * too, for the DevTools Protocol, which cannot click a notification: the
  * end-to-end tests answer through the same functions a click calls.

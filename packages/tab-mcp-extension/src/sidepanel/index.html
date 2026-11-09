@@ -11,14 +11,16 @@
 	<section id="questions" class="questions" aria-label="Tools that ask first" aria-live="polite"></section>
 
 	<section class="card" aria-labelledby="ai-heading">
-		<h2 id="ai-heading" class="label">AI app</h2>
-		<p id="state" class="state" data-state="off" role="status">
-			<span class="dot" aria-hidden="true"></span><span id="state-text">Off</span>
-		</p>
-		<div id="address-line" class="address" hidden>
-			<code id="address" title=""></code>
-			<button id="copy" type="button" class="quiet small">Copy</button>
+		<div class="card-head">
+			<h2 id="ai-heading" class="label">AI app</h2>
+			<label class="switch">
+				<input id="ai-switch" type="checkbox" role="switch" aria-checked="false">
+				<span>AI access</span>
+			</label>
 		</div>
+		<p id="state" class="state" data-state="off" role="status">
+			<span class="dot" aria-hidden="true"></span><span id="state-text">AI access is off · paired apps stay paired</span>
+		</p>
 		<ul id="grants" class="grants" aria-label="Connected AI apps"></ul>
 		<p id="problem" class="problem" hidden></p>
 		<div id="replaced" class="replaced" hidden>
@@ -28,25 +30,29 @@
 			</div>
 		</div>
 		<div class="buttons">
-			<button id="connect" type="button" class="primary">Connect your AI app</button>
-			<button id="stop" type="button" class="quiet" hidden>Turn off</button>
+			<button id="connect" type="button" class="primary">Turn on AI access</button>
 		</div>
-		<p class="muted small">Stays on with this panel closed, until you turn it off.</p>
-	</section>
+		<p><button id="add-app" type="button" class="link" hidden>+ Add another AI app</button></p>
 
-	<section id="pairing" class="card" aria-labelledby="pairing-heading" hidden>
-		<h2 id="pairing-heading" class="label">Pair an AI app</h2>
-		<p>Add the address above to your AI app as a connector (a remote MCP server).
-			<a href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">How, in Claude, ChatGPT, Claude Code and Codex</a></p>
-		<p>When the AI app opens the sign-in page, type this code there:</p>
-		<p class="code-line"><code id="code" class="code">––– –––</code>
-			<button id="copy-code" type="button" class="quiet small" disabled>Copy</button></p>
-		<p class="muted small">The code changes every 2 minutes and after each use.</p>
-		<div class="buttons">
-			<button id="pair-done" type="button" class="primary">Done</button>
-			<button id="new-address" type="button" class="quiet">New address</button>
+		<div id="pairing" class="pairing" hidden>
+			<h3 class="label">Pair an AI app</h3>
+			<p>Add this address to your AI app as a connector (a remote MCP server).
+				<a href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">How, in Claude, ChatGPT, Claude Code and Codex</a></p>
+			<div class="address">
+				<code id="address" title=""></code>
+				<button id="copy" type="button" class="quiet small">Copy</button>
+			</div>
+			<p>When the AI app opens the sign-in page, type this code there:</p>
+			<p class="code-line"><code id="code" class="code">––– –––</code>
+				<button id="copy-code" type="button" class="quiet small" disabled>Copy</button></p>
+			<p class="muted small">The code changes every 2 minutes and after each use.</p>
+			<div class="buttons">
+				<button id="pair-done" type="button" class="primary" hidden>Done</button>
+				<button id="new-address" type="button" class="quiet">New address</button>
+			</div>
+			<p id="new-address-note" class="muted small" hidden>A new address disconnects every AI app; each has to be added again. Click again to make one.</p>
 		</div>
-		<p id="new-address-note" class="muted small" hidden>A new address disconnects every AI app; each has to be added again. Click again to make one.</p>
+		<p class="muted small">AI access stays on with this panel closed, until you turn it off.</p>
 	</section>
 
 	<section class="card" aria-labelledby="tab-heading">

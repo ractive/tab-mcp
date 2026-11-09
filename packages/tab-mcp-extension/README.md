@@ -54,16 +54,20 @@ bun run build            # in packages/tab-mcp-extension: writes dist/
 
 Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 
-- Click the extension's icon on a tab: the side panel opens, and the extension may read
+- Click the extension's icon on a tab: the side panel opens (also over another
+  extension's panel for that tab, such as Claude in Chrome's), and the extension may read
   that tab, also after navigations on the same origin, until the tab goes to another
   origin (`www.example.com` is another origin than `example.com`).
   "Allow on all sites" in the side panel lets it read every tab without a click.
-- "Connect your AI app" connects to the relay and shows the address for your AI app and a
-  pairing code; the [connect page](https://ractive.ch/tab-mcp/connect/) says how to add
-  the address in Claude, ChatGPT, Claude Code and Codex. The connected apps are listed
-  with Disconnect. The relay address is under "Settings".
+- "Turn on AI access" (or the "AI access" switch) connects to the relay. With no AI app
+  paired yet, the panel shows the address for your AI app and a pairing code at once;
+  the [connect page](https://ractive.ch/tab-mcp/connect/) says how to add the address in
+  Claude, ChatGPT, Claude Code and Codex. Paired apps are listed, each with Disconnect
+  (which asks first); "+ Add another AI app" shows the address and a code again. The
+  address shows only while pairing. Off, the panel says "AI access is off · paired apps
+  stay paired". The relay address is under "Settings".
 - The connection lives in the extension's service worker, not in the side panel: close
-  the panel and AI access stays on, until "Turn off". It comes back by itself after a
+  the panel and AI access stays on, until the switch turns it off. It comes back by itself after a
   browser start, an update or a reload of the extension when you left it on. The icon
   shows "on" while it is connected, "…" while it connects, "?" while a tool asks. If
   another tab or program takes the address over, the extension does not take it back by
@@ -73,14 +77,18 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 ## Questions
 
 A tool that asks first asks in the side panel when the panel is open in the window of the
-tab the tool acts on and that window is in front: Allow and Always allow work once the
+tab the tool acts on, that window is in front, and the panel is not covered by another
+extension's panel for the tab (a question it shows goes out as a notification once it is
+covered): Allow and Always allow work once the
 panel has been in front for 750 ms, so the click that brings it forward cannot approve.
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site>" below, naming the AI app (its name and its
-verified host) and the arguments in short, with Don't allow first and
-Allow second; an Allow within half a second of the notification showing does not count,
-and a click on the notification's body, or closing it, is Don't allow. A notification
-answers only its own call. Questions also show in every open side panel, so with
+verified host) and the arguments in short, with the buttons Allow and Always allow (the
+same memory as the panel's: this tool, this AI app, this page; only Allow for pages
+without a site of their own). Don't allow is closing the notification, a click on its
+body, or no answer in 60 s. A click on either button within half a second of the
+notification showing does not count (it shows again). A notification answers only its
+own call. Questions also show in every open side panel, so with
 notifications off (Focus, Do Not Disturb, notifications off for Chrome) open the panel
 when the icon shows "?". A question nobody answers in 60 s is Don't allow.
 

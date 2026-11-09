@@ -66,6 +66,8 @@ interface Panel {
 	windowId?: number;
 	/** Its pairing view is open. */
 	pairing: boolean;
+	/** On screen, as it last said (covered by another extension's panel: not). */
+	visible: boolean;
 }
 
 /** The extension's icon for the AI app's connector list (a PNG `data:` URI). */
@@ -363,7 +365,7 @@ export class Connection {
 	 * sent before the connection had started.
 	 */
 	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
-		const panel: Panel = { port, pairing: false };
+		const panel: Panel = { port, pairing: false, visible: true };
 		this.#panels.add(panel);
 		const receive = (raw: unknown) => {
 			// Anything that is not a command is dropped.
@@ -395,6 +397,12 @@ export class Connection {
 		switch (command.type) {
 			case "hello":
 				panel.windowId = command.windowId;
+				return;
+			case "visible":
+				panel.visible = command.visible;
+				// Hidden: the questions it alone showed go out as notifications.
+				if (!command.visible && panel.windowId !== undefined)
+					this.#questions.panelClosed(panel.windowId);
 				return;
 			case "connect":
 				// The user's click takes the address back.
@@ -484,7 +492,11 @@ export class Connection {
 				}
 			},
 			panelInFocus: async (windowId) => {
-				if (![...this.#panels].some((p) => p.windowId === windowId))
+				// Open is not enough: it has to be on screen, not covered by
+				// another extension's panel for the tab.
+				if (
+					![...this.#panels].some((p) => p.windowId === windowId && p.visible)
+				)
 					return false;
 				return (await chrome.windows.get(windowId)).focused;
 			},
@@ -492,8 +504,10 @@ export class Connection {
 				await chrome.notifications.create(id, {
 					type: "basic",
 					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-					...text,
-					buttons: [{ title: "Don't allow" }, { title: "Allow" }],
+					title: text.title,
+					message: text.message,
+					contextMessage: text.contextMessage,
+					buttons: text.buttons.map((title) => ({ title })),
 					requireInteraction: true,
 					priority: 2,
 				});

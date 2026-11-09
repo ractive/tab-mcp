@@ -35,6 +35,7 @@ const contentScript = { id: ID, url: "https://site.test/page", tab: { id: 1 } };
 /** Every command there is, valid. */
 const COMMANDS: PanelCommand[] = [
 	{ type: "hello", windowId: 1 },
+	{ type: "visible", visible: false },
 	{ type: "connect" },
 	{ type: "stop" },
 	{ type: "pair", on: true },
@@ -103,6 +104,7 @@ describe("who may send what", () => {
 			{ type: "webmcp-changed" },
 			{ type: "hello", windowId: "1" },
 			{ type: "pair" },
+			{ type: "visible", visible: "no" },
 			{ type: "revoke", grantId: 1 },
 			{ type: "set-relay" },
 			{ type: "set-allowed", origin: "o", name: "n" },
@@ -166,13 +168,11 @@ function request(
 const settle = () => Bun.sleep(5);
 
 describe("questions", () => {
-	test("without a panel in front, a notification asks; Allow after the guard counts", async () => {
+	test("without a panel in front, a notification asks: Allow, Always allow", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
-		const answer = questions.ask(request(), {
-			tabId: 7,
-			origin: "https://site.test",
-		});
+		const where = { tabId: 7, origin: "https://site.test" };
+		const answer = questions.ask(request(), where);
 		await settle();
 		expect(questions.list).toHaveLength(1);
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
@@ -181,52 +181,72 @@ describe("questions", () => {
 		expect(text.message).toBe(
 			'Claude (claude.ai) wants to run page_place_order: {"item":"tea"}',
 		);
+		expect(text.buttons).toEqual(["Allow", "Always allow"]);
 		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(id, 1);
+		questions.notificationButton(id, 0);
 		expect(await answer).toBe("allow");
 		expect(questions.list).toEqual([]);
 		expect(host.shown.size).toBe(0);
-	});
-
-	test("Don't allow, a click on the body and closing it are Don't allow", async () => {
-		const host = fakeHost();
-		const questions = new Questions(host);
-		for (const act of [
-			(id: string) => questions.notificationButton(id, 0),
-			(id: string) => questions.notificationDismissed(id),
-		]) {
-			const answer = questions.ask(request(), { tabId: 7 });
-			await settle();
-			const id = [...host.shown.keys()].at(-1) as string;
-			act(id);
-			expect(await answer).toBe("deny");
-		}
-	});
-
-	test("an Allow within the guard does not count: the notification shows again", async () => {
-		const host = fakeHost();
-		const questions = new Questions(host);
-		let settled = false;
-		const answer = questions.ask(request(), { tabId: 7 });
-		void answer.then(() => {
-			settled = true;
-		});
+		const always = questions.ask(request(), where);
 		await settle();
-		const first = [...host.shown.keys()][0] as string;
-		host.advance(NOTIFICATION_GUARD_MS - 1);
-		questions.notificationButton(first, 1);
-		await settle();
-		expect(settled).toBe(false);
-		const second = [...host.shown.keys()][0] as string;
-		expect(second).not.toBe(first);
-		expect(host.cleared).toContain(first);
-		// The old one closing (as it was cleared) answers nothing.
-		questions.notificationDismissed(first);
-		await settle();
-		expect(settled).toBe(false);
 		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(second, 1);
+		questions.notificationButton([...host.shown.keys()][0] as string, 1);
+		expect(await always).toBe("always");
+	});
+
+	test("where Always allow is not offered, only Allow, and a second button counts as nothing", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		const answer = questions.ask(request(), { tabId: 7, origin: "null" });
+		await settle();
+		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
+		expect(text.buttons).toEqual(["Allow"]);
+		host.advance(NOTIFICATION_GUARD_MS);
+		questions.notificationButton(id, 1);
+		await settle();
+		expect(questions.list).toHaveLength(1);
+		questions.notificationButton(id, 0);
 		expect(await answer).toBe("allow");
+	});
+
+	test("Don't allow is a click on the body or closing it", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		const answer = questions.ask(request(), { tabId: 7 });
+		await settle();
+		questions.notificationDismissed([...host.shown.keys()][0] as string);
+		expect(await answer).toBe("deny");
+	});
+
+	test("an Allow or Always allow within the guard does not count: the notification shows again", async () => {
+		for (const index of [0, 1]) {
+			const host = fakeHost();
+			const questions = new Questions(host);
+			let settled = false;
+			const answer = questions.ask(request(), {
+				tabId: 7,
+				origin: "https://site.test",
+			});
+			void answer.then(() => {
+				settled = true;
+			});
+			await settle();
+			const first = [...host.shown.keys()][0] as string;
+			host.advance(NOTIFICATION_GUARD_MS - 1);
+			questions.notificationButton(first, index);
+			await settle();
+			expect(settled).toBe(false);
+			const second = [...host.shown.keys()][0] as string;
+			expect(second).not.toBe(first);
+			expect(host.cleared).toContain(first);
+			// The old one closing (as it was cleared) answers nothing.
+			questions.notificationDismissed(first);
+			await settle();
+			expect(settled).toBe(false);
+			host.advance(NOTIFICATION_GUARD_MS);
+			questions.notificationButton(second, index);
+			expect(await answer).toBe(index === 0 ? "allow" : "always");
+		}
 	});
 
 	test("a click answers only its own call; one on a settled call is dropped", async () => {
@@ -237,13 +257,13 @@ describe("questions", () => {
 		await settle();
 		const [idA, idB] = [...host.shown.keys()] as [string, string];
 		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(idB, 0);
+		questions.notificationDismissed(idB);
 		expect(await b).toBe("deny");
 		// A late Allow on b's notification does not go to a.
-		questions.notificationButton(idB, 1);
+		questions.notificationButton(idB, 0);
 		await settle();
 		expect(questions.list.map((q) => q.args)).toEqual(['{\n  "n": 1\n}']);
-		questions.notificationButton(idA, 1);
+		questions.notificationButton(idA, 0);
 		expect(await a).toBe("allow");
 	});
 
@@ -318,10 +338,11 @@ describe("questions", () => {
 			"Allow Order?",
 		);
 		const { origin: _, title: __, ...bare } = view;
-		expect(notificationText(bare, "{}")).toEqual({
+		expect(notificationText({ ...bare, always: false }, "{}")).toEqual({
 			title: "Allow page_x?",
 			message: "Claude (claude.ai) wants to run page_x.",
 			contextMessage: "tab-mcp for Chrome",
+			buttons: ["Allow"],
 		});
 	});
 

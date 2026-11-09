@@ -18,6 +18,13 @@ import {
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
+import {
+	cardView,
+	confirms,
+	SWITCH_WAIT_MS,
+	type SwitchIntent,
+	switchShown,
+} from "./card.ts";
 
 /** How long the panel must be visible and focused before Allow counts. */
 const ALLOW_DELAY_MS = 750;
@@ -29,8 +36,17 @@ const { id: windowId } = await chrome.windows.getCurrent();
 
 let port: chrome.runtime.Port | undefined;
 let state: PanelState | undefined;
-/** The pairing view is open (codes come only then). */
-let pairingOpen = false;
+/** The user asked to add another AI app (with apps paired already). */
+let addingApp = false;
+/** What the worker was told: pairing on (codes come only then). */
+let pairing = false;
+/** Disconnect asks first: the apps whose button was clicked once. */
+const disconnectArmed = new Map<
+	string,
+	{ at: number; timer: ReturnType<typeof setTimeout> }
+>();
+/** The user's flip of the AI access switch, while the worker acts on it. */
+let switchIntent: SwitchIntent | undefined;
 /** "New address" with apps connected asks first: a second click makes it. */
 let newAddressArmed = false;
 
@@ -68,34 +84,61 @@ function connect(): void {
 		setTimeout(connect, 250);
 	});
 	if (windowId !== undefined) send({ type: "hello", windowId });
-	if (pairingOpen) send({ type: "pair", on: true });
+	sendVisible();
+	if (pairing) send({ type: "pair", on: true });
 }
 
 // --- The AI app ---
 
-const STATUS_TEXT: Record<PanelState["status"], string> = {
-	off: "Off",
-	connecting: "Connecting…",
-	retrying: "Connection lost · retrying",
-	waiting: "On · no AI app connected yet",
-	on: "Connected",
-};
+/** Tell the worker whether to pair (codes come only then). */
+function syncPairing(on: boolean): void {
+	if (on === pairing) return;
+	pairing = on;
+	send({ type: "pair", on });
+}
+
+function disconnectButton(grant: PanelState["grants"][number]): HTMLElement {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "quiet small";
+	const armed = disconnectArmed.has(grant.grantId);
+	button.textContent = armed ? "Disconnect? Click again" : "Disconnect";
+	button.dataset["grant"] = grant.grantId;
+	button.addEventListener("click", () => {
+		const armed = disconnectArmed.get(grant.grantId);
+		if (armed === undefined) {
+			// Asks first: the app has to be added and paired again after.
+			disconnectArmed.set(grant.grantId, {
+				at: Date.now(),
+				timer: setTimeout(() => {
+					disconnectArmed.delete(grant.grantId);
+					if (state) showConnection(state);
+				}, 4000),
+			});
+		} else {
+			// The second click of a double click confirms nothing.
+			if (!confirms(armed.at, Date.now())) return;
+			clearTimeout(armed.timer);
+			disconnectArmed.delete(grant.grantId);
+			send({ type: "revoke", grantId: grant.grantId });
+		}
+		if (state) showConnection(state);
+	});
+	return button;
+}
 
 function showConnection(s: PanelState): void {
-	const names = s.grants.map((g) => g.name || g.host);
+	// Adding another app ends with the connection, or once none is paired.
+	if (s.status !== "on") addingApp = false;
+	const view = cardView(s, addingApp);
 	$("state").dataset["state"] = s.status;
-	$("state-text").textContent =
-		s.status === "on"
-			? `Connected · ${names.join(", ")}`
-			: STATUS_TEXT[s.status];
-	$("address-line").hidden = s.address === undefined;
-	$("address").textContent = s.address ?? "";
-	$("address").title = s.address ?? "";
-	// Also while retrying, so the user can stop the retries.
-	$("stop").hidden = s.status === "off";
-	const on = s.status !== "off";
-	$("connect").textContent = on ? "Pair an AI app" : "Connect your AI app";
-	$("connect").hidden = pairingOpen && on;
+	$("state-text").textContent = view.stateText;
+	// Also while connecting or retrying, so the user can stop it.
+	const shown = switchShown(view.switchOn, switchIntent, Date.now());
+	switchIntent = shown.intent;
+	($("ai-switch") as HTMLInputElement).checked = shown.checked;
+	$("ai-switch").setAttribute("aria-checked", String(shown.checked));
+	$("connect").hidden = !view.turnOn;
 	$("problem").hidden = s.problem === undefined;
 	$("problem").textContent = s.problem ?? "";
 	$("replaced").hidden = s.replaced === undefined;
@@ -113,18 +156,17 @@ function showConnection(s: PanelState): void {
 				host.textContent = ` ${grant.host}`;
 				name.append(host);
 			}
-			const disconnect = document.createElement("button");
-			disconnect.type = "button";
-			disconnect.className = "quiet small";
-			disconnect.textContent = "Disconnect";
-			disconnect.addEventListener("click", () =>
-				send({ type: "revoke", grantId: grant.grantId }),
-			);
-			li.append(name, disconnect);
+			li.append(name, disconnectButton(grant));
 			return li;
 		}),
 	);
-	$("pairing").hidden = !pairingOpen || !on;
+	syncPairing(view.pairing);
+	$("pairing").hidden = !view.pairing;
+	$("add-app").hidden = !view.addApp;
+	$("pair-done").hidden = !view.done;
+	// The address only while pairing: it is what an AI app is added with.
+	$("address").textContent = view.address;
+	$("address").title = view.address;
 	const code = s.code;
 	$("code").textContent =
 		code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
@@ -243,6 +285,12 @@ setInterval(() => {
 }, 100);
 for (const type of ["focus", "blur", "visibilitychange"])
 	window.addEventListener(type, arm);
+
+/** Tell the worker whether the panel is on screen (not covered by another's). */
+function sendVisible(): void {
+	send({ type: "visible", visible: document.visibilityState === "visible" });
+}
+document.addEventListener("visibilitychange", sendVisible);
 
 // --- The tab in front ---
 
@@ -375,23 +423,26 @@ function copy(button: HTMLElement, text: string | undefined): void {
 	);
 }
 
-function openPairing(on: boolean): void {
-	pairingOpen = on;
-	send({ type: "pair", on });
+function addApp(on: boolean): void {
+	addingApp = on;
 	if (state) showConnection(state);
 }
 
-$("connect").addEventListener("click", () => {
-	if (state?.status === "off") send({ type: "connect" });
-	openPairing(true);
+$("connect").addEventListener("click", () => send({ type: "connect" }));
+
+$("ai-switch").addEventListener("change", () => {
+	switchIntent = {
+		on: ($("ai-switch") as HTMLInputElement).checked,
+		until: Date.now() + SWITCH_WAIT_MS,
+	};
+	addingApp = false;
+	send({
+		type: ($("ai-switch") as HTMLInputElement).checked ? "connect" : "stop",
+	});
 });
 
-$("stop").addEventListener("click", () => {
-	openPairing(false);
-	send({ type: "stop" });
-});
-
-$("pair-done").addEventListener("click", () => openPairing(false));
+$("add-app").addEventListener("click", () => addApp(true));
+$("pair-done").addEventListener("click", () => addApp(false));
 
 $("new-address").addEventListener("click", () => {
 	if ((state?.grants.length ?? 0) > 0 && !newAddressArmed) {
@@ -431,7 +482,7 @@ $("relay-form").addEventListener("submit", (event) => {
 	$("relay-problem").hidden = why === undefined;
 	$("relay-problem").textContent = why ?? "";
 	if (why !== undefined || value === state?.relay) return;
-	openPairing(false);
+	addApp(false);
 	send({ type: "set-relay", relay: value });
 });
 

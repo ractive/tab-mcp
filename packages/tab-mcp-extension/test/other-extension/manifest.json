@@ -1,0 +1,9 @@
+{
+	"manifest_version": 3,
+	"name": "Another side panel",
+	"version": "1.0.0",
+	"description": "For the end-to-end tests: an extension with a side panel of its own for the tab, as Claude in Chrome has.",
+	"action": { "default_title": "Another side panel" },
+	"background": { "service_worker": "background.js" },
+	"permissions": ["sidePanel"]
+}
