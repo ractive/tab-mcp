@@ -166,11 +166,12 @@ export class TabSession {
 		this.#host = host;
 		this.expectedAddress = expectedAddress;
 		this.codes = new PairingCodes(
-			(code, expiresAt) => {
+			(code, expiresAt, reason) => {
 				this.send({
 					type: "pairing.code",
 					code,
 					expiresAt: new Date(expiresAt).toISOString(),
+					reason,
 				});
 			},
 			host.pairingCodeTtlMs === undefined

@@ -477,7 +477,15 @@ export function openConnection(
 				inflight.delete(message.id);
 				return;
 			case "pairing.code":
-				host.pairingCode({ code: message.code, expiresAt: message.expiresAt });
+				host.pairingCode(
+					message.reason === undefined
+						? { code: message.code, expiresAt: message.expiresAt }
+						: {
+								code: message.code,
+								expiresAt: message.expiresAt,
+								reason: message.reason,
+							},
+				);
 				return;
 			case "grant.added":
 				host.grantAdded(message.grant);

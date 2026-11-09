@@ -13,6 +13,7 @@ import type {
 	ConfirmRequest,
 	DisconnectDetail,
 	Grant,
+	PairingCode,
 	SessionInfo,
 	ToolCallClient,
 } from "./types.ts";
@@ -74,6 +75,7 @@ export const DIALOG_CSS = `.tab-mcp-dialog {
 --_tab-mcp-line: color-mix(in srgb, var(--_tab-mcp-fg) 22%, transparent);
 --_tab-mcp-surface: var(--tab-mcp-surface, color-mix(in srgb, var(--_tab-mcp-fg) 6%, transparent));
 --_tab-mcp-danger: var(--tab-mcp-danger, light-dark(#b3261e, #ffb4ab));
+--_tab-mcp-success: var(--tab-mcp-success, light-dark(#1a7f37, #6fdd8b));
 --_tab-mcp-mono: var(--tab-mcp-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 --_tab-mcp-small-radius: calc(var(--tab-mcp-radius, 0.75rem) * 0.6);
 box-sizing: border-box; margin: auto; width: calc(100% - 2rem); max-width: var(--tab-mcp-max-width, 34rem); max-height: calc(100% - 2rem); overflow: auto;
@@ -91,7 +93,7 @@ html dialog.tab-mcp-dialog:where(:focus) { outline: none; }
 .tab-mcp-dialog :where(h2) { font-size: var(--tab-mcp-title-size, 1.25em); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
 .tab-mcp-dialog :where(h3) { font-size: 0.875em; font-weight: 600; color: var(--_tab-mcp-muted); margin-bottom: 0.5rem; }
 .tab-mcp-dialog :where(small) { font-size: 0.875em; }
-.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note) { color: var(--_tab-mcp-muted); }
+.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note, .tab-mcp-success-next) { color: var(--_tab-mcp-muted); }
 html dialog.tab-mcp-dialog :where(:focus-visible) { outline: 2px solid var(--tab-mcp-focus, var(--_tab-mcp-fg)); outline-offset: 2px; }
 .tab-mcp-dialog :where(button) { font: inherit; font-size: 0.9375em; line-height: 1.25; min-height: 2.5rem; padding: 0.5rem 1rem; margin: 0; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: var(--_tab-mcp-small-radius); background: transparent; color: inherit; cursor: pointer; }
 html dialog.tab-mcp-dialog :where(button:hover:not(:disabled)) { color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); }
@@ -127,6 +129,15 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-apps :where(li) { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-app { min-width: 0; overflow-wrap: anywhere; }
 .tab-mcp-apps-note { margin-top: 0.5rem; }
+.tab-mcp-success { display: flex; align-items: center; gap: 0.875rem; padding: 1rem; background: color-mix(in srgb, var(--_tab-mcp-success) 10%, transparent); border: 1px solid color-mix(in srgb, var(--_tab-mcp-success) 45%, transparent); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-success-icon { flex: none; width: 2.75rem; height: 2.75rem; color: var(--_tab-mcp-success); }
+.tab-mcp-success-text { display: grid; gap: 0.125rem; min-width: 0; }
+.tab-mcp-success-title { font-size: 1.125em; line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
+.tab-mcp-setup { display: flex; flex-direction: column; gap: 1rem; }
+.tab-mcp-setup-toggle { display: flex; align-items: center; gap: 0.75rem; width: 100%; padding: 0.75rem 1rem; text-align: start; font-weight: 600; border-color: var(--_tab-mcp-line); }
+.tab-mcp-setup-toggle::before { content: ""; flex: none; width: 0.45em; height: 0.45em; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-0.1em) rotate(-45deg); }
+.tab-mcp-setup-toggle:where([aria-expanded="true"])::before { transform: translateY(-0.15em) rotate(45deg); }
+.tab-mcp-code-used { display: flex; align-items: center; min-height: calc(var(--tab-mcp-code-size, 2em) * 1.2); }
 .tab-mcp-new-address-question { display: grid; gap: 0.75rem; padding: 1rem; border: 1px solid color-mix(in srgb, var(--_tab-mcp-danger) 50%, transparent); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-connect > :where(.tab-mcp-actions) { gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--_tab-mcp-line); }
 .tab-mcp-close-note { flex: 1 1 12rem; }
@@ -134,9 +145,10 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-arguments { box-sizing: content-box; font: 0.875em / 1.45 var(--_tab-mcp-mono); padding: 0.75rem; background: var(--_tab-mcp-surface); border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-always-note { font-size: 0.875em; }
 @media (max-width: 30rem) { .tab-mcp-actions > :where(button) { flex: 1 1 auto; } .tab-mcp-connect > :where(.tab-mcp-actions) > :where(button) { flex: 0 0 auto; } }
-@media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } }
+@media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } .tab-mcp-success-icon { animation: tab-mcp-pop 0.4s cubic-bezier(0.3, 1.4, 0.6, 1); } }
 @media (forced-colors: active) { html button.tab-mcp-primary { border-color: ButtonText; } }
 @keyframes tab-mcp-in { from { opacity: 0; transform: translateY(0.5rem); } }
+@keyframes tab-mcp-pop { from { opacity: 0; transform: scale(0.4); } }
 `;
 
 const sheets = new WeakMap<Document, CSSStyleSheet>();
@@ -574,6 +586,14 @@ export function instructions(
 	];
 }
 
+/**
+ * The labels of the apps behind these grants, each once: an app can hold
+ * more than one grant (paired twice), and is still one app.
+ */
+function appLabels(grants: readonly Grant[]): string[] {
+	return [...new Set(grants.map((g) => clientLabel(g.client)))];
+}
+
 /** "A and B", "A, B and C". */
 function listOf(items: string[]): string {
 	return items.length < 2
@@ -679,14 +699,65 @@ export function replacedNotice(
 }
 
 /**
+ * How long a used code stays "Code used" before its replacement is shown: the
+ * AI app connects a moment after the code was entered (its token request), and
+ * a new code in plain view meanwhile looks as if it did not work. Only when
+ * the relay says the code was used (`reason: "used"`); a relay that does not
+ * say why gets the new code shown at once.
+ */
+export const CODE_USED_WAIT_MS = 10_000;
+
+const SVG = "http://www.w3.org/2000/svg";
+
+/** A check mark in a tinted disk, in the text colour (`currentColor`). */
+function checkIcon(doc: Document): SVGSVGElement {
+	const set = (node: Element, attributes: Record<string, string>) => {
+		for (const [key, value] of Object.entries(attributes))
+			node.setAttribute(key, value);
+	};
+	const svg = doc.createElementNS(SVG, "svg");
+	set(svg, {
+		class: "tab-mcp-success-icon",
+		viewBox: "0 0 48 48",
+		width: "44",
+		height: "44",
+		"aria-hidden": "true",
+		focusable: "false",
+	});
+	const disk = doc.createElementNS(SVG, "circle");
+	set(disk, {
+		cx: "24",
+		cy: "24",
+		r: "24",
+		fill: "currentColor",
+		"fill-opacity": "0.16",
+	});
+	const check = doc.createElementNS(SVG, "path");
+	set(check, {
+		d: "M14 24.5l7 7 13-14",
+		fill: "none",
+		stroke: "currentColor",
+		"stroke-width": "4",
+		"stroke-linecap": "round",
+		"stroke-linejoin": "round",
+	});
+	svg.append(disk, check);
+	return svg;
+}
+
+/**
  * The "Connect your AI app" dialog: the address with Copy and New address,
  * short instructions, the pairing code (with Copy) while the relay sends one,
  * and the connected apps with Disconnect. Pairing is on while it is open, so
  * closing it ends the code; the connection and the address stay. Until an app
- * connects, only a small Close (and Escape) close it; then a Done. New address
- * asks first when it would disconnect connected apps (`newAddress()` revokes
- * them). When the page loses its address (`replaced`), this dialog closes and
- * `replacedNotice` says why, from then on also while it is closed.
+ * is connected, only a small Close (and Escape) close it. Once one is (it
+ * pairs here, or was paired when the dialog opened), a confirmation with a
+ * check mark leads, the setup moves behind "Connect another app" and Done is
+ * the primary button. New address asks first when it would disconnect
+ * connected apps (`newAddress()` revokes them). When the page loses its
+ * address (`replaced`), this dialog closes and `replacedNotice` says why,
+ * from then on also while it is closed. Its nodes are built once and shown or
+ * hidden, not rebuilt on a change, so nothing flickers and focus stays.
  */
 export function showConnectDialog(
 	mcp: TabMcp,
@@ -716,8 +787,26 @@ export function showConnectDialog(
 	])
 		live.style.setProperty(property as string, value as string);
 	const announce = (text: string) => {
-		live.textContent = live.textContent === text ? `${text}\u00a0` : text;
+		live.textContent = live.textContent === text ? `${text} ` : text;
 	};
+
+	// The confirmation once an app is connected: what happened, what next.
+	const successId = `tab-mcp-${++counter}-success`;
+	const successTitle = el(doc, "p", { className: "tab-mcp-success-title" });
+	const successNext = el(doc, "p", { className: "tab-mcp-success-next" });
+	const success = el(
+		doc,
+		"div",
+		{ className: "tab-mcp-success", id: successId },
+		checkIcon(doc),
+		el(
+			doc,
+			"div",
+			{ className: "tab-mcp-success-text" },
+			successTitle,
+			successNext,
+		),
+	);
 
 	const addressId = `tab-mcp-${++counter}-address`;
 	const label = el(doc, "label", { text: "Add this address to your AI app:" });
@@ -727,7 +816,8 @@ export function showConnectDialog(
 		className: "tab-mcp-address-input",
 	});
 	address.readOnly = true;
-	// Copying the address is the first step: the primary button.
+	// Copying the address is the first step: the primary button, until an
+	// app is connected (then Done is).
 	const { button: copy, reset: resetCopy } = copyButton(
 		doc,
 		"address",
@@ -805,11 +895,15 @@ export function showConnectDialog(
 	// not its Copy button's "Copied".
 	const codeSentence = el(doc, "span", {}, "When asked, enter the code ", code);
 	codeSentence.setAttribute("aria-live", "polite");
+	// In the code's place while the AI app finishes connecting with it.
+	const codeUsed = el(doc, "span", { className: "tab-mcp-code-used" });
+	codeUsed.hidden = true;
 	const codeLine = el(
 		doc,
 		"p",
 		{ className: "tab-mcp-code" },
 		codeSentence,
+		codeUsed,
 		" ",
 		copyCode,
 		el(doc, "br"),
@@ -840,18 +934,46 @@ export function showConnectDialog(
 		el(doc, "p", { className: "tab-mcp-guide" }, guide),
 	);
 
+	// Everything for adding the page to an AI app. Once one is connected, it
+	// is behind "Connect another app", closed: the next code is not news.
+	const setupId = `tab-mcp-${++counter}-setup`;
+	const setup = el(
+		doc,
+		"div",
+		{ className: "tab-mcp-setup", id: setupId },
+		addressBox,
+		confirmBox,
+		codeLine,
+		signInLine,
+		help,
+	);
+	// Whether the user opened it while an app is connected.
+	let expanded = false;
+	const setupToggle = button(
+		doc,
+		"Connect another app",
+		() => {
+			expanded = !expanded;
+			renderView(false);
+		},
+		"tab-mcp-setup-toggle",
+	);
+	setupToggle.setAttribute("aria-controls", setupId);
+
 	const appList = el(doc, "ul");
+	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
 	const apps = el(
 		doc,
 		"div",
 		{ className: "tab-mcp-apps" },
 		el(doc, "h3", { text: "Connected" }),
 		appList,
+		appsNote,
 	);
 
-	// Until an app connects in this dialog, closing it is not the next step:
-	// a small Close at the end, saying what closing does (the code stops, the
-	// address stays). Once one connects, a prominent Done replaces both.
+	// Until an app is connected, closing it is not the next step: a small
+	// Close at the end, saying what closing does (the code stops, the address
+	// stays). Once one is, a prominent Done replaces both.
 	const closeNote = el(doc, "small", {
 		className: "tab-mcp-close-note",
 		text: "Closing this stops the code. The address stays the same: to connect later, open this again from the page.",
@@ -874,40 +996,10 @@ export function showConnectDialog(
 		close,
 		done,
 	);
-	// The note on the left, the button at the far right, apart from the code.
-	// An app connected while this dialog is open (since the last new address),
-	// and still connected: the grants that made it so.
-	let paired = false;
-	const pairedGrants = new Set<string>();
-	// The note is about the code: only while one is shown and nothing paired.
-	const renderCloseNote = () => {
-		closeNote.hidden = paired || codeLine.hidden;
-	};
-	const setPaired = (value: boolean) => {
-		paired = value;
-		if (!paired) pairedGrants.clear();
-		const focused = doc.activeElement;
-		renderCloseNote();
-		close.hidden = paired;
-		done.hidden = !paired;
-		// Focus never stays on a control that was just hidden.
-		if (paired && focused === close) done.focus();
-		if (!paired && focused === done) close.focus();
-	};
-	// The visible button that closes the dialog.
-	const closer = () => (paired ? done : close);
 
-	dialog.append(
-		status,
-		addressBox,
-		confirmBox,
-		codeLine,
-		signInLine,
-		help,
-		apps,
-		actions,
-		live,
-	);
+	dialog.append(success, status, apps, setupToggle, setup, actions, live);
+	success.hidden = true;
+	setupToggle.hidden = true;
 	addressBox.hidden = true;
 	codeLine.hidden = true;
 	signInLine.hidden = true;
@@ -916,9 +1008,61 @@ export function showConnectDialog(
 
 	// Set while New address waits for the new session.
 	let renewing = false;
+	// Grants of apps that connected while this dialog is open (since the last
+	// new address), and are still connected: the confirmation names them.
+	const pairedGrants = new Set<string>();
+	// Whether the dialog shows the connected state: an app is connected.
+	let connectedView = false;
+	// Whether a code is shown (or "Code used" in its place).
+	let codeShown = false;
+	// The visible button that closes the dialog.
+	const closer = () => (connectedView ? done : close);
+	// Where focus starts: Done once connected, else the address's Copy.
+	const start = () => (connectedView ? done : copy);
+	/** Whether focus was on a control that is no longer shown, or no longer there. */
+	const focusLost = (focused: Element | null): boolean =>
+		focused !== null &&
+		focused !== dialog &&
+		focused !== doc.body &&
+		(!focused.isConnected ||
+			(dialog.contains(focused) && focused.closest("[hidden]") !== null));
+	/**
+	 * Shows the setup or the connected state. `paired`: an app just connected
+	 * here, so the setup closes again (unless the New address question is
+	 * open in it) and the confirmation is announced.
+	 */
+	const renderView = (paired: boolean, focused = doc.activeElement) => {
+		connectedView =
+			!renewing && mcp.state === "connected" && mcp.grants.length > 0;
+		if (paired && confirmBox.hidden) expanded = false;
+		if (connectedView) {
+			const here = mcp.grants.filter((g) => pairedGrants.has(g.grantId));
+			const names = appLabels(here.length > 0 ? here : mcp.grants);
+			const one = names.length === 1;
+			successTitle.textContent = `${listOf(names)} ${one ? "is" : "are"} connected`;
+			successNext.textContent = `You can close this now and ask ${one ? "it" : "them"} to use the tools of this page.`;
+			dialog.setAttribute("aria-describedby", successId);
+		} else dialog.removeAttribute("aria-describedby");
+		success.hidden = !connectedView;
+		// The confirmation says it; the status line is for the setup.
+		status.hidden = connectedView;
+		setupToggle.hidden = !connectedView;
+		setupToggle.setAttribute("aria-expanded", String(expanded));
+		setup.hidden = connectedView && !expanded;
+		copy.classList.toggle("tab-mcp-primary", !connectedView);
+		// The note is about the code: only while one is shown and none connected.
+		closeNote.hidden = connectedView || !codeShown;
+		close.hidden = connectedView;
+		done.hidden = !connectedView;
+		// Focus never stays on a control that was just hidden or removed.
+		if (focusLost(focused)) closer().focus();
+		if (paired && connectedView)
+			announce(`${successTitle.textContent}. ${successNext.textContent}`);
+	};
+
 	// The question names the apps connected now; pairing goes on while it is open.
 	const renderQuestion = (): boolean => {
-		const names = mcp.grants.map((g) => clientLabel(g.client));
+		const names = appLabels(mcp.grants);
 		if (names.length === 0) return false;
 		confirmText.textContent = `A new address disconnects ${listOf(names)}. To use this page again, add the new address to ${names.length === 1 ? "it" : "them"}.`;
 		return true;
@@ -934,36 +1078,45 @@ export function showConnectDialog(
 	};
 	const getNewAddress = () => {
 		// The apps are disconnected: the next one has to pair again.
-		setPaired(false);
+		pairedGrants.clear();
+		renewing = true;
+		status.textContent = "Getting a new address…";
+		renderView(false);
 		// Focus moves before the focused control is hidden.
 		close.focus();
 		confirmBox.hidden = true;
-		renewing = true;
-		status.textContent = "Getting a new address…";
 		// Called from the click, so the reconnect has the user action it needs.
 		mcp.newAddress().then(
 			() => {
 				renewing = false;
 				status.textContent =
 					"This is a new address. Add it to your AI app again.";
+				renderView(false);
 				copy.focus();
 			},
 			(error: unknown) => {
 				renewing = false;
 				status.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}. Close this and connect again.`;
+				renderView(false);
 				closer().focus();
 			},
 		);
 	};
+	// The address the help's commands were made for.
+	let stepsFor: string | undefined;
 	const renderSession = (session: SessionInfo | undefined) => {
 		if (session === undefined) {
 			addressBox.hidden = true;
 			confirmBox.hidden = true;
 			help.hidden = true;
+			renderView(false);
 			return;
 		}
-		address.value = session.address;
-		resetCopy();
+		// The same address again (a reconnect): it stays as it is.
+		if (address.value !== session.address) {
+			address.value = session.address;
+			resetCopy();
+		}
 		const appName = session.appName ?? mcp.appName;
 		if (!renewing)
 			status.textContent =
@@ -972,9 +1125,12 @@ export function showConnectDialog(
 					: "This page is ready for your AI app.";
 		fresh.disabled = mcp.state !== "connected";
 		addressBox.hidden = false;
-		// Opened before the session was known: start at the address's Copy.
-		if (doc.activeElement === dialog) copy.focus();
 		help.hidden = false;
+		renderView(false);
+		// Opened before the session was known: start at Done or the address's Copy.
+		if (doc.activeElement === dialog) start().focus();
+		if (stepsFor === session.address) return;
+		stepsFor = session.address;
 		steps.replaceChildren(
 			...instructions(serverName, session.address).map(
 				([app, how, command, note]) => {
@@ -1023,18 +1179,85 @@ export function showConnectDialog(
 			),
 		);
 	};
+
+	// The code shown, and the wait after it was used (until the app connects).
+	let shownCode: PairingCode | undefined;
+	let usedTimer: ReturnType<typeof setTimeout> | undefined;
+	const stopWaiting = () => {
+		clearTimeout(usedTimer);
+		usedTimer = undefined;
+	};
+	// The wait is over (the app connected, or none did): the next code shows.
+	const endWait = () => {
+		stopWaiting();
+		shownCode = mcp.pairingCode;
+		renderCode();
+	};
 	const renderCode = () => {
+		const focused = doc.activeElement;
 		const current = mcp.pairingCode;
 		const oidc = mcp.session?.pairing === "oidc";
-		// A new code is not copied yet.
-		if (code.textContent !== (current?.code ?? "")) resetCopyCode();
-		code.textContent = current?.code ?? "";
+		if (current === undefined) stopWaiting();
+		else if (current.code !== shownCode?.code) {
+			if (current.reason === "used") {
+				// Entered just now: no new code in plain view while the AI app
+				// connects; it shows if none does.
+				if (usedTimer === undefined) {
+					usedTimer = setTimeout(endWait, CODE_USED_WAIT_MS);
+					announce("Code used. Waiting for your AI app…");
+				}
+			} else if (usedTimer !== undefined) {
+				// Locked or expired meanwhile: the user needs this one now.
+				stopWaiting();
+			}
+		}
+		const used = usedTimer !== undefined;
+		if (!used) {
+			// A new code is not copied yet.
+			if (code.textContent !== (current?.code ?? "")) resetCopyCode();
+			code.textContent = current?.code ?? "";
+			shownCode = current;
+		}
+		codeSentence.hidden = used;
+		copyCode.hidden = used;
+		codeUsed.hidden = !used;
+		codeUsed.textContent = used ? "Code used. Waiting for your AI app…" : "";
 		codeLine.hidden = oidc || current === undefined;
 		signInLine.hidden = !oidc;
-		renderCloseNote();
+		codeShown = !codeLine.hidden;
+		closeNote.hidden = connectedView || !codeShown;
+		// The code's Copy had the focus: to the button that closes.
+		if (focusLost(focused)) closer().focus();
 	};
-	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
-	apps.append(appsNote);
+
+	// One item per grant, kept while the grant is: a change adds or removes
+	// items, and a focused Disconnect keeps its focus.
+	const items = new Map<
+		string,
+		{ item: HTMLLIElement; disconnect: HTMLButtonElement }
+	>();
+	const appItem = (grant: Grant) => {
+		const disconnect = button(
+			doc,
+			"Disconnect",
+			() => {
+				if (!mcp.revoke(grant.grantId)) renderGrants();
+			},
+			"tab-mcp-disconnect",
+			"danger",
+		);
+		const item = el(
+			doc,
+			"li",
+			{},
+			el(doc, "span", {
+				className: "tab-mcp-app",
+				text: `${clientLabel(grant.client)} connected `,
+			}),
+			disconnect,
+		);
+		return { item, disconnect };
+	};
 	// Grants that were there when the dialog opened; a new one is announced.
 	const known = new Set(mcp.grants.map((g) => g.grantId));
 	// Grants that come with a (new) session were there before; only the ones
@@ -1045,44 +1268,35 @@ export function showConnectDialog(
 			session = mcp.session;
 			for (const grant of mcp.grants) known.add(grant.grantId);
 		}
+		let paired = false;
 		for (const grant of mcp.grants) {
 			if (known.has(grant.grantId)) continue;
 			known.add(grant.grantId);
 			status.textContent = `${clientLabel(grant.client)} is connected.`;
 			pairedGrants.add(grant.grantId);
-			if (!paired) setPaired(true);
+			paired = true;
 		}
-		// The app that connected here is gone again (Disconnect, or revoked):
-		// back to Close and the note, the code still runs.
-		if (paired && !mcp.grants.some((g) => pairedGrants.has(g.grantId))) {
-			setPaired(false);
+		const ids = new Set(mcp.grants.map((g) => g.grantId));
+		for (const id of pairedGrants) if (!ids.has(id)) pairedGrants.delete(id);
+		// Read before an item goes: a removed Disconnect may have had it.
+		const focused = doc.activeElement;
+		for (const [id, { item }] of items) {
+			if (ids.has(id)) continue;
+			item.remove();
+			items.delete(id);
 		}
+		// Only the relay can revoke, so only while connected.
 		const connected = mcp.state === "connected";
-		appList.replaceChildren(
-			...mcp.grants.map((grant) => {
-				const disconnect = button(
-					doc,
-					"Disconnect",
-					() => {
-						if (!mcp.revoke(grant.grantId)) renderGrants();
-					},
-					"tab-mcp-disconnect",
-					"danger",
-				);
-				// Only the relay can revoke, so only while connected.
-				disconnect.disabled = !connected;
-				return el(
-					doc,
-					"li",
-					{},
-					el(doc, "span", {
-						className: "tab-mcp-app",
-						text: `${clientLabel(grant.client)} connected `,
-					}),
-					disconnect,
-				);
-			}),
-		);
+		mcp.grants.forEach((grant, i) => {
+			let entry = items.get(grant.grantId);
+			if (entry === undefined) {
+				entry = appItem(grant);
+				items.set(grant.grantId, entry);
+			}
+			entry.disconnect.disabled = !connected;
+			if (appList.children[i] !== entry.item)
+				appList.insertBefore(entry.item, appList.children[i] ?? null);
+		});
 		appsNote.textContent = connected
 			? ""
 			: "To disconnect an app, connect this page again first.";
@@ -1093,6 +1307,11 @@ export function showConnectDialog(
 			confirmBox.hidden = true;
 			fresh.focus();
 		}
+		// It connected: no "Code used" any more, the next code is ready.
+		if (paired && usedTimer !== undefined) endWait();
+		// Focus went to the body with a removed item: it was there.
+		const now = doc.activeElement;
+		renderView(paired, now === null || now === doc.body ? focused : now);
 	};
 	const onDisconnected = (event: CustomEvent<DisconnectDetail>) => {
 		if (event.detail.reason !== "new_address")
@@ -1132,6 +1351,7 @@ export function showConnectDialog(
 		dialog.addEventListener(
 			"close",
 			() => {
+				stopWaiting();
 				mcp.stopPairing();
 				mcp.removeEventListener("pairingcode", renderCode);
 				mcp.removeEventListener("grantschange", renderGrants);
@@ -1144,9 +1364,10 @@ export function showConnectDialog(
 			{ once: true },
 		);
 		dialog.showModal();
-		// Start at the address's Copy; until the address is there, at the
-		// dialog itself (its title is read out), not at Close.
-		if (!addressBox.hidden) copy.focus();
+		// Start at Done once connected, else at the address's Copy; until the
+		// address is there, at the dialog itself (its title is read out), not
+		// at Close.
+		if (connectedView || !addressBox.hidden) start().focus();
 		else dialog.focus();
 	});
 }

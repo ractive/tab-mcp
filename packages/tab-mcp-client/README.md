@@ -169,10 +169,22 @@ handles only some calls itself.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
    code with a Copy button, which the user types or pastes there. The code changes every
    2 minutes and after each use.
-4. The dialog announces and lists the connected app with a Disconnect button, and shows
-   "Done" to close it.
+4. Once the AI app connects, the dialog says so at the top: a check mark, "Claude
+   (claude.ai) is connected" and what to do next (close it and ask the app to use the
+   page's tools); screen readers hear the same. The setup (address, code, help) moves
+   behind "Connect another app", closed, so the next code does not appear in view; the
+   connected app is listed with a Disconnect button, and "Done" closes the dialog.
+   Opened again while an app is connected, the dialog starts like this, with the focus
+   on Done.
 
-Until an app connects, the dialog offers no prominent button under the code: only a small
+The relay makes a new code the moment one is entered, but the AI app connects only a
+moment later. When the relay says the code was used (`reason: "used"` in the event
+`pairingcode`), the dialog shows "Code used. Waiting for your AI app…" instead of the new
+code, for up to 10 seconds; if no app connects by then, the new code appears. A code that
+replaces an expired or locked one (too many wrong tries), or one from a relay that does not
+say why, shows at once.
+
+Until an app is connected, the dialog offers no prominent button under the code: only a small
 "Close" at the bottom (and Escape). Closing it stops the code (`stopPairing()`); the page
 stays connected and the address stays the same, so calling `showConnectDialog()` again
 shows the same address with a new code. While the dialog is open, calling it again (a
@@ -351,8 +363,8 @@ The default dialogs bring their own stylesheet, a constructed stylesheet added t
 `document.adoptedStyleSheets`, so a strict CSP needs no `style-src` exception. It uses
 the page's font and system colours, and follows the page's `color-scheme`: declare
 `color-scheme: light dark` (or `<meta name="color-scheme" content="light dark">`) and the
-dialogs are dark in dark mode. They fit a 360 px wide screen, and they open without
-animation when the user prefers reduced motion.
+dialogs are dark in dark mode. They fit a 360 px wide screen, and they open (and show the
+check mark of a connected app) without animation when the user prefers reduced motion.
 
 To adjust single values, set these custom properties on `:root` or on `.tab-mcp-dialog`:
 
@@ -366,6 +378,7 @@ To adjust single values, set these custom properties on `:root` or on `.tab-mcp-
 | `--tab-mcp-accent` | the text colour | background of the primary button |
 | `--tab-mcp-accent-text` | the background colour | text of the primary button |
 | `--tab-mcp-danger` | dark red, light red in dark mode | Disconnect buttons |
+| `--tab-mcp-success` | dark green, light green in dark mode | the check mark and the box of "… is connected" |
 | `--tab-mcp-focus` | the text colour | focus ring |
 | `--tab-mcp-border` | `1px solid` the text colour at 22 % | border of the dialog |
 | `--tab-mcp-radius` | `0.75rem` | corners of the dialog (buttons and boxes: 60 % of it) |
@@ -389,14 +402,18 @@ dialogs set only in their base rules (for example `button:hover { padding: 0 }`)
 overrides outside cascade layers: the dialogs' rules are not in a layer, so they win over
 any layered rule. All dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
 `.tab-mcp-connect` (with `.tab-mcp-status`, `.tab-mcp-address`, `.tab-mcp-code`,
-`.tab-mcp-code-value`, `.tab-mcp-help`, `.tab-mcp-apps`, `.tab-mcp-app`,
-`.tab-mcp-new-address-question`, `.tab-mcp-actions`), the confirmation is
+`.tab-mcp-code-value`, `.tab-mcp-code-used`, `.tab-mcp-help`, `.tab-mcp-apps`,
+`.tab-mcp-app`, `.tab-mcp-new-address-question`, `.tab-mcp-actions`; once an app is
+connected `.tab-mcp-success`, with `.tab-mcp-success-icon` (the check mark, an inline
+`svg` in `currentColor`), `.tab-mcp-success-title` and `.tab-mcp-success-next`, and the
+button `.tab-mcp-setup-toggle`, "Connect another app", with `aria-expanded`, which shows
+and hides `.tab-mcp-setup`, the address, code and help), the confirmation is
 `.tab-mcp-confirm` (with `.tab-mcp-description`, `.tab-mcp-arguments`,
 `.tab-mcp-always-note`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
 `.tab-mcp-always`, with `alwaysAllow`), and the notice after `replaced` is
 `.tab-mcp-replaced` (with `.tab-mcp-description`, `.tab-mcp-status`, and the buttons
 `.tab-mcp-replaced-close` and `.tab-mcp-new-address`). Buttons are `.tab-mcp-primary` (the one
-next step: Copy the address, Done, "Don't allow", the safe choice, and the notice's "New
+next step: Copy the address until an app is connected, then Done, "Don't allow", the safe choice, and the notice's "New
 address", or its "Close" after a sibling tab), `.tab-mcp-danger` (Disconnect and
 "Disconnect and get new address") or plain; every Copy button is also `.tab-mcp-copy`, and
 the Disconnect buttons in the apps list are `.tab-mcp-disconnect`. For example:

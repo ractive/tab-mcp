@@ -212,6 +212,32 @@ describe("pairing (DEC-028)", () => {
 		expect(t.pairingCode).toBeUndefined();
 	});
 
+	test("the relay's reason for a code comes with it; an unknown one is left out", async () => {
+		t.startPairing();
+		await t.connect();
+		await relay.next("pairing.start");
+		const sent: unknown[] = [];
+		for (const reason of ["start", "used", "locked", "expired", "later", 7]) {
+			const code = nextEvent<PairingCode | null>(t, "pairingcode");
+			relay.send({
+				type: "pairing.code",
+				code: "123456",
+				expiresAt: "2026-10-20T10:00:00.000Z",
+				reason,
+			});
+			sent.push((await code).detail?.reason);
+		}
+		expect(sent).toEqual([
+			"start",
+			"used",
+			"locked",
+			"expired",
+			undefined,
+			undefined,
+		]);
+		t.stopPairing();
+	});
+
 	test("codes are ignored while pairing is off; a disconnect clears the code", async () => {
 		await t.connect();
 		relay.send({

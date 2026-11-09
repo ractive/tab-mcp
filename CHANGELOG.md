@@ -7,6 +7,37 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- The connect dialog confirms a connected AI app at the top: a check mark, "Claude
+  (claude.ai) is connected" and what to do next, also announced to screen readers. It
+  shows the same when it opens while an app is connected. New styling hooks:
+  `--tab-mcp-success`, `.tab-mcp-success` (with `.tab-mcp-success-icon`,
+  `.tab-mcp-success-title`, `.tab-mcp-success-next`), `.tab-mcp-setup-toggle`,
+  `.tab-mcp-setup` and `.tab-mcp-code-used`.
+- `PairingCode.reason` (`start`, `used`, `locked`, `expired`, type `PairingCodeReason`):
+  why the relay sent the code, when it says so. A missing or unknown reason is left out.
+
+#### Changed
+
+- Once an app is connected, the connect dialog's address, code and help are behind
+  "Connect another app", closed, and Done is its primary button (also when the dialog
+  opens while an app is connected; before, Done showed only after an app paired in it).
+- After a code is entered, the dialog shows "Code used. Waiting for your AI app…" in its
+  place for up to 10 seconds instead of the next code, until the app connects. Only when
+  the relay says the code was used (see `PairingCode.reason`); codes from older relays
+  show at once, as before.
+
+#### Fixed
+
+- The connect dialog no longer flickers when an app connects: it no longer shows the next
+  code before the app is connected, nor rebuilds its list of apps (a focused Disconnect
+  keeps the focus) or, on a reconnect with the same address, its help.
+- The connect dialog names an app that holds two grants (paired twice) once, in its
+  confirmation and in the New address question.
+
 ### [0.10.0][client-0.10.0] - 2026-11-01
 
 #### Added
@@ -324,6 +355,15 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Added
+
+- `pairing.code` has an optional `reason`: `start` (after `pairing.start`), `used` (the
+  last code was entered), `locked` (5 wrong attempts) or `expired`. The page's dialog
+  uses it to wait for the AI app after a code was used instead of showing the next code
+  at once. Older clients ignore it.
 
 ### [0.7.1][relay-0.7.1] - 2026-11-09
 
