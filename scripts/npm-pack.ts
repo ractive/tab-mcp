@@ -57,6 +57,7 @@ export const PACKAGES: Record<string, PackageSpec> = {
 		exports: {
 			".": { types: "./index.d.ts", default: "./index.js" },
 			"./react": { types: "./react.d.ts", default: "./react.js" },
+			"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 			"./cdn": "./cdn/tab-mcp-client.min.js",
 		},
 		types: "./index.d.ts",
@@ -71,6 +72,11 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"index.js.map",
 			"react.js",
 			"react.js.map",
+			"visible.js",
+			"visible.js.map",
+			// The escaping, shared by `.` and `./visible`.
+			"index-[hash].js",
+			"index-[hash].js.map",
 			"connection-[hash].js",
 			"connection-[hash].js.map",
 			"ui-[hash].js",
