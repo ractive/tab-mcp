@@ -294,14 +294,28 @@ async function answerInPanel(
 const kvAll = (worker: Worker) =>
 	worker.eval<Record<string, unknown>>(`new Promise((resolve, reject) => {
 		const open = indexedDB.open("tab-mcp");
-		open.onerror = () => reject(open.error);
+		// Not there (deleted): make nothing, for the worker to make it.
+		let missing = false;
+		open.onupgradeneeded = () => {
+			missing = true;
+			open.transaction.abort();
+		};
+		open.onerror = () => (missing ? resolve({}) : reject(open.error));
 		open.onsuccess = () => {
-			const store = open.result.transaction("settings").objectStore("settings");
+			const db = open.result;
+			// Out of the worker's way: a deletion waits for every connection.
+			db.onversionchange = () => db.close();
+			const store = db.transaction("settings").objectStore("settings");
 			const keys = store.getAllKeys();
 			const values = store.getAll();
-			values.onsuccess = () =>
+			values.onsuccess = () => {
+				db.close();
 				resolve(Object.fromEntries(keys.result.map((k, i) => [k, values.result[i]])));
-			values.onerror = () => reject(values.error);
+			};
+			values.onerror = () => {
+				db.close();
+				reject(values.error);
+			};
 		};
 	})`);
 
@@ -1176,62 +1190,64 @@ describe.skipIf(chrome === undefined)(
 			await stack.worker.eval("true");
 		}
 
-		/** Wait until the worker has emptied chrome.storage.local. */
-		async function localEmptied(): Promise<void> {
-			const end = Date.now() + 10_000;
-			while (Object.keys(await localAll(stack.worker)).length > 0) {
-				if (Date.now() > end) throw new Error("chrome.storage.local stayed");
-				await Bun.sleep(100);
-			}
-		}
+		/** What a content script could write there, where Chrome lets it. */
+		const INJECTED = {
+			relay: "https://evil.example",
+			aiOn: true,
+			allowedTools: { "https://evil.example": ["steal"] },
+			"tab-mcp:secret:https://evil.example:tab-mcp-for-chrome": "B".repeat(43),
+		};
 
-		test("once moved to IndexedDB, nothing written into chrome.storage.local is taken", async () => {
+		test("setting keys in chrome.storage.local are never taken", async () => {
 			const before = await kvAll(stack.worker);
-			expect(before["migrated"]).toBe(1);
-			// As a content script could, where Chrome lets it write the area.
 			await stack.worker.eval(
-				`chrome.storage.local.set(${JSON.stringify({
-					relay: "https://evil.example",
-					allowedTools: { "https://evil.example": ["steal"] },
-				})})`,
+				`chrome.storage.local.set(${JSON.stringify(INJECTED)})`,
 			);
 			await restartWorker();
-			await localEmptied();
-			const after = await kvAll(stack.worker);
-			expect(after["relay"]).toBe(before["relay"]);
-			expect(after["allowedTools"]).toEqual(before["allowedTools"]);
+			// IndexedDB is as it was: none of them came in.
+			expect(await kvAll(stack.worker)).toEqual(before);
+			await stack.worker.eval("chrome.storage.local.clear()");
 		});
 
-		test("settings an older version kept in chrome.storage.local move to IndexedDB, once", async () => {
-			// As before the move: no marker yet, the settings in the old area.
+		test("the database deleted under the worker: the next write opens it again, and nothing old comes in", async () => {
+			// The reload before closed the panel; the worker may have restarted.
+			stack.worker = await stack.browser.serviceWorker(
+				stack.browser.extensionId as string,
+			);
+			stack.panel = await openPanel(stack.browser, stack.tab);
+			// The site data cleared, say: the worker's connection is asked to
+			// close, and closes.
 			await stack.worker.eval(`new Promise((resolve, reject) => {
-				const open = indexedDB.open("tab-mcp");
-				open.onsuccess = () => {
-					const tx = open.result.transaction("settings", "readwrite");
-					tx.objectStore("settings").delete("migrated");
-					tx.oncomplete = () => { open.result.close(); resolve(true); };
-					tx.onerror = () => reject(tx.error);
-				};
-				open.onerror = () => reject(open.error);
+				const deleting = indexedDB.deleteDatabase("tab-mcp");
+				deleting.onsuccess = () => resolve(true);
+				deleting.onerror = () => reject(deleting.error);
 			})`);
-			const old = {
-				"tab-mcp:secret:https://old.test:tab-mcp-for-chrome": "A".repeat(43),
-				allowedTools: { "https://old.test": ["t"] },
-			};
+			// A write after it: the worker opens the database again (made anew).
+			await stack.panel.eval(`(async () => {
+				const port = chrome.runtime.connect({ name: "panel" });
+				port.postMessage({ type: "set-allowed", origin: "${SITE}", name: "place_order", on: true });
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				port.disconnect();
+			})()`);
+			const end = Date.now() + 10_000;
+			let kv = await kvAll(stack.worker);
+			while (kv["allowedTools"] === undefined) {
+				if (Date.now() > end)
+					throw new Error(`no write after the reopen: ${JSON.stringify(kv)}`);
+				await Bun.sleep(100);
+				kv = await kvAll(stack.worker);
+			}
+			expect(kv["allowedTools"]).toEqual({ [SITE]: ["place_order"] });
+			// With no settings at all, the next start still takes nothing old.
 			await stack.worker.eval(
-				`chrome.storage.local.set(${JSON.stringify(old)})`,
+				`chrome.storage.local.set(${JSON.stringify(INJECTED)})`,
 			);
-			const before = (await kvAll(stack.worker))["allowedTools"];
-			expect(before).toBeDefined();
 			await restartWorker();
-			await localEmptied();
-			const kv = await kvAll(stack.worker);
-			expect(kv["tab-mcp:secret:https://old.test:tab-mcp-for-chrome"]).toBe(
-				"A".repeat(43),
-			);
-			// One that was already in IndexedDB is newer: kept.
-			expect(kv["allowedTools"]).toEqual(before);
-			expect(kv["migrated"]).toBe(1);
+			kv = await kvAll(stack.worker);
+			for (const key of Object.keys(INJECTED))
+				if (key !== "allowedTools") expect(kv[key]).toBeUndefined();
+			expect(kv["allowedTools"]).toEqual({ [SITE]: ["place_order"] });
+			await stack.worker.eval("chrome.storage.local.clear()");
 		});
 	},
 );

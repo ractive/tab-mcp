@@ -18,7 +18,7 @@ import {
 } from "../src/protocol.ts";
 import { allowable, isAllowed, setAllowedMany } from "../src/worker/allowed.ts";
 import { AlwaysAllowed } from "../src/worker/always.ts";
-import { MIGRATED, memoryKv, migrate } from "../src/worker/kv.ts";
+import { memoryKv } from "../src/worker/kv.ts";
 import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
@@ -453,6 +453,14 @@ describe("allowed tools", () => {
 });
 
 describe("the settings in IndexedDB", () => {
+	test("a write is all or nothing: a value that cannot be cloned stores none", async () => {
+		const kv = memoryKv({ relay: "https://relay" });
+		await expect(
+			kv.set({ aiOn: true, allowedTools: {}, bad: () => {} }),
+		).rejects.toThrow();
+		expect(await kv.all()).toEqual({ relay: "https://relay" });
+	});
+
 	test("the address secret: loaded once, read from memory, written through", async () => {
 		const kv = memoryKv({
 			"tab-mcp:secret:https://relay:tab-mcp-for-chrome": "s1",
@@ -472,91 +480,6 @@ describe("the settings in IndexedDB", () => {
 		expect(kv.data.get("tab-mcp:secret:https://other:tab-mcp-for-chrome")).toBe(
 			"s2",
 		);
-	});
-
-	/** chrome.storage.local as the migration sees it. */
-	function oldArea(initial: Record<string, unknown>, failRemove = false) {
-		const data = { ...initial };
-		return {
-			data,
-			get: async () => ({ ...data }),
-			async remove(keys: string[]) {
-				if (failRemove) throw new Error("gone");
-				for (const key of keys) delete data[key];
-			},
-		};
-	}
-
-	const OLD = {
-		"tab-mcp:secret:https://relay:tab-mcp-for-chrome": "secret",
-		relay: "https://relay",
-		aiOn: true,
-		replaced: { sibling: false },
-		allowedTools: { "https://site.test": ["t"] },
-		somethingElse: 1,
-	};
-
-	test("the old settings move from chrome.storage.local, then go from there", async () => {
-		const old = oldArea(OLD);
-		const kv = memoryKv();
-		const moved = await migrate(old, kv);
-		expect(moved.sort()).toEqual(
-			[
-				"aiOn",
-				"allowedTools",
-				"relay",
-				"replaced",
-				"tab-mcp:secret:https://relay:tab-mcp-for-chrome",
-			].sort(),
-		);
-		const { somethingElse: _, ...settings } = OLD;
-		// With the marker that it was done.
-		expect(Object.fromEntries(kv.data)).toEqual({
-			...settings,
-			[MIGRATED]: 1,
-		});
-		expect(old.data).toEqual({ somethingElse: 1 });
-		// Again: nothing left to move, nothing changes.
-		expect(await migrate(old, kv)).toEqual([]);
-		expect(Object.fromEntries(kv.data)).toEqual({
-			...settings,
-			[MIGRATED]: 1,
-		});
-	});
-
-	test("once moved, never again: what a content script writes into chrome.storage.local is not taken", async () => {
-		const kv = memoryKv();
-		await migrate(oldArea({}), kv);
-		// A first start with nothing to move sets the marker too.
-		expect(kv.data.get(MIGRATED)).toBe(1);
-		// Where Chrome lets content scripts write the old area: a relay of
-		// theirs, AI access on, their own tools allowed, a secret.
-		const injected = oldArea({
-			relay: "https://evil.example",
-			aiOn: true,
-			allowedTools: { "https://evil.example": ["steal"] },
-			"tab-mcp:secret:https://evil.example:tab-mcp-for-chrome": "B".repeat(43),
-		});
-		expect(await migrate(injected, kv)).toEqual([]);
-		expect(Object.fromEntries(kv.data)).toEqual({ [MIGRATED]: 1 });
-		// Only removed from there.
-		expect(injected.data).toEqual({});
-	});
-
-	test("crash-safe: written before removed; a second run keeps what changed since", async () => {
-		const old = oldArea(OLD, true);
-		const kv = memoryKv();
-		await expect(migrate(old, kv)).rejects.toThrow("gone");
-		// Written, not removed: nothing lost.
-		expect(kv.data.get("tab-mcp:secret:https://relay:tab-mcp-for-chrome")).toBe(
-			"secret",
-		);
-		// The user turned AI access off meanwhile; the old value must not win.
-		await kv.set({ aiOn: false });
-		const again = oldArea(old.data);
-		await migrate(again, kv);
-		expect(kv.data.get("aiOn")).toBe(false);
-		expect(again.data).toEqual({ somethingElse: 1 });
 	});
 });
 

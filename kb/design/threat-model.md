@@ -295,13 +295,16 @@ did, by connecting the extension.
   that database, in any Chrome version and from the first moment of a browser start, so
   a page's compromised renderer, running code in the content script's world, can neither
   read the secret (and take the address over from anywhere) nor allow its own tools.
-  `chrome.storage.local`, where an earlier version kept them, is readable and writable
-  by content scripts by default: the worker moves what it finds there into IndexedDB
-  once, at its first start with this version (the entries and a "migrated" marker in one
-  transaction, then removed from the old area, so a crash loses nothing). Every later
-  start takes nothing from there, only removes setting keys it finds: where Chrome lets
-  content scripts write the area, a relay or secret written there must not be picked up
-  (the extension would connect to that relay and send it the address secret). As an extra layer it also sets that area to `TRUSTED_CONTEXTS`; sources
+  `chrome.storage.local`, where the owner's development builds kept them, is readable
+  and writable by content scripts by default. The worker never reads settings from
+  there, and leaves what is there alone (only the owner used those builds). Where Chrome lets
+  content scripts write that area, a relay or secret written there must never be picked
+  up (the extension would connect to that relay and send it the address secret). A
+  one-off import behind a "migrated" marker would not hold: the marker would live in the
+  database it guards, so a lost database (site data cleared, a forced close) would import
+  again. Only the owner's builds ever had settings there, and they have moved. The
+  worker's connection to the database is opened again when Chrome closes it under the
+  worker (a deletion, a version change), instead of being used dead. As an extra layer it also sets that area to `TRUSTED_CONTEXTS`; sources
   disagree on whether Chrome takes that for the local area (Chromium's API schema and
   MDN: session only; Chrome's guide: local too), an end-to-end test shows it in Chrome
   156, and nothing relies on it: a refusal is only logged. Whether the level outlasts a
