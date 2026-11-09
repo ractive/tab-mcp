@@ -488,16 +488,23 @@ export class Connection {
 				void this.#readTab();
 				return;
 			case "set-allowed-all": {
-				// Only tools the bridge offers on that origin now, that ask
-				// first: names the panel sends are not taken on trust.
-				const state = this.#bridge.state;
-				if (state.origin !== command.origin) return;
-				const wanted = new Set(command.names);
-				const names = state.tools
-					.filter(
-						(t) => t.tool !== undefined && !t.readOnly && wanted.has(t.name),
-					)
-					.map((t) => t.name);
+				// "Ask for all" takes away: every name given, from that origin,
+				// whether offered now or not (one dropped, read-only or broken
+				// since the panel showed it must not stay allowed for when it
+				// comes back). "Allow all" gives: only tools the bridge offers
+				// on that origin now that ask first; names from the panel are
+				// not taken on trust.
+				let names = command.names;
+				if (command.on) {
+					const state = this.#bridge.state;
+					if (state.origin !== command.origin) return;
+					const wanted = new Set(command.names);
+					names = state.tools
+						.filter(
+							(t) => t.tool !== undefined && !t.readOnly && wanted.has(t.name),
+						)
+						.map((t) => t.name);
+				}
 				this.#allowed = await setAllowedMany(
 					this.#kv,
 					command.origin,

@@ -147,6 +147,10 @@ function showConnection(s: PanelState): void {
 	$("replaced-text").textContent = s.replaced?.sibling
 		? "Opened elsewhere in this browser: the address is in use there."
 		: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.";
+	$("grants").setAttribute(
+		"aria-label",
+		s.status === "on" ? "Connected AI apps" : "Paired AI apps",
+	);
 	$("grants").replaceChildren(
 		...s.grants.map((grant) => {
 			const li = document.createElement("li");
@@ -154,7 +158,9 @@ function showConnection(s: PanelState): void {
 			const app = document.createElement("span");
 			app.className = "app";
 			const dot = document.createElement("span");
-			dot.className = "dot";
+			// Green only while connected: off, connecting or retrying the
+			// apps stay paired, not connected.
+			dot.className = s.status === "on" ? "dot on" : "dot";
 			dot.setAttribute("aria-hidden", "true");
 			const name = document.createElement("span");
 			name.className = "app-name";
@@ -241,6 +247,8 @@ function question(q: QuestionView): HTMLElement {
  * "asks first" that came there.
  */
 let movedUntil = 0;
+/** "Allow all" as last shown: its visibility, label and tools. */
+let allowAllShown = "";
 
 function showQuestions(questions: QuestionView[]): void {
 	const ids = new Set(questions.map((q) => q.id));
@@ -393,9 +401,30 @@ function showTab(s: PanelState): void {
 			? `${mirrored} more ${mirrored === 1 ? "comes" : "come"} from the page's own tab-mcp connection.`
 			: "");
 	const allowAll = allowAllView(tab);
+	// The page changed what "Allow all" does (another label, other tools, or
+	// it just came): it and the switches below wait, as when a question went,
+	// so a click meant for the button as it was cannot allow what it is now.
+	const shownAs = JSON.stringify([
+		allowAll.shown,
+		allowAll.label,
+		allowAll.names,
+	]);
+	if (allowAll.shown && shownAs !== allowAllShown) {
+		movedUntil = Date.now() + ALLOW_DELAY_MS;
+		arm();
+	}
+	allowAllShown = shownAs;
 	$("tools-head").hidden = !allowAll.shown;
-	$("allow-tools").textContent = allowAll.label;
-	($("allow-tools") as HTMLButtonElement).disabled = Date.now() < movedUntil;
+	const button = $("allow-tools") as HTMLButtonElement;
+	button.textContent = allowAll.label;
+	const scope = tab?.origin ?? "this site";
+	const label =
+		allowAll.label === "Allow all"
+			? `Allow all ${allowAll.names.length} tools that ask first on ${scope}`
+			: `Ask first for all tools on ${scope}`;
+	button.setAttribute("aria-label", label);
+	button.title = label;
+	button.disabled = Date.now() < movedUntil;
 	$("tools").replaceChildren(
 		...(tab?.tools ?? []).map((tool) =>
 			toolItem(tab?.origin ?? "", tab?.canAllow === true, tool),

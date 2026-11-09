@@ -489,41 +489,63 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await ordered).content[0]?.text).toContain("cake");
 	});
 
-	test("the AI access switch: its knob sits flush at both ends, light and dark", async () => {
+	test("the AI access switch: its knob sits flush at both ends, light, dark and forced colours", async () => {
 		/**
-		 * The track's width, the knob's left and right gaps to its outer edge
-		 * (the knob is placed in the padding box, so a border or padding moves
-		 * it), and whether the track may grow (it took the text fields' rules:
-		 * a 1 px border, 8 px padding, flex: 1, so it could be wider than the
-		 * knob's travel).
+		 * The track's width, the knob's gaps to the track's outer edges, on
+		 * and off, and whether the track may grow. The knob sits in the padding
+		 * box, so a border or padding moves it: the text fields' rules (8 px
+		 * padding, a 1 px border, flex: 1) once made the track wider than the
+		 * knob's travel. Without the transition, so no waiting.
 		 */
-		const gaps = () =>
-			stack.panel.eval<[number, number, number, string]>(`(() => {
+		const measure = () =>
+			stack.panel.eval<{
+				width: number;
+				on: [number, number];
+				off: [number, number];
+				grows: string;
+			}>(`(() => {
 				const input = document.getElementById("ai-switch");
+				const still = document.createElement("style");
+				still.textContent = "#ai-switch, #ai-switch::after { transition: none !important; }";
+				document.head.append(still);
+				const was = input.checked;
 				const style = getComputedStyle(input);
 				const width = input.getBoundingClientRect().width;
-				const knob = getComputedStyle(input, "::after");
-				const left =
-					parseFloat(style.borderLeftWidth) +
-					parseFloat(knob.left) +
-					new DOMMatrix(knob.transform === "none" ? "" : knob.transform).m41;
-				return [width, left, width - left - parseFloat(knob.width), style.flexGrow];
+				const gaps = (checked) => {
+					// Not a click: no change event, no command.
+					input.checked = checked;
+					const knob = getComputedStyle(input, "::after");
+					const left =
+						parseFloat(style.borderLeftWidth) +
+						parseFloat(knob.left) +
+						new DOMMatrix(knob.transform === "none" ? "" : knob.transform).m41;
+					return [left, width - left - parseFloat(knob.width)];
+				};
+				const result = { width, on: gaps(true), off: gaps(false), grows: style.flexGrow };
+				input.checked = was;
+				still.remove();
+				return result;
 			})()`);
-		for (const scheme of ["light", "dark"]) {
-			await stack.panel.send("Emulation.setEmulatedMedia", {
-				features: [{ name: "prefers-color-scheme", value: scheme }],
-			});
-			// On (connected): flush right, 2 px from the end, as off is left.
-			await stack.panel.waitFor(`document.getElementById("ai-switch").checked`);
-			await Bun.sleep(200); // the transition
-			expect(await gaps()).toEqual([34, 16, 2, "0"]);
-			const off = await stack.panel.eval<[number, number]>(`(() => {
-				const input = document.getElementById("ai-switch");
-				const knob = getComputedStyle(input, "::after");
-				return [parseFloat(knob.left), input.getBoundingClientRect().width];
-			})()`);
-			expect(off).toEqual([2, 34]);
+		const flush: Awaited<ReturnType<typeof measure>> = {
+			width: 34,
+			on: [16, 2],
+			off: [2, 16],
+			grows: "0",
+		};
+		for (const features of [
+			[{ name: "prefers-color-scheme", value: "light" }],
+			[{ name: "prefers-color-scheme", value: "dark" }],
+			[{ name: "forced-colors", value: "active" }],
+		]) {
+			await stack.panel.send("Emulation.setEmulatedMedia", { features });
+			expect(await measure()).toEqual(flush);
 		}
+		// Forced colours: the track is outlined, not left to a background.
+		expect(
+			await stack.panel.eval(
+				`getComputedStyle(document.getElementById("ai-switch")).borderTopStyle`,
+			),
+		).toBe("solid");
 		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
 	});
 
@@ -550,6 +572,19 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			async execute() { return "late order"; },
 		})`);
 		await waitForTools(stack, (n) => n.includes("page_late_order"));
+		// The button changed under the pointer (another label, one more tool):
+		// a click right then allows nothing.
+		await stack.panel.waitFor(
+			`${head}.title === "Allow all 2 tools that ask first on ${SITE}"`,
+		);
+		expect(await stack.panel.eval(`${head}.disabled`)).toBe(true);
+		await stack.panel.click("#allow-tools");
+		await Bun.sleep(300);
+		expect(
+			((await kvAll(stack.worker))["allowedTools"] as Record<string, string[]>)[
+				SITE
+			],
+		).not.toContain("late_order");
 		const late = call(stack, "page_late_order");
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");
@@ -561,7 +596,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.click("#allow-tools");
 		await stack.panel.waitFor(`${head}.textContent === "Ask for all"`);
 		expect((await call(stack, "page_late_order")).isError).toBeFalsy();
-		// Ask for all: every one asks first again.
+		// Ask for all (once it may be clicked: its label just changed): every
+		// one asks first again.
+		await stack.panel.waitFor(`!${head}.disabled`);
 		await stack.panel.click("#allow-tools");
 		await stack.panel.waitFor(`${head}.textContent === "Allow all"`);
 		const asks = call(stack, "page_place_order", { item: "asks" });
@@ -570,21 +607,97 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await asks).isError).toBe(true);
 	});
 
-	test("Allow all takes only tools the worker offers on that origin", async () => {
-		await stack.panel.eval(`(async () => {
+	/** Send panel commands over a port of the panel's own, as its page does. */
+	const sendCommands = (commands: unknown[]) =>
+		stack.panel.eval(`(async () => {
 			const port = chrome.runtime.connect({ name: "panel" });
-			port.postMessage({ type: "set-allowed-all", origin: "${SITE}", names: ["not_offered", "get_greeting"], on: true });
-			port.postMessage({ type: "set-allowed-all", origin: "${OTHER}", names: ["place_order"], on: true });
-			await new Promise((resolve) => setTimeout(resolve, 1000));
+			for (const command of ${JSON.stringify(commands)}) port.postMessage(command);
+			await new Promise((resolve) => setTimeout(resolve, 200));
 			port.disconnect();
 		})()`);
-		const allowedTools = (await kvAll(stack.worker))["allowedTools"] as
-			| Record<string, string[]>
-			| undefined;
+
+	/** The tools allowed on `origin`, once `check` holds for them (polled). */
+	async function allowedOn(
+		origin: string,
+		check: (names: string[]) => boolean,
+	): Promise<string[]> {
+		const end = Date.now() + 10_000;
+		for (;;) {
+			const all = (await kvAll(stack.worker))["allowedTools"] as
+				| Record<string, string[]>
+				| undefined;
+			const names = all?.[origin] ?? [];
+			if (check(names)) return names;
+			if (Date.now() > end)
+				throw new Error(`allowed on ${origin}: ${JSON.stringify(names)}`);
+			await Bun.sleep(100);
+		}
+	}
+
+	test("Allow all takes only tools the worker offers on that origin", async () => {
+		await sendCommands([
+			{
+				type: "set-allowed-all",
+				origin: SITE,
+				names: ["place_order", "not_offered", "get_greeting"],
+				on: true,
+			},
+			{
+				type: "set-allowed-all",
+				origin: OTHER,
+				names: ["place_order"],
+				on: true,
+			},
+		]);
+		// The one it offers there and that asks first: allowed.
+		const names = await allowedOn(SITE, (n) => n.includes("place_order"));
 		// Not a name it does not offer, not a read-only one, not another site.
-		expect(allowedTools?.[SITE] ?? []).not.toContain("not_offered");
-		expect(allowedTools?.[SITE] ?? []).not.toContain("get_greeting");
-		expect(allowedTools?.[OTHER]).toBeUndefined();
+		expect(names).toEqual(["place_order"]);
+		expect(await allowedOn(OTHER, () => true)).toEqual([]);
+		await sendCommands([
+			{
+				type: "set-allowed-all",
+				origin: SITE,
+				names: ["place_order"],
+				on: false,
+			},
+		]);
+		await allowedOn(SITE, (n) => n.length === 0);
+	});
+
+	test("Ask for all also takes away a tool the page dropped since: back, it asks first", async () => {
+		const register = `document.modelContext.registerTool({
+			name: "dropped_order",
+			description: "Orders; the page drops it and brings it back.",
+			inputSchema: { type: "object" },
+			async execute() { return "dropped order"; },
+		})`;
+		await tab.eval(register);
+		await waitForTools(stack, (n) => n.includes("page_dropped_order"));
+		await call(stack, "webmcp_tools");
+		const command = (on: boolean) => ({
+			type: "set-allowed-all",
+			origin: SITE,
+			names: ["dropped_order"],
+			on,
+		});
+		await sendCommands([command(true)]);
+		await allowedOn(SITE, (n) => n.includes("dropped_order"));
+		// The page drops it (another page of the site, without it), and the
+		// panel's "Ask for all" still names it.
+		await tab.goto(`${SITE}/plain.html`);
+		await call(stack, "webmcp_tools");
+		await sendCommands([command(false)]);
+		await allowedOn(SITE, (n) => !n.includes("dropped_order"));
+		// It comes back as a tool that changes things: it asks first.
+		await tab.goto(`${SITE}/webmcp.html`);
+		await tab.eval(register);
+		await waitForTools(stack, (n) => n.includes("page_dropped_order"));
+		await call(stack, "webmcp_tools");
+		const asked = call(stack, "page_dropped_order");
+		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+		await answerInPanel(stack, "deny");
+		expect((await asked).isError).toBe(true);
 	});
 
 	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
@@ -932,6 +1045,36 @@ describe.skipIf(chrome === undefined)(
 					];
 				})()`),
 			).toEqual([true, false, "solid"]);
+			// Off: the app stays paired, its dot grey, the list "Paired".
+			const appRow = () =>
+				stack.panel.eval<[number, boolean, string | null, string]>(`(() => {
+					const list = document.getElementById("grants");
+					const dot = list.querySelector(".dot");
+					return [
+						list.querySelectorAll("li").length,
+						dot?.classList.contains("on") ?? false,
+						list.getAttribute("aria-label"),
+						dot ? getComputedStyle(dot).backgroundColor : "",
+					];
+				})()`);
+			const [, , , green] = await appRow();
+			await stack.panel.click("#ai-switch");
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "off"`,
+			);
+			const off = await appRow();
+			expect(off.slice(0, 3)).toEqual([1, false, "Paired AI apps"]);
+			expect(off[3]).not.toBe(green);
+			await stack.panel.click("#connect");
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "on"`,
+				15_000,
+			);
+			expect((await appRow()).slice(0, 3)).toEqual([
+				1,
+				true,
+				"Connected AI apps",
+			]);
 			await stack.panel.click("#add-app");
 			await stack.panel.waitFor(
 				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)} && !document.getElementById("pair-done").hidden`,

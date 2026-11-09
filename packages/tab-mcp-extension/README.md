@@ -26,7 +26,8 @@ The page's tools are the page's word:
   list, a click on "asks first" turns the tool into "allowed" for that site (exact
   origin), kept until you click it again. "Allow all" over the list allows every tool
   listed at that moment that asks first, in one step; once they all are, it reads "Ask
-  for all" and turns them all back. A tool the page registers later asks first. Both only for pages of an http(s) site: pages
+  for all" and turns them all back. A tool the page registers later asks first. When the
+  page changes what the button would do, it waits 750 ms before it takes a click. Both only for pages of an http(s) site: pages
   with an opaque origin (`null`, such as sandboxed or `data:` pages) always ask.
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
@@ -64,8 +65,8 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 - "Turn on AI access" (or the "AI access" switch) connects to the relay. With no AI app
   paired yet, the panel shows the address for your AI app and a pairing code at once;
   the [connect page](https://ractive.ch/tab-mcp/connect/) says how to add the address in
-  Claude, ChatGPT, Claude Code and Codex. Paired apps are listed, each with a green dot and a
-  Disconnect button (which asks first, and takes no double click); "+ Add another AI app" shows the address and a code again. The
+  Claude, ChatGPT, Claude Code and Codex. Paired apps are listed, each with a dot (green while connected,
+  grey while off or connecting) and a Disconnect button (which asks first, and takes no double click); "+ Add another AI app" shows the address and a code again. The
   address shows only while pairing. Off, the panel says "AI access is off · paired apps
   stay paired". The relay address is under "Settings".
 - The connection lives in the extension's service worker, not in the side panel: close

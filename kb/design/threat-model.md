@@ -246,7 +246,11 @@ did, by connecting the extension.
   closed at once, and a command that does not parse is dropped. "Allow all" carries the
   site and the tool names, at most 64, and the worker allows only those it offers on
   that site itself, now, that are not read-only: names from the panel are not taken on
-  trust, and a tool the page registers later still asks first. The one message a
+  trust, and a tool the page registers later still asks first. "Ask for all" takes away
+  every name it carries on that site, offered now or not, so a tool the page dropped
+  or marked read-only since cannot come back allowed. When the page changes what "Allow
+  all" would do (its label, its tools, or it just appeared), the button and the
+  switches stay off for 750 ms. The one message a
   content script may send is `webmcp-changed`, which only makes the bridge read the
   tools again. A compromised page can therefore not turn AI access on, allow a tool or
   answer a question; a compromised extension page could, but then the extension is
