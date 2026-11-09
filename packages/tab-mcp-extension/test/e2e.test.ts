@@ -143,6 +143,11 @@ async function start(
 			`document.getElementById("address").textContent`,
 			15_000,
 		);
+		// Done with the address and code: close the connect dialog, as a user
+		// would, so it does not cover the panel.
+		await panel.eval(
+			`document.querySelectorAll("dialog.tab-mcp-dialog").forEach((d) => d.close())`,
+		);
 		const token = await tokenFor(relay.store, address);
 		const client = new Client(
 			{ name: "extension-e2e", version: "1.0.0" },
@@ -302,6 +307,11 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
+		// "Always allow" is offered too (the library forgets it when the page
+		// changes, as the bridge then registers the tool anew).
+		await stack.panel.waitFor(
+			`[...document.querySelectorAll("dialog.tab-mcp-dialog button")].some((b) => b.textContent.trim() === "Always allow")`,
+		);
 		await answerInPanel(stack, "Allow");
 		const result = await allowed;
 		expect(result.isError).toBeFalsy();
@@ -331,6 +341,29 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		});
 		await answerInPanel(stack, "Allow");
 		expect((await ordered).content[0]?.text).toContain("cake");
+	});
+
+	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
+		const toggle = `button[data-tool="place_order"]`;
+		await stack.panel.waitFor(`document.querySelector('${toggle}')`);
+		await stack.panel.click(toggle);
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}').textContent === "allowed"`,
+		);
+		const result = await call(stack, "page_place_order", { item: "allowed" });
+		expect(result.isError).toBeFalsy();
+		expect(await tab.eval("window.calls.at(-1)")).toEqual([
+			"place_order",
+			"allowed",
+		]);
+		// Switched back: it asks again.
+		await stack.panel.click(toggle);
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}').textContent === "asks first"`,
+		);
+		const asked = call(stack, "page_place_order", { item: "asked" });
+		await answerInPanel(stack, "Don't allow");
+		expect((await asked).isError).toBe(true);
 	});
 
 	test("cancelling a call cancels it in the page", async () => {

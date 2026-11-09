@@ -21,7 +21,10 @@ The page's tools are the page's word:
 - Their descriptions reach the AI app starting with the page's origin (`From
   https://shop.example: …`), cut to 1000 characters; titles to 100.
 - A tool the page marks read-only runs at once; every other one asks you in the side
-  panel each time (the library's dialog: click into the panel, then Allow).
+  panel each time (the library's dialog: click into the panel, then Allow). "Always
+  allow" in that dialog stops asking for that tool on this page until the page changes
+  (navigation, reload, another tab). In the panel's list, a click on "asks first" turns
+  the tool into "allowed" for that site (exact origin), kept until you click it again.
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
   changed, the AI app is told to list the tools again.

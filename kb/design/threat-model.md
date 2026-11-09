@@ -211,7 +211,10 @@ did, by connecting the extension.
   and descriptions with the same origin prefix.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user in the side panel every time, naming the page's origin in the tool's
-  description. A page can only mark its own tools read-only, so a lie harms that page's
+  description. The user can stop the questions: "Always allow" in the dialog for that
+  tool on that page (forgotten when the page changes), or "allowed" in the panel for a
+  tool of one exact origin (kept). An allowed tool runs whatever the AI app (or a prompt
+  injection steering it) asks of it. A page can only mark its own tools read-only, so a lie harms that page's
   own user session, which its scripts could reach anyway.
 - **A call runs only where its tool was listed.** Each page's content script has its
   own id; a call carries it and the read-only claim its tool was offered with, and the

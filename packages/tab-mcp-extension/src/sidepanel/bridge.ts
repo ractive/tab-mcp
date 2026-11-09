@@ -314,6 +314,20 @@ export class PageToolBridge {
 		return this.#state;
 	}
 
+	/** The page tool behind an offered tool name (`page_<name>`): its site and name. */
+	lookup(
+		toolName: string,
+	): { origin: string; name: string; readOnly: boolean } | undefined {
+		for (const callable of this.#callable.values())
+			if (bridgedName(callable.target.name) === toolName)
+				return {
+					origin: callable.origin,
+					name: callable.target.name,
+					readOnly: callable.target.readOnly,
+				};
+		return undefined;
+	}
+
 	/**
 	 * Read the tools of the page in front again and offer them. One read runs
 	 * at a time; asked again meanwhile, it reads once more after. Resolves
@@ -372,7 +386,8 @@ export class PageToolBridge {
 		if (!callable.target.readOnly) {
 			const allowed = await confirm({
 				tool: {
-					name: `${PREFIX}${name}`,
+					// The tool's own name, so "Always allow" is one entry for both.
+					name: bridgedName(name) ?? `${PREFIX}${name}`,
 					title: callable.title,
 					description: callable.description,
 				},

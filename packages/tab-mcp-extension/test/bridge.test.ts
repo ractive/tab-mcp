@@ -490,6 +490,14 @@ describe("webmcp_call (by name)", () => {
 		expect(state.calls[0]?.target.readOnly).toBe(false);
 	});
 
+	test("it asks under the tool's own name (one Always allow for both paths)", async () => {
+		const { bridge, asked, confirm } = await setup([
+			pageTool("place.order", { annotations: {} }),
+		]);
+		await bridge.callByName("place.order", {}, options(), confirm(true));
+		expect(asked[0]?.tool.name).toBe("page_place_order");
+	});
+
 	test("a name the page does not offer says so", async () => {
 		const { bridge, confirm } = await setup([pageTool("search")]);
 		await expect(

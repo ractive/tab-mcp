@@ -168,6 +168,25 @@ p {
 	color: var(--asks-fg);
 }
 
+.badge.allowed {
+	background: var(--accent);
+	color: var(--accent-fg);
+}
+
+/* A badge that is a switch: "asks first" and "allowed". */
+button.badge.toggle {
+	border: 0;
+	cursor: pointer;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	padding: 1px 8px;
+}
+
+button.badge.toggle:hover {
+	filter: brightness(0.95);
+}
+
 .tools {
 	list-style: none;
 	margin: 0;

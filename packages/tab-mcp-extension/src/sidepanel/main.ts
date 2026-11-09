@@ -5,6 +5,7 @@
  */
 
 import {
+	type ConfirmRequest,
 	type DisconnectDetail,
 	type Icon,
 	TabMcp,
@@ -17,6 +18,12 @@ import {
 	callInTab,
 	tabInFront,
 } from "../tabs.ts";
+import {
+	type AllowedTools,
+	isAllowed,
+	loadAllowed,
+	setAllowed,
+} from "./allowed.ts";
 import { type BridgeState, PageToolBridge } from "./bridge.ts";
 import {
 	loadAiOn,
@@ -58,8 +65,23 @@ async function iconsFor(): Promise<Icon[]> {
 
 const icons = await iconsFor();
 
+/** The page tools the user allowed without asking (per site), kept current. */
+let allowed: AllowedTools = await loadAllowed();
+
+/**
+ * The confirmation of a tool that is not read-only: a page tool the user
+ * allowed for its site runs; anything else asks (the library's dialog, with
+ * "Always allow" for this page).
+ */
+function decide(target: TabMcp, request: ConfirmRequest): Promise<boolean> {
+	const tool = bridge?.lookup(request.tool.name);
+	if (tool !== undefined && isAllowed(allowed, tool.origin, tool.name))
+		return Promise.resolve(true);
+	return target.confirmInPage(request);
+}
+
 function connection(relay: string): TabMcp {
-	const created = new TabMcp({
+	const created: TabMcp = new TabMcp({
 		relay,
 		server: {
 			name: "tab-mcp-for-chrome",
@@ -69,6 +91,12 @@ function connection(relay: string): TabMcp {
 			icons,
 		},
 		appName: "tab-mcp for Chrome",
+		// "Always allow" in the confirmation: per AI app and tool, forgotten
+		// when the tool is unregistered, which the bridge does whenever the
+		// page changes (navigation, reload, another tab). So it holds for this
+		// tool on this page only.
+		alwaysAllow: true,
+		onConfirm: (request) => decide(created, request),
 	});
 	const pageTools = new PageToolBridge(
 		created,
@@ -78,7 +106,7 @@ function connection(relay: string): TabMcp {
 	for (const tool of createTools(
 		tabs,
 		() => pageTools,
-		(request) => created.confirmInPage(request),
+		(request) => decide(created, request),
 	))
 		void created.registerTool(tool);
 	bridge?.stop();
@@ -245,6 +273,30 @@ async function showTab(): Promise<void> {
 			: "");
 }
 
+/**
+ * "asks first" or "allowed" for a tool that is not read-only: a click turns
+ * it into the other, for this site.
+ */
+function allowToggle(origin: string, name: string): HTMLElement {
+	const on = isAllowed(allowed, origin, name);
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = `badge toggle ${on ? "allowed" : "asks"}`;
+	button.textContent = on ? "allowed" : "asks first";
+	button.title = on
+		? `Runs without asking on ${origin}. Click to ask first again.`
+		: `Asks you before each call. Click to allow it on ${origin} without asking.`;
+	button.setAttribute("aria-pressed", String(on));
+	button.dataset["tool"] = name;
+	button.addEventListener("click", () => {
+		void setAllowed(origin, name, !on).then((now) => {
+			allowed = now;
+			showTools();
+		});
+	});
+	return button;
+}
+
 /** The page's tools as the bridge offers them. */
 function showTools(): void {
 	const state: BridgeState | undefined = bridge?.state;
@@ -271,7 +323,7 @@ function showTools(): void {
 				? badge("left out")
 				: tool.readOnly
 					? badge("reads", "reads")
-					: badge("asks first", "asks"),
+					: allowToggle(state?.origin ?? "", tool.name),
 		);
 		return li;
 	});
