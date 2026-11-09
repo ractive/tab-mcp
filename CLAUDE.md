@@ -118,7 +118,8 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 tab-mcp: a relay that lets AI apps call MCP tools offered by a web page in a
 browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
 `packages/tab-mcp-client` (browser library, `@ractive-ch/tab-mcp-client`),
-`test/e2e` (end-to-end test with its test page).
+`packages/tab-mcp-extension` (tab-mcp for Chrome, Chrome Web Store from
+`extension-v0.1.0`), `test/e2e` (end-to-end test with its test page).
 
 - Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
   `bun run fix` to format. Type check per workspace with `bun check -p <dir>`

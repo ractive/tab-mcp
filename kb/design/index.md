@@ -8,6 +8,6 @@
 * [Security model and threat model](threat-model.md) - Assets, attackers, what the relay sees, the mitigations and safe defaults, and the risks that remain.
 * [tab-mcp architecture](architecture.md) - Components, endpoints, data flow and the full sequence from a page connecting, through pairing with a code, to an AI app calling its tools and the user disconnecting.
 * [tab-mcp for Chrome: the browser extension](extension.md) - A small Chrome extension in this repository that bridges a page's own WebMCP tools to AI apps outside the browser, through the relay. Recipes (tools an AI app builds for a site) are dropped (DEC-114); user scripts are an experiment of their own.
-* [Tab↔relay protocol, version 1](protocol.md) - The versioned WebSocket protocol between the browser library and the relay — message types (session, pairing, grants, tunnel), JSON shapes, errors, heartbeat and limits.
+* [Tab↔relay protocol, version 1](protocol.md) - Pointer to docs/protocol.md, the normative description of the versioned WebSocket protocol `tab-mcp.v1` between the browser library and the relay.
 
 <!-- okf:index:end -->

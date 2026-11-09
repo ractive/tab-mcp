@@ -37,15 +37,17 @@ The page's tools are the page's word:
   itself). A call that the page does not answer in 60 s ends for the AI app, also when
   the page is stuck; cancelling in the AI app cancels it in the page. Results are marked
   untrusted; their text, all blocks together, is cut to 100,000 characters. A page that
-  answers with an MCP result (as `@mcp-b/global` pages do) gets its text blocks and up
-  to 1 MB per image through, at most 32 blocks.
+  answers with an MCP result (as `@mcp-b/global` pages do) gets its text blocks and
+  images through, at most 32 blocks, each image up to 1 MB of base64 (about 750 KB of
+  image data).
 - Names: `page_<name>`, other characters than letters, digits, `_` and `-` as `_`, at most
   64 characters in all: the Anthropic API takes no other tool names, and Claude drops the
   rest without a word.
 - Left out: tools whose `page_<name>` would be longer than 64 characters or the same as
   another's, a schema that is no
   object schema or over 16 KB, more than 64 tools, and tools a tab-mcp page offers itself
-  (listed in `<html data-tab-mcp-webmcp>`).
+  (listed in `<html data-tab-mcp-webmcp>`), once the library mirrors its tools into
+  WebMCP (iteration 25); until then no tab-mcp page sets the attribute.
 - Only the top frame, and only the browser's own WebMCP: a page's replacement
   `document.modelContext` (or a polyfill without native WebMCP) is not used.
 
@@ -125,11 +127,16 @@ key in its manifest, or, without one, from the folder it was loaded from.
 - Without the key the build gets an id of its own; run your own relay
   (`docs/self-hosting.md`) and allow that id, or use the relay's development mode.
 - `bun scripts/build.ts --store` builds the Chrome Web Store package (no key, no host
-  access); `--test` the end-to-end tests' build (no key, host access at install).
+  access, no source maps); `--test` the end-to-end tests' build (no key, host access at
+  install).
 
 ## Tests
 
 - `test/unit.test.ts`: manifests, the key's id, reading a page, the tool, the refusals.
+- `test/build.test.ts`: the store build has no key, no `host_permissions` and no source
+  maps.
+- `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
+  while pairing), its clicks (Disconnect's double click, the switch) and "Allow all".
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, the panel, the time limit), the

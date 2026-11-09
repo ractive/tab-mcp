@@ -2,6 +2,7 @@
 
 ## 2026-11-09
 
+- docs/pre-release: the pre-release review's documentation and release-path fixes: SECURITY.md and docs/threat-model.md cover tab-mcp for Chrome 0.1.0 (A13 ported); release.yml skips `extension-v*` releases cleanly; the `--store` build has no source maps (test/build.test.ts); iteration 23 tasks for the store id on the hosted relay and the store package checks; kb/design/protocol.md points to docs/protocol.md; webmcp_call in the extension design; image limit worded as base64; the extension in the README and CLAUDE.md
 - ext/kv-atomic: a settings write is all or nothing; the worker no longer reads or removes anything in chrome.storage.local (settings live only in its database); its database connection is reopened when Chrome closes it under the worker; threat model A13
 - ext/panel-polish: a connected app's row shows a green dot, Disconnect is an outlined button; the AI access switch's knob sits flush (the track took the text fields' padding, border and flex); "Allow all" / "Ask for all" over a site's tool list (set-allowed-all, checked by the worker against the tools it offers); threat model A13
 - ext/storage-hardening: the extension's settings and address secret moved from chrome.storage.local (open to content scripts by default) into IndexedDB in the extension's origin, worker only, with a one-off crash-safe migration; `TRUSTED_CONTEXTS` on the local area kept as an extra layer, best effort; notifications cleared only after their `create` finished, one per question; threat model A13
