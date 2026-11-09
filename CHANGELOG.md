@@ -364,6 +364,11 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   last code was entered), `locked` (5 wrong attempts) or `expired`. The page's dialog
   uses it to wait for the AI app after a code was used instead of showing the next code
   at once. Older clients ignore it.
+- When the same browser sends the `/authorize` form again for a request that already
+  paired (a double click, a page left open), the page names the AI app and says
+  "Already connected" once the app exchanged its code, else "Already sent" (start
+  again if the app does not show the connection), instead of "This connection request
+  has expired or was already used". Another browser still gets the error.
 
 ### [0.7.1][relay-0.7.1] - 2026-11-09
 
