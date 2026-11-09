@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-09
+
+- Iteration 20 on iter-20/webmcp-bridge: the WebMCP bridge (page.<name> tools, webmcp_tools, toolchange, confirmation of tools not marked read-only, timeout, cancellation, limits), the side panel redesigned, the connector's icon; threat model A13
+
 ## 2026-11-08
 
 - Planned tab-mcp for Chrome, a browser extension in this repository ([design](/design/extension.md)): iteration 18 tests whether an extension can reach a page's WebMCP tools, 19 the skeleton with reading tools, 20 the WebMCP bridge, 21 recipes (tools an AI app builds for a site, Overmark's matcher copied in), 22 managing them, 23 the release; DEC-109 to DEC-112

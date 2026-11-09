@@ -8,7 +8,23 @@ export const CONTENT_SCRIPT = "content.js";
 /** Its id for `chrome.scripting.registerContentScripts` (with host access). */
 export const CONTENT_SCRIPT_ID = "tab-mcp-page";
 
-export type ContentRequest = { type: "page-info" };
+export type ContentRequest =
+	| { type: "page-info" }
+	| { type: "webmcp-list" }
+	| {
+			type: "webmcp-call";
+			callId: string;
+			/** The page the tool was listed from: a call never reaches another. */
+			documentId: string;
+			name: string;
+			/** The read-only claim the tool was offered with. */
+			readOnly: boolean;
+			input: unknown;
+	  }
+	| { type: "webmcp-cancel"; callId: string };
+
+/** From the content script: the page's tools changed (`toolchange`). */
+export type ContentEvent = { type: "webmcp-changed" };
 
 /** The page in a tab, as the content script sees it. */
 export interface PageInfo {
@@ -30,6 +46,48 @@ export interface PageInfo {
 	};
 }
 
+/** A tool the page registered, as `getTools()` gives it (Chrome 156: no `outputSchema`). */
+export interface PageTool {
+	name: string;
+	/** Its schema was too big to send (over 16 KB as JSON). */
+	schemaTooBig?: true;
+	title?: string;
+	description: string;
+	inputSchema?: unknown;
+	annotations?: {
+		readOnlyHint?: boolean;
+		consequentialHint?: boolean;
+		untrustedContentHint?: boolean;
+	};
+}
+
+/** The page's WebMCP tools. */
+export interface PageTools {
+	url: string;
+	origin: string;
+	/** This page's id (one per content script, so per document). */
+	documentId: string;
+	/** Tools beyond the content script's cap, not listed. */
+	more: number;
+	/** `document.modelContext` is there. */
+	available: boolean;
+	tools: PageTool[];
+	/**
+	 * Tools left out: those a tab-mcp page mirrors into WebMCP (listed in
+	 * `<html data-tab-mcp-webmcp>`), which an AI app gets from the page itself.
+	 */
+	mirrored: string[];
+	/** Why the tools could not be listed, if they could not. */
+	error?: string;
+}
+
+/** The answer to a call: what `executeTool()` returned (`null`: the tool navigated). */
+export type CallResult =
+	| { ok: true; value: string | null }
+	| { ok: false; error: string; gone?: true };
+
 export type ContentResponse =
 	| ({ ok: true } & PageInfo)
+	| ({ ok: true } & PageTools)
+	| CallResult
 	| { ok: false; error: string };

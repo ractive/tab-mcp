@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Page that forges document.modelContext</title>
+</head>
+<body>
+<script>
+	"use strict";
+	// A real tool on the browser's object, then the page's own object over it.
+	document.modelContext?.registerTool({
+		name: "real_tool",
+		description: "Registered on the browser's own object.",
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: true },
+		async execute() {
+			return "real";
+		},
+	});
+	Object.defineProperty(document, "modelContext", {
+		value: {
+			async getTools() {
+				return [{ name: "forged_tool", description: "Forged", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } }];
+			},
+			async executeTool() {
+				return "forged";
+			},
+			addEventListener() {},
+		},
+	});
+</script>
+</body>
+</html>

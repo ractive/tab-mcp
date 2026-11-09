@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { createManifest, extensionId, mitText } from "../scripts/build.ts";
-import { pageInfo } from "../src/content.ts";
+import { callTool, pageInfo, pageTools } from "../src/content.ts";
 import { relayProblem } from "../src/sidepanel/relay.ts";
 import { createTools } from "../src/sidepanel/tools.ts";
 import { noAccess } from "../src/tabs.ts";
@@ -106,14 +106,25 @@ describe("pageInfo", () => {
 
 describe("page_info", () => {
 	test("read-only, untrusted, and answers for the tab in front", async () => {
-		const [tool] = createTools({
-			current: async () => ({ id: 7, url: "https://example.com/", title: "" }),
-			page: async (tab) => ({
-				url: tab.url,
-				title: "From the page",
-				webmcp: { available: false, tools: 0 },
+		const [tool] = createTools(
+			{
+				current: async () => ({
+					id: 7,
+					url: "https://example.com/",
+					title: "",
+				}),
+				page: async (tab) => ({
+					url: tab.url,
+					title: "From the page",
+					webmcp: { available: false, tools: 0 },
+				}),
+			},
+			() => ({
+				state: { available: false, tools: [], mirrored: [] },
+				refresh: async () => {},
+				callByName: async () => undefined,
 			}),
-		});
+		);
 		expect(tool?.name).toBe("page_info");
 		expect(tool?.annotations).toEqual({
 			readOnlyHint: true,
@@ -154,5 +165,117 @@ describe("relay address", () => {
 		expect(relayProblem("http://relay.example")).toContain("localhost");
 		expect(relayProblem("ftp://relay.example")).toContain("https:");
 		expect(relayProblem("nonsense")).toBe("Not an address.");
+	});
+});
+
+/** A document with WebMCP tools, as the content script reads it. */
+function toolDocument(
+	tools: { name: string; readOnly: boolean }[],
+	mirrored = "",
+) {
+	const executed: string[] = [];
+	const registered = tools.map((t) => ({
+		name: t.name,
+		description: `${t.name}.`,
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: t.readOnly },
+	}));
+	const doc = {
+		location: { href: "https://shop.example/", origin: "https://shop.example" },
+		title: "Shop",
+		documentElement: {
+			lang: "",
+			getAttribute: (name: string) =>
+				name === "data-tab-mcp-webmcp" ? mirrored : null,
+		},
+		modelContext: {
+			getTools: async () => registered,
+			executeTool: async (tool: { name: string }) => {
+				executed.push(tool.name);
+				return "ran";
+			},
+		},
+	} as unknown as Document;
+	return { doc, executed };
+}
+
+describe("calls in the content script", () => {
+	const signal = new AbortController().signal;
+
+	test("a call listed from this page, with the same claim, runs", async () => {
+		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
+		const listed = await pageTools(doc, "doc-A");
+		expect(listed.documentId).toBe("doc-A");
+		expect(
+			await callTool(
+				{ documentId: "doc-A", name: "buy", readOnly: false },
+				{},
+				signal,
+				doc,
+				"doc-A",
+			),
+		).toEqual({ ok: true, value: "ran" });
+		expect(executed).toEqual(["buy"]);
+	});
+
+	test("a call listed from another page (the tab navigated) never runs", async () => {
+		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
+		const result = await callTool(
+			{ documentId: "doc-A", name: "buy", readOnly: false },
+			{},
+			signal,
+			doc,
+			"doc-B",
+		);
+		expect(result).toMatchObject({ ok: false, gone: true });
+		expect(executed).toEqual([]);
+	});
+
+	test("a tool whose read-only claim changed since it was listed never runs", async () => {
+		// Offered as read-only (no confirmation), now consequential: refused.
+		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
+		const result = await callTool(
+			{ documentId: "doc-A", name: "buy", readOnly: true },
+			{},
+			signal,
+			doc,
+			"doc-A",
+		);
+		expect(result).toMatchObject({ ok: false, gone: true });
+		expect(executed).toEqual([]);
+	});
+
+	test("mirrored tools are left out and cannot be called", async () => {
+		const { doc, executed } = toolDocument(
+			[
+				{ name: "own", readOnly: true },
+				{ name: "mirror", readOnly: true },
+			],
+			"mirror",
+		);
+		const listed = await pageTools(doc, "doc-A");
+		expect(listed.tools.map((t) => t.name)).toEqual(["own"]);
+		expect(listed.mirrored).toEqual(["mirror"]);
+		const result = await callTool(
+			{ documentId: "doc-A", name: "mirror", readOnly: true },
+			{},
+			signal,
+			doc,
+			"doc-A",
+		);
+		expect(result).toMatchObject({ ok: false, gone: true });
+		expect(executed).toEqual([]);
+	});
+
+	test("what a page sends is capped", async () => {
+		const { doc } = toolDocument(
+			Array.from({ length: 300 }, (_, i) => ({
+				name: `t${i}`,
+				readOnly: true,
+			})),
+		);
+		const listed = await pageTools(doc, "doc-A");
+		expect(listed.tools.length).toBe(256);
+		expect(listed.more).toBe(44);
 	});
 });

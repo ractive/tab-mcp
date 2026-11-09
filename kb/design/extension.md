@@ -71,8 +71,11 @@ AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-cli
 | Tool | Kind | What it does |
 |---|---|---|
 | `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
-| `webmcp_tools` | read | The page's own WebMCP tools (iteration 20) |
-| `page.<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call |
+| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, whether it only reads, and why a tool is left out (iteration 20) |
+| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20) |
+
+The side panel shows the connection, the tab in front with its tools ("reads" or "asks
+first"), and the relay address under Settings. The connector carries the extension's icon.
 
 ## Risks and how the design meets them
 

@@ -16,6 +16,7 @@
 		"directory": "packages/tab-mcp-extension"
 	},
 	"dependencies": {
+		"@cfworker/json-schema": "4.1.4",
 		"@ractive-ch/tab-mcp-client": "workspace:*"
 	},
 	"devDependencies": {

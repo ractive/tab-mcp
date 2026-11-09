@@ -13,7 +13,14 @@
  * Playwright's cache): required in CI, skipped elsewhere without it.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	setDefaultTimeout,
+	test,
+} from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +41,10 @@ import {
 	type Page,
 	type Served,
 } from "./browser.ts";
+
+// `bun run verify` runs these with Bun's default of 5 s a test: too short on
+// CI for a navigation, an icon click and the tools following.
+setDefaultTimeout(30_000);
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
@@ -100,7 +111,12 @@ async function start(
 		});
 		browser = await Browser.launch(chrome as string, {
 			extension: outdir,
-			args: ["--enable-features=WebMCP"],
+			args: [
+				"--enable-features=WebMCP",
+				...(process.env["CHROME_LOG"]
+					? ["--enable-logging=stderr", "--v=0"]
+					: []),
+			],
 			serve,
 		});
 		const tab = await browser.newPage(first);
@@ -110,10 +126,14 @@ async function start(
 			(await browser.waitForTarget((t) => t.url === panelUrl)).targetId,
 		);
 		await panel.waitFor(`document.getElementById("relay")?.value`);
+		// The relay address is under "Settings", closed at first.
+		await panel.eval(`document.querySelector("details.settings").open = true`);
 		await panel.eval(
 			`document.getElementById("relay").value = ${JSON.stringify(relay.url)}`,
 		);
-		await panel.click(`#relay-form button[type=submit]`);
+		// Saving needs no click of the user's; a click right after "Settings"
+		// opened could land before the layout settled.
+		await panel.eval(`document.getElementById("relay-form").requestSubmit()`);
 		// The panel marks the relay it switched to (after saving it).
 		await panel.waitFor(
 			`document.documentElement.dataset.relay === ${JSON.stringify(relay.url)}`,
@@ -122,6 +142,11 @@ async function start(
 		const address = await panel.waitFor<string>(
 			`document.getElementById("address").textContent`,
 			15_000,
+		);
+		// Done with the address and code: close the connect dialog, as a user
+		// would, so it does not cover the panel.
+		await panel.eval(
+			`document.querySelectorAll("dialog.tab-mcp-dialog").forEach((d) => d.close())`,
 		);
 		const token = await tokenFor(relay.store, address);
 		const client = new Client(
@@ -146,11 +171,63 @@ interface CallResult {
 	structuredContent?: Record<string, unknown>;
 }
 
-const pageInfo = (stack: Stack) =>
-	stack.client.callTool({
-		name: "page_info",
-		arguments: {},
-	}) as Promise<CallResult>;
+const call = (
+	stack: Stack,
+	name: string,
+	args: Record<string, unknown> = {},
+	options: { signal?: AbortSignal } = {},
+) =>
+	stack.client.callTool(
+		{ name, arguments: args },
+		options,
+	) as Promise<CallResult>;
+
+const pageInfo = (stack: Stack) => call(stack, "page_info");
+
+/** The AI app's tool names, sorted. */
+async function toolNames(stack: Stack): Promise<string[]> {
+	return (await stack.client.listTools()).tools.map((t) => t.name).sort();
+}
+
+/** Wait until the AI app's tool list passes `check`. */
+async function waitForTools(
+	stack: Stack,
+	check: (names: string[]) => boolean,
+): Promise<string[]> {
+	const end = Date.now() + 10_000;
+	for (;;) {
+		const names = await toolNames(stack);
+		if (check(names)) return names;
+		if (Date.now() > end)
+			throw new Error(`the tool list stayed ${JSON.stringify(names)}`);
+		await Bun.sleep(100);
+	}
+}
+
+/** The extension's own tools, sorted. */
+const OWN_TOOLS = ["page_info", "webmcp_call", "webmcp_tools"];
+
+const PAGE_TOOLS = [
+	"page_get_greeting",
+	"page_mcp_result",
+	"page_place_order",
+	"page_slow_tool",
+];
+
+/** Answer the library's confirmation in the side panel with `button`. */
+async function answerInPanel(
+	stack: Stack,
+	button: "Allow" | "Don't allow",
+): Promise<void> {
+	// The dialog arms "Allow" only while its page has focus.
+	await stack.panel.send("Emulation.setFocusEmulationEnabled", {
+		enabled: true,
+	});
+	const selector = `(() => [...document.querySelectorAll("dialog.tab-mcp-dialog button")].find((b) => b.textContent.trim() === ${JSON.stringify(button)} && !b.disabled))()`;
+	await stack.panel.waitFor(`!!${selector}`, 10_000);
+	await stack.panel.eval(`${selector}.id = "e2e-answer"`);
+	await stack.panel.click("#e2e-answer");
+}
 
 describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	let stack: Stack;
@@ -166,10 +243,17 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack?.stop();
 	});
 
-	test("the AI app gets page_info, read-only", async () => {
+	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {
+		const names = await waitForTools(stack, (n) => n.length >= 7);
+		// mirrored_tool is the page's tab-mcp mirror: left out.
+		expect(names).toEqual([...OWN_TOOLS, ...PAGE_TOOLS].sort());
 		const { tools } = await stack.client.listTools();
-		expect(tools.map((t) => t.name)).toEqual(["page_info"]);
-		expect(tools[0]?.annotations?.readOnlyHint).toBe(true);
+		const byName = (name: string) => tools.find((t) => t.name === name);
+		expect(byName("page_info")?.annotations?.readOnlyHint).toBe(true);
+		const greeting = byName("page_get_greeting");
+		expect(greeting?.description).toBe(`From ${SITE}: Greets a name.`);
+		expect(greeting?.annotations?.readOnlyHint).toBe(true);
+		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
 	});
 
 	test("page_info tells the page in front and its WebMCP tools", async () => {
@@ -179,8 +263,145 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			url: `${SITE}/webmcp.html`,
 			title: "Page with WebMCP tools",
 			language: "de-CH",
-			webmcp: { available: true, tools: 2 },
+			webmcp: { available: true, tools: 5 },
 		});
+	});
+
+	test("webmcp_tools lists them, and what is left out", async () => {
+		const result = await call(stack, "webmcp_tools");
+		expect(result.structuredContent).toMatchObject({
+			origin: SITE,
+			available: true,
+			mirrored: ["mirrored_tool"],
+		});
+		const tools = result.structuredContent?.["tools"] as {
+			name: string;
+			tool?: string;
+			readOnly: boolean;
+		}[];
+		expect(tools.map((t) => t.tool).sort()).toEqual(PAGE_TOOLS);
+		expect(tools.find((t) => t.name === "place_order")?.readOnly).toBe(false);
+	});
+
+	test("a read-only tool runs at once, with the page's answer", async () => {
+		const result = await call(stack, "page_get_greeting", { name: "Ada" });
+		expect(result.isError).toBeFalsy();
+		expect(result.content).toEqual([{ type: "text", text: "Hello, Ada!" }]);
+		expect(await tab.eval("window.calls.at(-1)")).toEqual([
+			"get_greeting",
+			"Ada",
+		]);
+	});
+
+	test("arguments are checked against the page's schema (Chrome does not)", async () => {
+		const result = await call(stack, "page_get_greeting", { name: 42 });
+		expect(result.isError).toBe(true);
+		expect(await tab.eval("window.calls.length")).toBe(1);
+	});
+
+	test("an MCP result from the page passes as its content", async () => {
+		expect((await call(stack, "page_mcp_result")).content).toEqual([
+			{ type: "text", text: "from an MCP result" },
+		]);
+	});
+
+	test("a tool not marked read-only asks in the side panel first", async () => {
+		const allowed = call(stack, "page_place_order", { item: "tea" });
+		// "Always allow" is offered too (the library forgets it when the page
+		// changes, as the bridge then registers the tool anew).
+		await stack.panel.waitFor(
+			`[...document.querySelectorAll("dialog.tab-mcp-dialog button")].some((b) => b.textContent.trim() === "Always allow")`,
+		);
+		await answerInPanel(stack, "Allow");
+		const result = await allowed;
+		expect(result.isError).toBeFalsy();
+		expect(result.content[0]?.text).toContain("tea");
+		const declined = call(stack, "page_place_order", { item: "coffee" });
+		await answerInPanel(stack, "Don't allow");
+		expect((await declined).isError).toBe(true);
+		expect(await tab.eval("window.calls.map((c) => c[1])")).not.toContain(
+			"coffee",
+		);
+	});
+
+	test("webmcp_call calls a page tool by name, with the same confirmation", async () => {
+		const read = await call(stack, "webmcp_call", {
+			name: "get_greeting",
+			arguments: { name: "Bo" },
+		});
+		expect(read.content).toEqual([{ type: "text", text: "Hello, Bo!" }]);
+		const bad = await call(stack, "webmcp_call", {
+			name: "get_greeting",
+			arguments: { name: 7 },
+		});
+		expect(bad.isError).toBe(true);
+		const ordered = call(stack, "webmcp_call", {
+			name: "place_order",
+			arguments: { item: "cake" },
+		});
+		await answerInPanel(stack, "Allow");
+		expect((await ordered).content[0]?.text).toContain("cake");
+	});
+
+	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
+		const toggle = `button[data-tool="place_order"]`;
+		await stack.panel.waitFor(`document.querySelector('${toggle}')`);
+		await stack.panel.click(toggle);
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}').textContent === "allowed"`,
+		);
+		const result = await call(stack, "page_place_order", { item: "allowed" });
+		expect(result.isError).toBeFalsy();
+		expect(await tab.eval("window.calls.at(-1)")).toEqual([
+			"place_order",
+			"allowed",
+		]);
+		// Switched back: it asks again.
+		await stack.panel.click(toggle);
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}').textContent === "asks first"`,
+		);
+		const asked = call(stack, "page_place_order", { item: "asked" });
+		await answerInPanel(stack, "Don't allow");
+		expect((await asked).isError).toBe(true);
+	});
+
+	test("cancelling a call cancels it in the page", async () => {
+		const controller = new AbortController();
+		const slow = call(
+			stack,
+			"page_slow_tool",
+			{},
+			{ signal: controller.signal },
+		);
+		// Once the page's tool runs: aborted earlier, it would never start.
+		await tab.waitFor("window.slowStarted");
+		controller.abort();
+		await slow.catch(() => undefined);
+		await tab.waitFor("window.aborted");
+	});
+
+	test("the list follows toolchange, without a navigation", async () => {
+		await tab.eval(`document.modelContext.registerTool({
+			name: "late_tool",
+			description: "Registered later.",
+			inputSchema: { type: "object" },
+			annotations: { readOnlyHint: true },
+			async execute() { return "late"; },
+		})`);
+		await waitForTools(stack, (n) => n.includes("page_late_tool"));
+		expect((await call(stack, "page_late_tool")).content).toEqual([
+			{ type: "text", text: "late" },
+		]);
+	});
+
+	test("a page that replaces document.modelContext fools only itself", async () => {
+		await tab.goto(`${SITE}/forged.html`);
+		const names = await waitForTools(stack, (n) =>
+			n.includes("page_real_tool"),
+		);
+		expect(names).not.toContain("page_forged_tool");
+		expect(names).not.toContain("page_get_greeting");
 	});
 
 	test("it follows a navigation", async () => {
@@ -191,18 +412,25 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			title: "Plain page",
 			webmcp: { available: true, tools: 0 },
 		});
+		expect(await waitForTools(stack, (n) => n.length === 3)).toEqual(OWN_TOOLS);
 	});
 
-	test("it follows a tab switch", async () => {
-		const other = await stack.browser.newPage(`${OTHER}/plain.html`);
+	test("it follows a tab switch, tools included", async () => {
+		const other = await stack.browser.newPage(`${OTHER}/webmcp.html`);
 		await other.activate();
 		expect((await pageInfo(stack)).structuredContent).toMatchObject({
-			url: `${OTHER}/plain.html`,
+			url: `${OTHER}/webmcp.html`,
 		});
+		await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		const { tools } = await stack.client.listTools();
+		expect(tools.find((t) => t.name === "page_get_greeting")?.description).toBe(
+			`From ${OTHER}: Greets a name.`,
+		);
 		await tab.activate();
 		expect((await pageInfo(stack)).structuredContent).toMatchObject({
 			url: `${SITE}/plain.html`,
 		});
+		await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
 	});
 });
 
@@ -232,7 +460,7 @@ describe.skipIf(chrome === undefined)(
 			await tab.goto(`${SITE}/webmcp.html`);
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${SITE}/webmcp.html`,
-				webmcp: { available: true, tools: 2 },
+				webmcp: { available: true, tools: 5 },
 			});
 		});
 
@@ -252,11 +480,19 @@ describe.skipIf(chrome === undefined)(
 			const refused = await pageInfo(stack);
 			expect(refused.isError).toBe(true);
 			expect(refused.content[0]?.text).toContain("may not read this tab yet");
+			// No page tools, and webmcp_tools says why.
+			const listed = await call(stack, "webmcp_tools");
+			expect(listed.structuredContent?.["error"]).toContain(
+				"may not read this tab yet",
+			);
+			expect(await toolNames(stack)).toEqual(OWN_TOOLS);
 			await stack.browser.clickIcon(tab);
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${OTHER}/webmcp.html`,
-				webmcp: { available: true, tools: 2 },
+				webmcp: { available: true, tools: 5 },
 			});
+			// After the click its tools are offered (the content script says so).
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 		});
 	},
 );

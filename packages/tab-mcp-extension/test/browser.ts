@@ -114,7 +114,8 @@ interface Evaluated {
 /** How CDP messages get to Chrome; what comes back goes to `receive`. */
 interface Transport {
 	send(message: string): void;
-	close(): void;
+	/** Resolves once both ends are closed. */
+	close(): Promise<void>;
 }
 
 /** `--remote-debugging-pipe`: Chrome reads fd 3 and writes fd 4, each message ends in NUL. */
@@ -125,14 +126,18 @@ function pipe(
 	closed: () => void,
 ): Transport {
 	const writer = Bun.file(toChrome).writer();
-	void (async () => {
+	const reading = (async () => {
 		const decoder = new TextDecoder();
 		let text = "";
-		for await (const chunk of Bun.file(fromChrome).stream()) {
-			text += decoder.decode(chunk, { stream: true });
-			const messages = text.split("\0");
-			text = messages.pop() ?? "";
-			for (const message of messages) receive(message);
+		try {
+			for await (const chunk of Bun.file(fromChrome).stream()) {
+				text += decoder.decode(chunk, { stream: true });
+				const messages = text.split("\0");
+				text = messages.pop() ?? "";
+				for (const message of messages) receive(message);
+			}
+		} catch {
+			// The pipe went away.
 		}
 		closed();
 	})();
@@ -141,7 +146,16 @@ function pipe(
 			writer.write(`${message}\0`);
 			void writer.flush();
 		},
-		close: () => void writer.end(),
+		// The descriptors are numbers the next Chrome may get again: closing
+		// them late would close that Chrome's pipe. So wait until both are shut.
+		async close() {
+			try {
+				await writer.end();
+			} catch {
+				// already closed
+			}
+			await Promise.race([reading, Bun.sleep(5000)]);
+		},
 	};
 }
 
@@ -262,8 +276,10 @@ export class Browser {
 					...(process.platform === "linux" ? ["--no-sandbox"] : []),
 					"about:blank",
 				],
-				{ stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
+				{ stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] },
 			) as unknown as ChromeProcess;
+			const output = (proc as unknown as { stderr: ReadableStream<Uint8Array> })
+				.stderr;
 			const [, , , toChrome, fromChrome] = proc.stdio as unknown as number[];
 			browser = new Browser(
 				proc,
@@ -272,6 +288,7 @@ export class Browser {
 				fromChrome as number,
 				options.serve,
 			);
+			browser.#keepLog(output);
 			await Promise.race([
 				browser.send("Browser.getVersion"),
 				Bun.sleep(20_000).then(() => {
@@ -300,6 +317,30 @@ export class Browser {
 			}
 			throw error;
 		}
+	}
+
+	/** The end of Chrome's own output (stderr), for errors: a crash says why there. */
+	log = "";
+
+	#keepLog(output: ReadableStream<Uint8Array>): void {
+		void (async () => {
+			const decoder = new TextDecoder();
+			for await (const chunk of output) {
+				this.log = (this.log + decoder.decode(chunk, { stream: true })).slice(
+					-4000,
+				);
+			}
+		})();
+	}
+
+	/** Whether Chrome is still running. */
+	get running(): boolean {
+		return this.#proc.exitCode === null && this.#proc.signalCode === null;
+	}
+
+	/** How Chrome ended, if it did. */
+	get ended(): string {
+		return `exit code ${this.#proc.exitCode}, signal ${this.#proc.signalCode}`;
 	}
 
 	/** Click the extension's icon on a tab, as a person would (with `activeTab`). */
@@ -442,9 +483,11 @@ export class Browser {
 		} catch {
 			// already gone
 		}
-		this.#transport.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
+		// Chrome is gone: its end of the pipe is shut, ours follow before the
+		// next launch can get the same descriptor numbers.
+		await this.#transport.close();
 		rmSync(this.#profile, { recursive: true, force: true });
 	}
 }
@@ -499,6 +542,8 @@ export class Worker extends Target {}
 export class Page extends Target {
 	readonly targetId: string;
 	readonly console: string[] = [];
+	/** The last events of this page's sessions, for a timeout's error. */
+	readonly #recent: string[] = [];
 	/** Contexts of the page and of its out-of-process frames, by session. */
 	readonly #contexts = new Map<string, Map<number, ExecutionContext>>();
 
@@ -517,6 +562,15 @@ export class Page extends Target {
 		browser.on((method, params, s) => {
 			const contexts = s === undefined ? undefined : this.#contexts.get(s);
 			if (s === undefined || contexts === undefined) return;
+			if (!method.startsWith("Runtime.consoleAPI")) {
+				const url =
+					(params["frame"] as { url?: string } | undefined)?.url ??
+					(params["request"] as { url?: string } | undefined)?.url ??
+					(params["url"] as string | undefined) ??
+					"";
+				this.#recent.push(`${method}${url ? ` ${url}` : ""}`);
+				if (this.#recent.length > 15) this.#recent.shift();
+			}
 			if (method === "Runtime.executionContextCreated") {
 				const context = params["context"] as ExecutionContext;
 				contexts.set(context.id, context);
@@ -542,9 +596,11 @@ export class Page extends Target {
 		if (this.#served && this.browser.serve)
 			await send("Fetch.enable", { patterns: [{ urlPattern: "*" }] });
 		await send("Runtime.enable");
+		// Frames attach as they come, never held: a held target the page waits
+		// on (released a moment late, or not at all) stalls its load.
 		await send("Target.setAutoAttach", {
 			autoAttach: true,
-			waitForDebuggerOnStart: true,
+			waitForDebuggerOnStart: false,
 			flatten: true,
 		});
 		if (sessionId !== this.sessionId)
@@ -597,12 +653,24 @@ export class Page extends Target {
 	async goto(url: string): Promise<void> {
 		const loaded = this.browser.event("Page.loadEventFired", this.sessionId);
 		await this.send("Page.navigate", { url });
+		const state = () =>
+			this.eval<string>("document.readyState + ' ' + location.href").catch(
+				(error: unknown) =>
+					`(no answer: ${error}; Chrome ${this.browser.running ? "running" : `exited (${this.browser.ended})`}; its output ends: ${this.browser.log.slice(-1500)})`,
+			);
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		await Promise.race([
 			loaded,
 			new Promise((_, reject) => {
 				timer = setTimeout(
-					() => reject(new Error(`${url} did not load in 15 s`)),
+					() =>
+						void state().then((now) =>
+							reject(
+								new Error(
+									`${url} did not load in 15 s (now: ${now}); last events: ${this.#recent.join(" | ")}`,
+								),
+							),
+						),
 					15_000,
 				);
 			}),

@@ -40,7 +40,7 @@ try {
 	);
 	console.log(
 		"state:",
-		await panel.eval(`document.getElementById("state").textContent`),
+		await panel.eval(`document.getElementById("state-text").textContent`),
 	);
 	console.log("address:", address);
 	const code = await panel.waitFor<string>(

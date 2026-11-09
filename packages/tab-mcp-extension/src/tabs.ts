@@ -4,10 +4,12 @@
  */
 
 import {
+	type CallResult,
 	CONTENT_SCRIPT,
 	type ContentRequest,
 	type ContentResponse,
 	type PageInfo,
+	type PageTools,
 } from "./messages.ts";
 
 /** Host access on every site: what "Allow on all sites" asks for. */
@@ -80,29 +82,95 @@ export function noAccess(url: string): NoAccessError {
 	);
 }
 
-function ask(tabId: number, request: ContentRequest): Promise<ContentResponse> {
-	return chrome.tabs.sendMessage(tabId, request) as Promise<ContentResponse>;
+function send(tabId: number, request: ContentRequest): Promise<unknown> {
+	return chrome.tabs.sendMessage(tabId, request);
 }
 
 /**
- * Ask the content script of `tab` about its page. If it is not there yet
- * (granted by a click or host access, but the page changed since), put it in
- * and ask again; if the extension may not, say so.
+ * Ask the content script of `tab`. If it is not there yet (granted by a click
+ * or host access, but the page changed since), put it in and ask again; if
+ * the extension may not, say so.
  */
-export async function askPage(tab: TargetTab): Promise<PageInfo> {
-	let response: ContentResponse | undefined;
+export async function ask(
+	tab: TargetTab,
+	request: ContentRequest,
+): Promise<ContentResponse> {
+	let response: unknown;
 	try {
-		response = await ask(tab.id, { type: "page-info" });
+		response = await send(tab.id, request);
 	} catch {
+		// Only into a page that has loaded: during a navigation there is no
+		// page to put it in yet (and Chrome is changing what may be read).
+		const { status } = await chrome.tabs.get(tab.id);
+		if (status !== "complete")
+			throw new Error("The page in the tab is still loading; try again.");
 		try {
 			await injectInto(tab.id);
 		} catch {
 			throw noAccess(tab.url);
 		}
-		response = await ask(tab.id, { type: "page-info" });
+		response = await send(tab.id, request);
 	}
 	if (response === undefined) throw noAccess(tab.url);
+	return response as ContentResponse;
+}
+
+/** The page in `tab`. */
+export async function askPage(tab: TargetTab): Promise<PageInfo> {
+	const response = await ask(tab, { type: "page-info" });
 	if (!response.ok) throw new Error(response.error);
-	const { ok: _, ...info } = response;
+	const { ok: _, ...info } = response as { ok: true } & PageInfo;
 	return info;
+}
+
+/** The WebMCP tools of the page in `tab`. */
+export async function askTools(tab: TargetTab): Promise<PageTools> {
+	const response = await ask(tab, { type: "webmcp-list" });
+	if (!response.ok) throw new Error(response.error);
+	const { ok: _, ...tools } = response as { ok: true } & PageTools;
+	return tools;
+}
+
+/**
+ * Call a page tool in tab `tabId` (only the content script already there: a
+ * call does not inject it). The content script runs it only on the page it
+ * was listed from (`target.documentId`), with the claim it was offered with.
+ * Aborting `signal` cancels the call in the page.
+ */
+export async function callInTab(
+	tabId: number,
+	target: { documentId: string; name: string; readOnly: boolean },
+	input: unknown,
+	signal: AbortSignal,
+): Promise<CallResult> {
+	const callId = crypto.randomUUID();
+	const cancel = () =>
+		void send(tabId, { type: "webmcp-cancel", callId }).catch(() => {});
+	signal.addEventListener("abort", cancel, { once: true });
+	try {
+		const response = (await send(tabId, {
+			type: "webmcp-call",
+			callId,
+			documentId: target.documentId,
+			name: target.name,
+			readOnly: target.readOnly,
+			input,
+		})) as CallResult | undefined;
+		return (
+			response ?? {
+				ok: false,
+				error: "The page did not answer.",
+				gone: true,
+			}
+		);
+	} catch {
+		// The page went away (navigation, closed tab) during the call.
+		return {
+			ok: false,
+			error: "The page changed or closed during the call.",
+			gone: true,
+		};
+	} finally {
+		signal.removeEventListener("abort", cancel);
+	}
 }
