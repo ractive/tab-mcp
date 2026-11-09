@@ -146,7 +146,8 @@ ones to decide on for a public relay:
 | `TAB_MCP_PAGE_WAIT_S` | 10 by default. How long an MCP request waits for its page to open or reconnect before the relay answers "the page is not open". It covers a phone that paused the tab in the background. Raise it if your users switch apps often, but no response headers are sent while the request waits, so `TAB_MCP_PAGE_WAIT_S` + `TAB_MCP_KEEPALIVE_S` must stay below the first-byte limit of every proxy and CDN in front (see [Event streams](#event-streams-and-long-requests)). `0` answers at once; at most 60. See [protocol](protocol.md#when-the-page-is-not-open). |
 | `TAB_MCP_CLIENT_ID_HOSTS` | Empty admits any AI app that registers with a client id metadata document. List hosts (`claude.ai,chatgpt.com`) to admit only those apps. |
 | `TAB_MCP_CORS` | `on` by default, for browser-based MCP clients. `off` if none needs the relay. |
-| `TAB_MCP_MAX_SESSIONS`, `TAB_MCP_MAX_SESSIONS_PER_IP`, `TAB_MCP_MAX_CONCURRENT_REQUESTS`, `TAB_MCP_MAX_MESSAGE_BYTES` | Fit them to the memory you give the container (see [Resource limits](#resource-limits)). |
+| `TAB_MCP_MAX_SESSIONS`, `TAB_MCP_MAX_SESSIONS_PER_IP`, `TAB_MCP_MAX_CONCURRENT_REQUESTS`, `TAB_MCP_MAX_MESSAGE_BYTES` | Fit them to the memory you give the container and to the pages that stay connected (see [Resource limits](#resource-limits) and [Sizing the session limits](#sizing-the-session-limits)). |
+| `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` | 600 by default. A tab session that never had a grant, never started pairing ("Connect your AI app"), never had its user signed in (identity binding) and never got an MCP request is closed after this long (close code 4002, like the idle timeout), instead of after `TAB_MCP_IDLE_TIMEOUT_S` (3600). No AI app can use such a session, and they are what fills the session slots (see [Known limit: session slots](#known-limit-session-slots)). A page with its pairing dialog open, or with any AI app paired, is never closed by it. The browser extension connects again within a minute; a web page shows that it is disconnected until the user connects again. |
 | `TAB_MCP_GRANT_LIFETIME_S` | 90 days by default: an AI app pairs again at the latest 90 days after pairing. Shorter limits a leaked token further at the cost of pairing more often. |
 | `TAB_MCP_LOG_LEVEL` | `info`. Logs are JSON lines on stdout without request or response bodies; `debug` adds detail, still without bodies. |
 
@@ -626,16 +627,46 @@ worst case of the defaults is therefore several GiB; ordinary traffic is far bel
 - Against volumetric attacks, rely on the CDN or proxy in front; the relay's own limits
   protect it from single clients, not from a flood.
 
+### Sizing the session limits
+
+Every page with AI access on holds one tab session for as long as it is open, and the
+tab-mcp browser extension holds one **permanently** while its user leaves AI access on,
+whether or not an AI app is calling (it connects again by itself after a restart or a
+dropped connection). Size the limits for the users you expect to be connected at the
+same time, not for the requests:
+
+- `TAB_MCP_MAX_SESSIONS` (500 per instance) must cover every page and extension that is
+  on at once, with room to spare. A refusal is `too_many_sessions` (HTTP 429) and
+  `tab.refused` `max_sessions` in the log. Each idle session costs little memory (a
+  WebSocket and its buffers); what costs memory is requests in flight (see above).
+- `TAB_MCP_MAX_SESSIONS_PER_IP` (5) counts sessions per IPv4 address, and per IPv6 /64
+  and per /56 (each must stay under it). An office or a school behind one NAT address, a
+  company on one IPv6 /56, or a mobile network that puts many users behind one address
+  shares those 5: the sixth person with the extension on is refused. If your users come
+  from such networks, raise it to the number of users per network you expect; it is
+  also what limits one attacker's share of the slots (below), so raise it no further
+  than you need.
+- Watch `tab.refused` with `max_sessions_per_ip` in the log: many from a few addresses
+  mean users behind a shared address (or `TAB_MCP_TRUST_PROXY` not set, so every page
+  appears to come from the proxy).
+- A session that nobody paired with closes after `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` (10
+  minutes), so a forgotten page does not hold its slot for an hour; one with an AI app
+  paired stays until `TAB_MCP_IDLE_TIMEOUT_S` (1 hour without requests) or
+  `TAB_MCP_SESSION_LIFETIME_S` (12 hours), and the extension then connects again.
+
 ### Known limit: session slots
 
 The relay admits a tab session for any client that sends an allowed `Origin` and a
 well-formed secret. A browser cannot forge `Origin`, but any other program can. With the
 defaults, `TAB_MCP_MAX_SESSIONS` (500) slots and `TAB_MCP_MAX_SESSIONS_PER_IP` (5) per
-IPv4 address or IPv6 /64, a program on about 100 IPv6 /64s can hold every slot with idle
-WebSockets, and real pages get `too_many_sessions` (HTTP 429, logged as `tab.refused`
-`max_sessions`). It is a handful of quiet connections, not a flood, so a CDN does not see
-it. The fix (a quota per site, or evicting the oldest session that never paired and has
-no grants when the instance is full) is deferred (DEC-097). Until then:
+IPv4 address or IPv6 /56, a program on about 100 IPv4 addresses or IPv6 /56s can hold
+every slot, and real pages get `too_many_sessions` (HTTP 429, logged as `tab.refused`
+`max_sessions`). An IPv6 /48, which tunnel brokers hand out for free, has 256 /56s. It is
+a handful of quiet connections, not a flood, so a CDN does not see it. Sessions that only
+sit there are closed after `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` (10 minutes), so the program
+has to reconnect, or start pairing as a real page would, to keep them. The fix (a quota
+per site, or evicting the oldest session that never paired and has no grants when the
+instance is full) is deferred (DEC-097). Until then:
 
 - watch for `tab.refused` with `max_sessions` while your own pages are few;
 - if it happens, block the networks at the proxy or CDN, or lower

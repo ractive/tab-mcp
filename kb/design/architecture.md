@@ -218,6 +218,7 @@ settings to `createRelay({ … , store })`.
 | `TAB_MCP_REQUEST_TIMEOUT_S` | 300 | per MCP request |
 | `TAB_MCP_KEEPALIVE_S` | 20 | SSE keep-alive interval and relay-started stream delay |
 | `TAB_MCP_IDLE_TIMEOUT_S` | 3600 | session without MCP requests |
+| `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` | 600 | session that never had a grant, started pairing, signed in or got a request (DEC-117) |
 | `TAB_MCP_SESSION_LIFETIME_S` | 43200 | absolute WebSocket session lifetime |
 | `TAB_MCP_HEARTBEAT_S` | 25 | protocol ping interval |
 | `TAB_MCP_BODY_TIMEOUT_S` | 10 | deadline for receiving an MCP request body (408 and close; DEC-048) |

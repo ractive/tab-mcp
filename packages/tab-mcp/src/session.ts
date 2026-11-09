@@ -128,7 +128,13 @@ export class TabSession {
 	 * The binding key of the page's user, once an assertion was accepted
 	 * (DEC-077); `undefined` while nobody is signed in.
 	 */
-	identity: string | undefined;
+	get identity(): string | undefined {
+		return this.#identity;
+	}
+	set identity(key: string | undefined) {
+		this.#identity = key;
+		if (key !== undefined) this.#used = true;
+	}
 	/**
 	 * The last assertion could not be checked (keys or store unavailable): while
 	 * nobody is bound, AI apps are told to try again rather than to sign in.
@@ -140,6 +146,13 @@ export class TabSession {
 
 	readonly #ws: SocketLike;
 	readonly #host: SessionHost;
+	#identity: string | undefined;
+	/**
+	 * The session was of use: it had a grant, started pairing, had its user
+	 * signed in or got an MCP request. Until then it is closed after
+	 * `unpairedIdleTimeoutMs` instead of `idleTimeoutMs`.
+	 */
+	#used = false;
 	#state: "new" | "hello" | "ready" | "ended" = "new";
 	/** The "Connect your AI app" dialog is open (OIDC pairing, DEC-079). */
 	#dialogOpen = false;
@@ -307,6 +320,7 @@ export class TabSession {
 				this.end(CloseCode.normal, "bye");
 				return;
 			case "pairing.start":
+				this.#used = true;
 				if (this.site.pairing === "code") this.codes.start();
 				else this.#dialogOpen = true;
 				return;
@@ -431,8 +445,11 @@ export class TabSession {
 				op: "listGrants",
 				error: errorName(error),
 			});
+			// Unknown whether the page has grants: never close it early for it.
+			this.#used = true;
 		}
 		if (this.#state !== "hello") return; // closed meanwhile
+		if (grants.length > 0) this.#used = true;
 
 		const limits = this.limits;
 		const expiresAt = this.openedAt + limits.sessionLifetimeMs;
@@ -499,8 +516,46 @@ export class TabSession {
 			this.end(CloseCode.idleTimeout, "idle", "idle");
 			return;
 		}
+		// A session no AI app can use and nobody started to pair goes sooner:
+		// such sessions are what fills the session slots (DEC-097). The
+		// browser extension connects again through its alarm; a web page shows
+		// that it is disconnected until its user connects again (the library
+		// does not reconnect after `idle`).
+		if (
+			!this.#used &&
+			Date.now() - this.openedAt >= this.#host.config.unpairedIdleTimeoutMs
+		) {
+			this.end(CloseCode.idleTimeout, "unpaired idle", "idle");
+			return;
+		}
 		this.#missedPongs++;
 		this.send({ type: "ping", t: Date.now() });
+	}
+
+	/** A grant was made for this address: tell the tab. */
+	grantAdded(grant: GrantInfo): void {
+		this.#used = true;
+		this.send({ type: "grant.added", grant });
+	}
+
+	/**
+	 * End every request in flight of one grant, listen streams included, and
+	 * tell the page to stop them: the grant was revoked. Returns how many.
+	 */
+	failGrant(
+		grantId: string,
+		status: number,
+		code: number,
+		message: string,
+		headers: Record<string, string>,
+	): number {
+		let n = 0;
+		for (const exchange of [...this.pending.values()]) {
+			if (exchange.grantId !== grantId) continue;
+			exchange.fail(status, code, message, true, headers);
+			n++;
+		}
+		return n;
 	}
 
 	/** The listen streams one grant has open on this session. */
@@ -513,10 +568,12 @@ export class TabSession {
 	/** Tunnel one MCP request to the tab. Resolves with the AI app's response. */
 	forward(input: ForwardInput): Exchange {
 		this.#lastRequestAt = Date.now();
+		this.#used = true;
 		const id = `r${++this.#nextRequest}`;
 		const limits = this.limits;
 		const exchange = new Exchange({
 			id,
+			grantId: input.grant.grantId,
 			rpcId: input.rpcId,
 			isListen: input.isListen,
 			requestTimeoutMs: limits.requestTimeoutMs,

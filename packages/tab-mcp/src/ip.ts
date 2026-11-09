@@ -1,6 +1,7 @@
 /**
  * IP address parsing and the public-address check used by the CIMD fetcher's
- * SSRF guard (threat model A3) and by log truncation (A9).
+ * SSRF guard (threat model A3) and by log truncation (A9), and the keys of
+ * the per-IP limits (A8).
  */
 
 /** Parse dotted-quad IPv4 into four octets, or undefined. */
@@ -149,4 +150,20 @@ export function ipPrefixKey(ip: string): string {
 		.slice(0, 4)
 		.map((g) => g.toString(16))
 		.join(":")}::/64`;
+}
+
+/**
+ * The keys a tab session counts under for the per-IP session limit: the
+ * `ipPrefixKey`, and for IPv6 also its /56. Each must stay under the limit.
+ * A subscriber often gets a whole /56 (256 /64s), so counting /64s alone let
+ * one subscriber open 256 times the limit.
+ */
+export function ipSessionKeys(ip: string): string[] {
+	const key = ipPrefixKey(ip);
+	if (!key.endsWith("::/64")) return [key];
+	const v6 = parseIpv6(ip.replace(/^\[|\]$/g, ""));
+	if (v6 === undefined) return [key];
+	const g3 = (v6[3] ?? 0) & 0xff00;
+	const prefix = [...v6.slice(0, 3), g3].map((g) => g.toString(16)).join(":");
+	return [key, `${prefix}::/56`];
 }

@@ -49,6 +49,7 @@ than 0.
 | `TAB_MCP_REQUEST_TIMEOUT_S` | `300` | Longest time one MCP request may take; then HTTP 504 and the tab is told to stop. |
 | `TAB_MCP_KEEPALIVE_S` | `20` | Interval of the `: keep-alive` comments on event streams. It is also how long the relay waits for the tab before it starts the event stream itself. |
 | `TAB_MCP_IDLE_TIMEOUT_S` | `3600` | A tab session that gets no MCP request for this long is closed (close code 4002). |
+| `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` | `600` | A tab session that never had a grant, never started pairing, never had its user signed in and never got an MCP request is closed after this long instead (close code 4002, `bye` `idle`). A page with its pairing dialog open or an AI app paired is not affected. The browser extension connects again by itself; a web page shows that it is disconnected. See [self-hosting](self-hosting.md#sizing-the-session-limits). |
 | `TAB_MCP_SESSION_LIFETIME_S` | `43200` | Longest life of one tab session (12 hours; close code 4001). |
 | `TAB_MCP_HEARTBEAT_S` | `25` | Interval of the protocol `ping` to the tab. |
 | `TAB_MCP_BODY_TIMEOUT_S` | `10` | Deadline for receiving an MCP request body; a slower client gets HTTP 408. |

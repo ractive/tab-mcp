@@ -48,6 +48,8 @@ export type PageGoneReply =
 
 export interface ExchangeOptions {
 	id: string;
+	/** The grant the request was made under, so its revocation can end it. */
+	grantId?: string;
 	/** JSON-RPC id of the request; `undefined` for a notification. */
 	rpcId: RpcId | undefined;
 	/** `subscriptions/listen`: exempt from the request timer. */
@@ -133,6 +135,8 @@ const TAB_STARTED: ReadonlySet<State> = new Set([
 
 export class Exchange {
 	readonly id: string;
+	/** The grant the request was made under (`undefined` in unit tests). */
+	readonly grantId: string | undefined;
 	readonly isListen: boolean;
 	readonly response: Promise<Response>;
 	/** HTTP status sent to the AI app (for logs); 0 while waiting. */
@@ -159,6 +163,7 @@ export class Exchange {
 	constructor(options: ExchangeOptions) {
 		this.#options = options;
 		this.id = options.id;
+		this.grantId = options.grantId;
 		this.isListen = options.isListen;
 		this.response = new Promise((resolve) => {
 			this.#resolve = resolve;

@@ -222,7 +222,11 @@ describe("2: unauthenticated requests keep Bun's idle timeout", () => {
 		]);
 		expect(ms).toBeGreaterThan(0);
 		expect(ms).toBeLessThan(2500);
-		expect(received()).toStartWith("HTTP/1.1 408");
+		// Whichever comes first: the body deadline answers 408, or Bun's idle
+		// timeout closes the socket without an answer. Bun checks its idle
+		// timeouts on a coarse tick, so a 1 s timeout can fire after 0.1 s.
+		const answer = received();
+		if (answer !== "") expect(answer).toStartWith("HTTP/1.1 408");
 	}, 6000);
 
 	test("a stalled POST with a valid token is closed the same way (nothing is forwarded)", async () => {
