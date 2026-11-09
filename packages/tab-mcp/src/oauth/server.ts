@@ -84,6 +84,13 @@ const MAX_STATE_LENGTH = 1024;
 const MAX_NONCES_PER_HOST = 10_000;
 /** Keys each pairing-guess limit keeps; when full, new keys are refused. */
 const GUESS_LIMIT_KEYS = 100_000;
+/**
+ * `/token` and `/revoke` requests per IP, successes included (DEC-117): access
+ * tokens live an hour, so one AI app's users refresh about once an hour each;
+ * 20 a second covers 72 000 connected users per egress address, and a burst
+ * of 600 a restart of its clients.
+ */
+const TOKEN_REQUESTS_PER_IP = { capacity: 600, refillPerSecond: 20 };
 const MAX_NONCES = 100_000;
 /** The one text of every client authentication failure; the reason is logged. */
 const CLIENT_AUTH_FAILED = "client authentication failed";
@@ -117,6 +124,8 @@ export interface AuthorizationTestMode {
 	oidcMaxFlows?: number;
 	/** The clock of the AI apps' key sets (JWKS caching and refetching). */
 	clientKeysNow?: () => number;
+	/** A smaller ceiling on `/token` and `/revoke` requests per IP. */
+	tokenRequestsPerIp?: { capacity: number; refillPerSecond: number };
 }
 
 interface AuthorizationRequest {
@@ -186,6 +195,16 @@ class OAuthError extends Error {
 		this.code = code;
 	}
 }
+
+/** A per-IP limit of `/token` and `/revoke` refused the request. */
+class IpLimited extends OAuthError {}
+
+const TOO_MANY_REQUESTS = () =>
+	new IpLimited(
+		429,
+		"temporarily_unavailable",
+		"too many requests; try again shortly",
+	);
 
 function constantTimeEqual(a: string, b: string): boolean {
 	const x = Buffer.from(a);
@@ -282,18 +301,23 @@ export class AuthorizationServer {
 		refillPerSecond: 0.1,
 	});
 	/**
-	 * Code guesses (well-formed, against an active code) per address and IP:
-	 * one network cannot use up an address's allowance alone (DEC-061).
-	 * Both guess limits fail closed when full: a drained bucket is never
-	 * dropped to make room, so churning through keys cannot reset it.
+	 * Wrong code guesses (well-formed, against an active code) per address and
+	 * IP: one network cannot use up an address's allowance alone (DEC-061).
+	 * When full it drops its oldest bucket: that only lets one network use
+	 * more of the allowance `#guessesPerAddress` still caps, and failing
+	 * closed here would let a few networks refuse everyone's first guess.
 	 */
 	readonly #guessesPerAddressIp = new RateLimiter({
 		capacity: 10,
 		refillPerSecond: 1 / 60,
-		maxKeys: GUESS_LIMIT_KEYS,
-		whenFull: "fail-closed",
 	});
-	/** Code guesses per address from everywhere: the brute-force cap (A1). */
+	/**
+	 * Wrong code guesses per address from everywhere: the brute-force cap
+	 * (A1). Fails closed when full: a drained bucket is never dropped to make
+	 * room, so churning through keys cannot reset it. Its keys are addresses
+	 * with a live code and an open request, which a flood cannot multiply
+	 * cheaply.
+	 */
 	readonly #guessesPerAddress = new RateLimiter({
 		capacity: 30,
 		refillPerSecond: 1 / 30,
@@ -301,15 +325,22 @@ export class AuthorizationServer {
 		whenFull: "fail-closed",
 	});
 	/**
-	 * `/token` and `/revoke` per IP (prefix). A request that succeeds (a valid
-	 * code, refresh token or token to revoke of its client) gets its token
-	 * back: only failures are counted, so the users of one hosted AI app
-	 * behind a few shared IPs do not throttle each other, and a client that
-	 * sends what does not work is throttled by its network. Successes are
-	 * bounded per grant (`#refreshesPerGrant`) and by pairing (a code is
-	 * single-use).
+	 * Failed `/token` and `/revoke` requests per IP (prefix): once drained, a
+	 * request that fails is answered 429. A request that succeeds is never
+	 * refused by it, so stale tokens of some users of a hosted AI app behind
+	 * shared IPs do not block the others' refreshes.
 	 */
-	readonly #tokenPerIp = new RateLimiter({ capacity: 30, refillPerSecond: 1 });
+	readonly #tokenFailuresPerIp = new RateLimiter({
+		capacity: 30,
+		refillPerSecond: 1,
+	});
+	/**
+	 * Every `/token` and `/revoke` request per IP (prefix), never given back:
+	 * the ceiling on work and store writes from one network, successes
+	 * included (a holder of many grants rotating through them). Sized for a
+	 * large AI app's egress address (DEC-117).
+	 */
+	readonly #tokenPerIp: RateLimiter;
 	/** Refreshes per grant: each leaves a row for the reuse window (DEC-091). */
 	readonly #refreshesPerGrant = new RateLimiter({
 		capacity: 20,
@@ -319,6 +350,9 @@ export class AuthorizationServer {
 	constructor(host: AuthorizationHost, testMode?: AuthorizationTestMode) {
 		this.#host = host;
 		this.#authCodeTtlMs = testMode?.authCodeTtlMs ?? AUTH_CODE_TTL_MS;
+		this.#tokenPerIp = new RateLimiter(
+			testMode?.tokenRequestsPerIp ?? TOKEN_REQUESTS_PER_IP,
+		);
 		const oidc = host.config.oidc;
 		this.#methods = {
 			...PAIRING_METHODS,
@@ -899,15 +933,27 @@ ${intro}
 			);
 		}
 		// Only a real guess is charged: the method calls this right before it
-		// compares a well-formed answer (DEC-061).
-		const admit = () =>
-			this.#guessesPerAddressIp.take(`${pending.addressId}|${ip}`) &&
-			this.#guessesPerAddress.take(pending.addressId);
+		// compares a well-formed answer (DEC-061); a right one is given back.
+		const networkKey = `${pending.addressId}|${ip}`;
+		let charged = false;
+		const admit = () => {
+			if (!this.#guessesPerAddressIp.take(networkKey)) return false;
+			if (!this.#guessesPerAddress.take(pending.addressId)) {
+				this.#guessesPerAddressIp.refund(networkKey);
+				return false;
+			}
+			charged = true;
+			return true;
+		};
 		const result = await method.check(session, form, admit, {
 			requestId: pending.id,
 			browserId: browser.id,
 			addressId: pending.addressId,
 		});
+		if (result.ok === true && charged) {
+			this.#guessesPerAddressIp.refund(networkKey);
+			this.#guessesPerAddress.refund(pending.addressId);
+		}
 		if (result.ok === "redirect") {
 			this.#host.logger.info("oauth.pairing_redirect", {
 				address: shortAddress(pending.addressId),
@@ -1168,14 +1214,10 @@ ${cancel}
 	/** POST `/token`. */
 	async token(req: Request, ip: string): Promise<Response> {
 		const noStore = { "cache-control": "no-store", pragma: "no-cache" };
+		if (!this.#tokenPerIp.take(ip)) {
+			return this.#oauthErrorResponse(TOO_MANY_REQUESTS(), noStore);
+		}
 		try {
-			if (!this.#tokenPerIp.take(ip)) {
-				throw new OAuthError(
-					429,
-					"temporarily_unavailable",
-					"too many requests; try again shortly",
-				);
-			}
 			const params = await this.#formParams(req);
 			const p = single(params, [
 				"grant_type",
@@ -1213,10 +1255,9 @@ ${cancel}
 					"only authorization_code and refresh_token are supported",
 				);
 			}
-			this.#tokenPerIp.refund(ip);
 			return this.#json(200, body, noStore);
 		} catch (error) {
-			return this.#oauthErrorResponse(error, noStore);
+			return this.#oauthErrorResponse(this.#failed(error, ip), noStore);
 		}
 	}
 
@@ -1673,14 +1714,10 @@ ${cancel}
 	/** POST `/revoke` (RFC 7009). */
 	async revoke(req: Request, ip: string): Promise<Response> {
 		const noStore = { "cache-control": "no-store" };
+		if (!this.#tokenPerIp.take(ip)) {
+			return this.#oauthErrorResponse(TOO_MANY_REQUESTS(), noStore);
+		}
 		try {
-			if (!this.#tokenPerIp.take(ip)) {
-				throw new OAuthError(
-					429,
-					"temporarily_unavailable",
-					"too many requests; try again shortly",
-				);
-			}
 			const params = await this.#formParams(req);
 			const p = single(params, [
 				"token",
@@ -1708,12 +1745,15 @@ ${cancel}
 				`${this.#issuer}/token`,
 			]);
 			const record = await this.#host.store.get(hashToken(token));
-			// RFC 7009 §2.2: an unknown token is not an error.
-			if (record === undefined)
+			// RFC 7009 §2.2: an unknown token is not an error, but it counts as
+			// a failure against the network's allowance.
+			if (record === undefined) {
+				if (!this.#tokenFailuresPerIp.take(ip)) throw TOO_MANY_REQUESTS();
 				return new Response(null, {
 					status: 200,
 					headers: { ...this.#cors(), ...noStore },
 				});
+			}
 			if (!constantTimeEqual(client.clientId, record.clientId)) {
 				throw new OAuthError(
 					400,
@@ -1727,7 +1767,6 @@ ${cancel}
 			}
 			// The grant is the connection: revoking either token ends it.
 			await this.#revokeGrant(record.addressId, record.grantId, "revoked");
-			this.#tokenPerIp.refund(ip);
 			this.#host.logger.info("oauth.revoked", {
 				address: shortAddress(record.addressId),
 				client: hostOf(record.clientId),
@@ -1738,8 +1777,27 @@ ${cancel}
 				headers: { ...this.#cors(), ...noStore },
 			});
 		} catch (error) {
-			return this.#oauthErrorResponse(error, noStore);
+			return this.#oauthErrorResponse(this.#failed(error, ip), noStore);
 		}
+	}
+
+	/**
+	 * A `/token` or `/revoke` request failed with `error`: a client error (4xx)
+	 * counts against the network's failures, and once those are used up the
+	 * answer is 429 instead. Errors that are not the client's (503, 500) are
+	 * not counted.
+	 */
+	#failed(error: unknown, ip: string): unknown {
+		if (
+			error instanceof OAuthError &&
+			!(error instanceof IpLimited) &&
+			error.status >= 400 &&
+			error.status < 500 &&
+			!this.#tokenFailuresPerIp.take(ip)
+		) {
+			return TOO_MANY_REQUESTS();
+		}
+		return error;
 	}
 
 	// Housekeeping
@@ -1837,6 +1895,7 @@ ${cancel}
 		this.#guessesPerAddressIp.sweep(now);
 		this.#guessesPerAddress.sweep(now);
 		this.#tokenPerIp.sweep(now);
+		this.#tokenFailuresPerIp.sweep(now);
 		this.#refreshesPerGrant.sweep(now);
 		this.#nonces.sweep(now);
 	}

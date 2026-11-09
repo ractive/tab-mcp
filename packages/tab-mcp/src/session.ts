@@ -445,6 +445,8 @@ export class TabSession {
 				op: "listGrants",
 				error: errorName(error),
 			});
+			// Unknown whether the page has grants: never close it early for it.
+			this.#used = true;
 		}
 		if (this.#state !== "hello") return; // closed meanwhile
 		if (grants.length > 0) this.#used = true;
@@ -515,8 +517,10 @@ export class TabSession {
 			return;
 		}
 		// A session no AI app can use and nobody started to pair goes sooner:
-		// such sessions are what fills the session slots (DEC-097). A page
-		// that is closed this way connects again when its user turns to it.
+		// such sessions are what fills the session slots (DEC-097). The
+		// browser extension connects again through its alarm; a web page shows
+		// that it is disconnected until its user connects again (the library
+		// does not reconnect after `idle`).
 		if (
 			!this.#used &&
 			Date.now() - this.openedAt >= this.#host.config.unpairedIdleTimeoutMs

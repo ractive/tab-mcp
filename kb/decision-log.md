@@ -2257,13 +2257,23 @@ user of the Chrome extension (one session held open while AI access is on) uses 
   again within a minute, a web page shows it is disconnected (the library does not
   reconnect after `idle`). It raises the cost of holding slots; a program that sends
   `pairing.start` still holds them (DEC-097 stays open).
-- **Guess limits fail closed.** The two pairing-code guess limiters drop only buckets that
-  have refilled when full (100 000 keys) and refuse new keys otherwise, so churning keys
-  cannot reset a drained bucket. Accepted cost: filling them blocks pairing until refill.
-- **`/token` and `/revoke` count failures.** A successful request gets its token back from
-  the per-IP bucket (30, then 1/s), so one hosted AI app's users behind shared egress IPs
-  do not throttle each other; failures still are limited per network, successes are
-  bounded per grant and by pairing. Not keyed by `client_id`: any request can name a
-  well-known client's id and would use up its allowance.
+- **The per-address guess cap fails closed.** Only wrong guesses are charged (a right
+  code is refunded). The per-address limiter drops only buckets that have refilled when
+  full (100 000 keys) and refuses new keys otherwise, so churning keys cannot reset a
+  drained bucket; its keys are addresses with a live code and an open request. The
+  per-address-and-network share keeps evict-oldest (review of PR 94): keyed by address
+  and /64, a single /48 could fill it, and failing closed there would refuse everyone's
+  first guess, while an evicted bucket only lets one network use more of an allowance
+  the per-address cap still limits. A full limiter sweeps again only once its earliest
+  bucket can be full.
+- **`/token` and `/revoke`: failures per IP, and a ceiling.** Failed requests (client
+  errors, not 503) per IP: 30, then 1/s; past that a failing request is answered 429, a
+  succeeding one never (review of PR 94: refunding successes still let stale tokens of a
+  shared egress block everyone's refreshes). Every request per IP, never refunded: 600,
+  then 20/s. Access tokens live an hour, so 20/s covers about 72 000 connected users of
+  one AI app per egress address; it bounds work and store writes, also a holder of many
+  grants rotating through them (`#refreshesPerGrant` keeps only 10 000 keys). Not keyed
+  by `client_id`: any request can name a well-known client's id and would use up its
+  allowance.
 - No defaults changed besides the new unpaired timeout; `maxSessionsPerIp` stays 5, and
   `docs/self-hosting.md` says how to size the session limits for always-on users.

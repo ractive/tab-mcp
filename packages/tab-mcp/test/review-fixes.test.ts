@@ -527,44 +527,107 @@ describe("7: /token is limited by failures per network, not by successes", () =>
 		expect(statuses.every((s) => s === 200)).toBe(true);
 	});
 
-	test("failures from one IP are still throttled after 30, and only that IP", async () => {
+	const refresh = (r: OAuthTestRelay, token: string, ip: string) =>
+		postForm(
+			`${r.url}/token`,
+			{
+				grant_type: "refresh_token",
+				refresh_token: token,
+				client_id: clientId,
+			},
+			{ "x-real-ip": ip },
+		);
+
+	test("failures from one IP are throttled after 30, and only that IP; successes never are", async () => {
 		const r = oauthRelay({ trustProxy: "x-real-ip" });
-		const [good] = await refreshTokens(r, 1);
-		const bad = (ip: string) =>
-			postForm(
-				`${r.url}/token`,
-				{
-					grant_type: "refresh_token",
-					refresh_token: "nope",
-					client_id: clientId,
-				},
-				{ "x-real-ip": ip },
-			);
+		const [good, alsoGood] = await refreshTokens(r, 2);
 		const statuses: number[] = [];
 		for (let i = 0; i < 31; i++)
-			statuses.push((await bad("203.0.113.30")).status);
+			statuses.push((await refresh(r, "nope", "203.0.113.30")).status);
 		expect(statuses.slice(0, 30).every((s) => s === 400)).toBe(true);
 		expect(statuses[30]).toBe(429);
-		// A success does not get past a drained bucket either.
-		const blocked = await postForm(
-			`${r.url}/token`,
-			{
-				grant_type: "refresh_token",
-				refresh_token: good ?? "",
-				client_id: clientId,
-			},
-			{ "x-real-ip": "203.0.113.30" },
+		// Stale tokens of some users do not block another user's refresh.
+		expect((await refresh(r, good ?? "", "203.0.113.30")).status).toBe(200);
+		expect((await refresh(r, alsoGood ?? "", "198.51.100.21")).status).toBe(
+			200,
 		);
-		expect(blocked.status).toBe(429);
-		const other = await postForm(
-			`${r.url}/token`,
-			{
-				grant_type: "refresh_token",
-				refresh_token: good ?? "",
-				client_id: clientId,
-			},
-			{ "x-real-ip": "198.51.100.21" },
+		expect((await refresh(r, "nope", "198.51.100.21")).status).toBe(400);
+	});
+
+	test("every request counts against the per-IP ceiling, successes included", async () => {
+		const r = startOAuthRelay(
+			cimd,
+			{ trustProxy: "x-real-ip" },
+			{ tokenRequestsPerIp: { capacity: 5, refillPerSecond: 0.001 } },
 		);
-		expect(other.status).toBe(200);
+		relays.push(r);
+		const tokens = await refreshTokens(r, 7);
+		const statuses: number[] = [];
+		for (const token of tokens.slice(0, 6))
+			statuses.push((await refresh(r, token, "198.51.100.22")).status);
+		expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
+		expect((await refresh(r, tokens[6] ?? "", "198.51.100.23")).status).toBe(
+			200,
+		);
+	});
+});
+
+describe("review of tab-mcp#94", () => {
+	test("a right code is not charged: one network pairs an address more than 10 times", async () => {
+		const r = oauthRelay({ trustProxy: "x-real-ip" });
+		const t = tab(r);
+		const s = await t.connect();
+		await t.startPairing();
+		const browser = new TestBrowser(r.url, { "x-real-ip": "198.51.100.40" });
+		let previous: string | undefined;
+		for (let i = 0; i < 12; i++) {
+			const code = await t.nextCode(previous);
+			previous = code;
+			const page = await browser.open(
+				authorizeUrl(r.url, {
+					client_id: clientId,
+					redirect_uri: REDIRECT,
+					code_challenge: pkce().challenge,
+					resource: s.address,
+				}),
+			);
+			const done = await browser.submit(page, { action: "connect", code });
+			expect(done.status).toBe(303);
+		}
+	}, 20_000);
+
+	test("a session whose grants could not be listed at hello is not closed as unpaired", async () => {
+		class FailingStore extends MemoryTokenStore {
+			override async listGrants(): Promise<never> {
+				throw new Error("store down");
+			}
+		}
+		const r = relay({
+			store: new FailingStore(),
+			heartbeatMs: 20,
+			unpairedIdleTimeoutMs: 100,
+		});
+		const t = tab(r);
+		await t.connect();
+		await Bun.sleep(300);
+		expect(t.ws.readyState).toBe(WebSocket.OPEN);
+	});
+
+	test("a full fail-closed limiter sweeps again only once a bucket can be full", () => {
+		const limiter = new RateLimiter({
+			capacity: 2,
+			refillPerSecond: 1,
+			maxKeys: 2,
+			whenFull: "fail-closed",
+		});
+		expect(limiter.take("a", 0)).toBe(true);
+		expect(limiter.take("a", 0)).toBe(true); // drained: full again at 2000
+		expect(limiter.take("b", 500)).toBe(true); // full again at 1500
+		expect(limiter.take("c", 600)).toBe(false);
+		expect(limiter.take("c", 1499)).toBe(false);
+		expect(limiter.take("c", 1500)).toBe(true); // b was dropped
+		expect(limiter.size).toBe(2);
+		expect(limiter.take("d", 1600)).toBe(false); // a until 2000, c until 2500
+		expect(limiter.take("d", 2000)).toBe(true);
 	});
 });

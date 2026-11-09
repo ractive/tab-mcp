@@ -370,9 +370,11 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 - IPv6 tab sessions count against `TAB_MCP_MAX_SESSIONS_PER_IP` per /64 and per /56; both
   must stay under it. Before, one /56 (256 /64s) could open 256 times the limit.
-- `/token` and `/revoke` count only requests that fail against the per-IP limit (30,
-  then 1 a second): a request that succeeds gets its share back, so the users of one
-  hosted AI app behind shared addresses no longer throttle each other.
+- `/token` and `/revoke` limit failures per IP (30, then 1 a second; past that a failing
+  request gets 429), but never refuse a request that succeeds, so the users of one hosted
+  AI app behind shared addresses no longer block each other with stale tokens. Every
+  request, success or not, counts against a new ceiling per IP of 600, then 20 a second.
+- Only wrong pairing codes count against the guess limits; a right code is given back.
 
 #### Fixed
 
@@ -387,9 +389,10 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   grant dates from the code's issue time, so the address's tombstone refuses it (also
   after a revocation on another instance), and both now drop the address's open
   authorization requests and codes.
-- Security: the pairing-code guess limits no longer forget a drained bucket to make room
-  when full, so cycling through many keys cannot reset an address's allowance; while
-  they are full of buckets that still count, new keys are refused.
+- Security: the per-address pairing-code guess limit no longer forgets a drained bucket
+  to make room when full, so cycling through many keys cannot reset an address's
+  allowance; while it is full of buckets that still count, guesses at new addresses are
+  refused.
 
 ### [0.8.0][relay-0.8.0] - 2026-11-09
 

@@ -340,19 +340,24 @@ In-memory rate limits cover `/authorize` page loads and posts per IP, code guess
 address and network and per address, `/token` and `/revoke` per IP, refreshes per grant,
 and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /64.
 
-- The code-guess limits never forget a bucket that still counts something to make room:
-  when their maps are full (100 000 keys each), new keys are refused until buckets have
-  refilled, so cycling through many keys cannot reset an address's allowance. The price
-  is that someone who fills those maps (it takes well-formed guesses against live codes
-  of many addresses, from many networks) blocks pairing on the instance until they
-  refill, at most 15 minutes after they stop.
-- `/token` and `/revoke` count only what fails: a request that succeeds (a valid code,
-  refresh token or token to revoke of its client) gets its share back. The users of one
-  hosted AI app, who come from a few shared addresses, therefore do not throttle each
-  other, while a network that sends what does not work is stopped after 30 failures
-  (then one a second). Successes are bounded per grant (refreshes) and by pairing (codes
-  are single-use). The limit is not keyed by `client_id`, which any request can name: that
-  would let anyone use up a well-known AI app's allowance.
+- Only wrong code guesses are charged; a right code gives its share back. The cap per
+  address never forgets a bucket that still counts something to make room: when its map
+  is full (100 000 addresses), guesses at new addresses are refused until buckets have
+  refilled, so cycling through many keys cannot reset an address's allowance. Filling it
+  takes wrong guesses at 100 000 addresses with a live code and an open request each.
+  The share per address and network drops its oldest bucket when full: that only lets a
+  network use more of the allowance the per-address cap still limits, and refusing there
+  would let a few networks block everyone's first guess.
+- `/token` and `/revoke` have two limits per IP. Failed requests (client errors) are
+  limited to 30, then one a second; past that a request that fails is answered 429, but a
+  request that succeeds (a valid code, refresh token or token to revoke of its client) is
+  never refused by it. The users of one hosted AI app, who come from a few shared
+  addresses, therefore do not block each other with stale tokens. Every request, success
+  or not, counts against a ceiling of 600, then 20 a second: about 72 000 connected users
+  of one AI app per egress address, each refreshing once an hour. It bounds the work and
+  store writes from one network, also from someone rotating through many grants. Neither
+  is keyed by `client_id`, which any request can name: that would let anyone use up a
+  well-known AI app's allowance.
 
 Sessions are limited per IP
 on `/tab` (an IPv6 /64 and its /56 must each stay under the limit, since one subscriber

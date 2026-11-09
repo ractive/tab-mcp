@@ -73,6 +73,8 @@ const MAX_REMEMBERED_REVOCATIONS = 10_000;
 
 /** The answer to a request whose grant was revoked while it was in flight. */
 const REVOKED_TEXT = "The connection to this page was revoked.";
+/** The same, when the grant reached its end (90 days after pairing). */
+const EXPIRED_TEXT = "The connection to this page has expired.";
 
 /**
  * Bun closes a WebSocket whose frame is over `maxPayloadLength` (1009). Frames
@@ -449,7 +451,7 @@ function startRelay(
 			grantId,
 			401,
 			RelayErrorCode.signedOut,
-			REVOKED_TEXT,
+			reason === "expired" ? EXPIRED_TEXT : REVOKED_TEXT,
 			{ "www-authenticate": wwwAuthenticate(addressId, true) },
 		);
 		if (ended > 0) {

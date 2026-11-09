@@ -34,6 +34,11 @@ export class RateLimiter {
 	readonly #refill: number;
 	readonly #maxKeys: number;
 	readonly #failClosed: boolean;
+	/**
+	 * While full (fail-closed): no bucket is full again before this time, so
+	 * a refused new key does not sweep every bucket again before then.
+	 */
+	#roomAt = 0;
 
 	constructor(options: RateLimitOptions) {
 		this.#capacity = options.capacity;
@@ -53,6 +58,7 @@ export class RateLimiter {
 		if (bucket === undefined) {
 			if (this.#buckets.size >= this.#maxKeys) {
 				if (this.#failClosed) {
+					if (now < this.#roomAt) return false;
 					this.sweep(now);
 					if (this.#buckets.size >= this.#maxKeys) return false;
 				} else {
@@ -62,6 +68,10 @@ export class RateLimiter {
 			}
 			bucket = { tokens: this.#capacity, updatedAt: now };
 			this.#buckets.set(key, bucket);
+			// Full again one token's refill after this take, at the earliest.
+			if (this.#refill > 0) {
+				this.#roomAt = Math.min(this.#roomAt, now + 1000 / this.#refill);
+			}
 		} else {
 			this.#refillBucket(bucket, now);
 		}
@@ -79,6 +89,7 @@ export class RateLimiter {
 		if (bucket === undefined) return;
 		this.#refillBucket(bucket, now);
 		bucket.tokens = Math.min(this.#capacity, bucket.tokens + 1);
+		this.#roomAt = 0; // this bucket may be full sooner now
 	}
 
 	/** Whether `take` would succeed for `key` now; takes nothing. */
@@ -91,14 +102,23 @@ export class RateLimiter {
 		);
 	}
 
-	/** Drop buckets that are full again (nothing to remember). */
+	/**
+	 * Drop buckets that are full again (nothing to remember), and note when
+	 * the next of the others will be.
+	 */
 	sweep(now: number = Date.now()): void {
+		let roomAt = Number.POSITIVE_INFINITY;
 		for (const [key, b] of this.#buckets) {
 			const elapsed = Math.max(0, now - b.updatedAt) / 1000;
-			if (b.tokens + elapsed * this.#refill >= this.#capacity) {
+			const tokens = b.tokens + elapsed * this.#refill;
+			if (tokens >= this.#capacity) {
 				this.#buckets.delete(key);
+			} else if (this.#refill > 0) {
+				const fullAt = now + ((this.#capacity - tokens) / this.#refill) * 1000;
+				if (fullAt < roomAt) roomAt = fullAt;
 			}
 		}
+		this.#roomAt = roomAt;
 	}
 
 	#refillBucket(bucket: Bucket, now: number): void {

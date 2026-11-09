@@ -169,12 +169,16 @@ does not export and which refuses to run outside development (DEC-059).
 
 In-memory token buckets: `/authorize` page loads and posts per IP, guesses per address
 and network and per address, `/token` and `/revoke` per IP, CIMD fetches per host and in
-total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64. The guess limits fail
-closed when full (100 000 keys): a bucket that still counts something is never dropped,
-so churning keys cannot reset it; the cost is that filling them blocks pairing until they
-refill. `/token` and `/revoke` refund a request that succeeds, so only failures count per
-IP and one hosted AI app's users behind shared egress do not throttle each other; keying
-by `client_id` was rejected because any request can name a well-known one (DEC-117).
+total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64. Only wrong guesses
+are charged (a right code is refunded). The per-address guess cap fails closed when full
+(100 000 addresses): a bucket that still counts something is never dropped, so churning
+keys cannot reset it; the per-address-and-network share evicts its oldest when full,
+since failing closed there would let a few networks refuse everyone's first guess.
+`/token` and `/revoke`: failures per IP (30, then 1/s) turn a further failure into 429
+but never refuse a success, so one hosted AI app's users behind shared egress do not
+block each other; a ceiling on all requests per IP (600, then 20/s, not refunded) bounds
+work and store writes, also grant rotation; keying by `client_id` was rejected because
+any request can name a well-known one (DEC-117).
 Session limits per IP for `/tab` count IPv6 per /64 and per /56; concurrent requests per
 session for the MCP endpoint; pending
 authorizations and codes are bounded maps with expiry; WebSocket backpressure checked on every send (a dropped send fails the
