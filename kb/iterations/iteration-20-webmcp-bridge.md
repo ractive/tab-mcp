@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 20: a page's WebMCP tools for AI apps"
-status: in-progress
+status: completed
 description: "When the page in front registers WebMCP tools, the extension offers them to the connected AI app through the relay, reached from its content script (DEC-113): listed, called with a timeout, kept in step with toolchange, results marked untrusted, consequential calls confirmed."
 timestamp: 2026-11-08T23:45:00+01:00
 tags: [iteration, extension, webmcp]
@@ -64,7 +64,7 @@ reaches them from its content script, on the native `document.modelContext` (DEC
       does
 - [x] Threat model (`kb/design/threat-model.md`): the extension, page-written tool
       metadata, results, consequential calls
-- [ ] Docs; review; merged on the owner's word
+- [x] Docs; review; merged on the owner's word
 
 ## Outcome
 

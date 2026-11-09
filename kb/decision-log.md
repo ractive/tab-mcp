@@ -2195,3 +2195,20 @@ arriving ([adoption](/research/webmcp-adoption.md)).
   which of the two it is.
 - Only the native object is used (through `Document.prototype`'s getter, not a
   polyfill's own property); a name already taken keeps its owner.
+
+## DEC-116: The extension's connection lives outside the side panel (owner)
+
+2026-11-09. The connection to the AI app (`TabMcp`, the bridge) moves out of the side
+panel, so it stays while the panel is closed (iteration 26). The side panel becomes a view
+and the place for settings, pairing and questions.
+
+- Where: the service worker if a WebSocket keeps it alive (Chrome 116+) and the library
+  runs there without a document; else an offscreen document. The iteration's spike
+  decides.
+- A tool that asks first asks in the side panel of the tab's window when it is open and
+  focused, else in a Chrome notification; no answer in time is Don't allow. Read-only and
+  "allowed" tools run as before. The extension asks itself: the library's dialog draws
+  into a page nobody would see.
+- Commands and the state go only over the side panel's own port, never from content
+  scripts. AI access turns on only on the panel's command, or at a start when the user
+  left it on.

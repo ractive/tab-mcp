@@ -56,6 +56,10 @@ AI app ──MCP──▶ relay ◀──WebSocket── side panel (tab-mcp-cli
 - Pairing, grants, confirmations and the relay are tab-mcp's as they are. Consequential
   tools ask the user each time in the side panel (the library's confirmation).
 
+Today the connection lives in the side panel and ends when it is closed; iteration 26
+moves it out (into the service worker, or an offscreen document), with questions by
+notification while the panel is closed (DEC-116).
+
 ## Permissions
 
 - `activeTab`, `scripting`, `sidePanel`, `storage`.
