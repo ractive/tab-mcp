@@ -17,7 +17,7 @@ export function escapeHtml(text: string): string {
 	return text.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 }
 
-/** The stylesheet at `/authorize.css` (`style-src 'self'`). */
+/** The stylesheet at `/authorize.css` (`style-src 'self'`), also used by the relay's front page. */
 export const AUTHORIZE_CSS = `:root { color-scheme: light dark; --accent: #1d4ed8; --error: #b91c1c; }
 @media (prefers-color-scheme: dark) { :root { --accent: #93b4ff; --error: #fca5a5; } }
 * { box-sizing: border-box; }
@@ -36,6 +36,23 @@ button, .button { font: inherit; padding: 0.5rem 1.25rem; border-radius: 0.4rem;
 button.primary, .button.primary { background: var(--accent); color: Canvas; }
 button.secondary, .button:not(.primary) { background: transparent; color: var(--accent); }
 footer { margin-top: 2.5rem; font-size: 0.85rem; color: GrayText; }
+a { color: var(--accent); }
+.brand { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+.brand img { border-radius: 12px; }
+.brand h1, .brand p { margin: 0; }
+.lead { font-size: 1.15rem; }
+.flow { display: flex; align-items: center; margin: 2rem 0; font-size: 0.95rem; }
+.node { flex: none; padding: 0.5rem 0.8rem; border: 2px solid GrayText; border-radius: 0.5rem; font-weight: 600; }
+.node.relay { background: var(--accent); border-color: var(--accent); color: Canvas; }
+.link { flex: 1; min-width: 4.5rem; position: relative; padding: 0 0.6rem 1.6rem; text-align: center; font-size: 0.8rem; line-height: 1.5; color: GrayText; }
+.link::before { content: ""; position: absolute; left: 0.4rem; right: 0.5rem; top: calc(50% - 1px); border-top: 2px solid GrayText; }
+.link::after { content: ""; position: absolute; right: 0.35rem; top: calc(50% - 5px); border: 5px solid transparent; border-left: 8px solid GrayText; border-right: 0; }
+@media (max-width: 30rem) {
+  .flow { flex-direction: column; align-items: flex-start; }
+  .link { min-width: 0; margin-left: 1rem; padding: 0.6rem 0 0.75rem 1.25rem; text-align: left; }
+  .link::before { left: 0; right: auto; top: 0.2rem; bottom: 0.6rem; border-top: 0; border-left: 2px solid GrayText; }
+  .link::after { left: -4px; right: auto; top: auto; bottom: 0.2rem; border: 5px solid transparent; border-top: 8px solid GrayText; border-bottom: 0; }
+}
 `;
 
 /** Security headers of every `/authorize` response. */

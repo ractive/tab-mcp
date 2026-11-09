@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { addressIdFromSecret, newSecret } from "../src/address.ts";
-import type { CreateRelayOptions } from "../src/relay.ts";
+import { type CreateRelayOptions, VERSION } from "../src/relay.ts";
 import {
 	connectClient,
 	mcpPost,
@@ -960,9 +960,15 @@ describe("health and index", () => {
 		const index = await fetch(`${r.relay.url}/`);
 		expect(index.headers.get("content-type")).toContain("text/html");
 		expect(index.headers.get("cache-control")).toBe("public, max-age=3600");
-		expect(await index.text()).toContain(
-			'<link rel="icon" href="/favicon.svg"',
+		// The page loads only the relay's own stylesheet and icon.
+		expect(index.headers.get("content-security-policy")).toBe(
+			"default-src 'none'; style-src 'self'; img-src 'self'; frame-ancestors 'none'",
 		);
+		const html = await index.text();
+		expect(html).toContain('<link rel="icon" href="/favicon.svg"');
+		expect(html).toContain('<link rel="stylesheet" href="/authorize.css">');
+		expect(html).toContain('href="https://ractive.ch/tab-mcp/"');
+		expect(html).toContain(`Version ${VERSION}`);
 		expect((await fetch(`${r.relay.url}/nope`)).status).toBe(404);
 	});
 
