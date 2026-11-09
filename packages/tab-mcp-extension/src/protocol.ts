@@ -123,12 +123,22 @@ export interface PanelState {
 	/** "Allow on all sites" is granted. */
 	allSites: boolean;
 	tab?: TabView;
-	questions: QuestionView[];
+	/**
+	 * Without their arguments, which can be large: each question's come once
+	 * per panel, in a `question-args` message before the first state that
+	 * lists it.
+	 */
+	questions: QuestionSummary[];
 }
+
+/** A question as the repeated state lists it: all but its arguments. */
+export type QuestionSummary = Omit<QuestionView, "args">;
 
 /** From the service worker. */
 export type WorkerMessage =
 	| { type: "state"; state: PanelState }
+	/** A question's arguments, in full, once per panel. */
+	| { type: "question-args"; id: string; args: string }
 	/** To a question's window: its question, `undefined` once it is settled. */
 	| { type: "question"; question: QuestionView | undefined };
 

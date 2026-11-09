@@ -7,7 +7,11 @@ import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { allowable } from "./allowed.ts";
 import type { AlwaysAllowed, AlwaysKey } from "./always.ts";
 import { type LookedUp, sameTool } from "./bridge.ts";
-import { QUESTION_TIMEOUT_MS, type Questions } from "./questions.ts";
+import {
+	MAX_QUESTIONS_PER_APP,
+	QUESTION_TIMEOUT_MS,
+	type Questions,
+} from "./questions.ts";
 
 /** What `decide` needs: the bridge, the allowed tools, Always allow, a question. */
 export interface Decider {
@@ -46,6 +50,10 @@ export async function decide(
 		request,
 		tool === undefined ? {} : { tabId: tool.tabId, origin: tool.origin },
 	);
+	if (answer === "busy")
+		throw new Error(
+			`${MAX_QUESTIONS_PER_APP} calls of this AI app already wait for the user's answer; this one was not asked. Wait for those answers.`,
+		);
 	if (answer === "timeout")
 		// The library declines; `webmcp_call` passes this on to the AI app.
 		throw new Error(

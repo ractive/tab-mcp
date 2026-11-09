@@ -106,7 +106,8 @@ notification or no answer in 60 s. A click on either button within half a second
 the notification showing does not count (it shows again). A notification answers only
 its own call. Questions also show in every open side panel, so with notifications off
 (Focus, Do Not Disturb, notifications off for Chrome) open the panel when the icon shows
-"?". A question nobody answers in 60 s is Don't allow.
+"?". A question nobody answers in 60 s is Don't allow. At most 5 questions of one AI app wait at
+once; a further call of that app is declined without asking, and the app is told why.
 
 "Always allow" holds for the tool on the page the question was about (its site and that
 very page load) and the AI app that asked; if the page changed while the question was

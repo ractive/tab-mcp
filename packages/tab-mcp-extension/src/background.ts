@@ -21,7 +21,7 @@ import {
 	startProblem,
 	type WorkerMessage,
 } from "./protocol.ts";
-import { Starter } from "./starter.ts";
+import { attachWhenStarted, Starter } from "./starter.ts";
 import { ALL_SITES, injectInto } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 
@@ -131,42 +131,22 @@ chrome.runtime.onConnect.addListener((port) => {
 		port.disconnect();
 		return;
 	}
-	// Until the connection has started (a worker that just woke), keep what
-	// the panel says: Chrome hands a message only to the listeners there are.
-	const early: unknown[] = [];
-	let gone = false;
-	let added = false;
-	const add = () =>
-		void ready().then(
-			(c) => {
-				if (gone || added) return;
-				added = true;
-				port.onMessage.removeListener(keep);
-				c.addPanel(port, early);
+	// Until the connection has started (a worker that just woke, or a start
+	// that failed), keep what the panel says: Chrome hands a message only to
+	// the listeners there are. Attached once any start succeeds.
+	attachWhenStarted<Connection, WorkerMessage>(
+		connection,
+		{
+			postMessage: (message) => port.postMessage(message),
+			onMessage: (listener) => {
+				port.onMessage.addListener(listener);
+				return () => port.onMessage.removeListener(listener);
 			},
-			(error: unknown) => {
-				// The panel shows why; what it says next tries the start again.
-				if (gone || added) return;
-				const message: WorkerMessage = {
-					type: "state",
-					state: startProblem(error),
-				};
-				try {
-					port.postMessage(message);
-				} catch {
-					// Closed meanwhile.
-				}
-			},
-		);
-	const keep = (message: unknown) => {
-		early.push(message);
-		if (connection.failed) add();
-	};
-	port.onMessage.addListener(keep);
-	port.onDisconnect.addListener(() => {
-		gone = true;
-	});
-	add();
+			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
+		},
+		(c, early) => c.addPanel(port, early),
+		(error) => ({ type: "state", state: startProblem(error) }),
+	);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {

@@ -11,7 +11,7 @@ import {
 	PANEL_PORT,
 	type PanelCommand,
 	type PanelState,
-	type QuestionView,
+	type QuestionSummary,
 	type ToolView,
 	type WorkerMessage,
 } from "../protocol.ts";
@@ -79,7 +79,8 @@ function connect(): void {
 	}
 	port = opened;
 	opened.onMessage.addListener((message: WorkerMessage) => {
-		if (message?.type === "state") show(message.state);
+		if (message?.type === "question-args") args.set(message.id, message.args);
+		else if (message?.type === "state") show(message.state);
 	});
 	opened.onDisconnect.addListener(() => {
 		if (port === opened) port = undefined;
@@ -210,6 +211,8 @@ function showConnection(s: PanelState): void {
 /** Since when the panel has been visible and focused, if it is. */
 let focusedSince: number | undefined;
 const cards = new Map<string, { card: HTMLElement; shownAt: number }>();
+/** Each question's arguments, sent once before the state that lists it. */
+const args = new Map<string, string>();
 
 /**
  * Until when the panel's buttons that allow something stay off after its
@@ -221,8 +224,9 @@ let movedUntil = 0;
 /** "Allow all" as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
-function showQuestions(questions: QuestionView[]): void {
+function showQuestions(questions: QuestionSummary[]): void {
 	const ids = new Set(questions.map((q) => q.id));
+	for (const id of args.keys()) if (!ids.has(id)) args.delete(id);
 	let removed = false;
 	for (const [id, { card }] of cards)
 		if (!ids.has(id)) {
@@ -238,8 +242,9 @@ function showQuestions(questions: QuestionView[]): void {
 	}
 	for (const q of questions)
 		if (!cards.has(q.id)) {
-			const card = questionCard(q, (answer) =>
-				send({ type: "answer", id: q.id, answer }),
+			const card = questionCard(
+				{ ...q, args: args.get(q.id) ?? "" },
+				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
 			cards.set(q.id, { card, shownAt: Date.now() });

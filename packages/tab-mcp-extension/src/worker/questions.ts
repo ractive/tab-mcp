@@ -18,6 +18,12 @@ import { allowable } from "./allowed.ts";
 
 /** A question nobody answers in this time is Don't allow. */
 export const QUESTION_TIMEOUT_MS = 60_000;
+/**
+ * At most this many questions of one AI app wait at once; a call beyond
+ * them is declined without asking ("busy"), so an AI app cannot pile up
+ * questions (each with up to 1 MiB of arguments) faster than they are read.
+ */
+export const MAX_QUESTIONS_PER_APP = 5;
 /** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
 /**
@@ -126,8 +132,28 @@ export function notificationText(
 	};
 }
 
+/**
+ * The `question-args` messages a panel still needs: the arguments of each
+ * waiting question it has not had, once. `sent` is updated: ids of questions
+ * that went are dropped, the ones returned are added.
+ */
+export function argsToSend(
+	questions: QuestionView[],
+	sent: Set<string>,
+): { type: "question-args"; id: string; args: string }[] {
+	const waiting = new Set(questions.map((q) => q.id));
+	for (const id of sent) if (!waiting.has(id)) sent.delete(id);
+	const messages = questions
+		.filter((q) => !sent.has(q.id))
+		.map((q) => ({ type: "question-args" as const, id: q.id, args: q.args }));
+	for (const m of messages) sent.add(m.id);
+	return messages;
+}
+
 interface Pending {
 	view: QuestionView;
+	/** The AI app's grant that asks. */
+	grantId: string;
 	summary: string;
 	/** The summary is cut: the notification says so. */
 	argsCut: boolean;
@@ -160,12 +186,17 @@ export class Questions {
 	/**
 	 * Ask whether `request` may run, for the page tool on `origin` in tab
 	 * `tabId`. Resolves with the first answer, `"timeout"` when nobody
-	 * answered in time, `"deny"` when the AI app cancelled.
+	 * answered in time, `"deny"` when the AI app cancelled, `"busy"` (without
+	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already.
 	 */
 	ask(
 		request: ConfirmRequest,
 		where: { tabId?: number; origin?: string },
-	): Promise<Answer | "timeout"> {
+	): Promise<Answer | "timeout" | "busy"> {
+		const { grantId } = request.client;
+		let open = 0;
+		for (const p of this.#pending.values()) if (p.grantId === grantId) open++;
+		if (open >= MAX_QUESTIONS_PER_APP) return Promise.resolve("busy");
 		const id = crypto.randomUUID();
 		const json = visible(JSON.stringify(request.arguments, null, 2) ?? "{}");
 		const view: QuestionView = {
@@ -186,6 +217,7 @@ export class Questions {
 			const cancelled = () => pending.settle("deny");
 			const pending: Pending = {
 				view,
+				grantId,
 				summary,
 				argsCut: summary !== compact,
 				tabId: where.tabId,

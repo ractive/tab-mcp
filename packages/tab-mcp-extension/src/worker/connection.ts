@@ -45,7 +45,8 @@ import { AlwaysAllowed } from "./always.ts";
 import { PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import { type Kv, openKv } from "./kv.ts";
-import { Questions, type QuestionsHost } from "./questions.ts";
+import { QuestionWindows } from "./question-windows.ts";
+import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
@@ -69,6 +70,8 @@ interface Panel {
 	pairing: boolean;
 	/** On screen, as it last said (covered by another extension's panel: not). */
 	visible: boolean;
+	/** The questions whose arguments it got (they are sent once). */
+	argsSent: Set<string>;
 }
 
 /** The extension's icon for the AI app's connector list (a PNG `data:` URI). */
@@ -114,10 +117,8 @@ export class Connection {
 	readonly #always = new AlwaysAllowed();
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
-	/** The windows opened for one question each (by window id). */
-	readonly #questionWindows = new Map<number, string>();
-	/** The ports of those windows' pages, by window id. */
-	readonly #questionPorts = new Map<number, chrome.runtime.Port>();
+	/** The windows opened for one question each. */
+	readonly #questionWindows: QuestionWindows;
 	#allowed: AllowedTools;
 	#relay: string;
 	#mcp: TabMcp;
@@ -151,6 +152,23 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		this.#questionWindows = new QuestionWindows({
+			create: async () =>
+				(
+					await chrome.windows.create({
+						url: chrome.runtime.getURL(QUESTION_PATH),
+						type: "popup",
+						width: 440,
+						height: 560,
+						focused: true,
+					})
+				)?.id,
+			remove: (windowId) =>
+				void chrome.windows.remove(windowId).catch(() => {}),
+			list: () => this.#questions.list,
+			answer: (id, answer) => this.#questions.answer(id, answer),
+			parse: parseQuestionAnswer,
+		});
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -369,12 +387,7 @@ export class Connection {
 
 	/** A window closed: one opened for a question is its Don't allow. */
 	windowRemoved(windowId: number): void {
-		const question = this.#questionWindows.get(windowId);
-		if (question === undefined) return;
-		this.#questionWindows.delete(windowId);
-		this.#questionPorts.get(windowId)?.disconnect();
-		this.#questionPorts.delete(windowId);
-		this.#questions.answer(question, "deny");
+		this.#questionWindows.windowRemoved(windowId);
 	}
 
 	/**
@@ -390,7 +403,10 @@ export class Connection {
 		const ownWindow = (error?: unknown) => {
 			if (error !== undefined)
 				console.warn("tab-mcp: side panel for a question", error);
-			void this.#openQuestionWindow(id);
+			this.#questionWindows.open(id).catch((error: unknown) =>
+				// The question stays in the panels and the badge says so.
+				console.warn("tab-mcp: question window", error),
+			);
 		};
 		if (tabId === undefined || windowId === undefined) {
 			ownWindow();
@@ -405,74 +421,18 @@ export class Connection {
 		);
 	}
 
-	async #openQuestionWindow(id: string): Promise<void> {
-		if (!this.#questions.list.some((q) => q.id === id)) return;
-		try {
-			const opened = await chrome.windows.create({
-				url: chrome.runtime.getURL(QUESTION_PATH),
-				type: "popup",
-				width: 440,
-				height: 560,
-				focused: true,
-			});
-			if (opened?.id === undefined) return;
-			// Settled while the window opened: nothing to show.
-			if (!this.#questions.list.some((q) => q.id === id)) {
-				void chrome.windows.remove(opened.id).catch(() => {});
-				return;
-			}
-			this.#questionWindows.set(opened.id, id);
-		} catch (error) {
-			// The question stays in the panels and the badge says so.
-			console.warn("tab-mcp: question window", error);
-		}
-	}
-
 	/**
 	 * The port of a question window's page, its sender already checked: it
 	 * gets the question of the window it is in, and may answer that one only.
 	 */
 	addQuestionWindow(port: chrome.runtime.Port): void {
-		const windowId = port.sender?.tab?.windowId;
-		const question =
-			windowId === undefined ? undefined : this.#questionWindows.get(windowId);
-		if (windowId === undefined || question === undefined) {
-			port.disconnect();
-			return;
-		}
-		this.#questionPorts.get(windowId)?.disconnect();
-		this.#questionPorts.set(windowId, port);
-		port.onMessage.addListener((raw: unknown) => {
-			const answer = parseQuestionAnswer(raw);
-			if (answer !== undefined) this.#questions.answer(question, answer);
+		this.#questionWindows.addPort({
+			windowId: port.sender?.tab?.windowId,
+			postMessage: (message) => port.postMessage(message),
+			disconnect: () => port.disconnect(),
+			onMessage: (listener) => port.onMessage.addListener(listener),
+			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
 		});
-		port.onDisconnect.addListener(() => {
-			if (this.#questionPorts.get(windowId) === port)
-				this.#questionPorts.delete(windowId);
-		});
-		this.#sendQuestions();
-	}
-
-	/** Each question window its question; one whose question is settled closes. */
-	#sendQuestions(): void {
-		const questions = this.#questions.list;
-		for (const [windowId, id] of this.#questionWindows) {
-			const question = questions.find((q) => q.id === id);
-			const port = this.#questionPorts.get(windowId);
-			if (port !== undefined) {
-				const message: WorkerMessage = { type: "question", question };
-				try {
-					port.postMessage(message);
-				} catch {
-					// Closed meanwhile.
-				}
-			}
-			if (question === undefined) {
-				this.#questionWindows.delete(windowId);
-				this.#questionPorts.delete(windowId);
-				void chrome.windows.remove(windowId).catch(() => {});
-			}
-		}
 	}
 
 	notificationButton(id: string, index: number): void {
@@ -490,7 +450,12 @@ export class Connection {
 	 * sent before the connection had started.
 	 */
 	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
-		const panel: Panel = { port, pairing: false, visible: true };
+		const panel: Panel = {
+			port,
+			pairing: false,
+			visible: true,
+			argsSent: new Set(),
+		};
 		this.#panels.add(panel);
 		const receive = (raw: unknown) => {
 			// Anything that is not a command is dropped.
@@ -782,7 +747,7 @@ export class Connection {
 				: {}),
 			allSites: this.#allSites,
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
-			questions: this.#questions.list,
+			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 		};
 	}
 
@@ -794,13 +759,22 @@ export class Connection {
 		queueMicrotask(() => {
 			this.#sending = false;
 			for (const panel of this.#panels) this.#send(panel);
-			this.#sendQuestions();
+			this.#questionWindows.sync();
 		});
 	}
 
+	/**
+	 * The state to a panel. A question's arguments (up to the relay's 1 MiB
+	 * per request, more once escaped) go once per panel, each in a message
+	 * of its own before the state that first lists the question: repeated
+	 * in every state, a few large ones could pass Chrome's limit for one
+	 * message, and the panel would get no state at all.
+	 */
 	#send(panel: Panel): void {
-		const message: WorkerMessage = { type: "state", state: this.state };
 		try {
+			for (const args of argsToSend(this.#questions.list, panel.argsSent))
+				panel.port.postMessage(args);
+			const message: WorkerMessage = { type: "state", state: this.state };
 			panel.port.postMessage(message);
 		} catch {
 			// Closed meanwhile: its onDisconnect removes it.

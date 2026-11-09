@@ -294,7 +294,10 @@ did, by connecting the extension.
   they cover the popup path; the side panel path rests on Chromium dispatching
   `onClicked` with the gesture. In the panel and the popup, the site is on a line of
   its own ("Site (verified)") and the page's title for the tool apart, labelled as the
-  page's. A click on either button within 500 ms of showing does not count (it
+  page's. Each question's arguments go to a panel once, in a message of their own, not in
+  every state (several large ones in one state could pass Chrome's message limit and
+  leave the panel without any state); at most 5 questions of one AI app wait at once,
+  a further call of that app is declined without asking. A click on either button within 500 ms of showing does not count (it
   shows again), so a click meant for something that was there before cannot allow. Each notification
   carries its call: a click answers only that call, and one on a call already answered,
   timed out or cancelled is dropped, never taken for another. A notification is outside
@@ -329,7 +332,9 @@ did, by connecting the extension.
   Chrome closes it under the worker (a deletion, a version change), instead of being
   used dead. A worker whose start fails (the database refused, say) keeps the error,
   shows it in a panel that connects and tries the start again at the next event or
-  panel message, instead of leaving the panel silently dead.
+  panel message, instead of leaving the panel silently dead; a panel that connected
+  while it failed is attached as soon as any start succeeds, and what it said meanwhile
+  is kept (at most 64 messages).
 - **Notifications cleared once made.** A notification is cleared (answered, timed out,
   cancelled, shown again) only after its `create` has finished, so none stays on screen
   with buttons that answer nothing.
