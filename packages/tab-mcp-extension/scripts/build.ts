@@ -6,7 +6,8 @@
  *                                 its id is the one the hosted relay allows
  *   bun scripts/build.ts --test   no key, `<all_urls>` host access at install
  *                                 (end-to-end tests: no click on the icon)
- *   bun scripts/build.ts --store  no key, for the Chrome Web Store
+ *   bun scripts/build.ts --store  no key and no source maps, for the Chrome
+ *                                 Web Store
  *
  * The key is not in the repository: anyone with it could load an extension
  * with the development build's id and use the hosted relay as it. It is read
@@ -128,6 +129,7 @@ async function bundle(
 	outdir: string,
 	format: "esm" | "iife",
 	minify: boolean,
+	sourcemap: "none" | "linked",
 	naming?: string,
 ): Promise<string[]> {
 	const result = await Bun.build({
@@ -138,7 +140,7 @@ async function bundle(
 		...(naming ? { naming } : {}),
 		minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
-		sourcemap: "linked",
+		sourcemap,
 		metafile: true,
 	});
 	if (!result.success)
@@ -174,18 +176,28 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	const outdir = resolve(options.outdir ?? join(ROOT, "dist"));
 	await checkOutdir(outdir);
 	const minify = options.minify ?? true;
+	// The store package carries no source maps (iteration 23).
+	const sourcemap = options.store ? "none" : "linked";
 	const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as {
 		version: string;
 	};
 	await rm(outdir, { recursive: true, force: true });
 	const packages = new Set([
-		...(await bundle("src/background.ts", outdir, "esm", minify)),
-		...(await bundle("src/content.ts", outdir, "iife", minify, CONTENT_SCRIPT)),
+		...(await bundle("src/background.ts", outdir, "esm", minify, sourcemap)),
+		...(await bundle(
+			"src/content.ts",
+			outdir,
+			"iife",
+			minify,
+			sourcemap,
+			CONTENT_SCRIPT,
+		)),
 		...(await bundle(
 			"src/sidepanel/index.html",
 			join(outdir, "sidepanel"),
 			"esm",
 			minify,
+			sourcemap,
 		)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));

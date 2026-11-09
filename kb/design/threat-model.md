@@ -221,7 +221,7 @@ did, by connecting the extension.
   to 1000 characters, titles to 100; schemas over 16 KB and more than 64 tools are left
   out. Every result is marked untrusted (`untrustedContentHint`, mapped to MCP's
   `openWorldHint`); its text, all blocks together, is cut to 100,000 characters, with at
-  most 32 blocks and 1 MB per image. `webmcp_tools` lists names cut to 128 characters
+  most 32 blocks and each image up to 1 MB of base64 (about 750 KB of image data). `webmcp_tools` lists names cut to 128 characters
   and descriptions with the same origin prefix.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user every time (see "Questions" below), naming the page's origin. The user
