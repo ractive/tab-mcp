@@ -936,15 +936,6 @@ describe.skipIf(chrome === undefined)(
 			await stack.worker.eval("true");
 		}
 
-		/** Wait until the worker has emptied chrome.storage.local. */
-		async function localEmptied(): Promise<void> {
-			const end = Date.now() + 10_000;
-			while (Object.keys(await localAll(stack.worker)).length > 0) {
-				if (Date.now() > end) throw new Error("chrome.storage.local stayed");
-				await Bun.sleep(100);
-			}
-		}
-
 		/** What a content script could write there, where Chrome lets it. */
 		const INJECTED = {
 			relay: "https://evil.example",
@@ -953,15 +944,15 @@ describe.skipIf(chrome === undefined)(
 			"tab-mcp:secret:https://evil.example:tab-mcp-for-chrome": "B".repeat(43),
 		};
 
-		test("setting keys in chrome.storage.local are removed at a start and never taken", async () => {
+		test("setting keys in chrome.storage.local are never taken", async () => {
 			const before = await kvAll(stack.worker);
 			await stack.worker.eval(
 				`chrome.storage.local.set(${JSON.stringify(INJECTED)})`,
 			);
 			await restartWorker();
-			await localEmptied();
 			// IndexedDB is as it was: none of them came in.
 			expect(await kvAll(stack.worker)).toEqual(before);
+			await stack.worker.eval("chrome.storage.local.clear()");
 		});
 
 		test("the database deleted under the worker: the next write opens it again, and nothing old comes in", async () => {
@@ -998,11 +989,11 @@ describe.skipIf(chrome === undefined)(
 				`chrome.storage.local.set(${JSON.stringify(INJECTED)})`,
 			);
 			await restartWorker();
-			await localEmptied();
 			kv = await kvAll(stack.worker);
 			for (const key of Object.keys(INJECTED))
 				if (key !== "allowedTools") expect(kv[key]).toBeUndefined();
 			expect(kv["allowedTools"]).toEqual({ [SITE]: ["place_order"] });
+			await stack.worker.eval("chrome.storage.local.clear()");
 		});
 	},
 );

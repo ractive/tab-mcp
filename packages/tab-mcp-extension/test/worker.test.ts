@@ -18,7 +18,7 @@ import {
 } from "../src/protocol.ts";
 import { allowable, isAllowed } from "../src/worker/allowed.ts";
 import { AlwaysAllowed } from "../src/worker/always.ts";
-import { forgetOldSettings, memoryKv } from "../src/worker/kv.ts";
+import { memoryKv } from "../src/worker/kv.ts";
 import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
@@ -466,51 +466,6 @@ describe("the settings in IndexedDB", () => {
 		expect(kv.data.get("tab-mcp:secret:https://other:tab-mcp-for-chrome")).toBe(
 			"s2",
 		);
-	});
-
-	/** chrome.storage.local as the worker sees it. */
-	function oldArea(initial: Record<string, unknown>) {
-		const data = { ...initial };
-		return {
-			data,
-			get: async () => ({ ...data }),
-			async remove(keys: string[]) {
-				for (const key of keys) delete data[key];
-			},
-		};
-	}
-
-	/** What a content script could write there, where Chrome lets it. */
-	const INJECTED = {
-		relay: "https://evil.example",
-		aiOn: true,
-		replaced: { sibling: true },
-		allowedTools: { "https://evil.example": ["steal"] },
-		"tab-mcp:secret:https://evil.example:tab-mcp-for-chrome": "B".repeat(43),
-	};
-
-	test("the old settings in chrome.storage.local are removed and never taken, with kv empty", async () => {
-		const old = oldArea({ ...INJECTED, somethingElse: 1 });
-		const kv = memoryKv();
-		expect((await forgetOldSettings(old)).sort()).toEqual(
-			Object.keys(INJECTED).sort(),
-		);
-		expect(old.data).toEqual({ somethingElse: 1 });
-		expect(Object.fromEntries(kv.data)).toEqual({});
-		// Nothing left: nothing more to remove.
-		expect(await forgetOldSettings(old)).toEqual([]);
-	});
-
-	test("with settings in kv, the old ones are removed and change nothing there", async () => {
-		const settings = {
-			relay: "https://tab-mcp.ractive.ch",
-			allowedTools: { "https://site.test": ["t"] },
-		};
-		const kv = memoryKv(settings);
-		const old = oldArea(INJECTED);
-		await forgetOldSettings(old);
-		expect(old.data).toEqual({});
-		expect(Object.fromEntries(kv.data)).toEqual(settings);
 	});
 });
 

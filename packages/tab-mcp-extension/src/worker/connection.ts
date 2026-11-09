@@ -40,7 +40,7 @@ import {
 } from "./allowed.ts";
 import { AlwaysAllowed } from "./always.ts";
 import { PageToolBridge } from "./bridge.ts";
-import { forgetOldSettings, type Kv, openKv } from "./kv.ts";
+import { type Kv, openKv } from "./kv.ts";
 import {
 	QUESTION_TIMEOUT_MS,
 	Questions,
@@ -173,13 +173,9 @@ export class Connection {
 	 */
 	static async start(): Promise<Connection> {
 		await restrictStorage();
-		// The settings live in IndexedDB, out of content scripts' reach. An
-		// older development build kept them in chrome.storage.local: removed
-		// there, never read (a content script may have written them).
+		// The settings live in IndexedDB, out of content scripts' reach;
+		// chrome.storage.local is never read for them.
 		const kv = await openKv();
-		await forgetOldSettings(chrome.storage.local).catch((error: unknown) =>
-			console.error("tab-mcp: removing the old settings", error),
-		);
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();

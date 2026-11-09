@@ -289,8 +289,8 @@ did, by connecting the extension.
   a page's compromised renderer, running code in the content script's world, can neither
   read the secret (and take the address over from anywhere) nor allow its own tools.
   `chrome.storage.local`, where the owner's development builds kept them, is readable
-  and writable by content scripts by default. The worker takes nothing from there: on
-  every start it removes the setting keys it finds and imports none. Where Chrome lets
+  and writable by content scripts by default. The worker never reads settings from
+  there, and leaves what is there alone (only the owner used those builds). Where Chrome lets
   content scripts write that area, a relay or secret written there must never be picked
   up (the extension would connect to that relay and send it the address secret). A
   one-off import behind a "migrated" marker would not hold: the marker would live in the

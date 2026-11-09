@@ -135,35 +135,3 @@ export function memoryKv(initial: Record<string, unknown> = {}): Kv & {
 		},
 	};
 }
-
-/** The keys that used to be in `chrome.storage.local` (before IndexedDB): removed there, never read. */
-export function isSettingKey(key: string): boolean {
-	return (
-		key === "relay" ||
-		key === "aiOn" ||
-		key === "replaced" ||
-		key === "allowedTools" ||
-		key.startsWith("tab-mcp:secret:")
-	);
-}
-
-/** What forgetting the old settings needs of `chrome.storage.local`. */
-export interface OldArea {
-	get(keys: null): Promise<Record<string, unknown>>;
-	remove(keys: string[]): Promise<void>;
-}
-
-/**
- * Remove every setting key from `chrome.storage.local`, on each start, and
- * take none of them. Only the owner's development builds ever kept settings
- * there, and they have moved. Importing them once behind a marker kept in
- * the database it guards would import again whenever that database is lost
- * (site data cleared, a forced close): where Chrome does not keep content
- * scripts out of `chrome.storage.local`, one could have written a relay or a
- * secret there for that start to pick up. Returns the keys removed.
- */
-export async function forgetOldSettings(old: OldArea): Promise<string[]> {
-	const keys = Object.keys(await old.get(null)).filter(isSettingKey);
-	if (keys.length > 0) await old.remove(keys);
-	return keys;
-}
