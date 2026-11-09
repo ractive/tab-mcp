@@ -697,9 +697,15 @@ describe("showConnectDialog", () => {
 	async function sendCode(
 		code: string,
 		expiresAt = "2026-10-20T10:00:00.000Z",
+		reason?: string,
 	): Promise<void> {
 		const shown = nextEvent(mcp, "pairingcode");
-		relay.send({ type: "pairing.code", code, expiresAt });
+		relay.send({
+			type: "pairing.code",
+			code,
+			expiresAt,
+			...(reason === undefined ? {} : { reason }),
+		});
 		await shown;
 	}
 	/** An expiry two minutes from now, as the relay sends with a fresh code. */
@@ -963,7 +969,7 @@ describe("showConnectDialog", () => {
 	test("an app connects: the connected state in one change, no node made again, no new code in view (owner feedback)", async () => {
 		relay.grants = [];
 		const { dialog, closed } = await open();
-		await sendCode("111111", inTwoMinutes());
+		await sendCode("111111", inTwoMinutes(), "start");
 		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
 		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
 		const success = dialog.querySelector(".tab-mcp-success") as HTMLElement;
@@ -987,9 +993,9 @@ describe("showConnectDialog", () => {
 		observer.observe(dialog, { childList: true, subtree: true });
 		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).focus();
 
-		// The code is entered: the relay sends the next one at once, long
-		// before the old one expires. The AI app connects a moment later.
-		await sendCode("222222", inTwoMinutes());
+		// The code is entered: the relay sends the next one at once, saying
+		// why. The AI app connects a moment later.
+		await sendCode("222222", inTwoMinutes(), "used");
 		expect(shown(value)).toBe(false);
 		expect(shown(used)).toBe(true);
 		expect(used.textContent).toBe("Code used. Waiting for your AI app…");
@@ -1040,14 +1046,10 @@ describe("showConnectDialog", () => {
 		const { dialog } = await open();
 		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
 		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
-		// A code that replaces an expired one shows at once.
-		await sendCode("000000");
-		await sendCode("111111", inTwoMinutes());
-		expect(value.textContent).toBe("111111");
-		expect(used.hidden).toBe(true);
+		await sendCode("111111", inTwoMinutes(), "start");
 		jest.useFakeTimers();
 		try {
-			await sendCode("222222", inTwoMinutes());
+			await sendCode("222222", inTwoMinutes(), "used");
 			expect(shown(used)).toBe(true);
 			jest.advanceTimersByTime(CODE_USED_WAIT_MS - 1);
 			expect(shown(used)).toBe(true);
@@ -1059,6 +1061,62 @@ describe("showConnectDialog", () => {
 			jest.useRealTimers();
 		}
 		byText(dialog, "Close").click();
+	});
+
+	test("only a used code waits: expired, locked or no reason (an older relay) show the next code at once, whatever the clock", async () => {
+		relay.grants = [];
+		const { dialog } = await open();
+		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
+		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
+		const now = Date.now();
+		// The relay's expiry, read with the page's clock far behind and far ahead.
+		const relayExpiry = new Date(now + 120_000).toISOString();
+		for (const skew of [-600_000, 0, 600_000]) {
+			const clock = jest.spyOn(Date, "now").mockReturnValue(now + skew);
+			try {
+				let n = 100_000 + (skew + 600_000) / 1000;
+				for (const reason of [undefined, "start", "expired", "locked"]) {
+					const next = String(n++);
+					await sendCode(next, relayExpiry, reason);
+					expect({ reason, skew, shown: value.textContent }).toEqual({
+						reason,
+						skew,
+						shown: next,
+					});
+					expect(used.hidden).toBe(true);
+					expect(shown(value)).toBe(true);
+				}
+			} finally {
+				clock.mockRestore();
+			}
+		}
+		// A lockout during the wait ends it: /authorize says to enter the new code.
+		await sendCode("200001", inTwoMinutes(), "used");
+		expect(shown(used)).toBe(true);
+		await sendCode("200002", inTwoMinutes(), "locked");
+		expect(used.hidden).toBe(true);
+		expect(shown(value)).toBe(true);
+		expect(value.textContent).toBe("200002");
+		byText(dialog, "Close").click();
+	});
+
+	test("one app paired twice is named once, in the confirmation and the New address question", async () => {
+		relay.grants = [GRANT, { ...GRANT, grantId: "g_2" }];
+		const { dialog } = await open();
+		expect(dialog.querySelector(".tab-mcp-success")?.textContent).toBe(
+			"Claude (claude.ai) is connectedYou can close this now and ask it to use the tools of this page.",
+		);
+		byText(dialog, "Connect another app").click();
+		byText(dialog, "New address").click();
+		expect(
+			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
+		).toBe(
+			"A new address disconnects Claude (claude.ai). To use this page again, add the new address to it.",
+		);
+		// Both grants are listed, each with its own Disconnect.
+		expect(dialog.querySelectorAll(".tab-mcp-apps li")).toHaveLength(2);
+		byText(dialog, "Cancel").click();
+		byText(dialog, "Done").click();
 	});
 
 	test("opened while an app is connected: the connected state, focus on Done, the code behind the disclosure", async () => {

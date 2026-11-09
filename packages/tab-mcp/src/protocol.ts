@@ -99,6 +99,12 @@ export interface PairingCodeMessage {
 	type: "pairing.code";
 	code: string;
 	expiresAt: string;
+	/**
+	 * Why this code comes: `start` (the dialog opened), `used` (the last one
+	 * was entered), `locked` (too many wrong tries), `expired`. Older
+	 * relays leave it out; older clients ignore it.
+	 */
+	reason?: "start" | "used" | "locked" | "expired";
 }
 export interface GrantAddedMessage {
 	type: "grant.added";

@@ -107,12 +107,19 @@ function sameCode(a: string, b: string): boolean {
 }
 
 /**
+ * Why the relay sends a code (`pairing.code` `reason`): `start` the dialog
+ * opened (a new code, or the current one again), `used` the last one was
+ * entered, `locked` it had too many wrong tries, `expired` it timed out.
+ */
+export type CodeReason = "start" | "used" | "locked" | "expired";
+
+/**
  * The pairing codes of one tab session: on while the tab's dialog is open
  * (`pairing.start` … `pairing.stop`); a fresh code after expiry, after use and
  * after too many wrong attempts. Codes are never logged.
  */
 export class PairingCodes {
-	readonly #send: (code: string, expiresAt: number) => void;
+	readonly #send: (code: string, expiresAt: number, reason: CodeReason) => void;
 	readonly #ttlMs: number;
 	readonly #maxAttempts: number;
 	#current: { code: string; expiresAt: number; attempts: number } | undefined;
@@ -120,7 +127,7 @@ export class PairingCodes {
 	#timer: Timer | undefined;
 
 	constructor(
-		send: (code: string, expiresAt: number) => void,
+		send: (code: string, expiresAt: number, reason: CodeReason) => void,
 		options: { ttlMs?: number; maxAttempts?: number } = {},
 	) {
 		this.#send = send;
@@ -143,10 +150,10 @@ export class PairingCodes {
 	start(): void {
 		if (this.#current !== undefined) {
 			// Already on (e.g. a second dialog): show the same code again.
-			this.#send(this.#current.code, this.#current.expiresAt);
+			this.#send(this.#current.code, this.#current.expiresAt, "start");
 			return;
 		}
-		this.#issue();
+		this.#issue("start");
 	}
 
 	stop(): void {
@@ -172,12 +179,12 @@ export class PairingCodes {
 		if (!admit()) return "limited";
 		if (now >= current.expiresAt) {
 			this.#previous = current.code;
-			this.#issue();
+			this.#issue("expired");
 			return "expired";
 		}
 		if (sameCode(typed, current.code)) {
 			this.#previous = undefined;
-			this.#issue();
+			this.#issue("used");
 			return "ok";
 		}
 		current.attempts++;
@@ -185,22 +192,22 @@ export class PairingCodes {
 			this.#previous !== undefined && sameCode(typed, this.#previous);
 		if (current.attempts >= this.#maxAttempts) {
 			this.#previous = undefined;
-			this.#issue();
+			this.#issue("locked");
 			return "locked";
 		}
 		return expired ? "expired" : "wrong";
 	}
 
-	#issue(): void {
+	#issue(reason: CodeReason): void {
 		clearTimeout(this.#timer);
 		const expiresAt = Date.now() + this.#ttlMs;
 		this.#current = { code: newPairingCode(), expiresAt, attempts: 0 };
 		this.#timer = setTimeout(() => {
 			if (this.#current === undefined) return;
 			this.#previous = this.#current.code;
-			this.#issue();
+			this.#issue("expired");
 		}, this.#ttlMs);
-		this.#send(this.#current.code, expiresAt);
+		this.#send(this.#current.code, expiresAt, reason);
 	}
 }
 

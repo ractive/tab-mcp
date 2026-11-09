@@ -19,6 +19,7 @@ export type {
 	JsonSchema,
 	Limits,
 	PairingCode,
+	PairingCodeReason,
 	ReconnectingInfo,
 	ReconnectOptions,
 	RegisterToolOptions,

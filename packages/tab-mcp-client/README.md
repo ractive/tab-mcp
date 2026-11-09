@@ -178,8 +178,11 @@ handles only some calls itself.
    on Done.
 
 The relay makes a new code the moment one is entered, but the AI app connects only a
-moment later. Meanwhile the dialog shows "Code used. Waiting for your AI app…" instead of
-the new code, for up to 10 seconds; if no app connects by then, the new code appears.
+moment later. When the relay says the code was used (`reason: "used"` in the event
+`pairingcode`), the dialog shows "Code used. Waiting for your AI app…" instead of the new
+code, for up to 10 seconds; if no app connects by then, the new code appears. A code that
+replaces an expired or locked one (too many wrong tries), or one from a relay that does not
+say why, shows at once.
 
 Until an app is connected, the dialog offers no prominent button under the code: only a small
 "Close" at the bottom (and Escape). Closing it stops the code (`stopPairing()`); the page

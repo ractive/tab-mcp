@@ -54,7 +54,11 @@ export interface PairingCodeMessage {
 	type: "pairing.code";
 	code: string;
 	expiresAt: string;
+	/** Why it came; left out by older relays, and when it is not one of these. */
+	reason?: "start" | "used" | "locked" | "expired";
 }
+
+const CODE_REASONS = new Set(["start", "used", "locked", "expired"]);
 export interface GrantAddedMessage {
 	type: "grant.added";
 	grant: Grant;
@@ -201,10 +205,19 @@ export function parseRelayMessage(text: string): RelayMessage | undefined {
 				: undefined;
 		case "http.cancel":
 			return str(v["id"]) ? (v as unknown as HttpCancelMessage) : undefined;
-		case "pairing.code":
-			return str(v["code"]) && str(v["expiresAt"])
-				? (v as unknown as PairingCodeMessage)
-				: undefined;
+		case "pairing.code": {
+			if (!str(v["code"]) || !str(v["expiresAt"])) return undefined;
+			const message: PairingCodeMessage = {
+				type: "pairing.code",
+				code: v["code"],
+				expiresAt: v["expiresAt"],
+			};
+			// An unknown reason (a newer relay) counts as none.
+			const reason = v["reason"];
+			if (typeof reason === "string" && CODE_REASONS.has(reason))
+				message.reason = reason as NonNullable<PairingCodeMessage["reason"]>;
+			return message;
+		}
 		case "grant.added":
 			return isGrant(v["grant"])
 				? (v as unknown as GrantAddedMessage)

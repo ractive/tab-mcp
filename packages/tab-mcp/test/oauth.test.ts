@@ -568,6 +568,28 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		expect(ok.status).toBe(303);
 	});
 
+	test("the tab hears why each code comes: start, used after the right code, locked after 5 wrong ones", async () => {
+		const ctx = await setup();
+		const reason = async () =>
+			((await ctx.tab.next("pairing.code")) as { reason?: string }).reason;
+		const code = await currentCode(ctx);
+		const ok = await ctx.browser.submit(await open(ctx), {
+			action: "connect",
+			code,
+		});
+		expect(ok.status).toBe(303);
+		expect(await reason()).toBe("used");
+		let page = await open(ctx);
+		const next = await currentCode(ctx);
+		const wrong = next === "000000" ? "000001" : "000000";
+		for (let i = 0; i < 5; i++)
+			page = await ctx.browser.submit(page, { action: "connect", code: wrong });
+		expect(await reason()).toBe("locked");
+		// A second pairing.start repeats the current code, as "start".
+		ctx.tab.send({ type: "pairing.start" });
+		expect(await reason()).toBe("start");
+	});
+
 	test("5 wrong codes: the code is replaced and the old one no longer works", async () => {
 		const ctx = await setup();
 		let page = await open(ctx);

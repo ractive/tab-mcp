@@ -586,6 +586,14 @@ export function instructions(
 	];
 }
 
+/**
+ * The labels of the apps behind these grants, each once: an app can hold
+ * more than one grant (paired twice), and is still one app.
+ */
+function appLabels(grants: readonly Grant[]): string[] {
+	return [...new Set(grants.map((g) => clientLabel(g.client)))];
+}
+
 /** "A and B", "A, B and C". */
 function listOf(items: string[]): string {
 	return items.length < 2
@@ -691,14 +699,11 @@ export function replacedNotice(
 }
 
 /**
- * A code that comes this long or longer before the shown one expires replaced
- * it early: it was used (or locked after wrong tries), not timed out.
- */
-const EARLY_CODE_MS = 5_000;
-/**
  * How long a used code stays "Code used" before its replacement is shown: the
  * AI app connects a moment after the code was entered (its token request), and
- * a new code in plain view meanwhile looks as if it did not work.
+ * a new code in plain view meanwhile looks as if it did not work. Only when
+ * the relay says the code was used (`reason: "used"`); a relay that does not
+ * say why gets the new code shown at once.
  */
 export const CODE_USED_WAIT_MS = 10_000;
 
@@ -1032,9 +1037,7 @@ export function showConnectDialog(
 		if (paired && confirmBox.hidden) expanded = false;
 		if (connectedView) {
 			const here = mcp.grants.filter((g) => pairedGrants.has(g.grantId));
-			const names = (here.length > 0 ? here : mcp.grants).map((g) =>
-				clientLabel(g.client),
-			);
+			const names = appLabels(here.length > 0 ? here : mcp.grants);
 			const one = names.length === 1;
 			successTitle.textContent = `${listOf(names)} ${one ? "is" : "are"} connected`;
 			successNext.textContent = `You can close this now and ask ${one ? "it" : "them"} to use the tools of this page.`;
@@ -1059,7 +1062,7 @@ export function showConnectDialog(
 
 	// The question names the apps connected now; pairing goes on while it is open.
 	const renderQuestion = (): boolean => {
-		const names = mcp.grants.map((g) => clientLabel(g.client));
+		const names = appLabels(mcp.grants);
 		if (names.length === 0) return false;
 		confirmText.textContent = `A new address disconnects ${listOf(names)}. To use this page again, add the new address to ${names.length === 1 ? "it" : "them"}.`;
 		return true;
@@ -1195,16 +1198,18 @@ export function showConnectDialog(
 		const current = mcp.pairingCode;
 		const oidc = mcp.session?.pairing === "oidc";
 		if (current === undefined) stopWaiting();
-		else if (
-			usedTimer === undefined &&
-			shownCode !== undefined &&
-			current.code !== shownCode.code &&
-			Date.now() < Date.parse(shownCode.expiresAt) - EARLY_CODE_MS
-		) {
-			// Replaced early: most likely entered just now. No new code in plain
-			// view while the AI app connects; it shows if none does.
-			usedTimer = setTimeout(endWait, CODE_USED_WAIT_MS);
-			announce("Code used. Waiting for your AI app…");
+		else if (current.code !== shownCode?.code) {
+			if (current.reason === "used") {
+				// Entered just now: no new code in plain view while the AI app
+				// connects; it shows if none does.
+				if (usedTimer === undefined) {
+					usedTimer = setTimeout(endWait, CODE_USED_WAIT_MS);
+					announce("Code used. Waiting for your AI app…");
+				}
+			} else if (usedTimer !== undefined) {
+				// Locked or expired meanwhile: the user needs this one now.
+				stopWaiting();
+			}
 		}
 		const used = usedTimer !== undefined;
 		if (!used) {

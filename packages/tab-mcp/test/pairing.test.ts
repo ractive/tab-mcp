@@ -1,6 +1,10 @@
 /** Pairing codes (DEC-028): format, lifetime, attempts, single use. */
 import { afterEach, describe, expect, test } from "bun:test";
-import { newPairingCode, PairingCodes } from "../src/oauth/pairing.ts";
+import {
+	type CodeReason,
+	newPairingCode,
+	PairingCodes,
+} from "../src/oauth/pairing.ts";
 import { waitFor } from "./helpers.ts";
 
 const live: PairingCodes[] = [];
@@ -10,13 +14,14 @@ afterEach(() => {
 
 function codes(options: { ttlMs?: number } = {}) {
 	const sent: { code: string; expiresAt: number }[] = [];
-	const c = new PairingCodes(
-		(code, expiresAt) => sent.push({ code, expiresAt }),
-		options,
-	);
+	const reasons: CodeReason[] = [];
+	const c = new PairingCodes((code, expiresAt, reason) => {
+		sent.push({ code, expiresAt });
+		reasons.push(reason);
+	}, options);
 	live.push(c);
 	const last = () => sent.at(-1)?.code ?? "";
-	return { c, sent, last };
+	return { c, sent, last, reasons };
 }
 
 const other = (code: string) => (code === "000000" ? "000001" : "000000");
@@ -101,6 +106,30 @@ describe("PairingCodes", () => {
 		const code = last();
 		expect(c.check(code, Date.now() + 121_000)).toBe("expired");
 		expect(last()).not.toBe(code);
+	});
+
+	test("each code says why it came: start, used, locked, expired (timer and late check)", async () => {
+		const { c, last, reasons } = codes();
+		c.start();
+		c.start(); // the same code again
+		expect(reasons).toEqual(["start", "start"]);
+		expect(c.check(last())).toBe("ok");
+		expect(reasons.at(-1)).toBe("used");
+		const code = last();
+		for (let i = 0; i < 5; i++) c.check(other(code));
+		expect(reasons.at(-1)).toBe("locked");
+		// Wrong tries that do not lock send nothing.
+		const count = reasons.length;
+		expect(c.check(other(last()))).toBe("wrong");
+		expect(reasons).toHaveLength(count);
+		expect(c.check(last(), Date.now() + 121_000)).toBe("expired");
+		expect(reasons.at(-1)).toBe("expired");
+
+		const timed = codes({ ttlMs: 30 });
+		timed.c.start();
+		const first = timed.last();
+		await waitFor(() => timed.last() !== first, "a new code");
+		expect(timed.reasons).toEqual(["start", "expired"]);
 	});
 
 	test("stop ends pairing: nothing is accepted and no new codes come", async () => {

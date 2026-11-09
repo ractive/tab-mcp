@@ -256,10 +256,19 @@ export interface SessionInfo {
 	limits: Limits;
 }
 
+/** Why the relay sent a pairing code (`PairingCode.reason`). */
+export type PairingCodeReason = "start" | "used" | "locked" | "expired";
+
 /** A pairing code to show (DEC-028). */
 export interface PairingCode {
 	code: string;
 	expiresAt: string;
+	/**
+	 * Why it came: `start` (the dialog opened), `used` (the last code was
+	 * entered: an AI app is about to connect), `locked` (the last one had too
+	 * many wrong tries), `expired` (it timed out). Missing from older relays.
+	 */
+	reason?: PairingCodeReason;
 }
 
 /** Options of `connect()`. */
