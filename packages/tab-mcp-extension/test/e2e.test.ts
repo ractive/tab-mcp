@@ -13,7 +13,14 @@
  * Playwright's cache): required in CI, skipped elsewhere without it.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	setDefaultTimeout,
+	test,
+} from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +41,10 @@ import {
 	type Page,
 	type Served,
 } from "./browser.ts";
+
+// `bun run verify` runs these with Bun's default of 5 s a test: too short on
+// CI for a navigation, an icon click and the tools following.
+setDefaultTimeout(30_000);
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
@@ -115,7 +126,9 @@ async function start(
 		await panel.eval(
 			`document.getElementById("relay").value = ${JSON.stringify(relay.url)}`,
 		);
-		await panel.click(`#relay-form button[type=submit]`);
+		// Saving needs no click of the user's; a click right after "Settings"
+		// opened could land before the layout settled.
+		await panel.eval(`document.getElementById("relay-form").requestSubmit()`);
 		// The panel marks the relay it switched to (after saving it).
 		await panel.waitFor(
 			`document.documentElement.dataset.relay === ${JSON.stringify(relay.url)}`,
