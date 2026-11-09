@@ -325,6 +325,15 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+### [0.7.1][relay-0.7.1] - 2026-11-09
+
+#### Changed
+
+- The front page (`/`) is styled like the sign-in pages and shows the relay's version, a
+  diagram of the path from AI app to browser tab, and links to the documentation
+  (https://ractive.ch/tab-mcp/) and the guide to connecting an AI app. Its CSP adds
+  `style-src 'self'`. Both pages load the stylesheet as `/authorize.css?v=<version>`.
+
 ### [0.7.0][relay-0.7.0] - 2026-11-05
 
 #### Added
@@ -670,6 +679,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.7.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.1
 [relay-0.7.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.0
 [relay-0.6.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.6.1
 [relay-0.6.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.6.0
