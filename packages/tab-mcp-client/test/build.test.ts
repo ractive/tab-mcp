@@ -57,6 +57,8 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	const coreCode = [...core].map((n) => files.get(n) ?? "").join("");
 	expect(coreCode).not.toContain("cfworker");
 	expect(coreCode).not.toContain("subscriptions/listen");
+	// The setup steps (`./setup`, DEC-118) are in the UI chunk, not the core.
+	expect(coreCode).not.toContain("codex mcp add");
 
 	const coreGz = [...core].reduce((sum, n) => sum + gz(files.get(n) ?? ""), 0);
 	const connection = lazy
@@ -91,6 +93,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(pkg["exports"]).toEqual({
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
+		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	});
@@ -104,6 +107,8 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"index.d.ts",
 		"react.js",
 		"react.d.ts",
+		"setup.js",
+		"setup.d.ts",
 		"visible.js",
 		"visible.d.ts",
 		"cdn/tab-mcp-client.min.js",
@@ -149,12 +154,16 @@ test("the build produces a package whose declarations type-check for a consumer"
 	await Bun.write(
 		join(consumer, "page.ts"),
 		`import { TabMcp, type Tool, type SessionInfo } from "@ractive-ch/tab-mcp-client";
+import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo" });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
 void mcp.registerTool(tool, { signal: new AbortController().signal });
 mcp.addEventListener("disconnected", (e) => console.log(e.detail.reason, e.detail.code));
 mcp.addEventListener("pairingcode", (e) => console.log(e.detail?.code));
 export const session: Promise<SessionInfo> = mcp.connect({ resume: true });
+const steps: SetupInstruction[] = setupInstructions("x", "https://relay.example/a/x/mcp");
+export const help: string[] = steps.map((s) => \`\${s.app}: \${s.text} \${s.command ?? ""}\${(s.note ?? []).map((p) => ("code" in p ? p.code : p.text)).join("")}\`);
+export const guide: string = SETUP_GUIDE;
 // @ts-expect-error: unknown tool fields are type errors
 mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
 `,
@@ -196,6 +205,7 @@ export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x"
 				paths: {
 					"@ractive-ch/tab-mcp-client": [join(dist, "index.d.ts")],
 					"@ractive-ch/tab-mcp-client/react": [join(dist, "react.d.ts")],
+					"@ractive-ch/tab-mcp-client/setup": [join(dist, "setup.d.ts")],
 					react: [join(root, "node_modules/@types/react")],
 				},
 			},

@@ -357,6 +357,35 @@ mcp.addEventListener("toolcallend", (e) => {
 });
 ```
 
+### Setup steps in your own UI
+
+`@ractive-ch/tab-mcp-client/setup` has the steps the connect dialog shows under "How do I
+add it?", as data for your own UI. An entry of its own, out of the core, and not in the CDN
+build. `setupInstructions(serverName, address)` returns one entry per AI app (Claude,
+ChatGPT, Claude Code, Codex, in that order): `id` (`claude`, `chatgpt`, `claude-code`,
+`codex`), `app` (its name as shown), `text` (what to do), `command` (lines to run, for
+Claude Code and Codex) and `note` (text and code parts, for Codex). Every string is plain
+text: set it with `textContent`. The commands name the server by a label made from
+`serverName` and contain the address only when every shell reads both as plain words (see
+step 2 above), so they are safe to show with a Copy button; for an address that is not
+plain, `command` is left out and `text` names the command instead. `SETUP_GUIDE` is the
+guide with every step and what to do when it fails.
+
+```ts
+import { SETUP_GUIDE, setupInstructions } from "@ractive-ch/tab-mcp-client/setup";
+
+const el = (tag: string, text: string) =>
+  Object.assign(document.createElement(tag), { textContent: text });
+// `session` is what `mcp.connect()` resolved to; "notes" is your `server.name`.
+for (const { app, text, command, note } of setupInstructions("notes", session.address)) {
+  const li = list.appendChild(document.createElement("li"));
+  li.append(el("strong", app), ` ${text}`);
+  if (command) li.append(el("pre", command)); // and a Copy button for it
+  for (const part of note ?? []) li.append("code" in part ? el("code", part.code) : part.text);
+}
+guide.href = SETUP_GUIDE;
+```
+
 ### Styling the default dialogs
 
 The default dialogs bring their own stylesheet, a constructed stylesheet added to

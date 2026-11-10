@@ -137,6 +137,79 @@ p {
 	color: var(--muted);
 }
 
+/* "Copy" and "Copied" take the same width: nothing beside them moves. */
+button.copy {
+	min-width: 5em;
+	flex: none;
+}
+
+/* "How do I add it?": per AI app its steps, each command with its own Copy. */
+.setup {
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 0 10px;
+}
+
+.setup summary {
+	padding: 6px 0;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.setup[open] {
+	padding-bottom: 10px;
+}
+
+.setup-steps {
+	list-style: none;
+	margin: 4px 0 10px;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.setup-steps li {
+	overflow-wrap: anywhere;
+}
+
+.setup-steps strong {
+	display: block;
+	font-weight: 600;
+}
+
+.setup .command {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.setup pre {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+	padding: 6px 8px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--bg);
+	font-size: 12px;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.setup .note {
+	margin-top: 4px;
+}
+
+.setup code {
+	font-size: 12px;
+	padding: 0 4px;
+	border-radius: 4px;
+	background: var(--bg);
+}
+
 .tab-title {
 	font-weight: 600;
 	overflow-wrap: anywhere;
@@ -549,4 +622,9 @@ html [hidden] {
 /* A question's own window: the arguments get the room there is. */
 .question-window .question pre {
 	max-height: 50vh;
+}
+
+/* Empty until a Copy says something; kept rendered so the status is announced. */
+#copy-status:empty {
+	margin: 0;
 }

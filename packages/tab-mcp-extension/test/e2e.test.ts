@@ -558,6 +558,74 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
 	});
 
+	test("How do I add it? under the address: the commands fit, light and dark, Copy keeps its width", async () => {
+		// With an app paired, the address is behind "+ Add another AI app".
+		const adding = !(await stack.panel.eval<boolean>(
+			`document.getElementById("pairing").hidden === false`,
+		));
+		if (adding) await stack.panel.click("#add-app");
+		await stack.panel.waitFor(
+			`!document.getElementById("setup").hidden && document.getElementById("setup").offsetHeight > 0`,
+		);
+		expect(
+			await stack.panel.eval<boolean>(`document.getElementById("setup").open`),
+		).toBe(false);
+		await stack.panel.click("#setup summary");
+		await stack.panel.waitFor(`document.getElementById("setup").open`);
+		const measure = () =>
+			stack.panel.eval<{
+				apps: string[];
+				commands: string[];
+				overflow: boolean;
+				widths: [number, number];
+				pre: [string, string];
+			}>(`(() => {
+				const setup = document.getElementById("setup");
+				const pres = [...setup.querySelectorAll("pre")];
+				const copy = setup.querySelector("button.copy");
+				const before = copy.getBoundingClientRect().width;
+				copy.textContent = "Copied";
+				const after = copy.getBoundingClientRect().width;
+				copy.textContent = "Copy";
+				const style = getComputedStyle(pres[0]);
+				return {
+					apps: [...setup.querySelectorAll("li > strong")].map((e) => e.textContent),
+					commands: pres.map((e) => e.textContent),
+					overflow:
+						document.documentElement.scrollWidth > document.documentElement.clientWidth ||
+						pres.some((e) => e.scrollWidth > e.clientWidth),
+					widths: [before, after],
+					pre: [style.color, style.backgroundColor],
+				};
+			})()`);
+		const seen: [string, string][] = [];
+		for (const value of ["light", "dark"]) {
+			await stack.panel.send("Emulation.setEmulatedMedia", {
+				features: [{ name: "prefers-color-scheme", value }],
+			});
+			const m = await measure();
+			expect(m.apps).toEqual([
+				"Claude (claude.ai and the desktop app)",
+				"ChatGPT",
+				"Claude Code",
+				"Codex",
+			]);
+			expect(m.commands).toEqual([
+				`claude mcp add --transport http tab-mcp-for-chrome ${stack.address}`,
+				`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${stack.address}`,
+			]);
+			expect(m.overflow).toBe(false);
+			expect(m.widths[1]).toBe(m.widths[0]);
+			expect(m.pre[0]).not.toBe(m.pre[1]);
+			seen.push(m.pre);
+		}
+		// The scheme's own colours, not one fixed pair.
+		expect(seen[0]).not.toEqual(seen[1]);
+		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
+		await stack.panel.click("#setup summary");
+		if (adding) await stack.panel.click("#pair-done");
+	});
+
 	test("Allow all and Ask for all, for the tools listed at the click only", async () => {
 		const head = `document.getElementById("allow-tools")`;
 		// Off for a moment after a question went (the layout moved).

@@ -22,6 +22,7 @@
 	"devDependencies": {
 		"@modelcontextprotocol/client": "2.4.0",
 		"@ractive-ch/tab-mcp": "workspace:*",
-		"@types/chrome": "0.3.7"
+		"@types/chrome": "0.3.7",
+		"happy-dom": "21.0.4"
 	}
 }

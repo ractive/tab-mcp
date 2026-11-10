@@ -27,6 +27,7 @@ import {
 	switchShown,
 } from "./card.ts";
 import { questionCard } from "./question.ts";
+import { copyText, setupSteps } from "./setup.ts";
 
 /** How long the panel must be visible and focused before Allow counts. */
 const ALLOW_DELAY_MS = 750;
@@ -51,6 +52,8 @@ const disconnectArmed = new Map<
 let switchIntent: SwitchIntent | undefined;
 /** "New address" with apps connected asks first: a second click makes it. */
 let newAddressArmed = false;
+/** The address the setup steps were made for. */
+let stepsFor = "";
 
 function send(command: PanelCommand): void {
 	try {
@@ -198,6 +201,17 @@ function showConnection(s: PanelState): void {
 	// The address only while pairing: it is what an AI app is added with.
 	$("address").textContent = view.address;
 	$("address").title = view.address;
+	// The steps name the address: made again only when it changes, so a
+	// "Copied" and the focus on a Copy stay. Shown with the address.
+	if (view.address !== stepsFor) {
+		stepsFor = view.address;
+		$("setup-steps").replaceChildren(
+			...(view.address === ""
+				? []
+				: setupSteps(document, view.address, copyStatus)),
+		);
+	}
+	$("setup").hidden = view.address === "";
 	const code = s.code;
 	$("code").textContent =
 		code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
@@ -430,18 +444,31 @@ function problem(text: string): void {
 	$("problem").textContent = text;
 }
 
-function copy(button: HTMLElement, text: string | undefined): void {
-	if (text === undefined) return;
-	navigator.clipboard.writeText(text).then(
-		() => {
-			button.textContent = "Copied";
-			setTimeout(() => {
-				button.textContent = "Copy";
-			}, 1500);
-		},
-		// Not focused, or not allowed: it is shown whole to copy by hand.
-		() => problem(`Copy did not work: ${text}`),
-	);
+/**
+ * What a Copy in the pairing box did, for everyone and for screen readers
+ * (outside "How do I add it?", which may be closed).
+ */
+let copyStatusTimer: ReturnType<typeof setTimeout> | undefined;
+function copyStatus(message: string): void {
+	const status = $("copy-status");
+	status.textContent = message;
+	clearTimeout(copyStatusTimer);
+	copyStatusTimer = setTimeout(() => {
+		status.textContent = "";
+	}, 5000);
+}
+
+/** Not focused, or not allowed: the text is shown whole to copy by hand. */
+function copyFailed(text: string): void {
+	problem(`Copy did not work: ${text}`);
+}
+
+function copy(
+	button: HTMLElement,
+	text: string | undefined,
+	noun: string,
+): void {
+	if (text !== undefined) copyText(button, text, copyFailed, noun, copyStatus);
 }
 
 function addApp(on: boolean): void {
@@ -493,9 +520,11 @@ $("replaced-new-address").addEventListener("click", () =>
 	send({ type: "new-address" }),
 );
 
-$("copy").addEventListener("click", () => copy($("copy"), state?.address));
+$("copy").addEventListener("click", () =>
+	copy($("copy"), state?.address, "address"),
+);
 $("copy-code").addEventListener("click", () =>
-	copy($("copy-code"), state?.code),
+	copy($("copy-code"), state?.code, "code"),
 );
 
 $("allow-tools").addEventListener("click", () => {

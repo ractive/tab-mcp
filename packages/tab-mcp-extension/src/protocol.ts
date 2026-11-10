@@ -9,6 +9,12 @@
 
 import type { ContentEvent } from "./messages.ts";
 
+/**
+ * The extension's MCP server name: the worker's connection gives it to the
+ * relay, and the side panel's setup commands name the server by it.
+ */
+export const SERVER_NAME = "tab-mcp-for-chrome";
+
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "panel";
 

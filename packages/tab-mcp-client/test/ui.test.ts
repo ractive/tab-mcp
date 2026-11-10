@@ -5,11 +5,8 @@ import type { TabMcp } from "../src/index.ts";
 import type { ConfirmRequest, Grant, SessionInfo } from "../src/types.ts";
 import {
 	CODE_USED_WAIT_MS,
-	commandAddress,
-	commandName,
 	confirmDialog,
 	DIALOG_CSS,
-	instructions,
 	showConnectDialog,
 } from "../src/ui.ts";
 import { newTab, nextEvent } from "./helpers.ts";
@@ -1692,94 +1689,5 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		} finally {
 			spy.close();
 		}
-	});
-});
-
-describe("the commands in the help (dialog design, review of PR 34)", () => {
-	test("the name in a command is a label every shell reads as one plain word", () => {
-		const cases: [string, string][] = [
-			["tools", "tools"],
-			["My notes", "my-notes"],
-			["Bücher", "bucher"],
-			["ｃａｌｃ", "calc"],
-			["a\nb", "a-b"],
-			["a\rb", "a-b"],
-			["‘x’ “y”", "x-y"],
-			["a & calc & b", "a-calc-b"],
-			["a | calc", "a-calc"],
-			["$HOME", "home"],
-			["`calc`", "calc"],
-			["%PATH%", "path"],
-			["a^b", "a-b"],
-			["x' ; calc ; 'y$", "x-calc-y"],
-			["'$ & calc & '", "calc"],
-			["-rf", "rf"],
-			["--url=evil", "url-evil"],
-			["my_tools-2", "my_tools-2"],
-			["", "tools"],
-			["!!!", "tools"],
-			["日本語", "tools"],
-			["a".repeat(60), "a".repeat(40)],
-			[`${"a".repeat(39)} b`, "a".repeat(39)],
-		];
-		for (const [name, label] of cases)
-			expect({ name, label: commandName(name) }).toEqual({ name, label });
-	});
-
-	test("an address goes into a command only when every character is plain", () => {
-		expect(commandAddress("https://relay.example/a/abc234/mcp")).toBe(
-			"https://relay.example/a/abc234/mcp",
-		);
-		expect(commandAddress("http://127.0.0.1:8080/a/x/mcp")).toBe(
-			"http://127.0.0.1:8080/a/x/mcp",
-		);
-		expect(commandAddress("http://[::1]:8080/a/x/mcp")).toBe(
-			"http://[::1]:8080/a/x/mcp",
-		);
-		for (const unsafe of [
-			"https://relay.example/a/x/mcp?q=1&calc",
-			"https://relay.example/a/$(calc)/mcp",
-			"https://relay.example/a/x%0Acalc/mcp",
-			"https://relay.example/a/'x'/mcp",
-			"https://relay.example/a/x/mcp#frag",
-			"https://user:pw@relay.example/a/x/mcp",
-			"ftp://relay.example/a/x/mcp",
-			"not an address",
-		])
-			expect({ unsafe, command: commandAddress(unsafe) }).toEqual({
-				unsafe,
-				command: undefined,
-			});
-	});
-
-	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {
-		const codex = instructions("calc", "https://relay.example/a/x/mcp").find(
-			([app]) => app === "Codex",
-		);
-		expect(codex?.[2]).toBe(
-			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp",
-		);
-		const claudeCode = instructions(
-			"x' ; calc ; 'y$",
-			"https://r.example/a/x/mcp",
-		).find(([app]) => app === "Claude Code");
-		expect(claudeCode?.[2]).toBe(
-			"claude mcp add --transport http x-calc-y https://r.example/a/x/mcp",
-		);
-	});
-
-	test("with an address that is not plain, no commands: only the steps", () => {
-		const steps = instructions("calc", "https://relay.example/a/x/mcp?a=1&b");
-		expect(steps.every(([, , command]) => command === undefined)).toBe(true);
-		expect(steps.map(([app]) => app)).toEqual([
-			"Claude (claude.ai and the desktop app)",
-			"ChatGPT",
-			"Claude Code",
-			"Codex",
-		]);
-		const text = steps.map(([, how]) => how).join(" ");
-		expect(text).toContain("claude mcp add");
-		expect(text).toContain("mcp_2026_07_28");
-		expect(text).not.toContain("calc");
 	});
 });
