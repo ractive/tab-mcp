@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-10
+
+- client/setup-instructions: `@ractive-ch/tab-mcp-client/setup` exports `setupInstructions` and `SETUP_GUIDE` (the connect dialog's steps per AI app, out of the core); tab-mcp for Chrome's pairing box shows them under "How do I add it?" with a Copy per command; DEC-118
+
 ## 2026-11-09
 
 - relay/review-fixes: a revoked grant's requests in flight and listen streams end, and a request that waited for its page re-checks its token; a grant dates from its authorization code, so a code issued before New address or revoke all makes none (those also drop the address's pending requests and codes); IPv6 sessions counted per /64 and /56; sessions nobody paired with close after 10 minutes (TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S); the per-address guess limit fails closed when full and only wrong guesses count; /token and /revoke limit failures per IP without refusing successes, under a per-IP ceiling on all requests; the deterministic unknown-kid test; threat model A4 (the secret's holder can pair an AI app of their own), A8; DEC-117

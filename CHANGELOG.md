@@ -7,6 +7,16 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- `@ractive-ch/tab-mcp-client/setup`: `setupInstructions(serverName, address)`, the connect
+  dialog's steps per AI app (Claude, ChatGPT, Claude Code, Codex) as data (`id`, `app`,
+  `text`, `command`, `note`; types `SetupInstruction`, `SetupNotePart`), and `SETUP_GUIDE`,
+  the guide's address, for pages and extensions that show the steps in their own UI. An
+  entry of its own, out of the core; tab-mcp for Chrome uses it (DEC-118).
+
 ### [0.11.0][client-0.11.0] - 2026-11-09
 
 #### Added

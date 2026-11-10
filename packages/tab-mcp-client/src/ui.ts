@@ -8,6 +8,7 @@
  */
 
 import { AlwaysAllowed } from "./always-allowed.ts";
+import { SETUP_GUIDE, setupInstructions } from "./setup.ts";
 import type { TabMcp } from "./tab-mcp.ts";
 import type {
 	ConfirmRequest,
@@ -488,90 +489,6 @@ export function confirmInPage(
 }
 
 /**
- * The server's name as a label that every shell (POSIX shells, PowerShell,
- * cmd.exe) reads as one plain word, so it needs no quoting: letters without
- * their marks ("Bücher" → "bucher"), lower case, each run of anything but
- * a-z, 0-9, _ and - as one "-", no "-" at either end (no option), at most 40
- * characters; "tools" when nothing is left. The page names its server, but
- * the command runs in the user's shell: nothing of the name may be quoted
- * text (review of PR 34).
- */
-export function commandName(name: string): string {
-	const label = name
-		.normalize("NFKD")
-		.replace(/\p{M}/gu, "")
-		.toLowerCase()
-		.replace(/[^a-z0-9_-]+/g, "-")
-		.replace(/-{2,}/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 40)
-		.replace(/-+$/, "");
-	return label === "" ? "tools" : label;
-}
-
-/**
- * The address for a command, only when all of it is plain in every shell
- * (http or https, letters, digits and . : [ ] / _ ~ -); else `undefined`, and
- * the help shows the steps without commands. The relay's addresses are.
- */
-export function commandAddress(address: string): string | undefined {
-	try {
-		const href = new URL(address).href;
-		return /^https?:\/\/[A-Za-z0-9.:[\]/_~-]+$/.test(href) ? href : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-/** The guide for every AI app (its source is on ractive.ch). */
-const GUIDE = "https://ractive.ch/tab-mcp/connect/";
-
-/** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
-const CODEX_FEATURE = "mcp_2026_07_28";
-
-/**
- * Per AI app: its name, what to do, a command to run (one per line), and a
- * note after it, alternating text and code. `name` is the page's server name.
- */
-export function instructions(
-	name: string,
-	address: string,
-): [string, string, (string | undefined)?, string[]?][] {
-	const n = commandName(name);
-	const a = commandAddress(address);
-	return [
-		[
-			"Claude (claude.ai and the desktop app)",
-			"Settings → Connectors → Add custom connector, then paste the address.",
-		],
-		[
-			"ChatGPT",
-			"On chatgpt.com: Plugins, add an MCP server with the address. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP; it needs the Codex feature below.",
-		],
-		a === undefined
-			? ["Claude Code", "Add the address with claude mcp add --transport http."]
-			: ["Claude Code", "Run:", `claude mcp add --transport http ${n} ${a}`],
-		[
-			"Codex",
-			...((a === undefined
-				? [
-						`Run codex features enable ${CODEX_FEATURE}, then add the address with codex mcp add --url.`,
-						undefined,
-					]
-				: [
-						"Run:",
-						`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}`,
-					]) as [string, string | undefined]),
-			[
-				"Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
-				`codex features disable ${CODEX_FEATURE}`,
-				" turns it off.",
-			],
-		],
-	];
-}
-
-/**
  * The labels of the apps behind these grants, each once: an app can hold
  * more than one grant (paired twice), and is still one app.
  */
@@ -907,7 +824,7 @@ export function showConnectDialog(
 	const guide = el(doc, "a", {
 		text: "Step by step, and what to do when it fails",
 	});
-	guide.href = GUIDE;
+	guide.href = SETUP_GUIDE;
 	guide.target = "_blank";
 	guide.rel = "noopener noreferrer";
 	const help = el(
@@ -1117,8 +1034,8 @@ export function showConnectDialog(
 		if (stepsFor === session.address) return;
 		stepsFor = session.address;
 		steps.replaceChildren(
-			...instructions(serverName, session.address).map(
-				([app, how, command, note]) => {
+			...setupInstructions(serverName, session.address).map(
+				({ app, text: how, command, note }) => {
 					const item = el(
 						doc,
 						"li",
@@ -1154,8 +1071,10 @@ export function showConnectDialog(
 								doc,
 								"small",
 								{ className: "tab-mcp-command-note" },
-								...note.map((part, i) =>
-									i % 2 === 1 ? el(doc, "code", { text: part }) : part,
+								...note.map((part) =>
+									"code" in part
+										? el(doc, "code", { text: part.code })
+										: part.text,
 								),
 							),
 						);

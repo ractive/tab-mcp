@@ -4,7 +4,7 @@ title: "Decision log"
 description: Decisions for tab-mcp with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
-timestamp: 2026-11-09T15:00:00+01:00
+timestamp: 2026-11-10T14:30:00+01:00
 ---
 
 # Decision log
@@ -2277,3 +2277,26 @@ user of the Chrome extension (one session held open while AI access is on) uses 
   allowance.
 - No defaults changed besides the new unpaired timeout; `maxSessionsPerIp` stays 5, and
   `docs/self-hosting.md` says how to size the session limits for always-on users.
+
+## DEC-118: The setup steps per AI app are public, in an entry of their own
+
+2026-11-10, branch client/setup-instructions. The connect dialog's "How do I add it?"
+(the steps for Claude, ChatGPT, Claude Code and Codex, with commands to copy) were
+internal to the UI chunk; tab-mcp for Chrome's pairing box only linked to the guide, and
+Overmark wants the same steps in its own UI.
+
+- **`@ractive-ch/tab-mcp-client/setup`**, beside `./visible`, not the core:
+  `setupInstructions(serverName, address)` returns `SetupInstruction[]` (`id`, `app`,
+  `text`, optional `command` and `note`, the note's parts `{ text }` or `{ code }`), and
+  `SETUP_GUIDE` is the guide's address. Exported from `.` it took the core from 5,489 to
+  6,304 B gzipped (the module itself and a shared chunk the UI imports too), over the
+  6 KB budget (DEC-103). As its own entry the core is unchanged; the UI chunk grows by
+  about 60 B gzipped (object keys instead of a tuple). Not in the CDN build, like
+  `./visible`.
+- **Objects, not the dialog's tuple**: readable for consumers, and `id` (`claude`,
+  `chatgpt`, `claude-code`, `codex`) is stable while `app`, the name as shown, may change.
+  `command` is absent, not `undefined`, when there is none.
+- **The shell rules stay** (review of PR 34): `commandName` and `commandAddress` move to
+  an internal module (`command.ts`), not exported; a command exists only when the
+  address is shell-plain, so every command is safe to show and run.
+- The dialog renders from `setupInstructions` and looks and behaves as before.
