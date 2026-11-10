@@ -1,9 +1,12 @@
 /**
  * The side panel's "AI app" card: the next step stands out, the address
- * shows only while pairing.
+ * shows only while pairing, with "How do I add it?" under it.
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import { join } from "node:path";
+import { SETUP_GUIDE } from "@ractive-ch/tab-mcp-client/setup";
+import { Window } from "happy-dom";
 import type { PanelState, TabView } from "../src/protocol.ts";
 import {
 	allowAllView,
@@ -14,6 +17,7 @@ import {
 	switchExpiry,
 	switchShown,
 } from "../src/sidepanel/card.ts";
+import { COPIED_MS, copyText, setupSteps } from "../src/sidepanel/setup.ts";
 
 const base: PanelState = {
 	relay: "https://relay.example",
@@ -194,5 +198,124 @@ describe("Allow all", () => {
 		expect(allowAllView(tab([order], false)).shown).toBe(false);
 		expect(allowAllView(tab([read, broken])).shown).toBe(false);
 		expect(allowAllView(undefined).shown).toBe(false);
+	});
+});
+
+describe("How do I add it? (the pairing box)", () => {
+	let window: Window;
+	let doc: Document;
+	beforeEach(() => {
+		window = new Window({ url: "chrome-extension://x/sidepanel/index.html" });
+		doc = window.document as unknown as Document;
+	});
+	afterEach(async () => {
+		jest.useRealTimers();
+		await window.happyDOM.close();
+	});
+
+	/** The clipboard: what was written, or a refusal. */
+	function stubClipboard(refuse = false): () => string {
+		let copied = "";
+		Object.defineProperty(window.navigator, "clipboard", {
+			value: {
+				writeText: async (text: string) => {
+					if (refuse) throw new Error("Document is not focused.");
+					copied = text;
+				},
+			},
+			configurable: true,
+		});
+		return () => copied;
+	}
+
+	test("in the pairing box under the address, collapsed, the guide at its end", async () => {
+		const html = await Bun.file(
+			join(import.meta.dir, "../src/sidepanel/index.html"),
+		).text();
+		doc.write(html);
+		const details = doc.querySelector(
+			"#pairing > #setup",
+		) as HTMLDetailsElement;
+		expect(details.tagName).toBe("DETAILS");
+		expect(details.open).toBe(false);
+		// Right after the address: shown and hidden with it.
+		expect(details.previousElementSibling?.className).toBe("address");
+		expect(details.querySelector("summary")?.textContent).toBe(
+			"How do I add it?",
+		);
+		const guide = details.lastElementChild?.querySelector("a");
+		expect(guide?.getAttribute("href")).toBe(SETUP_GUIDE);
+		expect(guide?.getAttribute("target")).toBe("_blank");
+		expect(guide?.getAttribute("rel")).toBe("noopener");
+		// Every Copy says what it copies.
+		expect(
+			[...doc.querySelectorAll("#pairing button.copy")].map((b) =>
+				b.getAttribute("aria-label"),
+			),
+		).toEqual(["Copy address", "Copy code"]);
+	});
+
+	test("each app with its steps; Claude Code and Codex with a command and its own Copy", () => {
+		const items = setupSteps(doc, ADDRESS, () => {});
+		expect(items.map((li) => li.querySelector("strong")?.textContent)).toEqual([
+			"Claude (claude.ai and the desktop app)",
+			"ChatGPT",
+			"Claude Code",
+			"Codex",
+		]);
+		expect(
+			items.map((li) => li.querySelector("pre")?.textContent ?? null),
+		).toEqual([
+			null,
+			null,
+			`claude mcp add --transport http tab-mcp-for-chrome ${ADDRESS}`,
+			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}`,
+		]);
+		const copies = items.flatMap((li) => [...li.querySelectorAll("button")]);
+		expect(copies.map((b) => [b.type, b.getAttribute("aria-label")])).toEqual([
+			["button", "Copy Claude Code command"],
+			["button", "Copy Codex command"],
+		]);
+		expect(items[3]?.querySelector(".note code")?.textContent).toBe(
+			"codex features disable mcp_2026_07_28",
+		);
+	});
+
+	test("Copy copies the command whole and says Copied, then Copy again", async () => {
+		const copied = stubClipboard();
+		const failed: string[] = [];
+		const items = setupSteps(doc, ADDRESS, (t) => failed.push(t));
+		jest.useFakeTimers();
+		const copy = items[3]?.querySelector("button") as HTMLButtonElement;
+		copy.click();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(copied()).toBe(
+			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}`,
+		);
+		expect(copy.textContent).toBe("Copied");
+		expect(copy.getAttribute("aria-label")).toBe("Copied Codex command");
+		jest.advanceTimersByTime(COPIED_MS);
+		expect(copy.textContent).toBe("Copy");
+		expect(copy.getAttribute("aria-label")).toBe("Copy Codex command");
+		expect(failed).toEqual([]);
+	});
+
+	test("a refused clipboard hands the text over to be shown whole", async () => {
+		stubClipboard(true);
+		const button = doc.createElement("button");
+		button.textContent = "Copy";
+		const failed: string[] = [];
+		copyText(button, "the text", (t) => failed.push(t), "address");
+		await Bun.sleep(0);
+		expect(failed).toEqual(["the text"]);
+		expect(button.textContent).toBe("Copy");
+	});
+
+	test("an address that is not shell-plain: the steps without commands", () => {
+		const items = setupSteps(doc, `${ADDRESS}?a=1&b`, () => {});
+		expect(items).toHaveLength(4);
+		expect(items.some((li) => li.querySelector("pre, button"))).toBe(false);
+		expect(items[2]?.textContent).toContain("claude mcp add --transport http");
 	});
 });

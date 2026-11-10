@@ -36,15 +36,19 @@
 
 		<div id="pairing" class="pairing" hidden>
 			<h3 class="label">Pair an AI app</h3>
-			<p>Add this address to your AI app as a connector (a remote MCP server).
-				<a href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">How, in Claude, ChatGPT, Claude Code and Codex</a></p>
+			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
 			<div class="address">
 				<code id="address" title=""></code>
-				<button id="copy" type="button" class="quiet small">Copy</button>
+				<button id="copy" type="button" class="quiet small copy" aria-label="Copy address">Copy</button>
 			</div>
+			<details id="setup" class="setup">
+				<summary>How do I add it?</summary>
+				<ul id="setup-steps" class="setup-steps" aria-label="Steps per AI app"></ul>
+				<p><a id="setup-guide" href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">Step by step, and what to do when it fails</a></p>
+			</details>
 			<p>When the AI app opens the sign-in page, type this code there:</p>
 			<p class="code-line"><code id="code" class="code">––– –––</code>
-				<button id="copy-code" type="button" class="quiet small" disabled>Copy</button></p>
+				<button id="copy-code" type="button" class="quiet small copy" aria-label="Copy code" disabled>Copy</button></p>
 			<p class="muted small">The code changes every 2 minutes and after each use.</p>
 			<div class="buttons">
 				<button id="pair-done" type="button" class="primary" hidden>Done</button>

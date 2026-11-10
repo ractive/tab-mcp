@@ -21,6 +21,7 @@ import {
 	parseCommand,
 	parseQuestionAnswer,
 	QUESTION_PATH,
+	SERVER_NAME,
 	type TabView,
 	type WorkerMessage,
 } from "../protocol.ts";
@@ -211,7 +212,7 @@ export class Connection {
 		const mcp: TabMcp = new TabMcp({
 			relay,
 			server: {
-				name: "tab-mcp-for-chrome",
+				name: SERVER_NAME,
 				title: "tab-mcp for Chrome",
 				version: chrome.runtime.getManifest().version,
 				instructions: INSTRUCTIONS,

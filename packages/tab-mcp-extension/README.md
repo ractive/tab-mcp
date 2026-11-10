@@ -67,9 +67,10 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   origin (`www.example.com` is another origin than `example.com`).
   "Allow on all sites" in the side panel lets it read every tab without a click.
 - "Turn on AI access" (or the "AI access" switch) connects to the relay. With no AI app
-  paired yet, the panel shows the address for your AI app and a pairing code at once;
-  the [connect page](https://ractive.ch/tab-mcp/connect/) says how to add the address in
-  Claude, ChatGPT, Claude Code and Codex. Paired apps are listed, each with a dot (green while connected,
+  paired yet, the panel shows the address for your AI app and a pairing code at once.
+  "How do I add it?" under the address says how to add it in Claude, ChatGPT, Claude Code
+  and Codex (the client library's steps, the commands each with a Copy), and links to the
+  [connect page](https://ractive.ch/tab-mcp/connect/). Paired apps are listed, each with a dot (green while connected,
   grey while off or connecting) and a Disconnect button (which asks first, and takes no double click); "+ Add another AI app" shows the address and a code again. The
   address shows only while pairing. Off, the panel says "AI access is off · paired apps
   stay paired". The relay address is under "Settings".
@@ -156,7 +157,8 @@ key in its manifest, or, without one, from the folder it was loaded from.
 - `test/build.test.ts`: the store build has no key, no `host_permissions` and no source
   maps.
 - `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
-  while pairing), its clicks (Disconnect's double click, the switch) and "Allow all".
+  while pairing), "How do I add it?" and its Copy buttons, its clicks (Disconnect's double
+  click, the switch) and "Allow all".
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, a click on the body, cut arguments,
