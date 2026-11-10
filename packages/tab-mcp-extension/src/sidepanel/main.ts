@@ -208,7 +208,7 @@ function showConnection(s: PanelState): void {
 		$("setup-steps").replaceChildren(
 			...(view.address === ""
 				? []
-				: setupSteps(document, view.address, copyFailed)),
+				: setupSteps(document, view.address, copyStatus)),
 		);
 	}
 	$("setup").hidden = view.address === "";
@@ -444,6 +444,20 @@ function problem(text: string): void {
 	$("problem").textContent = text;
 }
 
+/**
+ * What a Copy in the pairing box did, for everyone and for screen readers
+ * (outside "How do I add it?", which may be closed).
+ */
+let copyStatusTimer: ReturnType<typeof setTimeout> | undefined;
+function copyStatus(message: string): void {
+	const status = $("copy-status");
+	status.textContent = message;
+	clearTimeout(copyStatusTimer);
+	copyStatusTimer = setTimeout(() => {
+		status.textContent = "";
+	}, 5000);
+}
+
 /** Not focused, or not allowed: the text is shown whole to copy by hand. */
 function copyFailed(text: string): void {
 	problem(`Copy did not work: ${text}`);
@@ -454,7 +468,7 @@ function copy(
 	text: string | undefined,
 	noun: string,
 ): void {
-	if (text !== undefined) copyText(button, text, copyFailed, noun);
+	if (text !== undefined) copyText(button, text, copyFailed, noun, copyStatus);
 }
 
 function addApp(on: boolean): void {

@@ -623,3 +623,8 @@ html [hidden] {
 .question-window .question pre {
 	max-height: 50vh;
 }
+
+/* Empty until a Copy says something; kept rendered so the status is announced. */
+#copy-status:empty {
+	margin: 0;
+}

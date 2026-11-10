@@ -12,7 +12,8 @@ export const COPIED_MS = 1500;
 
 /**
  * Copy `text` with `button`, which says "Copied" for a moment; with `noun`
- * its label says so too ("Copied Codex command"). `failed` gets the text
+ * its label says so too ("Copied Codex command"), and `announce` tells a
+ * screen reader, whose focus stays on the button. `failed` gets the text
  * when the clipboard refuses (the panel not focused, say), to show it whole.
  */
 export function copyText(
@@ -20,6 +21,7 @@ export function copyText(
 	text: string,
 	failed: (text: string) => void,
 	noun?: string,
+	announce?: (message: string) => void,
 ): void {
 	const say = (what: "Copy" | "Copied") => {
 		button.textContent = what;
@@ -34,17 +36,24 @@ export function copyText(
 	clipboard.writeText(text).then(
 		() => {
 			say("Copied");
+			announce?.(noun === undefined ? "Copied" : `Copied ${noun}`);
 			setTimeout(() => say("Copy"), COPIED_MS);
 		},
 		() => failed(text),
 	);
 }
 
-/** The list items for `address`: per AI app its name, what to do, a command with Copy, a note. */
+/** What a refused Copy of a command says: the command is selected instead. */
+export const SELECTED = "Selected: copy it with Ctrl+C or ⌘C";
+
+/**
+ * The list items for `address`: per AI app its name, what to do, a command
+ * with Copy, a note. `announce` says what a Copy did (a polite status).
+ */
 export function setupSteps(
 	doc: Document,
 	address: string,
-	failed: (text: string) => void,
+	announce: (message: string) => void,
 ): HTMLLIElement[] {
 	const el = <K extends keyof HTMLElementTagNameMap>(
 		tag: K,
@@ -67,8 +76,14 @@ export function setupSteps(
 				const copy = el("button", "quiet small copy", "Copy");
 				copy.type = "button";
 				copy.setAttribute("aria-label", `Copy ${noun}`);
+				// A refused clipboard: the command selected in place, its lines
+				// as they are (a one-line copy of Codex's two would run wrong).
+				const selected = () => {
+					doc.getSelection()?.selectAllChildren(pre);
+					announce(SELECTED);
+				};
 				copy.addEventListener("click", () =>
-					copyText(copy, command, failed, noun),
+					copyText(copy, command, selected, noun, announce),
 				);
 				const block = el("div", "command");
 				block.append(pre, copy);

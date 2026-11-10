@@ -17,7 +17,12 @@ import {
 	switchExpiry,
 	switchShown,
 } from "../src/sidepanel/card.ts";
-import { COPIED_MS, copyText, setupSteps } from "../src/sidepanel/setup.ts";
+import {
+	COPIED_MS,
+	copyText,
+	SELECTED,
+	setupSteps,
+} from "../src/sidepanel/setup.ts";
 
 const base: PanelState = {
 	relay: "https://relay.example",
@@ -283,8 +288,8 @@ describe("How do I add it? (the pairing box)", () => {
 
 	test("Copy copies the command whole and says Copied, then Copy again", async () => {
 		const copied = stubClipboard();
-		const failed: string[] = [];
-		const items = setupSteps(doc, ADDRESS, (t) => failed.push(t));
+		const said: string[] = [];
+		const items = setupSteps(doc, ADDRESS, (t) => said.push(t));
 		jest.useFakeTimers();
 		const copy = items[3]?.querySelector("button") as HTMLButtonElement;
 		copy.click();
@@ -298,7 +303,23 @@ describe("How do I add it? (the pairing box)", () => {
 		jest.advanceTimersByTime(COPIED_MS);
 		expect(copy.textContent).toBe("Copy");
 		expect(copy.getAttribute("aria-label")).toBe("Copy Codex command");
-		expect(failed).toEqual([]);
+		// Said for a screen reader too, whose focus stays on the button.
+		expect(said).toEqual(["Copied Codex command"]);
+	});
+
+	test("a refused clipboard selects the command in place, its lines kept", async () => {
+		stubClipboard(true);
+		const said: string[] = [];
+		const items = setupSteps(doc, ADDRESS, (t) => said.push(t));
+		const block = items[3] as HTMLLIElement;
+		doc.body.append(block);
+		(block.querySelector("button") as HTMLButtonElement).click();
+		await Bun.sleep(0);
+		expect(said).toEqual([SELECTED]);
+		expect(doc.getSelection()?.toString()).toBe(
+			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}`,
+		);
+		block.remove();
 	});
 
 	test("a refused clipboard hands the text over to be shown whole", async () => {
