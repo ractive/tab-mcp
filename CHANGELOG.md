@@ -25,6 +25,8 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 - The confirmation dialog also escapes C0 controls and DEL (but tab and line feed), lone
   surrogates, every space but the plain one (U+00A0, U+2007, U+3000…) and the Braille
   blank (U+2800) in the arguments and the AI app's name.
+- The CDN build bundles `@cfworker/json-schema` 4.1.6 (was 4.1.4); the dependency is
+  pinned to it.
 
 ### [0.11.0][client-0.11.0] - 2026-11-09
 
