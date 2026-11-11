@@ -29,6 +29,10 @@ refuses to pack a build that has any of these, and `--zip` without `--store` is 
 since a zip of the development build would carry the owner's key. Every build holds
 `LICENSES.txt`.
 
+The zip is reproducible: its entries are sorted, deflated in one zlib call and dated with
+`SOURCE_DATE_EPOCH`, else the last commit's time (UTC). Building the tagged commit again
+gives the zip whose SHA-256 `extension-release.yml` prints, with the same Bun version.
+
 ## Releases
 
 1. Bump `version` in `packages/tab-mcp-extension/package.json` and move the CHANGELOG's

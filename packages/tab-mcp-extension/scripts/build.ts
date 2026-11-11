@@ -268,6 +268,28 @@ async function filesOf(dir: string): Promise<string[]> {
 }
 
 /**
+ * The time a reproducible zip carries: `SOURCE_DATE_EPOCH` (seconds), else
+ * the time of the repository's last commit, else 1980-01-01. The same commit
+ * then gives the same zip, byte for byte, so a release's zip can be rebuilt
+ * and compared with the hash its workflow prints.
+ */
+export async function sourceDate(
+	env: Record<string, string | undefined> = process.env,
+): Promise<Date> {
+	const epoch = env["SOURCE_DATE_EPOCH"];
+	if (epoch !== undefined && /^\d+$/.test(epoch))
+		return new Date(Number(epoch) * 1000);
+	const git = Bun.spawnSync(["git", "log", "-1", "--format=%ct"], {
+		cwd: REPOSITORY,
+		stderr: "ignore",
+	});
+	const seconds = git.stdout.toString().trim();
+	if (git.exitCode === 0 && /^\d+$/.test(seconds))
+		return new Date(Number(seconds) * 1000);
+	return new Date(Date.UTC(1980, 0, 1));
+}
+
+/**
  * Pack a store build into `target`. A build that fails `storeProblems`, or
  * a zip that does not list the build's files, stops it.
  */
@@ -276,10 +298,17 @@ export async function zipStoreBuild(
 	target: string,
 ): Promise<string[]> {
 	const names = await filesOf(outdir);
-	const manifest = (await Bun.file(join(outdir, "manifest.json"))
-		.json()
-		.catch(() => ({}))) as Record<string, unknown>;
-	const before = storeProblems(manifest, names);
+	const before: string[] = [];
+	let manifest: Record<string, unknown> = {};
+	if (names.includes("manifest.json")) {
+		const parsed: unknown = await Bun.file(join(outdir, "manifest.json"))
+			.json()
+			.catch(() => undefined);
+		if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+			manifest = parsed as Record<string, unknown>;
+		else before.push("manifest.json is not a JSON object");
+	}
+	before.push(...storeProblems(manifest, names));
 	if (before.length > 0)
 		throw new Error(`not a store build: ${before.join("; ")}`);
 	const entries = [];
@@ -288,7 +317,7 @@ export async function zipStoreBuild(
 			name,
 			data: new Uint8Array(await Bun.file(join(outdir, name)).arrayBuffer()),
 		});
-	const zip = await writeZip(entries);
+	const zip = await writeZip(entries, { date: await sourceDate() });
 	const packed = zipNames(zip);
 	if (packed.join("\n") !== names.join("\n"))
 		throw new Error("the zip does not list the build's files");

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	build,
+	sourceDate,
 	storeProblems,
 	storeZipName,
 	zipStoreBuild,
@@ -55,17 +56,45 @@ test("the store zip lists the store build's files, without source maps", async (
 	expect(names).toContain("LICENSES.txt");
 	expect(names.filter((name) => name.endsWith(".map"))).toEqual([]);
 	// The zipped manifest is the store build's: no key, no host access.
+	// unzip (macOS and the CI runners have it) checks every entry's CRC.
+	expect(Bun.spawnSync(["unzip", "-tq", target]).exitCode).toBe(0);
 	const unzipped = Bun.spawnSync(["unzip", "-p", target, "manifest.json"]);
-	if (unzipped.exitCode === 0) {
-		const zipped = JSON.parse(unzipped.stdout.toString()) as Record<
-			string,
-			unknown
-		>;
-		expect(zipped["key"]).toBeUndefined();
-		expect(zipped["host_permissions"]).toBeUndefined();
-		expect(zipped["version"]).toBe(manifest["version"]);
-	}
+	expect(unzipped.exitCode).toBe(0);
+	const zipped = JSON.parse(unzipped.stdout.toString()) as Record<
+		string,
+		unknown
+	>;
+	expect(zipped["key"]).toBeUndefined();
+	expect(zipped["host_permissions"]).toBeUndefined();
+	expect(zipped["version"]).toBe(manifest["version"]);
+	// The same build packs to the same bytes (sourceDate, UTC times).
+	const again = join(dir, "again.zip");
+	await zipStoreBuild(outdir, again);
+	expect(Bun.hash(await Bun.file(again).arrayBuffer())).toBe(
+		Bun.hash(await Bun.file(target).arrayBuffer()),
+	);
 }, 60_000);
+
+test("the zip's time is SOURCE_DATE_EPOCH, else the last commit's", async () => {
+	expect(
+		(await sourceDate({ SOURCE_DATE_EPOCH: "1700000000" })).toISOString(),
+	).toBe("2023-11-14T22:13:20.000Z");
+	const commit = await sourceDate({});
+	expect(commit.getTime()).toBeGreaterThan(Date.UTC(2026, 0, 1));
+});
+
+test("a manifest that is not a JSON object is not packed", async () => {
+	const broken = join(dir, "broken");
+	await Bun.write(join(broken, "manifest.json"), "{ cut");
+	await Bun.write(join(broken, "background.js"), "");
+	await expect(zipStoreBuild(broken, join(dir, "broken.zip"))).rejects.toThrow(
+		"not a store build: manifest.json is not a JSON object",
+	);
+	await Bun.write(join(broken, "manifest.json"), "[]");
+	await expect(zipStoreBuild(broken, join(dir, "broken.zip"))).rejects.toThrow(
+		"manifest.json is not a JSON object",
+	);
+});
 
 test("a build with a key, host access or source maps is not packed for the store", async () => {
 	expect(storeProblems({ key: "x" }, ["manifest.json"])).toEqual([
@@ -103,8 +132,10 @@ test("the zip writer round-trips names and contents", async () => {
 	const path = join(dir, "round.zip");
 	await Bun.write(path, zip);
 	const unzipped = Bun.spawnSync(["unzip", "-p", path, "a.txt"]);
-	if (unzipped.exitCode === 0)
-		expect(unzipped.stdout.toString()).toBe("a".repeat(1000));
+	expect(unzipped.exitCode).toBe(0);
+	expect(unzipped.stdout.toString()).toBe("a".repeat(1000));
+	const png = Bun.spawnSync(["unzip", "-p", path, "dir/b.png"]);
+	expect([...new Uint8Array(png.stdout)]).toEqual([1, 2, 3]);
 });
 
 test("--zip without --store is refused", () => {

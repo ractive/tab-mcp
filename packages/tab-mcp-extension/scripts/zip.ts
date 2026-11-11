@@ -1,8 +1,12 @@
 /**
  * A small zip writer for the store package, from Overmark's `src/lib/zip.ts`
  * (writer only): stored and deflated entries, no zip64, no encryption.
- * Deflate goes through `CompressionStream`, which Bun has.
+ * Deflate is zlib's raw deflate in one call (`deflateRawSync`): Bun's
+ * streaming `CompressionStream` cuts large inputs into chunks at varying
+ * points, so the same file would not always pack to the same bytes.
  */
+
+import { deflateRawSync } from "node:zlib";
 
 export interface ZipEntry {
 	/** Path inside the archive, `/`-separated. */
@@ -11,7 +15,7 @@ export interface ZipEntry {
 }
 
 export interface WriteZipOptions {
-	/** The entries' modification time (default: now). */
+	/** The entries' modification time, in UTC (default: now). */
 	date?: Date;
 }
 
@@ -40,21 +44,22 @@ export function crc32(data: Uint8Array): number {
 	return (crc ^ 0xffffffff) >>> 0;
 }
 
-async function deflate(data: Uint8Array): Promise<Uint8Array> {
-	const body = new Blob([data as Uint8Array<ArrayBuffer>])
-		.stream()
-		.pipeThrough(new CompressionStream("deflate-raw"));
-	return new Uint8Array(await new Response(body).arrayBuffer());
+function deflate(data: Uint8Array): Uint8Array {
+	return new Uint8Array(deflateRawSync(data, { level: 9 }));
 }
 
+/** A DOS date and time, in UTC, so a zip does not depend on the time zone. */
 function dosTime(date: Date): { time: number; day: number } {
-	const year = Math.max(1980, date.getFullYear());
+	if (date.getUTCFullYear() < 1980) date = new Date(Date.UTC(1980, 0, 1));
 	return {
 		time:
-			(date.getHours() << 11) |
-			(date.getMinutes() << 5) |
-			Math.floor(date.getSeconds() / 2),
-		day: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+			(date.getUTCHours() << 11) |
+			(date.getUTCMinutes() << 5) |
+			Math.floor(date.getUTCSeconds() / 2),
+		day:
+			((date.getUTCFullYear() - 1980) << 9) |
+			((date.getUTCMonth() + 1) << 5) |
+			date.getUTCDate(),
 	};
 }
 
@@ -79,7 +84,7 @@ export async function writeZip(
 		let method = 0;
 		let body = entry.data;
 		if (!ALREADY_COMPRESSED.test(entry.name) && entry.data.length > 0) {
-			const deflated = await deflate(entry.data);
+			const deflated = deflate(entry.data);
 			if (deflated.length < entry.data.length) {
 				method = 8;
 				body = deflated;
