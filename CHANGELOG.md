@@ -7,6 +7,16 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
+### [0.12.1][client-0.12.1] - 2026-11-11
+
+#### Fixed
+
+- The npm build no longer carries Bun's chunk preload map. A page that bundles the
+  library again (Vite, webpack, Bun) got `<link rel="modulepreload">` requests for the
+  library's own chunk names (`./index-<hash>.js`) when the connect dialog loaded; they do
+  not exist in the page's build, so each one was a 404 and a console error. The CDN build
+  keeps the map: its chunks are served beside it.
+
 ### [0.12.0][client-0.12.0] - 2026-11-11
 
 #### Added
@@ -773,6 +783,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
 
+[client-0.12.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.1
 [client-0.12.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.0
 [client-0.11.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.11.0
 [client-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.10.0

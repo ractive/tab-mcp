@@ -134,6 +134,12 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(pkg["private"]).toBeUndefined();
 	const declarations = await Bun.file(join(dist, "index.d.ts")).text();
 	expect(declarations).not.toContain('.ts"');
+	// The npm files carry no preload map naming their own chunk files: a
+	// consumer's bundler renames them, and the map's links would 404.
+	for (const file of new Bun.Glob("*.js").scanSync(dist))
+		expect(await Bun.file(join(dist, file)).text()).not.toContain(
+			"modulepreload",
+		);
 	// The React entry: "use client" first, the core entry and react as imports.
 	const reactEntry = await Bun.file(join(dist, "react.js")).text();
 	expect(reactEntry.startsWith('"use client";')).toBe(true);
