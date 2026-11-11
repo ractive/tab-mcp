@@ -38,7 +38,7 @@
 		"react"
 	],
 	"dependencies": {
-		"@cfworker/json-schema": "4.1.4"
+		"@cfworker/json-schema": "4.1.6"
 	},
 	"peerDependencies": {
 		"react": ">=18.3.0 <20"
