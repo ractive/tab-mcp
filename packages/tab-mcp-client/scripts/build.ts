@@ -43,6 +43,10 @@ const npm = await Bun.build({
 	sourcemap: "linked",
 	packages: "external",
 	naming: { entry: "[name].js", chunk: "[name]-[hash].js" },
+	// No preload map: a consumer bundles these files again under other names,
+	// so `<link rel="modulepreload">` for `./index-<hash>.js` would 404 in
+	// its pages (client 0.12.0). The CDN build, served as is, keeps it.
+	modulePreload: false,
 });
 const cdn = await Bun.build({
 	...common,
