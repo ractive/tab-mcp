@@ -30,14 +30,15 @@ tags: [iteration, extension, release]
 
 ## Tasks
 
-- [ ] Release workflow on `extension-v*`; store package attached
+- [x] Release workflow on `extension-v*`; store package attached (`extension-release.yml`:
+  the tag push builds the zip, then creates the release; 2026-11-11, `ext/release-23`)
 - [x] `release.yml` (npm and Docker) skips `extension-v*` releases cleanly: the plan job
   succeeds with package `none` and every other job is skipped (2026-11-09,
   `docs/pre-release`)
-- [ ] The store package build (the zip) asserts that the manifest has no `key` and no
+- [x] The store package build (the zip) asserts that the manifest has no `key` and no
   `host_permissions`, and leaves out source maps (the `--store` build has had no source
-  maps since 2026-11-09, `docs/pre-release`, with `test/build.test.ts`; the zip step and
-  its assertion are still to do)
+  maps since 2026-11-09, `docs/pre-release`; `--store --zip` and `zipStoreBuild` since
+  2026-11-11, `ext/release-23`, with `test/build.test.ts`)
 - [ ] Once the store item exists, add its origin `chrome-extension://<store id>` to the
   hosted relay's allowed origins (ractive/ractive.ch `infra/tab-mcp`, through tofu) before
   the listing goes public, and check it with a live handshake (the store build connects
@@ -45,8 +46,15 @@ tags: [iteration, extension, release]
 - [ ] Afterwards, if wanted, remove the development build's id
   (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`) from the hosted relay's allowed
   origins, the same way
-- [ ] Publish workflow and environment; credentials set up by the owner
-- [ ] Listing texts, screenshots, privacy policy, review notes
+- [x] Publish workflow (`extension-publish.yml`, 2026-11-11, `ext/release-23`)
+- [ ] The `chrome-web-store` environment and its credentials, set up by the owner
+  ([chrome-web-store](../operations/chrome-web-store.md))
+- [x] Listing texts, single purpose, permission justifications, data usage, review notes
+  ([chrome-web-store](../operations/chrome-web-store.md)) and the privacy policy
+  (`packages/tab-mcp-extension/PRIVACY.md`) (2026-11-11, `ext/release-23`)
+- [ ] Screenshots (1280×800), and the privacy policy published on ractive.ch
+- [ ] `refs/tags/extension-v*` in the "release tags" tag ruleset (owner)
+- [x] CHANGELOG section for the extension (2026-11-11, `ext/release-23`)
 - [ ] Docs page content for ractive.ch (its own PR there)
 - [ ] First release on the owner's word
 

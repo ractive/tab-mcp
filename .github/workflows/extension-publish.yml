@@ -1,0 +1,72 @@
+name: Extension publish
+
+# Uploads the store zip of an extension-v<version> GitHub release to the
+# Chrome Web Store item and, when asked, submits it for review. Run it by hand
+# after extension-release.yml has created the release: Actions → Extension
+# publish → Run workflow, and pick the release's tag under "Use workflow
+# from". The tag it runs on is the tag it uploads; a run from a branch fails.
+# The first version is uploaded by hand in the developer dashboard: the API
+# only updates an existing item. Setup and secrets:
+# kb/operations/chrome-web-store.md.
+#
+# The upload uses mnao305/chrome-extension-upload (Chrome Web Store API v2),
+# pinned to a commit, because it receives the store's credentials. Nothing
+# else runs in this job: no checkout, no bun install.
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: "Submit for review after the upload (otherwise it stays a draft in the dashboard)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-web-store
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Holds the secrets; required reviewer and "tags extension-v*" only in the
+    # repository's environment settings.
+    environment: chrome-web-store
+    steps:
+      - name: Download the release's store zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag \
+            || { echo "::error::$TAG is no tag: pick the release's tag under \"Use workflow from\""; exit 1; }
+          echo "$TAG" | grep -Eq '^extension-v(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){0,3}$' \
+            || { echo "::error::not an extension version tag: $TAG"; exit 1; }
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "tab-mcp-for-chrome-${TAG#extension-v}-store.zip" --output store.zip
+      - name: The zip is a store build of that version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          manifest="$(unzip -p store.zip manifest.json)"
+          test "$(jq -r .version <<<"$manifest")" = "${TAG#extension-v}" \
+            || { echo "::error::the manifest's version is not ${TAG#extension-v}"; exit 1; }
+          jq -e 'has("key") or has("host_permissions") | not' <<<"$manifest" >/dev/null \
+            || { echo "::error::not a store build (a key or install-time host access)"; exit 1; }
+          # grep -c reads all of its input, so unzip never gets SIGPIPE.
+          maps="$(unzip -Z1 store.zip | grep -c '\.map$' || true)"
+          test "$maps" = 0 || { echo "::error::the zip has $maps source maps"; exit 1; }
+      - uses: mnao305/chrome-extension-upload@f549d5d654694a7722d6abfa64c97409ad5e64c1 # v7.0.0
+        with:
+          file-path: store.zip
+          extension-id: ${{ vars.CWS_EXTENSION_ID }}
+          publisher-id: ${{ vars.CWS_PUBLISHER_ID }}
+          client-id: ${{ secrets.CWS_CLIENT_ID }}
+          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+          publish: ${{ inputs.submit }}
