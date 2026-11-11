@@ -7,7 +7,7 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
-### [0.12.0][client-0.12.0] - 2026-11-10
+### [0.12.0][client-0.12.0] - 2026-11-11
 
 #### Added
 
@@ -22,7 +22,7 @@ with the Git tag `client-v<version>` or `relay-v<version>`.
 
 #### Changed
 
-- The confirmation dialog also escapes C0 controls (but tab and line feed), lone
+- The confirmation dialog also escapes C0 controls and DEL (but tab and line feed), lone
   surrogates, every space but the plain one (U+00A0, U+2007, U+3000…) and the Braille
   blank (U+2800) in the arguments and the AI app's name.
 

@@ -126,21 +126,28 @@ Tools are called while the user is in the AI app, so the dialog often opens in a
 the background. "Allow" and "Always allow" can be clicked only once the page has been
 visible and focused for `confirmDelayMs` (750 ms) with the dialog open; leaving the page
 disables them and coming back starts the wait again, so the click that brings the page
-forward cannot approve. Characters that are invisible or change the text direction (such
-as U+202E) are shown in the arguments as `\uXXXX`, so the AI app cannot make them look
-like something else; the tool gets the arguments unchanged.
+forward cannot approve. Characters that are invisible, blank (such as U+00A0, U+3000 or
+U+2800) or change the text direction (such as U+202E) are shown in the arguments and the
+AI app's name as `\uXXXX`, so the AI app cannot make them look like something else; the
+tool gets the arguments unchanged.
 
 Pass `onConfirm` to ask in your own UI (it is asked every time; remember answers there if
 you want to). Show the verified `client.host` next to the name the AI app declares, as the
-library's dialog does, since anyone can declare any name:
+library's dialog does, since anyone can declare any name. Escape the arguments and the
+name as the dialog does with `escapeInvisible` from `@ractive-ch/tab-mcp-client/visible`
+(an entry of its own, not in the core):
 
 ```ts
+import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
+
 const mcp = new TabMcp({
   relay: "https://relay.example",
   server: { name: "calculator", version: "1.0.0" },
   onConfirm: ({ tool, arguments: args, client, signal }) => {
-    const app = client.name ? `${client.name} (${client.host})` : client.host;
-    return myDialog.ask(`${app} wants to run ${tool.name}.`, args, signal);
+    const name = client.name ? escapeInvisible(client.name) : undefined;
+    const app = name ? `${name} (${client.host})` : client.host;
+    const shown = escapeInvisible(JSON.stringify(args, null, 2));
+    return myDialog.ask(`${app} wants to run ${tool.name}.`, shown, signal);
   },
 });
 ```
