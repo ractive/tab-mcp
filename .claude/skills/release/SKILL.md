@@ -34,7 +34,7 @@ the Write tool, then use `git commit -F`, `gh pr create --body-file`,
 4. `bun run verify`, and check its exit code (never through a pipe). The test "docs and
    plugin manifests name only the current package versions" fails on any version left over.
 5. Commit (author james@ractive.ch, trailer `Co-Authored-By: Claude Opus 5.5
-   <noreply@anthropic.com>`), push, PR titled "Client 0.14.0" / "relay 0.14.0". The
+   <noreply@anthropic.com>`), push, PR titled "Client 0.14.0" / "Relay 0.10.0". The
    content was reviewed in its own PRs; a pure version PR needs no review run.
 6. Wait for CI (`gh pr checks <n> --watch`; main has no required checks), then
    `gh pr merge <n> --merge`.

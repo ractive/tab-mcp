@@ -35,20 +35,41 @@ const NAMES: Record<Package, string> = {
 
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
 
-/** -1, 0 or 1; prerelease tags compare as strings and sort before the release. */
+/** -1, 0 or 1 in SemVer order (§11): a pre-release sorts before its release. */
 export function compareVersions(a: string, b: string): number {
-	const [ma, pa] = a.split("-", 2) as [string, string | undefined];
-	const [mb, pb] = b.split("-", 2) as [string, string | undefined];
-	const na = ma.split(".").map(Number);
-	const nb = mb.split(".").map(Number);
+	const split = (v: string) => {
+		const dash = v.indexOf("-");
+		return dash === -1
+			? { core: v, pre: undefined }
+			: { core: v.slice(0, dash), pre: v.slice(dash + 1) };
+	};
+	const va = split(a);
+	const vb = split(b);
+	const na = va.core.split(".").map(Number);
+	const nb = vb.core.split(".").map(Number);
 	for (let i = 0; i < 3; i++) {
 		const d = (na[i] ?? 0) - (nb[i] ?? 0);
 		if (d !== 0) return Math.sign(d);
 	}
-	if (pa === pb) return 0;
-	if (pa === undefined) return 1;
-	if (pb === undefined) return -1;
-	return pa < pb ? -1 : 1;
+	if (va.pre === vb.pre) return 0;
+	if (va.pre === undefined) return 1;
+	if (vb.pre === undefined) return -1;
+	const ia = va.pre.split(".");
+	const ib = vb.pre.split(".");
+	for (let i = 0; i < Math.max(ia.length, ib.length); i++) {
+		const x = ia[i];
+		const y = ib[i];
+		if (x === undefined) return -1;
+		if (y === undefined) return 1;
+		if (x === y) continue;
+		const xn = /^\d+$/.test(x);
+		const yn = /^\d+$/.test(y);
+		if (xn && yn) return Math.sign(Number(x) - Number(y));
+		if (xn) return -1;
+		if (yn) return 1;
+		return x < y ? -1 : 1;
+	}
+	return 0;
 }
 
 /** Every whole-version mention of `from` (not part of an IP address or a longer version) as `to`. */
@@ -60,23 +81,31 @@ export function replaceVersion(text: string, from: string, to: string): string {
 	);
 }
 
-/** The package's "### Unreleased" as the dated version, and its link above the first one of its kind. */
+/**
+ * The package's "### Unreleased" (its first "###" heading; an intro paragraph
+ * may come before it) as the dated version, and its link above the first one
+ * of its kind.
+ */
 export function datedChangelog(
 	text: string,
 	pkg: Package,
 	version: string,
 	date: string,
 ): string {
-	const heading = `## ${NAMES[pkg]}\n\n### Unreleased\n`;
-	if (!text.includes(heading))
+	const start = text.indexOf(`\n## ${NAMES[pkg]}\n`);
+	const sub = start === -1 ? -1 : text.indexOf("\n### ", start + 1);
+	const nextSection = start === -1 ? -1 : text.indexOf("\n## ", start + 1);
+	const unreleased = "\n### Unreleased\n";
+	if (
+		sub === -1 ||
+		(nextSection !== -1 && nextSection < sub) ||
+		!text.startsWith(unreleased, sub)
+	)
 		throw new Error(
-			`CHANGELOG.md: no "### Unreleased" right under "## ${NAMES[pkg]}"`,
+			`CHANGELOG.md: the first section under "## ${NAMES[pkg]}" is not "### Unreleased"`,
 		);
 	const tag = `${pkg}-${version}`;
-	let out = text.replace(
-		heading,
-		`## ${NAMES[pkg]}\n\n### [${version}][${tag}] - ${date}\n`,
-	);
+	let out = `${text.slice(0, sub)}\n### [${version}][${tag}] - ${date}\n${text.slice(sub + unreleased.length)}`;
 	const link = `[${tag}]: https://github.com/ractive/tab-mcp/releases/tag/${pkg}-v${version}\n`;
 	const first = out.search(new RegExp(`^\\[${pkg}-`, "m"));
 	out =
@@ -103,16 +132,28 @@ async function main(): Promise<void> {
 			.version;
 	const current = await versionOf(pkg);
 	const other = await versionOf(pkg === "client" ? "relay" : "client");
+	// tab-mcp for Chrome's version is named in the pinned docs too.
+	const extension = (
+		(await file("packages/tab-mcp-extension/package.json").json()) as {
+			version: string;
+		}
+	).version;
 	if (compareVersions(next, current) <= 0)
 		throw new Error(`${next} is not greater than ${current}`);
-	if (current === other)
-		throw new Error(
-			`${current} is also the other package's version; edit the pinned docs by hand`,
-		);
+	// A bare version in the docs must name one package only.
+	for (const [v, what] of [
+		[current, "old"],
+		[next, "new"],
+	] as const)
+		if (v === other || v === extension)
+			throw new Error(
+				`the ${what} version ${v} is also another package's version (relay, client or tab-mcp for Chrome); edit the pinned docs by hand`,
+			);
 
 	// Everything is worked out first, so a refusal leaves no file half done.
 	const edits = new Map<string, string>();
-	const date = new Date().toISOString().slice(0, 10);
+	// The local date (YYYY-MM-DD), not UTC's.
+	const date = new Date().toLocaleDateString("sv-SE");
 	edits.set(
 		"CHANGELOG.md",
 		datedChangelog(await file("CHANGELOG.md").text(), pkg, next, date),
