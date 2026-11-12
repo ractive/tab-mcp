@@ -269,7 +269,7 @@ did, by connecting the extension.
   user, with the tab's origin ("From", verified) and the address ("To", invisible
   characters escaped); Allow and Don't allow only, so one click is no standing
   permission, and a tab that changed origin while the question was open is not
-  navigated. Back or forward to an entry the Navigation API does not list (it lists only
+  navigated, nor one that is no longer the tab in front. Back or forward to an entry the Navigation API does not list (it lists only
   the page's origin) asks as well, the address not being known. Only `http:` and
   `https:` addresses, without user name or password (`https://shop.example@evil.example`
   is evil.example), at most 8192 characters. Residual: a GET on the page's own origin

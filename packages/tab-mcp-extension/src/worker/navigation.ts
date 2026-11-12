@@ -363,11 +363,37 @@ async function navigation(
 		throw new Error(
 			"The tab went to another page meanwhile; it was not navigated. page_info says which page it is now.",
 		);
+	// Still the tab in front: the user may have switched tabs while asked,
+	// and the tools act on the tab in front only (DEC-121).
+	if (!(await inFront(chrome, tab.id)))
+		throw new Error(
+			"The tab in front changed meanwhile; it was not navigated. page_info says which page is in front now.",
+		);
 	const loaded = await chrome.go(tab.id, target.step, options.signal);
 	if (loaded === "closed") throw new Error("The tab was closed.");
 	// The new page's page_<name> tools are offered before the answer.
 	await refresh().catch(() => {});
+	// The answer and those tools describe the same tab: the one in front.
+	if (!(await inFront(chrome, tab.id)))
+		return {
+			readable: false,
+			reason:
+				"The tab was navigated, but another tab is in front now; page_info says which page that is.",
+			...(loaded === "timeout" ? { loading: true as const } : {}),
+		};
 	return readAfter(chrome, tab.id, loaded);
+}
+
+/** Tab `tabId` is the tab in front (none in front: it is not). */
+async function inFront(
+	chrome: NavigationChrome,
+	tabId: number,
+): Promise<boolean> {
+	try {
+		return (await chrome.current()).id === tabId;
+	} catch {
+		return false;
+	}
 }
 
 const SAME_ORIGIN =

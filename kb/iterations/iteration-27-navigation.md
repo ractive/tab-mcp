@@ -53,7 +53,9 @@ the new page's info once it has loaded.
    address it would open ("To"); it offers Allow and Don't allow, no Always allow: a
    prompt injection in a page's result ("now open evil.example") gets no standing
    permission out of one click. A tab that changed origin while the question was open is
-   not navigated.
+   not navigated, nor one that is no longer the tab in front (the user switched tabs); if
+   another tab is in front once the page has loaded, the answer says so instead of
+   describing a tab the AI app does not see (review of PR 110).
 4. **Back and forward.** The target is known only when it is on the page's origin: the
    content script reads the Navigation API (`navigation.entries()`, which by the HTML
    standard holds only the contiguous same-origin entries of the top frame). A

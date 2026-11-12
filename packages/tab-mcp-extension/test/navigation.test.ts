@@ -493,6 +493,91 @@ describe("the navigation tools", () => {
 		expect(chrome.steps).toEqual([]);
 	});
 
+	test("another tab in front once the user answered: not navigated", async () => {
+		const chrome = fakeChrome({
+			url: SHOP,
+			readable: true,
+			history: history(),
+		});
+		const inFront = chrome.current;
+		const list = navigationTools(
+			chrome,
+			async () => {
+				// The user switched tabs while the question was open.
+				chrome.current = async () => ({
+					id: 10,
+					url: SHOP,
+					title: "Other tab",
+				});
+				return "allow";
+			},
+			async () => {},
+		);
+		const navigate = list.find((t) => t.name === "navigate") as Tool;
+		await expect(
+			navigate.execute(
+				{ url: "https://other.test/" },
+				execOptions(),
+			) as Promise<unknown>,
+		).rejects.toThrow("The tab in front changed meanwhile");
+		expect(chrome.steps).toEqual([]);
+		// No tab in front at all counts the same.
+		chrome.current = inFront;
+		const none = navigationTools(
+			chrome,
+			async () => {
+				chrome.current = async () => {
+					throw new Error("No tab is in front.");
+				};
+				return "allow";
+			},
+			async () => {},
+		).find((t) => t.name === "navigate") as Tool;
+		await expect(
+			none.execute(
+				{ url: "https://other.test/" },
+				execOptions(),
+			) as Promise<unknown>,
+		).rejects.toThrow("The tab in front changed meanwhile");
+		expect(chrome.steps).toEqual([]);
+	});
+
+	test("another tab in front once the page loaded: the answer says so, not the other tab's page", async () => {
+		const chrome = fakeChrome({
+			url: SHOP,
+			readable: true,
+			history: history(),
+		});
+		const t = navigationTools(
+			{
+				...chrome,
+				current: () => chrome.current(),
+				go: async (id, step, signal) => {
+					const loaded = await chrome.go(id, step, signal);
+					chrome.current = async () => ({
+						id: 10,
+						url: SHOP,
+						title: "Other tab",
+					});
+					return loaded;
+				},
+			},
+			async () => "allow",
+			async () => {},
+		).find((x) => x.name === "navigate") as Tool;
+		expect(
+			await (t.execute(
+				{ url: `${SHOP}/sale` },
+				execOptions(),
+			) as Promise<unknown>),
+		).toEqual({
+			readable: false,
+			reason:
+				"The tab was navigated, but another tab is in front now; page_info says which page that is.",
+		});
+		expect(chrome.steps).toEqual([{ url: `${SHOP}/sale` }]);
+	});
+
 	test("a caller that is not an AI app through the relay is not asked, and nothing runs", async () => {
 		const chrome = fakeChrome({
 			url: SHOP,
