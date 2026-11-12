@@ -2491,3 +2491,12 @@ does not send a `tools/call` again. Only an aborted `signal` rejects (`AbortErro
   `strictFunctionTypes`; the consumer type check covers it.
 - The MCP SDK client 2.4.0's `StreamableHTTPClientTransport` takes `fetch` and works
   pinned to 2026-07-28 through the tunnel (`test/serve.test.ts`).
+- **Review of PR 114** (claude 6, glm 1; all fixed). `serve` says `bye` when it closes,
+  the protocol's existing message, so the caller's requests end at once with `-31003`
+  instead of waiting for their timeout (a listen stream has none); `createTunnelFetch`
+  closes itself on it and stays closed. An `http.request` whose id is still in flight
+  ends the earlier request, and each `createTunnelFetch` has a random id prefix, so a
+  backend's new tunnel over the old port cannot orphan a call. A port is served once at
+  a time (`InvalidStateError` otherwise). `requestTimeoutMs` must be below 2^31
+  (`Infinity` would fire at once). A failure on a streamed body that is not an event
+  stream is the JSON error as the body, not an SSE event.

@@ -54,11 +54,17 @@ export interface TunnelFetchOptions {
 export interface TunnelFetch {
 	/** `fetch` for an MCP client; only the path and query of the URL are used. */
 	fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
-	/** Hand it every message from the page's end, as an object; unknown ones are ignored. */
+	/**
+	 * Hand it every message from the page's end, as an object
+	 * (`http.response*`, `error`, `bye`); unknown ones are ignored.
+	 */
 	receive(message: unknown): void;
 	/**
-	 * The page's end is gone: requests in flight are answered with a JSON-RPC
-	 * error (`-31003`), and so is every later one.
+	 * The page's end is gone, or this end gives up: requests in flight are
+	 * answered with a JSON-RPC error (`-31003`) and cancelled at the page,
+	 * and every later request gets that error too. The same happens by itself
+	 * when the page closes its `serve` (it says `bye`). A closed tunnel stays
+	 * closed: make a new one for a new `serve`.
 	 */
 	close(reason?: string): void;
 }
@@ -108,6 +114,8 @@ interface Pending {
 	reject(reason: unknown): void;
 	/** The body of a streamed response, once it has started. */
 	stream?: ReadableStreamDefaultController<Uint8Array>;
+	/** Whether the streamed response is an event stream (else one body in pieces). */
+	sse: boolean;
 	/** The last two characters of the stream so far: empty or a blank line is between two events. */
 	tail: string;
 	/** Stop the timer and the abort listener. */
@@ -126,16 +134,21 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 	if (
 		typeof options.send !== "function" ||
 		typeof timeoutMs !== "number" ||
-		!(timeoutMs > 0)
+		!(timeoutMs > 0) ||
+		// What `setTimeout` can keep: beyond it (and for Infinity) it fires at once.
+		timeoutMs >= 2 ** 31
 	) {
 		throw new TypeError(
-			"createTunnelFetch: needs send, and requestTimeoutMs in milliseconds",
+			"createTunnelFetch: needs send, and requestTimeoutMs in milliseconds (below 2^31)",
 		);
 	}
 	const pending = new Map<string, Pending>();
 	const encoder = new TextEncoder();
 	let closed: string | undefined;
 	let last = 0;
+	// Ids of two tunnels over one channel must not meet (a backend that makes
+	// a new tunnel while the page still answers the old one's requests).
+	const prefix = Math.random().toString(36).slice(2, 8);
 
 	const cancel = (id: string, reason: TunnelCancelMessage["reason"]): void => {
 		try {
@@ -162,13 +175,17 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 			return;
 		}
 		try {
-			if (entry.tail === "" || entry.tail === "\n\n") {
+			if (entry.sse && (entry.tail === "" || entry.tail === "\n\n")) {
 				entry.stream.enqueue(
 					encoder.encode(`event: message\ndata: ${body}\n\n`),
 				);
 				entry.stream.close();
+			} else if (!entry.sse && entry.tail === "") {
+				// A body in pieces of which none came yet: the error is the body.
+				entry.stream.enqueue(encoder.encode(body));
+				entry.stream.close();
 			} else {
-				// In the middle of an event: nothing readable can follow it.
+				// In the middle of an event or a body: nothing readable can follow it.
 				entry.stream.error(new Error(message));
 			}
 		} catch {
@@ -205,7 +222,7 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 			if (HEADERS.has(lower) || lower.startsWith("mcp-param-"))
 				headers[lower] = value;
 		});
-		const id = `t${++last}`;
+		const id = `${prefix}-${++last}`;
 		return new Promise<Response>((resolve, reject) => {
 			const onAbort = () => {
 				const entry = pending.get(id);
@@ -234,6 +251,7 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 				rpcId: jsonId,
 				resolve,
 				reject,
+				sse: false,
 				tail: "",
 				release() {
 					clearTimeout(timer);
@@ -255,9 +273,24 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 		});
 	}
 
+	/** No more requests: those in flight end with `-31003`, and so does every later one. */
+	function end(reason: string, tellPage: boolean): void {
+		if (closed !== undefined) return;
+		closed = reason;
+		for (const id of [...pending.keys()]) {
+			if (tellPage) cancel(id, "client_closed");
+			fail(id, GONE, reason);
+		}
+	}
+
 	function receive(message: unknown): void {
 		if (!isObject(message)) return;
 		const { type, id } = message;
+		if (type === "bye") {
+			// The page closed its `serve`: nothing will be answered any more.
+			end("The page stopped serving its tools.", false);
+			return;
+		}
 		if (typeof id !== "string") return;
 		const entry = pending.get(id);
 		if (entry === undefined) return; // over already: late messages are dropped
@@ -327,6 +360,9 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 					invalid(id);
 					return;
 				}
+				entry.sse = (
+					(headers as Record<string, string>)["content-type"] ?? ""
+				).startsWith("text/event-stream");
 				entry.resolve(response);
 				return;
 			}
@@ -369,9 +405,8 @@ export function createTunnelFetch(options: TunnelFetchOptions): TunnelFetch {
 		fetch: tunnelFetch,
 		receive,
 		close(reason?: string): void {
-			if (closed !== undefined) return;
-			closed = reason ?? "The connection to the page was closed.";
-			for (const id of [...pending.keys()]) fail(id, GONE, closed);
+			// The page is told too, in case the channel still stands.
+			end(reason ?? "The connection to the page was closed.", true);
 		},
 	};
 }

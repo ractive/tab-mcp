@@ -73,6 +73,10 @@ export function createTunnel(options: {
 
 	async function run(msg: HttpRequestMessage): Promise<void> {
 		const controller = new AbortController();
+		// An id that is still in flight (a relay never sends one; another end
+		// of a port may): the earlier request ends here, so that it does not
+		// run on unheard, out of reach of `http.cancel`.
+		inflight.get(msg.id)?.abort();
 		inflight.set(msg.id, controller);
 		const live = () =>
 			!closed &&
@@ -199,6 +203,9 @@ const MIN_CHUNK = 64;
 /** The longest request id, as between relay and tab. */
 const MAX_ID = 128;
 
+/** The ports being served now. */
+const served = new WeakSet<object>();
+
 /** One per `serve` call: the `n` of its grant id `local:<n>`. */
 let lastPort = 0;
 
@@ -239,6 +246,14 @@ export function servePort(
 		!("onmessage" in (port as object))
 	) {
 		throw new TypeError("serve: the port needs postMessage and onmessage");
+	}
+	// A second serve would take `onmessage` from the first, whose calls in
+	// flight would then run on unheard and unanswered.
+	if (served.has(port)) {
+		throw new DOMException(
+			"serve: this port is served already; close that first",
+			"InvalidStateError",
+		);
 	}
 	const client: LocalClient = { kind: "local", id: who.id };
 	if (who.name !== undefined && who.name !== "") client.name = who.name;
@@ -326,11 +341,14 @@ export function servePort(
 
 	const close = (): void => {
 		if (closed) return;
-		closed = true;
 		options.signal?.removeEventListener("abort", close);
 		stopWatching();
 		tunnel.close();
 		handler.close();
+		// The other end is told, so that its requests end now and not with
+		// their timeout; a port that was never served hears nothing.
+		if (served.delete(port)) send({ type: "bye", reason: "closed" });
+		closed = true;
 		if (port.onmessage === onMessage) port.onmessage = null;
 	};
 	if (options.signal?.aborted === true) {
@@ -338,6 +356,7 @@ export function servePort(
 		return { close };
 	}
 	options.signal?.addEventListener("abort", close);
+	served.add(port);
 	port.onmessage = onMessage; // starts a MessagePort
 	return { close };
 }

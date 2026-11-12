@@ -297,8 +297,11 @@ a port:
   them on over a text channel encodes and decodes them.
 - The caller sends `http.request` and `http.cancel`, the page `http.response`,
   `http.response.start`, `.chunk` and `.end`, with the fields and rules above. The
-  caller chooses `id` (at most 128 characters, unique among its requests in flight) and
-  sends only the listed `headers`.
+  caller chooses `id` (at most 128 characters, unique among the requests in flight on
+  the port) and sends only the listed `headers`. An `http.request` whose `id` is still
+  in flight ends the earlier request (as `http.cancel` would) and starts the new one.
+  `createTunnelFetch` gives each of its instances a random prefix, so two of them on
+  one port do not share ids.
 - `grant` is not needed, and one that is sent is ignored: the library runs every request
   of a port as the client the page named in `serve`
   (`{"grantId":"local:<n>","clientId":"<client.id>","scopes":["tools"]}`, one `n` per
@@ -307,6 +310,11 @@ a port:
 - There is no `hello`, `session`, heartbeat or limits message, and nothing about
   pairing, grants or identity. The page splits a response body into chunks of at most
   `maxChunk` characters (65536 by default).
+- When the page stops serving the port (`close()` or its `signal`), it aborts the
+  requests in flight, sends nothing more for them, and sends one `bye` with the reason
+  `closed`. `createTunnelFetch` then ends its requests in flight, and every later one,
+  with `-31003`. A port carries no news of its own closing, so without the `bye` the
+  caller would wait for each request's timeout.
 - To anything but `http.request` and `http.cancel` the page answers `error` with
   `bad_message` (and the `id`, if the message had one); an `error` message is never
   answered. `createTunnelFetch` ends the request a `bad_message` names with `-31007`.
@@ -314,8 +322,10 @@ a port:
   that apply, with the same codes at HTTP 200, or as the last event of a stream that
   had started: `-31002` when a response has not ended within its `requestTimeoutMs`
   (it sends `http.cancel` first; `subscriptions/listen` is not limited), `-31003` once
-  its `close()` was called, `-31005` when its `send` throws, `-31007` for a response
-  that breaks the rules above.
+  its `close()` was called (it sends `http.cancel` for each request in flight) or the
+  page said `bye`, `-31005` when its `send` throws, `-31007` for a response that breaks
+  the rules above. A response body that came in pieces without being an event stream
+  ends with the error as its body if no piece had come, else the body breaks off.
 
 Who holds the other end of the port is the page's decision when it hands the port out;
 see A15 in the [threat model](threat-model.md).

@@ -205,10 +205,11 @@ describe("serve and createTunnelFetch over a MessageChannel", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toMatchObject({
 			type: "http.request",
-			id: "t1",
 			method: "POST",
 			path: "/mcp",
 		});
+		// A prefix of the tunnel's own, then a count.
+		expect(sent[0]?.["id"]).toMatch(/^[a-z0-9]+-1$/);
 		expect("grant" in (sent[0] ?? {})).toBe(false);
 		expect(
 			Object.keys(sent[0]?.["headers"] as Record<string, string>).sort(),
@@ -501,8 +502,10 @@ describe("serve and createTunnelFetch over a MessageChannel", () => {
 		expect(port1.onmessage).toBeNull();
 		await wait(10);
 		const before = messages.length;
-		// Nothing more for the cancelled call, and nothing for a new one.
+		// Nothing more for the cancelled call but the news that serving ended,
+		// and nothing for a new request.
 		expect(messages.some((m) => m["type"] === "http.response.end")).toBe(false);
+		expect(messages.at(-1)).toEqual({ type: "bye", reason: "closed" });
 		port1.onmessage = () => {};
 		port2.postMessage(request("b"));
 		await wait(10);
@@ -532,6 +535,83 @@ describe("serve and createTunnelFetch over a MessageChannel", () => {
 			signal: controller.signal,
 		});
 		expect(third.port1.onmessage).toBeNull();
+	});
+
+	test("closing the serve ends the caller's requests at once, and its later ones (review of PR 114)", async () => {
+		const mcp = newPage();
+		await mcp.registerTool({
+			name: "slow",
+			description: "Never ends",
+			execute: () => new Promise(() => {}),
+		});
+		const w = await wire(mcp);
+		const started = nextEvent(mcp, "toolcall");
+		const call = await post(w.tunnel, rpc(1, "tools/call", { name: "slow" }));
+		const listen = await post(
+			w.tunnel,
+			rpc(2, "subscriptions/listen", {
+				notifications: { toolsListChanged: true },
+			}),
+		);
+		await started;
+		w.served.close();
+		const gone = {
+			code: -31003,
+			message: "The page stopped serving its tools.",
+		};
+		expect(await answer(call)).toMatchObject({ id: 1, error: gone });
+		// The listen stream, which has no timeout, ends too.
+		expect(
+			(await readEvents(listen, (event) => "error" in event)).at(-1),
+		).toMatchObject({ id: 2, error: gone });
+		const later = await post(w.tunnel, rpc(3, "tools/list"));
+		expect(await later.json()).toMatchObject({ id: 3, error: gone });
+	});
+
+	test("a request id that is still in flight ends the earlier request (review of PR 114)", async () => {
+		const mcp = newPage();
+		const aborted: number[] = [];
+		let calls = 0;
+		await mcp.registerTool({
+			name: "slow",
+			description: "Never ends",
+			execute: (_, { signal }) => {
+				const n = ++calls;
+				return new Promise((_resolve, reject) => {
+					signal.addEventListener("abort", () => {
+						aborted.push(n);
+						reject(new Error("aborted"));
+					});
+				});
+			},
+		});
+		const w = await wire(mcp);
+		const request = {
+			type: "http.request",
+			id: "same",
+			method: "POST",
+			path: "/mcp",
+			headers: {
+				"content-type": "application/json",
+				accept: "application/json, text/event-stream",
+				"mcp-protocol-version": "2026-07-28",
+				"mcp-method": "tools/call",
+				"mcp-name": "slow",
+			},
+			body: JSON.stringify(rpc(1, "tools/call", { name: "slow" })),
+		};
+		const first = nextEvent(mcp, "toolcall");
+		w.port.postMessage(request);
+		await first;
+		const ended = nextEvent<ToolCallEnd>(mcp, "toolcallend");
+		w.port.postMessage(request);
+		expect((await ended).detail.outcome).toBe("cancelled");
+		expect(aborted).toEqual([1]);
+		// The cancel reaches the one that is left.
+		const last = nextEvent<ToolCallEnd>(mcp, "toolcallend");
+		w.port.postMessage({ type: "http.cancel", id: "same" });
+		expect((await last).detail.outcome).toBe("cancelled");
+		expect(aborted).toEqual([1, 2]);
 	});
 
 	test("a registered tool reaches a subscriptions/listen stream", async () => {
@@ -687,6 +767,23 @@ describe("serve and createTunnelFetch over a MessageChannel", () => {
 		});
 	});
 
+	test("a port that is served already is refused until that serve is closed", async () => {
+		const mcp = newPage();
+		const { port1, port2 } = new MessageChannel();
+		open.push(port1, port2);
+		const first = await mcp.serve(port1, { client: ASSISTANT });
+		const handler = port1.onmessage;
+		const error = await mcp
+			.serve(port1, { client: { id: "other" } })
+			.catch((e: unknown) => e);
+		expect((error as DOMException).name).toBe("InvalidStateError");
+		expect(port1.onmessage).toBe(handler); // the first one still has it
+		first.close();
+		const again = await mcp.serve(port1, { client: ASSISTANT });
+		open.push(again);
+		expect(port1.onmessage).not.toBeNull();
+	});
+
 	test("serve rejects options it cannot use", async () => {
 		const mcp = newPage();
 		const { port1, port2 } = new MessageChannel();
@@ -745,40 +842,49 @@ describe("createTunnelFetch against a page that breaks the protocol", () => {
 		const tunnel = createTunnelFetch({ send: (m) => sent.push(m) });
 		return { sent, tunnel };
 	};
+	/** A request in flight, and the id the tunnel gave it. */
+	const inFlight = async (method = "tools/list") => {
+		const { sent, tunnel } = sentBy();
+		const pending = post(tunnel, rpc(9, method, { name: "x" }));
+		await wait(1);
+		return { sent, tunnel, pending, id: sent[0]?.id ?? "" };
+	};
 	const invalid = {
 		code: -31007,
 		message: "The page sent an invalid response.",
 	};
+	const sse = { "content-type": "text/event-stream" };
 
-	test("a chunk before the start, a second start, a body with 204", async () => {
-		for (const messages of [
-			[{ type: "http.response.chunk", id: "t1", data: "x" }],
-			[{ type: "http.response.end", id: "t1" }],
-			[
-				{
-					type: "http.response",
-					id: "t1",
-					status: 204,
-					headers: {},
-					body: "x",
-				},
-			],
-			[{ type: "http.response", id: "t1", status: 99, headers: {}, body: "" }],
-			[
-				{
-					type: "http.response",
-					id: "t1",
-					status: 200,
-					headers: { a: 1 },
-					body: "",
-				},
-			],
-			[{ type: "http.response.start", id: "t1", status: 200 }],
-		]) {
-			const { sent, tunnel } = sentBy();
-			const pending = post(tunnel, rpc(9, "tools/list"));
-			await wait(1);
-			for (const message of messages) tunnel.receive(message);
+	test("a chunk before the start, an end without one, a body with 204, a bad head", async () => {
+		const cases: ((id: string) => Record<string, unknown>)[] = [
+			(id) => ({ type: "http.response.chunk", id, data: "x" }),
+			(id) => ({ type: "http.response.end", id }),
+			(id) => ({
+				type: "http.response",
+				id,
+				status: 204,
+				headers: {},
+				body: "x",
+			}),
+			(id) => ({
+				type: "http.response",
+				id,
+				status: 99,
+				headers: {},
+				body: "",
+			}),
+			(id) => ({
+				type: "http.response",
+				id,
+				status: 200,
+				headers: { a: 1 },
+				body: "",
+			}),
+			(id) => ({ type: "http.response.start", id, status: 200 }),
+		];
+		for (const message of cases) {
+			const { sent, tunnel, pending, id } = await inFlight();
+			tunnel.receive(message(id));
 			expect(await (await pending).json()).toEqual({
 				jsonrpc: "2.0",
 				id: 9,
@@ -789,60 +895,90 @@ describe("createTunnelFetch against a page that breaks the protocol", () => {
 	});
 
 	test("an invalid message on a started stream: an error event between events, a broken stream inside one", async () => {
-		const sse = { "content-type": "text/event-stream" };
-		const between = sentBy();
-		let pending = post(between.tunnel, rpc(9, "tools/call", { name: "x" }));
-		await wait(1);
-		between.tunnel.receive({
+		const between = await inFlight("tools/call");
+		const start = (id: string, headers = sse) => ({
 			type: "http.response.start",
-			id: "t1",
+			id,
 			status: 200,
-			headers: sse,
+			headers,
 		});
+		between.tunnel.receive(start(between.id));
 		between.tunnel.receive({
 			type: "http.response.chunk",
-			id: "t1",
+			id: between.id,
 			data: 'event: message\ndata: {"jsonrpc":"2.0","method":"x"}\n',
 		});
+		// The blank line that ends the event comes in a piece of its own.
 		between.tunnel.receive({
 			type: "http.response.chunk",
-			id: "t1",
+			id: between.id,
 			data: "\n",
 		});
-		between.tunnel.receive({
-			type: "http.response.start",
-			id: "t1",
-			status: 200,
-			headers: sse,
-		});
-		expect(await answer(await pending)).toEqual({
+		between.tunnel.receive(start(between.id)); // a second start
+		expect(await answer(await between.pending)).toEqual({
 			jsonrpc: "2.0",
 			id: 9,
 			error: invalid,
 		});
 
-		const inside = sentBy();
-		pending = post(inside.tunnel, rpc(9, "tools/call", { name: "x" }));
-		await wait(1);
+		const inside = await inFlight("tools/call");
+		inside.tunnel.receive(start(inside.id));
 		inside.tunnel.receive({
-			type: "http.response.start",
-			id: "t1",
-			status: 200,
-			headers: sse,
+			type: "http.response.chunk",
+			id: inside.id,
+			data: "event: message\ndata: {",
 		});
 		inside.tunnel.receive({
 			type: "http.response.chunk",
-			id: "t1",
-			data: "event: message\ndata: {",
+			id: inside.id,
+			data: 5,
 		});
-		inside.tunnel.receive({ type: "http.response.chunk", id: "t1", data: 5 });
-		const failure = await (await pending).text().catch((e: unknown) => e);
+		const failure = await (await inside.pending)
+			.text()
+			.catch((e: unknown) => e);
 		expect(failure).toBeInstanceOf(Error);
 		// Late messages for a request that is over are dropped.
-		inside.tunnel.receive({ type: "http.response.end", id: "t1" });
+		inside.tunnel.receive({ type: "http.response.end", id: inside.id });
 		inside.tunnel.receive({ type: "http.response.end", id: "nobody" });
 		inside.tunnel.receive("text");
 		inside.tunnel.receive({ type: "session" });
+	});
+
+	test("a JSON body in pieces that ends early: the error is the body before the first piece, a broken stream after it (review of PR 114)", async () => {
+		const json = { "content-type": "application/json" };
+		const before = await inFlight();
+		before.tunnel.receive({
+			type: "http.response.start",
+			id: before.id,
+			status: 200,
+			headers: json,
+		});
+		before.tunnel.close();
+		// JSON under the JSON content type, not an SSE event.
+		expect(await (await before.pending).json()).toEqual({
+			jsonrpc: "2.0",
+			id: 9,
+			error: {
+				code: -31003,
+				message: "The connection to the page was closed.",
+			},
+		});
+
+		const after = await inFlight();
+		after.tunnel.receive({
+			type: "http.response.start",
+			id: after.id,
+			status: 200,
+			headers: json,
+		});
+		after.tunnel.receive({
+			type: "http.response.chunk",
+			id: after.id,
+			data: '{"jsonrpc":',
+		});
+		after.tunnel.close();
+		const failure = await (await after.pending).text().catch((e: unknown) => e);
+		expect(failure).toBeInstanceOf(Error);
 	});
 
 	test("a send that throws answers -31005; bad options throw", async () => {
@@ -859,12 +995,29 @@ describe("createTunnelFetch against a page that breaks the protocol", () => {
 				message: "The request could not be sent to the page.",
 			},
 		});
-		expect(() =>
-			createTunnelFetch({ send: () => {}, requestTimeoutMs: 0 }),
-		).toThrow(TypeError);
+		// Infinity and anything setTimeout cannot keep would time out at once.
+		for (const requestTimeoutMs of [0, -1, Number.NaN, Infinity, 2 ** 31])
+			expect(() =>
+				createTunnelFetch({ send: () => {}, requestTimeoutMs }),
+			).toThrow(TypeError);
 		expect(() =>
 			createTunnelFetch({} as Parameters<typeof createTunnelFetch>[0]),
 		).toThrow(TypeError);
+	});
+
+	test("two tunnels never share an id; close() cancels at the page", async () => {
+		const a = await inFlight();
+		const b = await inFlight();
+		expect(a.id).not.toBe(b.id);
+		expect(a.id.split("-")[0]).not.toBe(b.id.split("-")[0]);
+		a.tunnel.close();
+		b.tunnel.close();
+		expect(a.sent).toEqual([
+			expect.objectContaining({ type: "http.request", id: a.id }),
+			{ type: "http.cancel", id: a.id, reason: "client_closed" },
+		]);
+		await a.pending;
+		await b.pending;
 	});
 });
 

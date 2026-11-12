@@ -17,7 +17,7 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   client. The port carries the relay's `http.*` messages as plain objects (a
   `MessagePort` fits, or an object of your own with `postMessage` and `onmessage`). It
   resolves with `{ close() }`, takes a `signal`, and may be called for several ports,
-  next to a relay connection and `webmcp: true`. A port is a key to the tools: hand it
+  next to a relay connection and `webmcp: true`. Closing it tells the other end (`bye`). A port is a key to the tools: hand it
   only to a frame whose origin you checked (README, "Your own assistant on the page";
   threat model A15).
 - `@ractive-ch/tab-mcp-client/tunnel`: `createTunnelFetch({ send })` is the other end, a

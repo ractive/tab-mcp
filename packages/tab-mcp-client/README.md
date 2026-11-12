@@ -192,12 +192,14 @@ const mcp = new TabMcp({ server: { name: "shop", version: "1.0.0" } });
 await mcp.registerTool({ name: "add_to_cart", description: "…", execute: addToCart });
 
 const chat = document.querySelector<HTMLIFrameElement>("#chat")!;
+let served: { close(): void } | undefined;
 addEventListener("message", async (event) => {
   // Only the chat's frame, on the chat's origin, gets a port.
   if (event.origin !== "https://chat.example" || event.source !== chat.contentWindow) return;
   if (event.data?.type !== "tools-wanted") return;
   const { port1, port2 } = new MessageChannel();
-  await mcp.serve(port1, { client: { id: "assistant", name: "Example assistant" } });
+  served?.close(); // the chat asked again (it reloaded): the old port is dead
+  served = await mcp.serve(port1, { client: { id: "assistant", name: "Example assistant" } });
   chat.contentWindow!.postMessage({ type: "tools-port" }, "https://chat.example", [port2]);
 });
 ```
@@ -233,7 +235,11 @@ socket.on("message", (data) => {
 });
 socket.on("close", () => tunnel.close());
 
-const client = new Client({ name: "assistant", version: "1.0.0" });
+// The page speaks MCP 2026-07-28 only: pin it, or the SDK starts with an older version.
+const client = new Client(
+  { name: "assistant", version: "1.0.0" },
+  { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+);
 // The URL is never fetched; only its path reaches the page.
 await client.connect(
   new StreamableHTTPClientTransport(new URL("https://tab.invalid/mcp"), { fetch: tunnel.fetch }),
@@ -251,13 +257,17 @@ const { tools } = await client.listTools();
   that lets its own assistant run such tools without asking answers `onConfirm` itself
   for `request.client.kind === "local"`, and hands other calls to `mcp.confirmInPage`.
 - `serve` resolves with `{ close() }`; `options.signal` does the same. Closing aborts the
-  calls in flight. It may be called for several ports, and next to a relay connection
-  and `webmcp: true`: one registration reaches all three.
+  calls in flight and tells the other end (`bye`), whose requests then end at once with
+  `-31003`. Close a serve whose port is dead, as above: its calls, listen streams and an
+  open confirmation would stay otherwise. `serve` may be called for several ports (each
+  port once at a time), and next to a relay connection and `webmcp: true`: one
+  registration reaches all three.
 - `createTunnelFetch` answers a request that takes longer than `requestTimeoutMs`
   (300 s by default; a `subscriptions/listen` stream is not limited) with the JSON-RPC
   error `-31002`, and every request after `close()` with `-31003`, at HTTP 200 like the
   relay: the MCP client reads an error, not a network failure. Only an aborted `signal`
-  rejects.
+  rejects. Call `close()` when the channel to the page is gone; a closed tunnel stays
+  closed, so a new channel (or a new `serve`) gets a new `createTunnelFetch`.
 - Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
   `TypeError`, nothing is read from or written to `localStorage`, `mcp.hasRelay` is
   `false`, and React's `ConnectButton` renders nothing.
