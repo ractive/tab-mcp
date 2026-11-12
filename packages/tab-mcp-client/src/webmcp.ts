@@ -120,7 +120,9 @@ export function mirror(
 		};
 		const { signal } = entry.controller;
 		Promise.resolve()
-			.then(() => context.registerTool(native, { signal }))
+			// Not once unmirrored, also for a retry: whatever the browser does
+			// with an aborted signal.
+			.then(() => signal.aborted || context.registerTool(native, { signal }))
 			.catch((error: unknown) => {
 				if (signal.aborted) return; // unmirrored meanwhile
 				if (retry) {

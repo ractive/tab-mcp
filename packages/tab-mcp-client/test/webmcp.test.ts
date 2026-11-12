@@ -356,6 +356,28 @@ describe("every failure stays with the mirror", () => {
 		expect(warn).toHaveBeenCalledTimes(1);
 	});
 
+	test("a tool unregistered before its retry is not registered, whatever the browser does with an aborted signal (review of PR 103)", async () => {
+		const names: string[] = [];
+		let calls = 0;
+		native.registerTool = (tool: NativeTool) => {
+			names.push(tool.name);
+			// The first attempt fails; a browser that ignored an aborted signal
+			// would take the retry.
+			return ++calls === 1
+				? Promise.reject(new DOMException("taken", "InvalidStateError"))
+				: Promise.resolve();
+		};
+		const t = tab();
+		const controller = new AbortController();
+		await t.registerTool(add, { signal: controller.signal });
+		await Bun.sleep(0); // the first attempt failed; the retry waits a task
+		controller.abort();
+		await settle();
+		expect(names).toEqual(["add"]);
+		expect(attribute()).toBe("");
+		expect(warn).not.toHaveBeenCalled();
+	});
+
 	test("a registerTool that throws at once", async () => {
 		native.registerTool = () => {
 			throw new TypeError("nope");

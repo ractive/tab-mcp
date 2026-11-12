@@ -351,6 +351,36 @@ on(
 	},
 );
 
+on(
+	"a call the agent cancels aborts execute's signal and closes the dialog (review of PR 103)",
+	async () => {
+		const page = await open("?dialog");
+		try {
+			const call = page.eval(`agent("wipe_named", {}, 300)`);
+			let open = false;
+			for (let i = 0; i < 100 && !open; i++) {
+				await Bun.sleep(20);
+				open = await page.eval<boolean>(
+					`document.querySelector("dialog.tab-mcp-confirm") !== null`,
+				);
+			}
+			expect(open).toBe(true);
+			expect(await call).toEqual({ ok: false, error: "AbortError" });
+			await Bun.sleep(50);
+			expect(
+				await page.eval(
+					`document.querySelector("dialog.tab-mcp-confirm") === null`,
+				),
+			).toBe(true);
+			expect(
+				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
+			).toEqual(["cancelled"]);
+		} finally {
+			await page.close();
+		}
+	},
+);
+
 on("aborting unmirrors; registering again mirrors again", async () => {
 	const page = await open();
 	try {

@@ -2344,7 +2344,7 @@ own `document.modelContext` and leaves the getter alone.
   before the native registration and cleared after the abort or a failure, so tab-mcp
   for Chrome never sees a mirrored tool as the page's own. Once mirroring is on it is
   always there, empty when nothing is mirrored.
-- **Size: the mirror is in the core.** The core went from 5,490 to 6,115 B gzipped, 29 B
+- **Size: the mirror is in the core.** The core went from 5,490 to 6,121 B gzipped, 23 B
   under the 6 KB budget (DEC-103); the call path (check, confirm, run) is one function in
   the lazy chunk that the MCP handler uses too (`runCall` in `mcp.ts`). The next feature
   in the core will need the mirror in a lazy chunk (loaded when `webmcp: true` finds

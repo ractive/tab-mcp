@@ -143,7 +143,8 @@ agent in the browser can then call the mirrored tools without pairing.
   validator, which the first WebMCP call loads (as `connect()` does), refusing its
   schema.
 - A failed native registration only warns in the console, once per tool, and the tool
-  stays offered through the relay: a name the page or another script already registered
+  stays offered through the relay; it is tried again only when the tool is registered
+  again: a name the page or another script already registered
   natively keeps its owner, and a frame without `allow="tools"` refuses all. The other
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
   fails: a page that registers tools natively itself leaves `webmcp` off or uses other
