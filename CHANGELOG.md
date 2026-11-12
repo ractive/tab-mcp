@@ -33,6 +33,10 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   that reads `client.host` or `client.name` without checking `client.kind` first no
   longer type-checks; at run time, calls through the relay carry the same fields as
   before plus `kind`.
+- `confirmInPage` treats a client without `kind: "relay"` as a caller in the browser: no
+  "Always allow", offered or applied. A page that calls it with a client object it builds
+  itself (for example for its own local MCP endpoint) has to add `kind: "relay"` to keep
+  "Always allow".
 
 ### [0.12.1][client-0.12.1] - 2026-11-11
 
