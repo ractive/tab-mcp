@@ -136,12 +136,14 @@ Chrome has WebMCP for sites in its
   the library's dialog, which names the caller "An agent in this browser"), and
   `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Always allow" is
   never offered or applied for these calls: there is no identity to remember it for.
-- The call resolves with what `execute` returned. It rejects with what `execute` threw,
-  an `Error` with the text of an MCP result with `isError: true`, a `TypeError` for
-  invalid arguments, a `NotAllowedError` when the user declined, an `AbortError` when the
-  browser cancelled it, and an `InvalidStateError` when the tool is gone. Chrome 156
-  passes the agent neither the name nor the message of a rejection
-  (`UnknownError`).
+- The call resolves with what `execute` returned. A failure resolves too, as
+  `{ error: "<message>" }`, so that the agent can read it: invalid arguments (the same
+  message as for an AI app), "Don't allow" (`The user did not allow <tool> to run.`), a
+  tool that is gone, an error thrown by `execute` (its message) and an MCP result with
+  `isError: true` (its text). A rejection would not help: Chrome 156 hands the agent
+  every rejection as a bare `UnknownError`, without its message. Only a call the browser
+  cancelled rejects (`AbortError`), since its caller no longer waits for an answer.
+  `toolcallend` reports the outcome as for an AI app (`error`, `declined`, `cancelled`).
 - Only the native object is used, read through `Document.prototype`'s getter: an own
   `document.modelContext` (a polyfill such as `@mcp-b/global`, or a page script) is
   passed by, and with native WebMCP and the polyfill both present the tools go to the

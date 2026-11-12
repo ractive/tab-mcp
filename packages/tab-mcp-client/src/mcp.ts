@@ -297,16 +297,15 @@ function validate(tool: RegisteredTool, args: Json): string | undefined {
 }
 
 /**
- * How a call ended. `stop`: it did not run to its end, and what a WebMCP
- * caller is rejected with (`TypeError` or a `DOMException` name).
- * `returned`: what `execute` returned, `thrown`: what it threw.
+ * How a call ended. `stop`: it did not run to its end, and why (named as
+ * the `DOMException` or `TypeError` that would say so). `returned`: what
+ * `execute` returned.
  */
 export interface CallRun {
 	outcome: ToolCallOutcome;
 	result: CallToolResult;
 	stop?: "TypeError" | "NotAllowedError" | "AbortError" | "InvalidStateError";
 	returned?: { value: unknown };
-	thrown?: { error: unknown };
 }
 
 /**
@@ -404,7 +403,7 @@ async function decideAndRun(
 			returned: { value },
 		};
 	} catch (error) {
-		run = { outcome: "error", result: thrownResult(error), thrown: { error } };
+		run = { outcome: "error", result: thrownResult(error) };
 	}
 	// Cancelled is cancelled, however the tool answered the abort.
 	if (signal.aborted)
@@ -416,10 +415,12 @@ async function decideAndRun(
 /**
  * A call from an agent in the browser (WebMCP) of the mirrored `tool`: the
  * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
- * Resolves with what `execute` returned; rejects with what it threw, an
- * `Error` with the text of an `isError` result, a `TypeError` for invalid
- * arguments, a `NotAllowedError` when the user declined, an `AbortError`
- * when it was cancelled and an `InvalidStateError` when the tool is gone.
+ * Resolves with what `execute` returned. Every failure the agent should read
+ * resolves too, as `{ error: "<message>" }`: invalid arguments, "Don't
+ * allow", a tool that is gone, what `execute` threw, an `isError` result.
+ * Chrome 156 turns a rejection into a bare `UnknownError`, so the agent
+ * would learn neither why nor what to change (DEC-120). Only a call the
+ * browser cancelled rejects (`AbortError`): its caller has gone already.
  */
 export async function webMcpCall(
 	context: CallContext,
@@ -427,17 +428,11 @@ export async function webMcpCall(
 	input: unknown,
 	signal: unknown,
 ): Promise<unknown> {
-	const fail = (name: NonNullable<CallRun["stop"]>, message: string) =>
-		name === "TypeError"
-			? new TypeError(message)
-			: new DOMException(message, name);
+	const failed = (error: string) => ({ error });
+	const gone = `The tool ${tool.name} is no longer available.`;
 	// Gone already, e.g. refused by the validator just loaded: no call.
-	if (context.tools.get(tool.name) !== tool)
-		throw fail(
-			"InvalidStateError",
-			`The tool ${tool.name} is no longer available`,
-		);
-	if (!isObject(input)) throw fail("TypeError", "The input must be an object");
+	if (context.tools.get(tool.name) !== tool) return failed(gone);
+	if (!isObject(input)) return failed("The input must be an object.");
 	const run = await runCall(
 		context,
 		tool,
@@ -445,14 +440,13 @@ export async function webMcpCall(
 		signal instanceof AbortSignal ? signal : new AbortController().signal,
 		{ kind: "webmcp" },
 	);
-	if (run.stop !== undefined)
-		throw fail(
-			run.stop,
-			run.stop === "AbortError" ? "Cancelled" : resultText(run.result),
-		);
-	if (run.thrown !== undefined) throw run.thrown.error;
+	if (run.stop === "AbortError")
+		throw new DOMException("Cancelled", "AbortError");
+	if (run.stop === "NotAllowedError")
+		return failed(`The user did not allow ${tool.name} to run.`);
+	if (run.stop === "InvalidStateError") return failed(gone);
 	if (run.result.isError === true)
-		throw new Error(resultText(run.result) || "The tool failed.");
+		return failed(resultText(run.result) || "The tool failed.");
 	return run.returned?.value;
 }
 

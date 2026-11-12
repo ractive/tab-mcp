@@ -2323,7 +2323,7 @@ own `document.modelContext` and leaves the getter alone.
   neither why nor what to change (saturnus resolves with `{ error }` instead for this
   reason). Left as planned: the names are the WebMCP way, and other agents or a later
   Chrome may pass them on; the browser test keeps Chrome's behaviour as a canary. Open to
-  the owner.
+  the owner. Replaced in client 0.13.1 by error results (DEC-120).
 - **Any failed registration is tried once more, a task later**, not only a duplicate
   right after an abort: Chrome unregisters at once, so the retry is for implementations
   that do it later, and telling those cases apart costs core bytes. A failure after the
@@ -2354,3 +2354,27 @@ own `document.modelContext` and leaves the getter alone.
 - **Tests**: unit tests against a fake `ModelContext` behind a `Document.prototype`
   getter (`capture()`, internal to `webmcp.ts`, takes the getter again for them), and a
   browser test in Chrome for Testing 156 (`test/webmcp-browser.test.ts`).
+
+## DEC-120: WebMCP calls resolve with an error the agent can read (owner)
+
+2026-11-12, branch client/webmcp-error-results, for client 0.13.1. Replaces DEC-119's
+rejections. Chrome 156's `executeTool()` hands the agent every rejection of `execute` as
+`UnknownError: Tool was executed but the invocation failed`, without its name or
+message, so an agent could not tell bad arguments from "Don't allow" or a failed tool,
+nor what to change. saturnus' `web/ai-webmcp.js` resolves with `{ error }` for the same
+reason.
+
+- **Every failure the agent should read resolves** with `{ error: "<message>" }`, which
+  the agent gets as JSON text: invalid arguments (the validator's message, as an AI app
+  gets it), "Don't allow" (`The user did not allow <tool> to run.`), a tool that is gone
+  before or during the call (`The tool <name> is no longer available.`), input that is not
+  an object, an error thrown by `execute` (its message) and an MCP result with
+  `isError: true` (its text). A tool's own successful result is passed through as before,
+  so a tool that returns an object with an `error` key looks the same to the agent; that
+  is the tool's choice.
+- **A call the browser cancelled still rejects** (`AbortError`): the browser cancelled it
+  for its caller (Chrome rejects that caller with its own `AbortError` at once), so
+  nobody reads an answer, and a rejection keeps it from looking like a result.
+- `toolcallend` keeps the outcomes (`error`, `declined`, `cancelled`) and the MCP result;
+  calls through the relay are unchanged. The change is in the lazy chunk only
+  (`webMcpCall` in `mcp.ts`); the core is unchanged.
