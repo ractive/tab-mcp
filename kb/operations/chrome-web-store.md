@@ -75,10 +75,11 @@ nothing and installs nothing. Dependabot proposes its updates.
 
 1. **Developer account:** the Chrome Web Store developer account that also holds Overmark
    (one-time US$5, two-step verification, trader declaration).
-2. **Privacy policy URL:** publish [PRIVACY.md](../../packages/tab-mcp-extension/PRIVACY.md)
-   on ractive.ch, for example as `https://ractive.ch/tab-mcp/chrome/privacy/` next to the
-   relay's `https://ractive.ch/tab-mcp/privacy/` (a PR in ractive/ractive.ch, with the docs
-   page for the extension).
+2. **Privacy policy URL:** `https://ractive.ch/tab-mcp/privacy/`. The relay's privacy page
+   also covers the extension in its section `#chrome`, the same content as
+   [PRIVACY.md](../../packages/tab-mcp-extension/PRIVACY.md)
+   ([ractive.ch#88](https://github.com/ractive/ractive.ch/pull/88)); a change to one goes
+   into the other.
 3. **Tags:** add `refs/tags/extension-v*` to the "release tags" tag ruleset (it holds
    `client-v*` and `relay-v*`), so only the owner can create, move or delete extension
    release tags.

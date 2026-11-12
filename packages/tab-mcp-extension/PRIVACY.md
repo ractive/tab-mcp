@@ -2,7 +2,8 @@
 
 tab-mcp for Chrome passes the WebMCP tools of the page in front on to an AI app the user
 connects, through a tab-mcp relay. This page says what the extension reads, stores and
-sends. It is published by Jean-Pierre Bergamin, ractive.ch.
+sends. It is published by Jean-Pierre Bergamin, ractive.ch, and online at
+https://ractive.ch/tab-mcp/privacy/#chrome.
 
 ## What it reads
 
