@@ -76,7 +76,9 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   [connect page](https://ractive.ch/tab-mcp/connect/). Paired apps are listed, each with a dot (green while connected,
   grey while off or connecting) and a Disconnect button (which asks first, and takes no double click); "+ Add another AI app" shows the address and a code again. The
   address shows only while pairing. Off, the panel says "AI access is off · paired apps
-  stay paired". The relay address is under "Settings".
+  stay paired". The relay address is under "Settings". Give the connector a name such as
+  "Browser" in your AI app: "in my browser" then leads the AI to it. The extension's
+  instructions tell it to call `page_info` first when you refer to what you have open.
 - The connection lives in the extension's service worker, not in the side panel: close
   the panel and AI access stays on, until the switch turns it off. It comes back by itself after a
   browser start, an update or a reload of the extension when you left it on. The icon
