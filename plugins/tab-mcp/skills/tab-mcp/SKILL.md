@@ -13,7 +13,7 @@ tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and gets an MCP address. 
 adds that address to their AI app and pairs it with a code shown in the page. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.13.0):
+Facts to keep in mind (version 0.13.1):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code, claude.ai, Claude Desktop, ChatGPT and Codex work
@@ -40,7 +40,7 @@ Without a bundler, import the self-contained build from a CDN:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.13.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.13.1/cdn/tab-mcp-client.min.js";
 </script>
 ```
 

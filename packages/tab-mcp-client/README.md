@@ -8,7 +8,7 @@ from the page; the AI app then calls the page's tools while the tab stays open. 
 is installed on the user's computer. With `webmcp: true` the library also registers the
 tools with the browser's own [WebMCP](#webmcp), for agents in the browser.
 
-**Status: 0.13.0.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.13.1.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
@@ -40,7 +40,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.13.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.13.1/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
