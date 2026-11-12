@@ -3,7 +3,8 @@
 All notable changes to the published packages. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/). Each package is released on its own,
-with the Git tag `client-v<version>` or `relay-v<version>`.
+with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chrome,
+`extension-v<version>`.
 
 ## @ractive-ch/tab-mcp-client
 
@@ -782,6 +783,44 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
   environment variables (`tab-mcp --help`).
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
+
+## tab-mcp for Chrome
+
+The Chrome extension (`packages/tab-mcp-extension`), in the Chrome Web Store. Each release
+attaches its store package, `tab-mcp-for-chrome-<version>-store.zip`, to the GitHub
+release `extension-v<version>`.
+
+### Unreleased
+
+First release, version 0.1.0.
+
+#### Added
+
+- Passes the WebMCP tools of the page in front (`document.modelContext.registerTool()`,
+  Chrome's own WebMCP, top frame only) on to an AI app outside the browser, through a
+  tab-mcp relay (by default `https://tab-mcp.ractive.ch`; another one under "Settings").
+- Tools for the AI app: `page_info` (the tab's address, title, language, whether WebMCP is
+  available), `webmcp_tools` (the page's tools and why a tool is left out), one
+  `page_<name>` per page tool, following the tab in front and the page's `toolchange`,
+  and `webmcp_call` for AI apps that read their tool list once.
+- The page's tools are the page's word: descriptions start with the page's origin and are
+  cut, results are marked untrusted and cut, arguments are checked against the tool's
+  schema, a call runs only on the page its tool was listed from and ends after 60 s.
+- A tool the page does not mark read-only asks first: in the side panel, or in a Chrome
+  notification while the panel is not in front (Allow, Always allow; a click on its body
+  shows the whole question). "Always allow" holds for that tool, AI app and page load; the
+  panel's tool list allows tools per site.
+- Access per tab: a click on the icon lets the extension read that tab (until it goes to
+  another origin); "Allow on all sites" asks for optional access to every tab.
+- The side panel: AI access on or off, the address and pairing code for a new AI app with
+  "How do I add it?" (Claude, ChatGPT, Claude Code, Codex), the paired apps with
+  Disconnect, the tab's tools.
+- The connection lives in the service worker: it stays on with the panel closed and comes
+  back after a browser start, an update or sleep (an alarm once a minute while AI access is
+  on).
+- Permissions: `activeTab`, `scripting`, `sidePanel`, `notifications`, `alarms`, and
+  `<all_urls>` only as an optional permission. No `storage` permission: the settings are
+  in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
 [client-0.12.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.1
 [client-0.12.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.0

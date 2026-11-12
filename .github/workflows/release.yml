@@ -17,7 +17,8 @@
 #   publishes like a release (run it on the release tag).
 # - A release `extension-v<version>` (tab-mcp for Chrome, Chrome Web Store)
 #   is a no-op: the plan job succeeds with package `none` and every other
-#   job is skipped.
+#   job is skipped. Those releases come from extension-release.yml (on the
+#   tag push), and the store upload from extension-publish.yml.
 # - Bootstrap and publish refuse a commit that is not on main. That guards
 #   against mistakes, not against someone who can push a tag: the workflow
 #   file at the tagged commit runs. Only the owner may create release tags
@@ -112,7 +113,7 @@ jobs:
               relay-v*) package=relay; version=${RELEASE_TAG#relay-v} ;;
               extension-v*)
                 # tab-mcp for Chrome has its own release path to the Chrome
-                # Web Store (kb/iterations/iteration-23-extension-release.md);
+                # Web Store (extension-release.yml, extension-publish.yml);
                 # nothing to publish here, so every other job is skipped.
                 echo "release $RELEASE_TAG is the extension's: nothing to publish to npm or Docker"
                 echo "package=none" >> "$GITHUB_OUTPUT"

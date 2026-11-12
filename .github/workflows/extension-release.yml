@@ -1,0 +1,147 @@
+name: Extension release
+
+# tab-mcp for Chrome (iteration 23, kb/operations/chrome-web-store.md).
+#
+# Pushing a tag extension-v<version> (on a commit of main, with that version in
+# packages/tab-mcp-extension/package.json) runs verify, builds the store
+# package tab-mcp-for-chrome-<version>-store.zip, and only then creates the
+# GitHub release with the zip attached. A failed build leaves no release, and a
+# published release is never changed afterwards (so this also works with
+# immutable releases on).
+#
+#   git tag extension-v0.1.0 <merge commit on main>
+#   git push origin extension-v0.1.0
+#
+# Do not create the release with `gh release create`: the release must come
+# from this workflow, after the build. (A release created by hand is a no-op
+# in release.yml, which publishes only the npm packages and the relay image.)
+#
+# The build job runs third-party code (bun install, the tests, Chrome) with a
+# read-only token; only the release job, which runs none, may write. Uploading
+# to the Chrome Web Store is a separate, manual workflow (extension-publish.yml).
+
+on:
+  push:
+    tags: ["extension-v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extension-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Chrome for Testing, pinned; the same version as in ci.yml and release.yml.
+  CHROME_VERSION: "156.0.8078.80"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      commit: ${{ steps.tag.outputs.commit }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: The tag is a Chrome extension version on main
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#extension-v}"
+          # Chrome takes 1 to 4 dot-separated integers from 0 to 65535, no leading zeros.
+          if ! echo "$version" | grep -Eq '^(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){0,3}$' \
+            || ! echo "$version" | awk -F. '{ for (i = 1; i <= NF; i++) if ($i > 65535) exit 1 }'; then
+            echo "::error::tag $TAG is not extension-v plus a Chrome extension version"
+            exit 1
+          fi
+          # An annotated tag's GITHUB_SHA is the tag object: peel it to its commit.
+          commit="$(git rev-parse "$GITHUB_SHA^{commit}")"
+          git merge-base --is-ancestor "$commit" origin/main \
+            || { echo "::error::tag $TAG is not on main"; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: The tag matches the extension's package.json
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual="$(bun -e 'console.log((await Bun.file("packages/tab-mcp-extension/package.json").json()).version)')"
+          test "$actual" = "$VERSION" \
+            || { echo "::error::tag version $VERSION, packages/tab-mcp-extension/package.json $actual"; exit 1; }
+      - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        id: chrome
+        with:
+          chrome-version: ${{ env.CHROME_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      # The build refuses to pack a manifest with a key or host_permissions,
+      # or a source map (zipStoreBuild in scripts/build.ts).
+      - run: bun scripts/build.ts --store --zip
+        working-directory: packages/tab-mcp-extension
+      - name: The zip is the store build of that version
+        working-directory: packages/tab-mcp-extension
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          zip="tab-mcp-for-chrome-$VERSION-store.zip"
+          manifest="$(unzip -p "$zip" manifest.json)"
+          test "$(jq -r .version <<<"$manifest")" = "$VERSION" \
+            || { echo "::error::the manifest's version is not $VERSION"; exit 1; }
+          jq -e 'has("key") or has("host_permissions") | not' <<<"$manifest" >/dev/null \
+            || { echo "::error::not a store build (a key or install-time host access)"; exit 1; }
+          # grep -c reads all of its input, so unzip never gets SIGPIPE.
+          maps="$(unzip -Z1 "$zip" | grep -c '\.map$' || true)"
+          test "$maps" = 0 || { echo "::error::the zip has $maps source maps"; exit 1; }
+          sha256sum "$zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: store-zip
+          path: packages/tab-mcp-extension/tab-mcp-for-chrome-*-store.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: store-zip
+      - name: The tag still points at the commit that was built
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          BUILT: ${{ needs.build.outputs.commit }}
+        run: |
+          set -euo pipefail
+          # A tag moved since the push would get a zip of another commit. This
+          # API peels an annotated tag to its commit.
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
+          test "$tagged" = "$BUILT" \
+            || { echo "::error::tag $TAG is at $tagged, this run built $BUILT"; exit 1; }
+      - name: Create the release with the store zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          zip="tab-mcp-for-chrome-$VERSION-store.zip"
+          test -f "$zip"
+          gh release create "$TAG" "$zip" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --latest=false --title "tab-mcp for Chrome $VERSION" \
+            --notes "The Chrome Web Store package of tab-mcp for Chrome $VERSION (no key, no install-time host access, no source maps). What changed: the \"tab-mcp for Chrome\" section of CHANGELOG.md."

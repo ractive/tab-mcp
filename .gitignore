@@ -4,7 +4,10 @@ node_modules
 # output
 out
 dist
+dist-store
 *.tgz
+# the extension's store package (bun scripts/build.ts --store --zip)
+tab-mcp-for-chrome-*.zip
 
 # code coverage
 coverage

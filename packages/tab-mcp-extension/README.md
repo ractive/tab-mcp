@@ -5,7 +5,7 @@ through a tab-mcp relay. It is the WebMCP bridge of tab-mcp (DEC-114 in `kb/`): 
 register tools with WebMCP (`document.modelContext.registerTool()`) offer them only to
 agents in the browser; the extension passes them on (iterations 19 and 20).
 
-Not published yet; load it unpacked.
+Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## Tools
 
@@ -147,15 +147,26 @@ key in its manifest, or, without one, from the folder it was loaded from.
   repository: anyone with it could load an extension with that id.
 - Without the key the build gets an id of its own; run your own relay
   (`docs/self-hosting.md`) and allow that id, or use the relay's development mode.
-- `bun scripts/build.ts --store` builds the Chrome Web Store package (no key, no host
-  access, no source maps); `--test` the end-to-end tests' build (no key, host access at
+- `bun scripts/build.ts --store` builds the Chrome Web Store package into `dist-store/`
+  (no key, no host access, no source maps); `--store --zip` also packs it as
+  `tab-mcp-for-chrome-<version>-store.zip` and refuses a build with a key, host access or
+  source maps. `--test` builds the end-to-end tests' build (no key, host access at
   install).
+
+## Releases
+
+A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip
+and creates the GitHub release with it (`.github/workflows/extension-release.yml`); the
+"Extension publish" workflow uploads a release's zip to the Chrome Web Store. The owner's
+setup, the listing, the permission justifications and the review notes:
+`kb/operations/chrome-web-store.md`.
 
 ## Tests
 
 - `test/unit.test.ts`: manifests, the key's id, reading a page, the tool, the refusals.
 - `test/build.test.ts`: the store build has no key, no `host_permissions` and no source
-  maps.
+  maps; its zip lists the build's files; a build with a key, host access or source maps
+  is not packed; `--zip` needs `--store`.
 - `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
   while pairing), "How do I add it?" and its Copy buttons, its clicks (Disconnect's double
   click, the switch) and "Allow all".

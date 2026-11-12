@@ -28,7 +28,7 @@ test("Dockerfile, workflows and @types/bun name the same Bun version", async () 
 		new RegExp(`^oven/bun:${bun}-distroless@sha256:[0-9a-f]{64}$`),
 	);
 
-	for (const workflow of ["ci.yml", "release.yml"]) {
+	for (const workflow of ["ci.yml", "release.yml", "extension-release.yml"]) {
 		const text = await read(`.github/workflows/${workflow}`);
 		const versions = [
 			...text.matchAll(/(?:BUN_VERSION|bun-version):\s*"?([0-9.]+)"?/g),
@@ -37,6 +37,19 @@ test("Dockerfile, workflows and @types/bun name the same Bun version", async () 
 		for (const v of versions)
 			expect(`${workflow}: ${v}`).toBe(`${workflow}: ${bun}`);
 	}
+});
+
+test("every workflow that runs the browser tests pins the same Chrome", async () => {
+	const pins = new Set<string>();
+	for (const workflow of ["ci.yml", "release.yml", "extension-release.yml"]) {
+		const text = await read(`.github/workflows/${workflow}`);
+		const match = /CHROME_VERSION:\s*"([0-9.]+)"/.exec(text);
+		expect(`${workflow}: ${match ? "pinned" : "no CHROME_VERSION"}`).toBe(
+			`${workflow}: pinned`,
+		);
+		if (match?.[1]) pins.add(match[1]);
+	}
+	expect([...pins]).toHaveLength(1);
 });
 
 test("the image runs as a non-root user with the SQLite store on /data", async () => {
