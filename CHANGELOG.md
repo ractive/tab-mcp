@@ -8,7 +8,7 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
-### Unreleased
+### [0.13.1][client-0.13.1] - 2026-11-12
 
 #### Changed
 
@@ -865,6 +865,7 @@ First release, version 0.1.0.
   `<all_urls>` only as an optional permission. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[client-0.13.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.13.1
 [client-0.13.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.13.0
 [client-0.12.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.1
 [client-0.12.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.0

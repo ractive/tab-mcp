@@ -284,11 +284,11 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 
 ## Status
 
-**0.13.0**. Until 1.0, a new minor version can still change
+**0.13.1**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelog](CHANGELOG.md) says what changed.
 
 - Released: relay `@ractive-ch/tab-mcp` 0.9.0 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.13.0, on the npm tag `latest`.
+  `@ractive-ch/tab-mcp-client` 0.13.1, on the npm tag `latest`.
 - tab-mcp for Chrome 0.1.0 is not in the Chrome Web Store yet; load it unpacked
   ([README](packages/tab-mcp-extension/README.md)).
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
