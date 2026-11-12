@@ -572,8 +572,8 @@ like any other, `chrome-extension://<id>` (A11).
 With `webmcp: true` (off by default), the client library also registers the page's
 tools with the browser's own [WebMCP](https://webmachinelearning.github.io/webmcp/)
 (`document.modelContext`), where an agent in the browser calls them: one built into the
-browser, or an extension. This caller sits beside
-the AI apps of A2 and A6, and differs from them.
+browser, or an extension. This caller sits beside the AI apps of A2 and A6, and differs
+from them.
 
 - **No pairing, no identity.** Any agent the browser lets call the page's WebMCP tools
   can call the mirrored ones; the relay, its grants and its pairing are not involved,

@@ -20,8 +20,10 @@ open. Nothing is installed on the user's computer.
 
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) offers a
 page's tools to agents in the browser; tab-mcp offers them to AI apps outside it. The
-library can do both (`webmcp: true`, DEC-115), and tab-mcp for Chrome passes the WebMCP
-tools of any page on through the relay ([extension](/design/extension.md)).
+library can do both (`webmcp: true`, DEC-115), and tab-mcp for Chrome passes on the
+WebMCP tools of the page in front, in a tab the user gave it (a click on its icon, or
+"Allow on all sites"), top frame only, through the relay
+([extension](/design/extension.md)).
 
 ## Components
 

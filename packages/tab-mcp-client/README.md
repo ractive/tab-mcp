@@ -2,11 +2,11 @@
 
 Offer a web page's functions as [MCP](https://modelcontextprotocol.io) tools to AI apps
 (Claude, ChatGPT, Claude Code, Codex) through a
-[tab-mcp](https://github.com/ractive/tab-mcp) relay. The page connects to the relay and gets an address. The user adds that address to
-their AI app and types a pairing code from the page; the AI app then calls the page's
-tools while the tab stays open. Nothing is installed on the user's computer. With
-`webmcp: true` the library also registers the tools with the browser's own
-[WebMCP](#webmcp), for agents in the browser.
+[tab-mcp](https://github.com/ractive/tab-mcp) relay. The page connects to the relay and
+gets an address. The user adds that address to their AI app and types a pairing code
+from the page; the AI app then calls the page's tools while the tab stays open. Nothing
+is installed on the user's computer. With `webmcp: true` the library also registers the
+tools with the browser's own [WebMCP](#webmcp), for agents in the browser.
 
 **Status: 0.13.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).

@@ -1,6 +1,6 @@
 ---
 name: tab-mcp
-description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (`webmcp: true`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
+description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code, Codex) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (`webmcp: true`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
 compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.4+ or Docker.
 ---
@@ -18,8 +18,8 @@ Facts to keep in mind (version 0.13.0):
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code, claude.ai, Claude Desktop, ChatGPT and Codex work
   (Codex and ChatGPT for Mac with Codex's feature `mcp_2026_07_28` on); VS Code, Cursor
-  and Gemini CLI cannot connect. claude.ai, Claude Desktop and ChatGPT connect from their
-  own servers and need a relay with a public HTTPS address.
+  and Gemini CLI cannot connect. claude.ai, Claude Desktop and ChatGPT on the web connect
+  from their own servers and need a relay with a public HTTPS address.
 - The page needs a relay that allows its origin; run one (section 7).
 - [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) is the
   browser's own API for tools that agents in the browser call. tab-mcp is for AI apps

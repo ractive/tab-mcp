@@ -131,8 +131,9 @@ does not export and which refuses to run outside development (DEC-059).
 
 - Tab WebSockets only from allowed origins (default: none; DEC-032). An open relay needs
   `TAB_MCP_ALLOWED_ORIGINS=*` and logs a warning. The owner's hosted relay allows only
-  the owner's own pages and extensions. This stops other websites in a browser; a non-browser client can
-  forge `Origin`, so it is abuse control, not a security boundary for users.
+  the owner's own pages and extensions. This stops other websites in a browser; a
+  non-browser client can forge `Origin`, so it is abuse control, not a security boundary
+  for users.
 - Limits: sessions per IP (5; IPv6 per /64 and per /56) and in total (500), message and
   body size (1 MiB), concurrent requests per session (8), request timeout (300 s), idle
   timeout (10 minutes for a session that never had a grant, started pairing, signed in or

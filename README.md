@@ -134,8 +134,8 @@ You need a page that offers tab-mcp, such as the [live diagram editor](https://r
 4. Ask your AI app to use the page. To stop, click Disconnect in the page, or close the
    tab.
 
-claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
-relay with a public HTTPS address. All three work; see
+claude.ai, Claude Desktop and ChatGPT on the web connect from their own servers, so they
+need a relay with a public HTTPS address. All three work; see
 [compatibility](docs/compatibility.md).
 
 **Connecting an AI app to a page means trusting that page.** The page decides what its
@@ -265,7 +265,7 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | "tab-mcp for Chrome" 0.1.0, for the Chrome Web Store (not listed yet: load it unpacked) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | "tab-mcp for Chrome" 0.1.0 (not yet in the Chrome Web Store; load it unpacked) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
