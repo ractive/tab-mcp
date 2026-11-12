@@ -5,33 +5,23 @@
 
 import { pageIcons } from "./icons.ts";
 import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
-import { type CallContext, createMcpHandler, webMcpCall } from "./mcp.ts";
+import { createMcpHandler, webMcpCall } from "./mcp.ts";
 import {
-	type HttpRequestMessage,
 	parseRelayMessage,
 	type RelayMessage,
 	SUBPROTOCOL,
 	type TabMessage,
 } from "./protocol.ts";
 import type { RegisteredTool } from "./registry.ts";
+import { callContext, createTunnel } from "./serve.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
 /** For the core: the address id in the `/tab` URL (DEC-098). */
 export { addressIdOf, withAddress } from "./address.ts";
 /** For the core: compiles the schemas once this chunk (and the validator) is loaded. */
 export { compileRegistry } from "./mcp.ts";
-
-/** What a call through the relay or WebMCP needs (`mcp.ts`), from the core's host. */
-function callContext(host: CallHost): CallContext {
-	return {
-		tools: host.registry,
-		confirm: (request) => host.confirm(request),
-		observe: {
-			start: (call) => host.toolCallStarted(call),
-			end: (call) => host.toolCallEnded(call),
-		},
-	};
-}
+/** For the core: `TabMcp.serve`, the tunnel over a port (iteration 28). */
+export { pieces, servePort } from "./serve.ts";
 
 /**
  * For the core: a WebMCP call of a mirrored tool (iteration 25), on the
@@ -77,9 +67,6 @@ const BYE_REASONS: Record<string, DisconnectReason> = {
 function refused(message: string, reason: DisconnectReason): Error {
 	return Object.assign(new Error(message), { reason });
 }
-
-/** Response headers the relay passes on (it drops the rest). */
-const RESPONSE_HEADERS = ["content-type", "cache-control"];
 
 function pageTitle(): string {
 	const title = (globalThis as { document?: { title?: unknown } }).document
@@ -134,23 +121,6 @@ export function chunkSize(maxMessageBytes: number): number | undefined {
 		(maxMessageBytes - ENVELOPE_BYTES) / WORST_BYTES_PER_UNIT,
 	);
 	return units >= MIN_CHUNK_UNITS ? units : undefined;
-}
-
-/**
- * Split text into pieces of at most `max` UTF-16 units, never between the two
- * halves of a surrogate pair (a lone half would not survive JSON and UTF-8).
- */
-export function* pieces(text: string, max: number): Generator<string> {
-	let i = 0;
-	while (i < text.length) {
-		let end = Math.min(i + max, text.length);
-		const last = text.charCodeAt(end - 1);
-		if (end < text.length && last >= 0xd800 && last <= 0xdbff) {
-			end += end - 1 > i ? -1 : 1; // keep the pair together
-		}
-		yield text.slice(i, end);
-		i = end;
-	}
 }
 
 /**
@@ -234,7 +204,6 @@ export function openConnection(
 	revokeAll = false,
 ): ConnectionHandle {
 	const ws = new WebSocket(url, SUBPROTOCOL);
-	const inflight = new Map<string, AbortController>();
 	let state: "opening" | "ready" | "closed" = "opening";
 	let byeReason: DisconnectReason | undefined;
 	let maxChunk = 64 * 1024;
@@ -311,8 +280,7 @@ export function openConnection(
 		clearTimeout(connectTimer);
 		clearTimeout(heartbeat);
 		stopWatching();
-		for (const controller of inflight.values()) controller.abort();
-		inflight.clear();
+		tunnel.close();
 		handler.close();
 		if (wasReady) {
 			const reason =
@@ -340,101 +308,12 @@ export function openConnection(
 		siblings.close();
 	}
 
-	async function tunnel(msg: HttpRequestMessage): Promise<void> {
-		const controller = new AbortController();
-		inflight.set(msg.id, controller);
-		const live = () =>
-			state === "ready" &&
-			inflight.get(msg.id) === controller &&
-			!controller.signal.aborted;
-		try {
-			const request = new Request(`https://tab.invalid${msg.path}`, {
-				method: msg.method,
-				headers: msg.headers,
-				signal: controller.signal,
-			});
-			const response = await handler.handle(request, {
-				grant: msg.grant,
-				body: msg.body,
-			});
-			if (!live()) {
-				await response.body?.cancel().catch(() => {});
-				return;
-			}
-			const headers: Record<string, string> = {};
-			for (const name of RESPONSE_HEADERS) {
-				const value = response.headers.get(name);
-				if (value !== null) headers[name] = value;
-			}
-			const streamed = (headers["content-type"] ?? "").startsWith(
-				"text/event-stream",
-			);
-			if (!streamed || response.body === null) {
-				const body = await response.text();
-				if (!live()) return;
-				if (body.length <= maxChunk) {
-					send({
-						type: "http.response",
-						id: msg.id,
-						status: response.status,
-						headers,
-						body,
-					});
-					return;
-				}
-				// Too big for one message: stream it (the relay passes it on whole).
-				send({
-					type: "http.response.start",
-					id: msg.id,
-					status: response.status,
-					headers,
-				});
-				for (const data of pieces(body, maxChunk)) {
-					if (!live()) break;
-					send({ type: "http.response.chunk", id: msg.id, data });
-				}
-				if (live()) send({ type: "http.response.end", id: msg.id });
-				return;
-			}
-			send({
-				type: "http.response.start",
-				id: msg.id,
-				status: response.status,
-				headers,
-			});
-			const reader = response.body.getReader();
-			const decoder = new TextDecoder();
-			controller.signal.addEventListener("abort", () => {
-				reader.cancel().catch(() => {});
-			});
-			for (;;) {
-				const { done, value } = await reader.read();
-				if (done || !live()) break;
-				const text = decoder.decode(value, { stream: true });
-				for (const data of pieces(text, maxChunk)) {
-					send({ type: "http.response.chunk", id: msg.id, data });
-				}
-			}
-			if (live()) send({ type: "http.response.end", id: msg.id });
-		} catch (error) {
-			if (live()) {
-				host.error(error instanceof Error ? error : new Error(String(error)));
-				send({
-					type: "http.response",
-					id: msg.id,
-					status: 500,
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						jsonrpc: "2.0",
-						id: null,
-						error: { code: -32603, message: "Internal server error" },
-					}),
-				});
-			}
-		} finally {
-			if (inflight.get(msg.id) === controller) inflight.delete(msg.id);
-		}
-	}
+	const tunnel = createTunnel({
+		handler,
+		send,
+		maxChunk: () => maxChunk,
+		error: (error) => host.error(error),
+	});
 
 	function onMessage(message: RelayMessage): void {
 		if (state === "opening") {
@@ -491,11 +370,10 @@ export function openConnection(
 				send({ type: "pong", t: message.t });
 				return;
 			case "http.request":
-				void tunnel(message);
+				tunnel.request(message);
 				return;
 			case "http.cancel":
-				inflight.get(message.id)?.abort();
-				inflight.delete(message.id);
+				tunnel.cancel(message.id);
 				return;
 			case "pairing.code":
 				host.pairingCode(

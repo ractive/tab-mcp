@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 28: the page's tools for the site's own agent, without a relay"
-status: planned
+status: completed
 description: >-
   The client library serves its tools over any message port (mcp.serve), not only
   through a relay, and a small fetch function speaks the other end
@@ -219,19 +219,32 @@ page (TabMcp, relay optional)                 chat iframe              site's ba
    since it shares the protocol types), or a small package of its own for backends that
    should not install a browser library.
 
+## Outcome
+
+Built on 2026-11-13 as planned, with the owner's answers to the five questions
+(DEC-122 to DEC-125) and the changes of DEC-126: the page's end of the tunnel is in
+`src/serve.ts` (the entry `./tunnel` is `src/tunnel.ts`), the caller sends no `grant`, and
+`createTunnelFetch`'s timeout runs until the response has ended, as the relay's does. The
+core is 6241 B gzipped (budget 6.25 KB), the tunnel entry 1.6 KB.
+
+Answers: (1) `mcp.serve` with a raised budget; (2) `kind: "local"`, "this site's
+assistant"; (3) never "Always allow"; (4) JSON-RPC errors with the relay's codes;
+(5) an entry of the client package. The client release (0.15.0) follows as its own
+version PR.
+
 ## Tasks
 
-- [ ] Check that `@modelcontextprotocol/client` 2.4.0's `StreamableHTTPClientTransport`
+- [x] Check that `@modelcontextprotocol/client` 2.4.0's `StreamableHTTPClientTransport`
       takes a `fetch` option and pins 2026-07-28 with it (a scratch test)
-- [ ] The owner answers the open questions; decisions recorded as DEC-122 and following
-- [ ] `relay` optional in `TabMcp`, `TabMcpProvider` and `ConnectButton`
-- [ ] `src/tunnel.ts` out of `connection.ts`, no change in behaviour
-- [ ] `serve` with the grant set by the library, the `local` caller, confirmation text,
+- [x] The owner answers the open questions; decisions recorded as DEC-122 and following
+- [x] `relay` optional in `TabMcp`, `TabMcpProvider` and `ConnectButton`
+- [x] `src/tunnel.ts` out of `connection.ts`, no change in behaviour
+- [x] `serve` with the grant set by the library, the `local` caller, confirmation text,
       `signal` and `close()`
-- [ ] `@ractive-ch/tab-mcp-client/tunnel` with `createTunnelFetch`; package exports and
+- [x] `@ractive-ch/tab-mcp-client/tunnel` with `createTunnelFetch`; package exports and
       build
-- [ ] Tests as listed under Scope 6
-- [ ] `docs/protocol.md`, client README, architecture, threat model
-- [ ] CHANGELOG (client minor: a new caller kind changes `ToolCallClient`, so code
-      that switches over every `kind` needs a case), a client release on the owner's word
-- [ ] Review; merged on the owner's word
+- [x] Tests as listed under Scope 6
+- [x] `docs/protocol.md`, client README, architecture, threat model
+- [x] CHANGELOG (client minor: a new caller kind changes `ToolCallClient`, so code
+      that switches over every `kind` needs a case)
+- [x] Review; merged on the owner's word

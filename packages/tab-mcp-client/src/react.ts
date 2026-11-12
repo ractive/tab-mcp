@@ -157,7 +157,8 @@ export type TabMcpProviderProps = (
 ) & { children?: ReactNode };
 
 /**
- * Makes one `TabMcp` for its tree from the props of its first render. A
+ * Makes one `TabMcp` for its tree from the props of its first render
+ * (`relay` may be left out, as for `TabMcp`). A
  * changed `relay` or `server.name` makes a new instance (and warns); other
  * changes are ignored, but `onConfirm` and `identityAssertion` are always
  * the latest ones (also when added or removed later). Pass `client` to use an instance of your own instead. The
@@ -384,14 +385,17 @@ export function connectLabel(state: TabMcpSnapshot): string {
  * (`showConnectDialog()`), labelled with the state. `data-state` is
  * `disconnected`, `connecting`, `connected` or `reconnecting`, for styling.
  * An `onClick` that calls `event.preventDefault()` keeps the dialog closed.
+ * Renders nothing for a `TabMcp` without a relay: there is nothing to
+ * connect.
  */
 export function ConnectButton({
 	children,
 	onClick,
 	...rest
-}: ConnectButtonProps): ReactElement {
+}: ConnectButtonProps): ReactElement | null {
 	const mcp = useTabMcp();
 	const state = useTabMcpState();
+	if (!mcp.hasRelay) return null;
 	const label =
 		children === undefined
 			? connectLabel(state)

@@ -169,7 +169,8 @@ the grants of the previous one and ends their requests in flight.
   reaches the tab. The client library hands it to the page's tools as `client` with
   `kind: "relay"` (`grantId`, `id`, `host`, `name`); a call from an agent in the browser
   through WebMCP, which never passes the relay, has `kind: "webmcp"` and nothing more
-  (DEC-115).
+  (DEC-115), and a call over a port the page serves has `kind: "local"`
+  ([The tunnel without a relay](#the-tunnel-without-a-relay)).
 - The relay keeps only `content-type` and `cache-control` from the tab's response headers.
   It sets the rest itself (`x-accel-buffering: no` and `cache-control: no-cache` on
   streams, CORS headers).
@@ -283,6 +284,41 @@ started an event stream, the answer is its last event.
 One exception exists for a known client bug: a request with the header
 `MCP-Protocol-Version: 2025-11-25` whose body declares `2026-07-28` is accepted and
 counted in `/healthz` (`counters.claudeHeaderWorkaround`).
+
+### The tunnel without a relay
+
+The six `http.*` messages need no relay. With `serve(port, { client })` the client
+library answers them on any channel that delivers messages in order, for example a
+`MessagePort` to a chat frame of the site's own assistant, and
+`createTunnelFetch` (`@ractive-ch/tab-mcp-client/tunnel`) speaks the caller's end. On such
+a port:
+
+- The messages are objects, not JSON text (a `MessagePort` clones them). Whoever passes
+  them on over a text channel encodes and decodes them.
+- The caller sends `http.request` and `http.cancel`, the page `http.response`,
+  `http.response.start`, `.chunk` and `.end`, with the fields and rules above. The
+  caller chooses `id` (at most 128 characters, unique among its requests in flight) and
+  sends only the listed `headers`.
+- `grant` is not needed, and one that is sent is ignored: the library runs every request
+  of a port as the client the page named in `serve`
+  (`{"grantId":"local:<n>","clientId":"<client.id>","scopes":["tools"]}`, one `n` per
+  `serve`), and the page's tools see `client` with `kind: "local"`, `id` and `name`.
+  The other end cannot pass for an AI app of a relay.
+- There is no `hello`, `session`, heartbeat or limits message, and nothing about
+  pairing, grants or identity. The page splits a response body into chunks of at most
+  `maxChunk` characters (65536 by default).
+- To anything but `http.request` and `http.cancel` the page answers `error` with
+  `bad_message` (and the `id`, if the message had one); an `error` message is never
+  answered. `createTunnelFetch` ends the request a `bad_message` names with `-31007`.
+- The relay's errors have no relay to send them. `createTunnelFetch` produces the ones
+  that apply, with the same codes at HTTP 200, or as the last event of a stream that
+  had started: `-31002` when a response has not ended within its `requestTimeoutMs`
+  (it sends `http.cancel` first; `subscriptions/listen` is not limited), `-31003` once
+  its `close()` was called, `-31005` when its `send` throws, `-31007` for a response
+  that breaks the rules above.
+
+Who holds the other end of the port is the page's decision when it hands the port out;
+see A15 in the [threat model](threat-model.md).
 
 ### Errors between tab and relay
 

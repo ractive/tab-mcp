@@ -611,6 +611,40 @@ from them.
   `<html data-tab-mcp-webmcp>`, so tab-mcp for Chrome (A13) does not offer them, and ask
   for them, a second time; a page can only hide its own tools that way.
 
+### A15: The site's own assistant calling the page's tools over a port (`serve`)
+
+With `mcp.serve(port, { client })` the page answers MCP requests on a message port,
+without a relay: for the site's own assistant, e.g. a chat in a frame whose backend
+runs the MCP client ([protocol](protocol.md#the-tunnel-without-a-relay)). This caller
+sits beside the AI apps of A2 and A6 and the agents of A14.
+
+- **A port is a capability.** Whoever holds the other end calls the page's tools
+  without pairing, and the library cannot check who that is. The page decides it when
+  it hands the port out: it must check the frame's origin (and that the message came
+  from that frame) first, and post the port with that origin as the target, never
+  `"*"`. A port given to a frame on another origin, or to a script the page does not
+  control, gives that party the tools. The library has no handshake of its own on
+  purpose: it would have to guess what the page knows.
+- **The caller cannot pass for a paired AI app.** The library sets the grant of every
+  request on a port itself and ignores one that is sent; the page's tools, its
+  confirmation and its events see `client.kind` `"local"` with the id and name the
+  page gave to `serve`. The name is the page's claim about its own assistant, not
+  something verified; the page controls it, as it controls everything else it shows.
+- **Consequential tools still ask.** The same argument check and confirmation as for
+  an AI app; the library's dialog says "(this site's assistant)" and never offers
+  "Always allow". A page may answer `onConfirm` itself for `kind: "local"` and so let
+  its own assistant run such tools without a question; that is the page's decision
+  about its own backend, with A6's consequences if the assistant follows injected
+  instructions.
+- **A6 applies in full.** The assistant's model reads the tools' results and whatever
+  the user or other content tells it; `untrustedContentHint` stays on the results that
+  have it, and the page's tools must not do more for this caller than for the user.
+- **No relay, no relay limits.** There is no request size limit, rate limit or
+  concurrency limit on a port: the other end is the site's own code. A page that
+  serves a port to code it does not trust has given up more than a limit would save.
+- **Nothing is stored.** A `TabMcp` without `relay` creates no address secret and opens
+  no `BroadcastChannel` or WebSocket.
+
 ## Safe defaults
 
 - No page origin is allowed until configured; `*` only explicitly, with a warning.

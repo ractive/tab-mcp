@@ -8,6 +8,42 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- `mcp.serve(port, { client })` serves the page's tools over a message port, without a
+  relay: for a site's own assistant, e.g. a chat in an iframe whose backend runs the MCP
+  client. The port carries the relay's `http.*` messages as plain objects (a
+  `MessagePort` fits, or an object of your own with `postMessage` and `onmessage`). It
+  resolves with `{ close() }`, takes a `signal`, and may be called for several ports,
+  next to a relay connection and `webmcp: true`. A port is a key to the tools: hand it
+  only to a frame whose origin you checked (README, "Your own assistant on the page";
+  threat model A15).
+- `@ractive-ch/tab-mcp-client/tunnel`: `createTunnelFetch({ send })` is the other end, a
+  `fetch` for an MCP client such as the MCP SDK's
+  (`new StreamableHTTPClientTransport(url, { fetch })`). It needs only `Request`,
+  `Response` and web streams (Bun, Node, a browser frame) and shares no code with the
+  page's library. A timeout (`requestTimeoutMs`, 300 s), a closed tunnel and an invalid
+  answer are JSON-RPC errors with the relay's codes (`-31002`, `-31003`, `-31007`) at
+  HTTP 200; only an aborted `signal` rejects.
+- `relay` is optional. Without it the page offers its tools only through `serve` and
+  WebMCP: `connect()`, `showConnectDialog()` and `newAddress()` reject with a `TypeError`,
+  no address secret is read or written, and React's `ConnectButton` renders nothing. New
+  getter `mcp.hasRelay`.
+- New types `LocalClient`, `ServeOptions`, `ServeHandle`, `TunnelPort`.
+
+#### Changed
+
+- `ToolCallClient` has a new member, `{ kind: "local", id, name? }`: the caller of a port
+  served with `serve`, as the page named it. Code that switches over every `kind`, or
+  treats every caller that is not `"webmcp"` as a relay's AI app (reading `host` or
+  `grantId`), needs a case for it. It only occurs in pages that call `serve`. The
+  library's confirmation names it "<name> (this site's assistant)" and never offers
+  "Always allow" for it.
+- `TabMcpOptions.relay` and the `relay` prop of `TabMcpProvider` are optional in the
+  types; `ConnectButton` may return `null`.
+
 ### [0.14.0][client-0.14.0] - 2026-11-12
 
 #### Added

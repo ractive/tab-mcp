@@ -31,6 +31,7 @@ import {
 	MemoryStorage,
 	newTab,
 	nextEvent,
+	rpc,
 	startRelay,
 	type TestRelay,
 	tokenFor,
@@ -479,6 +480,47 @@ test("ConnectButton: preventDefault in onClick keeps the dialog closed", async (
 	await Bun.sleep(30);
 	expect(t.state).toBe("disconnected");
 	expect(doc.querySelector("dialog")).toBeNull();
+});
+
+test("without a relay the provider's tools are served over a port, and ConnectButton renders nothing (iteration 28)", async () => {
+	let mcp: TabMcp | undefined;
+	function Tools() {
+		mcp = useTabMcp();
+		useTool({ name: "ping", description: "Ping", execute: () => "pong" });
+		return <ConnectButton />;
+	}
+	render(
+		<TabMcpProvider server={{ name: "no-relay", version: "1.0.0", icons: [] }}>
+			<Tools />
+		</TabMcpProvider>,
+	);
+	expect(container.querySelector("button")).toBeNull();
+	expect(mcp?.hasRelay).toBe(false);
+	expect(mcp?.tools).toEqual(["ping"]);
+	const { port1, port2 } = new MessageChannel();
+	const answered = new Promise<{ body: string }>((resolve) => {
+		port2.onmessage = (event: MessageEvent) => resolve(event.data);
+	});
+	const served = await (mcp as TabMcp).serve(port1, {
+		client: { id: "chat" },
+	});
+	port2.postMessage({
+		type: "http.request",
+		id: "r1",
+		method: "POST",
+		path: "/mcp",
+		headers: {
+			"content-type": "application/json",
+			accept: "application/json, text/event-stream",
+			"mcp-protocol-version": "2026-07-28",
+			"mcp-method": "tools/list",
+		},
+		body: JSON.stringify(rpc(1, "tools/list")),
+	});
+	expect((await answered).body).toContain('"name":"ping"');
+	served.close();
+	port1.close();
+	port2.close();
 });
 
 test("the provider makes one instance; a new relay makes a new one, its own is disconnected on unmount", async () => {

@@ -403,6 +403,17 @@ used, and `<html data-tab-mcp-webmcp>` keeps tab-mcp for Chrome from offering a 
 tool a second time. The full analysis is A14 in `docs/threat-model.md` (DEC-115,
 DEC-119).
 
+### A15: The site's own assistant over a port (`serve`, iteration 28)
+
+With `mcp.serve(port, { client })` the page answers the tunnel's `http.*` messages on a
+message port, without a relay. A port is a capability: whoever holds the other end calls
+the tools without pairing, so the page must check the frame's origin before it hands one
+out; the library has no handshake of its own. The library sets the grant itself and
+ignores one sent on the port, so the caller is always `client.kind` `"local"` and cannot
+pass for a paired AI app. Consequential tools still ask ("(this site's assistant)", never
+"Always allow"); a page may answer `onConfirm` itself for this kind. No relay limits apply
+on a port. The full analysis is A15 in `docs/threat-model.md` (DEC-122 to DEC-126).
+
 ## Safe defaults
 
 - No tab origins allowed until configured; `*` only explicitly, with a warning.

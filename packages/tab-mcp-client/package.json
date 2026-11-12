@@ -8,6 +8,7 @@
 		".": "./src/index.ts",
 		"./react": "./src/react.ts",
 		"./setup": "./src/setup.ts",
+		"./tunnel": "./src/tunnel.ts",
 		"./visible": "./src/visible.ts"
 	},
 	"scripts": {

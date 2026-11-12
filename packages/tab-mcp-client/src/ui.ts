@@ -247,10 +247,15 @@ function newDialog(
 /** Invisible, blank and direction characters as `\uXXXX` (`visible.ts`). */
 const visible = escapeInvisible;
 
-/** How the dialogs name a caller: an AI app's name and verified host. */
+/**
+ * How the dialogs name a caller: an AI app's name and verified host; for
+ * the caller of a served port, the name the page gave it and what it is.
+ */
 function clientLabel(client: ToolCallClient | Grant["client"]): string {
 	if ("kind" in client && client.kind === "webmcp")
 		return "An agent in this browser";
+	if ("kind" in client && client.kind === "local")
+		return `${visible(client.name ?? client.id)} (this site's assistant)`;
 	const host = visible(client.host || client.id);
 	return client.name !== undefined && client.name !== ""
 		? `${visible(client.name)} (${host})`
