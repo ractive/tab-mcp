@@ -17,7 +17,9 @@ descriptions and input schemas, and the attribute `data-tab-mcp-webmcp` of the p
 own address, which the extension leaves out so that they are not offered twice. Apart
 from that and what the page's own tools return when the AI app calls them, it reads
 nothing else of the page: no page text, no form fields, no cookies, no screenshots, no
-browsing history.
+browsing history. Only when the AI app asks to go back or forward in the tab does it
+check, in the page, whether the page before or after is on the same site, and how many
+entries the tab's history has; that stays in the browser.
 
 ## What it stores
 
@@ -41,13 +43,15 @@ Only while AI access is on, and only to the relay the user chose:
 - the connection to the relay and the pairing of an AI app (the relay stores a grant for
   each paired app; see the relay's own policy below);
 - what the paired AI app asks for: the address, title and language of the tab in front
-  (`page_info`), the list of its WebMCP tools (`webmcp_tools`), and for each tool call the
-  tool's name, the arguments the AI app sent and the page's result.
+  (`page_info`), the list of its WebMCP tools (`webmcp_tools`), for each tool call the
+  tool's name, the arguments the AI app sent and the page's result, and after the AI app
+  opened a page in the tab, went back or forward or reloaded it, the same as `page_info`
+  for the new page.
 
-A tool that the page does not mark read-only runs only after the user allowed it, in the
-side panel or a notification. The relay passes the requests and results between the
-extension and the AI app; the AI app's own privacy policy applies to what it does with
-them.
+A tool that the page does not mark read-only, and a navigation to another site, runs only
+after the user allowed it, in the side panel or a notification. The relay passes the
+requests and results between the extension and the AI app; the AI app's own privacy
+policy applies to what it does with them.
 
 The hosted relay `tab-mcp.ractive.ch` is run by the same developer. What it passes on,
 stores and logs: https://ractive.ch/tab-mcp/privacy/. A relay the user runs or chooses

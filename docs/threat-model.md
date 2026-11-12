@@ -511,6 +511,14 @@ like any other, `chrome-extension://<id>` (A11).
   reads a tab only after a click on its icon there, and only on that origin. With "Allow
   on all sites" it reads every page in front: the AI app then gets the tools of whatever
   site the user looks at, each call to a tool not marked read-only still asked.
+- **Navigation.** `navigate`, `go_back`, `go_forward` and `reload` act only on a tab the
+  extension may read. A page's text could tell the AI app to open another site: on the
+  page's own origin a navigation runs without asking (as a link on the page would), to
+  another origin it asks the user, showing the site the tab is on and the address, with
+  Allow and Don't allow only. Back or forward to a page the extension cannot see asks
+  too. Only `http:` and `https:` addresses, without a user name or password. An open
+  redirect on the page's own origin can still lead elsewhere without a question; the
+  answer then shows where the tab landed, or that the extension may not read it.
 - **Only the side panel gives commands.** The connection lives in the extension's service
   worker, which the extension's scripts in every page it may read can message. Commands
   (turning AI access on or off, pairing, disconnecting an AI app, a new address, the

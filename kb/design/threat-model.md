@@ -261,6 +261,23 @@ did, by connecting the extension.
   icon there, and only on that origin. With "Allow on all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
   a tool not marked read-only still confirmed.
+- **Navigation (iteration 27, DEC-121).** `navigate`, `go_back`, `go_forward` and `reload`
+  act only on the tab in front while the extension may read it, so the AI app cannot
+  steer a tab the user never gave it. A page's text (a tool result, a description) can
+  tell the AI app to open another site: within the page's origin a navigation runs
+  without asking (a link on the page could do the same), to another origin it asks the
+  user, with the tab's origin ("From", verified) and the address ("To", invisible
+  characters escaped); Allow and Don't allow only, so one click is no standing
+  permission, and a tab that changed origin while the question was open is not
+  navigated. Back or forward to an entry the Navigation API does not list (it lists only
+  the page's origin) asks as well, the address not being known. Only `http:` and
+  `https:` addresses, without user name or password (`https://shop.example@evil.example`
+  is evil.example), at most 8192 characters. Residual: a GET on the page's own origin
+  runs without a question and can change things there (`/logout`, a link with an
+  action), as a click by the page's own script could; an open redirect on the page's
+  origin leads to another origin without a question (seeing it before it happens would
+  need `webNavigation` or `declarativeNetRequest`), and the answer then shows where the
+  tab landed, or that the extension may not read it there.
 - **The extension's id** is the relay origin `chrome-extension://<id>`. The development
   build's key is kept out of the public repository, so nobody else can load an extension
   with the id the hosted relay allows; the Chrome Web Store keeps its own key.

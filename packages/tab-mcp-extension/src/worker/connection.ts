@@ -28,9 +28,11 @@ import {
 import { relayProblem } from "../relay.ts";
 import {
 	ALL_SITES,
+	askHistory,
 	askPage,
 	askTools,
 	callInTab,
+	getTab,
 	type TargetTab,
 	tabInFront,
 } from "../tabs.ts";
@@ -46,6 +48,7 @@ import { AlwaysAllowed } from "./always.ts";
 import { PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import { type Kv, openKv } from "./kv.ts";
+import { goInTab, navigationTools } from "./navigation.ts";
 import { QuestionWindows } from "./question-windows.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
@@ -231,6 +234,20 @@ export class Connection {
 			{ current: tabInFront, page: askPage },
 			() => bridge,
 			(request) => this.#decide(request),
+		))
+			void mcp.registerTool(tool);
+		// Navigation (iteration 27, DEC-121): to another origin it asks
+		// through the same questions, never "allowed" or Always allow.
+		for (const tool of navigationTools(
+			{
+				current: tabInFront,
+				tab: getTab,
+				page: askPage,
+				history: askHistory,
+				go: goInTab,
+			},
+			(request, where) => this.#questions.ask(request, where),
+			() => bridge.refresh(),
 		))
 			void mcp.registerTool(tool);
 		void bridge.refresh();

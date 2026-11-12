@@ -855,6 +855,12 @@ First release, version 0.1.0.
   panel's tool list allows tools per site.
 - Access per tab: a click on the icon lets the extension read that tab (until it goes to
   another origin); "Allow on all sites" asks for optional access to every tab.
+- Navigation tools for the tab in front, while the extension may read it: `navigate` (an
+  http(s) address), `go_back`, `go_forward` and `reload`, each answering with the new
+  page's `page_info` once it has loaded (at most 30 s). On the page's own origin they run
+  at once; to another origin they ask first (Allow or Don't allow, no Always allow), also
+  a back or forward whose target the extension cannot see. The answer says when the new
+  page needs a click on the icon. No new permission (DEC-121).
 - The side panel: AI access on or off, the address and pairing code for a new AI app with
   "How do I add it?" (Claude, ChatGPT, Claude Code, Codex), the paired apps with
   Disconnect, the tab's tools.

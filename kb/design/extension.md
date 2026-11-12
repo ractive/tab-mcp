@@ -105,6 +105,9 @@ with a second extension).
 | `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, whether it only reads, and why a tool is left out (iteration 20) |
 | `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20) |
 | `webmcp_call` | as the called tool | Calls a tool of the page in front by its WebMCP name, with the same rules (schema check, confirmation, the page it was listed from); for AI apps that read their tool list once (Claude, Codex), which never see the `page_<name>` tools of a later tab (iteration 20 review, `src/worker/tools.ts`) |
+| `navigate` | navigates; another origin asks | Opens an http(s) address in the tab in front, if the extension may read it; waits for the load (30 s) and answers with the new page's `page_info`, or `readable: false` and why (iteration 27, DEC-121, `src/worker/navigation.ts`) |
+| `go_back`, `go_forward` | navigates; another or unknown origin asks | One step in the tab's history; a target on the page's origin is known from the Navigation API (same-origin entries only), any other one asks |
+| `reload` | navigates, never asks | Reloads the page in front, with its `page_info` |
 
 The side panel shows the connection and its apps, the pairing view, questions, the tab in
 front with its tools ("reads", "asks first" or "allowed"), and the relay address under

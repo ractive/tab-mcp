@@ -32,12 +32,22 @@ export function questionCard(
 	card.dataset["question"] = q.id;
 	const ask = document.createElement("p");
 	ask.className = "ask";
-	ask.textContent = `${q.app} wants to run ${q.tool}.`;
-	card.append(ask);
-	if (q.origin)
-		card.append(line("Site (verified)", q.origin, "site muted small"));
-	if (q.title)
-		card.append(line("Title (from the page)", q.title, "title muted small"));
+	if (q.navigation) {
+		// A navigation to another site (iteration 27): from where, to where.
+		// The title is the extension's, not the page's: not shown.
+		ask.textContent = `${q.app} wants to take the tab to another site (${q.tool}).`;
+		card.append(ask);
+		if (q.origin)
+			card.append(line("From (verified)", q.origin, "site muted small"));
+		card.append(line("To", q.navigation.to, "to small"));
+	} else {
+		ask.textContent = `${q.app} wants to run ${q.tool}.`;
+		card.append(ask);
+		if (q.origin)
+			card.append(line("Site (verified)", q.origin, "site muted small"));
+		if (q.title)
+			card.append(line("Title (from the page)", q.title, "title muted small"));
+	}
 	const tool = document.createElement("p");
 	tool.className = "muted small";
 	tool.textContent = "With these arguments from the AI app:";
@@ -65,7 +75,8 @@ export function questionCard(
 	buttons.append(button("Don't allow", "deny"), button("Allow", "allow", true));
 	card.append(tool, args, buttons);
 	// Not for a page without a site of its own (an opaque origin).
-	if (q.always) {
+	// Nor for a navigation: each one to another site asks (DEC-121).
+	if (q.always && !q.navigation) {
 		buttons.append(button("Always allow", "always"));
 		const always = document.createElement("p");
 		always.className = "muted small";

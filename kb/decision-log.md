@@ -2384,3 +2384,37 @@ reason.
 - `toolcallend` keeps the outcomes (`error`, `declined`, `cancelled`) and the MCP result;
   calls through the relay are unchanged. The change is in the lazy chunk only
   (`webMcpCall` in `mcp.ts`); the core is unchanged.
+
+## DEC-121: Navigation tools: the page's origin runs, another origin asks
+
+2026-11-12, branch ext/navigation, iteration 27. tab-mcp for Chrome gets `navigate`,
+`go_back`, `go_forward` and `reload` for the tab in front.
+
+- **Only a tab the extension may read now.** Without access the tools answer with
+  `page_info`'s access message and do nothing: the AI app cannot steer a tab the user never
+  clicked on (or allowed with "Allow on all sites"), and the rule below needs the page's
+  origin.
+- **Within the page's origin (scheme, host, port) they run; to another origin they ask
+  the user first**, through the questions page tools use (side panel of the tab's focused
+  window, else a notification), with Allow and Don't allow only: a page's result could
+  tell the AI app to open another site, and one click must not become a standing
+  permission. The same origin runs because a link on the page could do the same, and the
+  extension keeps its access there (Chrome keeps the `activeTab` grant across same-origin
+  navigations).
+- **Only `http:` and `https:`** addresses, without a user name or password, at most 8192
+  characters; relative ones resolved against the page.
+- **Back and forward**: a target on the page's origin is known from the content script's
+  Navigation API (`navigation.entries()` holds only same-origin entries) and runs at once.
+  Any other target is another origin or none, which the extension cannot tell apart
+  without history access: it asks as for another origin, saying the address is not known.
+  Reload never asks.
+- **Access to the new page is not checked up front.** After a navigation to another
+  origin without "Allow on all sites" the extension may not read the new page; the
+  result says so (`readable: false`, click the icon or allow all sites) instead of the
+  tool refusing. The user has just allowed the navigation by hand; refusing would make
+  another origin useless without "Allow on all sites".
+- **No new permission**: `tabs.update`, `goBack`, `goForward`, `reload` and the tab's
+  loading status need none. An open redirect on the page's own origin can still lead to
+  another origin without a question (seeing it before it happens would need
+  `webNavigation` or `declarativeNetRequest`); the result then shows where the tab
+  landed, or that the extension may not read it.

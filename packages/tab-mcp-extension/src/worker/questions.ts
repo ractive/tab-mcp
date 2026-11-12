@@ -119,15 +119,18 @@ export function notificationText(
 	const site = hostOf(view.origin);
 	// The note stays whole, however long the rest.
 	const note = argsCut ? `\n${ARGS_CUT_NOTE}` : "";
+	// A navigation (iteration 27): where the tab would go, from which site.
+	const { navigation } = view;
 	return {
 		title: `Allow ${what}?`,
-		message:
-			cut(
-				`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
-				300 - note.length,
-			) + note,
+		message: navigation
+			? cut(`${view.app} wants to take the tab to ${navigation.to}`, 300)
+			: cut(
+					`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
+					300 - note.length,
+				) + note,
 		contextMessage: site
-			? `On ${site} · tab-mcp for Chrome`
+			? `${navigation ? "From" : "On"} ${site} · tab-mcp for Chrome`
 			: "tab-mcp for Chrome",
 		buttons: view.always
 			? [...NOTIFICATION_BUTTONS]
@@ -190,11 +193,13 @@ export class Questions {
 	 * Ask whether `request` may run, for the page tool on `origin` in tab
 	 * `tabId`. Resolves with the first answer, `"timeout"` when nobody
 	 * answered in time, `"deny"` when the AI app cancelled, `"busy"` (without
-	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already.
+	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already. A
+	 * navigation to another site (`navigation`, iteration 27) says where to,
+	 * and never offers Always allow.
 	 */
 	ask(
 		request: AppRequest,
-		where: { tabId?: number; origin?: string },
+		where: { tabId?: number; origin?: string; navigation?: { to: string } },
 	): Promise<Answer | "timeout" | "busy"> {
 		const { grantId } = request.client;
 		let open = 0;
@@ -209,9 +214,15 @@ export class Questions {
 			tool: request.tool.name,
 			...(request.tool.title ? { title: visible(request.tool.title) } : {}),
 			...(where.origin ? { origin: where.origin } : {}),
+			...(where.navigation
+				? { navigation: { to: visible(where.navigation.to) } }
+				: {}),
 			// In full: what the user approves must be there to read.
 			args: json,
-			always: where.origin !== undefined && allowable(where.origin),
+			always:
+				where.navigation === undefined &&
+				where.origin !== undefined &&
+				allowable(where.origin),
 		};
 		const compact = visible(JSON.stringify(request.arguments) ?? "{}");
 		const summary = cut(compact, MAX_ARGS_NOTIFICATION);
