@@ -59,6 +59,9 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	expect(coreCode).not.toContain("subscriptions/listen");
 	// The setup steps (`./setup`, DEC-118) are in the UI chunk, not the core.
 	expect(coreCode).not.toContain("codex mcp add");
+	// The WebMCP mirror is in the core; its calls run in the lazy chunk (DEC-115).
+	expect(coreCode).toContain("data-tab-mcp-webmcp");
+	expect(coreCode).not.toContain("The user declined");
 
 	const coreGz = [...core].reduce((sum, n) => sum + gz(files.get(n) ?? ""), 0);
 	const connection = lazy
@@ -161,9 +164,12 @@ test("the build produces a package whose declarations type-check for a consumer"
 		join(consumer, "page.ts"),
 		`import { TabMcp, type Tool, type SessionInfo } from "@ractive-ch/tab-mcp-client";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
-const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo" });
+const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
-void mcp.registerTool(tool, { signal: new AbortController().signal });
+void mcp.registerTool(tool, { signal: new AbortController().signal, webmcp: true });
+mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind); });
+// @ts-expect-error: the caller may be an agent in the browser, which has no host
+mcp.addEventListener("toolcall", (e) => console.log(e.detail.client.host));
 mcp.addEventListener("disconnected", (e) => console.log(e.detail.reason, e.detail.code));
 mcp.addEventListener("pairingcode", (e) => console.log(e.detail?.code));
 export const session: Promise<SessionInfo> = mcp.connect({ resume: true });
@@ -180,7 +186,7 @@ mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
 import { ConnectButton, TabMcpProvider, useTabMcp, useTabMcpState, useTool, useToolCalls, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
 import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 function Tools(): ReactElement {
-	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, [1]);
+	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, [1], { webmcp: true });
 	const state: TabMcpSnapshot = useTabMcpState();
 	const mcp: TabMcp = useTabMcp();
 	const calls = useToolCalls({ limit: 5 });

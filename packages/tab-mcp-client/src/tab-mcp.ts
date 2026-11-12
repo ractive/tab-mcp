@@ -4,7 +4,7 @@
  * connection and the MCP handler with a dynamic `import()`.
  */
 
-import type { ConnectionHandle, ConnectionHost } from "./internal.ts";
+import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
 import type { GrantRef, SessionMessage } from "./protocol.ts";
 import { ToolRegistry } from "./registry.ts";
 import { SecretStore } from "./secret.ts";
@@ -20,6 +20,7 @@ import type {
 	PairingCode,
 	ReconnectingInfo,
 	RegisterToolOptions,
+	RelayClient,
 	ServerInfo,
 	SessionInfo,
 	TabMcpEventMap,
@@ -28,6 +29,7 @@ import type {
 	ToolCallClient,
 } from "./types.ts";
 import { LIBRARY_NAME, VERSION } from "./version.ts";
+import { mirror, nativeContext } from "./webmcp.ts";
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -191,6 +193,17 @@ export class TabMcp extends EventTarget {
 	#pageWaits = false;
 	/** The open "Connect your AI app" dialog: one at a time. */
 	#connectDialog: { doc: Document; shown: Promise<void> } | undefined;
+	/**
+	 * What a tool call needs, through the relay and WebMCP alike. The events
+	 * always, even from a connection that is no longer current: a call that
+	 * started must end, and every end has its start.
+	 */
+	readonly #calls: CallHost = {
+		registry: this.#registry,
+		confirm: (request) => this.#confirm(request),
+		toolCallStarted: (call) => this.#emit("toolcall", call),
+		toolCallEnded: (call) => this.#emit("toolcallend", call),
+	};
 
 	constructor(options: TabMcpOptions) {
 		super();
@@ -236,6 +249,19 @@ export class TabMcp extends EventTarget {
 		this.#registry.onChange(() =>
 			this.#emit("toolschange", { tools: this.tools }),
 		);
+		// Also through the browser's own WebMCP, where it has it (DEC-115):
+		// consequential tools only when their registration says so.
+		const context = options.webmcp === true ? nativeContext() : undefined;
+		if (context !== undefined)
+			mirror(
+				this.#registry,
+				context,
+				(tool) => tool.webmcp ?? tool.annotations.consequentialHint !== true,
+				(tool, input, signal) =>
+					this.#load().then((lazy) =>
+						lazy.callFromWebMcp(this.#calls, tool, input, signal),
+					),
+			);
 	}
 
 	/**
@@ -448,12 +474,19 @@ export class TabMcp extends EventTarget {
 		return connecting;
 	}
 
-	async #open(generation: number, revokeAll?: boolean): Promise<SessionInfo> {
-		const { openConnection, compileRegistry, addressIdOf, withAddress } =
-			await import("./connection.ts");
-		// The validator is loaded: it checks the schemas from now on (DEC-086).
-		for (const error of compileRegistry(this.#registry))
+	/**
+	 * The lazy chunk (on `connect()` or the first WebMCP call). The validator
+	 * is loaded with it: it checks the schemas from now on (DEC-086).
+	 */
+	async #load(): Promise<typeof import("./connection.ts")> {
+		const lazy = await import("./connection.ts");
+		for (const error of lazy.compileRegistry(this.#registry))
 			this.#emit("error", { error });
+		return lazy;
+	}
+
+	async #open(generation: number, revokeAll?: boolean): Promise<SessionInfo> {
+		const { openConnection, addressIdOf, withAddress } = await this.#load();
 		const secret = this.#secrets.get();
 		const address = await addressIdOf(secret);
 		if (generation !== this.#generation) {
@@ -782,19 +815,15 @@ export class TabMcp extends EventTarget {
 			ref.connection !== undefined && this.#connection === ref.connection;
 		let replacedHere = false;
 		return {
-			registry: this.#registry,
+			...this.#calls,
 			server: this.#server,
 			appName: this.#appName,
 			tabs: this.#tabs,
 			library: { name: LIBRARY_NAME, version: VERSION },
-			confirm: (request) => this.#confirm(request),
-			// Both always, even from a connection that is no longer current: a
-			// call that started must end, and every end has its start.
-			toolCallStarted: (call) => this.#emit("toolcall", call),
-			toolCallEnded: (call) => this.#emit("toolcallend", call),
 			clientFor: (grant: GrantRef): ToolCallClient => {
 				const known = this.#grants.find((g) => g.grantId === grant.grantId);
-				const client: ToolCallClient = {
+				const client: RelayClient = {
+					kind: "relay",
 					grantId: grant.grantId,
 					id: grant.clientId,
 					host: hostOf(grant.clientId),

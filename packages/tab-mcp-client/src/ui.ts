@@ -247,7 +247,10 @@ function newDialog(
 /** Invisible, blank and direction characters as `\uXXXX` (`visible.ts`). */
 const visible = escapeInvisible;
 
+/** How the dialogs name a caller: an AI app's name and verified host. */
 function clientLabel(client: ToolCallClient | Grant["client"]): string {
+	if ("kind" in client && client.kind === "webmcp")
+		return "An agent in this browser";
 	const host = visible(client.host || client.id);
 	return client.name !== undefined && client.name !== ""
 		? `${visible(client.name)} (${host})`
@@ -464,7 +467,14 @@ export function confirmInPage(
 	doc: Document,
 	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean },
 ): Promise<boolean> {
-	const { grantId } = request.client;
+	const { client } = request;
+	// An agent in the browser has no identity to remember an answer for:
+	// no Always allow, offered or applied (DEC-115).
+	if (client.kind !== "relay")
+		return confirmDialog(request, doc, {
+			allowDelayMs: options.allowDelayMs,
+		}).then((answer) => answer === "allow");
+	const { grantId } = client;
 	const tool = request.tool.name;
 	if (allowedAlways.get(mcp)?.has(grantId, tool)) return Promise.resolve(true);
 	return confirmDialog(request, doc, options).then((answer) => {

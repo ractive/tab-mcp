@@ -8,6 +8,32 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- `webmcp: true` (`TabMcpOptions`): the tools are also registered with the browser's own
+  WebMCP (`document.modelContext.registerTool()`) where it has it, so that agents in the
+  browser (built into it, or an extension) can call them. Off by default. When turned on,
+  this changes what the page exposes: any agent in the browser can call the mirrored
+  tools, without pairing and without an identity. Consequential tools are left out
+  unless registered with `{ webmcp: true }` (`RegisterToolOptions.webmcp`, also the third
+  argument of `useTool`); `{ webmcp: false }` keeps a tool out. A WebMCP call gets the
+  same argument check, confirmation and `toolcall`/`toolcallend` events as an AI app's,
+  never "Always allow". Only the native object is used (through `Document.prototype`'s
+  getter, not a polyfill's own `document.modelContext`); a failed native registration
+  only warns in the console. `<html data-tab-mcp-webmcp>` lists the mirrored names for
+  tab-mcp for Chrome (DEC-115, DEC-119).
+
+#### Changed
+
+- `client` in `execute`'s options, `ConfirmRequest` and the `toolcall`/`toolcallend`
+  events is a union with a `kind`: `RelayClient` (`kind: "relay"`, with `grantId`, `id`,
+  `host` and `name` as before) or `WebMcpClient` (`kind: "webmcp"`, nothing more). Code
+  that reads `client.host` or `client.name` without checking `client.kind` first no
+  longer type-checks; at run time, calls through the relay carry the same fields as
+  before plus `kind`.
+
 ### [0.12.1][client-0.12.1] - 2026-11-11
 
 #### Fixed

@@ -20,6 +20,8 @@ export interface RegisteredTool {
 	readonly inputSchema: JsonSchema;
 	readonly annotations: ToolAnnotations;
 	readonly execute: Tool["execute"];
+	/** `RegisterToolOptions.webmcp`: offered through WebMCP even if consequential, or never. */
+	readonly webmcp?: boolean | undefined;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -167,8 +169,8 @@ export class ToolRegistry {
 	 * `InvalidStateError` `DOMException` for a duplicate name.
 	 */
 	register(tool: Tool, options: RegisterToolOptions = {}): void {
-		const registered = validateTool(tool);
-		const { signal } = options;
+		const { signal, webmcp } = options;
+		const registered: RegisteredTool = { ...validateTool(tool), webmcp };
 		if (signal?.aborted) return;
 		if (this.#tools.has(registered.name)) {
 			throw new DOMException(

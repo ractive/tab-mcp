@@ -23,6 +23,7 @@ export type {
 	ReconnectingInfo,
 	ReconnectOptions,
 	RegisterToolOptions,
+	RelayClient,
 	ReplacedDetail,
 	SecretStorage,
 	ServerInfo,
@@ -37,5 +38,6 @@ export type {
 	ToolCallResult,
 	ToolCallStart,
 	ToolExecuteOptions,
+	WebMcpClient,
 } from "./types.ts";
 export { VERSION } from "./version.ts";

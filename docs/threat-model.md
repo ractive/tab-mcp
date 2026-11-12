@@ -40,6 +40,7 @@ and answers. See the [protocol](protocol.md) for the details.
 | The relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or changing traffic |
 | The AI app | the tools it may call and their results | following the user's intent (a model drives it) |
 | The model provider behind the AI app | the same as the AI app | nothing |
+| An agent in the browser (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP and their results | nothing |
 | The network | nothing: TLS everywhere, `wss:` and `https:` only outside development | nothing |
 
 The relay cannot be made blind. The AI app speaks HTTPS to the relay, and the relay must
@@ -565,6 +566,41 @@ like any other, `chrome-extension://<id>` (A11).
   the id the hosted relay allows for it; a build without that key gets an id of its own,
   which a relay must allow on its own.
 
+### A14: Agents in the browser calling a page's mirrored tools (WebMCP)
+
+With `webmcp: true` (off by default), the client library also registers the page's
+tools with the browser's own WebMCP (`document.modelContext`), where an agent in the
+browser calls them: one built into the browser, or an extension. This caller sits beside
+the AI apps of A2 and A6, and differs from them.
+
+- **No pairing, no identity.** Any agent the browser lets call the page's WebMCP tools
+  can call the mirrored ones; the relay, its grants and its pairing are not involved,
+  and the page learns nothing about the caller (`client.kind` is `"webmcp"`). Turning
+  `webmcp` on is a change in what the page exposes; the library treats it as one (off by
+  default, the CHANGELOG says so).
+- **It can operate the page's dialog.** Such an agent often drives the very tab it calls
+  into: input it sends through the DevTools Protocol or an extension is trusted input,
+  and the delay before Allow only needs the tab visible and focused. So the page's
+  confirmation is weaker against it than against a remote AI app. Hence consequential
+  tools are not mirrored unless the page registers them with `{ webmcp: true }`, which
+  says that its own dialog, or the agent's own confirmation, is enough for that tool.
+  "Always allow" is never offered or applied for these calls.
+- **The same check.** Arguments are checked against the tool's schema before `execute`
+  (Chrome does not), a consequential tool asks the page's `onConfirm` or the library's
+  dialog ("An agent in this browser wants to run …"), and the calls appear in the
+  page's `toolcall`/`toolcallend` events like an AI app's.
+- **Only the browser's own object.** The library reads `document.modelContext` through
+  `Document.prototype`'s getter, captured when it loads, and checks that it is a
+  `ModelContext`; an own property (a polyfill, any page script) is passed by. A page that
+  changes `Document.prototype` before the library loads can fool this; it owns the tools
+  anyway. Who may call into the page's WebMCP at all (cross-origin frames need
+  `allow="tools"`; which agents and extensions) is the browser's decision.
+- **Names keep their owner.** A name the page or another script registered natively
+  first stays theirs (the mirror only warns), and once a name is mirrored the page's own
+  native registration of it fails. The page lists its mirrored names in
+  `<html data-tab-mcp-webmcp>`, so tab-mcp for Chrome (A13) does not offer them, and ask
+  for them, a second time; a page can only hide its own tools that way.
+
 ## Safe defaults
 
 - No page origin is allowed until configured; `*` only explicitly, with a warning.
@@ -576,6 +612,8 @@ like any other, `chrome-extension://<id>` (A11).
   where the browser reports it (`navigator.userActivation`). This guards against
   accidental connects; it is not a security boundary, since a page can always open a
   WebSocket itself.
+- The browser library registers tools with the browser's WebMCP only with
+  `webmcp: true`, and consequential ones only when the page names them (A14).
 
 See [configuration](configuration.md#why-the-defaults-are-safe) for the reasons behind
 each default.
@@ -616,3 +654,6 @@ each default.
 - With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
   "Always allow" or "allowed") does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
+- With `webmcp: true`: any agent in the browser calls the mirrored tools without
+  pairing, and one that drives the tab can click Allow in the page's dialog for a
+  consequential tool the page chose to mirror (A14).

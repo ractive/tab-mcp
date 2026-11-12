@@ -55,6 +55,7 @@ function ours(
 		server: SERVER,
 		confirm,
 		client: (g) => ({
+			kind: "relay",
 			grantId: g.grantId,
 			id: g.clientId,
 			host: new URL(g.clientId).host,
@@ -356,6 +357,7 @@ describe("icons", () => {
 				},
 				confirm: async () => true,
 				client: (g) => ({
+					kind: "relay",
 					grantId: g.grantId,
 					id: g.clientId,
 					host: "a.example",
@@ -395,6 +397,7 @@ describe("icons", () => {
 			},
 			confirm: async () => true,
 			client: (g) => ({
+				kind: "relay",
 				grantId: g.grantId,
 				id: g.clientId,
 				host: "a.example",
@@ -500,6 +503,7 @@ describe("results", () => {
 			input: { x: 1 },
 			aborted: false,
 			client: {
+				kind: "relay",
 				grantId: "g_1",
 				id: "https://client.example/cimd.json",
 				host: "client.example",
@@ -578,7 +582,7 @@ describe("consequential tools", () => {
 			description: "Clears the memory",
 		});
 		expect(asked?.arguments).toEqual({ all: true });
-		expect(asked?.client.host).toBe("client.example");
+		expect(asked?.client).toMatchObject({ host: "client.example" });
 		answer(true);
 		expect((await pending)["content"]).toEqual([
 			{ type: "text", text: "wiped" },
@@ -748,7 +752,12 @@ describe("review fixes", () => {
 			tools: registry,
 			server: SERVER,
 			confirm: async () => true,
-			client: (g) => ({ grantId: g.grantId, id: g.clientId, host: "x" }),
+			client: (g) => ({
+				kind: "relay",
+				grantId: g.grantId,
+				id: g.clientId,
+				host: "x",
+			}),
 			observe: { start() {}, end: (e) => ends.push(e) },
 		});
 		const returned = {
@@ -792,7 +801,12 @@ describe("review fixes", () => {
 			tools: registry,
 			server: SERVER,
 			confirm: async () => true,
-			client: (g) => ({ grantId: g.grantId, id: g.clientId, host: "x" }),
+			client: (g) => ({
+				kind: "relay",
+				grantId: g.grantId,
+				id: g.clientId,
+				host: "x",
+			}),
 			observe: {
 				start: (c) => started.push(c.id),
 				end: (e) => ends.push(e),
@@ -921,7 +935,12 @@ describe("review fixes", () => {
 			},
 			server: SERVER,
 			confirm: async () => true,
-			client: (g) => ({ grantId: g.grantId, id: g.clientId, host: "x" }),
+			client: (g) => ({
+				kind: "relay",
+				grantId: g.grantId,
+				id: g.clientId,
+				host: "x",
+			}),
 		});
 		const res = await handler.handle(
 			request({ name: "", body: rpc(2, "tools/call", { name: "x" }) }),

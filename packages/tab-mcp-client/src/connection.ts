@@ -4,8 +4,8 @@
  */
 
 import { pageIcons } from "./icons.ts";
-import type { ConnectionHandle, ConnectionHost } from "./internal.ts";
-import { createMcpHandler } from "./mcp.ts";
+import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
+import { type CallContext, createMcpHandler, webMcpCall } from "./mcp.ts";
 import {
 	type HttpRequestMessage,
 	parseRelayMessage,
@@ -13,12 +13,38 @@ import {
 	SUBPROTOCOL,
 	type TabMessage,
 } from "./protocol.ts";
+import type { RegisteredTool } from "./registry.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
 /** For the core: the address id in the `/tab` URL (DEC-098). */
 export { addressIdOf, withAddress } from "./address.ts";
 /** For the core: compiles the schemas once this chunk (and the validator) is loaded. */
 export { compileRegistry } from "./mcp.ts";
+
+/** What a call through the relay or WebMCP needs (`mcp.ts`), from the core's host. */
+function callContext(host: CallHost): CallContext {
+	return {
+		tools: host.registry,
+		confirm: (request) => host.confirm(request),
+		observe: {
+			start: (call) => host.toolCallStarted(call),
+			end: (call) => host.toolCallEnded(call),
+		},
+	};
+}
+
+/**
+ * For the core: a WebMCP call of a mirrored tool (iteration 25), on the
+ * same path as an AI app's (`webMcpCall` in `mcp.ts`).
+ */
+export function callFromWebMcp(
+	host: CallHost,
+	tool: RegisteredTool,
+	input: unknown,
+	signal: unknown,
+): Promise<unknown> {
+	return webMcpCall(callContext(host), tool, input, signal);
+}
 
 /** How long `connect()` waits for the relay's `session`. */
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -234,15 +260,10 @@ export function openConnection(
 	}, CONNECT_TIMEOUT_MS);
 
 	const handler = createMcpHandler({
-		tools: host.registry,
+		...callContext(host),
 		// Without `icons`, the page's own <link rel="icon">, read now.
 		server: { ...host.server, icons: host.server.icons ?? pageIcons() },
-		confirm: (request) => host.confirm(request),
 		client: (grant) => host.clientFor(grant),
-		observe: {
-			start: (call) => host.toolCallStarted(call),
-			end: (call) => host.toolCallEnded(call),
-		},
 	});
 	const stopWatching = host.registry.onChange(() => handler.toolsChanged());
 

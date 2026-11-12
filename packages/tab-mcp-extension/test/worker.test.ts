@@ -35,6 +35,7 @@ import {
 	QuestionWindows,
 } from "../src/worker/question-windows.ts";
 import {
+	type AppRequest,
 	ARGS_CUT_NOTE,
 	argsToSend,
 	MAX_ARGS_NOTIFICATION,
@@ -215,11 +216,12 @@ function fakeHost(options: { panel?: boolean } = {}) {
 function request(
 	args: Record<string, unknown> = { item: "tea" },
 	signal = new AbortController().signal,
-): ConfirmRequest {
+): AppRequest {
 	return {
 		tool: { name: "page_place_order", title: "Place order", description: "" },
 		arguments: args,
 		client: {
+			kind: "relay",
 			grantId: "g1",
 			id: "https://claude.ai/oauth",
 			name: "Claude",

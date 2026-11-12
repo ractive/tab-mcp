@@ -18,9 +18,18 @@ import type {
 	ToolCallStart,
 } from "./types.ts";
 
-/** What a connection needs from the `TabMcp` that opened it. */
-export interface ConnectionHost {
+/** What a tool call needs from the `TabMcp`, through the relay or WebMCP. */
+export interface CallHost {
 	readonly registry: ToolRegistry;
+	/** Ask the user about a consequential tool call. */
+	confirm(request: ConfirmRequest): Promise<boolean>;
+	/** A tool call started or ended (the `toolcall` and `toolcallend` events). */
+	toolCallStarted(call: ToolCallStart): void;
+	toolCallEnded(call: ToolCallEnd): void;
+}
+
+/** What a connection needs from the `TabMcp` that opened it. */
+export interface ConnectionHost extends CallHost {
 	readonly server: ServerInfo;
 	readonly appName: string | undefined;
 	/**
@@ -30,11 +39,6 @@ export interface ConnectionHost {
 	readonly tabs: string | undefined;
 	/** Sent in `hello`. */
 	readonly library: { name: string; version: string };
-	/** Ask the user about a consequential tool call. */
-	confirm(request: ConfirmRequest): Promise<boolean>;
-	/** A tool call started or ended (the `toolcall` and `toolcallend` events). */
-	toolCallStarted(call: ToolCallStart): void;
-	toolCallEnded(call: ToolCallEnd): void;
 	/** The caller of a tunnelled request, with the name from the grants list. */
 	clientFor(grant: GrantRef): ToolCallClient;
 	/** The relay accepted the session; returns what `connect()` resolves with. */

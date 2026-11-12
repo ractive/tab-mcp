@@ -11,7 +11,7 @@
  * click on a call that is already settled is dropped.
  */
 
-import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
+import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import type { Answer, QuestionView } from "../protocol.ts";
 import { allowable } from "./allowed.ts";
@@ -87,8 +87,11 @@ const cut = (text: string, max: number) =>
  */
 export const visible: (text: string) => string = escapeInvisible;
 
+/** A confirmation request of an AI app through the relay (the extension's only caller). */
+export type AppRequest = ConfirmRequest & { client: RelayClient };
+
 /** The AI app as a question names it: its declared name beside its verified host. */
-export function appName(client: ConfirmRequest["client"]): string {
+export function appName(client: RelayClient): string {
 	return client.name ? `${visible(client.name)} (${client.host})` : client.host;
 }
 
@@ -190,7 +193,7 @@ export class Questions {
 	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already.
 	 */
 	ask(
-		request: ConfirmRequest,
+		request: AppRequest,
 		where: { tabId?: number; origin?: string },
 	): Promise<Answer | "timeout" | "busy"> {
 		const { grantId } = request.client;

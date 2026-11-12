@@ -195,6 +195,41 @@ test("useTool's deps register again", () => {
 	expect(changes).toEqual([[], ["add"]]);
 });
 
+test("useTool passes webmcp on to registerTool and registers again when it changes", () => {
+	const t = tab();
+	const seen: unknown[] = [];
+	const register = t.registerTool.bind(t);
+	t.registerTool = (tool, options) => {
+		seen.push(options?.webmcp);
+		return register(tool, options);
+	};
+	function Mirrored(props: { webmcp?: boolean }) {
+		useTool(
+			addTool(() => 1),
+			[],
+			props.webmcp === undefined ? {} : { webmcp: props.webmcp },
+		);
+		return null;
+	}
+	render(
+		<TabMcpProvider client={t}>
+			<Mirrored webmcp />
+		</TabMcpProvider>,
+	);
+	render(
+		<TabMcpProvider client={t}>
+			<Mirrored webmcp />
+		</TabMcpProvider>,
+	);
+	render(
+		<TabMcpProvider client={t}>
+			<Mirrored />
+		</TabMcpProvider>,
+	);
+	expect(seen).toEqual([true, undefined]);
+	expect(t.tools).toEqual(["add"]);
+});
+
 class Boundary extends Component<
 	{ children: ReactNode; onError: (error: unknown) => void },
 	{ failed: boolean }

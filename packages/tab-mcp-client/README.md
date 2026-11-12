@@ -91,8 +91,11 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
   validator itself is loaded by `connect()`: from then on it checks each schema at
   registration too, and a tool registered earlier whose schema it refuses (for example a
   `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
-- `execute(input, { signal, client })`: runs the tool. `signal` aborts when the AI app
-  gives up; `client` names the caller (`id`, verified `host`, declared `name`). Return a
+- `execute(input, { signal, client })`: runs the tool. `signal` aborts when the caller
+  gives up. `client` names the caller: `{ kind: "relay", grantId, id, host, name? }` for
+  an AI app through the relay (`id`, verified `host`, declared `name`), or
+  `{ kind: "webmcp" }` for an agent in the browser ([WebMCP](#webmcp)), of which nothing
+  more is known. Check `client.kind` before you read `host`. Return a
   string (one text block), an MCP result with a `content` array (passed through), or any
   other JSON value (sent as JSON text, and as `structuredContent` for an object). A thrown
   error becomes an error result with its message;
@@ -107,6 +110,48 @@ against the type, so keep the two in step.
 
 Abort the `signal` to remove the tool. AI apps that listen for changes learn about
 added and removed tools.
+
+### WebMCP
+
+`new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's own
+WebMCP (`document.modelContext.registerTool()`, the
+[WebMCP draft](https://webmachinelearning.github.io/webmcp/)), where the browser has it,
+so that agents in the browser can call them: an agent built into the browser, or an
+extension. Off by default. Turning it on is a change in what the page exposes: any
+agent in the browser can then call the mirrored tools without pairing.
+
+- Tools marked `consequentialHint` are left out unless their registration says
+  `{ webmcp: true }`: an agent in the browser often drives the very tab it calls into,
+  so it can click Allow in the page's confirmation itself. `{ webmcp: false }` keeps any
+  tool out of WebMCP.
+- A WebMCP call takes the same path as an AI app's: the arguments are checked against
+  `inputSchema` (Chrome does not check them), a consequential tool asks (`onConfirm`, or
+  the library's dialog, which names the caller "An agent in this browser"), and
+  `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Always allow" is
+  never offered or applied for these calls: there is no identity to remember it for.
+- The call resolves with what `execute` returned. It rejects with what `execute` threw,
+  an `Error` with the text of an MCP result with `isError: true`, a `TypeError` for
+  invalid arguments, a `NotAllowedError` when the user declined, an `AbortError` when the
+  browser cancelled it, and an `InvalidStateError` when the tool is gone. Chrome 156
+  passes the agent neither the name nor the message of a rejection
+  (`UnknownError`).
+- Only the native object is used, read through `Document.prototype`'s getter: an own
+  `document.modelContext` (a polyfill such as `@mcp-b/global`, or a page script) is
+  passed by, and with native WebMCP and the polyfill both present the tools go to the
+  native object.
+- A tool leaves WebMCP whenever it leaves the page's registry: its `signal`, or the
+  validator, which the first WebMCP call loads (as `connect()` does), refusing its
+  schema.
+- A failed native registration only warns in the console, once per tool, and the tool
+  stays offered through the relay; it is tried again only when the tool is registered
+  again: a name the page or another script already registered
+  natively keeps its owner, and a frame without `allow="tools"` refuses all. The other
+  way round, once a name is mirrored, the page's own native `registerTool()` of that name
+  fails: a page that registers tools natively itself leaves `webmcp` off or uses other
+  names.
+- `<html data-tab-mcp-webmcp="…">` lists the mirrored names, so that tab-mcp for Chrome
+  does not offer them a second time to an AI app that is connected to the page and to
+  the extension.
 
 ### Consequential tools
 
@@ -143,7 +188,10 @@ import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 const mcp = new TabMcp({
   relay: "https://relay.example",
   server: { name: "calculator", version: "1.0.0" },
-  onConfirm: ({ tool, arguments: args, client, signal }) => {
+  onConfirm: (request) => {
+    const { tool, arguments: args, client, signal } = request;
+    // An agent in the browser (`webmcp`): the library's own dialog.
+    if (client.kind !== "relay") return mcp.confirmInPage(request);
     const name = client.name ? escapeInvisible(client.name) : undefined;
     const app = name ? `${name} (${client.host})` : client.host;
     const shown = escapeInvisible(JSON.stringify(args, null, 2));
@@ -354,13 +402,16 @@ Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()
 `reconnecting` and `tools`, and the events `statechange`, `connected`, `disconnected`,
 `pairingcode`, `grantschange`, `reconnecting`, `toolschange`, `replaced` (with
 `detail.sibling`, see above) and `error`. For an activity log, `toolcall`
-and `toolcallend` report every call by an AI app: its id, tool, arguments and AI app as it
-starts, then its outcome (`ok`, `error`, `declined` or `cancelled`), result and duration.
+and `toolcallend` report every call by an AI app (or, with `webmcp`, an agent in the
+browser): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
+`error`, `declined` or `cancelled`), result and duration.
 
 ```ts
 mcp.addEventListener("toolcallend", (e) => {
   const { tool, client, outcome, durationMs } = e.detail;
-  log(`${client.name ?? client.host}: ${tool} ${outcome} in ${durationMs} ms`);
+  const who =
+    client.kind === "relay" ? (client.name ?? client.host) : "An agent in this browser";
+  log(`${who}: ${tool} ${outcome} in ${durationMs} ms`);
 });
 ```
 
@@ -506,10 +557,11 @@ function TodoList() {
   identityMessage, reconnecting, tools }` through `useSyncExternalStore`: the component
   renders again only when one of them changed. On the server and during hydration it is
   `disconnected`.
-- `useTool(tool, deps?)` registers the tool while the component is mounted and removes it
-  on unmount. `execute` is always the latest closure, so it may use the component's
-  current props and state without registering again; the tool is registered again only
-  when its name, title, description, input schema or annotations change, or one of
+- `useTool(tool, deps?, options?)` registers the tool while the component is mounted and
+  removes it on unmount. `execute` is always the latest closure, so it may use the
+  component's current props and state without registering again; the tool is registered
+  again only when its name, title, description, input schema or annotations change, or
+  `options.webmcp` ([WebMCP](#webmcp); `webmcp` on the provider turns it on), or one of
   `deps`. StrictMode's double mount registers it once at a time. A duplicate name or an
   invalid tool is thrown from the component's render, for an error boundary. Tools that
   read state right after another tool changed it should read it from a store (as the

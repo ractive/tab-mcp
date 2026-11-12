@@ -181,7 +181,10 @@ function Activity() {
 			<ol>
 				{calls.map((call) => (
 					<li key={call.id} data-outcome={call.end?.outcome ?? "running"}>
-						<code>{call.tool}</code> by {call.client.name ?? call.client.host}
+						<code>{call.tool}</code> by{" "}
+						{call.client.kind === "relay"
+							? (call.client.name ?? call.client.host)
+							: "an agent in this browser"}
 						{call.end === undefined ? " …" : ` · ${call.end.outcome}`}
 					</li>
 				))}

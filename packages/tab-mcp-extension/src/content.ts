@@ -79,12 +79,20 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 	};
 }
 
-/** The names a tab-mcp page mirrors into WebMCP (iteration 25), from `<html>`. */
-export function mirroredNames(doc: Document = document): string[] {
+/**
+ * Every name a tab-mcp page mirrors into WebMCP (iteration 25), from
+ * `<html>`: all of them, so that none is offered (or called) as the page's
+ * own; the library sets no limit (review of PR 103). Only what is sent is
+ * capped (`mirroredNames`).
+ */
+export function allMirrored(doc: Document = document): Set<string> {
 	const listed = doc.documentElement.getAttribute("data-tab-mcp-webmcp") ?? "";
-	return listed
-		.split(/[\s,]+/)
-		.filter((name) => name !== "")
+	return new Set(listed.split(/[\s,]+/).filter((name) => name !== ""));
+}
+
+/** The mirrored names as sent to the worker: at most `SEND_MIRRORED`, each cut. */
+export function mirroredNames(doc: Document = document): string[] {
+	return [...allMirrored(doc)]
 		.slice(0, SEND_MIRRORED)
 		.map((name) => cutText(name, SEND_NAME));
 }
@@ -101,13 +109,13 @@ export async function pageTools(
 	documentId: string = DOCUMENT_ID,
 ): Promise<PageTools> {
 	const context = contextOf(doc);
-	const mirrored = mirroredNames(doc);
+	const skip = allMirrored(doc);
 	const base = {
 		url: doc.location.href,
 		origin: doc.location.origin,
 		documentId,
 		available: context !== undefined,
-		mirrored,
+		mirrored: mirroredNames(doc),
 		more: 0,
 	};
 	if (context === undefined) return { ...base, tools: [] };
@@ -120,7 +128,7 @@ export async function pageTools(
 	const tools: PageTool[] = [];
 	let more = 0;
 	for (const tool of listed) {
-		if (mirrored.includes(tool.name)) continue;
+		if (skip.has(tool.name)) continue;
 		if (tools.length >= SEND_TOOLS) {
 			more++;
 			continue;
@@ -178,7 +186,7 @@ export async function callTool(
 	if (context === undefined)
 		return { ok: false, error: "WebMCP is not on in this page.", gone: true };
 	const tool = (await context.getTools()).find((t) => t.name === name);
-	if (tool === undefined || mirroredNames(doc).includes(name))
+	if (tool === undefined || allMirrored(doc).has(name))
 		return {
 			ok: false,
 			error: `The page has no tool ${name} (any more).`,
