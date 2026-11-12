@@ -88,16 +88,16 @@ Hence: off by default, and consequential tools stay out unless the page names th
 
 ## Tasks
 
-- [ ] Detection, opt-in (`webmcp` on `TabMcp` and per tool), mirroring with its own
+- [x] Detection, opt-in (`webmcp` on `TabMcp` and per tool), mirroring with its own
       abort, failure handling and the one retry
-- [ ] The shared check-confirm-run function in the lazy chunk; the WebMCP `execute` stub
-- [ ] The caller union; `ui.ts`, React bindings, README, react-todo example, e2e
-- [ ] The library sets the `data-tab-mcp-webmcp` attribute on `<html>` with the tools it
+- [x] The shared check-confirm-run function in the lazy chunk; the WebMCP `execute` stub
+- [x] The caller union; `ui.ts`, React bindings, README, react-todo example, e2e
+- [x] The library sets the `data-tab-mcp-webmcp` attribute on `<html>` with the tools it
       mirrors
 - [x] The extension reads the attribute (iteration 20): `src/content.ts` leaves out the
       tools it lists, so a tab-mcp page's tools do not reach the AI app twice; it takes
       effect once the library sets it (checked 2026-11-09, `docs/pre-release`)
-- [ ] Unit tests with a fake native object; a browser test with Chrome for Testing and
+- [x] Unit tests with a fake native object; a browser test with Chrome for Testing and
       `--enable-features=WebMCP` (pages served as in `test/webmcp-spike/`): `getTools()`
       lists the mirrored tools and not the consequential ones (unless named); a call
       runs; a bad argument and a declined call reject with their names; no "Always

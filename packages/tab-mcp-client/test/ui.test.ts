@@ -2,7 +2,12 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { TabMcp } from "../src/index.ts";
-import type { ConfirmRequest, Grant, SessionInfo } from "../src/types.ts";
+import type {
+	ConfirmRequest,
+	Grant,
+	RelayClient,
+	SessionInfo,
+} from "../src/types.ts";
 import {
 	CODE_USED_WAIT_MS,
 	confirmDialog,
@@ -53,6 +58,14 @@ function enabled(button: HTMLButtonElement): Promise<void> {
 	});
 }
 
+const APP: RelayClient = {
+	kind: "relay",
+	grantId: "g_1",
+	id: "https://claude.ai/c.json",
+	name: "Claude",
+	host: "claude.ai",
+};
+
 function question(signal = new AbortController().signal): ConfirmRequest {
 	return {
 		tool: {
@@ -61,12 +74,7 @@ function question(signal = new AbortController().signal): ConfirmRequest {
 			description: "Clears the calculator memory",
 		},
 		arguments: { all: true, note: "<b>not html</b>" },
-		client: {
-			grantId: "g_1",
-			id: "https://claude.ai/c.json",
-			name: "Claude",
-			host: "claude.ai",
-		},
+		client: APP,
 		signal,
 	};
 }
@@ -251,6 +259,48 @@ describe("confirmDialog: Always allow", () => {
 				byText(dialog, "Don't allow").click();
 				expect(await answer).toBe(false);
 			}
+		} finally {
+			g.document = saved;
+		}
+	});
+});
+
+describe("a WebMCP caller (iteration 25)", () => {
+	test("is named an agent in this browser and never offered or given Always allow", async () => {
+		const g = globalThis as { document?: Document | undefined };
+		const saved = g.document;
+		g.document = doc;
+		const mcp = newTab("http://127.0.0.1:9", { alwaysAllow: true });
+		const ask = () =>
+			mcp.confirmInPage({ ...question(), client: { kind: "webmcp" } });
+		const dialog = () =>
+			new Promise<HTMLDialogElement>((resolve) => {
+				const poll = () => {
+					const found = doc.querySelector("dialog.tab-mcp-confirm");
+					if (found !== null) resolve(found as HTMLDialogElement);
+					else setTimeout(poll, 1);
+				};
+				poll();
+			});
+		try {
+			const first = ask();
+			const shown = await dialog();
+			expect(shown.textContent).toContain(
+				"An agent in this browser wants to run Clear memory.",
+			);
+			expect(buttons(shown).map((b) => b.textContent)).toEqual([
+				"Don't allow",
+				"Allow",
+			]);
+			expect(shown.querySelector(".tab-mcp-always-note")).toBeNull();
+			const allow = byText(shown, "Allow");
+			await enabled(allow);
+			allow.click();
+			expect(await first).toBe(true);
+			// Every call asks again.
+			const again = ask();
+			byText(await dialog(), "Don't allow").click();
+			expect(await again).toBe(false);
 		} finally {
 			g.document = saved;
 		}
@@ -486,7 +536,7 @@ describe("confirmDialog: what the arguments look like (iteration 13)", () => {
 		const answer = confirmDialog(
 			{
 				...question(),
-				client: { ...question().client, name: "\u202EedualC" },
+				client: { ...APP, name: "\u202EedualC" },
 			},
 			doc,
 		);

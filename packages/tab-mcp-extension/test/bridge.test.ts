@@ -208,6 +208,7 @@ function fakeChrome(initial: PageTools) {
 }
 
 const client = {
+	kind: "relay" as const,
 	grantId: "g",
 	id: "https://client.example",
 	host: "client.example",

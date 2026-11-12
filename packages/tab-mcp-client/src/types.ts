@@ -27,8 +27,9 @@ export interface ToolAnnotations {
 	openWorldHint?: boolean;
 }
 
-/** The AI app that calls a tool, as far as the relay knows it. */
-export interface ToolCallClient {
+/** An AI app that calls a tool through the relay, as far as the relay knows it. */
+export interface RelayClient {
+	kind: "relay";
 	/** The grant (connected app) the call came through. */
 	grantId: string;
 	/** The client's id (its Client ID Metadata Document URL). */
@@ -39,11 +40,25 @@ export interface ToolCallClient {
 	host: string;
 }
 
+/**
+ * An agent in this browser that calls a mirrored tool through WebMCP
+ * (`webmcp: true`). Not paired and not identified: nothing more is known.
+ */
+export interface WebMcpClient {
+	kind: "webmcp";
+}
+
+/** Who calls a tool: an AI app through the relay, or an agent in the browser (`kind`). */
+export type ToolCallClient = RelayClient | WebMcpClient;
+
 /** Second argument of `execute`. */
 export interface ToolExecuteOptions {
-	/** Aborted when the AI app gives up on the call or the page disconnects. */
+	/**
+	 * Aborted when the caller gives up on the call or the page disconnects
+	 * (a WebMCP call: when the browser cancels it).
+	 */
 	signal: AbortSignal;
-	/** Who is calling. */
+	/** Who is calling: `client.kind` is `"relay"` or `"webmcp"`. */
 	client: ToolCallClient;
 }
 
@@ -69,6 +84,13 @@ export interface Tool<Input extends object = Record<string, unknown>> {
 export interface RegisterToolOptions {
 	/** Aborting it unregisters the tool. */
 	signal?: AbortSignal;
+	/**
+	 * With `TabMcpOptions.webmcp` on: `true` also offers this tool through
+	 * WebMCP when it is consequential, `false` never does. By default only
+	 * tools that are not consequential are offered there. Ignored while
+	 * `webmcp` is off.
+	 */
+	webmcp?: boolean;
 	/** WebMCP's cross-document exposure; ignored by tab-mcp. */
 	exposedTo?: string[];
 }
@@ -179,6 +201,16 @@ export interface TabMcpOptions {
 	 * network returns. On by default; `false` leaves it to the page.
 	 */
 	reconnect?: boolean | ReconnectOptions;
+	/**
+	 * Also register the tools with the browser's own WebMCP
+	 * (`document.modelContext.registerTool()`), where it has it, so that agents
+	 * in the browser can call them, without pairing. Off by default. Tools
+	 * marked `consequentialHint` are left out unless registered with
+	 * `{ webmcp: true }`: an agent that drives this tab can click Allow in the
+	 * page's confirmation itself. A failed native registration only warns in
+	 * the console.
+	 */
+	webmcp?: boolean;
 }
 
 /** Options of reconnecting (`TabMcpOptions.reconnect`). */

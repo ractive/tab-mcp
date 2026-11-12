@@ -166,7 +166,10 @@ the grants of the previous one and ends their requests in flight.
   JSON, and forwards it unchanged.
 - `grant` identifies the caller:
   `{"grantId":"g_…","clientId":"https://…","scopes":["tools"]}`. Nothing about the token
-  reaches the tab.
+  reaches the tab. The client library hands it to the page's tools as `client` with
+  `kind: "relay"` (`grantId`, `id`, `host`, `name`); a call from an agent in the browser
+  through WebMCP, which never passes the relay, has `kind: "webmcp"` and nothing more
+  (DEC-115).
 - The relay keeps only `content-type` and `cache-control` from the tab's response headers.
   It sets the rest itself (`x-accel-buffering: no` and `cache-control: no-cache` on
   streams, CORS headers).

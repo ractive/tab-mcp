@@ -32,6 +32,10 @@ export async function decide(
 	d: Decider,
 	request: ConfirmRequest,
 ): Promise<boolean> {
+	// Only AI apps through the relay call here: the extension does not mirror
+	// its tools into WebMCP (`webmcp` is off), so any other caller is declined.
+	const { client } = request;
+	if (client.kind !== "relay") return false;
 	const tool = d.lookup(request.tool.name);
 	if (tool !== undefined && d.allowed(tool.origin, tool.name)) return true;
 	// Always allow only for a page of a real site: opaque origins ("null")
@@ -39,7 +43,7 @@ export async function decide(
 	const key: AlwaysKey | undefined =
 		tool !== undefined && allowable(tool.origin)
 			? {
-					grantId: request.client.grantId,
+					grantId: client.grantId,
 					origin: tool.origin,
 					documentId: tool.documentId,
 					tool: request.tool.name,
@@ -47,7 +51,7 @@ export async function decide(
 			: undefined;
 	if (key !== undefined && d.always.has(key)) return true;
 	const answer = await d.ask(
-		request,
+		{ ...request, client },
 		tool === undefined ? {} : { tabId: tool.tabId, origin: tool.origin },
 	);
 	if (answer === "busy")

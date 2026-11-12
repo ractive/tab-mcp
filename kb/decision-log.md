@@ -2300,3 +2300,57 @@ Overmark wants the same steps in its own UI.
   an internal module (`command.ts`), not exported; a command exists only when the
   address is shell-plain, so every command is safe to show and run.
 - The dialog renders from `setupInstructions` and looks and behaves as before.
+
+## DEC-119: How the client library mirrors its tools into WebMCP
+
+2026-11-12, branch client/webmcp-mirror (iteration 25, DEC-115). Choices the plan left
+open, and what Chrome 156 showed (`--enable-features=WebMCP`): `registerTool()` returns
+a promise and rejects a taken name with `InvalidStateError`, a frame without
+`allow="tools"` with `NotAllowedError`, an already aborted signal with `AbortError`;
+an abort unregisters at once; `execute` gets `(input, { signal })`; `ModelContext` is a
+global and `Document.prototype.modelContext` a getter; `@mcp-b/global` 6.0.3 installs an
+own `document.modelContext` and leaves the getter alone.
+
+- **The per-tool option overrides in both directions, under the switch.**
+  `RegisterToolOptions.webmcp`: `true` mirrors a consequential tool, `false` keeps any
+  tool out, absent mirrors what is not consequential. Without `TabMcpOptions.webmcp` it
+  does nothing. `useTool` takes it as a third argument; a change registers again.
+- **Rejections as the plan says, though Chrome hides them.** A WebMCP call rejects with
+  `TypeError` (arguments), `NotAllowedError` (declined), `AbortError` (cancelled),
+  `InvalidStateError` (gone), what `execute` threw, or an `Error` with the text of an
+  `isError` result. Chrome 156's `executeTool()` turns every rejection into
+  `UnknownError: Tool was executed but the invocation failed`, so the agent learns
+  neither why nor what to change (saturnus resolves with `{ error }` instead for this
+  reason). Left as planned: the names are the WebMCP way, and other agents or a later
+  Chrome may pass them on; the browser test keeps Chrome's behaviour as a canary. Open to
+  the owner.
+- **Any failed registration is tried once more, a task later**, not only a duplicate
+  right after an abort: Chrome unregisters at once, so the retry is for implementations
+  that do it later, and telling those cases apart costs core bytes. A failure after the
+  retry warns once per tool name per `TabMcp` and stays: the tool is not tried again
+  until it is registered anew.
+- **Signals.** Each mirror's `AbortController` withdraws its registration only. A call
+  gets the browser's own `signal` as `execute`'s `signal` (a fresh one if the browser
+  gives none); a running call is not aborted when its tool is unmirrored, as through the
+  relay.
+- **Calls that never start.** A call of a tool that left the registry before it started
+  (for example refused by the validator the call itself loaded) rejects with
+  `InvalidStateError`, and input that is not an object with `TypeError`, both without
+  `toolcall`/`toolcallend`, as an unknown tool through the relay gets none.
+- **The confirmation** names the caller "An agent in this browser", offers only Don't
+  allow and Allow (also with `alwaysAllow: true`) and keeps the delay before Allow; an
+  `onConfirm` sees `client.kind === "webmcp"`.
+- **The attribute** lists the names of every `TabMcp` of the page (module-level), set
+  before the native registration and cleared after the abort or a failure, so tab-mcp
+  for Chrome never sees a mirrored tool as the page's own. Once mirroring is on it is
+  always there, empty when nothing is mirrored.
+- **Size: the mirror is in the core.** The core went from 5,490 to 6,115 B gzipped, 29 B
+  under the 6 KB budget (DEC-103); the call path (check, confirm, run) is one function in
+  the lazy chunk that the MCP handler uses too (`runCall` in `mcp.ts`). The next feature
+  in the core will need the mirror in a lazy chunk (loaded when `webmcp: true` finds
+  native WebMCP) or a new budget.
+- **tab-mcp for Chrome** keeps `webmcp` off; its confirmation declines any caller that is
+  not an AI app through the relay, which cannot happen there today.
+- **Tests**: unit tests against a fake `ModelContext` behind a `Document.prototype`
+  getter (`capture()`, internal to `webmcp.ts`, takes the getter again for them), and a
+  browser test in Chrome for Testing 156 (`test/webmcp-browser.test.ts`).

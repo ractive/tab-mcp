@@ -351,6 +351,7 @@ describe("grants", () => {
 			id: "r1",
 		});
 		expect(seen).toEqual({
+			kind: "relay",
 			grantId: "g_1",
 			id: GRANT.client.id,
 			name: "Claude Code",

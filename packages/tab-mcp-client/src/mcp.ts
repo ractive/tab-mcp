@@ -53,18 +53,22 @@ export interface ToolSource {
 	get(name: string): RegisteredTool | undefined;
 }
 
-export interface McpHandlerOptions {
+/** What a tool call needs, through the relay or through WebMCP. */
+export interface CallContext {
 	tools: ToolSource;
-	server: ServerInfo;
 	/** Ask the user before a consequential tool runs. */
 	confirm(request: ConfirmRequest): Promise<boolean>;
-	/** The caller of a request, from its grant. */
-	client(grant: GrantRef): ToolCallClient;
 	/** Told about every call of a known tool, as it starts and as it ends. */
 	observe?: {
 		start(call: ToolCallStart): void;
 		end(call: ToolCallEnd): void;
 	};
+}
+
+export interface McpHandlerOptions extends CallContext {
+	server: ServerInfo;
+	/** The caller of a request, from its grant. */
+	client(grant: GrantRef): ToolCallClient;
 }
 
 /** Tool call ids, unique in the page. */
@@ -274,6 +278,198 @@ function honoured(params: Json): Json {
 		: {};
 }
 
+function validate(tool: RegisteredTool, args: Json): string | undefined {
+	let outcome: ReturnType<ArgumentValidator>;
+	try {
+		outcome = compileTool(tool)(args);
+	} catch (error) {
+		// Refused at registration through `TabMcp`; this is for any other registry.
+		const message = error instanceof Error ? error.message : String(error);
+		return `The input schema of tool ${tool.name} cannot be used: ${message}`;
+	}
+	if (outcome.valid) return undefined;
+	const detail = outcome.errors
+		.filter((e) => e.keyword !== "properties" && e.keyword !== "$ref")
+		.map((e) => `${e.instanceLocation} ${e.error}`)
+		.slice(0, 5)
+		.join("; ");
+	return `Input validation error: Invalid arguments for tool ${tool.name}: ${detail || "the arguments do not match the schema"}`;
+}
+
+/**
+ * How a call ended. `stop`: it did not run to its end, and what a WebMCP
+ * caller is rejected with (`TypeError` or a `DOMException` name).
+ * `returned`: what `execute` returned, `thrown`: what it threw.
+ */
+export interface CallRun {
+	outcome: ToolCallOutcome;
+	result: CallToolResult;
+	stop?: "TypeError" | "NotAllowedError" | "AbortError" | "InvalidStateError";
+	returned?: { value: unknown };
+	thrown?: { error: unknown };
+}
+
+/**
+ * One call of a known tool, from an AI app through the relay or from an
+ * agent in the browser through WebMCP: the `toolcall` and `toolcallend`
+ * events around the argument check, the confirmation of a consequential
+ * tool and `execute`. The one path for both callers, so they cannot drift.
+ */
+export async function runCall(
+	context: CallContext,
+	tool: RegisteredTool,
+	raw: Json,
+	signal: AbortSignal,
+	client: ToolCallClient,
+): Promise<CallRun> {
+	// Copies: a listener cannot change what the tool gets or the caller receives.
+	const call: ToolCallStart = {
+		id: ++lastCallId,
+		tool: tool.name,
+		arguments: copy(raw),
+		client: { ...client },
+	};
+	if (tool.title !== undefined) call.title = tool.title;
+	const started = Date.now();
+	context.observe?.start(call);
+	// Every start has its end, also when something fails outside the tool.
+	let run: CallRun = {
+		outcome: "error",
+		result: errorResult("Internal error"),
+	};
+	try {
+		run = await decideAndRun(context, tool, raw, signal, client);
+	} finally {
+		context.observe?.end({
+			id: call.id,
+			tool: tool.name,
+			client: { ...client },
+			outcome: run.outcome,
+			result: copy(run.result),
+			durationMs: Date.now() - started,
+		});
+	}
+	return run;
+}
+
+/** Validate, confirm and run one call. */
+async function decideAndRun(
+	context: CallContext,
+	tool: RegisteredTool,
+	raw: Json,
+	signal: AbortSignal,
+	client: ToolCallClient,
+): Promise<CallRun> {
+	const stopped = (
+		outcome: ToolCallOutcome,
+		message: string,
+		stop: NonNullable<CallRun["stop"]>,
+	): CallRun => ({ outcome, result: errorResult(message), stop });
+	const invalid = validate(tool, raw);
+	if (invalid !== undefined) return stopped("error", invalid, "TypeError");
+	if (tool.annotations.consequentialHint === true) {
+		const question: ConfirmRequest = {
+			tool: { name: tool.name, description: tool.description },
+			arguments: raw,
+			client,
+			signal,
+		};
+		if (tool.title !== undefined) question.tool.title = tool.title;
+		let allowed = false;
+		try {
+			allowed = await context.confirm(question);
+		} catch {
+			allowed = false;
+		}
+		if (!allowed)
+			return signal.aborted
+				? stopped("cancelled", "The user declined", "AbortError")
+				: stopped("declined", "The user declined", "NotAllowedError");
+	}
+	if (signal.aborted) return stopped("cancelled", "Cancelled", "AbortError");
+	// Unregistered (or replaced) while the user was asked: not the tool
+	// the user allowed, or one the page still offers.
+	if (context.tools.get(tool.name) !== tool)
+		return stopped(
+			"error",
+			"The tool is no longer available",
+			"InvalidStateError",
+		);
+	let run: CallRun;
+	try {
+		const value = await tool.execute(raw, { signal, client });
+		run = {
+			outcome: "ok",
+			result: toCallToolResult(value),
+			returned: { value },
+		};
+	} catch (error) {
+		run = { outcome: "error", result: thrownResult(error), thrown: { error } };
+	}
+	// Cancelled is cancelled, however the tool answered the abort.
+	if (signal.aborted)
+		return { ...run, outcome: "cancelled", stop: "AbortError" };
+	if (run.result.isError === true) run.outcome = "error";
+	return run;
+}
+
+/**
+ * A call from an agent in the browser (WebMCP) of the mirrored `tool`: the
+ * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
+ * Resolves with what `execute` returned; rejects with what it threw, an
+ * `Error` with the text of an `isError` result, a `TypeError` for invalid
+ * arguments, a `NotAllowedError` when the user declined, an `AbortError`
+ * when it was cancelled and an `InvalidStateError` when the tool is gone.
+ */
+export async function webMcpCall(
+	context: CallContext,
+	tool: RegisteredTool,
+	input: unknown,
+	signal: unknown,
+): Promise<unknown> {
+	const fail = (name: NonNullable<CallRun["stop"]>, message: string) =>
+		name === "TypeError"
+			? new TypeError(message)
+			: new DOMException(message, name);
+	// Gone already, e.g. refused by the validator just loaded: no call.
+	if (context.tools.get(tool.name) !== tool)
+		throw fail(
+			"InvalidStateError",
+			`The tool ${tool.name} is no longer available`,
+		);
+	if (!isObject(input)) throw fail("TypeError", "The input must be an object");
+	const run = await runCall(
+		context,
+		tool,
+		input,
+		signal instanceof AbortSignal ? signal : new AbortController().signal,
+		{ kind: "webmcp" },
+	);
+	if (run.stop !== undefined)
+		throw fail(
+			run.stop,
+			run.stop === "AbortError" ? "Cancelled" : resultText(run.result),
+		);
+	if (run.thrown !== undefined) throw run.thrown.error;
+	if (run.result.isError === true)
+		throw new Error(resultText(run.result) || "The tool failed.");
+	return run.returned?.value;
+}
+
+/** The text blocks of a result, one per line. */
+function resultText(result: CallToolResult): string {
+	return result.content
+		.map((block) =>
+			isObject(block) &&
+			block["type"] === "text" &&
+			typeof block["text"] === "string"
+				? block["text"]
+				: "",
+		)
+		.filter((text) => text !== "")
+		.join("\n");
+}
+
 export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	const { tools, server } = options;
 	const serverInfo: Json = { name: server.name, version: server.version };
@@ -301,24 +497,6 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 			id,
 			result: { ...value, resultType: "complete", _meta: meta },
 		};
-	}
-
-	function validate(tool: RegisteredTool, args: Json): string | undefined {
-		let outcome: ReturnType<ArgumentValidator>;
-		try {
-			outcome = compileTool(tool)(args);
-		} catch (error) {
-			// Refused at registration through `TabMcp`; this is for any other registry.
-			const message = error instanceof Error ? error.message : String(error);
-			return `The input schema of tool ${tool.name} cannot be used: ${message}`;
-		}
-		if (outcome.valid) return undefined;
-		const detail = outcome.errors
-			.filter((e) => e.keyword !== "properties" && e.keyword !== "$ref")
-			.map((e) => `${e.instanceLocation} ${e.error}`)
-			.slice(0, 5)
-			.join("; ");
-		return `Input validation error: Invalid arguments for tool ${tool.name}: ${detail || "the arguments do not match the schema"}`;
 	}
 
 	function listTools(): Json[] {
@@ -360,78 +538,14 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		const raw = params["arguments"] ?? {};
 		if (!isObject(raw))
 			return invalidParams("Invalid params: arguments must be an object");
-		const client = options.client(grant);
-		// Copies: a listener cannot change what the tool gets or the AI app receives.
-		const call: ToolCallStart = {
-			id: ++lastCallId,
-			tool: tool.name,
-			arguments: copy(raw),
-			client: { ...client },
-		};
-		if (tool.title !== undefined) call.title = tool.title;
-		const started = Date.now();
-		options.observe?.start(call);
-		// Every start has its end, also when something fails outside the tool.
-		let outcome: ToolCallOutcome = "error";
-		let res: CallToolResult = errorResult("Internal error");
-		try {
-			[outcome, res] = await decideAndRun(tool, raw, signal, client);
-		} finally {
-			options.observe?.end({
-				id: call.id,
-				tool: tool.name,
-				client: { ...client },
-				outcome,
-				result: copy(res),
-				durationMs: Date.now() - started,
-			});
-		}
-		return { kind: "result", result: res };
-	}
-
-	/** Validate, confirm and run one call. */
-	async function decideAndRun(
-		tool: RegisteredTool,
-		raw: Json,
-		signal: AbortSignal,
-		client: ToolCallClient,
-	): Promise<[ToolCallOutcome, CallToolResult]> {
-		const invalid = validate(tool, raw);
-		if (invalid !== undefined) return ["error", errorResult(invalid)];
-		if (tool.annotations.consequentialHint === true) {
-			const question: ConfirmRequest = {
-				tool: { name: tool.name, description: tool.description },
-				arguments: raw,
-				client,
-				signal,
-			};
-			if (tool.title !== undefined) question.tool.title = tool.title;
-			let allowed = false;
-			try {
-				allowed = await options.confirm(question);
-			} catch {
-				allowed = false;
-			}
-			if (!allowed)
-				return [
-					signal.aborted ? "cancelled" : "declined",
-					errorResult("The user declined"),
-				];
-		}
-		if (signal.aborted) return ["cancelled", errorResult("Cancelled")];
-		// Unregistered (or replaced) while the user was asked: not the tool
-		// the user allowed, or one the page still offers.
-		if (tools.get(tool.name) !== tool)
-			return ["error", errorResult("The tool is no longer available")];
-		let res: CallToolResult;
-		try {
-			res = toCallToolResult(await tool.execute(raw, { signal, client }));
-		} catch (error) {
-			res = thrownResult(error);
-		}
-		// Cancelled is cancelled, however the tool answered the abort.
-		if (signal.aborted) return ["cancelled", res];
-		return [res.isError === true ? "error" : "ok", res];
+		const run = await runCall(
+			options,
+			tool,
+			raw,
+			signal,
+			options.client(grant),
+		);
+		return { kind: "result", result: run.result };
 	}
 
 	function callTool(

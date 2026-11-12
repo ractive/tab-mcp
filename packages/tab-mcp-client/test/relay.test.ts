@@ -170,7 +170,10 @@ describe("tools through the relay", () => {
 		const t = tab({
 			onConfirm: (request) =>
 				new Promise((resolve) => {
-					questions.push({ allow: resolve, host: request.client.host });
+					questions.push({
+						allow: resolve,
+						host: request.client.kind === "relay" ? request.client.host : "",
+					});
 					asked();
 				}),
 		});
@@ -182,7 +185,9 @@ describe("tools through the relay", () => {
 				arguments: args,
 				client,
 			} = (e as CustomEvent<ToolCallStart>).detail;
-			events.push(`start ${id} ${tool} ${JSON.stringify(args)} ${client.host}`);
+			events.push(
+				`start ${id} ${tool} ${JSON.stringify(args)} ${client.kind === "relay" ? client.host : ""}`,
+			);
 		});
 		t.addEventListener("toolcallend", (e) => {
 			const { id, outcome, result, durationMs } = (
