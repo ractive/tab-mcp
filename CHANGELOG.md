@@ -843,8 +843,8 @@ First release, version 0.1.0.
   Chrome's own WebMCP, top frame only) on to an AI app outside the browser, through a
   tab-mcp relay (by default `https://tab-mcp.ractive.ch`; another one under "Settings").
 - Tools for the AI app: `page_info` (the tab's address, title, language, whether WebMCP is
-  available; the server's instructions ask the AI app to call it first when the user
-  refers to what they have open in the browser), `webmcp_tools` (the page's tools and why a tool is left out), one
+  available; the server's instructions and its description ask the AI app to call it
+  first when the user refers to a page in their browser), `webmcp_tools` (the page's tools and why a tool is left out), one
   `page_<name>` per page tool, following the tab in front and the page's `toolchange`,
   and `webmcp_call` for AI apps that read their tool list once.
 - The page's tools are the page's word: descriptions start with the page's origin and are
