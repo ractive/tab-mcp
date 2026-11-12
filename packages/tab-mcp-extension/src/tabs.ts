@@ -8,6 +8,7 @@ import {
 	CONTENT_SCRIPT,
 	type ContentRequest,
 	type ContentResponse,
+	type PageHistory,
 	type PageInfo,
 	type PageTools,
 } from "./messages.ts";
@@ -128,6 +129,24 @@ export async function askPage(tab: TargetTab): Promise<PageInfo> {
 	if (!response.ok) throw new Error(response.error);
 	const { ok: _, ...info } = response as { ok: true } & PageInfo;
 	return info;
+}
+
+/** The history of the tab of `tab`, as its page sees it. */
+export async function askHistory(tab: TargetTab): Promise<PageHistory> {
+	const response = await ask(tab, { type: "history" });
+	if (!response.ok) throw new Error(response.error);
+	const { ok: _, ...history } = response as { ok: true } & PageHistory;
+	return history;
+}
+
+/** Tab `tabId` now (its address empty where Chrome hides it), `undefined` if closed. */
+export async function getTab(tabId: number): Promise<TargetTab | undefined> {
+	try {
+		const tab = await chrome.tabs.get(tabId);
+		return { id: tabId, url: tab.url ?? "", title: tab.title ?? "" };
+	} catch {
+		return undefined;
+	}
 }
 
 /** The WebMCP tools of the page in `tab`. */

@@ -260,7 +260,15 @@ async function waitForTools(
 }
 
 /** The extension's own tools, sorted. */
-const OWN_TOOLS = ["page_info", "webmcp_call", "webmcp_tools"];
+const OWN_TOOLS = [
+	"go_back",
+	"go_forward",
+	"navigate",
+	"page_info",
+	"reload",
+	"webmcp_call",
+	"webmcp_tools",
+];
 
 const PAGE_TOOLS = [
 	"page_get_greeting",
@@ -361,7 +369,10 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {
-		const names = await waitForTools(stack, (n) => n.length >= 7);
+		const names = await waitForTools(
+			stack,
+			(n) => n.length >= OWN_TOOLS.length + PAGE_TOOLS.length,
+		);
 		// mirrored_tool is the page's tab-mcp mirror: left out.
 		expect(names).toEqual([...OWN_TOOLS, ...PAGE_TOOLS].sort());
 		const { tools } = await stack.client.listTools();
@@ -849,7 +860,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			title: "Plain page",
 			webmcp: { available: true, tools: 0 },
 		});
-		expect(await waitForTools(stack, (n) => n.length === 3)).toEqual(OWN_TOOLS);
+		expect(
+			await waitForTools(stack, (n) => n.length === OWN_TOOLS.length),
+		).toEqual(OWN_TOOLS);
 	});
 
 	test("it follows a tab switch, tools included", async () => {
@@ -1587,6 +1600,190 @@ describe.skipIf(chrome === undefined)(
 				webmcp: { available: true, tools: 5 },
 			});
 			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		});
+	},
+);
+
+/** The address of the page in `stack`'s tab. */
+const tabUrl = (stack: Stack) => stack.tab.eval<string>("location.href");
+
+/** The texts of the newest question card in the panel. */
+const questionLines = (stack: Stack) =>
+	stack.panel.eval<string[]>(
+		`[...[...document.querySelectorAll("[data-question]")].at(-1).querySelectorAll("p.ask, p.line")].map((p) => p.textContent)`,
+	);
+
+/** No question waits in the panel. */
+const noQuestion = async (stack: Stack) =>
+	expect(
+		await stack.panel.eval<number>(
+			"document.querySelectorAll('[data-question]').length",
+		),
+	).toBe(0);
+
+describe.skipIf(chrome === undefined)(
+	"navigation (iteration 27, test build)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start({ store: false }, `${SITE}/plain.html`);
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("navigate on the page's origin runs at once, with the new page's page_info and tools", async () => {
+			const result = await call(stack, "navigate", { url: "/webmcp.html" });
+			expect(result.isError).toBeFalsy();
+			expect(result.structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html`,
+				title: "Page with WebMCP tools",
+				webmcp: { available: true, tools: 5 },
+			});
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+			await noQuestion(stack);
+		});
+
+		test("only http(s) addresses; the tab stays", async () => {
+			for (const url of [
+				"javascript:alert(1)",
+				"data:text/html,x",
+				"chrome://settings",
+				"file:///etc/hosts",
+			]) {
+				const refused = await call(stack, "navigate", { url });
+				expect(refused.isError).toBe(true);
+				expect(refused.content[0]?.text).toContain("Only http and https");
+			}
+			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
+		});
+
+		test("to another origin it asks in the side panel, without Always allow: Don't allow stays, Allow goes", async () => {
+			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
+			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+			const [ask, ...lines] = await questionLines(stack);
+			expect(ask).toEndWith(
+				" wants to take the tab to another site (navigate).",
+			);
+			expect(lines).toEqual([
+				`From (verified) ${SITE}`,
+				`To ${OTHER}/plain.html`,
+			]);
+			expect(
+				await stack.panel.eval<boolean>(
+					`!!document.querySelector('[data-question] button[data-answer="always"]')`,
+				),
+			).toBe(false);
+			await answerInPanel(stack, "deny");
+			const result = await declined;
+			expect(result.isError).toBe(true);
+			expect(result.content[0]?.text).toContain("did not allow");
+			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
+			const allowed = call(stack, "navigate", { url: `${OTHER}/plain.html` });
+			await answerInPanel(stack, "allow");
+			// With host access the new page is read.
+			expect((await allowed).structuredContent).toMatchObject({
+				url: `${OTHER}/plain.html`,
+				title: "Plain page",
+			});
+		});
+
+		test("back to another origin asks too, its address not known", async () => {
+			const back = call(stack, "go_back");
+			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+			const lines = await questionLines(stack);
+			expect(lines[1]).toBe(`From (verified) ${OTHER}`);
+			expect(lines[2]).toContain("previous page");
+			expect(lines[2]).toContain("not known");
+			await answerInPanel(stack, "allow");
+			expect((await back).structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html`,
+			});
+		});
+
+		test("back and forward on the page's origin run at once", async () => {
+			const back = await call(stack, "go_back");
+			expect(back.structuredContent).toMatchObject({
+				url: `${SITE}/plain.html`,
+			});
+			const forward = await call(stack, "go_forward");
+			expect(forward.structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html`,
+			});
+			await noQuestion(stack);
+		});
+
+		test("reload stays and never asks; within the page (#part) it answers at once", async () => {
+			await stack.tab.eval("window.e2eMarker = 1");
+			const reloaded = await call(stack, "reload");
+			expect(reloaded.structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html`,
+			});
+			expect(await stack.tab.eval("typeof window.e2eMarker")).toBe("undefined");
+			const started = Date.now();
+			const part = await call(stack, "navigate", { url: "#part" });
+			expect(part.structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html#part`,
+			});
+			expect(Date.now() - started).toBeLessThan(5_000);
+			await noQuestion(stack);
+		});
+	},
+);
+
+describe.skipIf(chrome === undefined)(
+	"navigation in the store package (no host access)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start({ store: true }, `${SITE}/plain.html`);
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("on the page's origin the click's access holds: the new page is read", async () => {
+			const result = await call(stack, "navigate", {
+				url: `${SITE}/webmcp.html`,
+			});
+			expect(result.structuredContent).toMatchObject({
+				url: `${SITE}/webmcp.html`,
+				webmcp: { available: true, tools: 5 },
+			});
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		});
+
+		test("to another origin, once allowed, the result says the new page needs a click; then nothing more", async () => {
+			const going = call(stack, "navigate", { url: `${OTHER}/plain.html` });
+			await answerInPanel(stack, "allow");
+			const result = await going;
+			expect(result.isError).toBeFalsy();
+			expect(result.structuredContent?.["readable"]).toBe(false);
+			expect(String(result.structuredContent?.["reason"])).toContain(
+				"may not read this tab yet",
+			);
+			expect(await tabUrl(stack)).toBe(`${OTHER}/plain.html`);
+			// A tab the extension may not read is not navigated.
+			for (const name of ["navigate", "go_back", "reload"]) {
+				const refused = await call(stack, name, {
+					...(name === "navigate" ? { url: `${OTHER}/webmcp.html` } : {}),
+				});
+				expect(refused.isError).toBe(true);
+				expect(refused.content[0]?.text).toContain("may not read this tab yet");
+			}
+			expect(await tabUrl(stack)).toBe(`${OTHER}/plain.html`);
+			// A click on the icon gives the new page, and its origin.
+			await stack.browser.clickIcon(stack.tab);
+			expect(
+				(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
+					.structuredContent,
+			).toMatchObject({ url: `${OTHER}/webmcp.html` });
 		});
 	},
 );

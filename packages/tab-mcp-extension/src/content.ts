@@ -11,6 +11,7 @@ import type {
 	ContentEvent,
 	ContentRequest,
 	ContentResponse,
+	PageHistory,
 	PageInfo,
 	PageTool,
 	PageTools,
@@ -95,6 +96,45 @@ export function mirroredNames(doc: Document = document): string[] {
 	return [...allMirrored(doc)]
 		.slice(0, SEND_MIRRORED)
 		.map((name) => cutText(name, SEND_NAME));
+}
+
+/** The part of the Navigation API `pageHistory` reads. */
+interface NavigationLike {
+	currentEntry: { index: number } | null;
+	entries(): { index: number; url: string | null }[];
+}
+
+/** A history entry's address is sent only up to this length (else hidden). */
+const SEND_URL = 8192;
+
+/**
+ * The tab's history as the page sees it. The Navigation API lists only the
+ * entries of the page's own origin, so a `back` or `forward` here is on the
+ * page's origin; one of another origin is not listed at all.
+ */
+export function pageHistory(win: Window = window): PageHistory {
+	const length = win.history.length;
+	const navigation = (win as Window & { navigation?: NavigationLike })
+		.navigation;
+	const index = navigation?.currentEntry?.index;
+	if (navigation === undefined || index === undefined) return { length };
+	const entries = navigation.entries();
+	const at = (i: number) => {
+		const entry = entries.find((e) => e.index === i);
+		if (entry === undefined) return undefined;
+		const url =
+			typeof entry.url === "string" && entry.url.length <= SEND_URL
+				? entry.url
+				: null;
+		return { url };
+	};
+	const back = at(index - 1);
+	const forward = at(index + 1);
+	return {
+		length,
+		...(back ? { back } : {}),
+		...(forward ? { forward } : {}),
+	};
 }
 
 const hint = (annotations: Record<string, unknown> | undefined, key: string) =>
@@ -226,6 +266,8 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 		case "webmcp-cancel":
 			running.get(request.callId)?.abort();
 			return { ok: true, value: null };
+		case "history":
+			return { ok: true, ...pageHistory() };
 	}
 }
 
@@ -234,6 +276,7 @@ const REQUESTS = new Set([
 	"webmcp-list",
 	"webmcp-call",
 	"webmcp-cancel",
+	"history",
 ]);
 
 declare global {

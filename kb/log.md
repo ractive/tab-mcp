@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-12
+
+- ext/navigation (iteration 27): navigate, go_back, go_forward and reload for the tab in front while the extension may read it, each answering with the new page's page_info; the page's origin runs at once, another origin (and a back or forward the Navigation API does not list) asks with From and To, Allow or Don't allow only; http(s) only, no user name or password; the result says when the new page needs a click; no new permission; threat model A13; DEC-121
+
 ## 2026-11-10
 
 - client/setup-instructions: `@ractive-ch/tab-mcp-client/setup` exports `setupInstructions` and `SETUP_GUIDE` (the connect dialog's steps per AI app, out of the core); tab-mcp for Chrome's pairing box shows them under "How do I add it?" with a Copy per command; DEC-118

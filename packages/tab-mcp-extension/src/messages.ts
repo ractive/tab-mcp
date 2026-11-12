@@ -22,7 +22,23 @@ export type ContentRequest =
 			readOnly: boolean;
 			input: unknown;
 	  }
-	| { type: "webmcp-cancel"; callId: string };
+	| { type: "webmcp-cancel"; callId: string }
+	| { type: "history" };
+
+/**
+ * The tab's history as the page can see it: the Navigation API lists only
+ * the entries of the page's own origin (HTML: the contiguous same-origin
+ * entries of the top frame), so `back` and `forward` are there only when
+ * that entry is on the page's origin.
+ */
+export interface PageHistory {
+	/** `history.length`: every entry of the tab, of any origin. */
+	length: number;
+	/** The previous entry, if it is on the page's origin (`url` may be hidden). */
+	back?: { url: string | null };
+	/** The next entry, if it is on the page's origin. */
+	forward?: { url: string | null };
+}
 
 /** From the content script: the page's tools changed (`toolchange`). */
 export type ContentEvent = { type: "webmcp-changed" };
@@ -90,5 +106,6 @@ export type CallResult =
 export type ContentResponse =
 	| ({ ok: true } & PageInfo)
 	| ({ ok: true } & PageTools)
+	| ({ ok: true } & PageHistory)
 	| CallResult
 	| { ok: false; error: string };

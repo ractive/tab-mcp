@@ -17,6 +17,25 @@ Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](
 | `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
 | `page_<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. |
 | `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page_<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
+| `navigate` | Opens an http(s) address (or one relative to the page, `/sale`) in the tab in front, waits until it has loaded and answers with its `page_info`. |
+| `go_back`, `go_forward` | Back or forward one page in that tab, as the browser's buttons do, with the new page's `page_info`. |
+| `reload` | Reloads the page in that tab, with its `page_info`. |
+
+The navigation tools act only on a tab the extension may read now (a click on its icon
+there, or "Allow on all sites"); on any other tab they do nothing and say why:
+
+- On the page's own origin (scheme, host and port) they run at once, as a link on the
+  page would.
+- To another origin they ask you first, in the side panel or a notification as page tools
+  do, naming the site the tab is on and the address it would open; Allow and Don't allow
+  only, no "Always allow" (a page's text could tell the AI app to go anywhere). Back or
+  forward to a page the extension cannot see (another origin: Chrome lists only the
+  page's own) asks too, saying its address is not known. A reload never asks.
+- Only `http:` and `https:` addresses, without a user name or password.
+- Without "Allow on all sites", Chrome lets the extension read the new page of another
+  origin only after a click on its icon there; the answer says so.
+- They wait up to 30 s for the page to load; after that the answer says it is still
+  loading.
 
 The page's tools are the page's word:
 

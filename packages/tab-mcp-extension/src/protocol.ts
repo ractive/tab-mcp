@@ -76,8 +76,13 @@ export interface QuestionView {
 	/** The page's tool: its name for the AI app, and its title. */
 	tool: string;
 	title?: string;
-	/** The site the tool acts on. */
+	/** The site the tool acts on (a navigation: the one the tab is on). */
 	origin?: string;
+	/**
+	 * A navigation to another site (iteration 27): the address the tab would
+	 * go to, or what is known of it (back or forward).
+	 */
+	navigation?: { to: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
 	/** "Always allow" is offered (a page of an http(s) site). */
