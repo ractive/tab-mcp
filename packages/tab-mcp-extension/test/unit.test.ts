@@ -268,6 +268,27 @@ describe("calls in the content script", () => {
 		expect(executed).toEqual([]);
 	});
 
+	test("every mirrored name is left out, also past the 256 sent (review of PR 103)", async () => {
+		const names = Array.from({ length: 300 }, (_, i) => `m${i}`);
+		const { doc, executed } = toolDocument(
+			[...names, "own"].map((name) => ({ name, readOnly: true })),
+			names.join(" "),
+		);
+		const listed = await pageTools(doc, "doc-A");
+		expect(listed.tools.map((t) => t.name)).toEqual(["own"]);
+		expect(listed.mirrored).toHaveLength(256);
+		expect(
+			await callTool(
+				{ documentId: "doc-A", name: "m299", readOnly: true },
+				{},
+				signal,
+				doc,
+				"doc-A",
+			),
+		).toMatchObject({ ok: false, gone: true });
+		expect(executed).toEqual([]);
+	});
+
 	test("what a page sends is capped", async () => {
 		const { doc } = toolDocument(
 			Array.from({ length: 300 }, (_, i) => ({
