@@ -139,14 +139,16 @@ Chrome has WebMCP for sites in its
 - The call resolves with what `execute` returned. A failure resolves too, as
   `{ error: "<message>" }`, so that the agent can read it: invalid arguments (the same
   message as for an AI app), "Don't allow" (`The user did not allow <tool> to run.`), a
-  tool that is gone, an error thrown by `execute` (its message) and an MCP result with
+  question not answered (`The user did not answer whether <tool> may run.`), a tool that
+  is gone, an error thrown by `execute` (its message) and an MCP result with
   `isError: true` (its text). A rejection would not help: Chrome 156 hands the agent
   every rejection as a bare `UnknownError`, without its message. Two cases still
   reject: a call the browser cancelled (`AbortError`), since its caller no longer waits
   for an answer, and a call made when the library's lazily loaded part cannot be loaded
   (a new deploy with other chunk names while the page stays open, the network, a
   Content Security Policy); reloading the page fixes the latter.
-  `toolcallend` reports the outcome as for an AI app (`error`, `declined`, `cancelled`).
+  `toolcallend` reports the outcome as for an AI app (`error`, `declined`, `unanswered`,
+  `cancelled`).
 - Only the native object is used, read through `Document.prototype`'s getter: an own
   `document.modelContext` (a polyfill such as `@mcp-b/global`, or a page script) is
   passed by, and with native WebMCP and the polyfill both present the tools go to the
@@ -421,7 +423,7 @@ Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()
 `detail.sibling`, see above) and `error`. For an activity log, `toolcall`
 and `toolcallend` report every call by an AI app (or, with `webmcp`, an agent in the
 browser): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
-`error`, `declined` or `cancelled`), result and duration.
+`error`, `declined`, `unanswered` or `cancelled`), result and duration.
 
 ```ts
 mcp.addEventListener("toolcallend", (e) => {

@@ -420,7 +420,8 @@ async function decideAndRun(
  * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
  * Resolves with what `execute` returned. Every failure the agent should read
  * resolves too, as `{ error: "<message>" }`: invalid arguments, "Don't
- * allow", a question not answered, a tool that is gone, what `execute` threw, an `isError` result.
+ * allow", a question not answered, a tool that is gone, what `execute`
+ * threw, an `isError` result.
  * Chrome 156 turns a rejection into a bare `UnknownError`, so the agent
  * would learn neither why nor what to change (DEC-120). Only a call the
  * browser cancelled rejects (`AbortError`): its caller has gone already.

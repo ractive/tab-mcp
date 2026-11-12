@@ -537,6 +537,23 @@ describe("calls", () => {
 		expect(events.end[1]?.outcome).toBe("declined");
 	});
 
+	test('a call cancelled while asked stays cancelled, even if onConfirm then says "unanswered" (review of PR 112)', async () => {
+		const controller = new AbortController();
+		const t = tab({
+			onConfirm: () => {
+				controller.abort();
+				return "unanswered";
+			},
+		});
+		await t.registerTool(wipe, { webmcp: true });
+		const events = watched(t);
+		await settle();
+		await expect(
+			native.call("wipe", {}, controller.signal),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(events.end[0]?.outcome).toBe("cancelled");
+	});
+
 	test("an isError result and a throw resolve with their message", async () => {
 		const t = tab();
 		const thrown = new RangeError("too big");
