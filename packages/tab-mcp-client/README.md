@@ -6,7 +6,9 @@ Offer a web page's functions as [MCP](https://modelcontextprotocol.io) tools to 
 gets an address. The user adds that address to their AI app and types a pairing code
 from the page; the AI app then calls the page's tools while the tab stays open. Nothing
 is installed on the user's computer. With `webmcp: true` the library also registers the
-tools with the browser's own [WebMCP](#webmcp), for agents in the browser.
+tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A site's own
+assistant can call the same tools over a port, without a relay:
+[Your own assistant on the page](#your-own-assistant-on-the-page).
 
 **Status: 0.14.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
@@ -29,6 +31,9 @@ docker run --rm -p 8080:8080 \
 
 For production, see
 [self-hosting](https://github.com/ractive/tab-mcp/blob/main/docs/self-hosting.md).
+
+A page that offers its tools only to its own assistant (`serve`) or to agents in the
+browser (`webmcp`) needs no relay: leave `relay` out.
 
 ## Install
 
@@ -166,6 +171,106 @@ Chrome has WebMCP for sites in its
 - `<html data-tab-mcp-webmcp="…">` lists the mirrored names, so that tab-mcp for Chrome
   does not offer them a second time to an AI app that is connected to the page and to
   the extension.
+
+### Your own assistant on the page
+
+A site with its own AI assistant can let it use the page's tools without a relay,
+pairing or an address. `mcp.serve(port, { client })` answers MCP requests on a message
+port, and `createTunnelFetch` (`@ractive-ch/tab-mcp-client/tunnel`) is a `fetch` for the
+other end. The port carries the relay's `http.*` messages
+([protocol](https://github.com/ractive/tab-mcp/blob/main/docs/protocol.md#the-tunnel-without-a-relay))
+as plain objects, so anything that passes them on in order will do. A usual setup: the
+assistant's chat runs in an iframe on the page, and its backend, which already holds a
+WebSocket to that chat, runs the MCP client.
+
+The page, without `relay`:
+
+```ts
+import { TabMcp } from "@ractive-ch/tab-mcp-client";
+
+const mcp = new TabMcp({ server: { name: "shop", version: "1.0.0" } });
+await mcp.registerTool({ name: "add_to_cart", description: "…", execute: addToCart });
+
+const chat = document.querySelector<HTMLIFrameElement>("#chat")!;
+let served: { close(): void } | undefined;
+addEventListener("message", async (event) => {
+  // Only the chat's frame, on the chat's origin, gets a port.
+  if (event.origin !== "https://chat.example" || event.source !== chat.contentWindow) return;
+  if (event.data?.type !== "tools-wanted") return;
+  const { port1, port2 } = new MessageChannel();
+  served?.close(); // the chat asked again (it reloaded): the old port is dead
+  served = await mcp.serve(port1, { client: { id: "assistant", name: "Example assistant" } });
+  chat.contentWindow!.postMessage({ type: "tools-port" }, "https://chat.example", [port2]);
+});
+```
+
+The chat in the iframe passes the messages on between the port and its WebSocket:
+
+```ts
+parent.postMessage({ type: "tools-wanted" }, "https://shop.example");
+addEventListener("message", (event) => {
+  if (event.origin !== "https://shop.example" || event.data?.type !== "tools-port") return;
+  const [port] = event.ports;
+  port.onmessage = (e) => socket.send(JSON.stringify({ tunnel: e.data }));
+  socket.addEventListener("message", (e) => {
+    const message = JSON.parse(e.data);
+    if (message.tunnel) port.postMessage(message.tunnel);
+  });
+});
+```
+
+The backend (Bun, Node or anything with `fetch`'s `Request` and `Response`), here with
+the MCP SDK's client:
+
+```ts
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { createTunnelFetch } from "@ractive-ch/tab-mcp-client/tunnel";
+
+const tunnel = createTunnelFetch({
+  send: (message) => socket.send(JSON.stringify({ tunnel: message })),
+});
+socket.on("message", (data) => {
+  const message = JSON.parse(String(data));
+  if (message.tunnel) tunnel.receive(message.tunnel);
+});
+socket.on("close", () => tunnel.close());
+
+// The page speaks MCP 2026-07-28 only: pin it, or the SDK starts with an older version.
+const client = new Client(
+  { name: "assistant", version: "1.0.0" },
+  { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+);
+// The URL is never fetched; only its path reaches the page.
+await client.connect(
+  new StreamableHTTPClientTransport(new URL("https://tab.invalid/mcp"), { fetch: tunnel.fetch }),
+);
+const { tools } = await client.listTools();
+```
+
+- **A port is a key.** Whoever holds the other end calls the tools without pairing, and
+  the library cannot check who that is. Hand a port only to a frame whose origin you
+  checked, as above, and send it with that origin as the target, never `"*"`.
+- Calls arrive with `client: { kind: "local", id, name }`, as given to `serve`. A `grant`
+  in a message is ignored, so the other end cannot pass for an AI app of the relay.
+- A consequential tool still asks. The library's dialog names the caller
+  "Example assistant (this site's assistant)" and never offers "Always allow". A page
+  that lets its own assistant run such tools without asking answers `onConfirm` itself
+  for `request.client.kind === "local"`, and hands other calls to `mcp.confirmInPage`.
+- `serve` resolves with `{ close() }`; `options.signal` does the same. Closing aborts the
+  calls in flight and tells the other end (`bye`), whose requests then end at once with
+  `-31003`. Close a serve whose port is dead, as above: its calls, listen streams and an
+  open confirmation would stay otherwise. `serve` may be called for several ports (each
+  port once at a time), and next to a relay connection and `webmcp: true`: one
+  registration reaches all three.
+- `createTunnelFetch` answers a request that takes longer than `requestTimeoutMs`
+  (300 s by default; a `subscriptions/listen` stream is not limited) with the JSON-RPC
+  error `-31002`, and every request after `close()` with `-31003`, at HTTP 200 like the
+  relay: the MCP client reads an error, not a network failure. Only an aborted `signal`
+  rejects. Call `close()` when the channel to the page is gone; a closed tunnel stays
+  closed, so a new channel (or a new `serve`) gets a new `createTunnelFetch`.
+- Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
+  `TypeError`, nothing is read from or written to `localStorage`, `mcp.hasRelay` is
+  `false`, and React's `ConnectButton` renders nothing.
 
 ### Consequential tools
 

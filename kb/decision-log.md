@@ -2418,3 +2418,85 @@ reason.
   another origin without a question (seeing it before it happens would need
   `webNavigation` or `declarativeNetRequest`); the result then shows where the tab
   landed, or that the extension may not read it.
+
+## DEC-122: `serve` is a method of `TabMcp`; the core budget is 6.25 KB (owner)
+
+2026-11-13, branch plan/iteration-28, iteration 28, for client 0.15.0. The owner chose
+`mcp.serve(port, options)` over an entry of its own (`serve(mcp, port, options)`) and over
+moving the WebMCP mirror into a lazy chunk first.
+
+- The core holds only a stub: `serve` loads the lazy chunk (`#load()`, as `connect()` and
+  the first WebMCP call do) and calls `servePort` there (`src/serve.ts`).
+- The stub, the optional relay (`noRelay()`, the `hasRelay` getter, the secret store made
+  only with a relay) cost 97 B gzipped: 6241 B against the 6144 B of DEC-103. The budget in
+  `test/build.test.ts` is now 6.25 KB (6400 B). DEC-119's remark stands: the next thing
+  that does not fit moves the WebMCP mirror into a lazy chunk.
+
+## DEC-123: The caller of a served port is `kind: "local"`, "this site's assistant" (owner)
+
+2026-11-13, iteration 28. `ToolCallClient` gets `LocalClient`
+(`{ kind: "local", id, name? }`, from `ServeOptions.client`). The owner chose `"local"`
+over `"port"` and `"site"`, and the wording "this site's assistant" for the library's
+confirmation: `<name or id> (this site's assistant) wants to run <tool>.`, with the
+description in the place where a relay's AI app shows its verified host. The name is the
+page's own claim; invisible characters in it are shown as escapes like any other name.
+
+## DEC-124: No "Always allow" for a served port (owner)
+
+2026-11-13, iteration 28. As for WebMCP callers (DEC-115): never offered, never applied,
+also with `alwaysAllow: true`. A page that trusts its own assistant answers `onConfirm`
+itself for `client.kind === "local"`. Offering it later is no breaking change.
+
+## DEC-125: `createTunnelFetch` answers with the relay's JSON-RPC errors, as an entry of the client package (owner)
+
+2026-11-13, iteration 28. `@ractive-ch/tab-mcp-client/tunnel` (`src/tunnel.ts`), not a
+package of its own: one version and one release process, and it imports nothing from the
+page's library (the build test checks that it stands alone, without DOM, under 2 KB
+gzipped). A timeout, a closed tunnel, a failed send and an invalid answer become JSON-RPC
+errors with the relay's codes (`-31002`, `-31003`, `-31005`, `-31007`) at HTTP 200, or the
+last event of a stream that had started, so an MCP client shows the agent an error and
+does not send a `tools/call` again. Only an aborted `signal` rejects (`AbortError`).
+
+## DEC-126: How `serve` and the tunnel are built
+
+2026-11-13, iteration 28. What the plan left open or what changed while building it:
+
+- **Files.** The page's end of the tunnel (`createTunnel`, out of `connection.ts`
+  unchanged) and `servePort` are in `src/serve.ts`; `src/tunnel.ts` is the public entry
+  with `createTunnelFetch`. The plan had the page's end in `src/tunnel.ts`, which the
+  entry's name needs.
+- **The handler is the caller's.** `createTunnel` takes the `McpHandler`, `send`,
+  `maxChunk()` and `error`; the relay connection and each served port make their own
+  handler (a port's handler names its one client).
+- **Objects, not text.** A port carries the messages as objects (a `MessagePort` clones
+  them); `serve` and `createTunnelFetch.receive` do not parse JSON. Whoever bridges to a
+  text channel encodes.
+- **No `grant` from the caller.** `createTunnelFetch` sends none (its message types have
+  no such field), and `serve` builds each request from the fields it checked plus its own
+  grant `local:<n>`, so a `grant` on the port never reaches the handler.
+- **The timeout runs until the response has ended**, as the relay's `requestTimeoutMs`
+  does, not until its first byte as the plan said: `tools/call` answers with a stream
+  that starts at once, so a timeout to the first byte would never end a call that hangs.
+  `subscriptions/listen` (by its `mcp-method` header) is not limited. On a stream the
+  error is the last event when the stream stands between two events, else the stream
+  breaks.
+- **`error` is never answered** by `serve`, so two ends cannot answer each other for
+  ever; `createTunnelFetch` ends the request a `bad_message` names with `-31007`.
+- **`mcp.hasRelay`** is public because `ConnectButton` has to know that there is nothing
+  to connect, also for a `client` it was handed.
+- **`serve` validates in the lazy chunk** (`client.id`, `maxChunk` of at least 64, a port
+  with `postMessage` and `onmessage`) and rejects with a `TypeError`.
+- **`TunnelPort.onmessage`** is typed as a method (`TunnelPortHandler`), so that a
+  `MessagePort`, whose handler takes a `MessageEvent`, is assignable under
+  `strictFunctionTypes`; the consumer type check covers it.
+- The MCP SDK client 2.4.0's `StreamableHTTPClientTransport` takes `fetch` and works
+  pinned to 2026-07-28 through the tunnel (`test/serve.test.ts`).
+- **Review of PR 114** (claude 6, glm 1; all fixed). `serve` says `bye` when it closes,
+  the protocol's existing message, so the caller's requests end at once with `-31003`
+  instead of waiting for their timeout (a listen stream has none); `createTunnelFetch`
+  closes itself on it and stays closed. An `http.request` whose id is still in flight
+  ends the earlier request, and each `createTunnelFetch` has a random id prefix, so a
+  backend's new tunnel over the old port cannot orphan a call. A port is served once at
+  a time (`InvalidStateError` otherwise). `requestTimeoutMs` must be below 2^31
+  (`Infinity` would fire at once). A failure on a streamed body that is not an event
+  stream is the JSON error as the body, not an SSE event.

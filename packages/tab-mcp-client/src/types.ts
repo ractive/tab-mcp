@@ -48,8 +48,58 @@ export interface WebMcpClient {
 	kind: "webmcp";
 }
 
-/** Who calls a tool: an AI app through the relay, or an agent in the browser (`kind`). */
-export type ToolCallClient = RelayClient | WebMcpClient;
+/**
+ * This site's own assistant, which the page serves its tools to over a port
+ * (`serve`). Not paired: the page chose who holds the other end of the port,
+ * and `id` and `name` are what the page said in `serve`.
+ */
+export interface LocalClient {
+	kind: "local";
+	/** `ServeOptions.client.id`. */
+	id: string;
+	/** `ServeOptions.client.name`. */
+	name?: string;
+}
+
+/**
+ * Who calls a tool (`kind`): an AI app through the relay, an agent in the
+ * browser, or this site's own assistant over a port.
+ */
+export type ToolCallClient = RelayClient | WebMcpClient | LocalClient;
+
+/**
+ * What `serve` talks over: a `MessagePort`, or an object of your own around
+ * another channel. The messages are plain objects (`docs/protocol.md`, "The
+ * tunnel without a relay"); `serve` sets `onmessage`.
+ */
+export interface TunnelPort {
+	postMessage(message: unknown): void;
+	onmessage: TunnelPortHandler | null;
+}
+
+/** `TunnelPort.onmessage` (declared as a method, so that a `MessagePort` fits). */
+export type TunnelPortHandler = {
+	handler(event: { data: unknown }): void;
+}["handler"];
+
+/** Options of `serve`. */
+export interface ServeOptions {
+	/** Who is on the other end: shown in confirmations, passed to `execute` and the events. */
+	client: { id: string; name?: string };
+	/** Aborting it stops serving: calls in flight are aborted, the port is let go. */
+	signal?: AbortSignal;
+	/**
+	 * The largest piece of a response body in one message, in characters
+	 * (UTF-16 units); 65536 by default, at least 64. Longer bodies are streamed.
+	 */
+	maxChunk?: number;
+}
+
+/** What `serve` resolves with. */
+export interface ServeHandle {
+	/** Stop serving this port: calls in flight are aborted, the port is let go. */
+	close(): void;
+}
 
 /** Second argument of `execute`. */
 export interface ToolExecuteOptions {
@@ -58,7 +108,7 @@ export interface ToolExecuteOptions {
 	 * (a WebMCP call: when the browser cancels it).
 	 */
 	signal: AbortSignal;
-	/** Who is calling: `client.kind` is `"relay"` or `"webmcp"`. */
+	/** Who is calling: `client.kind` is `"relay"`, `"webmcp"` or `"local"`. */
 	client: ToolCallClient;
 }
 
@@ -151,8 +201,13 @@ export interface SecretStorage {
 }
 
 export interface TabMcpOptions {
-	/** The relay, e.g. `https://relay.example` or `wss://relay.example`. */
-	relay: string;
+	/**
+	 * The relay, e.g. `https://relay.example` or `wss://relay.example`.
+	 * Without one the page offers its tools only through `serve` and WebMCP:
+	 * `connect()`, `showConnectDialog()` and `newAddress()` reject, and no
+	 * address secret is read or written.
+	 */
+	relay?: string;
 	/** Name, version and instructions of the page's MCP server. */
 	server: ServerInfo;
 	/** The page's app name (e.g. `saturnus`), shown when an AI app pairs; at most 64 characters. */

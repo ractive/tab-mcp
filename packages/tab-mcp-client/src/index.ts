@@ -19,6 +19,7 @@ export type {
 	IdentityState,
 	JsonSchema,
 	Limits,
+	LocalClient,
 	PairingCode,
 	PairingCodeReason,
 	ReconnectingInfo,
@@ -27,6 +28,8 @@ export type {
 	RelayClient,
 	ReplacedDetail,
 	SecretStorage,
+	ServeHandle,
+	ServeOptions,
 	ServerInfo,
 	SessionInfo,
 	TabMcpEventMap,
@@ -39,6 +42,8 @@ export type {
 	ToolCallResult,
 	ToolCallStart,
 	ToolExecuteOptions,
+	TunnelPort,
+	TunnelPortHandler,
 	WebMcpClient,
 } from "./types.ts";
 export { VERSION } from "./version.ts";

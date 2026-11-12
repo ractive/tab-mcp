@@ -31,12 +31,14 @@ const common = {
 
 const npm = await Bun.build({
 	...common,
-	// `./visible` (the escaping the confirmation dialog uses) and `./setup`
-	// (the connect dialog's steps per AI app) are entries of their own, out of
-	// the core (DEC-103, DEC-118).
+	// `./visible` (the escaping the confirmation dialog uses), `./setup` (the
+	// connect dialog's steps per AI app) and `./tunnel` (the caller's end of
+	// `serve`, for a backend) are entries of their own, out of the core
+	// (DEC-103, DEC-118, DEC-125).
 	entrypoints: [
 		entry,
 		join(root, "src/setup.ts"),
+		join(root, "src/tunnel.ts"),
 		join(root, "src/visible.ts"),
 	],
 	outdir: dist,
@@ -108,6 +110,7 @@ const published = {
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	},

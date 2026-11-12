@@ -1,7 +1,12 @@
 # Log
 
+## 2026-11-13
+
+- Iteration 28 built (plan/iteration-28, for client 0.15.0): `mcp.serve(port, { client })`, `@ractive-ch/tab-mcp-client/tunnel` with `createTunnelFetch`, `relay` optional, the caller kind `local`; DEC-122 to DEC-126; threat model A15; the core budget is 6.25 KB
+
 ## 2026-11-12
 
+- Iteration 28 planned: the client serves its tools over a message port (`mcp.serve`) and `@ractive-ch/tab-mcp-client/tunnel` speaks the other end (`createTunnelFetch`), so a site's own assistant in an iframe calls the page's tools through its backend's WebSocket with the `http.*` messages and no relay; `relay` optional on `TabMcp`; five open questions for the owner
 - ext/navigation (iteration 27): navigate, go_back, go_forward and reload for the tab in front while the extension may read it, each answering with the new page's page_info; the page's origin runs at once, another origin (and a back or forward the Navigation API does not list) asks with From and To, Allow or Don't allow only; http(s) only, no user name or password; the result says when the new page needs a click; no new permission; threat model A13; DEC-121
 
 ## 2026-11-10

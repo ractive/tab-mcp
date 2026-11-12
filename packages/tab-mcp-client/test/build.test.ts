@@ -71,14 +71,32 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	console.log(
 		`core ${(coreGz / 1024).toFixed(1)} KB gzipped, connection ${(connection / 1024).toFixed(1)} KB gzipped`,
 	);
-	// 6 KB since client 0.8.0 (DEC-103); 5.5 KB since the fixes of
-	// iteration 13 (DEC-086); 5.25 KB since the per-page secret key
-	// (DEC-083); 5 KB before.
-	expect(coreGz).toBeLessThanOrEqual(6 * 1024);
+	// 6.25 KB since `serve` and the optional relay (DEC-122); 6 KB since
+	// client 0.8.0 (DEC-103); 5.5 KB since the fixes of iteration 13
+	// (DEC-086); 5.25 KB since the per-page secret key (DEC-083); 5 KB before.
+	expect(coreGz).toBeLessThanOrEqual(6.25 * 1024);
+	// `serve` itself is in the lazy chunk, with the tunnel.
+	expect(coreCode).not.toContain("bad_message");
 	expect(connection).toBeLessThanOrEqual(100 * 1024);
 	for (const code of files.values()) {
 		expect(code).not.toMatch(/\bfrom\s*"node:|\bBun\./);
 	}
+});
+
+test("the tunnel entry stands alone: no DOM, nothing of the page's library", async () => {
+	const result = await Bun.build({
+		entrypoints: [join(root, "src/tunnel.ts")],
+		target: "browser",
+		format: "esm",
+		minify: true,
+	});
+	expect(result.success).toBe(true);
+	expect(result.outputs).toHaveLength(1);
+	const code = (await result.outputs[0]?.text()) ?? "";
+	expect(code).not.toMatch(/\bfrom\s*"|\bimport\s*\(/);
+	expect(code).not.toMatch(/\b(document|window|localStorage|Bun)\b/);
+	console.log(`tunnel entry ${(gz(code) / 1024).toFixed(1)} KB gzipped`);
+	expect(gz(code)).toBeLessThanOrEqual(2 * 1024);
 });
 
 const consumer = mkdtempSync(join(tmpdir(), "tab-mcp-client-consumer-"));
@@ -98,6 +116,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 	});
@@ -113,6 +132,8 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"react.d.ts",
 		"setup.js",
 		"setup.d.ts",
+		"tunnel.js",
+		"tunnel.d.ts",
 		"visible.js",
 		"visible.d.ts",
 		"cdn/tab-mcp-client.min.js",
@@ -163,12 +184,13 @@ test("the build produces a package whose declarations type-check for a consumer"
 
 	await Bun.write(
 		join(consumer, "page.ts"),
-		`import { TabMcp, type Tool, type SessionInfo } from "@ractive-ch/tab-mcp-client";
+		`import { TabMcp, type Tool, type SessionInfo, type ServeHandle, type TunnelPort } from "@ractive-ch/tab-mcp-client";
+import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type TunnelCancelMessage } from "@ractive-ch/tab-mcp-client/tunnel";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
 void mcp.registerTool(tool, { signal: new AbortController().signal, webmcp: true });
-mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind); });
+mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind === "local" ? c.id : c.kind); });
 // @ts-expect-error: the caller may be an agent in the browser, which has no host
 mcp.addEventListener("toolcall", (e) => console.log(e.detail.client.host));
 mcp.addEventListener("disconnected", (e) => console.log(e.detail.reason, e.detail.code));
@@ -179,6 +201,18 @@ export const help: string[] = steps.map((s) => \`\${s.app}: \${s.text} \${s.comm
 export const guide: string = SETUP_GUIDE;
 // @ts-expect-error: unknown tool fields are type errors
 mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
+// Without a relay: the tools over a port, a MessagePort or one of the page's own.
+const own = new TabMcp({ server: { name: "x", version: "1" } });
+const channel = new MessageChannel();
+const tunnel: TunnelFetch = createTunnelFetch({ send: (m: TunnelRequestMessage | TunnelCancelMessage) => channel.port2.postMessage(m) });
+channel.port2.onmessage = (e) => tunnel.receive(e.data);
+export const served: Promise<ServeHandle> = own.serve(channel.port1, { client: { id: "chat", name: "Assistant" }, signal: new AbortController().signal, maxChunk: 1024 });
+const port: TunnelPort = { postMessage: (m) => console.log(m), onmessage: null };
+void own.serve(port, { client: { id: "chat" } });
+export const listed: Promise<Response> = tunnel.fetch("https://tab.invalid/mcp", { method: "POST", body: "{}" });
+export const relay: boolean = own.hasRelay;
+// @ts-expect-error: serve needs to know who is on the other end
+void own.serve(channel.port1, {});
 `,
 	);
 	await Bun.write(
@@ -199,7 +233,9 @@ export const app: ReactElement = createElement(
 	createElement(Tools),
 	createElement(ConnectButton, { className: "ai", children: (s: TabMcpSnapshot) => s.state }),
 );
-// @ts-expect-error: the provider needs a relay and a server, or a client
+// Without a relay: tools through serve and WebMCP only.
+export const local: ReactElement = createElement(TabMcpProvider, { server: { name: "x", version: "1" }, webmcp: true });
+// @ts-expect-error: the provider needs a server, or a client
 export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x" });
 `,
 	);
@@ -219,6 +255,7 @@ export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x"
 					"@ractive-ch/tab-mcp-client": [join(dist, "index.d.ts")],
 					"@ractive-ch/tab-mcp-client/react": [join(dist, "react.d.ts")],
 					"@ractive-ch/tab-mcp-client/setup": [join(dist, "setup.d.ts")],
+					"@ractive-ch/tab-mcp-client/tunnel": [join(dist, "tunnel.d.ts")],
 					react: [join(root, "node_modules/@types/react")],
 				},
 			},

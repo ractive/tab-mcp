@@ -22,12 +22,15 @@ import type {
 	ReconnectingInfo,
 	RegisterToolOptions,
 	RelayClient,
+	ServeHandle,
+	ServeOptions,
 	ServerInfo,
 	SessionInfo,
 	TabMcpEventMap,
 	TabMcpOptions,
 	Tool,
 	ToolCallClient,
+	TunnelPort,
 } from "./types.ts";
 import { LIBRARY_NAME, VERSION } from "./version.ts";
 import { mirror, nativeContext } from "./webmcp.ts";
@@ -144,12 +147,18 @@ function sessionInfo(m: SessionMessage): SessionInfo {
 	return info;
 }
 
+/** What `connect()`, `showConnectDialog()` and `newAddress()` reject with without a relay. */
+function noRelay(): Promise<never> {
+	return Promise.reject(new TypeError("TabMcp: this TabMcp has no relay"));
+}
+
 type Listener<K extends keyof TabMcpEventMap> = (
 	event: TabMcpEventMap[K],
 ) => void;
 
 /**
- * Offers a page's tools to AI apps through a tab-mcp relay.
+ * Offers a page's tools to AI apps through a tab-mcp relay (and, without
+ * `relay`, only through `serve` and WebMCP).
  *
  * ```ts
  * const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "Calculator", version: "1.0.0" } });
@@ -164,8 +173,9 @@ export class TabMcp extends EventTarget {
 	readonly #onConfirm: ConfirmHandler | undefined;
 	readonly #confirmDelayMs: number | undefined;
 	readonly #alwaysAllow: boolean;
-	readonly #relayUrl: string;
-	readonly #secrets: SecretStore;
+	/** `undefined` without a relay: tools only through `serve` and WebMCP. */
+	readonly #relayUrl: string | undefined;
+	readonly #secrets: SecretStore | undefined;
 	/** The channel of the tabs that share the secret (DEC-095). */
 	readonly #tabs: string | undefined;
 	/** Replaced since the last session: `newAddress()` takes the address back first. */
@@ -208,8 +218,9 @@ export class TabMcp extends EventTarget {
 
 	constructor(options: TabMcpOptions) {
 		super();
-		const { url, origin } = tabUrl(options.relay);
 		const { server, appName } = options;
+		const relay =
+			options.relay === undefined ? undefined : tabUrl(options.relay);
 		if (
 			typeof server?.name !== "string" ||
 			typeof server.version !== "string"
@@ -221,7 +232,7 @@ export class TabMcp extends EventTarget {
 				"TabMcp: appName must be 1-64 characters without control characters",
 			);
 		}
-		this.#relayUrl = url;
+		this.#relayUrl = relay?.url;
 		this.#server = { ...server };
 		this.#appName = appName;
 		this.#onConfirm = options.onConfirm;
@@ -234,19 +245,23 @@ export class TabMcp extends EventTarget {
 		this.#identityTimeoutMs =
 			delayOption("identityTimeoutMs", options.identityTimeoutMs) ?? 15_000;
 		this.#reconnectDelays = reconnectDelays(options.reconnect);
-		// One address per relay and page (server name); the default of 0.4 and
-		// older, per relay only, is moved over once (DEC-083).
-		const key =
-			options.storageKey ??
-			`tab-mcp:secret:${origin}:${encodeURIComponent(server.name)}`;
-		this.#secrets = new SecretStore(
-			options.storage,
-			key,
-			options.storageKey === undefined ? `tab-mcp:secret:${origin}` : undefined,
-		);
-		// Tabs that share the secret share this channel; with `storage: null`
-		// every tab has an address of its own (DEC-095).
-		this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
+		if (relay !== undefined) {
+			// One address per relay and page (server name); the default of 0.4 and
+			// older, per relay only, is moved over once (DEC-083).
+			const key =
+				options.storageKey ??
+				`tab-mcp:secret:${relay.origin}:${encodeURIComponent(server.name)}`;
+			this.#secrets = new SecretStore(
+				options.storage,
+				key,
+				options.storageKey === undefined
+					? `tab-mcp:secret:${relay.origin}`
+					: undefined,
+			);
+			// Tabs that share the secret share this channel; with `storage: null`
+			// every tab has an address of its own (DEC-095).
+			this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
+		}
 		this.#registry.onChange(() =>
 			this.#emit("toolschange", { tools: this.tools }),
 		);
@@ -429,6 +444,7 @@ export class TabMcp extends EventTarget {
 	 * While reconnecting (`reconnecting`), it makes the next attempt at once.
 	 */
 	connect(options: ConnectOptions = {}): Promise<SessionInfo> {
+		if (this.#relayUrl === undefined) return noRelay();
 		if (this.#state === "connected" && this.#session !== undefined) {
 			return Promise.resolve(this.#session);
 		}
@@ -488,6 +504,8 @@ export class TabMcp extends EventTarget {
 
 	async #open(generation: number, revokeAll?: boolean): Promise<SessionInfo> {
 		const { openConnection, addressIdOf, withAddress } = await this.#load();
+		const relayUrl = this.#relayUrl;
+		if (relayUrl === undefined || this.#secrets === undefined) return noRelay();
 		const secret = this.#secrets.get();
 		const address = await addressIdOf(secret);
 		if (generation !== this.#generation) {
@@ -496,13 +514,43 @@ export class TabMcp extends EventTarget {
 		const ref: { connection?: ConnectionHandle } = {};
 		const connection = openConnection(
 			this.#host(ref),
-			withAddress(this.#relayUrl, address),
+			withAddress(relayUrl, address),
 			secret,
 			revokeAll,
 		);
 		ref.connection = connection;
 		this.#connection = connection;
 		return connection.ready;
+	}
+
+	/** Whether this `TabMcp` has a relay; without one, `connect()` rejects. */
+	get hasRelay(): boolean {
+		return this.#relayUrl !== undefined;
+	}
+
+	/**
+	 * Serve the tools over a port, without a relay: for this site's own
+	 * assistant, e.g. a chat in an iframe whose backend calls the tools through
+	 * `createTunnelFetch` (`@ractive-ch/tab-mcp-client/tunnel`). The port
+	 * carries the relay's `http.*` messages as plain objects; a `MessagePort`
+	 * fits. Whoever holds the other end calls the tools without pairing, as
+	 * `options.client` (`kind: "local"`): hand it out only to a frame whose
+	 * origin you checked. Consequential tools still ask. Resolves once the port
+	 * is served; may be called for several ports. Rejects with a `TypeError`
+	 * for options it cannot use.
+	 */
+	serve(port: TunnelPort, options: ServeOptions): Promise<ServeHandle> {
+		return this.#load().then((lazy) =>
+			lazy.servePort(
+				{
+					...this.#calls,
+					server: this.#server,
+					error: (error) => this.#emit("error", { error }),
+				},
+				port,
+				options,
+			),
+		);
 	}
 
 	/** End the session (`bye`). Grants stay: AI apps work again after the next `connect()`. */
@@ -519,6 +567,7 @@ export class TabMcp extends EventTarget {
 	 * user action.
 	 */
 	newAddress(): Promise<SessionInfo | undefined> {
+		if (this.#relayUrl === undefined) return noRelay();
 		if (this.#takenOver) {
 			// `hello.revokeAll`: the relay revokes as it hands the address back, and
 			// the connection resolves only once no grant is left. Taken over again
@@ -541,7 +590,7 @@ export class TabMcp extends EventTarget {
 		if (this.#state === "connected")
 			this.#connection?.send({ type: "grants.revokeAll" });
 		this.#end("new_address");
-		this.#secrets.rotate();
+		this.#secrets?.rotate();
 		this.#takenOver = false; // nobody else has the new secret
 		// It was on: the user chose that already, as for a reconnect.
 		return wasOn ? this.connect({ resume: true }) : Promise.resolve(undefined);
@@ -686,6 +735,7 @@ export class TabMcp extends EventTarget {
 	 * own UI use the events and methods instead.
 	 */
 	showConnectDialog(options: { document?: Document } = {}): Promise<void> {
+		if (this.#relayUrl === undefined) return noRelay();
 		const doc = options.document ?? globalThis.document;
 		const open = this.#connectDialog;
 		if (open !== undefined) {

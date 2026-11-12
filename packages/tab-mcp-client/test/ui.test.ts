@@ -307,6 +307,45 @@ describe("a WebMCP caller (iteration 25)", () => {
 	});
 });
 
+describe("a caller served over a port (iteration 28)", () => {
+	test("is named with what the page said, as this site's assistant, without Always allow", async () => {
+		const g = globalThis as { document?: Document | undefined };
+		const saved = g.document;
+		g.document = doc;
+		const mcp = newTab("http://127.0.0.1:9", { alwaysAllow: true });
+		const shownFor = async (client: { id: string; name?: string }) => {
+			const answer = mcp.confirmInPage({
+				...question(),
+				client: { kind: "local", ...client },
+			});
+			let dialog: HTMLDialogElement | null = null;
+			while (dialog === null) {
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				dialog = doc.querySelector("dialog.tab-mcp-confirm");
+			}
+			const text = dialog.querySelector("p")?.textContent;
+			const offered = buttons(dialog).map((b) => b.textContent);
+			byText(dialog, "Don't allow").click();
+			expect(await answer).toBe(false);
+			return { text, offered };
+		};
+		try {
+			expect(await shownFor({ id: "chat", name: "Example assistant" })).toEqual(
+				{
+					text: "Example assistant (this site's assistant) wants to run Clear memory.",
+					offered: ["Don't allow", "Allow"],
+				},
+			);
+			// Without a name, the id; invisible characters are shown as escapes.
+			expect((await shownFor({ id: "chat\u202e" })).text).toBe(
+				"chat\\u202E (this site's assistant) wants to run Clear memory.",
+			);
+		} finally {
+			g.document = saved;
+		}
+	});
+});
+
 describe("confirmDialog safety (review of PR #2)", () => {
 	test("long arguments are shown in full", async () => {
 		const long = "x".repeat(5000);
