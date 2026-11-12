@@ -2375,6 +2375,12 @@ reason.
 - **A call the browser cancelled still rejects** (`AbortError`): the browser cancelled it
   for its caller (Chrome rejects that caller with its own `AbortError` at once), so
   nobody reads an answer, and a rejection keeps it from looking like a result.
+- **A call when the lazy chunk cannot be loaded still rejects** (review of PR 107): a new
+  deploy with other chunk names while the page stays open, the network, a Content
+  Security Policy. The agent then gets Chrome's bare `UnknownError`; reloading the page
+  fixes it. Turning it into an error result belongs in the core (the `import()` there
+  failed), and the smallest such fallback took the core from 6,131 to 6,148 B gzipped,
+  over the 6 KB budget (DEC-103).
 - `toolcallend` keeps the outcomes (`error`, `declined`, `cancelled`) and the MCP result;
   calls through the relay are unchanged. The change is in the lazy chunk only
   (`webMcpCall` in `mcp.ts`); the core is unchanged.

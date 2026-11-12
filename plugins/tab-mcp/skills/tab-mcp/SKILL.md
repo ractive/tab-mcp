@@ -218,7 +218,9 @@ await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only
 - The agent gets what `execute` returned. A failure (invalid arguments, "Don't allow", a
   tool that is gone, a thrown error, an `isError` result) comes back as
   `{ error: "<message>" }`, not as a rejection, which Chrome would hand the agent as a
-  bare `UnknownError`. Only a call the browser cancelled rejects (`AbortError`).
+  bare `UnknownError`. Two cases still reject: a call the browser cancelled
+  (`AbortError`), and a call when the library's lazily loaded part cannot be loaded (a
+  new deploy while the page stays open, the network); reloading the page fixes that.
 - Only the native object is used, never a polyfill such as `@mcp-b/global`. A failed
   native registration (a name already registered natively, a frame without
   `allow="tools"`) only warns in the console; the tool stays offered through the relay.

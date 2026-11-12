@@ -297,14 +297,14 @@ function validate(tool: RegisteredTool, args: Json): string | undefined {
 }
 
 /**
- * How a call ended. `stop`: it did not run to its end, and why (named as
- * the `DOMException` or `TypeError` that would say so). `returned`: what
- * `execute` returned.
+ * How a call ended. `stop`: why it did not run to its end: invalid
+ * arguments, declined by the user, cancelled, or its tool gone. `returned`:
+ * what `execute` returned.
  */
 export interface CallRun {
 	outcome: ToolCallOutcome;
 	result: CallToolResult;
-	stop?: "TypeError" | "NotAllowedError" | "AbortError" | "InvalidStateError";
+	stop?: "invalid" | "declined" | "cancelled" | "gone";
 	returned?: { value: unknown };
 }
 
@@ -365,7 +365,7 @@ async function decideAndRun(
 		stop: NonNullable<CallRun["stop"]>,
 	): CallRun => ({ outcome, result: errorResult(message), stop });
 	const invalid = validate(tool, raw);
-	if (invalid !== undefined) return stopped("error", invalid, "TypeError");
+	if (invalid !== undefined) return stopped("error", invalid, "invalid");
 	if (tool.annotations.consequentialHint === true) {
 		const question: ConfirmRequest = {
 			tool: { name: tool.name, description: tool.description },
@@ -382,18 +382,14 @@ async function decideAndRun(
 		}
 		if (!allowed)
 			return signal.aborted
-				? stopped("cancelled", "The user declined", "AbortError")
-				: stopped("declined", "The user declined", "NotAllowedError");
+				? stopped("cancelled", "The user declined", "cancelled")
+				: stopped("declined", "The user declined", "declined");
 	}
-	if (signal.aborted) return stopped("cancelled", "Cancelled", "AbortError");
+	if (signal.aborted) return stopped("cancelled", "Cancelled", "cancelled");
 	// Unregistered (or replaced) while the user was asked: not the tool
 	// the user allowed, or one the page still offers.
 	if (context.tools.get(tool.name) !== tool)
-		return stopped(
-			"error",
-			"The tool is no longer available",
-			"InvalidStateError",
-		);
+		return stopped("error", "The tool is no longer available", "gone");
 	let run: CallRun;
 	try {
 		const value = await tool.execute(raw, { signal, client });
@@ -407,7 +403,7 @@ async function decideAndRun(
 	}
 	// Cancelled is cancelled, however the tool answered the abort.
 	if (signal.aborted)
-		return { ...run, outcome: "cancelled", stop: "AbortError" };
+		return { ...run, outcome: "cancelled", stop: "cancelled" };
 	if (run.result.isError === true) run.outcome = "error";
 	return run;
 }
@@ -440,11 +436,11 @@ export async function webMcpCall(
 		signal instanceof AbortSignal ? signal : new AbortController().signal,
 		{ kind: "webmcp" },
 	);
-	if (run.stop === "AbortError")
+	if (run.stop === "cancelled")
 		throw new DOMException("Cancelled", "AbortError");
-	if (run.stop === "NotAllowedError")
+	if (run.stop === "declined")
 		return failed(`The user did not allow ${tool.name} to run.`);
-	if (run.stop === "InvalidStateError") return failed(gone);
+	if (run.stop === "gone") return failed(gone);
 	if (run.result.isError === true)
 		return failed(resultText(run.result) || "The tool failed.");
 	return run.returned?.value;

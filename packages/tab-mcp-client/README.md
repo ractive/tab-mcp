@@ -141,8 +141,11 @@ Chrome has WebMCP for sites in its
   message as for an AI app), "Don't allow" (`The user did not allow <tool> to run.`), a
   tool that is gone, an error thrown by `execute` (its message) and an MCP result with
   `isError: true` (its text). A rejection would not help: Chrome 156 hands the agent
-  every rejection as a bare `UnknownError`, without its message. Only a call the browser
-  cancelled rejects (`AbortError`), since its caller no longer waits for an answer.
+  every rejection as a bare `UnknownError`, without its message. Two cases still
+  reject: a call the browser cancelled (`AbortError`), since its caller no longer waits
+  for an answer, and a call made when the library's lazily loaded part cannot be loaded
+  (a new deploy with other chunk names while the page stays open, the network, a
+  Content Security Policy); reloading the page fixes the latter.
   `toolcallend` reports the outcome as for an AI app (`error`, `declined`, `cancelled`).
 - Only the native object is used, read through `Document.prototype`'s getter: an own
   `document.modelContext` (a polyfill such as `@mcp-b/global`, or a page script) is
