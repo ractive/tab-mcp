@@ -8,7 +8,17 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
-### Unreleased
+### [0.12.1][client-0.12.1] - 2026-11-11
+
+#### Fixed
+
+- The npm build no longer carries Bun's chunk preload map. A page that bundles the
+  library again (Vite, webpack, Bun) got `<link rel="modulepreload">` requests for the
+  library's own chunk names (`./index-<hash>.js`) when the connect dialog loaded; they do
+  not exist in the page's build, so each one was a 404 and a console error. The CDN build
+  keeps the map: its chunks are served beside it.
+
+### [0.12.0][client-0.12.0] - 2026-11-11
 
 #### Added
 
@@ -17,6 +27,17 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   `text`, `command`, `note`; types `SetupInstruction`, `SetupNotePart`), and `SETUP_GUIDE`,
   the guide's address, for pages and extensions that show the steps in their own UI. An
   entry of its own, out of the core; tab-mcp for Chrome uses it (DEC-118).
+- `@ractive-ch/tab-mcp-client/visible`: `escapeInvisible(text)`, the escaping the
+  confirmation dialog uses for the arguments and the AI app's name, for pages (and tab-mcp
+  for Chrome) that ask in their own UI. An entry of its own, not in the core.
+
+#### Changed
+
+- The confirmation dialog also escapes C0 controls and DEL (but tab and line feed), lone
+  surrogates, every space but the plain one (U+00A0, U+2007, U+3000…) and the Braille
+  blank (U+2800) in the arguments and the AI app's name.
+- The CDN build bundles `@cfworker/json-schema` 4.1.6 (was 4.1.4); the dependency is
+  pinned to it.
 
 ### [0.11.0][client-0.11.0] - 2026-11-09
 
@@ -30,9 +51,6 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   `.tab-mcp-setup` and `.tab-mcp-code-used`.
 - `PairingCode.reason` (`start`, `used`, `locked`, `expired`, type `PairingCodeReason`):
   why the relay sent the code, when it says so. A missing or unknown reason is left out.
-- `@ractive-ch/tab-mcp-client/visible`: `escapeInvisible(text)`, the escaping the
-  confirmation dialog uses for the arguments and the AI app's name, for pages (and tab-mcp
-  for Chrome) that ask in their own UI. An entry of its own, not in the core.
 
 #### Changed
 
@@ -374,7 +392,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.9.0][relay-0.9.0] - 2026-11-11
 
 #### Added
 
@@ -804,6 +822,8 @@ First release, version 0.1.0.
   `<all_urls>` only as an optional permission. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[client-0.12.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.1
+[client-0.12.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.12.0
 [client-0.11.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.11.0
 [client-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.10.0
 [client-0.9.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.9.1
@@ -819,6 +839,7 @@ First release, version 0.1.0.
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.9.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.9.0
 [relay-0.8.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.8.0
 [relay-0.7.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.1
 [relay-0.7.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.0
