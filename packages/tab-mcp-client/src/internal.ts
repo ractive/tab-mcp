@@ -6,6 +6,7 @@
 import type { GrantRef, SessionMessage, TabMessage } from "./protocol.ts";
 import type { ToolRegistry } from "./registry.ts";
 import type {
+	ConfirmAnswer,
 	ConfirmRequest,
 	DisconnectReason,
 	Grant,
@@ -22,7 +23,7 @@ import type {
 export interface CallHost {
 	readonly registry: ToolRegistry;
 	/** Ask the user about a consequential tool call. */
-	confirm(request: ConfirmRequest): Promise<boolean>;
+	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
 	/** A tool call started or ended (the `toolcall` and `toolcallend` events). */
 	toolCallStarted(call: ToolCallStart): void;
 	toolCallEnded(call: ToolCallEnd): void;

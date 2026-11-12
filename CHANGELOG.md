@@ -8,6 +8,22 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Added
+
+- `onConfirm` may return (or resolve with) `"unanswered"` besides `true` and `false`: the
+  user was asked and did not answer, e.g. a question of the page's own that timed out.
+  The AI app then reads "The user was asked and did not answer." instead of "The user
+  declined", and an agent in the browser (`webmcp: true`) gets `{ error: "The user did not
+  answer whether <tool> may run." }`. New type `ConfirmAnswer`. Before, every answer but
+  `true` read as a refusal. A throw from `onConfirm` is still a refusal.
+
+#### Changed
+
+- `ToolCallOutcome` (the `toolcallend` event) has a new member, `unanswered`. Code that
+  switches over every outcome needs a case for it.
+
 ### [0.13.1][client-0.13.1] - 2026-11-12
 
 #### Changed

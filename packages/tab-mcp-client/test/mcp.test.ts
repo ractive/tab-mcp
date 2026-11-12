@@ -15,7 +15,12 @@ import {
 } from "../src/mcp.ts";
 import type { GrantRef } from "../src/protocol.ts";
 import { type RegisteredTool, ToolRegistry } from "../src/registry.ts";
-import type { ConfirmRequest, JsonSchema, ToolCallEnd } from "../src/types.ts";
+import type {
+	ConfirmAnswer,
+	ConfirmRequest,
+	JsonSchema,
+	ToolCallEnd,
+} from "../src/types.ts";
 import { rpc } from "./helpers.ts";
 
 const ADD_SCHEMA = {
@@ -31,7 +36,7 @@ const GRANT: GrantRef = {
 };
 
 function ours(
-	confirm: (r: ConfirmRequest) => Promise<boolean> = async () => true,
+	confirm: (r: ConfirmRequest) => Promise<ConfirmAnswer> = async () => true,
 ) {
 	const registry = new ToolRegistry();
 	registry.register({
@@ -535,7 +540,9 @@ describe("results", () => {
 });
 
 describe("consequential tools", () => {
-	const consequential = (confirm: (r: ConfirmRequest) => Promise<boolean>) => {
+	const consequential = (
+		confirm: (r: ConfirmRequest) => Promise<ConfirmAnswer>,
+	) => {
 		const { registry, handler } = ours(confirm);
 		let runs = 0;
 		registry.register({
@@ -602,6 +609,17 @@ describe("consequential tools", () => {
 			});
 			expect(t.runs()).toBe(0);
 		}
+	});
+
+	test('"unanswered" is an isError result of its own', async () => {
+		const t = consequential(async () => "unanswered");
+		expect(await t.call()).toMatchObject({
+			isError: true,
+			content: [
+				{ type: "text", text: "The user was asked and did not answer." },
+			],
+		});
+		expect(t.runs()).toBe(0);
 	});
 
 	test("the tool list shows destructiveHint and the WebMCP hint", async () => {

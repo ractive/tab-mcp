@@ -9,6 +9,7 @@ import type { GrantRef, SessionMessage } from "./protocol.ts";
 import { ToolRegistry } from "./registry.ts";
 import { SecretStore } from "./secret.ts";
 import type {
+	ConfirmAnswer,
 	ConfirmHandler,
 	ConfirmRequest,
 	ConnectionState,
@@ -781,12 +782,13 @@ export class TabMcp extends EventTarget {
 		this.#emit("grantschange", { grants: this.#grants });
 	}
 
-	#confirm(request: ConfirmRequest): Promise<boolean> {
+	#confirm(request: ConfirmRequest): Promise<ConfirmAnswer> {
 		if (this.#onConfirm !== undefined) {
 			const ask = this.#onConfirm;
+			// Anything but true or "unanswered" is a refusal.
 			return Promise.resolve()
 				.then(() => ask(request))
-				.then((allowed) => allowed === true);
+				.then((answer) => (answer === "unanswered" ? answer : answer === true));
 		}
 		return this.confirmInPage(request);
 	}

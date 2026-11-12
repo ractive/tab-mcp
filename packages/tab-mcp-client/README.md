@@ -212,6 +212,11 @@ const mcp = new TabMcp({
 });
 ```
 
+`onConfirm` returns `true` (run), `false` (the user refused) or `"unanswered"`: the user was
+asked and did not answer, e.g. your question timed out. The AI app then reads "The user was
+asked and did not answer." instead of "The user declined", and `toolcallend` has the
+outcome `unanswered`. Any other value, and a throw, is a refusal.
+
 `mcp.confirmInPage(request)` is the library's own dialog, for an `onConfirm` that
 handles only some calls itself.
 

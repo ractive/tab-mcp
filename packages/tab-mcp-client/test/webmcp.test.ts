@@ -516,6 +516,27 @@ describe("calls", () => {
 		expect(events.end[1]?.outcome).toBe("ok");
 	});
 
+	test('onConfirm\'s "unanswered" resolves with its own error and outcome; another value is a refusal', async () => {
+		let answer: unknown = "unanswered";
+		const t = tab({ onConfirm: () => answer as boolean });
+		await t.registerTool(wipe, { webmcp: true });
+		const events = watched(t);
+		await settle();
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not answer whether wipe may run.",
+		});
+		expect(events.end[0]?.outcome).toBe("unanswered");
+		expect(events.end[0]?.result.content).toEqual([
+			{ type: "text", text: "The user was asked and did not answer." },
+		]);
+		// From plain JavaScript: only true runs, only "unanswered" is unanswered.
+		answer = "yes";
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not allow wipe to run.",
+		});
+		expect(events.end[1]?.outcome).toBe("declined");
+	});
+
 	test("an isError result and a throw resolve with their message", async () => {
 		const t = tab();
 		const thrown = new RangeError("too big");

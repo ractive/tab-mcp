@@ -132,10 +132,17 @@ export interface ConfirmRequest {
 	signal: AbortSignal;
 }
 
+/**
+ * The answer to a consequential tool call: `true` runs it, `false` is a
+ * refusal, `"unanswered"` says the user was asked and did not answer (e.g. a
+ * question of your own that timed out). The AI app is told which.
+ */
+export type ConfirmAnswer = boolean | "unanswered";
+
 /** Decides whether a consequential tool may run. */
 export type ConfirmHandler = (
 	request: ConfirmRequest,
-) => boolean | Promise<boolean>;
+) => ConfirmAnswer | Promise<ConfirmAnswer>;
 
 /** Where the address secret is kept (`localStorage` by default). */
 export interface SecretStorage {
@@ -371,8 +378,16 @@ export interface ToolCallStart {
 	client: ToolCallClient;
 }
 
-/** How a tool call ended: `declined` by the user, `cancelled` by the AI app. */
-export type ToolCallOutcome = "ok" | "error" | "declined" | "cancelled";
+/**
+ * How a tool call ended: `declined` by the user, `unanswered` (the user was
+ * asked and did not answer, see `ConfirmAnswer`), `cancelled` by the AI app.
+ */
+export type ToolCallOutcome =
+	| "ok"
+	| "error"
+	| "declined"
+	| "unanswered"
+	| "cancelled";
 
 /** The MCP result of a tool call, as the AI app gets it. */
 export interface ToolCallResult {
@@ -421,6 +436,6 @@ export interface TabMcpEventMap {
 	reconnecting: CustomEvent<ReconnectingInfo | null>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;
-	/** That call ended; also when the user declined it or the AI app cancelled it. */
+	/** That call ended; also when the user declined it, did not answer, or the AI app cancelled it. */
 	toolcallend: CustomEvent<ToolCallEnd>;
 }
