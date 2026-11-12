@@ -27,6 +27,7 @@ import {
 import type { GrantRef } from "./protocol.ts";
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
 import type {
+	ConfirmAnswer,
 	ConfirmRequest,
 	ServerInfo,
 	ToolCallClient,
@@ -57,7 +58,7 @@ export interface ToolSource {
 export interface CallContext {
 	tools: ToolSource;
 	/** Ask the user before a consequential tool runs. */
-	confirm(request: ConfirmRequest): Promise<boolean>;
+	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
 	/** Told about every call of a known tool, as it starts and as it ends. */
 	observe?: {
 		start(call: ToolCallStart): void;
@@ -298,13 +299,13 @@ function validate(tool: RegisteredTool, args: Json): string | undefined {
 
 /**
  * How a call ended. `stop`: why it did not run to its end: invalid
- * arguments, declined by the user, cancelled, or its tool gone. `returned`:
- * what `execute` returned.
+ * arguments, declined by the user, not answered by the user, cancelled, or
+ * its tool gone. `returned`: what `execute` returned.
  */
 export interface CallRun {
 	outcome: ToolCallOutcome;
 	result: CallToolResult;
-	stop?: "invalid" | "declined" | "cancelled" | "gone";
+	stop?: "invalid" | "declined" | "unanswered" | "cancelled" | "gone";
 	returned?: { value: unknown };
 }
 
@@ -351,6 +352,9 @@ export async function runCall(
 	return run;
 }
 
+/** What the AI app reads when the user was asked and did not answer. */
+const UNANSWERED = "The user was asked and did not answer.";
+
 /** Validate, confirm and run one call. */
 async function decideAndRun(
 	context: CallContext,
@@ -374,16 +378,19 @@ async function decideAndRun(
 			signal,
 		};
 		if (tool.title !== undefined) question.tool.title = tool.title;
-		let allowed = false;
+		let answer: ConfirmAnswer = false;
 		try {
-			allowed = await context.confirm(question);
+			answer = await context.confirm(question);
 		} catch {
-			allowed = false;
+			answer = false; // a failing question is a refusal
 		}
-		if (!allowed)
-			return signal.aborted
-				? stopped("cancelled", "The user declined", "cancelled")
+		if (answer !== true) {
+			if (signal.aborted)
+				return stopped("cancelled", "The user declined", "cancelled");
+			return answer === "unanswered"
+				? stopped("unanswered", UNANSWERED, "unanswered")
 				: stopped("declined", "The user declined", "declined");
+		}
 	}
 	if (signal.aborted) return stopped("cancelled", "Cancelled", "cancelled");
 	// Unregistered (or replaced) while the user was asked: not the tool
@@ -413,7 +420,8 @@ async function decideAndRun(
  * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
  * Resolves with what `execute` returned. Every failure the agent should read
  * resolves too, as `{ error: "<message>" }`: invalid arguments, "Don't
- * allow", a tool that is gone, what `execute` threw, an `isError` result.
+ * allow", a question not answered, a tool that is gone, what `execute`
+ * threw, an `isError` result.
  * Chrome 156 turns a rejection into a bare `UnknownError`, so the agent
  * would learn neither why nor what to change (DEC-120). Only a call the
  * browser cancelled rejects (`AbortError`): its caller has gone already.
@@ -440,6 +448,8 @@ export async function webMcpCall(
 		throw new DOMException("Cancelled", "AbortError");
 	if (run.stop === "declined")
 		return failed(`The user did not allow ${tool.name} to run.`);
+	if (run.stop === "unanswered")
+		return failed(`The user did not answer whether ${tool.name} may run.`);
 	if (run.stop === "gone") return failed(gone);
 	if (run.result.isError === true)
 		return failed(resultText(run.result) || "The tool failed.");
