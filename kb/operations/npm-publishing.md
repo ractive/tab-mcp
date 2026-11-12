@@ -167,13 +167,14 @@ commands in an up-to-date checkout of `main`.
 
 ## Later releases
 
-1. Set the new version in `packages/tab-mcp-client/package.json`,
-   `packages/tab-mcp-client/src/version.ts` and the CDN link in
-   `packages/tab-mcp-client/README.md` (tests keep all three equal), run `bun install`
-   (the lockfile records it), update the pinned versions in the docs and plugin manifests
-   (the test "docs and plugin manifests name only the current package versions" in
-   `packages/tab-mcp-client/test/build.test.ts` lists the files and fails on any other
-   version), add a `CHANGELOG.md` entry, merge to `main`.
+1. With the release in `CHANGELOG.md` under `### Unreleased`, run
+   `bun scripts/bump-version.ts client <version>`: it sets
+   `packages/tab-mcp-client/package.json` (`src/version.ts` reads it), the pinned versions
+   in the docs and plugin manifests (`scripts/pinned-files.ts`; the test "docs and plugin
+   manifests name only the current package versions" fails on any other version), dates
+   the CHANGELOG section and runs `bun install`. Merge to `main`. The whole release,
+   including updating the apps that use the client, is the project skill
+   `.claude/skills/release/SKILL.md`.
 2. Create a GitHub release with the tag `client-v<version>` on exactly that merge commit,
    not on whatever `main` points to by then. Mark it as a pre-release exactly when the
    version is one (`0.1.0-alpha.1`, `0.2.0-beta.0`, `1.0.0-rc.1`); a stable version is a
@@ -309,8 +310,8 @@ the client only). Then:
 
 ### Later relay releases
 
-Set the version in `packages/tab-mcp/package.json`, run `bun install`, add a `CHANGELOG.md`
-entry, merge, create the release `relay-v<version>` on the merge commit (pre-release flag
+Run `bun scripts/bump-version.ts relay <version>` (package.json, the pinned docs and image
+tags, the CHANGELOG date, `bun install`), merge, create the release `relay-v<version>` on the merge commit (pre-release flag
 exactly when the version is one) and approve both jobs. To retry without a new release:
 `gh workflow run release.yml --ref relay-v<version> -f package=relay -f mode=publish -f
 version=<version>`; an identical npm version is skipped and the image is pushed again with

@@ -7,6 +7,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PINNED_FILES } from "../../../scripts/pinned-files.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -231,27 +232,6 @@ export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x"
 	expect(tsc.stdout.toString() + tsc.stderr.toString()).toBe("");
 	expect(tsc.exitCode).toBe(0);
 }, 60_000);
-
-/**
- * Docs and plugin manifests that pin a version (the release checklist in
- * kb/operations/npm-publishing.md). Paths from the repository root.
- */
-const PINNED_FILES = [
-	"README.md",
-	"SECURITY.md",
-	"packages/tab-mcp/README.md",
-	"packages/tab-mcp-client/README.md",
-	"test/e2e/README.md",
-	"docs/protocol.md",
-	"docs/self-hosting.md",
-	"docs/threat-model.md",
-	"docs/token-store.md",
-	"plugins/tab-mcp/README.md",
-	"plugins/tab-mcp/skills/tab-mcp/SKILL.md",
-	"plugins/tab-mcp/.claude-plugin/plugin.json",
-	"plugins/tab-mcp/.codex-plugin/plugin.json",
-	".claude-plugin/marketplace.json",
-];
 
 test("docs and plugin manifests name only the current package versions", async () => {
 	const repo = join(root, "../..");
