@@ -8,6 +8,19 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Changed
+
+- A WebMCP call (`webmcp: true`) that fails resolves with `{ error: "<message>" }`
+  instead of rejecting: invalid arguments, "Don't allow" (`The user did not allow <tool>
+  to run.`), a tool that is gone, an error thrown by `execute` and an `isError` result.
+  Chrome 156 hands the agent every rejection as a bare `UnknownError`, so it could not
+  tell why a call failed or what to change. Two cases still reject: a call the browser
+  cancelled (`AbortError`), and a call when the library's lazily loaded part cannot be
+  loaded (a new deploy while the page stays open, the network; reloading the page fixes
+  it). `toolcallend` and calls through the relay are unchanged (DEC-120).
+
 ### [0.13.0][client-0.13.0] - 2026-11-12
 
 #### Added

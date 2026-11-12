@@ -36,10 +36,9 @@ const POLYFILL_SRI =
  * The test page: the library with `webmcp: true` (`?off`: without), its
  * tools, and what the harness reads. `?native=<name>` registers a tool of
  * that name natively before the library does; `?poly` loads `@mcp-b/global`
- * first; `?dialog` asks with the library's own confirmation. The page wraps
- * the native `registerTool` (not the getter) to keep each mirror's
- * `execute`, so the harness can see what it rejects with: Chrome's
- * `executeTool()` turns every rejection into an `UnknownError`.
+ * first; `?dialog` asks with the library's own confirmation. `agent()`
+ * calls a tool as an agent does, through the native `executeTool()`, which
+ * hands back the result as JSON text.
  */
 const PAGE = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>WebMCP mirror</title>
@@ -50,14 +49,6 @@ const q = new URLSearchParams(location.search);
 window.warnings = [];
 const warn = console.warn;
 console.warn = (...args) => { warnings.push(args.map(String).join(" ")); warn(...args); };
-window.executes = {};
-if (typeof ModelContext === "function") {
-	const register = ModelContext.prototype.registerTool;
-	ModelContext.prototype.registerTool = function (tool, options) {
-		executes[tool.name] = tool.execute;
-		return register.call(this, tool, options);
-	};
-}
 const native = Object.getOwnPropertyDescriptor(Document.prototype, "modelContext")?.get?.call(document);
 if (q.has("native")) await native.registerTool({ name: q.get("native"), description: "The page's own", execute: () => "page" });
 const { TabMcp } = await import("/lib/index.js");
@@ -102,13 +93,6 @@ window.agent = async (name, input, cancelAfterMs) => {
 		return { ok: true, value: await native.executeTool(tool, input, { signal: controller.signal }) };
 	} catch (e) {
 		return { ok: false, error: e.name };
-	}
-};
-window.direct = async (name, input) => {
-	try {
-		return { ok: true, value: await executes[name](input, { signal: new AbortController().signal }) };
-	} catch (e) {
-		return { ok: false, error: e.name, message: e.message };
 	}
 };
 window.ready = true;
@@ -284,30 +268,33 @@ on(
 );
 
 on(
-	"a bad argument and a declined call reject with their names (Chrome's executeTool: UnknownError)",
+	"a bad argument, Don't allow and a throw reach the agent as a readable error (DEC-120)",
 	async () => {
 		const page = await open();
 		try {
-			expect(
-				await page.eval(`direct("add", { a: "one", b: 2 })`),
-			).toMatchObject({ ok: false, error: "TypeError" });
-			expect(await page.eval(`direct("wipe_named", {})`)).toMatchObject({
-				ok: false,
-				error: "NotAllowedError",
+			await page.eval(
+				`mcp.registerTool({ name: "broken", description: "Always fails", execute: () => { throw new Error("Out of paper"); } })`,
+			);
+			await Bun.sleep(20);
+			const bad = await page.eval<{ ok: boolean; value: string }>(
+				`agent("add", { a: "one", b: 2 })`,
+			);
+			expect(bad.ok).toBe(true);
+			expect(JSON.parse(bad.value).error).toStartWith(
+				"Input validation error: Invalid arguments for tool add: ",
+			);
+			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
+				ok: true,
+				value: '{"error":"The user did not allow wipe_named to run."}',
 			});
 			expect(await page.eval("asked")).toEqual([{ kind: "webmcp" }]);
-			// Chrome 156 hands the agent neither the name nor the message.
-			expect(await page.eval(`agent("add", { a: "one", b: 2 })`)).toEqual({
-				ok: false,
-				error: "UnknownError",
-			});
-			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
-				ok: false,
-				error: "UnknownError",
+			expect(await page.eval(`agent("broken", {})`)).toEqual({
+				ok: true,
+				value: '{"error":"Out of paper"}',
 			});
 			expect(
 				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
-			).toEqual(["error", "declined", "error", "declined"]);
+			).toEqual(["error", "declined", "error"]);
 			await page.eval("answer = true");
 			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
 				ok: true,
@@ -341,7 +328,10 @@ on(
 			await page.eval(
 				`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].find((b) => b.textContent === "Don't allow").click()`,
 			);
-			expect(await call).toEqual({ ok: false, error: "UnknownError" });
+			expect(await call).toEqual({
+				ok: true,
+				value: '{"error":"The user did not allow wipe_named to run."}',
+			});
 			expect(
 				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
 			).toEqual(["declined"]);

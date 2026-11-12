@@ -279,7 +279,7 @@ describe("mirroring", () => {
 			Promise.resolve().then(() =>
 				early.execute({}, { signal: new AbortController().signal }),
 			),
-		).rejects.toMatchObject({ name: "InvalidStateError" });
+		).resolves.toEqual({ error: "The tool early is no longer available." });
 	});
 
 	test("abort and register again, also when the browser unregisters a task later", async () => {
@@ -465,22 +465,35 @@ describe("calls", () => {
 		});
 	});
 
-	test("bad arguments reject with a TypeError and do not run", async () => {
+	test("bad arguments resolve with an error the agent can read and do not run (DEC-120)", async () => {
 		const t = tab();
 		const execute = jest.fn(() => 1);
 		await t.registerTool({ ...add, execute });
 		const events = watched(t);
 		await settle();
-		const error: unknown = await native.call("add", { a: "x" }).catch((e) => e);
-		expect(error).toBeInstanceOf(TypeError);
-		expect((error as Error).message).toContain(
-			"Invalid arguments for tool add",
+		const result = (await native.call("add", { a: "x" })) as {
+			error: string;
+		};
+		expect(Object.keys(result)).toEqual(["error"]);
+		expect(result.error).toStartWith(
+			"Input validation error: Invalid arguments for tool add: ",
 		);
 		expect(execute).not.toHaveBeenCalled();
 		expect(events.end[0]?.outcome).toBe("error");
 	});
 
-	test("a consequential tool asks onConfirm, which learns the caller; declined rejects with NotAllowedError", async () => {
+	test("input that is not an object resolves with an error, without a call", async () => {
+		const t = tab();
+		await t.registerTool(add);
+		const events = watched(t);
+		await settle();
+		await expect(native.call("add", "1, 2")).resolves.toEqual({
+			error: "The input must be an object.",
+		});
+		expect(events.start).toEqual([]);
+	});
+
+	test("a consequential tool asks onConfirm, which learns the caller; Don't allow resolves with an error", async () => {
 		const asked: ConfirmRequest[] = [];
 		let answer = false;
 		const t = tab({
@@ -493,8 +506,9 @@ describe("calls", () => {
 		await t.registerTool(wipe, { webmcp: true });
 		const events = watched(t);
 		await settle();
-		const declined = await native.call("wipe", {}).catch((e) => e);
-		expect(declined).toMatchObject({ name: "NotAllowedError" });
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not allow wipe to run.",
+		});
 		expect(asked[0]?.client).toEqual({ kind: "webmcp" });
 		expect(events.end[0]?.outcome).toBe("declined");
 		answer = true;
@@ -502,7 +516,7 @@ describe("calls", () => {
 		expect(events.end[1]?.outcome).toBe("ok");
 	});
 
-	test("an isError result rejects with its text; a throw rejects with what was thrown", async () => {
+	test("an isError result and a throw resolve with their message", async () => {
 		const t = tab();
 		const thrown = new RangeError("too big");
 		await t.registerTool({
@@ -522,12 +536,16 @@ describe("calls", () => {
 		});
 		const events = watched(t);
 		await settle();
-		await expect(native.call("fails", {})).rejects.toThrow("No such item");
-		await expect(native.call("throws", {})).rejects.toBe(thrown);
+		await expect(native.call("fails", {})).resolves.toEqual({
+			error: "No such item",
+		});
+		await expect(native.call("throws", {})).resolves.toEqual({
+			error: "too big",
+		});
 		expect(events.end.map((e) => e.outcome)).toEqual(["error", "error"]);
 	});
 
-	test("a call the browser cancels rejects with an AbortError", async () => {
+	test("a call the browser cancels still rejects with an AbortError: nobody reads it", async () => {
 		const t = tab();
 		const controller = new AbortController();
 		await t.registerTool({
@@ -547,7 +565,7 @@ describe("calls", () => {
 		expect(events.end[0]?.outcome).toBe("cancelled");
 	});
 
-	test("a tool unregistered while the user is asked rejects with an InvalidStateError", async () => {
+	test("a tool unregistered while the user is asked resolves with an error", async () => {
 		let allow: (yes: boolean) => void = () => {};
 		const t = tab({
 			onConfirm: () =>
@@ -562,6 +580,8 @@ describe("calls", () => {
 		await settle();
 		controller.abort();
 		allow(true);
-		await expect(call).rejects.toMatchObject({ name: "InvalidStateError" });
+		await expect(call).resolves.toEqual({
+			error: "The tool wipe is no longer available.",
+		});
 	});
 });
