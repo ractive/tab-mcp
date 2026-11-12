@@ -2,7 +2,8 @@
 
 tab-mcp for Chrome passes the WebMCP tools of the page in front on to an AI app the user
 connects, through a tab-mcp relay. This page says what the extension reads, stores and
-sends. It is published by Jean-Pierre Bergamin, ractive.ch, and online at
+sends. It is published by Jean-Pierre Bergamin, Zurich, Switzerland
+(james@ractive.ch), and online at
 https://ractive.ch/tab-mcp/privacy/#chrome.
 
 ## What it reads
@@ -11,7 +12,8 @@ Only tabs the user gave it: the tab where the user clicked the extension's icon 
 that tab goes to another origin), or every tab after the user turned on "Allow on all
 sites". From such a tab it reads the page's address, title and language, and the tools
 the page registered itself with WebMCP (`document.modelContext`): their names, titles,
-descriptions and input schemas. It reads nothing else of the page: no page text, no
+descriptions and input schemas. Apart from what the page's own tools return when the AI app calls
+them, it reads nothing else of the page: no page text, no
 form fields, no cookies, no screenshots, no browsing history.
 
 ## What it stores
@@ -24,9 +26,10 @@ In the extension's own IndexedDB in the browser, used by its service worker only
 - a random secret from which the connection's address is derived;
 - the tools the user allowed per site: the site's origin and the tool names.
 
-"Always allow" in a question is kept in memory only, for that page load. Nothing is
-synced to a Google account, and nothing is stored outside the browser. Removing the
-extension deletes all of it.
+"Always allow" in a question is kept in memory only, for that page load. None of this is
+synced to a Google account or kept outside the browser, and removing the extension
+deletes it. The grants the relay holds for paired AI apps end when the user disconnects
+an app, and 90 days after pairing at the latest.
 
 ## What leaves the browser
 
@@ -51,7 +54,7 @@ themselves has its operator's policy.
 
 - No analytics, no tracking, no advertising, no crash reports.
 - No data is sold or given to third parties, other than the relay and the AI app the user
-  chose, as above.
+  chose, as above, and the relay's host (for the hosted relay bunny.net).
 - No use of the data for anything but passing a page's tools to the user's AI app, and
   none to determine creditworthiness or for lending.
 - No remote code: all the extension's code is in its package.
