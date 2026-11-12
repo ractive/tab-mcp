@@ -1,10 +1,12 @@
 # @ractive-ch/tab-mcp-client
 
 Offer a web page's functions as [MCP](https://modelcontextprotocol.io) tools to AI apps
-(Claude, ChatGPT, Claude Code) through a [tab-mcp](https://github.com/ractive/tab-mcp)
-relay. The page connects to the relay and gets an address. The user adds that address to
-their AI app and types a pairing code from the page; the AI app then calls the page's
-tools while the tab stays open. Nothing is installed on the user's computer.
+(Claude, ChatGPT, Claude Code, Codex) through a
+[tab-mcp](https://github.com/ractive/tab-mcp) relay. The page connects to the relay and
+gets an address. The user adds that address to their AI app and types a pairing code
+from the page; the AI app then calls the page's tools while the tab stays open. Nothing
+is installed on the user's computer. With `webmcp: true` the library also registers the
+tools with the browser's own [WebMCP](#webmcp), for agents in the browser.
 
 **Status: 0.13.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
@@ -81,8 +83,8 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
 
 ### Tools
 
-`registerTool(tool, { signal })` takes a tool in the shape of the WebMCP draft's
-`registerTool`:
+`registerTool(tool, { signal, webmcp })` takes a tool in the shape of the WebMCP draft's
+`registerTool` (`webmcp`: see [WebMCP](#webmcp)):
 
 - `name` (1-128 characters of `A-Z a-z 0-9 _ - .`), `title`, `description` (not empty);
 - `inputSchema`: a JSON Schema with `"type": "object"`. Arguments are checked against it
@@ -115,10 +117,15 @@ added and removed tools.
 
 `new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's own
 WebMCP (`document.modelContext.registerTool()`, the
-[WebMCP draft](https://webmachinelearning.github.io/webmcp/)), where the browser has it,
-so that agents in the browser can call them: an agent built into the browser, or an
-extension. Off by default. Turning it on is a change in what the page exposes: any
-agent in the browser can then call the mirrored tools without pairing.
+[WebMCP draft](https://webmachinelearning.github.io/webmcp/) of the W3C Web Machine
+Learning Community Group; [explainer](https://github.com/webmachinelearning/webmcp)),
+where the browser has it, so that agents in the browser can call them: an agent built
+into the browser, or an extension. Off by default. Turning it on is a change in what the
+page exposes: any agent in the browser can then call the mirrored tools without pairing.
+Chrome has WebMCP for sites in its
+[origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (from Chrome
+149) and with `chrome://flags/#enable-webmcp-testing`
+([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)).
 
 - Tools marked `consequentialHint` are left out unless their registration says
   `{ webmcp: true }`: an agent in the browser often drives the very tab it calls into,

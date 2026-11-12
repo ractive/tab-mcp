@@ -4,10 +4,22 @@ Connect your AI app to a web page open in a browser tab.
 
 A web page offers some of its functions as [MCP](https://modelcontextprotocol.io) tools.
 The page connects to a tab-mcp relay and gets an address. You add the address to your AI
-app (Claude, ChatGPT, Claude Code; see [compatibility](docs/compatibility.md) for which
-apps work) and type a code that the page shows. The AI app then calls the page's tools
-through the relay while the tab stays open. Nothing has to be installed on your
+app (Claude, ChatGPT, Claude Code, Codex; see [compatibility](docs/compatibility.md) for
+which apps work) and type a code that the page shows. The AI app then calls the page's
+tools through the relay while the tab stays open. Nothing has to be installed on your
 computer.
+
+[WebMCP](https://webmachinelearning.github.io/webmcp/) is the browser's own way for a
+page to offer tools (`document.modelContext.registerTool()`), a draft of the W3C Web
+Machine Learning Community Group ([explainer](https://github.com/webmachinelearning/webmcp)).
+Its tools reach agents in the browser: one built into the browser, or an extension.
+tab-mcp brings a page's tools to AI apps outside the browser:
+
+- a page that uses the tab-mcp client library offers its tools through the relay, and
+  with `webmcp: true` registers them with the browser's WebMCP as well;
+- for a page that registers WebMCP tools itself, the extension
+  [tab-mcp for Chrome](packages/tab-mcp-extension/README.md) passes them on to an AI app
+  through the relay.
 
 <!-- The GIF lives on ractive.ch (static/tab-mcp/demo/ in ractive.ch), not in this
      repository; the link leads to the video there. -->
@@ -19,13 +31,14 @@ Claude Desktop, then Claude calling the page's tools (45 s; waiting cut, Claude'
 ## Live examples
 
 Try it without installing anything. These pages connect to the hosted relay
-`tab-mcp.ractive.ch` (all of them: <https://ractive.ch/tab-mcp/>):
+`tab-mcp.ractive.ch` (overview: <https://ractive.ch/tab-mcp/>):
 
 | Page | What your AI app can do there |
 |---|---|
 | [Diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
 | [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); its source is [examples/react-todo](examples/react-todo) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
+| [Sign-in example](https://tab-mcp-login.ractive.ch/) | read and add notes; the AI app connects by signing in with the same Google account as the page, without a code ([identity binding](#identity-binding)) |
 
 The hosted relay is run for ractive.ch's examples, not as a service for other pages.
 It refuses every origin it does not list, and the page then shows "Could not connect
@@ -98,7 +111,8 @@ tab-mcp is for state that lives only in the browser (a drawing, an emulator, a f
 filled in), and for acting as the signed-in user in their open tab. If a page's state
 lives on its server, an MCP server on that backend is the better answer: it works while
 no tab is open, needs no relay in between, and can check who calls with the site's own
-accounts.
+accounts. If the agent runs in the browser itself, it calls the tools a page registers
+with WebMCP without a relay.
 
 ## Quick start for users
 
@@ -120,8 +134,8 @@ You need a page that offers tab-mcp, such as the [live diagram editor](https://r
 4. Ask your AI app to use the page. To stop, click Disconnect in the page, or close the
    tab.
 
-claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
-relay with a public HTTPS address. All three work; see
+claude.ai, Claude Desktop and ChatGPT on the web connect from their own servers, so they
+need a relay with a public HTTPS address. All three work; see
 [compatibility](docs/compatibility.md).
 
 **Connecting an AI app to a page means trusting that page.** The page decides what its
@@ -182,8 +196,16 @@ worker, pass `storage` and `onConfirm`: it has no `localStorage` and no document
 `chrome-extension://<id>`.
 
 Mark tools that change or delete things with `annotations: { consequentialHint: true }`:
-the page then asks the user before each call. The
-[client README](packages/tab-mcp-client/README.md) covers the whole API; the
+the page then asks the user before each call ("Always allow" only if the page turns on
+`alwaysAllow`).
+
+`new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
+where the browser has it, so that agents in the browser call them without pairing, with
+the same argument check and confirmation. Consequential tools go there only when
+registered with `{ webmcp: true }`. See [WebMCP](packages/tab-mcp-client/README.md#webmcp)
+in the client README.
+
+The [client README](packages/tab-mcp-client/README.md) covers the whole API; the
 [live examples](https://ractive.ch/tab-mcp/) show what pages can offer.
 
 There is no public relay for other sites: run your own ([Self-hosting](#self-hosting)).
@@ -243,7 +265,7 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | Chrome Web Store "tab-mcp for Chrome" (from `extension-v0.1.0`) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | "tab-mcp for Chrome" 0.1.0 (not yet in the Chrome Web Store; load it unpacked) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
@@ -267,6 +289,8 @@ settings, the protocol or the API; the [changelog](CHANGELOG.md) says what chang
 
 - Released: relay `@ractive-ch/tab-mcp` 0.9.0 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.13.0, on the npm tag `latest`.
+- tab-mcp for Chrome 0.1.0 is not in the Chrome Web Store yet; load it unpacked
+  ([README](packages/tab-mcp-extension/README.md)).
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
   through OAuth Client ID Metadata Documents. Claude Code, claude.ai, Claude Desktop,
   ChatGPT (web and Mac) and Codex work (Codex and ChatGPT for Mac with the

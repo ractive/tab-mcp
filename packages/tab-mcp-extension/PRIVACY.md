@@ -12,9 +12,12 @@ Only tabs the user gave it: the tab where the user clicked the extension's icon 
 that tab goes to another origin), or every tab after the user turned on "Allow on all
 sites". From such a tab it reads the page's address, title and language, and the tools
 the page registered itself with WebMCP (`document.modelContext`): their names, titles,
-descriptions and input schemas. Apart from what the page's own tools return when the AI app calls
-them, it reads nothing else of the page: no page text, no
-form fields, no cookies, no screenshots, no browsing history.
+descriptions and input schemas, and the attribute `data-tab-mcp-webmcp` of the page's
+`<html>` element: the names of tools a page with the tab-mcp library offers through its
+own address, which the extension leaves out so that they are not offered twice. Apart
+from that and what the page's own tools return when the AI app calls them, it reads
+nothing else of the page: no page text, no form fields, no cookies, no screenshots, no
+browsing history.
 
 ## What it stores
 

@@ -8,7 +8,7 @@ description: >-
 tags:
   - architecture
   - design
-timestamp: 2026-10-25T18:00:00+02:00
+timestamp: 2026-11-12T16:30:00+01:00
 ---
 
 # tab-mcp architecture
@@ -18,6 +18,13 @@ and gets a public MCP address. The user adds the address to an AI app and pairs 
 code shown in the page; the AI app then calls the tools through the relay while the tab is
 open. Nothing is installed on the user's computer.
 
+[WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) offers a
+page's tools to agents in the browser; tab-mcp offers them to AI apps outside it. The
+library can do both (`webmcp: true`, DEC-115), and tab-mcp for Chrome passes on the
+WebMCP tools of the page in front, in a tab the user gave it (a click on its icon, or
+"Allow on all sites"), top frame only, through the relay
+([extension](/design/extension.md)).
+
 ## Components
 
 | Component | Package | Runs | Knows |
@@ -25,6 +32,8 @@ open. Nothing is installed on the user's computer.
 | Browser library | `@ractive-ch/tab-mcp-client` | in the page | the tools, the MCP server logic (loaded on `connect()`), the pairing and confirmation UI, the address secret |
 | Relay | `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | Bun server | tab sessions, OAuth (authorization server and resource server), limits; **not** tools |
 | Token store | `TokenStore` interface in the relay package | SQLite file (default), memory, or the library user's own | grants and token hashes per address |
+| Browser's WebMCP (optional) | none: the browser's `document.modelContext` | in the page, with `webmcp: true` | the tools the library mirrors there, for agents in the browser; calls never pass the relay (DEC-115, DEC-119) |
+| tab-mcp for Chrome | `packages/tab-mcp-extension` | Chrome extension, connected to the relay as `chrome-extension://<id>` | the WebMCP tools of the tab in front, the address secret of its own address ([extension](/design/extension.md)) |
 | End-to-end test page | `test/e2e` | served by the e2e test, against a relay the test starts | four-function calculator with `press_keys`, `read_display`, `clear`, `clear_memory` (consequential); the live examples are on ractive.ch (DEC-080) |
 
 The relay is a dumb pipe for MCP: it authenticates the AI app, checks a few HTTP-level
@@ -69,7 +78,7 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 ### 1. The page connects
 
 1. The page registers tools with the library (`registerTool(tool, { signal })`, WebMCP
-   shape) and shows a "Connect your AI tool" button. Only the small core is loaded.
+   shape) and shows a "Connect your AI app" button. Only the small core is loaded.
 2. On click, `connect()` loads the connection and MCP handler (dynamic import), computes
    the address id from the secret with Web Crypto, and opens `wss://relay/tab?a=<id>`
    with subprotocol `tab-mcp.v1` (DEC-098). The relay checks `Origin` against its
@@ -82,7 +91,7 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 
 ### 2. Pairing (TV sign-in)
 
-1. The page opens its "Connect your AI tool" dialog and sends `pairing.start`. The relay
+1. The page opens its "Connect your AI app" dialog and sends `pairing.start`. The relay
    answers `pairing.code` with a 6-digit code (single-use, 2 minutes, 5 attempts) and sends
    a fresh one by itself while the dialog is open (DEC-028).
 2. The dialog shows the address with a copy button, short instructions per AI app, and
@@ -105,10 +114,12 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
    an HTTPS URL; it fetches the Client ID Metadata Document (SSRF guards, size and time
    limits, cache) and checks `client_id` equality and that `redirect_uri` is listed. Errors
    before the redirect URI is trusted are shown on the page, never redirected.
-8. If the address's tab is not connected, the page says "Open the page and click Connect
-   your AI tool" and offers to try again. Otherwise it shows "You're connecting Claude
-   (claude.ai) to tools from `https://ractive.ch`" (declared name, verified client host,
-   page origin) and a field for the code.
+8. If the address's tab is not connected, the page says "Open the page, click “Connect
+   your AI app”, then try again here" (or, when the tab is connected but not pairing,
+   to open "Connect your AI app" first) and offers "Try again". Otherwise its heading is
+   "Connect Claude from claude.ai" and it says "You're connecting Claude (claude.ai) to
+   tools from `https://ractive.ch`" (declared name, verified client host, page origin;
+   the page's `appName` when it gives one), with a field for the code.
 9. The user types the code shown in the tab. A wrong code counts against the code's 5
    attempts. On success the relay redirects to `redirect_uri?code=…&state=…&iss=<relay
    origin>`; "Cancel" redirects with `error=access_denied`.
