@@ -58,6 +58,7 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			".": { types: "./index.d.ts", default: "./index.js" },
 			"./react": { types: "./react.d.ts", default: "./react.js" },
 			"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+			"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 			"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 			"./cdn": "./cdn/tab-mcp-client.min.js",
 		},
@@ -75,6 +76,8 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"react.js.map",
 			"setup.js",
 			"setup.js.map",
+			"tunnel.js",
+			"tunnel.js.map",
 			"visible.js",
 			"visible.js.map",
 			// Two chunks of this name: the escaping, shared by the UI and
