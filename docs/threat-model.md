@@ -2,7 +2,8 @@
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
 relay `@ractive-ch/tab-mcp` 0.9.0, browser library `@ractive-ch/tab-mcp-client` 0.13.0
-and the browser extension tab-mcp for Chrome 0.1.0 (Chrome Web Store, A13).
+and the browser extension tab-mcp for Chrome 0.1.0 (not yet in the Chrome Web Store,
+A13).
 To report a vulnerability,
 see [SECURITY.md](../SECURITY.md).
 
@@ -569,8 +570,9 @@ like any other, `chrome-extension://<id>` (A11).
 ### A14: Agents in the browser calling a page's mirrored tools (WebMCP)
 
 With `webmcp: true` (off by default), the client library also registers the page's
-tools with the browser's own WebMCP (`document.modelContext`), where an agent in the
-browser calls them: one built into the browser, or an extension. This caller sits beside
+tools with the browser's own [WebMCP](https://webmachinelearning.github.io/webmcp/)
+(`document.modelContext`), where an agent in the browser calls them: one built into the
+browser, or an extension. This caller sits beside
 the AI apps of A2 and A6, and differs from them.
 
 - **No pairing, no identity.** Any agent the browser lets call the page's WebMCP tools

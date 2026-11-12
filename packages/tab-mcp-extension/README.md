@@ -2,8 +2,10 @@
 
 A Chrome extension that offers the page in front to your AI app outside the browser,
 through a tab-mcp relay. It is the WebMCP bridge of tab-mcp (DEC-114 in `kb/`): pages that
-register tools with WebMCP (`document.modelContext.registerTool()`) offer them only to
-agents in the browser; the extension passes them on (iterations 19 and 20).
+register tools with [WebMCP](https://webmachinelearning.github.io/webmcp/)
+(`document.modelContext.registerTool()`) offer them only to agents in the browser; the
+extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp for
+this.
 
 Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](PRIVACY.md).
 
@@ -48,8 +50,9 @@ The page's tools are the page's word:
   `page_info`), and tools the client library refuses (none of them can be called through
   `webmcp_call` either), a schema that is no
   object schema or over 16 KB, more than 64 tools, and tools a tab-mcp page offers itself
-  (listed in `<html data-tab-mcp-webmcp>`), once the library mirrors its tools into
-  WebMCP (iteration 25); until then no tab-mcp page sets the attribute.
+  (the client library with `webmcp: true` lists the tools it mirrors into WebMCP in
+  `<html data-tab-mcp-webmcp>`): an AI app paired with the page reaches them through the
+  page's own address.
 - Only the top frame, and only the browser's own WebMCP: a page's replacement
   `document.modelContext` (or a polyfill without native WebMCP) is not used.
 
@@ -130,8 +133,10 @@ site and the secret behind the connection's address are in IndexedDB, used by th
 worker only, which content scripts (in the page's origin) cannot reach; there is no
 `chrome.storage` area for them to read or write.
 
-WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
-you turn on `chrome://flags/#enable-webmcp-testing`.
+WebMCP is on in Chrome only where a site takes part in Chrome's
+[origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial), or after you
+turn on `chrome://flags/#enable-webmcp-testing`
+([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)).
 
 ## The relay and the extension's id
 

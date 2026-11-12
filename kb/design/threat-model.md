@@ -5,7 +5,7 @@ description: Assets, attackers, what the relay sees, the mitigations and safe de
 tags:
   - security
   - design
-timestamp: 2026-11-09T15:00:00+01:00
+timestamp: 2026-11-12T16:30:00+01:00
 ---
 
 # Security model and threat model
@@ -35,6 +35,7 @@ Becomes `SECURITY.md` (reporting, supported versions) and `docs/threat-model.md`
 | Relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or altering traffic |
 | AI app | the tools it is allowed to call, their results | following the user's intent (it is driven by a model) |
 | Model provider behind the AI app | the same as the AI app | — |
+| Agent in the browser (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP, their results | — |
 | Network | nothing (TLS everywhere; `wss:` and `https:` only outside development) | — |
 
 The relay cannot be made blind: the AI app speaks HTTPS to the relay and the MCP payload
@@ -129,8 +130,8 @@ does not export and which refuses to run outside development (DEC-059).
 ### A5: A hostile page or another site using someone's relay
 
 - Tab WebSockets only from allowed origins (default: none; DEC-032). An open relay needs
-  `TAB_MCP_ALLOWED_ORIGINS=*` and logs a warning. The owner's hosted relay allows exactly
-  `https://ractive.ch`. This stops other websites in a browser; a non-browser client can
+  `TAB_MCP_ALLOWED_ORIGINS=*` and logs a warning. The owner's hosted relay allows only
+  the owner's own pages and extensions. This stops other websites in a browser; a non-browser client can
   forge `Origin`, so it is abuse control, not a security boundary for users.
 - Limits: sessions per IP (5; IPv6 per /64 and per /56) and in total (500), message and
   body size (1 MiB), concurrent requests per session (8), request timeout (300 s), idle
@@ -371,6 +372,18 @@ The web app's assertion signing key and the relay's OIDC client secret become op
 secrets. A mismatch is refused with "This AI tool is logged in as someone other than the
 page." The threats and mitigations are in `docs/threat-model.md` (A12) and DEC-076 to
 DEC-079.
+
+### A14: Agents in the browser calling mirrored tools (WebMCP, iteration 25)
+
+With `webmcp: true` the library also registers the page's tools with the browser's own
+[WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`). Agents
+in the browser call them without pairing and without an identity (`client.kind`
+`"webmcp"`). Such an agent often drives the tab and can click Allow itself, so
+consequential tools are mirrored only when registered with `{ webmcp: true }`; calls get
+the same schema check and confirmation, never "Always allow". Only the native object is
+used, and `<html data-tab-mcp-webmcp>` keeps tab-mcp for Chrome from offering a mirrored
+tool a second time. The full analysis is A14 in `docs/threat-model.md` (DEC-115,
+DEC-119).
 
 ## Safe defaults
 

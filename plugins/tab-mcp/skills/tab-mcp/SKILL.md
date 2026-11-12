@@ -1,6 +1,6 @@
 ---
 name: tab-mcp
-description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP-style registerTool or "Connect your AI app", or needs to self-host the tab-mcp relay.
+description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (`webmcp: true`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
 compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.4+ or Docker.
 ---
@@ -16,9 +16,16 @@ forwards the AI app's requests to the page; the tools run in the page.
 Facts to keep in mind (version 0.13.0):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
-  Metadata Documents. Claude Code works; VS Code, Cursor and Gemini CLI cannot connect.
-  claude.ai and ChatGPT need a relay with a public HTTPS address.
-- The page needs a relay that allows its origin; run one (section 6).
+  Metadata Documents. Claude Code, claude.ai, Claude Desktop, ChatGPT and Codex work
+  (Codex and ChatGPT for Mac with Codex's feature `mcp_2026_07_28` on); VS Code, Cursor
+  and Gemini CLI cannot connect. claude.ai, Claude Desktop and ChatGPT connect from their
+  own servers and need a relay with a public HTTPS address.
+- The page needs a relay that allows its origin; run one (section 7).
+- [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) is the
+  browser's own API for tools that agents in the browser call. tab-mcp is for AI apps
+  outside the browser. With `webmcp: true` the library offers the page's tools both ways
+  (section 5). A page that only registers WebMCP tools natively needs no library: the
+  extension tab-mcp for Chrome passes them on to an AI app through a relay.
 - tab-mcp fits state that lives only in the browser, and acting as the signed-in user in
   their open tab. If the state lives on the site's server, suggest an MCP server on that
   backend instead: it works without an open tab and without a relay.
@@ -68,9 +75,9 @@ await mcp.registerTool(
 
 Rules for tools:
 
-- The shape follows the WebMCP draft (`document.modelContext.registerTool`). There is no
-  `unregisterTool`: abort the registration signal. AI apps that listen get a
-  tool-list-changed notification.
+- The shape follows the WebMCP draft (`document.modelContext.registerTool`); the second
+  argument is `{ signal, webmcp }`. There is no `unregisterTool`: abort the registration
+  signal. AI apps that listen get a tool-list-changed notification.
 - `registerTool` returns a promise. It rejects with a `TypeError` for an invalid tool and
   an `InvalidStateError` for a duplicate name. Do not use `x-mcp-header` in schemas.
 - Arguments are validated against `inputSchema` before `execute` runs. Still treat them
@@ -80,8 +87,10 @@ Rules for tools:
   passed through as an MCP result (use it for images); any other JSON value is sent as
   JSON text and, for objects, as `structuredContent`. A thrown error becomes an error
   result with its message, so throw errors that tell the model what to do.
-- `signal` aborts when the AI app gives up. `client` has `id`, the verified `host` and
-  the declared `name`.
+- `signal` aborts when the caller gives up. `client` names the caller:
+  `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared
+  `name`), or `{ kind: "webmcp" }` for an agent in the browser, of which nothing more is
+  known. Check `client.kind` before reading `host`.
 - Annotations: `readOnlyHint` for tools that only read; `consequentialHint` for tools
   that change or delete something (section 4); `untrustedContentHint` for results that
   contain user or third-party content. MCP hints (`destructiveHint`, `idempotentHint`,
@@ -183,10 +192,37 @@ that AI app until a reload or a disconnect) appears only with `alwaysAllow: true
 brake on a prompt injection, and the relay's one `tools` scope covers every tool, so
 consent per tool is the page's. A refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
 pass `onConfirm: (request) => boolean | Promise<boolean>` to `TabMcp`. `request` has
-`tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts. Without `onConfirm` and without a `document`,
+`tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts.
+`mcp.confirmInPage(request)` is the library's dialog, for example for
+`client.kind === "webmcp"`. Without `onConfirm` and without a `document`,
 calls are declined.
 
-## 5. Security defaults
+## 5. WebMCP: agents in the browser
+
+```ts
+const mcp = new TabMcp({ relay, server, webmcp: true });
+await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only when named
+```
+
+- `webmcp: true` (off by default) also registers each tool with the browser's native
+  `document.modelContext.registerTool()`, where the browser has it (in Chrome: sites in
+  the WebMCP origin trial, or `chrome://flags/#enable-webmcp-testing`). Agents in the
+  browser (built in, or an extension) then call the tools without pairing. It is a
+  change in what the page exposes: turn it on only when the user wants that.
+- Tools with `consequentialHint` are left out unless registered with `{ webmcp: true }`
+  (React: `useTool(tool, deps, { webmcp: true })`): such an agent often drives the tab
+  and can click Allow itself. `{ webmcp: false }` keeps any tool out.
+- A WebMCP call gets the same argument check and confirmation (the dialog names the caller
+  "An agent in this browser", never offers "Always allow"), and fires `toolcall` and
+  `toolcallend` with `client.kind === "webmcp"`.
+- Only the native object is used, never a polyfill such as `@mcp-b/global`. A failed
+  native registration (a name already registered natively, a frame without
+  `allow="tools"`) only warns in the console; the tool stays offered through the relay.
+  A page that registers tools natively itself leaves `webmcp` off or uses other names.
+- `<html data-tab-mcp-webmcp>` lists the mirrored names, so that tab-mcp for Chrome does
+  not offer them a second time.
+
+## 6. Security defaults
 
 Keep these; do not work around them.
 
@@ -211,7 +247,7 @@ Keep these; do not work around them.
   results go to the model.
 - Do not open the relay to every origin (`TAB_MCP_ALLOWED_ORIGINS=*`) in production.
 
-## 6. Run the relay
+## 7. Run the relay
 
 Local development (a page on `http://localhost:3000`):
 

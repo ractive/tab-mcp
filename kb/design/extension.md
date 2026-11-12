@@ -9,7 +9,7 @@ tags:
   - design
   - extension
   - webmcp
-timestamp: 2026-11-09T15:00:00+01:00
+timestamp: 2026-11-12T16:30:00+01:00
 ---
 
 # tab-mcp for Chrome: the browser extension
@@ -64,6 +64,11 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   with its own pairing view (the address, the code, the connected apps, New address),
   since the library's dialog would draw into no page. Commands reach the worker only
   over the panel's port (threat model A13).
+- A page with the client library and `webmcp: true` (client 0.13.0, DEC-115, DEC-119)
+  registers its tools with WebMCP too and lists their names in
+  `<html data-tab-mcp-webmcp>`. The extension leaves every listed name out: an AI app
+  paired with the page reaches those tools through the page's own address, and would
+  otherwise get each twice.
 - Tools that ask first ask in the side panel when it is open in the focused window of the
   tab the call acts on, else in a Chrome notification; the extension asks, not the
   library (iteration 26). A click on a notification's body opens the whole question in
@@ -126,6 +131,8 @@ release, like Overmark (DEC-109). Relay and client releases stay as they are.
 # Citations
 
 - [WebMCP draft, W3C Web Machine Learning Community Group (2 November 2026)](https://webmachinelearning.github.io/webmcp/)
+- [WebMCP explainer and repository](https://github.com/webmachinelearning/webmcp)
+- [Chrome: WebMCP developer docs](https://developer.chrome.com/docs/ai/webmcp)
 - [Chrome: WebMCP origin trial (9 June 2026)](https://developer.chrome.com/blog/ai-webmcp-origin-trial)
 - [SiteSkills: navigation guides for AI browser agents](https://siteskills.ai/)
 - [Chrome extensions: userScripts API](https://developer.chrome.com/docs/extensions/reference/api/userScripts)

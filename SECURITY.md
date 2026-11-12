@@ -27,7 +27,7 @@ comes as a new version, not as a patch to an older one.
 |---|---|---|
 | `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.9.0 | older versions |
 | `@ractive-ch/tab-mcp-client` (npm) | 0.13.0 | older versions |
-| tab-mcp for Chrome (Chrome Web Store) | 0.1.0 | older versions |
+| tab-mcp for Chrome (loaded unpacked; not yet in the Chrome Web Store) | 0.1.0 | older versions |
 
 ## Connecting an AI app to a page means trusting the page
 
@@ -48,6 +48,13 @@ honest.
   it elsewhere, choose "New address": someone may have copied the page's address, and
   your AI apps would talk to them.
 - Disconnect AI apps you no longer use, in the page's "Connect your AI app" dialog.
+
+A page that also registers its tools with the browser's
+[WebMCP](https://webmachinelearning.github.io/webmcp/) (the client library's
+`webmcp: true`) offers them to agents in your browser without pairing; which agents may
+call them is the browser's decision. Tools that change something go there only if the
+page names them, and then ask in the page as well
+([threat model](docs/threat-model.md), A14).
 
 A relay accepts pages only from the origins its operator lists. This keeps other
 websites from using a well-known relay's address to look trustworthy. It does not make

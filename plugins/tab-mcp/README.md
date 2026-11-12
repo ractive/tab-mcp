@@ -2,8 +2,9 @@
 
 An [Agent Skill](https://agentskills.io/specification) that teaches a coding agent to add
 tab-mcp to a web app: install `@ractive-ch/tab-mcp-client`, register tools, set up the
-connect and pairing flow, confirm consequential tools, keep the security defaults and
-run a tab-mcp relay. The skill is [`skills/tab-mcp/SKILL.md`](skills/tab-mcp/SKILL.md).
+connect and pairing flow, confirm consequential tools, register the tools with the
+browser's WebMCP too, keep the security defaults and run a tab-mcp relay. The skill is
+[`skills/tab-mcp/SKILL.md`](skills/tab-mcp/SKILL.md).
 
 This folder is a plugin for Claude Code and Codex. The repository root holds the
 marketplace files that point here.
