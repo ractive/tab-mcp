@@ -18,7 +18,7 @@ own address, which the extension leaves out so that they are not offered twice. 
 from that and what the page's own tools return when the AI app calls them, it reads
 nothing else of the page: no page text, no form fields, no cookies, no screenshots, no
 browsing history. Only when the AI app asks to go back or forward in the tab does it
-check, in the page, whether the page before or after is on the same site, and how many
+check, in the page, whether the page before or after is on the same origin, and how many
 entries the tab's history has; that stays in the browser.
 
 ## What it stores
@@ -48,7 +48,7 @@ Only while AI access is on, and only to the relay the user chose:
   opened a page in the tab, went back or forward or reloaded it, the same as `page_info`
   for the new page.
 
-A tool that the page does not mark read-only, and a navigation to another site, runs only
+A tool that the page does not mark read-only, and a navigation to another origin, runs only
 after the user allowed it, in the side panel or a notification. The relay passes the
 requests and results between the extension and the AI app; the AI app's own privacy
 policy applies to what it does with them.
