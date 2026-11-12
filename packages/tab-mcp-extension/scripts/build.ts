@@ -7,7 +7,12 @@
  *   bun scripts/build.ts --test   no key, `<all_urls>` host access at install
  *                                 (end-to-end tests: no click on the icon)
  *   bun scripts/build.ts --store  no key and no source maps, for the Chrome
- *                                 Web Store
+ *                                 Web Store, into `dist-store/` (so it does
+ *                                 not replace a development build in `dist/`)
+ *   bun scripts/build.ts --store --zip
+ *                                 also packs tab-mcp-for-chrome-<version>-store.zip
+ *                                 (`--zip` only with `--store`: a zip of the
+ *                                 development build would carry the key)
  *
  * The key is not in the repository: anyone with it could load an extension
  * with the development build's id and use the hosted relay as it. It is read
@@ -21,6 +26,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { CONTENT_SCRIPT } from "../src/messages.ts";
 import { ICON_SIZES } from "./icons.ts";
+import { writeZip, zipNames } from "./zip.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const REPOSITORY = join(ROOT, "../..");
@@ -172,7 +178,9 @@ export async function checkOutdir(outdir: string): Promise<void> {
 }
 
 export async function build(options: BuildOptions = {}): Promise<BuildResult> {
-	const outdir = resolve(options.outdir ?? join(ROOT, "dist"));
+	const outdir = resolve(
+		options.outdir ?? join(ROOT, options.store ? "dist-store" : "dist"),
+	);
 	await checkOutdir(outdir);
 	const minify = options.minify ?? true;
 	// The store package carries no source maps (iteration 23).
@@ -227,14 +235,109 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	return { outdir, manifest, id: key ? extensionId(key) : undefined };
 }
 
+/** The store package's file name for `version`. */
+export function storeZipName(version: string): string {
+	return `tab-mcp-for-chrome-${version}-store.zip`;
+}
+
+/**
+ * What the Chrome Web Store must not get: a `key` (the store gives the item
+ * its own), host access granted at install, or source maps. Returns the
+ * problems; none means the package may go to the store.
+ */
+export function storeProblems(
+	manifest: Record<string, unknown>,
+	names: readonly string[],
+): string[] {
+	const problems: string[] = [];
+	if ("key" in manifest) problems.push("the manifest has a key");
+	if ("host_permissions" in manifest)
+		problems.push("the manifest has host_permissions");
+	for (const name of names.filter((n) => n.endsWith(".map")))
+		problems.push(`source map ${name}`);
+	if (!names.includes("manifest.json")) problems.push("no manifest.json");
+	return problems;
+}
+
+async function filesOf(dir: string): Promise<string[]> {
+	const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+	return entries
+		.filter((e) => e.isFile())
+		.map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join("/"))
+		.sort();
+}
+
+/**
+ * The time a reproducible zip carries: `SOURCE_DATE_EPOCH` (seconds), else
+ * the time of the repository's last commit, else 1980-01-01. The same commit
+ * then gives the same zip, byte for byte, so a release's zip can be rebuilt
+ * and compared with the hash its workflow prints.
+ */
+export async function sourceDate(
+	env: Record<string, string | undefined> = process.env,
+): Promise<Date> {
+	const epoch = env["SOURCE_DATE_EPOCH"];
+	if (epoch !== undefined && /^\d+$/.test(epoch))
+		return new Date(Number(epoch) * 1000);
+	const git = Bun.spawnSync(["git", "log", "-1", "--format=%ct"], {
+		cwd: REPOSITORY,
+		stderr: "ignore",
+	});
+	const seconds = git.stdout.toString().trim();
+	if (git.exitCode === 0 && /^\d+$/.test(seconds))
+		return new Date(Number(seconds) * 1000);
+	return new Date(Date.UTC(1980, 0, 1));
+}
+
+/**
+ * Pack a store build into `target`. A build that fails `storeProblems`, or
+ * a zip that does not list the build's files, stops it.
+ */
+export async function zipStoreBuild(
+	outdir: string,
+	target: string,
+): Promise<string[]> {
+	const names = await filesOf(outdir);
+	const before: string[] = [];
+	let manifest: Record<string, unknown> = {};
+	if (names.includes("manifest.json")) {
+		const parsed: unknown = await Bun.file(join(outdir, "manifest.json"))
+			.json()
+			.catch(() => undefined);
+		if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+			manifest = parsed as Record<string, unknown>;
+		else before.push("manifest.json is not a JSON object");
+	}
+	before.push(...storeProblems(manifest, names));
+	if (before.length > 0)
+		throw new Error(`not a store build: ${before.join("; ")}`);
+	const entries = [];
+	for (const name of names)
+		entries.push({
+			name,
+			data: new Uint8Array(await Bun.file(join(outdir, name)).arrayBuffer()),
+		});
+	const zip = await writeZip(entries, { date: await sourceDate() });
+	const packed = zipNames(zip);
+	if (packed.join("\n") !== names.join("\n"))
+		throw new Error("the zip does not list the build's files");
+	await Bun.write(target, zip);
+	return packed;
+}
+
 if (import.meta.main) {
 	const { values } = parseArgs({
 		options: {
 			store: { type: "boolean" },
 			test: { type: "boolean" },
+			zip: { type: "boolean" },
 			outdir: { type: "string" },
 		},
 	});
+	if (values.zip && !values.store) {
+		console.error("--zip packs only the store build: add --store");
+		process.exit(2);
+	}
 	const result = await build({
 		...(values.outdir ? { outdir: values.outdir } : {}),
 		...(values.store ? { store: true } : {}),
@@ -248,4 +351,9 @@ if (import.meta.main) {
 				? `Built ${where} (no key)`
 				: `Built ${where} without a key: no ~/.config/tab-mcp/extension-key.txt, so the hosted relay will not accept this build's id`,
 	);
+	if (values.zip) {
+		const target = join(ROOT, storeZipName(String(result.manifest["version"])));
+		await zipStoreBuild(result.outdir, target);
+		console.log(`Packed ${relative(process.cwd(), target)}`);
+	}
 }
