@@ -52,7 +52,16 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	const core = staticClosure(files, "index.js");
 	const lazy = [...files.keys()].filter((name) => !core.has(name));
 	expect(lazy.some((n) => n.startsWith("connection-"))).toBe(true);
-	expect(lazy.some((n) => n.startsWith("ui-"))).toBe(true);
+	// The dialogs: the confirmation and the connect dialog load apart (CU 19).
+	expect(lazy.some((n) => n.startsWith("confirm-"))).toBe(true);
+	expect(lazy.some((n) => n.startsWith("connect-"))).toBe(true);
+	// A confirmation alone (a page without a relay) loads no connect dialog.
+	const confirmChunk = lazy.find((n) => n.startsWith("confirm-")) ?? "";
+	const confirmCode = [...staticClosure(files, confirmChunk)]
+		.map((n) => files.get(n) ?? "")
+		.join("");
+	expect(confirmCode).toContain("Allow until reload");
+	expect(confirmCode).not.toContain("codex mcp add");
 	const entry = files.get("index.js") ?? "";
 	expect(entry).toMatch(/import\("\.\/connection-[^"]+\.js"\)/);
 	const coreCode = [...core].map((n) => files.get(n) ?? "").join("");
@@ -186,7 +195,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 
 	await Bun.write(
 		join(consumer, "page.ts"),
-		`import { TabMcp, type Tool, type SessionInfo, type ServeHandle, type TunnelPort } from "@ractive-ch/tab-mcp-client";
+		`import { TabMcp, type Tool, type SessionInfo, type ServeHandle, type TunnelPort, type DialogOptions, type DialogStrings } from "@ractive-ch/tab-mcp-client";
 import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type TunnelCancelMessage } from "@ractive-ch/tab-mcp-client/tunnel";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
@@ -195,8 +204,11 @@ void mcp.registerTool(tool, { signal: new AbortController().signal, webmcp: true
 mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind === "local" ? c.id : c.kind); });
 // @ts-expect-error: the caller may be an agent in the browser, which has no host
 mcp.addEventListener("toolcall", (e) => console.log(e.detail.client.host));
-mcp.addEventListener("disconnected", (e) => console.log(e.detail.reason, e.detail.code));
-mcp.addEventListener("pairingcode", (e) => console.log(e.detail?.code));
+mcp.addEventListener("statechange", (e) => console.log(e.detail.state, e.detail.reason));
+mcp.addEventListener("pairingcode", (e) => console.log(e.detail.pairingCode?.code));
+export const revoked: Promise<void> = mcp.revoke("g_1");
+const dialogs: DialogOptions = { strings: { lang: "de", allow: "Erlauben" }, setup: { guide: null, instructions: (name, address) => [{ app: name, text: address }] } };
+export const strings: Partial<DialogStrings> | undefined = dialogs.strings;
 export const session: Promise<SessionInfo> = mcp.connect({ resume: true });
 const steps: SetupInstruction[] = setupInstructions("x", "https://relay.example/a/x/mcp");
 export const help: string[] = steps.map((s) => \`\${s.app}: \${s.text} \${s.command ?? ""}\${(s.note ?? []).map((p) => ("code" in p ? p.code : p.text)).join("")}\`);
@@ -223,7 +235,7 @@ void own.serve(channel.port1, {});
 import { ConnectButton, TabMcpProvider, useTabMcp, useTabMcpState, useTool, useToolCalls, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
 import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 function Tools(): ReactElement {
-	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, [1], { webmcp: true });
+	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, { webmcp: true });
 	const state: TabMcpSnapshot = useTabMcpState();
 	const mcp: TabMcp = useTabMcp();
 	const calls = useToolCalls({ limit: 5 });
@@ -231,7 +243,7 @@ function Tools(): ReactElement {
 }
 export const app: ReactElement = createElement(
 	TabMcpProvider,
-	{ relay: "https://relay.example", server: { name: "x", version: "1" }, reconnect: { delaysMs: [1000] } },
+	{ relay: "https://relay.example", server: { name: "x", version: "1" }, reconnect: false, ui: { strings: { lang: "de", copy: "Kopieren" }, setup: { guide: null } } },
 	createElement(Tools),
 	createElement(ConnectButton, { className: "ai", children: (s: TabMcpSnapshot) => s.state }),
 );

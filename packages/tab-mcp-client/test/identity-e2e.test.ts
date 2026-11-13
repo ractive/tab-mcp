@@ -230,7 +230,7 @@ test("the page's user connects an SDK client without a code, calls a tool, and s
 	expect(
 		(dialog()?.querySelector(".tab-mcp-code") as HTMLElement | null)?.hidden,
 	).toBe(true);
-	const address = tab.address ?? "";
+	const address = tab.session?.address ?? "";
 
 	const { provider, transport, url } = await startAuth(address);
 	const done = await signInAtProvider(url, "alice");
@@ -254,9 +254,10 @@ test("the page's user connects an SDK client without a code, calls a tool, and s
 	await client.close();
 
 	// Logout in the web app: the relay revokes at once, the page drops the app.
-	expect(tab.signOut()).toBe(true);
+	const signedOut = tab.signOut();
 	expect(tab.identity).toBe("none");
-	await until(() => tab.grants.length === 0, "grant.removed");
+	await signedOut; // settles once the grants are gone (CU 10)
+	expect(tab.grants).toEqual([]);
 	const after = await mcpPost(address, rpc(1, "tools/list"), {
 		token: provider.tokens()?.access_token ?? "",
 	});
@@ -269,7 +270,7 @@ test("the page's user connects an SDK client without a code, calls a tool, and s
 
 test("an AI app signed in as someone else gets the mismatch error and no code", async () => {
 	const { tab, doc, closed } = await signedInPage("alice");
-	const { url } = await startAuth(tab.address ?? "");
+	const { url } = await startAuth(tab.session?.address ?? "");
 	const done = await signInAtProvider(url, "bob");
 	expect(done.status).toBe(403);
 	expect(done.location).toBeUndefined();
@@ -292,14 +293,14 @@ test("a refused assertion is reported; refreshIdentity() binds after sign-in", a
 					: oidc.assertion(user, address),
 	});
 	const states: string[] = [];
-	tab.addEventListener("identitychange", (e) => states.push(e.detail.state));
+	tab.addEventListener("identitychange", (e) => states.push(e.detail.identity));
 	await tab.connect({ resume: true });
 	await until(() => states.includes("none"), "nobody signed in");
 	user = "bad";
-	expect(await tab.refreshIdentity()).toBe(false);
+	expect(await tab.refreshIdentity()).toBe("refused");
 	expect(tab.identity).toBe("refused");
 	user = "alice";
-	expect(await tab.refreshIdentity()).toBe(true);
+	expect(await tab.refreshIdentity()).toBe("bound");
 	expect(tab.identity).toBe("bound");
 	tab.disconnect();
 	expect(tab.identity).toBe("none");

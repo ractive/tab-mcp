@@ -4,17 +4,20 @@
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { TabMcp } from "../src/tab-mcp.ts";
-import { newTab, nextEvent } from "./helpers.ts";
+import { newTab, nextEvent, setTiming } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
 let relay: StubRelay;
 let tab: TabMcp | undefined;
+let restore: () => void;
 
 beforeEach(() => {
+	restore = setTiming({ identityTimeoutMs: 100 });
 	relay = new StubRelay();
 	relay.pairing = "oidc";
 });
 afterEach(async () => {
+	restore();
 	tab?.disconnect();
 	tab = undefined;
 	await relay.stop();
@@ -25,8 +28,9 @@ test("an answer to an assertion sent before signOut() is ignored", async () => {
 	await tab.connect({ resume: true });
 	const sent = await relay.next("identity");
 	expect(tab.identity).toBe("pending");
-	expect(tab.signOut()).toBe(true);
+	const out = tab.signOut();
 	await relay.next("identity.logout");
+	await out; // no grants to remove
 	relay.send({ type: "identity.bound", round: sent["round"] }); // the answer to the old assertion
 	await relay.settled();
 	expect(tab.identity).toBe("none");
@@ -52,20 +56,19 @@ test("only the answer to the newest assertion counts", async () => {
 	await relay.settled();
 	expect(tab.identity).toBe("pending");
 	relay.send({ type: "identity.bound", round: latest["round"] });
-	expect(await second).toBe(true);
+	expect(await second).toBe("bound");
 	expect(tab.identity).toBe("bound");
 });
 
 test("refreshIdentity() gives up when the relay never answers", async () => {
 	tab = newTab(relay.url, {
 		identityAssertion: () => "a.b.c",
-		identityTimeoutMs: 100,
 	});
 	await tab.connect({ resume: true });
 	const first = await relay.next("identity");
 	const refreshed = tab.refreshIdentity();
 	const second = await relay.next("identity");
-	expect(await refreshed).toBe(false);
+	expect(await refreshed).toBe("none");
 	expect(tab.identity).toBe("none");
 	// A late answer of a given-up round is dropped.
 	relay.send({ type: "identity.bound", round: first["round"] });
@@ -77,7 +80,6 @@ test("refreshIdentity() gives up when the relay never answers", async () => {
 test("after a lost answer, the next assertion still binds (review of PR #13)", async () => {
 	tab = newTab(relay.url, {
 		identityAssertion: () => "a.b.c",
-		identityTimeoutMs: 100,
 	});
 	await tab.connect({ resume: true });
 	await relay.next("identity"); // its answer is lost
@@ -87,14 +89,13 @@ test("after a lost answer, the next assertion still binds (review of PR #13)", a
 	const sent = await relay.next("identity");
 	expect(typeof sent["round"]).toBe("number");
 	relay.send({ type: "identity.bound", round: sent["round"] });
-	expect(await again).toBe(true);
+	expect(await again).toBe("bound");
 	expect(tab.identity).toBe("bound");
 });
 
 test("an answer without the newest round never counts", async () => {
 	tab = newTab(relay.url, {
 		identityAssertion: () => "a.b.c",
-		identityTimeoutMs: 200,
 	});
 	await tab.connect({ resume: true });
 	await relay.next("identity");
@@ -106,11 +107,10 @@ test("an answer without the newest round never counts", async () => {
 test("the timeout also covers an identityAssertion that never settles (iteration 13)", async () => {
 	tab = newTab(relay.url, {
 		identityAssertion: () => new Promise<string>(() => {}),
-		identityTimeoutMs: 100,
 	});
 	const gaveUp = new Promise<void>((resolve) =>
 		tab?.addEventListener("identitychange", (e) => {
-			if (e.detail.state === "none") resolve();
+			if (e.detail.identity === "none") resolve();
 		}),
 	);
 	await tab.connect({ resume: true });

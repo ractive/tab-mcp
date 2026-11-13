@@ -15,6 +15,7 @@ import {
 	newDialog,
 	nextId,
 	stringsOf,
+	visible,
 } from "./dialog.ts";
 import { SETUP_GUIDE, setupInstructions } from "./setup.ts";
 import type { DialogStrings } from "./strings.ts";
@@ -247,7 +248,8 @@ export function showConnectDialog(
 	const successId = `${nextId()}-success`;
 	const successTitle = el(doc, "p", { className: "tab-mcp-success-title" });
 	const successNext = el(doc, "p", { className: "tab-mcp-success-next" });
-	const check = el(doc, "span", { className: "tab-mcp-success-icon", text: "✓" });
+	// A check mark in a tinted disk, drawn by the stylesheet (CU 19).
+	const check = el(doc, "span", { className: "tab-mcp-success-icon" });
 	check.setAttribute("aria-hidden", "true");
 	const success = el(
 		doc,
@@ -366,10 +368,7 @@ export function showConnectDialog(
 	);
 	codeSentence.setAttribute("aria-live", "polite");
 	// In the code's place while the AI app finishes connecting with it.
-	const codeUsed = el(doc, "span", {
-		className: "tab-mcp-code-used",
-		text: s.codeUsed,
-	});
+	const codeUsed = el(doc, "span", { className: "tab-mcp-code-used" });
 	const codeLine = el(
 		doc,
 		"p",
@@ -433,10 +432,8 @@ export function showConnectDialog(
 	setupToggle.setAttribute("aria-controls", setupId);
 
 	const appList = el(doc, "ul");
-	const appsNote = el(doc, "p", {
-		className: "tab-mcp-apps-note",
-		text: s.disconnectNote,
-	});
+	const appsNote = el(doc, "p", { className: "tab-mcp-apps-note" });
+	appsNote.setAttribute("role", "status");
 	const apps = el(
 		doc,
 		"div",
@@ -509,6 +506,8 @@ export function showConnectDialog(
 	let renewed = false;
 	/** Why it is not connected, in the user's words, while it is not. */
 	let message: string | undefined;
+	/** Why the last Disconnect failed, while connected. */
+	let appsProblem: string | undefined;
 	/** The grants of the last render: a new one is an app that just paired. */
 	let grantsSeen = new Set(mcp.grants.map((g) => g.grantId));
 	/** The address the help's steps were made for. */
@@ -542,7 +541,18 @@ export function showConnectDialog(
 			doc,
 			s.disconnect,
 			() => {
-				mcp.revoke(grant.grantId).catch(() => render());
+				appsProblem = undefined;
+				mcp.revoke(grant.grantId).catch((error: unknown) => {
+					// Not connected any more: the note says so already.
+					if (mcp.state === "connected")
+						appsProblem =
+							(error as { code?: unknown } | null)?.code ===
+							"store_unavailable"
+								? s.storeUnavailable
+								: s.disconnectFailed;
+					render();
+				});
+				render();
 			},
 			"tab-mcp-disconnect",
 			"danger",
@@ -651,7 +661,9 @@ export function showConnectDialog(
 				// connects; it shows if none does.
 				if (usedTimer === undefined) {
 					usedTimer = setTimeout(() => {
+						// No app came: the code shows (unless another came meanwhile).
 						usedTimer = undefined;
+						shownCode = mcp.pairingCode;
 						render();
 					}, CODE_USED_WAIT_MS);
 					announce(s.codeUsed);
@@ -672,6 +684,7 @@ export function showConnectDialog(
 		codeSentence.hidden = used;
 		copyCode.hidden = used;
 		codeUsed.hidden = !used;
+		codeUsed.textContent = used ? s.codeUsed : "";
 		return current !== undefined;
 	};
 
@@ -769,12 +782,13 @@ export function showConnectDialog(
 			const tools = allowed.list(grant.grantId);
 			entry.allowedBox.hidden = tools.length === 0;
 			entry.allowedText.textContent = format(s.runsWithoutAsking, {
-				tools: tools.join(", "),
+				tools: tools.map(visible).join(", "),
 			});
 			if (appList.children[i] !== entry.item)
 				appList.insertBefore(entry.item, appList.children[i] ?? null);
 		});
-		appsNote.hidden = connected;
+		appsNote.textContent = connected ? (appsProblem ?? "") : s.disconnectNote;
+		appsNote.hidden = connected && appsProblem === undefined;
 		apps.hidden = grants.length === 0;
 
 		// The note is about the code: only while one is shown and none connected.
@@ -844,17 +858,14 @@ export function showConnectDialog(
 	};
 
 	// A refusal that stops reconnecting comes as `error` (with its `reason`)
-	// just before the state turns `disconnected`: that says why it stopped.
+	// just before the `statechange` to `disconnected`: that says why it stopped.
 	let stoppedBy: unknown;
+	let wasReconnecting = mcp.state === "reconnecting";
 	const onError = (event: CustomEvent<{ error: Error }>) => {
 		const { error } = event.detail;
-		if (
-			mcp.state === "reconnecting" &&
-			(error as { reason?: unknown }).reason !== undefined
-		)
+		if (wasReconnecting && (error as { reason?: unknown }).reason !== undefined)
 			stoppedBy = error;
 	};
-	let wasReconnecting = mcp.state === "reconnecting";
 	const onState = (event: CustomEvent<StateChangeDetail>) => {
 		const { state, reason } = event.detail;
 		if (reason !== undefined && reason !== "new_address") {

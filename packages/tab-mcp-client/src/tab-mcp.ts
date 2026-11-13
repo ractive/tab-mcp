@@ -44,7 +44,7 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
  * the last one repeating. `identityTimeoutMs`: for an identity assertion and
  * the relay's answer to it.
  */
-export const timing = {
+export const timing: { reconnectDelaysMs: number[]; identityTimeoutMs: number } = {
 	reconnectDelaysMs: [5_000, 10_000, 20_000, 40_000, 60_000],
 	identityTimeoutMs: 15_000,
 };
@@ -643,12 +643,16 @@ export class TabMcp extends EventTarget {
 				this.#scheduleReconnect(info.reason, info.attempt + 1);
 				return;
 			}
-			// A refusal stops it, and `error` says why, before `disconnected`.
+			// A refusal stops it, and `error` says why, before `statechange`.
+			// The state is `disconnected` already, so that a `connect()` from
+			// the listener starts afresh (with the user-activation check).
 			this.#stopReconnecting();
+			this.#state = "disconnected";
 			this.#emit("error", {
 				error: error instanceof Error ? error : new Error(String(error)),
 			});
-			this.#setState("disconnected");
+			if (this.#state === "disconnected")
+				this.#emit("statechange", { state: "disconnected" });
 		});
 		return attempt;
 	}
@@ -704,7 +708,9 @@ export class TabMcp extends EventTarget {
 	 * Disconnect one AI app: its tokens stop working at once. Resolves once
 	 * the relay removed the grant (at once for one that is not in `grants`).
 	 * Rejects with an `InvalidStateError` while not connected (only the relay
-	 * can do it) and when the session ends first.
+	 * can do it) and when the session ends first, and with the relay's error
+	 * when it refuses (its `code` is `store_unavailable` when it could not
+	 * save the change: try again; `unknown_id` for a grant it does not know).
 	 */
 	revoke(grantId: string): Promise<void> {
 		const gone = () => !this.#grants.some((g) => g.grantId === grantId);
@@ -715,22 +721,26 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Send `message` to the relay and resolve once `done()` holds (it is
-	 * checked on each change of the grants), or reject when not connected or
-	 * the session ends first.
+	 * checked on each change of the grants). Rejects when not connected, when
+	 * the session ends first, and with the relay's error when it sends one
+	 * meanwhile (`store_unavailable`: it could not save the change).
 	 */
 	#ask(message: TabMessage, done: () => boolean): Promise<void> {
 		if (!this.#session || this.#connection?.send(message) !== true)
 			return notConnected();
 		return new Promise((resolve, reject) => {
-			const check = () => {
+			const check = (event?: Event) => {
+				const error = (event as Partial<TabMcpEventMap["error"]>)?.detail
+					?.error as { code?: string } | undefined;
 				if (done()) resolve();
+				else if (error?.code) reject(error);
 				else if (this.#state !== "connected") notConnected().catch(reject);
 				else return;
-				this.removeEventListener("grantschange", check);
-				this.removeEventListener("statechange", check);
+				for (const type of ["grantschange", "statechange", "error"])
+					this.removeEventListener(type, check);
 			};
-			this.addEventListener("grantschange", check);
-			this.addEventListener("statechange", check);
+			for (const type of ["grantschange", "statechange", "error"])
+				this.addEventListener(type, check);
 			check();
 		});
 	}

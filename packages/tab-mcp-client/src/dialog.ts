@@ -195,6 +195,7 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-apps-note { margin-top: 0.5rem; }
 .tab-mcp-success { display: flex; align-items: center; gap: 0.875rem; padding: 1rem; background: color-mix(in srgb, var(--_tab-mcp-success) 10%, transparent); border: 1px solid color-mix(in srgb, var(--_tab-mcp-success) 45%, transparent); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-success-icon { flex: none; display: grid; place-items: center; width: 2.75rem; height: 2.75rem; border-radius: 50%; font-size: 1.5em; font-weight: 700; line-height: 1; color: var(--_tab-mcp-success); background: color-mix(in srgb, var(--_tab-mcp-success) 16%, transparent); }
+.tab-mcp-success-icon::before { content: "\\2713"; }
 .tab-mcp-success-text { display: grid; gap: 0.125rem; min-width: 0; }
 .tab-mcp-success-title { font-size: 1.125em; line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
 .tab-mcp-setup { display: flex; flex-direction: column; gap: 1rem; }

@@ -11,16 +11,13 @@ import {
 	test,
 } from "bun:test";
 import type { TabMcp } from "../src/index.ts";
-import type {
-	DisconnectDetail,
-	ToolCallEnd,
-	ToolCallStart,
-} from "../src/types.ts";
+import type { ToolCallEnd, ToolCallStart } from "../src/types.ts";
 import {
 	connectClient,
 	MemoryStorage,
 	mcpPost,
 	newTab,
+	nextEnd,
 	nextEvent,
 	readEvents,
 	rpc,
@@ -64,16 +61,14 @@ describe("connect", () => {
 		const t = tab();
 		const states: string[] = [];
 		t.addEventListener("statechange", (e) => states.push(e.detail.state));
-		const connected = nextEvent(t, "connected");
 		const pending = t.connect();
 		expect(t.connect()).toBe(pending); // one connection at a time
 		const session = await pending;
 		expect(session.address).toMatch(
 			/^http:\/\/127\.0\.0\.1:\d+\/a\/[a-z2-7]{52}\/mcp$/,
 		);
-		expect((await connected).detail).toEqual(session);
 		expect(t.state).toBe("connected");
-		expect(t.address).toBe(session.address);
+		expect(t.session).toBe(session);
 		expect(states).toEqual(["connecting", "connected"]);
 		expect(await t.connect()).toBe(session);
 	});
@@ -311,9 +306,9 @@ describe("disconnect", () => {
 		const t = tab();
 		const { address } = await t.connect();
 		const token = await tokenFor(r.store, address);
-		const gone = nextEvent<DisconnectDetail>(t, "disconnected");
+		const gone = nextEnd(t);
 		t.disconnect();
-		expect((await gone).detail).toEqual({ reason: "user", code: 1000 });
+		expect(await gone).toEqual({ state: "disconnected", reason: "user" });
 		expect(t.state).toBe("disconnected");
 		expect(t.session).toBeUndefined();
 		const res = await mcpPost(address, rpc(1, "tools/list"), { token });
@@ -328,11 +323,11 @@ describe("disconnect", () => {
 		const first = tab({ storage });
 		await first.connect();
 		const replaced = nextEvent(first, "replaced");
-		const gone = nextEvent<DisconnectDetail>(first, "disconnected");
+		const gone = nextEnd(first);
 		await tab({ storage }).connect();
 		// The new tab announced on the page's BroadcastChannel (DEC-095).
 		expect((await replaced).detail).toEqual({ sibling: true });
-		expect((await gone).detail).toEqual({ reason: "replaced", code: 4005 });
+		expect(await gone).toEqual({ state: "disconnected", reason: "replaced" });
 	});
 
 	/** A program with a copied secret: `hello` over a plain WebSocket, no tab. */
@@ -452,8 +447,8 @@ describe("disconnect", () => {
 		try {
 			await replaced;
 			expect(t.state).toBe("disconnected");
-			const renewed = await t.newAddress();
-			expect(renewed?.address).not.toBe(address);
+			await t.newAddress();
+			expect(t.session?.address).not.toBe(address);
 			expect(t.state).toBe("connected");
 			// The app paired with the old address no longer reaches anyone.
 			const res = await mcpPost(address, rpc(1, "tools/list"), { token });
@@ -466,10 +461,10 @@ describe("disconnect", () => {
 	test("newAddress() connects again with a new address", async () => {
 		const t = tab();
 		const before = (await t.connect()).address;
-		const gone = nextEvent<DisconnectDetail>(t, "disconnected");
-		const after = await t.newAddress();
-		expect((await gone).detail.reason).toBe("new_address");
-		expect(after?.address).not.toBe(before);
+		const gone = nextEnd(t);
+		await t.newAddress();
+		expect((await gone).reason).toBe("new_address");
+		expect(t.session?.address).not.toBe(before);
 		expect(t.state).toBe("connected");
 	});
 
@@ -477,8 +472,9 @@ describe("disconnect", () => {
 		const own = startRelay();
 		const t = newTab(own.url);
 		await t.connect();
-		const gone = nextEvent<DisconnectDetail>(t, "disconnected");
+		const gone = nextEnd(t);
 		await own.stop();
-		expect((await gone).detail).toEqual({ reason: "shutdown", code: 4004 });
+		expect(await gone).toEqual({ state: "reconnecting", reason: "shutdown" });
+		t.disconnect();
 	});
 });

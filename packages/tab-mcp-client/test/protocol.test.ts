@@ -5,13 +5,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { TabMcp } from "../src/index.ts";
 import type {
-	DisconnectDetail,
+	DisconnectReason,
 	Grant,
 	PairingCode,
 	ToolCallClient,
 	ToolCallEnd,
 } from "../src/types.ts";
-import { MemoryStorage, newTab, nextEvent } from "./helpers.ts";
+import { MemoryStorage, newTab, nextEnd, nextEvent } from "./helpers.ts";
 import { STUB_LIMITS, StubRelay } from "./stub-relay.ts";
 
 let relay: StubRelay;
@@ -82,19 +82,19 @@ test("ping is answered with pong and the same t", async () => {
 test("two missed pings end the session (reason heartbeat)", async () => {
 	relay.limits = { ...STUB_LIMITS, heartbeatMs: 40 };
 	await t.connect();
-	const gone = await nextEvent<DisconnectDetail>(t, "disconnected");
-	expect(gone.detail.reason).toBe("heartbeat");
-	expect(t.state).toBe("disconnected");
+	const gone = await nextEnd(t);
+	expect(gone.reason).toBe("heartbeat");
+	expect(t.state).toBe("reconnecting");
 });
 
 test("bye replaced, then close 4005: replaced and disconnected", async () => {
 	await t.connect();
 	const replaced = nextEvent(t, "replaced");
-	const gone = nextEvent<DisconnectDetail>(t, "disconnected");
+	const gone = nextEnd(t);
 	relay.send({ type: "bye", reason: "replaced" });
 	relay.close(4005, "replaced");
 	await replaced;
-	expect((await gone).detail).toEqual({ reason: "replaced", code: 4005 });
+	expect((await gone).reason).toBe("replaced");
 });
 
 test.each([
@@ -112,12 +112,9 @@ test.each([
 	[1013, "shutdown"],
 ])("close code %d means %s", async (code, reason) => {
 	await t.connect();
-	const gone = nextEvent<DisconnectDetail>(t, "disconnected");
+	const gone = nextEnd(t);
 	relay.close(code);
-	expect((await gone).detail).toEqual({
-		reason: reason as DisconnectDetail["reason"],
-		code,
-	});
+	expect((await gone).reason).toBe(reason as DisconnectReason);
 });
 
 test("disconnect() says bye", async () => {
@@ -202,21 +199,21 @@ describe("pairing (DEC-028)", () => {
 		t.startPairing();
 		await t.connect();
 		await relay.next("pairing.start");
-		const code = nextEvent<PairingCode | null>(t, "pairingcode");
+		const code = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
 		relay.send({
 			type: "pairing.code",
 			code: "123456",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
-		expect((await code).detail).toEqual({
+		expect((await code).detail.pairingCode).toEqual({
 			code: "123456",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		expect(t.pairingCode?.code).toBe("123456");
-		const cleared = nextEvent<PairingCode | null>(t, "pairingcode");
+		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
 		t.stopPairing();
 		await relay.next("pairing.stop");
-		expect((await cleared).detail).toBeNull();
+		expect((await cleared).detail.pairingCode).toBeUndefined();
 		expect(t.pairingCode).toBeUndefined();
 	});
 
@@ -226,14 +223,14 @@ describe("pairing (DEC-028)", () => {
 		await relay.next("pairing.start");
 		const sent: unknown[] = [];
 		for (const reason of ["start", "used", "locked", "expired", "later", 7]) {
-			const code = nextEvent<PairingCode | null>(t, "pairingcode");
+			const code = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
 			relay.send({
 				type: "pairing.code",
 				code: "123456",
 				expiresAt: "2026-10-20T10:00:00.000Z",
 				reason,
 			});
-			sent.push((await code).detail?.reason);
+			sent.push((await code).detail.pairingCode?.reason);
 		}
 		expect(sent).toEqual([
 			"start",
@@ -264,9 +261,9 @@ describe("pairing (DEC-028)", () => {
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		await nextEvent(t, "pairingcode");
-		const cleared = nextEvent<PairingCode | null>(t, "pairingcode");
+		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
 		relay.close(4002);
-		expect((await cleared).detail).toBeNull();
+		expect((await cleared).detail.pairingCode).toBeUndefined();
 	});
 });
 
@@ -286,7 +283,7 @@ describe("grants", () => {
 			"g_1",
 			"g_2",
 		]);
-		expect(t.revoke("g_1")).toBe(true);
+		const revoked = t.revoke("g_1");
 		expect(await relay.next("grant.revoke")).toEqual({
 			type: "grant.revoke",
 			grantId: "g_1",
@@ -296,16 +293,18 @@ describe("grants", () => {
 		expect((await removed).detail.grants.map((g) => g.grantId)).toEqual([
 			"g_2",
 		]);
+		await revoked; // settles on the removal (CU 10)
 	});
 
-	test("revoke() reports false while not connected", async () => {
-		expect(t.revoke("g_1")).toBe(false);
+	test("revoke() rejects while not connected", async () => {
 		relay.grants = [GRANT];
 		await t.connect();
-		const gone = nextEvent(t, "disconnected");
+		const gone = nextEnd(t);
 		relay.close(4002);
 		await gone;
-		expect(t.revoke("g_1")).toBe(false);
+		await expect(t.revoke("g_1")).rejects.toMatchObject({
+			name: "InvalidStateError",
+		});
 	});
 
 	test("a tool call names its client from the grants list", async () => {
@@ -426,8 +425,6 @@ describe("grants", () => {
 		const firstSecret = (await relay.next("hello"))["secret"];
 		const states: string[] = [];
 		t.addEventListener("statechange", (e) => states.push(e.detail.state));
-		const connected: string[] = [];
-		t.addEventListener("connected", (e) => connected.push(e.detail.address));
 		const again = t.newAddress();
 		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
 		expect(await relay.next("hello")).toMatchObject({
@@ -446,7 +443,6 @@ describe("grants", () => {
 		);
 		// The take-back's session is never the page's: one `connected`, no flicker.
 		expect(states).toEqual(["disconnected", "connecting", "connected"]);
-		expect(connected).toHaveLength(1);
 	});
 });
 
@@ -619,9 +615,9 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await t.connect();
 		const order: string[] = [];
 		t.addEventListener("replaced", () => order.push("replaced"));
-		const gone = nextEvent<DisconnectDetail>(t, "disconnected");
+		const gone = nextEnd(t);
 		replace();
-		expect((await gone).detail.reason).toBe("replaced");
+		expect((await gone).reason).toBe("replaced");
 		expect(t.state).toBe("disconnected");
 		expect(order).toEqual([]); // still waiting for a sibling's claim
 		await nextEvent(t, "replaced");
@@ -631,7 +627,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 	test("newAddress() during the wait for the detail takes the address back first", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
-		const gone = nextEvent(t, "disconnected");
+		const gone = nextEnd(t);
 		replace();
 		await gone;
 		const renewed = t.newAddress();
@@ -639,7 +635,8 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		expect(back["secret"]).toBe(secret);
 		expect(back["revokeAll"]).toBe(true);
 		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
-		expect((await renewed)?.address).toBeDefined();
+		await renewed;
+		expect(t.session?.address).toBeDefined();
 		expect(t.state).toBe("connected");
 	});
 
@@ -665,7 +662,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		replace();
-		await nextEvent(t, "disconnected");
+		await nextEnd(t);
 		relay.answerHello = false;
 		const renewing = t.newAddress();
 		expect(await relay.next("hello")).toMatchObject({
@@ -691,7 +688,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		replace();
-		await nextEvent(t, "disconnected");
+		await nextEnd(t);
 		const renewing = t.newAddress();
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
@@ -716,8 +713,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await relay.next("bye");
 		expect(t.grants).toHaveLength(1); // grants stay across disconnect()
 		const changes = nextEvent<{ grants: unknown[] }>(t, "grantschange");
-		const renewed = await t.newAddress();
-		expect(renewed).toBeUndefined();
+		await t.newAddress();
 		const back = await relay.next("hello");
 		expect(back).toMatchObject({ secret, revokeAll: true });
 		expect((await changes).detail.grants).toEqual([]);
@@ -730,8 +726,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 	});
 
 	test("a page that never had a secret makes one without connecting", async () => {
-		const renewed = await t.newAddress();
-		expect(renewed).toBeUndefined();
+		await t.newAddress();
 		expect(relay.urls).toEqual([]);
 		expect(t.state).toBe("disconnected");
 	});
@@ -794,7 +789,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		replace();
 		await nextEvent(t, "replaced");
 		await t.connect({ resume: true });
-		const gone = nextEvent(t, "disconnected");
+		const gone = nextEnd(t);
 		relay.close(4002); // idle: not reconnected
 		await gone;
 		await t.newAddress();

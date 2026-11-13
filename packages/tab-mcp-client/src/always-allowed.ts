@@ -17,12 +17,12 @@ const seen = (tool: ToolSeen) => JSON.stringify([tool.title, tool.description]);
 
 export class AlwaysAllowed {
 	/** Per grant: the tools by name, with what the user saw of each. */
-	readonly #tools = new Map<string, Map<string, string>>();
+	readonly #tools = new Map<string, Map<string, { seen: string; label: string }>>();
 	readonly #listeners = new Set<() => void>();
 
 	has(grantId: string, tool: ToolSeen): boolean {
 		const tools = this.#tools.get(grantId);
-		const allowed = tools?.get(tool.name);
+		const allowed = tools?.get(tool.name)?.seen;
 		if (allowed === undefined || allowed === seen(tool)) {
 			return allowed !== undefined;
 		}
@@ -33,15 +33,15 @@ export class AlwaysAllowed {
 	}
 
 	add(grantId: string, tool: ToolSeen): void {
-		const tools = this.#tools.get(grantId) ?? new Map<string, string>();
-		tools.set(tool.name, seen(tool));
+		const tools = this.#tools.get(grantId) ?? new Map();
+		tools.set(tool.name, { seen: seen(tool), label: tool.title ?? tool.name });
 		this.#tools.set(grantId, tools);
 		this.#changed();
 	}
 
-	/** The names of the tools allowed for a grant, in the order allowed. */
+	/** The tools allowed for a grant (title, else name), in the order allowed. */
 	list(grantId: string): string[] {
-		return [...(this.#tools.get(grantId)?.keys() ?? [])];
+		return [...(this.#tools.get(grantId)?.values() ?? [])].map((t) => t.label);
 	}
 
 	/** Ask again for every tool of a grant. */

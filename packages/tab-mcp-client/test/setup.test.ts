@@ -114,12 +114,7 @@ describe("setupInstructions, the public API", () => {
 			{
 				id: "chatgpt",
 				app: "ChatGPT",
-				text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP, paste the address, save, then Authenticate.",
-				note: [
-					{ text: "The Mac app first needs a feature of Codex: run " },
-					{ code: "codex features enable mcp_2026_07_28" },
-					{ text: " in a terminal." },
-				],
+				text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. The Mac app needs more steps: see the guide.",
 			},
 			{
 				id: "claude-code",
@@ -139,10 +134,8 @@ describe("setupInstructions, the public API", () => {
 				command: `codex features enable mcp_2026_07_28\ncodex mcp add my-notes --url ${ADDRESS}\ncodex mcp login my-notes`,
 				note: [
 					{
-						text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
+						text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects.",
 					},
-					{ code: "codex features disable mcp_2026_07_28" },
-					{ text: " turns it off." },
 				],
 			},
 		]);
@@ -161,12 +154,10 @@ describe("setupInstructions, the public API", () => {
 		// Claude Code signs in from /mcp: the step after the command.
 		const claudeCode = steps.find(({ id }) => id === "claude-code");
 		expect(claudeCode?.note).toContainEqual({ code: "/mcp" });
-		// ChatGPT's Mac app names the feature it needs in its own entry.
+		// ChatGPT's Mac app: the guide has its steps (CU 20).
 		const chatgpt = steps.find(({ id }) => id === "chatgpt");
-		expect(chatgpt?.text).not.toContain("below");
-		expect(chatgpt?.note).toContainEqual({
-			code: "codex features enable mcp_2026_07_28",
-		});
+		expect(chatgpt?.text).toContain("see the guide");
+		expect(chatgpt?.note).toBeUndefined();
 	});
 
 	test("an address that is not shell-plain: no command key at all, the note stays", () => {
@@ -181,7 +172,7 @@ describe("setupInstructions, the public API", () => {
 			expect(steps.find(({ id }) => id === "claude-code")?.text).toBe(
 				"Add the address with claude mcp add --transport http.",
 			);
-			expect(steps.find(({ id }) => id === "codex")?.note).toHaveLength(3);
+			expect(steps.find(({ id }) => id === "codex")?.note).toHaveLength(1);
 			expect(JSON.stringify(steps)).not.toContain(unsafe);
 		}
 	});

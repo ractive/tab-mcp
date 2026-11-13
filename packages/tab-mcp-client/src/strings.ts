@@ -45,7 +45,7 @@ export const STRINGS = {
 	selected: "Selected",
 	copyAddress: "Copy address",
 	copyCode: "Copy code",
-	copyCommand: "Copy the {app} command",
+	copyCommand: "Copy {app} command",
 
 	// The connect dialog.
 	connectTitle: "Connect your AI app",
@@ -98,6 +98,10 @@ export const STRINGS = {
 	disconnect: "Disconnect",
 	disconnectApp: "Disconnect {app}",
 	disconnectNote: "To disconnect an app, connect this page again first.",
+	/** Disconnect failed: the relay could not save it (`store_unavailable`). */
+	storeUnavailable: "The relay could not save this. Try again.",
+	/** Disconnect failed for another reason. */
+	disconnectFailed: "Could not disconnect the app. Try again.",
 	/** Under a connected app: the tools allowed until reload for it. */
 	runsWithoutAsking: "Runs without asking: {tools}",
 	askAgain: "Ask again",
