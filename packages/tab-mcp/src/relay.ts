@@ -1,6 +1,7 @@
 import type { Server, ServerWebSocket } from "bun";
 import { version } from "../package.json" with { type: "json" };
 import { addressIdFromSecret, isAddressId, shortAddress } from "./address.ts";
+import { readBodyWithDeadline } from "./body.ts";
 import {
 	largestMessageBytes,
 	MIN_MESSAGE_BYTES,
@@ -18,7 +19,7 @@ import {
 } from "./exchange.ts";
 import { APPLE_TOUCH_ICON, FAVICON_ICO, FAVICON_SVG } from "./icons.ts";
 import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
-import { ipPrefixKey, ipSessionKeys } from "./ip.ts";
+import { forwardedIp, ipPrefixKey, ipSessionKeys } from "./ip.ts";
 import { JwtError, type KeySource } from "./jwt.ts";
 import { createLogger, errorName, type Logger, truncateIp } from "./log.ts";
 import {
@@ -68,6 +69,8 @@ const MAX_LISTEN_STREAMS_PER_GRANT = 2;
  * waited for its page checks its token again in the store anyway).
  */
 const REVOCATION_MEMORY_MS = 120_000;
+/** A second "revoke all" of an address within this time is a no-op. */
+const REVOKE_ALL_REPEAT_MS = 1000;
 /** At most this many remembered revocations of each kind (oldest go first). */
 const MAX_REMEMBERED_REVOCATIONS = 10_000;
 
@@ -382,6 +385,10 @@ function startRelay(
 	 */
 	const revokedGrants = new Map<string, number>();
 	const revokedAddresses = new Map<string, { at: number; until: number }>();
+	/** When each address last had all its grants revoked by its tab (RS 3). */
+	const revokedAllAt = new Map<string, number>();
+	/** Revocations of every grant of an address that are under way. */
+	const revokingAll = new Map<string, Promise<void>>();
 
 	function remember<V>(map: Map<string, V>, key: string, value: V): void {
 		map.delete(key);
@@ -397,6 +404,9 @@ function startRelay(
 		}
 		for (const [id, a] of revokedAddresses) {
 			if (a.until <= now) revokedAddresses.delete(id);
+		}
+		for (const [id, at] of revokedAllAt) {
+			if (now - at >= REVOKE_ALL_REPEAT_MS) revokedAllAt.delete(id);
 		}
 	}
 
@@ -483,18 +493,48 @@ function startRelay(
 			grantRemoved(addressId, grantId, "revoked");
 			return true;
 		},
-		async revokeAll(session: TabSession): Promise<void> {
+		async revokeAll(session: TabSession, fromHello = false): Promise<void> {
 			const addressId = session.addressId;
 			if (addressId === undefined) return;
-			const grants = await store.listGrants(addressId, Date.now());
-			const options = revokeOptions();
-			await store.revoke({ addressId }, options);
-			addressRevoked(addressId, options.now, true);
-			logger.info("oauth.revoked_all", {
-				address: shortAddress(addressId),
-				grants: grants.length,
-			});
-			for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+			// A `grants.revokeAll` frame within a second of a finished revocation
+			// costs no store write (RS 3). A `hello` with `revokeAll` always
+			// revokes: its `session` message must list only what is left (DEC-095).
+			const last = revokedAllAt.get(addressId);
+			if (
+				!fromHello &&
+				last !== undefined &&
+				Date.now() - last < REVOKE_ALL_REPEAT_MS
+			) {
+				return;
+			}
+			// One revocation of an address at a time: a repeat waits for the one
+			// under way, then (a frame) is done or (a hello) revokes again.
+			const running = revokingAll.get(addressId);
+			if (running !== undefined) {
+				const ok = await running.then(
+					() => true,
+					() => false,
+				);
+				if (ok && !fromHello) return;
+			}
+			const work = (async () => {
+				const grants = await store.listGrants(addressId, Date.now());
+				const options = revokeOptions();
+				await store.revoke({ addressId }, options);
+				addressRevoked(addressId, options.now, true);
+				logger.info("oauth.revoked_all", {
+					address: shortAddress(addressId),
+					grants: grants.length,
+				});
+				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+			})();
+			revokingAll.set(addressId, work);
+			try {
+				await work;
+				remember(revokedAllAt, addressId, Date.now());
+			} finally {
+				if (revokingAll.get(addressId) === work) revokingAll.delete(addressId);
+			}
 		},
 		/**
 		 * Called one at a time per session (the session chains `identity` and
@@ -770,17 +810,35 @@ function startRelay(
 		else perIp.set(ip, n);
 	}
 
+	let warnedForwarded = false;
+	/**
+	 * The client's address: from the trusted proxy's header, with a port
+	 * stripped (RS 15); a value that is not an address falls back to the
+	 * socket's, so a malformed header never gives each connection a limiter
+	 * key of its own.
+	 */
 	function clientIp(req: Request, server: Server<WsData>): string {
+		let raw: string | undefined;
 		if (config.trustProxy === "x-real-ip") {
-			const v = req.headers.get("x-real-ip")?.trim();
-			if (v) return v;
+			raw = req.headers.get("x-real-ip")?.trim() || undefined;
 		} else if (config.trustProxy === "x-forwarded-for") {
-			const parts = (req.headers.get("x-forwarded-for") ?? "")
+			raw = (req.headers.get("x-forwarded-for") ?? "")
 				.split(",")
 				.map((s) => s.trim())
-				.filter((s) => s !== "");
-			const last = parts.at(-1);
-			if (last !== undefined) return last;
+				.filter((s) => s !== "")
+				.at(-1);
+		}
+		if (raw !== undefined) {
+			const ip = forwardedIp(raw);
+			if (ip !== undefined) return ip;
+			if (!warnedForwarded) {
+				warnedForwarded = true;
+				logger.warn("relay.bad_forwarded_ip", {
+					header: config.trustProxy,
+					message:
+						"the trusted proxy header holds no IP address; using the socket address",
+				});
+			}
 		}
 		return server.requestIP(req)?.address ?? "unknown";
 	}
@@ -911,34 +969,14 @@ function startRelay(
 		req: Request,
 		maxBytes: number,
 	): Promise<Body | Response> {
-		const length = Number(req.headers.get("content-length") ?? "0");
-		if (length > maxBytes) {
-			return rpcError(
-				413,
-				undefined,
-				-32600,
-				"Request body too large.",
-				corsHeaders,
-			);
-		}
-		let bytes: ArrayBuffer;
-		try {
-			// Bun's idle timeout does not fire while a body is being read, so a
-			// client that stalls mid-body would hold the socket; our own deadline
-			// answers 408 and closes the connection.
-			const reading = req.arrayBuffer();
-			reading.catch(() => {}); // rejects once the socket is closed
-			let timer: Timer | undefined;
-			const deadline = new Promise<"timeout">((resolve) => {
-				timer = setTimeout(() => resolve("timeout"), config.bodyTimeoutMs);
-			});
-			let result: ArrayBuffer | "timeout";
-			try {
-				result = await Promise.race([reading, deadline]);
-			} finally {
-				clearTimeout(timer);
-			}
-			if (result === "timeout") {
+		// Our own deadline answers 408 and closes the connection (DEC-048).
+		const read = await readBodyWithDeadline(
+			req,
+			maxBytes,
+			config.bodyTimeoutMs,
+		);
+		if (!read.ok) {
+			if (read.reason === "timeout") {
 				return rpcError(
 					408,
 					undefined,
@@ -947,17 +985,15 @@ function startRelay(
 					{ ...corsHeaders, connection: "close" },
 				);
 			}
-			bytes = result;
-		} catch {
-			return rpcError(
-				400,
-				undefined,
-				-32700,
-				"Could not read the request body.",
-				corsHeaders,
-			);
-		}
-		if (bytes.byteLength > maxBytes) {
+			if (read.reason === "unreadable") {
+				return rpcError(
+					400,
+					undefined,
+					-32700,
+					"Could not read the request body.",
+					corsHeaders,
+				);
+			}
 			return rpcError(
 				413,
 				undefined,
@@ -966,6 +1002,7 @@ function startRelay(
 				corsHeaders,
 			);
 		}
+		const bytes = read.bytes;
 		let text: string;
 		let value: unknown;
 		try {
@@ -1069,24 +1106,9 @@ function startRelay(
 				...extra,
 			});
 
-		// The page's own limit when it is connected; else the instance's (the
-		// request then ends with 401 or 503 anyway).
-		const body = await readBody(
-			req,
-			sessions.get(addressId)?.limits.maxMessageBytes ?? config.maxMessageBytes,
-		);
-		if (body instanceof Response) {
-			logDone(body.status, "?");
-			return body;
-		}
-		const rpcId = rpcIdOf(body.value);
-		const method = methodForLog(body.value);
-
-		const version = checkVersion(req, body.value, rpcId);
-		if (version instanceof Response) {
-			logDone(version.status, method);
-			return version;
-		}
+		// Known once the body is parsed; the refusals below read them then.
+		let rpcId: RpcId | undefined;
+		let method = "?";
 
 		/** The answer to a token that does not authenticate (now or after the wait). */
 		const refused = (
@@ -1121,7 +1143,34 @@ function startRelay(
 			);
 		};
 
+		// The token is looked up before the body is read (RS 8): only an
+		// authenticated request may send up to the page's limit (the
+		// instance's while the page is away). Without a valid token the body
+		// may be MIN_MESSAGE_BYTES, which every version probe fits; a larger
+		// one is not parsed and gets the 401 (or 503) it would get after the
+		// version check anyway (DEC-040 keeps that order for what is parsed).
 		const auth = await authenticate(req, addressId);
+		const authenticated = typeof auth !== "string";
+		const body = await readBody(
+			req,
+			authenticated
+				? (sessions.get(addressId)?.limits.maxMessageBytes ??
+						config.maxMessageBytes)
+				: MIN_MESSAGE_BYTES,
+		);
+		if (body instanceof Response) {
+			if (!authenticated && body.status === 413) return refused(auth);
+			logDone(body.status, "?");
+			return body;
+		}
+		rpcId = rpcIdOf(body.value);
+		method = methodForLog(body.value);
+
+		const version = checkVersion(req, body.value, rpcId);
+		if (version instanceof Response) {
+			logDone(version.status, method);
+			return version;
+		}
 		if (typeof auth === "string") return refused(auth);
 
 		const headers: Record<string, string> = {};
@@ -1581,6 +1630,15 @@ function startRelay(
 			},
 		},
 		fetch: () => new Response("Not found", { status: 404 }),
+		// A handler that throws: one JSON log line with the error's name only
+		// (DEC-047), not Bun's own output with message and stack (RQ 20).
+		error(error) {
+			logger.error("http.handler_error", { error: errorName(error) });
+			return new Response("Internal error", {
+				status: 500,
+				headers: { "content-type": "text/plain; charset=utf-8" },
+			});
+		},
 		websocket: {
 			data: {} as WsData,
 			maxPayloadLength: largest * FRAME_HEADROOM,
@@ -1622,8 +1680,10 @@ function startRelay(
 	const sweep = setInterval(() => {
 		auth.sweep();
 		sweepRevocations(Date.now());
-		store
-			.deleteExpired(Date.now())
+		// Inside a promise chain, so a store that throws synchronously is a
+		// logged failure, not an uncaught exception in the timer (RQ 10).
+		Promise.resolve()
+			.then(() => store.deleteExpired(Date.now()))
 			.then((n) => {
 				if (n > 0) logger.debug("store.swept", { deleted: n });
 			})

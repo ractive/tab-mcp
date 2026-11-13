@@ -94,8 +94,22 @@ The returned `Relay` has `url`, `port`, `config`, `sessionCount`, `addressFor(se
 and `stop()`, which sends `bye` to every page (close code 4004) and stops the server.
 
 The package also exports `MemoryTokenStore`, `SqliteTokenStore`, the `TokenStore` types,
-`configFromEnv`, `resolveConfig`, `DEFAULT_CONFIG`, `createLogger`, `SUBPROTOCOL`
-(`tab-mcp.v1`) and `VERSION`.
+`configFromEnv`, `resolveConfig`, `DEFAULT_CONFIG`, `createLogger`, `installCrashLogging`,
+`SUBPROTOCOL` (`tab-mcp.v1`) and `VERSION`.
+
+`installCrashLogging(logger)` is what the `tab-mcp` command installs before it starts:
+an unhandled promise rejection is logged and the process keeps running; an uncaught
+exception is logged and the process exits with 1, for your supervisor to restart it. Both
+lines carry the error's name only. Install it in your own process too, unless it already
+handles these events:
+
+```ts
+import { createLogger, createRelay, installCrashLogging } from "@ractive-ch/tab-mcp";
+
+const logger = createLogger("info");
+installCrashLogging(logger);
+const relay = createRelay({ publicUrl: "https://relay.example.com", logger });
+```
 
 ### Your own token store
 

@@ -18,7 +18,12 @@ export {
 	type TrustProxy,
 } from "./config.ts";
 export { TAB_ASSERTION_TYP } from "./identity.ts";
-export { createLogger, type LogFields, type Logger } from "./log.ts";
+export {
+	createLogger,
+	installCrashLogging,
+	type LogFields,
+	type Logger,
+} from "./log.ts";
 export { SUBPROTOCOL } from "./protocol.ts";
 export {
 	type CreateRelayOptions,

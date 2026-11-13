@@ -90,6 +90,7 @@ export interface DocumentOptions {
  */
 const TRANSIENT_REASONS = new Set([
 	"rate_limited",
+	"requester_limited",
 	"fetch_failed",
 	"unresolvable",
 	"too_large",
@@ -126,6 +127,25 @@ const MAX_FAILURES = 1000;
 async function defaultLookup(hostname: string): Promise<string[]> {
 	const records = await Bun.dns.lookup(hostname, {});
 	return records.map((r) => r.address);
+}
+
+/** `promise`, or a rejection once `signal` aborts, whichever comes first. */
+function withSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
 }
 
 /**
@@ -230,6 +250,14 @@ export class ClientMetadataFetcher {
 	 * refreshes. The totals are higher: the per-host and per-domain shares
 	 * are what keep one party from taking them.
 	 */
+	/**
+	 * Fetches of client ids nobody has seen, per requesting network (the
+	 * caller's key, a /56 for IPv6): 5, then one a minute (RS 2, DEC-129).
+	 */
+	readonly #perRequester = new RateLimiter({
+		capacity: 5,
+		refillPerSecond: 1 / 60,
+	});
 	readonly #refreshes = knownBudget();
 	readonly #keys = knownBudget();
 	readonly #allowedHosts: readonly string[];
@@ -262,7 +290,7 @@ export class ClientMetadataFetcher {
 	 */
 	async get(
 		clientId: string,
-		options: { allowStale?: boolean } = {},
+		options: { allowStale?: boolean; requester?: string } = {},
 	): Promise<ClientMetadata> {
 		const url = this.#checkUrl(clientId);
 		const now = this.#now();
@@ -275,7 +303,7 @@ export class ClientMetadataFetcher {
 		try {
 			const failed = this.#failures.get(clientId);
 			if (failed !== undefined && failed.until > now) throw failed.error;
-			return await this.#refresh(clientId, url, now, known);
+			return await this.#refresh(clientId, url, now, known, options.requester);
 		} catch (error) {
 			const transient =
 				error instanceof ClientMetadataError && isTransient(error);
@@ -296,15 +324,21 @@ export class ClientMetadataFetcher {
 		url: URL,
 		now: number,
 		known: boolean,
+		requester: string | undefined,
 	): Promise<ClientMetadata> {
-		this.#admit(url, now, known ? "refresh" : "new");
+		this.#admit(url, now, known ? "refresh" : "new", requester);
 		let meta: ClientMetadata;
 		let ttlMs: number;
 		try {
-			const address = await this.#vettedAddress(url);
-			const response = await this.#fetchJson(url, address, [
-				"application/json",
-			]);
+			// One deadline for the lookup and the fetch (RS 13).
+			const signal = AbortSignal.timeout(this.#timeoutMs);
+			const address = await this.#vettedAddress(url, signal);
+			const response = await this.#fetchJson(
+				url,
+				address,
+				["application/json"],
+				signal,
+			);
 			meta = validateDocument(response.doc, clientId, url, {
 				test: this.#testMode !== undefined,
 				onFallback: (reason) =>
@@ -354,12 +388,15 @@ export class ClientMetadataFetcher {
 	 */
 	async fetchJwks(jwksUri: string): Promise<unknown> {
 		const url = this.#checkJwksUri(jwksUri);
-		this.#admit(url, this.#now(), "keys");
-		const address = await this.#vettedAddress(url);
-		const response = await this.#fetchJson(url, address, [
-			"application/json",
-			"application/jwk-set+json",
-		]);
+		this.#admit(url, this.#now(), "keys", undefined);
+		const signal = AbortSignal.timeout(this.#timeoutMs);
+		const address = await this.#vettedAddress(url, signal);
+		const response = await this.#fetchJson(
+			url,
+			address,
+			["application/json", "application/jwk-set+json"],
+			signal,
+		);
 		return response.doc;
 	}
 
@@ -369,7 +406,12 @@ export class ClientMetadataFetcher {
 	 * the others nothing (DEC-089). `budget`: new client ids, refreshes of
 	 * known ones, or keys (review of PR 65).
 	 */
-	#admit(url: URL, now: number, budget: "new" | "refresh" | "keys"): void {
+	#admit(
+		url: URL,
+		now: number,
+		budget: "new" | "refresh" | "keys",
+		requester: string | undefined,
+	): void {
 		const { perHost, perDomain, global } =
 			budget === "refresh"
 				? this.#refreshes
@@ -387,7 +429,17 @@ export class ClientMetadataFetcher {
 				"Too many requests for this AI app's details. Try again in a minute.",
 			);
 		}
+		// A client id nobody has seen is a fetch anyone can cause: its network
+		// pays first, so one network cannot empty the global budget (RS 2).
+		const charged = budget === "new" && requester !== undefined;
+		if (charged && !this.#perRequester.take(requester, now)) {
+			throw new ClientMetadataError(
+				"requester_limited",
+				"Too many new AI apps from your network. Try again in a minute.",
+			);
+		}
 		if (!global.take("all", now)) {
+			if (charged) this.#perRequester.refund(requester, now);
 			throw new ClientMetadataError(
 				"rate_limited",
 				"The relay is busy. Try again in a minute.",
@@ -493,12 +545,14 @@ export class ClientMetadataFetcher {
 	 * address to connect to (IPv4 first). The fetch is pinned to it, so a DNS
 	 * answer that changes between check and connect is never used.
 	 */
-	async #vettedAddress(url: URL): Promise<string> {
+	async #vettedAddress(url: URL, signal: AbortSignal): Promise<string> {
 		const hostname = url.hostname.replace(/^\[|\]$/g, "");
 		if (isIpLiteral(hostname)) return hostname; // checked in #checkUrl
 		let addresses: string[];
 		try {
-			addresses = await this.#lookup(hostname);
+			// The fetch's deadline covers the lookup too: a name server that
+			// never answers fails like an unresolvable name (RS 13).
+			addresses = await withSignal(this.#lookup(hostname), signal);
 		} catch {
 			throw this.#notLoaded("unresolvable", url);
 		}
@@ -518,6 +572,7 @@ export class ClientMetadataFetcher {
 		url: URL,
 		address: string,
 		types: readonly string[],
+		signal: AbortSignal,
 	): Promise<{ doc: unknown; cacheControl: string | null }> {
 		const fail = (detail: string) =>
 			this.#notLoaded("fetch_failed", url, detail);
@@ -543,7 +598,7 @@ export class ClientMetadataFetcher {
 				method: "GET",
 				redirect: "manual",
 				headers: { accept: "application/json", host: url.host },
-				signal: AbortSignal.timeout(this.#timeoutMs),
+				signal,
 				...tls,
 			} as RequestInit);
 		} catch (error) {

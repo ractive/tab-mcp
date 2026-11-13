@@ -153,6 +153,36 @@ export function ipPrefixKey(ip: string): string {
 }
 
 /**
+ * The wider network of an `ipPrefixKey`: the /56 of an IPv6 /64 key (one
+ * subscriber often holds a whole /56, DEC-061); any other key as it is.
+ */
+export function networkKey(prefixKey: string): string {
+	if (!prefixKey.endsWith("::/64")) return prefixKey;
+	const v6 = parseIpv6(prefixKey.slice(0, -"/64".length));
+	if (v6 === undefined) return prefixKey;
+	const g3 = (v6[3] ?? 0) & 0xff00;
+	const prefix = [...v6.slice(0, 3), g3].map((g) => g.toString(16)).join(":");
+	return `${prefix}::/56`;
+}
+
+/**
+ * The client address in an `X-Real-IP` or `X-Forwarded-For` entry: a bare
+ * IPv4 or IPv6 address, or one with a port as some proxies write it
+ * (`203.0.113.7:51234`, `[2001:db8::1]:443`); `undefined` for anything else.
+ */
+export function forwardedIp(value: string): string | undefined {
+	const v = value.trim();
+	if (parseIpv4(v) !== undefined || parseIpv6(v) !== undefined) return v;
+	const bracketed = /^\[([^\]]+)\](?::\d{1,5})?$/.exec(v)?.[1];
+	if (bracketed !== undefined && parseIpv6(bracketed) !== undefined) {
+		return bracketed;
+	}
+	const v4 = /^(\d{1,3}(?:\.\d{1,3}){3}):\d{1,5}$/.exec(v)?.[1];
+	if (v4 !== undefined && parseIpv4(v4) !== undefined) return v4;
+	return undefined;
+}
+
+/**
  * The keys a tab session counts under for the per-IP session limit: the
  * `ipPrefixKey`, and for IPv6 also its /56. Each must stay under the limit.
  * A subscriber often gets a whole /56 (256 /64s), so counting /64s alone let

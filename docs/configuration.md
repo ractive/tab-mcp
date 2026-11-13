@@ -39,7 +39,7 @@ than 0.
 | `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | Comma-separated page origins (`https://app.example.com`, or a Chrome or Edge extension's `chrome-extension://<id>`, see [Browser extensions](#browser-extensions)) allowed to open tab sessions with the default limits. `*` admits any website and any extension (an open relay, see below). |
 | `TAB_MCP_SITES` | empty | JSON array of sites with their own app name or limits (see [Sites](#sites)). A site listed here needs no entry in `TAB_MCP_ALLOWED_ORIGINS`; an origin may appear in only one of the two. |
 | `TAB_MCP_CLIENT_ID_HOSTS` | empty: any AI app | Comma-separated hosts whose AI apps may connect, compared exactly with the host of the app's client id URL. For example `claude.ai` admits Claude Code, whose client id is `https://claude.ai/oauth/claude-code-client-metadata`. An app that authenticates with `private_key_jwt` (ChatGPT) publishes its keys on the same host, so the list covers them too (DEC-106). |
-| `TAB_MCP_TRUST_PROXY` | `none` | Where the client IP for rate limits comes from: `none` (the TCP peer), `x-real-ip`, or `x-forwarded-for` (its last entry, the one your proxy added). Set it only behind a proxy that sets the header; otherwise clients can choose their own IP. |
+| `TAB_MCP_TRUST_PROXY` | `none` | Where the client IP for rate limits comes from: `none` (the TCP peer), `x-real-ip`, or `x-forwarded-for` (its last entry, the one your proxy added). Set it only behind a proxy that sets the header; otherwise clients can choose their own IP. A value with a port (`203.0.113.7:51234`, `[2001:db8::1]:443`) counts as its address; a value that is not an address is ignored for the TCP peer, logged once as `relay.bad_forwarded_ip`. |
 | `TAB_MCP_CORS` | `on` | `on` answers cross-origin requests to the MCP, OAuth metadata, token and revoke endpoints without credentials, so browser-based MCP clients work. `off` drops the CORS headers. |
 | `TAB_MCP_STORE` | `sqlite` | Where grants and token hashes are kept: `sqlite` or `memory` (lost on restart). |
 | `TAB_MCP_SQLITE_PATH` | `tab-mcp.db` | The SQLite file. The Docker image sets `/data/tab-mcp.db`. |
@@ -52,7 +52,7 @@ than 0.
 | `TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S` | `600` | A tab session that never had a grant, never started pairing, never had its user signed in and never got an MCP request is closed after this long instead (close code 4002, `bye` `idle`). A page with its pairing dialog open or an AI app paired is not affected. The browser extension connects again by itself; a web page shows that it is disconnected. See [self-hosting](self-hosting.md#sizing-the-session-limits). |
 | `TAB_MCP_SESSION_LIFETIME_S` | `43200` | Longest life of one tab session (12 hours; close code 4001). |
 | `TAB_MCP_HEARTBEAT_S` | `25` | Interval of the protocol `ping` to the tab. |
-| `TAB_MCP_BODY_TIMEOUT_S` | `10` | Deadline for receiving an MCP request body; a slower client gets HTTP 408. |
+| `TAB_MCP_BODY_TIMEOUT_S` | `10` | Deadline for receiving a request body (the MCP endpoint, `/token`, `/revoke`, the pairing form); a slower client gets HTTP 408 and the connection closes. |
 | `TAB_MCP_PAGE_WAIT_S` | `10` | How long an MCP request waits for its page to open or reconnect (a phone pauses a tab in the background) before the relay answers "the page is not open". `0` answers at once; at most `60`. Waiting requests count against `TAB_MCP_MAX_CONCURRENT_REQUESTS` per address and `TAB_MCP_MAX_SESSIONS` in total; beyond that the relay answers at once. |
 | `TAB_MCP_MAX_MESSAGE_BYTES` | `1048576` | Largest MCP request body and largest WebSocket message from the tab (1 MiB). At least `16384`. |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` | `3600` | Access token lifetime (1 hour). |
@@ -66,6 +66,11 @@ than 0.
 | `TAB_MCP_OIDC_SUBJECT_CLAIM` | `sub` | The ID token claim compared with the page's user: `sub`, or `oid` for Microsoft Entra ID (whose `sub` differs per application). |
 | `TAB_MCP_TAB_ASSERTION_ISSUER` | none | The `iss` of the tab assertions your web app's backend signs. Required for `oidc`. |
 | `TAB_MCP_TAB_ASSERTION_JWKS_URL` | none | The URL of the public keys (JWKS) that sign those assertions. Required for `oidc`. |
+
+Settings that run a timer (`TAB_MCP_REQUEST_TIMEOUT_S`, `TAB_MCP_KEEPALIVE_S`,
+`TAB_MCP_SESSION_LIFETIME_S`, `TAB_MCP_HEARTBEAT_S`, `TAB_MCP_BODY_TIMEOUT_S`, and the same
+limits of a site) are at most 2147483 seconds (about 24.8 days): a timer fires at once
+beyond that, so the relay refuses to start with a larger value.
 
 `NODE_ENV=development` is for local testing only. It allows an `http:` public URL and,
 without `TAB_MCP_PUBLIC_URL`, uses `http://localhost:<port>`, or

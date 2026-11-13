@@ -14,12 +14,14 @@
 
 import { timingSafeEqual } from "node:crypto";
 import { isAddressId, shortAddress } from "../address.ts";
+import { readBodyWithDeadline } from "../body.ts";
 import {
 	isExtensionOrigin,
 	type PairingKind,
 	type RelayConfig,
 	type Site,
 } from "../config.ts";
+import { networkKey } from "../ip.ts";
 import { JWT_ALGORITHMS, JwtError } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import type { GrantInfo } from "../protocol.ts";
@@ -118,6 +120,8 @@ export interface AuthorizationHost {
 export interface AuthorizationTestMode {
 	cimd?: CimdTestMode;
 	authCodeTtlMs?: number;
+	/** A smaller cap on open authorization requests on the instance. */
+	maxPending?: number;
 	/** Replace the pairing methods (a stub method proves the server needs no codes). */
 	pairingMethods?: Partial<Record<PairingKind, PairingMethod>>;
 	/** A smaller cap on open OIDC sign-ins. */
@@ -141,7 +145,7 @@ interface AuthorizationRequest {
 interface Pending extends AuthorizationRequest {
 	id: string;
 	expiresAt: number;
-	/** The IP (prefix) key that opened it, for the per-IP cap. */
+	/** The network that opened it (`networkKey`, a /56 for IPv6), for the per-network caps. */
 	ip: string;
 }
 
@@ -198,6 +202,9 @@ class OAuthError extends Error {
 
 /** A per-IP limit of `/token` and `/revoke` refused the request. */
 class IpLimited extends OAuthError {}
+
+/** The body did not arrive within the deadline: 408, and the connection closes. */
+class BodyTimeout extends OAuthError {}
 
 const TOO_MANY_REQUESTS = () =>
 	new IpLimited(
@@ -288,6 +295,7 @@ export class AuthorizationServer {
 	/** Insertion order is pairing order, not expiry order: sweeps look at all. */
 	readonly #usedRequests = new Map<string, UsedRequest>();
 	readonly #authCodeTtlMs: number;
+	readonly #maxPending: number;
 	readonly #methods: Partial<Record<PairingKind, PairingMethod>>;
 	readonly #csrfSecret = random(32);
 	/** `/authorize` page loads per IP. */
@@ -341,6 +349,18 @@ export class AuthorizationServer {
 	 * large AI app's egress address (DEC-117).
 	 */
 	readonly #tokenPerIp: RateLimiter;
+	/**
+	 * Client assertions that failed verification (a bad signature, an
+	 * unknown key, wrong claims) per network (`networkKey`: an IPv6 /56),
+	 * checked before the next
+	 * assertion is verified (RS 5). A client with a working key never fails
+	 * here, so an AI app's egress address keeps its refreshes while stale
+	 * refresh tokens of some of its users fail later, at the grant.
+	 */
+	readonly #assertionFailuresPerIp = new RateLimiter({
+		capacity: 30,
+		refillPerSecond: 0.5,
+	});
 	/** Refreshes per grant: each leaves a row for the reuse window (DEC-091). */
 	readonly #refreshesPerGrant = new RateLimiter({
 		capacity: 20,
@@ -350,6 +370,7 @@ export class AuthorizationServer {
 	constructor(host: AuthorizationHost, testMode?: AuthorizationTestMode) {
 		this.#host = host;
 		this.#authCodeTtlMs = testMode?.authCodeTtlMs ?? AUTH_CODE_TTL_MS;
+		this.#maxPending = testMode?.maxPending ?? MAX_PENDING;
 		this.#tokenPerIp = new RateLimiter(
 			testMode?.tokenRequestsPerIp ?? TOKEN_REQUESTS_PER_IP,
 		);
@@ -633,7 +654,7 @@ export class AuthorizationServer {
 		}
 		let client: ClientMetadata;
 		try {
-			client = await this.#cimd.get(clientId);
+			client = await this.#cimd.get(clientId, { requester: networkKey(ip) });
 		} catch (error) {
 			if (error instanceof ClientMetadataError) {
 				this.#host.logger.info("oauth.client_refused", {
@@ -643,7 +664,10 @@ export class AuthorizationServer {
 						? hostOf(clientId).slice(0, 100)
 						: "(not a URL)",
 				});
-				return this.#errorPage(400, error.message);
+				const limited =
+					error.reason === "rate_limited" ||
+					error.reason === "requester_limited";
+				return this.#errorPage(limited ? 429 : 400, error.message);
 			}
 			throw error;
 		}
@@ -732,20 +756,20 @@ export class AuthorizationServer {
 			}
 		}
 		this.#sweepPending();
-		if (
-			this.#pending.size >= MAX_PENDING ||
-			(this.#pendingPerIp.get(ip) ?? 0) >= MAX_PENDING_PER_IP
-		) {
+		// Counted per /56 for IPv6, as tab sessions are (RS 1).
+		const network = networkKey(ip);
+		if ((this.#pendingPerIp.get(network) ?? 0) >= MAX_PENDING_PER_IP) {
 			return this.#errorPage(
 				429,
 				"Too many connection requests are open right now. Wait a few minutes and try again.",
 			);
 		}
-		this.#makeRoom(addressId, ip);
+		this.#makeRoom(addressId, network);
+		if (this.#pending.size >= this.#maxPending) this.#evictOne();
 		const pending: Pending = {
 			id: random(24),
 			expiresAt: Date.now() + PENDING_TTL_MS,
-			ip,
+			ip: network,
 			client,
 			redirectUri,
 			state,
@@ -804,6 +828,37 @@ export class AuthorizationServer {
 			if (list.length >= most.length) most = list;
 		}
 		if (most[0] !== undefined) this.#dropPending(most[0]);
+	}
+
+	/**
+	 * Every open request on this instance is taken: evict one instead of
+	 * refusing everyone (RS 1, DEC-129). First the oldest request whose page
+	 * is gone or whose dialog is closed (it cannot pair now), else the
+	 * oldest request of the network holding the most. A party that fills the
+	 * total from many networks then pushes out its own requests, not the one
+	 * of a user whose dialog is open.
+	 */
+	#evictOne(): void {
+		for (const p of this.#pending.values()) {
+			if (this.#host.session(p.addressId)?.pairingOpen !== true) {
+				this.#dropPending(p);
+				return;
+			}
+		}
+		let network: string | undefined;
+		let most = 0;
+		for (const [key, n] of this.#pendingPerIp) {
+			if (n > most) {
+				most = n;
+				network = key;
+			}
+		}
+		for (const p of this.#pending.values()) {
+			if (p.ip === network) {
+				this.#dropPending(p);
+				return;
+			}
+		}
 	}
 
 	#dropPending(p: Pending): void {
@@ -868,8 +923,13 @@ ${intro}
 			return this.#errorPage(400, "The form was not sent correctly.");
 		}
 		const text = await this.#readForm(req);
-		if (text === undefined) {
+		if (text === "too_large") {
 			return this.#errorPage(413, "The form was too large.");
+		}
+		if (text === "timeout") {
+			const page = this.#errorPage(408, "The form did not arrive in time.");
+			page.headers.set("connection", "close");
+			return page;
 		}
 		const form = new URLSearchParams(text);
 		const requestId = form.get("request_id") ?? "";
@@ -1120,12 +1180,19 @@ ${intro}
 			: "tab-mcp-authorize";
 	}
 
-	async #readForm(req: Request): Promise<string | undefined> {
-		const length = Number(req.headers.get("content-length") ?? "0");
-		if (length > MAX_FORM_BYTES) return undefined;
-		const bytes = await req.arrayBuffer().catch(() => new ArrayBuffer(0));
-		if (bytes.byteLength > MAX_FORM_BYTES) return undefined;
-		return new TextDecoder().decode(bytes);
+	/**
+	 * A form body, at most `MAX_FORM_BYTES`, within the body deadline
+	 * (DEC-128); `"too_large"` or `"timeout"` otherwise. An unreadable body
+	 * (the socket closed) reads as empty.
+	 */
+	async #readForm(req: Request): Promise<string | "too_large" | "timeout"> {
+		const read = await readBodyWithDeadline(
+			req,
+			MAX_FORM_BYTES,
+			this.#host.config.bodyTimeoutMs,
+		);
+		if (read.ok) return new TextDecoder().decode(read.bytes);
+		return read.reason === "unreadable" ? "" : read.reason;
 	}
 
 	#pairingPage(
@@ -1238,9 +1305,11 @@ ${cancel}
 					`${p.duplicate} was sent more than once`,
 				);
 			}
-			const client = await this.#authenticateClient(p, [
-				`${this.#issuer}/token`,
-			]);
+			const client = await this.#authenticateClient(
+				p,
+				[`${this.#issuer}/token`],
+				ip,
+			);
 			let body: Record<string, unknown>;
 			if (p["grant_type"] === "authorization_code") {
 				body = await this.#codeGrant(p, client);
@@ -1271,6 +1340,7 @@ ${cancel}
 				extra["www-authenticate"] = 'Basic realm="tab-mcp"';
 			if (error.status === 429 || error.status === 503)
 				extra["retry-after"] = "10";
+			if (error instanceof BodyTimeout) extra["connection"] = "close";
 			return this.#json(
 				error.status,
 				{ error: error.code, error_description: error.message },
@@ -1313,8 +1383,15 @@ ${cancel}
 			);
 		}
 		const text = await this.#readForm(req);
-		if (text === undefined) {
+		if (text === "too_large") {
 			throw new OAuthError(413, "invalid_request", "the request is too large");
+		}
+		if (text === "timeout") {
+			throw new BodyTimeout(
+				408,
+				"invalid_request",
+				"the request body did not arrive in time",
+			);
 		}
 		const params = new URLSearchParams(text);
 		if (params.has("client_secret")) {
@@ -1337,6 +1414,7 @@ ${cancel}
 	async #authenticateClient(
 		p: Record<string, string | undefined>,
 		endpoints: readonly string[],
+		ip: string,
 	): Promise<RequestClient> {
 		const assertion = p["client_assertion"];
 		const type = p["client_assertion_type"];
@@ -1361,12 +1439,22 @@ ${cancel}
 		if (clientId === undefined) {
 			throw this.#clientAuthFailed(clientId, "no_client_id");
 		}
+		// A network whose assertions keep failing is refused before the
+		// metadata and key work (RS 5, DEC-129).
+		const network = networkKey(ip);
+		if (!this.#assertionFailuresPerIp.available(network)) {
+			throw TOO_MANY_REQUESTS();
+		}
 		let client: ClientMetadata;
 		try {
 			// A recent copy if the host cannot be reached right now (DEC-106).
-			client = await this.#cimd.get(clientId, { allowStale: true });
+			client = await this.#cimd.get(clientId, {
+				allowStale: true,
+				requester: network,
+			});
 		} catch (error) {
 			if (!(error instanceof ClientMetadataError)) throw error;
+			if (error.reason === "requester_limited") throw TOO_MANY_REQUESTS();
 			const reason = `metadata_${error.reason}`;
 			// A private address answers like an unreachable one, so these
 			// endpoints do not tell where a name points (review of PR 65).
@@ -1391,9 +1479,11 @@ ${cancel}
 		} catch (error) {
 			if (!(error instanceof JwtError)) throw error;
 			// The keys could not be loaded: that says nothing about the client.
-			throw error.reason === "jwks_unavailable"
-				? this.#clientAuthUnavailable(clientId, error.reason)
-				: this.#clientAuthFailed(clientId, error.reason);
+			if (error.reason === "jwks_unavailable") {
+				throw this.#clientAuthUnavailable(clientId, error.reason);
+			}
+			this.#assertionFailuresPerIp.take(network);
+			throw this.#clientAuthFailed(clientId, error.reason);
 		}
 		return { clientId, assertion: true };
 	}
@@ -1525,29 +1615,41 @@ ${cancel}
 		// The grant dates from the code, not from its exchange: a "New address"
 		// or "revoke all" in between leaves a tombstone that refuses it.
 		const createdAt = issued.issuedAt;
-		const grantId = newId("g");
+		// A retry after a store failure keeps the grant id, so tokens the failed
+		// attempt did store belong to the same grant.
+		const grantId = issued.grantId ?? newId("g");
 		issued.grantId = grantId;
 		const config = this.#host.config;
-		const tokens = await issueTokenPair(
-			this.#host.store,
-			{
-				grantId,
-				addressId: issued.addressId,
-				clientId: issued.client.clientId,
-				clientName: issued.client.name,
-				scopes: issued.scopes,
-				grantCreatedAt: createdAt,
-				...(issued.subject === undefined ? {} : { subject: issued.subject }),
-				// Made with the client's key: its refreshes need it too (DEC-106).
-				...(client.assertion ? { clientAuth: "private_key_jwt" as const } : {}),
-			},
-			{
-				accessTtlMs: config.accessTokenTtlMs,
-				refreshTtlMs: config.refreshTokenTtlMs,
-				grantEndsAt: createdAt + config.grantLifetimeMs,
-				now,
-			},
-		);
+		let tokens: Awaited<ReturnType<typeof issueTokenPair>>;
+		try {
+			tokens = await issueTokenPair(
+				this.#host.store,
+				{
+					grantId,
+					addressId: issued.addressId,
+					clientId: issued.client.clientId,
+					clientName: issued.client.name,
+					scopes: issued.scopes,
+					grantCreatedAt: createdAt,
+					...(issued.subject === undefined ? {} : { subject: issued.subject }),
+					// Made with the client's key: its refreshes need it too (DEC-106).
+					...(client.assertion
+						? { clientAuth: "private_key_jwt" as const }
+						: {}),
+				},
+				{
+					accessTtlMs: config.accessTokenTtlMs,
+					refreshTtlMs: config.refreshTokenTtlMs,
+					grantEndsAt: createdAt + config.grantLifetimeMs,
+					now,
+				},
+			);
+		} catch (error) {
+			// The store failed (503, "try again"): the code stays usable for the
+			// retry the answer asks for (DEC-127).
+			issued.used = false;
+			throw error;
+		}
 		if (tokens === undefined) {
 			// Revoked after the code was issued (code reuse, New address).
 			throw invalid("the connection was revoked");
@@ -1639,20 +1741,10 @@ ${cancel}
 				"too many refreshes for this connection; try again in a minute",
 			);
 		}
-		// Atomic: of two refreshes with the same token only one gets here.
-		// The used token is kept for the reuse window only (DEC-091).
-		if (
-			!(await this.#host.store.markUsed(
-				hash,
-				now,
-				now + REFRESH_REUSE_WINDOW_MS,
-			))
-		) {
-			await this.#reuseDetected(record);
-			throw invalid(
-				"the refresh token was already used; the connection was revoked",
-			);
-		}
+		// The new pair is stored before the old token is marked used (DEC-127):
+		// if the store fails in between, the answer is "try again" (503) and
+		// the old token still works for that retry. Tokens a failed attempt
+		// stored belong to the grant and expire or go with it.
 		const tokens = await issueTokenPair(
 			this.#host.store,
 			{
@@ -1680,6 +1772,21 @@ ${cancel}
 		if (tokens === undefined) {
 			// The grant was revoked while this refresh ran (DEC-063).
 			throw invalid("the connection was revoked");
+		}
+		// Atomic: of two refreshes with the same token only one marks it; the
+		// other revokes the grant, the new pairs of both included. The used
+		// token is kept for the reuse window only (DEC-091).
+		if (
+			!(await this.#host.store.markUsed(
+				hash,
+				now,
+				now + REFRESH_REUSE_WINDOW_MS,
+			))
+		) {
+			await this.#reuseDetected(record);
+			throw invalid(
+				"the refresh token was already used; the connection was revoked",
+			);
 		}
 		this.#host.logger.debug("oauth.refreshed", {
 			address: shortAddress(record.addressId),
@@ -1740,10 +1847,11 @@ ${cancel}
 			// An assertion, if sent, must be valid; a public grant's tokens are
 			// revoked without one, a bound grant's only with one (RFC 7009 §2.1,
 			// DEC-106).
-			const client = await this.#authenticateClient(p, [
-				`${this.#issuer}/revoke`,
-				`${this.#issuer}/token`,
-			]);
+			const client = await this.#authenticateClient(
+				p,
+				[`${this.#issuer}/revoke`, `${this.#issuer}/token`],
+				ip,
+			);
 			const record = await this.#host.store.get(hashToken(token));
 			// RFC 7009 §2.2: an unknown token is not an error, but it counts as
 			// a failure against the network's allowance.
@@ -1896,6 +2004,7 @@ ${cancel}
 		this.#guessesPerAddress.sweep(now);
 		this.#tokenPerIp.sweep(now);
 		this.#tokenFailuresPerIp.sweep(now);
+		this.#assertionFailuresPerIp.sweep(now);
 		this.#refreshesPerGrant.sweep(now);
 		this.#nonces.sweep(now);
 	}

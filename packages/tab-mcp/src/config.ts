@@ -256,6 +256,32 @@ export function normalizePageOrigin(value: string): string {
 	return normalizeOrigin(value);
 }
 
+/**
+ * The longest delay a timer keeps: `setTimeout` and `setInterval` take a
+ * signed 32-bit number of milliseconds (about 24.8 days) and fire at once
+ * for anything larger.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/** Settings that run a timer, instance-wide or per site (RQ 3, DEC-128). */
+const TIMER_KEYS = [
+	"requestTimeoutMs",
+	"keepAliveMs",
+	"sessionLifetimeMs",
+	"heartbeatMs",
+	"helloTimeoutMs",
+	"bodyTimeoutMs",
+	"sweepIntervalMs",
+] as const;
+
+function checkTimer(name: string, value: number): void {
+	if (value > MAX_TIMER_MS) {
+		throw new ConfigError(
+			`${name} must be at most ${MAX_TIMER_MS} ms (about 24.8 days): a timer fires at once beyond that`,
+		);
+	}
+}
+
 /** Fill in defaults and validate. Throws `ConfigError` on bad values. */
 export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	const config: RelayConfig = { ...DEFAULT_CONFIG, ...input };
@@ -320,6 +346,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 			throw new ConfigError(`${key} must be a positive number`);
 		}
 	}
+	for (const key of TIMER_KEYS) checkTimer(key, config[key] as number);
 	if (
 		typeof config.pageWaitMs !== "number" ||
 		!Number.isFinite(config.pageWaitMs) ||
@@ -412,6 +439,9 @@ function validateSite(input: unknown): SiteConfig {
 			}
 			if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
 				throw new ConfigError(`site limit ${key} must be a positive number`);
+			}
+			if ((TIMER_KEYS as readonly string[]).includes(key)) {
+				checkTimer(`site limit ${key}`, value);
 			}
 			parsed[key as keyof SiteLimits] = value;
 		}

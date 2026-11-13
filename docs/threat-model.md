@@ -138,7 +138,8 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
 - the fetch connects to the address that passed the check, with the original `Host` and
   TLS server name, so DNS rebinding between check and connect cannot reach another
   address;
-- no redirects, a 5 second timeout, a 64 KiB limit, `application/json` only;
+- no redirects, a 5 second timeout for the DNS lookup and the fetch together, a 64 KiB
+  limit, `application/json` only;
 - responses are cached as their `Cache-Control` says (at least 5 minutes, at most 24
   hours);
 - fetches are rate-limited per host (5, then 1 every 5 seconds), per domain (the last
@@ -148,6 +149,11 @@ The relay fetches a URL chosen by an unauthenticated party. Guards:
   over: all clients under a multi-label suffix such as `co.uk` or `pages.dev` share one
   domain limit, so an attacker with many hosts there can keep their uncached fetches
   refused;
+- a fetch for a client id the relay has not seen is charged to the requesting network
+  first (5, then 1 a minute, per IPv4 address or IPv6 /56; DEC-129), before the overall
+  limit, at `/authorize`, `/token` and `/revoke`. One network can therefore no longer keep
+  the overall budget empty; doing so now takes about 60 networks, and with the client
+  host list set (`TAB_MCP_CLIENT_ID_HOSTS`) none of this is reachable;
 - every failure from resolving to parsing shows the same message, so the page cannot be
   used to probe what answers where.
 
@@ -176,9 +182,12 @@ What is left: an attacker can still delay such a client. Made-up key ids for a r
 client keep that client's key budget near empty, so a key rotation may be seen a few
 attempts late; with about 17 registrable domains of its own it can use up the totals of
 the known-client budgets; with about 1000 it can push a rarely used client out of the
-caches; and a relay that has just started knows no client, so made-up ids on a real AI
-app's host can keep that app's first fetch waiting. Each of these gives the AI app 503s,
-which it retries, not a lost grant, unless they last longer than the grace hour.
+caches; a relay that has just started knows no client, so made-up ids on a real AI
+app's host can keep that app's first fetch waiting; and an attacker with about 60
+networks can keep the overall budget for new client ids empty, so an AI app the relay
+has not cached cannot pair ("The relay is busy"). Each of these gives the AI app 503s,
+which it retries, not a lost grant, unless they last longer than the grace hour. A relay
+that sets `TAB_MCP_CLIENT_ID_HOSTS` is not exposed to any of them.
 
 ### A4: Token theft and replay
 
@@ -345,7 +354,8 @@ does not reconnect by itself.
 
 In-memory rate limits cover `/authorize` page loads and posts per IP, code guesses per
 address and network and per address, `/token` and `/revoke` per IP, refreshes per grant,
-and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /64.
+and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /64
+(per /56 where noted below).
 
 - Only wrong code guesses are charged; a right code gives its share back. The cap per
   address never forgets a bucket that still counts something to make room: when its map
@@ -379,6 +389,34 @@ authorizations and codes live in bounded maps that expire. Every WebSocket send 
 checked: a send dropped under backpressure fails its request instead of hanging it. A
 single relay can still be flooded; put a CDN or proxy in front of it against volumetric
 attacks.
+
+- **Open authorization requests** (DEC-129) are capped at 10 per network, where an IPv6
+  network is a /56 (one subscriber's), 20 per address and 10 000 per instance. When the
+  instance is full, a new request evicts one instead of being refused: first the oldest
+  request whose page is gone or whose dialog is closed (it cannot pair now), else the
+  oldest of the network holding the most. A party that fills the total therefore pushes
+  out its own requests, not the one of a user whose dialog is open.
+- **Control messages from a tab** (everything but `pong` and the `http.response*`
+  answers) have a budget per session: 30, then 2 a second. Past it the relay sends
+  `rate_limited` and closes with 4008. A second "revoke all" of an address within a
+  second does not write to the store again.
+- **Request bodies** at `/token`, `/revoke`, `POST /authorize` and the MCP endpoint must
+  arrive within `TAB_MCP_BODY_TIMEOUT_S` (10 seconds), else the answer is 408 and the
+  connection closes (DEC-128): Bun's idle timeout does not fire while a handler waits for
+  a body (DEC-048).
+- **The MCP endpoint** looks the token up before it reads the body. Without a valid token
+  it reads at most 16 KiB (every version probe fits); a larger body is not parsed, and
+  the answer is the 401 (or 503) it would get anyway. Bodies are counted while they
+  arrive, so one sent without a `Content-Length` is refused once it passes the limit.
+  The endpoint still has no per-IP limit (AI apps share egress addresses).
+- **Client assertions** that fail verification count per network (an IPv6 /56; 30, then one every 2
+  seconds); once that is used up, further assertions from the network are refused with
+  429 before any key is fetched or tried. A client's key set is read up to its first 20
+  keys, and at most 3 keys that fit a token's `kid` and algorithm are tried.
+- **Proxy headers** (`TAB_MCP_TRUST_PROXY`): a value with a port (`203.0.113.7:51234`,
+  `[2001:db8::1]:443`) counts as its address. A value that is not an address falls back
+  to the socket's address and is logged once (`relay.bad_forwarded_ip`), so a
+  misconfigured proxy never gives each connection a limiter key of its own.
 
 ### A9: Logs and privacy
 
