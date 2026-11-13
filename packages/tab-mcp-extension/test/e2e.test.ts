@@ -556,6 +556,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// Back to "Ask first" for the tests after this one.
 		await stack.panel.waitFor(takesClicks(askFirst("place_order")));
 		await stack.panel.click(askFirst("place_order"));
+		// The click flips the switch at once; the worker's write comes after.
+		await allowedOn(SITE, (n) => !n.includes("place_order"));
 		await stack.panel.waitFor(asksFirst("place_order", true));
 	});
 
@@ -933,8 +935,17 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				return [e.type, e.getAttribute("role"), e.getAttribute("aria-label"), e.checked];
 			})()`),
 		).toEqual(["checkbox", "switch", "Ask first: place_order", true]);
+		// The switch as drawn now: the click flips it at once, the worker's
+		// state then draws the list anew.
+		await stack.panel.eval(
+			`document.querySelector(${JSON.stringify(toggle)}).dataset.e2eOld = "1"`,
+		);
 		await stack.panel.click(toggle);
-		await stack.panel.waitFor(asksFirst("place_order", false));
+		// Written by the worker, then shown from its state.
+		await allowedOn(SITE, (n) => n.includes("place_order"));
+		await stack.panel.waitFor(
+			`(() => { const e = document.querySelector(${JSON.stringify(toggle)}); return e !== null && e.dataset.e2eOld === undefined && !e.checked; })()`,
+		);
 		expect(
 			await stack.panel.eval(
 				`document.querySelector(${JSON.stringify(toggle)}).getAttribute("aria-label")`,
@@ -955,6 +966,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		]);
 		// Switched back: it asks again.
 		await stack.panel.click(toggle);
+		await allowedOn(SITE, (n) => !n.includes("place_order"));
 		await stack.panel.waitFor(asksFirst("place_order", true));
 		const asked = call(stack, "page_place_order", { item: "asked" });
 		await answerInPanel(stack, "deny");
