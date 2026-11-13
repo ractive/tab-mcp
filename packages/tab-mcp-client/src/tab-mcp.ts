@@ -583,7 +583,7 @@ export class TabMcp extends EventTarget {
 	newAddress(): Promise<SessionInfo | undefined> {
 		// Without a relay there is no secret store.
 		const secrets = this.#secrets;
-		if (secrets === undefined) return noRelay();
+		if (!secrets) return noRelay();
 		// biome-ignore lint/suspicious/noAssignInExpressions: one promise per run
 		return (this.#renewing ??= this.#renew(secrets).finally(() => {
 			this.#renewing = undefined;
@@ -600,7 +600,7 @@ export class TabMcp extends EventTarget {
 		const old = secrets.current();
 		this.#end("new_address");
 		const generation = this.#generation;
-		if (old !== undefined) {
+		if (old) {
 			this.#setState("connecting");
 			try {
 				await this.#open(generation, old);

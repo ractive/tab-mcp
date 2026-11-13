@@ -113,7 +113,8 @@ report. Decisions: DEC-136 to DEC-138. The 0.4 secret-key migration (DEC-083) st
   (for example on logout). It takes no user activation, as before; the connection only
   revokes and closes (DEC-136).
 - After the relay with the optional `page` is everywhere, the client can drop the field.
-- The core grows by about 50 B gzipped (6293 B against 6242 B, budget 6400 B):
+- The core grows by about 50 B gzipped (6293 B against 6242 B; on top of iteration 31,
+  6396 B of the 6400 B budget):
   `SecretStore.get()` gave way to `current()` plus `rotate()`, and remembering the last
   connected secret was dropped (23 B) to pay for the `newAddress()` guard the review
   asked for.
