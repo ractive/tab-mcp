@@ -17,11 +17,17 @@ export function App() {
 
 function TodoList() {
   const todos = useTodos(); // a store, so a tool reads what the previous tool wrote
-  useTool({
+  useTool<{ text: string }>({
     name: "add_todo",
-    description: "Add a todo item. Returns it with its id.",
-    inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
-    execute: ({ text }) => todos.add(String(text)),
+    title: "Add a todo",
+    description: "Add a todo item (at most 200 characters). Returns it with its id.",
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string", minLength: 1, maxLength: 200 } },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    execute: ({ text }) => todos.add(text),
   });
   const { state, grants } = useTabMcpState();
   return <><ConnectButton /> {state === "connected" && `${grants.length} AI apps`}</>;

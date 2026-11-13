@@ -50,22 +50,6 @@ const HINTS = [
 ] as const;
 
 /**
- * `<html data-tab-mcp-webmcp="…">`: the names mirrored. tab-mcp for Chrome no
- * longer reads it (DEC-140); pages may (whether mirroring is on).
- */
-const ATTRIBUTE = "data-tab-mcp-webmcp";
-
-/** The mirrors registered (or being registered) by every `TabMcp` of the page. */
-const listed = new Set<{ readonly name: string }>();
-
-function writeAttribute(): void {
-	globalThis.document?.documentElement?.setAttribute(
-		ATTRIBUTE,
-		[...listed].map((m) => m.name).join(" "),
-	);
-}
-
-/**
  * Mirror `registry`'s tools into `context`, now and whenever the registry
  * changes: those registered with `{ webmcp: true }`, and by default those not
  * marked consequential, where MCP's `destructiveHint` counts as
@@ -77,31 +61,26 @@ export function mirror(
 	context: ModelContext,
 	call: WebMcpCall,
 ): void {
-	const mirrors = new Map<
-		RegisteredTool,
-		{ name: string; controller: AbortController }
-	>();
+	const mirrors = new Map<RegisteredTool, AbortController>();
 	const warned = new Set<string>();
 	const sync = (): void => {
-		for (const [tool, entry] of mirrors) {
+		for (const [tool, controller] of mirrors) {
 			if (registry.get(tool.name) === tool) continue;
-			entry.controller.abort();
+			controller.abort();
 			mirrors.delete(tool);
-			listed.delete(entry);
 		}
 		for (const tool of registry.list()) {
 			const { annotations } = tool;
 			const consequential =
 				annotations.consequentialHint ?? annotations.destructiveHint;
 			if (mirrors.has(tool) || !(tool.webmcp ?? !consequential)) continue;
-			const entry = { name: tool.name, controller: new AbortController() };
-			mirrors.set(tool, entry);
-			listed.add(entry);
+			const controller = new AbortController();
+			mirrors.set(tool, controller);
 			const hints: Record<string, boolean | undefined> = {
 				consequentialHint: consequential,
 			};
 			for (const key of HINTS) hints[key] ??= annotations[key];
-			const { signal } = entry.controller;
+			const { signal } = controller;
 			Promise.resolve()
 				// Not once unmirrored: whatever the browser does with an aborted
 				// signal.
@@ -125,8 +104,6 @@ export function mirror(
 				)
 				.catch((error: unknown) => {
 					if (signal.aborted) return; // unmirrored meanwhile
-					listed.delete(entry);
-					writeAttribute();
 					if (warned.has(tool.name)) return;
 					warned.add(tool.name);
 					console.warn(
@@ -135,8 +112,6 @@ export function mirror(
 					);
 				});
 		}
-		// Listed before the browser has them, unlisted after it dropped them.
-		writeAttribute();
 	};
 	registry.onChange(sync);
 	sync();

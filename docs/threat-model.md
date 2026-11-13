@@ -686,8 +686,7 @@ from them.
   native registration of it fails. tab-mcp for Chrome (A13) offers mirrored tools like
   any other page tool, since it cannot know whether the AI app is also paired with the
   page: an AI app connected to both sees such a tool twice, and a consequential one asks
-  in the extension and again in the page. (The page still lists its mirrored names in
-  `<html data-tab-mcp-webmcp>`; the extension no longer reads it.)
+  in the extension and again in the page.
 
 ### A15: The site's own assistant calling the page's tools over a port (`serve`)
 

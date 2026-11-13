@@ -4,15 +4,20 @@ A single-page todo app with React 19 that offers its list to AI apps through tab
 with the React bindings `@ractive-ch/tab-mcp-client/react`:
 
 - `TabMcpProvider` around the app (`src/App.tsx`),
-- one `useTool` per tool where the list lives: `list_todos`, `add_todo`,
-  `complete_todo`, and `delete_todos` (one or more ids in one call, so "delete all" asks
-  once), which the user confirms in the page (`consequentialHint`); `alwaysAllow` on
-  the provider adds "Always allow" to that question,
+- one `useTool` per tool where the list lives, typed with `useTool<{ … }>` and limited
+  by their schemas: `list_todos` (`untrustedContentHint`: the texts are the user's),
+  `add_todo`, `complete_todo`, and `delete_todos` (one or more ids in one call, so
+  "delete all" asks once), which the user confirms in the page (`consequentialHint`:
+  a deleted todo cannot be restored, while an added or completed one can be changed back
+  in the page, so those do not ask),
 - `ConnectButton` for the "Connect your AI app" dialog, `useTabMcpState` for the status
-  line and `useToolCalls` for "The AI's calls".
+  line and `useToolCalls` for "The AI's calls", which names the caller of each call: an AI
+  app, the site's own assistant (`serve`) or an agent in the browser.
 
-The live version is at <https://ractive.ch/tab-mcp/examples/todo/>, connected to the
-hosted relay `tab-mcp.ractive.ch`; all live examples: <https://ractive.ch/tab-mcp/>.
+The live version at <https://ractive.ch/tab-mcp/examples/todo/> is based on this one; it
+also keeps the list in the browser, keeps AI access on after a reload, registers the
+tools with WebMCP and offers "Always allow". All live examples:
+<https://ractive.ch/tab-mcp/>.
 
 The list is a small external store (`src/todos.ts`) read with `useSyncExternalStore`, so
 a tool call and the next one see the same list even before React renders.
