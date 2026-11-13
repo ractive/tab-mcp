@@ -19,6 +19,8 @@ import { allowable } from "./allowed.ts";
 
 /** A question nobody answers in this time is Don't allow. */
 export const QUESTION_TIMEOUT_MS = 60_000;
+/** How long the panels hear that a question ran out (its notice shows for less). */
+export const EXPIRED_KEEP_MS = 10_000;
 /**
  * At most this many questions of one AI app wait at once; a call beyond
  * them is declined without asking ("busy"), so an AI app cannot pile up
@@ -178,6 +180,8 @@ export class Questions {
 	readonly #host: QuestionsHost;
 	readonly #timeoutMs: number;
 	readonly #pending = new Map<string, Pending>();
+	/** Questions that ran out unanswered, and when. */
+	readonly #expired = new Map<string, number>();
 	#shown = 0;
 	/** Each notification's `create`, until it is cleared. */
 	readonly #creating = new Map<string, Promise<void>>();
@@ -190,6 +194,17 @@ export class Questions {
 	/** The questions waiting, oldest first. */
 	get list(): QuestionView[] {
 		return [...this.#pending.values()].map((p) => p.view);
+	}
+
+	/**
+	 * The questions that ran out unanswered within the last
+	 * EXPIRED_KEEP_MS, so a panel says so where their card was (EQ 13).
+	 */
+	get expired(): string[] {
+		const now = this.#host.now();
+		for (const [id, at] of this.#expired)
+			if (now - at > EXPIRED_KEEP_MS) this.#expired.delete(id);
+		return [...this.#expired.keys()];
 	}
 
 	/**
@@ -245,6 +260,7 @@ export class Questions {
 				settle: (answer) => {
 					if (this.#pending.get(id) !== pending) return;
 					this.#pending.delete(id);
+					if (answer === "timeout") this.#expired.set(id, this.#host.now());
 					clearTimeout(timer);
 					request.signal.removeEventListener("abort", cancelled);
 					if (pending.notification !== undefined)

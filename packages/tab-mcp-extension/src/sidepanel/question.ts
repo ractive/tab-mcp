@@ -39,23 +39,6 @@ export function countdownText(expiresAt: number, now: number): string {
 	return `${left} s left to answer; no answer is Don't allow.`;
 }
 
-/** A question gone this close to its end ran out of time, as far as a page can tell. */
-export const EXPIRY_SLACK_MS = 1500;
-
-/**
- * Whether a question that went away at `now` ran out of time (nobody
- * answered, the tool did not run), so the panel says so for a moment
- * (EQ 13). One answered in this page, or gone well before its end (answered
- * elsewhere, cancelled by the AI app), did not.
- */
-export function ranOut(
-	expiresAt: number,
-	now: number,
-	answeredHere: boolean,
-): boolean {
-	return !answeredHere && now >= expiresAt - EXPIRY_SLACK_MS;
-}
-
 /** Bring every countdown under `root` to `now`. */
 export function updateCountdowns(root: ParentNode, now: number): void {
 	for (const p of root.querySelectorAll<HTMLElement>("[data-expires]")) {

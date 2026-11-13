@@ -23,7 +23,7 @@ import {
 	confirms,
 	DONT_ASK_ALL,
 	introText,
-	NO_ACCESS_TEXT,
+	noAccessText,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
 	switchExpiry,
@@ -34,7 +34,6 @@ import {
 	isUnavailable,
 	questionAnnouncement,
 	questionCard,
-	ranOut,
 	setAvailable,
 	setReady,
 	updateCountdowns,
@@ -263,8 +262,6 @@ const cards = new Map<
 >();
 /** Each question's arguments, sent once before the state that lists it. */
 const args = new Map<string, string>();
-/** The questions answered in this panel: their card goes without a notice. */
-const answered = new Set<string>();
 /** How long the notice of a question nobody answered stays (EQ 13). */
 const NOTICE_MS = 6000;
 
@@ -279,19 +276,17 @@ let movedUntil = 0;
 /** "Don't ask for these tools" as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
-function showQuestions(questions: QuestionSummary[]): void {
+function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	const ids = new Set(questions.map((q) => q.id));
 	for (const id of args.keys()) if (!ids.has(id)) args.delete(id);
 	let removed = false;
 	for (const [id, { card, question }] of cards)
 		if (!ids.has(id)) {
-			// Gone at its time limit and not answered here: it ran out, and the
-			// tool did not run. Said for a few seconds where the card was.
-			if (ranOut(question.expiresAt, Date.now(), answered.has(id)))
-				card.replaceWith(expiredNotice(question));
+			// The worker says it ran out unanswered: the tool did not run. Said
+			// for a few seconds where the card was.
+			if (expired.includes(id)) card.replaceWith(expiredNotice(question));
 			else card.remove();
 			cards.delete(id);
-			answered.delete(id);
 			removed = true;
 		}
 	if (removed) {
@@ -304,10 +299,7 @@ function showQuestions(questions: QuestionSummary[]): void {
 		if (!cards.has(q.id)) {
 			const card = questionCard(
 				{ ...q, args: args.get(q.id) ?? "" },
-				(answer) => {
-					answered.add(q.id);
-					send({ type: "answer", id: q.id, answer });
-				},
+				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
 			const now = Date.now();
@@ -324,15 +316,18 @@ function showQuestions(questions: QuestionSummary[]): void {
 /**
  * Say `text` in the questions' status line, for screen readers: emptied
  * first, so the same line twice (two questions for the same tool) is said
- * twice.
+ * twice. Lines that come within the same moment (two questions in one
+ * state) are said together, none dropped.
  */
 let announcing: ReturnType<typeof setTimeout> | undefined;
+const toAnnounce: string[] = [];
 function announce(text: string): void {
 	const status = $("question-status");
 	status.textContent = "";
+	toAnnounce.push(text);
 	clearTimeout(announcing);
 	announcing = setTimeout(() => {
-		status.textContent = text;
+		status.textContent = toAnnounce.splice(0).join(" ");
 	}, 50);
 }
 
@@ -487,7 +482,7 @@ function showTab(s: PanelState): void {
 	setText(
 		$("tab-access"),
 		tab?.noAccess !== undefined
-			? NO_ACCESS_TEXT[tab.noAccess]
+			? noAccessText(tab.noAccess, s.allSites)
 			: (tab?.access ?? ""),
 	);
 	// No tools: what still works, and where WebMCP comes from (EQ 7).
@@ -543,7 +538,7 @@ function show(s: PanelState): void {
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
-	showQuestions(s.questions);
+	showQuestions(s.questions, s.expired);
 	showTab(s);
 }
 

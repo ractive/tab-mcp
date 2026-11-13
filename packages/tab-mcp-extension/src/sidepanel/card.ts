@@ -80,14 +80,35 @@ export function introText(relay: string): string {
 	return `Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay ${host}.`;
 }
 
-/** Why the tab cannot be read, in the panel's words (EQ 6). */
-export const NO_ACCESS_TEXT: Record<NoAccessReason, string> = {
-	"no-grant":
-		"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
-	"browser-page": "Chrome does not let extensions read browser pages.",
-	"web-store": "Chrome does not let extensions read the Chrome Web Store.",
-	"not-site": "tab-mcp reads only pages of http(s) sites.",
-};
+const CLICK_ICON =
+	"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.";
+const BROWSER_PAGE = "Chrome does not let extensions read browser pages.";
+
+/**
+ * Why the tab cannot be read, in the panel's words (EQ 6). Chrome hides the
+ * address of a page the extension may not read and of its own pages alike:
+ * with host access on all sites a hidden address can only be a browser page,
+ * without it either, and the click on the icon helps only on a web page.
+ */
+export function noAccessText(
+	reason: NoAccessReason,
+	allSites: boolean,
+): string {
+	switch (reason) {
+		case "hidden":
+			return allSites
+				? BROWSER_PAGE
+				: `${CLICK_ICON} Chrome's own pages, such as a new tab, cannot be read at all.`;
+		case "no-grant":
+			return CLICK_ICON;
+		case "browser-page":
+			return BROWSER_PAGE;
+		case "web-store":
+			return "Chrome does not let extensions read the Chrome Web Store.";
+		case "not-site":
+			return "tab-mcp reads only pages of http(s) sites.";
+	}
+}
 
 /** The tab card's line about the page's tools, when it has none to list (EQ 7). */
 export function webmcpNote(

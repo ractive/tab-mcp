@@ -15,7 +15,7 @@ import {
 	confirms,
 	DONT_ASK_ALL,
 	introText,
-	NO_ACCESS_TEXT,
+	noAccessText,
 	type SwitchIntent,
 	switchExpiry,
 	switchShown,
@@ -23,9 +23,7 @@ import {
 } from "../src/sidepanel/card.ts";
 import {
 	countdownText,
-	EXPIRY_SLACK_MS,
 	questionAnnouncement,
-	ranOut,
 } from "../src/sidepanel/question.ts";
 import {
 	COPIED_MS,
@@ -41,6 +39,7 @@ const base: PanelState = {
 	pairing: false,
 	allSites: false,
 	questions: [],
+	expired: [],
 };
 const ADDRESS = "https://relay.example/a/x/mcp";
 const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
@@ -211,13 +210,29 @@ describe("the tab card's texts", () => {
 	});
 
 	test("an unreadable tab in the user's words: the toolbar icon, no AI app wording (EQ 6)", () => {
-		expect(NO_ACCESS_TEXT["no-grant"]).toBe(
+		expect(noAccessText("no-grant", false)).toBe(
 			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 		);
-		for (const text of Object.values(NO_ACCESS_TEXT)) {
-			expect(text).not.toContain("The user");
-			expect(text).not.toContain("on the tab,");
-		}
+		// A hidden address may be a browser page, where the click cannot help;
+		// with host access on all sites it can only be one.
+		expect(noAccessText("hidden", false)).toBe(
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab. Chrome's own pages, such as a new tab, cannot be read at all.",
+		);
+		expect(noAccessText("hidden", true)).toBe(
+			"Chrome does not let extensions read browser pages.",
+		);
+		for (const reason of [
+			"hidden",
+			"no-grant",
+			"browser-page",
+			"web-store",
+			"not-site",
+		] as const)
+			for (const allSites of [false, true]) {
+				const text = noAccessText(reason, allSites);
+				expect(text).not.toContain("The user");
+				expect(text).not.toContain("on the tab,");
+			}
 	});
 
 	test("no tools: whether WebMCP is off or the page offers none (EQ 7)", () => {
@@ -298,15 +313,6 @@ describe("the tab card's texts", () => {
 		expect(countdownText(10_000, 12_000)).toBe(
 			"0 s left to answer; no answer is Don't allow.",
 		);
-	});
-
-	test("a question that went at its end ran out; one answered here or gone early did not (EQ 13)", () => {
-		expect(ranOut(60_000, 60_010, false)).toBe(true);
-		expect(ranOut(60_000, 60_000 - EXPIRY_SLACK_MS, false)).toBe(true);
-		// Answered in this panel just before the end.
-		expect(ranOut(60_000, 59_900, true)).toBe(false);
-		// Answered elsewhere or cancelled by the AI app, well before the end.
-		expect(ranOut(60_000, 30_000, false)).toBe(false);
 	});
 });
 

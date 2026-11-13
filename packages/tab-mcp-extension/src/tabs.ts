@@ -84,10 +84,13 @@ export async function tabInFront(): Promise<TargetTab> {
 export const isSitePage = (url: string): boolean => /^https?:\/\//i.test(url);
 
 /**
- * Why the extension may not read a tab: no click on its icon there (and no
- * host access), a browser page, the Chrome Web Store, or no http(s) page.
+ * Why the extension may not read a tab: its address is hidden (no click on
+ * its icon there and no host access, or a browser page: Chrome hides both
+ * alike), no click on a page whose address is known, a browser page, the
+ * Chrome Web Store, or no http(s) page.
  */
 export type NoAccessReason =
+	| "hidden"
 	| "no-grant"
 	| "browser-page"
 	| "web-store"
@@ -113,7 +116,7 @@ export function noAccess(url: string): NoAccessError {
 	// Without a grant Chrome hides the tab's address: "" is any page.
 	if (url === "")
 		return new NoAccessError(
-			"no-grant",
+			"hidden",
 			`${NO_GRANT} (Browser pages such as chrome:// cannot be read at all.)`,
 		);
 	if (/^(chrome|edge|about|devtools|view-source):/i.test(url))

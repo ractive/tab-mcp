@@ -32,9 +32,12 @@ list of paired apps, the notification's wording).
 
 ### EQ 6: the unreadable-tab text is written for the AI app
 
-- [x] `NoAccessError` carries a reason (`no-grant`, `browser-page`, `web-store`,
-  `not-site`); `TabView.noAccess` passes it to the panel, which writes its own sentence
-  ("Click the tab-mcp icon in Chrome's toolbar to let it read this tab.")
+- [x] `NoAccessError` carries a reason (`hidden`, `no-grant`, `browser-page`,
+  `web-store`, `not-site`); `TabView.noAccess` passes it to the panel, which writes its
+  own sentence ("Click the tab-mcp icon in Chrome's toolbar to let it read this tab.").
+  A hidden address may be a browser page, so the panel adds that Chrome's own pages
+  cannot be read; with host access on all sites a hidden address is one, and the panel
+  says only that
 - [x] The AI app's text names the icon in the toolbar, not "on the tab", and the host
   access button by its new label
 - [x] Tests: unit (reasons, the AI app's text), panel (the panel's texts), e2e (store
@@ -94,13 +97,13 @@ list of paired apps, the notification's wording).
 
 - [x] `QuestionView.expiresAt`; the card counts down ("47 s left to answer; no answer is
   Don't allow."), in the panel and in the question's window
-- [x] A card that goes at its end, not answered in this panel, leaves "Not answered in
-  time: <tool> did not run." for 6 s (`ranOut`)
+- [x] A card the worker says ran out (`PanelState.expired`, the questions that timed out
+  in the last 10 s) leaves "Not answered in time: <tool> did not run." for 6 s
 - [x] The notification's context line: "On <site> · Closing this is Don't allow"
 - [x] Not done: a record of what ran (the review's last sentence names the gap but
   suggests nothing for it)
-- [x] Tests: worker (`expiresAt`, the notification), navigation (the countdown), panel
-  (`ranOut`, `countdownText`), e2e (the countdown in the panel)
+- [x] Tests: worker (`expiresAt`, `expired`, the notification), navigation (the
+  countdown), panel (`countdownText`), e2e (the countdown in the panel)
 
 ### EQ 16: a failed Copy's fallback text is erased by the next state
 

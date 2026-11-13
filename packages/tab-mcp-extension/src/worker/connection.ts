@@ -359,13 +359,18 @@ export class Connection {
 		mcp.addEventListener(
 			"grantschange",
 			() => {
-				void this.#setGrants(
+				// The list in memory is set at once; a failed write to storage
+				// is shown as the problem, not left as an unhandled rejection.
+				this.#setGrants(
 					mcp.grants.map((g) => ({
 						grantId: g.grantId,
 						name: g.client.name,
 						host: g.client.host,
 					})),
-				);
+				).catch((error: unknown) => {
+					this.#problem = message(error);
+					this.#changed();
+				});
 				this.#changed();
 			},
 			{ signal },
@@ -447,6 +452,9 @@ export class Connection {
 	 */
 	async #useRelay(relay: string): Promise<void> {
 		const before = this.#mcp;
+		// The old connection's events end here: a grant it reports during the
+		// writes below must not come back as the new relay's list.
+		this.#listening.abort();
 		this.#bridge.stop();
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
@@ -850,6 +858,7 @@ export class Connection {
 			allSites: this.#allSites,
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
+			expired: this.#questions.expired,
 		};
 	}
 

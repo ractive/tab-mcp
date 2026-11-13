@@ -164,7 +164,7 @@ describe("page_info", () => {
 describe("refusals", () => {
 	test("a hidden address (no grant) is any page", () => {
 		expect(noAccess("").message).toContain("may not read this tab yet");
-		expect(noAccess("").reason).toBe("no-grant");
+		expect(noAccess("").reason).toBe("hidden");
 		expect(noAccess("https://shop.example/").reason).toBe("no-grant");
 		// The icon is in the toolbar, not on the tab; the host access button
 		// by its label (EQ 6, EQ 9).

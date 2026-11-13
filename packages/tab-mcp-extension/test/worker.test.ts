@@ -46,6 +46,7 @@ import {
 	type AppRequest,
 	ARGS_CUT_NOTE,
 	argsToSend,
+	EXPIRED_KEEP_MS,
 	MAX_ARGS_NOTIFICATION,
 	MAX_QUESTIONS_PER_APP,
 	NOTIFICATION_GUARD_MS,
@@ -486,14 +487,24 @@ describe("questions", () => {
 	test("nobody answering is a timeout; the AI app cancelling is Don't allow", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host, 20);
-		expect(await questions.ask(request(), { tabId: 7 })).toBe("timeout");
+		const timedOut = questions.ask(request(), { tabId: 7 });
+		await settle();
+		const id = questions.list[0]?.id as string;
+		expect(await timedOut).toBe("timeout");
 		expect(host.shown.size).toBe(0);
+		// The panels hear that it ran out, for a while (EQ 13).
+		expect(questions.expired).toEqual([id]);
 		const controller = new AbortController();
 		const cancelled = questions.ask(request({}, controller.signal), {});
 		await settle();
+		const cancelledId = questions.list[0]?.id as string;
 		controller.abort();
 		expect(await cancelled).toBe("deny");
 		expect(questions.list).toEqual([]);
+		// Cancelled or answered: not among the ones that ran out.
+		expect(questions.expired).not.toContain(cancelledId);
+		host.advance(EXPIRED_KEEP_MS + 1);
+		expect(questions.expired).toEqual([]);
 		const gone = new AbortController();
 		gone.abort();
 		expect(await questions.ask(request({}, gone.signal), {})).toBe("deny");
@@ -1021,6 +1032,7 @@ describe("the worker's start", () => {
 			status: "off",
 			grants: [],
 			questions: [],
+			expired: [],
 			pairing: false,
 		});
 	});

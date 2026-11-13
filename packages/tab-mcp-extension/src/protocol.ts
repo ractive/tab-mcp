@@ -147,6 +147,8 @@ export interface PanelState {
 	 * lists it.
 	 */
 	questions: QuestionSummary[];
+	/** The questions that ran out unanswered in the last few seconds (EQ 13). */
+	expired: string[];
 }
 
 /** A question as the repeated state lists it: all but its arguments. */
@@ -174,6 +176,7 @@ export function startProblem(error: unknown): PanelState {
 		problem: `tab-mcp for Chrome could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],
+		expired: [],
 	};
 }
 
