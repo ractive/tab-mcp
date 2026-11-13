@@ -49,7 +49,7 @@ export interface SessionHost {
 	/** The tab pressed Disconnect for one app; false if the grant is not this address's. */
 	revokeGrant(session: TabSession, grantId: string): Promise<boolean>;
 	/** The tab revokes every grant of its address ("New address"). */
-	revokeAll(session: TabSession): Promise<void>;
+	revokeAll(session: TabSession, fromHello?: boolean): Promise<void>;
 	/** The page proves who its user is (DEC-076); answers the tab itself. */
 	bindIdentity(
 		session: TabSession,
@@ -459,7 +459,7 @@ export class TabSession {
 			// same step as the claim, whatever claims the address next, and the
 			// `session` below lists none, which confirms it to the page.
 			try {
-				await this.#host.revokeAll(this);
+				await this.#host.revokeAll(this, true);
 			} catch (error) {
 				this.#host.logger.error("store.error", {
 					op: "revokeAll",

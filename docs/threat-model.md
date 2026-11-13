@@ -404,7 +404,7 @@ attacks.
   the answer is the 401 (or 503) it would get anyway. The endpoint still has no per-IP
   limit (AI apps share egress addresses), so a body sent without a `Content-Length` is
   still received up to the instance's limit before it is refused.
-- **Client assertions** that fail verification count per IP (30, then one every 2
+- **Client assertions** that fail verification count per network (an IPv6 /56; 30, then one every 2
   seconds); once that is used up, further assertions from the network are refused with
   429 before any key is fetched or tried. A client's key set is read up to its first 20
   keys, and at most 3 keys that fit a token's `kid` and algorithm are tried.

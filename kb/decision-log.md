@@ -2558,15 +2558,17 @@ because the disk was full for a moment.
 - **Tab control messages (RS 3).** Each session has a budget for every frame except
   `pong` and `http.response*`: 30, then 2 a second. Past it the relay sends
   `rate_limited` and closes with 4008, both reserved in the protocol until now; the
-  library already treats 4008 as a reason not to reconnect. A second `grants.revokeAll`
-  of an address within a second is a no-op (tracked apart from sign-outs, which also
-  remember the address, so "New address" right after a sign-out still drops the
-  address's open requests).
+  library already treats 4008 as a reason not to reconnect. A `grants.revokeAll` frame
+  within a second of a finished revocation of its address is a no-op, and one that
+  arrives while a revocation is under way waits for it (tracked apart from sign-outs,
+  which also remember the address, so "New address" right after a sign-out still drops
+  the address's open requests). A `hello` with `revokeAll` always revokes, after any
+  revocation under way: its `session` message must list only what is left (DEC-095).
 - **Client assertions (RS 5).** The reviewer proposed checking `#tokenFailuresPerIp`
   before client authentication; that bucket also counts stale refresh tokens of a hosted
   AI app's users, and checking it first would refuse that app's good refreshes too
   (against DEC-117). Instead, assertions that fail verification count in a bucket of
-  their own per IP (30, then one every 2 seconds), checked before the metadata and keys
+  their own per network (IPv4 address, IPv6 /56; 30, then one every 2 seconds), checked before the metadata and keys
   are loaded; a client with a working key never fails there. A JWKS is read up to its
   first 20 keys, and at most 3 keys that fit the token's `kid` and algorithm are tried.
 - **The MCP endpoint (RS 8).** The token is looked up before the body is read. Only a

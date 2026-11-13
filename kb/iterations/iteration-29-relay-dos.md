@@ -49,7 +49,8 @@ Iteration B (the pairing page and the logs) follows on the same package.
 
 - [x] Per-session budget (30, then 2 a second) for every frame but `pong` and
   `http.response*`; `rate_limited` and close 4008, documented in the protocol
-- [x] A second `grants.revokeAll` within a second is a no-op
+- [x] A second `grants.revokeAll` within a second is a no-op; a repeat waits for a
+  revocation under way; a `hello` with `revokeAll` always revokes (review of PR 117)
 
 ### RS 4 = RQ 2: `/token`, `/revoke`, `POST /authorize` read their body without a deadline (DEC-128)
 
@@ -88,6 +89,9 @@ Iteration B (the pairing page and the logs) follows on the same package.
 
 - [x] Keep-alives, error events and the page-gone event only when the AI app's stream
   is an event stream
+- [x] A streamed body that is not an event stream and ends early is broken off
+  (the stream errors, Bun resets the connection) instead of ending cleanly, so the AI
+  app cannot take a cut body for a whole one (review of PR 117)
 
 ### RQ 10: a sweep with a store that throws synchronously ends the process
 
@@ -101,7 +105,7 @@ Iteration B (the pairing page and the logs) follows on the same package.
 ## Outcome
 
 - Tests: `packages/tab-mcp/test/dos-hardening.test.ts`, one block per finding; 31 of its
-  38 tests fail on the code before this iteration (the others guard behaviour that must
+  first 38 tests failed on the code before this iteration (the others guard behaviour that must
   not change, such as reuse detection and the DEC-040 order).
 - Deploy notes: no new environment variables and no changed defaults. A configuration
   with a timer setting above 24.8 days now refuses to start instead of closing every

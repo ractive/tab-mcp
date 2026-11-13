@@ -528,7 +528,14 @@ export class Exchange {
 		clearTimeout(this.#keepAliveTimer);
 		if (wasStreaming && closeStream) {
 			try {
-				this.#controller?.close();
+				// A body that is not an event stream has no way to say it failed:
+				// it is broken off, so the AI app does not take a cut body for a
+				// whole one.
+				if (!this.#eventStream && outcome !== "ok") {
+					this.#controller?.error(new Error(outcome));
+				} else {
+					this.#controller?.close();
+				}
 			} catch {
 				// already closed by the client
 			}

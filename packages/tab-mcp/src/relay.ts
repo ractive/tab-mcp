@@ -387,6 +387,8 @@ function startRelay(
 	const revokedAddresses = new Map<string, { at: number; until: number }>();
 	/** When each address last had all its grants revoked by its tab (RS 3). */
 	const revokedAllAt = new Map<string, number>();
+	/** Revocations of every grant of an address that are under way. */
+	const revokingAll = new Map<string, Promise<void>>();
 
 	function remember<V>(map: Map<string, V>, key: string, value: V): void {
 		map.delete(key);
@@ -491,31 +493,48 @@ function startRelay(
 			grantRemoved(addressId, grantId, "revoked");
 			return true;
 		},
-		async revokeAll(session: TabSession): Promise<void> {
+		async revokeAll(session: TabSession, fromHello = false): Promise<void> {
 			const addressId = session.addressId;
 			if (addressId === undefined) return;
-			// Revoked within the last second already: nothing new can have
-			// paired since, so a repeat costs no store write (RS 3).
+			// A `grants.revokeAll` frame within a second of a finished revocation
+			// costs no store write (RS 3). A `hello` with `revokeAll` always
+			// revokes: its `session` message must list only what is left (DEC-095).
 			const last = revokedAllAt.get(addressId);
-			if (last !== undefined && Date.now() - last < REVOKE_ALL_REPEAT_MS) {
+			if (
+				!fromHello &&
+				last !== undefined &&
+				Date.now() - last < REVOKE_ALL_REPEAT_MS
+			) {
 				return;
 			}
-			remember(revokedAllAt, addressId, Date.now());
-			let grants: Awaited<ReturnType<typeof store.listGrants>>;
-			const options = revokeOptions();
-			try {
-				grants = await store.listGrants(addressId, Date.now());
-				await store.revoke({ addressId }, options);
-			} catch (error) {
-				revokedAllAt.delete(addressId); // not done: a repeat must run
-				throw error;
+			// One revocation of an address at a time: a repeat waits for the one
+			// under way, then (a frame) is done or (a hello) revokes again.
+			const running = revokingAll.get(addressId);
+			if (running !== undefined) {
+				const ok = await running.then(
+					() => true,
+					() => false,
+				);
+				if (ok && !fromHello) return;
 			}
-			addressRevoked(addressId, options.now, true);
-			logger.info("oauth.revoked_all", {
-				address: shortAddress(addressId),
-				grants: grants.length,
-			});
-			for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+			const work = (async () => {
+				const grants = await store.listGrants(addressId, Date.now());
+				const options = revokeOptions();
+				await store.revoke({ addressId }, options);
+				addressRevoked(addressId, options.now, true);
+				logger.info("oauth.revoked_all", {
+					address: shortAddress(addressId),
+					grants: grants.length,
+				});
+				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+			})();
+			revokingAll.set(addressId, work);
+			try {
+				await work;
+				remember(revokedAllAt, addressId, Date.now());
+			} finally {
+				if (revokingAll.get(addressId) === work) revokingAll.delete(addressId);
+			}
 		},
 		/**
 		 * Called one at a time per session (the session chains `identity` and

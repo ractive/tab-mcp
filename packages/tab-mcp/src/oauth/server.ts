@@ -351,7 +351,8 @@ export class AuthorizationServer {
 	readonly #tokenPerIp: RateLimiter;
 	/**
 	 * Client assertions that failed verification (a bad signature, an
-	 * unknown key, wrong claims) per IP (prefix), checked before the next
+	 * unknown key, wrong claims) per network (`networkKey`: an IPv6 /56),
+	 * checked before the next
 	 * assertion is verified (RS 5). A client with a working key never fails
 	 * here, so an AI app's egress address keeps its refreshes while stale
 	 * refresh tokens of some of its users fail later, at the grant.
@@ -1440,13 +1441,16 @@ ${cancel}
 		}
 		// A network whose assertions keep failing is refused before the
 		// metadata and key work (RS 5, DEC-129).
-		if (!this.#assertionFailuresPerIp.available(ip)) throw TOO_MANY_REQUESTS();
+		const network = networkKey(ip);
+		if (!this.#assertionFailuresPerIp.available(network)) {
+			throw TOO_MANY_REQUESTS();
+		}
 		let client: ClientMetadata;
 		try {
 			// A recent copy if the host cannot be reached right now (DEC-106).
 			client = await this.#cimd.get(clientId, {
 				allowStale: true,
-				requester: networkKey(ip),
+				requester: network,
 			});
 		} catch (error) {
 			if (!(error instanceof ClientMetadataError)) throw error;
@@ -1478,7 +1482,7 @@ ${cancel}
 			if (error.reason === "jwks_unavailable") {
 				throw this.#clientAuthUnavailable(clientId, error.reason);
 			}
-			this.#assertionFailuresPerIp.take(ip);
+			this.#assertionFailuresPerIp.take(network);
 			throw this.#clientAuthFailed(clientId, error.reason);
 		}
 		return { clientId, assertion: true };

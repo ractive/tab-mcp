@@ -452,6 +452,49 @@ describe("RS 3: control messages from a tab are rate-limited", () => {
 		await Bun.sleep(50);
 		expect(revokes).toBe(1);
 	});
+
+	test("a repeat waits for a revocation under way; a hello with revokeAll always revokes (DEC-095)", async () => {
+		let release: () => void = () => {};
+		let revokes = 0;
+		class GatedStore extends MemoryTokenStore {
+			gate: Promise<void> | undefined;
+			override async revoke(
+				selector: RevokeSelector,
+				options: RevokeOptions,
+			): Promise<number> {
+				revokes++;
+				if (this.gate !== undefined) await this.gate;
+				return super.revoke(selector, options);
+			}
+		}
+		const store = new GatedStore();
+		const r = relay({ store });
+		const t = tab(r);
+		await t.connect();
+		store.gate = new Promise((resolve) => {
+			release = resolve;
+		});
+		t.send({ type: "grants.revokeAll" });
+		await waitFor(() => revokes === 1, "the first revocation");
+		t.send({ type: "grants.revokeAll" });
+		await Bun.sleep(30);
+		release();
+		store.gate = undefined;
+		await Bun.sleep(30);
+		expect(revokes).toBe(1);
+		// Within the second after it, a grant paired meanwhile and a take-back:
+		// the hello revokes again, and its session lists nothing.
+		await tokenFor(r.store, t.addressId);
+		const back = new ScriptedTab(r.wsUrl, {
+			secret: t.secret,
+			revokeAll: true,
+		});
+		tabs.push(back);
+		const session = await back.connect();
+		expect(revokes).toBe(2);
+		expect(session.grants).toHaveLength(0);
+		expect(await store.listGrants(t.addressId, Date.now())).toHaveLength(0);
+	});
 });
 
 /** Open a raw TCP connection, send `data`, and collect the answer until the server closes. */
@@ -711,7 +754,7 @@ describe("RS 16 / RQ 9: keep-alives and error events go only into event streams"
 		expect(await res.text()).toBe(body);
 	});
 
-	test("a page that goes away mid-JSON-stream adds no event to the body", async () => {
+	test("a page that goes away mid-JSON-stream breaks the body off, with no event in it", async () => {
 		const r = relay({ keepAliveMs: 100 });
 		const t = tab(r, (msg: HttpRequestMessage, page) => {
 			page.send({
@@ -724,8 +767,17 @@ describe("RS 16 / RQ 9: keep-alives and error events go only into event streams"
 		});
 		const session = await t.connect();
 		const token = await tokenFor(r.store, t.addressId);
-		const res = await mcpPost(session.address, rpc(1, "tools/list"), { token });
-		expect(await res.text()).toBe("");
+		// Broken off, not ended: the AI app cannot take it for a whole body
+		// (Bun resets the connection; with no byte sent yet, fetch rejects).
+		const text = await mcpPost(session.address, rpc(1, "tools/list"), {
+			token,
+		})
+			.then((res) => res.text())
+			.then(
+				(body) => `ended: ${body}`,
+				() => "broken off",
+			);
+		expect(text).toBe("broken off");
 	});
 });
 
