@@ -9,6 +9,8 @@
 interface Bucket {
 	tokens: number;
 	updatedAt: number;
+	/** `onLimited` was called and the bucket has not been full since. */
+	limited?: boolean;
 }
 
 export interface RateLimitOptions {
@@ -26,6 +28,12 @@ export interface RateLimitOptions {
 	 * through many keys cannot reset it.
 	 */
 	whenFull?: "evict-oldest" | "fail-closed";
+	/**
+	 * Called when a key is first refused, and again only after its bucket
+	 * was full again in between (RQ 6): a steady flood is reported once, not
+	 * once per refill.
+	 */
+	onLimited?: (key: string) => void;
 }
 
 export class RateLimiter {
@@ -34,6 +42,7 @@ export class RateLimiter {
 	readonly #refill: number;
 	readonly #maxKeys: number;
 	readonly #failClosed: boolean;
+	readonly #onLimited: ((key: string) => void) | undefined;
 	/**
 	 * While full (fail-closed): no bucket is full again before this time, so
 	 * a refused new key does not sweep every bucket again before then.
@@ -45,6 +54,7 @@ export class RateLimiter {
 		this.#refill = options.refillPerSecond;
 		this.#maxKeys = options.maxKeys ?? 10_000;
 		this.#failClosed = options.whenFull === "fail-closed";
+		this.#onLimited = options.onLimited;
 	}
 
 	/** Number of keys kept. */
@@ -75,7 +85,13 @@ export class RateLimiter {
 		} else {
 			this.#refillBucket(bucket, now);
 		}
-		if (bucket.tokens < 1) return false;
+		if (bucket.tokens < 1) {
+			if (bucket.limited !== true) {
+				bucket.limited = true;
+				this.#onLimited?.(key);
+			}
+			return false;
+		}
 		bucket.tokens -= 1;
 		return true;
 	}
@@ -128,5 +144,6 @@ export class RateLimiter {
 			bucket.tokens + elapsed * this.#refill,
 		);
 		bucket.updatedAt = now;
+		if (bucket.tokens >= this.#capacity) bucket.limited = false;
 	}
 }

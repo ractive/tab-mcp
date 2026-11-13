@@ -10,7 +10,7 @@ and gets an MCP address. The user adds that address to an AI app and pairs it by
 a code from the page on the relay's sign-in page. The relay then forwards the AI app's
 requests to the page. It knows nothing about the tools themselves.
 
-**Status: 0.9.0.** Until 1.0, a new minor version can still change settings and the API.
+**Status: 0.10.0.** Until 1.0, a new minor version can still change settings and the API.
 The relay speaks MCP revision 2026-07-28 only and accepts AI apps that register through
 OAuth Client ID Metadata Documents; see [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md)
 for which apps work.
@@ -32,7 +32,7 @@ Or with Docker (linux/amd64 and linux/arm64):
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.9.0
+  ractive/tab-mcp:0.10.0
 ```
 
 The image is also on `ghcr.io/ractive/tab-mcp`. Put the relay behind a reverse proxy
@@ -97,10 +97,16 @@ The package also exports `MemoryTokenStore`, `SqliteTokenStore`, the `TokenStore
 `configFromEnv`, `resolveConfig`, `DEFAULT_CONFIG`, `createLogger`, `installCrashLogging`,
 `SUBPROTOCOL` (`tab-mcp.v1`) and `VERSION`.
 
+A `ConfigError` names the setting it is about in `key`; `describeConfigError(error)`
+puts the environment variable in front of its message, as the `tab-mcp` command prints
+it. `unknownEnvNames(process.env)` lists `TAB_MCP_*` variables the relay does not read
+(a misspelled setting is otherwise ignored); the command logs each as
+`relay.unknown_setting`.
+
 `installCrashLogging(logger)` is what the `tab-mcp` command installs before it starts:
 an unhandled promise rejection is logged and the process keeps running; an uncaught
 exception is logged and the process exits with 1, for your supervisor to restart it. Both
-lines carry the error's name only. Install it in your own process too, unless it already
+lines carry the error's name only, and its code when it has one like `SQLITE_FULL`. Install it in your own process too, unless it already
 handles these events:
 
 ```ts

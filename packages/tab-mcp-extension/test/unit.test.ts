@@ -320,6 +320,54 @@ describe("calls in the content script", () => {
 		});
 	});
 
+	test("a tool is sent with what the bridge uses: readOnlyHint, debugging, outputSchema (WM 3, WM 8)", async () => {
+		const outputSchema = { type: "object", properties: { n: {} } };
+		const doc = {
+			location: {
+				href: "https://shop.example/",
+				origin: "https://shop.example",
+			},
+			title: "Shop",
+			documentElement: { lang: "" },
+			modelContext: {
+				getTools: async () => [
+					{
+						name: "typed",
+						description: "d",
+						outputSchema,
+						annotations: {
+							readOnlyHint: true,
+							consequentialHint: true,
+							untrustedContentHint: true,
+							debugging: true,
+						},
+					},
+					{
+						name: "huge",
+						description: "d",
+						outputSchema: { type: "object", description: "z".repeat(17000) },
+					},
+				],
+				executeTool: async () => "ran",
+			},
+		} as unknown as Document;
+		const listed = await pageTools(doc, "doc-A");
+		expect(listed.tools).toEqual([
+			{
+				name: "typed",
+				description: "d",
+				outputSchema,
+				annotations: { readOnlyHint: true, debugging: true },
+			},
+			// An output schema over 16 KB is left out; the tool is not.
+			{
+				name: "huge",
+				description: "d",
+				annotations: { readOnlyHint: false, debugging: false },
+			},
+		]);
+	});
+
 	test("what a page sends is capped", async () => {
 		const { doc } = toolDocument(
 			Array.from({ length: 300 }, (_, i) => ({

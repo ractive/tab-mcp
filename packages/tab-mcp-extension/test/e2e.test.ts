@@ -1841,12 +1841,18 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(
 				`document.getElementById("tab-badges").textContent === "Not readable"`,
 			);
-			expect(
-				await stack.panel.eval(
-					`[document.getElementById("tab-access").textContent, document.getElementById("host-access").hidden, document.getElementById("allow-all").textContent]`,
-				),
-			).toEqual([
+			const [access, hidden, button] = await stack.panel.eval<
+				[string, boolean, string]
+			>(
+				`[document.getElementById("tab-access").textContent, document.getElementById("host-access").hidden, document.getElementById("allow-all").textContent]`,
+			);
+			// Chrome reports the address of this tab or hides it, depending on
+			// when it is asked; hidden, the line adds that browser pages cannot
+			// be read either.
+			expect(access).toStartWith(
 				"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+			);
+			expect([hidden, button]).toEqual([
 				false,
 				"Read all sites without a click",
 			]);

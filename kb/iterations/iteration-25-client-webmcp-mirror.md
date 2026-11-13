@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 25: tab-mcp tools also as WebMCP tools"
-status: planned
+status: completed
 description: "When a page asks for it, the client library registers its tools also with document.modelContext.registerTool() where the browser has WebMCP, so agents in the browser (ChatGPT's browser, Gemini in Chrome when it comes, extensions) can use the page's tools; consequential tools only when the page says so per tool, because an agent in the browser can answer the page's own confirmation."
 timestamp: 2026-11-09T15:00:00+01:00
 tags: [iteration, client, webmcp]
@@ -104,10 +104,18 @@ Hence: off by default, and consequential tools stay out unless the page names th
       allow" for WebMCP callers; aborting and `compileRegistry()` unmirror; abort then
       register again; a native duplicate in either order; a frame without `allow="tools"`;
       the polyfill present over native; `webmcp` off registers nothing
-- [ ] Threat model: in-browser agents as a new caller beside the AI apps (no pairing,
+- [x] Threat model: in-browser agents as a new caller beside the AI apps (no pairing,
       can operate the page's dialog); CHANGELOG notes it as a change in what a page
       exposes when turned on; a client release on the owner's word
-- [ ] Review; merged on the owner's word
+- [x] Review; merged on the owner's word
+
+## Outcome
+
+Shipped in client 0.13.0 (DEC-119, threat model A14); failures resolve as `{ error }`
+since 0.13.1 (DEC-120). Later changes: tab-mcp for Chrome no longer reads the attribute
+(DEC-140); the retry and the load-time capture of the getter are gone, `destructiveHint`
+counts as consequential, results are mapped for WebMCP and `outputSchema` and
+`exposedTo` are passed on (iteration 34, DEC-143).
 
 ## Out of scope
 

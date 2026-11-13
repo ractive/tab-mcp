@@ -2810,6 +2810,83 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
 - The tab drops a relay frame it cannot parse without answering. The relay only
   debug-logged the tab's `error`, which it still accepts from older libraries.
 
+## DEC-143: The client follows the WebMCP draft of 2026-11-12
+
+2026-11-13, iteration 34 (review of 2026-11-13, WM 3, 4, 5, 6, 9, 10, 11). Amends
+DEC-119 and DEC-120; keeps DEC-115.
+
+- **`outputSchema`.** `Tool` takes it, as the draft's `ModelContextTool` does: an object
+  schema with `"type": "object"` (what MCP wants), copied as JSON and checked like
+  `inputSchema` (patterns, `$ref`s; an AI app's MCP SDK compiles every output schema when
+  it lists the tools, and one that does not compile fails the whole list; review of PR
+  123); anything else is a `TypeError`. It is listed in `tools/list` and passed to the
+  native registration. The
+  library does not check results against it; the README tells authors to return a plain
+  object, since an AI app expects `structuredContent` from every result of such a tool.
+- **`exposedTo`** (owner) is kept on the registered tool and passed to the native
+  `registerTool` options of a mirrored tool. The browser checks it; a list it refuses is
+  a failed registration like any other (a warning). Not checked by the library.
+- **An already aborted signal** rejects with the signal's reason, as the draft does; it
+  resolved without registering. `useTool` ignores a rejection after its own abort.
+- **Kept as deviations**, documented in the README's Tools section: an invalid name or
+  empty description is a `TypeError`, as every other invalid tool is (the draft says
+  `InvalidStateError`); both schemas need `"type": "object"`; the arguments are checked
+  before `execute`; `execute` may return an MCP result.
+- **`destructiveHint` counts as consequential for the mirror.** A tool with
+  `consequentialHint ?? destructiveHint` true is left out of WebMCP unless registered
+  with `{ webmcp: true }`, and the native registration gets that value as
+  `consequentialHint` (so `destructiveHint: false` gives `consequentialHint: false`, and
+  an explicit `consequentialHint` wins). The library's own confirmation still asks only
+  for `consequentialHint` (DEC-022).
+- **Results through WebMCP** (`webMcpValue`, lazy chunk): `undefined`, which the draft
+  cannot serialize (the call failed with `OperationError`), and an empty MCP result
+  resolve as `"Done."`. Not `null`: tab-mcp for Chrome reads `null` from
+  `executeTool()` as "the tool navigated". An MCP result goes out as its
+  `structuredContent` if it has one, else as its text blocks, each other block a line
+  "[<type> content left out: WebMCP results are text.]", instead of the JSON of the
+  whole result with base64 images. Other values go out as before.
+- **No retry** (WM 9, owner). A failed native registration warns at once. The draft
+  unregisters synchronously on abort and so does Chrome (DEC-119); a browser that
+  unregisters later loses that mirror until the tool is registered again.
+- **The getter read when a `TabMcp` is made** (WM 10, owner):
+  `Object.getOwnPropertyDescriptor(Document.prototype, "modelContext")?.get?.call(document)`.
+  An own `document.modelContext` (a polyfill) is still passed by (DEC-115). `capture()`,
+  the `instanceof ModelContext` check and the tests' re-capture are gone: they only
+  defended against a page script that changes the prototype after the library loads,
+  which owns the tools anyway (threat model A14), and they missed WebMCP that an
+  origin-trial token added by script turns on later.
+- Core size: 6397 B gzipped before; WM 9 and WM 10 alone 6313 B; with the rest 6385 B of
+  6400 B.
+
+## DEC-144: What a page tool keeps through tab-mcp for Chrome
+
+2026-11-13, iteration 34 (review of 2026-11-13, WM 3, 7, 8). Amends DEC-113 and DEC-141.
+
+- **`outputSchema` is shown, not declared.** The content script sends a page tool's
+  `outputSchema` (where the browser gives one; Chrome 156 does not) when it is at most
+  16 KB; `webmcp_tools` lists it (patterns noted as below, within the listing's budget,
+  dropped first). The `page_<name>` tool does not declare it: an AI app expects every
+  result of a tool with an output schema to carry matching `structuredContent` (the MCP
+  SDK's client refuses a result without), and a page's string result has none, nor can
+  the extension vouch for the page's object matching it.
+- **Results.** A result that is the JSON of a string (the draft JSON-encodes every
+  result; Chrome 156 passes strings on as they are) is that string. The JSON of a plain
+  object without a `content` key, within 100,000 characters, goes to the library as that
+  object, which sends it as text and as `structuredContent` (MCP needs no output schema
+  for that). An object with a `content` key that is not an MCP result within the budget
+  stays text, so that the library cannot pass it through as a result past the budget.
+  Arrays stay text.
+- **Patterns.** The schema the AI app gets has no `pattern` (DEC-113's guard); each one
+  is added to its schema's `description`, "(Must match the regular expression …)", cut to
+  200 characters, so the app still knows the format. `patternProperties` are only
+  dropped.
+- **`debugging`.** A tool marked `debugging: true` (WebMCP's hint for tools meant for the
+  page's developers) is listed with that reason, not offered and not callable through
+  `webmcp_call`.
+- `PageTool` carries `readOnlyHint` and `debugging` only; `consequentialHint` and
+  `untrustedContentHint` were sent and never used (the bridge asks for every tool not
+  marked read-only, DEC-141, and marks every result untrusted).
+
 ## DEC-146: The connect dialog says why it is not connected, and how to go on
 
 Iteration 33 (review of 2026-11-13, CU 4, CU 7). Amends DEC-028.
@@ -2865,6 +2942,112 @@ Iteration 33 (review of 2026-11-13, CU 5 in part, CU 9, CU 12).
   and screen readers hear the same, without keys on a touch screen; "Copied" lasts 2 s.
 - Every dialog carries `lang="en"` and `dir="ltr"` until iteration J lets a page pass
   its own strings.
+
+## DEC-130: What the pairing page shows and when pairing may finish
+
+2026-11-13, iteration 30 (review 2026-11-13, RS 6, 7, 9, 10, 11, 12, 17, 18). Amends
+DEC-061 and DEC-065.
+
+- **Page origin (RS 6).** On an open relay any `Origin` header was kept as sent, so a
+  program could put free text (`https://ractive.ch (verified by the relay)`) or 8 KB into
+  the pairing page's origin slot and the log. Now a session on an open relay keeps only
+  a serialised web origin (`new URL(o).origin === o`, http or https) or a browser
+  extension's origin of at most 255 characters; anything else is no origin (`""`), which
+  the page shows as "a page that did not say where it runs". A listed origin matched the
+  list exactly and is kept as before.
+- **App name (RS 7).** `hello.app.name` goes through `displayName` (DEC-065: bidi,
+  zero-width and other invisible characters removed) and is dropped when it is empty
+  then or names a domain that is not the page origin's host, a parent or a subdomain of
+  it (`foreignDomain`, DEC-092). The session is not refused for it: the name is the
+  page's claim and only decoration; `tab.session` logs `appNameDropped`. A configured
+  site name is not checked. The pairing page's `strong` and `.origin` are
+  `unicode-bidi: isolate`.
+- **One offline page (RS 10).** `/authorize` answered "Open the page first" without a
+  session and "Open “Connect your AI app” first" with one whose dialog was closed, which
+  told whoever knew an address whether its page was open. Both cases now get one text;
+  the retry is the same. Left over, in A1: an open dialog shows the pairing page with
+  the origin and app name.
+- **Code guesses per network (RS 9).** The share of an address's guesses per network
+  counts an IPv4 address or an IPv6 /56 (`networkKey`), as sessions and open requests do.
+  Three networks still drain the per-address allowance (30, then one every 30 s); the
+  threat model says so instead of "many networks".
+- **OIDC callback (RS 11).** The callback fails with `inactive` when the page's dialog
+  is closed by then, before the identity comparison: a sign-in started while the dialog
+  was open no longer pairs up to 10 minutes after the user closed it, as a code is void
+  once the dialog closes.
+- **`identity_refused` (RS 12).** `JwtError` messages are fixed texts; the JWKS failure's
+  inner error (the configured URL and HTTP status, or Bun's fetch error) is its `cause`,
+  logged by name in `identity.refused` and in full only in `oidc.sign_in_failed`, an
+  operator's line about the provider.
+- **Visit cookie (RS 17).** Every pairing page, and the redirect to the provider, sends
+  the visit cookie again with the same id and a fresh `Max-Age` of 10 minutes. It was
+  set only when absent, so a request opened late in an earlier visit outlived the cookie
+  its form was checked against and failed with "your browser may block cookies".
+- **`[::1]` in `form-action` (RS 18).** Checked in Chrome 151 (headless, pages served
+  through the DevTools protocol): `form-action 'self' http://[::1]:5000` is parsed as
+  `form-action 'self'` and the redirect after Connect is blocked; `http:` lets it
+  through. A loopback redirect to an IPv6 literal therefore gets the scheme source
+  `http:`. The pairing page has no script and its one form posts to the relay, so a
+  wider `form-action` for that case allows nothing an attacker controls: the redirect
+  target is the registered URI the relay chose. Dropping `[::1]` from the loopback
+  hosts, the other option, would refuse clients that register it (RFC 8252 §7.3).
+
+## DEC-131: What the logs say about failures, refusals and load
+
+2026-11-13, iteration 30 (review 2026-11-13, RQ 4, 5, 6). Amends DEC-047.
+
+- **Error codes (RQ 4).** Error lines carry `errorCode` next to `error` when the error
+  has a `code` of the form `^[A-Z0-9_]{1,40}$` (`SQLITE_FULL`, `SQLITE_BUSY`,
+  `EADDRINUSE`). Such a code cannot carry request data; messages are still never logged
+  while the relay runs. A separate field, not `"SQLiteError (SQLITE_FULL)"` in `error`,
+  so a filter on `error` keeps working.
+- **Failures at start (RQ 4).** The `tab-mcp` command catches an error of `createRelay`
+  that is not a `ConfigError`, logs `relay.start_failed`, prints the message and code on
+  stderr and exits with 1. Nothing has run yet, so the message holds no request data;
+  before, an unwritable volume was `process.uncaught_exception` with `SQLiteError` only.
+- **Store failures (RQ 5).** The relay wraps its token store (`guardStore`): every
+  failure of a store method, a rejection or a synchronous throw, is a `StoreFailure`
+  with the store's error as `cause`. That tells a store failure from a bug wherever it
+  surfaces. `/token` and `/revoke` log it as `store.error` (`op` `token`, `revoke`)
+  instead of `oauth.error`; a tab's `grant.revoke` and `grants.revokeAll` log
+  `store.error` (`op` `revokeGrant`, `revokeAll`) and answer the new error code
+  `store_unavailable` instead of `bad_message`, which blamed the page's message. The
+  fields called `message` in `oauth.error` and `tab.handler_error` are `error` now.
+- **Refusals and limits (RQ 6).** `oauth.token_refused` (info) for every 4xx answer of
+  `/token` and `/revoke` except a per-network limit: endpoint, grant type (known ones by
+  name, else `other`), status, OAuth error, the fixed reason text, the client host. Each
+  per-network limiter of the authorization server (`/authorize` views and posts, code
+  guesses, `/token` requests and failures, client assertions) warns once
+  (`oauth.rate_limited` with `limit` and the shortened network) when a network is first
+  refused, and again only after its bucket was full again, so a steady flood is one
+  line. `relay.stats` (info) every sweep: sessions and `maxSessions`, waiting requests,
+  open authorizations. A successful refresh stays at debug (one per hour per connected
+  app).
+
+## DEC-132: Configuration checks, the body limit while a page is away, provider discovery
+
+2026-11-13, iteration 30 (review 2026-11-13, RQ 11, 12, 13).
+
+- **Configuration (RQ 11).** `resolveConfig` checks `store`, `trustProxy`, `logLevel` and
+  `cors` against their values: through the API, `store: "sqlLite"` ran the memory store.
+  `ConfigError` has a `key` (the setting), and `describeConfigError` puts its
+  environment variable in front (`TAB_MCP_MAX_SESSIONS: maxSessions must be a positive
+  number`; `TAB_MCP_ALLOWED_ORIGINS: not an origin: x`). At start the command logs
+  `relay.unknown_setting` for each `TAB_MCP_*` variable it does not read; a warning, not
+  a refusal, so a variable an older or newer release reads does not stop a rollout.
+- **Body limit (RQ 12).** The last session of an address also remembers its site's
+  `maxMessageBytes`; an authenticated request while the page is away is read up to that
+  limit, not the instance's. A site with a raised limit then answers a large request
+  with "the page is not open" (it does not wait: only bodies up to 16 KiB wait) instead
+  of 413.
+- **Provider discovery (RQ 13).** As the provider's keys (`JwksCache`): after a failed
+  refresh the last good metadata serves for another hour, and no new fetch starts for
+  30 seconds. Before, a discovery outage after the hour stopped pairing on every `oidc`
+  site, and every `/authorize` waited for a fetch that failed.
+- **Not done (RQ 7).** A revocation on another instance does not end requests already
+  forwarded on the page's instance, nor its listen streams (up to the session lifetime).
+  The self-hosting guide states it. Closing it would take a store read per listen stream
+  per keep-alive, for setups with several instances only.
 
 ## DEC-154: tab-mcp for Chrome's panel names its controls by what they act on
 

@@ -60,7 +60,9 @@ The page's tools are the page's word:
   gives the new page's `page_info` once it has loaded; its tools are offered by then.
 - Arguments are checked against the tool's schema before the call (without the schema's
   regular expressions, which a page could make freeze the extension; the page checks those
-  itself; a parameter that is called `pattern` stays). A call that the page does not
+  itself; a parameter that is called `pattern` stays). The schema the AI app gets has no
+  `pattern` either: each one is added to its property's description instead ("Must match
+  the regular expression …", cut to 200 characters). A call that the page does not
   answer in 60 s ends for the AI app, also when the page is stuck; cancelling in the AI
   app cancels it in the page. A page that does not answer the extension's other questions
   (its tools, `page_info`) in 5 s is given up, so a stuck page cannot hold the other
@@ -69,21 +71,32 @@ The page's tools are the page's word:
   (as `@mcp-b/global` pages do) gets its text blocks and images through, at most 32
   blocks, the images of one result up to 640 KiB of base64 together (about 480 KB of
   image data; an image beyond that is replaced by a note), so that a result stays within
-  the relay's default 1 MiB per response.
+  the relay's default 1 MiB per response. A result that is the JSON of another object
+  (within the 100,000 characters, and without a `content` key) reaches the AI app as text
+  and as `structuredContent`. A result that is a JSON-encoded string (`"Hello"`, as the
+  WebMCP draft encodes every result; Chrome 156 passes strings on as they are) is that
+  string.
+- A tool's `outputSchema` (the WebMCP draft has it; Chrome 156 does not give it) is shown
+  in `webmcp_tools`, but not declared on its `page_<name>` tool: an AI app expects every
+  result of a tool with an output schema to carry matching `structuredContent`, which a
+  page's text result does not.
 - Names: `page_<name>`, other characters than letters, digits, `_` and `-` as `_`, at most
   64 characters in all: the Anthropic API takes no other tool names, and Claude drops the
   rest without a word.
 - Left out: tools whose `page_<name>` would be longer than 64 characters, the same as
   another's or the same as one of the extension's own tools (a page tool `info` would be
   `page_info`), and tools the client library refuses (none of them can be called through
-  `webmcp_call` either), a schema that is no object schema or over 16 KB, and more than
-  64 tools.
+  `webmcp_call` either), a schema that is no object schema or over 16 KB, tools marked
+  `debugging` (WebMCP's hint for tools meant for the page's developers), and more than
+  64 tools. `webmcp_tools` lists each of them with the reason.
 - Tools a tab-mcp page mirrors into WebMCP (the client library's `webmcp: true`) are
   offered like any other: the extension cannot know whether your AI app is also paired
   with the page itself. An AI app connected to both sees such a tool twice, once from
   each connector, and a consequential one asks in the page as well.
-- Only the top frame, and only the browser's own WebMCP: a page's replacement
-  `document.modelContext` (or a polyfill without native WebMCP) is not used.
+- The top frame's WebMCP, which lists the tools of the page and of its same-origin
+  frames (the draft and Chrome's documentation say so; not tested here); tools of
+  frames of other origins are not listed. Only the browser's own WebMCP: a page's
+  replacement `document.modelContext` (or a polyfill without native WebMCP) is not used.
 - Only pages of http(s) sites, not `file:` pages, and not Incognito tabs (the extension
   cannot be allowed there).
 
@@ -193,7 +206,8 @@ worker only, which content scripts (in the page's origin) cannot reach; there is
 `chrome.storage` area for them to read or write.
 
 WebMCP is on in Chrome only where a site takes part in Chrome's
-[origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial), or after you
+[origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
+162), or after you
 turn on `chrome://flags/#enable-webmcp-testing`
 ([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)).
 

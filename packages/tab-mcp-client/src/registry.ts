@@ -18,10 +18,13 @@ export interface RegisteredTool {
 	readonly title: string | undefined;
 	readonly description: string;
 	readonly inputSchema: JsonSchema;
+	readonly outputSchema?: JsonSchema | undefined;
 	readonly annotations: ToolAnnotations;
 	readonly execute: Tool["execute"];
 	/** `RegisterToolOptions.webmcp`: offered through WebMCP even if consequential, or never. */
 	readonly webmcp?: boolean | undefined;
+	/** `RegisterToolOptions.exposedTo`, passed on to the native registration. */
+	readonly exposedTo?: string[] | undefined;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -119,7 +122,15 @@ function schemaProblem(root: unknown): string | undefined {
 export function validateTool(tool: Tool): RegisteredTool {
 	if (!isPlainObject(tool))
 		throw new TypeError("registerTool: the tool must be an object");
-	const { name, title, description, inputSchema, execute, annotations } = tool;
+	const {
+		name,
+		title,
+		description,
+		inputSchema,
+		outputSchema,
+		execute,
+		annotations,
+	} = tool;
 	if (typeof name !== "string" || !NAME.test(name)) {
 		throw new TypeError(
 			`registerTool: the name must be 1–128 characters of A–Z, a–z, 0–9, "_", "-" or "." (got ${JSON.stringify(name)})`,
@@ -134,24 +145,28 @@ export function validateTool(tool: Tool): RegisteredTool {
 	if (typeof execute !== "function") {
 		throw new TypeError(`registerTool: tool ${name} needs an execute function`);
 	}
-	const schema = inputSchema ?? { type: "object" };
-	if (!isPlainObject(schema) || schema["type"] !== "object") {
-		throw new TypeError(
-			`registerTool: the inputSchema of ${name} must be a JSON Schema object with "type": "object"`,
-		);
-	}
-	const problem = schemaProblem(schema);
-	if (problem !== undefined) {
-		throw new TypeError(`registerTool: the inputSchema of ${name}: ${problem}`);
-	}
-	let copied: JsonSchema;
-	try {
-		copied = JSON.parse(JSON.stringify(schema)) as JsonSchema;
-	} catch {
-		throw new TypeError(
-			`registerTool: the inputSchema of ${name} must be JSON`,
-		);
-	}
+	/**
+	 * An object schema (MCP wants `"type": "object"`), copied as JSON and
+	 * checked by `schemaProblem`: an AI app compiles the output schema too.
+	 */
+	const copy = (schema: unknown, what: string): JsonSchema => {
+		if (!isPlainObject(schema) || schema["type"] !== "object") {
+			throw new TypeError(
+				`registerTool: the ${what} of ${name} must be a JSON Schema object with "type": "object"`,
+			);
+		}
+		let copied: JsonSchema;
+		try {
+			copied = JSON.parse(JSON.stringify(schema)) as JsonSchema;
+		} catch {
+			throw new TypeError(`registerTool: the ${what} of ${name} must be JSON`);
+		}
+		const problem = schemaProblem(copied);
+		if (problem !== undefined)
+			throw new TypeError(`registerTool: the ${what} of ${name}: ${problem}`);
+		return copied;
+	};
+	const copied = copy(inputSchema ?? { type: "object" }, "inputSchema");
 	if (annotations !== undefined && !isPlainObject(annotations)) {
 		throw new TypeError(
 			`registerTool: the annotations of ${name} must be an object`,
@@ -174,6 +189,10 @@ export function validateTool(tool: Tool): RegisteredTool {
 		title,
 		description,
 		inputSchema: copied,
+		outputSchema:
+			outputSchema === undefined
+				? undefined
+				: copy(outputSchema, "outputSchema"),
 		annotations: hints,
 		execute,
 	};
@@ -188,15 +207,20 @@ export class ToolRegistry {
 	#compile: SchemaCompiler | undefined;
 
 	/**
-	 * Register a tool; throws `TypeError` for an invalid tool and an
-	 * `InvalidStateError` `DOMException` for a duplicate name.
+	 * Register a tool; throws `TypeError` for an invalid tool, an
+	 * `InvalidStateError` `DOMException` for a duplicate name and the abort
+	 * reason for an aborted signal (as WebMCP).
 	 */
 	register(tool: Tool, options: RegisterToolOptions = {}): void {
-		const { signal, webmcp } = options;
+		const { signal, webmcp, exposedTo } = options;
 		if (webmcp !== undefined && typeof webmcp !== "boolean")
 			throw new TypeError("registerTool: webmcp must be a boolean");
-		const registered: RegisteredTool = { ...validateTool(tool), webmcp };
-		if (signal?.aborted) return;
+		const registered: RegisteredTool = {
+			...validateTool(tool),
+			webmcp,
+			exposedTo,
+		};
+		signal?.throwIfAborted();
 		if (this.#tools.has(registered.name)) {
 			throw new DOMException(
 				`registerTool: a tool named ${registered.name} is already registered`,

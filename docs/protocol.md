@@ -56,7 +56,7 @@ T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `app?: {name}`, `secret`, `revokeAll?` | First message after the open. The relay ignores a `page` field; relays up to 0.9 require `page: {title}`, so the library sends `page: {title: ""}` (it sent the page title before, which no relay read). `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim; the relay shows it on `/authorize` unless the relay configures a name for the site. `revokeAll: true` takes the address back after a takeover (DEC-095): the relay claims the address and revokes every grant of it before it lists the grants for `session`, whatever session claims the address next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `newAddress()` rejects (DEC-136). |
+| `hello` | T→R | `library: {name, version}`, `app?: {name}`, `secret`, `revokeAll?` | First message after the open. The relay ignores a `page` field; relays up to 0.9 require `page: {title}`, so the library sends `page: {title: ""}` (it sent the page title before, which no relay read). `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim; the relay shows it on `/authorize` unless the relay configures a name for the site. The relay removes bidi, zero-width and other invisible characters from it, and ignores a name that is empty then or names a domain other than the page origin's host (`session` then has no `appName`). Any dotted word that ends in two or more letters counts as a domain, as in AI apps' names (DEC-092): "Node.js tools" on `https://example.com` is ignored; a page that wants such a name configures it as the site's `name`. `revokeAll: true` takes the address back after a takeover (DEC-095): the relay claims the address and revokes every grant of it before it lists the grants for `session`, whatever session claims the address next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `newAddress()` rejects (DEC-136). |
 | `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app. `pairing` is `code` or `oidc` (identity binding). |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
@@ -77,7 +77,10 @@ old tab gets `bye` with reason `replaced` and close 4005.
 
 **The session message.** `sessionId` is a fresh random id per WebSocket. It appears only
 in logs and in this protocol, never in URLs. `origin` is the page origin the relay saw on
-the upgrade; `/authorize` shows it. `appName` is the name `/authorize` will show: the
+the upgrade; `/authorize` shows it. On an open relay (`TAB_MCP_ALLOWED_ORIGINS=*`) only a
+serialised web origin (`https://host[:port]`, as browsers send it) or a browser
+extension's origin of at most 255 characters is kept; anything else is `""`, as for a
+client that sends no `Origin`. `appName` is the name `/authorize` will show: the
 site's configured name, else the page's `app.name`, absent if neither exists. `pairing`
 says how AI apps pair with this page: `code` (the tab shows codes) or `oidc` (the same
 sign-in, see [Identity binding](#identity-binding)); older relays omit it, which
@@ -139,7 +142,7 @@ signed in to the page, proved by the web app's backend
 
 The relay handles `identity` and `identity.logout` one after another, in the order they
 came, and answers every `identity` exactly once. A refused assertion gets `error`
-`identity_refused` with the reason in `message` (and the `round`); the session stays, and the
+`identity_refused` with the reason in `message`, a fixed text per reason (and the `round`); the session stays, and the
 binding it had ends (fail closed), with its requests in flight. Grants made by identity
 binding remember the person (as a hash of issuer and subject). An MCP request on such a
 grant, or any request on an `oidc` site, reaches the page only while it is bound to the
@@ -355,6 +358,7 @@ read.
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
+| `store_unavailable` | relay | A `grant.revoke` or `grants.revokeAll` failed because the relay's token store failed. Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
 | `address_mismatch` | relay | The address id in the URL (`/tab?a=`) is not the one of the `secret` in `hello`. Followed by close 4009. A tab bug: the library computes both from one secret. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with

@@ -371,6 +371,56 @@ on(
 	},
 );
 
+on(
+	"results as the agent reads them: nothing, an MCP result, a destructive tool (WM 4, WM 5, WM 6)",
+	async () => {
+		const page = await open();
+		try {
+			await page.eval(`(async () => {
+				await mcp.registerTool({ name: "noop", description: "Returns nothing", annotations: { readOnlyHint: true }, execute: () => {} });
+				await mcp.registerTool({ name: "structured", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "n is 1" }], structuredContent: { n: 1 } }) });
+				await mcp.registerTool({ name: "picture", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "The diagram:" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] }) });
+				await mcp.registerTool({ name: "remove", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" });
+				await mcp.registerTool({ name: "remove_named", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" }, { webmcp: true });
+				await mcp.registerTool({ name: "typed", description: "d", annotations: { readOnlyHint: true }, outputSchema: { type: "object", properties: { n: { type: "number" } } }, execute: () => ({ n: 2 }) });
+			})()`);
+			await Bun.sleep(50);
+			// Chrome 156 passes a string on as it is (the draft would JSON-encode
+			// it): what matters is that the call succeeds.
+			expect(await page.eval(`agent("noop", {})`)).toEqual({
+				ok: true,
+				value: "Done.",
+			});
+			expect(await page.eval(`agent("structured", {})`)).toEqual({
+				ok: true,
+				value: '{"n":1}',
+			});
+			const picture = await page.eval<{ ok: boolean; value: string }>(
+				`agent("picture", {})`,
+			);
+			expect(picture.ok).toBe(true);
+			expect(picture.value).toContain(
+				"[image content left out: WebMCP results are text.]",
+			);
+			expect(picture.value).not.toContain("iVBORw0KGgo");
+			expect(await page.eval(`agent("typed", {})`)).toEqual({
+				ok: true,
+				value: '{"n":2}',
+			});
+			const names = await page.eval<string[]>("nativeNames()");
+			expect(names).not.toContain("remove");
+			expect(names).toContain("remove_named");
+			expect(
+				await page.eval(
+					`native.getTools().then((ts) => ts.find((t) => t.name === "remove_named").annotations.consequentialHint)`,
+				),
+			).toBe(true);
+		} finally {
+			await page.close();
+		}
+	},
+);
+
 on("aborting unmirrors; registering again mirrors again", async () => {
 	const page = await open();
 	try {

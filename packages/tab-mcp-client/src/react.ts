@@ -265,8 +265,8 @@ export type UseToolOptions = Omit<RegisterToolOptions, "signal">;
  * Registers a tool while the component is mounted (with an `AbortSignal`,
  * aborted on unmount). `execute` is always the latest one, so a new closure
  * on each render does not register again; the tool is registered again only
- * when its name, title, description, input schema or annotations change, or
- * `options.webmcp`, or one of `deps`. A duplicate name or an invalid tool is
+ * when its name, title, description, input or output schema or annotations
+ * change, or `options.webmcp` or `options.exposedTo`, or one of `deps`. A duplicate name or an invalid tool is
  * thrown from the component's next render, for an error boundary.
  */
 export function useTool<Input extends object = Record<string, unknown>>(
@@ -286,8 +286,10 @@ export function useTool<Input extends object = Record<string, unknown>>(
 		tool.title,
 		tool.description,
 		tool.inputSchema,
+		tool.outputSchema,
 		tool.annotations,
 		options.webmcp,
+		options.exposedTo,
 	]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `shape` and `deps` stand for the tool and its options; `execute` is read through the ref
 	useEffect(() => {

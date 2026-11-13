@@ -55,7 +55,7 @@ docker run -d --name tab-mcp --restart unless-stopped \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
   -e TAB_MCP_TRUST_PROXY=x-real-ip \
-  ractive/tab-mcp:0.9.0
+  ractive/tab-mcp:0.10.0
 ```
 
 This publishes the port on the loopback interface only, for a reverse proxy on the same
@@ -69,7 +69,7 @@ machine (see [below](#behind-a-reverse-proxy-or-cdn)). The image:
 - has no shell and no `HEALTHCHECK`. Probe `GET /healthz` from your platform instead
   (see [Health checks](#health-checks-and-monitoring)).
 
-`docker run --rm ractive/tab-mcp:0.9.0 --version` prints the version, `--help` the
+`docker run --rm ractive/tab-mcp:0.10.0 --version` prints the version, `--help` the
 settings. A setting the relay cannot use stops it at start with
 `tab-mcp: configuration error: …` and exit code 2; read the container log if it does not
 come up.
@@ -79,7 +79,7 @@ With Docker Compose:
 ```yaml
 services:
   tab-mcp:
-    image: ractive/tab-mcp:0.9.0
+    image: ractive/tab-mcp:0.10.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
@@ -108,13 +108,15 @@ again after an upgrade.
 
   ```sh
   sudo install -d -o 65532 -g 65532 -m 0700 /srv/tab-mcp
-  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.9.0
+  docker run … -v /srv/tab-mcp:/data ractive/tab-mcp:0.10.0
   ```
 
 - **Platform volumes** (container hosts, Kubernetes) are sometimes mounted owned by
   root. If uid 65532 cannot write there, the relay cannot open its store and stops at
-  start: the log shows `process.uncaught_exception` with `"error":"SQLiteError"`, the
-  process exits with code 1, and the platform restarts it in a loop. On Kubernetes, `securityContext.fsGroup: 65532` fixes it. Where the
+  start: stderr shows `tab-mcp: could not start: unable to open database file
+  (SQLITE_CANTOPEN)`, the log has `relay.start_failed` with `"error":"SQLiteError"` and
+  `"errorCode":"SQLITE_CANTOPEN"`, the process exits with code 1, and the platform
+  restarts it in a loop. On Kubernetes, `securityContext.fsGroup: 65532` fixes it. Where the
   platform has no such setting, ask whether its volumes allow writes by other users; as
   a last resort, `TAB_MCP_STORE=memory` runs the relay without the file (users pair
   again after every restart).
@@ -415,10 +417,19 @@ What lives in each process, and what routing by the id does to it:
 | Grants, access and refresh token hashes, and whether a grant needs a client assertion | token store | needs the shared store |
 
 Refreshes and revocations work on any instance with a shared store: the store's atomic
-`markUsed` still catches a reused refresh token. But the page's list of connected apps
-is updated only by the instance that holds the page: a revocation on another instance
-(`/revoke`, a reused refresh token) shows in the page after it reconnects. The revoked
-tokens stop working at once, since they are gone from the shared store.
+`markUsed` still catches a reused refresh token. But only the instance that holds the
+page acts on the page when a grant is revoked. A revocation on another instance
+(`/revoke`, a reused refresh token) deletes the tokens from the shared store, so new
+requests with them are refused at once, but:
+
+- requests already forwarded to the page go on until they finish or time out, and an
+  open listen stream (`subscriptions/listen`, which has no request timeout) stays open
+  until the page's session ends, at the latest after `TAB_MCP_SESSION_LIFETIME_S`
+  (12 hours);
+- the page's list of connected apps shows the change after the page reconnects.
+
+On one instance, or for revocations on the page's own instance (Disconnect, "New
+address", sign-out), both happen at once.
 
 ### Rules for the load balancer
 
@@ -553,7 +564,7 @@ route that too. Check the [CDN settings](#a-cdn-in-front) as well.
 `GET /healthz` answers `200` with
 
 ```json
-{"status":"ok","version":"0.9.0","counters":{"claudeHeaderWorkaround":0}}
+{"status":"ok","version":"0.10.0","counters":{"claudeHeaderWorkaround":0}}
 ```
 
 and `Cache-Control: no-store`. It needs no token and touches no page. It does read the
@@ -561,7 +572,7 @@ token store once (a key that never exists) and waits at most one second for it. 
 store fails or does not answer in time, it answers `503`:
 
 ```json
-{"status":"unhealthy","reason":"store_unavailable","version":"0.9.0"}
+{"status":"unhealthy","reason":"store_unavailable","version":"0.10.0"}
 ```
 
 `reason` is `store_unavailable` (the store threw) or `store_timeout` (no answer within
@@ -599,15 +610,20 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 
 | Event | Meaning |
 |---|---|
-| `store.error` | The token store failed while running (disk full, file removed). The line names the operation (`op`) and the error's name (`error`), never its message, which can carry token hashes or a connection string. MCP requests then get HTTP 503 with `Retry-After`, so AI apps keep their tokens and retry. A store that cannot be opened at all stops the relay at start instead (`process.uncaught_exception`, see [The data volume](#the-data-volume)). |
+| `store.error` | The token store failed while running (disk full, file removed). The line names the operation (`op`: `get` for an MCP request, `token` and `revoke` for those endpoints, `revokeGrant` and `revokeAll` for the page's Disconnect and "New address", `listGrants`, `identity`, `signOut`, `deleteExpired`), the error's name (`error`) and its code when it has one (`errorCode`, for example `SQLITE_FULL`, `SQLITE_BUSY`, `SQLITE_IOERR`), never its message, which can carry token hashes or a connection string. AI apps get HTTP 503 with `Retry-After`, so they keep their tokens and retry; a page gets `store_unavailable`. |
+| `relay.start_failed` | The relay could not start (a store file it cannot open, a port in use): `error` and `errorCode`; the full message is on stderr. The process exits with 1. See [The data volume](#the-data-volume). |
+| `relay.unknown_setting` | At start: a `TAB_MCP_*` variable the relay does not read (`name`), such as a misspelled or removed setting. It is ignored. |
 | `relay.no_origins` | No page is allowed; every page is refused. A missing or misspelled setting. |
 | `relay.open_relay` | `TAB_MCP_ALLOWED_ORIGINS=*` is set. |
 | `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`, `bad_address` (a malformed `?a=`), `address_mismatch` (the URL's address id is not the secret's). Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. Many `max_sessions` refusals while few real pages are open may be the attack in [Known limit: session slots](#known-limit-session-slots). |
 | `health.store` | The `/healthz` probe of the token store failed (`error` is the error's name, or `timeout`). |
 | `oauth.refresh_reuse` | An old refresh token was used again, so the relay revoked that grant. A sign of a stolen token, or of a client that lost its newest token. |
+| `oauth.token_refused` | Info: `/token` or `/revoke` refused a request (`endpoint`, `grant` type, HTTP `status`, OAuth `error`, a fixed `reason` text, the AI app's `client` host). It answers "why did the AI app lose its connection": `invalid_grant` with "the refresh token has expired" (the grant ran out), "the refresh token is not valid" (its grant was revoked by Disconnect, "New address" or a sign-out, or the token is unknown), or "the refresh token was already used; the connection was revoked" (reuse detection, with `oauth.refresh_reuse`). |
+| `oauth.rate_limited` | Warn, once per episode: a network ran into a per-network limit (`limit`: `authorize_views`, `authorize_posts`, `code_guesses`, `token_requests`, `token_failures`, `client_assertions`; `ip` shortened to /24 or /48). Logged again only after that network's allowance was full again. Many of these for one AI app's egress addresses mean the limits are too low for it; see DEC-117. |
+| `relay.stats` | Info, every 10 minutes: `sessions` and `maxSessions`, `waitingRequests` (MCP requests waiting for their page), `pendingAuthorizations` (open `/authorize` requests). Size `TAB_MCP_MAX_SESSIONS` by it before `tab.refused` `max_sessions` starts. |
 | `tab.rate_limited` | A tab sent more control messages than its budget (30, then 2 a second) and was closed with 4008. A real page does not; many of these are a program flooding the relay. |
 | `relay.bad_forwarded_ip` | Logged once: the header named by `TAB_MCP_TRUST_PROXY` held something that is not an IP address, so the relay used the TCP peer's address. Every client may then appear to come from the proxy; check the proxy's header. |
-| `http.handler_error` | A request handler failed unexpectedly; the client got HTTP 500. The line has the error's name only. Report it as a bug. |
+| `http.handler_error` | A request handler failed unexpectedly; the client got HTTP 500. The line has the error's name (and code) only. Report it as a bug. So are `oauth.error` (an unexpected failure at `/token` or `/revoke`, answered 503) and `tab.handler_error` (a page's message the relay could not handle). |
 
 ## Resource limits
 
@@ -649,6 +665,8 @@ same time, not for the requests:
   from such networks, raise it to the number of users per network you expect; it is
   also what limits one attacker's share of the slots (below), so raise it no further
   than you need.
+- `relay.stats` in the log says every 10 minutes how many sessions are open; size the
+  limit by its peaks.
 - Watch `tab.refused` with `max_sessions_per_ip` in the log: many from a few addresses
   mean users behind a shared address (or `TAB_MCP_TRUST_PROXY` not set, so every page
   appears to come from the proxy).
@@ -715,7 +733,8 @@ deleted at the next sweep. Keep backups as private as the file itself.
    1.0, a minor version can change settings and the protocol.
 2. Back up the SQLite file if you keep backups.
 3. Change the settings the changelog asks for. The relay stops at start on a value it
-   cannot use, but it does not notice a variable it no longer knows; remove those.
+   cannot use and names the variable. A `TAB_MCP_*` variable it does not read is
+   ignored and logged as `relay.unknown_setting` at start; remove those.
 4. Pull the new tag and recreate the container with the same volume:
 
    ```sh
@@ -755,14 +774,16 @@ users pair again, or roll forward with a fix.
 
 ### What a restart does
 
-- Every tab session ends. Pages show that they are disconnected; the user clicks Connect
-  again and gets the same address (its secret is in the page's `localStorage`). A tool
-  call in progress ends with an error.
+- Every tab session ends (close code 4004), and a tool call in progress ends with an
+  error. Pages connect again by themselves, after 5 to 60 seconds, to the same address
+  (its secret is in the page's `localStorage`). Only a page that turned reconnecting
+  off (`reconnect: false` in the client library) shows that it is disconnected and
+  waits for the user to click Connect.
 - Grants and token hashes are in the SQLite file, so AI apps stay paired across restarts
   and upgrades. While no page is connected, their requests wait up to
   `TAB_MCP_PAGE_WAIT_S` and then get "the page is not open" (HTTP 200 with a JSON-RPC
   error or a tool error, see [protocol](protocol.md#when-the-page-is-not-open)). Once the
-  user clicks Connect, the same AI app works again without signing in.
+  page is connected again, the same AI app works again without signing in.
 - Pairing codes and sign-ins in progress are kept in memory and are lost; the user starts
   the sign-in again.
 - Rate-limit counters start from zero.

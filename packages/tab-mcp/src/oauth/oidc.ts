@@ -29,6 +29,10 @@ import type {
 const FLOW_TTL_MS = 10 * 60_000;
 const MAX_FLOWS = 10_000;
 const METADATA_TTL_MS = 60 * 60_000;
+/** How long the last good metadata serves after a failed refresh (RQ 13). */
+const METADATA_GRACE_MS = 60 * 60_000;
+/** No new discovery fetch for this long after a failed one. */
+const METADATA_REFETCH_MS = 30_000;
 const MAX_TOKEN_RESPONSE_BYTES = 65_536;
 
 /** The provider's metadata the relay uses (OIDC Discovery §3). */
@@ -83,17 +87,32 @@ function originOf(url: string): string | undefined {
 	}
 }
 
-/** Discovery for the configured issuer, cached an hour (OIDC Discovery §4). */
+/**
+ * Discovery for the configured issuer, cached an hour (OIDC Discovery §4).
+ * When a refresh fails, the last good metadata serves for another hour
+ * (`METADATA_GRACE_MS`), and nothing is fetched again for 30 seconds, as the
+ * provider's keys are (`JwksCache`): an outage of the discovery document
+ * does not stop pairing, and does not make every `/authorize` wait for a
+ * fetch that fails (RQ 13).
+ */
 export class ProviderDiscovery {
 	readonly #issuer: string;
 	readonly #development: boolean;
+	readonly #now: () => number;
 	#metadata: ProviderMetadata | undefined;
 	#fetchedAt = 0;
+	#failedAt = Number.NEGATIVE_INFINITY;
+	#lastError: unknown;
 	#inflight: Promise<ProviderMetadata> | undefined;
 
-	constructor(issuer: string, development: boolean) {
+	constructor(
+		issuer: string,
+		development: boolean,
+		now: () => number = Date.now,
+	) {
 		this.#issuer = issuer;
 		this.#development = development;
+		this.#now = now;
 	}
 
 	/** The cached metadata, if loaded. */
@@ -102,16 +121,34 @@ export class ProviderDiscovery {
 	}
 
 	async get(): Promise<ProviderMetadata> {
-		if (
-			this.#metadata !== undefined &&
-			Date.now() - this.#fetchedAt < METADATA_TTL_MS
-		) {
+		const now = this.#now();
+		const age = now - this.#fetchedAt;
+		if (this.#metadata !== undefined && age < METADATA_TTL_MS) {
 			return this.#metadata;
 		}
-		this.#inflight ??= this.#load().finally(() => {
-			this.#inflight = undefined;
-		});
-		return this.#inflight;
+		const usable =
+			this.#metadata !== undefined && age < METADATA_TTL_MS + METADATA_GRACE_MS
+				? this.#metadata
+				: undefined;
+		if (now - this.#failedAt < METADATA_REFETCH_MS) {
+			if (usable !== undefined) return usable;
+			throw this.#lastError;
+		}
+		this.#inflight ??= this.#load()
+			.catch((error: unknown) => {
+				this.#failedAt = this.#now();
+				this.#lastError = error;
+				throw error;
+			})
+			.finally(() => {
+				this.#inflight = undefined;
+			});
+		try {
+			return await this.#inflight;
+		} catch (error) {
+			if (usable !== undefined) return usable;
+			throw error;
+		}
 	}
 
 	async #load(): Promise<ProviderMetadata> {
@@ -159,7 +196,7 @@ export class ProviderDiscovery {
 			tokenAuth,
 		};
 		this.#metadata = metadata;
-		this.#fetchedAt = Date.now();
+		this.#fetchedAt = this.#now();
 		return metadata;
 	}
 }
@@ -386,9 +423,17 @@ export class OidcPairing implements PairingMethod {
 		} catch (e) {
 			const reason =
 				e instanceof OidcError || e instanceof JwtError ? e.reason : "exchange";
+			// The provider's answer, for the operator; never shown in the page.
+			const cause = e instanceof Error ? e.cause : undefined;
+			const detail =
+				e instanceof Error
+					? cause instanceof Error
+						? `${e.message}: ${cause.message}`
+						: e.message
+					: "unknown";
 			this.#logger.warn("oidc.sign_in_failed", {
 				reason,
-				message: e instanceof Error ? e.message.slice(0, 200) : "unknown",
+				message: detail.slice(0, 200),
 			});
 			return fail(
 				reason,
@@ -401,6 +446,14 @@ export class OidcPairing implements PairingMethod {
 			return fail(
 				"page_closed",
 				"The page is not open any more. Open it and try again.",
+			);
+		}
+		// The dialog must still be open when the sign-in comes back, as a code
+		// is void once the dialog closes (RS 11).
+		if (!target.pairingOpen) {
+			return fail(
+				"inactive",
+				"The page is not connecting any more. In the page, open “Connect your AI app”, then click Connect here again.",
 			);
 		}
 		if (target.identity === undefined) {

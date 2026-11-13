@@ -39,8 +39,9 @@ export class JwtError extends Error {
 	override name = "JwtError";
 	/** A short reason for the log. */
 	readonly reason: string;
-	constructor(reason: string, message: string) {
-		super(message);
+	/** `message` is a fixed text, safe to pass on; details stay in `cause`. */
+	constructor(reason: string, message: string, cause?: unknown) {
+		super(message, cause === undefined ? undefined : { cause });
 		this.reason = reason;
 	}
 }
@@ -386,9 +387,12 @@ export async function verifyJwt(
 			.filter((k) => keyFits(k, alg))
 			.slice(0, MAX_CANDIDATES);
 	} catch (error) {
+		// A fixed text: the inner error names the JWKS URL and the HTTP status
+		// or Bun's own fetch error, which the caller logs by name only (RS 12).
 		throw new JwtError(
 			"jwks_unavailable",
-			`the signing keys could not be loaded: ${error instanceof Error ? error.message : "unknown"}`,
+			"the signing keys could not be loaded",
+			error,
 		);
 	}
 	// Without a kid, only an unambiguous key is used.
