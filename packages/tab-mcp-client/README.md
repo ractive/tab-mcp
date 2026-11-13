@@ -10,7 +10,7 @@ tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A sit
 assistant can call the same tools over a port, without a relay:
 [Your own assistant on the page](#your-own-assistant-on-the-page).
 
-**Status: 0.16.0.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.16.1.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## You need a relay
@@ -26,7 +26,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.10.1
+  ractive/tab-mcp:0.10.2
 ```
 
 For production, see
@@ -45,7 +45,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.16.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.16.1/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -791,7 +791,7 @@ the session ends after the message was sent and before the relay answered, and w
 or may not have done it, and `grants` says so once the page is connected again. They
 also reject with the relay's refusal of that message, an `Error` whose `code` is
 `store_unavailable` (the relay could not save the change: try again) or `unknown_id`.
-A relay after 0.10.1 names the message it answers (`for`, and `grantId` for a
+A relay after 0.10.2 names the message it answers (`for`, and `grantId` for a
 revocation), so with several revocations pending only the one it answers rejects; an
 older relay's refusal rejects every pending `revoke()` and `signOut()`. When the relay
 does not know a grant the page lists (it expired), the grant leaves `grants` (with

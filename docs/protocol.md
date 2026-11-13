@@ -114,7 +114,7 @@ types the code on the relay's `/authorize` page when the AI app opens it.
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
 | `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this address, or has expired, gets `error` `unknown_id` with `for` and `grantId` ([Errors](#errors-between-tab-and-relay)). |
 | `grants.revokeAll` | T→R | none | Revoke every grant of this address (sent before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every 10 minutes) tells each connected page of its grants that no longer have a usable token, so it comes up to that long after the last token ran out; with several instances, a grant revoked through another instance also comes as `expired` (relays up to 0.10.1 announced neither). The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every 10 minutes) tells each connected page of its grants that no longer have a usable token, so it comes up to that long after the last token ran out; with several instances, a grant revoked through another instance also comes as `expired` (relays up to 0.10.2 announced neither). The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
 
 A grant as the tab sees it:
 
@@ -358,7 +358,7 @@ only logs it at debug level; libraries up to 0.15 sent one for a message they co
 read.
 
 An `unknown_id` or `store_unavailable` that answers a `grant.revoke`, `grants.revokeAll`
-or `identity.logout` names that message in `for` (relays after 0.10.1), and the
+or `identity.logout` names that message in `for` (relays after 0.10.2), and the
 grant of a `grant.revoke` in `grantId`:
 
 ```json
@@ -367,8 +367,8 @@ grant of a `grant.revoke` in `grantId`:
 ```
 
 A page with several of these pending settles only the one named. Without `for` (relays
-up to 0.10.1) the error may answer any of them; the library (after 0.16.0) then
-settles every pending one, as 0.16.0 did. Older libraries ignore the two fields.
+up to 0.10.2) the error may answer any of them; the library (after 0.16.1) then
+settles every pending one, as 0.16.1 did. Older libraries ignore the two fields.
 
 | Code | Sent by | Meaning |
 |---|---|---|

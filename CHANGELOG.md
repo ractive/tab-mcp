@@ -8,7 +8,7 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
-### Unreleased
+### [0.16.1][client-0.16.1] - 2026-11-13
 
 #### Fixed
 
@@ -771,7 +771,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.10.2][relay-0.10.2] - 2026-11-13
 
 #### Fixed
 
@@ -1332,6 +1332,7 @@ First release, version 0.1.0.
   `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[client-0.16.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.1
 [client-0.16.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.0
 [client-0.15.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.15.0
 [client-0.14.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.14.0
@@ -1354,6 +1355,7 @@ First release, version 0.1.0.
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.10.2]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.2
 [relay-0.10.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.1
 [relay-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.0
 [relay-0.9.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.9.0
