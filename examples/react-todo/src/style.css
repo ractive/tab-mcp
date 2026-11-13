@@ -47,6 +47,10 @@ h1 {
 	color: var(--muted);
 }
 
+.problem {
+	color: #b42318;
+}
+
 button {
 	font: inherit;
 	cursor: pointer;

@@ -1,6 +1,6 @@
 ---
 name: tab-mcp
-description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code, Codex) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (`webmcp: true`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
+description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code, Codex) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (`webmcp: true`), serving them to the site's own assistant without a relay (`serve`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
 compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.4+ or Docker.
 ---
@@ -56,18 +56,18 @@ const mcp = new TabMcp({
 });
 
 const tools = new AbortController();
-await mcp.registerTool(
+await mcp.registerTool<{ text: string }>( // types `input`; the schema is what is checked
   {
     name: "add_note",                      // 1-128 of A-Z a-z 0-9 _ - .
-    title: "Add note",
-    description: "Add a note to the list on the page and return its id.",
+    title: "Add a note",
+    description: "Add a note (at most 500 characters) to the list on the page and return its id.",
     inputSchema: {
       type: "object",                      // required: the schema must be an object
-      properties: { text: { type: "string", maxLength: 500 } },
+      properties: { text: { type: "string", minLength: 1, maxLength: 500 } },
       required: ["text"],
       additionalProperties: false,
     },
-    execute: async ({ text }, { signal }) => addNote(String(text), { signal }),
+    execute: ({ text }) => addNote(text),  // second argument: { signal, client }
   },
   { signal: tools.signal },                // abort to remove the tool
 );
@@ -80,8 +80,10 @@ Rules for tools:
   signal. AI apps that listen get a tool-list-changed notification.
 - `registerTool` returns a promise. It rejects with a `TypeError` for an invalid tool and
   an `InvalidStateError` for a duplicate name. Do not use `x-mcp-header` in schemas.
-- Arguments are validated against `inputSchema` before `execute` runs. Still treat them
-  as untrusted input in `execute`.
+- Arguments are validated against `inputSchema` before `execute` runs, so `execute`
+  needs no casts such as `String(text)`; give the type as `registerTool<{ text: string }>`
+  and keep it in step with the schema. Still treat the values as untrusted input (limits
+  such as `maxLength` in the schema, no HTML from them).
 - Write `description` for a model: what the tool does, its units, an example.
 - `execute` results: a string becomes one text block; an MCP result (`content` an array
   of MCP content blocks: `text`, `image`, `audio`, `resource_link`, `resource`) is passed
@@ -91,12 +93,16 @@ Rules for tools:
   result with its message, so throw errors that tell the model what to do.
 - `signal` aborts when the caller gives up. `client` names the caller:
   `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared
-  `name`), or `{ kind: "webmcp" }` for an agent in the browser, of which nothing more is
-  known. Check `client.kind` before reading `host`.
+  `name`), `{ kind: "local", id, name? }` for the site's own assistant on a served port
+  (what the page passed to `serve`, section 3), or `{ kind: "webmcp" }` for an agent in
+  the browser, of which nothing more is known. Check `client.kind` before reading `host`;
+  a label for a log has three cases, e.g. `kind === "relay" ? name ?? host : kind ===
+  "local" ? name ?? id : "an agent in this browser"`.
 - Annotations: `readOnlyHint` for tools that only read; `consequentialHint` for tools
-  that change or delete something (section 4); `untrustedContentHint` for results that
-  contain user or third-party content. MCP hints (`destructiveHint`, `idempotentHint`,
-  `openWorldHint`) may be set directly.
+  whose effect cannot be undone in the page or reaches outside it (section 4);
+  `untrustedContentHint` for results that contain text from the user, another AI app or
+  third parties (a list of notes, todos, labels). MCP hints (`destructiveHint`,
+  `idempotentHint`, `openWorldHint`) may be set directly.
 
 ## 3. Connect and pair
 
@@ -169,18 +175,45 @@ address was taken over again first: say so and let the user try again.
 [references/sign-in.md](references/sign-in.md). **React** single-page apps: see
 [references/react.md](references/react.md).
 
-## 4. Consequential tools
-
-Every tool that changes data, spends money, sends something or deletes something gets
-`consequentialHint: true`:
+**The site's own assistant, without a relay.** A site whose AI assistant runs on the page
+(a chat in an iframe whose backend runs the MCP client) can serve the tools to it over a
+`MessagePort`: no relay, no pairing, no address.
 
 ```ts
-await mcp.registerTool({
+const mcp = new TabMcp({ server: { name: "shop", version: "1.0.0" } }); // no relay
+const served = await mcp.serve(port, { client: { id: "assistant", name: "Shop assistant" } });
+```
+
+- The other end uses `createTunnelFetch` from `@ractive-ch/tab-mcp-client/tunnel` as the
+  `fetch` of an MCP client (pinned to `2026-07-28`) and passes the messages over its own
+  channel; the client README's "Your own assistant on the page" has the whole setup.
+- A port is a key: whoever holds the other end calls the tools without pairing. Hand it
+  only to a frame whose origin you checked, with that origin as the `postMessage` target,
+  never `"*"`.
+- Calls arrive with `client: { kind: "local", id, name }`. A consequential tool still asks
+  (the dialog names "Shop assistant (this site's assistant)", no "Always allow"); a port
+  has none of the relay's limits.
+- `served.close()` (or `options.signal`) ends it; close it when the channel is gone.
+  Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
+  `TypeError` and React's `ConnectButton` renders nothing. `serve`, the relay and
+  `webmcp: true` can be used together: one registration reaches all three.
+
+## 4. Consequential tools
+
+Give `consequentialHint: true` to a tool whose effect the user cannot undo in the page,
+or that acts outside it: it deletes for good, sends, buys, books, publishes, or changes
+data on the server. A change the user sees in the page and can take back (add a note, move
+a shape in an editor with Undo) gets none: a question on every call teaches users to click
+Allow without reading. The live examples follow this rule: the todo list asks before
+deleting, the sign-in example before deleting notes; adding and completing do not ask.
+
+```ts
+await mcp.registerTool<{ id: string }>({
   name: "delete_note",
-  description: "Delete a note by its id.",
+  description: "Delete a note by its id. It cannot be restored.",
   inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
   annotations: { consequentialHint: true },
-  execute: ({ id }) => deleteNote(String(id)),
+  execute: ({ id }) => deleteNote(id),
 });
 ```
 
@@ -193,10 +226,14 @@ that AI app until a reload or a disconnect) appears only with `alwaysAllow: true
 `TabMcp`. Leave it off unless the user really need not check each call: it lifts the only
 brake on a prompt injection, and the relay's one `tools` scope covers every tool, so
 consent per tool is the page's. A refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
-pass `onConfirm: (request) => boolean | Promise<boolean>` to `TabMcp`. `request` has
+pass `onConfirm: (request) => ConfirmAnswer | Promise<ConfirmAnswer>` to `TabMcp`, where
+`ConfirmAnswer` is `true` (run), `false` (the user refused) or `"unanswered"` (the user
+was asked and did not answer, e.g. the page's own question timed out: the AI app reads
+"The user was asked and did not answer." and `toolcallend` has the outcome
+`unanswered`); anything else, and a throw, is a refusal. `request` has
 `tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts.
 `mcp.confirmInPage(request)` is the library's dialog, for example for
-`client.kind === "webmcp"`. Without `onConfirm` and without a `document`,
+`client.kind === "webmcp"` or `"local"`. Without `onConfirm` and without a `document`,
 calls are declined.
 
 ## 5. WebMCP: agents in the browser
@@ -227,9 +264,8 @@ await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only
   native registration (a name already registered natively, a frame without
   `allow="tools"`) only warns in the console; the tool stays offered through the relay.
   A page that registers tools natively itself leaves `webmcp` off or uses other names.
-- `<html data-tab-mcp-webmcp>` lists the mirrored names. tab-mcp for Chrome offers
-  mirrored tools like any page tool, so an AI app connected to both the page and the
-  extension sees them twice.
+- tab-mcp for Chrome offers mirrored tools like any page tool, so an AI app connected to
+  both the page and the extension sees them twice.
 
 ## 6. Security defaults
 

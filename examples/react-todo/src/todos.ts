@@ -10,6 +10,10 @@ export interface Todo {
 	done: boolean;
 }
 
+/** The longest text and the most todos; the tools' schemas say the same. */
+export const MAX_TEXT = 200;
+export const MAX_TODOS = 200;
+
 export class TodoList {
 	#items: readonly Todo[] = [];
 	#next = 1;
@@ -23,8 +27,12 @@ export class TodoList {
 	readonly snapshot = (): readonly Todo[] => this.#items;
 
 	add(text: string): Todo {
-		const trimmed = text.trim();
+		const trimmed = text.trim().replace(/\s+/g, " ");
 		if (trimmed === "") throw new Error("A todo needs a text");
+		if (trimmed.length > MAX_TEXT)
+			throw new Error(`A todo has at most ${MAX_TEXT} characters`);
+		if (this.#items.length >= MAX_TODOS)
+			throw new Error(`The list holds at most ${MAX_TODOS} todos`);
 		const todo: Todo = { id: `t${this.#next++}`, text: trimmed, done: false };
 		this.#set([...this.#items, todo]);
 		return todo;
