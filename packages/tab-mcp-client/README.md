@@ -101,8 +101,10 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
   `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
 - `execute(input, { signal, client })`: runs the tool. `signal` aborts when the caller
   gives up. `client` names the caller: `{ kind: "relay", grantId, id, host, name? }` for
-  an AI app through the relay (`id`, verified `host`, declared `name`), or
-  `{ kind: "webmcp" }` for an agent in the browser ([WebMCP](#webmcp)), of which nothing
+  an AI app through the relay (`id`, verified `host`, declared `name`),
+  `{ kind: "local", id, name? }` for the site's own assistant on a served port, with the
+  `id` and `name` the page gave `serve` ([Your own assistant](#your-own-assistant-on-the-page)),
+  or `{ kind: "webmcp" }` for an agent in the browser ([WebMCP](#webmcp)), of which nothing
   more is known. Check `client.kind` before you read `host`. Return a
   string (one text block), an MCP result (passed through with its `_meta`: an object
   whose `content` is an array of MCP content blocks, each with `type` `text`, `image`,
@@ -175,10 +177,9 @@ Chrome has WebMCP for sites in its
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
   fails: a page that registers tools natively itself leaves `webmcp` off or uses other
   names.
-- `<html data-tab-mcp-webmcp="…">` lists the mirrored names. tab-mcp for Chrome does not
-  read it: it offers mirrored tools like any page tool, since it cannot know whether the
-  AI app is also paired with the page, so an AI app connected to the page and to the
-  extension sees such a tool twice.
+- tab-mcp for Chrome offers mirrored tools like any page tool, since it cannot know
+  whether the AI app is also paired with the page, so an AI app connected to the page and
+  to the extension sees such a tool twice.
 
 ### Your own assistant on the page
 
@@ -330,7 +331,8 @@ const mcp = new TabMcp({
   server: { name: "calculator", version: "1.0.0" },
   onConfirm: (request) => {
     const { tool, arguments: args, client, signal } = request;
-    // An agent in the browser (`webmcp`): the library's own dialog.
+    // An agent in the browser (`webmcp`) or the site's own assistant (`local`):
+    // the library's own dialog.
     if (client.kind !== "relay") return mcp.confirmInPage(request);
     const name = client.name ? escapeInvisible(client.name) : undefined;
     const app = name ? `${name} (${client.host})` : client.host;
@@ -506,8 +508,9 @@ AI access on, remember the user's choice and connect on load:
 
 ```ts
 const key = "my-page:ai-on";
-mcp.addEventListener("statechange", () => {
-  if (mcp.state === "connected") localStorage.setItem(key, "1");
+// On once an AI app is paired: opening the dialog and closing it again does not count.
+mcp.addEventListener("grantschange", () => {
+  if (mcp.grants.length > 0) localStorage.setItem(key, "1");
 });
 // Turned off by the user (`disconnect()`): stay off after the next reload.
 mcp.addEventListener("disconnected", (e) => {
@@ -565,14 +568,18 @@ Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()
 `pairingcode`, `grantschange`, `reconnecting`, `toolschange`, `replaced` (with
 `detail.sibling`, see above) and `error`. For an activity log, `toolcall`
 and `toolcallend` report every call by an AI app (or, with `webmcp`, an agent in the
-browser): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
+browser, or the assistant on a served port): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
 `error`, `declined`, `unanswered` or `cancelled`), result and duration.
 
 ```ts
 mcp.addEventListener("toolcallend", (e) => {
   const { tool, client, outcome, durationMs } = e.detail;
   const who =
-    client.kind === "relay" ? (client.name ?? client.host) : "An agent in this browser";
+    client.kind === "relay"
+      ? (client.name ?? client.host)
+      : client.kind === "local"
+        ? (client.name ?? client.id)
+        : "An agent in this browser";
   log(`${who}: ${tool} ${outcome} in ${durationMs} ms`);
 });
 ```

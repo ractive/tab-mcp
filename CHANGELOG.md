@@ -61,6 +61,13 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   read as "Opened in another tab".
 - The library no longer answers a relay message it cannot read with `error`.
 
+#### Removed
+
+- `<html data-tab-mcp-webmcp="…">`: the library no longer lists the tools it mirrors
+  into WebMCP on the page's root element. It was made for tab-mcp for Chrome, which has
+  not read it since its own review fixes. A page that watched it for whether its tools are
+  mirrored reads `toolcall` events with `client.kind === "webmcp"` instead.
+
 #### Fixed
 
 - The schema check at registration no longer reads `default`, `examples`, `const` and

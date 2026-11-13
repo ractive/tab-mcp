@@ -61,7 +61,9 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	// The setup steps (`./setup`, DEC-118) are in the UI chunk, not the core.
 	expect(coreCode).not.toContain("codex mcp add");
 	// The WebMCP mirror is in the core; its calls run in the lazy chunk (DEC-115).
-	expect(coreCode).toContain("data-tab-mcp-webmcp");
+	expect(coreCode).toContain("is not offered through WebMCP");
+	// No mark on <html> since iteration 37 (the attribute was for the extension).
+	expect(coreCode).not.toContain("data-tab-mcp-webmcp");
 	expect(coreCode).not.toContain("The user declined");
 
 	const coreGz = [...core].reduce((sum, n) => sum + gz(files.get(n) ?? ""), 0);

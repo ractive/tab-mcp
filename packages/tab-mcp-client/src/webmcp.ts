@@ -68,22 +68,6 @@ const HINTS = [
 ] as const;
 
 /**
- * `<html data-tab-mcp-webmcp="…">`: the names mirrored. tab-mcp for Chrome no
- * longer reads it (DEC-140); pages may (whether mirroring is on).
- */
-const ATTRIBUTE = "data-tab-mcp-webmcp";
-
-/** The mirrors registered (or being registered) by every `TabMcp` of the page. */
-const listed = new Set<{ readonly name: string }>();
-
-function writeAttribute(): void {
-	g.document?.documentElement?.setAttribute(
-		ATTRIBUTE,
-		[...listed].map((m) => m.name).join(" "),
-	);
-}
-
-/**
  * Mirror `registry`'s tools that `offered` accepts into `context`, now and
  * whenever the registry changes. Every failure of the native
  * `registerTool()` stays here: warned once per name, the tool still offered
@@ -134,8 +118,6 @@ export function mirror(
 					setTimeout(() => register(tool, entry, false));
 					return;
 				}
-				listed.delete(entry);
-				writeAttribute();
 				if (warned.has(tool.name)) return;
 				warned.add(tool.name);
 				console.warn(
@@ -149,17 +131,13 @@ export function mirror(
 			if (registry.get(tool.name) === tool) continue;
 			entry.controller.abort();
 			mirrors.delete(tool);
-			listed.delete(entry);
 		}
 		for (const tool of registry.list()) {
 			if (mirrors.has(tool) || !offered(tool)) continue;
 			const entry = { name: tool.name, controller: new AbortController() };
 			mirrors.set(tool, entry);
-			listed.add(entry);
 			register(tool, entry, true);
 		}
-		// Listed before the browser has them, unlisted after it dropped them.
-		writeAttribute();
 	};
 	registry.onChange(sync);
 	sync();

@@ -205,7 +205,8 @@ describe("mirroring", () => {
 			},
 			execute: "function",
 		});
-		expect(attribute()).toBe("add");
+		// The page is not marked: <html data-tab-mcp-webmcp> is gone.
+		expect(attribute()).toBeNull();
 		// Through the relay, both.
 		expect(t.tools).toEqual(["add", "wipe"]);
 	});
@@ -216,7 +217,6 @@ describe("mirroring", () => {
 		await t.registerTool({ ...add, name: "hidden" }, { webmcp: false });
 		await settle();
 		expect([...native.tools.keys()]).toEqual(["wipe"]);
-		expect(attribute()).toBe("wipe");
 	});
 
 	test("after connect() too", async () => {
@@ -240,10 +240,8 @@ describe("mirroring", () => {
 		await t.registerTool(add, { signal: controller.signal });
 		await t.registerTool({ ...add, name: "other" });
 		await settle();
-		expect(attribute()).toBe("add other");
 		controller.abort();
 		expect([...native.tools.keys()]).toEqual(["other"]);
-		expect(attribute()).toBe("other");
 	});
 
 	test("a tool the validator refuses is unmirrored when the lazy chunk loads", async () => {
@@ -263,7 +261,6 @@ describe("mirroring", () => {
 		});
 		await t.registerTool(add);
 		await settle();
-		expect(attribute()).toBe("early add");
 		const early = native.tools.get("early") as NativeTool;
 		// The first WebMCP call loads the chunk and compiles every schema.
 		await expect(native.call("add", { a: 1, b: 2 })).resolves.toEqual({
@@ -273,7 +270,6 @@ describe("mirroring", () => {
 			'registerTool: the inputSchema of early: $ref "#/$defs/s" does not resolve; the tool was unregistered',
 		]);
 		expect([...native.tools.keys()]).toEqual(["add"]);
-		expect(attribute()).toBe("add");
 		// A call that still holds the old function: the tool is gone.
 		await expect(
 			Promise.resolve().then(() =>
@@ -297,7 +293,6 @@ describe("mirroring", () => {
 				late,
 				tools: ["add"],
 			});
-			expect(attribute()).toBe("add");
 			expect(warn).not.toHaveBeenCalled();
 			await expect(native.call("add", { a: 2, b: 2 })).resolves.toEqual({
 				sum: 4,
@@ -321,7 +316,6 @@ describe("every failure stays with the mirror", () => {
 		await settle();
 		expect(native.tools.get("add")?.description).toBe("The page's own");
 		expect(t.tools).toEqual(["add"]);
-		expect(attribute()).toBe("");
 		// Registered again (useTool): still the page's, no second warning.
 		controller.abort();
 		await t.registerTool(add);
@@ -339,7 +333,6 @@ describe("every failure stays with the mirror", () => {
 		await expect(
 			native.registerTool({ name: "add", description: "d", execute: () => 1 }),
 		).rejects.toMatchObject({ name: "InvalidStateError" });
-		expect(attribute()).toBe("add");
 	});
 
 	test('a frame without allow="tools" (NotAllowedError): warned, tools unchanged', async () => {
@@ -352,7 +345,6 @@ describe("every failure stays with the mirror", () => {
 		await settle();
 		expect(native.tools.size).toBe(0);
 		expect(t.tools).toEqual(["add"]);
-		expect(attribute()).toBe("");
 		expect(warn).toHaveBeenCalledTimes(1);
 	});
 
@@ -374,7 +366,6 @@ describe("every failure stays with the mirror", () => {
 		controller.abort();
 		await settle();
 		expect(names).toEqual(["add"]);
-		expect(attribute()).toBe("");
 		expect(warn).not.toHaveBeenCalled();
 	});
 

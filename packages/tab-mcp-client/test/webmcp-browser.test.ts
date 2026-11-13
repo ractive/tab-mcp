@@ -107,7 +107,8 @@ console.warn = (...args) => warnings.push(args.map(String).join(" "));
 const { TabMcp } = await import("${SITE}/lib/index.js");
 const mcp = new TabMcp({ relay: "https://relay.test", server: { name: "frame", version: "1.0.0" }, storage: null, webmcp: true });
 await mcp.registerTool({ name: "frame_" + location.search.slice(1), description: "d", annotations: { readOnlyHint: true }, execute: () => 1 });
-setTimeout(() => parent.postMessage({ frame: location.search.slice(1), tools: mcp.tools, warnings, listed: document.documentElement.getAttribute("data-tab-mcp-webmcp") }, "*"), 200);
+const nativeNames = async () => { try { return (await document.modelContext.getTools()).map((t) => t.name); } catch { return null; } };
+setTimeout(async () => parent.postMessage({ frame: location.search.slice(1), tools: mcp.tools, warnings, native: await nativeNames() }, "*"), 200);
 </script></body></html>`;
 
 let browser: Browser | undefined;
@@ -228,11 +229,12 @@ on(
 					untrustedContentHint: false,
 				},
 			});
+			// The page is not marked: <html data-tab-mcp-webmcp> is gone.
 			expect(
 				await page.eval(
-					`document.documentElement.getAttribute("data-tab-mcp-webmcp")`,
+					`document.documentElement.hasAttribute("data-tab-mcp-webmcp")`,
 				),
-			).toBe("add wipe_named refused");
+			).toBe(false);
 			expect(await page.eval("mcp.tools")).toEqual([
 				"add",
 				"wipe",
@@ -376,11 +378,6 @@ on("aborting unmirrors; registering again mirrors again", async () => {
 	try {
 		await page.eval("addControl.abort()");
 		expect(await page.eval("nativeNames()")).toEqual(["refused", "wipe_named"]);
-		expect(
-			await page.eval(
-				`document.documentElement.getAttribute("data-tab-mcp-webmcp")`,
-			),
-		).toBe("wipe_named refused");
 		// As React's useTool does: abort and register again at once.
 		await page.eval(`(async () => {
 			const c = new AbortController();
@@ -412,11 +409,6 @@ on("a native duplicate in either order keeps its owner", async () => {
 			"add is not offered through WebMCP",
 		);
 		expect(await page.eval("mcp.tools")).toContain("add");
-		expect(
-			await page.eval(
-				`document.documentElement.getAttribute("data-tab-mcp-webmcp")`,
-			),
-		).toBe("wipe_named refused");
 		// The mirror came first: the page's own registration fails.
 		expect(
 			await page.eval(
@@ -437,7 +429,7 @@ on(
 				frame: string;
 				tools: string[];
 				warnings: string[];
-				listed: string | null;
+				native: string[] | null;
 			}
 			let frames: FrameReport[] = [];
 			for (let i = 0; i < 100 && frames.length < 2; i++) {
@@ -445,10 +437,9 @@ on(
 				frames = await page.eval("frames_");
 			}
 			const byName = Object.fromEntries(frames.map((f) => [f.frame, f]));
-			expect(byName["plain"]).toMatchObject({
-				tools: ["frame_plain"],
-				listed: "",
-			});
+			expect(byName["plain"]).toMatchObject({ tools: ["frame_plain"] });
+			// Not registered natively: no tools there, or no access at all.
+			expect(byName["plain"]?.native ?? []).toEqual([]);
 			expect(
 				(byName["plain"] as unknown as { warnings: string[] }).warnings,
 			).toHaveLength(1);
@@ -456,7 +447,7 @@ on(
 				frame: "allowed",
 				tools: ["frame_allowed"],
 				warnings: [],
-				listed: "frame_allowed",
+				native: ["frame_allowed"],
 			});
 		} finally {
 			await page.close();
