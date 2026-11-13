@@ -394,7 +394,8 @@ export function showConnectDialog(
 		el(doc, "summary", { text: s.help }),
 		steps,
 	);
-	const guideUrl = ui?.setup?.guide === undefined ? SETUP_GUIDE : ui.setup.guide;
+	const guideUrl =
+		ui?.setup?.guide === undefined ? SETUP_GUIDE : ui.setup.guide;
 	if (guideUrl !== null) {
 		const guide = el(doc, "a", { text: s.guide });
 		guide.href = guideUrl;
@@ -546,8 +547,7 @@ export function showConnectDialog(
 					// Not connected any more: the note says so already.
 					if (mcp.state === "connected")
 						appsProblem =
-							(error as { code?: unknown } | null)?.code ===
-							"store_unavailable"
+							(error as { code?: unknown } | null)?.code === "store_unavailable"
 								? s.storeUnavailable
 								: s.disconnectFailed;
 					render();
@@ -714,10 +714,9 @@ export function showConnectDialog(
 
 		connectedView = !renewing && connected && grants.length > 0;
 		const one = names.length === 1;
-		successTitle.textContent = format(
-			one ? s.connectedOne : s.connectedMany,
-			{ apps: listOf(names, s) },
-		);
+		successTitle.textContent = format(one ? s.connectedOne : s.connectedMany, {
+			apps: listOf(names, s),
+		});
 		successNext.textContent = one ? s.connectedNextOne : s.connectedNextMany;
 		if (connectedView) dialog.setAttribute("aria-describedby", successId);
 		else dialog.removeAttribute("aria-describedby");
@@ -815,7 +814,12 @@ export function showConnectDialog(
 		// New address, at its Copy.
 		else if (doc.activeElement === dialog && (connectedView || shown))
 			start().focus();
-		else if (renewed && shown && !addressShownBefore && doc.activeElement === close)
+		else if (
+			renewed &&
+			shown &&
+			!addressShownBefore &&
+			doc.activeElement === close
+		)
 			copy.focus();
 		if (paired && connectedView)
 			announce(`${successTitle.textContent}. ${successNext.textContent}`);

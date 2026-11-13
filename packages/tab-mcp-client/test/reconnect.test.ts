@@ -216,7 +216,8 @@ test("no reconnecting after replaced, expired, idle, a refusal, or with reconnec
 test("a page that connects in its own listener of the end makes the first attempt, once", async () => {
 	const t = await connected([600_000]);
 	t.addEventListener("statechange", (e) => {
-		if (e.detail.reason !== undefined) t.connect({ resume: true }).catch(() => {});
+		if (e.detail.reason !== undefined)
+			t.connect({ resume: true }).catch(() => {});
 	});
 	relay.close(4004);
 	await nextState(t, "connected");

@@ -14,10 +14,7 @@ describe("methods that ask the relay (CU 10)", () => {
 		const tab = newTab("https://relay.example", {
 			identityAssertion: () => "assertion",
 		});
-		for (const call of [
-			() => tab.signOut(),
-			() => tab.refreshIdentity(),
-		]) {
+		for (const call of [() => tab.signOut(), () => tab.refreshIdentity()]) {
 			const error = await call().then(
 				() => undefined,
 				(e: unknown) => e as DOMException,

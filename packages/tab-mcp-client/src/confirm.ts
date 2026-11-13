@@ -191,9 +191,7 @@ function showConfirm(
 	const extra: HTMLElement[] = [];
 	if (options.alwaysAllow === true) {
 		// Left of Allow: not where most platforms put the default (CU 11).
-		approve.unshift(
-			approving(s.allowUntilReload, "always", "tab-mcp-always"),
-		);
+		approve.unshift(approving(s.allowUntilReload, "always", "tab-mcp-always"));
 		extra.push(
 			el(
 				doc,
@@ -245,7 +243,12 @@ function showConfirm(
 		text: s.scrollToAllow,
 	});
 	scrollNote.hidden = true;
-	const who = el(doc, "p", { id: `${id}-who` }, ...fill(doc, s.confirmWho, names));
+	const who = el(
+		doc,
+		"p",
+		{ id: `${id}-who` },
+		...fill(doc, s.confirmWho, names),
+	);
 	dialog.setAttribute(
 		"aria-describedby",
 		shown !== undefined && !args.hidden && shown.length <= DESCRIBED_ARGUMENTS

@@ -215,7 +215,9 @@ test("SDK client pairs with a tab through the code shown in its dialog, calls a 
 	expect(grant.client.host).toBe(new URL(clientId).host);
 	const title =
 		dialog()?.querySelector(".tab-mcp-success-title")?.textContent ?? "";
-	expect(title).toBe(`SDK test client (${new URL(clientId).host}) is connected`);
+	expect(title).toBe(
+		`SDK test client (${new URL(clientId).host}) is connected`,
+	);
 	expect(dialog()?.querySelector(".tab-mcp-apps")?.textContent).toContain(
 		"SDK test client",
 	);

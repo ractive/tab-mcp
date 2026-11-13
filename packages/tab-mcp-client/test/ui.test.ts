@@ -1,20 +1,21 @@
 /** The default dialogs in a DOM (happy-dom, passed in; no globals touched). */
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
-import type { TabMcp } from "../src/index.ts";
-import type {
-	ConfirmRequest,
-	Grant,
-	RelayClient,
-	SessionInfo,
-} from "../src/types.ts";
-import { confirmDialog, confirmInPage } from "../src/confirm.ts";
+import { confirmDialog } from "../src/confirm.ts";
 import {
 	CODE_USED_WAIT_MS,
 	replacedNotice,
 	showConnectDialog,
 } from "../src/connect.ts";
 import { COPIED_MS, DIALOG_CSS, SELECTED_MS } from "../src/dialog.ts";
+import type { TabMcp } from "../src/index.ts";
+import type {
+	ConfirmRequest,
+	DialogOptions,
+	Grant,
+	RelayClient,
+	SessionInfo,
+} from "../src/types.ts";
 import { newTab, nextEnd, nextEvent, nextState, setTiming } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
@@ -393,7 +394,6 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		allow.click();
 		expect(await answer).toBe("allow");
 	});
-
 });
 
 describe("confirmDialog: only while the user sees the page (iteration 13)", () => {
@@ -2377,5 +2377,196 @@ describe("the connect dialog for people who are not developers (iteration 33)", 
 			jest.useRealTimers();
 		}
 		byText(dialog, "Close").click();
+	});
+});
+
+describe("the dialogs' texts, help and Allow until reload (iteration 38)", () => {
+	let relay: StubRelay;
+	let mcp: TabMcp | undefined;
+	const GRANT: Grant = {
+		grantId: "g_1",
+		client: {
+			id: "https://claude.ai/c.json",
+			name: "Claude",
+			host: "claude.ai",
+		},
+		createdAt: "2026-10-19T20:00:00.000Z",
+	};
+	beforeEach(() => {
+		relay = new StubRelay();
+		relay.grants = [GRANT];
+	});
+	afterEach(async () => {
+		mcp?.disconnect();
+		mcp = undefined;
+		await relay.stop();
+	});
+	async function open(m: TabMcp, ui?: DialogOptions) {
+		const connecting = m.connect();
+		const closed = showConnectDialog(m, connecting, doc, "tools", ui);
+		const session = await connecting;
+		await relay.next("pairing.start");
+		const dialog = doc.querySelector(
+			"dialog.tab-mcp-connect",
+		) as HTMLDialogElement;
+		return { dialog, closed, session };
+	}
+	const waitFor = (selector: string) =>
+		new Promise<HTMLElement>((resolve) => {
+			const poll = () => {
+				const found = doc.querySelector(selector);
+				if (found !== null) resolve(found as HTMLElement);
+				else setTimeout(poll, 1);
+			};
+			poll();
+		});
+
+	test("a page's own texts replace the English ones key by key, with their language (CU 5)", async () => {
+		mcp = newTab(relay.url, {
+			ui: {
+				strings: {
+					lang: "de",
+					confirmTitle: "{tool} erlauben?",
+					confirmWho: "{client} möchte {tool} ausführen.",
+					deny: "Nicht erlauben",
+					allow: "Erlauben",
+				},
+			},
+		});
+		const answer = mcp.confirmInPage(
+			{ ...question(), client: { kind: "webmcp" } },
+			{ document: doc },
+		);
+		const dialog = await waitFor("dialog.tab-mcp-confirm");
+		expect(dialog.getAttribute("lang")).toBe("de");
+		expect(dialog.getAttribute("dir")).toBe("ltr");
+		expect(dialog.querySelector("h2")?.textContent).toBe(
+			"Clear memory erlauben?",
+		);
+		// The names stay isolated inside the page's sentence.
+		expect(dialog.querySelector("h2 bdi")?.textContent).toBe("Clear memory");
+		expect(dialog.textContent).toContain(
+			"An agent in this browser möchte Clear memory ausführen.",
+		);
+		expect(buttons(dialog).map((b) => b.textContent)).toEqual([
+			"Nicht erlauben",
+			"Erlauben",
+		]);
+		byText(dialog, "Nicht erlauben").click();
+		expect(await answer).toBe(false);
+	});
+
+	test("setup: a guide of the page's own, or none, and its own steps per app (CU 20)", async () => {
+		mcp = newTab(relay.url);
+		const { dialog, closed, session } = await open(mcp, {
+			strings: { help: "Wie füge ich sie hinzu?" },
+			setup: {
+				guide: null,
+				instructions: (name, address) => [
+					{ app: "Our assistant", text: `Paste ${address} as ${name}.` },
+				],
+			},
+		});
+		const help = dialog.querySelector(".tab-mcp-help") as HTMLElement;
+		expect(help.querySelector("summary")?.textContent).toBe(
+			"Wie füge ich sie hinzu?",
+		);
+		expect(help.querySelector(".tab-mcp-guide")).toBeNull();
+		expect(
+			[...help.querySelectorAll("li")].map((li) => li.textContent),
+		).toEqual([`Our assistant: Paste ${session.address} as tools.`]);
+		byText(dialog, "Done").click();
+		await closed;
+
+		const second = await open(mcp, {
+			setup: { guide: "https://help.example/connect" },
+		});
+		const link = second.dialog.querySelector(
+			".tab-mcp-guide a",
+		) as HTMLAnchorElement;
+		expect(link.href).toBe("https://help.example/connect");
+		// The library's own steps by default.
+		expect(second.dialog.querySelector(".tab-mcp-help")?.textContent).toContain(
+			"claude mcp add --transport http tools",
+		);
+		byText(second.dialog, "Done").click();
+		await second.closed;
+	});
+
+	test("Allow until reload sits left of Allow, and its note names the app and any arguments (CU 11)", async () => {
+		const answer = confirmDialog(question(), doc, { alwaysAllow: true });
+		const dialog = doc.querySelector("dialog.tab-mcp-confirm") as HTMLElement;
+		expect(
+			buttons(dialog.querySelector(".tab-mcp-actions") as HTMLElement).map(
+				(b) => b.textContent,
+			),
+		).toEqual(["Don't allow", "Allow until reload", "Allow"]);
+		byText(dialog, "Don't allow").click();
+		expect(await answer).toBe("deny");
+	});
+
+	test("the Connected list says what runs without asking, and Ask again takes it back (CU 11)", async () => {
+		mcp = newTab(relay.url, { alwaysAllow: true });
+		const tab = mcp;
+		await tab.registerTool({
+			name: "clear_memory",
+			title: "Clear memory",
+			description: "Clears the calculator memory",
+			execute: () => "ok",
+		});
+		const { dialog, closed } = await open(tab);
+		const allowed = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
+		expect(shown(allowed)).toBe(false);
+		// Allowed until reload in a confirmation over the open dialog.
+		const first = tab.confirmInPage(question(), { document: doc });
+		const confirm = await waitFor("dialog.tab-mcp-confirm");
+		const always = byText(confirm, "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true);
+		expect(shown(allowed)).toBe(true);
+		expect(allowed.textContent).toBe(
+			"Runs without asking: Clear memory Ask again",
+		);
+		const askAgain = byText(allowed, "Ask again");
+		expect(askAgain.getAttribute("aria-label")).toBe(
+			"Ask again before Claude (claude.ai) runs a tool",
+		);
+		askAgain.click();
+		expect(shown(allowed)).toBe(false);
+		// Asked again.
+		const again = tab.confirmInPage(question(), { document: doc });
+		byText(await waitFor("dialog.tab-mcp-confirm"), "Don't allow").click();
+		expect(await again).toBe(false);
+		byText(dialog, "Done").click();
+		await closed;
+	});
+
+	test("a Disconnect the relay could not save says so (store_unavailable)", async () => {
+		mcp = newTab(relay.url);
+		const { dialog, closed } = await open(mcp);
+		const note = dialog.querySelector(".tab-mcp-apps-note") as HTMLElement;
+		expect(shown(note)).toBe(false);
+		byText(dialog, "Disconnect").click();
+		await relay.next("grant.revoke");
+		relay.send({
+			type: "error",
+			code: "store_unavailable",
+			message: "the relay cannot change grants right now; try again shortly",
+		});
+		await relay.settled();
+		await Bun.sleep(0);
+		expect(shown(note)).toBe(true);
+		expect(note.textContent).toBe("The relay could not save this. Try again.");
+		expect(note.getAttribute("role")).toBe("status");
+		// Disconnect again: it worked this time.
+		byText(dialog, "Disconnect").click();
+		await relay.next("grant.revoke");
+		relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+		await relay.settled();
+		await Bun.sleep(0);
+		expect(shown(dialog.querySelector(".tab-mcp-apps"))).toBe(false);
+		byText(dialog, "Close").click();
+		await closed;
 	});
 });

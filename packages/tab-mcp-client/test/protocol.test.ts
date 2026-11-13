@@ -199,7 +199,10 @@ describe("pairing (DEC-028)", () => {
 		t.startPairing();
 		await t.connect();
 		await relay.next("pairing.start");
-		const code = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
+		const code = nextEvent<{ pairingCode: PairingCode | undefined }>(
+			t,
+			"pairingcode",
+		);
 		relay.send({
 			type: "pairing.code",
 			code: "123456",
@@ -210,7 +213,10 @@ describe("pairing (DEC-028)", () => {
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		expect(t.pairingCode?.code).toBe("123456");
-		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
+		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(
+			t,
+			"pairingcode",
+		);
 		t.stopPairing();
 		await relay.next("pairing.stop");
 		expect((await cleared).detail.pairingCode).toBeUndefined();
@@ -223,7 +229,10 @@ describe("pairing (DEC-028)", () => {
 		await relay.next("pairing.start");
 		const sent: unknown[] = [];
 		for (const reason of ["start", "used", "locked", "expired", "later", 7]) {
-			const code = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
+			const code = nextEvent<{ pairingCode: PairingCode | undefined }>(
+				t,
+				"pairingcode",
+			);
 			relay.send({
 				type: "pairing.code",
 				code: "123456",
@@ -261,7 +270,10 @@ describe("pairing (DEC-028)", () => {
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		await nextEvent(t, "pairingcode");
-		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(t, "pairingcode");
+		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(
+			t,
+			"pairingcode",
+		);
 		relay.close(4002);
 		expect((await cleared).detail.pairingCode).toBeUndefined();
 	});

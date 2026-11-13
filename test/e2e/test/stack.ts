@@ -345,7 +345,7 @@ export async function pair(
 
 	await waitFor(
 		calculator,
-		`document.querySelector('${dialog} .tab-mcp-status')?.textContent.endsWith('is connected.')`,
+		`document.querySelector('${dialog} .tab-mcp-success-title')?.textContent.endsWith('is connected')`,
 	);
 	const buttonsAfter = await dialogButtons(calculator);
 	const { removed, codes: otherCodesInView } = await calculator.eval<{

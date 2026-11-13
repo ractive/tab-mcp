@@ -27,7 +27,10 @@ export function format(
 	template: string,
 	values: Record<string, string>,
 ): string {
-	return template.replace(/\{(\w+)\}/g, (all, key: string) => values[key] ?? all);
+	return template.replace(
+		/\{(\w+)\}/g,
+		(all, key: string) => values[key] ?? all,
+	);
 }
 
 /**
@@ -319,7 +322,9 @@ export function copyButton(
 				say(pressToCopy(doc, s), SELECTED_MS);
 			};
 			if (clipboard !== undefined)
-				clipboard.writeText(value()).then(() => say(s.copied, COPIED_MS), selected);
+				clipboard
+					.writeText(value())
+					.then(() => say(s.copied, COPIED_MS), selected);
 			else selected();
 		},
 		className,

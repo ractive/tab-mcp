@@ -10,7 +10,6 @@
 
 import {
 	type ConfirmRequest,
-	type DisconnectDetail,
 	type Icon,
 	type ReplacedDetail,
 	TabMcp,
@@ -117,7 +116,6 @@ const message = (error: unknown) =>
 /** What the panel's status is made from. */
 export interface StatusInput {
 	state: TabMcp["state"];
-	reconnecting: boolean;
 	grants: number;
 	/** The user left AI access on. */
 	aiOn: boolean;
@@ -134,7 +132,7 @@ export interface StatusInput {
 export function panelStatus(s: StatusInput): PanelState["status"] {
 	if (s.state === "connected") return s.grants > 0 ? "on" : "waiting";
 	if (s.state === "connecting") return "connecting";
-	if (s.reconnecting || (s.aiOn && !s.replaced)) return "retrying";
+	if (s.state === "reconnecting" || (s.aiOn && !s.replaced)) return "retrying";
 	return "off";
 }
 
@@ -334,28 +332,17 @@ export class Connection {
 		this.#listening = new AbortController();
 		const { signal } = this.#listening;
 		const changed = () => this.#changed();
-		for (const type of [
-			"statechange",
-			"reconnecting",
-			"pairingcode",
-			"grantschange",
-		] as const)
+		for (const type of ["pairingcode", "grantschange"] as const)
 			mcp.addEventListener(type, changed, { signal });
 		mcp.addEventListener(
-			"connected",
-			() => {
-				this.#problem = undefined;
-				void this.#setReplaced(undefined);
-				void this.#setAiOn(true);
-				this.#changed();
-			},
-			{ signal },
-		);
-		mcp.addEventListener(
-			"disconnected",
+			"statechange",
 			(event) => {
-				if ((event as CustomEvent<DisconnectDetail>).detail.reason === "user")
-					void this.#setAiOn(false);
+				const { state, reason } = event.detail;
+				if (state === "connected") {
+					this.#problem = undefined;
+					void this.#setReplaced(undefined);
+					void this.#setAiOn(true);
+				} else if (reason === "user") void this.#setAiOn(false);
 				this.#changed();
 			},
 			{ signal },
@@ -438,7 +425,6 @@ export class Connection {
 					on &&
 					replaced === undefined &&
 					this.#mcp.state === "disconnected" &&
-					this.#mcp.reconnecting === undefined &&
 					this.#replaced === undefined
 				)
 					this.#connect();
@@ -567,7 +553,7 @@ export class Connection {
 				this.#changed();
 				return;
 			case "stop":
-				// "disconnected" fires only for a connection that was up.
+				// A `statechange` with reason "user" comes only for a connection that was up.
 				await this.#setAiOn(false);
 				await this.#mcp.disconnect();
 				this.#changed();
@@ -579,7 +565,10 @@ export class Connection {
 				this.#changed();
 				return;
 			case "revoke":
-				this.#mcp.revoke(command.grantId);
+				this.#mcp.revoke(command.grantId).catch((error: unknown) => {
+					this.#problem = message(error);
+					this.#changed();
+				});
 				return;
 			case "new-address":
 				await this.#newAddress();
@@ -789,7 +778,7 @@ export class Connection {
 	get state(): PanelState {
 		const mcp = this.#mcp;
 		const status = this.#status();
-		const address = mcp.address;
+		const address = mcp.session?.address;
 		const code = mcp.pairingCode?.code;
 		const problem = this.#problem;
 		return {
@@ -816,7 +805,6 @@ export class Connection {
 	#status(): PanelState["status"] {
 		return panelStatus({
 			state: this.#mcp.state,
-			reconnecting: this.#mcp.reconnecting !== undefined,
 			grants: this.#mcp.grants.length,
 			aiOn: this.#aiOn,
 			replaced: this.#replaced !== undefined,

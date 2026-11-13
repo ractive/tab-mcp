@@ -17,7 +17,10 @@ const seen = (tool: ToolSeen) => JSON.stringify([tool.title, tool.description]);
 
 export class AlwaysAllowed {
 	/** Per grant: the tools by name, with what the user saw of each. */
-	readonly #tools = new Map<string, Map<string, { seen: string; label: string }>>();
+	readonly #tools = new Map<
+		string,
+		Map<string, { seen: string; label: string }>
+	>();
 	readonly #listeners = new Set<() => void>();
 
 	has(grantId: string, tool: ToolSeen): boolean {

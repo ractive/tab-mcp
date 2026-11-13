@@ -44,7 +44,10 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
  * the last one repeating. `identityTimeoutMs`: for an identity assertion and
  * the relay's answer to it.
  */
-export const timing: { reconnectDelaysMs: number[]; identityTimeoutMs: number } = {
+export const timing: {
+	reconnectDelaysMs: number[];
+	identityTimeoutMs: number;
+} = {
 	reconnectDelaysMs: [5_000, 10_000, 20_000, 40_000, 60_000],
 	identityTimeoutMs: 15_000,
 };
