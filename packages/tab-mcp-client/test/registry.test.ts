@@ -361,8 +361,15 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		for (const callers of ["relay", ["relay", "agents"], [true]]) {
 			expect(() => r.register(tool(), { callers: callers as never })).toThrow(
 				new TypeError(
-					'registerTool: callers must be "relay", "local" or "webmcp"',
+					'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
 				),
+			);
+		}
+		// The option `callers` replaced is refused, not ignored (review of PR 129):
+		// an ignored `webmcp: false` would put the tool into WebMCP.
+		for (const webmcp of [false, true, undefined]) {
+			expect(() => r.register(tool(), { webmcp } as never)).toThrow(
+				/option webmcp is gone/,
 			);
 		}
 		// Not a list at all: the copy throws the TypeError.

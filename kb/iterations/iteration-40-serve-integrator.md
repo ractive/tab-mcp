@@ -89,10 +89,23 @@ DEC-164 to DEC-167.
   CHANGELOG, `docs/protocol.md`, `docs/threat-model.md` A14/A15, `kb/design/threat-model.md`,
   `kb/design/architecture.md`, the skill and its React reference
 
+## Review of PR 129
+
+- [x] A leftover `webmcp` registration option was silently ignored, so `{ webmcp: false }`
+  put the tool into WebMCP (claude): `registerTool` now refuses an options object with
+  `webmcp` (`TypeError`), tested
+- [x] The time limit's exemption for `subscriptions/listen` read the `mcp-method` header
+  case-sensitively (claude, glm): any case now, tested with `Mcp-Method`
+- [x] Stale `offeredTo` references in comments (claude); the README's path to the recipe
+  (claude) is the full repository path, linked
+- [x] A time limit that fires in the middle of an SSE event sends no error (glm):
+  answered, the handler enqueues whole events and each read goes out in one task, so
+  the timer always finds the stream between two events; a comment says so
+
 ## Outcome
 
-- Core 6384 B gzipped of 6400 (iteration 38: 6322): the `callers` check and copy in the
-  registry and the mirror's rule. A helper shared by the core and the lazy chunk would
+- Core 6399 B gzipped of 6400 (iteration 38: 6322): the `callers` check and copy in the
+  registry, the refusal of `webmcp`, and the mirror's rule. A helper shared by the core and the lazy chunk would
   have split the core into two files (6.8 KB); the relay and the port filter in the lazy
   chunk instead. The connection chunk grew by about 0.5 KB (15.9 KB); the tunnel entry is
   unchanged (1.7 KB).

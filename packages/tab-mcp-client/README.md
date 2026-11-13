@@ -302,7 +302,8 @@ An agent framework's own MCP client may not speak MCP 2026-07-28, the only versi
 page speaks. Use the MCP SDK's client (`@modelcontextprotocol/client`), pinned to that
 version, next to the framework, and hand the framework the page's tools as plain function
 tools: most frameworks take a function tool as a name, a description, a JSON Schema and a
-function. This recipe is tested in the repository (`test/assistant-backend.ts`):
+function. This recipe is tested in the repository
+([`packages/tab-mcp-client/test/assistant-backend.ts`](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp-client/test/assistant-backend.ts)):
 
 ```ts
 import {

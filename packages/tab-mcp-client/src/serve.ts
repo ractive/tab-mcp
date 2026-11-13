@@ -29,10 +29,10 @@ import type {
 /**
  * The tools that callers of `kind` see (`RegisterToolOptions.callers`): to
  * the others a tool they cannot see does not exist, in `tools/list` and in
- * `tools/call` alike. For the relay and a port that is `offeredTo` of
- * `registry.ts`, whose default for them is every tool; it is not imported,
- * since a module the core and this chunk share would split the core in two.
- * WebMCP calls come only for the tools the core mirrored (`offeredTo` there).
+ * `tools/call` alike. Without `callers`, the relay and a port see every tool.
+ * The rule for WebMCP lives in the core's `mirror` (webmcp.ts), and WebMCP
+ * calls come only for the tools it mirrored. Not one shared helper: a module
+ * the core and this chunk both import would split the core in two.
  */
 export function toolsFor(
 	registry: ToolRegistry,
@@ -160,9 +160,13 @@ export function createTunnel(options: {
 		let started = false;
 		/** The last two characters of that stream: empty or a blank line is between two events. */
 		let tail = "";
+		// Header names in any case, as the handler reads them (review of PR 129).
+		const listen = Object.entries(msg.headers).some(
+			([name, value]) =>
+				name.toLowerCase() === "mcp-method" && value === "subscriptions/listen",
+		);
 		const timer =
-			timeoutMs === undefined ||
-			msg.headers["mcp-method"] === "subscriptions/listen"
+			timeoutMs === undefined || listen
 				? undefined
 				: setTimeout(() => {
 						if (!live()) return;
@@ -184,7 +188,11 @@ export function createTunnel(options: {
 							return;
 						}
 						// As `createTunnelFetch` does: the error as the stream's last
-						// event where it stands between two events.
+						// event where it stands between two events. The handler
+						// (mcp.ts) enqueues whole events and each read's text goes out
+						// in one task, so the timer always finds the stream between
+						// two events; the check only guards against sending an event
+						// into the middle of another (review of PR 129).
 						if (tail === "" || tail === "\n\n")
 							send({
 								type: "http.response.chunk",

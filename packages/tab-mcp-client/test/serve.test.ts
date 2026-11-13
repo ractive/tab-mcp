@@ -1476,6 +1476,36 @@ describe("a site's own assistant (iteration 40)", () => {
 		expect(await list.json()).toMatchObject({ id: 3, result: {} });
 	});
 
+	test("requestTimeoutMs: a listen stream is not cut whatever the case of its header names (review of PR 129)", async () => {
+		const mcp = newPage();
+		const w = await wire(mcp, { requestTimeoutMs: 30 });
+		w.port.postMessage({
+			type: "http.request",
+			id: "listen",
+			method: "POST",
+			path: "/mcp",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json, text/event-stream",
+				"MCP-Protocol-Version": "2026-07-28",
+				"Mcp-Method": "subscriptions/listen",
+			},
+			body: JSON.stringify(
+				rpc(1, "subscriptions/listen", {
+					notifications: { toolsListChanged: true },
+				}),
+			),
+		});
+		await received(w, "http.response.start");
+		await wait(100);
+		const own = w.received.filter((m) => m["id"] === "listen");
+		expect(own.map((m) => m["type"])).toEqual([
+			"http.response.start",
+			"http.response.chunk",
+		]);
+		expect(JSON.stringify(own)).not.toContain("-31002");
+	});
+
 	test("serve refuses an onConfirm that is not a function and a requestTimeoutMs it cannot keep", async () => {
 		const mcp = newPage();
 		for (const options of [

@@ -92,7 +92,7 @@ The API before 1.0 (iteration 38). Each item says what to change.
   `webmcp: true` before. Migration: `{ webmcp: true }` → `{ callers: ["relay", "local",
   "webmcp"] }` (or only the callers that should see it); `{ webmcp: false }` →
   `{ callers: ["relay", "local"] }`; also in React's `useTool(tool, options)`. A
-  `callers` that is not a list of those three throws a `TypeError`. `TabMcpOptions.webmcp`
+  `callers` that is not a list of those three, and the old `webmcp` option (which would otherwise be ignored, and an ignored `webmcp: false` would put the tool into WebMCP), throw a `TypeError`. `TabMcpOptions.webmcp`
   stays: it turns WebMCP on.
 
 #### Added

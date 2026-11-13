@@ -3331,7 +3331,10 @@ is a list of origins and is passed through to the native registration (DEC-143).
   the core's mirror, and a WebMCP call comes only for a mirrored tool. A shared helper
   imported by both would have made the bundler move `registry.ts` into a chunk of its
   own (6.8 KB core in two files). The list is copied at registration and checked
-  (`TypeError`); `[]` is allowed (a tool for nobody, for now).
+  (`TypeError`); `[]` is allowed (a tool for nobody, for now). An options object that
+  still has `webmcp` is refused with a `TypeError` instead of being ignored (review of
+  PR 129): an ignored `webmcp: false` would put the tool into WebMCP. The core is then
+  6399 B of 6400.
 - React's `useTool` registers again when `callers` changes by value.
 
 ## DEC-166: Every result of an `untrustedContentHint` tool carries a marker

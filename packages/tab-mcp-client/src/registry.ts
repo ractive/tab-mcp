@@ -22,7 +22,10 @@ export interface RegisteredTool {
 	readonly outputSchema?: JsonSchema | undefined;
 	readonly annotations: ToolAnnotations;
 	readonly execute: Tool["execute"];
-	/** `RegisterToolOptions.callers`, copied; `undefined`: the default (`offeredTo`). */
+	/**
+	 * `RegisterToolOptions.callers`, copied; `undefined`: the default, which
+	 * `toolsFor` (serve.ts, the relay and a port) and `mirror` (webmcp.ts) apply.
+	 */
 	readonly callers?: readonly ToolCaller[] | undefined;
 	/** `RegisterToolOptions.exposedTo`, passed on to the native registration. */
 	readonly exposedTo?: string[] | undefined;
@@ -217,9 +220,14 @@ export class ToolRegistry {
 		// A copy: the page's array may change later, what was registered does
 		// not. Not a list: the spread throws a `TypeError` itself.
 		const callers = options.callers && [...options.callers];
-		if (callers?.some((c) => !/^(relay|local|webmcp)$/.test(c)))
+		// The option of 0.15 and before, refused rather than ignored: an ignored
+		// `webmcp: false` would put the tool into WebMCP (DEC-165).
+		if (
+			"webmcp" in options ||
+			callers?.some((c) => !/^(relay|local|webmcp)$/.test(c))
+		)
 			throw new TypeError(
-				'registerTool: callers must be "relay", "local" or "webmcp"',
+				'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
 			);
 		const registered: RegisteredTool = {
 			...validateTool(tool),
