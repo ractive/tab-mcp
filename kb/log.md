@@ -2,6 +2,7 @@
 
 ## 2026-11-13
 
+- Iteration 31 (review iteration C, client): a hint that is not a boolean is refused (CC 2); only an MCP result with MCP content blocks passes through, with its `_meta`, and `structuredContent` is the parsed JSON (CC 3); the schema check skips data and property names (CC 13); confirmations one at a time per document, re-armed when another dialog closes, Allow only after the arguments were scrolled to their end, stray Enter, Space and Escape ignored before the delay (CU 1, 2, 13); page colours, button styles and `pointer-events: none` kept out of the dialogs (CU 3, 8); `aria-describedby` and named Disconnect buttons (CU 14); `serve` ends on the port's `close` event (CC 1); a port's missing limits documented (CC 8); DEC-133 to DEC-135
 - Full review of every component (relay, client library, tab-mcp for Chrome, WebMCP integration, example pages) by eight read-only reviewers: 144 findings (1 high, 44 medium, 99 low), a triage and ten proposed iterations in `research/review-2026-11-13.md`
 - Client 0.15.0 released (iteration 28); ractive.ch examples, the sign-in example, saturnus and Overmark moved to it
 - Iteration 28 built (plan/iteration-28, for client 0.15.0): `mcp.serve(port, { client })`, `@ractive-ch/tab-mcp-client/tunnel` with `createTunnelFetch`, `relay` optional, the caller kind `local`; DEC-122 to DEC-126; threat model A15; the core budget is 6.25 KB

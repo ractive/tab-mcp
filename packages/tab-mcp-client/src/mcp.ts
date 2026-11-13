@@ -21,6 +21,7 @@ import {
 	type CallToolResult,
 	errorResult,
 	mapAnnotations,
+	resultText,
 	thrownResult,
 	toCallToolResult,
 } from "./mapping.ts";
@@ -456,20 +457,6 @@ export async function webMcpCall(
 	return run.returned?.value;
 }
 
-/** The text blocks of a result, one per line. */
-function resultText(result: CallToolResult): string {
-	return result.content
-		.map((block) =>
-			isObject(block) &&
-			block["type"] === "text" &&
-			typeof block["text"] === "string"
-				? block["text"]
-				: "",
-		)
-		.filter((text) => text !== "")
-		.join("\n");
-}
-
 export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 	const { tools, server } = options;
 	const serverInfo: Json = { name: server.name, version: server.version };
@@ -587,7 +574,8 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 										id,
 										error: { code: -32602, message: outcome.message },
 									}
-								: result(id, outcome.result),
+								: // The tool's own `_meta` is kept, next to serverInfo.
+									result(id, outcome.result, resultMeta(outcome.result._meta)),
 						),
 					() =>
 						finish({

@@ -52,6 +52,19 @@ button:focus { outline: none; }
 button:disabled { opacity: 1; }
 </style>`;
 
+/**
+ * A page with its own colours for elements, a classless framework's buttons,
+ * and `body { pointer-events: none }` as Radix sets it while one of its modal
+ * layers is open (iteration 31, CU 3 and CU 8).
+ */
+const DARK_STYLE = `<style>
+body { pointer-events: none; background: #111; }
+h2 { color: rgb(255, 0, 0); }
+p { color: rgb(0, 255, 0); }
+pre { color: rgb(0, 0, 255); }
+button { width: 100%; text-transform: uppercase; letter-spacing: 3px; }
+</style>`;
+
 let relay: TestRelay;
 let server: ReturnType<typeof Bun.serve>;
 let browser: Browser | undefined;
@@ -75,14 +88,13 @@ beforeAll(async () => {
 		hostname: "127.0.0.1",
 		fetch: (req) => {
 			const path = new URL(req.url).pathname;
-			if (path === "/" || path === "/host") {
+			if (path === "/" || path === "/host" || path === "/dark") {
 				const page = PAGE.replace("RELAY", JSON.stringify(relay.url));
-				return new Response(
-					path === "/host"
-						? page.replace("</head>", `${HOST_STYLE}</head>`)
-						: page,
-					{ headers: { "content-type": "text/html; charset=utf-8" } },
-				);
+				const style =
+					path === "/host" ? HOST_STYLE : path === "/dark" ? DARK_STYLE : "";
+				return new Response(page.replace("</head>", `${style}</head>`), {
+					headers: { "content-type": "text/html; charset=utf-8" },
+				});
 			}
 			const js = files.get(path);
 			return js === undefined
@@ -392,6 +404,107 @@ test.skipIf(chrome === undefined)(
 		expect(plain.color).not.toBe("rgb(0, 255, 0)");
 		await page.press("Escape");
 		expect(await page.eval("window.answer")).toBe(false);
+	},
+	30_000,
+);
+
+test.skipIf(chrome === undefined)(
+	"confirmations one at a time, Allow after the arguments were seen, no stray Enter, page colours and pointer-events kept out (iteration 31)",
+	async () => {
+		await page.goto(`http://127.0.0.1:${server.port}/dark`);
+		await page.eval(
+			"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })",
+		);
+		await page.send("Target.activateTarget", { targetId: page.targetId });
+		// A long argument list, with what matters last; then a second call.
+		await page.eval(`(() => {
+			const ask = (args) => mcp.confirmInPage({
+				tool: { name: "send_mail", description: "Sends a mail" },
+				arguments: args,
+				client: { kind: "relay", grantId: "g_1", id: "https://client.example/c.json", host: "client.example" },
+				signal: new AbortController().signal,
+			});
+			const rows = Object.fromEntries(Array.from({ length: 60 }, (_, i) => ["row" + i, i]));
+			window.answers = [];
+			window.ask = ask;
+			ask({ subject: "Hi", ...rows, bcc: "someone@example.com" }).then((a) => answers.push(a));
+		})()`);
+		const waitFor = (condition: string) =>
+			page.eval(
+				`new Promise((r) => { const w = () => ((${condition}) ? r(true) : setTimeout(w, 10)); w(); })`,
+			);
+		await waitFor("document.querySelector('dialog.tab-mcp-confirm')");
+		// Asked once the first is shown: the dialogs' chunk loads with the
+		// first call, and two calls before it has loaded may arrive in
+		// either order.
+		await page.eval(
+			"(() => { ask({ subject: 'Second' }).then((a) => answers.push(a)); })()",
+		);
+		await waitFor(
+			"document.querySelector('.tab-mcp-waiting').checkVisibility()",
+		);
+		const enter = async () => {
+			for (const type of ["keyDown", "keyUp"])
+				await page.send("Input.dispatchKeyEvent", {
+					type,
+					key: "Enter",
+					code: "Enter",
+					windowsVirtualKeyCode: 13,
+					...(type === "keyDown" ? { text: "\r" } : {}),
+				});
+		};
+		// Enter on the focused "Don't allow" right away does not answer.
+		await enter();
+		expect(
+			await page.eval(
+				"[document.querySelectorAll('dialog.tab-mcp-confirm').length, document.querySelector('dialog.tab-mcp-confirm').open, answers.length]",
+			),
+		).toEqual([1, true, 0]);
+		// The page's element colours, button width, case and spacing stay out.
+		const looks = await page.eval<Record<string, string>>(`(() => {
+			const d = document.querySelector('dialog.tab-mcp-confirm');
+			const c = (s) => getComputedStyle(d.querySelector(s)).color;
+			const b = getComputedStyle(d.querySelector('.tab-mcp-allow'));
+			return { dialog: getComputedStyle(d).color, h2: c('h2'), p: c('p'), pre: c('pre'), events: getComputedStyle(d).pointerEvents,
+				transform: b.textTransform, spacing: b.letterSpacing, narrow: String(d.querySelector('.tab-mcp-allow').getBoundingClientRect().width < d.getBoundingClientRect().width / 2) };
+		})()`);
+		expect(looks).toEqual({
+			dialog: looks["dialog"] as string,
+			h2: looks["dialog"] as string,
+			p: looks["dialog"] as string,
+			pre: looks["dialog"] as string,
+			events: "auto",
+			transform: "none",
+			spacing: "normal",
+			narrow: "true",
+		});
+		expect(looks["dialog"]).not.toBe("rgb(0, 255, 0)");
+		// Well past the delay, Allow still waits: the arguments overflow.
+		await Bun.sleep(1200);
+		expect(
+			await page.eval(
+				"[document.querySelector('.tab-mcp-allow').disabled, document.querySelector('.tab-mcp-scroll-note').checkVisibility()]",
+			),
+		).toEqual([true, true]);
+		await page.eval(
+			"(() => { const pre = document.querySelector('.tab-mcp-arguments'); pre.scrollTop = pre.scrollHeight; })()",
+		);
+		await waitFor("!document.querySelector('.tab-mcp-allow').disabled");
+		// A real click, with pointer-events: none on body.
+		await page.click(".tab-mcp-allow");
+		await waitFor("answers.length === 1");
+		// The second dialog is shown now, Allow disabled again from zero.
+		await waitFor(
+			"document.querySelector('dialog.tab-mcp-confirm pre')?.textContent.includes('Second')",
+		);
+		expect(
+			await page.eval("document.querySelector('.tab-mcp-allow').disabled"),
+		).toBe(true);
+		await waitFor("!document.querySelector('.tab-mcp-allow').disabled");
+		// After the delay, Enter on "Don't allow" answers.
+		await enter();
+		await waitFor("answers.length === 2");
+		expect(await page.eval("answers")).toEqual([true, false]);
 	},
 	30_000,
 );

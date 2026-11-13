@@ -54,6 +54,7 @@ export interface CallToolResult {
 	content: unknown[];
 	structuredContent?: Record<string, unknown>;
 	isError?: boolean;
+	_meta?: Record<string, unknown>;
 	[key: string]: unknown;
 }
 
@@ -61,23 +62,53 @@ export function errorResult(message: string): CallToolResult {
 	return { content: [{ type: "text", text: message }], isError: true };
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
+function isObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/** The content block types of MCP 2026-07-28. */
+const BLOCK_TYPES = new Set([
+	"text",
+	"image",
+	"audio",
+	"resource_link",
+	"resource",
+]);
+
 /**
- * What `execute` returned → a `CallToolResult`: a string is one text block; an
- * object with a `content` array passes through; `undefined` is an empty
- * result; any other JSON value is a text block with its JSON, plus
- * `structuredContent` when it is an object.
+ * Whether `value` is an MCP `CallToolResult`: an object whose `content` is an
+ * array of MCP content blocks (objects whose `type` is `text`, `image`,
+ * `audio`, `resource_link` or `resource`), with `isError` a boolean and
+ * `structuredContent` and `_meta` objects where present. Domain data that
+ * happens to have a `content` array (a ProseMirror document,
+ * `{ title, content: ["…"] }`) is not one (CC 3). Other keys are allowed, as
+ * MCP allows them on a result.
+ */
+export function isCallToolResult(value: unknown): value is CallToolResult {
+	if (!isObject(value) || !Array.isArray(value["content"])) return false;
+	const { content, isError, structuredContent, _meta } = value;
+	return (
+		content.every(
+			(block) => isObject(block) && BLOCK_TYPES.has(block["type"] as string),
+		) &&
+		(isError === undefined || typeof isError === "boolean") &&
+		(structuredContent === undefined || isObject(structuredContent)) &&
+		(_meta === undefined || isObject(_meta))
+	);
+}
+
+/**
+ * What `execute` returned → a `CallToolResult`: a string is one text block; a
+ * `CallToolResult` (`isCallToolResult`) passes through; `undefined` is an
+ * empty result; any other JSON value is a text block with its JSON, plus
+ * that JSON as `structuredContent` when it is an object (so a `Date` or a
+ * `URL`, whose JSON is a string, has none).
  */
 export function toCallToolResult(value: unknown): CallToolResult {
 	if (typeof value === "string")
 		return { content: [{ type: "text", text: value }] };
 	if (value === undefined) return { content: [] };
-	if (isPlainObject(value) && Array.isArray(value["content"])) {
-		return value as CallToolResult;
-	}
+	if (isCallToolResult(value)) return value;
 	let text: string | undefined;
 	try {
 		text = JSON.stringify(value);
@@ -87,8 +118,24 @@ export function toCallToolResult(value: unknown): CallToolResult {
 	if (text === undefined)
 		return errorResult("The tool returned a value that is not JSON.");
 	const result: CallToolResult = { content: [{ type: "text", text }] };
-	if (isPlainObject(value)) result.structuredContent = value;
+	// What the text says, not the value: `toJSON` applied, no class instances.
+	const parsed: unknown = JSON.parse(text);
+	if (isObject(parsed)) result.structuredContent = parsed;
 	return result;
+}
+
+/** The text blocks of a result, one per line. */
+export function resultText(result: CallToolResult): string {
+	return result.content
+		.map((block) =>
+			isObject(block) &&
+			block["type"] === "text" &&
+			typeof block["text"] === "string"
+				? block["text"]
+				: "",
+		)
+		.filter((text) => text !== "")
+		.join("\n");
 }
 
 /** A thrown value → an `isError` result with its message. */

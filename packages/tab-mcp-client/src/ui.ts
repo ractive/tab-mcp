@@ -84,20 +84,21 @@ box-sizing: border-box; margin: auto; width: calc(100% - 2rem); max-width: var(-
 font: var(--tab-mcp-font, inherit); line-height: 1.5; color: var(--_tab-mcp-fg); background: var(--_tab-mcp-bg);
 border: var(--tab-mcp-border, 1px solid var(--_tab-mcp-line)); border-radius: var(--tab-mcp-radius, 0.75rem);
 padding: var(--tab-mcp-padding, clamp(1rem, 5vw, 1.5rem)); box-shadow: var(--tab-mcp-shadow, 0 1rem 3rem rgb(0 0 0 / 0.3));
+pointer-events: auto;
 }
 .tab-mcp-dialog::backdrop { background: var(--tab-mcp-backdrop, rgb(0 0 0 / 0.4)); }
 .tab-mcp-dialog:where([open]) { display: flex; flex-direction: column; gap: 1rem; }
 .tab-mcp-dialog:where([open]) > * { flex-shrink: 0; }
 .tab-mcp-dialog :where([hidden]) { display: none !important; }
 html dialog.tab-mcp-dialog:where(:focus) { outline: none; }
-.tab-mcp-dialog :where(*) { box-sizing: border-box; }
+.tab-mcp-dialog :where(*) { box-sizing: border-box; color: inherit; }
 .tab-mcp-dialog :where(h2, h3, p, ul, li, pre) { margin: 0; }
 .tab-mcp-dialog :where(h2) { font-size: var(--tab-mcp-title-size, 1.25em); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
 .tab-mcp-dialog :where(h3) { font-size: 0.875em; font-weight: 600; color: var(--_tab-mcp-muted); margin-bottom: 0.5rem; }
 .tab-mcp-dialog :where(small) { font-size: 0.875em; }
-.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note, .tab-mcp-success-next) { color: var(--_tab-mcp-muted); }
+.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note, .tab-mcp-success-next, .tab-mcp-waiting, .tab-mcp-scroll-note) { color: var(--_tab-mcp-muted); }
 html dialog.tab-mcp-dialog :where(:focus-visible) { outline: 2px solid var(--tab-mcp-focus, var(--_tab-mcp-fg)); outline-offset: 2px; }
-.tab-mcp-dialog :where(button) { font: inherit; font-size: 0.9375em; line-height: 1.25; min-height: 2.5rem; padding: 0.5rem 1rem; margin: 0; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: var(--_tab-mcp-small-radius); background: transparent; color: inherit; cursor: pointer; }
+.tab-mcp-dialog :where(button) { font: inherit; font-size: 0.9375em; line-height: 1.25; text-transform: none; letter-spacing: normal; width: auto; min-height: 2.5rem; padding: 0.5rem 1rem; margin: 0; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: var(--_tab-mcp-small-radius); background: transparent; color: inherit; cursor: pointer; }
 html dialog.tab-mcp-dialog :where(button:hover:not(:disabled)) { color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); }
 html dialog.tab-mcp-dialog :where(button:disabled) { opacity: 0.45; cursor: not-allowed; }
 html button.tab-mcp-primary { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); color: var(--tab-mcp-accent-text, var(--_tab-mcp-bg)); border-color: transparent; font-weight: 600; }
@@ -145,7 +146,7 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-close-note { flex: 1 1 12rem; }
 .tab-mcp-confirm :where(p bdi) { font-weight: 600; }
 .tab-mcp-arguments { box-sizing: content-box; font: 0.875em / 1.45 var(--_tab-mcp-mono); padding: 0.75rem; background: var(--_tab-mcp-surface); border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
-.tab-mcp-always-note { font-size: 0.875em; }
+.tab-mcp-always-note, .tab-mcp-waiting, .tab-mcp-scroll-note { font-size: 0.875em; }
 @media (max-width: 30rem) { .tab-mcp-actions > :where(button) { flex: 1 1 auto; } .tab-mcp-connect > :where(.tab-mcp-actions) > :where(button) { flex: 0 0 auto; } }
 @media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } .tab-mcp-success-icon { animation: tab-mcp-pop 0.4s cubic-bezier(0.3, 1.4, 0.6, 1); } }
 @media (forced-colors: active) { html button.tab-mcp-primary { border-color: ButtonText; } }
@@ -232,7 +233,7 @@ function newDialog(
 	doc: Document,
 	className: string,
 	title: string,
-): { dialog: HTMLDialogElement; heading: HTMLHeadingElement } {
+): { dialog: HTMLDialogElement; heading: HTMLHeadingElement; id: string } {
 	const id = `tab-mcp-${++counter}`;
 	const dialog = el(doc, "dialog", {
 		className: `tab-mcp-dialog ${className}`,
@@ -241,7 +242,7 @@ function newDialog(
 	adoptStyles(doc);
 	const heading = el(doc, "h2", { id: `${id}-title`, text: title });
 	dialog.append(heading);
-	return { dialog, heading };
+	return { dialog, heading, id };
 }
 
 /** Invisible, blank and direction characters as `\uXXXX` (`visible.ts`). */
@@ -300,26 +301,108 @@ function allowDelay(ms: number | undefined): number {
 	return Math.max(MIN_ALLOW_DELAY_MS, value);
 }
 
+/** Arguments up to this many characters are read out with the question. */
+const DESCRIBED_ARGUMENTS = 500;
+
+/**
+ * The confirmations of one document: one is shown at a time, the others
+ * wait in order, so that the click that answered one cannot answer the next
+ * (each starts its own delay when it is shown).
+ */
+interface ConfirmQueue {
+	shown: boolean;
+	waiting: (() => void)[];
+	/** Updates the shown dialog's line about the calls that wait. */
+	changed?: (() => void) | undefined;
+}
+
+const queues = new WeakMap<Document, ConfirmQueue>();
+
 /**
  * Ask whether a consequential tool may run. "Always allow" is offered only
- * with `alwaysAllow` (DEC-096). "Allow" and "Always allow" stay disabled
- * until the page has been visible and focused for `allowDelayMs` (default
- * 750, at least 500) while the dialog is open, so a click meant for the page,
- * or the click that brings the tab or window back, cannot approve. Leaving
- * the page disables them again. Everything else (Don't allow, Escape, an
- * aborted call) is "deny".
+ * with `alwaysAllow` (DEC-096). One confirmation is shown at a time per
+ * document; the others wait their turn, and a call cancelled while it waits
+ * is never shown. "Allow" and "Always allow" stay disabled until the page has
+ * been visible and focused for `allowDelayMs` (default 750, at least 500)
+ * while the dialog is open and is the top one, so a click meant for the page,
+ * the click that brings the tab or window back, or the one that closed
+ * another dialog, cannot approve; leaving the page disables them again. They
+ * also wait until the arguments have been scrolled to their end. Before the
+ * delay has run out, Enter or Space on a button and Escape are ignored, so
+ * typing meant for the page cannot refuse either. Everything else (Don't
+ * allow, Escape, an aborted call) is "deny".
  */
 export function confirmDialog(
 	request: ConfirmRequest,
 	doc: Document,
 	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean } = {},
 ): Promise<ConfirmAnswer> {
-	const delay = allowDelay(options.allowDelayMs);
 	if (request.signal.aborted) return Promise.resolve("deny");
+	let queue = queues.get(doc);
+	if (queue === undefined) {
+		queue = { shown: false, waiting: [] };
+		queues.set(doc, queue);
+	}
+	const q = queue;
+	/** The shown confirmation closed: the next one, if any. */
+	const next = () => {
+		const start = q.waiting.shift();
+		q.shown = start !== undefined;
+		start?.();
+		q.changed?.();
+	};
+	const show = () => {
+		try {
+			return showConfirm(request, doc, options, q, next);
+		} catch (error) {
+			next(); // not shown: the queue goes on
+			return Promise.reject(error);
+		}
+	};
+	if (!q.shown) {
+		q.shown = true;
+		return show();
+	}
+	return new Promise((resolve) => {
+		const start = () => {
+			request.signal.removeEventListener("abort", onAbort);
+			resolve(show());
+		};
+		const onAbort = () => {
+			q.waiting.splice(q.waiting.indexOf(start), 1);
+			q.changed?.();
+			resolve("deny");
+		};
+		request.signal.addEventListener("abort", onAbort, { once: true });
+		q.waiting.push(start);
+		q.changed?.();
+	});
+}
+
+/** `confirmDialog` once it is this request's turn; calls `next` when it closes. */
+function showConfirm(
+	request: ConfirmRequest,
+	doc: Document,
+	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean },
+	queue: ConfirmQueue,
+	next: () => void,
+): Promise<ConfirmAnswer> {
+	const delay = allowDelay(options.allowDelayMs);
 	const title = request.tool.title ?? request.tool.name;
-	const { dialog, heading } = newDialog(doc, "tab-mcp-confirm", "");
+	const { dialog, heading, id } = newDialog(doc, "tab-mcp-confirm", "");
 	heading.append("Allow ", name(doc, title), "?");
 	const client = clientLabel(request.client);
+	const waiting = el(doc, "p", { className: "tab-mcp-waiting" });
+	const showWaiting = () => {
+		const n = queue.waiting.length;
+		waiting.hidden = n === 0;
+		waiting.textContent =
+			n === 1
+				? "1 more call is waiting after this one."
+				: `${n} more calls are waiting after this one.`;
+	};
+	queue.changed = showWaiting;
+	showWaiting();
 	// The safe choice is the default: focused, and the one that stands out.
 	const deny = button(
 		doc,
@@ -371,13 +454,18 @@ export function confirmDialog(
 			),
 		);
 	}
-	const enable = (on: boolean) => {
-		for (const b of approve) b.disabled = !on;
+	// Approving needs both: the delay ran out while the user saw the page
+	// (`settled`), and the arguments were seen to their end (`seen`).
+	let settled = false;
+	let seen = false;
+	const enable = () => {
+		for (const b of approve) b.disabled = !(settled && seen);
 	};
-	enable(false);
+	enable();
 	const shown = showArguments(request.arguments);
 	const args = el(doc, "pre", {
 		className: "tab-mcp-arguments",
+		id: `${id}-arguments`,
 		text:
 			shown ?? "The arguments cannot be shown, so this call cannot be allowed.",
 	});
@@ -391,27 +479,43 @@ export function confirmDialog(
 	args.style.setProperty("overflow-wrap", "anywhere");
 	args.style.setProperty(
 		"max-height",
-		"var(--tab-mcp-arguments-height, 12rem)",
+		"var(--tab-mcp-arguments-height, min(50vh, 24rem))",
 	);
 	args.style.setProperty("overflow", "auto");
 	args.hidden = Object.keys(request.arguments).length === 0;
+	// The caller chooses the order of the keys, so what matters may come
+	// last: below the end of the box, the user is told, and Allow waits.
+	const scrollNote = el(doc, "p", {
+		className: "tab-mcp-scroll-note",
+		text: "Scroll to the end of the arguments to allow this call.",
+	});
+	scrollNote.hidden = true;
+	const who = el(
+		doc,
+		"p",
+		{ id: `${id}-who` },
+		name(doc, client),
+		" wants to run ",
+		name(doc, title),
+		".",
+	);
+	dialog.setAttribute(
+		"aria-describedby",
+		shown !== undefined && !args.hidden && shown.length <= DESCRIBED_ARGUMENTS
+			? `${who.id} ${args.id}`
+			: who.id,
+	);
 	dialog.append(
-		el(
-			doc,
-			"p",
-			{},
-			name(doc, client),
-			" wants to run ",
-			name(doc, title),
-			".",
-		),
+		who,
 		el(doc, "p", {
 			className: "tab-mcp-description",
 			text: request.tool.description,
 		}),
 		args,
+		scrollNote,
 		actions,
 		...extra,
+		waiting,
 	);
 	doc.body.append(dialog);
 	const view = doc.defaultView;
@@ -421,33 +525,75 @@ export function confirmDialog(
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		// The delay counts only while the user can see the page: tools are
 		// called while the user is in the AI app, so the dialog often opens in
-		// a background tab or window. Any change starts it again from zero (DEC-087).
+		// a background tab or window. Any change starts it again from zero
+		// (DEC-087), and so does another dialog of the page that closes over
+		// this one.
 		const arm = (event?: Event) => {
+			if (event?.type === "close" && event.target === dialog) return;
 			clearTimeout(timer);
 			timer = undefined;
-			enable(false);
+			settled = false;
+			enable();
 			if (
 				event?.type === "blur" ||
 				doc.visibilityState === "hidden" ||
 				!doc.hasFocus()
 			)
 				return;
-			timer = setTimeout(() => enable(true), delay);
+			timer = setTimeout(() => {
+				settled = true;
+				enable();
+			}, delay);
+		};
+		// Scrolled to the end, or nothing to scroll (also without layout).
+		const check = () => {
+			if (seen) return;
+			if (args.scrollTop + args.clientHeight < args.scrollHeight - 2) {
+				scrollNote.hidden = false;
+				args.tabIndex = 0; // to scroll it with the keyboard
+				return;
+			}
+			seen = true;
+			scrollNote.hidden = true;
+			enable();
+		};
+		// Not answered by a key before the delay has run out.
+		const guard = (event: KeyboardEvent) => {
+			if (settled) return;
+			const onButton = (event.target as Element | null)?.localName === "button";
+			if (
+				event.key === "Escape" ||
+				(onButton && (event.key === "Enter" || event.key === " "))
+			)
+				event.preventDefault();
+		};
+		const onCancel = (event: Event) => {
+			if (!settled) event.preventDefault();
 		};
 		doc.addEventListener("visibilitychange", arm);
+		doc.addEventListener("close", arm, true); // `close` does not bubble
 		view?.addEventListener("focus", arm);
 		view?.addEventListener("blur", arm);
+		view?.addEventListener("resize", check);
+		args.addEventListener("scroll", check);
+		dialog.addEventListener("keydown", guard);
+		dialog.addEventListener("keyup", guard);
+		dialog.addEventListener("cancel", onCancel);
 		dialog.addEventListener(
 			"close",
 			() => {
 				clearTimeout(timer);
 				doc.removeEventListener("visibilitychange", arm);
+				doc.removeEventListener("close", arm, true);
 				view?.removeEventListener("focus", arm);
 				view?.removeEventListener("blur", arm);
+				view?.removeEventListener("resize", check);
 				request.signal.removeEventListener("abort", onAbort);
 				const value = dialog.returnValue;
 				dialog.remove();
+				if (queue.changed === showWaiting) queue.changed = undefined;
 				resolve(value === "allow" || value === "always" ? value : "deny");
+				next();
 			},
 			{ once: true },
 		);
@@ -455,6 +601,7 @@ export function confirmDialog(
 		deny.focus(); // the safe choice is the default
 		// Counted from when the dialog is shown, not from when it was built.
 		arm();
+		check();
 	});
 }
 
@@ -1164,6 +1311,11 @@ export function showConnectDialog(
 			},
 			"tab-mcp-disconnect",
 			"danger",
+		);
+		// One name per button: each list item has its own Disconnect.
+		disconnect.setAttribute(
+			"aria-label",
+			`Disconnect ${clientLabel(grant.client)}`,
 		);
 		const item = el(
 			doc,
