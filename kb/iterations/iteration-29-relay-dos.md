@@ -55,7 +55,8 @@ Iteration B (the pairing page and the logs) follows on the same package.
 ### RS 4 = RQ 2: `/token`, `/revoke`, `POST /authorize` read their body without a deadline (DEC-128)
 
 - [x] One reader with a deadline (`src/body.ts`) for all four endpoints; 408 and
-  `Connection: close`
+  `Connection: close`; it counts bytes while they arrive, so a chunked body is refused
+  at the limit instead of buffered whole (review of PR 117)
 - [x] Raw-socket tests for the three OAuth endpoints
 
 ### RQ 3: timer settings above 24.8 days fire at once (DEC-128)

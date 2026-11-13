@@ -2526,7 +2526,8 @@ because the disk was full for a moment.
 - **One body reader** (`src/body.ts`, `readBodyWithDeadline`) for the MCP endpoint,
   `/token`, `/revoke` and the pairing form: `TAB_MCP_BODY_TIMEOUT_S`, then 408 with
   `Connection: close` (an OAuth error at the token endpoints, the error page at
-  `/authorize`). DEC-048's deadline existed for MCP bodies only; a stalled form body held
+  `/authorize`). It counts bytes while they arrive, so a chunked body is refused at the
+  limit, not buffered up to Bun's `maxRequestBodySize` first. DEC-048's deadline existed for MCP bodies only; a stalled form body held
   its socket for as long as the client kept it open.
 - **Timer settings** (`requestTimeoutMs`, `keepAliveMs`, `sessionLifetimeMs`,
   `heartbeatMs`, `helloTimeoutMs`, `bodyTimeoutMs`, `sweepIntervalMs`, and the same site

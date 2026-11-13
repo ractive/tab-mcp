@@ -663,6 +663,21 @@ describe("RS 8: the MCP endpoint reads a large body only for a valid token", () 
 		expect(res.status).toBe(200);
 		expect(await res.text()).toContain("x".repeat(100));
 	});
+
+	test("a chunked body without a token is refused once it passes 16 KiB, not read to its end", async () => {
+		const r = relay({ bodyTimeoutMs: 5000 });
+		const address = new URL(r.relay.addressFor(newSecret()));
+		const chunk = "x".repeat(20_000);
+		const received = await stalled(
+			r.relay.port,
+			`POST ${address.pathname} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nTransfer-Encoding: chunked\r\n\r\n${chunk.length.toString(16)}\r\n${chunk}\r\n`,
+		);
+		// The body never ends; before the fix the answer came at the deadline (408).
+		const started = Date.now();
+		await waitFor(() => received() !== "", "an answer", 3000);
+		expect(received()).toStartWith("HTTP/1.1 401");
+		expect(Date.now() - started).toBeLessThan(3000);
+	});
 });
 
 describe("RS 13: the metadata fetch's deadline covers the DNS lookup", () => {
