@@ -155,10 +155,11 @@ icon are three more hex values in `worker/connection.ts`.
   | AI access off | dot `--ink-2` | the state's sentence |
   | connecting, retrying, waiting | dot `--accent`, ring `--accent-edge` | the sentence |
   | on | dot `--ok` | the sentence, in 600 |
-  | problem | dot `--danger`, red notice | the notice's text |
-  | tool: read-only / not offered | pill `--wash`, text `--ink-2` | its word |
-  | tool: asks first | pill `--warn-bg`, text `--warn` | its word |
-  | tool: allowed on this site | pill `--ok-bg`, text `--ok` | its word |
+  | problem | a red notice (the connection has no "problem" status, so no red dot) | the notice's text |
+  | tool: read-only / not offered; a tab that cannot be read | pill `--wash`, text `--ink-2` | its word |
+  | tool: asks first, where it has no switch | pill `--warn-bg`, text `--warn` | its word |
+  | page: offers WebMCP tools | pill `--ok-bg`, text `--ok` | its words |
+  | tool: allowed on this site | the "Ask first" switch, off (iteration 36) | its label |
 
   A pill is 20 px high, 12/16/600, pill radius, with a 1.5 px transparent border (in
   forced colours the border shows and is the pill's shape). Where H turns the

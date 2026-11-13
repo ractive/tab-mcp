@@ -520,8 +520,9 @@ function showTab(s: PanelState): void {
 		allowAll.label === DONT_ASK_ALL
 			? `Don't ask for the ${allowAll.names.length} tools listed on ${scope}, for every paired AI app`
 			: `Ask first again for the ${allowAll.names.length} tools listed on ${scope}`;
+	// No tooltip (DEC-160): the line under the button names the site and
+	// "every paired AI app"; the count is the list below.
 	button.setAttribute("aria-label", label);
-	button.title = label;
 	setAvailable(button, Date.now() >= movedUntil);
 	// The list is made anew: a keyboard user's focus goes back to the same
 	// tool's switch, not to the page's body (EQ 11).

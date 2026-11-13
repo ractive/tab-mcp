@@ -395,6 +395,15 @@ describe("the style sheet's rules", () => {
 		expect(knob).toBeGreaterThanOrEqual(0);
 		expect(unavailable).toBeGreaterThan(knob);
 		expect(forced[unavailable]?.body).toBe("background: GrayText;");
+		// On: the knob is the text colour of the Highlight it stands on
+		// (CanvasText on Highlight is a pair no theme promises); before the
+		// unavailable knob's rule, which weighs the same and wins.
+		const onKnob = forced.findIndex(
+			(r) => r.selector === ":is(.switch, .ask-switch) input:checked::after",
+		);
+		expect(forced[onKnob]?.body).toBe("background: HighlightText;");
+		expect(onKnob).toBeGreaterThan(knob);
+		expect(onKnob).toBeLessThan(unavailable);
 		// Every selector that sets a knob or track colour outside the block
 		// has a rule inside it.
 		const coloured = plain

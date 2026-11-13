@@ -883,6 +883,11 @@ html [hidden] {
 		forced-color-adjust: none;
 	}
 
+	/* On Highlight the knob is its text colour: CanvasText need not show there. */
+	:is(.switch, .ask-switch) input:checked::after {
+		background: HighlightText;
+	}
+
 	.ask-switch input[aria-disabled="true"] {
 		border-color: GrayText;
 		box-shadow: none;

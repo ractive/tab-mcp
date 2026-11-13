@@ -1007,6 +1007,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 						input.closest("label").title,
 						input.getAttribute("aria-describedby"),
 						document.getElementById("ask-first-note").textContent,
+						// As the panel is drawn now, not only as its HTML is.
+						[...document.querySelectorAll("[title]")].map((e) => e.id || e.className),
 					];
 				})()`),
 			).toEqual([
@@ -1014,6 +1016,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				true,
 				"",
 				"ask-first-note",
+				[],
 				`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${SITE}, for every paired AI app.`,
 			]);
 		} finally {
@@ -1053,7 +1056,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The button changed under the pointer (another label, one more tool):
 		// a click right then allows nothing.
 		await stack.panel.waitFor(
-			`${head}.title === "Don't ask for the 2 tools listed on ${SITE}, for every paired AI app"`,
+			`${head}.getAttribute("aria-label") === "Don't ask for the 2 tools listed on ${SITE}, for every paired AI app"`,
 		);
 		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
 		// Not `disabled`: it stays in the tab order (EQ 11).
