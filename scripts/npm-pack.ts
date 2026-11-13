@@ -91,6 +91,9 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"confirm-[hash].js.map",
 			"connect-[hash].js",
 			"connect-[hash].js.map",
+			// The WebMCP mirror (DEC-171).
+			"webmcp-[hash].js",
+			"webmcp-[hash].js.map",
 			"cdn/tab-mcp-client.min.js",
 			"cdn/tab-mcp-client.min.js.map",
 			"cdn/connection-[hash].min.js",
@@ -99,6 +102,8 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"cdn/confirm-[hash].min.js.map",
 			"cdn/connect-[hash].min.js",
 			"cdn/connect-[hash].min.js.map",
+			"cdn/webmcp-[hash].min.js",
+			"cdn/webmcp-[hash].min.js.map",
 			"cdn/index-[hash].min.js",
 			"cdn/index-[hash].min.js.map",
 		],
