@@ -3,6 +3,10 @@
  * published declarations must not import from other workspace packages.
  */
 
+import type { DialogStrings } from "./strings.ts";
+
+export type { DialogStrings };
+
 /** A JSON Schema document (draft 2020-12) describing a tool's input object. */
 export type JsonSchema = { [key: string]: unknown };
 
@@ -187,6 +191,44 @@ export interface ServerInfo {
 	instructions?: string;
 }
 
+/** A part of a {@link SetupStep}'s note: plain text, or code to show as code. */
+export type SetupNotePart = { text: string } | { code: string };
+
+/**
+ * How to add the page's address to one AI app, as the connect dialog shows it
+ * under "How do I add it?". All strings are plain text.
+ */
+export interface SetupStep {
+	/** The app's name as shown, such as "Claude Code". */
+	app: string;
+	/** What to do, a sentence or two. "Run:" when `command` follows. */
+	text: string;
+	/** Commands to run in a terminal, one per line, shown with a Copy button. */
+	command?: string;
+	/** Shown after the command (or the text): text and code, in order. */
+	note?: SetupNotePart[];
+}
+
+/** Options of the library's dialogs (`TabMcpOptions.ui`). */
+export interface DialogOptions {
+	/**
+	 * Texts of the dialogs, key by key; the rest stay English. The keys and
+	 * the English texts are in `src/strings.ts`; `{name}` placeholders are
+	 * filled in. Set `lang` and `dir` with the texts' language.
+	 */
+	strings?: Partial<DialogStrings>;
+	/** The help in the connect dialog ("How do I add it?"). */
+	setup?: {
+		/** The link at its end; default the guide on ractive.ch, `null` for none. */
+		guide?: string | null;
+		/**
+		 * The steps per AI app for the page's `server.name` and address;
+		 * default `setupInstructions` of `@ractive-ch/tab-mcp-client/setup`.
+		 */
+		instructions?: (serverName: string, address: string) => SetupStep[];
+	};
+}
+
 /** A consequential tool call waiting for the user's approval. */
 export interface ConfirmRequest {
 	tool: { name: string; title?: string; description: string };
@@ -229,20 +271,16 @@ export interface TabMcpOptions {
 	/** Approves consequential tool calls; default: a dialog in the page. */
 	onConfirm?: ConfirmHandler;
 	/**
-	 * How long the page must be visible and focused, with the default
-	 * confirmation open, before "Allow" can be clicked, in milliseconds: 750
-	 * by default, never less than 500. Leaving the page starts it again. The
-	 * constructor throws a `TypeError` for anything but a number of ms.
-	 */
-	confirmDelayMs?: number;
-	/**
-	 * Offer "Always allow" in the default confirmation: it lets a tool run
-	 * without asking for one AI app until the page is reloaded or the app is
-	 * disconnected. Off by default (DEC-096): the confirmation then shows only
-	 * "Don't allow" and "Allow", and every call asks. Turn it on only for
-	 * tools whose calls the user does not need to check one by one.
+	 * Offer "Allow until reload" in the default confirmation: it lets a tool
+	 * run without asking for one AI app, with any arguments, until the page
+	 * is reloaded or the app is disconnected; the connect dialog lists it
+	 * with a reset. Off by default (DEC-096): the confirmation then shows
+	 * only "Don't allow" and "Allow", and every call asks. Turn it on only
+	 * for tools whose calls the user does not need to check one by one.
 	 */
 	alwaysAllow?: boolean;
+	/** Texts and help of the library's dialogs. */
+	ui?: DialogOptions;
 	/**
 	 * Where the address secret lives; default `localStorage`. `null` keeps it
 	 * only for the page's lifetime (a new address on every visit).
@@ -265,18 +303,13 @@ export interface TabMcpOptions {
 	 */
 	identityAssertion?: IdentityAssertionHandler;
 	/**
-	 * How long to wait for an assertion and the relay's answer to it, from
-	 * when `identityAssertion` is asked, before `identity` goes back to
-	 * `none`, in milliseconds; default 15000.
-	 */
-	identityTimeoutMs?: number;
-	/**
 	 * Connect again by itself after the connection broke (reason `network`,
-	 * `heartbeat` or `shutdown`): after 5, 10, 20 and 40 seconds, then every
-	 * 60 seconds, and at once when the tab comes back to the front or the
-	 * network returns. On by default; `false` leaves it to the page.
+	 * `heartbeat` or `shutdown`; `state` is `reconnecting` meanwhile): after
+	 * about 5, 10, 20 and 40 seconds, then every 60 seconds, and at once when
+	 * the tab comes back to the front or the network returns. On by default;
+	 * `false` leaves it to the page.
 	 */
-	reconnect?: boolean | ReconnectOptions;
+	reconnect?: boolean;
 	/**
 	 * Also register the tools with the browser's own WebMCP
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
@@ -289,16 +322,7 @@ export interface TabMcpOptions {
 	webmcp?: boolean;
 }
 
-/** Options of reconnecting (`TabMcpOptions.reconnect`). */
-export interface ReconnectOptions {
-	/**
-	 * The waits before each attempt in milliseconds; the last one repeats.
-	 * Default `[5000, 10000, 20000, 40000, 60000]`.
-	 */
-	delaysMs?: readonly number[];
-}
-
-/** The library is reconnecting by itself (`reconnecting`). */
+/** The library is reconnecting by itself (`state` is `reconnecting`). */
 export interface ReconnectingInfo {
 	/** Why the connection ended. */
 	reason: DisconnectReason;
@@ -389,7 +413,16 @@ export interface ConnectOptions {
 	resume?: boolean;
 }
 
-export type ConnectionState = "disconnected" | "connecting" | "connected";
+/**
+ * The connection to the relay. `reconnecting`: it broke, and the library
+ * connects again by itself (waiting for the next attempt or making it;
+ * `TabMcp.reconnecting` says which attempt and when).
+ */
+export type ConnectionState =
+	| "disconnected"
+	| "connecting"
+	| "connected"
+	| "reconnecting";
 
 /** Why a session ended. */
 export type DisconnectReason =
@@ -419,10 +452,14 @@ export type DisconnectReason =
 	/** The network connection broke. */
 	| "network";
 
-export interface DisconnectDetail {
-	reason: DisconnectReason;
-	/** The WebSocket close code. */
-	code: number;
+/** The `statechange` event. */
+export interface StateChangeDetail {
+	state: ConnectionState;
+	/**
+	 * Why the session ended: only on the change from `connected` (to
+	 * `disconnected`, or to `reconnecting` when the connection broke).
+	 */
+	reason?: DisconnectReason;
 }
 
 /** The `replaced` event: who took over the page's address. */
@@ -479,33 +516,36 @@ export interface ToolCallEnd {
 	durationMs: number;
 }
 
-/** Events of `TabMcp`. */
+/**
+ * Events of `TabMcp`. Every detail is an object; a change event names the
+ * new values like the properties they change (`grantschange` has `grants`,
+ * the value of `mcp.grants`), and a value that is gone is `undefined`.
+ */
 export interface TabMcpEventMap {
-	statechange: CustomEvent<{ state: ConnectionState }>;
-	connected: CustomEvent<SessionInfo>;
-	disconnected: CustomEvent<DisconnectDetail>;
+	/**
+	 * `state` changed (`session` with it), or, while `reconnecting`, the next
+	 * attempt was scheduled (`mcp.reconnecting`). A refusal that stops
+	 * reconnecting comes as `error` just before the change to `disconnected`.
+	 */
+	statechange: CustomEvent<StateChangeDetail>;
 	/**
 	 * Another tab, or a program with this page's address secret, took over
-	 * the address. It follows `disconnected` (reason `replaced`), up to a second
-	 * later while the library listens for a sibling tab. `sibling` says which it
-	 * probably was.
+	 * the address. It follows the `statechange` with reason `replaced`, up to
+	 * a second later while the library listens for a sibling tab. `sibling`
+	 * says which it probably was.
 	 */
 	replaced: CustomEvent<ReplacedDetail>;
 	/** Something went wrong outside a pending promise (e.g. a relay error message). */
 	error: CustomEvent<{ error: Error }>;
-	/** A new pairing code, or `null` when there is none (any more). */
-	pairingcode: CustomEvent<PairingCode | null>;
+	/** A new pairing code, or `undefined` when there is none (any more). */
+	pairingcode: CustomEvent<{ pairingCode: PairingCode | undefined }>;
 	grantschange: CustomEvent<{ grants: readonly Grant[] }>;
 	/** The relay accepted or refused the page's identity, or it was cleared. */
-	identitychange: CustomEvent<{ state: IdentityState; message?: string }>;
+	identitychange: CustomEvent<{
+		identity: IdentityState;
+		identityMessage: string | undefined;
+	}>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
-	/**
-	 * Reconnecting by itself: the next attempt and when it starts, or `null`
-	 * when it stopped (connected again, `disconnect()`, or the relay refused
-	 * an attempt: then `error` says why just before, unless the attempt was
-	 * the page's own `connect()`, whose promise rejects).
-	 */
-	reconnecting: CustomEvent<ReconnectingInfo | null>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;
 	/** That call ended; also when the user declined it, did not answer, or the AI app cancelled it. */
