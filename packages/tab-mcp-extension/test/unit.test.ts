@@ -366,6 +366,28 @@ describe("asking a tab's content script", () => {
 		}
 	});
 
+	test("only pages of http(s) sites, also where a click granted a file: page (DEC-142)", async () => {
+		let sent = 0;
+		const chrome = stubChrome({
+			sendMessage: async () => {
+				sent++;
+				return { ok: true };
+			},
+		});
+		try {
+			await expect(
+				ask(
+					{ ...tab, url: "file:///home/me/report.html" },
+					{ type: "page-info" },
+				),
+			).rejects.toThrow("works only on pages of http(s) sites");
+			expect(sent).toBe(0);
+			expect(chrome.injected).toEqual([]);
+		} finally {
+			chrome.restore();
+		}
+	});
+
 	test("a page still loading gets the content script all the same (EQ 15)", async () => {
 		let sent = 0;
 		const chrome = stubChrome({
@@ -438,5 +460,18 @@ describe("asking a tab's content script", () => {
 				new Error("The message port closed before a response was received."),
 			),
 		).toMatchObject({ navigated: true });
+		expect(
+			callFailed(
+				new Error(
+					"The page keeping the extension port is moved into back/forward cache, so the message channel is closed.",
+				),
+			),
+		).toMatchObject({ navigated: true });
+		// Anything else: a plain failure, nothing says the tool ran.
+		const other = callFailed(new Error("An unexpected error occurred"));
+		expect(other).toEqual({
+			ok: false,
+			error: "The call did not reach the page: An unexpected error occurred",
+		});
 	});
 });

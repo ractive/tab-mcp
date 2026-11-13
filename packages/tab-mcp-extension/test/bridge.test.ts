@@ -28,7 +28,11 @@ import {
 	resultOf,
 	schemaFor,
 } from "../src/worker/bridge.ts";
-import { createTools, OWN_TOOL_NAMES } from "../src/worker/tools.ts";
+import {
+	createTools,
+	MAX_LISTED_SCHEMAS,
+	OWN_TOOL_NAMES,
+} from "../src/worker/tools.ts";
 
 describe("names, descriptions, schemas", () => {
 	test("page tools are page_<name>, in names every AI app takes (Claude: no dots, 64)", () => {
@@ -258,6 +262,7 @@ function fakeChrome(initial: PageTools) {
 			signal: AbortSignal,
 		) => Promise<CallResult>,
 		settled: [] as number[],
+		settledSignals: [] as AbortSignal[],
 	};
 	const chrome: BridgeChrome = {
 		current: async () => ({ id: state.tabId, url: state.url, title: "" }),
@@ -269,8 +274,9 @@ function fakeChrome(initial: PageTools) {
 			state.calls.push({ tabId, target, input });
 			return state.answer(signal);
 		},
-		settled: async (tabId) => {
+		settled: async (tabId, signal) => {
 			state.settled.push(tabId);
+			state.settledSignals.push(signal);
 			return { url: "https://shop.example/thanks", title: "Thanks" };
 		},
 	};
@@ -370,6 +376,45 @@ describe("PageToolBridge", () => {
 			"inputSchema",
 		);
 		expect(state.tabId).toBe(1);
+	});
+
+	test("the schemas webmcp_tools lists stay within a budget; past it a tool says where its schema is", async () => {
+		const reg = registrar();
+		// 64 tools with schemas near the 16 KB cap.
+		const big = (i: number) => ({
+			type: "object",
+			description: `${i} ${"d".repeat(MAX_SCHEMA_BYTES - 200)}`,
+		});
+		const { chrome } = fakeChrome(
+			page(
+				Array.from({ length: MAX_TOOLS }, (_, i) =>
+					pageTool(`t${i}`, { inputSchema: big(i) }),
+				),
+			),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		const listed = createTools(
+			{
+				current: async () => ({ id: 1, url: "", title: "" }),
+				page: async () => ({}) as never,
+			},
+			() => bridge,
+		).find((t) => t.name === "webmcp_tools");
+		const state = (await listed?.execute({}, options())) as typeof bridge.state;
+		const withSchema = state.tools.filter((t) => t.inputSchema !== undefined);
+		expect(withSchema.length).toBeGreaterThan(0);
+		expect(withSchema.length).toBeLessThan(MAX_TOOLS);
+		expect(
+			JSON.stringify(withSchema.map((t) => t.inputSchema)).length,
+		).toBeLessThanOrEqual(MAX_LISTED_SCHEMAS + MAX_TOOLS);
+		const left = state.tools.find((t) => t.inputSchema === undefined);
+		expect(left?.schemaLeftOut).toContain(`inputSchema of ${left?.tool}`);
+		// Twice (text and structuredContent) it still fits the relay's 1 MiB.
+		expect(JSON.stringify(state).length * 2.2).toBeLessThan(1024 * 1024);
+		// The bridge's own state keeps every schema (webmcp_call checks them).
+		expect(bridge.state.tools.every((t) => t.inputSchema !== undefined)).toBe(
+			true,
+		);
 	});
 
 	test("a page that says it is another site than Chrome reports gets no tools (ES 4)", async () => {
@@ -665,10 +710,14 @@ describe("PageToolBridge", () => {
 				navigated: true,
 			};
 		};
+		const cancel = new AbortController();
 		const result = (await reg.tools
 			.get("page_checkout")
-			?.execute({}, options())) as Record<string, unknown>;
+			?.execute({}, options(cancel.signal))) as Record<string, unknown>;
 		expect(result["navigated"]).toBe(true);
+		// The wait for the new page ends only with the AI app's cancel, not
+		// with what is left of the call's own time limit.
+		expect(state.settledSignals[0]).toBe(cancel.signal);
 		expect(result["note"]).toContain("may have completed");
 		expect(result["page"]).toEqual({
 			url: "https://shop.example/thanks",

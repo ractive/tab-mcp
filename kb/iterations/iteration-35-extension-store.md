@@ -171,3 +171,18 @@ iteration H.
 - `resultOf(null)` is gone: Chrome's `null` and a channel closed mid-call give the same
   answer with the new page.
 - Chrome for Testing 157 passes the new e2e test of a navigating tool.
+- **Review of PR 120** (claude 2, glm 2; all fixed). `webmcp_tools` lists at most
+  192 KB of schemas together (`MAX_LISTED_SCHEMAS`, `listing()`): the library sends a
+  result as text and as `structuredContent`, so 64 schemas of 16 KB would pass the
+  relay's 1 MiB; a tool past the budget says where its schema is (`schemaLeftOut`). A
+  tab whose address is not http(s) (a `file:` page a click granted with "Allow access to
+  file URLs") is refused in `ask()` and not injected at a click (`isSitePage`).
+  `callFailed` calls a call `navigated` only on Chrome's closed-channel and
+  back/forward-cache messages; any other error is a plain failure. The wait for the new
+  page after a navigating tool ends with the AI app's cancel only, not with what is left
+  of the call's 60 s.
+- **Review of ractive.ch PR 104** (claude 2, glm 3): tool annotations named among what
+  is read, the allowed tools stored by origin, "allowed on that site" for tools only
+  (a navigation to another origin asks each time), the navigations worded as actions;
+  the same in PRIVACY.md. Answered: a one-time Allow keeps nothing, so there is nothing
+  to disclose for it.

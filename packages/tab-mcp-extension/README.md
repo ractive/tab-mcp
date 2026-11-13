@@ -14,7 +14,7 @@ Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](
 | Tool | What it does |
 |---|---|
 | `page_info` | The tab in front: address (with its query and fragment), title, language, whether WebMCP is available on the page and how many tools it registered. Read-only; its text is the page's own (untrusted). |
-| `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, input schema (what `webmcp_call` checks the arguments against), whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
+| `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, input schema (what `webmcp_call` checks the arguments against; 192 KB of schemas together at most, past that a tool says where its schema is), whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
 | `page_<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. |
 | `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page_<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
 | `navigate` | Opens an http(s) address (or one relative to the page, `/sale`) in the tab in front, waits until it has loaded and answers with its `page_info`. |
@@ -50,7 +50,7 @@ The page's tools are the page's word:
   reads "Ask for all" and turns them all back. A tool the page registers later asks first.
   When the page changes what the button would do, it waits 750 ms before it takes a
   click. All of these only for pages of an http(s) site: pages with an opaque origin
-  (`null`, such as sandboxed or `data:` pages) always ask.
+  (`null`, such as sandboxed pages) always ask.
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
   changed (also while you were asked), the AI app is told to list the tools again.

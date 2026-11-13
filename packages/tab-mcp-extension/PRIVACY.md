@@ -13,7 +13,8 @@ Incognito tabs): the tab where the user clicked the extension's icon (until that
 to another origin), or every tab after the user turned on "Allow on all sites". From such
 a tab it reads the page's address (with its query and fragment, as the browser shows it),
 title and language, and the tools the page registered itself with WebMCP
-(`document.modelContext`): their names, titles, descriptions and input schemas. Apart
+(`document.modelContext`): their names, titles, descriptions, input schemas and
+annotations (such as read-only). Apart
 from that and what the page's own tools return when the AI app calls them, it reads
 nothing else of the page: no page text, no form fields, no cookies, no screenshots. It
 reads no browsing history, with one exception: when the AI app asks to go back or forward
@@ -50,10 +51,11 @@ Only while AI access is on, and only to the relay the user chose:
   tool took the tab to another page, the same as `page_info` for the new page.
 
 The AI app can open pages in the tab in front (`navigate`, `go_back`, `go_forward`,
-`reload`). A page tool that the page does not mark read-only, and a navigation to another
-origin, runs only after the user allowed it, in the side panel or a notification (or
-after the user allowed that tool on that site); a navigation on the page's own origin
-runs without a question, as a link on the page would. The relay passes the requests and
+`reload`). A page tool that the page does not mark read-only runs only after the user
+allowed it, in the side panel or a notification, or after the user allowed that tool on
+that site. A navigation to another origin runs only after the user allowed it, each time;
+a navigation on the page's own origin runs without a question, as a link on the page
+would. The relay passes the requests and
 results between the extension and the AI app; the AI app's own privacy policy applies to
 what it does with them.
 

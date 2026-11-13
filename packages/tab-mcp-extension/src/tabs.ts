@@ -80,6 +80,9 @@ export async function tabInFront(): Promise<TargetTab> {
 	return { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" };
 }
 
+/** A page of an http(s) site: the only pages the extension acts on (DEC-142). */
+export const isSitePage = (url: string): boolean => /^https?:\/\//i.test(url);
+
 /** The extension may not run on this tab, and why, with what the user can do. */
 export class NoAccessError extends Error {}
 
@@ -97,6 +100,10 @@ export function noAccess(url: string): NoAccessError {
 	if (/^https:\/\/chromewebstore\.google\.com\//i.test(url))
 		return new NoAccessError(
 			"Chrome does not let extensions read the Chrome Web Store.",
+		);
+	if (!isSitePage(url))
+		return new NoAccessError(
+			"tab-mcp for Chrome works only on pages of http(s) sites (not file: or other pages). Switch to a web page.",
 		);
 	return new NoAccessError(
 		'tab-mcp for Chrome may not read this tab yet. The user can click its icon on the tab, or turn on "Allow on all sites" in its side panel.',
@@ -139,6 +146,10 @@ async function askNow(
 	tab: TargetTab,
 	request: ContentRequest,
 ): Promise<ContentResponse> {
+	// Only http(s) pages, also where a click granted another (a file: page
+	// with "Allow access to file URLs"). An empty address is a tab Chrome
+	// hides from the extension: asking says so.
+	if (tab.url !== "" && !isSitePage(tab.url)) throw noAccess(tab.url);
 	let response: unknown;
 	try {
 		response = await send(tab.id, request);
@@ -197,10 +208,12 @@ export async function askTools(tab: TargetTab): Promise<PageTools> {
 
 /**
  * A call's message that Chrome rejected. No content script to take it (the
- * page changed before the call): the tool did not run. Otherwise the message
- * reached the page and its channel closed before the answer: the page went
- * away while the tool ran (it navigated, or the tab closed), and the tool
- * may have done its work (WM 2).
+ * page changed before the call): the tool did not run. The message reached
+ * the page and its channel closed before the answer (Chrome's words for it,
+ * also when the page went into the back/forward cache): the page went away
+ * while the tool ran (it navigated, or the tab closed), and the tool may
+ * have done its work (WM 2). Any other error is a plain failure: nothing
+ * says the tool ran.
  */
 export function callFailed(error: unknown): CallResult {
 	const text = error instanceof Error ? error.message : String(error);
@@ -210,11 +223,13 @@ export function callFailed(error: unknown): CallResult {
 			error: "The page in the tab changed before the call reached it.",
 			gone: true,
 		};
-	return {
-		ok: false,
-		error: "The page went away while the tool ran.",
-		navigated: true,
-	};
+	if (/message (port|channel) (is )?closed|back\/forward cache/i.test(text))
+		return {
+			ok: false,
+			error: "The page went away while the tool ran.",
+			navigated: true,
+		};
+	return { ok: false, error: `The call did not reach the page: ${text}` };
 }
 
 /**

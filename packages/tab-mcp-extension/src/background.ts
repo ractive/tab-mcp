@@ -22,7 +22,7 @@ import {
 	type WorkerMessage,
 } from "./protocol.ts";
 import { attachWhenStarted, Starter } from "./starter.ts";
-import { ALL_SITES, injectInto, SITE_MATCHES } from "./tabs.ts";
+import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
@@ -55,7 +55,8 @@ chrome.action.onClicked.addListener((tab) => {
 				: { tabId: tab.id, windowId: tab.windowId },
 		)
 		.catch((error: unknown) => console.warn("tab-mcp: side panel", error));
-	if (tab.id !== undefined)
+	// Only into a page of an http(s) site (DEC-142); elsewhere page_info says why.
+	if (tab.id !== undefined && isSitePage(tab.url ?? ""))
 		void injectInto(tab.id)
 			.then(() => withConnection((c) => c.tabChanged()))
 			.catch(() => {

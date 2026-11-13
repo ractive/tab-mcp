@@ -235,6 +235,8 @@ export interface Offered {
 	 * it): only for a tool that is offered.
 	 */
 	inputSchema?: Record<string, unknown>;
+	/** Why `webmcp_tools` lists no schema for it although it is offered (size). */
+	schemaLeftOut?: string;
 	/** Why it is not offered. */
 	problem?: string;
 }
@@ -535,8 +537,10 @@ export class PageToolBridge {
 			// The tool navigated (Chrome's `null`), or the page went away while
 			// it ran: a tool that navigates (a checkout, a search) ends so. Not
 			// a failure: it may well have done its work (WM 2).
+			// Only the AI app's cancel ends this wait, not what is left of the
+			// call's 60 s: the load has its own limit (then `loading: true`).
 			const page = await this.#chrome
-				.settled(callable.tabId, signal)
+				.settled(callable.tabId, options.signal)
 				.catch((error: unknown) => ({
 					readable: false,
 					reason: message(error),
