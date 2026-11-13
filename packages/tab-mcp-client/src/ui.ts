@@ -198,7 +198,6 @@ const TEXT = {
 	pressOther: "Press Ctrl+C",
 	/** The same on a touch screen, where there is no key to press. */
 	selected: "Selected",
-	selectedAnnounced: "Selected: copy it with Ctrl+C or ⌘C",
 	connecting: "Connecting…",
 	connectAgain: "Connect again",
 	reconnecting: "Connection lost. Reconnecting…",
@@ -217,6 +216,7 @@ const TEXT = {
 		why === undefined || why === ""
 			? "Your sign-in on this page was not accepted."
 			: `Your sign-in on this page was not accepted (${why}).`,
+	newAddressDone: "This is a new address. Add it to your AI app again.",
 	newAddressNote:
 		"Someone else may have this address, or is guessing codes? A new address disconnects every AI app from this one.",
 	/** Before the page's title while a confirmation waits in a hidden tab. */
@@ -264,15 +264,21 @@ function copyButton(
 		doc,
 		TEXT.copy,
 		() => {
+			const Noun = `${noun[0]?.toUpperCase()}${noun.slice(1)}`;
 			const done = () => {
 				say(TEXT.copied, `Copied ${noun}`, COPIED_MS);
-				announce(`${noun[0]?.toUpperCase()}${noun.slice(1)} copied`);
+				announce(`${Noun} copied`);
 			};
 			const selected = () => {
 				select();
+				// Said as shown: no keys named on a touch screen.
 				const press = pressToCopy(doc);
-				say(press, `${press}: ${noun} selected`, SELECTED_MS);
-				announce(TEXT.selectedAnnounced);
+				const label =
+					press === TEXT.selected
+						? `${Noun} selected`
+						: `${press}: ${noun} selected`;
+				say(press, label, SELECTED_MS);
+				announce(label);
 			};
 			const clipboard = (doc.defaultView?.navigator as Navigator | undefined)
 				?.clipboard;
@@ -1246,6 +1252,9 @@ export function showConnectDialog(
 				(error: unknown) => {
 					status.textContent = connectFailure(error);
 					renderView(false);
+					// Focus went to Close while it connected: back to Connect
+					// again, so a second Enter tries again instead of closing.
+					if (doc.activeElement === close && !retry.hidden) retry.focus();
 				},
 			);
 			renderView(false);
@@ -1277,6 +1286,10 @@ export function showConnectDialog(
 
 	// Set while New address waits for the new session.
 	let renewing = false;
+	// Set once New address got the new session, until an app pairs: the
+	// status says the address is new also when it shows later (an identity
+	// still to be bound).
+	let renewed = false;
 	// Grants of apps that connected while this dialog is open (since the last
 	// new address), and are still connected: the confirmation names them.
 	const pairedGrants = new Set<string>();
@@ -1351,6 +1364,7 @@ export function showConnectDialog(
 		// The apps are disconnected: the next one has to pair again.
 		pairedGrants.clear();
 		renewing = true;
+		renewed = false;
 		status.textContent = "Getting a new address…";
 		renderView(false);
 		// Focus moves before the focused control is hidden.
@@ -1360,10 +1374,11 @@ export function showConnectDialog(
 		mcp.newAddress().then(
 			() => {
 				renewing = false;
-				status.textContent =
-					"This is a new address. Add it to your AI app again.";
-				renderView(false);
-				copy.focus();
+				renewed = true;
+				// Says so, and takes the focus to Copy, once the address shows
+				// (with identity binding, maybe only later: renderSession).
+				renderSession(mcp.session);
+				if (!addressBox.hidden) copy.focus();
 			},
 			(error: unknown) => {
 				renewing = false;
@@ -1394,18 +1409,23 @@ export function showConnectDialog(
 			resetCopy();
 		}
 		const appName = session.appName ?? mcp.appName;
-		if (!renewing)
+		if (renewed) status.textContent = TEXT.newAddressDone;
+		else if (!renewing)
 			status.textContent =
 				appName !== undefined
 					? `${appName} is ready for your AI app.`
 					: "This page is ready for your AI app.";
+		const shownBefore = !addressBox.hidden;
 		fresh.disabled = mcp.state !== "connected";
 		addressBox.hidden = false;
 		freshBox.hidden = false;
 		help.hidden = false;
 		renderView(false);
-		// Opened before the session was known: start at Done or the address's Copy.
+		// Opened before the session was known: start at Done or the address's
+		// Copy. A new address that just showed: at its Copy.
 		if (doc.activeElement === dialog) start().focus();
+		else if (renewed && !shownBefore && doc.activeElement === close)
+			copy.focus();
 		if (stepsFor === session.address) return;
 		stepsFor = session.address;
 		steps.replaceChildren(
@@ -1561,6 +1581,7 @@ export function showConnectDialog(
 			status.textContent = `${clientLabel(grant.client)} is connected.`;
 			pairedGrants.add(grant.grantId);
 			paired = true;
+			renewed = false;
 		}
 		const ids = new Set(mcp.grants.map((g) => g.grantId));
 		for (const id of pairedGrants) if (!ids.has(id)) pairedGrants.delete(id);
@@ -1600,8 +1621,10 @@ export function showConnectDialog(
 		renderView(paired, now === null || now === doc.body ? focused : now);
 	};
 	const onDisconnected = (event: CustomEvent<DisconnectDetail>) => {
-		if (event.detail.reason !== "new_address")
+		if (event.detail.reason !== "new_address") {
 			status.textContent = disconnectedText(event.detail.reason);
+			renewed = false;
+		}
 		renderSession(undefined);
 		renderGrants();
 		renderCode();
@@ -1611,11 +1634,27 @@ export function showConnectDialog(
 		renderGrants();
 		renderCode();
 	};
+	// A refusal that stops reconnecting comes as `error` (with its `reason`)
+	// just before `reconnecting` turns null: that says why it stopped.
+	// (`mcp.reconnecting` is already unset when that `error` comes.)
+	let reconnecting = mcp.reconnecting !== undefined;
+	let stoppedBy: unknown;
+	const onError = (event: CustomEvent<{ error: Error }>) => {
+		const { error } = event.detail;
+		if (reconnecting && (error as { reason?: unknown }).reason !== undefined)
+			stoppedBy = error;
+	};
 	// It connects again by itself: no request to do what already happens.
 	const onReconnecting = (event: CustomEvent<ReconnectingInfo | null>) => {
+		reconnecting = event.detail !== null;
+		const why = stoppedBy;
+		stoppedBy = undefined;
 		if (renewing) return;
 		if (event.detail !== null) status.textContent = TEXT.reconnecting;
-		else if (mcp.state === "disconnected") status.textContent = TEXT.lost;
+		else if (mcp.state === "disconnected")
+			// Refused, or ended by the page (`disconnect()`) while it waited.
+			status.textContent =
+				why === undefined ? TEXT.disconnected : connectFailure(why);
 		renderView(false);
 	};
 	// Connecting and back: Connect again only while it is not.
@@ -1635,6 +1674,7 @@ export function showConnectDialog(
 	mcp.addEventListener("reconnecting", onReconnecting);
 	mcp.addEventListener("statechange", onState);
 	mcp.addEventListener("identitychange", onIdentity);
+	mcp.addEventListener("error", onError);
 	mcp.addEventListener("replaced", onReplaced);
 	doc.body.append(dialog);
 	mcp.startPairing();
@@ -1663,6 +1703,7 @@ export function showConnectDialog(
 				mcp.removeEventListener("reconnecting", onReconnecting);
 				mcp.removeEventListener("statechange", onState);
 				mcp.removeEventListener("identitychange", onIdentity);
+				mcp.removeEventListener("error", onError);
 				mcp.removeEventListener("replaced", onReplaced);
 				dialog.remove();
 				resolve();

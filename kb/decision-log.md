@@ -2824,6 +2824,9 @@ Iteration 33 (review of 2026-11-13, CU 4, CU 7). Amends DEC-028.
   itself (then it makes the next attempt at once). It calls `connect()` from its own
   click, so the user activation check (DEC-009) is met where the page's first call was
   not.
+- When reconnecting stops, the dialog reads the `error` that comes just before
+  `reconnecting: null` and shows its `reason` the same way; without one (the page called
+  `disconnect()` while it waited) it says "Disconnected.".
 - With identity binding (`oidc`), the address is shown only once `identity` is `bound`:
   before, an address without a signed-in page could not pair, and the dialog invited the
   user on regardless. The status says what is missing; a refusal shows `identityMessage`
@@ -2851,12 +2854,14 @@ Iteration 33 (review of 2026-11-13, CU 5 in part, CU 9, CU 12).
 - While a confirmation is open in a hidden tab, the document title starts with
   "Allow? – ", put back when the tab is shown or the dialog closes, unless the page
   changed the title meanwhile (then the page's title stays).
-- `tools/list` appends "Each call waits until the user allows it in the page's browser
-  tab." to the description of a consequential tool, so the AI app can tell the user
-  where to look. Only there: the WebMCP registration and the registry keep the page's
+- `tools/list` appends "The page may ask the user to allow
+  each call, usually in the page's browser tab." to the description of a consequential
+  tool, so the AI app can tell the user where to look. "May" and "usually": a page with
+  `onConfirm` may answer without asking or ask elsewhere, and "Always allow" skips the
+  question; a flag for that would cost bytes in the core (review of PR 121). Only there: the WebMCP registration and the registry keep the page's
   description.
 - A refused Copy says on the button what to do ("Press Ctrl+C", "Press ⌘C" where
-  `navigator.platform` starts with `Mac` or `iP`, "Selected" on a coarse pointer) for 8 s;
-  "Copied" lasts 2 s.
+  `navigator.platform` starts with `Mac` or `iP`, "Selected" on a coarse pointer) for 8 s,
+  and screen readers hear the same, without keys on a touch screen; "Copied" lasts 2 s.
 - Every dialog carries `lang="en"` and `dir="ltr"` until iteration J lets a page pass
   its own strings.

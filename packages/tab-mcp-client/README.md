@@ -319,8 +319,8 @@ tool gets the arguments unchanged.
 While a confirmation is open in a hidden tab, the tab's title starts with "Allow? – ", so
 the user can find the tab that asks; the title is put back when the tab is shown or the
 dialog closes (unless the page changed it meanwhile). In `tools/list`, the description of
-a consequential tool ends with "Each call waits until the user allows it in the page's
-browser tab.", so the AI app can tell the user where to look while it waits.
+a consequential tool ends with "The page may ask the user to allow
+each call, usually in the page's browser tab.", so the AI app can tell the user where to look while it waits.
 
 Pass `onConfirm` to ask in your own UI (it is asked every time; remember answers there if
 you want to). Show the verified `client.host` next to the name the AI app declares, as the

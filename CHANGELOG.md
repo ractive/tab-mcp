@@ -79,8 +79,8 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   devices, "Selected" on a touch screen) instead of only telling screen readers.
   "Copied" goes back to "Copy" after 2 seconds.
 - While a confirmation is open in a hidden tab, the tab's title starts with "Allow? – ".
-  In `tools/list`, the description of a consequential tool ends with "Each call waits
-  until the user allows it in the page's browser tab."
+  In `tools/list`, the description of a consequential tool ends with "The page may ask
+  the user to allow each call, usually in the page's browser tab."
 - The dialogs carry `lang="en"` and `dir="ltr"`, so a screen reader on a page in another
   language reads them with an English voice and a right-to-left page does not mirror
   them.

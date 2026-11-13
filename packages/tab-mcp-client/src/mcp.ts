@@ -49,7 +49,7 @@ const UNSUPPORTED_VERSION = -32022;
 
 /** After the description of a consequential tool in `tools/list`. */
 export const CONFIRMED_IN_TAB =
-	"Each call waits until the user allows it in the page's browser tab.";
+	"The page may ask the user to allow each call, usually in the page's browser tab.";
 
 type Id = string | number;
 type Json = Record<string, unknown>;

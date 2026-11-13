@@ -881,7 +881,7 @@ describe("showConnectDialog", () => {
 		});
 		(dialog.querySelector(".tab-mcp-address-copy") as HTMLElement).click();
 		await Bun.sleep(0);
-		expect(live.textContent).toBe("Selected: copy it with Ctrl+C or ⌘C");
+		expect(live.textContent).toMatch(/^Press (Ctrl\+C|⌘C): address selected$/);
 		// The clipboard refuses: the same.
 		Object.defineProperty(window.navigator, "clipboard", {
 			value: { writeText: () => Promise.reject(new Error("denied")) },
@@ -889,9 +889,19 @@ describe("showConnectDialog", () => {
 		});
 		(dialog.querySelector(".tab-mcp-code-copy") as HTMLElement).click();
 		await Bun.sleep(0);
-		expect(live.textContent?.trim()).toBe(
-			"Selected: copy it with Ctrl+C or ⌘C",
-		);
+		expect(live.textContent).toMatch(/^Press (Ctrl\+C|⌘C): code selected$/);
+		// On a touch screen, no keys are named (review of PR 121).
+		Object.defineProperty(window, "matchMedia", {
+			value: (query: string) => ({ matches: query === "(pointer: coarse)" }),
+			configurable: true,
+		});
+		(dialog.querySelector(".tab-mcp-address-copy") as HTMLElement).click();
+		await Bun.sleep(0);
+		expect(live.textContent).toBe("Address selected");
+		expect(
+			(dialog.querySelector(".tab-mcp-address-copy") as HTMLElement)
+				.textContent,
+		).toBe("Selected");
 		byText(dialog, "Close").click();
 	});
 
@@ -1389,6 +1399,59 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Done").click();
 	});
 
+	test("reconnecting that stops says why: a refusal, or the page's disconnect() (review of PR 121)", async () => {
+		const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+		mcp = newTab(relay.url, {
+			appName: "saturnus",
+			reconnect: { delaysMs: [60_000] },
+		});
+		const { dialog } = await open();
+		await relay.next("hello"); // the first session's
+		const status = dialog.querySelector(".tab-mcp-status") as HTMLElement;
+		let reconnecting = nextEvent(mcp, "reconnecting");
+		relay.close(4004);
+		await reconnecting;
+		// The next attempt is refused: reconnecting stops, and the dialog says why.
+		relay.answerHello = false;
+		let hello = relay.next("hello");
+		const stopped = nextEvent(mcp, "reconnecting");
+		// The page's own connect() makes the attempt, not the dialog's button.
+		mcp.connect().catch(() => {});
+		await hello;
+		relay.send({ type: "error", code: "rate_limited", message: "slow down" });
+		expect((await stopped).detail).toBeNull();
+		await Bun.sleep(0);
+		expect(status.textContent).toBe(
+			"Too many attempts. Wait a minute, then connect again.",
+		);
+		// Connect again, refused too: focus comes back to it from Close, so a
+		// second Enter tries again instead of closing the dialog.
+		const retry = byText(dialog, "Connect again");
+		expect(shown(retry)).toBe(true);
+		retry.focus();
+		hello = relay.next("hello");
+		retry.click();
+		expect(doc.activeElement).toBe(byText(dialog, "Close"));
+		await hello;
+		relay.send({ type: "error", code: "policy", message: "no" });
+		await nextEvent(mcp, "statechange");
+		await Bun.sleep(0);
+		expect(status.textContent).toBe("The connection was refused.");
+		expect(doc.activeElement).toBe(retry);
+		// Reconnecting again, then the page turns it off.
+		relay.answerHello = true;
+		const connected = nextEvent(mcp, "connected");
+		retry.click();
+		await connected;
+		reconnecting = nextEvent(mcp, "reconnecting");
+		relay.close(4004);
+		await reconnecting;
+		mcp.disconnect();
+		expect(status.textContent).toBe("Disconnected.");
+		warn.mockRestore();
+		byText(dialog, "Close").click();
+	});
+
 	test("with identity binding: no address until the relay knows who is signed in (CU 7)", async () => {
 		relay.pairing = "oidc";
 		relay.grants = [];
@@ -1428,6 +1491,37 @@ describe("showConnectDialog", () => {
 		expect(address.hidden).toBe(false);
 		expect(shown(signIn)).toBe(true);
 		expect(status.textContent).toBe("This page is ready for your AI app.");
+		byText(dialog, "Close").click();
+	});
+
+	test("with identity binding, New address says the address is new once it shows, at its Copy (review of PR 121)", async () => {
+		relay.pairing = "oidc";
+		relay.grants = [];
+		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+		const { dialog } = await open();
+		const bind = async () => {
+			const m = await relay.next("identity");
+			relay.send({ type: "identity.bound", round: m["round"] });
+			await relay.settled();
+			expect(mcp.identity).toBe("bound");
+		};
+		await bind();
+		const status = dialog.querySelector(".tab-mcp-status") as HTMLElement;
+		const address = dialog.querySelector(".tab-mcp-address") as HTMLElement;
+		expect(address.hidden).toBe(false);
+		byText(dialog, "New address").click();
+		// The new session's identity is not bound yet: no address, no claim about it.
+		await nextEvent(mcp, "connected");
+		await Bun.sleep(0);
+		expect(address.hidden).toBe(true);
+		await bind();
+		expect(address.hidden).toBe(false);
+		expect(status.textContent).toBe(
+			"This is a new address. Add it to your AI app again.",
+		);
+		expect(doc.activeElement).toBe(
+			dialog.querySelector(".tab-mcp-address-copy"),
+		);
 		byText(dialog, "Close").click();
 	});
 

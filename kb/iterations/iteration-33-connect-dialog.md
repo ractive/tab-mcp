@@ -59,8 +59,8 @@ into one table with a `ui: { strings }` override (the rest of CU 5), adds
 
 - [x] While a confirmation is open and the document hidden, the title starts with
   "Allow? – "; put back when shown or closed, unless the page changed it
-- [x] `tools/list`: a consequential tool's description ends with "Each call waits until
-  the user allows it in the page's browser tab." (`CONFIRMED_IN_TAB`, in the lazy chunk)
+- [x] `tools/list`: a consequential tool's description ends with "The page may ask the
+  user to allow each call, usually in the page's browser tab." (`CONFIRMED_IN_TAB`, in the lazy chunk)
 - [x] The guide's entry for an AI app that waits on a tool (CU 22)
 - [x] Tests: the title, the description
 
@@ -101,6 +101,19 @@ into one table with a `ui: { strings }` override (the rest of CU 5), adds
   tab or program took over this page" and what New address costs, "Could not connect"
   and Connect again
 - [x] A separate ractive.ch PR, to merge after the client release
+
+### Review of PR 121
+
+- [x] A failed Connect again hands the focus back to it from Close
+- [x] Reconnecting that stops says why: the refusal's `reason` from the `error` before
+  `reconnecting: null`, or "Disconnected." after the page's `disconnect()`
+- [x] With identity binding, "This is a new address…" shows once the new address does,
+  with the focus on its Copy
+- [x] The `tools/list` note says "may" and "usually" (a page's `onConfirm`, Always allow)
+- [x] A refused Copy is announced as shown ("Address selected" on a touch screen)
+- [x] The guide (ractive.ch PR 105): the dialog's texts quoted exactly, the relay's
+  Connect page and the account mismatch for pages without a code, tab-mcp for Chrome's
+  question and its 60 s, "Opened in another tab" explained
 
 ### Docs
 
