@@ -1724,8 +1724,8 @@ function startRelay(
 	const port = server.port ?? config.port;
 	if (publicUrl === "") publicUrl = developmentUrl(config.host, port);
 
-	/** The running `sweepExpiredGrants`, if any. */
-	let expiring: Promise<void> | undefined;
+	/** A `sweepExpiredGrants` is running. */
+	let sweepingGrants = false;
 	const sweep = setInterval(() => {
 		auth.sweep();
 		sweepRevocations(Date.now());
@@ -1751,16 +1751,19 @@ function startRelay(
 				}),
 			);
 		// The pages hear of their expired grants (one run at a time).
-		expiring ??= sweepExpiredGrants()
-			.catch((error: unknown) =>
-				logger.error("store.error", {
-					op: "listGrants",
-					...errorFields(error),
-				}),
-			)
-			.finally(() => {
-				expiring = undefined;
-			});
+		if (!sweepingGrants) {
+			sweepingGrants = true;
+			sweepExpiredGrants()
+				.catch((error: unknown) =>
+					logger.error("store.error", {
+						op: "listGrants",
+						...errorFields(error),
+					}),
+				)
+				.finally(() => {
+					sweepingGrants = false;
+				});
+		}
 	}, config.sweepIntervalMs);
 
 	const siteCount =
