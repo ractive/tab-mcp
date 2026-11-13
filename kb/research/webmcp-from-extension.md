@@ -50,7 +50,11 @@ below was observed in Chrome for Testing 156.0.8078.80 (the version CI pins) wit
   registration (DevTools' `WebMCP.toolsAdded` has none either).
 - `executeTool(tool, input, { signal })` runs the page's `execute` (in the page's world,
   with a signal) and resolves to a **string**: a string result as it is, anything else
-  JSON-encoded (`{ ordered: "tea" }` → `'{"ordered":"tea","quantity":1}'`).
+  JSON-encoded (`{ ordered: "tea" }` → `'{"ordered":"tea","quantity":1}'`). This
+  differs from the draft (12 November 2026), which JSON-encodes every result, a string
+  too (`"Hello"` → `'"Hello"'`). Since iteration 34 the bridge decodes a result that is
+  a JSON string (`resultOf`, WM 7), so either way reaches the AI app as the text; a
+  string result that is itself the JSON of a string loses its quotes in Chrome 156.
 - Chrome does **not** check the input against `inputSchema`: `{ name: 42 }` for a
   `string` property reached the page.
 - `toolchange` fires in the isolated world (one event per registration; a tool registered
@@ -119,9 +123,10 @@ world.
 - The bridge can use the content script alone: no main-world script and no message
   channel through the page, so a page cannot forge the object or the answers.
 - It has to bring what Chrome leaves out: a timeout and abort for calls, input
-  validation against `inputSchema`, and a result mapping from a string (no
-  `outputSchema`, so no structured content; a string that is the JSON of an MCP result,
-  as polyfill pages give, is one to unwrap).
+  validation against `inputSchema`, and a result mapping from a string (a string that is
+  the JSON of an MCP result, as polyfill pages give, is one to unwrap; since iteration 34
+  the JSON of another object reaches the AI app as `structuredContent` too, which MCP
+  allows without an `outputSchema`).
 - Frames: tools of cross-origin frames are reachable from a content script in that frame
   (`all_frames`) when the page allows `tools` there; the top page's list does not have
   them.

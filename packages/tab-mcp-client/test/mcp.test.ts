@@ -690,6 +690,38 @@ describe("consequential tools", () => {
 			annotations: { destructiveHint: true },
 			_meta: { "ch.ractive.tab-mcp/annotations": { consequentialHint: true } },
 		});
+		expect(
+			Object.hasOwn(tools.find((x) => x["name"] === "c") ?? {}, "outputSchema"),
+		).toBe(false);
+	});
+
+	test("the tool list carries a tool's outputSchema (WM 3)", async () => {
+		const t = ours();
+		const outputSchema = {
+			type: "object",
+			properties: { sum: { type: "number" } },
+		};
+		t.registry.register({
+			name: "o",
+			description: "O",
+			outputSchema,
+			execute: () => ({ sum: 1 }),
+		});
+		const list = await outcome(
+			await t.handler.handle(
+				request({ name: "", body: rpc(1, "tools/list") }),
+				{ grant: GRANT },
+			),
+		);
+		const result = list.message?.["result"] as {
+			tools: Record<string, unknown>[];
+		};
+		expect(result.tools.find((x) => x["name"] === "o")).toEqual({
+			name: "o",
+			description: "O",
+			inputSchema: { type: "object" },
+			outputSchema,
+		});
 	});
 });
 

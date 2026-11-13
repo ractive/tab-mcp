@@ -24,6 +24,7 @@ import {
 	resultText,
 	thrownResult,
 	toCallToolResult,
+	webMcpValue,
 } from "./mapping.ts";
 import type { GrantRef } from "./protocol.ts";
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
@@ -437,13 +438,14 @@ async function decideAndRun(
 /**
  * A call from an agent in the browser (WebMCP) of the mirrored `tool`: the
  * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
- * Resolves with what `execute` returned. Every failure the agent should read
- * resolves too, as `{ error: "<message>" }`: invalid arguments, "Don't
- * allow", a question not answered, a tool that is gone, what `execute`
- * threw, an `isError` result.
- * Chrome 156 turns a rejection into a bare `UnknownError`, so the agent
- * would learn neither why nor what to change (DEC-120). Only a call the
- * browser cancelled rejects (`AbortError`): its caller has gone already.
+ * Resolves with what `execute` returned, as `webMcpValue` maps it. Every
+ * failure the agent should read resolves too, as `{ error: "<message>" }`:
+ * invalid arguments, "Don't allow", a question not answered, a tool that is
+ * gone, what `execute` threw, an `isError` result.
+ * WebMCP hands the agent a rejection without its message (the draft: an
+ * `OperationError`; Chrome 156: `UnknownError`), so the agent would learn
+ * neither why nor what to change (DEC-120). Only a call the browser
+ * cancelled rejects (`AbortError`): its caller has gone already.
  */
 export async function webMcpCall(
 	context: CallContext,
@@ -472,7 +474,7 @@ export async function webMcpCall(
 	if (run.stop === "gone") return failed(gone);
 	if (run.result.isError === true)
 		return failed(resultText(run.result) || "The tool failed.");
-	return run.returned?.value;
+	return webMcpValue(run.returned?.value);
 }
 
 export function createMcpHandler(options: McpHandlerOptions): McpHandler {
@@ -515,6 +517,8 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 					? `${tool.description} ${CONFIRMED_IN_TAB}`
 					: tool.description;
 			entry["inputSchema"] = tool.inputSchema;
+			if (tool.outputSchema !== undefined)
+				entry["outputSchema"] = tool.outputSchema;
 			const { annotations, meta } = mapAnnotations(tool.annotations);
 			if (annotations !== undefined) entry["annotations"] = annotations;
 			if (meta !== undefined) entry["_meta"] = { [ANNOTATIONS_META_KEY]: meta };

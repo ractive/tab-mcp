@@ -275,14 +275,10 @@ export class TabMcp extends EventTarget {
 		// consequential tools only when their registration says so.
 		const context = options.webmcp === true ? nativeContext() : undefined;
 		if (context !== undefined)
-			mirror(
-				this.#registry,
-				context,
-				(tool) => tool.webmcp ?? tool.annotations.consequentialHint !== true,
-				(tool, input, signal) =>
-					this.#load().then((lazy) =>
-						lazy.callFromWebMcp(this.#calls, tool, input, signal),
-					),
+			mirror(this.#registry, context, (tool, input, signal) =>
+				this.#load().then((lazy) =>
+					lazy.callFromWebMcp(this.#calls, tool, input, signal),
+				),
 			);
 	}
 

@@ -61,7 +61,8 @@ test.skipIf(chrome === undefined)(
 			"slow_tool",
 		]);
 		const weather = report.tools.find((t) => t.name === "get_weather");
-		// No outputSchema in Chrome 156: the bridge cannot pass one on.
+		// No outputSchema in Chrome 156, though the draft has it: the bridge shows
+		// one in webmcp_tools once Chrome gives it (DEC-144).
 		expect(weather?.keys).toEqual([
 			"annotations",
 			"description",

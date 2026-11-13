@@ -10,8 +10,28 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ### Unreleased
 
+#### Added
+
+- `Tool.outputSchema` (the WebMCP draft of 12 November 2026 has it): an object schema of
+  the result, listed in `tools/list` and passed on to WebMCP.
+- `RegisterToolOptions.exposedTo` is passed on to the native WebMCP registration of a
+  mirrored tool; it was accepted and ignored.
+
 #### Changed
 
+- WebMCP: a mirrored tool that returns nothing resolves as `"Done."` (the browser cannot
+  serialize `undefined`, so the agent saw a failed call); an MCP result goes out as its
+  `structuredContent`, else as its text with other blocks (images) named as left out,
+  instead of the JSON of the whole result with base64 images.
+- WebMCP: tools marked only with MCP's `destructiveHint` are left out of WebMCP unless
+  registered with `{ webmcp: true }`, like `consequentialHint`, and a mirrored one is
+  registered natively with `consequentialHint: true`.
+- WebMCP: each `TabMcp` reads the native `document.modelContext` when it is made (through
+  `Document.prototype`'s getter, as before), not when the library loads, so an
+  origin-trial token added by a script counts for a `TabMcp` made after it. A failed
+  native registration is no longer tried a second time.
+- `registerTool` with an already aborted signal rejects with the signal's reason, as the
+  WebMCP draft does; it resolved without registering.
 - `registerTool` rejects with a `TypeError` when a hint (`consequentialHint`,
   `readOnlyHint`, any `…Hint`, `debugging`) or the `webmcp` option is not a boolean. Until
   now such a hint was dropped, so `consequentialHint: "true"` registered a tool that ran
@@ -589,7 +609,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.10.0][relay-0.10.0] - 2026-11-13
 
 #### Added
 
@@ -603,8 +623,45 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - The tab error code `store_unavailable`: a `grant.revoke` or `grants.revokeAll` that
   failed because the token store failed (was `bad_message`).
 - `describeConfigError` and `unknownEnvNames` in the package; `ConfigError` has `key`.
+- Log events `tab.rate_limited`, `relay.bad_forwarded_ip` (a proxy header that is not an
+  address, logged once) and `http.handler_error` (an exception in a request handler,
+  answered with a plain 500 by the new `Bun.serve` `error` handler).
+- `installCrashLogging` is exported and described in the README, for embedders.
 
 #### Changed
+
+- A refresh stores the new token pair before it marks the old refresh token used. A token
+  store failure during a refresh is answered with 503 and the retry with the same token
+  succeeds; before, the retry counted as reuse and revoked the grant. A code exchange whose
+  token issue fails makes the code usable again.
+- A full instance (10 000 open authorization requests) evicts a request instead of
+  answering 429 to everyone: first one whose page is gone or whose dialog is closed,
+  otherwise the oldest of the network holding the most. Per-network caps count an IPv6
+  /56.
+- A metadata fetch for a client id that is not cached is charged to the requesting
+  network first (5, then 1 a minute) at `/authorize`, `/token` and `/revoke`, with 429
+  when used up. Set `TAB_MCP_CLIENT_ID_HOSTS` to avoid fetching for strangers at all.
+- Tab sessions have a message budget (30, then 2 a second) for every frame except `pong`
+  and `http.response*`. Past it the relay sends `rate_limited` and closes with 4008. A
+  second `grants.revokeAll` within a second of a finished revocation writes nothing.
+- `/token`, `/revoke` and `POST /authorize` read their body with a deadline and count its
+  bytes as they arrive: a slow body gets 408 with `Connection: close`, an oversized
+  chunked body is refused at the limit.
+- Timer settings above 2^31-1 ms (about 24.8 days) are refused at start; before, they
+  fired at once (a 30-day session lifetime closed every session right after it opened).
+- A client's JWKS may hold at most 20 keys, and at most 3 are tried per assertion. Failed
+  client assertions have a per-network budget, checked before metadata or keys are
+  loaded.
+- The MCP endpoint looks up the token before it reads the body: without a valid token at
+  most 16 KiB is read, and a larger body gets 401 (or 503) unparsed.
+- One timeout covers the DNS lookup and the metadata fetch.
+- A port is stripped from `X-Real-IP` / `X-Forwarded-For`; a value that is not an address
+  falls back to the socket address.
+- Keep-alive comments, error events and the "page gone" event are written only into event
+  streams. A streamed body that is not an event stream and ends early is broken off
+  instead of ending cleanly.
+- The expiry sweep calls the store inside a promise chain, so a store that throws
+  synchronously no longer ends the process.
 
 - `hello` no longer needs `page: {title}`; the relay ignores the field, which it never
   read. Libraries up to 0.15 send the page title, newer ones an empty one.
@@ -1041,7 +1098,7 @@ First release, version 0.1.0.
 #### Added
 
 - Passes the WebMCP tools of the page in front (`document.modelContext.registerTool()`,
-  Chrome's own WebMCP, top frame only) on to an AI app outside the browser, through a
+  Chrome's own WebMCP, the top frame's, with its same-origin frames) on to an AI app outside the browser, through a
   tab-mcp relay (by default `https://tab-mcp.ractive.ch`; another one under "Settings").
 - Tools for the AI app: `page_info` (the tab's address, title, language, whether WebMCP is
   available; the server's instructions and its description ask the AI app to call it
@@ -1055,7 +1112,10 @@ First release, version 0.1.0.
   checked against the tool's schema, a call runs only on the page its tool was listed
   from and ends after 60 s; a page that does not answer the extension within 5 s is
   given up. A tool that takes the tab to another page answers with the new page's
-  `page_info`.
+  `page_info`. A schema's `pattern`s are not run but named in the property's
+  description; a result that is the JSON of an object reaches the AI app with
+  `structuredContent`, and a JSON-encoded string as the string; a tool's `outputSchema`
+  is shown in `webmcp_tools`; tools marked `debugging` are left out.
 - A tool the page does not mark read-only asks first: in the side panel, or in a Chrome
   notification while the panel is not in front (Allow; a click on its body shows the
   whole question). "Don't ask again on <host>" in the question, or the panel's tool list,
@@ -1101,6 +1161,7 @@ First release, version 0.1.0.
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.0
 [relay-0.9.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.9.0
 [relay-0.8.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.8.0
 [relay-0.7.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.1

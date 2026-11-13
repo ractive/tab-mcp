@@ -26,7 +26,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.9.0
+  ractive/tab-mcp:0.10.0
 ```
 
 For production, see
@@ -88,8 +88,8 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
 
 ### Tools
 
-`registerTool(tool, { signal, webmcp })` takes a tool in the shape of the WebMCP draft's
-`registerTool` (`webmcp`: see [WebMCP](#webmcp)):
+`registerTool(tool, { signal, webmcp, exposedTo })` takes a tool in the shape of the
+WebMCP draft's `registerTool` (`webmcp` and `exposedTo`: see [WebMCP](#webmcp)):
 
 - `name` (1-128 characters of `A-Z a-z 0-9 _ - .`), `title`, `description` (not empty);
 - `inputSchema`: a JSON Schema with `"type": "object"`. Arguments are checked against it
@@ -99,6 +99,13 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
   validator itself is loaded by `connect()`: from then on it checks each schema at
   registration too, and a tool registered earlier whose schema it refuses (for example a
   `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
+- `outputSchema` (optional): a JSON Schema with `"type": "object"` for the result, listed
+  to AI apps (`tools/list`) and passed on to WebMCP. `registerTool` checks it as it checks
+  `inputSchema` (an AI app compiles it when it lists the tools, and one that does not
+  compile can cost the whole list), but results are not checked against it. An AI app
+  expects every result of such a tool to carry
+  `structuredContent` that matches it (the MCP SDK's client refuses one without), so
+  `execute` returns a plain object, not a string;
 - `execute(input, { signal, client })`: runs the tool. `signal` aborts when the caller
   gives up. `client` names the caller: `{ kind: "relay", grantId, id, host, name? }` for
   an AI app through the relay (`id`, verified `host`, declared `name`),
@@ -113,10 +120,29 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
   it has none). Data that only looks like a result, such as a ProseMirror document with
   its `content` array, is sent as JSON. A thrown error becomes an error result with its
   message;
-- `annotations`: `readOnlyHint`, `consequentialHint`, `untrustedContentHint`, and the
-  MCP hints `destructiveHint`, `idempotentHint`, `openWorldHint`. A hint must be `true`
-  or `false`: `registerTool` rejects any other value with a `TypeError`, since a
+- `annotations`: the WebMCP hints `readOnlyHint`, `consequentialHint`,
+  `untrustedContentHint` and `debugging` (a tool meant for the page's developers), and
+  the MCP hints `destructiveHint`, `idempotentHint`, `openWorldHint`. A hint must be
+  `true` or `false`: `registerTool` rejects any other value with a `TypeError`, since a
   `consequentialHint: "true"` that was dropped would run the tool without asking.
+
+Where `registerTool` differs from the WebMCP draft's (of 12 November 2026), so that code
+written for the native API behaves differently here:
+
+- An invalid name, an empty description or an invalid schema is a `TypeError`; the
+  draft rejects the first two with an `InvalidStateError`. A duplicate name is an
+  `InvalidStateError` in both.
+- `inputSchema` and `outputSchema` need `"type": "object"`, as MCP does; the draft takes
+  any object. The library also checks `inputSchema`'s patterns and `$ref`s (above).
+- The library checks the arguments against `inputSchema` before `execute` runs; the
+  draft leaves that to the page.
+- `execute` may return an MCP result; through WebMCP it goes out as its
+  `structuredContent` or its text ([WebMCP](#webmcp)).
+- `exposedTo` matters only for WebMCP: it is passed on to the native registration of a
+  mirrored tool, and AI apps never see it.
+
+An already aborted `signal` rejects with its reason and registers nothing, as in the
+draft.
 
 In TypeScript, `Tool<Input>` types the `input` of `execute`, and `registerTool` and
 `useTool` infer it from the tool or take it explicitly
@@ -137,26 +163,41 @@ where the browser has it, so that agents in the browser can call them: an agent 
 into the browser, or an extension. Off by default. Turning it on is a change in what the
 page exposes: any agent in the browser can then call the mirrored tools without pairing.
 Chrome has WebMCP for sites in its
-[origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (from Chrome
-149) and with `chrome://flags/#enable-webmcp-testing`
-([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)).
+[origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
+162; a site needs a trial token) and with `chrome://flags/#enable-webmcp-testing`
+([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Without either,
+`webmcp: true` does nothing. Each `new TabMcp` looks for WebMCP when it is made, so a
+trial token that a script adds later counts for a `TabMcp` made after it.
 
-- Tools marked `consequentialHint` are left out unless their registration says
-  `{ webmcp: true }`: an agent in the browser often drives the very tab it calls into,
-  so it can click Allow in the page's confirmation itself. `{ webmcp: false }` keeps any
-  tool out of WebMCP.
+- Tools marked `consequentialHint`, or MCP's `destructiveHint`, are left out unless
+  their registration says `{ webmcp: true }`: an agent in the browser often drives the
+  very tab it calls into, so it can click Allow in the page's confirmation itself.
+  `{ webmcp: false }` keeps any tool out of WebMCP. A tool marked only
+  `destructiveHint: true` is registered natively with `consequentialHint: true`, since
+  WebMCP has no `destructiveHint` (DEC-022 maps the other way).
+- The native registration gets the WebMCP fields: `name`, `title`, `description`,
+  `inputSchema`, `outputSchema` and the WebMCP hints, and `exposedTo` from
+  `registerTool`'s options (origins of other documents in the tab that may see the
+  tool; the browser checks it, and an invalid list only warns, as below).
 - A WebMCP call takes the same path as an AI app's: the arguments are checked against
   `inputSchema` (Chrome does not check them), a consequential tool asks (`onConfirm`, or
   the library's dialog, which names the caller "An agent in this browser"), and
   `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Always allow" is
   never offered or applied for these calls: there is no identity to remember it for.
-- The call resolves with what `execute` returned. A failure resolves too, as
+- The call resolves with what `execute` returned, which the browser hands the agent as
+  JSON text. An MCP result goes out as its `structuredContent` if it has one, else as
+  its text blocks, one per line, each other block (an image, a resource) as a line that
+  says it was left out: WebMCP results are text, and an image as base64 inside JSON
+  costs the agent tokens for nothing. Nothing (`undefined`), which the browser cannot
+  serialize, and an empty MCP result resolve as `"Done."`.
+- A failure resolves too, as
   `{ error: "<message>" }`, so that the agent can read it: invalid arguments (the same
   message as for an AI app), "Don't allow" (`The user did not allow <tool> to run.`), a
   question not answered (`The user did not answer whether <tool> may run.`), a tool that
   is gone, an error thrown by `execute` (its message) and an MCP result with
-  `isError: true` (its text). A rejection would not help: Chrome 156 hands the agent
-  every rejection as a bare `UnknownError`, without its message. Two cases still
+  `isError: true` (its text). A rejection would not help: the draft hands the agent
+  every rejection as an `OperationError` without its message, on purpose (a failure the
+  agent should read belongs in the result), and Chrome 156 as `UnknownError`. Two cases still
   reject: a call the browser cancelled (`AbortError`), since its caller no longer waits
   for an answer, and a call made when the library's lazily loaded part cannot be loaded
   (a new deploy with other chunk names while the page stays open, the network, a
@@ -172,7 +213,9 @@ Chrome has WebMCP for sites in its
   schema.
 - A failed native registration only warns in the console, once per tool, and the tool
   stays offered through the relay; it is tried again only when the tool is registered
-  again: a name the page or another script already registered
+  again (a browser that unregisters a tool some time after its abort would refuse a
+  registration of the same name at once after it, as a duplicate; Chrome unregisters at
+  once): a name the page or another script already registered
   natively keeps its owner, and a frame without `allow="tools"` refuses all. The other
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
   fails: a page that registers tools natively itself leaves `webmcp` off or uses other
@@ -761,9 +804,9 @@ function TodoList() {
 - `useTool(tool, deps?, options?)` registers the tool while the component is mounted and
   removes it on unmount. `execute` is always the latest closure, so it may use the
   component's current props and state without registering again; the tool is registered
-  again only when its name, title, description, input schema or annotations change, or
-  `options.webmcp` ([WebMCP](#webmcp); `webmcp` on the provider turns it on), or one of
-  `deps`. StrictMode's double mount registers it once at a time. A duplicate name or an
+  again only when its name, title, description, input or output schema or annotations
+  change, or `options.webmcp` or `options.exposedTo` ([WebMCP](#webmcp); `webmcp` on the
+  provider turns it on), or one of `deps`. StrictMode's double mount registers it once at a time. A duplicate name or an
   invalid tool is thrown from the component's render, for an error boundary. Tools that
   read state right after another tool changed it should read it from a store (as the
   example does) or a ref ([Tools in a `useState` app](#tools-in-a-usestate-app)), not

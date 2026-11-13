@@ -256,10 +256,71 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		expect(r.get("add")).toBeDefined();
 	});
 
-	test("an already aborted signal registers nothing", () => {
+	test("an already aborted signal throws its reason and registers nothing, as WebMCP (WM 11)", () => {
 		const r = new ToolRegistry();
-		r.register(tool(), { signal: AbortSignal.abort() });
+		const reason = new Error("gone");
+		expect(() =>
+			r.register(tool(), { signal: AbortSignal.abort(reason) }),
+		).toThrow(reason);
+		expect(() => r.register(tool(), { signal: AbortSignal.abort() })).toThrow(
+			expect.objectContaining({ name: "AbortError" }),
+		);
 		expect(r.list()).toEqual([]);
+	});
+
+	test("outputSchema: an object schema, copied as JSON; anything else is refused (WM 3)", () => {
+		const r = new ToolRegistry();
+		const outputSchema = {
+			type: "object",
+			properties: { sum: { type: "number" } },
+		};
+		r.register({ ...tool(), outputSchema });
+		const registered = r.get("add");
+		expect(registered?.outputSchema).toEqual(outputSchema);
+		expect(registered?.outputSchema).not.toBe(outputSchema);
+		for (const bad of [{ type: "string" }, [], "x"])
+			expect(() =>
+				r.register({
+					...tool(),
+					name: "bad",
+					outputSchema: bad as unknown as Record<string, unknown>,
+				}),
+			).toThrow(
+				'registerTool: the outputSchema of bad must be a JSON Schema object with "type": "object"',
+			);
+		// Checked like inputSchema: an AI app compiles it when it lists the tools.
+		expect(() =>
+			r.register({
+				...tool(),
+				name: "dangling",
+				outputSchema: { type: "object", $ref: "#/$defs/Item" },
+			}),
+		).toThrow(
+			'registerTool: the outputSchema of dangling: $ref "#/$defs/Item" does not resolve',
+		);
+		expect(() =>
+			r.register({
+				...tool(),
+				name: "badPattern",
+				outputSchema: {
+					type: "object",
+					properties: { a: { type: "string", pattern: "(" } },
+				},
+			}),
+		).toThrow(
+			'registerTool: the outputSchema of badPattern: pattern "(" is not',
+		);
+		const cyclic: Record<string, unknown> = { type: "object" };
+		cyclic["self"] = cyclic;
+		expect(() =>
+			r.register({ ...tool(), name: "cyclic", outputSchema: cyclic }),
+		).toThrow("registerTool: the outputSchema of cyclic must be JSON");
+	});
+
+	test("exposedTo is kept for the native registration", () => {
+		const r = new ToolRegistry();
+		r.register(tool(), { exposedTo: ["https://a.example"] });
+		expect(r.get("add")?.exposedTo).toEqual(["https://a.example"]);
 	});
 
 	test("a hint that is not a boolean is refused, so a consequential tool cannot run without asking (CC 2)", () => {
