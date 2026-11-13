@@ -34,7 +34,25 @@ import type {
 	TunnelPort,
 } from "./types.ts";
 import { LIBRARY_NAME, VERSION } from "./version.ts";
-import { mirror, nativeContext } from "./webmcp.ts";
+import type { ModelContext } from "./webmcp.ts";
+
+/**
+ * The browser's own `ModelContext` of this document, read when a `TabMcp` is
+ * made, through `Document.prototype`'s getter: never an own
+ * `document.modelContext` (a polyfill such as `@mcp-b/global`, or any page
+ * script; DEC-115). `undefined` without native WebMCP or a document. In the
+ * core; the mirror itself is a chunk of its own (DEC-171).
+ */
+function nativeContext(): ModelContext | undefined {
+	try {
+		return Object.getOwnPropertyDescriptor(
+			Document.prototype,
+			"modelContext",
+		)?.get?.call(document);
+	} catch {
+		return undefined; // no document
+	}
+}
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -254,12 +272,15 @@ export class TabMcp extends EventTarget {
 			this.#emit("toolschange", { tools: this.tools }),
 		);
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
-		// consequential tools only when their registration says so.
+		// consequential tools only when their registration says so. The getter
+		// is read now (WM 10); the mirror loads only then (DEC-171).
 		const context = options.webmcp === true ? nativeContext() : undefined;
 		if (context !== undefined)
-			mirror(this.#registry, context, (tool, input, signal) =>
-				this.#load().then((lazy) =>
-					lazy.callFromWebMcp(this.#calls, tool, input, signal),
+			import("./webmcp.ts").then((m) =>
+				m.mirror(this.#registry, context, (tool, input, signal) =>
+					this.#load().then((lazy) =>
+						lazy.callFromWebMcp(this.#calls, tool, input, signal),
+					),
 				),
 			);
 	}
