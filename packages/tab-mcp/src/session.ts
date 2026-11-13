@@ -10,7 +10,8 @@ import {
 	RelayErrorCode,
 	type RpcId,
 } from "./exchange.ts";
-import { errorName, type Logger } from "./log.ts";
+import { errorFields, type Logger } from "./log.ts";
+import { displayName, foreignDomain } from "./oauth/cimd.ts";
 import { PairingCodes } from "./oauth/pairing.ts";
 import {
 	type ByeReason,
@@ -23,6 +24,7 @@ import {
 	type RelayMessage,
 	type TabMessage,
 } from "./protocol.ts";
+import { StoreFailure } from "./store/guard.ts";
 import type { TokenStore } from "./store/types.ts";
 import { newId } from "./tokens.ts";
 
@@ -111,6 +113,30 @@ function clientHost(clientId: string): string {
 	} catch {
 		return "";
 	}
+}
+
+/**
+ * The app name a page claims, as the pairing page and the relay's texts for
+ * the model show it (RS 7, DEC-130): cleaned like an AI app's name (bidi,
+ * zero-width and other invisible characters removed, `displayName`), and
+ * dropped when it is empty then or names a domain that is not the page
+ * origin's host, its parent or a subdomain (`foreignDomain`), so
+ * "saturnus on https://ractive.ch" cannot stand in front of another origin.
+ */
+export function pageAppName(
+	name: string | undefined,
+	origin: string,
+): string | undefined {
+	if (name === undefined) return undefined;
+	const cleaned = displayName(name);
+	if (cleaned === "") return undefined;
+	let host = "";
+	try {
+		host = new URL(origin).hostname;
+	} catch {
+		// no origin: any domain in the name is foreign
+	}
+	return foreignDomain(cleaned, host) ? undefined : cleaned;
 }
 
 /**
@@ -319,10 +345,25 @@ export class TabSession {
 			this.#host.logger.error("tab.handler_error", {
 				session: this.sessionId,
 				type: parsed.message.type,
-				message: error instanceof Error ? error.name : "unknown",
+				...errorFields(error),
 			});
 			this.#sendError("bad_message", "the relay could not handle this message");
 		});
+	}
+
+	/**
+	 * A revocation the tab asked for failed. A store failure is logged as
+	 * `store.error` and the tab is told `store_unavailable`: nothing was wrong
+	 * with its message, and it may try again (RQ 5). Anything else goes to
+	 * `tab.handler_error` as before.
+	 */
+	#storeFailed(op: string, error: unknown): void {
+		if (!(error instanceof StoreFailure)) throw error;
+		this.#host.logger.error("store.error", { op, ...errorFields(error) });
+		this.#sendError(
+			"store_unavailable",
+			"the relay cannot change grants right now; try again shortly",
+		);
 	}
 
 	/** Take one token of the control budget; false when it is used up. */
@@ -382,12 +423,20 @@ export class TabSession {
 				await this.#serialIdentity(() => this.#host.signOut(this));
 				return;
 			case "grant.revoke":
-				if (!(await this.#host.revokeGrant(this, msg.grantId))) {
-					this.#sendError("unknown_id", "unknown grant");
+				try {
+					if (!(await this.#host.revokeGrant(this, msg.grantId))) {
+						this.#sendError("unknown_id", "unknown grant");
+					}
+				} catch (error) {
+					this.#storeFailed("revokeGrant", error);
 				}
 				return;
 			case "grants.revokeAll":
-				await this.#host.revokeAll(this);
+				try {
+					await this.#host.revokeAll(this);
+				} catch (error) {
+					this.#storeFailed("revokeAll", error);
+				}
 				return;
 			case "error":
 				this.#host.logger.debug("tab.error", {
@@ -445,7 +494,9 @@ export class TabSession {
 		clearTimeout(this.#helloTimer);
 		this.#state = "hello";
 		this.addressId = addressId;
-		this.appName = this.site.name ?? appName;
+		const claimed = pageAppName(appName, this.origin);
+		const appNameDropped = appName !== undefined && claimed === undefined;
+		this.appName = this.site.name ?? claimed;
 		const replaced = this.#host.claimAddress(this);
 		if (replaced !== undefined) {
 			replaced.end(
@@ -463,7 +514,7 @@ export class TabSession {
 			} catch (error) {
 				this.#host.logger.error("store.error", {
 					op: "revokeAll",
-					error: errorName(error),
+					...errorFields(error),
 				});
 				this.end(CloseCode.policyViolation, "could not revoke the grants");
 				return;
@@ -488,7 +539,7 @@ export class TabSession {
 		} catch (error) {
 			this.#host.logger.error("store.error", {
 				op: "listGrants",
-				error: errorName(error),
+				...errorFields(error),
 			});
 			// Unknown whether the page has grants: never close it early for it.
 			this.#used = true;
@@ -530,6 +581,9 @@ export class TabSession {
 			origin: this.origin,
 			library: `${library.name}@${library.version}`,
 			replaced: replaced !== undefined,
+			...(appNameDropped && this.site.name === undefined
+				? { appNameDropped: true }
+				: {}),
 		});
 		this.#host.ready(this);
 	}
