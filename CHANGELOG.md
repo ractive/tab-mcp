@@ -580,7 +580,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-### Unreleased
+### [0.10.0][relay-0.10.0] - 2026-11-13
 
 #### Added
 
@@ -594,8 +594,45 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - The tab error code `store_unavailable`: a `grant.revoke` or `grants.revokeAll` that
   failed because the token store failed (was `bad_message`).
 - `describeConfigError` and `unknownEnvNames` in the package; `ConfigError` has `key`.
+- Log events `tab.rate_limited`, `relay.bad_forwarded_ip` (a proxy header that is not an
+  address, logged once) and `http.handler_error` (an exception in a request handler,
+  answered with a plain 500 by the new `Bun.serve` `error` handler).
+- `installCrashLogging` is exported and described in the README, for embedders.
 
 #### Changed
+
+- A refresh stores the new token pair before it marks the old refresh token used. A token
+  store failure during a refresh is answered with 503 and the retry with the same token
+  succeeds; before, the retry counted as reuse and revoked the grant. A code exchange whose
+  token issue fails makes the code usable again.
+- A full instance (10 000 open authorization requests) evicts a request instead of
+  answering 429 to everyone: first one whose page is gone or whose dialog is closed,
+  otherwise the oldest of the network holding the most. Per-network caps count an IPv6
+  /56.
+- A metadata fetch for a client id that is not cached is charged to the requesting
+  network first (5, then 1 a minute) at `/authorize`, `/token` and `/revoke`, with 429
+  when used up. Set `TAB_MCP_CLIENT_ID_HOSTS` to avoid fetching for strangers at all.
+- Tab sessions have a message budget (30, then 2 a second) for every frame except `pong`
+  and `http.response*`. Past it the relay sends `rate_limited` and closes with 4008. A
+  second `grants.revokeAll` within a second of a finished revocation writes nothing.
+- `/token`, `/revoke` and `POST /authorize` read their body with a deadline and count its
+  bytes as they arrive: a slow body gets 408 with `Connection: close`, an oversized
+  chunked body is refused at the limit.
+- Timer settings above 2^31-1 ms (about 24.8 days) are refused at start; before, they
+  fired at once (a 30-day session lifetime closed every session right after it opened).
+- A client's JWKS may hold at most 20 keys, and at most 3 are tried per assertion. Failed
+  client assertions have a per-network budget, checked before metadata or keys are
+  loaded.
+- The MCP endpoint looks up the token before it reads the body: without a valid token at
+  most 16 KiB is read, and a larger body gets 401 (or 503) unparsed.
+- One timeout covers the DNS lookup and the metadata fetch.
+- A port is stripped from `X-Real-IP` / `X-Forwarded-For`; a value that is not an address
+  falls back to the socket address.
+- Keep-alive comments, error events and the "page gone" event are written only into event
+  streams. A streamed body that is not an event stream and ends early is broken off
+  instead of ending cleanly.
+- The expiry sweep calls the store inside a promise chain, so a store that throws
+  synchronously no longer ends the process.
 
 - `hello` no longer needs `page: {title}`; the relay ignores the field, which it never
   read. Libraries up to 0.15 send the page title, newer ones an empty one.
@@ -1092,6 +1129,7 @@ First release, version 0.1.0.
 [client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0
 [client-0.1.0-alpha.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.1
 [client-0.1.0-alpha.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0-alpha.0
+[relay-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.0
 [relay-0.9.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.9.0
 [relay-0.8.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.8.0
 [relay-0.7.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.7.1
