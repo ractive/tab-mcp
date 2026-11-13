@@ -602,7 +602,9 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - On an open relay a page origin that is not a serialised origin (or an extension's) of
   at most 255 characters is treated as no origin, on the pairing page and in the log.
 - A page's app name is cleaned like an AI app's name (bidi and invisible characters
-  removed) and dropped when it names a domain other than the page origin's host. Names
+  removed) and dropped when it names a domain other than the page origin's host (a
+  dotted word such as "Node.js" counts as one; a site's configured `name` is not
+  checked). Names
   and origins on the pairing page are bidi-isolated.
 - `/authorize` answers one "Open the page first" text whether the page is closed or its
   dialog is closed.

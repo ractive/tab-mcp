@@ -741,14 +741,25 @@ export function largestMessageBytes(config: RelayConfig): number {
 
 type Env = Record<string, string | undefined>;
 
-function seconds(env: Env, name: string): number | undefined {
+/**
+ * A number of seconds as milliseconds. Checked here, in seconds, so the
+ * error speaks the variable's unit: a value that rounds to 0 ms is not
+ * positive, and a timer setting (`timer`) stops at 2^31-1 ms.
+ */
+function seconds(env: Env, name: string, timer = false): number | undefined {
 	const raw = env[name];
 	if (raw === undefined || raw === "") return undefined;
 	const n = Number(raw);
-	if (!Number.isFinite(n) || n <= 0) {
+	const ms = Math.round(n * 1000);
+	if (!Number.isFinite(n) || ms <= 0) {
 		throw new ConfigError(`${name} must be a positive number of seconds`);
 	}
-	return Math.round(n * 1000);
+	if (timer && ms > MAX_TIMER_MS) {
+		throw new ConfigError(
+			`${name} must be at most ${Math.floor(MAX_TIMER_MS / 1000)} seconds (about 24.8 days): a timer fires at once beyond that`,
+		);
+	}
+	return ms;
 }
 
 /** Like `seconds`, but 0 is allowed (it switches the feature off). */
@@ -877,13 +888,13 @@ export function configFromEnv(env: Env): Partial<RelayConfig> {
 	set("maxSessions", integer(env, "TAB_MCP_MAX_SESSIONS"));
 	set("maxSessionsPerIp", integer(env, "TAB_MCP_MAX_SESSIONS_PER_IP"));
 	set("maxConcurrentRequests", integer(env, "TAB_MCP_MAX_CONCURRENT_REQUESTS"));
-	set("requestTimeoutMs", seconds(env, "TAB_MCP_REQUEST_TIMEOUT_S"));
-	set("keepAliveMs", seconds(env, "TAB_MCP_KEEPALIVE_S"));
+	set("requestTimeoutMs", seconds(env, "TAB_MCP_REQUEST_TIMEOUT_S", true));
+	set("keepAliveMs", seconds(env, "TAB_MCP_KEEPALIVE_S", true));
 	set("idleTimeoutMs", seconds(env, "TAB_MCP_IDLE_TIMEOUT_S"));
 	set("unpairedIdleTimeoutMs", seconds(env, "TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S"));
-	set("sessionLifetimeMs", seconds(env, "TAB_MCP_SESSION_LIFETIME_S"));
-	set("heartbeatMs", seconds(env, "TAB_MCP_HEARTBEAT_S"));
-	set("bodyTimeoutMs", seconds(env, "TAB_MCP_BODY_TIMEOUT_S"));
+	set("sessionLifetimeMs", seconds(env, "TAB_MCP_SESSION_LIFETIME_S", true));
+	set("heartbeatMs", seconds(env, "TAB_MCP_HEARTBEAT_S", true));
+	set("bodyTimeoutMs", seconds(env, "TAB_MCP_BODY_TIMEOUT_S", true));
 	set("pageWaitMs", secondsOrZero(env, "TAB_MCP_PAGE_WAIT_S"));
 	set("maxMessageBytes", integer(env, "TAB_MCP_MAX_MESSAGE_BYTES"));
 	set("accessTokenTtlMs", seconds(env, "TAB_MCP_ACCESS_TOKEN_TTL_S"));

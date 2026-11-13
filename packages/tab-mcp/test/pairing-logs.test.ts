@@ -16,6 +16,7 @@ import {
 import { join } from "node:path";
 import {
 	ConfigError,
+	configFromEnv,
 	describeConfigError,
 	resolveConfig,
 	unknownEnvNames,
@@ -657,6 +658,21 @@ describe("RQ 11: enums are checked, errors name the variable, unknown variables 
 		expect(message({ development: false })).toBe(
 			"TAB_MCP_PUBLIC_URL is required",
 		);
+	});
+
+	test("a seconds variable is checked in seconds (review of PR 122)", () => {
+		expect(() =>
+			configFromEnv({ TAB_MCP_REQUEST_TIMEOUT_S: "3000000" }),
+		).toThrow(
+			"TAB_MCP_REQUEST_TIMEOUT_S must be at most 2147483 seconds (about 24.8 days)",
+		);
+		expect(() => configFromEnv({ TAB_MCP_KEEPALIVE_S: "0.0001" })).toThrow(
+			"TAB_MCP_KEEPALIVE_S must be a positive number of seconds",
+		);
+		// Not a timer: compared with timestamps, so no upper bound.
+		expect(
+			configFromEnv({ TAB_MCP_IDLE_TIMEOUT_S: "3000000" }).idleTimeoutMs,
+		).toBe(3_000_000_000);
 	});
 
 	test("unknownEnvNames lists TAB_MCP_ variables the relay does not read", () => {
