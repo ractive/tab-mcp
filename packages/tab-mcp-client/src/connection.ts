@@ -123,7 +123,8 @@ export const SIBLING_GRACE_MS = 1_000;
  * only a claim of this tab's own address, heard after this tab's own
  * `session`, counts: one heard while this tab was still connecting, or from
  * a tab on another address (after `newAddress()` there), cannot have caused
- * the replacement (CC 5). Without `BroadcastChannel` nothing is heard, and
+ * the replacement (CC 5). A claim without an address, from a tab still on a
+ * library up to 0.15, counts as before. Without `BroadcastChannel` nothing is heard, and
  * every `replaced` counts as unknown.
  */
 function siblingTabs(
@@ -145,7 +146,12 @@ function siblingTabs(
 			channel = new BroadcastChannel(name);
 			channel.onmessage = (event: MessageEvent) => {
 				const data = event.data as { type?: unknown; address?: unknown } | null;
-				if (!listening || data?.type !== "claimed" || data.address !== address)
+				// No address: a tab with a library up to 0.15, while both run.
+				if (
+					!listening ||
+					data?.type !== "claimed" ||
+					(data.address !== undefined && data.address !== address)
+				)
 					return;
 				at = Date.now();
 				onClaim?.();

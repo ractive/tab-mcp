@@ -5,6 +5,18 @@ import { base64url, isSecret, newSecret, SecretStore } from "../src/secret.ts";
 import { MemoryStorage, newTab } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
+/** What a connection uses: the current secret, else a new one. */
+const got = (store: SecretStore): string => store.current() ?? store.rotate();
+
+test("current() makes no secret", () => {
+	const storage = new MemoryStorage();
+	const store = new SecretStore(storage, "k");
+	expect(store.current()).toBeUndefined();
+	expect(storage.items.size).toBe(0);
+	const made = store.rotate();
+	expect(store.current()).toBe(made);
+});
+
 test("base64url matches the platform encoder", () => {
 	for (const n of [0, 1, 2, 3, 31, 32, 33]) {
 		const bytes = crypto.getRandomValues(new Uint8Array(n));
@@ -22,15 +34,15 @@ test("a secret is 43 base64url characters and gives a 52-character address id", 
 
 test("the secret is kept in storage and stable", () => {
 	const storage = new MemoryStorage();
-	const a = new SecretStore(storage, "k").get();
+	const a = got(new SecretStore(storage, "k"));
 	expect(storage.items.get("k")).toBe(a);
-	expect(new SecretStore(storage, "k").get()).toBe(a);
+	expect(got(new SecretStore(storage, "k"))).toBe(a);
 });
 
 test("an invalid stored value is replaced", () => {
 	const storage = new MemoryStorage();
 	storage.setItem("k", "too-short");
-	const s = new SecretStore(storage, "k").get();
+	const s = got(new SecretStore(storage, "k"));
 	expect(isSecret(s)).toBe(true);
 	expect(storage.items.get("k")).toBe(s);
 });
@@ -39,16 +51,16 @@ test("rotate makes a new secret; another store on the same storage sees it", () 
 	const storage = new MemoryStorage();
 	const a = new SecretStore(storage, "k");
 	const b = new SecretStore(storage, "k");
-	const first = a.get();
-	expect(b.get()).toBe(first);
+	const first = got(a);
+	expect(got(b)).toBe(first);
 	const second = a.rotate();
 	expect(second).not.toBe(first);
-	expect(b.get()).toBe(second);
+	expect(got(b)).toBe(second);
 });
 
 test("without storage, or with storage that throws, the secret lives as long as the page", () => {
 	const none = new SecretStore(null, "k");
-	expect(none.get()).toBe(none.get());
+	expect(got(none)).toBe(got(none));
 	const throwing = new SecretStore(
 		{
 			getItem: () => {
@@ -60,9 +72,9 @@ test("without storage, or with storage that throws, the secret lives as long as 
 		},
 		"k",
 	);
-	const s = throwing.get();
+	const s = got(throwing);
 	expect(isSecret(s)).toBe(true);
-	expect(throwing.get()).toBe(s);
+	expect(got(throwing)).toBe(s);
 });
 
 const OLD = "tab-mcp:secret:https://relay.example";
@@ -73,14 +85,14 @@ test("the old shared key's secret is copied once: the first page keeps the addre
 	const storage = new MemoryStorage();
 	const old = newSecret();
 	storage.setItem(OLD, old);
-	expect(store(storage, "saturnus").get()).toBe(old);
+	expect(got(store(storage, "saturnus"))).toBe(old);
 	expect(storage.items.get(`${OLD}:saturnus`)).toBe(old);
 	// Copied, not moved: a page still on 0.4 (or a rollback) reads it as before.
 	expect(storage.items.get(OLD)).toBe(old);
-	const second = store(storage, "todo").get();
+	const second = got(store(storage, "todo"));
 	expect(second).not.toBe(old);
 	// The first page keeps it on the next load.
-	expect(store(storage, "saturnus").get()).toBe(old);
+	expect(got(store(storage, "saturnus"))).toBe(old);
 });
 
 test("New address before the first connect marks the old secret taken, so no other page picks up the abandoned address", () => {
@@ -89,7 +101,7 @@ test("New address before the first connect marks the old secret taken, so no oth
 	storage.setItem(OLD, old);
 	const fresh = store(storage, "a").rotate();
 	expect(fresh).not.toBe(old);
-	expect(store(storage, "b").get()).not.toBe(old);
+	expect(got(store(storage, "b"))).not.toBe(old);
 });
 
 test("a secret that was read is kept even when writing the copy fails", () => {
@@ -99,7 +111,7 @@ test("a secret that was read is kept even when writing the copy fails", () => {
 	storage.setItem = () => {
 		throw new Error("QuotaExceededError");
 	};
-	expect(store(storage, "page").get()).toBe(old);
+	expect(got(store(storage, "page"))).toBe(old);
 });
 
 test("TabMcp keys the secret by relay origin and the URI-encoded server name; an explicit storageKey is used as given", async () => {

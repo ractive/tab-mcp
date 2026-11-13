@@ -274,9 +274,9 @@ does not reconnect by itself.
   the latest). "New address" (`newAddress()`) always first takes the address back with
   the old secret and `hello.revokeAll`, connected or not, taken over or not (DEC-136), so
   the relay revokes the grants of the old address in the same step as it hands the
-  address back; whoever claims it again right after gets no grant back. The old secret
-  is the one the tab last connected with, so a rotation in another tab meanwhile does
-  not leave the hijacked address untouched. Requests already on their way under a revoked grant are
+  address back; whoever claims it again right after gets no grant back. It takes back
+  the stored secret's address; a tab that rotated the secret before took its own old
+  address back the same way. Requests already on their way under a revoked grant are
   refused before they reach the page, requests in flight and open listen streams of the
   grant end, and authorization codes the address was given before are void, so a pairing
   the holder finished just before does not become a grant either. Only once the relay
@@ -295,7 +295,8 @@ does not reconnect by itself.
   takeover look harmless, but such script can read the secret and change the page
   anyway, so the channel adds no new attacker. The address id is in the MCP address,
   which is no secret either. A tab on another address, or one that claimed while this
-  tab was still connecting, does not count.
+  tab was still connecting, does not count. A claim without an address, from a tab on
+  a library up to 0.15, still counts while both versions run.
 - **What helps:** identity binding for pages with user accounts; the page on its own
   origin, without third-party scripts; `newAddress()` on logout on a shared device.
   A backend-signed claim of the address was considered and not built (DEC-094): without a

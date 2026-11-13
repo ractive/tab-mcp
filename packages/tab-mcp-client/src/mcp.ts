@@ -582,11 +582,14 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		};
 		const stream = new ReadableStream<Uint8Array>({
 			start: (controller) => {
-				/** Send the one answer and end the stream, whatever happens. */
-				const finish = (event: Uint8Array) => {
+				/**
+				 * Send the one answer and end the stream, whatever happens. Encoded
+				 * only if someone listens: a cancelled call's result was not checked.
+				 */
+				const finish = (event: () => Uint8Array) => {
 					if (signal.aborted) return; // nobody listens any more
 					try {
-						controller.enqueue(event);
+						controller.enqueue(event());
 						controller.close();
 					} catch {
 						// the stream was cancelled meanwhile
@@ -594,7 +597,7 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 				};
 				runTool(params, signal, grant, deliverable).then(
 					(outcome) =>
-						finish(
+						finish(() =>
 							outcome.kind === "invalid"
 								? sseEvent({
 										jsonrpc: "2.0",
@@ -606,7 +609,7 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 									: answer(outcome.result),
 						),
 					() =>
-						finish(
+						finish(() =>
 							sseEvent({
 								jsonrpc: "2.0",
 								id,

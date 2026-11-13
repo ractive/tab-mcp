@@ -2690,9 +2690,11 @@ Iteration 32 (review of 2026-11-13, CC 4, CC 12, CC 14). Amends DEC-095.
   `replaced` it had seen in memory, so a page with its own UI, the documented "call
   `newAddress()` on logout" and a reload after a takeover left the old grants at the
   relay for up to 90 days.
-- The old secret is the one this tab last connected with, else the stored one, read when
-  `newAddress()` is called. A rotation in another tab no longer makes the take-back
-  connect with the new secret and leave the hijacked address alone.
+- The old secret is the stored one, read when `newAddress()` is called. The review's case
+  of a rotation in another tab (the take-back then used the new secret and left the
+  hijacked address alone) is gone with the first point: that tab's `newAddress()` took
+  the hijacked address back itself. Remembering the secret this tab last connected with
+  was built and dropped in review: 23 B of the core for a case without harm.
 - The take-back connection is never the page's session: its `session`, grants and close
   stay unseen (`#open` gives it a host whose callbacks are never current), `state` goes
   `connecting` once, and `disconnect()` cancels it. Only then does the page rotate, clear
@@ -2708,8 +2710,9 @@ Iteration 32 (review of 2026-11-13, CC 4, CC 12, CC 14). Amends DEC-095.
   The hosted relay is 0.9.0; `hello.revokeAll` exists since 0.5.
 - A `newAddress()` with a stored secret opens a WebSocket also when the page is off. It
   takes no user activation (as before); the connection only revokes and closes.
-- No guard for a `connect()` while `newAddress()` runs (33 B of the core); the README says
-  to wait for it.
+- One `newAddress()` at a time: a second call returns the running one, and `connect()`
+  meanwhile waits for it and then connects with the new address (review of PR 119:
+  without that, a `connect()` opened a second connection with the old secret).
 
 ## DEC-137: A sibling's `claimed` carries the address id
 
@@ -2723,6 +2726,9 @@ channel.
   replacement and no longer makes a takeover read as "Opened in another tab".
 - The address id is part of the MCP address, which is no secret; script that can post on
   the channel can read the secret anyway.
+- A claim without an address, from a tab still on a library up to 0.15, counts as
+  before, so that a deploy does not show "someone may have copied its address" for a
+  harmless older tab (review of PR 119). It can go once 0.15 is gone.
 
 ## DEC-138: Connection edge cases of the client
 

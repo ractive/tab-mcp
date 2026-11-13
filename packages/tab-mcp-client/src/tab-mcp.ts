@@ -186,12 +186,8 @@ export class TabMcp extends EventTarget {
 	 * takes the old address back does not depend on it (DEC-136).
 	 */
 	#stayOn = false;
-	/**
-	 * The secret of the last connection this page opened: the address that
-	 * `newAddress()` takes back, also when another tab has rotated the stored
-	 * secret since (CC 4).
-	 */
-	#lastSecret: string | undefined;
+	/** The running `newAddress()`: a second call returns it, `connect()` waits for it. */
+	#renewing: Promise<SessionInfo | undefined> | undefined;
 	readonly #identityAssertion: IdentityAssertionHandler | undefined;
 	#identity: IdentityState = "none";
 	#identityMessage: string | undefined;
@@ -477,7 +473,10 @@ export class TabMcp extends EventTarget {
 				),
 			);
 		}
-		return this.#start();
+		// While `newAddress()` runs: afterwards, with the new address.
+		return this.#renewing
+			? this.#renewing.then(() => this.connect({ resume: true }))
+			: this.#start();
 	}
 
 	#start(): Promise<SessionInfo> {
@@ -518,7 +517,8 @@ export class TabMcp extends EventTarget {
 		const { openConnection, addressIdOf, withAddress } = await this.#load();
 		const relayUrl = this.#relayUrl;
 		if (relayUrl === undefined || this.#secrets === undefined) return noRelay();
-		const secret = takeBack ?? this.#secrets.get();
+		const secret =
+			takeBack ?? this.#secrets.current() ?? this.#secrets.rotate();
 		const address = await addressIdOf(secret);
 		if (generation !== this.#generation) {
 			throw new DOMException("The connection was cancelled", "AbortError");
@@ -530,10 +530,7 @@ export class TabMcp extends EventTarget {
 			secret,
 			{ address, revokeAll: !!takeBack },
 		);
-		if (!takeBack) {
-			ref.connection = connection;
-			this.#lastSecret = secret;
-		}
+		if (!takeBack) ref.connection = connection;
 		this.#connection = connection;
 		return connection.ready;
 	}
@@ -587,7 +584,10 @@ export class TabMcp extends EventTarget {
 		// Without a relay there is no secret store.
 		const secrets = this.#secrets;
 		if (secrets === undefined) return noRelay();
-		return this.#renew(secrets);
+		// biome-ignore lint/suspicious/noAssignInExpressions: one promise per run
+		return (this.#renewing ??= this.#renew(secrets).finally(() => {
+			this.#renewing = undefined;
+		}));
 	}
 
 	async #renew(secrets: SecretStore): Promise<SessionInfo | undefined> {
@@ -595,10 +595,9 @@ export class TabMcp extends EventTarget {
 			this.#state !== "disconnected" ||
 			this.#reconnecting !== undefined ||
 			this.#stayOn;
-		// The address this page used, else the stored one (a page that has not
-		// connected since it loaded); captured now, so that a rotation in
-		// another tab does not change which address is taken back.
-		const old = this.#lastSecret ?? secrets.current();
+		// Read now, also when the page is off or was taken over (CC 4). Another
+		// tab that rotated the secret since took the address it had back itself.
+		const old = secrets.current();
 		this.#end("new_address");
 		const generation = this.#generation;
 		if (old !== undefined) {
@@ -619,12 +618,11 @@ export class TabMcp extends EventTarget {
 				}
 			}
 		}
-		this.#lastSecret = undefined;
 		secrets.rotate();
 		// The relay revoked them (CC 14).
 		this.#setGrants([]);
 		// It was on: the user chose that already, as for a reconnect.
-		if (wasOn) return this.connect({ resume: true });
+		if (wasOn) return this.#start();
 		this.#setState("disconnected");
 		return undefined;
 	}
@@ -918,6 +916,7 @@ export class TabMcp extends EventTarget {
 				const session = sessionInfo(m);
 				if (!current()) return session;
 				this.#session = session;
+				this.#stayOn = false;
 				this.#stopReconnecting();
 				this.#setState("connected");
 				this.#setGrants([...m.grants]);

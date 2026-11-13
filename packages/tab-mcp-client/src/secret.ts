@@ -54,12 +54,10 @@ export class SecretStore {
 		this.#claimKey = oldKey === undefined ? undefined : `${oldKey}#moved`;
 	}
 
-	/** The current secret; storage first, so a rotation in another tab is seen. */
-	get(): string {
-		return this.current() ?? this.rotate();
-	}
-
-	/** The current secret, or `undefined` while this page has none (none made yet). */
+	/**
+	 * The current secret, or `undefined` while this page has none (none made
+	 * yet); storage first, so a rotation in another tab is seen.
+	 */
 	current(): string | undefined {
 		let stored: string | null = null;
 		try {

@@ -25,21 +25,22 @@ report. Decisions: DEC-136 to DEC-138. The 0.4 secret-key migration (DEC-083) st
 - [x] `newAddress()` always takes the old address back with `hello.revokeAll` before it
   rotates, connected or not, taken over or not; nothing to take back when the page never
   had a secret (`SecretStore.current()`)
-- [x] The old secret is the one this tab last connected with (else the stored one),
-  captured when `newAddress()` is called: a rotation in another tab no longer makes the
-  take-back connect with the new secret
+- [x] The old secret is the stored one, read when `newAddress()` is called; a tab that
+  rotated it before took its own old address back (DEC-136)
 - [x] `#takenOver` and the `grants.revokeAll`-then-`bye` branch removed; `#stayOn` only
   decides whether to connect afterwards (taken over while on, or a failed `newAddress()`)
 - [x] The take-back connection is never the page's session: no `connected` for the old
   address, `state` goes `connecting` once; `disconnect()` cancels it
 - [x] Rejects and keeps the secret when the take-back fails (unreachable, refused, taken
-  over again)
+  over again); one run at a time, `connect()` meanwhile waits for it
 - [x] Tests: connected, disconnected with and without a secret, unreachable relay, a
-  rotation in another tab, `disconnect()` during the take-back
+  rotation in another tab, `connect()`, a second call and `disconnect()` during the
+  take-back
 
 ### CC 5: sibling detection counts claims that cannot have caused the replacement
 
-- [x] `claimed` carries the address id; a claim of another address does not count
+- [x] `claimed` carries the address id; a claim of another address does not count (one
+  without an address, from a tab on 0.15 or older, still does)
 - [x] Claims heard before the tab's own `session` are ignored
 - [x] Tests for both; the channel test now expects the address id and no secret
 
@@ -112,6 +113,10 @@ report. Decisions: DEC-136 to DEC-138. The 0.4 secret-key migration (DEC-083) st
   (for example on logout). It takes no user activation, as before; the connection only
   revokes and closes (DEC-136).
 - After the relay with the optional `page` is everywhere, the client can drop the field.
-- The core grows by about 50 B gzipped (6292 B, budget 6400 B). A guard that made a
-  `connect()` during `newAddress()` wait for it cost 33 B and was left out: the README
-  says to wait for `newAddress()` first.
+- The core grows by about 50 B gzipped (6293 B against 6242 B, budget 6400 B):
+  `SecretStore.get()` gave way to `current()` plus `rotate()`, and remembering the last
+  connected secret was dropped (23 B) to pay for the `newAddress()` guard the review
+  asked for.
+- Review of PR 119 (claude 4 findings): the `newAddress()` guard, `#stayOn` reset at
+  `session`, a cancelled call whose result is not JSON no longer throws in a promise
+  handler, and addressless claims of older tabs count.

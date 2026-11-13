@@ -573,6 +573,34 @@ describe("message size (review of PR #2)", () => {
 		expect((await ended).detail.outcome).toBe("error");
 	});
 
+	test("a cancelled call whose result is not JSON ends without an unhandled rejection", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			await t.registerTool({
+				name: "late",
+				description: "Answers the abort with a BigInt",
+				execute: (_input, { signal }) =>
+					new Promise((resolve) =>
+						signal.addEventListener("abort", () =>
+							resolve({ content: [{ type: "text", text: "a" }], n: 1n }),
+						),
+					),
+			});
+			await t.connect();
+			const ended = nextEvent<ToolCallEnd>(t, "toolcallend");
+			relay.send(call("r1", "late"));
+			await relay.next("http.response.start");
+			relay.send({ type: "http.cancel", id: "r1", reason: "client_closed" });
+			expect((await ended).detail.outcome).toBe("cancelled");
+			await Bun.sleep(20);
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
 	test("a limit too small to frame anything refuses to connect", async () => {
 		relay.limits = { ...STUB_LIMITS, maxMessageBytes: 300 };
 		await expect(t.connect()).rejects.toThrow(/message limit/);
@@ -719,28 +747,58 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		expect((await relay.next("hello"))["secret"]).toBe(secret);
 	});
 
-	test("takes back the address this page used, also after another tab rotated the stored secret (CC 4)", async () => {
+	test("a tab that never connected takes the stored address back, which another tab uses (CC 4)", async () => {
 		const storage = new MemoryStorage();
 		const a = newTab(relay.url, { storage });
 		const b = newTab(relay.url, { storage });
 		try {
 			await a.connect();
 			const first = (await relay.next("hello"))["secret"];
-			// The other tab gets a new address first (it takes `first` back).
 			await b.newAddress();
 			expect(await relay.next("hello")).toMatchObject({
 				secret: first,
 				revokeAll: true,
 			});
+			// The stored secret is new now; the next take-back is of that one.
 			await a.newAddress();
-			expect(await relay.next("hello")).toMatchObject({
-				secret: first,
-				revokeAll: true,
-			});
+			const second = await relay.next("hello");
+			expect(second).toMatchObject({ revokeAll: true });
+			expect(second["secret"]).not.toBe(first);
 		} finally {
 			a.disconnect();
 			b.disconnect();
 		}
+	});
+
+	test("connect() while newAddress() runs waits for it and connects with the new address", async () => {
+		await t.connect();
+		const secret = (await relay.next("hello"))["secret"];
+		t.disconnect();
+		const renewing = t.newAddress();
+		expect(t.newAddress()).toBe(renewing); // one run at a time
+		const connecting = t.connect();
+		await renewing;
+		const session = await connecting;
+		expect(session.address).toBeDefined();
+		expect(await relay.next("hello")).toMatchObject({
+			secret,
+			revokeAll: true,
+		});
+		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
+		expect(t.state).toBe("connected");
+		expect(relay.sockets).toHaveLength(3); // first, take-back, new: no fourth
+	});
+
+	test("after a takeover and a later session of its own that ended, newAddress() stays off", async () => {
+		await t.connect();
+		replace();
+		await nextEvent(t, "replaced");
+		await t.connect({ resume: true });
+		const gone = nextEvent(t, "disconnected");
+		relay.close(4002); // idle: not reconnected
+		await gone;
+		await t.newAddress();
+		expect(t.state).toBe("disconnected");
 	});
 
 	test("disconnect() during the take-back cancels it and keeps the secret", async () => {
@@ -798,6 +856,26 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		} finally {
 			sibling.disconnect();
 		}
+	});
+
+	test("a claim without an address, from a tab on a library up to 0.15, counts", async () => {
+		await t.connect();
+		const announce = new BroadcastChannel(
+			`tab-mcp:secret:${relay.url}:test-page#tabs`,
+		);
+		const listener = new BroadcastChannel(
+			`tab-mcp:secret:${relay.url}:test-page#tabs`,
+		);
+		const delivered = new Promise((r) => {
+			listener.onmessage = r;
+		});
+		announce.postMessage({ type: "claimed" });
+		await delivered;
+		announce.close();
+		listener.close();
+		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
+		replaceFirst();
+		expect((await replaced).detail).toEqual({ sibling: true });
 	});
 
 	test("a claim of another address does not count (CC 5)", async () => {

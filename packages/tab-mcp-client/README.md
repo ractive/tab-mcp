@@ -400,14 +400,15 @@ keeps it, the others get new ones. The old key stays for pages still on 0.4.
 
 "New address" in the dialog calls `newAddress()`, which disconnects every
 app and makes a new address; when apps are connected, the dialog asks first. It first
-takes the old address back: it connects with the old secret (the one the tab last
-connected with, else the stored one), and the relay revokes every grant of the address in
+takes the old address back: it connects with the stored secret, and the relay revokes
+every grant of the address in
 the same step (`hello.revokeAll`), whether the page was connected or not. Then it makes
 the new secret, clears `grants`, and connects with it if the page was connected,
 connecting or reconnecting (or taken over). A page that never had a secret makes one
 without connecting. If the old address cannot be taken back (the relay is unreachable,
 or someone takes it over again first), it rejects and keeps the old secret, so calling
-it again tries again. Wait for it before calling `connect()`. The relay's
+it again tries again. A second call while it runs returns the same promise; `connect()`
+meanwhile waits for it and then connects with the new address. The relay's
 sign-in page points users to it when someone else may be guessing codes. A page with its
 own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects
 again; while the page is closed, they get "the page is not open".
@@ -422,7 +423,7 @@ was:
 - `event.detail.sibling` is `true`: a tab of the same page in this browser said within
   the last 10 seconds that it claimed this tab's address, after this tab's own session
   started (a claim of another address, or one heard while this tab was still connecting,
-  does not count). That message usually comes just after the takeover, so the
+  does not count; a claim without an address, from a tab still on 0.15 or older, does). That message usually comes just after the takeover, so the
   library waits up to a second for it, and `replaced` may come that much after
   `disconnected`. The usual cause, and harmless. Once the page has opened the default
   dialog, the library shows "Opened in another tab".
