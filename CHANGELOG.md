@@ -80,8 +80,35 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   or one that claimed while this tab was still connecting, no longer makes a takeover
   read as "Opened in another tab".
 - The library no longer answers a relay message it cannot read with `error`.
+- The connect dialog says in plain words why it could not connect or why the page was
+  disconnected ("Could not connect. Check your internet connection.", "The session
+  ended.", "Not connected." for a call without a user action) and offers "Connect again"
+  (`.tab-mcp-retry`); the error itself goes to the console. While the library reconnects
+  by itself, it says "Connection lost. Reconnecting…". Before, it showed the relay's
+  message after "Could not connect:" and had no way to connect again.
+- With identity binding, the connect dialog shows the address only once the relay
+  accepted the page's sign-in, and says otherwise "Checking your sign-in…", "Sign in to
+  this page first." or that the sign-in was not accepted, with `identityMessage`.
+- The connect dialog: "How do I add it?" comes right below the address, before the code;
+  "New address" moved from beside Copy to the end of the setup
+  (`.tab-mcp-new-address-row`), with a line on what it does.
+- The setup steps (`./setup` and the dialog) end with the step that starts the sign-in:
+  `/mcp` and Authenticate for Claude Code, `codex mcp login <name>` as the third line of
+  Codex's command. ChatGPT's entry names the Codex feature its Mac app needs.
+- A refused Copy says on the button what to do ("Press Ctrl+C", "Press ⌘C" on Apple
+  devices, "Selected" on a touch screen) instead of only telling screen readers.
+  "Copied" goes back to "Copy" after 2 seconds.
+- While a confirmation is open in a hidden tab, the tab's title starts with "Allow? – ".
+  In `tools/list`, the description of a consequential tool ends with "The page may ask
+  the user to allow each call, usually in the page's browser tab."
+- The dialogs carry `lang="en"` and `dir="ltr"`, so a screen reader on a page in another
+  language reads them with an English voice and a right-to-left page does not mirror
+  them.
 
 #### Fixed
+
+- The connect dialog's code row no longer overflows at 320 px: below 30rem, the code's
+  Copy goes under the code.
 
 - The schema check at registration no longer reads `default`, `examples`, `const` and
   `enum` values or property names as keywords: `examples: [{ pattern: "*.ts" }]` was

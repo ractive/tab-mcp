@@ -680,7 +680,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			]);
 			expect(m.commands).toEqual([
 				`claude mcp add --transport http tab-mcp-for-chrome ${stack.address}`,
-				`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${stack.address}`,
+				`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${stack.address}\ncodex mcp login tab-mcp-for-chrome`,
 			]);
 			expect(m.overflow).toBe(false);
 			expect(m.widths[1]).toBe(m.widths[0]);

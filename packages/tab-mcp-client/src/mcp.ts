@@ -48,6 +48,10 @@ const META_SUBSCRIPTION = "io.modelcontextprotocol/subscriptionId";
 const HEADER_MISMATCH = -32020;
 const UNSUPPORTED_VERSION = -32022;
 
+/** After the description of a consequential tool in `tools/list`. */
+export const CONFIRMED_IN_TAB =
+	"The page may ask the user to allow each call, usually in the page's browser tab.";
+
 type Id = string | number;
 type Json = Record<string, unknown>;
 
@@ -506,7 +510,12 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		return tools.list().map((tool) => {
 			const entry: Json = { name: tool.name };
 			if (tool.title !== undefined) entry["title"] = tool.title;
-			entry["description"] = tool.description;
+			// The AI app waits while the page asks: it can tell the user where
+			// (CU 9). The tool's own description is unchanged elsewhere.
+			entry["description"] =
+				tool.annotations.consequentialHint === true
+					? `${tool.description} ${CONFIRMED_IN_TAB}`
+					: tool.description;
 			entry["inputSchema"] = tool.inputSchema;
 			if (tool.outputSchema !== undefined)
 				entry["outputSchema"] = tool.outputSchema;

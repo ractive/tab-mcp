@@ -9,6 +9,7 @@ import {
 	createMcpHandler as sdkHandler,
 } from "@modelcontextprotocol/server";
 import {
+	CONFIRMED_IN_TAB,
 	compileTool,
 	createMcpHandler,
 	decodeHeaderValue,
@@ -664,7 +665,7 @@ describe("consequential tools", () => {
 		expect(t.runs()).toBe(0);
 	});
 
-	test("the tool list shows destructiveHint and the WebMCP hint", async () => {
+	test("the tool list shows destructiveHint and the WebMCP hint, and that the page asks (CU 9)", async () => {
 		const t = ours();
 		t.registry.register({
 			name: "c",
@@ -684,7 +685,7 @@ describe("consequential tools", () => {
 		const tools = result.tools;
 		expect(tools.find((x) => x["name"] === "c")).toEqual({
 			name: "c",
-			description: "C",
+			description: `C ${CONFIRMED_IN_TAB}`,
 			inputSchema: { type: "object" },
 			annotations: { destructiveHint: true },
 			_meta: { "ch.ractive.tab-mcp/annotations": { consequentialHint: true } },

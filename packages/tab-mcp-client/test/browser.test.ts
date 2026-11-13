@@ -260,6 +260,67 @@ test.skipIf(chrome === undefined)(
 	60_000,
 );
 
+/**
+ * What sticks out of the connect dialog's content box sideways (into its
+ * padding or beyond), at the window's width; the code box's own padding too.
+ */
+const OVERFLOW = `(() => {
+	const d = document.querySelector('dialog.tab-mcp-connect');
+	const right = (e) => e.getBoundingClientRect().right - parseFloat(getComputedStyle(e).paddingRight);
+	const edge = right(d) + 1;
+	const code = d.querySelector('.tab-mcp-code');
+	const out = [...d.querySelectorAll('*')].filter((e) => e.checkVisibility() && e.getBoundingClientRect().right > (code.contains(e) && e !== code ? right(code) + 1 : edge)).map((e) => e.className || e.localName);
+	return { scrolls: d.scrollWidth > d.clientWidth, out, codeShown: d.querySelector('.tab-mcp-code-value').checkVisibility() };
+})()`;
+
+test.skipIf(chrome === undefined)(
+	"the connect dialog with its code fits 320 and 360 px, also with 18 px text (CU 15)",
+	async () => {
+		try {
+			for (const [width, font] of [
+				[320, 16],
+				[360, 16],
+				[360, 18],
+			] as const) {
+				await page.send("Emulation.setDeviceMetricsOverride", {
+					width,
+					height: 640,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+				await page.goto(`http://127.0.0.1:${server.port}/`);
+				await page.eval(
+					"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })",
+				);
+				await page.eval(
+					`document.documentElement.style.fontSize = "${font}px"`,
+				);
+				await page.click("#connect");
+				await page.eval(
+					"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-connect .tab-mcp-code-value')?.textContent ? r(true) : setTimeout(w, 10)); w(); })",
+				);
+				const seen: Record<string, unknown> = {
+					width,
+					font,
+					...(await page.eval<Record<string, unknown>>(OVERFLOW)),
+				};
+				expect(seen).toEqual({
+					width,
+					font,
+					scrolls: false,
+					out: [],
+					codeShown: true,
+				});
+				await page.press("Escape");
+				await page.eval("mcp.disconnect()");
+			}
+		} finally {
+			await page.send("Emulation.clearDeviceMetricsOverride");
+		}
+	},
+	60_000,
+);
+
 test.skipIf(chrome === undefined)(
 	"a confirmation opened in a background tab waits until the tab is in front again (iteration 13)",
 	async () => {
