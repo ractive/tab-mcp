@@ -8,6 +8,7 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { TabMcp } from "../src/index.ts";
+import { CONFIRMED_IN_TAB } from "../src/mcp.ts";
 import { createTunnelFetch, type TunnelFetch } from "../src/tunnel.ts";
 import type {
 	ConfirmAnswer,
@@ -1204,6 +1205,27 @@ describe("a site's own assistant (iteration 40)", () => {
 		annotations: { consequentialHint: true },
 		execute: () => "gone",
 	};
+
+	test("tools/list says the page asks in its tab only when the library's dialog asks (DEC-169)", async () => {
+		const description = async (w: Wire) => {
+			const list = (await (
+				await post(w.tunnel, rpc(1, "tools/list"))
+			).json()) as { result: { tools: { description: string }[] } };
+			return list.result.tools[0]?.description;
+		};
+		const dialog = newPage();
+		await dialog.registerTool(wipe);
+		expect(await description(await wire(dialog))).toBe(
+			`Delete everything ${CONFIRMED_IN_TAB}`,
+		);
+		// The port's own question, or the page's: they may ask anywhere.
+		expect(
+			await description(await wire(dialog, { onConfirm: () => true })),
+		).toBe("Delete everything");
+		const own = newPage({ onConfirm: () => true });
+		await own.registerTool(wipe);
+		expect(await description(await wire(own))).toBe("Delete everything");
+	});
 
 	test("serve's onConfirm answers the port's calls; the page's onConfirm the others (DEC-164)", async () => {
 		const page: ConfirmRequest[] = [];

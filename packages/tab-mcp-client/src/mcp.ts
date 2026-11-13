@@ -66,6 +66,11 @@ export interface CallContext {
 	tools: ToolSource;
 	/** Ask the user before a consequential tool runs. */
 	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
+	/**
+	 * `confirm` is an own `onConfirm` (the page's, or a serve's), which may
+	 * ask anywhere: `tools/list` then does not say where (DEC-169).
+	 */
+	ownConfirm?: boolean;
 	/** Told about every call of a known tool, as it starts and as it ends. */
 	observe?: {
 		start(call: ToolCallStart): void;
@@ -527,9 +532,11 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 			const entry: Json = { name: tool.name };
 			if (tool.title !== undefined) entry["title"] = tool.title;
 			// The AI app waits while the page asks: it can tell the user where
-			// (CU 9). The tool's own description is unchanged elsewhere.
+			// (CU 9). Not with an own `onConfirm`, which may ask elsewhere (a
+			// side panel, the site's chat; DEC-169). The tool's own description
+			// is unchanged elsewhere.
 			entry["description"] =
-				tool.annotations.consequentialHint === true
+				tool.annotations.consequentialHint === true && !options.ownConfirm
 					? `${tool.description} ${CONFIRMED_IN_TAB}`
 					: tool.description;
 			entry["inputSchema"] = tool.inputSchema;

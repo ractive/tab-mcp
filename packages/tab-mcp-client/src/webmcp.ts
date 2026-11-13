@@ -2,9 +2,10 @@
  * Mirroring the tools into the browser's own WebMCP (iteration 25, DEC-115,
  * DEC-119, DEC-143): with `webmcp: true`, each tool that is offered there is
  * also registered with `document.modelContext.registerTool()`, under its own
- * `AbortController`, aborted when the tool leaves the registry. Part of the
- * core: only the detection, the registrations and the `<html>` attribute;
- * a call loads the lazy chunk, which checks, confirms and runs it.
+ * `AbortController`, aborted when the tool leaves the registry. A chunk of
+ * its own (DEC-171), loaded by a `TabMcp` whose constructor found native
+ * WebMCP (`nativeContext` in the core); a call loads the connection chunk,
+ * which checks, confirms and runs it.
  */
 
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
@@ -23,23 +24,6 @@ export type WebMcpCall = (
 	input: unknown,
 	signal: unknown,
 ) => Promise<unknown>;
-
-/**
- * The browser's own `ModelContext` of this document, read when a `TabMcp` is
- * made, through `Document.prototype`'s getter: never an own
- * `document.modelContext` (a polyfill such as `@mcp-b/global`, or any page
- * script; DEC-115). `undefined` without native WebMCP or a document.
- */
-export function nativeContext(): ModelContext | undefined {
-	try {
-		return Object.getOwnPropertyDescriptor(
-			Document.prototype,
-			"modelContext",
-		)?.get?.call(document);
-	} catch {
-		return undefined; // no document
-	}
-}
 
 /** The WebMCP hints; the MCP-only ones are left out. */
 const HINTS = [

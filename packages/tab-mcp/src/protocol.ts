@@ -128,7 +128,20 @@ export interface ErrorMessage {
 	id?: string;
 	/** On `identity_refused`: the `round` of the `identity` it answers, if it had one. */
 	round?: number;
+	/**
+	 * The page's message this error answers, on `unknown_id` and
+	 * `store_unavailable` for a revocation or a sign-out (since relay 0.10.2),
+	 * so that a page with several of them pending settles the right one.
+	 */
+	for?: ErrorAnswers;
+	/** With `for: "grant.revoke"`: the grant of that message. */
+	grantId?: string;
 }
+/** The page's messages an `error` can name in `for`. */
+export type ErrorAnswers =
+	| "grant.revoke"
+	| "grants.revokeAll"
+	| "identity.logout";
 export type RelayMessage =
 	| SessionMessage
 	| PingMessage

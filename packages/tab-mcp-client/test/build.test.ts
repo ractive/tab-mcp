@@ -69,8 +69,13 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	expect(coreCode).not.toContain("subscriptions/listen");
 	// The setup steps (`./setup`, DEC-118) are in the UI chunk, not the core.
 	expect(coreCode).not.toContain("codex mcp add");
-	// The WebMCP mirror is in the core; its calls run in the lazy chunk (DEC-115).
-	expect(coreCode).toContain("is not offered through WebMCP");
+	// The WebMCP mirror is a chunk of its own, loaded by a `TabMcp` that finds
+	// native WebMCP (DEC-171); the core keeps only the getter's read (WM 10).
+	expect(coreCode).not.toContain("is not offered through WebMCP");
+	expect(coreCode).toContain('"modelContext"');
+	const mirrorChunk = lazy.find((n) => n.startsWith("webmcp-")) ?? "";
+	expect(files.get(mirrorChunk)).toContain("is not offered through WebMCP");
+	expect(gz(files.get(mirrorChunk) ?? "")).toBeLessThanOrEqual(1024);
 	// No mark on <html> since iteration 37 (the attribute was for the extension).
 	expect(coreCode).not.toContain("data-tab-mcp-webmcp");
 	expect(coreCode).not.toContain("The user declined");
@@ -80,7 +85,7 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 		.filter((n) => n.startsWith("connection-"))
 		.reduce((s, n) => s + gz(files.get(n) ?? ""), 0);
 	console.log(
-		`core ${(coreGz / 1024).toFixed(1)} KB gzipped, connection ${(connection / 1024).toFixed(1)} KB gzipped`,
+		`core ${coreGz} B gzipped, connection ${(connection / 1024).toFixed(1)} KB gzipped`,
 	);
 	// 6.25 KB since `serve` and the optional relay (DEC-122); 6 KB since
 	// client 0.8.0 (DEC-103); 5.5 KB since the fixes of iteration 13

@@ -398,12 +398,25 @@ export function openConnection(
 					);
 					return;
 				}
-				// With its `code`, so that a pending `revoke()` can tell it is
-				// refused (`store_unavailable`, `unknown_id`).
+				// The relay does not know a grant the page lists: it is gone (it
+				// expired), and a `revoke()` of it resolves (DEC-168).
+				if (
+					message.code === "unknown_id" &&
+					message.for === "grant.revoke" &&
+					typeof message.grantId === "string"
+				)
+					host.grantRemoved(message.grantId);
+				// With its `code`, and what it answers (relay 0.10.2), so that
+				// only the pending `revoke()` or `signOut()` it answers settles
+				// (`store_unavailable`, `unknown_id`).
 				host.error(
 					Object.assign(
 						new Error(`Relay error ${message.code}: ${message.message}`),
 						{ code: message.code },
+						typeof message.for === "string" ? { for: message.for } : {},
+						typeof message.grantId === "string"
+							? { grantId: message.grantId }
+							: {},
 					),
 				);
 				return;

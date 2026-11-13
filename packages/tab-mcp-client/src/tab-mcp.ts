@@ -34,7 +34,25 @@ import type {
 	TunnelPort,
 } from "./types.ts";
 import { LIBRARY_NAME, VERSION } from "./version.ts";
-import { mirror, nativeContext } from "./webmcp.ts";
+import type { ModelContext } from "./webmcp.ts";
+
+/**
+ * The browser's own `ModelContext` of this document, read when a `TabMcp` is
+ * made, through `Document.prototype`'s getter: never an own
+ * `document.modelContext` (a polyfill such as `@mcp-b/global`, or any page
+ * script; DEC-115). `undefined` without native WebMCP or a document. In the
+ * core; the mirror itself is a chunk of its own (DEC-171).
+ */
+function nativeContext(): ModelContext | undefined {
+	try {
+		return Object.getOwnPropertyDescriptor(
+			Document.prototype,
+			"modelContext",
+		)?.get?.call(document);
+	} catch {
+		return undefined; // no document
+	}
+}
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -135,6 +153,15 @@ function noRelay(): Promise<never> {
 	return Promise.reject(new TypeError("TabMcp: this TabMcp has no relay"));
 }
 
+/**
+ * A rejection of `newAddress()`: `addressChanged` says whether the address
+ * changed (only connecting with the new one failed) or not (the old one
+ * could not be taken back and is kept, with its grants).
+ */
+function changed(error: unknown, addressChanged: boolean): unknown {
+	return Object.assign(Object(error), { addressChanged });
+}
+
 /** What a method that asks the relay rejects with while it cannot. */
 function notConnected(): Promise<never> {
 	return Promise.reject(
@@ -205,6 +232,7 @@ export class TabMcp extends EventTarget {
 	readonly #calls: CallHost = {
 		registry: this.#registry,
 		confirm: (request) => this.#confirm(request),
+		ownConfirm: () => !!this.#onConfirm,
 		toolCallStarted: (call) => this.#emit("toolcall", call),
 		toolCallEnded: (call) => this.#emit("toolcallend", call),
 	};
@@ -254,13 +282,20 @@ export class TabMcp extends EventTarget {
 			this.#emit("toolschange", { tools: this.tools }),
 		);
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
-		// consequential tools only when their registration says so.
+		// consequential tools only when their registration says so. The getter
+		// is read now (WM 10); the mirror loads only then (DEC-171).
 		const context = options.webmcp === true ? nativeContext() : undefined;
 		if (context !== undefined)
-			mirror(this.#registry, context, (tool, input, signal) =>
-				this.#load().then((lazy) =>
-					lazy.callFromWebMcp(this.#calls, tool, input, signal),
-				),
+			import("./webmcp.ts").then(
+				(m) =>
+					m.mirror(this.#registry, context, (tool, input, signal) =>
+						this.#load().then((lazy) =>
+							lazy.callFromWebMcp(this.#calls, tool, input, signal),
+						),
+					),
+				// Like a failed registration: warned, the relay unaffected.
+				(error: unknown) =>
+					console.warn("tab-mcp: no tools are offered through WebMCP:", error),
 			);
 	}
 
@@ -392,8 +427,8 @@ export class TabMcp extends EventTarget {
 	 * address at once (identity binding). Call it from the web app's logout.
 	 * `identity` goes to `none` at once. Resolves once the relay removed the
 	 * grants; rejects with an `InvalidStateError` while not connected to a
-	 * relay that pairs by sign-in (`session.pairing` is `oidc`), and when the
-	 * session ends first. Grants that stay work only while a page signed in
+	 * relay that pairs by sign-in (`session.pairing` is `oidc`), and with a
+	 * `NetworkError` when the session ends first. Grants that stay work only while a page signed in
 	 * as the same person is open.
 	 */
 	signOut(): Promise<void> {
@@ -551,8 +586,10 @@ export class TabMcp extends EventTarget {
 	 * the page was connected, connecting or reconnecting, and resolves once
 	 * that is done (the new session is `session`). Rejects, and keeps the old
 	 * secret so that a retry takes it back again, when the old address could
-	 * not be taken back (relay unreachable, taken over again first). Call it
-	 * from a user action.
+	 * not be taken back (relay unreachable, taken over again first). With a
+	 * relay, every rejection has `addressChanged`: `false` then, `true` when
+	 * only connecting with the new address failed (without one: a
+	 * `TypeError`). Call it from a user action.
 	 */
 	newAddress(): Promise<void> {
 		// Without a relay there is no secret store.
@@ -580,7 +617,7 @@ export class TabMcp extends EventTarget {
 					this.#setState("disconnected");
 					this.#stayOn = wasOn; // a retry does the same
 				}
-				throw error;
+				throw changed(error, false);
 			} finally {
 				// The take-back connection, unless `#end` closed it already.
 				if (generation === this.#generation) {
@@ -593,7 +630,10 @@ export class TabMcp extends EventTarget {
 		// The relay revoked them (CC 14).
 		this.#setGrants([]);
 		// It was on: the user chose that already, as for a reconnect.
-		if (wasOn) await this.#start();
+		if (wasOn)
+			await this.#start().catch((error: unknown) => {
+				throw changed(error, true);
+			});
 		else this.#setState("disconnected");
 	}
 
@@ -718,11 +758,12 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Disconnect one AI app: its tokens stop working at once. Resolves once
-	 * the relay removed the grant (at once for one that is not in `grants`).
+	 * the relay removed the grant (at once for one that is not in `grants`,
+	 * and when the relay no longer knows it: it leaves `grants` then).
 	 * Rejects with an `InvalidStateError` while not connected (only the relay
-	 * can do it) and when the session ends first, and with the relay's error
-	 * when it refuses (its `code` is `store_unavailable` when it could not
-	 * save the change: try again; `unknown_id` for a grant it does not know).
+	 * can do it), a `NetworkError` when the session ends before the answer,
+	 * and with the relay's error when it refuses (its `code` is
+	 * `store_unavailable` when it could not save the change: try again).
 	 */
 	revoke(grantId: string): Promise<void> {
 		const gone = () => !this.#grants.some((g) => g.grantId === grantId);
@@ -733,12 +774,17 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Send `message` to the relay and resolve once `done()` holds (it is
-	 * checked on each change of the grants). Rejects when not connected, when
-	 * the session ends first, with the relay's refusal (`store_unavailable`:
-	 * it could not save the change; `unknown_id`), and with a `TimeoutError`
-	 * when none of that happened within `timing.answerTimeoutMs`.
+	 * checked on each change of the grants). Rejects with an
+	 * `InvalidStateError` when it cannot send, a `NetworkError` when the
+	 * session ends first, the relay's refusal of this message
+	 * (`store_unavailable`: it could not save the change; `unknown_id`), and a
+	 * `TimeoutError` when none of that happened within
+	 * `timing.answerTimeoutMs`.
 	 */
-	#ask(message: TabMessage, done: () => boolean): Promise<void> {
+	#ask(
+		message: TabMessage & { grantId?: string },
+		done: () => boolean,
+	): Promise<void> {
 		if (!this.#session || this.#connection?.send(message) !== true)
 			return notConnected();
 		return new Promise((resolve, reject) => {
@@ -751,16 +797,27 @@ export class TabMcp extends EventTarget {
 			};
 			const check = (event?: Event) => {
 				const error = (event as Partial<TabMcpEventMap["error"]>)?.detail
-					?.error as { code?: string } | undefined;
+					?.error as
+					| { code?: string; for?: string; grantId?: string }
+					| undefined;
 				if (done()) settle();
 				else if (
-					error?.code === "store_unavailable" ||
-					error?.code === "unknown_id"
+					(error?.code === "store_unavailable" ||
+						error?.code === "unknown_id") &&
+					// It names the message it answers (relay 0.10.2); an older
+					// relay's answers every pending one (DEC-168).
+					(error.for === undefined ||
+						(error.for === message.type && error.grantId === message.grantId))
 				)
 					settle(error);
 				else if (this.#state !== "connected")
+					// Sent, but the answer cannot come: it may or may not have
+					// happened.
 					settle(
-						new DOMException("TabMcp: not connected", "InvalidStateError"),
+						new DOMException(
+							"TabMcp: the session ended before the relay answered",
+							"NetworkError",
+						),
 					);
 			};
 			const timer = setTimeout(

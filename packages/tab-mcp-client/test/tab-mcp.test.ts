@@ -95,9 +95,126 @@ describe("with a relay", () => {
 		const ended = tab.revoke("g_1");
 		await relay.next("grant.revoke");
 		tab.disconnect();
-		await expect(ended).rejects.toThrow("not connected");
-		// Disconnected, the grant still listed: only the relay can revoke it.
-		await expect(tab.revoke("g_1")).rejects.toThrow("not connected");
+		// Sent, but the session ended first: a NetworkError (DEC-170).
+		const lost = await ended.then(
+			() => undefined,
+			(e: unknown) => e as DOMException,
+		);
+		expect(lost?.name).toBe("NetworkError");
+		// Disconnected, the grant still listed: only the relay can revoke it,
+		// and nothing was sent: an InvalidStateError.
+		const unsent = await tab.revoke("g_1").then(
+			() => undefined,
+			(e: unknown) => e as DOMException,
+		);
+		expect(unsent?.name).toBe("InvalidStateError");
+		expect(unsent?.message).toContain("not connected");
+	});
+
+	test("an error that names its grant settles only that revoke() (relay 0.10.2, DEC-168)", async () => {
+		const second: Grant = { ...GRANT, grantId: "g_2" };
+		relay.grants = [GRANT, second];
+		await tab.connect({ resume: true });
+		const first = tab.revoke("g_1");
+		const other = tab.revoke("g_2");
+		await relay.next("grant.revoke");
+		await relay.next("grant.revoke");
+		let otherSettled = false;
+		void other.then(
+			() => (otherSettled = true),
+			() => (otherSettled = true),
+		);
+		relay.send({
+			type: "error",
+			code: "store_unavailable",
+			message: "the relay cannot change grants right now; try again shortly",
+			for: "grant.revoke",
+			grantId: "g_1",
+		});
+		const error = await first.then(
+			() => undefined,
+			(e: unknown) => e as Error & { code?: string; grantId?: string },
+		);
+		expect(error).toMatchObject({ code: "store_unavailable", grantId: "g_1" });
+		await Bun.sleep(10);
+		expect(otherSettled).toBe(false);
+		relay.send({ type: "grant.removed", grantId: "g_2", reason: "revoked" });
+		await other;
+		expect(tab.grants.map((g) => g.grantId)).toEqual(["g_1"]);
+	});
+
+	test("an error without for (relay 0.10.1) settles every pending revoke(), as before", async () => {
+		const second: Grant = { ...GRANT, grantId: "g_2" };
+		relay.grants = [GRANT, second];
+		await tab.connect({ resume: true });
+		const both = [tab.revoke("g_1"), tab.revoke("g_2")];
+		await relay.next("grant.revoke");
+		await relay.next("grant.revoke");
+		relay.send({
+			type: "error",
+			code: "store_unavailable",
+			message: "the relay cannot change grants right now; try again shortly",
+		});
+		const results = await Promise.allSettled(both);
+		expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+		expect(tab.grants.length).toBe(2);
+	});
+
+	test("unknown_id for a grant drops it from grants, and its revoke() resolves (DEC-168)", async () => {
+		const second: Grant = { ...GRANT, grantId: "g_2" };
+		relay.grants = [GRANT, second];
+		await tab.connect({ resume: true });
+		const changes: string[][] = [];
+		tab.addEventListener("grantschange", (e) =>
+			changes.push(e.detail.grants.map((g) => g.grantId)),
+		);
+		const gone = tab.revoke("g_1");
+		const other = tab.revoke("g_2");
+		await relay.next("grant.revoke");
+		await relay.next("grant.revoke");
+		relay.send({
+			type: "error",
+			code: "unknown_id",
+			message: "unknown grant",
+			for: "grant.revoke",
+			grantId: "g_1",
+		});
+		await gone;
+		expect(changes).toEqual([["g_2"]]);
+		expect(tab.grants.map((g) => g.grantId)).toEqual(["g_2"]);
+		// The other one still waits for its own answer.
+		relay.send({ type: "grant.removed", grantId: "g_2", reason: "revoked" });
+		await other;
+	});
+
+	test("an error naming another message does not settle signOut()", async () => {
+		relay.pairing = "oidc";
+		await tab.connect({ resume: true });
+		let settled = false;
+		const out = tab.signOut().then(
+			() => (settled = true),
+			(e: unknown) => {
+				settled = true;
+				throw e;
+			},
+		);
+		await relay.next("identity.logout");
+		relay.send({
+			type: "error",
+			code: "store_unavailable",
+			message: "x",
+			for: "grant.revoke",
+			grantId: "g_1",
+		});
+		await Bun.sleep(10);
+		expect(settled).toBe(false);
+		relay.send({
+			type: "error",
+			code: "store_unavailable",
+			message: "x",
+			for: "identity.logout",
+		});
+		await expect(out).rejects.toMatchObject({ code: "store_unavailable" });
 	});
 
 	test("a schema the validator cannot use: unregistered at connect, refused after it", async () => {

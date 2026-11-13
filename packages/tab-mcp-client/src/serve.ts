@@ -74,6 +74,7 @@ export function callContext(host: CallHost, kind: ToolCaller): CallContext {
 	return {
 		tools: kind === "webmcp" ? host.registry : toolsFor(host.registry, kind),
 		confirm: (request) => host.confirm(request),
+		ownConfirm: host.ownConfirm(),
 		observe: {
 			start: (call) => host.toolCallStarted(call),
 			end: (call) => host.toolCallEnded(call),
@@ -410,7 +411,7 @@ export function servePort(
 	// This port's own question, in place of the page's (DEC-164). Normalised
 	// as the page's: anything but `true` or "unanswered" is a refusal, and a
 	// throw too (`runCall`).
-	if (ask !== undefined)
+	if (ask !== undefined) {
 		context.confirm = (request) =>
 			Promise.resolve()
 				.then(() => ask(request))
@@ -418,6 +419,8 @@ export function servePort(
 					(answer): ConfirmAnswer =>
 						answer === "unanswered" ? answer : answer === true,
 				);
+		context.ownConfirm = true;
+	}
 	const handler = createMcpHandler({
 		...context,
 		// Without `icons`, the page's own <link rel="icon">, read now.

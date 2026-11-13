@@ -713,7 +713,11 @@ describe("identity binding: review of PR #13", () => {
 		expect(Date.now() - started).toBeLessThan(1000);
 		// The page is told that the grants could not be revoked.
 		const told = (await ctx.tab.next("error")) as { code: string };
-		expect(told.code).toBe("store_unavailable");
+		expect(told).toMatchObject({
+			code: "store_unavailable",
+			for: "identity.logout",
+		});
+		expect(told).not.toHaveProperty("grantId");
 		await waitFor(
 			() => ctx.r.logs.events("store.error").some((e) => e["op"] === "signOut"),
 			"the logged store error",

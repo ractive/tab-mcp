@@ -480,12 +480,19 @@ describe("RQ 5: a store failure is store.error wherever it happens", () => {
 		};
 		store.failing.add("revoke");
 		t.send({ type: "grant.revoke", grantId: added.grant.grantId });
-		const error = (await t.next("error")) as { code: string };
-		expect(error.code).toBe("store_unavailable");
+		const error: unknown = await t.next("error");
+		expect(error).toEqual({
+			type: "error",
+			code: "store_unavailable",
+			message: "the relay cannot change grants right now; try again shortly",
+			for: "grant.revoke",
+			grantId: added.grant.grantId,
+		});
 		t.send({ type: "grants.revokeAll" });
-		expect(((await t.next("error")) as { code: string }).code).toBe(
-			"store_unavailable",
-		);
+		expect(await t.next("error")).toMatchObject({
+			code: "store_unavailable",
+			for: "grants.revokeAll",
+		});
 		expect(r.logs.events("store.error").map((e) => e["op"])).toEqual([
 			"revokeGrant",
 			"revokeAll",
@@ -607,6 +614,51 @@ describe("RQ 6: refusals, limits and session figures in the log", () => {
 			maxSessions: 500,
 			waitingRequests: 0,
 			pendingAuthorizations: 0,
+		});
+	});
+
+	test("the sweep tells the page of its expired grants with grant.removed expired, once", async () => {
+		const r = oauthRelay({
+			sweepIntervalMs: 50,
+			accessTokenTtlMs: 300,
+			refreshTokenTtlMs: 300,
+		});
+		const t = tab(r);
+		await t.connect();
+		await t.startPairing();
+		await pair(r, t);
+		const added = (await t.next("grant.added")) as {
+			grant: { grantId: string };
+		};
+		const removed = await t.next("grant.removed");
+		expect(removed).toEqual({
+			type: "grant.removed",
+			grantId: added.grant.grantId,
+			reason: "expired",
+		});
+		expect(r.logs.events("grant.expired")).toHaveLength(1);
+		// Not again on the next sweeps.
+		await Bun.sleep(200);
+		expect(r.logs.events("grant.expired")).toHaveLength(1);
+		expect(t.received.some((m) => m.type === "grant.removed")).toBe(false);
+	});
+
+	test("revoking every grant also removes a listed grant that expired before the sweep", async () => {
+		const r = oauthRelay({ accessTokenTtlMs: 200, refreshTokenTtlMs: 200 });
+		const t = tab(r);
+		await t.connect();
+		await t.startPairing();
+		await pair(r, t);
+		const added = (await t.next("grant.added")) as {
+			grant: { grantId: string };
+		};
+		await Bun.sleep(300); // expired; no sweep within 10 minutes
+		expect(await r.store.listGrants(t.addressId, Date.now())).toEqual([]);
+		t.send({ type: "grants.revokeAll" });
+		expect(await t.next("grant.removed")).toEqual({
+			type: "grant.removed",
+			grantId: added.grant.grantId,
+			reason: "revoked",
 		});
 	});
 });

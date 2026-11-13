@@ -16,6 +16,7 @@ import { PairingCodes } from "./oauth/pairing.ts";
 import {
 	type ByeReason,
 	CloseCode,
+	type ErrorAnswers,
 	type ErrorCode,
 	type GrantInfo,
 	type GrantRef,
@@ -77,6 +78,10 @@ export interface ForwardInput {
 	/** The answer when the page goes away mid-request (DEC-074). */
 	pageGone?: (waiting: boolean) => PageGoneReply;
 }
+
+/** `store_unavailable`'s text when a revocation or sign-out could not be saved. */
+export const STORE_UNAVAILABLE_TEXT =
+	"the relay cannot change grants right now; try again shortly";
 
 /**
  * The control budget of a session (RS 3, DEC-129): every frame from the tab
@@ -183,6 +188,11 @@ export class TabSession {
 	 */
 	identityUnchecked = false;
 	readonly pending: Map<string, Exchange> = new Map();
+	/**
+	 * The grants the page was told of (`session`, `grant.added`) and not
+	 * told removed: the expiry sweep tells it of those that expired.
+	 */
+	readonly #grantIds = new Set<string>();
 	/** The grant of each pending listen stream (a cap per grant). */
 	readonly #listenGrants = new Map<string, string>();
 
@@ -357,13 +367,14 @@ export class TabSession {
 	 * with its message, and it may try again (RQ 5). Anything else goes to
 	 * `tab.handler_error` as before.
 	 */
-	#storeFailed(op: string, error: unknown): void {
+	#storeFailed(
+		op: string,
+		error: unknown,
+		about: TabMessage & { type: ErrorAnswers },
+	): void {
 		if (!(error instanceof StoreFailure)) throw error;
 		this.#host.logger.error("store.error", { op, ...errorFields(error) });
-		this.#sendError(
-			"store_unavailable",
-			"the relay cannot change grants right now; try again shortly",
-		);
+		this.refused("store_unavailable", STORE_UNAVAILABLE_TEXT, about);
 	}
 
 	/** Take one token of the control budget; false when it is used up. */
@@ -425,17 +436,19 @@ export class TabSession {
 			case "grant.revoke":
 				try {
 					if (!(await this.#host.revokeGrant(this, msg.grantId))) {
-						this.#sendError("unknown_id", "unknown grant");
+						// The page lists a grant the relay does not: it is gone.
+						this.#grantIds.delete(msg.grantId);
+						this.refused("unknown_id", "unknown grant", msg);
 					}
 				} catch (error) {
-					this.#storeFailed("revokeGrant", error);
+					this.#storeFailed("revokeGrant", error, msg);
 				}
 				return;
 			case "grants.revokeAll":
 				try {
 					await this.#host.revokeAll(this);
 				} catch (error) {
-					this.#storeFailed("revokeAll", error);
+					this.#storeFailed("revokeAll", error, msg);
 				}
 				return;
 			case "error":
@@ -546,6 +559,7 @@ export class TabSession {
 		}
 		if (this.#state !== "hello") return; // closed meanwhile
 		if (grants.length > 0) this.#used = true;
+		for (const g of grants) this.#grantIds.add(g.grantId);
 
 		const limits = this.limits;
 		const expiresAt = this.openedAt + limits.sessionLifetimeMs;
@@ -634,7 +648,22 @@ export class TabSession {
 	/** A grant was made for this address: tell the tab. */
 	grantAdded(grant: GrantInfo): void {
 		this.#used = true;
+		this.#grantIds.add(grant.grantId);
 		this.send({ type: "grant.added", grant });
+	}
+
+	/** A grant of this address ended: tell the tab. */
+	grantRemoved(
+		grantId: string,
+		reason: "revoked" | "reuse_detected" | "expired",
+	): void {
+		this.#grantIds.delete(grantId);
+		this.send({ type: "grant.removed", grantId, reason });
+	}
+
+	/** The grants the tab was told of and not told removed. */
+	get grantIds(): ReadonlySet<string> {
+		return this.#grantIds;
 	}
 
 	/**
@@ -762,6 +791,24 @@ export class TabSession {
 				? { type: "error", code, message }
 				: { type: "error", code, message, id },
 		);
+	}
+
+	/**
+	 * The answer to a revocation or sign-out that did not happen, naming the
+	 * message it answers (`for`, and the grant of a `grant.revoke`).
+	 */
+	refused(
+		code: "unknown_id" | "store_unavailable",
+		message: string,
+		about: TabMessage & { type: ErrorAnswers },
+	): void {
+		this.send({
+			type: "error",
+			code,
+			message,
+			for: about.type,
+			...(about.type === "grant.revoke" ? { grantId: about.grantId } : {}),
+		});
 	}
 
 	#protocolError(code: ErrorCode, message: string): void {
