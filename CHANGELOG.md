@@ -60,6 +60,30 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   or one that claimed while this tab was still connecting, no longer makes a takeover
   read as "Opened in another tab".
 - The library no longer answers a relay message it cannot read with `error`.
+- The connect dialog says in plain words why it could not connect or why the page was
+  disconnected ("Could not connect. Check your internet connection.", "The session
+  ended.", "Not connected." for a call without a user action) and offers "Connect again"
+  (`.tab-mcp-retry`); the error itself goes to the console. While the library reconnects
+  by itself, it says "Connection lost. Reconnecting…". Before, it showed the relay's
+  message after "Could not connect:" and had no way to connect again.
+- With identity binding, the connect dialog shows the address only once the relay
+  accepted the page's sign-in, and says otherwise "Checking your sign-in…", "Sign in to
+  this page first." or that the sign-in was not accepted, with `identityMessage`.
+- The connect dialog: "How do I add it?" comes right below the address, before the code;
+  "New address" moved from beside Copy to the end of the setup
+  (`.tab-mcp-new-address-row`), with a line on what it does.
+- The setup steps (`./setup` and the dialog) end with the step that starts the sign-in:
+  `/mcp` and Authenticate for Claude Code, `codex mcp login <name>` as the third line of
+  Codex's command. ChatGPT's entry names the Codex feature its Mac app needs.
+- A refused Copy says on the button what to do ("Press Ctrl+C", "Press ⌘C" on Apple
+  devices, "Selected" on a touch screen) instead of only telling screen readers.
+  "Copied" goes back to "Copy" after 2 seconds.
+- While a confirmation is open in a hidden tab, the tab's title starts with "Allow? – ".
+  In `tools/list`, the description of a consequential tool ends with "The page may ask
+  the user to allow each call, usually in the page's browser tab."
+- The dialogs carry `lang="en"` and `dir="ltr"`, so a screen reader on a page in another
+  language reads them with an English voice and a right-to-left page does not mirror
+  them.
 
 #### Removed
 
@@ -69,6 +93,9 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   mirrored reads `toolcall` events with `client.kind === "webmcp"` instead.
 
 #### Fixed
+
+- The connect dialog's code row no longer overflows at 320 px: below 30rem, the code's
+  Copy goes under the code.
 
 - The schema check at registration no longer reads `default`, `examples`, `const` and
   `enum` values or property names as keywords: `examples: [{ pattern: "*.ts" }]` was
@@ -562,10 +589,50 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 ### Unreleased
 
+#### Added
+
+- Log events: `oauth.token_refused` (info: a refused `/token` or `/revoke` request with
+  its grant type, OAuth error, a fixed reason and the AI app's host), `oauth.rate_limited`
+  (warn, once per network and episode: which per-network limit), `relay.stats` (info,
+  every sweep: sessions, waiting requests, open authorizations), `relay.start_failed` and
+  `relay.unknown_setting` (a `TAB_MCP_*` variable the relay does not read).
+- Error log lines carry `errorCode` next to `error` when the error has a code such as
+  `SQLITE_FULL` or `EADDRINUSE`.
+- The tab error code `store_unavailable`: a `grant.revoke` or `grants.revokeAll` that
+  failed because the token store failed (was `bad_message`).
+- `describeConfigError` and `unknownEnvNames` in the package; `ConfigError` has `key`.
+
 #### Changed
 
 - `hello` no longer needs `page: {title}`; the relay ignores the field, which it never
   read. Libraries up to 0.15 send the page title, newer ones an empty one.
+- On an open relay a page origin that is not a serialised origin (or an extension's) of
+  at most 255 characters is treated as no origin, on the pairing page and in the log.
+- A page's app name is cleaned like an AI app's name (bidi and invisible characters
+  removed) and dropped when it names a domain other than the page origin's host (a
+  dotted word such as "Node.js" counts as one; a site's configured `name` is not
+  checked). Names
+  and origins on the pairing page are bidi-isolated.
+- `/authorize` answers one "Open the page first" text whether the page is closed or its
+  dialog is closed.
+- Identity binding: the dialog must still be open when the provider sends the browser
+  back; `identity_refused` has a fixed text per reason (no longer the JWKS fetch error).
+  Provider discovery serves its last metadata for an hour after a failed refresh and
+  waits 30 seconds before it tries again.
+- A network's share of an address's code guesses counts an IPv6 /56.
+- The visit cookie is renewed with every pairing page, so a second authorization within
+  ten minutes no longer fails with "your browser may block cookies".
+- A loopback redirect to `[::1]` is allowed in `form-action` as `http:` (Chrome ignored
+  the IPv6 literal and blocked the redirect after Connect).
+- A token store failure at `/token` and `/revoke` is logged as `store.error` (`op`
+  `token`, `revoke`), no longer as `oauth.error`. The fields `message` of `oauth.error`
+  and `tab.handler_error` are renamed `error`.
+- A failure at start other than a configuration error prints its message on stderr and
+  exits with 1, instead of an uncaught exception with the class name only. Configuration
+  errors name the environment variable. `store`, `trustProxy`, `logLevel` and `cors` are
+  checked when passed to `createRelay`.
+- A large request for a site with a raised `maxMessageBytes` gets "the page is not open"
+  while its page reconnects, not 413.
 
 ### [0.9.0][relay-0.9.0] - 2026-11-11
 

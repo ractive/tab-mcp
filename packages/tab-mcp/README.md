@@ -97,10 +97,16 @@ The package also exports `MemoryTokenStore`, `SqliteTokenStore`, the `TokenStore
 `configFromEnv`, `resolveConfig`, `DEFAULT_CONFIG`, `createLogger`, `installCrashLogging`,
 `SUBPROTOCOL` (`tab-mcp.v1`) and `VERSION`.
 
+A `ConfigError` names the setting it is about in `key`; `describeConfigError(error)`
+puts the environment variable in front of its message, as the `tab-mcp` command prints
+it. `unknownEnvNames(process.env)` lists `TAB_MCP_*` variables the relay does not read
+(a misspelled setting is otherwise ignored); the command logs each as
+`relay.unknown_setting`.
+
 `installCrashLogging(logger)` is what the `tab-mcp` command installs before it starts:
 an unhandled promise rejection is logged and the process keeps running; an uncaught
 exception is logged and the process exits with 1, for your supervisor to restart it. Both
-lines carry the error's name only. Install it in your own process too, unless it already
+lines carry the error's name only, and its code when it has one like `SQLITE_FULL`. Install it in your own process too, unless it already
 handles these events:
 
 ```ts

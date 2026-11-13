@@ -1,5 +1,6 @@
 import type { LogLevel } from "./config.ts";
 import { parseIpv4, parseIpv6 } from "./ip.ts";
+import { StoreFailure } from "./store/guard.ts";
 
 /**
  * Structured JSON-line logging (threat model A9). Callers pass only metadata:
@@ -73,10 +74,43 @@ export function truncateIp(ip: string): string {
 
 /**
  * An error for a log line: its name only. Messages can carry request data,
- * and a custom store's can hold token hashes or a connection string.
+ * and a custom store's can hold token hashes or a connection string. A
+ * `StoreFailure` is named by the store's own error.
  */
 export function errorName(error: unknown): string {
-	return error instanceof Error ? error.name : typeof error;
+	const inner = error instanceof StoreFailure ? error.cause : error;
+	return inner instanceof Error ? inner.name : typeof inner;
+}
+
+/** An error code as SQLite, Bun and Node write them: `SQLITE_FULL`, `EADDRINUSE`. */
+const ERROR_CODE = /^[A-Z0-9_]{1,40}$/;
+
+/**
+ * The log fields of an error (RQ 4, DEC-131): `error`, its name, and
+ * `errorCode` when it has a code like `SQLITE_FULL` or `EADDRINUSE`. A code
+ * of that shape cannot carry request data; the message is never logged.
+ */
+export function errorFields(error: unknown): {
+	error: string;
+	errorCode?: string;
+} {
+	const inner = error instanceof StoreFailure ? error.cause : error;
+	const code =
+		typeof inner === "object" && inner !== null && "code" in inner
+			? (inner as { code: unknown }).code
+			: undefined;
+	return typeof code === "string" && ERROR_CODE.test(code)
+		? { error: errorName(inner), errorCode: code }
+		: { error: errorName(inner) };
+}
+
+/**
+ * A per-network rate-limit key (an IPv4 address, `…::/64`, `…::/56`, or
+ * `<address id>|<network>`) shortened like an IP for the log.
+ */
+export function truncateKey(key: string): string {
+	const network = key.includes("|") ? key.slice(key.indexOf("|") + 1) : key;
+	return truncateIp(network.replace(/\/\d+$/, ""));
 }
 
 /**
@@ -95,10 +129,10 @@ export function installCrashLogging(
 	exit: (code: number) => void = (code) => process.exit(code),
 ): () => void {
 	const onRejection = (error: unknown) => {
-		logger.error("process.unhandled_rejection", { error: errorName(error) });
+		logger.error("process.unhandled_rejection", errorFields(error));
 	};
 	const onException = (error: unknown) => {
-		logger.error("process.uncaught_exception", { error: errorName(error) });
+		logger.error("process.uncaught_exception", errorFields(error));
 		exit(1);
 	};
 	process.on("unhandledRejection", onRejection);

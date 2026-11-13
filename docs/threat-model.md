@@ -64,9 +64,12 @@ From a shared screenshot, a chat log or over the user's shoulder.
   counts, so junk input cannot lock the owner out. Even an attacker who keeps fresh codes
   coming gets about 2 880 guesses a day per address against a million codes, and only
   while the user keeps the dialog open.
-- An attacker on many networks can use up the per-address allowance and make the owner
-  wait. "New address" in the page ends that, because the attacker does not learn the new
-  address. Per-IP limits count an IPv6 /64 as one network.
+- An attacker on three networks can use up the per-address allowance (30) and make the
+  owner wait: the owner's correct code is then refused unjudged while the dialog is
+  open, and two networks keep it drained. "New address" in the page ends that, because
+  the attacker does not learn the new address. A network's share of the guesses counts
+  an IPv4 address or an IPv6 /56 (one subscriber's, DEC-130), so one IPv6 subscriber is
+  one network, not 256.
 - `/authorize` opens a connection request only while the dialog is open, and an address
   holds at most 20, at most 5 per network. Past that the oldest request of the network
   holding the most is dropped (on a tie, of the network that came last), so knowing an
@@ -74,8 +77,11 @@ From a shared screenshot, a chat log or over the user's shoulder.
   keeps the address full from many networks can push out a request the owner opens
   after the flood began; "New address" ends it. With identity binding, each request has one sign-in at a time, and
   each Connect that starts one counts like a guess.
-- Without a token, every address looks the same: no 404 for unknown addresses, so
-  addresses cannot be probed.
+- Without a token, every address looks the same at the MCP endpoint: no 404 for unknown
+  addresses, so addresses cannot be probed. `/authorize` answers the same page whether
+  the address's page is closed or open with its dialog closed (DEC-130). Left over:
+  whoever knows an address can see whether its dialog is open right now, since the
+  pairing page then names the page's origin and app name.
 - "New address" in the page revokes the old address's connections and replaces the
   secret.
 - Left over: a user who reads the code out to someone else, or types it for an AI app an
@@ -340,15 +346,20 @@ does not reconnect by itself.
 
 - `/authorize` sends a strict Content Security Policy (`default-src 'none'`, styles from
   the relay only, `frame-ancestors 'none'`, `form-action` limited to the relay and the
-  client's redirect origin), `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and
+  client's redirect origin; for a loopback redirect to `[::1]` the scheme `http:`,
+  because CSP has no syntax for an IPv6 literal and Chrome drops one), `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and
   `Cache-Control: no-store`. The page has no JavaScript. Framing is refused, so the code
   field cannot be overlaid.
 - The form posts only the id of a pending request. Its CSRF token is bound to that
   request and to a first-party `HttpOnly`, `SameSite=Lax` cookie. Posts with a foreign
   `Origin` or `Sec-Fetch-Site` are refused. The page sets no `Cross-Origin-Opener-Policy`,
   because claude.ai opens it in a popup and needs its opener back.
-- Every value shown on the page (client name, page origin) is HTML-escaped and
-  length-limited.
+- Every value shown on the page is HTML-escaped and length-limited: the client name
+  (64 characters, cleaned, DEC-065), the page's app name (64 characters, cleaned the same
+  way, A11) and the page origin (a listed origin, or on an open relay a serialised
+  origin of at most 255 characters, else none, DEC-130). Names and the origin are
+  rendered with `unicode-bidi: isolate`, so a right-to-left character cannot reorder the
+  text around them.
 - The metadata, token, revoke and MCP endpoints answer CORS requests from any origin
   without credentials (`Access-Control-Allow-Origin: *`, never `Allow-Credentials`).
   They use no cookies, and tokens travel only in the `Authorization` header, so another
@@ -366,7 +377,8 @@ and metadata fetches per domain and overall. IPv4 counts per address, IPv6 per /
   is full (100 000 addresses), guesses at new addresses are refused until buckets have
   refilled, so cycling through many keys cannot reset an address's allowance. Filling it
   takes wrong guesses at 100 000 addresses with a live code and an open request each.
-  The share per address and network drops its oldest bucket when full: that only lets a
+  The share per address and network counts an IPv6 /56, as sessions do (DEC-130), and
+  drops its oldest bucket when full: that only lets a
   network use more of the allowance the per-address cap still limits, and refusing there
   would let a few networks block everyone's first guess.
 - `/token` and `/revoke` have two limits per IP. Failed requests (client errors) are
@@ -425,7 +437,8 @@ attacks.
 ### A9: Logs and privacy
 
 Logs are JSON lines with the event, a shortened address id, the session id, the MCP
-method, the HTTP status, the duration, the client id host and coarse error codes. They
+method, the HTTP status, the duration, the client id host, coarse error codes and the
+names and codes of errors (`SQLiteError`, `SQLITE_FULL`, never their messages). They
 never contain bodies, tool names, arguments, results, tokens, codes or secrets. Client
 IPs appear only in rate-limit warnings, shortened to /24 (IPv4) or /48 (IPv6). An
 operator should tell users this in a privacy notice.
@@ -445,7 +458,11 @@ trustworthy.
 - One relay may serve several sites, each configured by origin. The relay takes the
   origin from the `Origin` header of the page's WebSocket and checks it against the
   list. The app name a page sends is its own claim, so the pairing page shows the name
-  next to the origin: "saturnus on `https://ractive.ch`".
+  next to the origin: "saturnus on `https://ractive.ch`". The relay cleans it as it
+  cleans AI apps' names (bidi, zero-width and other invisible characters removed) and
+  drops a name that names a domain other than the page origin's host, so a page on one
+  listed origin cannot put "saturnus on https://ractive.ch" in front of its own origin
+  (DEC-130). A configured site name is used as configured.
 - **The origin on the pairing page is reported, not verified.** A browser sends the
   page's true origin, but a program can claim any origin, including a listed one, and
   then shows its own code under that origin. The origin tells the user which page
@@ -497,8 +514,10 @@ who signed in at `/authorize` (an ID token).
   `azp`, `exp`, `iat`, `nonce`).
 - **Phishing the user into a sign-in.** Someone who sends the user an `/authorize` link
   for their own AI app would only need a click on Connect if the user is signed in at the
-  provider. The page's "Connect your AI app" dialog must be open, as with codes, and the
-  pairing page names the AI app and its verified host. The same click-through risk exists
+  provider. The page's "Connect your AI app" dialog must be open, as with codes: when
+  Connect is clicked and again when the provider sends the browser back, so a sign-in
+  started before the user closed the dialog pairs nobody (DEC-130). The pairing page
+  names the AI app and its verified host. The same click-through risk exists
   for every OAuth consent page.
 - **A different person later uses the same browser.** Grants remember a hash of the
   person they were made for. MCP requests reach the page only while it is bound to that

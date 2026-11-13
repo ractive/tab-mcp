@@ -37,6 +37,7 @@ main { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; }
 h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 1rem; }
 p { margin: 0 0 1rem; }
 code, .origin { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+strong, .origin { unicode-bidi: isolate; }
 .help { color: GrayText; font-size: 0.9rem; }
 .error { color: var(--error); font-weight: 600; }
 label { display: block; font-weight: 600; margin-bottom: 0.25rem; }

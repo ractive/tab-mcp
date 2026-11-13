@@ -2810,6 +2810,167 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
 - The tab drops a relay frame it cannot parse without answering. The relay only
   debug-logged the tab's `error`, which it still accepts from older libraries.
 
+## DEC-146: The connect dialog says why it is not connected, and how to go on
+
+Iteration 33 (review of 2026-11-13, CU 4, CU 7). Amends DEC-028.
+
+- A failure is shown in the user's words, by `reason`: `network` "Could not connect. Check
+  your internet connection.", `rate_limited` "Too many attempts…", any other refusal
+  "The connection was refused.", no reason (no user action, cancelled) "Not connected.".
+  The relay's message names the relay and the origin, which mean nothing to an end user;
+  it goes to `console.warn`. A disconnect says why (`expired`/`idle`: "The session
+  ended.").
+- "Connect again" is shown while the page is not connected, also while it reconnects by
+  itself (then it makes the next attempt at once). It calls `connect()` from its own
+  click, so the user activation check (DEC-009) is met where the page's first call was
+  not.
+- When reconnecting stops, the dialog reads the `error` that comes just before
+  `reconnecting: null` and shows its `reason` the same way; without one (the page called
+  `disconnect()` while it waited) it says "Disconnected.".
+- With identity binding (`oidc`), the address is shown only once `identity` is `bound`:
+  before, an address without a signed-in page could not pair, and the dialog invited the
+  user on regardless. The status says what is missing; a refusal shows `identityMessage`
+  in brackets, as the relay worded it.
+
+## DEC-147: Help between the address and the code, closed; New address at the end
+
+Iteration 33 (review of 2026-11-13, CU 23).
+
+- "How do I add it?" comes right after the address, before the code. It stays closed:
+  the review suggested opening it while no app is connected, but its four entries (two
+  with commands) push the code below the fold on a 1000 px tall desktop window and about
+  1500 px down at 320 px, and the code is what the user needs when the AI app asks.
+- "New address" leaves the address row, where it sat as a full button next to the
+  primary Copy without a word on what it does. It goes to the end of the setup, with
+  "Someone else may have this address, or is guessing codes? A new address disconnects
+  every AI app from this one." Not under the Connected list (the review's other option):
+  the relay's lockout page sends users to "New address" when someone may be guessing
+  codes, which is when no app is connected.
+
+## DEC-148: Where the confirmation waits, a failed Copy, the dialogs' language
+
+Iteration 33 (review of 2026-11-13, CU 5 in part, CU 9, CU 12).
+
+- While a confirmation is open in a hidden tab, the document title starts with
+  "Allow? – ", put back when the tab is shown or the dialog closes, unless the page
+  changed the title meanwhile (then the page's title stays).
+- `tools/list` appends "The page may ask the user to allow
+  each call, usually in the page's browser tab." to the description of a consequential
+  tool, so the AI app can tell the user where to look. "May" and "usually": a page with
+  `onConfirm` may answer without asking or ask elsewhere, and "Always allow" skips the
+  question; a flag for that would cost bytes in the core (review of PR 121). Only there: the WebMCP registration and the registry keep the page's
+  description.
+- A refused Copy says on the button what to do ("Press Ctrl+C", "Press ⌘C" where
+  `navigator.platform` starts with `Mac` or `iP`, "Selected" on a coarse pointer) for 8 s,
+  and screen readers hear the same, without keys on a touch screen; "Copied" lasts 2 s.
+- Every dialog carries `lang="en"` and `dir="ltr"` until iteration J lets a page pass
+  its own strings.
+
+## DEC-130: What the pairing page shows and when pairing may finish
+
+2026-11-13, iteration 30 (review 2026-11-13, RS 6, 7, 9, 10, 11, 12, 17, 18). Amends
+DEC-061 and DEC-065.
+
+- **Page origin (RS 6).** On an open relay any `Origin` header was kept as sent, so a
+  program could put free text (`https://ractive.ch (verified by the relay)`) or 8 KB into
+  the pairing page's origin slot and the log. Now a session on an open relay keeps only
+  a serialised web origin (`new URL(o).origin === o`, http or https) or a browser
+  extension's origin of at most 255 characters; anything else is no origin (`""`), which
+  the page shows as "a page that did not say where it runs". A listed origin matched the
+  list exactly and is kept as before.
+- **App name (RS 7).** `hello.app.name` goes through `displayName` (DEC-065: bidi,
+  zero-width and other invisible characters removed) and is dropped when it is empty
+  then or names a domain that is not the page origin's host, a parent or a subdomain of
+  it (`foreignDomain`, DEC-092). The session is not refused for it: the name is the
+  page's claim and only decoration; `tab.session` logs `appNameDropped`. A configured
+  site name is not checked. The pairing page's `strong` and `.origin` are
+  `unicode-bidi: isolate`.
+- **One offline page (RS 10).** `/authorize` answered "Open the page first" without a
+  session and "Open “Connect your AI app” first" with one whose dialog was closed, which
+  told whoever knew an address whether its page was open. Both cases now get one text;
+  the retry is the same. Left over, in A1: an open dialog shows the pairing page with
+  the origin and app name.
+- **Code guesses per network (RS 9).** The share of an address's guesses per network
+  counts an IPv4 address or an IPv6 /56 (`networkKey`), as sessions and open requests do.
+  Three networks still drain the per-address allowance (30, then one every 30 s); the
+  threat model says so instead of "many networks".
+- **OIDC callback (RS 11).** The callback fails with `inactive` when the page's dialog
+  is closed by then, before the identity comparison: a sign-in started while the dialog
+  was open no longer pairs up to 10 minutes after the user closed it, as a code is void
+  once the dialog closes.
+- **`identity_refused` (RS 12).** `JwtError` messages are fixed texts; the JWKS failure's
+  inner error (the configured URL and HTTP status, or Bun's fetch error) is its `cause`,
+  logged by name in `identity.refused` and in full only in `oidc.sign_in_failed`, an
+  operator's line about the provider.
+- **Visit cookie (RS 17).** Every pairing page, and the redirect to the provider, sends
+  the visit cookie again with the same id and a fresh `Max-Age` of 10 minutes. It was
+  set only when absent, so a request opened late in an earlier visit outlived the cookie
+  its form was checked against and failed with "your browser may block cookies".
+- **`[::1]` in `form-action` (RS 18).** Checked in Chrome 151 (headless, pages served
+  through the DevTools protocol): `form-action 'self' http://[::1]:5000` is parsed as
+  `form-action 'self'` and the redirect after Connect is blocked; `http:` lets it
+  through. A loopback redirect to an IPv6 literal therefore gets the scheme source
+  `http:`. The pairing page has no script and its one form posts to the relay, so a
+  wider `form-action` for that case allows nothing an attacker controls: the redirect
+  target is the registered URI the relay chose. Dropping `[::1]` from the loopback
+  hosts, the other option, would refuse clients that register it (RFC 8252 §7.3).
+
+## DEC-131: What the logs say about failures, refusals and load
+
+2026-11-13, iteration 30 (review 2026-11-13, RQ 4, 5, 6). Amends DEC-047.
+
+- **Error codes (RQ 4).** Error lines carry `errorCode` next to `error` when the error
+  has a `code` of the form `^[A-Z0-9_]{1,40}$` (`SQLITE_FULL`, `SQLITE_BUSY`,
+  `EADDRINUSE`). Such a code cannot carry request data; messages are still never logged
+  while the relay runs. A separate field, not `"SQLiteError (SQLITE_FULL)"` in `error`,
+  so a filter on `error` keeps working.
+- **Failures at start (RQ 4).** The `tab-mcp` command catches an error of `createRelay`
+  that is not a `ConfigError`, logs `relay.start_failed`, prints the message and code on
+  stderr and exits with 1. Nothing has run yet, so the message holds no request data;
+  before, an unwritable volume was `process.uncaught_exception` with `SQLiteError` only.
+- **Store failures (RQ 5).** The relay wraps its token store (`guardStore`): every
+  failure of a store method, a rejection or a synchronous throw, is a `StoreFailure`
+  with the store's error as `cause`. That tells a store failure from a bug wherever it
+  surfaces. `/token` and `/revoke` log it as `store.error` (`op` `token`, `revoke`)
+  instead of `oauth.error`; a tab's `grant.revoke` and `grants.revokeAll` log
+  `store.error` (`op` `revokeGrant`, `revokeAll`) and answer the new error code
+  `store_unavailable` instead of `bad_message`, which blamed the page's message. The
+  fields called `message` in `oauth.error` and `tab.handler_error` are `error` now.
+- **Refusals and limits (RQ 6).** `oauth.token_refused` (info) for every 4xx answer of
+  `/token` and `/revoke` except a per-network limit: endpoint, grant type (known ones by
+  name, else `other`), status, OAuth error, the fixed reason text, the client host. Each
+  per-network limiter of the authorization server (`/authorize` views and posts, code
+  guesses, `/token` requests and failures, client assertions) warns once
+  (`oauth.rate_limited` with `limit` and the shortened network) when a network is first
+  refused, and again only after its bucket was full again, so a steady flood is one
+  line. `relay.stats` (info) every sweep: sessions and `maxSessions`, waiting requests,
+  open authorizations. A successful refresh stays at debug (one per hour per connected
+  app).
+
+## DEC-132: Configuration checks, the body limit while a page is away, provider discovery
+
+2026-11-13, iteration 30 (review 2026-11-13, RQ 11, 12, 13).
+
+- **Configuration (RQ 11).** `resolveConfig` checks `store`, `trustProxy`, `logLevel` and
+  `cors` against their values: through the API, `store: "sqlLite"` ran the memory store.
+  `ConfigError` has a `key` (the setting), and `describeConfigError` puts its
+  environment variable in front (`TAB_MCP_MAX_SESSIONS: maxSessions must be a positive
+  number`; `TAB_MCP_ALLOWED_ORIGINS: not an origin: x`). At start the command logs
+  `relay.unknown_setting` for each `TAB_MCP_*` variable it does not read; a warning, not
+  a refusal, so a variable an older or newer release reads does not stop a rollout.
+- **Body limit (RQ 12).** The last session of an address also remembers its site's
+  `maxMessageBytes`; an authenticated request while the page is away is read up to that
+  limit, not the instance's. A site with a raised limit then answers a large request
+  with "the page is not open" (it does not wait: only bodies up to 16 KiB wait) instead
+  of 413.
+- **Provider discovery (RQ 13).** As the provider's keys (`JwksCache`): after a failed
+  refresh the last good metadata serves for another hour, and no new fetch starts for
+  30 seconds. Before, a discovery outage after the hour stopped pairing on every `oidc`
+  site, and every `/authorize` waited for a fetch that failed.
+- **Not done (RQ 7).** A revocation on another instance does not end requests already
+  forwarded on the page's instance, nor its listen streams (up to the session lifetime).
+  The self-hosting guide states it. Closing it would take a store read per listen stream
+  per keep-alive, for setups with several instances only.
 ## DEC-157: When a tool is consequential: what the user cannot undo in the page
 
 2026-11-13, iteration 37 (review finding EX 2, EX 5). The README and the skill said every

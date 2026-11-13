@@ -3,9 +3,13 @@
 The relay (`tab-mcp` command, Docker image `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`) reads its settings from environment variables. `tab-mcp --help`
 prints the same list. A value the relay cannot use stops it at start with
-`tab-mcp: configuration error: …` and exit code 2, so a wrong value never runs with a
-silent default. A misspelled variable name is not detected: the relay ignores variables
-it does not know and uses the default.
+`tab-mcp: configuration error: …` and exit code 2, naming the variable
+(`TAB_MCP_MAX_SESSIONS: maxSessions must be a positive number`), so a wrong value never
+runs with a silent default. A `TAB_MCP_*` variable the relay does not read (a
+misspelled or removed setting) is ignored, and logged at start as
+`relay.unknown_setting` with its name. Any other failure at start (a store file it
+cannot open, a port in use) prints `tab-mcp: could not start: …` with the error's
+message and code, logs `relay.start_failed`, and exits with 1.
 
 If you embed the relay with `createRelay()` from `@ractive-ch/tab-mcp`, pass the same
 settings as options (`publicUrl`, `allowedOrigins`, `sites`, `maxSessionsPerIp`, …, in
@@ -225,7 +229,11 @@ See the [threat model](threat-model.md) for what this does and does not protect.
 > Use it only on a relay that you run for yourself, for development, or when you accept
 > that any website can use it.
 
-Users still have to pair each AI app with a code, and all limits still apply. Prefer a
+Users still have to pair each AI app with a code, and all limits still apply. The page
+origin the pairing page shows is then whatever the page's client sent: a browser sends
+its page's true origin, a program any origin it likes. The relay keeps it only if it is
+a serialised origin (`https://host[:port]`) or a browser extension's origin of at most
+255 characters, and otherwise shows "a page that did not say where it runs". Prefer a
 list of origins or `TAB_MCP_SITES`.
 
 ## Examples

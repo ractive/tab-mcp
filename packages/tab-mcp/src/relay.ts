@@ -9,6 +9,7 @@ import {
 	resolveConfig,
 	type Site,
 	type StoreKind,
+	shownOrigin,
 	siteFor,
 } from "./config.ts";
 import {
@@ -21,7 +22,7 @@ import { APPLE_TOUCH_ICON, FAVICON_ICO, FAVICON_SVG } from "./icons.ts";
 import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
 import { forwardedIp, ipPrefixKey, ipSessionKeys } from "./ip.ts";
 import { JwtError, type KeySource } from "./jwt.ts";
-import { createLogger, errorName, type Logger, truncateIp } from "./log.ts";
+import { createLogger, errorFields, type Logger, truncateIp } from "./log.ts";
 import {
 	isRetryable,
 	type NotOpenPhase,
@@ -42,6 +43,7 @@ import {
 	SUBPROTOCOL,
 } from "./protocol.ts";
 import { TabSession } from "./session.ts";
+import { guardStore } from "./store/guard.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import { SqliteTokenStore } from "./store/sqlite.ts";
 import type { TokenRecord, TokenStore } from "./store/types.ts";
@@ -328,11 +330,14 @@ function startRelay(
 	);
 	const logger = givenLogger ?? createLogger(config.logLevel);
 	const ownsStore = tokenStore === undefined;
-	const store: TokenStore =
+	// Every failure of the store is a `StoreFailure` from here on, so it can
+	// be told from other errors wherever it surfaces (RQ 5, DEC-131).
+	const store: TokenStore = guardStore(
 		tokenStore ??
-		(config.store === "sqlite"
-			? new SqliteTokenStore(config.sqlitePath)
-			: new MemoryTokenStore());
+			(config.store === "sqlite"
+				? new SqliteTokenStore(config.sqlitePath)
+				: new MemoryTokenStore()),
+	);
 
 	const sessions = new Map<string, TabSession>();
 	const allSessions = new Set<TabSession>();
@@ -344,11 +349,16 @@ function startRelay(
 	let waitingCount = 0;
 	/**
 	 * Each address's last session: its app name, for "open <name>", and its
-	 * site's concurrency limit, for requests that wait for the page.
+	 * site's limits, for requests that come while the page is away: how many
+	 * may wait, and how large a body may be (RQ 12).
 	 */
 	const lastSeen = new Map<
 		string,
-		{ appName: string | undefined; maxConcurrentRequests: number }
+		{
+			appName: string | undefined;
+			maxConcurrentRequests: number;
+			maxMessageBytes: number;
+		}
 	>();
 	let claudeWorkarounds = 0;
 	let publicUrl = config.publicUrl ?? "";
@@ -560,7 +570,7 @@ function startRelay(
 					});
 				}
 			};
-			const refuse = (reason: string, message: string) => {
+			const refuse = (reason: string, message: string, cause?: unknown) => {
 				// Fail closed: a refused assertion also ends an earlier binding,
 				// and the requests made under it. When the relay could not check
 				// (keys or store unavailable), the AI app is told to try again,
@@ -578,6 +588,7 @@ function startRelay(
 				logger.info("identity.refused", {
 					address: shortAddress(addressId),
 					reason,
+					...(cause === undefined ? {} : errorFields(cause)),
 				});
 				answer({ type: "error", code: "identity_refused", message, ...echo });
 			};
@@ -592,9 +603,12 @@ function startRelay(
 					`${publicUrl}/a/${addressId}/mcp`,
 				);
 			} catch (error) {
+				// JwtError messages are fixed texts; what an inner error says
+				// (the JWKS URL, a fetch error) goes to the log by name (RS 12).
 				refuse(
 					error instanceof JwtError ? error.reason : "error",
 					`the identity assertion was refused: ${error instanceof JwtError ? error.message : "the relay could not check it"}`,
+					error instanceof JwtError ? error.cause : error,
 				);
 				return;
 			}
@@ -617,7 +631,7 @@ function startRelay(
 			} catch (error) {
 				logger.error("store.error", {
 					op: "identity",
-					error: errorName(error),
+					...errorFields(error),
 				});
 				refuse("store_unavailable", "the relay cannot check grants right now");
 				return;
@@ -661,7 +675,7 @@ function startRelay(
 				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
 			} catch (error) {
 				// The grants stay, but work only for a page bound to their person.
-				logger.error("store.error", { op: "signOut", error: errorName(error) });
+				logger.error("store.error", { op: "signOut", ...errorFields(error) });
 			}
 		},
 		claimAddress(session: TabSession): TabSession | undefined {
@@ -692,6 +706,7 @@ function startRelay(
 			lastSeen.set(id, {
 				appName,
 				maxConcurrentRequests: session.limits.maxConcurrentRequests,
+				maxMessageBytes: session.limits.maxMessageBytes,
 			});
 			// Bounded: forget the oldest addresses first.
 			if (lastSeen.size > config.maxSessions * 2) {
@@ -920,7 +935,7 @@ function startRelay(
 			data: {
 				ip,
 				ipKeys,
-				origin: origin ?? "",
+				origin: shownOrigin(site, origin),
 				site,
 				...(address === undefined ? {} : { address }),
 			},
@@ -950,7 +965,7 @@ function startRelay(
 		try {
 			record = await store.get(hashToken(token));
 		} catch (error) {
-			logger.error("store.error", { op: "get", error: errorName(error) });
+			logger.error("store.error", { op: "get", ...errorFields(error) });
 			return "unavailable";
 		}
 		if (
@@ -1144,8 +1159,9 @@ function startRelay(
 		};
 
 		// The token is looked up before the body is read (RS 8): only an
-		// authenticated request may send up to the page's limit (the
-		// instance's while the page is away). Without a valid token the body
+		// authenticated request may send up to the page's limit (while the
+		// page is away, its site's as last seen, else the instance's: RQ 12).
+		// Without a valid token the body
 		// may be MIN_MESSAGE_BYTES, which every version probe fits; a larger
 		// one is not parsed and gets the 401 (or 503) it would get after the
 		// version check anyway (DEC-040 keeps that order for what is parsed).
@@ -1155,6 +1171,7 @@ function startRelay(
 			req,
 			authenticated
 				? (sessions.get(addressId)?.limits.maxMessageBytes ??
+						lastSeen.get(addressId)?.maxMessageBytes ??
 						config.maxMessageBytes)
 				: MIN_MESSAGE_BYTES,
 		);
@@ -1512,7 +1529,7 @@ function startRelay(
 			}
 			return result;
 		} catch (error) {
-			logger.warn("health.store", { error: errorName(error) });
+			logger.warn("health.store", { ...errorFields(error) });
 			return "store_unavailable";
 		} finally {
 			clearTimeout(timer);
@@ -1633,7 +1650,7 @@ function startRelay(
 		// A handler that throws: one JSON log line with the error's name only
 		// (DEC-047), not Bun's own output with message and stack (RQ 20).
 		error(error) {
-			logger.error("http.handler_error", { error: errorName(error) });
+			logger.error("http.handler_error", { ...errorFields(error) });
 			return new Response("Internal error", {
 				status: 500,
 				headers: { "content-type": "text/plain; charset=utf-8" },
@@ -1680,6 +1697,14 @@ function startRelay(
 	const sweep = setInterval(() => {
 		auth.sweep();
 		sweepRevocations(Date.now());
+		// The figures to size TAB_MCP_MAX_SESSIONS by before refusals start
+		// (RQ 6), every sweep (10 minutes by default).
+		logger.info("relay.stats", {
+			sessions: allSessions.size,
+			maxSessions: config.maxSessions,
+			waitingRequests: waitingCount,
+			pendingAuthorizations: auth.pendingCount,
+		});
 		// Inside a promise chain, so a store that throws synchronously is a
 		// logged failure, not an uncaught exception in the timer (RQ 10).
 		Promise.resolve()
@@ -1690,7 +1715,7 @@ function startRelay(
 			.catch((error: unknown) =>
 				logger.error("store.error", {
 					op: "deleteExpired",
-					error: errorName(error),
+					...errorFields(error),
 				}),
 			);
 	}, config.sweepIntervalMs);
