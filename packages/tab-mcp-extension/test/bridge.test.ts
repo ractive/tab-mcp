@@ -93,7 +93,7 @@ describe("names, descriptions, schemas", () => {
 							description: "The order code.",
 							pattern: `^[A-Z]{3}${"x".repeat(MAX_PATTERN)}`,
 						},
-						// A description that is not a string stays as it is.
+						// A description that is not a string gives way to the note.
 						odd: { type: "string", description: 7, pattern: "^x$" },
 					},
 					patternProperties: { "^x": { type: "number" } },
@@ -111,7 +111,10 @@ describe("names, descriptions, schemas", () => {
 						type: "string",
 						description: `The order code. (Must match the regular expression ^[A-Z]{3}${"x".repeat(MAX_PATTERN - 10)}….)`,
 					},
-					odd: { type: "string", description: 7 },
+					odd: {
+						type: "string",
+						description: "(Must match the regular expression ^x$.)",
+					},
 				},
 			},
 		});
@@ -634,7 +637,9 @@ describe("PageToolBridge", () => {
 				[
 					pageTool("x".repeat(5000)),
 					pageTool("odd", { inputSchema: { type: "array" } }),
-					pageTool("refused"),
+					pageTool("refused", {
+						outputSchema: { type: "object", properties: {} },
+					}),
 					...many,
 				],
 				{ more: 10 },
@@ -656,6 +661,24 @@ describe("PageToolBridge", () => {
 		expect(tools.find((t) => t.name === "refused")).not.toHaveProperty(
 			"inputSchema",
 		);
+		expect(tools.find((t) => t.name === "refused")).not.toHaveProperty(
+			"outputSchema",
+		);
+		// And listing() leaves out any output schema of a tool not offered.
+		expect(
+			listing({
+				available: true,
+				tools: [
+					{
+						name: "x",
+						description: "d",
+						readOnly: true,
+						problem: "p",
+						outputSchema: { type: "object" },
+					},
+				],
+			}).tools[0],
+		).not.toHaveProperty("outputSchema");
 		expect(reg.tools.size).toBeLessThanOrEqual(MAX_TOOLS);
 	});
 

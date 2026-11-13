@@ -145,24 +145,28 @@ export function validateTool(tool: Tool): RegisteredTool {
 	if (typeof execute !== "function") {
 		throw new TypeError(`registerTool: tool ${name} needs an execute function`);
 	}
-	/** An object schema, copied as JSON (MCP wants `"type": "object"`). */
+	/**
+	 * An object schema (MCP wants `"type": "object"`), copied as JSON and
+	 * checked by `schemaProblem`: an AI app compiles the output schema too.
+	 */
 	const copy = (schema: unknown, what: string): JsonSchema => {
 		if (!isPlainObject(schema) || schema["type"] !== "object") {
 			throw new TypeError(
 				`registerTool: the ${what} of ${name} must be a JSON Schema object with "type": "object"`,
 			);
 		}
+		let copied: JsonSchema;
 		try {
-			return JSON.parse(JSON.stringify(schema)) as JsonSchema;
+			copied = JSON.parse(JSON.stringify(schema)) as JsonSchema;
 		} catch {
 			throw new TypeError(`registerTool: the ${what} of ${name} must be JSON`);
 		}
+		const problem = schemaProblem(copied);
+		if (problem !== undefined)
+			throw new TypeError(`registerTool: the ${what} of ${name}: ${problem}`);
+		return copied;
 	};
 	const copied = copy(inputSchema ?? { type: "object" }, "inputSchema");
-	const problem = schemaProblem(copied);
-	if (problem !== undefined) {
-		throw new TypeError(`registerTool: the inputSchema of ${name}: ${problem}`);
-	}
 	if (annotations !== undefined && !isPlainObject(annotations)) {
 		throw new TypeError(
 			`registerTool: the annotations of ${name} must be an object`,

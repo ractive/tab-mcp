@@ -115,12 +115,10 @@ function withoutPatterns(schema: unknown): unknown {
 	if (!isObject(schema)) return schema;
 	const out: Record<string, unknown> = {};
 	const { pattern, description } = schema;
-	if (
-		typeof pattern === "string" &&
-		(description === undefined || typeof description === "string")
-	)
+	// A description that is not a string (not valid JSON Schema) gives way.
+	if (typeof pattern === "string")
 		out["description"] =
-			`${description ? `${description} ` : ""}(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`;
+			`${typeof description === "string" && description ? `${description} ` : ""}(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`;
 	for (const [key, value] of Object.entries(schema)) {
 		if (key === "pattern" || key === "patternProperties") continue;
 		if (key === "description" && "description" in out) continue;
@@ -749,6 +747,7 @@ export class PageToolBridge {
 					if (entry) {
 						delete entry.tool;
 						delete entry.inputSchema;
+						delete entry.outputSchema;
 						entry.problem = problem;
 						this.#changed();
 					}

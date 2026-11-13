@@ -288,6 +288,28 @@ describe("ToolRegistry (WebMCP rules)", () => {
 			).toThrow(
 				'registerTool: the outputSchema of bad must be a JSON Schema object with "type": "object"',
 			);
+		// Checked like inputSchema: an AI app compiles it when it lists the tools.
+		expect(() =>
+			r.register({
+				...tool(),
+				name: "dangling",
+				outputSchema: { type: "object", $ref: "#/$defs/Item" },
+			}),
+		).toThrow(
+			'registerTool: the outputSchema of dangling: $ref "#/$defs/Item" does not resolve',
+		);
+		expect(() =>
+			r.register({
+				...tool(),
+				name: "badPattern",
+				outputSchema: {
+					type: "object",
+					properties: { a: { type: "string", pattern: "(" } },
+				},
+			}),
+		).toThrow(
+			'registerTool: the outputSchema of badPattern: pattern "(" is not',
+		);
 		const cyclic: Record<string, unknown> = { type: "object" };
 		cyclic["self"] = cyclic;
 		expect(() =>

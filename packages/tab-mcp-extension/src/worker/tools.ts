@@ -47,7 +47,11 @@ export function listing(state: BridgeState): BridgeState {
 	return {
 		...state,
 		tools: state.tools.map((tool) => {
-			if (tool.inputSchema === undefined) return tool;
+			// Not offered: no schema of either kind (DEC-144).
+			if (tool.inputSchema === undefined) {
+				const { outputSchema: _, ...rest } = tool;
+				return rest;
+			}
 			const size = JSON.stringify(tool.inputSchema).length;
 			if (size <= room) {
 				room -= size;
