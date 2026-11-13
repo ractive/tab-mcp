@@ -76,8 +76,12 @@ await mcp.registerTool<{ text: string }>( // types `input`; the schema is what i
 Rules for tools:
 
 - The shape follows the WebMCP draft (`document.modelContext.registerTool`); the second
-  argument is `{ signal, webmcp }`. There is no `unregisterTool`: abort the registration
-  signal. AI apps that listen get a tool-list-changed notification.
+  argument is `{ signal, callers, exposedTo }`. There is no `unregisterTool`: abort the
+  registration signal. AI apps that listen get a tool-list-changed notification.
+- `callers` (default: all) lists who sees a tool: `"relay"` (AI apps), `"local"` (the
+  site's own assistant on a served port), `"webmcp"` (agents in the browser; a
+  consequential tool only when listed). For the others the tool does not exist (not
+  listed, no list-changed, a call answered as for an unknown tool).
 - `registerTool` returns a promise. It rejects with a `TypeError` for an invalid tool and
   an `InvalidStateError` for a duplicate name. Do not use `x-mcp-header` in schemas.
 - Arguments are validated against `inputSchema` before `execute` runs, so `execute`
@@ -91,7 +95,8 @@ Rules for tools:
   something else, is sent as JSON text and, for objects, as `structuredContent`.
   Annotation hints must be `true` or `false`; anything else is a `TypeError`. A thrown error becomes an error
   result with its message, so throw errors that tell the model what to do.
-- `signal` aborts when the caller gives up. `client` names the caller:
+- `signal` aborts when the caller gives up; the call ends then even if `execute` keeps
+  going, and its late result is dropped. `client` names the caller:
   `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared
   `name`), `{ kind: "local", id, name? }` for the site's own assistant on a served port
   (what the page passed to `serve`, section 3), or `{ kind: "webmcp" }` for an agent in
@@ -101,8 +106,10 @@ Rules for tools:
 - Annotations: `readOnlyHint` for tools that only read; `consequentialHint` for tools
   whose effect cannot be undone in the page or reaches outside it (section 4);
   `untrustedContentHint` for results that contain text from the user, another AI app or
-  third parties (a list of notes, todos, labels). MCP hints (`destructiveHint`,
-  `idempotentHint`, `openWorldHint`) may be set directly.
+  third parties (a list of notes, todos, labels); every result of such a tool carries
+  `_meta["ch.ractive.tab-mcp/annotations"].untrustedContentHint: true`, which a consumer
+  should read (MCP has no such hint; `tools/list` shows `openWorldHint`). MCP hints
+  (`destructiveHint`, `idempotentHint`, `openWorldHint`) may be set directly.
 
 ## 3. Connect and pair
 
@@ -187,18 +194,34 @@ address was taken over again first: say so and let the user try again.
 
 ```ts
 const mcp = new TabMcp({ server: { name: "shop", version: "1.0.0" } }); // no relay
-const served = await mcp.serve(port, { client: { id: "assistant", name: "Shop assistant" } });
+const served = await mcp.serve(port, {
+  client: { id: "assistant", name: "Shop assistant" },
+  onConfirm: (request) => askInChat(request), // the user's click in the chat answers
+});
 ```
 
 - The other end uses `createTunnelFetch` from `@ractive-ch/tab-mcp-client/tunnel` as the
-  `fetch` of an MCP client (pinned to `2026-07-28`) and passes the messages over its own
-  channel; the client README's "Your own assistant on the page" has the whole setup.
+  `fetch` of the MCP SDK's client, pinned to `2026-07-28` (an agent framework's own MCP
+  client may not speak it), and passes the messages over its own channel; it hands the
+  framework the tools as function tools. The client README's "Your own assistant on the
+  page" has the whole setup and a tested backend recipe.
 - A port is a key: whoever holds the other end calls the tools without pairing. Hand it
   only to a frame whose origin you checked, with that origin as the `postMessage` target,
   never `"*"`.
-- Calls arrive with `client: { kind: "local", id, name }`. A consequential tool still asks
-  (the dialog names "Shop assistant (this site's assistant)", no "Allow until reload"); a port
-  has none of the relay's limits.
+- Calls arrive with `client: { kind: "local", id, name }`. A consequential tool still
+  asks: recommend `serve`'s `onConfirm`, which asks in the site's chat, in the user's
+  language, for that port's calls only (relay and WebMCP calls keep the page's
+  `onConfirm` or dialog; same answers; `request.signal` aborts on cancel, timeout or
+  close). The answer must come from the user's click, never from a message of the
+  assistant's backend: the library does not send the question over the port for that
+  reason. Do not answer `true` for `kind === "local"` to skip the question: tool results
+  bring third-party text into the model. Without it the dialog names "Shop assistant
+  (this site's assistant)", no "Allow until reload".
+- Page state that changes (the product shown, the cart) belongs in a read-only tool such
+  as `get_page_context`, not in `instructions`: MCP has no notification for changed
+  instructions.
+- `requestTimeoutMs` (300 s) limits each request on the page's side (`-31002`, the call
+  ends as `cancelled`); a port has none of the relay's other limits.
 - `served.close()` (or `options.signal`) ends it; close it when the channel is gone.
   Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
   `TypeError` and React's `ConnectButton` renders nothing. `serve`, the relay and
@@ -240,14 +263,15 @@ was asked and did not answer, e.g. the page's own question timed out: the AI app
 `unanswered`); anything else, and a throw, is a refusal. `request` has
 `tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts.
 `mcp.confirmInPage(request, { document? })` is the library's dialog, for example for
-`client.kind === "webmcp"` or `"local"`. Without `onConfirm` and without a `document`,
+`client.kind === "webmcp"`. A served port can have its own `onConfirm` (section 3).
+Without `onConfirm` and without a `document`,
 calls are declined.
 
 ## 5. WebMCP: agents in the browser
 
 ```ts
 const mcp = new TabMcp({ relay, server, webmcp: true });
-await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only when named
+await mcp.registerTool(deleteNoteTool, { callers: ["relay", "webmcp"] }); // consequential: only when named
 ```
 
 - `webmcp: true` (off by default) also registers each tool with the browser's native
@@ -255,9 +279,9 @@ await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only
   the WebMCP origin trial, or `chrome://flags/#enable-webmcp-testing`). Agents in the
   browser (built in, or an extension) then call the tools without pairing. It is a
   change in what the page exposes: turn it on only when the user wants that.
-- Tools with `consequentialHint` are left out unless registered with `{ webmcp: true }`
-  (React: `useTool(tool, { webmcp: true })`): such an agent often drives the tab
-  and can click Allow itself. `{ webmcp: false }` keeps any tool out.
+- Tools with `consequentialHint` are left out unless their `callers` list `"webmcp"`
+  (React: `useTool(tool, { callers: ["relay", "webmcp"] })`): such an agent often drives
+  the tab and can click Allow itself. `callers` without `"webmcp"` keeps any tool out.
 - A WebMCP call gets the same argument check and confirmation (the dialog names the caller
   "An agent in this browser", never offers "Allow until reload"), and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`.

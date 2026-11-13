@@ -424,7 +424,7 @@ With `webmcp: true` the library also registers the page's tools with the browser
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`). Agents
 in the browser call them without pairing and without an identity (`client.kind`
 `"webmcp"`). Such an agent often drives the tab and can click Allow itself, so
-consequential tools are mirrored only when registered with `{ webmcp: true }`; calls get
+consequential tools are mirrored only when their `callers` list `"webmcp"`; calls get
 the same schema check and confirmation, never "Always allow". Only the native object is
 used. tab-mcp for Chrome offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice, and a consequential
@@ -439,8 +439,11 @@ the tools without pairing, so the page must check the frame's origin before it h
 out; the library has no handshake of its own. The library sets the grant itself and
 ignores one sent on the port, so the caller is always `client.kind` `"local"` and cannot
 pass for a paired AI app. Consequential tools still ask ("(this site's assistant)", never
-"Always allow"); a page may answer `onConfirm` itself for this kind. No relay limits apply
-on a port. The full analysis is A15 in `docs/threat-model.md` (DEC-122 to DEC-126).
+"Always allow"), or `serve`'s own `onConfirm` asks for that port (in the site's chat);
+the question never goes over the port, whose other end is the caller, and the answer must
+come from the user's click. `callers` without `"local"` hide a tool from every port. No
+relay limits apply on a port; each request has a page-side time limit. The full analysis
+is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
 
 ## Safe defaults
 

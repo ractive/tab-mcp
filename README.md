@@ -206,13 +206,15 @@ take back in the page, such as `add_note` above, needs no question.
 
 A site with its own AI assistant on the page can serve the tools to it over a
 `MessagePort` with `mcp.serve(port, { client })`, without a relay, pairing or an address;
-calls then come with `client.kind === "local"`. See
+calls then come with `client.kind === "local"`, and `serve`'s `onConfirm` asks for them in
+the site's own chat. See
 [Your own assistant on the page](packages/tab-mcp-client/README.md#your-own-assistant-on-the-page).
 
 `new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
 where the browser has it, so that agents in the browser call them without pairing, with
 the same argument check and confirmation. Consequential tools (`consequentialHint` or
-`destructiveHint`) go there only when registered with `{ webmcp: true }`. See [WebMCP](packages/tab-mcp-client/README.md#webmcp)
+`destructiveHint`) go there only when their registration lists `"webmcp"` in `callers`,
+which says per tool which callers see it. See [WebMCP](packages/tab-mcp-client/README.md#webmcp)
 in the client README.
 
 The [client README](packages/tab-mcp-client/README.md) covers the whole API; the

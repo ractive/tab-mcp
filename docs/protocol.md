@@ -339,6 +339,13 @@ a port:
   page said `bye`, `-31005` when its `send` throws, `-31007` for a response that breaks
   the rules above. A response body that came in pieces without being an event stream
   ends with the error as its body if no piece had come, else the body breaks off.
+- The page limits each request too (`serve`'s `requestTimeoutMs`, 300 s by default;
+  `subscriptions/listen` is not limited). When a request has not ended in time, the page
+  aborts it, sends nothing more for it, and answers the same `-31002` error itself: as
+  `http.response` with status 200 and the JSON-RPC error as its body if no response had
+  started, else as a last `http.response.chunk` with that error as an event
+  (`event: message`, between two events) followed by `http.response.end`. A caller
+  therefore gets `-31002` from whichever end's limit runs out first.
 
 Who holds the other end of the port is the page's decision when it hands the port out;
 see A15 in the [threat model](threat-model.md).

@@ -41,9 +41,9 @@ function TodoList() {
   again only on change.
 - `useTool(tool, options?)` always calls the latest `execute`; it registers again
   only when the name, title, description, schemas or annotations change, or
-  `options.webmcp` or `options.exposedTo`. A duplicate name throws from render (use an error boundary).
+  `options.callers` or `options.exposedTo` (by value). A duplicate name throws from render (use an error boundary).
 - `webmcp` on the provider registers the tools with the browser's WebMCP too; a
-  consequential tool only with `useTool(tool, { webmcp: true })` (SKILL.md,
-  section 5).
+  consequential tool only with `useTool(tool, { callers: ["relay", "webmcp"] })`
+  (SKILL.md, section 5).
 - `useToolCalls({ limit })` lists the AI app's recent calls; `ConnectButton` opens the
   dialog and labels itself by state.

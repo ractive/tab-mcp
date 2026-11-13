@@ -25,7 +25,7 @@ import {
 	useTool,
 	useToolCalls,
 } from "../src/react.ts";
-import type { Tool } from "../src/types.ts";
+import type { Tool, ToolCaller } from "../src/types.ts";
 import {
 	connectClient,
 	MemoryStorage,
@@ -195,29 +195,30 @@ test("useTool registers again only when the tool changes, not for a new execute 
 	expect(changes).toEqual([]);
 });
 
-test("useTool passes webmcp on to registerTool and registers again when it changes", () => {
+test("useTool passes callers on to registerTool and registers again when they change", () => {
 	const t = tab();
 	const seen: unknown[] = [];
 	const register = t.registerTool.bind(t);
 	t.registerTool = (tool, options) => {
-		seen.push(options?.webmcp);
+		seen.push(options?.callers);
 		return register(tool, options);
 	};
-	function Mirrored(props: { webmcp?: boolean }) {
+	function Mirrored(props: { callers?: ToolCaller[] }) {
 		useTool(
 			addTool(() => 1),
-			props.webmcp === undefined ? {} : { webmcp: props.webmcp },
+			props.callers === undefined ? {} : { callers: props.callers },
 		);
 		return null;
 	}
+	// A new array with the same callers on each render registers once.
 	render(
 		<TabMcpProvider client={t}>
-			<Mirrored webmcp />
+			<Mirrored callers={["local", "webmcp"]} />
 		</TabMcpProvider>,
 	);
 	render(
 		<TabMcpProvider client={t}>
-			<Mirrored webmcp />
+			<Mirrored callers={["local", "webmcp"]} />
 		</TabMcpProvider>,
 	);
 	render(
@@ -225,7 +226,7 @@ test("useTool passes webmcp on to registerTool and registers again when it chang
 			<Mirrored />
 		</TabMcpProvider>,
 	);
-	expect(seen).toEqual([true, undefined]);
+	expect(seen).toEqual([["local", "webmcp"], undefined]);
 	expect(t.tools).toEqual(["add"]);
 });
 

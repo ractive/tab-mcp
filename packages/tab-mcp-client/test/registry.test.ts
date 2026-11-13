@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { compileRegistry } from "../src/mcp.ts";
 import { ToolRegistry } from "../src/registry.ts";
+import { toolsFor } from "../src/serve.ts";
 import { TabMcp } from "../src/tab-mcp.ts";
-import type { Tool } from "../src/types.ts";
+import type { Tool, ToolCaller } from "../src/types.ts";
 import { MemoryStorage } from "./helpers.ts";
 
 const tool = (over: Partial<Tool> = {}): Tool => ({
@@ -355,13 +356,56 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		} as never);
 	});
 
-	test("webmcp must be a boolean (CC 2)", () => {
+	test("callers must list relay, local or webmcp; the list is copied (DEC-165)", () => {
 		const r = new ToolRegistry();
-		expect(() => r.register(tool(), { webmcp: "true" as never })).toThrow(
-			new TypeError("registerTool: webmcp must be a boolean"),
+		for (const callers of ["relay", ["relay", "agents"], [true]]) {
+			expect(() => r.register(tool(), { callers: callers as never })).toThrow(
+				new TypeError(
+					'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
+				),
+			);
+		}
+		// The option `callers` replaced is refused, not ignored (review of PR 129):
+		// an ignored `webmcp: false` would put the tool into WebMCP.
+		for (const webmcp of [false, true, undefined]) {
+			expect(() => r.register(tool(), { webmcp } as never)).toThrow(
+				/option webmcp is gone/,
+			);
+		}
+		// Not a list at all: the copy throws the TypeError.
+		expect(() => r.register(tool(), { callers: {} as never })).toThrow(
+			TypeError,
 		);
-		r.register(tool(), { webmcp: false });
-		expect(r.get("add")?.webmcp).toBe(false);
+		expect(r.list()).toEqual([]);
+		const callers: ToolCaller[] = ["local"];
+		r.register(tool(), { callers });
+		callers.push("relay");
+		expect(r.get("add")?.callers).toEqual(["local"]);
+		r.register(tool({ name: "none" }), { callers: [] });
+		expect(r.get("none")?.callers).toEqual([]);
+	});
+
+	test("toolsFor: the relay and a port see every tool by default, else those whose callers list them", () => {
+		const r = new ToolRegistry();
+		r.register(tool({ name: "plain" }));
+		r.register(
+			tool({ name: "wipe", annotations: { consequentialHint: true } }),
+		);
+		r.register(tool({ name: "webOnly" }), { callers: ["webmcp"] });
+		r.register(tool({ name: "localOnly" }), { callers: ["local"] });
+		r.register(tool({ name: "nobody" }), { callers: [] });
+		const relay = toolsFor(r, "relay");
+		const local = toolsFor(r, "local");
+		expect(relay.list().map((t) => t.name)).toEqual(["plain", "wipe"]);
+		expect(local.list().map((t) => t.name)).toEqual([
+			"plain",
+			"wipe",
+			"localOnly",
+		]);
+		expect(relay.get("localOnly")).toBeUndefined();
+		expect(local.get("localOnly")?.name).toBe("localOnly");
+		expect(local.get("webOnly")).toBeUndefined();
+		expect(local.get("missing")).toBeUndefined();
 	});
 });
 

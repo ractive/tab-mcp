@@ -13,7 +13,7 @@ import {
 	type TabMessage,
 } from "./protocol.ts";
 import type { RegisteredTool } from "./registry.ts";
-import { callContext, createTunnel } from "./serve.ts";
+import { callContext, createTunnel, watchTools } from "./serve.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
 /** For the core: the address id in the `/tab` URL (DEC-098). */
@@ -33,7 +33,7 @@ export function callFromWebMcp(
 	input: unknown,
 	signal: unknown,
 ): Promise<unknown> {
-	return webMcpCall(callContext(host), tool, input, signal);
+	return webMcpCall(callContext(host, "webmcp"), tool, input, signal);
 }
 
 /** How long `connect()` waits for the relay's `session`. */
@@ -219,14 +219,17 @@ export function openConnection(
 		fail(refused("The relay did not answer in time.", "network"));
 	}, CONNECT_TIMEOUT_MS);
 
+	const context = callContext(host, "relay");
 	const handler = createMcpHandler({
-		...callContext(host),
+		...context,
 		// Without `icons`, the page's own <link rel="icon">, read now.
 		server: { ...host.server, icons: host.server.icons ?? pageIcons() },
 		client: (grant) => host.clientFor(grant),
 		maxBodyBytes: () => maxBodyBytes,
 	});
-	const stopWatching = host.registry.onChange(() => handler.toolsChanged());
+	const stopWatching = watchTools(host.registry, context.tools, () =>
+		handler.toolsChanged(),
+	);
 
 	function send(message: TabMessage): boolean {
 		if (ws.readyState !== WebSocket.OPEN) return false;

@@ -86,6 +86,14 @@ The API before 1.0 (iteration 38). Each item says what to change.
   connected app is drawn by the stylesheet, not an inline `svg`. A Copy button's name is
   what it shows while it says "Copied" or "Press Ctrl+C", and that is what is announced
   ("Copied", not "Address copied").
+- **`RegisterToolOptions.webmcp` is gone; `callers` replaces it** (iteration 40). `callers`
+  lists who sees a tool: `"relay"`, `"local"` (a served port), `"webmcp"`; by default all
+  of them, and WebMCP gets a consequential tool only when `"webmcp"` is listed, as with
+  `webmcp: true` before. Migration: `{ webmcp: true }` → `{ callers: ["relay", "local",
+  "webmcp"] }` (or only the callers that should see it); `{ webmcp: false }` →
+  `{ callers: ["relay", "local"] }`; also in React's `useTool(tool, options)`. A
+  `callers` that is not a list of those three, and the old `webmcp` option (which would otherwise be ignored, and an ignored `webmcp: false` would put the tool into WebMCP), throw a `TypeError`. `TabMcpOptions.webmcp`
+  stays: it turns WebMCP on.
 
 #### Added
 
@@ -107,6 +115,26 @@ The API before 1.0 (iteration 38). Each item says what to change.
   the result, listed in `tools/list` and passed on to WebMCP.
 - `RegisterToolOptions.exposedTo` is passed on to the native WebMCP registration of a
   mirrored tool; it was accepted and ignored.
+- `serve(port, { onConfirm })`: approves the consequential calls of that port in place of
+  the page's `onConfirm` and the library's dialog, for example as a question in the
+  site's own chat in the user's language; relay and WebMCP calls keep the page's. Same
+  answers as `onConfirm`; `request.signal` aborts when the call is cancelled, times out
+  or the serve closes. The question is never sent over the port. The README recommends it
+  for a site's own assistant instead of answering `true` for `kind === "local"`.
+- `serve(port, { requestTimeoutMs })`: a time limit per request on the page's side, 300 s
+  by default as in `createTunnelFetch` (below 2^31 ms; a `subscriptions/listen` stream is
+  not limited). On expiry the call is aborted and ends as `cancelled`, a later answer is
+  dropped, and the other end gets the JSON-RPC error `-31002`.
+- `RegisterToolOptions.callers` (`ToolCaller[]`): which callers see a tool, `"relay"`,
+  `"local"` and `"webmcp"`. `tools/list` and `notifications/tools/list_changed` are per
+  caller, and a call of a tool the caller does not see is answered as for an unknown tool.
+- Every result of a tool marked `untrustedContentHint` carries
+  `_meta["ch.ractive.tab-mcp/annotations"]: { untrustedContentHint: true }`, through the
+  relay and through a port, next to the tool's own `_meta` (MCP has no such hint; in
+  `tools/list` it stays `openWorldHint` plus the original in `_meta`).
+- README: a tested backend recipe for a site's own assistant (the MCP SDK's client pinned
+  to 2026-07-28 next to an agent framework, the tools as function tools, untrusted results
+  delimited), and page context in a read-only tool such as `get_page_context`.
 
 #### Changed
 
@@ -115,8 +143,12 @@ The API before 1.0 (iteration 38). Each item says what to change.
   `structuredContent`, else as its text with other blocks (images) named as left out,
   instead of the JSON of the whole result with base64 images.
 - WebMCP: tools marked only with MCP's `destructiveHint` are left out of WebMCP unless
-  registered with `{ webmcp: true }`, like `consequentialHint`, and a mirrored one is
+  their `callers` list `"webmcp"`, like `consequentialHint`, and a mirrored one is
   registered natively with `consequentialHint: true`.
+- A call that is cancelled (the AI app gave up, the serve closed, its time ran out) ends
+  at once, with `toolcallend` outcome `cancelled`, also when the confirmation (an own
+  `onConfirm`) or `execute` does not heed the signal; what they answer later is dropped.
+  Before, the call ended only when they settled.
 - WebMCP: each `TabMcp` reads the native `document.modelContext` when it is made (through
   `Document.prototype`'s getter, as before), not when the library loads, so an
   origin-trial token added by a script counts for a `TabMcp` made after it. A failed

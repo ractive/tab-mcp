@@ -200,7 +200,7 @@ import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type Tu
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
-void mcp.registerTool(tool, { signal: new AbortController().signal, webmcp: true });
+void mcp.registerTool(tool, { signal: new AbortController().signal, callers: ["relay", "webmcp"] });
 mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind === "local" ? c.id : c.kind); });
 // @ts-expect-error: the caller may be an agent in the browser, which has no host
 mcp.addEventListener("toolcall", (e) => console.log(e.detail.client.host));
@@ -235,7 +235,7 @@ void own.serve(channel.port1, {});
 import { ConnectButton, TabMcpProvider, useTabMcp, useTabMcpState, useTool, useToolCalls, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
 import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 function Tools(): ReactElement {
-	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, { webmcp: true });
+	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, { callers: ["webmcp"] });
 	const state: TabMcpSnapshot = useTabMcpState();
 	const mcp: TabMcp = useTabMcp();
 	const calls = useToolCalls({ limit: 5 });

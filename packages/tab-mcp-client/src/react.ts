@@ -270,7 +270,7 @@ export type UseToolOptions = Omit<RegisterToolOptions, "signal">;
  * aborted on unmount). `execute` is always the latest one, so a new closure
  * on each render does not register again; the tool is registered again only
  * when its name, title, description, input or output schema or annotations
- * change, or `options.webmcp` or `options.exposedTo` (a tool allowed until reload stays allowed when it is
+ * change, or `options.callers` or `options.exposedTo` (a tool allowed until reload stays allowed when it is
  * registered again unchanged). A duplicate name or an invalid tool is thrown
  * from the component's next render, for an error boundary.
  */
@@ -292,7 +292,7 @@ export function useTool<Input extends object = Record<string, unknown>>(
 		tool.inputSchema,
 		tool.outputSchema,
 		tool.annotations,
-		options.webmcp,
+		options.callers,
 		options.exposedTo,
 	]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: `shape` stands for the tool and its options; `execute` is read through the ref

@@ -74,8 +74,8 @@ const add = {
 window.addControl = new AbortController();
 await mcp.registerTool(add, { signal: addControl.signal });
 await mcp.registerTool({ name: "wipe", description: "Wipes the memory", annotations: { consequentialHint: true }, execute: () => "wiped" });
-await mcp.registerTool({ name: "wipe_named", description: "Wipes, offered in WebMCP", annotations: { consequentialHint: true }, execute: () => "wiped" }, { webmcp: true });
-await mcp.registerTool({ name: "hidden", description: "Never in WebMCP", annotations: { readOnlyHint: true }, execute: () => 1 }, { webmcp: false });
+await mcp.registerTool({ name: "wipe_named", description: "Wipes, offered in WebMCP", annotations: { consequentialHint: true }, execute: () => "wiped" }, { callers: ["relay", "webmcp"] });
+await mcp.registerTool({ name: "hidden", description: "Never in WebMCP", annotations: { readOnlyHint: true }, execute: () => 1 }, { callers: ["relay"] });
 await mcp.registerTool({
 	name: "refused", description: "A schema only the validator refuses",
 	inputSchema: { type: "object", properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } }, $defs: { s: { type: "string" } } },
@@ -383,7 +383,7 @@ on(
 				await mcp.registerTool({ name: "structured", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "n is 1" }], structuredContent: { n: 1 } }) });
 				await mcp.registerTool({ name: "picture", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "The diagram:" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] }) });
 				await mcp.registerTool({ name: "remove", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" });
-				await mcp.registerTool({ name: "remove_named", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" }, { webmcp: true });
+				await mcp.registerTool({ name: "remove_named", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" }, { callers: ["relay", "webmcp"] });
 				await mcp.registerTool({ name: "typed", description: "d", annotations: { readOnlyHint: true }, outputSchema: { type: "object", properties: { n: { type: "number" } } }, execute: () => ({ n: 2 }) });
 			})()`);
 			await Bun.sleep(50);

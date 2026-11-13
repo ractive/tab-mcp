@@ -8,20 +8,71 @@
 
 import { pageIcons } from "./icons.ts";
 import type { CallHost } from "./internal.ts";
-import { type CallContext, createMcpHandler, type McpHandler } from "./mcp.ts";
+import {
+	type CallContext,
+	createMcpHandler,
+	type McpHandler,
+	type ToolSource,
+} from "./mcp.ts";
 import type { GrantRef, HttpRequestMessage, TabMessage } from "./protocol.ts";
+import type { RegisteredTool, ToolRegistry } from "./registry.ts";
 import type {
+	ConfirmAnswer,
 	LocalClient,
 	ServeHandle,
 	ServeOptions,
 	ServerInfo,
+	ToolCaller,
 	TunnelPort,
 } from "./types.ts";
 
-/** What a call through the relay, a port or WebMCP needs (`mcp.ts`), from the core's host. */
-export function callContext(host: CallHost): CallContext {
+/**
+ * The tools that callers of `kind` see (`RegisterToolOptions.callers`): to
+ * the others a tool they cannot see does not exist, in `tools/list` and in
+ * `tools/call` alike. Without `callers`, the relay and a port see every tool.
+ * The rule for WebMCP lives in the core's `mirror` (webmcp.ts), and WebMCP
+ * calls come only for the tools it mirrored. Not one shared helper: a module
+ * the core and this chunk both import would split the core in two.
+ */
+export function toolsFor(
+	registry: ToolRegistry,
+	kind: "relay" | "local",
+): ToolSource {
+	const sees = (tool: RegisteredTool | undefined) =>
+		tool && (tool.callers?.includes(kind) ?? true);
 	return {
-		tools: host.registry,
+		list: () => registry.list().filter(sees),
+		get: (name) => {
+			const tool = registry.get(name);
+			return sees(tool) ? tool : undefined;
+		},
+	};
+}
+
+/**
+ * Calls `changed` when the list that `tools` gives changed, not on every
+ * change of the registry: a tool another kind of caller sees is no news to
+ * this one (`list_changed` per caller). Returns a function that stops.
+ */
+export function watchTools(
+	registry: ToolRegistry,
+	tools: ToolSource,
+	changed: () => void,
+): () => void {
+	let last = tools.list();
+	return registry.onChange(() => {
+		const now = tools.list();
+		if (now.length === last.length && now.every((t, i) => t === last[i]))
+			return;
+		last = now;
+		changed();
+	});
+}
+
+/** What a call of `kind` through the relay, a port or WebMCP needs (`mcp.ts`), from the core's host. */
+export function callContext(host: CallHost, kind: ToolCaller): CallContext {
+	return {
+		tools: kind === "webmcp" ? host.registry : toolsFor(host.registry, kind),
 		confirm: (request) => host.confirm(request),
 		observe: {
 			start: (call) => host.toolCallStarted(call),
@@ -50,6 +101,20 @@ export function* pieces(text: string, max: number): Generator<string> {
 	}
 }
 
+/** The relay's JSON-RPC error for a request that took too long, as `createTunnelFetch` sends it. */
+const TIMEOUT = -31002;
+const TIMED_OUT = "The page did not answer in time.";
+
+/** The JSON-RPC id of a request body, for the error that answers it. */
+function rpcId(body: string): string | number | null {
+	try {
+		const id: unknown = JSON.parse(body)?.id;
+		return typeof id === "string" || typeof id === "number" ? id : null;
+	} catch {
+		return null;
+	}
+}
+
 /** The requests in flight of one channel (a relay session or a port). */
 export interface Tunnel {
 	/** Answer one request; nothing is sent for it once it is cancelled or the tunnel closed. */
@@ -66,8 +131,14 @@ export function createTunnel(options: {
 	maxChunk(): number;
 	/** Something failed outside the handler. */
 	error(error: Error): void;
+	/**
+	 * How long a request may take until its answer has ended
+	 * (`ServeOptions.requestTimeoutMs`); none for the relay's session, whose
+	 * relay has its own. A `subscriptions/listen` stream is not limited.
+	 */
+	timeoutMs?: number;
 }): Tunnel {
-	const { handler, send } = options;
+	const { handler, send, timeoutMs } = options;
 	const inflight = new Map<string, AbortController>();
 	let closed = false;
 
@@ -82,6 +153,54 @@ export function createTunnel(options: {
 			!closed &&
 			inflight.get(msg.id) === controller &&
 			!controller.signal.aborted;
+		/**
+		 * Whether an event stream has started, for the time limit's error (a
+		 * body in pieces goes out in one task, which no timer interrupts).
+		 */
+		let started = false;
+		/** The last two characters of that stream: empty or a blank line is between two events. */
+		let tail = "";
+		// Header names in any case, as the handler reads them (review of PR 129).
+		const listen = Object.entries(msg.headers).some(
+			([name, value]) =>
+				name.toLowerCase() === "mcp-method" && value === "subscriptions/listen",
+		);
+		const timer =
+			timeoutMs === undefined || listen
+				? undefined
+				: setTimeout(() => {
+						if (!live()) return;
+						// The call ends as cancelled; whatever it answers later is dropped.
+						controller.abort();
+						const error = JSON.stringify({
+							jsonrpc: "2.0",
+							id: rpcId(msg.body),
+							error: { code: TIMEOUT, message: TIMED_OUT },
+						});
+						if (!started) {
+							send({
+								type: "http.response",
+								id: msg.id,
+								status: 200,
+								headers: { "content-type": "application/json" },
+								body: error,
+							});
+							return;
+						}
+						// As `createTunnelFetch` does: the error as the stream's last
+						// event where it stands between two events. The handler
+						// (mcp.ts) enqueues whole events and each read's text goes out
+						// in one task, so the timer always finds the stream between
+						// two events; the check only guards against sending an event
+						// into the middle of another (review of PR 129).
+						if (tail === "" || tail === "\n\n")
+							send({
+								type: "http.response.chunk",
+								id: msg.id,
+								data: `event: message\ndata: ${error}\n\n`,
+							});
+						send({ type: "http.response.end", id: msg.id });
+					}, timeoutMs);
 		try {
 			const request = new Request(`https://tab.invalid${msg.path}`, {
 				method: msg.method,
@@ -138,6 +257,7 @@ export function createTunnel(options: {
 				status: response.status,
 				headers,
 			});
+			started = true;
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			controller.signal.addEventListener("abort", () => {
@@ -147,6 +267,7 @@ export function createTunnel(options: {
 				const { done, value } = await reader.read();
 				if (done || !live()) break;
 				const text = decoder.decode(value, { stream: true });
+				if (text !== "") tail = (tail + text).slice(-2);
 				for (const data of pieces(text, maxChunk)) {
 					send({ type: "http.response.chunk", id: msg.id, data });
 				}
@@ -170,6 +291,7 @@ export function createTunnel(options: {
 				});
 			}
 		} finally {
+			clearTimeout(timer);
 			if (inflight.get(msg.id) === controller) inflight.delete(msg.id);
 		}
 	}
@@ -200,6 +322,8 @@ export interface ServeHost extends CallHost {
 /** The default and the smallest `ServeOptions.maxChunk`. */
 const MAX_CHUNK = 64 * 1024;
 const MIN_CHUNK = 64;
+/** The default `ServeOptions.requestTimeoutMs`, as `createTunnelFetch`'s and the relay's. */
+const REQUEST_TIMEOUT_MS = 300_000;
 /** The longest request id, as between relay and tab. */
 const MAX_ID = 128;
 
@@ -241,6 +365,15 @@ export function servePort(
 			`serve: maxChunk must be a whole number of at least ${MIN_CHUNK}`,
 		);
 	}
+	const timeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+	// What `setTimeout` can keep: beyond it (and for Infinity) it fires at once.
+	if (typeof timeoutMs !== "number" || !(timeoutMs > 0) || timeoutMs >= 2 ** 31)
+		throw new TypeError(
+			"serve: requestTimeoutMs must be milliseconds above 0 and below 2^31",
+		);
+	const ask = options.onConfirm;
+	if (ask !== undefined && typeof ask !== "function")
+		throw new TypeError("serve: onConfirm must be a function");
 	if (
 		typeof port?.postMessage !== "function" ||
 		!("onmessage" in (port as object))
@@ -273,18 +406,33 @@ export function servePort(
 			return false;
 		}
 	};
+	const context = callContext(host, "local");
+	// This port's own question, in place of the page's (DEC-164). Normalised
+	// as the page's: anything but `true` or "unanswered" is a refusal, and a
+	// throw too (`runCall`).
+	if (ask !== undefined)
+		context.confirm = (request) =>
+			Promise.resolve()
+				.then(() => ask(request))
+				.then(
+					(answer): ConfirmAnswer =>
+						answer === "unanswered" ? answer : answer === true,
+				);
 	const handler = createMcpHandler({
-		...callContext(host),
+		...context,
 		// Without `icons`, the page's own <link rel="icon">, read now.
 		server: { ...host.server, icons: host.server.icons ?? pageIcons() },
 		client: () => ({ ...client }),
 	});
-	const stopWatching = host.registry.onChange(() => handler.toolsChanged());
+	const stopWatching = watchTools(host.registry, context.tools, () =>
+		handler.toolsChanged(),
+	);
 	const tunnel = createTunnel({
 		handler,
 		send,
 		maxChunk: () => maxChunk,
 		error: (error) => host.error(error),
+		timeoutMs,
 	});
 
 	const bad = (message: string, id?: unknown): void => {

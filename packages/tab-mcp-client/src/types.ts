@@ -90,6 +90,25 @@ export type TunnelPortHandler = {
 export interface ServeOptions {
 	/** Who is on the other end: shown in confirmations, passed to `execute` and the events. */
 	client: { id: string; name?: string };
+	/**
+	 * Approves the consequential tool calls that come through this port, in
+	 * place of `TabMcpOptions.onConfirm` and the library's dialog, for
+	 * example as a question in the site's own chat. Same answers as
+	 * `onConfirm`; a throw is a refusal. `request.signal` aborts when the call
+	 * is cancelled, times out or the serve closes. The answer must come from
+	 * the user: never let the other end of the port answer it, since that is
+	 * the caller that wants the tool to run. Calls through the relay and
+	 * WebMCP keep the page's `onConfirm` or dialog.
+	 */
+	onConfirm?: ConfirmHandler;
+	/**
+	 * How long one request may take until its answer has ended, in
+	 * milliseconds; 300000 by default, as `createTunnelFetch`, below 2^31. On
+	 * expiry the call is aborted (`execute`'s signal), `toolcallend` says
+	 * `cancelled`, a late answer is dropped, and the other end gets the
+	 * JSON-RPC error `-31002`. A `subscriptions/listen` stream is not limited.
+	 */
+	requestTimeoutMs?: number;
 	/** Aborting it stops serving: calls in flight are aborted, the port is let go. */
 	signal?: AbortSignal;
 	/**
@@ -141,6 +160,9 @@ export interface Tool<Input extends object = Record<string, unknown>> {
 	annotations?: ToolAnnotations;
 }
 
+/** A kind of caller (`ToolCallClient.kind`), for `RegisterToolOptions.callers`. */
+export type ToolCaller = ToolCallClient["kind"];
+
 /** Options of `registerTool`. */
 export interface RegisterToolOptions {
 	/**
@@ -149,12 +171,15 @@ export interface RegisterToolOptions {
 	 */
 	signal?: AbortSignal;
 	/**
-	 * With `TabMcpOptions.webmcp` on: `true` also offers this tool through
-	 * WebMCP when it is consequential, `false` never does. By default only
-	 * tools that are not consequential (neither `consequentialHint` nor
-	 * `destructiveHint`) are offered there. Ignored while `webmcp` is off.
+	 * Which callers see the tool: `"relay"` (AI apps through the relay),
+	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (agents
+	 * in the browser, with `TabMcpOptions.webmcp` on). Others neither list nor
+	 * call it: for them it does not exist. By default all of them, except
+	 * that a consequential tool (`consequentialHint` or `destructiveHint`)
+	 * goes to WebMCP only when `"webmcp"` is listed: an agent that drives
+	 * this tab can click Allow in the page's confirmation itself.
 	 */
-	webmcp?: boolean;
+	callers?: readonly ToolCaller[];
 	/**
 	 * WebMCP's origins of other documents in this tab that may see the tool:
 	 * passed on to the native `registerTool` of a mirrored tool, which checks
@@ -318,7 +343,7 @@ export interface TabMcpOptions {
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
 	 * in the browser can call them, without pairing. Off by default. Tools
 	 * marked `consequentialHint` or `destructiveHint` are left out unless
-	 * registered with `{ webmcp: true }`: an agent that drives this tab can
+	 * their `callers` list `"webmcp"`: an agent that drives this tab can
 	 * click Allow in the page's confirmation itself. A failed native
 	 * registration only warns in the console.
 	 */

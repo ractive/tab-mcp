@@ -8,6 +8,7 @@ import type {
 	RegisterToolOptions,
 	Tool,
 	ToolAnnotations,
+	ToolCaller,
 } from "./types.ts";
 
 const NAME = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -21,8 +22,11 @@ export interface RegisteredTool {
 	readonly outputSchema?: JsonSchema | undefined;
 	readonly annotations: ToolAnnotations;
 	readonly execute: Tool["execute"];
-	/** `RegisterToolOptions.webmcp`: offered through WebMCP even if consequential, or never. */
-	readonly webmcp?: boolean | undefined;
+	/**
+	 * `RegisterToolOptions.callers`, copied; `undefined`: the default, which
+	 * `toolsFor` (serve.ts, the relay and a port) and `mirror` (webmcp.ts) apply.
+	 */
+	readonly callers?: readonly ToolCaller[] | undefined;
 	/** `RegisterToolOptions.exposedTo`, passed on to the native registration. */
 	readonly exposedTo?: string[] | undefined;
 }
@@ -212,12 +216,22 @@ export class ToolRegistry {
 	 * reason for an aborted signal (as WebMCP).
 	 */
 	register(tool: Tool, options: RegisterToolOptions = {}): void {
-		const { signal, webmcp, exposedTo } = options;
-		if (webmcp !== undefined && typeof webmcp !== "boolean")
-			throw new TypeError("registerTool: webmcp must be a boolean");
+		const { signal, exposedTo } = options;
+		// A copy: the page's array may change later, what was registered does
+		// not. Not a list: the spread throws a `TypeError` itself.
+		const callers = options.callers && [...options.callers];
+		// The option of 0.15 and before, refused rather than ignored: an ignored
+		// `webmcp: false` would put the tool into WebMCP (DEC-165).
+		if (
+			"webmcp" in options ||
+			callers?.some((c) => !/^(relay|local|webmcp)$/.test(c))
+		)
+			throw new TypeError(
+				'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
+			);
 		const registered: RegisteredTool = {
 			...validateTool(tool),
-			webmcp,
+			callers,
 			exposedTo,
 		};
 		signal?.throwIfAborted();

@@ -58,6 +58,27 @@ export interface CallToolResult {
 	[key: string]: unknown;
 }
 
+/**
+ * `result` with `_meta["ch.ractive.tab-mcp/annotations"].untrustedContentHint`
+ * set, for every result of a tool marked `untrustedContentHint` (DEC-166):
+ * MCP has no such hint, and `openWorldHint` in `tools/list` says something
+ * else. The tool's own `_meta` is kept; `result` is not changed.
+ */
+export function markUntrusted(result: CallToolResult): CallToolResult {
+	const meta = result._meta ?? {};
+	const own = meta[ANNOTATIONS_META_KEY];
+	return {
+		...result,
+		_meta: {
+			...meta,
+			[ANNOTATIONS_META_KEY]: {
+				...(isObject(own) ? own : {}),
+				untrustedContentHint: true,
+			},
+		},
+	};
+}
+
 export function errorResult(message: string): CallToolResult {
 	return { content: [{ type: "text", text: message }], isError: true };
 }
