@@ -24,7 +24,7 @@ after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
 `dist-store/` (so it does not replace a development build in `dist/`) and packs
 `tab-mcp-for-chrome-<version>-store.zip` next to `package.json`. The manifest has no `key`
 (the store gives the item its own id), no `host_permissions` (host access is optional,
-asked for with "Allow on all sites"), the package no source maps, and its scripts not the
+asked for with "Read all sites without a click"), the package no source maps, and its scripts not the
 test build's hooks (`TAB_MCP_TEST`, a `define`: the functions through which the
 end-to-end tests answer notifications). `zipStoreBuild`
 refuses to pack a build that has any of these, and `--zip` without `--store` is refused,
@@ -170,7 +170,7 @@ registered, and opening pages in that tab.
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front (Allow; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Allow on all sites": read every http(s) tab's WebMCP tools without a click on the icon. |
+| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Read all sites without a click": read every http(s) tab's WebMCP tools without a click on the icon. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the
 tools a page registered itself through the browser's WebMCP API; the relay connection

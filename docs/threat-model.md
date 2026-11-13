@@ -599,7 +599,7 @@ like any other, `chrome-extension://<id>` (A11).
   side panel, as Chrome reports the sender; anything else is dropped. Besides the panel,
   only the buttons of the extension's own notifications and a question's own window,
   which the extension opened for that one question and which can answer only it, answer
-  questions (see Questions). "Allow all" allows
+  questions (see Questions). "Don't ask for these tools" allows
   only the tools the extension itself offers on that site at that moment that are not
   read-only, so a tool the page registers later still asks. From a page, the one message
   accepted says that the page's tools changed. A compromised page can therefore not turn
@@ -610,7 +610,7 @@ like any other, `chrome-extension://<id>` (A11).
   approve, and the page's scripts cannot reach the panel. Otherwise a Chrome notification
   asks. It names the AI app (its declared name beside its verified host), the tool and,
   on a line of its own, the page's site, and the arguments in short, saying so when they
-  are cut; its one button is Allow ("Don't ask again" needs the full question), and a
+  are cut; its one button is "Allow once" ("Don't ask again" needs the full question), and a
   click on the notification's body opens the full
   question with all its arguments in the side panel of the tab's window, or in a small
   window of its own where Chrome does not open the panel; the question waits there, its

@@ -164,18 +164,26 @@ describe("page_info", () => {
 describe("refusals", () => {
 	test("a hidden address (no grant) is any page", () => {
 		expect(noAccess("").message).toContain("may not read this tab yet");
+		expect(noAccess("").reason).toBe("hidden");
+		expect(noAccess("https://shop.example/").reason).toBe("no-grant");
+		// The icon is in the toolbar, not on the tab; the host access button
+		// by its label (EQ 6, EQ 9).
+		expect(noAccess("").message).toContain("icon in Chrome's toolbar");
+		expect(noAccess("").message).toContain("Read all sites without a click");
 	});
 
 	test("browser pages and the Web Store cannot be read at all", () => {
 		expect(noAccess("chrome://settings/").message).toContain("browser page");
-		expect(
-			noAccess("https://chromewebstore.google.com/detail/x").message,
-		).toContain("Chrome Web Store");
+		expect(noAccess("chrome://settings/").reason).toBe("browser-page");
+		const store = noAccess("https://chromewebstore.google.com/detail/x");
+		expect(store.message).toContain("Chrome Web Store");
+		expect(store.reason).toBe("web-store");
+		expect(noAccess("file:///tmp/a.html").reason).toBe("not-site");
 	});
 
 	test("a web page needs a click or host access", () => {
 		expect(noAccess("https://example.com/").message).toContain(
-			"click its icon",
+			"click the tab-mcp for Chrome icon in Chrome's toolbar",
 		);
 	});
 });

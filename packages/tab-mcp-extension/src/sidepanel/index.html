@@ -8,7 +8,8 @@
 </head>
 <body>
 <main>
-	<section id="questions" class="questions" aria-label="Tools that ask first" aria-live="polite"></section>
+	<p id="question-status" class="visually-hidden" role="status"></p>
+	<section id="questions" class="questions" aria-label="Tools that ask first"></section>
 
 	<section class="card" aria-labelledby="ai-heading">
 		<div class="card-head">
@@ -18,11 +19,14 @@
 				<span>AI access</span>
 			</label>
 		</div>
+		<p id="intro" class="muted small" hidden></p>
 		<p id="state" class="state" data-state="off" role="status">
-			<span class="dot" aria-hidden="true"></span><span id="state-text">AI access is off · paired apps stay paired</span>
+			<span class="dot" aria-hidden="true"></span><span id="state-text">AI access is off</span>
 		</p>
 		<ul id="grants" class="grants" aria-label="Connected AI apps"></ul>
-		<p id="problem" class="problem" hidden></p>
+		<p id="grants-note" class="muted small" hidden></p>
+		<p id="problem" class="problem" role="alert" hidden></p>
+		<p id="local-problem" class="problem" role="alert" hidden></p>
 		<div id="replaced" class="replaced" hidden>
 			<p id="replaced-text"></p>
 			<div class="buttons">
@@ -37,6 +41,7 @@
 		<div id="pairing" class="pairing" hidden>
 			<h3 class="label">Pair an AI app</h3>
 			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
+			<p class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
 			<div class="address">
 				<code id="address" title=""></code>
 				<button id="copy" type="button" class="quiet small copy" aria-label="Copy address">Copy</button>
@@ -65,17 +70,22 @@
 		<p id="tab-title" class="tab-title">–</p>
 		<p id="tab-host" class="muted"></p>
 		<p id="tab-badges" class="badges"></p>
-		<p id="tab-access" class="muted"></p>
+		<p id="tab-access" class="muted" role="status"></p>
+		<p id="no-tools" class="muted small" hidden>This page offers no WebMCP tools. page_info and the navigation tools still work.</p>
+		<p id="no-webmcp" class="muted small" hidden>WebMCP is off in this tab: Chrome turns it on for sites in its origin trial, or everywhere with <code>chrome://flags/#enable-webmcp-testing</code> (<a href="https://developer.chrome.com/docs/ai/webmcp" target="_blank" rel="noopener">WebMCP in Chrome</a>). page_info and the navigation tools still work.</p>
 		<div id="tools-head" class="tools-head" hidden>
 			<span class="label">Tools</span>
-			<button id="allow-tools" type="button" class="small" aria-controls="tools">Allow all</button>
+			<button id="allow-tools" type="button" class="small" aria-controls="tools">Don't ask for these tools</button>
 		</div>
 		<ul id="tools" class="tools" aria-label="The page's WebMCP tools"></ul>
-		<div class="buttons">
-			<button id="allow-all" type="button" hidden>Allow on all sites</button>
+		<div id="host-access" class="host-access" hidden>
+			<p class="muted small">tab-mcp reads a tab only after you click its icon in Chrome's toolbar there. To read every http(s) site without that click, Chrome asks you first to let it "Read and change all your data on all websites".</p>
+			<div class="buttons">
+				<button id="allow-all" type="button">Read all sites without a click</button>
+			</div>
 		</div>
 		<p id="allowed-all" class="muted small" hidden>
-			Allowed on all sites. <button id="disallow-all" type="button" class="link">Stop</button>
+			Reads all sites without a click. <button id="disallow-all" type="button" class="link">Stop reading all sites</button>
 		</p>
 	</section>
 
