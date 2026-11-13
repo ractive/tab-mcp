@@ -8,6 +8,7 @@
  */
 
 import type { ContentEvent } from "./messages.ts";
+import type { NoAccessReason } from "./tabs.ts";
 
 /**
  * The extension's MCP server name: the worker's connection gives it to the
@@ -90,6 +91,8 @@ export interface QuestionView {
 	args: string;
 	/** "Don't ask again on <host>" is offered (a page tool of an http(s) site). */
 	site: boolean;
+	/** When it ends unanswered as Don't allow (epoch ms, the worker's clock). */
+	expiresAt: number;
 }
 
 /** A page tool as the panel lists it. */
@@ -107,8 +110,11 @@ export interface ToolView {
 export interface TabView {
 	title: string;
 	host: string;
-	/** `undefined`: the extension may not read it, `access` says why. */
+	/** `undefined`: the extension may not read it, `noAccess` or `access` says why. */
 	webmcp?: { available: boolean; tools: number };
+	/** Why it may not be read, for the panel to put in its own words (EQ 6). */
+	noAccess?: NoAccessReason;
+	/** Any other reason it could not be read (a page that did not answer). */
 	access: string;
 	origin?: string;
 	tools: ToolView[];
@@ -132,7 +138,7 @@ export interface PanelState {
 	problem?: string;
 	/** Another tab or program took the address over. */
 	replaced?: { sibling: boolean };
-	/** "Allow on all sites" is granted. */
+	/** Host access on all sites ("Read all sites without a click") is granted. */
 	allSites: boolean;
 	tab?: TabView;
 	/**
@@ -141,6 +147,8 @@ export interface PanelState {
 	 * lists it.
 	 */
 	questions: QuestionSummary[];
+	/** The questions that ran out unanswered in the last few seconds (EQ 13). */
+	expired: string[];
 }
 
 /** A question as the repeated state lists it: all but its arguments. */
@@ -168,6 +176,7 @@ export function startProblem(error: unknown): PanelState {
 		problem: `tab-mcp for Chrome could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],
+		expired: [],
 	};
 }
 

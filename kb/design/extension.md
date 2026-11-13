@@ -78,9 +78,9 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   (`question/index.html`, whose port may answer only the question of its window).
   The bridge asks itself for both ways of calling a page tool (`page_<name>` is not
   `consequentialHint`, DEC-141), so the AI app hears why a call did not run. "Don't ask
-  again on <host>" in a question writes the site's "allowed" entry, as the panel's
+  again on <host>" in a question writes the site's "allowed" entry, as the panel's "Ask first"
   switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
-  notification has Allow only.
+  notification has "Allow once" only.
 - The origin a page's tools carry (the description's prefix, the "allowed" key, the
   question's "Site (verified)") is checked against the origin of the address Chrome
   reports for the tab; a page that says otherwise gets no tools (iteration 35).
@@ -102,7 +102,7 @@ with a second extension).
   `optional_host_permissions`, not `<all_urls>`: no `file:` pages, iteration 35): without
   it the extension runs on a tab only after a click on its icon, as Overmark does, and
   only for that origin in that tab (Chrome keeps the grant across navigations on the same
-  origin, not to another subdomain). "Allow on all sites" asks for it; the content script
+  origin, not to another subdomain). "Read all sites without a click" asks for it; the content script
   is then registered for every http(s) page. `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).
 - No remote code.
@@ -120,7 +120,8 @@ with a second extension).
 | `reload` | navigates, never asks | Reloads the page in front, with its `page_info` |
 
 The side panel shows the connection and its apps, the pairing view, questions, the tab in
-front with its tools ("reads", "asks first" or "allowed"), and the relay address under
+front with its tools ("reads", "asks first", or an "Ask first" switch where a tool can be
+allowed on the site), and the relay address under
 Settings. The icon's badge shows "on", "…" or "?" (a question waits). The connector
 carries the extension's icon.
 

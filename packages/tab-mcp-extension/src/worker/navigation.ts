@@ -397,7 +397,7 @@ async function inFront(
 }
 
 const SAME_ORIGIN =
-	'On the page\'s own origin it runs at once; to another origin it asks the user first, and the extension may then not read the new page until the user clicks its icon there (or turned on "Allow on all sites").';
+	'On the page\'s own origin it runs at once; to another origin it asks the user first, and the extension may then not read the new page until the user clicks its icon there (or turned on "Read all sites without a click" in the side panel).';
 
 /** The four navigation tools, for the connection's `TabMcp`. */
 export function navigationTools(

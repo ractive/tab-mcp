@@ -13,10 +13,18 @@ import {
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
+	DONT_ASK_ALL,
+	introText,
+	noAccessText,
 	type SwitchIntent,
 	switchExpiry,
 	switchShown,
+	webmcpNote,
 } from "../src/sidepanel/card.ts";
+import {
+	countdownText,
+	questionAnnouncement,
+} from "../src/sidepanel/question.ts";
 import {
 	COPIED_MS,
 	copyText,
@@ -31,6 +39,7 @@ const base: PanelState = {
 	pairing: false,
 	allSites: false,
 	questions: [],
+	expired: [],
 };
 const ADDRESS = "https://relay.example/a/x/mcp";
 const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
@@ -38,14 +47,44 @@ const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
 describe("the AI app card", () => {
 	test("off: the switch is off, Turn on AI access is the step, no address", () => {
 		expect(cardView(base, false)).toEqual({
-			stateText: "AI access is off · paired apps stay paired",
+			// Nothing paired: no promise about paired apps (EQ 7).
+			stateText: "AI access is off",
 			switchOn: false,
 			turnOn: true,
 			pairing: false,
 			addApp: false,
 			done: false,
 			address: "",
+			intro: true,
+			disconnect: false,
+			grantsNote: "",
 		});
+	});
+
+	test("off with apps paired: they stay listed, without Disconnect, and the panel says why (EQ 8)", () => {
+		const view = cardView({ ...base, grants: [claude] }, false);
+		expect(view).toMatchObject({
+			stateText: "AI access is off · paired apps stay paired",
+			intro: false,
+			disconnect: false,
+			grantsNote: "Turn on AI access to disconnect an app.",
+		});
+		for (const status of ["connecting", "retrying"] as const)
+			expect(
+				cardView({ ...base, status, grants: [claude] }, false),
+			).toMatchObject({
+				disconnect: false,
+				grantsNote: "An app can be disconnected once connected again.",
+			});
+		expect(
+			cardView({ ...base, status: "on", grants: [claude] }, false),
+		).toMatchObject({ disconnect: true, grantsNote: "" });
+	});
+
+	test("the first look says what the extension does and names the relay (EQ 7)", () => {
+		expect(introText("https://relay.example:8443")).toBe(
+			"Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay relay.example:8443.",
+		);
 	});
 
 	test("connecting: the switch is on (to stop it), nothing to pair yet", () => {
@@ -71,6 +110,9 @@ describe("the AI app card", () => {
 			addApp: false,
 			done: false,
 			address: ADDRESS,
+			intro: true,
+			disconnect: true,
+			grantsNote: "",
 		});
 	});
 
@@ -89,6 +131,9 @@ describe("the AI app card", () => {
 			addApp: true,
 			done: false,
 			address: "",
+			intro: false,
+			disconnect: true,
+			grantsNote: "",
 		});
 		expect(cardView(state, true)).toMatchObject({
 			pairing: true,
@@ -154,7 +199,124 @@ describe("the switch with no state to follow", () => {
 	});
 });
 
-describe("Allow all", () => {
+describe("the tab card's texts", () => {
+	const tab = (over: Partial<TabView>): TabView => ({
+		title: "Shop",
+		host: "shop.example",
+		access: "",
+		tools: [],
+		canAllow: false,
+		...over,
+	});
+
+	test("an unreadable tab in the user's words: the toolbar icon, no AI app wording (EQ 6)", () => {
+		expect(noAccessText("no-grant", false)).toBe(
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+		);
+		// A hidden address may be a browser page, where the click cannot help;
+		// with host access on all sites it can only be one.
+		expect(noAccessText("hidden", false)).toBe(
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab. Chrome's own pages, such as a new tab, cannot be read at all.",
+		);
+		expect(noAccessText("hidden", true)).toBe(
+			"Chrome does not let extensions read browser pages.",
+		);
+		for (const reason of [
+			"hidden",
+			"no-grant",
+			"browser-page",
+			"web-store",
+			"not-site",
+		] as const)
+			for (const allSites of [false, true]) {
+				const text = noAccessText(reason, allSites);
+				expect(text).not.toContain("The user");
+				expect(text).not.toContain("on the tab,");
+			}
+	});
+
+	test("no tools: whether WebMCP is off or the page offers none (EQ 7)", () => {
+		expect(webmcpNote(undefined)).toBeUndefined();
+		// Not readable: the access line says why, no note on tools.
+		expect(webmcpNote(tab({ noAccess: "no-grant" }))).toBeUndefined();
+		expect(webmcpNote(tab({ webmcp: { available: false, tools: 0 } }))).toBe(
+			"no-webmcp",
+		);
+		expect(webmcpNote(tab({ webmcp: { available: true, tools: 0 } }))).toBe(
+			"no-tools",
+		);
+		expect(
+			webmcpNote(tab({ webmcp: { available: true, tools: 2 } })),
+		).toBeUndefined();
+	});
+
+	test("the panel's texts in index.html: by what they act on (EQ 9), roles for what changes (EQ 11)", async () => {
+		const html = await Bun.file(
+			join(import.meta.dir, "../src/sidepanel/index.html"),
+		).text();
+		const window = new Window({
+			url: "chrome-extension://x/sidepanel/index.html",
+		});
+		const doc = window.document as unknown as Document;
+		doc.write(html);
+		try {
+			const text = (id: string) =>
+				doc.getElementById(id)?.textContent?.replace(/\s+/g, " ").trim();
+			expect(text("allow-all")).toBe("Read all sites without a click");
+			expect(text("disallow-all")).toBe("Stop reading all sites");
+			// What Chrome will ask, before its prompt.
+			expect(text("host-access")).toContain(
+				'"Read and change all your data on all websites"',
+			);
+			expect(text("allow-tools")).toBe(DONT_ASK_ALL);
+			// Problems are announced; a question's card is not a live region
+			// (its arguments can be 1 MiB), a short line is.
+			expect(doc.getElementById("problem")?.getAttribute("role")).toBe("alert");
+			expect(doc.getElementById("local-problem")?.getAttribute("role")).toBe(
+				"alert",
+			);
+			expect(doc.getElementById("tab-access")?.getAttribute("role")).toBe(
+				"status",
+			);
+			expect(doc.getElementById("questions")?.hasAttribute("aria-live")).toBe(
+				false,
+			);
+			expect(doc.getElementById("question-status")?.getAttribute("role")).toBe(
+				"status",
+			);
+			// Where WebMCP comes from, and what works without it.
+			expect(text("no-webmcp")).toContain(
+				"chrome://flags/#enable-webmcp-testing",
+			);
+			expect(text("no-tools")).toContain("page_info and the navigation tools");
+			// The chat in a tab of this profile (EQ 2).
+			expect(text("pairing")).toContain("outside this Chrome profile");
+		} finally {
+			await window.happyDOM.close();
+		}
+	});
+
+	test("the announcement of a question is one short line (EQ 11)", () => {
+		expect(
+			questionAnnouncement({ app: "Claude (claude.ai)", tool: "page_order" }),
+		).toBe("Claude (claude.ai) asks to run page_order.");
+		expect(
+			questionAnnouncement({
+				app: "Claude (claude.ai)",
+				tool: "navigate",
+				navigation: { to: "https://evil.test/" },
+			}),
+		).toBe("Claude (claude.ai) asks to take the tab to another site.");
+		expect(countdownText(10_000, 9_001)).toBe(
+			"1 s left to answer; no answer is Don't allow.",
+		);
+		expect(countdownText(10_000, 12_000)).toBe(
+			"0 s left to answer; no answer is Don't allow.",
+		);
+	});
+});
+
+describe("Don't ask for these tools", () => {
 	const tab = (tools: TabView["tools"], canAllow = true): TabView => ({
 		title: "Shop",
 		host: "shop.example",
@@ -176,15 +338,15 @@ describe("Allow all", () => {
 	test("for the listed tools that ask first, not read-only or left-out ones", () => {
 		expect(allowAllView(tab([order, pay, read, broken]))).toEqual({
 			shown: true,
-			label: "Allow all",
+			label: "Don't ask for these tools",
 			names: ["order", "pay"],
 			on: true,
 		});
 	});
 
-	test("some allowed: still Allow all; all allowed: Ask for all", () => {
+	test("some allowed: still Don't ask; none asks: Ask first for these tools", () => {
 		expect(allowAllView(tab([{ ...order, allowed: true }, pay])).label).toBe(
-			"Allow all",
+			DONT_ASK_ALL,
 		);
 		expect(
 			allowAllView(
@@ -192,7 +354,7 @@ describe("Allow all", () => {
 			),
 		).toEqual({
 			shown: true,
-			label: "Ask for all",
+			label: "Ask first for these tools",
 			names: ["order", "pay"],
 			on: false,
 		});

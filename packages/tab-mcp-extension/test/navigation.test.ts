@@ -11,7 +11,11 @@ import { Window as HappyWindow } from "happy-dom";
 import { pageHistory } from "../src/content.ts";
 import type { PageHistory, PageInfo } from "../src/messages.ts";
 import type { Answer, QuestionView } from "../src/protocol.ts";
-import { questionCard } from "../src/sidepanel/question.ts";
+import {
+	questionCard,
+	setReady,
+	updateCountdowns,
+} from "../src/sidepanel/question.ts";
 import { noAccess, type TargetTab } from "../src/tabs.ts";
 import {
 	addressFor,
@@ -648,8 +652,8 @@ describe("the navigation question", () => {
 			title: "Allow opening evil.test?",
 			message:
 				"Claude (claude.ai) wants to take the tab to https://evil.test/login",
-			contextMessage: "From shop.test · tab-mcp for Chrome",
-			buttons: ["Allow"],
+			contextMessage: "From shop.test · Closing this is Don't allow",
+			buttons: ["Allow once"],
 		});
 	});
 
@@ -666,6 +670,7 @@ describe("the navigation question", () => {
 				navigation: { to },
 				args: "{}",
 				site: false,
+				expiresAt: 0,
 			},
 			"{}",
 		);
@@ -710,6 +715,7 @@ describe("the navigation question", () => {
 					navigation: { to: "https://evil.test/" },
 					args: '{\n  "url": "https://evil.test/"\n}',
 					site: true, // not trusted for a navigation: see below
+					expiresAt: 60_000,
 				},
 				() => {},
 			);
@@ -730,7 +736,7 @@ describe("the navigation question", () => {
 		}
 	});
 
-	test("a page tool's card: Don't allow, Allow, Don't ask again on <host> (EQ 10)", async () => {
+	test("a page tool's card: Don't allow, Allow once, Don't ask again on <host> (EQ 10, EQ 9)", async () => {
 		const window = new HappyWindow({
 			url: "chrome-extension://x/sidepanel/index.html",
 		});
@@ -748,21 +754,40 @@ describe("the navigation question", () => {
 					origin: "https://www.shop.example:8443",
 					args: "{}",
 					site: true,
+					expiresAt: 60_000,
 				},
 				(answer) => answers.push(answer),
+				12_400,
 			);
 			const buttons = [...card.querySelectorAll("button")];
 			expect(buttons.map((b) => b.textContent)).toEqual([
 				"Don't allow",
-				"Allow",
+				"Allow once",
 				"Don't ask again on www.shop.example:8443",
 			]);
 			expect(card.textContent).toContain("for every paired AI app");
-			// Disabled until the panel has been in front long enough.
-			expect(buttons[2]?.disabled).toBe(true);
-			(buttons[2] as HTMLButtonElement).disabled = false;
+			// The time left (EQ 13).
+			expect(card.querySelector(".countdown")?.textContent).toBe(
+				"48 s left to answer; no answer is Don't allow.",
+			);
+			updateCountdowns(card, 59_100);
+			expect(card.querySelector(".countdown")?.textContent).toBe(
+				"1 s left to answer; no answer is Don't allow.",
+			);
+			// Unavailable until the panel has been in front long enough, but
+			// not `disabled`: a focused button keeps its focus (EQ 11).
+			expect(buttons[2]?.disabled).toBe(false);
+			expect(buttons[2]?.getAttribute("aria-disabled")).toBe("true");
+			expect(buttons[1]?.getAttribute("aria-disabled")).toBe("true");
+			expect(buttons[0]?.hasAttribute("aria-disabled")).toBe(false);
+			buttons[2]?.click();
+			buttons[1]?.click();
+			expect(answers).toEqual([]);
+			setReady(card, true);
 			buttons[2]?.click();
 			expect(answers).toEqual(["site"]);
+			setReady(card, false);
+			expect(buttons[1]?.getAttribute("aria-disabled")).toBe("true");
 			// Not offered (an opaque origin): two buttons.
 			const opaque = questionCard(
 				{
@@ -773,6 +798,7 @@ describe("the navigation question", () => {
 					origin: "null",
 					args: "{}",
 					site: false,
+					expiresAt: 60_000,
 				},
 				() => {},
 			);

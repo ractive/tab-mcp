@@ -15,6 +15,7 @@ import {
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
 import {
+	type GrantView,
 	type PanelCommand,
 	type PanelState,
 	parseCommand,
@@ -32,6 +33,7 @@ import {
 	askTools,
 	callInTab,
 	getTab,
+	NoAccessError,
 	type TargetTab,
 	tabInFront,
 } from "../tabs.ts";
@@ -52,14 +54,20 @@ import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
+	loadGrants,
 	loadRelay,
 	loadReplaced,
 	type Replaced,
 	saveAiOn,
+	saveGrants,
 	saveRelay,
 	saveReplaced,
 } from "./settings.ts";
 import { createTools, INSTRUCTIONS } from "./tools.ts";
+
+/** What a Disconnect while not connected says (it did nothing). */
+export const DISCONNECT_WHILE_DOWN =
+	"The app was not disconnected: AI access has to be on and connected to disconnect an app.";
 
 /** Wakes the worker while AI access is on, should the connection be down. */
 export const ALARM = "tab-mcp-keepup";
@@ -162,6 +170,11 @@ export class Connection {
 	#sending = false;
 	/** AI access is on, as last saved. */
 	#aiOn: boolean;
+	/**
+	 * The paired apps as the relay last listed them, kept in storage: a new
+	 * worker's library knows of none until it is connected (EQ 8).
+	 */
+	#grants: GrantView[];
 
 	private constructor(
 		storage: CachedSecretStorage,
@@ -171,9 +184,11 @@ export class Connection {
 		replaced: Replaced | undefined,
 		kv: Kv,
 		aiOn: boolean,
+		grants: GrantView[],
 	) {
 		this.#kv = kv;
 		this.#aiOn = aiOn;
+		this.#grants = grants;
 		this.#storage = storage;
 		this.#icons = icons;
 		this.#allowed = allowed;
@@ -212,14 +227,16 @@ export class Connection {
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
-		const [storage, icons, allowed, relay, on, replaced] = await Promise.all([
-			CachedSecretStorage.load(kv),
-			iconsFor(),
-			loadAllowed(kv),
-			loadRelay(kv),
-			loadAiOn(kv),
-			loadReplaced(kv),
-		]);
+		const [storage, icons, allowed, relay, on, replaced, grants] =
+			await Promise.all([
+				CachedSecretStorage.load(kv),
+				iconsFor(),
+				loadAllowed(kv),
+				loadRelay(kv),
+				loadAiOn(kv),
+				loadReplaced(kv),
+				loadGrants(kv),
+			]);
 		const connection = new Connection(
 			storage,
 			icons,
@@ -228,6 +245,7 @@ export class Connection {
 			replaced,
 			kv,
 			on,
+			grants,
 		);
 		connection.#showBadge();
 		// The alarm too, not only once connected: after an update (which
@@ -332,8 +350,30 @@ export class Connection {
 		this.#listening = new AbortController();
 		const { signal } = this.#listening;
 		const changed = () => this.#changed();
-		for (const type of ["pairingcode", "grantschange"] as const)
-			mcp.addEventListener(type, changed, { signal });
+		// `statechange` and `grantschange` have their own listeners below, which
+		// call `#changed` too.
+		mcp.addEventListener("pairingcode", changed, { signal });
+		// The library sets its list only from the relay (connected) or empties
+		// it with a new address: either way the list to keep (EQ 8).
+		mcp.addEventListener(
+			"grantschange",
+			() => {
+				// The list in memory is set at once; a failed write to storage
+				// is shown as the problem, not left as an unhandled rejection.
+				this.#setGrants(
+					mcp.grants.map((g) => ({
+						grantId: g.grantId,
+						name: g.client.name,
+						host: g.client.host,
+					})),
+				).catch((error: unknown) => {
+					this.#problem = message(error);
+					this.#changed();
+				});
+				this.#changed();
+			},
+			{ signal },
+		);
 		mcp.addEventListener(
 			"statechange",
 			(event) => {
@@ -386,6 +426,12 @@ export class Connection {
 		await saveReplaced(this.#kv, replaced);
 	}
 
+	/** The paired apps to show: in memory and in storage. */
+	async #setGrants(grants: GrantView[]): Promise<void> {
+		this.#grants = grants;
+		await saveGrants(this.#kv, grants);
+	}
+
 	async #setAiOn(on: boolean): Promise<void> {
 		this.#aiOn = on;
 		await saveAiOn(this.#kv, on);
@@ -399,9 +445,14 @@ export class Connection {
 	 */
 	async #useRelay(relay: string): Promise<void> {
 		const before = this.#mcp;
+		// The old connection's events end here: a grant it reports during the
+		// writes below must not come back as the new relay's list.
+		this.#listening.abort();
 		this.#bridge.stop();
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
+		// Apps paired through the relay before are not paired with this one.
+		await this.#setGrants([]);
 		this.#problem = undefined;
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
@@ -565,8 +616,14 @@ export class Connection {
 				this.#changed();
 				return;
 			case "revoke":
+				// Only the relay can disconnect an app: not while down (EQ 8). The
+				// panel offers Disconnect only while connected; a refusal of the
+				// relay (store_unavailable, a timeout) is shown as it is.
 				this.#mcp.revoke(command.grantId).catch((error: unknown) => {
-					this.#problem = message(error);
+					this.#problem =
+						error instanceof DOMException && error.name === "InvalidStateError"
+							? DISCONNECT_WHILE_DOWN
+							: message(error);
 					this.#changed();
 				});
 				return;
@@ -762,7 +819,9 @@ export class Connection {
 			view = {
 				title: tab.title || host || "(no title)",
 				host,
-				access: message(error),
+				// An access problem in the panel's own words (EQ 6).
+				...(error instanceof NoAccessError ? { noAccess: error.reason } : {}),
+				access: error instanceof NoAccessError ? "" : message(error),
 				tools: [],
 				canAllow: false,
 			};
@@ -785,11 +844,7 @@ export class Connection {
 			relay: this.#relay,
 			status,
 			...(address !== undefined ? { address } : {}),
-			grants: mcp.grants.map((g) => ({
-				grantId: g.grantId,
-				name: g.client.name,
-				host: g.client.host,
-			})),
+			grants: this.#grants,
 			pairing: [...this.#panels].some((p) => p.pairing),
 			...(code !== undefined ? { code } : {}),
 			...(problem !== undefined ? { problem } : {}),
@@ -799,6 +854,7 @@ export class Connection {
 			allSites: this.#allSites,
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
+			expired: this.#questions.expired,
 		};
 	}
 

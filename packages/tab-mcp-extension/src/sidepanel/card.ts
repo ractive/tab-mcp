@@ -2,13 +2,15 @@
  * What the side panel's "AI app" card shows for a state: the next step is the
  * one that stands out. Off: "Turn on AI access". On with no app paired: the
  * address and the code at once. Apps paired: the apps, and "+ Add another AI
- * app" as a link, which shows the address and code again.
+ * app" as a link, which shows the address and code again. Also the tab
+ * card's texts, in the user's words.
  */
 
 import type { PanelState, TabView } from "../protocol.ts";
+import type { NoAccessReason } from "../tabs.ts";
 
 const STATUS_TEXT: Record<PanelState["status"], string> = {
-	off: "AI access is off · paired apps stay paired",
+	off: "AI access is off",
 	connecting: "Connecting…",
 	retrying: "Connection lost · retrying",
 	waiting: "On · no AI app paired yet",
@@ -29,6 +31,12 @@ export interface CardView {
 	done: boolean;
 	/** The address, shown only while pairing. */
 	address: string;
+	/** What the extension does and which relay it uses: no app paired yet (EQ 7). */
+	intro: boolean;
+	/** Disconnect works: only while connected, through the relay (EQ 8). */
+	disconnect: boolean;
+	/** Why the paired apps have no Disconnect now ("" when they have). */
+	grantsNote: string;
 }
 
 /** The card for `state`; `adding`: the user asked to add another app. */
@@ -41,14 +49,74 @@ export function cardView(state: PanelState, adding: boolean): CardView {
 		stateText:
 			state.status === "on"
 				? `Connected · ${names.join(", ")}`
-				: STATUS_TEXT[state.status],
+				: state.status === "off" && paired
+					? "AI access is off · paired apps stay paired"
+					: STATUS_TEXT[state.status],
 		switchOn: state.status !== "off",
 		turnOn: state.status === "off",
 		pairing,
 		addApp: connected && paired && !pairing,
 		done: pairing && paired,
 		address: pairing ? (state.address ?? "") : "",
+		intro: !paired,
+		disconnect: connected,
+		grantsNote:
+			!paired || connected
+				? ""
+				: state.status === "off"
+					? "Turn on AI access to disconnect an app."
+					: "An app can be disconnected once connected again.",
 	};
+}
+
+/** What the extension does, with the relay's host, for a first look (EQ 7). */
+export function introText(relay: string): string {
+	let host = relay;
+	try {
+		host = new URL(relay).host || relay;
+	} catch {
+		// Shown as it is.
+	}
+	return `Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay ${host}.`;
+}
+
+const CLICK_ICON =
+	"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.";
+const BROWSER_PAGE = "Chrome does not let extensions read browser pages.";
+
+/**
+ * Why the tab cannot be read, in the panel's words (EQ 6). Chrome hides the
+ * address of a page the extension may not read and of its own pages alike:
+ * with host access on all sites a hidden address can only be a browser page,
+ * without it either, and the click on the icon helps only on a web page.
+ */
+export function noAccessText(
+	reason: NoAccessReason,
+	allSites: boolean,
+): string {
+	switch (reason) {
+		case "hidden":
+			return allSites
+				? BROWSER_PAGE
+				: `${CLICK_ICON} Chrome's own pages, such as a new tab, cannot be read at all.`;
+		case "no-grant":
+			return CLICK_ICON;
+		case "browser-page":
+			return BROWSER_PAGE;
+		case "web-store":
+			return "Chrome does not let extensions read the Chrome Web Store.";
+		case "not-site":
+			return "tab-mcp reads only pages of http(s) sites.";
+	}
+}
+
+/** The tab card's line about the page's tools, when it has none to list (EQ 7). */
+export function webmcpNote(
+	tab: TabView | undefined,
+): "no-webmcp" | "no-tools" | undefined {
+	if (tab?.webmcp === undefined) return undefined;
+	if (!tab.webmcp.available) return "no-webmcp";
+	return tab.webmcp.tools === 0 ? "no-tools" : undefined;
 }
 
 /** A confirming click this soon after the first one (a double click) counts as nothing. */
@@ -102,20 +170,24 @@ export function switchExpiry(
 	);
 }
 
-/** "Allow all" over the tab's tool list, or why it is not there. */
+/** The button over the tab's tool list, or why it is not there. */
 export interface AllowAllView {
 	shown: boolean;
-	label: "Allow all" | "Ask for all";
+	label: typeof DONT_ASK_ALL | typeof ASK_ALL;
 	/** The tools it is for: listed, offered, not read-only. */
 	names: string[];
 	/** What a click asks for: allow them (true), or ask first again. */
 	on: boolean;
 }
 
+/** The labels say what they act on (EQ 9): the tools listed, on this site. */
+export const DONT_ASK_ALL = "Don't ask for these tools";
+export const ASK_ALL = "Ask first for these tools";
+
 /**
- * "Allow all" for the tools listed now on a site whose tools can be allowed;
- * once they all are, "Ask for all". A tool the page adds later is not
- * among them: it asks first.
+ * "Don't ask for these tools" for the tools listed now on a site whose tools
+ * can be allowed; once none asks, "Ask first for these tools". A tool the
+ * page adds later is not among them: it asks first.
  */
 export function allowAllView(tab: TabView | undefined): AllowAllView {
 	const names = (tab?.tools ?? [])
@@ -128,7 +200,7 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
 		);
 	return {
 		shown: tab?.canAllow === true && names.length > 0,
-		label: all ? "Ask for all" : "Allow all",
+		label: all ? ASK_ALL : DONT_ASK_ALL,
 		names,
 		on: !all,
 	};

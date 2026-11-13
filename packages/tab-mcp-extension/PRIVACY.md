@@ -10,7 +10,7 @@ https://ractive.ch/tab-mcp/privacy/#chrome.
 
 Only tabs the user gave it, and only pages of http(s) sites (no `file:` pages, no
 Incognito tabs): the tab where the user clicked the extension's icon (until that tab goes
-to another origin), or every tab after the user turned on "Allow on all sites". From such
+to another origin), or every tab after the user turned on "Read all sites without a click". From such
 a tab it reads the page's address (with its query and fragment, as the browser shows it),
 title and language, and the tools the page registered itself with WebMCP
 (`document.modelContext`): their names, titles, descriptions, input schemas and

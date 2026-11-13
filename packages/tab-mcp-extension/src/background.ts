@@ -2,7 +2,7 @@
  * The service worker: home of the connection to the AI app (DEC-116), so it
  * stays while the side panel is closed. A click on the icon opens the side
  * panel and injects the content script into that tab (the click grants
- * `activeTab` for that page). With host access ("Allow on all sites", or the
+ * `activeTab` for that page). With host access ("Read all sites without a click", or the
  * test build) the content script is registered for every page instead, so it
  * is there after navigations and on every tab.
  *
