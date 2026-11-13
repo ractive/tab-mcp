@@ -994,7 +994,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Disconnect and get new address").click();
 		expect(done.hidden).toBe(true);
 		expect(close.hidden).toBe(false);
-		await relay.next("grants.revokeAll");
+		await relay.next("hello", (m) => m["revokeAll"] === true);
 		await connected;
 
 		const again = nextEvent(mcp, "grantschange");
@@ -1405,8 +1405,10 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
 			"Getting a new address…",
 		);
-		expect(await relay.next("grants.revokeAll")).toEqual({
-			type: "grants.revokeAll",
+		// The relay revokes them as it hands the old address back (DEC-136).
+		expect(await relay.next("hello")).toMatchObject({
+			secret: hello["secret"],
+			revokeAll: true,
 		});
 		const again = await relay.next("hello");
 		expect(again["secret"]).not.toBe(hello["secret"]);
@@ -1438,9 +1440,7 @@ describe("showConnectDialog", () => {
 			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
 				.hidden,
 		).toBe(true);
-		expect(await relay.next("grants.revokeAll")).toEqual({
-			type: "grants.revokeAll",
-		});
+		expect(await relay.next("hello")).toMatchObject({ revokeAll: true });
 		await relay.next("hello");
 		byText(dialog, "Close").click();
 	});
@@ -1687,13 +1687,14 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		await connecting;
 		await relay.next("pairing.start");
 		if (sibling) {
-			// A sibling tab says its session started (`claimed`).
+			// A sibling tab says its session started (`claimed`), on this address.
+			const address = new URL(relay.urls.at(-1) ?? "").searchParams.get("a");
 			const announce = new BroadcastChannel(channelName);
 			const listener = new BroadcastChannel(channelName);
 			const delivered = new Promise((r) => {
 				listener.onmessage = r;
 			});
-			announce.postMessage({ type: "claimed" });
+			announce.postMessage({ type: "claimed", address });
 			await delivered;
 			announce.close();
 			listener.close();
@@ -1723,9 +1724,9 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		expect(doc.activeElement?.textContent).toBe("New address");
 		byText(notice, "New address").click();
 		// Back on the old address first, so the relay disconnects its apps.
-		expect((await relay.next("hello"))["secret"]).toBe(secret);
-		expect(await relay.next("grants.revokeAll")).toEqual({
-			type: "grants.revokeAll",
+		expect(await relay.next("hello")).toMatchObject({
+			secret,
+			revokeAll: true,
 		});
 		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
 		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
@@ -1771,18 +1772,21 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		expect(mcp.state).toBe("disconnected");
 	});
 
-	test("the channel carries neither the secret nor the address", async () => {
+	test("the channel carries the address id, never the secret (CC 5)", async () => {
 		const seen: unknown[] = [];
 		const spy = new BroadcastChannel(channelName);
 		spy.onmessage = (e) => seen.push(e.data);
 		try {
-			const session = await mcp.connect();
+			await mcp.connect();
 			const secret = (await relay.next("hello"))["secret"] as string;
 			await relay.settled();
-			expect(seen).toEqual([{ type: "claimed" }]);
-			const text = JSON.stringify(seen);
-			expect(text).not.toContain(secret);
-			expect(text).not.toContain(session.address);
+			expect(seen).toEqual([
+				{
+					type: "claimed",
+					address: new URL(relay.urls.at(-1) ?? "").searchParams.get("a"),
+				},
+			]);
+			expect(JSON.stringify(seen)).not.toContain(secret);
 		} finally {
 			spy.close();
 		}

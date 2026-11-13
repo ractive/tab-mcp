@@ -155,7 +155,10 @@ export type ErrorCode =
 export interface HelloMessage {
 	type: "hello";
 	library: { name: string; version: string };
-	page: { title: string };
+	/*
+	 * `page: {title}` is no longer read (CC 6): accepted and ignored, as
+	 * libraries up to 0.15 send it and relays up to 0.9 require it.
+	 */
 	/** Self-declared app name (DEC-045), unverified. */
 	app?: { name: string };
 	secret: string;
@@ -245,7 +248,6 @@ export type ParseResult =
 	| { ok: true; unknown: true; type: string; id?: string }
 	| { ok: false; error: string; id?: string };
 
-const MAX_TITLE = 300;
 const MAX_NAME = 200;
 const MAX_ID = 128;
 const MAX_HEADER_COUNT = 32;
@@ -315,16 +317,12 @@ export function parseTabMessage(text: string): ParseResult {
 	switch (type) {
 		case "hello": {
 			const library = v["library"];
-			const page = v["page"];
 			if (
 				!isObject(library) ||
 				!isString(library["name"], MAX_NAME) ||
 				!isString(library["version"], MAX_NAME)
 			) {
 				return bad("hello.library must be {name, version}");
-			}
-			if (!isObject(page) || !isString(page["title"], MAX_TITLE)) {
-				return bad("hello.page must be {title}");
 			}
 			if (typeof v["secret"] !== "string") return bad("hello.secret missing");
 			const app = v["app"];
@@ -338,7 +336,6 @@ export function parseTabMessage(text: string): ParseResult {
 			const hello: HelloMessage = {
 				type,
 				library: { name: library["name"], version: library["version"] },
-				page: { title: page["title"] },
 				secret: v["secret"],
 			};
 			if (isObject(app) && isAppName(app["name"])) {

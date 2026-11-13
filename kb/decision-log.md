@@ -2738,3 +2738,74 @@ declines: no tool of the extension is consequential any more.
 - **The address**: `page_info` and the navigation results keep the page's query and
   fragment (single-page apps route with the fragment); PRIVACY.md, the store listing and
   the threat model say that a token in the address goes with it.
+
+## DEC-136: `newAddress()` always takes the old address back
+
+Iteration 32 (review of 2026-11-13, CC 4, CC 12, CC 14). Amends DEC-095.
+
+- `newAddress()` first connects with the old secret and `hello.revokeAll`, whenever the
+  page has a secret: connected or not, taken over or not. Before, it sent
+  `grants.revokeAll` only while connected and took the address back only after a
+  `replaced` it had seen in memory, so a page with its own UI, the documented "call
+  `newAddress()` on logout" and a reload after a takeover left the old grants at the
+  relay for up to 90 days.
+- The old secret is the stored one, read when `newAddress()` is called. The review's case
+  of a rotation in another tab (the take-back then used the new secret and left the
+  hijacked address alone) is gone with the first point: that tab's `newAddress()` took
+  the hijacked address back itself. Remembering the secret this tab last connected with
+  was built and dropped in review: 23 B of the core for a case without harm.
+- The take-back connection is never the page's session: its `session`, grants and close
+  stay unseen (`#open` gives it a host whose callbacks are never current), `state` goes
+  `connecting` once, and `disconnect()` cancels it. Only then does the page rotate, clear
+  `grants` (`grantschange`) and connect with the new secret if it was on, or if a takeover
+  (or a failed `newAddress()`) ended a session that was on.
+- If the take-back fails (relay unreachable, refused, taken over again before `session`),
+  `newAddress()` rejects and keeps the old secret. Offline, a page cannot get a new
+  address any more; a new secret with the old grants alive is what "New address" exists
+  to prevent.
+- The fallback for relays of 0.4 and older (`grants.revokeAll`, then waiting for a
+  `grant.removed` per grant, without a timeout) is deleted. A relay that lists grants in
+  the `session` of a take-back did not revoke them: the connection fails with `policy`.
+  The hosted relay is 0.9.0; `hello.revokeAll` exists since 0.5.
+- A `newAddress()` with a stored secret opens a WebSocket also when the page is off. It
+  takes no user activation (as before); the connection only revokes and closes.
+- One `newAddress()` at a time: a second call returns the running one, and `connect()`
+  meanwhile waits for it and then connects with the new address (review of PR 119:
+  without that, a `connect()` opened a second connection with the old secret).
+
+## DEC-137: A sibling's `claimed` carries the address id
+
+Iteration 32 (review of 2026-11-13, CC 5). Amends DEC-095, which kept the address off the
+channel.
+
+- `claimed` is `{ type: "claimed", address }`, the address id of the `/tab` URL. A tab
+  counts a claim only of its own address and only after its own `session` arrived. A
+  claim heard while it was still connecting, or from a tab on another address (after
+  `newAddress()` there, blocked storage, `sessionStorage`), cannot have caused its
+  replacement and no longer makes a takeover read as "Opened in another tab".
+- The address id is part of the MCP address, which is no secret; script that can post on
+  the channel can read the secret anyway.
+- A claim without an address, from a tab still on a library up to 0.15, counts as
+  before, so that a deploy does not show "someone may have copied its address" for a
+  harmless older tab (review of PR 119). It can go once 0.15 is gone.
+
+## DEC-138: Connection edge cases of the client
+
+Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC-082.
+
+- Close codes 1001, 1011, 1012 and 1013 mean `shutdown` and reconnect: a proxy or platform
+  sends them when the relay behind it restarts without its own `bye`. Every wait varies
+  by up to 20 % either way; `reconnect.delaysMs` entries must stay below 2^31 / 1.2 ms.
+- A failed attempt schedules the next one only when no other attempt runs, reading
+  `reconnecting` when it settles; a `connect()` from a listener no longer leaves
+  `reconnecting` set without a timer. `#pageWaits` is gone: a refusal that stops
+  reconnecting always emits `error`, also when the page's `connect()` rejects with it.
+- A `tools/call` result whose event exceeds the session's `maxBodyBytes` is answered as
+  an error result giving both sizes, decided before `toolcallend`, so the event and the AI
+  app agree and the AI app does not read `-31006` for a tool that ran. A result that is
+  not JSON goes the same way (it used to report `ok`).
+- `hello` sends `page: { title: "" }`: the relay never read the title. The relay accepts
+  `hello` without `page` and ignores it; the field can go from the client once relays up
+  to 0.9 are gone.
+- The tab drops a relay frame it cannot parse without answering. The relay only
+  debug-logged the tab's `error`, which it still accepts from older libraries.

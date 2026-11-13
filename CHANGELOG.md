@@ -40,6 +40,26 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 - `serve` also ends when the port fires `close` (the other end went away), where the
   browser has that event: Bun does; Chrome only with the `MessagePortCloseEvent` Blink
   feature. Elsewhere, close the serve yourself as before.
+- `newAddress()` always takes the old address back first: it connects with the stored
+  secret and `hello.revokeAll`, so the relay revokes every grant of the address, whether
+  the page was connected or not and whether it was taken over or not. Before, a page
+  that was not connected only made a new secret, and the old address kept its grants.
+  It rejects, and keeps the old secret, when the address cannot be taken back (relay
+  unreachable, taken over again first). A page that never had a secret makes one without
+  connecting. A second call while it runs returns the same promise; `connect()` waits
+  for it. Relays of 0.4 and older cannot take an address back: `newAddress()` rejects
+  there with `reason` `"policy"` (it sent `grants.revokeAll` and waited for every grant).
+- `grants` is empty (with `grantschange`) after `newAddress()`.
+- A refusal that stops reconnecting always emits `error`, also when a `connect()` of the
+  page waited on that attempt.
+- Close codes 1001, 1011, 1012 and 1013 (a proxy in front of a restarting relay) mean
+  `shutdown`, so the page reconnects. The reconnect waits vary by up to 20 %;
+  `reconnect.delaysMs` entries must be below 2^31 / 1.2 ms.
+- `hello` sends an empty page title: the relay never read it.
+- Tabs of a page tell each other which address they claimed, so a tab on another address,
+  or one that claimed while this tab was still connecting, no longer makes a takeover
+  read as "Opened in another tab".
+- The library no longer answers a relay message it cannot read with `error`.
 
 #### Fixed
 
@@ -47,6 +67,12 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   `enum` values or property names as keywords: `examples: [{ pattern: "*.ts" }]` was
   refused as an invalid regular expression. A malformed `%` escape in a `$ref` is a
   `TypeError`, not a `URIError`.
+- A tool result larger than the relay's `maxBodyBytes` is answered as an error result
+  that gives both sizes, and `toolcallend` says `error`; before, `toolcallend` said `ok`
+  and the AI app got a transport error (`-31006`) for a tool that ran. A result that is
+  not JSON now also ends with `toolcallend` `error`.
+- Reconnecting no longer stops for good when a `statechange` listener calls `connect()`
+  after a failed attempt.
 
 ### [0.15.0][client-0.15.0] - 2026-11-13
 
@@ -526,6 +552,13 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Changed
+
+- `hello` no longer needs `page: {title}`; the relay ignores the field, which it never
+  read. Libraries up to 0.15 send the page title, newer ones an empty one.
 
 ### [0.9.0][relay-0.9.0] - 2026-11-11
 

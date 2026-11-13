@@ -55,7 +55,8 @@ function reconnectDelays(
 	if (
 		!Array.isArray(delays) ||
 		delays.length === 0 ||
-		!delays.every((d) => typeof d === "number" && d >= 0 && d < 2 ** 31)
+		// With 20 % jitter still below 2^31 ms, what `setTimeout` keeps.
+		!delays.every((d) => typeof d === "number" && d >= 0 && d * 1.2 < 2 ** 31)
 	) {
 		throw new TypeError("TabMcp: reconnect.delaysMs: a non-empty list of ms");
 	}
@@ -178,8 +179,15 @@ export class TabMcp extends EventTarget {
 	readonly #secrets: SecretStore | undefined;
 	/** The channel of the tabs that share the secret (DEC-095). */
 	readonly #tabs: string | undefined;
-	/** Replaced since the last session: `newAddress()` takes the address back first. */
-	#takenOver = false;
+	/**
+	 * The page was on when a takeover ended its session (or when a
+	 * `newAddress()` failed), and nothing was ended since: the next
+	 * `newAddress()` connects with the new address. Only that; whether it
+	 * takes the old address back does not depend on it (DEC-136).
+	 */
+	#stayOn = false;
+	/** The running `newAddress()`: a second call returns it, `connect()` waits for it. */
+	#renewing: Promise<SessionInfo | undefined> | undefined;
 	readonly #identityAssertion: IdentityAssertionHandler | undefined;
 	#identity: IdentityState = "none";
 	#identityMessage: string | undefined;
@@ -200,8 +208,6 @@ export class TabMcp extends EventTarget {
 	#reconnecting: ReconnectingInfo | undefined;
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#unwatch: (() => void) | undefined;
-	/** The page's `connect()` waits on the running reconnect attempt: its promise tells it. */
-	#pageWaits = false;
 	/** The open "Connect your AI app" dialog: one at a time. */
 	#connectDialog: { doc: Document; shown: Promise<void> } | undefined;
 	/**
@@ -448,11 +454,8 @@ export class TabMcp extends EventTarget {
 		if (this.#state === "connected" && this.#session !== undefined) {
 			return Promise.resolve(this.#session);
 		}
-		if (this.#connecting !== undefined) {
-			if (this.#reconnecting !== undefined) this.#pageWaits = true;
-			return this.#connecting;
-		}
-		if (this.#reconnecting !== undefined) return this.#attemptReconnect(true);
+		if (this.#connecting !== undefined) return this.#connecting;
+		if (this.#reconnecting !== undefined) return this.#attemptReconnect();
 		const activation = (
 			globalThis.navigator as
 				| { userActivation?: { isActive: boolean } }
@@ -470,12 +473,15 @@ export class TabMcp extends EventTarget {
 				),
 			);
 		}
-		return this.#start();
+		// While `newAddress()` runs: afterwards, with the new address.
+		return this.#renewing
+			? this.#renewing.then(() => this.connect({ resume: true }))
+			: this.#start();
 	}
 
-	#start(revokeAll?: boolean): Promise<SessionInfo> {
+	#start(): Promise<SessionInfo> {
 		this.#setState("connecting");
-		const connecting = this.#open(this.#generation, revokeAll);
+		const connecting = this.#open(this.#generation);
 		this.#connecting = connecting;
 		connecting.then(
 			() => {
@@ -502,11 +508,17 @@ export class TabMcp extends EventTarget {
 		return lazy;
 	}
 
-	async #open(generation: number, revokeAll?: boolean): Promise<SessionInfo> {
+	/**
+	 * Open a connection. `takeBack`: the secret of an address to take back
+	 * (`hello.revokeAll`, DEC-095); that connection is never current, so its
+	 * session and events stay unseen, but `#end` closes it.
+	 */
+	async #open(generation: number, takeBack?: string): Promise<SessionInfo> {
 		const { openConnection, addressIdOf, withAddress } = await this.#load();
 		const relayUrl = this.#relayUrl;
 		if (relayUrl === undefined || this.#secrets === undefined) return noRelay();
-		const secret = this.#secrets.get();
+		const secret =
+			takeBack ?? this.#secrets.current() ?? this.#secrets.rotate();
 		const address = await addressIdOf(secret);
 		if (generation !== this.#generation) {
 			throw new DOMException("The connection was cancelled", "AbortError");
@@ -516,9 +528,9 @@ export class TabMcp extends EventTarget {
 			this.#host(ref),
 			withAddress(relayUrl, address),
 			secret,
-			revokeAll,
+			{ address, revokeAll: !!takeBack },
 		);
-		ref.connection = connection;
+		if (!takeBack) ref.connection = connection;
 		this.#connection = connection;
 		return connection.ready;
 	}
@@ -559,46 +571,66 @@ export class TabMcp extends EventTarget {
 	}
 
 	/**
-	 * A new address: revokes every connected app of the old one (while
-	 * connected), makes a new secret, and connects again if it was connected or
-	 * connecting. After `replaced`, it first connects with the old address
-	 * again, so that the relay disconnects the apps that now talk to whoever
-	 * took it over (DEC-095), then connects with the new one. Call it from a
-	 * user action.
+	 * A new address. If the page has one already, it first takes it back: it
+	 * connects with the old secret and the relay revokes every grant of it in
+	 * the same step (`hello.revokeAll`, DEC-095, DEC-136), connected or not,
+	 * taken over or not. Then it makes a new secret and connects with it if
+	 * the page was connected, connecting or reconnecting. Rejects, and keeps
+	 * the old secret so that a retry takes it back again, when the old address
+	 * could not be taken back (relay unreachable, taken over again first).
+	 * Call it from a user action.
 	 */
 	newAddress(): Promise<SessionInfo | undefined> {
-		if (this.#relayUrl === undefined) return noRelay();
-		if (this.#takenOver) {
-			// `hello.revokeAll`: the relay revokes as it hands the address back, and
-			// the connection resolves only once no grant is left. Taken over again
-			// first: reject, keep the secret, so that a retry takes it back again.
-			this.#end("new_address");
-			return this.#start(true).then(
-				() => this.#renew(true),
-				(error: unknown) => {
-					this.#takenOver = true;
-					throw error;
-				},
-			);
-		}
-		return this.#renew(false);
+		// Without a relay there is no secret store.
+		const secrets = this.#secrets;
+		if (!secrets) return noRelay();
+		// biome-ignore lint/suspicious/noAssignInExpressions: one promise per run
+		return (this.#renewing ??= this.#renew(secrets).finally(() => {
+			this.#renewing = undefined;
+		}));
 	}
 
-	#renew(on: boolean): Promise<SessionInfo | undefined> {
+	async #renew(secrets: SecretStore): Promise<SessionInfo | undefined> {
 		const wasOn =
-			on || this.#state !== "disconnected" || this.#reconnecting !== undefined;
-		if (this.#state === "connected")
-			this.#connection?.send({ type: "grants.revokeAll" });
+			this.#state !== "disconnected" ||
+			this.#reconnecting !== undefined ||
+			this.#stayOn;
+		// Read now, also when the page is off or was taken over (CC 4). Another
+		// tab that rotated the secret since took the address it had back itself.
+		const old = secrets.current();
 		this.#end("new_address");
-		this.#secrets?.rotate();
-		this.#takenOver = false; // nobody else has the new secret
+		const generation = this.#generation;
+		if (old) {
+			this.#setState("connecting");
+			try {
+				await this.#open(generation, old);
+			} catch (error) {
+				if (generation === this.#generation) {
+					this.#setState("disconnected");
+					this.#stayOn = wasOn; // a retry does the same
+				}
+				throw error;
+			} finally {
+				// The take-back connection, unless `#end` closed it already.
+				if (generation === this.#generation) {
+					this.#connection?.close("new_address");
+					this.#connection = undefined;
+				}
+			}
+		}
+		secrets.rotate();
+		// The relay revoked them (CC 14).
+		this.#setGrants([]);
 		// It was on: the user chose that already, as for a reconnect.
-		return wasOn ? this.connect({ resume: true }) : Promise.resolve(undefined);
+		if (wasOn) return this.#start();
+		this.#setState("disconnected");
+		return undefined;
 	}
 
 	/** Close the connection (or cancel connecting) and report it at once. */
 	#end(reason: DisconnectReason): void {
 		this.#stopReconnecting();
+		this.#stayOn = false;
 		this.#generation++;
 		const connection = this.#connection;
 		const wasConnected = this.#state === "connected";
@@ -618,7 +650,12 @@ export class TabMcp extends EventTarget {
 	#scheduleReconnect(reason: DisconnectReason, attempt: number): void {
 		const delays = this.#reconnectDelays;
 		if (delays === undefined) return;
-		const delay = delays[Math.min(attempt, delays.length) - 1] ?? 0;
+		// Up to 20 % either way, so that the tabs a relay restart disconnected
+		// do not all come back at the same moment (CC 11). Below 2^31 ms: the
+		// waits are checked against 2^31 / 1.2.
+		const delay =
+			(delays[Math.min(attempt, delays.length) - 1] ?? 0) *
+			(0.8 + 0.4 * Math.random());
 		clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = setTimeout(() => {
 			this.#attemptReconnect().catch(() => {}); // the next one is scheduled
@@ -628,21 +665,18 @@ export class TabMcp extends EventTarget {
 		this.#emit("reconnecting", this.#reconnecting);
 	}
 
-	/**
-	 * Make the next reconnect attempt now; on failure, schedule the one after.
-	 * `byPage`: from `connect()`, whose promise tells the page why it failed.
-	 */
-	#attemptReconnect(byPage = false): Promise<SessionInfo> {
+	/** Make the next reconnect attempt now; on failure, schedule the one after. */
+	#attemptReconnect(): Promise<SessionInfo> {
 		clearTimeout(this.#reconnectTimer);
 		this.#reconnectTimer = undefined;
 		if (this.#connecting !== undefined) return this.#connecting;
-		const info = this.#reconnecting;
-		this.#pageWaits = byPage;
 		const attempt = this.#start();
 		attempt.catch((error: unknown) => {
-			const pageWaits = this.#pageWaits;
-			this.#pageWaits = false;
-			if (info === undefined || this.#reconnecting !== info) return;
+			// Read now, not when the attempt started: a listener of the
+			// `statechange` before this may have ended it all or started the next
+			// attempt, which then owns the next step (CC 10).
+			const info = this.#reconnecting;
+			if (info === undefined || this.#connecting !== undefined) return;
 			// Only what may get better: an unreachable relay (network), a
 			// heartbeat or a shutdown; a refusal stops it (DEC-082).
 			const reason = (error as { reason?: DisconnectReason } | null)?.reason;
@@ -650,14 +684,9 @@ export class TabMcp extends EventTarget {
 				this.#scheduleReconnect(info.reason, info.attempt + 1);
 				return;
 			}
-			// A refusal stops it. Without a connect() of the page's waiting on this
-			// attempt, nothing else tells the page why: `error` does, before `null`.
+			// A refusal stops it, and `error` says why, before `null`.
 			this.#stopReconnecting(
-				pageWaits
-					? undefined
-					: error instanceof Error
-						? error
-						: new Error(String(error)),
+				error instanceof Error ? error : new Error(String(error)),
 			);
 		});
 		return attempt;
@@ -887,7 +916,7 @@ export class TabMcp extends EventTarget {
 				const session = sessionInfo(m);
 				if (!current()) return session;
 				this.#session = session;
-				this.#takenOver = false;
+				this.#stayOn = false;
 				this.#stopReconnecting();
 				this.#setState("connected");
 				this.#setGrants([...m.grants]);
@@ -928,9 +957,7 @@ export class TabMcp extends EventTarget {
 			},
 			closed: (reason: DisconnectReason, code: number) => {
 				if (!current()) return;
-				// Taken over: `newAddress()` takes it back first, whatever runs by
-				// then (review of PR 39).
-				if (reason === "replaced") this.#takenOver = replacedHere = true;
+				if (reason === "replaced") this.#stayOn = replacedHere = true;
 				// Any listener below may end it all (`disconnect()`, `newAddress()`):
 				// that bumps the generation, and then nothing is scheduled.
 				const generation = this.#generation;
