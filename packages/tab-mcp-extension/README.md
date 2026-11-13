@@ -251,6 +251,13 @@ setup, the listing, the permission justifications and the review notes:
   its Copy buttons, its clicks (Disconnect's double click, the switch), "Don't ask for
   these tools", the tab card's texts (an unreadable tab, no tools), the labels and live
   regions of `index.html`, a question's countdown and its end.
+- `test/contrast.test.ts`: the panel's look (`kb/design/extension-look.md`). Every pair
+  of colours the style sheet uses, from its two token blocks (light and dark): text at
+  least 4.5:1, edges, dots and the switches' parts at least 3:1; the badge's colours
+  (`src/look.ts`); and the style sheet's rules: every colour is a token, none is unused,
+  nothing is dimmed by opacity, no hover reaches a button that takes no click, no button
+  is amber, one focus ring, reduced motion stops every transition, forced colours name
+  every state. A new colour or pair goes into the test's table first.
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, a click on the body, cut arguments,
@@ -264,7 +271,8 @@ setup, the listing, the permission justifications and the review notes:
 - `test/e2e.test.ts`: the test build and the store package in Chrome for Testing 156 or
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
-  tools (confirmation in the panel, cancellation, `toolchange`, a forged
+  tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
+  colours as computed, both switches' contrast; confirmation in the panel, cancellation, `toolchange`, a forged
   `document.modelContext`, a tool that takes the tab to another page, "Don't ask again")
   across navigations and tab switches; with the panel closed
   (tools still run, questions as notifications, a panel closed during a question, a click

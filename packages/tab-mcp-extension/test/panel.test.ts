@@ -10,6 +10,7 @@ import { Window } from "happy-dom";
 import type { PanelState, TabView } from "../src/protocol.ts";
 import {
 	allowAllView,
+	askFirstNote,
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
@@ -291,9 +292,29 @@ describe("the tab card's texts", () => {
 			expect(text("no-tools")).toContain("page_info and the navigation tools");
 			// The chat in a tab of this profile (EQ 2).
 			expect(text("pairing")).toContain("outside this Chrome profile");
+			// The look (DEC-160, DEC-161): the main actions are ink ("strong"),
+			// none is "primary" (amber in Overmark); nothing is in a tooltip
+			// alone; the line for the "Ask first" switches is there to be filled.
+			expect(
+				[...doc.querySelectorAll("button.strong")].map((b) =>
+					b.textContent?.trim(),
+				),
+			).toEqual(["Turn on AI access", "Done", "Save"]);
+			expect(doc.querySelector(".primary")).toBeNull();
+			expect(doc.querySelectorAll("[title]").length).toBe(0);
+			expect(doc.getElementById("ask-first-note")?.hidden).toBe(true);
+			expect(
+				[...doc.querySelectorAll("h2, h3")].map((h) => h.textContent),
+			).toEqual(["AI app", "Pair an AI app", "Tab in front", "Tools"]);
 		} finally {
 			await window.happyDOM.close();
 		}
+	});
+
+	test("what Ask first does is a line for everyone, with the site (DEC-160)", () => {
+		expect(askFirstNote("https://shop.example")).toBe(
+			"Ask first, on: the tool asks you before each call. Off: it runs without asking on https://shop.example, for every paired AI app.",
+		);
 	});
 
 	test("the announcement of a question is one short line (EQ 11)", () => {

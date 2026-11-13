@@ -216,8 +216,10 @@ Check the example storefront and the Chrome version before each submission.
 
 **Screenshots (1280×800):** the side panel with a page's tools and AI access on; the
 pairing address and code with "How do I add it?" open; a question in the side panel
-(Don't allow, Allow, Don't ask again on <host>) with the arguments; Claude Code calling a
-page tool.
+(Don't allow, Allow once, Don't ask again on <host>) with the arguments; Claude Code
+calling a page tool. The panel's look changed with iteration 39
+([the look](../design/extension-look.md)): screenshots taken before it are to be taken
+again before the next submission.
 
 # Citations
 

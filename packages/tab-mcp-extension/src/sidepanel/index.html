@@ -13,7 +13,7 @@
 
 	<section class="card" aria-labelledby="ai-heading">
 		<div class="card-head">
-			<h2 id="ai-heading" class="label">AI app</h2>
+			<h2 id="ai-heading">AI app</h2>
 			<label class="switch">
 				<input id="ai-switch" type="checkbox" role="switch" aria-checked="false">
 				<span>AI access</span>
@@ -34,16 +34,16 @@
 			</div>
 		</div>
 		<div class="buttons">
-			<button id="connect" type="button" class="primary">Turn on AI access</button>
+			<button id="connect" type="button" class="strong">Turn on AI access</button>
 		</div>
 		<p><button id="add-app" type="button" class="link" hidden>+ Add another AI app</button></p>
 
 		<div id="pairing" class="pairing" hidden>
-			<h3 class="label">Pair an AI app</h3>
+			<h3>Pair an AI app</h3>
 			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
 			<p class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
 			<div class="address">
-				<code id="address" title=""></code>
+				<code id="address"></code>
 				<button id="copy" type="button" class="quiet small copy" aria-label="Copy address">Copy</button>
 			</div>
 			<details id="setup" class="setup">
@@ -57,7 +57,7 @@
 				<button id="copy-code" type="button" class="quiet small copy" aria-label="Copy code" disabled>Copy</button></p>
 			<p class="muted small">The code changes every 2 minutes and after each use.</p>
 			<div class="buttons">
-				<button id="pair-done" type="button" class="primary" hidden>Done</button>
+				<button id="pair-done" type="button" class="strong" hidden>Done</button>
 				<button id="new-address" type="button" class="quiet">New address</button>
 			</div>
 			<p id="new-address-note" class="muted small" hidden>A new address disconnects every AI app; each has to be added again. Click again to make one.</p>
@@ -66,7 +66,7 @@
 	</section>
 
 	<section class="card" aria-labelledby="tab-heading">
-		<h2 id="tab-heading" class="label">Tab in front</h2>
+		<h2 id="tab-heading">Tab in front</h2>
 		<p id="tab-title" class="tab-title">–</p>
 		<p id="tab-host" class="muted"></p>
 		<p id="tab-badges" class="badges"></p>
@@ -74,9 +74,10 @@
 		<p id="no-tools" class="muted small" hidden>This page offers no WebMCP tools. page_info and the navigation tools still work.</p>
 		<p id="no-webmcp" class="muted small" hidden>WebMCP is off in this tab: Chrome turns it on for sites in its origin trial, or everywhere with <code>chrome://flags/#enable-webmcp-testing</code> (<a href="https://developer.chrome.com/docs/ai/webmcp" target="_blank" rel="noopener">WebMCP in Chrome</a>). page_info and the navigation tools still work.</p>
 		<div id="tools-head" class="tools-head" hidden>
-			<span class="label">Tools</span>
+			<h3>Tools</h3>
 			<button id="allow-tools" type="button" class="small" aria-controls="tools">Don't ask for these tools</button>
 		</div>
+		<p id="ask-first-note" class="muted small" hidden></p>
 		<ul id="tools" class="tools" aria-label="The page's WebMCP tools"></ul>
 		<div id="host-access" class="host-access" hidden>
 			<p class="muted small">tab-mcp reads a tab only after you click its icon in Chrome's toolbar there. To read every http(s) site without that click, Chrome asks you first to let it "Read and change all your data on all websites".</p>
@@ -95,7 +96,7 @@
 			<label for="relay">Relay</label>
 			<div class="field">
 				<input id="relay" name="relay" type="url" spellcheck="false" autocomplete="off">
-				<button type="submit">Save</button>
+				<button type="submit" class="strong">Save</button>
 			</div>
 		</form>
 		<p id="relay-problem" class="problem" hidden></p>

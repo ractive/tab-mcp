@@ -3135,3 +3135,84 @@ they found "Turn off AI access". The flag is now set when the page is connected 
 least one grant (`grantschange`, and `statechange` for a connection whose grants arrived
 first); Turn off still clears it. A page whose apps were all disconnected keeps the flag:
 the user may add another app.
+
+## DEC-160: tab-mcp for Chrome takes Overmark's look: paper and ink, every colour a token (owner)
+
+The owner, 2026-11-13: "Overmark did a redesign of the Chrome extension. Apply the same
+design language and best practices to tab-mcp-extension as well." Iteration 39, designed
+in [tab-mcp for Chrome: the look](design/extension-look.md). Measured before: the text
+was fine, the boundaries were not (a button's, a field's and a card's border 1.24:1 on
+its surface in light, 1.28:1 in dark), as in Overmark before its redesign.
+
+- The side panel and the question window are paper (`--paper`) with sheets on it
+  (the pairing step, a question). The sections ("AI app", "Tab in front", Settings) stand
+  on the paper with a rule between them; no cards, no shadows.
+- Overmark's tokens with its names and values for surfaces, text, lines, actions and
+  messages, so the two style sheets can be compared; one type scale, one spacing scale,
+  radii 6, 10 and 999; system fonts.
+- Buttons, fields and switches have an edge (`--edge`) that reaches 3:1. A control that
+  takes no click (`disabled`, or `aria-disabled` during the wait after the layout moved)
+  is flat in colours of its own, never dimmed by opacity.
+- One `:focus-visible` ring for every control; `prefers-reduced-motion` stops the
+  transitions; in forced colours every filled control keeps an edge and each rule names
+  the hover and unavailable states that would outweigh it.
+- Nothing is said in a tooltip alone: the pairing address is shown whole, on as many
+  lines as it takes; what a tool's "Ask first" does is one line over the tool list.
+- The second click of Disconnect and of New address (with apps paired) is on a button
+  filled in red (`data-armed`).
+- The toolbar icon's badge colours are one constant (`src/look.ts`), the light tokens'
+  values with white text.
+
+Not taken from Overmark: its top bar, margin rail, chips, banners, the warning sign and
+the page overlay's rules (they are for its views and marks), and any of its code as a
+dependency.
+
+## DEC-161: No button of tab-mcp for Chrome is amber (owner)
+
+2026-11-13, iteration 39; the owner confirmed the design's proposal. In Overmark amber
+marks the one action of a view that starts drawing; its copy of this extension's AI app
+card uses the ink "strong" button for "Turn on AI access" and "Allow". This panel has
+no drawing action, and an amber "Allow once" would push the answer to a question. "Turn
+on AI access", "Done", "Save" and "Allow once" are strong (ink); amber is the dot of a
+connection that is connecting, retrying or waiting for an app, with a ring
+(`--accent-edge`), since amber alone is 1.67:1 on paper. The AI app card then looks the
+same in both extensions.
+
+## DEC-162: What a colour says in tab-mcp for Chrome's panel
+
+2026-11-13, iteration 39. Overmark's status colours are a mark's status; here a colour
+says one of these, and a word says it too:
+
+- The connection's dot: grey (`--ink-2`) off, amber with a ring while connecting,
+  retrying or waiting, green (`--ok`) on. A paired app's dot is green only while
+  connected.
+- Pills: plain (`--wash`) for what only reads, is left out or cannot be read; the
+  warning's tint for a tool that asks first and has no switch; green for a page that
+  offers tools ("WebMCP · n tools").
+- Switches (AI access, a tool's "Ask first"): the track is the edge colour off and ink
+  on, the knob the ink's counter colour. Knob on track and track on paper are at least
+  3:1 in both positions and both schemes (light 16.07 and 14.61 on, 3.86 and 3.51 off;
+  dark 15.89 and 15.89 on, 4.39 and 4.39 off); this replaces the two tokens iteration 36
+  added for EQ 17. A tool's "Ask first" is drawn as a switch, smaller: it was a native
+  checkbox with `role="switch"`.
+- Red is a failure (a problem's notice, its text in ink) or the second click of a
+  disconnecting action; the warning's tint is the notice that the address is in use
+  elsewhere.
+
+## DEC-163: Tests hold tab-mcp for Chrome's look
+
+2026-11-13, iteration 39, as in Overmark (its DEC-024).
+
+- `test/contrast.test.ts` reads the two token blocks from `style.css` and asserts every
+  pair the design's tables list, in light and dark: the exact ratio, and text at least
+  4.5:1, boundaries, dots and a switch's parts at least 3:1 (WCAG 2.2, 1.4.3 and
+  1.4.11). It also parses the style sheet and holds: no colour literal outside the two
+  blocks; no token unused or undefined; no `opacity`, `filter` or blurred shadow; no
+  hover rule that reaches a button that takes no click; amber on the waiting dot only;
+  one focus rule; the reduced-motion block names every selector with a transition; the
+  forced-colours block names the states that outweigh it. A new colour or pair fails
+  the test until the table has it.
+- `test/e2e.test.ts` in Chrome for Testing: nothing reaches past the panel's edge at
+  345, 360 and 420 px in its widest states; no button is amber; the tokens arrive as
+  computed under an emulated light and dark scheme; both switches' contrast is measured
+  from the computed colours.

@@ -19,6 +19,7 @@ import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
 import {
 	allowAllView,
+	askFirstNote,
 	cardView,
 	confirms,
 	DONT_ASK_ALL,
@@ -130,6 +131,8 @@ function disconnectButton(grant: PanelState["grants"][number]): HTMLElement {
 	button.className = "small";
 	const armed = disconnectArmed.has(grant.grantId);
 	button.textContent = armed ? "Disconnect? Click again" : "Disconnect";
+	// Armed, it is another button to the eye too (DEC-160).
+	button.toggleAttribute("data-armed", armed);
 	button.dataset["grant"] = grant.grantId;
 	button.addEventListener("click", () => {
 		const armed = disconnectArmed.get(grant.grantId);
@@ -229,8 +232,8 @@ function showConnection(s: PanelState): void {
 	$("pair-done").hidden = !view.done;
 	// The address only while pairing: it is what an AI app is added with.
 	// Set only when it changes: a failed Copy selects it in place (EQ 16).
+	// Shown whole, on as many lines as it takes: no tooltip (DEC-160).
 	setText($("address"), view.address);
-	$("address").title = view.address;
 	// The steps name the address: made again only when it changes, so a
 	// "Copied" and the focus on a Copy stay. Shown with the address.
 	if (view.address !== stepsFor) {
@@ -250,6 +253,7 @@ function showConnection(s: PanelState): void {
 	($("copy-code") as HTMLButtonElement).disabled = code === undefined;
 	if (s.grants.length === 0) newAddressArmed = false;
 	$("new-address-note").hidden = !newAddressArmed;
+	$("new-address").toggleAttribute("data-armed", newAddressArmed);
 }
 
 // --- Questions ---
@@ -406,7 +410,8 @@ function askFirstSwitch(origin: string, tool: ToolView): HTMLElement {
 	input.checked = !tool.allowed;
 	input.dataset["tool"] = tool.name;
 	input.setAttribute("aria-label", `Ask first: ${tool.title ?? tool.name}`);
-	label.title = `On: asks you before each call. Off: runs without asking on ${origin}, for every paired AI app.`;
+	// What on and off do is a line over the list, not a tooltip (DEC-160).
+	input.setAttribute("aria-describedby", "ask-first-note");
 	setAvailable(input, Date.now() >= movedUntil);
 	input.addEventListener("click", (event) => {
 		// During the wait after the layout moved the click does nothing.
@@ -454,7 +459,7 @@ function toolItem(
 		tool.problem
 			? badge("left out")
 			: tool.readOnly
-				? badge("reads", "reads")
+				? badge("reads")
 				: canAllow
 					? askFirstSwitch(origin, tool)
 					: badge("asks first", "asks"),
@@ -475,7 +480,7 @@ function showTab(s: PanelState): void {
 			: tab.webmcp === undefined
 				? [badge("Not readable")]
 				: count > 0
-					? [badge(`WebMCP · ${count} tool${count === 1 ? "" : "s"}`, "reads")]
+					? [badge(`WebMCP · ${count} tool${count === 1 ? "" : "s"}`, "ok")]
 					: []),
 	);
 	// The panel's own words for why it may not read the tab (EQ 6).
@@ -508,6 +513,9 @@ function showTab(s: PanelState): void {
 	const button = $("allow-tools") as HTMLButtonElement;
 	setText(button, allowAll.label);
 	const scope = tab?.origin ?? "this site";
+	// What a tool's "Ask first" switch does, where there is one.
+	$("ask-first-note").hidden = !allowAll.shown;
+	setText($("ask-first-note"), allowAll.shown ? askFirstNote(scope) : "");
 	const label =
 		allowAll.label === DONT_ASK_ALL
 			? `Don't ask for the ${allowAll.names.length} tools listed on ${scope}, for every paired AI app`
@@ -632,9 +640,11 @@ $("new-address").addEventListener("click", () => {
 	if ((state?.grants.length ?? 0) > 0 && !newAddressArmed) {
 		newAddressArmed = true;
 		$("new-address-note").hidden = false;
+		$("new-address").toggleAttribute("data-armed", true);
 		return;
 	}
 	newAddressArmed = false;
+	$("new-address").toggleAttribute("data-armed", false);
 	send({ type: "new-address" });
 });
 $("replaced-new-address").addEventListener("click", () =>

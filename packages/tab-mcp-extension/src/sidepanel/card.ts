@@ -185,6 +185,13 @@ export const DONT_ASK_ALL = "Don't ask for these tools";
 export const ASK_ALL = "Ask first for these tools";
 
 /**
+ * What a tool's "Ask first" switch does on `site`: a line over the tool
+ * list, for everyone, not a tooltip on each switch (DEC-160).
+ */
+export const askFirstNote = (site: string): string =>
+	`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${site}, for every paired AI app.`;
+
+/**
  * "Don't ask for these tools" for the tools listed now on a site whose tools
  * can be allowed; once none asks, "Ask first for these tools". A tool the
  * page adds later is not among them: it asks first.

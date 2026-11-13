@@ -30,10 +30,12 @@ once", merge `3779e8e`) with its review commits, its `kb/design/ux-review-2026-1
 (section "Visual direction") and its DEC-024. Read there: `src/sidepanel/style.css`,
 `test/contrast.test.ts`, `test/e2e/look.test.ts`.
 
-This note is phase 1 of iteration 39. It changes no source. Iteration H of the review
-(EQ 2, 6, 7, 8, 9, 11, 13, 16, 17: the panel's wording and accessibility) is rewriting
-the panel's markup and texts at the same time and lands first; the selectors named
-below are today's and are mapped again onto H's markup before anything is built.
+The note was written before iteration H of the review landed (iteration 36: the panel's
+wording and accessibility, EQ 2, 6, 7, 8, 9, 11, 13, 16, 17), against the panel as it
+was then, and built on top of it in
+[iteration 39](../iterations/iteration-39-extension-look.md) (DEC-160 to DEC-163).
+"Today's panel" below is the panel before both; [As built](#as-built) says where the
+build differs from the plan, with screenshots.
 
 ## What Overmark's look is
 
@@ -247,7 +249,7 @@ icon are three more hex values in `worker/connection.ts`.
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   /* Space and shape */
-  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
   --r-control: 6px; --r-card: 10px; --r-pill: 999px;
 }
 @media (prefers-color-scheme: dark) {
@@ -379,6 +381,46 @@ No behaviour changes: no text, no order of controls, no message of the protocol.
   this design go with it; nothing else depends on them.
 - **Density.** 13 px body where 14 px is today, and sections in place of cards: the
   panel gets a little denser. The e2e widths and the screenshots are the check.
+
+## As built
+
+Iteration 39, on the panel of iteration 36. The plan held; these points differ.
+
+- **The "allowed" pill is gone before this iteration** (iteration 36, DEC-154): a tool
+  that can be allowed on the site has an "Ask first" switch. It is drawn as the small
+  switch (track 28 px, knob 12 px, the same rules as the AI access switch), where it was
+  a native checkbox. `--ok-bg` and `--ok` are the pill of a page that offers tools
+  ("WebMCP · n tools"); "reads", "left out" and "Not readable" are plain; "asks first"
+  (a tool without a switch) is the warning's tint.
+- **One line of text is new.** Each "Ask first" label had a `title` that said what on
+  and off do, the only place it was said. It is now one line over the tool list ("Ask
+  first, on: the tool asks you before each call. Off: it runs without asking on
+  <origin>, for every paired AI app."), which every switch names with
+  `aria-describedby`. No other text changed.
+- **`--s5` and `--s6` are not copied**: nothing in this panel is 24 or 32 px apart, and
+  the test fails on a token that no rule reads.
+- **The badge's text is set to white** (`chrome.action.setBadgeTextColor`): on
+  `#a06c00` white is 4.53:1 and black 4.63:1, so Chrome's own choice could be either.
+- **A wait is flat, not dimmed.** The 750 ms waits of iteration 36 (`aria-disabled` on
+  "Allow once", "Don't ask again", "Don't ask for these tools" and the "Ask first"
+  switches) take the disabled colours; every hover rule leaves `:disabled` and
+  `[aria-disabled="true"]` out, and a test holds that.
+- **The switch's contrast** (EQ 17) is measured in Chrome for both switches against the
+  paper: light 16.07 (knob on track) and 14.61 (track on paper) on, 3.86 and 3.51 off;
+  dark 15.89 and 15.89 on, 4.39 and 4.39 off.
+- **The e2e look test** is one test in the test build's block of `test/e2e.test.ts`
+  rather than a block of its own: the states it needs are there already (tools, the
+  address and code, a question), and each further browser start costs seconds and has
+  crashed Chrome for Testing 157 before.
+- **The store listing's screenshots** show the look before; they are to be taken again
+  before the next submission ([Chrome Web Store](../operations/chrome-web-store.md)).
+
+The panel at 380 px, with no app paired and with a question, in light and dark:
+
+| Light | Dark |
+|---|---|
+| ![Pairing, light](extension-look/pairing-light.png) | ![Pairing, dark](extension-look/pairing-dark.png) |
+| ![A question, light](extension-look/question-light.png) | ![A question, dark](extension-look/question-dark.png) |
 
 # Citations
 
