@@ -8,6 +8,46 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Changed
+
+- `registerTool` rejects with a `TypeError` when a hint (`consequentialHint`,
+  `readOnlyHint`, any `…Hint`, `debugging`) or the `webmcp` option is not a boolean. Until
+  now such a hint was dropped, so `consequentialHint: "true"` registered a tool that ran
+  without asking. Other annotation keys that are not booleans are still ignored.
+- Only an MCP result passes through as one: an object whose `content` is an array of MCP
+  content blocks (`type` `text`, `image`, `audio`, `resource_link` or `resource`, with the
+  fields that type needs, such as a string `text` or `data` and `mimeType`). Any other
+  value with a `content` array (a ProseMirror document, `{ title, content: [...] }`, also
+  with an empty `content`) is sent as JSON text with `structuredContent`, like other
+  objects. A passed-through
+  result keeps its own `_meta`. `structuredContent` is the parsed JSON text, so a `Date`
+  or `URL` (whose JSON is a string) has none.
+- The confirmation: one dialog at a time per document; the others wait, and the shown one
+  says how many. Each dialog starts its Allow delay when it is shown, and again when
+  another dialog of the page closes over it, so the second click of a double click cannot
+  approve the next call. When the arguments overflow their box (now up to
+  `min(50vh, 24rem)`, `--tab-mcp-arguments-height`), Allow and Always allow wait until
+  the box has been scrolled to its end, and the dialog says so. Before the delay has run
+  out, Enter or Space on a button and Escape are ignored, so typing meant for the page
+  cannot refuse a call either. The dialog is described by its question (and short
+  arguments) for screen readers; each Disconnect button is named for its app.
+- The dialogs' elements inherit the dialog's colour, buttons reset `width`,
+  `text-transform` and `letter-spacing`, and the dialogs set `pointer-events: auto`, so
+  a page's `p { color: … }`, a classless framework's buttons or Radix's
+  `body { pointer-events: none }` no longer change or block them.
+- `serve` also ends when the port fires `close` (the other end went away), where the
+  browser has that event: Bun does; Chrome only with the `MessagePortCloseEvent` Blink
+  feature. Elsewhere, close the serve yourself as before.
+
+#### Fixed
+
+- The schema check at registration no longer reads `default`, `examples`, `const` and
+  `enum` values or property names as keywords: `examples: [{ pattern: "*.ts" }]` was
+  refused as an invalid regular expression. A malformed `%` escape in a `$ref` is a
+  `TypeError`, not a `URIError`.
+
 ### [0.15.0][client-0.15.0] - 2026-11-13
 
 #### Added

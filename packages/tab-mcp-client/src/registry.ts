@@ -28,20 +28,43 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** `x-mcp-header` makes the relay validate headers it does not know; not supported in v1. */
-function usesMcpHeader(schema: unknown, depth = 0): boolean {
-	if (depth > 64 || typeof schema !== "object" || schema === null) return false;
-	if (!Array.isArray(schema) && "x-mcp-header" in schema) return true;
-	return Object.values(schema).some((v) => usesMcpHeader(v, depth + 1));
+/** Keywords whose values are data, not schemas (CC 13). */
+const DATA = /^(default|examples|const|enum)$/;
+/** Keywords whose values map names to schemas: the names are not keywords. */
+const NAMED =
+	/^(properties|patternProperties|\$defs|definitions|dependentSchemas)$/;
+
+/**
+ * Calls `visit` for every schema object in `node`, itself included. The
+ * values of `default`, `examples`, `const` and `enum` are data and are
+ * skipped. An array, or the map under `properties` and the like (`map`), is
+ * not a schema itself: its values are, and its keys are names, not keywords.
+ */
+function eachSchema(
+	node: unknown,
+	visit: (schema: Record<string, unknown>) => void,
+	depth = 0,
+	map = false,
+): void {
+	if (depth > 64 || typeof node !== "object" || node === null) return;
+	map ||= Array.isArray(node);
+	if (!map) visit(node as Record<string, unknown>);
+	for (const [key, value] of Object.entries(node))
+		if (map || !DATA.test(key))
+			eachSchema(value, visit, depth + 1, !map && NAMED.test(key));
 }
 
 /** A JSON pointer (`/a/b~1c`) inside `root`, or `undefined`. */
 function resolvePointer(root: unknown, pointer: string): unknown {
 	let node: unknown = root;
 	for (const raw of pointer.split("/").slice(1)) {
-		const key = decodeURIComponent(raw)
-			.replaceAll("~1", "/")
-			.replaceAll("~0", "~");
+		let key: string;
+		try {
+			key = decodeURIComponent(raw);
+		} catch {
+			return undefined; // a malformed `%`
+		}
+		key = key.replaceAll("~1", "/").replaceAll("~0", "~");
 		if (typeof node !== "object" || node === null || !Object.hasOwn(node, key))
 			return undefined;
 		node = (node as Record<string, unknown>)[key];
@@ -54,25 +77,23 @@ function resolvePointer(root: unknown, pointer: string): unknown {
  * now so that a bad schema fails registration: patterns that are not
  * regular expressions, and `$ref`s that do not resolve inside the schema.
  * Without `$id`s; once the validator is loaded, it checks too (`setCompiler`).
+ * Also `x-mcp-header`, which makes the relay validate headers it does not
+ * know; not supported in v1.
  */
 function schemaProblem(root: unknown): string | undefined {
 	const anchors = new Set<string>();
 	const refs: string[] = [];
 	const patterns: string[] = [];
-	const walk = (node: unknown, depth: number): void => {
-		if (depth > 64 || typeof node !== "object" || node === null) return;
-		if (!Array.isArray(node)) {
-			const o = node as Record<string, unknown>;
-			if (typeof o["$anchor"] === "string") anchors.add(o["$anchor"]);
-			if (typeof o["$ref"] === "string") refs.push(o["$ref"]);
-			if (typeof o["pattern"] === "string") patterns.push(o["pattern"]);
-			const pp = o["patternProperties"];
-			if (typeof pp === "object" && pp !== null)
-				patterns.push(...Object.keys(pp));
-		}
-		for (const v of Object.values(node)) walk(v, depth + 1);
-	};
-	walk(root, 0);
+	let header = false;
+	eachSchema(root, (o) => {
+		if (typeof o["$anchor"] === "string") anchors.add(o["$anchor"]);
+		if (typeof o["$ref"] === "string") refs.push(o["$ref"]);
+		if (typeof o["pattern"] === "string") patterns.push(o["pattern"]);
+		const pp = o["patternProperties"];
+		if (isPlainObject(pp)) patterns.push(...Object.keys(pp));
+		if ("x-mcp-header" in o) header = true;
+	});
+	if (header) return "x-mcp-header is not supported by tab-mcp";
 	for (const p of patterns) {
 		try {
 			new RegExp(p, "u");
@@ -119,11 +140,6 @@ export function validateTool(tool: Tool): RegisteredTool {
 			`registerTool: the inputSchema of ${name} must be a JSON Schema object with "type": "object"`,
 		);
 	}
-	if (usesMcpHeader(schema)) {
-		throw new TypeError(
-			`registerTool: ${name} uses x-mcp-header, which tab-mcp does not support`,
-		);
-	}
 	const problem = schemaProblem(schema);
 	if (problem !== undefined) {
 		throw new TypeError(`registerTool: the inputSchema of ${name}: ${problem}`);
@@ -141,10 +157,17 @@ export function validateTool(tool: Tool): RegisteredTool {
 			`registerTool: the annotations of ${name} must be an object`,
 		);
 	}
+	// A hint that is not a boolean is refused, not dropped: a dropped
+	// `consequentialHint: "true"` would run the tool without asking (CC 2).
+	// Every key ending in `Hint`, and `debugging`, counts as a hint, also
+	// one tab-mcp does not know (a later draft's, or a misspelt one); other
+	// keys that are not booleans are ignored.
 	const hints: ToolAnnotations = {};
 	for (const [key, value] of Object.entries(annotations ?? {})) {
 		if (typeof value === "boolean")
 			(hints as Record<string, boolean>)[key] = value;
+		else if (value !== undefined && /Hint$|^debugging$/.test(key))
+			throw new TypeError(`registerTool: ${key} of ${name} must be a boolean`);
 	}
 	return {
 		name,
@@ -170,6 +193,8 @@ export class ToolRegistry {
 	 */
 	register(tool: Tool, options: RegisterToolOptions = {}): void {
 		const { signal, webmcp } = options;
+		if (webmcp !== undefined && typeof webmcp !== "boolean")
+			throw new TypeError("registerTool: webmcp must be a boolean");
 		const registered: RegisteredTool = { ...validateTool(tool), webmcp };
 		if (signal?.aborted) return;
 		if (this.#tools.has(registered.name)) {

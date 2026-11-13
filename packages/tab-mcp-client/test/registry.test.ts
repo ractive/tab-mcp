@@ -102,6 +102,74 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		expect(r.get("good")).toBeDefined();
 	});
 
+	test("data in default, examples, const and enum is not read as schema; nor are property names (CC 13)", () => {
+		const r = new ToolRegistry();
+		r.register(
+			tool({
+				name: "search",
+				inputSchema: {
+					type: "object",
+					properties: {
+						filter: {
+							type: "object",
+							properties: { pattern: { type: "string" } },
+							default: { pattern: "*" },
+							examples: [{ pattern: "*.ts", $ref: "#/nowhere" }],
+						},
+						mode: { enum: [{ $anchor: "x", "x-mcp-header": "M" }] },
+						fixed: { const: { pattern: "(" } },
+						"x-mcp-header": { type: "string" },
+					},
+				},
+			}),
+		);
+		expect(r.get("search")).toBeDefined();
+		// The keywords themselves are still checked next to such data.
+		expect(() =>
+			r.register(
+				tool({
+					name: "bad",
+					inputSchema: {
+						type: "object",
+						properties: {
+							a: { type: "string", pattern: "(", default: "x" },
+						},
+					},
+				}),
+			),
+		).toThrow(/pattern "\(" is not a valid regular expression/);
+		expect(() =>
+			r.register(
+				tool({
+					name: "deep",
+					inputSchema: {
+						type: "object",
+						$defs: { s: { type: "string", "x-mcp-header": "S" } },
+					},
+				}),
+			),
+		).toThrow(/x-mcp-header/);
+	});
+
+	test("a $ref with a malformed escape is a TypeError, not a URIError (CC 13)", () => {
+		const r = new ToolRegistry();
+		expect(() =>
+			r.register(
+				tool({
+					name: "uri",
+					inputSchema: {
+						type: "object",
+						properties: { a: { $ref: "#/$defs/%E0%A4%A" } },
+					},
+				}),
+			),
+		).toThrow(
+			new TypeError(
+				'registerTool: the inputSchema of uri: $ref "#/$defs/%E0%A4%A" does not resolve',
+			),
+		);
+	});
+
 	test("once the validator is loaded, it checks the schemas too, also of tools registered before (iteration 13)", () => {
 		const r = new ToolRegistry();
 		// The core's own check passes these; the nested $id moves the $ref's base.
@@ -194,14 +262,45 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		expect(r.list()).toEqual([]);
 	});
 
-	test("keeps only boolean annotations", () => {
+	test("a hint that is not a boolean is refused, so a consequential tool cannot run without asking (CC 2)", () => {
 		const r = new ToolRegistry();
+		for (const [key, value] of [
+			["consequentialHint", "true"],
+			["consequentialHint", 1],
+			["consequentialHint", null],
+			["readOnlyHint", "yes"],
+			["destructiveHint", 0],
+			["debugging", "on"],
+		] as const) {
+			expect(() =>
+				r.register(tool({ annotations: { [key]: value } as never })),
+			).toThrow(new TypeError(`registerTool: ${key} of add must be a boolean`));
+		}
+		expect(r.list()).toEqual([]);
+		// Undefined is no hint; other keys that are not booleans are ignored.
 		r.register(
 			tool({
-				annotations: { readOnlyHint: true, consequentialHint: "yes" } as never,
+				annotations: {
+					readOnlyHint: true,
+					consequentialHint: undefined,
+					title: "Add",
+					custom: true,
+				} as never,
 			}),
 		);
-		expect(r.get("add")?.annotations).toEqual({ readOnlyHint: true });
+		expect(r.get("add")?.annotations).toEqual({
+			readOnlyHint: true,
+			custom: true,
+		} as never);
+	});
+
+	test("webmcp must be a boolean (CC 2)", () => {
+		const r = new ToolRegistry();
+		expect(() => r.register(tool(), { webmcp: "true" as never })).toThrow(
+			new TypeError("registerTool: webmcp must be a boolean"),
+		);
+		r.register(tool(), { webmcp: false });
+		expect(r.get("add")?.webmcp).toBe(false);
 	});
 });
 
