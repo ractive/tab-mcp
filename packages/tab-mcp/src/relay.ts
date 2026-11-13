@@ -483,11 +483,23 @@ function startRelay(
 	}
 
 	/**
-	 * Tell each connected page of the grants it lists that have expired (no
-	 * usable token left), with `grant.removed` `expired`; the store's sweep
-	 * does not say which grants it deleted. One `listGrants` per page that
-	 * lists a grant, one after another. Requests in flight keep running: their
-	 * tokens were valid when they came.
+	 * Every grant of the address was revoked: the page also hears of those it
+	 * lists that `listGrants` no longer returned (expired since the last
+	 * sweep, or added meanwhile), so its list ends empty and its `signOut()`
+	 * settles.
+	 */
+	function allRemoved(addressId: string): void {
+		const session = sessions.get(addressId);
+		for (const grantId of [...(session?.grantIds ?? [])])
+			grantRemoved(addressId, grantId, "revoked");
+	}
+
+	/**
+	 * Tell each connected page of the grants it lists that have no usable
+	 * token left, with `grant.removed` `expired`, and end their requests in
+	 * flight: the grant ran out, or another instance revoked it (it cannot
+	 * tell which); the store's sweep does not say which grants it deleted. One
+	 * `listGrants` per page that lists a grant, one after another.
 	 */
 	async function sweepExpiredGrants(): Promise<void> {
 		for (const [addressId, session] of [...sessions]) {
@@ -501,7 +513,7 @@ function startRelay(
 			if (sessions.get(addressId) !== session || !session.ready) continue;
 			for (const grantId of known) {
 				if (live.has(grantId) || !session.grantIds.has(grantId)) continue;
-				session.grantRemoved(grantId, "expired");
+				grantRemoved(addressId, grantId, "expired");
 				logger.info("grant.expired", { address: shortAddress(addressId) });
 			}
 		}
@@ -562,6 +574,7 @@ function startRelay(
 					grants: grants.length,
 				});
 				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+				allRemoved(addressId);
 			})();
 			revokingAll.set(addressId, work);
 			try {
@@ -698,6 +711,7 @@ function startRelay(
 					grants: grants.length,
 				});
 				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
+				allRemoved(addressId);
 			} catch (error) {
 				// The grants stay, but work only for a page bound to their person.
 				// The page is told, as for a failed revocation: its `signOut()`

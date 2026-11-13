@@ -42,7 +42,11 @@ the wrong one was rejected.
 - [x] Relay: the sweep tells each connected page of its grants that expired
       (`grant.removed` `expired`, log `grant.expired`): the session keeps the ids it told
       the page, and the sweep compares them with `listGrants` (one call per page with a
-      grant, one run at a time; only ids known before the read count)
+      grant, one run at a time; only ids known before the read count), and ends their
+      requests in flight (review: a grant revoked through another instance looks the
+      same)
+- [x] Relay: "revoke all" and sign-out also remove the grants the page still lists
+      (expired since the last sweep), so `signOut()` settles (review)
 - [x] Client: `unknown_id` for a `grant.revoke` with `grantId` drops the grant from
       `grants` (`grantschange`) before the `error`, so its `revoke()` resolves
 - [x] Tests: the sweep's `grant.removed` once; the client's drop and `grantschange`
@@ -82,7 +86,7 @@ The core was at 6400 B of 6400 gzipped (measured on `origin/main`; the brief sai
       constructor (WM 10, DEC-143) stay
 - [x] `build.test.ts`: the core has no mirror text, the `webmcp-` chunk has it and stays
       under 1 KB; the test prints the core in bytes
-- [x] Sizes: before 6400 B; mirror moved 6082 B; with the fixes of 1 to 4 6176 B (224 B
+- [x] Sizes: before 6400 B; mirror moved 6082 B; with the fixes of 1 to 4 6216 B (184 B
       under the budget, which is unchanged)
 
 ## Outcome

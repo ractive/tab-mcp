@@ -286,12 +286,16 @@ export class TabMcp extends EventTarget {
 		// is read now (WM 10); the mirror loads only then (DEC-171).
 		const context = options.webmcp === true ? nativeContext() : undefined;
 		if (context !== undefined)
-			import("./webmcp.ts").then((m) =>
-				m.mirror(this.#registry, context, (tool, input, signal) =>
-					this.#load().then((lazy) =>
-						lazy.callFromWebMcp(this.#calls, tool, input, signal),
+			import("./webmcp.ts").then(
+				(m) =>
+					m.mirror(this.#registry, context, (tool, input, signal) =>
+						this.#load().then((lazy) =>
+							lazy.callFromWebMcp(this.#calls, tool, input, signal),
+						),
 					),
-				),
+				// Like a failed registration: warned, the relay unaffected.
+				(error: unknown) =>
+					console.warn("tab-mcp: no tools are offered through WebMCP:", error),
 			);
 	}
 
@@ -582,9 +586,10 @@ export class TabMcp extends EventTarget {
 	 * the page was connected, connecting or reconnecting, and resolves once
 	 * that is done (the new session is `session`). Rejects, and keeps the old
 	 * secret so that a retry takes it back again, when the old address could
-	 * not be taken back (relay unreachable, taken over again first). Every
-	 * rejection has `addressChanged`: `false` then, `true` when only
-	 * connecting with the new address failed. Call it from a user action.
+	 * not be taken back (relay unreachable, taken over again first). With a
+	 * relay, every rejection has `addressChanged`: `false` then, `true` when
+	 * only connecting with the new address failed (without one: a
+	 * `TypeError`). Call it from a user action.
 	 */
 	newAddress(): Promise<void> {
 		// Without a relay there is no secret store.

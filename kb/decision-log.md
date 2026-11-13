@@ -3484,8 +3484,12 @@ is a list of origins and is passed through to the native registration (DEC-143).
   and changing the public `TokenStore` interface for it would break custom stores. Cost:
   one `listGrants` per connected page with a grant per sweep, one sweep run at a time;
   only grants known before the read count, so one added meanwhile is never reported.
-  An expired grant's requests in flight keep running (their tokens were valid when they
-  came); revocation still ends them.
+  Its requests in flight end as for a revocation (review of PR 131): with several
+  instances the sweep cannot tell a grant that ran out from one revoked through another
+  instance, whose listen streams would otherwise stay open until the session's end.
+  "Revoke all" and a sign-out also remove every grant the page still lists after the
+  revocation (expired since the last sweep), so `signOut()`, which waits for an empty
+  list, settles.
 
 ## DEC-169: The `tools/list` sentence about the page's tab only with the library's dialog
 
@@ -3536,5 +3540,5 @@ is a list of origins and is passed through to the native registration (DEC-143).
 - The tools reach `registerTool` once the chunk has loaded, a little later than a
   microtask; nothing waited for that before either (registration was already async).
   Builds without splitting (tab-mcp for Chrome's service worker) inline it.
-- Core: 6400 B before, 6082 B with the mirror out, 6176 B with iteration 41's fixes;
+- Core: 6400 B before, 6082 B with the mirror out, 6216 B with iteration 41's fixes;
   the budget stays 6400 B.

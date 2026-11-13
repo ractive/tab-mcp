@@ -642,6 +642,25 @@ describe("RQ 6: refusals, limits and session figures in the log", () => {
 		expect(r.logs.events("grant.expired")).toHaveLength(1);
 		expect(t.received.some((m) => m.type === "grant.removed")).toBe(false);
 	});
+
+	test("revoking every grant also removes a listed grant that expired before the sweep", async () => {
+		const r = oauthRelay({ accessTokenTtlMs: 200, refreshTokenTtlMs: 200 });
+		const t = tab(r);
+		await t.connect();
+		await t.startPairing();
+		await pair(r, t);
+		const added = (await t.next("grant.added")) as {
+			grant: { grantId: string };
+		};
+		await Bun.sleep(300); // expired; no sweep within 10 minutes
+		expect(await r.store.listGrants(t.addressId, Date.now())).toEqual([]);
+		t.send({ type: "grants.revokeAll" });
+		expect(await t.next("grant.removed")).toEqual({
+			type: "grant.removed",
+			grantId: added.grant.grantId,
+			reason: "revoked",
+		});
+	});
 });
 
 describe("RQ 11: enums are checked, errors name the variable, unknown variables are found", () => {

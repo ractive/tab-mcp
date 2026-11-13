@@ -797,7 +797,7 @@ older relay's refusal rejects every pending `revoke()` and `signOut()`. When the
 does not know a grant the page lists (it expired), the grant leaves `grants` (with
 `grantschange`) and its `revoke()` resolves.
 
-`newAddress()` rejects with an error whose `addressChanged` says what happened: `false`
+With a relay, `newAddress()` rejects with an error whose `addressChanged` says what happened: `false`
 when the old address could not be taken back (it is kept with its grants; call
 `newAddress()` again), `true` when the address changed and only connecting with the new
 one failed (call `connect()`).

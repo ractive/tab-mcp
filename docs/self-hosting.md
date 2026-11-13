@@ -422,11 +422,12 @@ page acts on the page when a grant is revoked. A revocation on another instance
 (`/revoke`, a reused refresh token) deletes the tokens from the shared store, so new
 requests with them are refused at once, but:
 
-- requests already forwarded to the page go on until they finish or time out, and an
-  open listen stream (`subscriptions/listen`, which has no request timeout) stays open
-  until the page's session ends, at the latest after `TAB_MCP_SESSION_LIFETIME_S`
-  (12 hours);
-- the page's list of connected apps shows the change after the page reconnects.
+- requests already forwarded to the page, and an open listen stream
+  (`subscriptions/listen`, which has no request timeout), go on until the page's
+  instance runs its next sweep (every 10 minutes);
+- the page's list of connected apps shows the change at that sweep too, as
+  `grant.removed` with the reason `expired` (the instance cannot tell a revocation
+  elsewhere from a grant that ran out), or when the page reconnects.
 
 On one instance, or for revocations on the page's own instance (Disconnect, "New
 address", sign-out), both happen at once.

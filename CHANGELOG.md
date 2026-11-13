@@ -778,7 +778,13 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 - The sweep (every `sweepIntervalMs`, 10 minutes by default) tells each connected page
   of its grants that expired, with `grant.removed` `expired` (logged as `grant.expired`).
   Before, a page listed an expired app until it connected again. One `listGrants` per
-  connected page that lists a grant, per sweep.
+  connected page that lists a grant, per sweep. The grant's requests in flight end then,
+  as for a revocation. With several instances, a grant revoked through another instance
+  is announced the same way, and its listen streams on the page's instance end at that
+  sweep instead of at the session's end.
+- "Revoke all" and a sign-out also remove the grants the page lists that expired since
+  the last sweep, so the page's list ends empty and `signOut()` no longer runs into its
+  15 s timeout.
 
 #### Changed
 
