@@ -10,8 +10,28 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ### Unreleased
 
+#### Added
+
+- `Tool.outputSchema` (the WebMCP draft of 12 November 2026 has it): an object schema of
+  the result, listed in `tools/list` and passed on to WebMCP.
+- `RegisterToolOptions.exposedTo` is passed on to the native WebMCP registration of a
+  mirrored tool; it was accepted and ignored.
+
 #### Changed
 
+- WebMCP: a mirrored tool that returns nothing resolves as `"Done."` (the browser cannot
+  serialize `undefined`, so the agent saw a failed call); an MCP result goes out as its
+  `structuredContent`, else as its text with other blocks (images) named as left out,
+  instead of the JSON of the whole result with base64 images.
+- WebMCP: tools marked only with MCP's `destructiveHint` are left out of WebMCP unless
+  registered with `{ webmcp: true }`, like `consequentialHint`, and a mirrored one is
+  registered natively with `consequentialHint: true`.
+- WebMCP: each `TabMcp` reads the native `document.modelContext` when it is made (through
+  `Document.prototype`'s getter, as before), not when the library loads, so an
+  origin-trial token added by a script counts for a `TabMcp` made after it. A failed
+  native registration is no longer tried a second time.
+- `registerTool` with an already aborted signal rejects with the signal's reason, as the
+  WebMCP draft does; it resolved without registering.
 - `registerTool` rejects with a `TypeError` when a hint (`consequentialHint`,
   `readOnlyHint`, any `…Hint`, `debugging`) or the `webmcp` option is not a boolean. Until
   now such a hint was dropped, so `consequentialHint: "true"` registered a tool that ran
@@ -1069,7 +1089,7 @@ First release, version 0.1.0.
 #### Added
 
 - Passes the WebMCP tools of the page in front (`document.modelContext.registerTool()`,
-  Chrome's own WebMCP, top frame only) on to an AI app outside the browser, through a
+  Chrome's own WebMCP, the top frame's, with its same-origin frames) on to an AI app outside the browser, through a
   tab-mcp relay (by default `https://tab-mcp.ractive.ch`; another one under "Settings").
 - Tools for the AI app: `page_info` (the tab's address, title, language, whether WebMCP is
   available; the server's instructions and its description ask the AI app to call it
@@ -1083,7 +1103,10 @@ First release, version 0.1.0.
   checked against the tool's schema, a call runs only on the page its tool was listed
   from and ends after 60 s; a page that does not answer the extension within 5 s is
   given up. A tool that takes the tab to another page answers with the new page's
-  `page_info`.
+  `page_info`. A schema's `pattern`s are not run but named in the property's
+  description; a result that is the JSON of an object reaches the AI app with
+  `structuredContent`, and a JSON-encoded string as the string; a tool's `outputSchema`
+  is shown in `webmcp_tools`; tools marked `debugging` are left out.
 - A tool the page does not mark read-only asks first: in the side panel, or in a Chrome
   notification while the panel is not in front (Allow; a click on its body shows the
   whole question). "Don't ask again on <host>" in the question, or the panel's tool list,

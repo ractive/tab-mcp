@@ -201,8 +201,8 @@ the page then asks the user before each call ("Always allow" only if the page tu
 
 `new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
 where the browser has it, so that agents in the browser call them without pairing, with
-the same argument check and confirmation. Consequential tools go there only when
-registered with `{ webmcp: true }`. See [WebMCP](packages/tab-mcp-client/README.md#webmcp)
+the same argument check and confirmation. Consequential tools (`consequentialHint` or
+`destructiveHint`) go there only when registered with `{ webmcp: true }`. See [WebMCP](packages/tab-mcp-client/README.md#webmcp)
 in the client README.
 
 The [client README](packages/tab-mcp-client/README.md) covers the whole API; the

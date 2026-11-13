@@ -32,6 +32,7 @@ interface RegisteredTool {
 	title?: string;
 	description: string;
 	inputSchema?: unknown;
+	outputSchema?: unknown;
 	annotations?: Record<string, unknown>;
 }
 
@@ -162,14 +163,14 @@ export async function pageTools(
 			continue;
 		}
 		const annotations = tool.annotations;
+		/** Whether `schema` fits in a message (as JSON). */
+		const fits = (schema: unknown) =>
+			(JSON.stringify(schema) ?? "").length <= SEND_SCHEMA_BYTES;
 		let schema: { inputSchema?: unknown; schemaTooBig?: true } = {};
-		if (tool.inputSchema !== undefined) {
-			const json = JSON.stringify(tool.inputSchema) ?? "";
-			schema =
-				json.length > SEND_SCHEMA_BYTES
-					? { schemaTooBig: true }
-					: { inputSchema: tool.inputSchema };
-		}
+		if (tool.inputSchema !== undefined)
+			schema = fits(tool.inputSchema)
+				? { inputSchema: tool.inputSchema }
+				: { schemaTooBig: true };
 		tools.push({
 			name: cutText(String(tool.name), SEND_NAME),
 			...(typeof tool.title === "string" && tool.title !== ""
@@ -177,10 +178,13 @@ export async function pageTools(
 				: {}),
 			description: cutText(String(tool.description ?? ""), SEND_TEXT),
 			...schema,
+			// The draft's (WM 3); left out when too big, as it is only shown.
+			...(tool.outputSchema !== undefined && fits(tool.outputSchema)
+				? { outputSchema: tool.outputSchema }
+				: {}),
 			annotations: {
 				readOnlyHint: hint(annotations, "readOnlyHint"),
-				consequentialHint: hint(annotations, "consequentialHint"),
-				untrustedContentHint: hint(annotations, "untrustedContentHint"),
+				debugging: hint(annotations, "debugging"),
 			},
 		});
 	}

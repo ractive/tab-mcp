@@ -20,7 +20,6 @@ import type {
 	ToolCallEnd,
 	ToolCallStart,
 } from "../src/types.ts";
-import { capture } from "../src/webmcp.ts";
 import { newTab } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
@@ -29,6 +28,7 @@ interface NativeTool {
 	title?: string;
 	description: string;
 	inputSchema?: object;
+	outputSchema?: object;
 	annotations?: Record<string, boolean>;
 	execute: (input: unknown, options: { signal: AbortSignal }) => unknown;
 }
@@ -42,8 +42,15 @@ class FakeModelContext {
 	lateUnregister = false;
 	registrations = 0;
 
-	registerTool(tool: NativeTool, options: { signal?: AbortSignal } = {}) {
+	/** The options of each registration. */
+	readonly options: { signal?: AbortSignal; exposedTo?: string[] }[] = [];
+
+	registerTool(
+		tool: NativeTool,
+		options: { signal?: AbortSignal; exposedTo?: string[] } = {},
+	) {
 		this.registrations++;
+		this.options.push(options);
 		const { signal } = options;
 		if (signal?.aborted)
 			return Promise.reject(new DOMException("aborted", "AbortError"));
@@ -76,13 +83,12 @@ let native: FakeModelContext;
 const g = globalThis as Record<string, unknown>;
 const saved = {
 	Document: g["Document"],
-	ModelContext: g["ModelContext"],
 	document: g["document"],
 };
 const warn = spyOn(console, "warn").mockImplementation(() => {});
 const tabs: TabMcp[] = [];
 
-/** A page whose document has the native object, then the library "loads". */
+/** A page whose document has the native object (read by each new `TabMcp`). */
 beforeEach(() => {
 	window = new Window({ url: "https://page.example/" });
 	native = new FakeModelContext();
@@ -93,9 +99,7 @@ beforeEach(() => {
 		get: () => native,
 	});
 	g["Document"] = Doc;
-	g["ModelContext"] = FakeModelContext;
 	g["document"] = window.document;
-	capture();
 	warn.mockClear();
 });
 
@@ -104,7 +108,6 @@ afterEach(async () => {
 	scope = new AbortController();
 	for (const tab of tabs.splice(0)) tab.disconnect();
 	Object.assign(g, saved);
-	capture();
 	await window.happyDOM.close();
 });
 
@@ -132,7 +135,7 @@ function tab(options: Partial<TabMcpOptions> = {}): TabMcp {
 
 const attribute = () =>
 	window.document.documentElement.getAttribute("data-tab-mcp-webmcp");
-/** Registration happens a microtask later; a retry a task later. */
+/** Registration happens a microtask later. */
 const settle = () => Bun.sleep(5);
 
 const add = {
@@ -176,12 +179,33 @@ describe("off by default", () => {
 	test("without native WebMCP nothing happens", async () => {
 		delete (window.Document.prototype as { modelContext?: unknown })
 			.modelContext;
-		capture();
 		const t = tab();
 		await t.registerTool(add);
 		await settle();
 		expect(native.registrations).toBe(0);
 		expect(t.tools).toEqual(["add"]);
+	});
+
+	test("without a document nothing happens", async () => {
+		delete g["document"];
+		delete g["Document"];
+		const t = tab();
+		await t.registerTool(add);
+		await settle();
+		expect(native.registrations).toBe(0);
+	});
+
+	test("WebMCP that appears after the library loaded (an origin-trial token added by script) is used by a TabMcp made later (WM 10)", async () => {
+		const proto = window.Document.prototype as { modelContext?: unknown };
+		const getter = Object.getOwnPropertyDescriptor(proto, "modelContext");
+		delete proto.modelContext;
+		const before = tab();
+		await before.registerTool({ ...add, name: "before" });
+		Object.defineProperty(proto, "modelContext", getter as PropertyDescriptor);
+		const after = tab();
+		await after.registerTool(add);
+		await settle();
+		expect([...native.tools.keys()]).toEqual(["add"]);
 	});
 });
 
@@ -202,6 +226,8 @@ describe("mirroring", () => {
 				readOnlyHint: true,
 				untrustedContentHint: false,
 				debugging: false,
+				// From destructiveHint: false (WM 5).
+				consequentialHint: false,
 			},
 			execute: "function",
 		});
@@ -282,29 +308,82 @@ describe("mirroring", () => {
 		).resolves.toEqual({ error: "The tool early is no longer available." });
 	});
 
-	test("abort and register again, also when the browser unregisters a task later", async () => {
-		for (const late of [false, true]) {
-			native = new FakeModelContext();
-			native.lateUnregister = late;
-			const t = tab();
-			const first = new AbortController();
-			await t.registerTool(add, { signal: first.signal });
-			await settle();
-			first.abort();
-			await t.registerTool(add); // as React's useTool does on a change
-			await settle();
-			expect({ late, tools: [...native.tools.keys()] }).toEqual({
-				late,
-				tools: ["add"],
-			});
-			expect(attribute()).toBe("add");
-			expect(warn).not.toHaveBeenCalled();
-			await expect(native.call("add", { a: 2, b: 2 })).resolves.toEqual({
-				sum: 4,
-			});
-			scope.abort();
-			scope = new AbortController();
-		}
+	test("abort and register again, as React's useTool does on a change", async () => {
+		const t = tab();
+		const first = new AbortController();
+		await t.registerTool(add, { signal: first.signal });
+		await settle();
+		first.abort();
+		await t.registerTool(add);
+		await settle();
+		expect([...native.tools.keys()]).toEqual(["add"]);
+		expect(attribute()).toBe("add");
+		expect(warn).not.toHaveBeenCalled();
+		await expect(native.call("add", { a: 2, b: 2 })).resolves.toEqual({
+			sum: 4,
+		});
+	});
+
+	test("a browser that unregisters a task after the abort loses that mirror: not tried again (WM 9)", async () => {
+		native.lateUnregister = true;
+		const t = tab();
+		const first = new AbortController();
+		await t.registerTool(add, { signal: first.signal });
+		await settle();
+		first.abort();
+		await t.registerTool(add);
+		await settle();
+		expect(native.registrations).toBe(2);
+		expect(native.tools.size).toBe(0);
+		expect(attribute()).toBe("");
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(t.tools).toEqual(["add"]);
+	});
+
+	test("outputSchema and exposedTo are passed on (WM 3, WM 11)", async () => {
+		const t = tab();
+		const outputSchema = {
+			type: "object",
+			properties: { sum: { type: "number" } },
+		};
+		await t.registerTool(
+			{ ...add, outputSchema },
+			{ exposedTo: ["https://embedder.example"] },
+		);
+		await t.registerTool({ ...add, name: "plain" });
+		await settle();
+		expect(native.tools.get("add")?.outputSchema).toEqual(outputSchema);
+		expect(native.options[0]?.exposedTo).toEqual(["https://embedder.example"]);
+		expect(native.tools.get("plain")?.outputSchema).toBeUndefined();
+		expect(native.options[1]?.exposedTo).toBeUndefined();
+	});
+
+	test("destructiveHint counts as consequentialHint: left out by default, consequential when mirrored (WM 5)", async () => {
+		const t = tab();
+		const remove = {
+			name: "remove",
+			description: "Removes an element",
+			annotations: { destructiveHint: true },
+			execute: () => "removed",
+		};
+		await t.registerTool(remove);
+		await t.registerTool({ ...remove, name: "removeAnyway" }, { webmcp: true });
+		await t.registerTool({
+			...remove,
+			name: "notConsequential",
+			annotations: { destructiveHint: true, consequentialHint: false },
+		});
+		await settle();
+		expect([...native.tools.keys()]).toEqual([
+			"removeAnyway",
+			"notConsequential",
+		]);
+		expect(native.tools.get("removeAnyway")?.annotations).toEqual({
+			consequentialHint: true,
+		});
+		expect(native.tools.get("notConsequential")?.annotations).toEqual({
+			consequentialHint: false,
+		});
 	});
 });
 
@@ -356,26 +435,35 @@ describe("every failure stays with the mirror", () => {
 		expect(warn).toHaveBeenCalledTimes(1);
 	});
 
-	test("a tool unregistered before its retry is not registered, whatever the browser does with an aborted signal (review of PR 103)", async () => {
+	test("a tool unregistered before its registration ran is not registered, whatever the browser does with an aborted signal (review of PR 103)", async () => {
 		const names: string[] = [];
-		let calls = 0;
 		native.registerTool = (tool: NativeTool) => {
+			// A browser that ignored an aborted signal would take it.
 			names.push(tool.name);
-			// The first attempt fails; a browser that ignored an aborted signal
-			// would take the retry.
-			return ++calls === 1
-				? Promise.reject(new DOMException("taken", "InvalidStateError"))
-				: Promise.resolve();
+			return Promise.resolve();
 		};
 		const t = tab();
 		const controller = new AbortController();
-		await t.registerTool(add, { signal: controller.signal });
-		await Bun.sleep(0); // the first attempt failed; the retry waits a task
-		controller.abort();
+		const registered = t.registerTool(add, { signal: controller.signal });
+		controller.abort(); // before the microtask that registers
+		await registered;
 		await settle();
-		expect(names).toEqual(["add"]);
+		expect(names).toEqual([]);
 		expect(attribute()).toBe("");
 		expect(warn).not.toHaveBeenCalled();
+	});
+
+	test("a genuine duplicate is tried once and warned at once", async () => {
+		await native.registerTool({
+			name: "add",
+			description: "The page's own",
+			execute: () => "page",
+		});
+		const t = tab();
+		await t.registerTool(add);
+		await Bun.sleep(0);
+		expect(native.registrations).toBe(2);
+		expect(warn).toHaveBeenCalledTimes(1);
 	});
 
 	test("a registerTool that throws at once", async () => {
@@ -402,20 +490,6 @@ describe("only the native object", () => {
 		await settle();
 		expect(polyfill.registerTool).not.toHaveBeenCalled();
 		expect([...native.tools.keys()]).toEqual(["add"]);
-	});
-
-	test("a getter that does not give a ModelContext is not used", async () => {
-		const forged = new FakeModelContext();
-		Object.defineProperty(window.Document.prototype, "modelContext", {
-			configurable: true,
-			get: () => forged,
-		});
-		g["ModelContext"] = class Other {};
-		capture();
-		const t = tab();
-		await t.registerTool(add);
-		await settle();
-		expect(forged.registrations).toBe(0);
 	});
 });
 
@@ -462,6 +536,63 @@ describe("calls", () => {
 			client: { kind: "webmcp" },
 			outcome: "ok",
 			result: { structuredContent: { sum: 3 } },
+		});
+	});
+
+	test('a tool that returns nothing resolves with "Done.", which a browser can serialize (WM 4)', async () => {
+		const t = tab();
+		await t.registerTool({ name: "noop", description: "d", execute: () => {} });
+		const events = watched(t);
+		await settle();
+		const value = await native.call("noop", {});
+		expect(value).toBe("Done.");
+		expect(JSON.stringify(value)).toBe('"Done."');
+		// Through the relay it stays an empty result.
+		expect(events.end[0]?.result).toEqual({ content: [] });
+	});
+
+	test("an MCP result goes out as its structuredContent, else as its text with other blocks noted (WM 6)", async () => {
+		const t = tab();
+		const image = {
+			type: "image",
+			data: "iVBORw0KGgo=",
+			mimeType: "image/png",
+		};
+		await t.registerTool({
+			name: "structured",
+			description: "d",
+			execute: () => ({
+				content: [{ type: "text", text: '{"n":1}' }],
+				structuredContent: { n: 1 },
+			}),
+		});
+		await t.registerTool({
+			name: "picture",
+			description: "d",
+			execute: () => ({
+				content: [{ type: "text", text: "The diagram:" }, image],
+			}),
+		});
+		await t.registerTool({
+			name: "empty",
+			description: "d",
+			execute: () => ({ content: [] }),
+		});
+		await t.registerTool({
+			name: "data",
+			description: "d",
+			// Domain data with a content array is not an MCP result (CC 3).
+			execute: () => ({ title: "Post", content: ["para"] }),
+		});
+		await settle();
+		await expect(native.call("structured", {})).resolves.toEqual({ n: 1 });
+		await expect(native.call("picture", {})).resolves.toBe(
+			"The diagram:\n[image content left out: WebMCP results are text.]",
+		);
+		await expect(native.call("empty", {})).resolves.toBe("Done.");
+		await expect(native.call("data", {})).resolves.toEqual({
+			title: "Post",
+			content: ["para"],
 		});
 	});
 

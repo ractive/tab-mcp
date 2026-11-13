@@ -125,6 +125,13 @@ export interface Tool<Input extends object = Record<string, unknown>> {
 	description: string;
 	/** JSON Schema of the input object; defaults to `{ "type": "object" }`. */
 	inputSchema?: JsonSchema;
+	/**
+	 * JSON Schema of the result object (`"type": "object"`), listed to AI apps
+	 * and passed on to WebMCP. Not checked by the library. MCP wants every
+	 * result of such a tool to have `structuredContent` that matches it, so
+	 * `execute` should return a plain object (DEC-023), not a string.
+	 */
+	outputSchema?: JsonSchema;
 	/** Runs the tool. Its return value becomes the result (DEC-023). */
 	execute: (input: Input, options: ToolExecuteOptions) => unknown;
 	annotations?: ToolAnnotations;
@@ -132,16 +139,23 @@ export interface Tool<Input extends object = Record<string, unknown>> {
 
 /** Options of `registerTool`. */
 export interface RegisterToolOptions {
-	/** Aborting it unregisters the tool. */
+	/**
+	 * Aborting it unregisters the tool. Already aborted: `registerTool`
+	 * rejects with its reason and registers nothing (as WebMCP).
+	 */
 	signal?: AbortSignal;
 	/**
 	 * With `TabMcpOptions.webmcp` on: `true` also offers this tool through
 	 * WebMCP when it is consequential, `false` never does. By default only
-	 * tools that are not consequential are offered there. Ignored while
-	 * `webmcp` is off.
+	 * tools that are not consequential (neither `consequentialHint` nor
+	 * `destructiveHint`) are offered there. Ignored while `webmcp` is off.
 	 */
 	webmcp?: boolean;
-	/** WebMCP's cross-document exposure; ignored by tab-mcp. */
+	/**
+	 * WebMCP's origins of other documents in this tab that may see the tool:
+	 * passed on to the native `registerTool` of a mirrored tool, which checks
+	 * it (an invalid list only warns). No effect on AI apps.
+	 */
 	exposedTo?: string[];
 }
 
@@ -267,10 +281,10 @@ export interface TabMcpOptions {
 	 * Also register the tools with the browser's own WebMCP
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
 	 * in the browser can call them, without pairing. Off by default. Tools
-	 * marked `consequentialHint` are left out unless registered with
-	 * `{ webmcp: true }`: an agent that drives this tab can click Allow in the
-	 * page's confirmation itself. A failed native registration only warns in
-	 * the console.
+	 * marked `consequentialHint` or `destructiveHint` are left out unless
+	 * registered with `{ webmcp: true }`: an agent that drives this tab can
+	 * click Allow in the page's confirmation itself. A failed native
+	 * registration only warns in the console.
 	 */
 	webmcp?: boolean;
 }

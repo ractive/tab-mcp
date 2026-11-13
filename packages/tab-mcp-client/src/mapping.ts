@@ -150,18 +150,36 @@ export function toCallToolResult(value: unknown): CallToolResult {
 	return result;
 }
 
-/** The text blocks of a result, one per line. */
-export function resultText(result: CallToolResult): string {
+/**
+ * The text blocks of a result, one per line. With `noted`, each other block
+ * (an image, a resource) is a line that says it was left out, naming its type.
+ */
+export function resultText(result: CallToolResult, noted = false): string {
 	return result.content
 		.map((block) =>
 			isObject(block) &&
 			block["type"] === "text" &&
 			typeof block["text"] === "string"
 				? block["text"]
-				: "",
+				: noted
+					? `[${isObject(block) ? String(block["type"]) : "A"} content left out: WebMCP results are text.]`
+					: "",
 		)
 		.filter((text) => text !== "")
 		.join("\n");
+}
+
+/**
+ * What a WebMCP caller gets for what `execute` returned (WM 4, WM 6): an MCP
+ * result as its `structuredContent` if it has one, else as its text
+ * (`resultText`, other blocks noted); `undefined` (which a browser cannot
+ * serialize as JSON, so the call would fail) and an empty MCP result as
+ * "Done."; any other value as it is.
+ */
+export function webMcpValue(value: unknown): unknown {
+	if (isCallToolResult(value))
+		return value.structuredContent ?? (resultText(value, true) || "Done.");
+	return value === undefined ? "Done." : value;
 }
 
 /** A thrown value → an `isError` result with its message. */
