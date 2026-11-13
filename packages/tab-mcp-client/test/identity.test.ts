@@ -12,7 +12,7 @@ let tab: TabMcp | undefined;
 let restore: () => void;
 
 beforeEach(() => {
-	restore = setTiming({ identityTimeoutMs: 100 });
+	restore = setTiming({ answerTimeoutMs: 100 });
 	relay = new StubRelay();
 	relay.pairing = "oidc";
 });
@@ -118,4 +118,53 @@ test("the timeout also covers an identityAssertion that never settles (iteration
 	await gaveUp;
 	expect(tab.identity).toBe("none");
 	expect(relay.received.filter((m) => m.type === "identity")).toEqual([]);
+});
+
+const GRANT = {
+	grantId: "g_1",
+	client: { id: "https://claude.ai/c.json", name: "Claude", host: "claude.ai" },
+	createdAt: "2026-10-19T20:00:00.000Z",
+};
+
+test("signOut() settles: on the grants' removal, on store_unavailable, or after the answer wait (CU 10)", async () => {
+	relay.grants = [GRANT];
+	tab = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+	const t = tab;
+	await t.connect({ resume: true });
+	await relay.next("identity");
+	// The relay removes the grants: resolves.
+	const done = t.signOut();
+	await relay.next("identity.logout");
+	relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+	await done;
+	expect(t.grants).toEqual([]);
+	// Grants again (a later pairing), and the relay's store fails: rejects with it.
+	relay.send({ type: "grant.added", grant: GRANT });
+	await relay.settled();
+	const failed = t.signOut();
+	await relay.next("identity.logout");
+	// An error about something else does not settle it.
+	relay.send({ type: "error", code: "bad_message", message: "other" });
+	relay.send({
+		type: "error",
+		code: "store_unavailable",
+		message: "the relay cannot change grants right now; try again shortly",
+	});
+	const error = await failed.then(
+		() => undefined,
+		(e: unknown) => e as Error & { code?: string },
+	);
+	expect(error?.code).toBe("store_unavailable");
+	// No answer at all (100 ms here, 15 s for pages): a TimeoutError.
+	const silent = t.signOut();
+	await relay.next("identity.logout");
+	await expect(silent).rejects.toMatchObject({ name: "TimeoutError" });
+});
+
+test("refreshIdentity() without the hook is a TypeError, not 'not connected'", async () => {
+	tab = newTab(relay.url);
+	await tab.connect({ resume: true });
+	await expect(tab.refreshIdentity()).rejects.toThrow(
+		new TypeError("TabMcp: no identityAssertion"),
+	);
 });

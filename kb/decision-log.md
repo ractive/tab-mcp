@@ -3142,11 +3142,15 @@ and the identity methods of iteration 7.
   the grants (it sends `grant.removed` for each). It rejects with an `InvalidStateError`
   unless connected to a relay that pairs by `oidc`: a code relay answers
   `identity.logout` with an error and removes nothing, so a promise would never settle. A
-  relay whose store fails during the sign-out sends nothing: the promise settles when the
-  session ends. A logout that should not wait calls `signOut().catch(() => {})`.
+  relay whose store fails during the sign-out answers `store_unavailable` (since this
+  iteration), and the promise rejects with it; one that answers nothing at all, or a grant
+  that expired and so never gets a `grant.removed`, ends in a `TimeoutError` after 15 s
+  (`revoke()` the same). Only `store_unavailable` and `unknown_id` count as the relay's
+  answer: an error about another message does not settle the promise. A logout that
+  should not wait calls `signOut().catch(() => {})`.
 - `refreshIdentity()` resolves with the new `identity` (`bound`, `refused` or `none`):
   a refusal is an outcome, not an error. It rejects with an `InvalidStateError` while
-  not connected or without `identityAssertion`, where it resolved `false`; the library's
+  not connected and with a `TypeError` without `identityAssertion`, where it resolved `false`; the library's
   own call after `session` happens only with a hook.
 - `newAddress()` resolves with nothing; the new session is `mcp.session`. `connect()`
   keeps resolving with the session: it is what the caller asked for.
@@ -3162,7 +3166,9 @@ and the identity methods of iteration 7.
 
 - `confirmDelayMs` (750 ms), `identityTimeoutMs` (15 s) and `reconnect.delaysMs` (5, 10,
   20, 40, then 60 s, each ±20 %) are no longer options: only the library's own tests set
-  them. The connection waits are an exported object `timing` of `tab-mcp.ts`, which the
+  them. The connection waits are an exported object `timing` of `tab-mcp.ts`
+  (`reconnectDelaysMs`, and `answerTimeoutMs`, which also bounds the wait for the relay's
+  answer to `revoke()` and `signOut()`, DEC-150), which the
   entry does not export and tests change (`setTiming` in the helpers); the confirmation's
   delay is `ALLOW_DELAY_MS`, and tests pass `allowDelayMs` to the internal `confirmDialog`.
   The validation code and the 500 ms floor (it guarded a page's value) are gone.

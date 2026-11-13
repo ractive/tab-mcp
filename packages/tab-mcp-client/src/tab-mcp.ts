@@ -41,15 +41,16 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 /**
  * The library's waits, in milliseconds: constants for pages (CU 17), which
  * only tests change. `reconnectDelaysMs`: before each reconnect attempt,
- * the last one repeating. `identityTimeoutMs`: for an identity assertion and
- * the relay's answer to it.
+ * the last one repeating. `answerTimeoutMs`: for an identity assertion and
+ * the relay's answer to it, and for the relay's answer to `revoke()` and
+ * `signOut()`.
  */
 export const timing: {
 	reconnectDelaysMs: number[];
-	identityTimeoutMs: number;
+	answerTimeoutMs: number;
 } = {
 	reconnectDelaysMs: [5_000, 10_000, 20_000, 40_000, 60_000],
-	identityTimeoutMs: 15_000,
+	answerTimeoutMs: 15_000,
 };
 /** Reasons after which the library connects again by itself. */
 const RECONNECT_REASONS = new Set<DisconnectReason>([
@@ -325,12 +326,15 @@ export class TabMcp extends EventTarget {
 	 * the user signed in without a page load. Resolves with the outcome, the
 	 * new `identity`: `bound` once the relay accepted it, `refused`, or `none`
 	 * when nobody is signed in or no answer came in time. Rejects with an
-	 * `InvalidStateError` while not connected or without the hook.
+	 * `InvalidStateError` while not connected, and with a `TypeError` without
+	 * the hook.
 	 */
 	refreshIdentity(): Promise<IdentityState> {
 		const session = this.#session;
 		const ask = this.#identityAssertion;
-		if (session === undefined || ask === undefined) return notConnected();
+		if (ask === undefined)
+			return Promise.reject(new TypeError("TabMcp: no identityAssertion"));
+		if (session === undefined) return notConnected();
 		const round = ++this.#identityRound;
 		const connection = this.#connection;
 		this.#setIdentity("pending");
@@ -340,7 +344,7 @@ export class TabMcp extends EventTarget {
 			if (round !== this.#identityRound || this.#identity !== "pending") return;
 			this.#identityRound++; // a late answer is dropped
 			this.#setIdentity("none");
-		}, timing.identityTimeoutMs);
+		}, timing.answerTimeoutMs);
 		return new Promise<IdentityState>((resolve) => {
 			const settle = (event: TabMcpEventMap["identitychange"]) => {
 				const { identity } = event.detail;
@@ -595,7 +599,6 @@ export class TabMcp extends EventTarget {
 		this.#stayOn = false;
 		this.#generation++;
 		const connection = this.#connection;
-		const wasConnected = this.#state === "connected";
 		this.#connection = undefined;
 		this.#connecting = undefined;
 		connection?.close(reason); // its callbacks are stale from here on
@@ -604,7 +607,9 @@ export class TabMcp extends EventTarget {
 		this.#setPairingCode(undefined);
 		this.#identityRound++;
 		this.#setIdentity("none");
-		this.#setState("disconnected", wasConnected ? reason : undefined);
+		// With the reason also when it ended connecting or reconnecting: the
+		// page turned it off (or got a new address) all the same.
+		this.#setState("disconnected", reason);
 	}
 
 	/**
@@ -725,25 +730,46 @@ export class TabMcp extends EventTarget {
 	/**
 	 * Send `message` to the relay and resolve once `done()` holds (it is
 	 * checked on each change of the grants). Rejects when not connected, when
-	 * the session ends first, and with the relay's error when it sends one
-	 * meanwhile (`store_unavailable`: it could not save the change).
+	 * the session ends first, with the relay's refusal (`store_unavailable`:
+	 * it could not save the change; `unknown_id`), and with a `TimeoutError`
+	 * when none of that happened within `timing.answerTimeoutMs`.
 	 */
 	#ask(message: TabMessage, done: () => boolean): Promise<void> {
 		if (!this.#session || this.#connection?.send(message) !== true)
 			return notConnected();
 		return new Promise((resolve, reject) => {
+			const types = ["grantschange", "statechange", "error"];
+			const settle = (error?: unknown) => {
+				clearTimeout(timer);
+				for (const type of types) this.removeEventListener(type, check);
+				if (error) reject(error);
+				else resolve();
+			};
 			const check = (event?: Event) => {
 				const error = (event as Partial<TabMcpEventMap["error"]>)?.detail
 					?.error as { code?: string } | undefined;
-				if (done()) resolve();
-				else if (error?.code) reject(error);
-				else if (this.#state !== "connected") notConnected().catch(reject);
-				else return;
-				for (const type of ["grantschange", "statechange", "error"])
-					this.removeEventListener(type, check);
+				if (done()) settle();
+				else if (
+					error?.code === "store_unavailable" ||
+					error?.code === "unknown_id"
+				)
+					settle(error);
+				else if (this.#state !== "connected")
+					settle(
+						new DOMException("TabMcp: not connected", "InvalidStateError"),
+					);
 			};
-			for (const type of ["grantschange", "statechange", "error"])
-				this.addEventListener(type, check);
+			const timer = setTimeout(
+				() =>
+					settle(
+						new DOMException(
+							"TabMcp: the relay did not answer",
+							"TimeoutError",
+						),
+					),
+				timing.answerTimeoutMs,
+			);
+			for (const type of types) this.addEventListener(type, check);
 			check();
 		});
 	}

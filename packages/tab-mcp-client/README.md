@@ -649,12 +649,13 @@ Instead of `showConnectDialog()`, use the methods, properties and events below.
 | `startPairing()`, `stopPairing()` | codes come only while pairing is on |
 | `revoke(grantId)` | resolves once the relay removed the grant |
 | `signOut()` | resolves once the relay removed the grants (identity binding) |
-| `refreshIdentity()` | resolves with the new `identity` |
+| `refreshIdentity()` | resolves with the new `identity`; a `TypeError` without `identityAssertion` |
 
 A method that asks the relay rejects with an `InvalidStateError` while the page is not
-connected, and when the session ends before the relay answered; `revoke()` also rejects
-with the relay's error when it refuses (its `code` is `store_unavailable` when the
-relay could not save the change: try again).
+connected, and when the session ends before the relay answered. `revoke()` and `signOut()`
+also reject with the relay's refusal (its `code` is `store_unavailable` when the relay
+could not save the change: try again; `unknown_id` for a grant the relay does not know),
+and with a `TimeoutError` when the relay has not answered within 15 s.
 
 The properties are `state` (`disconnected`, `connecting`, `connected`, `reconnecting`),
 `session` (while connected; `session.address` is the MCP address, `session.appName` the
@@ -667,7 +668,7 @@ properties (`grantschange` has `grants`), and a value that is gone is `undefined
 
 | Event | `detail` |
 |---|---|
-| `statechange` | `{ state, reason? }`: `reason` when a session ended; also for each reconnect attempt |
+| `statechange` | `{ state, reason? }`: `reason` when a session ended, or when `disconnect()` or `newAddress()` ended connecting or reconnecting; also for each reconnect attempt |
 | `grantschange` | `{ grants }` |
 | `pairingcode` | `{ pairingCode }` |
 | `identitychange` | `{ identity, identityMessage }` |
@@ -731,7 +732,8 @@ are two keys (`waitingOne`, `waitingMany`). `lang` and `dir` are the language an
 set on every dialog: set them with your texts.
 
 `ui.setup` changes the help in the connect dialog: `guide` is the link at its end
-(default the guide on ractive.ch; `null` for none, for example on your own relay), and
+(default the guide on ractive.ch; `null` for none, for example on your own relay, and
+then your own `instructions` too, since the default steps refer to the guide), and
 `instructions(serverName, address)` returns the steps per AI app, each `{ app, text,
 command?, note? }` (default `setupInstructions` of `@ractive-ch/tab-mcp-client/setup`,
 which you can filter or extend).

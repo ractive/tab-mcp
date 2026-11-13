@@ -19,7 +19,12 @@ export function nextId(): string {
 
 /** The texts: the page's own where it gave them, else the English ones. */
 export function stringsOf(options: DialogOptions | undefined): DialogStrings {
-	return { ...STRINGS, ...options?.strings };
+	const s: DialogStrings = { ...STRINGS };
+	// Only strings: a missing translation (`undefined`) keeps the English text.
+	for (const [key, value] of Object.entries(options?.strings ?? {}))
+		if (typeof value === "string" && key in s)
+			s[key as keyof DialogStrings] = value;
+	return s;
 }
 
 /** `template` with its `{name}` placeholders filled in, as text. */

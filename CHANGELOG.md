@@ -25,7 +25,8 @@ The API before 1.0 (iteration 38). Each item says what to change.
   `disconnected`, where it came before `reconnecting: null`.
 - **The `connected` and `disconnected` events are gone; `statechange` carries the reason.**
   `statechange` has `{ state, reason? }`: `reason` (a `DisconnectReason`) on the change
-  from `connected`, to `disconnected` or, when the connection broke, to `reconnecting`.
+  from `connected`, to `disconnected` or, when the connection broke, to `reconnecting`,
+  and when `disconnect()` or `newAddress()` ends connecting or reconnecting.
   The close code is not reported any more; `DisconnectDetail` is gone, `StateChangeDetail`
   is new. Migration: `connected` → `statechange` with `state === "connected"` and
   `mcp.session`; `disconnected` → `statechange` with `e.detail.reason !== undefined`
@@ -38,15 +39,16 @@ The API before 1.0 (iteration 38). Each item says what to change.
 - **`revoke(grantId)` returns a promise** that resolves once the relay removed the grant
   (at once for a grant not in `grants`) and rejects with an `InvalidStateError` while not
   connected, when the session ends first, and with the relay's error when it refuses
-  (`code` `store_unavailable` or `unknown_id`). It returned `false` when it could not
-  send. Migration: `mcp.revoke(id).catch(showProblem)` instead of checking the boolean.
+  (`code` `store_unavailable` or `unknown_id`), or with a `TimeoutError` when the relay has
+  not answered within 15 s. It returned `false` when it could not send. Migration: `mcp.revoke(id).catch(showProblem)` instead of checking the boolean.
 - **`signOut()` returns a promise** that resolves once the relay removed the grants, and
   rejects with an `InvalidStateError` while not connected to a relay that pairs by
-  sign-in; `identity` is cleared in any case. It returned whether it was sent.
+  sign-in, with the relay's `store_unavailable`, and with a `TimeoutError` after 15 s;
+  `identity` is cleared in any case. It returned whether it was sent.
   Migration: `mcp.signOut().catch(() => {})` in a logout that does not wait.
 - **`refreshIdentity()` resolves with the new `identity`** (`"bound"`, `"refused"` or
   `"none"`) instead of `true`/`false`, and rejects with an `InvalidStateError` while not
-  connected or without `identityAssertion` (it resolved `false`). Migration:
+  connected and a `TypeError` without `identityAssertion` (it resolved `false`). Migration:
   `(await mcp.refreshIdentity()) === "bound"`.
 - **`newAddress()` resolves with nothing** (`Promise<void>`); it resolved with the new
   session or `undefined`. Migration: read `mcp.session` after it.
@@ -696,6 +698,14 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Changed
+
+- When the store fails while the page signs its user out (`identity.logout`), the relay
+  tells the page with `error` `store_unavailable`, as for a failed revocation; it only
+  logged it, and the client's `signOut()` waited for grants that did not go.
 
 ### [0.10.0][relay-0.10.0] - 2026-11-13
 

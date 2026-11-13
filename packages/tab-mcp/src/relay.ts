@@ -675,7 +675,15 @@ function startRelay(
 				for (const g of grants) grantRemoved(addressId, g.grantId, "revoked");
 			} catch (error) {
 				// The grants stay, but work only for a page bound to their person.
+				// The page is told, as for a failed revocation: its `signOut()`
+				// waits for the grants to go.
 				logger.error("store.error", { op: "signOut", ...errorFields(error) });
+				session.send({
+					type: "error",
+					code: "store_unavailable",
+					message:
+						"the relay cannot change grants right now; try again shortly",
+				});
 			}
 		},
 		claimAddress(session: TabSession): TabSession | undefined {

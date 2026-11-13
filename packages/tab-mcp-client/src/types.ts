@@ -219,7 +219,10 @@ export interface DialogOptions {
 	strings?: Partial<DialogStrings>;
 	/** The help in the connect dialog ("How do I add it?"). */
 	setup?: {
-		/** The link at its end; default the guide on ractive.ch, `null` for none. */
+		/**
+		 * The link at its end; default the guide on ractive.ch, `null` for none
+		 * (then pass `instructions` too: the default steps refer to the guide).
+		 */
 		guide?: string | null;
 		/**
 		 * The steps per AI app for the page's `server.name` and address;
@@ -456,8 +459,9 @@ export type DisconnectReason =
 export interface StateChangeDetail {
 	state: ConnectionState;
 	/**
-	 * Why the session ended: only on the change from `connected` (to
-	 * `disconnected`, or to `reconnecting` when the connection broke).
+	 * Why it ended: on the change from `connected` (to `disconnected`, or to
+	 * `reconnecting` when the connection broke), and when `disconnect()` or
+	 * `newAddress()` ends connecting or reconnecting (`user`, `new_address`).
 	 */
 	reason?: DisconnectReason;
 }

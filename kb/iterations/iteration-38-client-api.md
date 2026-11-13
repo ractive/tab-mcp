@@ -119,9 +119,25 @@ allowed, no compatibility shims. Builds on iterations 31, 32, 33 (C, D, E), 34 (
 
 ## Outcome
 
-- The core: 6252 B gzipped of 6400 on top of main's 6298 (the getters, the delay options
-  and the `reconnecting` event out pay for the promises of `revoke` and `signOut`).
+- The core: 6322 B gzipped of 6400 on top of main's 6298 (the getters, the delay options
+  and the `reconnecting` event out pay for most of the promises of `revoke` and `signOut`
+  and their answer wait).
 - The dialogs: a shared chunk of about 5.7 KB gzipped, the confirmation 1.9 KB, the
   connect dialog 4.7 KB; before, one 10.7 KB chunk for both.
 - Not done: nothing of the scope. The class names inside the dialogs stay as they were;
   only the documentation promises fewer.
+
+## Review of PR 127
+
+- [x] `signOut()` could wait forever (a relay store failure sent nothing, an expired grant
+  never leaves `grants`): the relay now answers `store_unavailable` for a failed
+  `identity.logout`, and `revoke()`/`signOut()` reject with a `TimeoutError` after 15 s
+  (`timing.answerTimeoutMs`, which `identityTimeoutMs` became)
+- [x] Only `store_unavailable` and `unknown_id` reject a pending `revoke()`/`signOut()`, not
+  any coded relay error (claude, glm)
+- [x] A page string that is `undefined` keeps the English text
+- [x] `disconnect()` from `connecting` or `reconnecting` carries `reason: "user"`, so the
+  README's keep-on example clears its flag then too
+- [x] `refreshIdentity()` without the hook rejects with a `TypeError` that says so
+- [x] `setup.guide: null` documented: pass `instructions` too (the default steps refer
+  to the guide)

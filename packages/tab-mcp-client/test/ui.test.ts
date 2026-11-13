@@ -7,7 +7,12 @@ import {
 	replacedNotice,
 	showConnectDialog,
 } from "../src/connect.ts";
-import { COPIED_MS, DIALOG_CSS, SELECTED_MS } from "../src/dialog.ts";
+import {
+	COPIED_MS,
+	DIALOG_CSS,
+	SELECTED_MS,
+	stringsOf,
+} from "../src/dialog.ts";
 import type { TabMcp } from "../src/index.ts";
 import type {
 	ConfirmRequest,
@@ -2462,6 +2467,19 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		]);
 		byText(dialog, "Nicht erlauben").click();
 		expect(await answer).toBe(false);
+	});
+
+	test("a page string that is undefined (a missing translation) keeps the English text", () => {
+		const s = stringsOf({
+			strings: {
+				allow: undefined as unknown as string,
+				deny: "Nein",
+				nope: "x",
+			} as never,
+		});
+		expect(s.allow).toBe("Allow");
+		expect(s.deny).toBe("Nein");
+		expect("nope" in s).toBe(false);
 	});
 
 	test("setup: a guide of the page's own, or none, and its own steps per app (CU 20)", async () => {

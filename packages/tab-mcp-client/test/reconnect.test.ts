@@ -184,9 +184,12 @@ test("disconnect() stops reconnecting", async () => {
 	jest.useFakeTimers(); // the attempt's timer is a fake one
 	relay.close(4004);
 	await nextState(t, "reconnecting");
+	const off = nextState(t, "disconnected");
 	t.disconnect();
 	expect(t.reconnecting).toBeUndefined();
 	expect(seen).toEqual([1, null]);
+	// The page turned it off: the reason says so also from reconnecting.
+	expect(await off).toEqual({ state: "disconnected", reason: "user" });
 	jest.advanceTimersByTime(60_000); // an attempt would start connecting now
 	expect(t.state).toBe("disconnected");
 });
