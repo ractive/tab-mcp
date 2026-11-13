@@ -3,6 +3,7 @@
  * list lives, a `ConnectButton`, and the AI app's recent calls.
  */
 
+import type { ToolCallClient } from "@ractive-ch/tab-mcp-client";
 import {
 	ConnectButton,
 	TabMcpProvider,
@@ -11,24 +12,19 @@ import {
 	useToolCalls,
 } from "@ractive-ch/tab-mcp-client/react";
 import { type FormEvent, useState, useSyncExternalStore } from "react";
-import type { TodoList } from "./todos.ts";
+import { MAX_TEXT, MAX_TODOS, type TodoList } from "./todos.ts";
 
 const SERVER = {
 	name: "todo",
+	title: "Todo list",
 	version: "1.0.0",
 	instructions:
-		"A todo list in the user's browser tab. list_todos first to get the ids; complete_todo takes one, delete_todos one or more (delete several in one call).",
+		"A todo list in the user's browser tab, which the user also edits. Call list_todos first to get the ids; complete_todo takes one, delete_todos one or more (delete several in one call). Deleting asks the user first.",
 };
 
 export function App(props: { relay: string; todos: TodoList }) {
 	return (
-		// alwaysAllow: the confirmation offers "Always allow" (off by default).
-		<TabMcpProvider
-			relay={props.relay}
-			server={SERVER}
-			appName="Todo"
-			alwaysAllow
-		>
+		<TabMcpProvider relay={props.relay} server={SERVER} appName="Todo">
 			<main>
 				<header>
 					<h1>Todo</h1>
@@ -57,7 +53,7 @@ function Status() {
 				? "Connected, no AI app yet."
 				: `${grants.length} AI app${grants.length === 1 ? "" : "s"} connected: ${grants.map((g) => g.client.name).join(", ")}.`;
 	return (
-		<p className="status" data-state={state}>
+		<p className="status" role="status" data-state={state}>
 			{text}
 		</p>
 	);
@@ -65,7 +61,9 @@ function Status() {
 
 const ID = {
 	type: "object",
-	properties: { id: { type: "string", description: "The todo's id" } },
+	properties: {
+		id: { type: "string", description: "The todo's id, from list_todos" },
+	},
 	required: ["id"],
 	additionalProperties: false,
 };
@@ -73,35 +71,53 @@ const ID = {
 function Todos({ todos }: { todos: TodoList }) {
 	const items = useSyncExternalStore(todos.subscribe, todos.snapshot);
 	const [draft, setDraft] = useState("");
+	const [refused, setProblem] = useState<string | undefined>(undefined);
+	// The form refuses only a full list: once there is room again, the alert goes.
+	const problem = items.length >= MAX_TODOS ? refused : undefined;
 
 	useTool({
 		name: "list_todos",
-		description: "List the todos with their ids and whether they are done",
-		annotations: { readOnlyHint: true },
+		title: "List todos",
+		description: "List the todos with their ids and whether they are done.",
+		// The texts come from the user or another AI app: not instructions.
+		annotations: { readOnlyHint: true, untrustedContentHint: true },
 		execute: () => ({ todos: todos.snapshot() }),
 	});
-	useTool({
+	// The user sees the new todo and can delete it: no question.
+	useTool<{ text: string }>({
 		name: "add_todo",
-		description: "Add a todo item",
+		title: "Add a todo",
+		description: `Add a todo item (a short text, at most ${MAX_TEXT} characters). Returns it with its id.`,
 		inputSchema: {
 			type: "object",
-			properties: { text: { type: "string", minLength: 1 } },
+			properties: {
+				text: { type: "string", minLength: 1, maxLength: MAX_TEXT },
+			},
 			required: ["text"],
 			additionalProperties: false,
 		},
-		execute: ({ text }) => todos.add(String(text)),
+		execute: ({ text }) => todos.add(text),
 	});
-	useTool({
+	useTool<{ id: string; done?: boolean }>({
 		name: "complete_todo",
-		description: "Mark a todo as done",
-		inputSchema: ID,
+		title: "Complete a todo",
+		description: "Mark a todo as done, or as not done with done: false.",
+		inputSchema: {
+			...ID,
+			properties: {
+				...ID.properties,
+				done: { type: "boolean", description: "Default true" },
+			},
+		},
 		annotations: { idempotentHint: true },
-		execute: ({ id }) => todos.complete(String(id)),
+		execute: ({ id, done }) => todos.complete(id, done !== false),
 	});
-	useTool({
+	// Cannot be undone in the page: the page asks the user first.
+	useTool<{ ids: string[] }>({
 		name: "delete_todos",
+		title: "Delete todos",
 		description:
-			"Delete one or more todos by their ids, in one call; the user confirms it in the page once",
+			"Delete one or more todos by their ids from list_todos, in one call. The page asks once for all of them; deleted todos cannot be restored.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -109,23 +125,27 @@ function Todos({ todos }: { todos: TodoList }) {
 					type: "array",
 					items: { type: "string" },
 					minItems: 1,
-					maxItems: 200,
+					maxItems: MAX_TODOS,
 				},
 			},
 			required: ["ids"],
 			additionalProperties: false,
 		},
 		annotations: { consequentialHint: true, destructiveHint: true },
-		execute: ({ ids }) => ({
-			deleted: todos.removeAll((ids as unknown[]).map(String)),
-		}),
+		execute: ({ ids }) => ({ deleted: todos.removeAll(ids) }),
 	});
 
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
 		if (draft.trim() === "") return;
-		todos.add(draft);
-		setDraft("");
+		try {
+			todos.add(draft);
+			setDraft("");
+			setProblem(undefined);
+		} catch (error) {
+			// A full list: say so instead of doing nothing.
+			setProblem(error instanceof Error ? error.message : String(error));
+		}
 	};
 
 	return (
@@ -134,11 +154,17 @@ function Todos({ todos }: { todos: TodoList }) {
 				<input
 					aria-label="New todo"
 					placeholder="What needs doing?"
+					maxLength={MAX_TEXT}
 					value={draft}
 					onChange={(e) => setDraft(e.target.value)}
 				/>
 				<button type="submit">Add</button>
 			</form>
+			{problem !== undefined && (
+				<p className="problem" role="alert">
+					{problem}
+				</p>
+			)}
 			{items.length === 0 ? (
 				<p className="empty">Nothing to do.</p>
 			) : (
@@ -172,6 +198,13 @@ function Todos({ todos }: { todos: TodoList }) {
 	);
 }
 
+/** Who called: an AI app through the relay, the site's own assistant (`serve`), or an agent in the browser (WebMCP). */
+function caller(client: ToolCallClient): string {
+	if (client.kind === "relay") return client.name ?? client.host;
+	if (client.kind === "local") return client.name ?? client.id;
+	return "an agent in this browser";
+}
+
 function Activity() {
 	const calls = useToolCalls({ limit: 8 });
 	if (calls.length === 0) return null;
@@ -181,10 +214,7 @@ function Activity() {
 			<ol>
 				{calls.map((call) => (
 					<li key={call.id} data-outcome={call.end?.outcome ?? "running"}>
-						<code>{call.tool}</code> by{" "}
-						{call.client.kind === "relay"
-							? (call.client.name ?? call.client.host)
-							: "an agent in this browser"}
+						<code>{call.tool}</code> by {caller(call.client)}
 						{call.end === undefined ? " …" : ` · ${call.end.outcome}`}
 					</li>
 				))}

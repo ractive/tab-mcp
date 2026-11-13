@@ -36,9 +36,9 @@ Try it without installing anything. These pages connect to the hosted relay
 | Page | What your AI app can do there |
 |---|---|
 | [Diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
-| [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); its source is [examples/react-todo](examples/react-todo) |
+| [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); based on [examples/react-todo](examples/react-todo) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
-| [Sign-in example](https://tab-mcp-login.ractive.ch/) | read and add notes; the AI app connects by signing in with the same Google account as the page, without a code ([identity binding](#identity-binding)) |
+| [Sign-in example](https://tab-mcp-login.ractive.ch/) | read, add and delete notes; the AI app connects by signing in with the same Google account as the page, without a code ([identity binding](#identity-binding)) |
 
 The hosted relay is run for ractive.ch's examples, not as a service for other pages.
 It refuses every origin it does not list, and the page then shows "Could not connect
@@ -77,7 +77,7 @@ sequenceDiagram
     App->>Relay: POST /a/{id}/mcp with the token: tools/call
     Note over Relay: checks the token and limits, knows no tools, stores no arguments
     Relay->>Page: http.request over the WebSocket
-    opt the tool changes something
+    opt the tool cannot be undone in the page
         Page->>You: ask first
         You-->>Page: allow
     end
@@ -98,7 +98,8 @@ sequenceDiagram
 3. The AI app gets a token for that address. The page lists it as connected, with a
    Disconnect button.
 4. When the AI app calls a tool, the relay forwards the request to the page. The page
-   runs the tool and answers. Tools that change something ask you in the page first.
+   runs the tool and answers. Tools whose effect you cannot undo in the page (deleting
+   for good, sending, buying) ask you in the page first.
 5. When you close the tab, the tools are gone. The AI app stays paired and can use the
    tools again the next time you connect the page.
 
@@ -120,7 +121,7 @@ You need a page that offers tab-mcp, such as the [live diagram editor](https://r
 
 1. In the page, click "Connect your AI app" and copy the address.
 2. Add it to your AI app:
-   - **Claude Code:** `claude mcp add --transport http calc <address>`, then run `/mcp`
+   - **Claude Code:** `claude mcp add --transport http diagram <address>`, then run `/mcp`
      in Claude Code and choose Authenticate.
    - **Claude (claude.ai and the desktop app):** Settings → Connectors → Add custom
      connector, then paste the address.
@@ -172,15 +173,17 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
      appName: "notes",
    });
 
-   await mcp.registerTool({
+   await mcp.registerTool<{ text: string }>({
      name: "add_note",
-     description: "Add a note to the list on the page",
+     title: "Add a note",
+     description: "Add a note (at most 500 characters) to the list on the page and return its id.",
      inputSchema: {
        type: "object",
-       properties: { text: { type: "string" } },
+       properties: { text: { type: "string", minLength: 1, maxLength: 500 } },
        required: ["text"],
+       additionalProperties: false,
      },
-     execute: ({ text }) => addNote(String(text)),
+     execute: ({ text }) => addNote(text),
    });
 
    connectButton.addEventListener("click", () => mcp.showConnectDialog());
@@ -195,9 +198,16 @@ worker, pass `storage` and `onConfirm`: it has no `localStorage` and no document
 [browser extensions](docs/configuration.md#browser-extensions)). The relay then lists
 `chrome-extension://<id>`.
 
-Mark tools that change or delete things with `annotations: { consequentialHint: true }`:
-the page then asks the user before each call ("Always allow" only if the page turns on
-`alwaysAllow`).
+Mark tools whose effect the user cannot undo in the page, or that act outside it (delete
+for good, send, buy, change data on the server), with
+`annotations: { consequentialHint: true }`: the page then asks the user before each call
+("Always allow" only if the page turns on `alwaysAllow`). A change the user sees and can
+take back in the page, such as `add_note` above, needs no question.
+
+A site with its own AI assistant on the page can serve the tools to it over a
+`MessagePort` with `mcp.serve(port, { client })`, without a relay, pairing or an address;
+calls then come with `client.kind === "local"`. See
+[Your own assistant on the page](packages/tab-mcp-client/README.md#your-own-assistant-on-the-page).
 
 `new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
 where the browser has it, so that agents in the browser call them without pairing, with
@@ -299,7 +309,7 @@ settings, the protocol or the API; the [changelog](CHANGELOG.md) says what chang
 
 ## Development
 
-Requires [Bun](https://bun.sh) 1.4.
+Requires [Bun](https://bun.sh) 1.4.4 or newer.
 
 ```sh
 bun install

@@ -133,19 +133,21 @@ test.skipIf(chrome === undefined)(
 			`document.querySelector('.todos li[data-id="${added.id}"]').classList.contains('done')`,
 		);
 
-		// Deleting asks the user in the page first, offering Always allow.
+		// Deleting asks the user in the page first, without Always allow (the
+		// example leaves alwaysAllow off, as the docs advise).
 		const deleting = client.callTool({
 			name: "delete_todos",
 			arguments: { ids: [added.id] },
 		});
 		await waitFor(
 			page,
-			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].some((b) => b.textContent === 'Always allow')",
-		);
-		await waitFor(
-			page,
 			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow' && !b.disabled)",
 		);
+		expect(
+			await page.eval(
+				"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].map((b) => b.textContent)",
+			),
+		).not.toContain("Always allow");
 		await page.eval(
 			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow').id = 'allow'",
 		);
