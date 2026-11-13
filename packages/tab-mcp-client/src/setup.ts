@@ -63,24 +63,36 @@ export function setupInstructions(
 		{
 			id: "chatgpt",
 			app: "ChatGPT",
-			text: "On chatgpt.com: Plugins, add an MCP server with the address. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP; it needs the Codex feature below.",
+			text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP, paste the address, save, then Authenticate.",
+			note: [
+				{ text: "The Mac app first needs a feature of Codex: run " },
+				{ code: `codex features enable ${CODEX_FEATURE}` },
+				{ text: " in a terminal." },
+			],
 		},
 		{
 			id: "claude-code",
 			app: "Claude Code",
 			text: "Add the address with claude mcp add --transport http.",
 			...run(`claude mcp add --transport http ${n} ${a}`),
+			// The command only adds the server; the sign-in that asks for the
+			// code starts in Claude Code (CU 6).
+			note: [
+				{ text: "Then type " },
+				{ code: "/mcp" },
+				{ text: " in Claude Code and choose Authenticate." },
+			],
 		},
 		{
 			id: "codex",
 			app: "Codex",
-			text: `Run codex features enable ${CODEX_FEATURE}, then add the address with codex mcp add --url.`,
+			text: `Run codex features enable ${CODEX_FEATURE}, then add the address with codex mcp add --url and sign in with codex mcp login.`,
 			...run(
-				`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}`,
+				`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}\ncodex mcp login ${n}`,
 			),
 			note: [
 				{
-					text: "Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
+					text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
 				},
 				{ code: `codex features disable ${CODEX_FEATURE}` },
 				{ text: " turns it off." },

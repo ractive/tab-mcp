@@ -273,7 +273,7 @@ describe("How do I add it? (the pairing box)", () => {
 			null,
 			null,
 			`claude mcp add --transport http tab-mcp-for-chrome ${ADDRESS}`,
-			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}`,
+			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}\ncodex mcp login tab-mcp-for-chrome`,
 		]);
 		const copies = items.flatMap((li) => [...li.querySelectorAll("button")]);
 		expect(copies.map((b) => [b.type, b.getAttribute("aria-label")])).toEqual([
@@ -295,7 +295,7 @@ describe("How do I add it? (the pairing box)", () => {
 		await Promise.resolve();
 		await Promise.resolve();
 		expect(copied()).toBe(
-			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}`,
+			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}\ncodex mcp login tab-mcp-for-chrome`,
 		);
 		expect(copy.textContent).toBe("Copied");
 		expect(copy.getAttribute("aria-label")).toBe("Copied Codex command");
@@ -316,7 +316,7 @@ describe("How do I add it? (the pairing box)", () => {
 		await Bun.sleep(0);
 		expect(said).toEqual([SELECTED]);
 		expect(doc.getSelection()?.toString()).toBe(
-			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}`,
+			`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${ADDRESS}\ncodex mcp login tab-mcp-for-chrome`,
 		);
 		block.remove();
 	});

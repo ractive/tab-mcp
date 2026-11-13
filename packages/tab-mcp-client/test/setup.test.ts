@@ -70,7 +70,7 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 			"https://relay.example/a/x/mcp",
 		).find(({ id }) => id === "codex");
 		expect(codex?.command).toBe(
-			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp",
+			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp\ncodex mcp login calc",
 		);
 		const claudeCode = setupInstructions(
 			"x' ; calc ; 'y$",
@@ -114,22 +114,32 @@ describe("setupInstructions, the public API", () => {
 			{
 				id: "chatgpt",
 				app: "ChatGPT",
-				text: "On chatgpt.com: Plugins, add an MCP server with the address. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP; it needs the Codex feature below.",
+				text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP, paste the address, save, then Authenticate.",
+				note: [
+					{ text: "The Mac app first needs a feature of Codex: run " },
+					{ code: "codex features enable mcp_2026_07_28" },
+					{ text: " in a terminal." },
+				],
 			},
 			{
 				id: "claude-code",
 				app: "Claude Code",
 				text: "Run:",
 				command: `claude mcp add --transport http my-notes ${ADDRESS}`,
+				note: [
+					{ text: "Then type " },
+					{ code: "/mcp" },
+					{ text: " in Claude Code and choose Authenticate." },
+				],
 			},
 			{
 				id: "codex",
 				app: "Codex",
 				text: "Run:",
-				command: `codex features enable mcp_2026_07_28\ncodex mcp add my-notes --url ${ADDRESS}`,
+				command: `codex features enable mcp_2026_07_28\ncodex mcp add my-notes --url ${ADDRESS}\ncodex mcp login my-notes`,
 				note: [
 					{
-						text: "Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
+						text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
 					},
 					{ code: "codex features disable mcp_2026_07_28" },
 					{ text: " turns it off." },
@@ -140,14 +150,23 @@ describe("setupInstructions, the public API", () => {
 		expect(JSON.parse(JSON.stringify(steps))).toEqual(steps);
 	});
 
-	test("Codex's first command line turns on the feature, the second adds the server", () => {
-		const codex = setupInstructions("calc", ADDRESS).find(
-			({ id }) => id === "codex",
-		);
+	test("Codex's first command line turns on the feature, the second adds the server, the third signs in (CU 6)", () => {
+		const steps = setupInstructions("calc", ADDRESS);
+		const codex = steps.find(({ id }) => id === "codex");
 		expect(codex?.command?.split("\n")).toEqual([
 			"codex features enable mcp_2026_07_28",
 			`codex mcp add calc --url ${ADDRESS}`,
+			"codex mcp login calc",
 		]);
+		// Claude Code signs in from /mcp: the step after the command.
+		const claudeCode = steps.find(({ id }) => id === "claude-code");
+		expect(claudeCode?.note).toContainEqual({ code: "/mcp" });
+		// ChatGPT's Mac app names the feature it needs in its own entry.
+		const chatgpt = steps.find(({ id }) => id === "chatgpt");
+		expect(chatgpt?.text).not.toContain("below");
+		expect(chatgpt?.note).toContainEqual({
+			code: "codex features enable mcp_2026_07_28",
+		});
 	});
 
 	test("an address that is not shell-plain: no command key at all, the note stays", () => {
