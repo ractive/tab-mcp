@@ -9,6 +9,7 @@ import {
 	Component,
 	type ReactNode,
 	StrictMode,
+	useEffect,
 	useState,
 	version,
 } from "react";
@@ -16,7 +17,6 @@ import { createRoot, type Root } from "react-dom/client";
 import type { TabMcp } from "../src/index.ts";
 import {
 	ConnectButton,
-	connectLabel,
 	TabMcpProvider,
 	type TabMcpSnapshot,
 	type ToolCallRecord,
@@ -31,7 +31,9 @@ import {
 	MemoryStorage,
 	newTab,
 	nextEvent,
+	nextState,
 	rpc,
+	setTiming,
 	startRelay,
 	type TestRelay,
 	tokenFor,
@@ -167,13 +169,10 @@ test("a re-render with a new execute does not register again; unmount removes th
 	expect(t.tools).toEqual([]);
 });
 
-test("useTool's deps register again", () => {
+test("useTool registers again only when the tool changes, not for a new execute (CU 18)", () => {
 	const t = tab();
 	function Versioned(props: { version: number }) {
-		useTool(
-			addTool(() => props.version),
-			[props.version],
-		);
+		useTool(addTool(() => props.version));
 		return null;
 	}
 	render(
@@ -193,7 +192,7 @@ test("useTool's deps register again", () => {
 			<Versioned version={2} />
 		</TabMcpProvider>,
 	);
-	expect(changes).toEqual([[], ["add"]]);
+	expect(changes).toEqual([]);
 });
 
 test("useTool passes webmcp on to registerTool and registers again when it changes", () => {
@@ -207,7 +206,6 @@ test("useTool passes webmcp on to registerTool and registers again when it chang
 	function Mirrored(props: { webmcp?: boolean }) {
 		useTool(
 			addTool(() => 1),
-			[],
 			props.webmcp === undefined ? {} : { webmcp: props.webmcp },
 		);
 		return null;
@@ -301,7 +299,6 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 	});
 	const last = snapshots.at(-1);
 	expect(last?.state).toBe("connected");
-	expect(last?.address).toBe(t.address as string);
 	expect(last?.session).toBe(t.session as NonNullable<typeof t.session>);
 	const renders = snapshots.length;
 	// The same values again: the same object, no render.
@@ -343,10 +340,8 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 
 test("useTabMcpState shows identity binding and reconnecting", async () => {
 	stub.pairing = "oidc";
-	const t = tab({
-		identityAssertion: () => "a.b.c",
-		reconnect: { delaysMs: [600_000] },
-	});
+	const restore = setTiming({ reconnectDelaysMs: [600_000] });
+	const t = tab({ identityAssertion: () => "a.b.c" });
 	let latest: TabMcpSnapshot | undefined;
 	function Status() {
 		latest = useTabMcpState();
@@ -377,11 +372,11 @@ test("useTabMcpState shows identity binding and reconnecting", async () => {
 		identityMessage: "not this user",
 	});
 	await act(async () => {
-		const reconnecting = nextEvent(t, "reconnecting");
+		const reconnecting = nextState(t, "reconnecting");
 		stub.close(4004, "shutdown");
 		await reconnecting;
 	});
-	expect(latest?.state).toBe("disconnected");
+	expect(latest?.state).toBe("reconnecting");
 	expect(latest?.identity).toBe("none");
 	expect(latest?.identityMessage).toBeUndefined();
 	expect(latest?.reconnecting).toMatchObject({
@@ -391,6 +386,7 @@ test("useTabMcpState shows identity binding and reconnecting", async () => {
 	const button = container.querySelector("button") as HTMLButtonElement;
 	expect(button.textContent).toBe("Reconnecting…");
 	expect(button.dataset["state"]).toBe("reconnecting");
+	restore();
 });
 
 test("a tool call reaches the latest execute; useToolCalls lists it with its end", async () => {
@@ -570,6 +566,7 @@ test("the provider makes one instance; a new relay makes a new one, its own is d
 		);
 		const second = seen.at(-1) as TabMcp;
 		expect(second).not.toBe(first);
+		await act(async () => {}); // disconnected a moment after (CU 24)
 		expect(first.state).toBe("disconnected");
 		expect(warnings).toHaveLength(1);
 		await act(async () => {
@@ -577,11 +574,46 @@ test("the provider makes one instance; a new relay makes a new one, its own is d
 		});
 		act(() => root?.unmount());
 		root = undefined;
+		await Promise.resolve();
 		expect(second.state).toBe("disconnected");
 	} finally {
 		console.warn = warn;
 		await other.stop();
 	}
+});
+
+test("StrictMode: a child's connect({ resume: true }) is not cancelled by the provider's simulated unmount (CU 24)", async () => {
+	let instance: TabMcp | undefined;
+	const results: string[] = [];
+	function Resume() {
+		const mcp = useTabMcp();
+		instance = mcp;
+		useEffect(() => {
+			mcp.connect({ resume: true }).then(
+				() => results.push("connected"),
+				(error: Error) => results.push(error.message),
+			);
+		}, [mcp]);
+		return null;
+	}
+	render(
+		<StrictMode>
+			<TabMcpProvider
+				relay={stub.url}
+				server={{ name: "resume", version: "1" }}
+				storage={new MemoryStorage()}
+			>
+				<Resume />
+			</TabMcpProvider>
+		</StrictMode>,
+	);
+	await until(() => results.length >= 2);
+	expect(results).toEqual(["connected", "connected"]);
+	expect(instance?.state).toBe("connected");
+	act(() => root?.unmount());
+	root = undefined;
+	await Promise.resolve();
+	expect(instance?.state).toBe("disconnected");
 });
 
 test("the provider uses the latest onConfirm", async () => {
@@ -744,20 +776,35 @@ test("an onConfirm added after the first render is used; without one, the page's
 });
 
 test("game feedback 3: the default label says the connection is lost after three failed attempts", () => {
-	const snapshot = (attempt: number): TabMcpSnapshot => ({
-		state: "disconnected",
-		address: undefined,
-		session: undefined,
-		grants: [],
-		pairingCode: undefined,
-		identity: "none",
-		identityMessage: undefined,
-		reconnecting: { reason: "network", attempt, at: 0 },
-		tools: [],
+	const t = tab();
+	let attempt = 1;
+	// Reconnecting, attempt by attempt, without a relay to break.
+	Object.defineProperty(t, "state", { get: () => "reconnecting" });
+	Object.defineProperty(t, "reconnecting", {
+		get: () => ({ reason: "network", attempt, at: 0 }),
 	});
-	expect(connectLabel(snapshot(1))).toBe("Reconnecting…");
-	expect(connectLabel(snapshot(3))).toBe("Reconnecting…");
-	expect(connectLabel(snapshot(4))).toBe("Connection lost, retrying…");
+	render(
+		<TabMcpProvider client={t}>
+			<ConnectButton />
+		</TabMcpProvider>,
+	);
+	const button = container.querySelector("button") as HTMLButtonElement;
+	const labels: (string | null)[] = [];
+	for (const next of [1, 3, 4]) {
+		attempt = next;
+		act(() => {
+			t.dispatchEvent(
+				new CustomEvent("statechange", { detail: { state: "reconnecting" } }),
+			);
+		});
+		labels.push(button.textContent);
+	}
+	expect(labels).toEqual([
+		"Reconnecting…",
+		"Reconnecting…",
+		"Connection lost, retrying…",
+	]);
+	expect(button.dataset["state"]).toBe("reconnecting");
 });
 
 test("game feedback 8: useTool and registerTool take the input's type", () => {

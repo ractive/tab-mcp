@@ -6,35 +6,25 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { TabMcp } from "../src/tab-mcp.ts";
 import type { Grant } from "../src/types.ts";
-import { newTab, nextEvent } from "./helpers.ts";
+import { newTab, nextState } from "./helpers.ts";
 import { StubRelay } from "./stub-relay.ts";
 
-describe("options", () => {
-	test("confirmDelayMs and identityTimeoutMs must be a number of ms", () => {
-		for (const bad of [
-			Number.NaN,
-			-1,
-			Number.POSITIVE_INFINITY,
-			2 ** 31,
-			"750",
-		]) {
-			expect(() =>
-				newTab("https://relay.example", {
-					confirmDelayMs: bad as number,
-				}),
-			).toThrow(/confirmDelayMs/);
-			expect(() =>
-				newTab("https://relay.example", {
-					identityTimeoutMs: bad as number,
-				}),
-			).toThrow(/identityTimeoutMs/);
+describe("methods that ask the relay (CU 10)", () => {
+	test("reject with an InvalidStateError while not connected", async () => {
+		const tab = newTab("https://relay.example", {
+			identityAssertion: () => "assertion",
+		});
+		for (const call of [() => tab.signOut(), () => tab.refreshIdentity()]) {
+			const error = await call().then(
+				() => undefined,
+				(e: unknown) => e as DOMException,
+			);
+			expect(error?.name).toBe("InvalidStateError");
 		}
-		expect(() =>
-			newTab("https://relay.example", {
-				confirmDelayMs: 0,
-				identityTimeoutMs: 0,
-			}),
-		).not.toThrow();
+	});
+
+	test("revoke() of a grant the page does not list resolves at once", async () => {
+		await newTab("https://relay.example").revoke("g_unknown");
 	});
 });
 
@@ -73,6 +63,41 @@ describe("with a relay", () => {
 		expect(tab.grants[0]?.grantId).toBe("g_1");
 		// Stable between changes, as a store snapshot needs.
 		expect(tab.grants).toBe(grants);
+	});
+
+	test("revoke() resolves once the relay removed the grant (CU 10)", async () => {
+		await tab.connect({ resume: true });
+		let done = false;
+		const revoked = tab.revoke("g_1").then(() => (done = true));
+		expect((await relay.next("grant.revoke"))["grantId"]).toBe("g_1");
+		await Bun.sleep(10);
+		expect(done).toBe(false);
+		relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
+		await revoked;
+		expect(tab.grants).toEqual([]);
+	});
+
+	test("revoke() rejects with the relay's error, and when the session ends first", async () => {
+		await tab.connect({ resume: true });
+		const refused = tab.revoke("g_1");
+		await relay.next("grant.revoke");
+		relay.send({
+			type: "error",
+			code: "store_unavailable",
+			message: "the relay cannot change grants right now; try again shortly",
+		});
+		const error = await refused.then(
+			() => undefined,
+			(e: unknown) => e as Error & { code?: string },
+		);
+		expect(error?.code).toBe("store_unavailable");
+		expect(tab.grants.length).toBe(1);
+		const ended = tab.revoke("g_1");
+		await relay.next("grant.revoke");
+		tab.disconnect();
+		await expect(ended).rejects.toThrow("not connected");
+		// Disconnected, the grant still listed: only the relay can revoke it.
+		await expect(tab.revoke("g_1")).rejects.toThrow("not connected");
 	});
 
 	test("a schema the validator cannot use: unregistered at connect, refused after it", async () => {
@@ -118,7 +143,7 @@ describe("with a relay", () => {
 		try {
 			const first = tab.showConnectDialog({ document: doc });
 			const second = tab.showConnectDialog({ document: doc });
-			await nextEvent(tab, "connected");
+			await nextState(tab, "connected");
 			await relay.next("pairing.start");
 			await Bun.sleep(0); // the UI chunk is loaded by now
 			const dialogs = doc.querySelectorAll("dialog");
@@ -130,7 +155,7 @@ describe("with a relay", () => {
 			(dialogs[0] as HTMLDialogElement).close();
 			await Promise.all([first, second]);
 			expect([firstDone, secondDone]).toEqual([true, true]);
-			expect(tab.pairing).toBe(false);
+			await relay.next("pairing.stop");
 			// Once closed, it opens again.
 			const again = tab.showConnectDialog({ document: doc });
 			await relay.next("pairing.start");

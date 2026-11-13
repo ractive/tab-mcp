@@ -6,6 +6,9 @@
  */
 
 import { commandAddress, commandName } from "./command.ts";
+import type { SetupNotePart, SetupStep } from "./types.ts";
+
+export type { SetupNotePart, SetupStep };
 
 /** The guide for every AI app, step by step and what to do when it fails (its source is on ractive.ch). */
 export const SETUP_GUIDE = "https://ractive.ch/tab-mcp/connect/";
@@ -13,29 +16,19 @@ export const SETUP_GUIDE = "https://ractive.ch/tab-mcp/connect/";
 /** Codex's feature for MCP 2026-07-28, which the relay speaks; off by default in Codex 0.163. */
 const CODEX_FEATURE = "mcp_2026_07_28";
 
-/** A part of a {@link SetupInstruction}'s note: plain text, or code to show as code. */
-export type SetupNotePart = { text: string } | { code: string };
-
-/** The steps for one AI app. All strings are plain text (set them with `textContent`). */
-export interface SetupInstruction {
+/**
+ * The steps for one AI app. All strings are plain text (set them with
+ * `textContent`). `command`, where present, is safe to show and to run: the
+ * server's name and the address in it are words that every shell (POSIX
+ * shells, PowerShell, cmd.exe) reads as plain, with nothing to quote. It is
+ * absent for apps without a command, and when the address is not
+ * shell-plain (only http or https, letters, digits and `. : [ ] / _ ~ -`);
+ * then `text` names the command instead. The relay's addresses are
+ * shell-plain.
+ */
+export interface SetupInstruction extends SetupStep {
 	/** Which app, stable across versions: `claude`, `chatgpt`, `claude-code` or `codex`. */
 	id: "claude" | "chatgpt" | "claude-code" | "codex";
-	/** The app's name as shown, such as "Claude Code". */
-	app: string;
-	/** What to do, a sentence or two. "Run:" when `command` follows. */
-	text: string;
-	/**
-	 * The commands to run in a terminal, one per line, to show with a Copy
-	 * button. Safe to show and to run: the server's name and the address in
-	 * them are words that every shell (POSIX shells, PowerShell, cmd.exe) reads
-	 * as plain, with nothing to quote. Absent for apps without a command, and
-	 * when the address is not shell-plain (only http or https, letters, digits
-	 * and `. : [ ] / _ ~ -`); then `text` names the command instead. The relay's
-	 * addresses are shell-plain.
-	 */
-	command?: string;
-	/** Shown after the command (or the text): text and code, in order. */
-	note?: SetupNotePart[];
 }
 
 /**
@@ -44,7 +37,8 @@ export interface SetupInstruction {
  * page's `server.name`; the commands name the server by it, reduced to a
  * shell-plain label (lower case, letters without marks, each run of other
  * characters as `-`, at most 40 characters, `tools` if nothing is left).
- * End the list with a link to {@link SETUP_GUIDE}.
+ * End the list with a link to {@link SETUP_GUIDE}: the steps here are the
+ * minimum (CU 20), the guide has the rest and follows the apps' menus.
  */
 export function setupInstructions(
 	serverName: string,
@@ -63,12 +57,7 @@ export function setupInstructions(
 		{
 			id: "chatgpt",
 			app: "ChatGPT",
-			text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. In the Mac app: Settings → Plugins → MCPs → Add, type Streamable HTTP, paste the address, save, then Authenticate.",
-			note: [
-				{ text: "The Mac app first needs a feature of Codex: run " },
-				{ code: `codex features enable ${CODEX_FEATURE}` },
-				{ text: " in a terminal." },
-			],
+			text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. The Mac app needs more steps: see the guide.",
 		},
 		{
 			id: "claude-code",
@@ -92,10 +81,8 @@ export function setupInstructions(
 			),
 			note: [
 				{
-					text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects. The first line turns on a feature for all of Codex's MCP servers; ",
+					text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects.",
 				},
-				{ code: `codex features disable ${CODEX_FEATURE}` },
-				{ text: " turns it off." },
 			],
 		},
 	];

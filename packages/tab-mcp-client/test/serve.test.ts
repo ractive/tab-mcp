@@ -139,9 +139,9 @@ describe("without a relay", () => {
 		mcp.disconnect();
 		mcp.startPairing();
 		mcp.stopPairing();
-		expect(mcp.revoke("g_1")).toBe(false);
-		expect(mcp.signOut()).toBe(false);
-		expect(await mcp.refreshIdentity()).toBe(false);
+		await mcp.revoke("g_1"); // not listed: nothing to do
+		await expect(mcp.signOut()).rejects.toThrow("not connected");
+		await expect(mcp.refreshIdentity()).rejects.toThrow("no identityAssertion");
 		const w = await wire(mcp);
 		await mcp.registerTool({
 			name: "ping",

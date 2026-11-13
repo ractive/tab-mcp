@@ -395,8 +395,13 @@ export function openConnection(
 					);
 					return;
 				}
+				// With its `code`, so that a pending `revoke()` can tell it is
+				// refused (`store_unavailable`, `unknown_id`).
 				host.error(
-					new Error(`Relay error ${message.code}: ${message.message}`),
+					Object.assign(
+						new Error(`Relay error ${message.code}: ${message.message}`),
+						{ code: message.code },
+					),
 				);
 				return;
 			case "session":

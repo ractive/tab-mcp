@@ -31,7 +31,9 @@ test("the provider renders on the server without a browser", () => {
 		useTool({ name: "add", description: "Add", execute: () => 1 });
 		const state = useTabMcpState();
 		tools = state.tools;
-		return <p data-state={state.state}>{state.address ?? "no address"}</p>;
+		return (
+			<p data-state={state.state}>{state.session?.address ?? "no address"}</p>
+		);
 	}
 	const html = renderToString(
 		<TabMcpProvider

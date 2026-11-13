@@ -137,7 +137,7 @@ test.skipIf(chrome === undefined)(
 		).toBe("NotAllowedError");
 
 		const connected = page.eval<string>(
-			"new Promise((r) => mcp.addEventListener('connected', (e) => r(e.detail.address), { once: true }))",
+			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
 		);
 		await page.click("#connect");
 		const address = await connected;
@@ -147,29 +147,27 @@ test.skipIf(chrome === undefined)(
 		);
 		expect(after.some((n) => n.includes("/lib/connection-"))).toBe(true);
 
-		// The default dialog shows the address; pairing is on while it is open.
+		// The default dialog shows the address; closing it ends the code.
 		const dialog = await page.eval<{
 			open: boolean;
 			address: string;
-			pairing: boolean;
 			status: string;
 		}>(
-			// `connected` fires before the dialog is built (its chunk loads after
+			// The page is connected before the dialog is built (its chunk loads after
 			// connect()), so wait for it to be open instead of reading it at once.
-			"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-connect'); if (d === null || !d.open) return setTimeout(w, 10); r({ open: d.open, address: d.querySelector('input').value, pairing: mcp.pairing, status: d.querySelector('.tab-mcp-status').textContent }); }; w(); })",
+			"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-connect'); if (d === null || !d.open) return setTimeout(w, 10); r({ open: d.open, address: d.querySelector('input').value, status: d.querySelector('.tab-mcp-status').textContent }); }; w(); })",
 		);
 		expect(dialog).toEqual({
 			open: true,
 			address,
-			pairing: true,
 			status: "browser test is ready for your AI app.",
 		});
 		await page.press("Escape");
 		expect(
 			await page.eval(
-				"new Promise((r) => { const w = () => (document.querySelector('dialog') ? setTimeout(w, 10) : r(mcp.pairing)); w(); })",
+				"new Promise((r) => { const w = () => (document.querySelector('dialog') ? setTimeout(w, 10) : r(mcp.pairingCode === undefined)); w(); })",
 			),
-		).toBe(false);
+		).toBe(true);
 
 		let client: Client | undefined;
 		const token = await tokenFor(relay.store, address);
@@ -213,7 +211,7 @@ test.skipIf(chrome === undefined)(
 		// New address in the dialog: it asks, revokes the app and connects again.
 		await page.eval("mcp.disconnect()");
 		const reconnected = page.eval<string>(
-			"new Promise((r) => mcp.addEventListener('connected', (e) => r(e.detail.address), { once: true }))",
+			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
 		);
 		await page.click("#connect");
 		expect(await reconnected).toBe(address);
@@ -236,7 +234,7 @@ test.skipIf(chrome === undefined)(
 			"A new address disconnects Test client (client.example). To use this page again, add the new address to it.",
 		);
 		const renewed = page.eval<string>(
-			"new Promise((r) => mcp.addEventListener('connected', (e) => r(e.detail.address), { once: true }))",
+			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
 		);
 		// A real click: the reconnect needs the user action.
 		await page.click("dialog.tab-mcp-connect .tab-mcp-new-address-confirm");
@@ -345,7 +343,7 @@ test.skipIf(chrome === undefined)(
 			const stillDisabled = await page.eval<boolean[]>(
 				`new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-confirm'); d ? setTimeout(() => r([...d.querySelectorAll('button')].filter((x) => x.textContent !== "Don't allow").map((x) => x.disabled)), 1500) : setTimeout(w, 10); }; w(); })`,
 			);
-			// Allow only: Always allow is opt-in (DEC-096).
+			// Allow only: Allow until reload is opt-in (DEC-096).
 			expect(stillDisabled).toEqual([true]);
 			// Back in front: the full delay from then on.
 			const timing = page.eval<{ visible: boolean; waited: number }>(

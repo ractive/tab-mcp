@@ -10,8 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteTokenStore } from "@ractive-ch/tab-mcp";
 import type { Subprocess } from "bun";
-import type { DisconnectDetail } from "../src/types.ts";
-import { connectClient, newTab, nextEvent, tokenFor } from "./helpers.ts";
+import { connectClient, newTab, nextEnd, tokenFor } from "./helpers.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "tab-mcp-client-int-"));
 const dbPath = join(dir, "tab-mcp.db");
@@ -115,8 +114,9 @@ test("SDK client → relay process → TabMcp in Bun", async () => {
 		expect(log).not.toContain(secret);
 
 	// SIGTERM: the tab hears "shutdown".
-	const gone = nextEvent<DisconnectDetail>(tab, "disconnected");
+	const gone = nextEnd(tab);
 	proc.kill("SIGTERM");
-	expect((await gone).detail).toEqual({ reason: "shutdown", code: 4004 });
+	expect(await gone).toEqual({ state: "reconnecting", reason: "shutdown" });
+	tab.disconnect();
 	expect(await proc.exited).toBe(0);
 }, 20_000);

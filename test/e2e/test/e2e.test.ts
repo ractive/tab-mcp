@@ -203,16 +203,16 @@ test.skipIf(chrome === undefined)(
 			expect(text(await allowed)).toBe("Memory cleared.");
 			await waitFor(page, "document.querySelector('#memory-flag').hidden");
 
-			// "Always allow" runs it and remembers: the next call does not ask.
+			// "Allow until reload" runs it and remembers: the next call does not ask.
 			const always = client.callTool({ name: "clear_memory" });
 			await waitFor(
 				page,
-				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Always allow' && !b.disabled)",
+				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow until reload' && !b.disabled)",
 			);
 			await clickButton(
 				page,
 				"dialog.tab-mcp-confirm",
-				"Always allow",
+				"Allow until reload",
 				"!document.querySelector('dialog.tab-mcp-confirm')",
 			);
 			expect(text(await always)).toBe("Memory cleared.");

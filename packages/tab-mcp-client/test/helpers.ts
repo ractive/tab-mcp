@@ -10,7 +10,13 @@ import {
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
 import { TabMcp } from "../src/index.ts";
-import type { SecretStorage, TabMcpOptions } from "../src/types.ts";
+import { timing } from "../src/tab-mcp.ts";
+import type {
+	ConnectionState,
+	SecretStorage,
+	StateChangeDetail,
+	TabMcpOptions,
+} from "../src/types.ts";
 
 /** The published test relay and token helper (`@ractive-ch/tab-mcp/testing`). */
 export { startRelay, type TestRelay, tokenFor };
@@ -60,6 +66,50 @@ export async function connectClient(
 		}),
 	);
 	return client;
+}
+
+/** The next `statechange` to `state`, as a promise of its detail. */
+export function nextState(
+	target: EventTarget,
+	state: ConnectionState,
+): Promise<StateChangeDetail> {
+	return new Promise((resolve) => {
+		const listener = (e: Event) => {
+			const detail = (e as CustomEvent<StateChangeDetail>).detail;
+			if (detail.state !== state) return;
+			target.removeEventListener("statechange", listener);
+			resolve(detail);
+		};
+		target.addEventListener("statechange", listener);
+	});
+}
+
+/**
+ * The next end of a session: the `statechange` that carries a `reason` (to
+ * `disconnected`, or to `reconnecting` when it reconnects by itself).
+ */
+export function nextEnd(target: EventTarget): Promise<StateChangeDetail> {
+	return new Promise((resolve) => {
+		const listener = (e: Event) => {
+			const detail = (e as CustomEvent<StateChangeDetail>).detail;
+			if (detail.reason === undefined) return;
+			target.removeEventListener("statechange", listener);
+			resolve(detail);
+		};
+		target.addEventListener("statechange", listener);
+	});
+}
+
+/**
+ * Sets the library's waits (`timing` of `tab-mcp.ts`, CU 17) until the
+ * returned function puts the defaults back; call that in `afterEach`.
+ */
+export function setTiming(values: Partial<typeof timing>): () => void {
+	const before = { ...timing };
+	Object.assign(timing, values);
+	return () => {
+		Object.assign(timing, before);
+	};
 }
 
 /** The next event of a type, as a promise. */

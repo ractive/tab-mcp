@@ -157,8 +157,8 @@ test("SDK client pairs with a tab through the code shown in its dialog, calls a 
 	});
 	const dialogClosed = tab.showConnectDialog({ document: doc });
 	const dialog = () => doc.querySelector(".tab-mcp-connect");
-	await until(() => tab.address !== undefined, "the session");
-	const address = tab.address ?? "";
+	await until(() => tab.session !== undefined, "the session");
+	const address = tab.session?.address ?? "";
 	const shownCode = () =>
 		dialog()?.querySelector(".tab-mcp-code-value")?.textContent ?? "";
 	await until(() => /^\d{6}$/.test(shownCode()), "a code in the dialog");
@@ -213,9 +213,10 @@ test("SDK client pairs with a tab through the code shown in its dialog, calls a 
 	const grant = tab.grants[0] as Grant;
 	expect(grant.client.name).toBe("SDK test client");
 	expect(grant.client.host).toBe(new URL(clientId).host);
-	const status = dialog()?.querySelector(".tab-mcp-status")?.textContent ?? "";
-	expect(status).toBe(
-		`SDK test client (${new URL(clientId).host}) is connected.`,
+	const title =
+		dialog()?.querySelector(".tab-mcp-success-title")?.textContent ?? "";
+	expect(title).toBe(
+		`SDK test client (${new URL(clientId).host}) is connected`,
 	);
 	expect(dialog()?.querySelector(".tab-mcp-apps")?.textContent).toContain(
 		"SDK test client",
@@ -295,7 +296,7 @@ test("Disconnect in the dialog revokes the app's tokens at once", async () => {
 	const dialogClosed = tab.showConnectDialog({ document: doc });
 	const dialog = () => doc.querySelector(".tab-mcp-connect");
 	await until(() => tab.pairingCode !== undefined, "a code");
-	const address = tab.address ?? "";
+	const address = tab.session?.address ?? "";
 
 	const provider = new TestProvider(clientId);
 	const transport = new StreamableHTTPClientTransport(new URL(address), {

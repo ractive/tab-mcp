@@ -80,20 +80,27 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"tunnel.js.map",
 			"visible.js",
 			"visible.js.map",
-			// Two chunks of this name: the escaping, shared by the UI and
-			// `./visible`, and the setup steps, shared by the UI and `./setup`.
+			// Chunks of this name: the escaping, shared by the dialogs and
+			// `./visible`, the setup steps, shared by the connect dialog and
+			// `./setup`, and what the two dialogs share (iteration 38).
 			"index-[hash].js",
 			"index-[hash].js.map",
 			"connection-[hash].js",
 			"connection-[hash].js.map",
-			"ui-[hash].js",
-			"ui-[hash].js.map",
+			"confirm-[hash].js",
+			"confirm-[hash].js.map",
+			"connect-[hash].js",
+			"connect-[hash].js.map",
 			"cdn/tab-mcp-client.min.js",
 			"cdn/tab-mcp-client.min.js.map",
 			"cdn/connection-[hash].min.js",
 			"cdn/connection-[hash].min.js.map",
-			"cdn/ui-[hash].min.js",
-			"cdn/ui-[hash].min.js.map",
+			"cdn/confirm-[hash].min.js",
+			"cdn/confirm-[hash].min.js.map",
+			"cdn/connect-[hash].min.js",
+			"cdn/connect-[hash].min.js.map",
+			"cdn/index-[hash].min.js",
+			"cdn/index-[hash].min.js.map",
 		],
 		declarationsFrom: "src",
 	},

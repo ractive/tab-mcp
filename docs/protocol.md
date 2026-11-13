@@ -138,7 +138,7 @@ signed in to the page, proved by the web app's backend
 |---|---|---|---|
 | `identity` | T→R | `assertion`, `round?` | A tab assertion for the page's signed-in user: a JWT of at most 8 192 bytes, `typ` `tab-mcp-identity+jwt`, `aud` this session's `address`, `exp` at most 60 s ahead, a single-use `jti`. Sent after `session` (every connection) and again after a sign-in. `round` (a non-negative integer) is the page's number for this assertion; the answer echoes it. |
 | `identity.bound` | R→T | `round?` | The assertion was accepted; the address is bound to this person for the session. `round` is the one of the `identity` it answers, when that had one. |
-| `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the address (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. |
+| `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the address (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. A store failure is answered with `error` `store_unavailable`. |
 
 The relay handles `identity` and `identity.logout` one after another, in the order they
 came, and answers every `identity` exactly once. A refused assertion gets `error`
@@ -358,7 +358,7 @@ read.
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
-| `store_unavailable` | relay | A `grant.revoke` or `grants.revokeAll` failed because the relay's token store failed. Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
+| `store_unavailable` | relay | A `grant.revoke`, `grants.revokeAll` or `identity.logout` failed because the relay's token store failed (for `identity.logout` the binding and the requests in flight end anyway). Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
 | `address_mismatch` | relay | The address id in the URL (`/tab?a=`) is not the one of the `secret` in `hello`. Followed by close 4009. A tab bug: the library computes both from one secret. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with

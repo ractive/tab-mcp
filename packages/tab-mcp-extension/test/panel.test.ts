@@ -442,8 +442,9 @@ describe("How do I add it? (the pairing box)", () => {
 			["button", "Copy Claude Code command"],
 			["button", "Copy Codex command"],
 		]);
-		expect(items[3]?.querySelector(".note code")?.textContent).toBe(
-			"codex features disable mcp_2026_07_28",
+		expect(items[2]?.querySelector(".note code")?.textContent).toBe("/mcp");
+		expect(items[3]?.querySelector(".note")?.textContent).toContain(
+			"The last line opens the sign-in",
 		);
 	});
 
