@@ -76,7 +76,8 @@ await mcp.registerTool({
 button.addEventListener("click", () => mcp.showConnectDialog());
 ```
 
-Importing the library loads only a small core; `connect()` loads the rest.
+Importing the library loads only a small core; `connect()` loads the rest, and
+`webmcp: true` loads the WebMCP mirror where the browser has WebMCP.
 
 `server` is what the AI app sees: `name`, `version`, optional `title` and
 `instructions`, and `icons`. Without `icons`, the page's own `<link rel="icon">` and
@@ -497,6 +498,9 @@ the user can find the tab that asks; the title is put back when the tab is shown
 dialog closes (unless the page changed it meanwhile). In `tools/list`, the description of
 a consequential tool ends with "The page may ask the user to allow
 each call, usually in the page's browser tab.", so the AI app can tell the user where to look while it waits.
+Not when an `onConfirm` answers (the page's, or for a served port its own): it may ask
+anywhere, such as a side panel or the site's chat. Say where in the tool's own
+description if the AI app should know.
 
 Pass `onConfirm` to ask in your own UI (it is asked every time; remember answers there if
 you want to). Show the verified `client.host` next to the name the AI app declares, as the
@@ -690,8 +694,8 @@ seconds (each wait varies by up to 20 %, so that the tabs of a restarted relay d
 come back at once), and at once when the tab comes back to the front or the network
 returns. Meanwhile `state` is `reconnecting` (while it waits and while it makes an
 attempt), `reconnecting` says which attempt is next and when, and `statechange` fires
-for each attempt it schedules; the `statechange` that leaves `connected` carries the
-`reason`. Calling `connect()` meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
+for each attempt it schedules; only the `statechange` that leaves `connected` carries the
+`reason` ([Your own UI](#your-own-ui)). Calling `connect()` meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
 another tab taking over the address (`replaced`), an expired or idle session, or a
 refusal by the relay, and an attempt the relay refuses stops it (an unreachable relay is
 tried again); the event `error` then says why, with `state` already `disconnected`, just
@@ -781,10 +785,22 @@ Instead of `showConnectDialog()`, use the methods, properties and events below.
 | `refreshIdentity()` | resolves with the new `identity`; a `TypeError` without `identityAssertion` |
 
 A method that asks the relay rejects with an `InvalidStateError` while the page is not
-connected, and when the session ends before the relay answered. `revoke()` and `signOut()`
-also reject with the relay's refusal (its `code` is `store_unavailable` when the relay
-could not save the change: try again; `unknown_id` for a grant the relay does not know),
-and with a `TimeoutError` when the relay has not answered within 15 s.
+connected: nothing was sent. `revoke()` and `signOut()` reject with a `NetworkError` when
+the session ends after the message was sent and before the relay answered, and with a
+`TimeoutError` when the relay has not answered within 15 s: in both cases the relay may
+or may not have done it, and `grants` says so once the page is connected again. They
+also reject with the relay's refusal of that message, an `Error` whose `code` is
+`store_unavailable` (the relay could not save the change: try again) or `unknown_id`.
+A relay after 0.10.1 names the message it answers (`for`, and `grantId` for a
+revocation), so with several revocations pending only the one it answers rejects; an
+older relay's refusal rejects every pending `revoke()` and `signOut()`. When the relay
+does not know a grant the page lists (it expired), the grant leaves `grants` (with
+`grantschange`) and its `revoke()` resolves.
+
+`newAddress()` rejects with an error whose `addressChanged` says what happened: `false`
+when the old address could not be taken back (it is kept with its grants; call
+`newAddress()` again), `true` when the address changed and only connecting with the new
+one failed (call `connect()`).
 
 The properties are `state` (`disconnected`, `connecting`, `connected`, `reconnecting`),
 `session` (while connected; `session.address` is the MCP address, `session.appName` the
@@ -797,14 +813,24 @@ properties (`grantschange` has `grants`), and a value that is gone is `undefined
 
 | Event | `detail` |
 |---|---|
-| `statechange` | `{ state, reason? }`: `reason` when a session ended, or when `disconnect()` or `newAddress()` ended connecting or reconnecting; also for each reconnect attempt |
+| `statechange` | `{ state, reason? }`, see below |
 | `grantschange` | `{ grants }` |
 | `pairingcode` | `{ pairingCode }` |
 | `identitychange` | `{ identity, identityMessage }` |
 | `toolschange` | `{ tools }` |
 | `replaced` | `{ sibling }` (see above) |
 | `error` | `{ error }` |
-| `toolcall`, `toolcallend` | the call, see below | For an activity log, `toolcall`
+| `toolcall`, `toolcallend` | the call, see below |
+
+`statechange`'s `reason` (a `DisconnectReason`) says why a session or an attempt to
+open one ended, once: on the change from `connected` (to `disconnected`, or to
+`reconnecting` when the connection broke), and when `disconnect()` or `newAddress()`
+ends connecting or reconnecting. It is absent on every other change: `connecting`,
+`connected`, each later reconnect attempt (`statechange` fires for each, and
+`reconnecting.reason` keeps the reason of the break), a failed `connect()`, and the
+`disconnected` after a refusal stopped reconnecting (the `error` just before says why).
+
+For an activity log, `toolcall`
 and `toolcallend` report every call by an AI app (or, with `webmcp`, an agent in the
 browser, or the assistant on a served port): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
 `error`, `declined`, `unanswered` or `cancelled`), result and duration.

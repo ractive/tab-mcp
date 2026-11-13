@@ -138,7 +138,10 @@ export interface ErrorMessage {
 	grantId?: string;
 }
 /** The page's messages an `error` can name in `for`. */
-export type ErrorAnswers = "grant.revoke" | "grants.revokeAll" | "identity.logout";
+export type ErrorAnswers =
+	| "grant.revoke"
+	| "grants.revokeAll"
+	| "identity.logout";
 export type RelayMessage =
 	| SessionMessage
 	| PingMessage

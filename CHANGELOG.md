@@ -8,6 +8,46 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Fixed
+
+- With several `revoke()` calls pending, a refusal by the relay rejects only the one it
+  answers: relays from 0.10.2 name the message (`for`) and the grant (`grantId`) in
+  their `error`, which the library compares. Before, any `store_unavailable` or
+  `unknown_id` rejected every pending `revoke()` and `signOut()`, as it still does with
+  older relays.
+- A grant the relay no longer knows (`unknown_id` for a `revoke()` of it: it expired)
+  leaves `grants`, with `grantschange`, and its `revoke()` resolves. Before, it stayed
+  listed and could not be disconnected. Grants that expire while the page is connected
+  leave `grants` too, through relay 0.10.2's `grant.removed` `expired`.
+- In `tools/list`, a consequential tool's description no longer ends with "The page may
+  ask the user to allow each call, usually in the page's browser tab." when an
+  `onConfirm` answers: the page's, or for the calls of a served port its own. Such a
+  question may be anywhere (a side panel, the site's chat). 0.16.0 added the sentence
+  for every consequential tool.
+
+#### Changed
+
+- `revoke()` and `signOut()` reject with a `NetworkError` when the session ends after
+  the message was sent and before the relay answered (the relay may have done it), and
+  keep the `InvalidStateError` for a page that is not connected (nothing was sent). Both
+  were an `InvalidStateError`. Migration: code that checks `name === "InvalidStateError"`
+  for a lost session checks `"NetworkError"`.
+- A rejection of `newAddress()` has `addressChanged`: `false` when the old address could
+  not be taken back (kept, with its grants), `true` when the address changed and only
+  connecting with the new one failed.
+- The WebMCP mirror is a chunk of its own, loaded by a `TabMcp` made with `webmcp: true`
+  in a browser with native WebMCP; the core went from 6400 to 6082 B gzipped. Each
+  `TabMcp` still reads `document.modelContext` through `Document.prototype`'s getter when
+  it is made. The tools are registered natively once the chunk has loaded, a little
+  later than before.
+- The README says exactly when `statechange` has a `reason`: on the change from
+  `connected`, and when `disconnect()` or `newAddress()` ends connecting or
+  reconnecting; not on later reconnect attempts (`reconnecting.reason` has it), a failed
+  `connect()` or the `disconnected` after a refusal (the `error` before it says why).
+  The behaviour is unchanged.
+
 ### [0.16.0][client-0.16.0] - 2026-11-13
 
 #### Breaking
@@ -730,6 +770,22 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Fixed
+
+- The sweep (every `sweepIntervalMs`, 10 minutes by default) tells each connected page
+  of its grants that expired, with `grant.removed` `expired` (logged as `grant.expired`).
+  Before, a page listed an expired app until it connected again. One `listGrants` per
+  connected page that lists a grant, per sweep.
+
+#### Changed
+
+- An `error` `unknown_id` or `store_unavailable` that answers a `grant.revoke`,
+  `grants.revokeAll` or `identity.logout` names it: `for` (the message's type) and, for
+  `grant.revoke`, `grantId`. A page with several revocations pending can tell which one
+  failed (`docs/protocol.md`). Libraries up to 0.16.0 ignore the fields.
 
 ### [0.10.1][relay-0.10.1] - 2026-11-13
 

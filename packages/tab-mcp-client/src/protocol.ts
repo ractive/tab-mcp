@@ -80,6 +80,14 @@ export interface ErrorMessage {
 	id?: string;
 	/** On `identity_refused`: the `round` of the `identity` it answers. */
 	round?: number;
+	/**
+	 * On `unknown_id` and `store_unavailable` from relay 0.10.2: the type of
+	 * the page's message it answers (`grant.revoke`, `grants.revokeAll`,
+	 * `identity.logout`); older relays leave it out.
+	 */
+	for?: unknown;
+	/** With `for: "grant.revoke"`: that message's grant. */
+	grantId?: unknown;
 }
 export type RelayMessage =
 	| SessionMessage

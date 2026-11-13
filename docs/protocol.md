@@ -112,9 +112,9 @@ types the code on the relay's `/authorize` page when the AI app opens it.
 | `pairing.code` | R→T | `code`, `expiresAt`, optional `reason` | The code to show: 6 digits, single-use, valid 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. Guesses are also limited per address and network and per address overall; malformed input does not count. `reason` says why this code comes: `start` (after `pairing.start`, a new code or the current one again), `used` (the last code was entered; its AI app is about to finish pairing), `locked` (5 wrong attempts) or `expired`. Relays before it leave it out; a tab treats a missing or unknown `reason` as no reason given. |
 | `pairing.stop` | T→R | none | The dialog closed; the current code becomes invalid and no more codes come. |
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
-| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this address gets `error` `unknown_id`. |
+| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this address, or has expired, gets `error` `unknown_id` with `for` and `grantId` ([Errors](#errors-between-tab-and-relay)). |
 | `grants.revokeAll` | T→R | none | Revoke every grant of this address (sent before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired` is reserved; grants that run out (at the latest 90 days after pairing) are not announced. The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every `sweepIntervalMs`, 10 minutes by default) tells each connected page of its grants that expired, so it comes up to that long after the last token ran out (relays up to 0.10.1 did not announce expired grants). An `expired` grant's requests in flight are left to finish. A revoked grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
 
 A grant as the tab sees it:
 
@@ -357,11 +357,24 @@ and names the request the error concerns. The relay accepts `error` from the tab
 only logs it at debug level; libraries up to 0.15 sent one for a message they could not
 read.
 
+An `unknown_id` or `store_unavailable` that answers a `grant.revoke`, `grants.revokeAll`
+or `identity.logout` names that message in `for` (relays after 0.10.1), and the
+grant of a `grant.revoke` in `grantId`:
+
+```json
+{"type":"error","code":"store_unavailable","message":"the relay cannot change grants right now; try again shortly","for":"grant.revoke","grantId":"g_…"}
+{"type":"error","code":"store_unavailable","message":"…","for":"identity.logout"}
+```
+
+A page with several of these pending settles only the one named. Without `for` (relays
+up to 0.10.1) the error may answer any of them; the library (after 0.16.0) then
+settles every pending one, as 0.16.0 did. Older libraries ignore the two fields.
+
 | Code | Sent by | Meaning |
 |---|---|---|
 | `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`. The library sends none to the relay: it drops a message it cannot read. |
 | `unknown_type` | relay | Message type not understood, but an answer was expected. |
-| `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's; the error has no `id`. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
+| `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |

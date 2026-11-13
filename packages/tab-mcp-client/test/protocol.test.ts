@@ -748,10 +748,42 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		const secret = (await relay.next("hello"))["secret"];
 		t.disconnect();
 		relay.refuse = true;
-		await expect(t.newAddress()).rejects.toMatchObject({ reason: "network" });
+		// The address did not change (DEC-170).
+		await expect(t.newAddress()).rejects.toMatchObject({
+			reason: "network",
+			addressChanged: false,
+		});
 		relay.refuse = false;
 		await t.connect();
 		expect((await relay.next("hello"))["secret"]).toBe(secret);
+	});
+
+	test("taken back, but connecting with the new address fails: rejects with addressChanged (DEC-170)", async () => {
+		await t.connect();
+		const secret = (await relay.next("hello"))["secret"];
+		relay.answerHello = false;
+		const renewing = t.newAddress();
+		const back = await relay.next("hello");
+		expect(back).toMatchObject({ secret, revokeAll: true });
+		relay.refuse = true;
+		relay.send({
+			type: "session",
+			sessionId: "s_back",
+			address: `${relay.url}/a/${"a".repeat(52)}/mcp`,
+			origin: "https://page.example",
+			expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+			limits: relay.limits,
+			grants: [],
+		});
+		await expect(renewing).rejects.toMatchObject({
+			reason: "network",
+			addressChanged: true,
+		});
+		// The new secret stays: the next connect() uses it.
+		relay.refuse = false;
+		relay.answerHello = true;
+		await t.connect();
+		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
 	});
 
 	test("a tab that never connected takes the stored address back, which another tab uses (CC 4)", async () => {

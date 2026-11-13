@@ -153,6 +153,15 @@ function noRelay(): Promise<never> {
 	return Promise.reject(new TypeError("TabMcp: this TabMcp has no relay"));
 }
 
+/**
+ * A rejection of `newAddress()`: `addressChanged` says whether the address
+ * changed (only connecting with the new one failed) or not (the old one
+ * could not be taken back and is kept, with its grants).
+ */
+function changed(error: unknown, addressChanged: boolean): unknown {
+	return Object.assign(Object(error), { addressChanged });
+}
+
 /** What a method that asks the relay rejects with while it cannot. */
 function notConnected(): Promise<never> {
 	return Promise.reject(
@@ -223,6 +232,7 @@ export class TabMcp extends EventTarget {
 	readonly #calls: CallHost = {
 		registry: this.#registry,
 		confirm: (request) => this.#confirm(request),
+		ownConfirm: () => !!this.#onConfirm,
 		toolCallStarted: (call) => this.#emit("toolcall", call),
 		toolCallEnded: (call) => this.#emit("toolcallend", call),
 	};
@@ -601,7 +611,7 @@ export class TabMcp extends EventTarget {
 					this.#setState("disconnected");
 					this.#stayOn = wasOn; // a retry does the same
 				}
-				throw error;
+				throw changed(error, false);
 			} finally {
 				// The take-back connection, unless `#end` closed it already.
 				if (generation === this.#generation) {
@@ -614,7 +624,10 @@ export class TabMcp extends EventTarget {
 		// The relay revoked them (CC 14).
 		this.#setGrants([]);
 		// It was on: the user chose that already, as for a reconnect.
-		if (wasOn) await this.#start();
+		if (wasOn)
+			await this.#start().catch((error: unknown) => {
+				throw changed(error, true);
+			});
 		else this.#setState("disconnected");
 	}
 
@@ -754,12 +767,17 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Send `message` to the relay and resolve once `done()` holds (it is
-	 * checked on each change of the grants). Rejects when not connected, when
-	 * the session ends first, with the relay's refusal (`store_unavailable`:
-	 * it could not save the change; `unknown_id`), and with a `TimeoutError`
-	 * when none of that happened within `timing.answerTimeoutMs`.
+	 * checked on each change of the grants). Rejects with an
+	 * `InvalidStateError` when it cannot send, a `NetworkError` when the
+	 * session ends first, the relay's refusal of this message
+	 * (`store_unavailable`: it could not save the change; `unknown_id`), and a
+	 * `TimeoutError` when none of that happened within
+	 * `timing.answerTimeoutMs`.
 	 */
-	#ask(message: TabMessage, done: () => boolean): Promise<void> {
+	#ask(
+		message: TabMessage & { grantId?: string },
+		done: () => boolean,
+	): Promise<void> {
 		if (!this.#session || this.#connection?.send(message) !== true)
 			return notConnected();
 		return new Promise((resolve, reject) => {
@@ -772,16 +790,27 @@ export class TabMcp extends EventTarget {
 			};
 			const check = (event?: Event) => {
 				const error = (event as Partial<TabMcpEventMap["error"]>)?.detail
-					?.error as { code?: string } | undefined;
+					?.error as
+					| { code?: string; for?: string; grantId?: string }
+					| undefined;
 				if (done()) settle();
 				else if (
-					error?.code === "store_unavailable" ||
-					error?.code === "unknown_id"
+					(error?.code === "store_unavailable" ||
+						error?.code === "unknown_id") &&
+					// It names the message it answers (relay 0.10.2); an older
+					// relay's answers every pending one (DEC-168).
+					(error.for === undefined ||
+						(error.for === message.type && error.grantId === message.grantId))
 				)
 					settle(error);
 				else if (this.#state !== "connected")
+					// Sent, but the answer cannot come: it may or may not have
+					// happened.
 					settle(
-						new DOMException("TabMcp: not connected", "InvalidStateError"),
+						new DOMException(
+							"TabMcp: the session ended before the relay answered",
+							"NetworkError",
+						),
 					);
 			};
 			const timer = setTimeout(
