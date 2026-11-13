@@ -385,9 +385,11 @@ on(
 				await mcp.registerTool({ name: "typed", description: "d", annotations: { readOnlyHint: true }, outputSchema: { type: "object", properties: { n: { type: "number" } } }, execute: () => ({ n: 2 }) });
 			})()`);
 			await Bun.sleep(50);
+			// Chrome 156 passes a string on as it is (the draft would JSON-encode
+			// it): what matters is that the call succeeds.
 			expect(await page.eval(`agent("noop", {})`)).toEqual({
 				ok: true,
-				value: '"Done."',
+				value: "Done.",
 			});
 			expect(await page.eval(`agent("structured", {})`)).toEqual({
 				ok: true,
