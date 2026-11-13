@@ -182,7 +182,7 @@ trial token that a script adds later counts for a `TabMcp` made after it.
 - A WebMCP call takes the same path as an AI app's: the arguments are checked against
   `inputSchema` (Chrome does not check them), a consequential tool asks (`onConfirm`, or
   the library's dialog, which names the caller "An agent in this browser"), and
-  `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Always allow" is
+  `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Allow until reload" is
   never offered or applied for these calls: there is no identity to remember it for.
 - The call resolves with what `execute` returned, which the browser hands the agent as
   JSON text. An MCP result goes out as its `structuredContent` if it has one, else as
@@ -305,7 +305,7 @@ const { tools } = await client.listTools();
 - Calls arrive with `client: { kind: "local", id, name }`, as given to `serve`. A `grant`
   in a message is ignored, so the other end cannot pass for an AI app of the relay.
 - A consequential tool still asks. The library's dialog names the caller
-  "Example assistant (this site's assistant)" and never offers "Always allow". A page
+  "Example assistant (this site's assistant)" and never offers "Allow until reload". A page
   that lets its own assistant run such tools without asking answers `onConfirm` itself
   for `request.client.kind === "local"`, and hands other calls to `mcp.confirmInPage`.
 - `serve` resolves with `{ close() }`; `options.signal` does the same. Closing aborts the
@@ -336,16 +336,19 @@ asks the user before every call ("Don't allow" or "Allow"), showing the AI app a
 arguments. A refusal reaches the AI app as an error result, and so does a call whose tool
 was removed while the user was asked.
 
-`alwaysAllow: true` adds "Always allow", which lets that tool run without asking for that
-AI app until the page is reloaded or the app is disconnected. It is off by default: it
+`alwaysAllow: true` adds "Allow until reload", which lets that tool run without asking for
+that AI app, with any arguments, until the page is reloaded or the app is disconnected.
+The connect dialog lists such tools under the app ("Runs without asking: …") with "Ask
+again", and a tool registered again unchanged (React's `useTool` on a remount) keeps its
+entry; one whose title or description changed is asked again. It is off by default: it
 lifts the only brake at run time, which is what a prompt injection needs, and the relay
 cannot help, since its one OAuth scope (`tools`) covers every tool of the page. Consent
 per tool is the page's. Turn it on only for tools whose calls the user need not check one
 by one.
 
 Tools are called while the user is in the AI app, so the dialog often opens in a tab in
-the background. "Allow" and "Always allow" can be clicked only once the page has been
-visible and focused for `confirmDelayMs` (750 ms) with the dialog open; leaving the page
+the background. "Allow" and "Allow until reload" can be clicked only once the page has
+been visible and focused for 750 ms with the dialog open; leaving the page
 disables them and coming back starts the wait again, so the click that brings the page
 forward cannot approve. One confirmation is shown at a time; the others wait, the shown
 one says how many, and each starts its own wait when it is shown (and again when another
@@ -396,8 +399,8 @@ asked and did not answer, e.g. your question timed out. The AI app then reads "T
 asked and did not answer." instead of "The user declined", and `toolcallend` has the
 outcome `unanswered`. Any other value, and a throw, is a refusal.
 
-`mcp.confirmInPage(request)` is the library's own dialog, for an `onConfirm` that
-handles only some calls itself.
+`mcp.confirmInPage(request, { document })` is the library's own dialog, for an
+`onConfirm` that handles only some calls itself (`document` defaults to the global one).
 
 ### Connecting and pairing
 
@@ -425,17 +428,21 @@ handles only some calls itself.
    shows the steps without commands. Each entry ends with the step that starts the
    sign-in: `/mcp` and Authenticate in Claude Code, `codex mcp login <name>` as the third
    line of Codex's command. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
-   revision, so its command turns that on first (for all of Codex's MCP servers;
-   `codex features disable mcp_2026_07_28` turns it off), and ChatGPT's entry names the
-   same command for its Mac app. The user adds the address to their AI app.
+   revision, so its command turns that on first. The steps are the minimum; the link at
+   the end of the help leads to the guide with the rest (ChatGPT's Mac app, turning the
+   Codex feature off, what to do when it fails). A page can link its own guide and give
+   its own steps (`ui.setup`, see [Texts and help of the dialogs](#texts-and-help-of-the-dialogs)).
+   The user adds the address to their AI app.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
    code with a Copy button, which the user types or pastes there. The code changes every
    2 minutes and after each use.
 4. Once the AI app connects, the dialog says so at the top: a check mark, "Claude
-   (claude.ai) is connected" and what to do next (close it and ask the app to use the
+   (claude.ai) is connected" (every connected app is named) and what to do next (close it and ask the app to use the
    page's tools); screen readers hear the same. The setup (address, code, help) moves
    behind "Connect another app", closed, so the next code does not appear in view; the
-   connected app is listed with a Disconnect button, and "Done" closes the dialog.
+   connected app is listed with a Disconnect button (and the tools it may run without
+   asking, with "Ask again"), and "Done" closes the dialog. A Disconnect the relay could
+   not save says so in the list ("The relay could not save this. Try again.").
    Opened again while an app is connected, the dialog starts like this, with the focus
    on Done.
 
@@ -479,7 +486,8 @@ own UI calls `newAddress()` from a click. Connected apps keep working after a re
 again; while the page is closed, they get "the page is not open".
 
 When another tab or program connects with the same address, it takes the address over:
-the page gets `disconnected` with reason `replaced` at once, then the event `replaced`,
+the page gets `statechange` to `disconnected` with reason `replaced` at once, then the
+event `replaced`,
 and does not reconnect by itself. Tabs of the same page say on a `BroadcastChannel` (per
 relay and storage key; it carries the address id, which is part of the address, never
 the secret) when the relay accepted their session, so `replaced` says which it probably
@@ -490,7 +498,7 @@ was:
   started (a claim of another address, or one heard while this tab was still connecting,
   does not count; a claim without an address, from a tab still on 0.15 or older, does). That message usually comes just after the takeover, so the
   library waits up to a second for it, and `replaced` may come that much after
-  `disconnected`. The usual cause, and harmless. Once the page has opened the default
+  the `statechange`. The usual cause, and harmless. Once the page has opened the default
   dialog, the library shows "Opened in another tab".
 - `false`: none did (or the browser has no `BroadcastChannel`). It may be a program with
   a copy of the address secret, and the AI apps paired with the address now talk to it.
@@ -551,16 +559,16 @@ network, a phone pausing the tab in the background, a relay restart; close codes
 connects again by itself: after about 5, 10, 20 and 40 seconds, then about every 60
 seconds (each wait varies by up to 20 %, so that the tabs of a restarted relay do not all
 come back at once), and at once when the tab comes back to the front or the network
-returns. `reconnecting` (the
-next attempt, its number and time) and the event `reconnecting` say so; `null` in the
-event means it stopped, connected again or after `disconnect()`. Calling `connect()`
-meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
+returns. Meanwhile `state` is `reconnecting` (while it waits and while it makes an
+attempt), `reconnecting` says which attempt is next and when, and `statechange` fires
+for each attempt it schedules; the `statechange` that leaves `connected` carries the
+`reason`. Calling `connect()` meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
 another tab taking over the address (`replaced`), an expired or idle session, or a
 refusal by the relay, and an attempt the relay refuses stops it (an unreachable relay is
-tried again); the event `error` then says why, just before `reconnecting` turns `null`,
-also when a `connect()` of the page waits on that attempt and rejects with the same
-error. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
-sets the waits (the last one repeats).
+tried again); the event `error` then says why, with `state` already `disconnected`, just
+before the `statechange` to `disconnected`, also when a `connect()` of the page waits on
+that attempt and rejects with the same error. `reconnect: false` turns it off; the waits
+are fixed.
 
 ### Keeping AI access on after a reload
 
@@ -575,7 +583,7 @@ mcp.addEventListener("grantschange", () => {
   if (mcp.grants.length > 0) localStorage.setItem(key, "1");
 });
 // Turned off by the user (`disconnect()`): stay off after the next reload.
-mcp.addEventListener("disconnected", (e) => {
+mcp.addEventListener("statechange", (e) => {
   if (e.detail.reason === "user") localStorage.removeItem(key);
 });
 turnOffButton.onclick = () => mcp.disconnect();
@@ -611,14 +619,17 @@ const mcp = new TabMcp({
 });
 
 // In your logout: the relay ends every AI connection of this page at once.
-logoutButton.onclick = () => { mcp.signOut(); /* then your own logout */ };
-// After a sign-in without a reload:
-await mcp.refreshIdentity();
+logoutButton.onclick = () => {
+  mcp.signOut().catch(() => {}); // settles once the relay removed the grants
+  // then your own logout
+};
+// After a sign-in without a reload: "bound", "refused" or "none".
+const identity = await mcp.refreshIdentity();
 ```
 
 The library asks the function after every connect. `identity` (`none`, `pending`,
 `bound`, `refused`, with the reason in `identityMessage`) and the event
-`identitychange` tell you whether the relay accepted it; when the function or the relay does not answer within `identityTimeoutMs` (15 s, counted from when the function is asked), it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
+`identitychange` tell you whether the relay accepted it; when the function or the relay does not answer within 15 s (counted from when the function is asked), it goes back to `none`. `signOut()` and `refreshIdentity()` reject with an `InvalidStateError` while the page is not connected (`signOut()` also on a relay that pairs by code); `identity` is cleared either way. An AI app signed in as someone else gets "This AI tool is logged in as someone other
 than the page."
 
 The connect dialog follows `identity`: it shows the address and "When your AI app asks,
@@ -628,12 +639,43 @@ says what is missing: "Checking your sign-in…" (`pending`), "Sign in to this p
 
 ### Your own UI
 
-Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()`,
-`startPairing()` and `stopPairing()` (codes come only while pairing is on),
-`revoke(grantId)`, the properties `state`, `address`, `pairingCode`, `grants`,
-`reconnecting` and `tools`, and the events `statechange`, `connected`, `disconnected`,
-`pairingcode`, `grantschange`, `reconnecting`, `toolschange`, `replaced` (with
-`detail.sibling`, see above) and `error`. For an activity log, `toolcall`
+Instead of `showConnectDialog()`, use the methods, properties and events below.
+
+| Methods | |
+|---|---|
+| `connect(options?)` | resolves with the session (`SessionInfo`) |
+| `disconnect()` | ends the session at once |
+| `newAddress()` | resolves once the new address is in use (connected again if it was on) |
+| `startPairing()`, `stopPairing()` | codes come only while pairing is on |
+| `revoke(grantId)` | resolves once the relay removed the grant |
+| `signOut()` | resolves once the relay removed the grants (identity binding) |
+| `refreshIdentity()` | resolves with the new `identity`; a `TypeError` without `identityAssertion` |
+
+A method that asks the relay rejects with an `InvalidStateError` while the page is not
+connected, and when the session ends before the relay answered. `revoke()` and `signOut()`
+also reject with the relay's refusal (its `code` is `store_unavailable` when the relay
+could not save the change: try again; `unknown_id` for a grant the relay does not know),
+and with a `TimeoutError` when the relay has not answered within 15 s.
+
+The properties are `state` (`disconnected`, `connecting`, `connected`, `reconnecting`),
+`session` (while connected; `session.address` is the MCP address, `session.appName` the
+name the relay shows), `reconnecting` (the next attempt, while `state` is
+`reconnecting`), `pairingCode`, `grants`, `identity`, `identityMessage`, `tools` and
+`hasRelay`.
+
+Every event's `detail` is an object. A change event names the new values like the
+properties (`grantschange` has `grants`), and a value that is gone is `undefined`:
+
+| Event | `detail` |
+|---|---|
+| `statechange` | `{ state, reason? }`: `reason` when a session ended, or when `disconnect()` or `newAddress()` ended connecting or reconnecting; also for each reconnect attempt |
+| `grantschange` | `{ grants }` |
+| `pairingcode` | `{ pairingCode }` |
+| `identitychange` | `{ identity, identityMessage }` |
+| `toolschange` | `{ tools }` |
+| `replaced` | `{ sibling }` (see above) |
+| `error` | `{ error }` |
+| `toolcall`, `toolcallend` | the call, see below | For an activity log, `toolcall`
 and `toolcallend` report every call by an AI app (or, with `webmcp`, an agent in the
 browser, or the assistant on a served port): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
 `error`, `declined`, `unanswered` or `cancelled`), result and duration.
@@ -658,8 +700,7 @@ add it?", as data for your own UI. An entry of its own, out of the core, and not
 build. `setupInstructions(serverName, address)` returns one entry per AI app (Claude,
 ChatGPT, Claude Code, Codex, in that order): `id` (`claude`, `chatgpt`, `claude-code`,
 `codex`), `app` (its name as shown), `text` (what to do), `command` (lines to run, for
-Claude Code and Codex) and `note` (text and code parts, for ChatGPT, Claude Code and
-Codex). Every string is plain
+Claude Code and Codex) and `note` (text and code parts, for Claude Code and Codex). Every string is plain
 text: set it with `textContent`. The commands name the server by a label made from
 `serverName` and contain the address only when every shell reads both as plain words (see
 step 2 above), so they are safe to show with a Copy button; for an address that is not
@@ -681,16 +722,55 @@ for (const { app, text, command, note } of setupInstructions("notes", session.ad
 guide.href = SETUP_GUIDE;
 ```
 
+### Texts and help of the dialogs
+
+Every text of the dialogs is in one table, [`src/strings.ts`](src/strings.ts) (the type
+`DialogStrings`). Pass your own for some or all keys as `ui.strings`; the rest stay
+English. `{name}` placeholders are filled in: names of tools and AI apps (isolated, so
+they cannot reorder your sentence), the code, counts. Where English needs two forms there
+are two keys (`waitingOne`, `waitingMany`). `lang` and `dir` are the language and direction
+set on every dialog: set them with your texts.
+
+`ui.setup` changes the help in the connect dialog: `guide` is the link at its end
+(default the guide on ractive.ch; `null` for none, for example on your own relay, and
+then your own `instructions` too, since the default steps refer to the guide), and
+`instructions(serverName, address)` returns the steps per AI app, each `{ app, text,
+command?, note? }` (default `setupInstructions` of `@ractive-ch/tab-mcp-client/setup`,
+which you can filter or extend).
+
+```ts
+import { setupInstructions } from "@ractive-ch/tab-mcp-client/setup";
+
+const mcp = new TabMcp({
+  relay: "https://relay.example",
+  server: { name: "notizen", version: "1.0.0" },
+  ui: {
+    strings: {
+      lang: "de",
+      connectTitle: "KI-App verbinden",
+      confirmTitle: "{tool} erlauben?",
+      allow: "Erlauben",
+      deny: "Nicht erlauben",
+    },
+    setup: {
+      guide: "https://example.com/hilfe/ki",
+      instructions: (name, address) =>
+        setupInstructions(name, address).filter((step) => step.id !== "codex"),
+    },
+  },
+});
+```
+
 ### Styling the default dialogs
 
 The default dialogs bring their own stylesheet, a constructed stylesheet added to
 `document.adoptedStyleSheets`, so a strict CSP needs no `style-src` exception. It uses
 the page's font and system colours, and follows the page's `color-scheme`: declare
 `color-scheme: light dark` (or `<meta name="color-scheme" content="light dark">`) and the
-dialogs are dark in dark mode. They fit a 320 px wide screen (below 30rem the code's Copy goes under the code), and they open (and show the
-check mark of a connected app) without animation when the user prefers reduced motion.
-Their texts are English, so they carry `lang="en"` and `dir="ltr"` whatever the page's
-language and direction.
+dialogs are dark in dark mode. They fit a 320 px wide screen (below 30rem the code's Copy
+goes under the code), and they open without animation when the user prefers reduced
+motion. The page's rules for elements (`button { … }`, `p { color: … }`, a reset) do not
+reach into them, nor does `body { pointer-events: none }` of a modal layer (Radix, shadcn).
 
 To adjust single values, set these custom properties on `:root` or on `.tab-mcp-dialog`:
 
@@ -717,37 +797,12 @@ To adjust single values, set these custom properties on `:root` or on `.tab-mcp-
 | `--tab-mcp-code-size` | `2em` | the pairing code |
 | `--tab-mcp-arguments-height` | `min(50vh, 24rem)` | the arguments scroll beyond this |
 
-For more, write CSS for the class names. Each of the dialogs' rules has the specificity
-of one class, so the page's rules for elements (`button { … }`, a reset's
-`* { border-width: 0 }`) do not change them: every element in a dialog inherits the
-dialog's colour, buttons reset `width`, `text-transform` and `letter-spacing`, and the
-dialogs set `pointer-events: auto` (so they work while a modal layer of Radix or shadcn
-sets `body { pointer-events: none }`). The rules for hover, focus and disabled, and
-for the primary and danger buttons, have one class and two elements (0,1,2), so the page's
-`button:hover`, `button:focus` or `button:disabled` (0,1,1) do not change those either. A
-rule with two classes, such as `.tab-mcp-dialog .tab-mcp-primary` (0,2,0), wins over all
-of them. A page rule of one element and one pseudo-class still changes a property that the
-dialogs set only in their base rules (for example `button:hover { padding: 0 }`). Write
-overrides outside cascade layers: the dialogs' rules are not in a layer, so they win over
-any layered rule. All dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
-`.tab-mcp-connect` (with `.tab-mcp-status`, `.tab-mcp-address`, `.tab-mcp-code`,
-`.tab-mcp-code-value`, `.tab-mcp-code-used`, `.tab-mcp-help`, `.tab-mcp-apps`,
-`.tab-mcp-app`, `.tab-mcp-new-address-row` (New address and its line),
-`.tab-mcp-new-address-question`, `.tab-mcp-actions`, the button `.tab-mcp-retry` (Connect
-again, while not connected); once an app is
-connected `.tab-mcp-success`, with `.tab-mcp-success-icon` (the check mark, an inline
-`svg` in `currentColor`), `.tab-mcp-success-title` and `.tab-mcp-success-next`, and the
-button `.tab-mcp-setup-toggle`, "Connect another app", with `aria-expanded`, which shows
-and hides `.tab-mcp-setup`, the address, code and help), the confirmation is
-`.tab-mcp-confirm` (with `.tab-mcp-description`, `.tab-mcp-arguments`,
-`.tab-mcp-scroll-note`, `.tab-mcp-always-note`, `.tab-mcp-waiting`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
-`.tab-mcp-always`, with `alwaysAllow`), and the notice after `replaced` is
-`.tab-mcp-replaced` (with `.tab-mcp-description`, `.tab-mcp-status`, and the buttons
-`.tab-mcp-replaced-close` and `.tab-mcp-new-address`). Buttons are `.tab-mcp-primary` (the one
-next step: Copy the address until an app is connected, then Done, Connect again while not connected, "Don't allow", the safe choice, and the notice's "New
-address", or its "Close" after a sibling tab), `.tab-mcp-danger` (Disconnect and
-"Disconnect and get new address") or plain; every Copy button is also `.tab-mcp-copy`, and
-the Disconnect buttons in the apps list are `.tab-mcp-disconnect`. For example:
+For more, override with two classes, `.tab-mcp-dialog .tab-mcp-x`, outside cascade layers;
+a rule with one class does not win. The class names that stay are the dialogs:
+`.tab-mcp-dialog` (all of them), `.tab-mcp-connect`, `.tab-mcp-confirm` and
+`.tab-mcp-replaced`; and the kinds of button: `.tab-mcp-primary` (the one next step),
+`.tab-mcp-danger` (what disconnects apps) and `.tab-mcp-copy` (every Copy). Other class
+names inside the dialogs may change with any release. For example:
 
 ```css
 :root {
@@ -793,20 +848,22 @@ function TodoList() {
   its first render. A changed `relay` or `server.name` makes a new one (with a warning);
   other changes are ignored, except that `onConfirm` and `identityAssertion` are always
   the latest ones, also when added or removed after the first render (without
-  `onConfirm`, the library's dialog asks). It disconnects its instance when it unmounts. `<TabMcpProvider
+  `onConfirm`, the library's dialog asks). It disconnects its instance when it unmounts (a moment later, so that StrictMode's
+  simulated unmount does not cancel a `connect()` a child started). `<TabMcpProvider
   client={mcp}>` uses an instance of your own instead (and leaves it connected).
 - `useTabMcp()` returns the instance, for everything the hooks do not cover
   (`newAddress()`, `signOut()`, `refreshIdentity()`, `revoke()`, …).
-- `useTabMcpState()` returns `{ state, address, session, grants, pairingCode, identity,
-  identityMessage, reconnecting, tools }` through `useSyncExternalStore`: the component
+- `useTabMcpState()` returns `{ state, session, grants, pairingCode, identity,
+  identityMessage, reconnecting, tools }` (the address is `session?.address`) through `useSyncExternalStore`: the component
   renders again only when one of them changed. On the server and during hydration it is
   `disconnected`.
-- `useTool(tool, deps?, options?)` registers the tool while the component is mounted and
+- `useTool(tool, options?)` registers the tool while the component is mounted and
   removes it on unmount. `execute` is always the latest closure, so it may use the
   component's current props and state without registering again; the tool is registered
   again only when its name, title, description, input or output schema or annotations
   change, or `options.webmcp` or `options.exposedTo` ([WebMCP](#webmcp); `webmcp` on the
-  provider turns it on), or one of `deps`. StrictMode's double mount registers it once at a time. A duplicate name or an
+  provider turns it on). Registered again unchanged, a tool allowed until reload stays
+  allowed. StrictMode's double mount registers it once at a time. A duplicate name or an
   invalid tool is thrown from the component's render, for an error boundary. Tools that
   read state right after another tool changed it should read it from a store (as the
   example does) or a ref ([Tools in a `useState` app](#tools-in-a-usestate-app)), not

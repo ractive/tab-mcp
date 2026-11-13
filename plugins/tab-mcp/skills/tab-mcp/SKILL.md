@@ -139,13 +139,12 @@ When the connection breaks (reason `network`, `heartbeat` or `shutdown`: a dropp
 network, a phone pausing the tab in the background, a relay restart), the library
 connects again by itself: after 5, 10, 20 and 40 s, then every 60 s, and at once when the
 tab comes back to the front or the network returns. Do not write your own retry loop;
-show the property and event `reconnecting` (the next attempt, its number and time; once
-it stopped, the event carries `null` and the property is `undefined`; when the relay
-refused an attempt, `error` says why just before). It never reconnects after `disconnect()`, a new address, another
+show `state === "reconnecting"` and the property `reconnecting` (the next attempt, its
+number and time); `statechange` fires for each attempt, and when the relay refused one,
+`error` says why just before the `statechange` to `disconnected`. It never reconnects after `disconnect()`, a new address, another
 tab taking over the address (`replaced`), an expired or idle session or a refusal by the
 relay, and a first `connect()` that fails is not retried (show the error and let the
-user try again). `reconnect: false`
-turns it off, `reconnect: { delaysMs: [...] }` sets the waits.
+user try again). `reconnect: false` turns it off.
 
 The library does not connect on page load by itself: if the page offers a "Keep AI
 access on" switch that the user turned on, call `connect({ resume: true })` on load.
@@ -156,12 +155,19 @@ users to it when someone may be guessing codes. A custom UI calls `mcp.newAddres
 a click.
 
 For a custom UI, use `connect()`, `startPairing()`/`stopPairing()` (codes come only while
-pairing is on), `revoke(grantId)`, `disconnect()`, the properties `address`,
-`pairingCode` and `grants`, and the events `connected`, `disconnected`, `pairingcode`,
-`grantschange`, `statechange`, `reconnecting`, `replaced` and `error`.
+pairing is on), `revoke(grantId)` (resolves once the relay removed the grant),
+`disconnect()`, the properties `state` (`disconnected`, `connecting`, `connected`,
+`reconnecting`), `session` (its `address` is the MCP address), `pairingCode` and
+`grants`, and the events `statechange` (`{ state, reason? }`, `reason` when a session
+ended), `pairingcode` (`{ pairingCode }`), `grantschange` (`{ grants }`), `replaced` and
+`error`. Every detail is an object; a value that is gone is `undefined`. Methods that ask
+the relay reject with an `InvalidStateError` while not connected. The dialogs' texts can
+be replaced (`ui: { strings }`, keys in the client's `src/strings.ts`, with `lang` and
+`dir`), and their help gets its own guide link and steps (`ui: { setup: { guide,
+instructions } }`).
 
-When another tab or program takes over the address, the page gets `disconnected` (reason
-`replaced`) and then, up to a second later, `replaced`. Once the page has opened the
+When another tab or program takes over the address, the page gets a `statechange` to
+`disconnected` (reason `replaced`) and then, up to a second later, `replaced`. Once the page has opened the
 default dialog, the library says so itself: "Opened in another tab" when a tab of the
 same page said on its `BroadcastChannel` that its session started, otherwise a warning
 with "New address". A custom UI does the same with `event.detail.sibling`: `true` is the
@@ -191,7 +197,7 @@ const served = await mcp.serve(port, { client: { id: "assistant", name: "Shop as
   only to a frame whose origin you checked, with that origin as the `postMessage` target,
   never `"*"`.
 - Calls arrive with `client: { kind: "local", id, name }`. A consequential tool still asks
-  (the dialog names "Shop assistant (this site's assistant)", no "Always allow"); a port
+  (the dialog names "Shop assistant (this site's assistant)", no "Allow until reload"); a port
   has none of the relay's limits.
 - `served.close()` (or `options.signal`) ends it; close it when the channel is gone.
   Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
@@ -221,8 +227,9 @@ The page then asks before every call: a dialog names the AI app and shows the ar
 "Don't allow" has the focus, and "Allow" turns on only after the page has been visible and
 focused for 750 ms with the dialog open (leaving the page starts the wait again).
 Invisible and direction-changing characters in the arguments are shown as `\uXXXX`. The
-dialog offers "Don't allow" and "Allow"; "Always allow" (that tool runs without asking for
-that AI app until a reload or a disconnect) appears only with `alwaysAllow: true` on
+dialog offers "Don't allow" and "Allow"; "Allow until reload" (that tool runs without asking for
+that AI app, with any arguments, until a reload or a disconnect; the connect dialog lists
+it with "Ask again") appears only with `alwaysAllow: true` on
 `TabMcp`. Leave it off unless the user really need not check each call: it lifts the only
 brake on a prompt injection, and the relay's one `tools` scope covers every tool, so
 consent per tool is the page's. A refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
@@ -232,7 +239,7 @@ was asked and did not answer, e.g. the page's own question timed out: the AI app
 "The user was asked and did not answer." and `toolcallend` has the outcome
 `unanswered`); anything else, and a throw, is a refusal. `request` has
 `tool`, `arguments`, `client` and `signal`; close the question when `signal` aborts.
-`mcp.confirmInPage(request)` is the library's dialog, for example for
+`mcp.confirmInPage(request, { document? })` is the library's dialog, for example for
 `client.kind === "webmcp"` or `"local"`. Without `onConfirm` and without a `document`,
 calls are declined.
 
@@ -249,10 +256,10 @@ await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only
   browser (built in, or an extension) then call the tools without pairing. It is a
   change in what the page exposes: turn it on only when the user wants that.
 - Tools with `consequentialHint` are left out unless registered with `{ webmcp: true }`
-  (React: `useTool(tool, deps, { webmcp: true })`): such an agent often drives the tab
+  (React: `useTool(tool, { webmcp: true })`): such an agent often drives the tab
   and can click Allow itself. `{ webmcp: false }` keeps any tool out.
 - A WebMCP call gets the same argument check and confirmation (the dialog names the caller
-  "An agent in this browser", never offers "Always allow"), and fires `toolcall` and
+  "An agent in this browser", never offers "Allow until reload"), and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`.
 - The agent gets what `execute` returned. A failure (invalid arguments, "Don't allow", a
   tool that is gone, a thrown error, an `isError` result) comes back as

@@ -852,7 +852,6 @@ describe("deciding whether a page tool may run", () => {
 describe("the panel's status", () => {
 	const down = {
 		state: "disconnected" as const,
-		reconnecting: false,
 		grants: 0,
 		aiOn: false,
 		replaced: false,
@@ -861,7 +860,7 @@ describe("the panel's status", () => {
 	test("down with AI access left on is retrying, not off (EQ 3)", () => {
 		expect(panelStatus(down)).toBe("off");
 		expect(panelStatus({ ...down, aiOn: true })).toBe("retrying");
-		expect(panelStatus({ ...down, reconnecting: true })).toBe("retrying");
+		expect(panelStatus({ ...down, state: "reconnecting" })).toBe("retrying");
 		// Taken over: nothing connects by itself.
 		expect(panelStatus({ ...down, aiOn: true, replaced: true })).toBe("off");
 		expect(panelStatus({ ...down, state: "connecting", aiOn: true })).toBe(

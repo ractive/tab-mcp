@@ -11,7 +11,6 @@ import {
 	type ButtonHTMLAttributes,
 	createContext,
 	createElement,
-	type DependencyList,
 	type MouseEvent,
 	type ReactElement,
 	type ReactNode,
@@ -43,8 +42,7 @@ import {
 /** What `useTabMcpState()` returns: one object per change, the same object otherwise. */
 export interface TabMcpSnapshot {
 	state: ConnectionState;
-	/** The MCP address to give to AI apps, while connected. */
-	address: string | undefined;
+	/** The session while connected; `session.address` is the MCP address to give to AI apps. */
 	session: SessionInfo | undefined;
 	/** The AI apps connected to this address. */
 	grants: readonly Grant[];
@@ -54,7 +52,7 @@ export interface TabMcpSnapshot {
 	identity: IdentityState;
 	/** Why the relay refused the identity (`identity: "refused"`). */
 	identityMessage: string | undefined;
-	/** While the library connects again by itself after the connection broke. */
+	/** While `state` is `reconnecting`: the next attempt and when it starts. */
 	reconnecting: ReconnectingInfo | undefined;
 	/** Names of the registered tools. */
 	tools: readonly string[];
@@ -65,7 +63,6 @@ const EMPTY: readonly never[] = Object.freeze([]);
 /** What the server renders, and what hydration starts from. */
 const SERVER_SNAPSHOT: TabMcpSnapshot = Object.freeze({
 	state: "disconnected",
-	address: undefined,
 	session: undefined,
 	grants: EMPTY,
 	pairingCode: undefined,
@@ -77,12 +74,9 @@ const SERVER_SNAPSHOT: TabMcpSnapshot = Object.freeze({
 
 const STATE_EVENTS = [
 	"statechange",
-	"connected",
-	"disconnected",
 	"grantschange",
 	"pairingcode",
 	"identitychange",
-	"reconnecting",
 	"toolschange",
 ] as const satisfies readonly (keyof TabMcpEventMap)[];
 
@@ -117,7 +111,6 @@ class Store {
 		const tools = mcp.tools;
 		const next: TabMcpSnapshot = {
 			state: mcp.state,
-			address: mcp.address,
 			session: mcp.session,
 			grants: mcp.grants,
 			pairingCode: mcp.pairingCode,
@@ -218,6 +211,8 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 	const mcp = props.client ?? (current as { mcp: TabMcp }).mcp;
 
 	const previous = useRef<TabMcp | undefined>(undefined);
+	/** The instance the mounted effect is for; `undefined` after its cleanup. */
+	const active = useRef<TabMcp | undefined>(undefined);
 	useEffect(() => {
 		if (
 			previous.current !== undefined &&
@@ -230,7 +225,16 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 		}
 		previous.current = mcp;
 		if (props.client !== undefined) return;
-		return () => mcp.disconnect();
+		active.current = mcp;
+		// Disconnected a moment later, unless the effect ran again for the same
+		// instance meanwhile: StrictMode's simulated unmount and mount would
+		// otherwise cancel a `connect()` that a child's effect started (CU 24).
+		return () => {
+			active.current = undefined;
+			queueMicrotask(() => {
+				if (active.current !== mcp) mcp.disconnect();
+			});
+		};
 	}, [mcp, props.client]);
 
 	return createElement(Context.Provider, { value: mcp }, props.children);
@@ -266,12 +270,12 @@ export type UseToolOptions = Omit<RegisterToolOptions, "signal">;
  * aborted on unmount). `execute` is always the latest one, so a new closure
  * on each render does not register again; the tool is registered again only
  * when its name, title, description, input or output schema or annotations
- * change, or `options.webmcp` or `options.exposedTo`, or one of `deps`. A duplicate name or an invalid tool is
- * thrown from the component's next render, for an error boundary.
+ * change, or `options.webmcp` or `options.exposedTo` (a tool allowed until reload stays allowed when it is
+ * registered again unchanged). A duplicate name or an invalid tool is thrown
+ * from the component's next render, for an error boundary.
  */
 export function useTool<Input extends object = Record<string, unknown>>(
 	tool: Tool<Input>,
-	deps: DependencyList = EMPTY,
 	options: UseToolOptions = {},
 ): void {
 	const mcp = useTabMcp();
@@ -291,7 +295,7 @@ export function useTool<Input extends object = Record<string, unknown>>(
 		options.webmcp,
 		options.exposedTo,
 	]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: `shape` and `deps` stand for the tool and its options; `execute` is read through the ref
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `shape` stands for the tool and its options; `execute` is read through the ref
 	useEffect(() => {
 		const controller = new AbortController();
 		const { execute: _, ...fields } = latest.current;
@@ -308,7 +312,7 @@ export function useTool<Input extends object = Record<string, unknown>>(
 				if (!controller.signal.aborted) setFailure({ error });
 			});
 		return () => controller.abort();
-	}, [mcp, shape, ...deps]);
+	}, [mcp, shape]);
 }
 
 /** A tool call of an AI app, as `useToolCalls()` lists it. */
@@ -369,13 +373,13 @@ export interface ConnectButtonProps
 const LOST_AFTER_ATTEMPTS = 3;
 
 /** The default label of `ConnectButton`. */
-export function connectLabel(state: TabMcpSnapshot): string {
+function connectLabel(state: TabMcpSnapshot): string {
 	if (state.state === "connected" && state.grants.length > 0)
 		return state.grants.length === 1
 			? "AI app connected"
 			: `${state.grants.length} AI apps connected`;
-	if (state.reconnecting !== undefined)
-		return state.reconnecting.attempt > LOST_AFTER_ATTEMPTS
+	if (state.state === "reconnecting")
+		return (state.reconnecting?.attempt ?? 0) > LOST_AFTER_ATTEMPTS
 			? "Connection lost, retrying…"
 			: "Reconnecting…";
 	if (state.state === "connecting") return "Connecting…";
@@ -408,10 +412,7 @@ export function ConnectButton({
 		"button",
 		{
 			type: "button",
-			"data-state":
-				state.reconnecting !== undefined && state.state !== "connected"
-					? "reconnecting"
-					: state.state,
+			"data-state": state.state,
 			...rest,
 			onClick: (event: MouseEvent<HTMLButtonElement>) => {
 				onClick?.(event);

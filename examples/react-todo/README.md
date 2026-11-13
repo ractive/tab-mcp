@@ -16,7 +16,7 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
 
 The live version at <https://ractive.ch/tab-mcp/examples/todo/> is based on this one; it
 also keeps the list in the browser, keeps AI access on after a reload, registers the
-tools with WebMCP and offers "Always allow". All live examples:
+tools with WebMCP and offers "Allow until reload". All live examples:
 <https://ractive.ch/tab-mcp/>.
 
 The list is a small external store (`src/todos.ts`) read with `useSyncExternalStore`, so

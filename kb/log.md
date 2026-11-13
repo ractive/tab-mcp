@@ -1,5 +1,9 @@
 # Log
 
+## 2026-11-14
+
+- Iteration 38 (iteration J of the review, `iteration/38-client-api`, breaking): one event convention (object details, `undefined`), `reconnecting` a `ConnectionState`, `statechange` with `reason` instead of `connected`/`disconnected`/`reconnecting` (CU 10); `revoke()`, `signOut()`, `refreshIdentity()`, `newAddress()` settle on the relay's answer, `revoke()` rejects with `store_unavailable`; `confirmInPage(request, { document })`; the three delays constants, `reconnect` a boolean, `address`/`appName`/`pairing` and `useTool`'s `deps` gone (CU 17, 18); every dialog text in `src/strings.ts` with `ui: { strings }`, `ui: { setup: { guide, instructions } }`, shorter default steps (CU 5, 20); "Allow until reload" listed with Ask again and kept across `useTool` re-registration (CU 11); the styling contract cut to the dialogs and button kinds (CU 16); StrictMode-safe provider (CU 24); `ui.ts` split into confirm, connect and a shared chunk with one `render()` (CU 19); core 6322 of 6400 B; the relay answers a failed `identity.logout` with `store_unavailable`; DEC-149 to DEC-153
+
 ## 2026-11-13
 
 - Iteration 39 (`iteration/39-extension-look`, owner: Overmark's design language on tab-mcp for Chrome): the side panel and the question window are paper and ink on Overmark's tokens, every used pair held to its contrast in light and dark by `test/contrast.test.ts` (button and field borders were 1.24:1); sections on paper instead of cards, no amber button (DEC-161), switches in ink with a tool's "Ask first" drawn as one, pills and notices on tints, a red armed second click, one focus ring, reduced motion, forced colours, the address shown whole and "Ask first" explained in a line instead of tooltips, the badge's colours in `src/look.ts`; an e2e "look" test (no sideways scroll at 345, 360 and 420 px, the tokens as computed); design in `kb/design/extension-look.md` (DEC-160 to DEC-163)

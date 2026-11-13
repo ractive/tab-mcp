@@ -43,9 +43,9 @@ export function App(props: { relay: string; todos: TodoList }) {
 }
 
 function Status() {
-	const { state, grants, reconnecting } = useTabMcpState();
+	const { state, grants } = useTabMcpState();
 	let text = "Not connected.";
-	if (reconnecting !== undefined) text = "Connection lost, reconnecting…";
+	if (state === "reconnecting") text = "Connection lost, reconnecting…";
 	else if (state === "connecting") text = "Connecting…";
 	else if (state === "connected")
 		text =

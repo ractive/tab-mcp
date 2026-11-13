@@ -3136,6 +3136,150 @@ least one grant (`grantschange`, and `statechange` for a connection whose grants
 first); Turn off still clears it. A page whose apps were all disconnected keeps the flag:
 the user may add another app.
 
+## DEC-149: One connection event: `statechange` with the reason; object details
+
+2026-11-14, iteration 38 (review finding CU 10). Owner: breaking changes before 1.0, no
+compatibility shims.
+
+- `ConnectionState` is `disconnected`, `connecting`, `connected` or `reconnecting`.
+  `reconnecting` covers the waits and the attempts of reconnecting by itself (an attempt
+  was `connecting` before, so a UI flipped between "Reconnecting…" and "Connecting…").
+  The `reconnecting` property stays for the attempt's number and time; `statechange`
+  fires for each attempt scheduled, so a label such as "Connection lost, retrying…" after
+  three attempts follows without a separate event. The `reconnecting` event is gone.
+- `statechange` stays and `connected`/`disconnected` go, not the other way round: the
+  pair covered two of four states, so a UI that shows `connecting` or `reconnecting`
+  listened to `statechange` anyway, and dropping `statechange` would have needed two
+  new events. What the pair carried moves: the session is `mcp.session`, and the reason a
+  session ended is `statechange`'s `reason`, set only on the change from `connected` (to
+  `disconnected`, or to `reconnecting` when it broke). The WebSocket close code is not
+  reported any more; nobody read it.
+- Reconnecting is decided before the page hears of the end: the `statechange` already
+  says `reconnecting`, and a `connect()` from its listener makes the first attempt at
+  once instead of opening a second connection.
+- A refusal that stops reconnecting: `error` is emitted with `state` already
+  `disconnected` (set without an event), then the `statechange` to `disconnected`, unless
+  the `error`'s listener connected again meanwhile. A `connect()` from that listener starts
+  afresh with the user-activation check, as DEC-138 intended, and is not undone.
+- Every event detail is an object. A change event names its new values like the
+  properties it changes (`grantschange` `{ grants }`, `pairingcode` `{ pairingCode }`,
+  `identitychange` `{ identity, identityMessage }`), and a value that is gone is
+  `undefined`, never `null`.
+- Cost in the core: none; the event and the three getters that went (DEC-151) pay for
+  the promises of DEC-150.
+
+## DEC-150: Methods that ask the relay settle on its answer
+
+2026-11-14, iteration 38 (review finding CU 10). Amends DEC-095 (`newAddress()`'s result)
+and the identity methods of iteration 7.
+
+- `revoke(grantId)` resolves once the grant is gone from `grants` (the relay's
+  `grant.removed`), at once for a grant that is not listed. It rejects with an
+  `InvalidStateError` while not connected (only the relay can revoke) and when the
+  session ends first, and with the relay's error when the relay sends one meanwhile: a
+  relay `error` now carries its `code` in the `error` event, `store_unavailable` (iteration
+  B: the store failed, try again) or `unknown_id`. The connect dialog shows "The relay could
+  not save this. Try again." for the first and "Could not disconnect the app. Try again."
+  for the rest.
+- `signOut()` clears `identity` at once, as before, and resolves once the relay removed
+  the grants (it sends `grant.removed` for each). It rejects with an `InvalidStateError`
+  unless connected to a relay that pairs by `oidc`: a code relay answers
+  `identity.logout` with an error and removes nothing, so a promise would never settle. A
+  relay whose store fails during the sign-out answers `store_unavailable` (since this
+  iteration), and the promise rejects with it; one that answers nothing at all, or a grant
+  that expired and so never gets a `grant.removed`, ends in a `TimeoutError` after 15 s
+  (`revoke()` the same). Only `store_unavailable` and `unknown_id` count as the relay's
+  answer: an error about another message does not settle the promise. A logout that
+  should not wait calls `signOut().catch(() => {})`.
+- `refreshIdentity()` resolves with the new `identity` (`bound`, `refused` or `none`):
+  a refusal is an outcome, not an error. It rejects with an `InvalidStateError` while
+  not connected and with a `TypeError` without `identityAssertion`, where it resolved `false`; the library's
+  own call after `session` happens only with a hook.
+- `newAddress()` resolves with nothing; the new session is `mcp.session`. `connect()`
+  keeps resolving with the session: it is what the caller asked for.
+- The rule: a method whose effect happens at the relay returns a promise that settles on
+  the relay's answer, and rejects with an `InvalidStateError` where it cannot ask.
+- `registerTool` stays as DEC-010 has it (synchronous work, a programming error as a
+  rejection); the class's doc example awaits it. A throw would be the one exception to
+  the rule above, and the owner chose the rejection.
+
+## DEC-151: The waits are constants; three getters and `useTool`'s `deps` go
+
+2026-11-14, iteration 38 (review findings CU 17, CU 18). Amends DEC-081 and DEC-087.
+
+- `confirmDelayMs` (750 ms), `identityTimeoutMs` (15 s) and `reconnect.delaysMs` (5, 10,
+  20, 40, then 60 s, each ±20 %) are no longer options: only the library's own tests set
+  them. The connection waits are an exported object `timing` of `tab-mcp.ts`
+  (`reconnectDelaysMs`, and `answerTimeoutMs`, which also bounds the wait for the relay's
+  answer to `revoke()` and `signOut()`, DEC-150), which the
+  entry does not export and tests change (`setTiming` in the helpers); the confirmation's
+  delay is `ALLOW_DELAY_MS`, and tests pass `allowDelayMs` to the internal `confirmDialog`.
+  The validation code and the 500 ms floor (it guarded a page's value) are gone.
+  `reconnect` is a boolean.
+- The getters `address` (it was `session.address`), `appName` (the relay echoes the page's
+  name in `session.appName` unless it configures one) and `pairing` (the page called
+  `startPairing()` itself) go. `exposedTo` stays (owner: it is passed on to WebMCP since
+  iteration 34).
+- `useTool(tool, options?)`: `deps` re-registered the same tool, which costs a
+  `list_changed`, drops "Allow until reload" and ends a pending confirmation with "The
+  tool is no longer available". DEC-081 said it could be challenged; no example used it.
+- `connectLabel` is no longer exported (undocumented; a page that wants its own label
+  passes `children`). `useToolCalls` stays: the todo examples use it.
+
+## DEC-152: The dialogs' texts in one table; the help's guide and steps an option
+
+2026-11-14, iteration 38 (review findings CU 5, CU 20, CU 19, CU 16). Extends DEC-148 and
+DEC-118.
+
+- Every text of the dialogs is a key of `STRINGS` (`src/strings.ts`, type
+  `DialogStrings`). `ui: { strings }` replaces keys; the rest stay English. Placeholders
+  are `{name}` in plain strings, not functions: the table can come from a JSON file, and
+  a name is put in as an isolated `<bdi dir="ltr">`, which a function returning a string
+  could not keep. Where English needs a plural there are two keys (`…One`, `…Many`);
+  languages with more forms get the closest two. `lang` and `dir` are keys of the table,
+  set on every dialog, so a page that translates sets them with the texts (DEC-148's
+  `lang="en"`/`dir="ltr"` are the defaults).
+- The text that goes to the AI app (`CONFIRMED_IN_TAB` in `tools/list`) is not a dialog
+  text and stays English.
+- A Copy button's accessible name is its label key (`copyAddress`, "Copy address") until
+  it is pressed; while it says "Copied" or "Press Ctrl+C", the name is what it shows and
+  that is what is announced. Before, the announcements named the noun ("Address copied",
+  "Press ⌘C: address selected"), which multiplied the keys; the user has just pressed the
+  button that names it.
+- `ui: { setup: { guide, instructions } }`: the help's link (default the guide on
+  ractive.ch, `null` for none, for a self-hosted relay) and the steps per AI app
+  (`instructions(serverName, address)`, default `setupInstructions`). The default steps
+  are the minimum: ChatGPT's Mac app and turning Codex's feature off are left to the
+  guide, which follows the apps' menus without a library release.
+- `ui.ts` is split into `dialog.ts` (the stylesheet, elements, texts and Copy, a shared
+  chunk), `confirm.ts` and `connect.ts` (with the takeover notice), so a confirmation
+  alone (a page without a relay) loads no connect dialog or setup steps. The connect
+  dialog derives everything from `mcp` and a few flags in one `render()`, which also
+  keeps the focus; the bookkeeping of which apps paired while it was open is gone and the
+  confirmation names every connected app. The check mark is drawn by the stylesheet.
+- Styling: the README documents the dialog classes (`.tab-mcp-dialog`, `.tab-mcp-connect`,
+  `.tab-mcp-confirm`, `.tab-mcp-replaced`) and the button kinds (`.tab-mcp-primary`,
+  `.tab-mcp-danger`, `.tab-mcp-copy`) and says in one sentence how to override (two
+  classes, outside cascade layers). The other class names stay in the code but may change.
+  A shadow root (DEC-135) was again not taken: it would end styling by class name.
+
+## DEC-153: "Allow until reload", listed and kept across re-registration
+
+2026-11-14, iteration 38 (review finding CU 11). Amends DEC-096 (its label) and the
+removal rule of the tools allowed always.
+
+- The button is "Allow until reload", left of Allow (most platforms put the default
+  rightmost), with the note "Allow until reload: X will run for <app> without asking,
+  with any arguments, until you reload this page or disconnect <app>." The option is
+  still `alwaysAllow`.
+- The connect dialog lists under each connected app "Runs without asking: …" (titles)
+  with "Ask again", which forgets that app's entries.
+- An entry is kept while its tool is registered again unchanged: a tool's absence counts
+  only after the current task (the `toolschange` is read in a microtask), which is when
+  React's `useTool` has registered it again, and an entry remembers the title and
+  description the user saw; a tool registered with other ones is asked again (and leaves
+  the list then). Before, any re-registration dropped the entry silently.
+
 ## DEC-160: tab-mcp for Chrome takes Overmark's look: paper and ink, every colour a token (owner)
 
 The owner, 2026-11-13: "Overmark did a redesign of the Chrome extension. Apply the same

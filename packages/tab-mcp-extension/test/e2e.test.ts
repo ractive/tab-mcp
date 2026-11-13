@@ -1016,8 +1016,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				true,
 				"",
 				"ask-first-note",
-				[],
 				`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${SITE}, for every paired AI app.`,
+				[],
 			]);
 		} finally {
 			await panel.send("Emulation.setEmulatedMedia", { features: [] });
