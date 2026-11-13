@@ -71,6 +71,12 @@ export interface McpHandlerOptions extends CallContext {
 	server: ServerInfo;
 	/** The caller of a request, from its grant. */
 	client(grant: GrantRef): ToolCallClient;
+	/**
+	 * The largest response body the relay passes on (`limits.maxBodyBytes`);
+	 * `undefined`: no limit. A larger tool result is answered as an error
+	 * result instead (CC 7).
+	 */
+	maxBodyBytes?: () => number | undefined;
 }
 
 /** Tool call ids, unique in the page. */
@@ -322,6 +328,12 @@ export async function runCall(
 	raw: Json,
 	signal: AbortSignal,
 	client: ToolCallClient,
+	/**
+	 * Whether the caller can be sent this result: `undefined` if so, else an
+	 * error result to send instead. Before `toolcallend`, so that the event
+	 * says what the caller gets.
+	 */
+	deliverable?: (result: CallToolResult) => CallToolResult | undefined,
 ): Promise<CallRun> {
 	// Copies: a listener cannot change what the tool gets or the caller receives.
 	const call: ToolCallStart = {
@@ -340,6 +352,8 @@ export async function runCall(
 	};
 	try {
 		run = await decideAndRun(context, tool, raw, signal, client);
+		const instead = signal.aborted ? undefined : deliverable?.(run.result);
+		if (instead !== undefined) run = { outcome: "error", result: instead };
 	} finally {
 		context.observe?.end({
 			id: call.id,
@@ -516,6 +530,7 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		params: Json,
 		signal: AbortSignal,
 		grant: GrantRef,
+		deliverable: (result: CallToolResult) => CallToolResult | undefined,
 	): Promise<RunOutcome> {
 		const name = params["name"];
 		if (typeof name !== "string")
@@ -531,6 +546,7 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 			raw,
 			signal,
 			options.client(grant),
+			deliverable,
 		);
 		return { kind: "result", result: run.result };
 	}
@@ -541,48 +557,65 @@ export function createMcpHandler(options: McpHandlerOptions): McpHandler {
 		signal: AbortSignal,
 		grant: GrantRef,
 	): Response {
+		/** The answer's event; the tool's own `_meta` is kept, next to serverInfo. */
+		const answer = (value: CallToolResult): Uint8Array =>
+			sseEvent(result(id, value, resultMeta(value._meta)));
+		/** The event of the result checked last, so that it is encoded once. */
+		let checked: { result: CallToolResult; event: Uint8Array } | undefined;
+		/** A result the caller cannot get: not JSON, or more than the relay passes on (CC 7). */
+		const deliverable = (value: CallToolResult): CallToolResult | undefined => {
+			let event: Uint8Array;
+			try {
+				event = answer(value);
+			} catch {
+				// e.g. a BigInt or a cycle inside a passed-through result
+				return errorResult("The tool returned a result that is not JSON.");
+			}
+			const max = options.maxBodyBytes?.();
+			if (max !== undefined && event.byteLength > max) {
+				return errorResult(
+					`The result is ${event.byteLength} bytes; the relay passes on at most ${max}.`,
+				);
+			}
+			checked = { result: value, event };
+			return undefined;
+		};
 		const stream = new ReadableStream<Uint8Array>({
 			start: (controller) => {
-				/** Send the one answer and end the stream, whatever happens. */
-				const finish = (message: unknown) => {
+				/**
+				 * Send the one answer and end the stream, whatever happens. Encoded
+				 * only if someone listens: a cancelled call's result was not checked.
+				 */
+				const finish = (event: () => Uint8Array) => {
 					if (signal.aborted) return; // nobody listens any more
-					let event: Uint8Array;
 					try {
-						event = sseEvent(message);
-					} catch {
-						// e.g. a BigInt or a cycle inside a passed-through result
-						event = sseEvent(
-							result(
-								id,
-								errorResult("The tool returned a result that is not JSON."),
-							),
-						);
-					}
-					try {
-						controller.enqueue(event);
+						controller.enqueue(event());
 						controller.close();
 					} catch {
 						// the stream was cancelled meanwhile
 					}
 				};
-				runTool(params, signal, grant).then(
+				runTool(params, signal, grant, deliverable).then(
 					(outcome) =>
-						finish(
+						finish(() =>
 							outcome.kind === "invalid"
-								? {
+								? sseEvent({
 										jsonrpc: "2.0",
 										id,
 										error: { code: -32602, message: outcome.message },
-									}
-								: // The tool's own `_meta` is kept, next to serverInfo.
-									result(id, outcome.result, resultMeta(outcome.result._meta)),
+									})
+								: outcome.result === checked?.result
+									? checked.event
+									: answer(outcome.result),
 						),
 					() =>
-						finish({
-							jsonrpc: "2.0",
-							id,
-							error: { code: -32603, message: "Internal error" },
-						}),
+						finish(() =>
+							sseEvent({
+								jsonrpc: "2.0",
+								id,
+								error: { code: -32603, message: "Internal error" },
+							}),
+						),
 				);
 			},
 		});

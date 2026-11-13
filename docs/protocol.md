@@ -41,8 +41,9 @@ AI app ──HTTPS POST /a/{id}/mcp──▶ relay ──WebSocket /tab (tab-mcp
 - Frames are UTF-8 text, one JSON object each, with a string `type`. Binary frames are a
   protocol error.
 - Unknown `type` values from the peer are ignored, for forward compatibility. If such a
-  message carries an `id` that expects an answer, the receiver answers with `error` code
-  `unknown_type`.
+  message from the tab carries an `id` that expects an answer, the relay answers with
+  `error` code `unknown_type`. The library drops an unknown or malformed message from the
+  relay without an answer.
 - A session begins only after a user action in the page. The library opens the WebSocket
   only from `connect()`, which pages call from a click handler.
 - The tab must send `hello` within 10 seconds of the open, or the relay closes with 1008.
@@ -55,7 +56,7 @@ T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `page: {title}`, `app?: {name}`, `secret`, `revokeAll?` | First message after the open. `page.title` is untrusted and never logged. `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim; the relay shows it on `/authorize` unless the relay configures a name for the site. `revokeAll: true` takes the address back after a takeover (DEC-095): the relay claims the address and revokes every grant of it before it lists the grants for `session`, whatever session claims the address next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field: the library then sends `grants.revokeAll` and waits for a `grant.removed` for every listed grant. |
+| `hello` | T→R | `library: {name, version}`, `app?: {name}`, `secret`, `revokeAll?` | First message after the open. The relay ignores a `page` field; relays up to 0.9 require `page: {title}`, so the library sends `page: {title: ""}` (it sent the page title before, which no relay read). `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim; the relay shows it on `/authorize` unless the relay configures a name for the site. `revokeAll: true` takes the address back after a takeover (DEC-095): the relay claims the address and revokes every grant of it before it lists the grants for `session`, whatever session claims the address next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `newAddress()` rejects (DEC-136). |
 | `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app. `pairing` is `code` or `oidc` (identity binding). |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
@@ -84,7 +85,9 @@ means `code`. `grants` lists the AI apps already connected to this address (see 
 
 `limits` carries `maxMessageBytes`, `maxBodyBytes`, `requestTimeoutMs`, `idleTimeoutMs`,
 `heartbeatMs`, `keepAliveMs` and `maxConcurrentRequests`, so the tab can show and respect
-them. `maxMessageBytes` is at least 16 384.
+them. `maxMessageBytes` is at least 16 384. The library sends a tool result whose
+response would exceed `maxBodyBytes` as an error result that gives both sizes instead,
+so that the AI app does not read a transport error (`-31006`) for a tool that ran.
 
 ```json
 {"type":"session","sessionId":"s_6Gx…","origin":"https://ractive.ch","pairing":"code",
@@ -339,13 +342,15 @@ see A15 in the [threat model](threat-model.md).
 
 ### Errors between tab and relay
 
-`{"type":"error","code":"…","message":"…","id":"r42"}` in either direction. `id` is
-optional and names the request the error concerns.
+`{"type":"error","code":"…","message":"…","id":"r42"}` from the relay. `id` is optional
+and names the request the error concerns. The relay accepts `error` from the tab and
+only logs it at debug level; libraries up to 0.15 sent one for a message they could not
+read.
 
 | Code | Sent by | Meaning |
 |---|---|---|
-| `bad_message` | both | Not JSON, missing fields, a binary frame, a malformed `secret`. |
-| `unknown_type` | both | Message type not understood, but an answer was expected. |
+| `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`. The library sends none to the relay: it drops a message it cannot read. |
+| `unknown_type` | relay | Message type not understood, but an answer was expected. |
 | `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's; the error has no `id`. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
@@ -376,8 +381,10 @@ pairing code becomes invalid. Grants and tokens stay: they belong to the address
 the WebSocket. While no tab is connected, MCP requests with a valid token get "the page
 is not open". After a close with 4003 or 4004 (or `bye` `shutdown`) or a broken
 connection, the library opens a new session by itself with growing waits (5, 10, 20,
-40 s, then every 60 s), since the user already started this one; after the other
-reasons it waits for the user.
+40 s, then every 60 s, each varied by up to 20 % so that tabs do not all come back at
+once), since the user already started this one; after the other reasons it waits for
+the user. The library treats 1001, 1011, 1012 and 1013 like 4004: a proxy or platform in
+front of the relay sends them when the relay behind it restarts without its own `bye`.
 
 ## Heartbeat
 

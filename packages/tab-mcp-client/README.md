@@ -399,7 +399,16 @@ existing page keeps its address; on a site with several pages the first one to c
 keeps it, the others get new ones. The old key stays for pages still on 0.4.
 
 "New address" in the dialog calls `newAddress()`, which disconnects every
-app and makes a new address; when apps are connected, the dialog asks first. The relay's
+app and makes a new address; when apps are connected, the dialog asks first. It first
+takes the old address back: it connects with the stored secret, and the relay revokes
+every grant of the address in
+the same step (`hello.revokeAll`), whether the page was connected or not. Then it makes
+the new secret, clears `grants`, and connects with it if the page was connected,
+connecting or reconnecting (or taken over). A page that never had a secret makes one
+without connecting. If the old address cannot be taken back (the relay is unreachable,
+or someone takes it over again first), it rejects and keeps the old secret, so calling
+it again tries again. A second call while it runs returns the same promise; `connect()`
+meanwhile waits for it and then connects with the new address. The relay's
 sign-in page points users to it when someone else may be guessing codes. A page with its
 own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects
 again; while the page is closed, they get "the page is not open".
@@ -407,11 +416,14 @@ again; while the page is closed, they get "the page is not open".
 When another tab or program connects with the same address, it takes the address over:
 the page gets `disconnected` with reason `replaced` at once, then the event `replaced`,
 and does not reconnect by itself. Tabs of the same page say on a `BroadcastChannel` (per
-relay and storage key; it carries neither the secret nor the address) when the relay
-accepted their session, so `replaced` says which it probably was:
+relay and storage key; it carries the address id, which is part of the address, never
+the secret) when the relay accepted their session, so `replaced` says which it probably
+was:
 
-- `event.detail.sibling` is `true`: a tab of the same page in this browser said so within
-  the last 10 seconds. That message usually comes just after the takeover, so the
+- `event.detail.sibling` is `true`: a tab of the same page in this browser said within
+  the last 10 seconds that it claimed this tab's address, after this tab's own session
+  started (a claim of another address, or one heard while this tab was still connecting,
+  does not count; a claim without an address, from a tab still on 0.15 or older, does). That message usually comes just after the takeover, so the
   library waits up to a second for it, and `replaced` may come that much after
   `disconnected`. The usual cause, and harmless. Once the page has opened the default
   dialog, the library shows "Opened in another tab".
@@ -419,14 +431,14 @@ accepted their session, so `replaced` says which it probably was:
   a copy of the address secret, and the AI apps paired with the address now talk to it.
   The library shows "Another tab or program took over this page" with "New address".
 
-After a takeover, `newAddress()` (from the `replaced` listener, before it, or later)
-first takes the address back: it connects with the old secret and asks the relay to
-revoke every grant of the address in the same step (`hello.revokeAll`), and makes the new
-address only once the relay confirmed that no grant is left. If the address is taken
-over again before that, it rejects with an error whose `reason` is `"replaced"` and keeps
-the old secret, so calling it again takes it back again. Against a relay of 0.4 or older
-it sends `grants.revokeAll` and waits until every grant is gone. Then it connects with
-the new address; the default notice opens the connect dialog to add it to the AI apps.
+After a takeover, `newAddress()` (from the `replaced` listener, before it, or later, also
+after a reload) takes the address back as above and makes the new address only once the
+relay confirmed that no grant is left. If the address is taken over again before that,
+it rejects with an error whose `reason` is `"replaced"` and keeps the old secret, so
+calling it again takes it back again. A relay of 0.4 or older cannot take an address
+back: `newAddress()` rejects there with `reason` `"policy"`. When the takeover ended a
+session of this page, it then connects with the new address; the default notice opens
+the connect dialog to add it to the AI apps.
 
 The default dialog closes when the page is replaced, and the notice appears also when the
 dialog is closed, but only once the page has opened the dialog: a page that connects on
@@ -469,15 +481,20 @@ third-party script, another page on the same origin) or access to the device can
   pair with.
 
 When the connection breaks (reason `network`, `heartbeat` or `shutdown`: a dropped
-network, a phone pausing the tab in the background, a relay restart), the library
-connects again by itself: after 5, 10, 20 and 40 seconds, then every 60 seconds, and at
-once when the tab comes back to the front or the network returns. `reconnecting` (the
+network, a phone pausing the tab in the background, a relay restart; close codes 1001,
+1011, 1012 and 1013 from a proxy in front of the relay count as `shutdown`), the library
+connects again by itself: after about 5, 10, 20 and 40 seconds, then about every 60
+seconds (each wait varies by up to 20 %, so that the tabs of a restarted relay do not all
+come back at once), and at once when the tab comes back to the front or the network
+returns. `reconnecting` (the
 next attempt, its number and time) and the event `reconnecting` say so; `null` in the
 event means it stopped, connected again or after `disconnect()`. Calling `connect()`
 meanwhile tries at once. It never reconnects after `disconnect()`, a new address,
 another tab taking over the address (`replaced`), an expired or idle session, or a
 refusal by the relay, and an attempt the relay refuses stops it (an unreachable relay is
-tried again); the event `error` then says why, just before `reconnecting` turns `null`. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
+tried again); the event `error` then says why, just before `reconnecting` turns `null`,
+also when a `connect()` of the page waits on that attempt and rejects with the same
+error. `reconnect: false` turns it off, `reconnect: { delaysMs: [...] }`
 sets the waits (the last one repeats).
 
 ### Keeping AI access on after a reload

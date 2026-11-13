@@ -389,7 +389,10 @@ export type DisconnectReason =
 	| "expired"
 	/** No AI app used the tools for a long time. */
 	| "idle"
-	/** The relay is shutting down. */
+	/**
+	 * The relay is shutting down or restarting (also close codes 1001, 1011,
+	 * 1012 and 1013, which a proxy in front of it sends).
+	 */
 	| "shutdown"
 	/** The connection stopped answering. */
 	| "heartbeat"

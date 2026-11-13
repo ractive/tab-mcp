@@ -271,28 +271,32 @@ does not reconnect by itself.
 - **How long it lasts:** after the XSS is fixed, the page is closed or the script is
   removed, until the page gets a new address, and an AI app the holder paired lasts until
   it is disconnected or the page gets a new address (a grant ends 90 days after pairing at
-  the latest). "New address" first takes the address back
-  with the old secret and `hello.revokeAll`, so the relay revokes the grants of the old
-  address in the same step as it hands the address back; whoever claims it again right
-  after gets no grant back. Requests already on their way under a revoked grant are
+  the latest). "New address" (`newAddress()`) always first takes the address back with
+  the old secret and `hello.revokeAll`, connected or not, taken over or not (DEC-136), so
+  the relay revokes the grants of the old address in the same step as it hands the
+  address back; whoever claims it again right after gets no grant back. It takes back
+  the stored secret's address; a tab that rotated the secret before took its own old
+  address back the same way. Requests already on their way under a revoked grant are
   refused before they reach the page, requests in flight and open listen streams of the
   grant end, and authorization codes the address was given before are void, so a pairing
   the holder finished just before does not become a grant either. Only once the relay
   confirmed it (no grants in `session`)
-  does the page make the new address; taken over again first, the page says so and the
-  user tries again.
+  does the page make the new address; taken over again first, or the relay unreachable,
+  the page keeps the old secret, says so, and the user tries again.
 - **What the page sees:** the library tells a takeover by a second tab of the same page
   from one by someone else. Tabs that share the secret say on a `BroadcastChannel` (per
-  relay origin and storage key, never the secret or the address) when the relay accepted
-  their session; a tab whose `hello` failed says nothing. A replaced tab that heard a
-  sibling within 10 seconds (waiting up to a second for it) reports `sibling: true` and
+  relay origin and storage key, with the address id, never the secret) when the relay
+  accepted their session; a tab whose `hello` failed says nothing. A replaced tab that
+  heard a sibling claim its own address within 10 seconds, after its own session started
+  (waiting up to a second for it), reports `sibling: true` and
   the default UI shows "Opened in another tab". Otherwise, and in browsers without
   `BroadcastChannel`, it warns that another tab or program took over and offers "New
   address". A message on the channel from script on the page's origin can make a
   takeover look harmless, but such script can read the secret and change the page
-  anyway, so the channel adds no new attacker. With a `storage` other than
-  `localStorage` that tabs do not share (say `sessionStorage`), a sibling that connects
-  within those 10 seconds can make an unrelated takeover look harmless.
+  anyway, so the channel adds no new attacker. The address id is in the MCP address,
+  which is no secret either. A tab on another address, or one that claimed while this
+  tab was still connecting, does not count. A claim without an address, from a tab on
+  a library up to 0.15, still counts while both versions run.
 - **What helps:** identity binding for pages with user accounts; the page on its own
   origin, without third-party scripts; `newAddress()` on logout on a shared device.
   A backend-signed claim of the address was considered and not built (DEC-094): without a
