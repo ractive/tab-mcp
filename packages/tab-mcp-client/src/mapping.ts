@@ -66,31 +66,57 @@ function isObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** The content block types of MCP 2026-07-28. */
-const BLOCK_TYPES = new Set([
-	"text",
-	"image",
-	"audio",
-	"resource_link",
-	"resource",
+const isString = (v: unknown): v is string => typeof v === "string";
+
+/**
+ * Whether `block` is an MCP 2026-07-28 content block with the fields its
+ * type requires: `text` a string `text`; `image` and `audio` string `data`
+ * and `mimeType`; `resource_link` string `uri` and `name`; `resource` a
+ * `resource` object with a string `uri`.
+ */
+function isContentBlock(block: unknown): boolean {
+	if (!isObject(block)) return false;
+	switch (block["type"]) {
+		case "text":
+			return isString(block["text"]);
+		case "image":
+		case "audio":
+			return isString(block["data"]) && isString(block["mimeType"]);
+		case "resource_link":
+			return isString(block["uri"]) && isString(block["name"]);
+		case "resource":
+			return isObject(block["resource"]) && isString(block["resource"]["uri"]);
+		default:
+			return false;
+	}
+}
+
+/** The keys of a `CallToolResult` (`resultType` is set by the server). */
+const RESULT_KEYS = new Set([
+	"content",
+	"structuredContent",
+	"isError",
+	"_meta",
+	"resultType",
 ]);
 
 /**
  * Whether `value` is an MCP `CallToolResult`: an object whose `content` is an
- * array of MCP content blocks (objects whose `type` is `text`, `image`,
- * `audio`, `resource_link` or `resource`), with `isError` a boolean and
- * `structuredContent` and `_meta` objects where present. Domain data that
- * happens to have a `content` array (a ProseMirror document,
- * `{ title, content: ["…"] }`) is not one (CC 3). Other keys are allowed, as
- * MCP allows them on a result.
+ * array of MCP content blocks (`isContentBlock`), with `isError` a boolean
+ * and `structuredContent` and `_meta` objects where present. Domain data
+ * that happens to have a `content` array (a ProseMirror document,
+ * `{ title, content: ["…"] }`, a chat message with its own blocks) is not
+ * one (CC 3). Other keys are allowed next to blocks, as MCP allows them on a
+ * result; with an empty `content` they are not, so that `{ title, content:
+ * [] }` is data, not an empty result.
  */
 export function isCallToolResult(value: unknown): value is CallToolResult {
 	if (!isObject(value) || !Array.isArray(value["content"])) return false;
 	const { content, isError, structuredContent, _meta } = value;
 	return (
-		content.every(
-			(block) => isObject(block) && BLOCK_TYPES.has(block["type"] as string),
-		) &&
+		(content.length > 0
+			? content.every(isContentBlock)
+			: Object.keys(value).every((key) => RESULT_KEYS.has(key))) &&
 		(isError === undefined || typeof isError === "boolean") &&
 		(structuredContent === undefined || isObject(structuredContent)) &&
 		(_meta === undefined || isObject(_meta))

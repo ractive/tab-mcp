@@ -159,7 +159,9 @@ export function validateTool(tool: Tool): RegisteredTool {
 	}
 	// A hint that is not a boolean is refused, not dropped: a dropped
 	// `consequentialHint: "true"` would run the tool without asking (CC 2).
-	// Other keys that are not booleans are ignored.
+	// Every key ending in `Hint`, and `debugging`, counts as a hint, also
+	// one tab-mcp does not know (a later draft's, or a misspelt one); other
+	// keys that are not booleans are ignored.
 	const hints: ToolAnnotations = {};
 	for (const [key, value] of Object.entries(annotations ?? {})) {
 		if (typeof value === "boolean")

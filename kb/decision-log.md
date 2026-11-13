@@ -2529,14 +2529,17 @@ boolean annotations are kept").
 2026-11-13, iteration 31 (review 2026-11-13, CC 3 = WM 12). Amends DEC-023.
 
 - `isCallToolResult` (in `mapping.ts`, exported for the WebMCP mapping of iteration F)
-  is true for an object whose `content` is an array of objects with `type` `text`,
-  `image`, `audio`, `resource_link` or `resource`, with `isError` a boolean and
-  `structuredContent` and `_meta` objects where present. Only such a value passes
-  through. A ProseMirror or TipTap document (`{ type: "doc", content: [{ type:
-  "paragraph" }] }`) or `{ title, content: ["…"] }` goes the JSON way. Checking only
-  "every item has a string `type`", as the review proposed, would still pass the
-  ProseMirror document. Other keys on a result are allowed, as MCP allows them, so
-  `{ title, content: [] }` still passes; that is the one remaining ambiguity.
+  is true for an object whose `content` is an array of MCP content blocks with the
+  fields their type requires (`text` a string `text`; `image` and `audio` string `data`
+  and `mimeType`; `resource_link` string `uri` and `name`; `resource` a `resource`
+  object with a string `uri`), with `isError` a boolean and `structuredContent` and
+  `_meta` objects where present. Only such a value passes through. A ProseMirror or
+  TipTap document (`{ type: "doc", content: [{ type: "paragraph" }] }`),
+  `{ title, content: ["…"] }` or a chat message whose image block has a `source` goes
+  the JSON way. Checking only "every item has a string `type`", as the review proposed,
+  would still pass the ProseMirror document. Other keys next to blocks are allowed, as
+  MCP allows them on a result; with an empty `content` only a result's own keys are, so
+  `{ title, content: [] }` is data (review of PR 118).
 - A passed-through result's own `_meta` is merged with the server info
   (`{ ...result._meta, "io.modelcontextprotocol/serverInfo": … }`); it was overwritten.
 - `structuredContent` is the JSON text parsed again, set when that is an object. So it
@@ -2558,7 +2561,9 @@ CC 8). Extends DEC-054, DEC-087 and DEC-093.
   (`.tab-mcp-waiting`, last in the dialog so that the "X wants to run Y" paragraph stays
   the first `p`). The queue is per document, not per `TabMcp`, since all dialogs share
   the top layer. Two calls made before the dialogs' chunk has loaded may reach the
-  queue in either order.
+  queue in either order. A waiting call whose tool the user allowed always on the call
+  before it is answered "allow" when its turn comes, without being shown; a dialog
+  whose `showModal()` throws is removed and the queue goes on (review of PR 118).
 - **Re-armed by another dialog.** The delay also starts again when any other dialog of
   the document closes (a capture listener for `close`, which does not bubble): the
   connect dialog or the page's own dialog over a confirmation could otherwise hand the

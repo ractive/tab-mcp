@@ -17,9 +17,11 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   now such a hint was dropped, so `consequentialHint: "true"` registered a tool that ran
   without asking. Other annotation keys that are not booleans are still ignored.
 - Only an MCP result passes through as one: an object whose `content` is an array of MCP
-  content blocks (`type` `text`, `image`, `audio`, `resource_link` or `resource`). Any
-  other value with a `content` array (a ProseMirror document, `{ title, content: [...] }`)
-  is sent as JSON text with `structuredContent`, like other objects. A passed-through
+  content blocks (`type` `text`, `image`, `audio`, `resource_link` or `resource`, with the
+  fields that type needs, such as a string `text` or `data` and `mimeType`). Any other
+  value with a `content` array (a ProseMirror document, `{ title, content: [...] }`, also
+  with an empty `content`) is sent as JSON text with `structuredContent`, like other
+  objects. A passed-through
   result keeps its own `_meta`. `structuredContent` is the parsed JSON text, so a `Date`
   or `URL` (whose JSON is a string) has none.
 - The confirmation: one dialog at a time per document; the others wait, and the shown one

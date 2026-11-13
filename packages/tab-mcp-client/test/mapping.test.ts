@@ -70,6 +70,9 @@ describe("results (DEC-023)", () => {
 	test("only an MCP result passes through: domain data with a content array is JSON (CC 3)", () => {
 		const results = [
 			{ content: [] },
+			{ content: [], isError: false, structuredContent: { a: 1 } },
+			// Other keys next to blocks are allowed, as MCP allows them.
+			{ content: [{ type: "text", text: "a" }], invalid: "rows skipped" },
 			{ content: [{ type: "text", text: "a" }], isError: true },
 			{
 				content: [
@@ -98,6 +101,17 @@ describe("results (DEC-023)", () => {
 			{ content: [{ type: "text", text: "a" }], isError: "yes" },
 			{ content: [], structuredContent: [1] },
 			{ content: [], _meta: "x" },
+			// An empty content with keys a result does not have (review of PR 118)
+			{ title: "Groceries", content: [] },
+			// Blocks without the fields their type needs: a chat message, say
+			{
+				role: "user",
+				content: [{ type: "image", source: { type: "base64", data: "AA==" } }],
+			},
+			{ content: [{ type: "text", text: 5 }] },
+			{ content: [{ type: "image", data: "AA==" }] },
+			{ content: [{ type: "resource_link", uri: "https://x.example/a" }] },
+			{ content: [{ type: "resource", resource: { text: "a" } }] },
 		];
 		for (const d of data) {
 			expect(isCallToolResult(d)).toBe(false);

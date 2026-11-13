@@ -330,12 +330,18 @@ const queues = new WeakMap<Document, ConfirmQueue>();
  * also wait until the arguments have been scrolled to their end. Before the
  * delay has run out, Enter or Space on a button and Escape are ignored, so
  * typing meant for the page cannot refuse either. Everything else (Don't
- * allow, Escape, an aborted call) is "deny".
+ * allow, Escape, an aborted call) is "deny". `allowedNow` is asked when a
+ * waiting call's turn comes: `true` (the user chose "Always allow" for it
+ * meanwhile) answers "allow" without showing it.
  */
 export function confirmDialog(
 	request: ConfirmRequest,
 	doc: Document,
-	options: { allowDelayMs?: number | undefined; alwaysAllow?: boolean } = {},
+	options: {
+		allowDelayMs?: number | undefined;
+		alwaysAllow?: boolean;
+		allowedNow?: () => boolean;
+	} = {},
 ): Promise<ConfirmAnswer> {
 	if (request.signal.aborted) return Promise.resolve("deny");
 	let queue = queues.get(doc);
@@ -366,6 +372,11 @@ export function confirmDialog(
 	return new Promise((resolve) => {
 		const start = () => {
 			request.signal.removeEventListener("abort", onAbort);
+			if (options.allowedNow?.() === true) {
+				resolve("allow");
+				next();
+				return;
+			}
 			resolve(show());
 		};
 		const onAbort = () => {
@@ -519,7 +530,7 @@ function showConfirm(
 	);
 	doc.body.append(dialog);
 	const view = doc.defaultView;
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		const onAbort = () => dialog.close("deny");
 		request.signal.addEventListener("abort", onAbort, { once: true });
 		let timer: ReturnType<typeof setTimeout> | undefined;
@@ -579,25 +590,36 @@ function showConfirm(
 		dialog.addEventListener("keydown", guard);
 		dialog.addEventListener("keyup", guard);
 		dialog.addEventListener("cancel", onCancel);
+		const cleanup = () => {
+			clearTimeout(timer);
+			doc.removeEventListener("visibilitychange", arm);
+			doc.removeEventListener("close", arm, true);
+			view?.removeEventListener("focus", arm);
+			view?.removeEventListener("blur", arm);
+			view?.removeEventListener("resize", check);
+			request.signal.removeEventListener("abort", onAbort);
+			dialog.remove();
+			if (queue.changed === showWaiting) queue.changed = undefined;
+		};
 		dialog.addEventListener(
 			"close",
 			() => {
-				clearTimeout(timer);
-				doc.removeEventListener("visibilitychange", arm);
-				doc.removeEventListener("close", arm, true);
-				view?.removeEventListener("focus", arm);
-				view?.removeEventListener("blur", arm);
-				view?.removeEventListener("resize", check);
-				request.signal.removeEventListener("abort", onAbort);
 				const value = dialog.returnValue;
-				dialog.remove();
-				if (queue.changed === showWaiting) queue.changed = undefined;
+				cleanup();
 				resolve(value === "allow" || value === "always" ? value : "deny");
 				next();
 			},
 			{ once: true },
 		);
-		dialog.showModal();
+		try {
+			dialog.showModal();
+		} catch (error) {
+			// Never shown, so never closed: the queue must not wait for it.
+			cleanup();
+			reject(error);
+			next();
+			return;
+		}
 		deny.focus(); // the safe choice is the default
 		// Counted from when the dialog is shown, not from when it was built.
 		arm();
@@ -628,26 +650,34 @@ export function confirmInPage(
 		}).then((answer) => answer === "allow");
 	const { grantId } = client;
 	const tool = request.tool.name;
-	if (allowedAlways.get(mcp)?.has(grantId, tool)) return Promise.resolve(true);
-	return confirmDialog(request, doc, options).then((answer) => {
-		// Only while the grant is still there: a revoked app gets nothing.
-		if (answer === "always" && mcp.grants.some((g) => g.grantId === grantId)) {
-			let allowed = allowedAlways.get(mcp);
-			if (allowed === undefined) {
-				const kept = new AlwaysAllowed();
-				mcp.addEventListener("grantschange", (e) =>
-					kept.keepGrants(e.detail.grants.map((g) => g.grantId)),
-				);
-				mcp.addEventListener("toolschange", (e) =>
-					kept.keepTools(e.detail.tools),
-				);
-				allowedAlways.set(mcp, kept);
-				allowed = kept;
+	const allowedNow = () => allowedAlways.get(mcp)?.has(grantId, tool) === true;
+	if (allowedNow()) return Promise.resolve(true);
+	// Asked again when its turn comes: the call before it in the queue may
+	// have been allowed always.
+	return confirmDialog(request, doc, { ...options, allowedNow }).then(
+		(answer) => {
+			// Only while the grant is still there: a revoked app gets nothing.
+			if (
+				answer === "always" &&
+				mcp.grants.some((g) => g.grantId === grantId)
+			) {
+				let allowed = allowedAlways.get(mcp);
+				if (allowed === undefined) {
+					const kept = new AlwaysAllowed();
+					mcp.addEventListener("grantschange", (e) =>
+						kept.keepGrants(e.detail.grants.map((g) => g.grantId)),
+					);
+					mcp.addEventListener("toolschange", (e) =>
+						kept.keepTools(e.detail.tools),
+					);
+					allowedAlways.set(mcp, kept);
+					allowed = kept;
+				}
+				allowed.add(grantId, tool);
 			}
-			allowed.add(grantId, tool);
-		}
-		return answer !== "deny";
-	});
+			return answer !== "deny";
+		},
+	);
 }
 
 /**

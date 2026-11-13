@@ -1869,6 +1869,46 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 		expect(await fourth).toBe("deny");
 	});
 
+	test("a dialog that cannot be shown does not block the queue (review of PR 118)", async () => {
+		const proto = window.HTMLDialogElement.prototype as unknown as {
+			showModal: () => void;
+		};
+		const original = proto.showModal;
+		proto.showModal = () => {
+			proto.showModal = original;
+			throw new window.DOMException("not active", "InvalidStateError");
+		};
+		const failed = confirmDialog(named("one"), doc);
+		await expect(failed).rejects.toThrow("not active");
+		expect(doc.querySelectorAll("dialog")).toHaveLength(0);
+		const next = confirmDialog(named("two"), doc);
+		expect(confirms()).toHaveLength(1);
+		expect(confirms()[0]?.open).toBe(true);
+		byText(doc, "Don't allow").click();
+		expect(await next).toBe("deny");
+	});
+
+	test("a waiting call allowed always meanwhile is not shown (review of PR 118)", async () => {
+		let always = false;
+		const first = confirmDialog(named("one"), doc, { allowDelayMs: 600 });
+		const second = confirmDialog(named("one"), doc, {
+			allowedNow: () => always,
+		});
+		const third = confirmDialog(named("two"), doc, {
+			allowedNow: () => false,
+		});
+		jest.advanceTimersByTime(600);
+		always = true; // what "Always allow" on the first one does
+		byText(doc, "Allow").click();
+		expect(await first).toBe("allow");
+		expect(await second).toBe("allow");
+		// The next waiting call is shown, and asked.
+		expect(confirms()).toHaveLength(1);
+		expect(confirms()[0]?.querySelector("h2")?.textContent).toBe("Allow two?");
+		byText(doc, "Don't allow").click();
+		expect(await third).toBe("deny");
+	});
+
 	test("another dialog closing over the confirmation starts the delay again (CU 1)", async () => {
 		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
 		const allow = byText(doc, "Allow");

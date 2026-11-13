@@ -97,8 +97,15 @@ telling the page to close a dead serve itself.
 ## Outcome
 
 The core grew by about 100 B gzipped (6346 of 6400 B; main was 6243 B), all in
-`registry.ts`. Not done: an announcement when Allow becomes enabled (CU 14); re-checking
-"Always allow" for a queued call of the same tool once the call before it was allowed
-always (the user is asked again, the safe direction); an `onConfirm` that ignores the
-call's `signal` still keeps a cancelled call waiting (unchanged, the library's own
-dialog closes on it).
+`registry.ts`. Not done: an announcement when Allow becomes enabled (CU 14); an
+`onConfirm` that ignores the call's `signal` still keeps a cancelled call waiting
+(unchanged, the library's own dialog closes on it).
+
+## Review of PR 118
+
+claude 4 findings, glm 2. Fixed: a `showModal()` that throws no longer blocks the
+queue; a waiting call allowed always meanwhile is answered without a dialog;
+`isCallToolResult` checks the fields each block type needs and treats
+`{ title, content: [] }` as data. Answered: a key ending in `Hint` counts as a hint on
+purpose (DEC-133, comment made precise); the second `JSON.parse` for
+`structuredContent` is kept (correctness over one parse of a result the relay bounds).

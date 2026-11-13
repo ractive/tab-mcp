@@ -106,7 +106,7 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
   more is known. Check `client.kind` before you read `host`. Return a
   string (one text block), an MCP result (passed through with its `_meta`: an object
   whose `content` is an array of MCP content blocks, each with `type` `text`, `image`,
-  `audio`, `resource_link` or `resource`), or any other JSON value (sent as JSON text,
+  `audio`, `resource_link` or `resource` and the fields that type needs), or any other JSON value (sent as JSON text,
   and as `structuredContent` when that JSON is an object; a `Date` becomes a string, so
   it has none). Data that only looks like a result, such as a ProseMirror document with
   its `content` array, is sent as JSON. A thrown error becomes an error result with its
