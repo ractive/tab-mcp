@@ -39,6 +39,10 @@ consequential rule), DEC-158 (no attribute), DEC-159 (keep-on after the first pa
 - [x] The canvas's label names the counts and the selection; the status line announces
       each selection; the label editor gives the focus back to the canvas
 - [x] Help text says how; browser check in ractive.ch's `check:tab-mcp`
+- [x] Review of ractive.ch PR 106: `]` and `[` also with Option (Swiss and German Macs) or
+      AltGr; the letter and bracket keys only while the canvas has the focus (WCAG 2.1.4);
+      in a scrolling canvas the selection is scrolled into view; feedback when Enter
+      cannot finish an arrow
 
 ## EX 4: the skill and the 0.15.0 features
 
