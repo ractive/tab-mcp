@@ -19,7 +19,7 @@ import {
  */
 export const SITE_MATCHES = ["http://*/*", "https://*/*"];
 
-/** Host access on every site: what "Allow on all sites" asks for. */
+/** Host access on every site: what "Read all sites without a click" asks for. */
 export const ALL_SITES: chrome.permissions.Permissions = {
 	origins: SITE_MATCHES,
 };
@@ -83,31 +83,55 @@ export async function tabInFront(): Promise<TargetTab> {
 /** A page of an http(s) site: the only pages the extension acts on (DEC-142). */
 export const isSitePage = (url: string): boolean => /^https?:\/\//i.test(url);
 
-/** The extension may not run on this tab, and why, with what the user can do. */
-export class NoAccessError extends Error {}
+/**
+ * Why the extension may not read a tab: no click on its icon there (and no
+ * host access), a browser page, the Chrome Web Store, or no http(s) page.
+ */
+export type NoAccessReason =
+	| "no-grant"
+	| "browser-page"
+	| "web-store"
+	| "not-site";
 
-/** The answer to an access problem, for the AI app and the user. */
+/**
+ * The extension may not run on this tab. The message is for the AI app;
+ * the side panel writes its own sentence for `reason` (EQ 6).
+ */
+export class NoAccessError extends Error {
+	readonly reason: NoAccessReason;
+	constructor(reason: NoAccessReason, message: string) {
+		super(message);
+		this.reason = reason;
+	}
+}
+
+const NO_GRANT =
+	'tab-mcp for Chrome may not read this tab yet. The user can click the tab-mcp for Chrome icon in Chrome\'s toolbar while on this tab, or turn on "Read all sites without a click" in its side panel.';
+
+/** The answer to an access problem: its reason, and what the AI app is told. */
 export function noAccess(url: string): NoAccessError {
 	// Without a grant Chrome hides the tab's address: "" is any page.
 	if (url === "")
 		return new NoAccessError(
-			'tab-mcp for Chrome may not read this tab yet. The user can click its icon on the tab, or turn on "Allow on all sites" in its side panel. (Browser pages such as chrome:// cannot be read at all.)',
+			"no-grant",
+			`${NO_GRANT} (Browser pages such as chrome:// cannot be read at all.)`,
 		);
 	if (/^(chrome|edge|about|devtools|view-source):/i.test(url))
 		return new NoAccessError(
+			"browser-page",
 			"Chrome does not let extensions read this tab (a browser page). Switch to a web page.",
 		);
 	if (/^https:\/\/chromewebstore\.google\.com\//i.test(url))
 		return new NoAccessError(
+			"web-store",
 			"Chrome does not let extensions read the Chrome Web Store.",
 		);
 	if (!isSitePage(url))
 		return new NoAccessError(
+			"not-site",
 			"tab-mcp for Chrome works only on pages of http(s) sites (not file: or other pages). Switch to a web page.",
 		);
-	return new NoAccessError(
-		'tab-mcp for Chrome may not read this tab yet. The user can click its icon on the tab, or turn on "Allow on all sites" in its side panel.',
-	);
+	return new NoAccessError("no-grant", NO_GRANT);
 }
 
 function send(tabId: number, request: ContentRequest): Promise<unknown> {

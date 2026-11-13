@@ -2865,3 +2865,45 @@ Iteration 33 (review of 2026-11-13, CU 5 in part, CU 9, CU 12).
   and screen readers hear the same, without keys on a touch screen; "Copied" lasts 2 s.
 - Every dialog carries `lang="en"` and `dir="ltr"` until iteration J lets a page pass
   its own strings.
+
+## DEC-154: tab-mcp for Chrome's panel names its controls by what they act on
+
+2026-11-13, iteration 36 (review findings EQ 9, EQ 11). After DEC-139 the panel still had
+"Allow all", "Allow on all sites", an "allowed" pill and the question's "Allow", near
+alike with different scopes. Now:
+- Host access: "Read all sites without a click", and, granted, "Reads all sites without a
+  click. Stop reading all sites". A line before the button says that without it the
+  extension reads a tab only after a click on its icon, and what Chrome will ask ("Read
+  and change all your data on all websites").
+- Per tool on an http(s) site: an "Ask first" switch (a native checkbox with
+  `role="switch"`, labelled "Ask first: <tool>"), on by default; off is the site's
+  "allowed" entry. It replaces the pill that changed its text and `aria-pressed` and
+  looked like the static "reads" and "asks first" badges.
+- Over the list: "Don't ask for these tools" / "Ask first for these tools".
+- A question (panel, question window, notification): "Allow once" beside "Don't allow"
+  and "Don't ask again on <host>".
+The worker's protocol and storage do not change (`set-allowed`, `set-allowed-all`,
+`allowedTools`). The waits after the layout moved use `aria-disabled`, not `disabled`, so
+a focused control keeps its focus and its place in the tab order.
+
+## DEC-155: tab-mcp for Chrome keeps the relay's last list of paired apps for the panel
+
+2026-11-13, iteration 36 (review finding EQ 8). The library learns the grants only from
+the relay; a new worker (the old one stops within a minute while AI access is off) knew
+none, so the list under "paired apps stay paired" emptied itself. The worker now stores
+the list (grant id, the app's declared name, its host) in IndexedDB at every
+`grantschange` and shows it while off, connecting or retrying; a new relay empties it.
+Disconnect is offered only while connected, since only the relay can revoke a grant; off,
+the panel says "Turn on AI access to disconnect an app." A revoke the library refuses
+sets the panel's problem instead of doing nothing. The stored list can be out of date
+while off (an app the relay revoked meanwhile); the first connection replaces it.
+
+## DEC-156: tab-mcp for Chrome does not skip the AI app's own tab
+
+2026-11-13, iteration 36 (review finding EQ 2). An AI app whose chat runs in a tab of the
+same Chrome profile becomes the tab in front while the user types in it. The review
+suggested skipping tabs whose host is a paired app's host. Not done: without host access
+Chrome hides the address of every tab the extension may not read, so the skip would work
+only for users who granted host access, and the host of an AI app's client id need not
+be the host its chat runs on. The pairing box says instead to use the AI app outside this
+Chrome profile (its desktop app, another browser or another profile), and why.

@@ -22,7 +22,7 @@ Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](
 | `reload` | Reloads the page in that tab, with its `page_info`. |
 
 The navigation tools act only on a tab the extension may read now (a click on its icon
-there, or "Allow on all sites"); on any other tab they do nothing and say why:
+there, or "Read all sites without a click"); on any other tab they do nothing and say why:
 
 - On the page's own origin (scheme, host and port) they run at once, as a link on the
   page would.
@@ -32,7 +32,7 @@ there, or "Allow on all sites"); on any other tab they do nothing and say why:
   forward to a page the extension cannot see (another origin: Chrome lists only the
   page's own) asks too, saying its address is not known. A reload never asks.
 - Only `http:` and `https:` addresses, without a user name or password.
-- Without "Allow on all sites", Chrome lets the extension read the new page of another
+- Without "Read all sites without a click", Chrome lets the extension read the new page of another
   origin only after a click on its icon there; the answer says so.
 - They wait up to 30 s for the page to load; after that the answer says it is still
   loading.
@@ -43,14 +43,15 @@ The page's tools are the page's word:
   https://shop.example: …`), cut to 1000 characters; titles to 100. The origin is the one
   Chrome reports for the tab: a page that says it is another site gets no tools.
 - A tool the page marks read-only runs at once; every other one asks you each time
-  (see "Questions" below). "Don't ask again on <host>" in a question, or a click on "asks
-  first" in the panel's list, turns the tool into "allowed" for that site (exact origin),
-  for every paired AI app, kept until you click it again. "Allow all" over the list allows
-  every tool listed at that moment that asks first, in one step; once they all are, it
-  reads "Ask for all" and turns them all back. A tool the page registers later asks first.
-  When the page changes what the button would do, it waits 750 ms before it takes a
-  click. All of these only for pages of an http(s) site: pages with an opaque origin
-  (`null`, such as sandboxed pages) always ask.
+  (see "Questions" below). "Don't ask again on <host>" in a question, or switching off
+  the tool's "Ask first" in the panel's list, allows the tool on that site (exact origin)
+  for every paired AI app, kept until you switch "Ask first" on again. "Don't ask for
+  these tools" over the list does that for every tool listed at that moment that asks
+  first, in one step; once none asks, it reads "Ask first for these tools" and turns them
+  all back. A tool the page registers later asks first. When the page changes what the
+  button would do, it waits 750 ms before it takes a click. All of these only for pages
+  of an http(s) site: pages with an opaque origin (`null`, such as sandboxed pages)
+  always ask ("asks first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
   changed (also while you were asked), the AI app is told to list the tools again.
@@ -98,15 +99,28 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   extension's panel for that tab, such as Claude in Chrome's), and the extension may read
   that tab, also after navigations on the same origin, until the tab goes to another
   origin (`www.example.com` is another origin than `example.com`).
-  "Allow on all sites" in the side panel lets it read every tab without a click.
-- "Turn on AI access" (or the "AI access" switch) connects to the relay. With no AI app
-  paired yet, the panel shows the address for your AI app and a pairing code at once.
+  "Read all sites without a click" in the side panel lets it read every http(s) tab
+  without a click; the panel says before the button what Chrome will ask ("Read and
+  change all your data on all websites"). On a tab it may not read, the panel says to
+  click the icon in the toolbar (or that Chrome does not let extensions read the page).
+  On a page without tools it says so, that `page_info` and the navigation tools still
+  work, and, where WebMCP is off, how Chrome turns it on.
+- "Turn on AI access" (or the "AI access" switch) connects to the relay. While no AI app
+  is paired, a line under the heading says what the extension does and names the relay.
+  With no AI app paired yet, the panel shows the address for your AI app and a pairing
+  code at once, with a note to use the AI app outside this Chrome profile (a chat in a
+  tab of the same profile becomes the tab in front while you type in it).
   "How do I add it?" under the address says how to add it in Claude, ChatGPT, Claude Code
   and Codex (the client library's steps, the commands each with a Copy), and links to the
-  [connect page](https://ractive.ch/tab-mcp/connect/). Paired apps are listed, each with a dot (green while connected,
-  grey while off or connecting) and a Disconnect button (which asks first, and takes no double click); "+ Add another AI app" shows the address and a code again. The
-  address shows only while pairing. Off, the panel says "AI access is off · paired apps
-  stay paired". The relay address is under "Settings". Where you name the connector
+  [connect page](https://ractive.ch/tab-mcp/connect/). A Copy the clipboard refuses
+  selects the text in place to copy by hand. Paired apps are listed, each with a dot
+  (green while connected, grey while off or connecting); while connected each has a
+  Disconnect button (which asks first, and takes no double click). Only the relay can
+  disconnect an app, so while off or connecting the list has no Disconnect and says why;
+  the list is kept from the relay's last one, also across a restart of the extension.
+  "+ Add another AI app" shows the address and a code again. The address shows only
+  while pairing. Off with apps paired, the panel says "AI access is off · paired apps stay
+  paired". The relay address is under "Settings". Where you name the connector
   yourself (Claude, ChatGPT), a name such as "Browser" helps: "in my browser" then leads
   the AI to it (the Claude Code and Codex commands name it `tab-mcp-for-chrome`). The
   extension's instructions and `page_info` tell the AI to call `page_info` first when you
@@ -126,23 +140,28 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 A tool that asks first asks in the side panel when the panel is open in the window of the
 tab the tool acts on, that window is in front, and the panel is not covered by another
 extension's panel for the tab (a question it shows goes out as a notification once it is
-covered): Allow and "Don't ask again on <host>" work once the
-panel has been in front for 750 ms, so the click that brings it forward cannot approve.
-The panel's question names the AI app and the tool, then, each on a line of its own, the
-site the tool acts on ("Site (verified)") and the page's title for the tool ("Title (from
-the page)"), and the arguments in full (they scroll when long). A question that comes or
-goes moves what is below it: the panel's switches and "Allow all" wait 750 ms after.
+covered): "Allow once" and "Don't ask again on <host>" work once the
+panel has been in front for 750 ms, so the click that brings it forward cannot approve
+(until then they keep their focus and place in the tab order, `aria-disabled`, and take
+no click). The panel's question names the AI app and the tool, then, each on a line of
+its own, the site the tool acts on ("Site (verified)") and the page's title for the tool
+("Title (from the page)"), the arguments in full (they scroll when long) and the seconds
+left to answer. A question that runs out leaves "Not answered in time: <tool> did not
+run." for a few seconds. A screen reader hears one short line per question ("<app> asks
+to run <tool>"), not the card. A question that comes or goes moves what is below it: the
+"Ask first" switches and "Don't ask for these tools" wait 750 ms after.
 
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
-cut to 60 characters) with "On <site>" below, naming the AI app (its name and its
-verified host) and the arguments in short (cut to 150 characters; when they are cut, the
-notification says "Arguments cut: click to see them in full."), with the button Allow.
-"Don't ask again" is not on the notification: allowing a tool for good needs the whole
-question. A click on the notification's body opens it, the arguments in full, with Don't
-allow, Allow and "Don't ask again on <host>": in the side panel of the tab's window, or,
-where Chrome does not open the panel, in a small window of its own (closing that window is
-Don't allow). The question waits there, its 60 s still running. Don't allow is closing the
-notification or no answer in 60 s. A click on Allow within half a second of the
+cut to 60 characters) with "On <site> · Closing this is Don't allow" below, naming the AI
+app (its name and its verified host) and the arguments in short (cut to 150 characters;
+when they are cut, the notification says "Arguments cut: click to see them in full."),
+with the button "Allow once". "Don't ask again" is not on the notification: allowing a
+tool for good needs the whole question. A click on the notification's body opens it, the
+arguments in full, with Don't allow, "Allow once" and "Don't ask again on <host>": in the
+side panel of the tab's window, or, where Chrome does not open the panel, in a small
+window of its own (closing that window is Don't allow). The question waits there, its
+60 s still running. Don't allow is closing the
+notification or no answer in 60 s. A click on "Allow once" within half a second of the
 notification showing does not count (it shows again). A notification answers only its
 own call. Questions also show in every open side panel, so with notifications off
 (Focus, Do Not Disturb, notifications off for Chrome) open the panel when the icon shows
@@ -151,8 +170,8 @@ not answer. At most 5 questions of one AI app wait at once; a further call of th
 declined without asking, and the app is told why.
 
 "Don't ask again on <host>" allows the tool on that site (exact origin) for every paired
-AI app, as the panel's "allowed" does, until you set it back to "asks first" in the
-panel's tool list.
+AI app, as switching off its "Ask first" in the panel's tool list does, until you switch
+it on again there.
 
 ## Permissions
 
@@ -163,7 +182,7 @@ panel's tool list.
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Only after "Allow on all sites": read every tab of an http(s) site without a click. |
+| `http://*/*`, `https://*/*` (optional) | Only after "Read all sites without a click": read every tab of an http(s) site without a click. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
 app.
@@ -214,8 +233,10 @@ setup, the listing, the permission justifications and the review notes:
   maps and no test hooks; its zip lists the build's files; a build with any of these is
   not packed; `--zip` needs `--store`.
 - `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
-  while pairing), "How do I add it?" and its Copy buttons, its clicks (Disconnect's double
-  click, the switch) and "Allow all".
+  while pairing, the first look, Disconnect only while connected), "How do I add it?" and
+  its Copy buttons, its clicks (Disconnect's double click, the switch), "Don't ask for
+  these tools", the tab card's texts (an unreadable tab, no tools), the labels and live
+  regions of `index.html`, a question's countdown and its end.
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, a click on the body, cut arguments,

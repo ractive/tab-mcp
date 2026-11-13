@@ -3,9 +3,10 @@
  * asks (the AI app's declared name beside its verified host), the tool, the
  * site it acts on on a line of its own (what Chrome reports, the part that
  * is verified), the page's title for the tool apart and labelled as the
- * page's, and the arguments in full. Allow and "Don't ask again on <host>"
- * start disabled: the page that shows the card enables them once it has been
- * in front long enough.
+ * page's, the arguments in full, and the time left to answer. "Allow once"
+ * and "Don't ask again on <host>" start unavailable (`aria-disabled`, so a
+ * focused button keeps its focus): the page that shows the card makes them
+ * available once it has been in front long enough (`setReady`).
  */
 
 import type { Answer, QuestionView } from "../protocol.ts";
@@ -32,9 +33,68 @@ function line(label: string, value: string, className: string): HTMLElement {
 	return p;
 }
 
+/** What the card says of the time left (EQ 13). */
+export function countdownText(expiresAt: number, now: number): string {
+	const left = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+	return `${left} s left to answer; no answer is Don't allow.`;
+}
+
+/** A question gone this close to its end ran out of time, as far as a page can tell. */
+export const EXPIRY_SLACK_MS = 1500;
+
+/**
+ * Whether a question that went away at `now` ran out of time (nobody
+ * answered, the tool did not run), so the panel says so for a moment
+ * (EQ 13). One answered in this page, or gone well before its end (answered
+ * elsewhere, cancelled by the AI app), did not.
+ */
+export function ranOut(
+	expiresAt: number,
+	now: number,
+	answeredHere: boolean,
+): boolean {
+	return !answeredHere && now >= expiresAt - EXPIRY_SLACK_MS;
+}
+
+/** Bring every countdown under `root` to `now`. */
+export function updateCountdowns(root: ParentNode, now: number): void {
+	for (const p of root.querySelectorAll<HTMLElement>("[data-expires]")) {
+		const text = countdownText(Number(p.dataset["expires"]), now);
+		if (p.textContent !== text) p.textContent = text;
+	}
+}
+
+/** A button that is shown but takes no click yet (EQ 11: keeps its focus). */
+export const isUnavailable = (button: HTMLElement): boolean =>
+	button.getAttribute("aria-disabled") === "true";
+
+/** Make `button` take clicks (`ready`) or not, without taking its focus. */
+export function setAvailable(button: HTMLElement, ready: boolean): void {
+	if (ready) button.removeAttribute("aria-disabled");
+	else button.setAttribute("aria-disabled", "true");
+}
+
+/** "Allow once" and "Don't ask again" of the cards under `root`: ready or not. */
+export function setReady(root: ParentNode, ready: boolean): void {
+	for (const b of root.querySelectorAll<HTMLButtonElement>(
+		'button[data-answer]:not([data-answer="deny"])',
+	))
+		setAvailable(b, ready);
+}
+
+/** What a screen reader is told when a question comes (EQ 11). */
+export function questionAnnouncement(
+	q: Pick<QuestionView, "app" | "tool" | "navigation">,
+): string {
+	return q.navigation
+		? `${q.app} asks to take the tab to another site.`
+		: `${q.app} asks to run ${q.tool}.`;
+}
+
 export function questionCard(
 	q: QuestionView,
 	answer: (answer: Answer) => void,
+	now: number = Date.now(),
 ): HTMLElement {
 	const card = document.createElement("section");
 	card.className = "card question";
@@ -65,6 +125,10 @@ export function questionCard(
 	// Scrollable, and reachable by keyboard to scroll it.
 	args.tabIndex = 0;
 	args.setAttribute("aria-label", "Arguments");
+	const left = document.createElement("p");
+	left.className = "countdown muted small";
+	left.dataset["expires"] = String(q.expiresAt);
+	left.textContent = countdownText(q.expiresAt, now);
 	const buttons = document.createElement("div");
 	buttons.className = "buttons";
 	const button = (text: string, value: Answer, primary = false) => {
@@ -75,14 +139,18 @@ export function questionCard(
 		if (primary) b.className = "primary";
 		// Allow and "Don't ask again" only once the page has been in front a
 		// while: the click that brings it forward cannot approve.
-		if (value !== "deny") b.disabled = true;
+		if (value !== "deny") setAvailable(b, false);
 		b.addEventListener("click", () => {
-			if (!b.disabled) answer(value);
+			if (!isUnavailable(b)) answer(value);
 		});
 		return b;
 	};
-	buttons.append(button("Don't allow", "deny"), button("Allow", "allow", true));
-	card.append(tool, args, buttons);
+	// "Allow once": this call only, beside the one that keeps (EQ 9).
+	buttons.append(
+		button("Don't allow", "deny"),
+		button("Allow once", "allow", true),
+	);
+	card.append(tool, args, left, buttons);
 	// Not for a page without a site of its own (an opaque origin).
 	// Nor for a navigation: each one to another site asks (DEC-121).
 	if (q.site && q.origin && !q.navigation) {
@@ -90,7 +158,7 @@ export function questionCard(
 		buttons.append(button(`Don't ask again on ${host}`, "site"));
 		const note = document.createElement("p");
 		note.className = "muted small";
-		note.textContent = `Don't ask again: this tool runs without asking on ${host}, for every paired AI app, until you set it back to "asks first" in the tool list.`;
+		note.textContent = `Don't ask again: this tool runs without asking on ${host}, for every paired AI app, until you turn "Ask first" back on in the tool list.`;
 		card.append(note);
 	}
 	return card;

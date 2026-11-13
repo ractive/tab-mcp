@@ -293,13 +293,30 @@ async function answerInPanel(
 		enabled: true,
 	});
 	const selector = `[...document.querySelectorAll('[data-question] button[data-answer="${answer}"]')].at(-1)`;
-	await stack.panel.waitFor(`${selector} && !${selector}.disabled`, 10_000);
+	await stack.panel.waitFor(
+		`${selector} && ${selector}.getAttribute("aria-disabled") !== "true"`,
+		10_000,
+	);
 	await stack.panel.eval(`${selector}.id = "e2e-answer"`);
 	await stack.panel.click("#e2e-answer");
 	await stack.panel.eval(
 		`document.getElementById("e2e-answer")?.removeAttribute("id")`,
 	);
 }
+
+/**
+ * An expression: the panel's element `selector` is there and takes clicks
+ * (not `aria-disabled` during a wait after the layout moved, EQ 11).
+ */
+const takesClicks = (selector: string) =>
+	`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e !== null && e.getAttribute("aria-disabled") !== "true"; })()`;
+
+/** A tool's "Ask first" switch in the panel's tool list. */
+const askFirst = (name: string) => `input.ask-first[data-tool="${name}"]`;
+
+/** An expression: tool `name`'s "Ask first" switch is on (`true`) or off. */
+const asksFirst = (name: string, on: boolean) =>
+	`document.querySelector(${JSON.stringify(askFirst(name))})?.checked === ${on}`;
 
 /** The worker's settings in its IndexedDB, read in the worker (`kv.ts`). */
 const kvAll = (worker: Worker) =>
@@ -518,9 +535,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				SITE
 			],
 		).toEqual(["place_order"]);
-		await stack.panel.waitFor(
-			`document.querySelector('button[data-tool="place_order"]')?.textContent === "allowed"`,
-		);
+		await stack.panel.waitFor(asksFirst("place_order", false));
 		// The next call runs without a question, also through webmcp_call.
 		expect(
 			(await call(stack, "page_place_order", { item: "unasked" })).isError,
@@ -538,13 +553,10 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				`document.querySelectorAll("[data-question]").length`,
 			),
 		).toBe(0);
-		// Back to "asks first" for the tests after this one.
-		const toggle = `button[data-tool="place_order"]`;
-		await stack.panel.waitFor(`!document.querySelector('${toggle}').disabled`);
-		await stack.panel.click(toggle);
-		await stack.panel.waitFor(
-			`document.querySelector('${toggle}').textContent === "asks first"`,
-		);
+		// Back to "Ask first" for the tests after this one.
+		await stack.panel.waitFor(takesClicks(askFirst("place_order")));
+		await stack.panel.click(askFirst("place_order"));
+		await stack.panel.waitFor(asksFirst("place_order", true));
 	});
 
 	test("webmcp_call calls a page tool by name, with the same confirmation", async () => {
@@ -626,6 +638,71 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
 	});
 
+	test("the AI access switch: knob on track and track on card at least 3:1, light and dark, on and off (EQ 17)", async () => {
+		/** The contrast ratios Chrome's computed colours give, on and off. */
+		const contrast = () =>
+			stack.panel.eval<{
+				on: { knob: number; track: number };
+				off: { knob: number; track: number };
+			}>(`(() => {
+				const input = document.getElementById("ai-switch");
+				const still = document.createElement("style");
+				still.textContent = "#ai-switch, #ai-switch::after { transition: none !important; }";
+				document.head.append(still);
+				const was = input.checked;
+				const rgb = (color) => {
+					const c = document.createElement("canvas").getContext("2d");
+					c.fillStyle = color;
+					c.fillRect(0, 0, 1, 1);
+					return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3);
+				};
+				const lum = (color) => {
+					const [r, g, b] = rgb(color).map((v) => {
+						const s = v / 255;
+						return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+					});
+					return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+				};
+				const ratio = (a, b) => {
+					const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+					return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100;
+				};
+				const card = getComputedStyle(input.closest(".card")).backgroundColor;
+				const at = (checked) => {
+					input.checked = checked;
+					const track = getComputedStyle(input).backgroundColor;
+					const knob = getComputedStyle(input, "::after").backgroundColor;
+					return { knob: ratio(knob, track), track: ratio(track, card) };
+				};
+				const result = { on: at(true), off: at(false) };
+				input.checked = was;
+				still.remove();
+				return result;
+			})()`);
+		const measured: Record<string, unknown> = {};
+		for (const value of ["light", "dark"]) {
+			await stack.panel.send("Emulation.setEmulatedMedia", {
+				features: [{ name: "prefers-color-scheme", value }],
+			});
+			const m = await contrast();
+			measured[value] = m;
+			for (const ratio of [m.on.knob, m.on.track, m.off.knob, m.off.track])
+				expect(ratio).toBeGreaterThanOrEqual(3);
+		}
+		// Before: the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
+		expect(measured).toEqual({
+			light: {
+				on: { knob: 5.02, track: 5.02 },
+				off: { knob: 3.77, track: 3.77 },
+			},
+			dark: {
+				on: { knob: 9.48, track: 9.48 },
+				off: { knob: 3.42, track: 3.42 },
+			},
+		});
+		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
+	});
+
 	test("How do I add it? under the address: the commands fit, light and dark, Copy keeps its width", async () => {
 		// With an app paired, the address is behind "+ Add another AI app".
 		const adding = !(await stack.panel.eval<boolean>(
@@ -694,19 +771,17 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		if (adding) await stack.panel.click("#pair-done");
 	});
 
-	test("Allow all and Ask for all, for the tools listed at the click only", async () => {
+	test("Don't ask for these tools and Ask first for these tools, for the tools listed at the click only", async () => {
 		const head = `document.getElementById("allow-tools")`;
+		const DONT_ASK = JSON.stringify("Don't ask for these tools");
+		const ASK = JSON.stringify("Ask first for these tools");
 		// Off for a moment after a question went (the layout moved).
 		await stack.panel.waitFor(
-			`!document.getElementById("tools-head").hidden && ${head}.textContent === "Allow all" && !${head}.disabled`,
+			`!document.getElementById("tools-head").hidden && ${head}.textContent === ${DONT_ASK} && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === "Ask for all"`);
-		expect(
-			await stack.panel.eval(
-				`document.querySelector('button[data-tool="place_order"]').textContent`,
-			),
-		).toBe("allowed");
+		await stack.panel.waitFor(`${head}.textContent === ${ASK}`);
+		expect(await stack.panel.eval(asksFirst("place_order", false))).toBe(true);
 		const allowed = await call(stack, "page_place_order", { item: "all" });
 		expect(allowed.content[0]?.text).toContain("all");
 		// A tool the page registers later asks first.
@@ -720,9 +795,11 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The button changed under the pointer (another label, one more tool):
 		// a click right then allows nothing.
 		await stack.panel.waitFor(
-			`${head}.title === "Allow all 2 tools that ask first on ${SITE}"`,
+			`${head}.title === "Don't ask for the 2 tools listed on ${SITE}, for every paired AI app"`,
 		);
-		expect(await stack.panel.eval(`${head}.disabled`)).toBe(true);
+		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
+		// Not `disabled`: it stays in the tab order (EQ 11).
+		expect(await stack.panel.eval(`${head}.disabled`)).toBe(false);
 		await stack.panel.click("#allow-tools");
 		await Bun.sleep(300);
 		expect(
@@ -734,18 +811,18 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");
 		expect((await late).isError).toBe(true);
-		// Not all allowed any more: Allow all again takes the late one too.
+		// One asks again: "Don't ask" again takes the late one too.
 		await stack.panel.waitFor(
-			`${head}.textContent === "Allow all" && !${head}.disabled`,
+			`${head}.textContent === ${DONT_ASK} && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === "Ask for all"`);
+		await stack.panel.waitFor(`${head}.textContent === ${ASK}`);
 		expect((await call(stack, "page_late_order")).isError).toBeFalsy();
-		// Ask for all (once it may be clicked: its label just changed): every
+		// "Ask first" (once it may be clicked: its label just changed): every
 		// one asks first again.
-		await stack.panel.waitFor(`!${head}.disabled`);
+		await stack.panel.waitFor(takesClicks("#allow-tools"));
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === "Allow all"`);
+		await stack.panel.waitFor(`${head}.textContent === ${DONT_ASK}`);
 		const asks = call(stack, "page_place_order", { item: "asks" });
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");
@@ -845,16 +922,31 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await asked).isError).toBe(true);
 	});
 
-	test("a tool switched to allowed in the panel runs without asking, for that site", async () => {
-		const toggle = `button[data-tool="place_order"]`;
+	test("a tool whose Ask first is switched off in the panel runs without asking, for that site", async () => {
+		const toggle = askFirst("place_order");
 		// Off for a moment after the last question went (the layout moved).
-		await stack.panel.waitFor(
-			`document.querySelector('${toggle}') && !document.querySelector('${toggle}').disabled`,
-		);
+		await stack.panel.waitFor(takesClicks(toggle));
+		// A switch with a label that stays (EQ 11).
+		expect(
+			await stack.panel.eval(`(() => {
+				const e = document.querySelector(${JSON.stringify(toggle)});
+				return [e.type, e.getAttribute("role"), e.getAttribute("aria-label"), e.checked];
+			})()`),
+		).toEqual(["checkbox", "switch", "Ask first: place_order", true]);
 		await stack.panel.click(toggle);
-		await stack.panel.waitFor(
-			`document.querySelector('${toggle}').textContent === "allowed"`,
-		);
+		await stack.panel.waitFor(asksFirst("place_order", false));
+		expect(
+			await stack.panel.eval(
+				`document.querySelector(${JSON.stringify(toggle)}).getAttribute("aria-label")`,
+			),
+		).toBe("Ask first: place_order");
+		// The list was made anew with the state: the focus is on the same
+		// tool's switch, not on the page's body (EQ 11).
+		expect(
+			await stack.panel.eval(
+				`document.activeElement?.matches(${JSON.stringify(toggle)}) === true`,
+			),
+		).toBe(true);
 		const result = await call(stack, "page_place_order", { item: "allowed" });
 		expect(result.isError).toBeFalsy();
 		expect(await tab.eval("window.calls.at(-1)")).toEqual([
@@ -863,9 +955,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		]);
 		// Switched back: it asks again.
 		await stack.panel.click(toggle);
-		await stack.panel.waitFor(
-			`document.querySelector('${toggle}').textContent === "asks first"`,
-		);
+		await stack.panel.waitFor(asksFirst("place_order", true));
 		const asked = call(stack, "page_place_order", { item: "asked" });
 		await answerInPanel(stack, "deny");
 		expect((await asked).isError).toBe(true);
@@ -986,6 +1076,18 @@ describe.skipIf(chrome === undefined)(
 			const asked = call(stack, "page_place_order", { item: "panel" });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			expect(await badge()).toBe("?");
+			// A short line for screen readers, not the card (EQ 11); the time
+			// left on the card (EQ 13).
+			expect(
+				await stack.panel.waitFor<string>(
+					`document.getElementById("question-status").textContent`,
+				),
+			).toEndWith("asks to run page_place_order.");
+			expect(
+				await stack.panel.eval(
+					`document.querySelector("[data-question] .countdown").textContent`,
+				),
+			).toMatch(/^(59|60) s left to answer; no answer is Don't allow\.$/);
 			await answerInPanel(stack, "allow");
 			expect((await asked).isError).toBeFalsy();
 			expect(await badge()).toBe("on");
@@ -1002,9 +1104,9 @@ describe.skipIf(chrome === undefined)(
 			// switches wait too (ES 5).
 			expect(
 				await stack.panel.eval(
-					`[...document.querySelectorAll("button.badge.toggle")].map((b) => b.disabled)`,
+					`[...document.querySelectorAll("input.ask-first")].map((b) => b.getAttribute("aria-disabled"))`,
 				),
-			).toEqual([true]);
+			).toEqual(["true"]);
 			const second = call(stack, "page_place_order", { item: "second" });
 			await stack.panel.waitFor(
 				`document.querySelectorAll("[data-question]").length === 2`,
@@ -1013,7 +1115,9 @@ describe.skipIf(chrome === undefined)(
 				enabled: true,
 			});
 			const top = `document.querySelector('[data-question] button[data-answer="allow"]')`;
-			await stack.panel.waitFor(`!${top}.disabled`);
+			await stack.panel.waitFor(
+				`${top}.getAttribute("aria-disabled") !== "true"`,
+			);
 			await stack.panel.eval(`${top}.id = "e2e-answer"`);
 			await stack.panel.click("#e2e-answer");
 			expect((await first).isError).toBeFalsy();
@@ -1023,12 +1127,20 @@ describe.skipIf(chrome === undefined)(
 			// The question left, and the tools' switches, wait again.
 			expect(
 				await stack.panel.eval(
-					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), button.badge.toggle')].map((b) => b.disabled)`,
+					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), input.ask-first')].map((b) => b.getAttribute("aria-disabled"))`,
 				),
-			).toEqual([true, true, true]);
+			).toEqual(["true", "true", "true"]);
+			// A click on the waiting switch changes nothing.
+			await stack.panel.click(askFirst("place_order"));
+			await Bun.sleep(300);
+			expect(await stack.panel.eval(asksFirst("place_order", true))).toBe(true);
 			await stack.panel.waitFor(
-				`![...document.querySelectorAll("button.badge.toggle")].some((b) => b.disabled)`,
+				`![...document.querySelectorAll("input.ask-first")].some((b) => b.getAttribute("aria-disabled") === "true")`,
 			);
+			const allowedTools = (await kvAll(stack.worker))["allowedTools"] as
+				| Record<string, string[]>
+				| undefined;
+			expect(allowedTools?.[SITE] ?? []).not.toContain("place_order");
 			await answerInPanel(stack, "deny");
 			expect((await second).isError).toBe(true);
 		});
@@ -1095,7 +1207,7 @@ describe.skipIf(chrome === undefined)(
 			const once = call(stack, "page_place_order", { item: "once" });
 			const third = await newNotification(stack, [first, second]);
 			expect(await stack.worker.eval("globalThis.e2eButtons")).toEqual([
-				["Allow"],
+				["Allow once"],
 			]);
 			await Bun.sleep(600);
 			await clickNotification(stack, third, 1);
@@ -1176,7 +1288,7 @@ describe.skipIf(chrome === undefined)(
 			expect(await stack.tab.eval("window.calls.length")).toBe(0);
 			await popup.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 			const allow = `document.querySelector('[data-question] button[data-answer="allow"]')`;
-			await popup.waitFor(`!${allow}.disabled`);
+			await popup.waitFor(`${allow}.getAttribute("aria-disabled") !== "true"`);
 			await popup.click(`[data-question] button[data-answer="allow"]`);
 			const result = await asked;
 			expect(result.isError).toBeFalsy();
@@ -1352,6 +1464,35 @@ describe.skipIf(chrome === undefined)(
 			const off = await appRow();
 			expect(off.slice(0, 3)).toEqual([1, false, "Paired AI apps"]);
 			expect(off[3]).not.toBe(green);
+			// No Disconnect while off: only the relay can disconnect an app,
+			// and the panel says so (EQ 8).
+			const offView = () =>
+				stack.panel.eval(
+					`[document.getElementById("state-text").textContent, document.querySelectorAll("#grants li").length, document.querySelectorAll("#grants button").length, document.getElementById("grants-note").hidden, document.getElementById("grants-note").textContent]`,
+				);
+			const expectedOff = [
+				"AI access is off · paired apps stay paired",
+				1,
+				0,
+				false,
+				"Turn on AI access to disconnect an app.",
+			];
+			expect(await offView()).toEqual(expectedOff);
+			// A new worker (an update, or the old one stopped while idle) still
+			// lists the app: kept from the relay's last list.
+			await restartWorker();
+			stack.panel = await openPanel(stack.browser, stack.tab);
+			await stack.panel.waitFor(
+				`document.querySelectorAll("#grants li").length === 1`,
+			);
+			expect(await offView()).toEqual(expectedOff);
+			expect(await stored("grants")).toEqual([
+				{
+					grantId: expect.any(String),
+					name: "Test client",
+					host: expect.any(String),
+				},
+			]);
 			await stack.panel.click("#connect");
 			await stack.panel.waitFor(
 				`document.getElementById("state").dataset.state === "on"`,
@@ -1672,6 +1813,14 @@ describe.skipIf(chrome === undefined)(
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${SITE}/plain.html`,
 			});
+			// A page without tools: what still works, instead of a bare "No
+			// WebMCP" (EQ 7).
+			await stack.panel.waitFor(`!document.getElementById("no-tools").hidden`);
+			expect(
+				await stack.panel.eval(
+					`[document.getElementById("no-webmcp").hidden, document.getElementById("tab-badges").textContent]`,
+				),
+			).toEqual([true, ""]);
 		});
 
 		test("on the same origin after a navigation too (Chrome keeps the grant)", async () => {
@@ -1687,6 +1836,20 @@ describe.skipIf(chrome === undefined)(
 			const refused = await pageInfo(stack);
 			expect(refused.isError).toBe(true);
 			expect(refused.content[0]?.text).toContain("may not read this tab yet");
+			// The panel in its own words: the toolbar icon, or host access,
+			// whose button is explained before Chrome's prompt (EQ 6, EQ 9).
+			await stack.panel.waitFor(
+				`document.getElementById("tab-badges").textContent === "Not readable"`,
+			);
+			expect(
+				await stack.panel.eval(
+					`[document.getElementById("tab-access").textContent, document.getElementById("host-access").hidden, document.getElementById("allow-all").textContent]`,
+				),
+			).toEqual([
+				"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+				false,
+				"Read all sites without a click",
+			]);
 			await stack.browser.clickIcon(tab);
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${SUBDOMAIN}/plain.html`,

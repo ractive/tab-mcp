@@ -51,11 +51,13 @@ import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
 	notificationText,
+	QUESTION_TIMEOUT_MS,
 	Questions,
 	type QuestionsHost,
 	visible,
 } from "../src/worker/questions.ts";
 import { CachedSecretStorage } from "../src/worker/secret.ts";
+import { loadGrants, saveGrants } from "../src/worker/settings.ts";
 
 const ID = "abcdefghijklmnopabcdefghijklmnop";
 const PANEL = `chrome-extension://${ID}/sidepanel/index.html`;
@@ -251,13 +253,17 @@ describe("questions", () => {
 		const answer = questions.ask(request(), where);
 		await settle();
 		expect(questions.list).toHaveLength(1);
+		// The panel counts down to its end (EQ 13).
+		expect(questions.list[0]?.expiresAt).toBe(1_000_000 + QUESTION_TIMEOUT_MS);
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text.title).toBe("Allow Place order?");
-		expect(text.contextMessage).toBe("On site.test · tab-mcp for Chrome");
+		expect(text.contextMessage).toBe(
+			"On site.test · Closing this is Don't allow",
+		);
 		expect(text.message).toBe(
 			'Claude (claude.ai) wants to run page_place_order: {"item":"tea"}',
 		);
-		expect(text.buttons).toEqual(["Allow"]);
+		expect(text.buttons).toEqual(["Allow once"]);
 		host.advance(NOTIFICATION_GUARD_MS);
 		// Any other button counts as nothing.
 		questions.notificationButton(id, 1);
@@ -335,7 +341,7 @@ describe("questions", () => {
 		});
 		await settle();
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
-		expect(text.buttons).toEqual(["Allow"]);
+		expect(text.buttons).toEqual(["Allow once"]);
 		expect(text.message.endsWith(`\n${ARGS_CUT_NOTE}`)).toBe(true);
 		expect(text.message.length).toBeLessThanOrEqual(300);
 		expect(text.message).toContain("y".repeat(MAX_ARGS_NOTIFICATION - 20));
@@ -565,6 +571,7 @@ describe("questions", () => {
 			tool: "page_x",
 			args: `{"big": "${id.repeat(1000)}"}`,
 			site: true,
+			expiresAt: 0,
 		});
 		const sent = new Set<string>();
 		expect(argsToSend([view("a"), view("b")], sent).map((m) => m.id)).toEqual([
@@ -605,10 +612,13 @@ describe("questions", () => {
 			origin: "https://shop.example",
 			args: "{}",
 			site: true,
+			expiresAt: 0,
 		};
 		const text = notificationText(view, "{}");
 		expect(text.title).toBe(`Allow ${"A".repeat(59)}…?`);
-		expect(text.contextMessage).toBe("On shop.example · tab-mcp for Chrome");
+		expect(text.contextMessage).toBe(
+			"On shop.example · Closing this is Don't allow",
+		);
 		expect(notificationText({ ...view, title: "Order" }, "{}").title).toBe(
 			"Allow Order?",
 		);
@@ -616,8 +626,8 @@ describe("questions", () => {
 		expect(notificationText({ ...bare, site: false }, "{}")).toEqual({
 			title: "Allow page_x?",
 			message: "Claude (claude.ai) wants to run page_x.",
-			contextMessage: "tab-mcp for Chrome",
-			buttons: ["Allow"],
+			contextMessage: "Closing this is Don't allow",
+			buttons: ["Allow once"],
 		});
 	});
 
@@ -697,6 +707,25 @@ describe("the settings in IndexedDB", () => {
 		expect(kv.data.get("tab-mcp:secret:https://other:tab-mcp-for-chrome")).toBe(
 			"s2",
 		);
+	});
+
+	test("the paired apps as last listed: kept for a panel while off, anything else dropped (EQ 8)", async () => {
+		const kv = memoryKv();
+		expect(await loadGrants(kv)).toEqual([]);
+		const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
+		await saveGrants(kv, [claude]);
+		expect(await loadGrants(kv)).toEqual([claude]);
+		await kv.set({
+			grants: [
+				{ ...claude, extra: 1 },
+				{ grantId: 2, name: "", host: "x" },
+				null,
+				"g3",
+			],
+		});
+		expect(await loadGrants(kv)).toEqual([claude]);
+		await kv.set({ grants: "nope" });
+		expect(await loadGrants(kv)).toEqual([]);
 	});
 });
 
@@ -1062,6 +1091,7 @@ describe("a question's own window", () => {
 				tool: "page_x",
 				args: "{}",
 				site: true,
+				expiresAt: 0,
 			});
 		return { windows, waiting, answers, removed, port, ask };
 	}
@@ -1072,6 +1102,7 @@ describe("a question's own window", () => {
 		tool: string;
 		args: string;
 		site: boolean;
+		expiresAt: number;
 	};
 
 	test("a port from a window not opened for a question is disconnected and never heard", async () => {

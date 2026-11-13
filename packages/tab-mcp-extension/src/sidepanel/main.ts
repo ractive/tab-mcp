@@ -21,19 +21,40 @@ import {
 	allowAllView,
 	cardView,
 	confirms,
+	DONT_ASK_ALL,
+	introText,
+	NO_ACCESS_TEXT,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
 	switchExpiry,
 	switchShown,
+	webmcpNote,
 } from "./card.ts";
-import { questionCard } from "./question.ts";
-import { copyText, setupSteps } from "./setup.ts";
+import {
+	isUnavailable,
+	questionAnnouncement,
+	questionCard,
+	ranOut,
+	setAvailable,
+	setReady,
+	updateCountdowns,
+} from "./question.ts";
+import { copyText, SELECTED, setupSteps } from "./setup.ts";
 
 /** How long the panel must be visible and focused before Allow counts. */
 const ALLOW_DELAY_MS = 750;
 
 const $ = <T extends HTMLElement>(id: string) =>
 	document.getElementById(id) as T;
+
+/**
+ * Set an element's text only when it changes: a live region (`role="alert"`
+ * or `"status"`) would be read out again on every state, and a selection in
+ * it would be lost.
+ */
+function setText(element: HTMLElement, text: string): void {
+	if (element.textContent !== text) element.textContent = text;
+}
 
 const { id: windowId } = await chrome.windows.getCurrent();
 
@@ -139,7 +160,11 @@ function showConnection(s: PanelState): void {
 	if (s.status !== "on") addingApp = false;
 	const view = cardView(s, addingApp);
 	$("state").dataset["state"] = s.status;
-	$("state-text").textContent = view.stateText;
+	setText($("state-text"), view.stateText);
+	$("intro").hidden = !view.intro;
+	setText($("intro"), view.intro ? introText(s.relay) : "");
+	$("grants-note").hidden = view.grantsNote === "";
+	setText($("grants-note"), view.grantsNote);
 	// Also while connecting or retrying, so the user can stop it.
 	const shown = switchShown(view.switchOn, switchIntent, Date.now());
 	switchIntent = shown.intent;
@@ -147,11 +172,14 @@ function showConnection(s: PanelState): void {
 	$("ai-switch").setAttribute("aria-checked", String(shown.checked));
 	$("connect").hidden = !view.turnOn;
 	$("problem").hidden = s.problem === undefined;
-	$("problem").textContent = s.problem ?? "";
+	setText($("problem"), s.problem ?? "");
 	$("replaced").hidden = s.replaced === undefined;
-	$("replaced-text").textContent = s.replaced?.sibling
-		? "Opened elsewhere in this browser: the address is in use there."
-		: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.";
+	setText(
+		$("replaced-text"),
+		s.replaced?.sibling
+			? "Opened elsewhere in this browser: the address is in use there."
+			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.",
+	);
 	$("grants").setAttribute(
 		"aria-label",
 		s.status === "on" ? "Connected AI apps" : "Paired AI apps",
@@ -184,7 +212,9 @@ function showConnection(s: PanelState): void {
 				host.textContent = grant.host;
 				app.append(" ", host);
 			}
-			li.append(app, disconnectButton(grant));
+			// Disconnect goes through the relay: only while connected (EQ 8).
+			li.append(app);
+			if (view.disconnect) li.append(disconnectButton(grant));
 			return li;
 		}),
 	);
@@ -199,7 +229,8 @@ function showConnection(s: PanelState): void {
 	$("add-app").hidden = !view.addApp;
 	$("pair-done").hidden = !view.done;
 	// The address only while pairing: it is what an AI app is added with.
-	$("address").textContent = view.address;
+	// Set only when it changes: a failed Copy selects it in place (EQ 16).
+	setText($("address"), view.address);
 	$("address").title = view.address;
 	// The steps name the address: made again only when it changes, so a
 	// "Copied" and the focus on a Copy stay. Shown with the address.
@@ -213,8 +244,10 @@ function showConnection(s: PanelState): void {
 	}
 	$("setup").hidden = view.address === "";
 	const code = s.code;
-	$("code").textContent =
-		code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
+	setText(
+		$("code"),
+		code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`,
+	);
 	($("copy-code") as HTMLButtonElement).disabled = code === undefined;
 	if (s.grants.length === 0) newAddressArmed = false;
 	$("new-address-note").hidden = !newAddressArmed;
@@ -224,29 +257,41 @@ function showConnection(s: PanelState): void {
 
 /** Since when the panel has been visible and focused, if it is. */
 let focusedSince: number | undefined;
-const cards = new Map<string, { card: HTMLElement; shownAt: number }>();
+const cards = new Map<
+	string,
+	{ card: HTMLElement; shownAt: number; question: QuestionSummary }
+>();
 /** Each question's arguments, sent once before the state that lists it. */
 const args = new Map<string, string>();
+/** The questions answered in this panel: their card goes without a notice. */
+const answered = new Set<string>();
+/** How long the notice of a question nobody answered stays (EQ 13). */
+const NOTICE_MS = 6000;
 
 /**
- * Until when the panel's buttons that allow something stay off after its
- * layout moved: a question that went away moves what was below it up, and
- * one that came moves it down, under the pointer; a click meant for what was
- * there must not land on an Allow, "Allow all" or an "asks first" that came
- * there instead (ES 5).
+ * Until when the panel's controls that allow something take no click after
+ * its layout moved: a question that went away moves what was below it up,
+ * and one that came moves it down, under the pointer; a click meant for what
+ * was there must not land on an "Allow once", "Don't ask for these tools" or
+ * an "Ask first" switch that came there instead (ES 5).
  */
 let movedUntil = 0;
-/** "Allow all" as last shown: its visibility, label and tools. */
+/** "Don't ask for these tools" as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
 function showQuestions(questions: QuestionSummary[]): void {
 	const ids = new Set(questions.map((q) => q.id));
 	for (const id of args.keys()) if (!ids.has(id)) args.delete(id);
 	let removed = false;
-	for (const [id, { card }] of cards)
+	for (const [id, { card, question }] of cards)
 		if (!ids.has(id)) {
-			card.remove();
+			// Gone at its time limit and not answered here: it ran out, and the
+			// tool did not run. Said for a few seconds where the card was.
+			if (ranOut(question.expiresAt, Date.now(), answered.has(id)))
+				card.replaceWith(expiredNotice(question));
+			else card.remove();
 			cards.delete(id);
+			answered.delete(id);
 			removed = true;
 		}
 	if (removed) {
@@ -259,15 +304,51 @@ function showQuestions(questions: QuestionSummary[]): void {
 		if (!cards.has(q.id)) {
 			const card = questionCard(
 				{ ...q, args: args.get(q.id) ?? "" },
-				(answer) => send({ type: "answer", id: q.id, answer }),
+				(answer) => {
+					answered.add(q.id);
+					send({ type: "answer", id: q.id, answer });
+				},
 			);
 			$("questions").append(card);
 			const now = Date.now();
-			cards.set(q.id, { card, shownAt: now });
+			cards.set(q.id, { card, shownAt: now, question: q });
+			// A short line for screen readers, not the card with its arguments
+			// (up to 1 MiB) as a live region (EQ 11).
+			announce(questionAnnouncement(q));
 			// Everything below the questions moved down by the card's height.
 			movedUntil = now + ALLOW_DELAY_MS;
 		}
 	arm();
+}
+
+/**
+ * Say `text` in the questions' status line, for screen readers: emptied
+ * first, so the same line twice (two questions for the same tool) is said
+ * twice.
+ */
+let announcing: ReturnType<typeof setTimeout> | undefined;
+function announce(text: string): void {
+	const status = $("question-status");
+	status.textContent = "";
+	clearTimeout(announcing);
+	announcing = setTimeout(() => {
+		status.textContent = text;
+	}, 50);
+}
+
+/** What is left of a question that nobody answered in time (EQ 13). */
+function expiredNotice(q: QuestionSummary): HTMLElement {
+	const notice = document.createElement("p");
+	notice.className = "question-notice muted small";
+	notice.textContent = `Not answered in time: ${q.tool} did not run.`;
+	announce(notice.textContent);
+	setTimeout(() => {
+		notice.remove();
+		// What was below moves up again.
+		movedUntil = Date.now() + ALLOW_DELAY_MS;
+		arm();
+	}, NOTICE_MS);
+	return notice;
 }
 
 /**
@@ -279,19 +360,19 @@ function arm(): void {
 	if (document.visibilityState === "visible" && document.hasFocus())
 		focusedSince ??= now;
 	else focusedSince = undefined;
-	for (const { card, shownAt } of cards.values()) {
-		const ready =
+	for (const { card, shownAt } of cards.values())
+		setReady(
+			card,
 			focusedSince !== undefined &&
-			now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS;
-		for (const b of card.querySelectorAll<HTMLButtonElement>(
-			'button[data-answer]:not([data-answer="deny"])',
-		))
-			b.disabled = !ready;
-	}
-	for (const toggle of document.querySelectorAll<HTMLButtonElement>(
-		"button.badge.toggle, #allow-tools",
+				now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS,
+		);
+	updateCountdowns($("questions"), now);
+	// `aria-disabled`, not `disabled`: a focused control keeps its focus and
+	// its place in the tab order during the wait (EQ 11).
+	for (const control of document.querySelectorAll<HTMLElement>(
+		"input.ask-first, #allow-tools",
 	))
-		toggle.disabled = now < movedUntil;
+		setAvailable(control, now >= movedUntil);
 }
 
 setInterval(() => {
@@ -315,24 +396,41 @@ function badge(text: string, kind = ""): HTMLElement {
 	return span;
 }
 
-/** "asks first" or "allowed": a click turns it into the other, for this site. */
-function allowToggle(origin: string, tool: ToolView): HTMLElement {
-	const on = tool.allowed;
-	const button = document.createElement("button");
-	button.type = "button";
-	button.className = `badge toggle ${on ? "allowed" : "asks"}`;
-	button.textContent = on ? "allowed" : "asks first";
-	button.title = on
-		? `Runs without asking on ${origin}. Click to ask first again.`
-		: `Asks you before each call. Click to allow it on ${origin} without asking.`;
-	button.setAttribute("aria-pressed", String(on));
-	button.dataset["tool"] = tool.name;
-	button.disabled = Date.now() < movedUntil;
-	button.addEventListener("click", () => {
-		if (!button.disabled)
-			send({ type: "set-allowed", origin, name: tool.name, on: !on });
+/**
+ * The tool's "Ask first" switch, for this site: on, it asks before each
+ * call; off, it runs without asking, for every paired AI app. A switch with
+ * a label that stays, not a badge that changes its text (EQ 9, EQ 11).
+ */
+function askFirstSwitch(origin: string, tool: ToolView): HTMLElement {
+	const label = document.createElement("label");
+	label.className = "ask-switch";
+	const input = document.createElement("input");
+	input.type = "checkbox";
+	input.className = "ask-first";
+	input.setAttribute("role", "switch");
+	input.checked = !tool.allowed;
+	input.dataset["tool"] = tool.name;
+	input.setAttribute("aria-label", `Ask first: ${tool.title ?? tool.name}`);
+	label.title = `On: asks you before each call. Off: runs without asking on ${origin}, for every paired AI app.`;
+	setAvailable(input, Date.now() >= movedUntil);
+	input.addEventListener("click", (event) => {
+		// During the wait after the layout moved the click does nothing.
+		if (isUnavailable(input)) {
+			event.preventDefault();
+			return;
+		}
+		send({
+			type: "set-allowed",
+			origin,
+			name: tool.name,
+			on: !input.checked,
+		});
 	});
-	return button;
+	const text = document.createElement("span");
+	text.textContent = "Ask first";
+	text.setAttribute("aria-hidden", "true");
+	label.append(input, text);
+	return label;
 }
 
 function toolItem(
@@ -363,38 +461,44 @@ function toolItem(
 			: tool.readOnly
 				? badge("reads", "reads")
 				: canAllow
-					? allowToggle(origin, tool)
+					? askFirstSwitch(origin, tool)
 					: badge("asks first", "asks"),
 	);
 	return li;
 }
 
 function showTab(s: PanelState): void {
-	$("allow-all").hidden = s.allSites;
+	$("host-access").hidden = s.allSites;
 	$("allowed-all").hidden = !s.allSites;
 	const tab = s.tab;
-	$("tab-title").textContent = tab?.title ?? "–";
-	$("tab-host").textContent = tab?.host ?? "";
+	setText($("tab-title"), tab?.title ?? "–");
+	setText($("tab-host"), tab?.host ?? "");
 	const count = tab?.webmcp?.tools ?? 0;
 	$("tab-badges").replaceChildren(
 		...(tab === undefined
 			? []
-			: [
-					tab.webmcp === undefined
-						? badge("Not readable")
-						: tab.webmcp.available
-							? badge(
-									`WebMCP · ${count} tool${count === 1 ? "" : "s"}`,
-									"reads",
-								)
-							: badge("No WebMCP"),
-				]),
+			: tab.webmcp === undefined
+				? [badge("Not readable")]
+				: count > 0
+					? [badge(`WebMCP · ${count} tool${count === 1 ? "" : "s"}`, "reads")]
+					: []),
 	);
-	$("tab-access").textContent = tab?.access ?? "";
+	// The panel's own words for why it may not read the tab (EQ 6).
+	setText(
+		$("tab-access"),
+		tab?.noAccess !== undefined
+			? NO_ACCESS_TEXT[tab.noAccess]
+			: (tab?.access ?? ""),
+	);
+	// No tools: what still works, and where WebMCP comes from (EQ 7).
+	const note = webmcpNote(tab);
+	$("no-tools").hidden = note !== "no-tools";
+	$("no-webmcp").hidden = note !== "no-webmcp";
 	const allowAll = allowAllView(tab);
-	// The page changed what "Allow all" does (another label, other tools, or
-	// it just came): it and the switches below wait, as when a question went,
-	// so a click meant for the button as it was cannot allow what it is now.
+	// The page changed what the button over the list does (another label,
+	// other tools, or it just came): it and the switches below wait, as when
+	// a question went, so a click meant for the button as it was cannot allow
+	// what it is now.
 	const shownAs = JSON.stringify([
 		allowAll.shown,
 		allowAll.label,
@@ -407,20 +511,31 @@ function showTab(s: PanelState): void {
 	allowAllShown = shownAs;
 	$("tools-head").hidden = !allowAll.shown;
 	const button = $("allow-tools") as HTMLButtonElement;
-	button.textContent = allowAll.label;
+	setText(button, allowAll.label);
 	const scope = tab?.origin ?? "this site";
 	const label =
-		allowAll.label === "Allow all"
-			? `Allow all ${allowAll.names.length} tools that ask first on ${scope}`
-			: `Ask first for all tools on ${scope}`;
+		allowAll.label === DONT_ASK_ALL
+			? `Don't ask for the ${allowAll.names.length} tools listed on ${scope}, for every paired AI app`
+			: `Ask first again for the ${allowAll.names.length} tools listed on ${scope}`;
 	button.setAttribute("aria-label", label);
 	button.title = label;
-	button.disabled = Date.now() < movedUntil;
+	setAvailable(button, Date.now() >= movedUntil);
+	// The list is made anew: a keyboard user's focus goes back to the same
+	// tool's switch, not to the page's body (EQ 11).
+	const focused =
+		document.activeElement instanceof HTMLElement &&
+		document.activeElement.closest("#tools") !== null
+			? document.activeElement.dataset["tool"]
+			: undefined;
 	$("tools").replaceChildren(
 		...(tab?.tools ?? []).map((tool) =>
 			toolItem(tab?.origin ?? "", tab?.canAllow === true, tool),
 		),
 	);
+	if (focused !== undefined)
+		$("tools")
+			.querySelector<HTMLElement>(`[data-tool="${CSS.escape(focused)}"]`)
+			?.focus();
 }
 
 function show(s: PanelState): void {
@@ -434,9 +549,14 @@ function show(s: PanelState): void {
 
 // --- Controls ---
 
+/**
+ * A problem of the panel's own (Chrome refused a permission, the extension
+ * was reloaded): in an element of its own, which the worker's states do not
+ * overwrite (EQ 16).
+ */
 function problem(text: string): void {
-	$("problem").hidden = false;
-	$("problem").textContent = text;
+	$("local-problem").hidden = false;
+	setText($("local-problem"), text);
 }
 
 /**
@@ -453,17 +573,28 @@ function copyStatus(message: string): void {
 	}, 5000);
 }
 
-/** Not focused, or not allowed: the text is shown whole to copy by hand. */
-function copyFailed(text: string): void {
-	problem(`Copy did not work: ${text}`);
-}
-
+/**
+ * Copy `text` (shown in `shown`). The clipboard refused (the panel not
+ * focused, say): the text is selected where it is, to copy by hand, as for
+ * the setup commands; the states that follow leave it alone (EQ 16).
+ */
 function copy(
 	button: HTMLElement,
+	shown: HTMLElement,
 	text: string | undefined,
 	noun: string,
 ): void {
-	if (text !== undefined) copyText(button, text, copyFailed, noun, copyStatus);
+	if (text === undefined) return;
+	copyText(
+		button,
+		text,
+		() => {
+			document.getSelection()?.selectAllChildren(shown);
+			copyStatus(SELECTED);
+		},
+		noun,
+		copyStatus,
+	);
 }
 
 function addApp(on: boolean): void {
@@ -516,17 +647,17 @@ $("replaced-new-address").addEventListener("click", () =>
 );
 
 $("copy").addEventListener("click", () =>
-	copy($("copy"), state?.address, "address"),
+	copy($("copy"), $("address"), state?.address, "address"),
 );
 $("copy-code").addEventListener("click", () =>
-	copy($("copy-code"), state?.code, "code"),
+	copy($("copy-code"), $("code"), state?.code, "code"),
 );
 
 $("allow-tools").addEventListener("click", () => {
 	const button = $("allow-tools") as HTMLButtonElement;
 	const tab = state?.tab;
 	const view = allowAllView(tab);
-	if (button.disabled || !view.shown || tab?.origin === undefined) return;
+	if (isUnavailable(button) || !view.shown || tab?.origin === undefined) return;
 	send({
 		type: "set-allowed-all",
 		origin: tab.origin,
@@ -536,6 +667,7 @@ $("allow-tools").addEventListener("click", () => {
 });
 
 $("allow-all").addEventListener("click", () => {
+	$("local-problem").hidden = true;
 	// From the click: Chrome asks the user. The worker hears of the change.
 	chrome.permissions
 		.request(ALL_SITES)
@@ -543,6 +675,7 @@ $("allow-all").addEventListener("click", () => {
 });
 
 $("disallow-all").addEventListener("click", () => {
+	$("local-problem").hidden = true;
 	chrome.permissions
 		.remove(ALL_SITES)
 		.catch((error: unknown) => problem(String(error)));

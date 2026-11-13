@@ -41,7 +41,10 @@ export const ARGS_CUT_NOTE = "Arguments cut: click to see them in full.";
  * notification may show the arguments cut, and allowing a tool for good
  * should not rest on a part of them (DEC-139).
  */
-export const NOTIFICATION_BUTTONS = ["Allow"] as const;
+export const NOTIFICATION_BUTTONS = ["Allow once"] as const;
+
+/** A notification's context line says what closing it does. */
+export const CLOSE_NOTE = "Closing this is Don't allow";
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -130,9 +133,10 @@ export function notificationText(
 					`${view.app} wants to run ${view.tool}${summary === "{}" ? "." : `: ${summary}`}`,
 					300 - note.length,
 				) + note,
+		// Closing it answers too (EQ 13). Chrome names the extension above.
 		contextMessage: site
-			? `${navigation ? "From" : "On"} ${site} · tab-mcp for Chrome`
-			: "tab-mcp for Chrome",
+			? `${navigation ? "From" : "On"} ${site} · ${CLOSE_NOTE}`
+			: CLOSE_NOTE,
 		buttons: [...NOTIFICATION_BUTTONS],
 	};
 }
@@ -222,6 +226,8 @@ export class Questions {
 				where.navigation === undefined &&
 				where.origin !== undefined &&
 				allowable(where.origin),
+			// The card counts down to it (EQ 13).
+			expiresAt: this.#host.now() + this.#timeoutMs,
 		};
 		const compact = visible(JSON.stringify(request.arguments) ?? "{}");
 		const summary = cut(compact, MAX_ARGS_NOTIFICATION);
