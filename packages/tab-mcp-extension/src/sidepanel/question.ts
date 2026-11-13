@@ -119,7 +119,7 @@ export function questionCard(
 		b.type = "button";
 		b.textContent = text;
 		b.dataset["answer"] = value;
-		if (primary) b.className = "primary";
+		if (primary) b.className = "strong";
 		// Allow and "Don't ask again" only once the page has been in front a
 		// while: the click that brings it forward cannot approve.
 		if (value !== "deny") setAvailable(b, false);

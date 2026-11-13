@@ -8,6 +8,7 @@
 * [Security model and threat model](threat-model.md) - Assets, attackers, what the relay sees, the mitigations and safe defaults, and the risks that remain.
 * [tab-mcp architecture](architecture.md) - Components, endpoints, data flow and the full sequence from a page connecting, through pairing with a code, to an AI app calling its tools and the user disconnecting.
 * [tab-mcp for Chrome: the browser extension](extension.md) - A small Chrome extension in this repository that bridges a page's own WebMCP tools to AI apps outside the browser, through the relay. Recipes (tools an AI app builds for a site) are dropped (DEC-114); user scripts are an experiment of their own.
+* [tab-mcp for Chrome: the look](extension-look.md) - Overmark's design language (paper and ink, tokens with computed contrast for light and dark, edges that reach 3:1, one type and spacing scale, forced colours, reduced motion, tests that guard the look) mapped onto the side panel and the question window of tab-mcp for Chrome: what is adopted as it is, what is adapted, what is left out and why, and the changes and tests of iteration 39.
 * [Tab↔relay protocol, version 1](protocol.md) - Pointer to docs/protocol.md, the normative description of the versioned WebSocket protocol `tab-mcp.v1` between the browser library and the relay.
 
 <!-- okf:index:end -->

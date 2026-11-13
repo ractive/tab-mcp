@@ -14,6 +14,7 @@ import {
 	type ReplacedDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
+import { BADGE_LOOK } from "../look.ts";
 import {
 	type GrantView,
 	type PanelCommand,
@@ -908,15 +909,19 @@ export class Connection {
 			questions > 0
 				? [
 						"?",
-						"#b45309",
+						BADGE_LOOK.question,
 						`tab-mcp for Chrome: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the side panel to answer.`,
 					]
 				: status === "on" || status === "waiting"
-					? ["on", "#15803d", "tab-mcp for Chrome: AI access is on"]
+					? ["on", BADGE_LOOK.on, "tab-mcp for Chrome: AI access is on"]
 					: status === "connecting" || status === "retrying"
-						? ["…", "#6b7280", "tab-mcp for Chrome: connecting"]
-						: ["", "#6b7280", "tab-mcp for Chrome"];
+						? ["…", BADGE_LOOK.idle, "tab-mcp for Chrome: connecting"]
+						: ["", BADGE_LOOK.idle, "tab-mcp for Chrome"];
 		void chrome.action.setBadgeText({ text }).catch(() => {});
+		// Said, not left to Chrome's choice between black and white.
+		void chrome.action
+			.setBadgeTextColor({ color: BADGE_LOOK.text })
+			.catch(() => {});
 		void chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
 		void chrome.action.setTitle({ title }).catch(() => {});
 	}

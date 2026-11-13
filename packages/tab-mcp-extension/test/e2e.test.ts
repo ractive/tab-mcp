@@ -640,16 +640,16 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
 	});
 
-	test("the AI access switch: knob on track and track on card at least 3:1, light and dark, on and off (EQ 17)", async () => {
+	test("the AI access switch and a tool's Ask first: knob on track and track on the paper at least 3:1, light and dark, on and off (EQ 17, DEC-160)", async () => {
 		/** The contrast ratios Chrome's computed colours give, on and off. */
-		const contrast = () =>
+		const contrast = (selector: string) =>
 			stack.panel.eval<{
 				on: { knob: number; track: number };
 				off: { knob: number; track: number };
 			}>(`(() => {
-				const input = document.getElementById("ai-switch");
+				const input = document.querySelector(${JSON.stringify(selector)});
 				const still = document.createElement("style");
-				still.textContent = "#ai-switch, #ai-switch::after { transition: none !important; }";
+				still.textContent = "input, input::after { transition: none !important; }";
 				document.head.append(still);
 				const was = input.checked;
 				const rgb = (color) => {
@@ -669,7 +669,11 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 					const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
 					return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100;
 				};
-				const card = getComputedStyle(input.closest(".card")).backgroundColor;
+				// The sections are on the paper (the body), not on a card.
+				const card = getComputedStyle(document.body).backgroundColor;
+				// The wait after the layout moved makes a tool's switch flat.
+				const waits = input.getAttribute("aria-disabled");
+				input.removeAttribute("aria-disabled");
 				const at = (checked) => {
 					input.checked = checked;
 					const track = getComputedStyle(input).backgroundColor;
@@ -678,30 +682,38 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				};
 				const result = { on: at(true), off: at(false) };
 				input.checked = was;
+				if (waits !== null) input.setAttribute("aria-disabled", waits);
 				still.remove();
 				return result;
 			})()`);
-		const measured: Record<string, unknown> = {};
-		for (const value of ["light", "dark"]) {
-			await stack.panel.send("Emulation.setEmulatedMedia", {
-				features: [{ name: "prefers-color-scheme", value }],
+		await stack.panel.waitFor(`document.querySelector("input.ask-first")`);
+		for (const selector of ["#ai-switch", "input.ask-first"]) {
+			const measured: Record<string, unknown> = {};
+			for (const value of ["light", "dark"]) {
+				await stack.panel.send("Emulation.setEmulatedMedia", {
+					features: [{ name: "prefers-color-scheme", value }],
+				});
+				const m = await contrast(selector);
+				measured[value] = m;
+				for (const ratio of [m.on.knob, m.on.track, m.off.knob, m.off.track])
+					expect(ratio).toBeGreaterThanOrEqual(3);
+			}
+			// The tokens' pairs (test/contrast.test.ts): on, the knob
+			// (--on-strong) on the ink track (--strong), which is ink on paper;
+			// off, the knob on the edge (--edge), and the edge on paper. Before
+			// the tokens: 5.02 / 3.77 in light, 9.48 / 3.42 in dark; before
+			// EQ 17 the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
+			expect(measured).toEqual({
+				light: {
+					on: { knob: 16.07, track: 14.61 },
+					off: { knob: 3.86, track: 3.51 },
+				},
+				dark: {
+					on: { knob: 15.89, track: 15.89 },
+					off: { knob: 4.39, track: 4.39 },
+				},
 			});
-			const m = await contrast();
-			measured[value] = m;
-			for (const ratio of [m.on.knob, m.on.track, m.off.knob, m.off.track])
-				expect(ratio).toBeGreaterThanOrEqual(3);
 		}
-		// Before: the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
-		expect(measured).toEqual({
-			light: {
-				on: { knob: 5.02, track: 5.02 },
-				off: { knob: 3.77, track: 3.77 },
-			},
-			dark: {
-				on: { knob: 9.48, track: 9.48 },
-				off: { knob: 3.42, track: 3.42 },
-			},
-		});
 		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
 	});
 
@@ -773,6 +785,253 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		if (adding) await stack.panel.click("#pair-done");
 	});
 
+	test("the look: nothing past the panel's edge at 345, 360 and 420 px, no amber button, each scheme's tokens (DEC-160 to DEC-163)", async () => {
+		const panel = stack.panel;
+		/**
+		 * Chrome's narrowest side panel with a classic scrollbar beside its
+		 * content (15 px on Windows and Linux), the same without one, and a
+		 * common width.
+		 */
+		const WIDTHS = [345, 360, 420];
+		const AMBER = "rgb(255, 176, 0)";
+		/**
+		 * What reaches past the right edge of the panel's content (the
+		 * scrolling element's `clientWidth`: the window's less a scrollbar),
+		 * and the buttons filled or outlined in amber.
+		 */
+		const measure = () =>
+			panel.eval<{
+				scroll: number;
+				client: number;
+				past: string[];
+				amber: string[];
+			}>(`(() => {
+				const shown = (e) => e.getClientRects().length > 0;
+				const root = document.scrollingElement;
+				return {
+					scroll: root.scrollWidth,
+					client: root.clientWidth,
+					past: [...document.querySelectorAll("body *")]
+						.filter((e) => shown(e) && !e.closest(".visually-hidden") && e.getBoundingClientRect().right > root.clientWidth + 0.5)
+						.map((e) => e.tagName + "#" + e.id + "." + e.className),
+					amber: [...document.querySelectorAll("button")]
+						.filter((e) => {
+							const style = getComputedStyle(e);
+							return style.backgroundColor === ${JSON.stringify(AMBER)} || style.borderTopColor === ${JSON.stringify(AMBER)};
+						})
+						.map((e) => e.id || e.textContent),
+				};
+			})()`);
+		/** At each width: no sideways scroll, nothing past the edge, no amber. */
+		const holds = async () => {
+			for (const width of WIDTHS) {
+				await panel.send("Emulation.setDeviceMetricsOverride", {
+					width,
+					height: 900,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+				await panel.waitFor(`innerWidth === ${width}`);
+				const seen = await measure();
+				expect(seen.client).toBeLessThanOrEqual(width);
+				expect(seen.scroll).toBeLessThanOrEqual(seen.client);
+				expect(seen.past).toEqual([]);
+				expect(seen.amber).toEqual([]);
+			}
+		};
+		const adding = !(await panel.eval<boolean>(
+			`document.getElementById("pairing").hidden === false`,
+		));
+		try {
+			// The tab's tools with their switches, and the address and the code.
+			if (adding) await panel.click("#add-app");
+			await panel.waitFor(
+				`!document.getElementById("pairing").hidden && !document.getElementById("tools-head").hidden && document.querySelector("input.ask-first") !== null`,
+			);
+			await holds();
+			// "How do I add it?" (its commands) and Settings open, and the two
+			// notices, with words that have nowhere to break. The next state
+			// hides the notices again.
+			const LONG = "x".repeat(120);
+			await panel.eval(`(() => {
+				document.getElementById("setup").open = true;
+				document.querySelector("details.settings").open = true;
+				for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = false;
+				document.getElementById("local-problem").textContent = "Could not reach the relay at https://${LONG}.example";
+				document.getElementById("replaced-text").textContent = "Another tab or program took over this address ${LONG}";
+			})()`);
+			await holds();
+			// A problem is red in its fill and edge, its words in ink; the
+			// notice is the warning's; a button on it keeps its edge.
+			expect(
+				await panel.eval<string[]>(`(() => {
+					const css = (id) => getComputedStyle(document.getElementById(id));
+					const root = getComputedStyle(document.documentElement);
+					const token = (name) => {
+						const probe = document.createElement("i");
+						probe.style.color = "var(" + name + ")";
+						document.body.append(probe);
+						const colour = getComputedStyle(probe).color;
+						probe.remove();
+						return colour;
+					};
+					return [
+						css("local-problem").backgroundColor === token("--danger-bg"),
+						css("local-problem").borderTopColor === token("--danger"),
+						css("local-problem").color === token("--ink"),
+						css("replaced").backgroundColor === token("--warn-bg"),
+						css("replaced").borderTopColor === token("--warn-edge"),
+						css("replaced-new-address").borderTopColor === token("--edge"),
+					].map(String);
+				})()`),
+			).toEqual(["true", "true", "true", "true", "true", "true"]);
+			// A question with arguments and a title that have nowhere to break.
+			const asked = call(stack, "page_place_order", { item: LONG.repeat(4) });
+			await panel.waitFor(`document.querySelector("[data-question] pre")`);
+			await holds();
+			// It is a sheet with an edge; "Allow once" is ink, not amber, and
+			// while it takes no click it is flat, in colours of its own.
+			const question = await panel.eval<Record<string, string>>(`(() => {
+				const card = getComputedStyle(document.querySelector("[data-question]"));
+				const allow = document.querySelector('[data-question] button[data-answer="allow"]');
+				const was = allow.getAttribute("aria-disabled");
+				const still = document.createElement("style");
+				still.textContent = "button { transition: none !important; }";
+				document.head.append(still);
+				allow.setAttribute("aria-disabled", "true");
+				const waiting = getComputedStyle(allow).backgroundColor;
+				const opacity = getComputedStyle(allow).opacity;
+				allow.removeAttribute("aria-disabled");
+				const ready = getComputedStyle(allow).backgroundColor;
+				if (was !== null) allow.setAttribute("aria-disabled", was);
+				still.remove();
+				return {
+					sheet: card.backgroundColor,
+					edge: card.borderTopColor,
+					shadow: card.boxShadow,
+					class: allow.className,
+					waiting,
+					opacity,
+					ready,
+				};
+			})()`);
+			await answerInPanel(stack, "deny");
+			expect((await asked).isError).toBe(true);
+			await panel.waitFor(
+				`document.querySelectorAll("[data-question]").length === 0`,
+			);
+			// Each scheme's tokens arrive: paper and ink, a default button's
+			// edge, the strong button's fill, an armed button's red.
+			const read = () =>
+				panel.eval<Record<string, string>>(`(() => {
+					const root = getComputedStyle(document.documentElement);
+					const still = document.createElement("style");
+					still.textContent = "button { transition: none !important; }";
+					document.head.append(still);
+					const armed = document.createElement("button");
+					armed.className = "small";
+					armed.setAttribute("data-armed", "");
+					armed.textContent = "Disconnect? Click again";
+					document.querySelector("main").append(armed);
+					const result = {
+						paper: root.getPropertyValue("--paper").trim(),
+						ink: root.getPropertyValue("--ink").trim(),
+						body: getComputedStyle(document.body).backgroundColor,
+						text: getComputedStyle(document.body).color,
+						section: getComputedStyle(document.querySelector("main > .card")).backgroundColor,
+						edge: getComputedStyle(document.getElementById("allow-tools")).borderTopColor,
+						field: getComputedStyle(document.getElementById("relay")).borderTopColor,
+						strong: getComputedStyle(document.querySelector("#relay-form button")).backgroundColor,
+						onStrong: getComputedStyle(document.querySelector("#relay-form button")).color,
+						armed: getComputedStyle(armed).backgroundColor,
+						onArmed: getComputedStyle(armed).color,
+					};
+					armed.remove();
+					still.remove();
+					return result;
+				})()`);
+			const scheme = (value: string) =>
+				panel.send("Emulation.setEmulatedMedia", {
+					features: [{ name: "prefers-color-scheme", value }],
+				});
+			await scheme("light");
+			// Wait for the "Don't ask for these tools" button to take clicks
+			// again: it is flat for a moment after the question went.
+			await panel.waitFor(takesClicks("#allow-tools"));
+			expect(await read()).toEqual({
+				paper: "#f6f4ee",
+				ink: "#1b2130",
+				body: "rgb(246, 244, 238)",
+				text: "rgb(27, 33, 48)",
+				// A section is on the paper: no card.
+				section: "rgba(0, 0, 0, 0)",
+				edge: "rgb(123, 130, 145)",
+				field: "rgb(123, 130, 145)",
+				strong: "rgb(27, 33, 48)",
+				onStrong: "rgb(255, 255, 255)",
+				armed: "rgb(179, 38, 30)",
+				onArmed: "rgb(255, 255, 255)",
+			});
+			expect(question).toEqual({
+				sheet: "rgb(255, 255, 255)",
+				edge: "rgb(123, 130, 145)",
+				shadow: "none",
+				class: "strong",
+				waiting: "rgb(235, 232, 224)",
+				opacity: "1",
+				ready: "rgb(27, 33, 48)",
+			});
+			await scheme("dark");
+			expect(await read()).toEqual({
+				paper: "#11141a",
+				ink: "#eceef3",
+				body: "rgb(17, 20, 26)",
+				text: "rgb(236, 238, 243)",
+				section: "rgba(0, 0, 0, 0)",
+				edge: "rgb(115, 124, 142)",
+				field: "rgb(115, 124, 142)",
+				strong: "rgb(236, 238, 243)",
+				onStrong: "rgb(17, 20, 26)",
+				armed: "rgb(255, 143, 133)",
+				onArmed: "rgb(17, 20, 26)",
+			});
+			// Nothing is said in a tooltip alone: the address is shown whole,
+			// and what "Ask first" does is a line over the list.
+			expect(
+				await panel.eval(`(() => {
+					const address = document.getElementById("address");
+					const input = document.querySelector("input.ask-first");
+					return [
+						address.title,
+						address.scrollWidth <= address.clientWidth,
+						input.closest("label").title,
+						input.getAttribute("aria-describedby"),
+						document.getElementById("ask-first-note").textContent,
+						// As the panel is drawn now, not only as its HTML is.
+						[...document.querySelectorAll("[title]")].map((e) => e.id || e.className),
+					];
+				})()`),
+			).toEqual([
+				"",
+				true,
+				"",
+				"ask-first-note",
+				`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${SITE}, for every paired AI app.`,
+				[],
+			]);
+		} finally {
+			await panel.send("Emulation.setEmulatedMedia", { features: [] });
+			await panel.send("Emulation.clearDeviceMetricsOverride");
+			await panel.eval(`(() => {
+				document.getElementById("setup").open = false;
+				document.querySelector("details.settings").open = false;
+				for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = true;
+			})()`);
+			if (adding)
+				await panel.eval(`document.getElementById("pair-done").click()`);
+		}
+	}, 90_000);
+
 	test("Don't ask for these tools and Ask first for these tools, for the tools listed at the click only", async () => {
 		const head = `document.getElementById("allow-tools")`;
 		const DONT_ASK = JSON.stringify("Don't ask for these tools");
@@ -797,7 +1056,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The button changed under the pointer (another label, one more tool):
 		// a click right then allows nothing.
 		await stack.panel.waitFor(
-			`${head}.title === "Don't ask for the 2 tools listed on ${SITE}, for every paired AI app"`,
+			`${head}.getAttribute("aria-label") === "Don't ask for the 2 tools listed on ${SITE}, for every paired AI app"`,
 		);
 		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
 		// Not `disabled`: it stays in the tab order (EQ 11).
@@ -1297,6 +1556,26 @@ describe.skipIf(chrome === undefined)(
 					`(() => { const pre = document.querySelector("[data-question] pre"); return pre.scrollHeight > pre.clientHeight && getComputedStyle(pre).overflowY; })()`,
 				),
 			).toBe("auto");
+			// The panel's look (DEC-160): on paper, the question a sheet, and
+			// nothing past the window's edge, whatever the arguments are.
+			expect(
+				await popup.eval(`(() => {
+					const root = document.scrollingElement;
+					const token = (name) => {
+						const probe = document.createElement("i");
+						probe.style.color = "var(" + name + ")";
+						document.body.append(probe);
+						const colour = getComputedStyle(probe).color;
+						probe.remove();
+						return colour;
+					};
+					return [
+						getComputedStyle(document.body).backgroundColor === token("--paper"),
+						getComputedStyle(document.querySelector("[data-question]")).backgroundColor === token("--sheet"),
+						root.scrollWidth <= root.clientWidth,
+					];
+				})()`),
+			).toEqual([true, true, true]);
 			// Its closing after the click answers nothing: the question waits.
 			await stack.worker.eval(
 				`tabMcpNotificationDismissed(${JSON.stringify(id)})`,
@@ -1540,6 +1819,18 @@ describe.skipIf(chrome === undefined)(
 					`[document.querySelector("#grants button")?.textContent, document.querySelectorAll("#grants li").length, document.activeElement === document.querySelector("#grants button")]`,
 				),
 			).toEqual(["Disconnect? Click again", 1, true]);
+			// Armed, it is another button to the eye too: filled in red.
+			expect(
+				await stack.panel.eval(`(() => {
+					const button = document.querySelector("#grants button");
+					const probe = document.createElement("i");
+					probe.style.color = "var(--danger)";
+					document.body.append(probe);
+					const danger = getComputedStyle(probe).color;
+					probe.remove();
+					return [button.hasAttribute("data-armed"), getComputedStyle(button).borderTopColor === danger];
+				})()`),
+			).toEqual([true, true]);
 			await Bun.sleep(800);
 			for (const type of ["keyDown", "keyUp"])
 				await stack.panel.send("Input.dispatchKeyEvent", {

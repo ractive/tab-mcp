@@ -123,7 +123,9 @@ The side panel shows the connection and its apps, the pairing view, questions, t
 front with its tools ("reads", "asks first", or an "Ask first" switch where a tool can be
 allowed on the site), and the relay address under
 Settings. The icon's badge shows "on", "…" or "?" (a question waits). The connector
-carries the extension's icon.
+carries the extension's icon. The panel's look (paper and ink on tokens whose pairs are
+held to their contrast in light and dark, no amber button, what each colour says) is
+[tab-mcp for Chrome: the look](extension-look.md) (iteration 39, DEC-160 to DEC-163).
 
 ## Risks and how the design meets them
 
