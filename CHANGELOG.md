@@ -582,10 +582,48 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 ### Unreleased
 
+#### Added
+
+- Log events: `oauth.token_refused` (info: a refused `/token` or `/revoke` request with
+  its grant type, OAuth error, a fixed reason and the AI app's host), `oauth.rate_limited`
+  (warn, once per network and episode: which per-network limit), `relay.stats` (info,
+  every sweep: sessions, waiting requests, open authorizations), `relay.start_failed` and
+  `relay.unknown_setting` (a `TAB_MCP_*` variable the relay does not read).
+- Error log lines carry `errorCode` next to `error` when the error has a code such as
+  `SQLITE_FULL` or `EADDRINUSE`.
+- The tab error code `store_unavailable`: a `grant.revoke` or `grants.revokeAll` that
+  failed because the token store failed (was `bad_message`).
+- `describeConfigError` and `unknownEnvNames` in the package; `ConfigError` has `key`.
+
 #### Changed
 
 - `hello` no longer needs `page: {title}`; the relay ignores the field, which it never
   read. Libraries up to 0.15 send the page title, newer ones an empty one.
+- On an open relay a page origin that is not a serialised origin (or an extension's) of
+  at most 255 characters is treated as no origin, on the pairing page and in the log.
+- A page's app name is cleaned like an AI app's name (bidi and invisible characters
+  removed) and dropped when it names a domain other than the page origin's host. Names
+  and origins on the pairing page are bidi-isolated.
+- `/authorize` answers one "Open the page first" text whether the page is closed or its
+  dialog is closed.
+- Identity binding: the dialog must still be open when the provider sends the browser
+  back; `identity_refused` has a fixed text per reason (no longer the JWKS fetch error).
+  Provider discovery serves its last metadata for an hour after a failed refresh and
+  waits 30 seconds before it tries again.
+- A network's share of an address's code guesses counts an IPv6 /56.
+- The visit cookie is renewed with every pairing page, so a second authorization within
+  ten minutes no longer fails with "your browser may block cookies".
+- A loopback redirect to `[::1]` is allowed in `form-action` as `http:` (Chrome ignored
+  the IPv6 literal and blocked the redirect after Connect).
+- A token store failure at `/token` and `/revoke` is logged as `store.error` (`op`
+  `token`, `revoke`), no longer as `oauth.error`. The fields `message` of `oauth.error`
+  and `tab.handler_error` are renamed `error`.
+- A failure at start other than a configuration error prints its message on stderr and
+  exits with 1, instead of an uncaught exception with the class name only. Configuration
+  errors name the environment variable. `store`, `trustProxy`, `logLevel` and `cors` are
+  checked when passed to `createRelay`.
+- A large request for a site with a raised `maxMessageBytes` gets "the page is not open"
+  while its page reconnects, not 413.
 
 ### [0.9.0][relay-0.9.0] - 2026-11-11
 

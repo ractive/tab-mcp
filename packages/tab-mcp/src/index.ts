@@ -8,6 +8,7 @@ export {
 	ConfigError,
 	configFromEnv,
 	DEFAULT_CONFIG,
+	describeConfigError,
 	type LogLevel,
 	type OidcConfig,
 	type PairingKind,
@@ -16,6 +17,7 @@ export {
 	type StoreKind,
 	type SubjectClaim,
 	type TrustProxy,
+	unknownEnvNames,
 } from "./config.ts";
 export { TAB_ASSERTION_TYP } from "./identity.ts";
 export {

@@ -23,9 +23,10 @@ import {
 } from "../config.ts";
 import { networkKey } from "../ip.ts";
 import { JWT_ALGORITHMS, JwtError } from "../jwt.ts";
-import type { Logger } from "../log.ts";
+import { errorFields, type Logger, truncateKey } from "../log.ts";
 import type { GrantInfo } from "../protocol.ts";
 import { RateLimiter } from "../ratelimit.ts";
+import { StoreFailure } from "../store/guard.ts";
 import { NonceSet } from "../store/memory.ts";
 import type { TokenRecord, TokenStore } from "../store/types.ts";
 import { hashToken, issueTokenPair, newId } from "../tokens.ts";
@@ -200,6 +201,21 @@ class OAuthError extends Error {
 	}
 }
 
+/** What the log line of a refused `/token` or `/revoke` request names. */
+interface Refusal {
+	endpoint: "token" | "revoke";
+	/** The `grant_type` sent, if any. */
+	grant?: string | undefined;
+	/** The client id sent or authenticated; only its host is logged. */
+	clientId?: string | undefined;
+}
+
+/** Grant types logged by name; anything else is logged as `other`. */
+const KNOWN_GRANTS: ReadonlySet<string> = new Set([
+	"authorization_code",
+	"refresh_token",
+]);
+
 /** A per-IP limit of `/token` and `/revoke` refused the request. */
 class IpLimited extends OAuthError {}
 
@@ -251,10 +267,18 @@ function random(bytes: number): string {
 		.toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
-/** The origin a redirect URI sends the browser to, for CSP `form-action`. */
+/**
+ * The origin a redirect URI sends the browser to, for CSP `form-action`.
+ * CSP host sources have no syntax for an IPv6 literal: Chrome drops
+ * `http://[::1]:5000` from the list and blocks the redirect (RS 18, checked
+ * in Chrome 151), so a loopback redirect to `[::1]` gets the scheme source
+ * `http:`. The page has no script and its one form posts to the relay; the
+ * redirect target is the registered URI the relay chose.
+ */
 function formTarget(redirectUri: string): string {
 	try {
 		const u = new URL(redirectUri);
+		if (u.protocol === "http:" && u.hostname.startsWith("[")) return "http:";
 		return u.protocol === "http:" || u.protocol === "https:"
 			? u.origin
 			: u.protocol;
@@ -302,11 +326,13 @@ export class AuthorizationServer {
 	readonly #viewsPerIp = new RateLimiter({
 		capacity: 30,
 		refillPerSecond: 0.5,
+		onLimited: (key) => this.#limited("authorize_views", key),
 	});
 	/** Form posts per IP (every action; locks out only that network). */
 	readonly #attemptsPerIp = new RateLimiter({
 		capacity: 20,
 		refillPerSecond: 0.1,
+		onLimited: (key) => this.#limited("authorize_posts", key),
 	});
 	/**
 	 * Wrong code guesses (well-formed, against an active code) per address and
@@ -318,6 +344,7 @@ export class AuthorizationServer {
 	readonly #guessesPerAddressIp = new RateLimiter({
 		capacity: 10,
 		refillPerSecond: 1 / 60,
+		onLimited: (key) => this.#limited("code_guesses", key),
 	});
 	/**
 	 * Wrong code guesses per address from everywhere: the brute-force cap
@@ -341,6 +368,7 @@ export class AuthorizationServer {
 	readonly #tokenFailuresPerIp = new RateLimiter({
 		capacity: 30,
 		refillPerSecond: 1,
+		onLimited: (key) => this.#limited("token_failures", key),
 	});
 	/**
 	 * Every `/token` and `/revoke` request per IP (prefix), never given back:
@@ -360,6 +388,7 @@ export class AuthorizationServer {
 	readonly #assertionFailuresPerIp = new RateLimiter({
 		capacity: 30,
 		refillPerSecond: 0.5,
+		onLimited: (key) => this.#limited("client_assertions", key),
 	});
 	/** Refreshes per grant: each leaves a row for the reuse window (DEC-091). */
 	readonly #refreshesPerGrant = new RateLimiter({
@@ -371,9 +400,10 @@ export class AuthorizationServer {
 		this.#host = host;
 		this.#authCodeTtlMs = testMode?.authCodeTtlMs ?? AUTH_CODE_TTL_MS;
 		this.#maxPending = testMode?.maxPending ?? MAX_PENDING;
-		this.#tokenPerIp = new RateLimiter(
-			testMode?.tokenRequestsPerIp ?? TOKEN_REQUESTS_PER_IP,
-		);
+		this.#tokenPerIp = new RateLimiter({
+			...(testMode?.tokenRequestsPerIp ?? TOKEN_REQUESTS_PER_IP),
+			onLimited: (key) => this.#limited("token_requests", key),
+		});
 		const oidc = host.config.oidc;
 		this.#methods = {
 			...PAIRING_METHODS,
@@ -402,6 +432,22 @@ export class AuthorizationServer {
 			(url) => cimd.fetchJwks(url),
 			testMode?.clientKeysNow,
 		);
+	}
+
+	/**
+	 * A network first ran into one of the per-network limits (RQ 6): one
+	 * warning per episode, with the network shortened like every logged IP.
+	 */
+	#limited(limit: string, key: string): void {
+		this.#host.logger.warn("oauth.rate_limited", {
+			limit,
+			ip: truncateKey(key),
+		});
+	}
+
+	/** Open authorization requests on this instance (for `relay.stats`). */
+	get pendingCount(): number {
+		return this.#pending.size;
 	}
 
 	get #issuer(): string {
@@ -737,7 +783,6 @@ export class AuthorizationServer {
 					"access_denied",
 					"the user cancelled the connection",
 				),
-				session !== undefined,
 			);
 		}
 		const method = this.#methods[session.site.pairing];
@@ -779,14 +824,7 @@ export class AuthorizationServer {
 			scopes,
 		};
 		this.#addPending(pending);
-		const browser = this.#browserId(req);
-		return this.#pairingPage(
-			pending,
-			browser.id,
-			undefined,
-			200,
-			browser.cookie,
-		);
+		return this.#pairingPage(pending, this.#browserId(req).id);
 	}
 
 	#addPending(p: Pending): void {
@@ -874,26 +912,20 @@ export class AuthorizationServer {
 	}
 
 	/**
-	 * The tab is not connected, or (`connected`) its dialog is closed: try
-	 * again by loading the page again.
+	 * The tab is not connected, or its dialog is closed: try again by loading
+	 * the page again. One text for both, so whoever knows an address cannot
+	 * tell whether its page is open (RS 10); what to do is the same anyway.
 	 */
 	#offlinePage(
 		client: ClientMetadata,
 		retryUrl: string,
 		cancelUrl: string,
-		connected = false,
 	): Response {
 		const who = `<strong>${escapeHtml(client.name)}</strong> (${escapeHtml(client.host)})`;
-		const title = connected
-			? "Open “Connect your AI app” first"
-			: "Open the page first";
-		const intro = connected
-			? `<p>${who} wants to use the tools of a web page, but that page is not connecting right now.</p>
-<p>In the page, click “Connect your AI app”, then try again here.</p>`
-			: `<p>${who} wants to use the tools of a web page, but that page is not open right now.</p>
-<p>Open the page, click “Connect your AI app”, then try again here.</p>`;
+		const title = "Open the page first";
 		const body = `<h1>${title}</h1>
-${intro}
+<p>${who} wants to use the tools of a web page, but that page is not open or not connecting right now.</p>
+<p>Open the page, click “Connect your AI app”, then try again here.</p>
 <div class="actions">
 <a class="button primary" href="${escapeHtml(retryUrl)}">Try again</a>
 <a class="button" href="${escapeHtml(cancelUrl)}">Cancel</a>
@@ -994,12 +1026,14 @@ ${intro}
 		}
 		// Only a real guess is charged: the method calls this right before it
 		// compares a well-formed answer (DEC-061); a right one is given back.
-		const networkKey = `${pending.addressId}|${ip}`;
+		// The network's share counts an IPv6 /56, as sessions do (RS 9): one
+		// subscriber's /64s are not separate networks.
+		const guessKey = `${pending.addressId}|${networkKey(ip)}`;
 		let charged = false;
 		const admit = () => {
-			if (!this.#guessesPerAddressIp.take(networkKey)) return false;
+			if (!this.#guessesPerAddressIp.take(guessKey)) return false;
 			if (!this.#guessesPerAddress.take(pending.addressId)) {
-				this.#guessesPerAddressIp.refund(networkKey);
+				this.#guessesPerAddressIp.refund(guessKey);
 				return false;
 			}
 			charged = true;
@@ -1011,7 +1045,7 @@ ${intro}
 			addressId: pending.addressId,
 		});
 		if (result.ok === true && charged) {
-			this.#guessesPerAddressIp.refund(networkKey);
+			this.#guessesPerAddressIp.refund(guessKey);
 			this.#guessesPerAddress.refund(pending.addressId);
 		}
 		if (result.ok === "redirect") {
@@ -1026,6 +1060,8 @@ ${intro}
 					location: result.location,
 					"cache-control": "no-store",
 					"referrer-policy": "no-referrer",
+					// The callback checks the cookie: it must outlive the sign-in.
+					"set-cookie": this.#visitCookie(browser.id),
 				},
 			});
 		}
@@ -1167,11 +1203,19 @@ ${intro}
 			}
 		}
 		const id = random(16);
+		return { id, cookie: this.#visitCookie(id) };
+	}
+
+	/**
+	 * The visit cookie for `id`, valid as long as a pending request. Sent with
+	 * every pairing page and with the redirect to the provider, not only when
+	 * it is new (RS 17): a request opened late in an earlier visit, or a
+	 * sign-in started late in this one, must not outlive the cookie it is
+	 * checked against.
+	 */
+	#visitCookie(id: string): string {
 		const secure = this.#issuer.startsWith("https:") ? "; Secure" : "";
-		return {
-			id,
-			cookie: `${name}=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PENDING_TTL_MS / 1000}${secure}`,
-		};
+		return `${this.#cookieName()}=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PENDING_TTL_MS / 1000}${secure}`;
 	}
 
 	#cookieName(): string {
@@ -1200,7 +1244,6 @@ ${intro}
 		browserId: string,
 		error?: string,
 		status = 200,
-		cookie?: string,
 	): Response {
 		const csrf = Bun.CSRF.generate(this.#csrfSecret, {
 			sessionId: `${pending.id}.${browserId}`,
@@ -1214,7 +1257,8 @@ ${intro}
 			error === undefined
 				? ""
 				: `<p class="error" role="alert" id="error">${escapeHtml(error)}</p>`;
-		const extra = cookie === undefined ? {} : { "set-cookie": cookie };
+		// Renewed with every page: the form it carries lives PENDING_TTL_MS.
+		const extra = { "set-cookie": this.#visitCookie(browserId) };
 		const targets: string[] = [formTarget(pending.redirectUri)];
 		const cancel = `<button type="submit" class="secondary" name="action" value="cancel" formnovalidate>Cancel</button>`;
 
@@ -1284,6 +1328,8 @@ ${cancel}
 		if (!this.#tokenPerIp.take(ip)) {
 			return this.#oauthErrorResponse(TOO_MANY_REQUESTS(), noStore);
 		}
+		/** What the refusal's log line names (RQ 6). */
+		const refusal: Refusal = { endpoint: "token" };
 		try {
 			const params = await this.#formParams(req);
 			const p = single(params, [
@@ -1305,11 +1351,14 @@ ${cancel}
 					`${p.duplicate} was sent more than once`,
 				);
 			}
+			refusal.grant = p["grant_type"];
+			refusal.clientId = p["client_id"];
 			const client = await this.#authenticateClient(
 				p,
 				[`${this.#issuer}/token`],
 				ip,
 			);
+			refusal.clientId = client.clientId;
 			let body: Record<string, unknown>;
 			if (p["grant_type"] === "authorization_code") {
 				body = await this.#codeGrant(p, client);
@@ -1326,15 +1375,50 @@ ${cancel}
 			}
 			return this.#json(200, body, noStore);
 		} catch (error) {
-			return this.#oauthErrorResponse(this.#failed(error, ip), noStore);
+			return this.#oauthErrorResponse(
+				this.#failed(error, ip),
+				noStore,
+				refusal,
+			);
 		}
 	}
 
+	/**
+	 * The answer to a failed `/token` or `/revoke` request, and its log line
+	 * (RQ 5, RQ 6, DEC-131): a refusal of the client's request
+	 * (`invalid_grant` for an expired, revoked or foreign token, a bad
+	 * client, a bad request) is `oauth.token_refused`; a per-network limit is
+	 * logged by the limit itself, once; a store failure is `store.error`;
+	 * anything else `oauth.error`. Both of the last answer 503, so the AI app
+	 * keeps its tokens and tries again.
+	 */
 	#oauthErrorResponse(
 		error: unknown,
 		headers: Record<string, string>,
+		refusal?: Refusal,
 	): Response {
 		if (error instanceof OAuthError) {
+			if (
+				refusal !== undefined &&
+				!(error instanceof IpLimited) &&
+				error.status < 500
+			) {
+				this.#host.logger.info("oauth.token_refused", {
+					endpoint: refusal.endpoint,
+					...(refusal.grant === undefined
+						? {}
+						: {
+								grant: KNOWN_GRANTS.has(refusal.grant)
+									? refusal.grant
+									: "other",
+							}),
+					status: error.status,
+					error: error.code,
+					// Fixed texts of this file; none carries request data.
+					reason: error.message,
+					client: logHost(refusal.clientId),
+				});
+			}
 			const extra: Record<string, string> = { ...headers };
 			if (error.status === 401)
 				extra["www-authenticate"] = 'Basic realm="tab-mcp"';
@@ -1347,9 +1431,14 @@ ${cancel}
 				extra,
 			);
 		}
-		this.#host.logger.error("oauth.error", {
-			message: error instanceof Error ? error.name : "unknown",
-		});
+		if (error instanceof StoreFailure) {
+			this.#host.logger.error("store.error", {
+				op: refusal?.endpoint ?? "token",
+				...errorFields(error),
+			});
+		} else {
+			this.#host.logger.error("oauth.error", errorFields(error));
+		}
 		return this.#json(
 			503,
 			{
@@ -1824,6 +1913,7 @@ ${cancel}
 		if (!this.#tokenPerIp.take(ip)) {
 			return this.#oauthErrorResponse(TOO_MANY_REQUESTS(), noStore);
 		}
+		const refusal: Refusal = { endpoint: "revoke" };
 		try {
 			const params = await this.#formParams(req);
 			const p = single(params, [
@@ -1840,6 +1930,7 @@ ${cancel}
 					`${p.duplicate} was sent more than once`,
 				);
 			}
+			refusal.clientId = p["client_id"];
 			const token = p["token"];
 			if (token === undefined) {
 				throw new OAuthError(400, "invalid_request", "token is required");
@@ -1852,6 +1943,7 @@ ${cancel}
 				[`${this.#issuer}/revoke`, `${this.#issuer}/token`],
 				ip,
 			);
+			refusal.clientId = client.clientId;
 			const record = await this.#host.store.get(hashToken(token));
 			// RFC 7009 §2.2: an unknown token is not an error, but it counts as
 			// a failure against the network's allowance.
@@ -1885,7 +1977,11 @@ ${cancel}
 				headers: { ...this.#cors(), ...noStore },
 			});
 		} catch (error) {
-			return this.#oauthErrorResponse(this.#failed(error, ip), noStore);
+			return this.#oauthErrorResponse(
+				this.#failed(error, ip),
+				noStore,
+				refusal,
+			);
 		}
 	}
 

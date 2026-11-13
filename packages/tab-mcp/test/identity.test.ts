@@ -393,6 +393,32 @@ describe("identity binding: the page's state", () => {
 		expect(done.html).toContain("Nobody is signed in to the page any more");
 	});
 
+	test("RS 11: a dialog closed between Connect and the callback pairs nobody", async () => {
+		const ctx = await setup();
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const posted = await ctx.browser.submit(flow.page, { action: "connect" });
+		const back = await provider.signIn(posted.location ?? "");
+		ctx.tab.send({ type: "pairing.stop" });
+		// The relay has handled the stop once a new request sees no dialog.
+		for (let i = 0; i < 50; i++) {
+			const probe = await openAuthorize({
+				...ctx,
+				browser: new TestBrowser(ctx.r.url),
+			});
+			if (probe.page.html.includes("Open the page first")) break;
+			await Bun.sleep(20);
+		}
+		const done = await ctx.browser.open(back);
+		expect(done.status).toBe(400);
+		expect(done.location).toBeUndefined();
+		expect(done.html).toContain("The page is not connecting any more");
+		expect(ctx.r.logs.events("oauth.pairing_failed").at(-1)?.["reason"]).toBe(
+			"inactive",
+		);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
+	});
+
 	test("an open page without a signed-in user: requests wait for it, then get the signed-out answer", async () => {
 		const ctx = await setup({ pageWaitMs: 300 });
 		const token = await pairedToken(ctx);
@@ -815,6 +841,34 @@ describe("identity binding: -31009 (iteration 11, finding 3)", () => {
 		expect(ctx.r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
 			"jwks_unavailable",
 		);
+	});
+
+	test("RS 12: identity_refused carries a fixed text, not the inner error's", async () => {
+		const keys: KeySource = {
+			keys: async () => {
+				throw new Error("HTTP 500 from https://keys.internal.example/jwks");
+			},
+		};
+		const r = await relay({}, { assertionKeys: keys });
+		const tab = await newTab(r);
+		tab.send({
+			type: "identity",
+			assertion: await provider.assertion("alice", tab.session?.address ?? ""),
+		});
+		const ctx = { r };
+		const refused = (await tab.next("error")) as {
+			code: string;
+			message: string;
+		};
+		expect(refused.code).toBe("identity_refused");
+		expect(refused.message).toBe(
+			"the identity assertion was refused: the signing keys could not be loaded",
+		);
+		expect(refused.message).not.toContain("internal");
+		const line = ctx.r.logs.events("identity.refused").at(-1);
+		expect(line?.["reason"]).toBe("jwks_unavailable");
+		expect(line?.["error"]).toBe("Error");
+		expect(JSON.stringify(line)).not.toContain("internal");
 	});
 
 	test("after a transient refusal a retry is told to try again, not to sign in (review of PR #30)", async () => {

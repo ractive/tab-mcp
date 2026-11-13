@@ -183,6 +183,80 @@ export const DEFAULT_CONFIG: Readonly<RelayConfig> = {
 
 export class ConfigError extends Error {
 	override name = "ConfigError";
+	/** The setting the error is about, when known (for the variable's name). */
+	key: keyof RelayConfig | undefined;
+	constructor(message: string, key?: keyof RelayConfig) {
+		super(message);
+		this.key = key;
+	}
+}
+
+/**
+ * The environment variable of each setting `configFromEnv` reads, so an
+ * error of `resolveConfig` names the variable the operator set (RQ 11).
+ */
+export const ENV_NAMES: Readonly<Partial<Record<keyof RelayConfig, string>>> = {
+	publicUrl: "TAB_MCP_PUBLIC_URL",
+	port: "TAB_MCP_PORT",
+	host: "TAB_MCP_HOST",
+	allowedOrigins: "TAB_MCP_ALLOWED_ORIGINS",
+	sites: "TAB_MCP_SITES",
+	clientIdHosts: "TAB_MCP_CLIENT_ID_HOSTS",
+	identity: "TAB_MCP_IDENTITY",
+	trustProxy: "TAB_MCP_TRUST_PROXY",
+	cors: "TAB_MCP_CORS",
+	store: "TAB_MCP_STORE",
+	sqlitePath: "TAB_MCP_SQLITE_PATH",
+	maxSessions: "TAB_MCP_MAX_SESSIONS",
+	maxSessionsPerIp: "TAB_MCP_MAX_SESSIONS_PER_IP",
+	maxConcurrentRequests: "TAB_MCP_MAX_CONCURRENT_REQUESTS",
+	requestTimeoutMs: "TAB_MCP_REQUEST_TIMEOUT_S",
+	keepAliveMs: "TAB_MCP_KEEPALIVE_S",
+	idleTimeoutMs: "TAB_MCP_IDLE_TIMEOUT_S",
+	unpairedIdleTimeoutMs: "TAB_MCP_UNPAIRED_IDLE_TIMEOUT_S",
+	sessionLifetimeMs: "TAB_MCP_SESSION_LIFETIME_S",
+	heartbeatMs: "TAB_MCP_HEARTBEAT_S",
+	bodyTimeoutMs: "TAB_MCP_BODY_TIMEOUT_S",
+	pageWaitMs: "TAB_MCP_PAGE_WAIT_S",
+	maxMessageBytes: "TAB_MCP_MAX_MESSAGE_BYTES",
+	accessTokenTtlMs: "TAB_MCP_ACCESS_TOKEN_TTL_S",
+	refreshTokenTtlMs: "TAB_MCP_REFRESH_TOKEN_TTL_S",
+	grantLifetimeMs: "TAB_MCP_GRANT_LIFETIME_S",
+	logLevel: "TAB_MCP_LOG_LEVEL",
+};
+
+/** Every `TAB_MCP_*` variable the relay reads. */
+const KNOWN_ENV: ReadonlySet<string> = new Set([
+	...Object.values(ENV_NAMES),
+	"TAB_MCP_OIDC_ISSUER",
+	"TAB_MCP_OIDC_CLIENT_ID",
+	"TAB_MCP_OIDC_CLIENT_SECRET",
+	"TAB_MCP_OIDC_SUBJECT_CLAIM",
+	"TAB_MCP_TAB_ASSERTION_ISSUER",
+	"TAB_MCP_TAB_ASSERTION_JWKS_URL",
+]);
+
+/**
+ * `TAB_MCP_*` variables the relay does not know: a misspelled or removed
+ * setting, which would otherwise be ignored without a word (RQ 11).
+ */
+export function unknownEnvNames(
+	env: Record<string, string | undefined>,
+): string[] {
+	return Object.keys(env)
+		.filter((name) => name.startsWith("TAB_MCP_") && !KNOWN_ENV.has(name))
+		.sort();
+}
+
+/**
+ * A configuration error as the `tab-mcp` command prints it: with the
+ * environment variable of the setting it is about, when there is one.
+ */
+export function describeConfigError(error: ConfigError): string {
+	const name = error.key === undefined ? undefined : ENV_NAMES[error.key];
+	return name === undefined || error.message.startsWith(name)
+		? error.message
+		: `${name}: ${error.message}`;
 }
 
 /** Normalise an origin (`scheme://host[:port]`), or throw. */
@@ -274,10 +348,41 @@ const TIMER_KEYS = [
 	"sweepIntervalMs",
 ] as const;
 
-function checkTimer(name: string, value: number): void {
+function checkTimer(
+	name: string,
+	value: number,
+	key?: keyof RelayConfig,
+): void {
 	if (value > MAX_TIMER_MS) {
 		throw new ConfigError(
 			`${name} must be at most ${MAX_TIMER_MS} ms (about 24.8 days): a timer fires at once beyond that`,
+			key,
+		);
+	}
+}
+
+/** Run `fn`; a `ConfigError` it throws without a setting is about `key`. */
+function withKey<T>(key: keyof RelayConfig, fn: () => T): T {
+	try {
+		return fn();
+	} catch (error) {
+		if (error instanceof ConfigError && error.key === undefined) {
+			error.key = key;
+		}
+		throw error;
+	}
+}
+
+/** A setting that must be one of `values` (a JavaScript caller may pass anything). */
+function checkEnum(
+	config: RelayConfig,
+	key: keyof RelayConfig,
+	values: readonly unknown[],
+): void {
+	if (!values.includes(config[key])) {
+		throw new ConfigError(
+			`${key} must be one of ${values.map(String).join(", ")}`,
+			key,
 		);
 	}
 }
@@ -287,27 +392,40 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	const config: RelayConfig = { ...DEFAULT_CONFIG, ...input };
 
 	if (config.publicUrl !== undefined) {
-		const origin = normalizeOrigin(config.publicUrl);
+		const url = config.publicUrl;
+		const origin = withKey("publicUrl", () => normalizeOrigin(url));
 		if (!origin.startsWith("https:") && !config.development) {
 			throw new ConfigError(
 				"TAB_MCP_PUBLIC_URL must be https outside development",
+				"publicUrl",
 			);
 		}
 		config.publicUrl = origin;
 	} else if (!config.development) {
-		throw new ConfigError("TAB_MCP_PUBLIC_URL is required");
+		throw new ConfigError("TAB_MCP_PUBLIC_URL is required", "publicUrl");
 	}
 
-	if (config.allowedOrigins !== "*") {
-		config.allowedOrigins = config.allowedOrigins.map(normalizePageOrigin);
+	// Enums: anything else would silently take the other branch (RQ 11).
+	checkEnum(config, "store", ["sqlite", "memory"]);
+	checkEnum(config, "trustProxy", ["none", "x-real-ip", "x-forwarded-for"]);
+	checkEnum(config, "logLevel", ["error", "warn", "info", "debug"]);
+	checkEnum(config, "cors", [true, false]);
+
+	const origins = config.allowedOrigins;
+	if (origins !== "*") {
+		config.allowedOrigins = withKey("allowedOrigins", () =>
+			origins.map(normalizePageOrigin),
+		);
 	}
-	config.sites = config.sites.map((site) => validateSite(site));
+	config.sites = withKey("sites", () =>
+		config.sites.map((site) => validateSite(site)),
+	);
 	const seen = new Set(
 		config.allowedOrigins === "*" ? [] : config.allowedOrigins,
 	);
 	for (const site of config.sites) {
 		if (seen.has(site.origin)) {
-			throw new ConfigError(`origin configured twice: ${site.origin}`);
+			throw new ConfigError(`origin configured twice: ${site.origin}`, "sites");
 		}
 		seen.add(site.origin);
 	}
@@ -315,7 +433,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	config.clientIdHosts = config.clientIdHosts.map((h) => {
 		const host = h.trim().toLowerCase();
 		if (!/^[a-z0-9.-]+(:\d+)?$/.test(host)) {
-			throw new ConfigError(`not a host name: ${h}`);
+			throw new ConfigError(`not a host name: ${h}`, "clientIdHosts");
 		}
 		return host;
 	});
@@ -343,10 +461,10 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	for (const key of positive) {
 		const v = config[key];
 		if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) {
-			throw new ConfigError(`${key} must be a positive number`);
+			throw new ConfigError(`${key} must be a positive number`, key);
 		}
 	}
-	for (const key of TIMER_KEYS) checkTimer(key, config[key] as number);
+	for (const key of TIMER_KEYS) checkTimer(key, config[key] as number, key);
 	if (
 		typeof config.pageWaitMs !== "number" ||
 		!Number.isFinite(config.pageWaitMs) ||
@@ -355,11 +473,13 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	) {
 		throw new ConfigError(
 			`pageWaitMs must be 0-${MAX_PAGE_WAIT_MS} (0-${MAX_PAGE_WAIT_MS / 1000} seconds)`,
+			"pageWaitMs",
 		);
 	}
 	if (config.maxMessageBytes < MIN_MESSAGE_BYTES) {
 		throw new ConfigError(
 			`maxMessageBytes must be at least ${MIN_MESSAGE_BYTES} (16 KiB)`,
+			"maxMessageBytes",
 		);
 	}
 	if (config.httpIdleTimeoutS > 255) {
@@ -370,7 +490,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 		config.port < 0 ||
 		config.port > 65535
 	) {
-		throw new ConfigError("port must be 0-65535");
+		throw new ConfigError("port must be 0-65535", "port");
 	}
 	return config;
 }
@@ -582,6 +702,33 @@ export function siteFor(
 		};
 	}
 	return undefined;
+}
+
+/** The longest page origin the relay keeps (RFC 1035 names fit with room to spare). */
+const MAX_ORIGIN_LENGTH = 255;
+
+/**
+ * The origin a session keeps, shows on the pairing page and logs (RS 6,
+ * DEC-130). A listed site's origin matched the list exactly. On an open
+ * relay any `Origin` header is admitted, so only a serialised web origin
+ * (`new URL(o).origin === o`, http or https) or a browser extension's origin
+ * of at most 255 characters is kept; anything else, such as free text from
+ * a program, is treated as no origin (`""`).
+ */
+export function shownOrigin(site: Site, origin: string | null): string {
+	if (origin === null) return "";
+	if (site.origin !== "*") return origin;
+	if (origin.length > MAX_ORIGIN_LENGTH) return "";
+	if (isExtensionOrigin(origin)) return origin;
+	try {
+		const url = new URL(origin);
+		return (url.protocol === "https:" || url.protocol === "http:") &&
+			url.origin === origin
+			? origin
+			: "";
+	} catch {
+		return "";
+	}
 }
 
 /** The largest message limit of any site (Bun's server-wide limits). */
