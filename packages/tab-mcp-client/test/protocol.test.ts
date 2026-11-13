@@ -9,8 +9,9 @@ import type {
 	Grant,
 	PairingCode,
 	ToolCallClient,
+	ToolCallEnd,
 } from "../src/types.ts";
-import { newTab, nextEvent } from "./helpers.ts";
+import { MemoryStorage, newTab, nextEvent } from "./helpers.ts";
 import { STUB_LIMITS, StubRelay } from "./stub-relay.ts";
 
 let relay: StubRelay;
@@ -49,6 +50,17 @@ test("hello carries the library, the page title, the app name and the secret", a
 		secret: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
 	});
 	expect(t.session?.appName).toBe("saturnus");
+});
+
+test("hello never sends the page title (CC 6)", async () => {
+	const g = globalThis as { document?: unknown };
+	g.document = { title: "Inbox (3): a private subject" };
+	try {
+		await t.connect();
+		expect((await relay.next("hello"))["page"]).toEqual({ title: "" });
+	} finally {
+		delete g.document;
+	}
 });
 
 test("the version sent in hello is the package version", async () => {
@@ -93,6 +105,11 @@ test.each([
 	[4009, "policy"],
 	[1008, "policy"],
 	[3999, "closed"],
+	// What a proxy sends when the relay behind it restarts (CC 11).
+	[1001, "shutdown"],
+	[1011, "shutdown"],
+	[1012, "shutdown"],
+	[1013, "shutdown"],
 ])("close code %d means %s", async (code, reason) => {
 	await t.connect();
 	const gone = nextEvent<DisconnectDetail>(t, "disconnected");
@@ -110,23 +127,14 @@ test("disconnect() says bye", async () => {
 });
 
 describe("errors", () => {
-	test("an unknown type with an id gets unknown_type; a malformed known one bad_message", async () => {
+	test("an unknown type or a malformed known one is dropped without an answer (CC 15)", async () => {
 		await t.connect();
 		relay.send({ type: "future.thing", id: "x1" });
-		expect(await relay.next("error")).toEqual({
-			type: "error",
-			code: "unknown_type",
-			message: "unknown type future.thing",
-			id: "x1",
-		});
 		relay.send({ type: "http.request", id: "r9" });
-		expect(await relay.next("error")).toMatchObject({
-			code: "bad_message",
-			id: "r9",
-		});
-		relay.send({ type: "future.notice" }); // no id: ignored
-		relay.send({ type: "ping", t: 1 });
-		await relay.next("pong");
+		relay.send({ type: "future.notice" });
+		relay.send("not json");
+		await relay.settled();
+		expect(t.state).toBe("connected");
 		expect(relay.received.filter((m) => m.type === "error")).toEqual([]);
 	});
 
@@ -410,18 +418,35 @@ describe("grants", () => {
 		expect(relay.received.filter((m) => m["id"] === "r2")).toEqual([]);
 	});
 
-	test("newAddress revokes all grants, says bye, and connects with a new secret", async () => {
+	test("newAddress takes the address back (hello.revokeAll), then connects with a new secret (DEC-136)", async () => {
+		relay.grants = [GRANT];
 		await t.connect();
+		expect(t.grants.map((g) => g.grantId)).toEqual(["g_1"]);
+		relay.grants = []; // the new address has none
 		const firstSecret = (await relay.next("hello"))["secret"];
+		const states: string[] = [];
+		t.addEventListener("statechange", (e) => states.push(e.detail.state));
+		const connected: string[] = [];
+		t.addEventListener("connected", (e) => connected.push(e.detail.address));
 		const again = t.newAddress();
-		expect(await relay.next("grants.revokeAll")).toEqual({
-			type: "grants.revokeAll",
+		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
+		expect(await relay.next("hello")).toMatchObject({
+			secret: firstSecret,
+			revokeAll: true,
 		});
 		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
 		const hello = await relay.next("hello");
 		expect(hello["secret"]).not.toBe(firstSecret);
+		expect(hello["revokeAll"]).toBeUndefined();
 		await again;
 		expect(t.state).toBe("connected");
+		expect(t.grants).toEqual([]);
+		expect(relay.received.some((m) => m.type === "grants.revokeAll")).toBe(
+			false,
+		);
+		// The take-back's session is never the page's: one `connected`, no flicker.
+		expect(states).toEqual(["disconnected", "connecting", "connected"]);
+		expect(connected).toHaveLength(1);
 	});
 });
 
@@ -486,6 +511,66 @@ describe("message size (review of PR #2)", () => {
 			.join("");
 		expect(data).toContain(JSON.stringify(text).slice(1, -1));
 		expect(Math.max(...relay.frameBytes)).toBeLessThanOrEqual(2000);
+	});
+
+	/** The body the tab sent for a streamed response, chunks joined. */
+	function body(): string {
+		return relay.received
+			.filter((m) => m.type === "http.response.chunk")
+			.map((m) => String(m["data"]))
+			.join("");
+	}
+
+	test("a result larger than maxBodyBytes is an error result, and toolcallend says so (CC 7)", async () => {
+		relay.limits = { ...STUB_LIMITS, maxBodyBytes: 4096 };
+		await t.registerTool({
+			name: "big",
+			description: "Returns a lot",
+			execute: () => "x".repeat(10_000),
+		});
+		await t.connect();
+		const ended = nextEvent<ToolCallEnd>(t, "toolcallend");
+		relay.send(call("r1", "big"));
+		await relay.next("http.response.end");
+		const sent = body();
+		expect(Buffer.byteLength(sent)).toBeLessThanOrEqual(4096);
+		const message = JSON.parse(sent.replace(/^event: message\ndata: /, ""));
+		expect(message.result.isError).toBe(true);
+		expect(message.result.content[0].text).toMatch(
+			/^The result is \d+ bytes; the relay passes on at most 4096\.$/,
+		);
+		const end = (await ended).detail;
+		expect(end.outcome).toBe("error");
+		expect(end.result.isError).toBe(true);
+	});
+
+	test("a result that fits is sent as it is", async () => {
+		relay.limits = { ...STUB_LIMITS, maxBodyBytes: 4096 };
+		await t.registerTool({
+			name: "small",
+			description: "Returns a little",
+			execute: () => "x".repeat(1000),
+		});
+		await t.connect();
+		const ended = nextEvent<ToolCallEnd>(t, "toolcallend");
+		relay.send(call("r1", "small"));
+		await relay.next("http.response.end");
+		expect(body()).toContain("x".repeat(1000));
+		expect((await ended).detail.outcome).toBe("ok");
+	});
+
+	test("a result that is not JSON is an error result, and toolcallend says so", async () => {
+		await t.registerTool({
+			name: "bigint",
+			description: "Returns a BigInt",
+			execute: () => ({ content: [{ type: "text", text: "a" }], n: 1n }),
+		});
+		await t.connect();
+		const ended = nextEvent<ToolCallEnd>(t, "toolcallend");
+		relay.send(call("r1", "bigint"));
+		await relay.next("http.response.end");
+		expect(body()).toContain("The tool returned a result that is not JSON.");
+		expect((await ended).detail.outcome).toBe("error");
 	});
 
 	test("a limit too small to frame anything refuses to connect", async () => {
@@ -572,42 +657,104 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await retry;
 	});
 
-	test("an older relay that ignores hello.revokeAll: grants.revokeAll, then the grants must go", async () => {
+	test("a relay that ignores hello.revokeAll (older than 0.5): rejects, keeps the secret (DEC-136)", async () => {
 		relay.grants = [GRANT];
 		relay.ignoreRevokeAll = true;
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		replace();
 		await nextEvent(t, "disconnected");
-		let settled = false;
-		const renewing = t.newAddress().finally(() => {
-			settled = true;
-		});
+		const renewing = t.newAddress();
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
 		});
-		expect(await relay.next("grants.revokeAll")).toEqual({
-			type: "grants.revokeAll",
+		await expect(renewing).rejects.toMatchObject({ reason: "policy" });
+		expect(t.state).toBe("disconnected");
+		relay.ignoreRevokeAll = false;
+		const retry = t.newAddress();
+		expect(await relay.next("hello")).toMatchObject({
+			secret,
+			revokeAll: true,
 		});
-		await relay.settled();
-		expect(settled).toBe(false); // not before the relay removed the grant
-		relay.grants = [];
-		relay.send({ type: "grant.removed", grantId: "g_1", reason: "revoked" });
-		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
-		await renewing;
+		await retry;
 	});
 
-	test("an older relay, and the page is taken over again before the grants went: rejects", async () => {
+	test("disconnected, with a secret: takes the address back, clears the grants, stays off (CC 4, CC 14)", async () => {
 		relay.grants = [GRANT];
-		relay.ignoreRevokeAll = true;
 		await t.connect();
-		replace();
-		await nextEvent(t, "disconnected");
+		const secret = (await relay.next("hello"))["secret"];
+		t.disconnect();
+		await relay.next("bye");
+		expect(t.grants).toHaveLength(1); // grants stay across disconnect()
+		const changes = nextEvent<{ grants: unknown[] }>(t, "grantschange");
+		const renewed = await t.newAddress();
+		expect(renewed).toBeUndefined();
+		const back = await relay.next("hello");
+		expect(back).toMatchObject({ secret, revokeAll: true });
+		expect((await changes).detail.grants).toEqual([]);
+		expect(t.grants).toEqual([]);
+		expect(t.state).toBe("disconnected");
+		expect(relay.sockets).toHaveLength(2); // nothing after the take-back
+		// The next connect() uses the new secret.
+		await t.connect();
+		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
+	});
+
+	test("a page that never had a secret makes one without connecting", async () => {
+		const renewed = await t.newAddress();
+		expect(renewed).toBeUndefined();
+		expect(relay.urls).toEqual([]);
+		expect(t.state).toBe("disconnected");
+	});
+
+	test("the relay cannot be reached: rejects, keeps the secret", async () => {
+		await t.connect();
+		const secret = (await relay.next("hello"))["secret"];
+		t.disconnect();
+		relay.refuse = true;
+		await expect(t.newAddress()).rejects.toMatchObject({ reason: "network" });
+		relay.refuse = false;
+		await t.connect();
+		expect((await relay.next("hello"))["secret"]).toBe(secret);
+	});
+
+	test("takes back the address this page used, also after another tab rotated the stored secret (CC 4)", async () => {
+		const storage = new MemoryStorage();
+		const a = newTab(relay.url, { storage });
+		const b = newTab(relay.url, { storage });
+		try {
+			await a.connect();
+			const first = (await relay.next("hello"))["secret"];
+			// The other tab gets a new address first (it takes `first` back).
+			await b.newAddress();
+			expect(await relay.next("hello")).toMatchObject({
+				secret: first,
+				revokeAll: true,
+			});
+			await a.newAddress();
+			expect(await relay.next("hello")).toMatchObject({
+				secret: first,
+				revokeAll: true,
+			});
+		} finally {
+			a.disconnect();
+			b.disconnect();
+		}
+	});
+
+	test("disconnect() during the take-back cancels it and keeps the secret", async () => {
+		await t.connect();
+		const secret = (await relay.next("hello"))["secret"];
+		relay.answerHello = false;
 		const renewing = t.newAddress();
-		await relay.next("grants.revokeAll");
-		replace();
-		await expect(renewing).rejects.toMatchObject({ reason: "replaced" });
+		await relay.next("hello", (m) => m["revokeAll"] === true);
+		t.disconnect();
+		await expect(renewing).rejects.toMatchObject({ name: "AbortError" });
+		expect(t.state).toBe("disconnected");
+		relay.answerHello = true;
+		await t.connect();
+		expect((await relay.next("hello"))["secret"]).toBe(secret);
 	});
 });
 
@@ -618,10 +765,18 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		first?.close(4005, "replaced");
 	}
 
+	/** A tab of the same page as `t`: same storage, so the same secret. */
+	let storage: MemoryStorage;
+	beforeEach(() => {
+		t.disconnect();
+		storage = new MemoryStorage();
+		t = newTab(relay.url, { appName: "saturnus", storage });
+	});
+
 	test("a sibling whose hello was never answered does not count", async () => {
 		await t.connect();
 		relay.answerHello = false;
-		const sibling = newTab(relay.url);
+		const sibling = newTab(relay.url, { storage });
 		const failed = sibling.connect();
 		failed.catch(() => {});
 		await relay.next("hello", (m) => m["app"] === undefined);
@@ -634,7 +789,7 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 
 	test("a sibling whose session started counts", async () => {
 		await t.connect();
-		const sibling = newTab(relay.url);
+		const sibling = newTab(relay.url, { storage });
 		await sibling.connect();
 		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
 		replaceFirst();
@@ -643,5 +798,45 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		} finally {
 			sibling.disconnect();
 		}
+	});
+
+	test("a claim of another address does not count (CC 5)", async () => {
+		await t.connect();
+		// Same channel (same storage key), another secret: after newAddress() there.
+		const other = newTab(relay.url, { storage: new MemoryStorage() });
+		await other.connect();
+		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
+		replaceFirst();
+		try {
+			expect((await replaced).detail).toEqual({ sibling: false });
+		} finally {
+			other.disconnect();
+		}
+	});
+
+	test("a claim heard while this tab was still connecting does not count (CC 5)", async () => {
+		relay.answerHello = false;
+		const connecting = t.connect();
+		await relay.next("hello");
+		const sibling = newTab(relay.url, { storage });
+		relay.answerHello = true;
+		await sibling.connect(); // claims while `t` still waits for its session
+		sibling.disconnect();
+		// `t`'s own socket, the first one, gets its session now.
+		relay.sockets[0]?.send(
+			JSON.stringify({
+				type: "session",
+				sessionId: "s_t",
+				address: `${relay.url}/a/${"a".repeat(52)}/mcp`,
+				origin: "https://page.example",
+				expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+				limits: STUB_LIMITS,
+				grants: [],
+			}),
+		);
+		await connecting;
+		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
+		replaceFirst();
+		expect((await replaced).detail).toEqual({ sibling: false });
 	});
 });

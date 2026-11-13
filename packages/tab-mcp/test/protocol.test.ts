@@ -17,20 +17,33 @@ describe("parseTabMessage", () => {
 			message: {
 				type: "hello",
 				library: { name: "lib", version: "1" },
-				page: { title: "T" },
 				secret: "s",
 			},
 		});
 	});
 
-	test("hello without library, page or secret is refused", () => {
+	test("hello without library or secret is refused; page is not needed and never read (CC 6)", () => {
 		expect(ok({ type: "hello", page: { title: "" }, secret: "s" }).ok).toBe(
 			false,
 		);
 		expect(
-			ok({ type: "hello", library: { name: "l", version: "1" }, secret: "s" })
-				.ok,
-		).toBe(false);
+			ok({ type: "hello", library: { name: "l", version: "1" }, secret: "s" }),
+		).toEqual({
+			ok: true,
+			message: {
+				type: "hello",
+				library: { name: "l", version: "1" },
+				secret: "s",
+			},
+		});
+		expect(
+			ok({
+				type: "hello",
+				library: { name: "l", version: "1" },
+				page: 42,
+				secret: "s",
+			}).ok,
+		).toBe(true);
 		expect(
 			ok({
 				type: "hello",

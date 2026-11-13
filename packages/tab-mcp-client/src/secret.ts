@@ -56,6 +56,11 @@ export class SecretStore {
 
 	/** The current secret; storage first, so a rotation in another tab is seen. */
 	get(): string {
+		return this.current() ?? this.rotate();
+	}
+
+	/** The current secret, or `undefined` while this page has none (none made yet). */
+	current(): string | undefined {
 		let stored: string | null = null;
 		try {
 			stored = this.#storage?.getItem(this.#key) ?? null;
@@ -81,7 +86,7 @@ export class SecretStore {
 			this.#memory = stored;
 			return stored;
 		}
-		return this.#memory ?? this.rotate();
+		return this.#memory;
 	}
 
 	/** Make and keep a new secret (a new address). */

@@ -158,8 +158,13 @@ test("the /tab URL carries the address id of the secret in hello, never the secr
 		expect(url.pathname).toBe("/tab");
 		expect(url.searchParams.getAll("a")).toEqual([addressIdFromSecret(secret)]);
 		expect(url.href).not.toContain(secret);
-		// New address: the next connection names the new id.
+		// New address: the take-back names the old id, the next connection the new one.
 		await t.newAddress();
+		const back = await relay.next("hello");
+		expect(back).toMatchObject({ secret, revokeAll: true });
+		expect(new URL(relay.urls.at(-2) ?? "").searchParams.get("a")).toBe(
+			addressIdFromSecret(secret),
+		);
 		const second = await relay.next("hello");
 		expect(second["secret"]).not.toBe(secret);
 		expect(new URL(relay.urls.at(-1) ?? "").searchParams.get("a")).toBe(

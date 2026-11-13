@@ -41,8 +41,17 @@ const CONNECT_TIMEOUT_MS = 15_000;
 
 const CLOSE_REASONS: Record<number, DisconnectReason> = {
 	1000: "closed",
+	/**
+	 * Going away, internal error, service restart, try again later: what a
+	 * proxy or platform in front of the relay sends when the relay behind it
+	 * restarts without its own `bye`. Reconnecting may help.
+	 */
+	1001: "shutdown",
 	1008: "policy",
 	1009: "too_large",
+	1011: "shutdown",
+	1012: "shutdown",
+	1013: "shutdown",
 	4001: "expired",
 	4002: "idle",
 	4003: "heartbeat",
@@ -67,38 +76,6 @@ const BYE_REASONS: Record<string, DisconnectReason> = {
 function refused(message: string, reason: DisconnectReason): Error {
 	return Object.assign(new Error(message), { reason });
 }
-
-function pageTitle(): string {
-	const title = (globalThis as { document?: { title?: unknown } }).document
-		?.title;
-	return typeof title === "string" ? title.slice(0, 300) : "";
-}
-
-function frameInfo(text: string): { type: string; id?: string } | undefined {
-	try {
-		const v = JSON.parse(text) as Record<string, unknown>;
-		if (typeof v !== "object" || v === null || typeof v["type"] !== "string")
-			return undefined;
-		return typeof v["id"] === "string"
-			? { type: v["type"], id: v["id"] }
-			: { type: v["type"] };
-	} catch {
-		return undefined;
-	}
-}
-
-const KNOWN_TYPES = new Set([
-	"session",
-	"ping",
-	"bye",
-	"http.request",
-	"http.cancel",
-	"pairing.code",
-	"grant.added",
-	"grant.removed",
-	"identity.bound",
-	"error",
-]);
 
 /**
  * Room for a message's envelope (`http.response` with its headers, or a
@@ -138,27 +115,37 @@ export const SIBLING_WINDOW_MS = 10_000;
 export const SIBLING_GRACE_MS = 1_000;
 
 /**
- * The tabs of one page (same relay, same secret) tell each other on a
- * `BroadcastChannel` when the relay accepted their claim of the address
+ * The tabs of one page (same relay, same storage key) tell each other on a
+ * `BroadcastChannel` when the relay accepted their claim of an address
  * (`claimed`, once their `session` arrived), so that a replaced tab can tell
  * a sibling from an impostor. A sibling whose `hello` failed says nothing.
- * Nothing else goes on the channel: no secret, no address. Without
- * `BroadcastChannel` nothing is heard, and every `replaced` counts as unknown.
+ * The message carries the address id (as in the `/tab` URL; no secret), and
+ * only a claim of this tab's own address, heard after this tab's own
+ * `session`, counts: one heard while this tab was still connecting, or from
+ * a tab on another address (after `newAddress()` there), cannot have caused
+ * the replacement (CC 5). Without `BroadcastChannel` nothing is heard, and
+ * every `replaced` counts as unknown.
  */
-function siblingTabs(name: string | undefined): {
+function siblingTabs(
+	name: string | undefined,
+	address: string | undefined,
+): {
+	/** The own session arrived: say so, and listen to the others from now on. */
 	claimed(): void;
 	/** `true` once `claimed` was heard in the window, `false` after the grace. */
 	heard(): Promise<boolean>;
 	close(): void;
 } {
 	let channel: BroadcastChannel | undefined;
+	let listening = false;
 	let at = Number.NEGATIVE_INFINITY;
 	let onClaim: (() => void) | undefined;
 	try {
 		if (name !== undefined && typeof BroadcastChannel === "function") {
 			channel = new BroadcastChannel(name);
 			channel.onmessage = (event: MessageEvent) => {
-				if ((event.data as { type?: unknown } | null)?.type !== "claimed")
+				const data = event.data as { type?: unknown; address?: unknown } | null;
+				if (!listening || data?.type !== "claimed" || data.address !== address)
 					return;
 				at = Date.now();
 				onClaim?.();
@@ -169,8 +156,9 @@ function siblingTabs(name: string | undefined): {
 	}
 	return {
 		claimed() {
+			listening = true;
 			try {
-				channel?.postMessage({ type: "claimed" });
+				channel?.postMessage({ type: "claimed", address });
 			} catch {
 				// closed or not allowed: the other tab counts it as unknown
 			}
@@ -193,29 +181,26 @@ function siblingTabs(name: string | undefined): {
 }
 
 /**
- * Open the WebSocket and run the session. `revokeAll`: take the address back
- * (DEC-095); `ready` resolves only once the relay has no grant of the address
- * left, and rejects if the session ends first.
+ * Open the WebSocket and run the session. `address`: the secret's address id
+ * (`addressIdOf`). `revokeAll`: take the address back (DEC-095); the relay
+ * revokes every grant as it claims the address, and its `session` lists none.
  */
 export function openConnection(
 	host: ConnectionHost,
 	url: string,
 	secret: string,
-	revokeAll = false,
+	options: { address?: string | undefined; revokeAll?: boolean } = {},
 ): ConnectionHandle {
+	const revokeAll = options.revokeAll === true;
 	const ws = new WebSocket(url, SUBPROTOCOL);
 	let state: "opening" | "ready" | "closed" = "opening";
 	let byeReason: DisconnectReason | undefined;
 	let maxChunk = 64 * 1024;
+	/** The relay's limit on a response body (CC 7); known once `session` came. */
+	let maxBodyBytes: number | undefined;
 	let heartbeat: ReturnType<typeof setTimeout> | undefined;
 	let heartbeatMs = 0;
-	const siblings = siblingTabs(host.tabs);
-	/**
-	 * Taking the address back from a relay that ignored `hello.revokeAll` (0.4
-	 * and older): the grants still to go after `grants.revokeAll`, and the
-	 * session to resolve with then.
-	 */
-	let revoking: { left: Set<string>; session: SessionInfo } | undefined;
+	const siblings = siblingTabs(host.tabs, options.address);
 
 	let resolveReady!: (session: SessionInfo) => void;
 	let rejectReady!: (error: Error) => void;
@@ -233,6 +218,7 @@ export function openConnection(
 		// Without `icons`, the page's own <link rel="icon">, read now.
 		server: { ...host.server, icons: host.server.icons ?? pageIcons() },
 		client: (grant) => host.clientFor(grant),
+		maxBodyBytes: () => maxBodyBytes,
 	});
 	const stopWatching = host.registry.onChange(() => handler.toolsChanged());
 
@@ -287,13 +273,6 @@ export function openConnection(
 				byeReason ??
 				CLOSE_REASONS[code] ??
 				(code === 1006 ? "network" : "closed");
-			// The grants of a taken-back address did not all go (DEC-095).
-			rejectReady(
-				refused(
-					"The address was taken over again before its AI apps were disconnected.",
-					reason,
-				),
-			);
 			// Over at once; only the detail of `replaced` waits for a sibling's
 			// `claimed`, which comes a moment after the `bye` (DEC-095).
 			host.closed(reason, code);
@@ -328,24 +307,25 @@ export function openConnection(
 					);
 					return;
 				}
+				if (revokeAll && message.grants.length > 0) {
+					// A relay older than 0.5 ignores hello.revokeAll and lists the
+					// grants: the address was not taken back (DEC-136).
+					fail(
+						refused(
+							"The relay did not revoke the address's grants (it needs tab-mcp 0.5 or later).",
+							"policy",
+						),
+					);
+					return;
+				}
 				maxChunk = chunk;
+				maxBodyBytes = message.limits.maxBodyBytes;
 				state = "ready";
 				clearTimeout(connectTimer);
 				heartbeatMs = message.limits.heartbeatMs;
 				armHeartbeat();
 				siblings.claimed();
-				const session = host.sessionStarted(message);
-				if (revokeAll && message.grants.length > 0) {
-					// A relay that ignored hello.revokeAll: revoke now, and wait until
-					// it has removed every grant.
-					revoking = {
-						left: new Set(message.grants.map((g) => g.grantId)),
-						session,
-					};
-					send({ type: "grants.revokeAll" });
-					return;
-				}
-				resolveReady(session);
+				resolveReady(host.sessionStarted(message));
 			} else if (message.type === "error") {
 				fail(
 					refused(
@@ -391,8 +371,6 @@ export function openConnection(
 				return;
 			case "grant.removed":
 				host.grantRemoved(message.grantId);
-				revoking?.left.delete(message.grantId);
-				if (revoking?.left.size === 0) resolveReady(revoking.session);
 				return;
 			case "identity.bound":
 				host.identityResult(true, message.round);
@@ -433,7 +411,9 @@ export function openConnection(
 		const hello: TabMessage = {
 			type: "hello",
 			library: host.library,
-			page: { title: pageTitle() },
+			// The relay never read the title (CC 6); relays up to 0.9 still
+			// require the field.
+			page: { title: "" },
 			secret,
 		};
 		if (host.appName !== undefined) hello.app = { name: host.appName };
@@ -442,30 +422,12 @@ export function openConnection(
 	});
 	ws.addEventListener("message", (event: MessageEvent) => {
 		if (typeof event.data !== "string") return;
+		// A frame the tab cannot read is dropped without an answer (CC 15): the
+		// relay only logged one, and its request ends at its own timeout.
 		const message = parseRelayMessage(event.data);
-		if (message !== undefined) {
-			if (state === "ready") armHeartbeat(); // any traffic shows the link is alive
-			onMessage(message);
-			return;
-		}
-		const info = frameInfo(event.data);
-		if (info?.id !== undefined) {
-			send(
-				KNOWN_TYPES.has(info.type)
-					? {
-							type: "error",
-							code: "bad_message",
-							message: `malformed ${info.type}`,
-							id: info.id,
-						}
-					: {
-							type: "error",
-							code: "unknown_type",
-							message: `unknown type ${info.type}`,
-							id: info.id,
-						},
-			);
-		}
+		if (message === undefined) return;
+		if (state === "ready") armHeartbeat(); // any traffic shows the link is alive
+		onMessage(message);
 	});
 	ws.addEventListener("close", (event: CloseEvent) => {
 		if (state === "opening") {

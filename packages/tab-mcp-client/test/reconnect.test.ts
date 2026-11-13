@@ -3,7 +3,7 @@
  * connects again with growing waits, at once on `online` or when the tab is
  * visible again, and never after the user or the relay ended it on purpose.
  */
-import { afterEach, beforeEach, expect, jest, test } from "bun:test";
+import { afterEach, beforeEach, expect, jest, spyOn, test } from "bun:test";
 import type { TabMcp } from "../src/tab-mcp.ts";
 import type { ReconnectingInfo, TabMcpOptions } from "../src/types.ts";
 import {
@@ -78,13 +78,18 @@ test("the waits grow: 5, 10, 20, 40 s, then every 60 s", async () => {
 		jest.advanceTimersByTime(wait); // the attempt starts and is refused
 	}
 	await failed.promise;
-	expect(delays.map((d) => Math.round(d / 1000))).toEqual([
-		5, 10, 20, 40, 60, 60, 60,
-	]);
+	// Each within 20 % of its step (CC 11).
+	const steps = [5, 10, 20, 40, 60, 60, 60];
+	expect(delays).toHaveLength(steps.length);
+	delays.forEach((d, i) => {
+		const step = (steps[i] ?? 0) * 1000;
+		expect(d).toBeGreaterThanOrEqual(step * 0.8 - 5);
+		expect(d).toBeLessThanOrEqual(step * 1.2 + 5);
+	});
 	expect(t.reconnecting).toMatchObject({ reason: "heartbeat", attempt: 7 });
 	// The relay is back: the next attempt connects and starts over.
 	relay.refuse = false;
-	jest.advanceTimersByTime(60_000);
+	jest.advanceTimersByTime(delays.at(-1) ?? 0);
 	jest.useRealTimers();
 	await nextEvent(t, "connected");
 	expect(t.reconnecting).toBeUndefined();
@@ -210,6 +215,11 @@ test("newAddress() while waiting connects with the new address", async () => {
 	const session = await t.newAddress();
 	expect(session).toBeDefined();
 	expect(t.reconnecting).toBeUndefined();
+	// The old address is taken back first (DEC-136).
+	expect(await relay.next("hello")).toMatchObject({
+		secret: before["secret"],
+		revokeAll: true,
+	});
 	const after = await relay.next("hello");
 	expect(after["secret"]).not.toBe(before["secret"]);
 });
@@ -324,7 +334,7 @@ test("a refused attempt of its own says why with error, just before reconnecting
 	]);
 });
 
-test("a refused connect() while reconnecting rejects its promise and emits no error", async () => {
+test("a refused connect() while reconnecting rejects its promise, and error says why it stopped (CC 10)", async () => {
 	const t = await connected({ reconnect: { delaysMs: [60_000] } });
 	const errors: string[] = [];
 	t.addEventListener("error", (e) => errors.push(e.detail.error.message));
@@ -340,7 +350,9 @@ test("a refused connect() while reconnecting rejects its promise and emits no er
 	});
 	await expect(attempt).rejects.toThrow("This origin is not allowed");
 	expect(t.reconnecting).toBeUndefined();
-	expect(errors).toEqual([]);
+	expect(errors).toEqual([
+		"The relay refused the connection: This origin is not allowed",
+	]);
 });
 
 test("a relay that ends the attempt with 1008 stops reconnecting; 4004 retries", async () => {
@@ -361,7 +373,7 @@ test("a relay that ends the attempt with 1008 stops reconnecting; 4004 retries",
 	expect(t.reconnecting).toBeUndefined();
 });
 
-test("a connect() that joins the attempt the library started is told by its promise only", async () => {
+test("a connect() that joins the attempt the library started: its promise rejects, and error says why (CC 10)", async () => {
 	const t = await connected({ reconnect: { delaysMs: [10] } });
 	const errors: string[] = [];
 	t.addEventListener("error", (e) => errors.push(e.detail.error.message));
@@ -376,7 +388,51 @@ test("a connect() that joins the attempt the library started is told by its prom
 	});
 	await expect(joined).rejects.toThrow("This origin is not allowed");
 	expect(t.reconnecting).toBeUndefined();
-	expect(errors).toEqual([]);
+	expect(errors).toEqual([
+		"The relay refused the connection: This origin is not allowed",
+	]);
+});
+
+test("a connect() from a statechange listener after a failed attempt does not stop reconnecting (CC 10)", async () => {
+	const t = await connected({ reconnect: { delaysMs: [10] } });
+	relay.answerHello = false;
+	relay.close(4004);
+	await relay.next("hello"); // the first attempt
+	let joined = false;
+	t.addEventListener("statechange", (e) => {
+		if (e.detail.state !== "disconnected" || joined) return;
+		joined = true;
+		t.connect({ resume: true }).catch(() => {});
+	});
+	relay.close(4004); // the first attempt fails; the listener starts the next
+	await relay.next("hello");
+	await Bun.sleep(40); // a timer of the failed attempt would fire meanwhile
+	relay.answerHello = true;
+	relay.close(4004); // the listener's attempt fails too
+	await nextEvent(t, "connected"); // and reconnecting goes on
+	expect(t.reconnecting).toBeUndefined();
+});
+
+test("the waits vary by up to 20 % (CC 11)", async () => {
+	const random = spyOn(Math, "random");
+	try {
+		for (const [r, factor] of [
+			[0, 0.8],
+			[0.5, 1],
+			[0.999_999, 1.2],
+		] as const) {
+			random.mockReturnValue(r);
+			const t = await connected({ reconnect: { delaysMs: [600_000] } });
+			relay.close(4004);
+			const info = (await nextEvent<ReconnectingInfo>(t, "reconnecting"))
+				.detail;
+			expect(info.at - Date.now()).toBeGreaterThan(600_000 * factor - 50);
+			expect(info.at - Date.now()).toBeLessThanOrEqual(600_000 * factor);
+			t.disconnect();
+		}
+	} finally {
+		random.mockRestore();
+	}
 });
 
 test("when error says why it stopped, reconnecting is over already: connect() from the listener starts afresh", async () => {
