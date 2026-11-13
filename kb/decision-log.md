@@ -3460,3 +3460,81 @@ is a list of origins and is passed through to the native registration (DEC-143).
   then promise ("end the call"). This holds for relay and WebMCP calls too; a tool that
   ignores the signal still runs on in the page, and its result goes nowhere. The
   library's dialog closes on its `close` event, a task after the call ended.
+
+## DEC-168: A relay error names the message it answers; expired grants are announced
+
+2026-11-14, iteration 41 (Overmark's migration review of client 0.16.0). Amends DEC-150.
+
+- The relay's `error` `unknown_id` or `store_unavailable` that answers a `grant.revoke`,
+  `grants.revokeAll` or `identity.logout` carries `for` (that message's type) and, for
+  `grant.revoke`, `grantId`. The client settles a pending `revoke()` or `signOut()` on
+  an error only when it names that message and grant; an error without `for` (relay
+  0.10.1) settles every pending one, as 0.16.0 did. Chosen over a request id on every
+  control message: the page's message already carries what identifies it (the grant;
+  a sign-out is one per page), and old relays and old clients need no change.
+- `unknown_id` for a grant the page lists means the relay has no usable token of it (it
+  expired, or another instance revoked it): the client drops it from `grants`, with
+  `grantschange`, before the `error` is emitted, so the `revoke()` of it resolves. The
+  outcome the caller asked for holds; a rejection would show "Could not disconnect" for
+  an app that is gone. Only with `grantId` (relay 0.10.2): with an older relay two
+  pending revocations could not be told apart.
+- The relay's sweep (every `sweepIntervalMs`) sends `grant.removed` `expired` to each
+  connected page for the grants it told the page of (`session`, `grant.added`) that
+  `listGrants` no longer lists. `deleteExpired` does not say which grants it deleted,
+  and changing the public `TokenStore` interface for it would break custom stores. Cost:
+  one `listGrants` per connected page with a grant per sweep, one sweep run at a time;
+  only grants known before the read count, so one added meanwhile is never reported.
+  An expired grant's requests in flight keep running (their tokens were valid when they
+  came); revocation still ends them.
+
+## DEC-169: The `tools/list` sentence about the page's tab only with the library's dialog
+
+2026-11-14, iteration 41. Amends iteration 33's `CONFIRMED_IN_TAB` (CU 9).
+
+- A consequential tool's description in `tools/list` ends with "The page may ask the
+  user to allow each call, usually in the page's browser tab." only when the library's
+  dialog asks: not with the page's `onConfirm` (relay and served ports) nor, for a
+  served port, with that port's own `onConfirm`. Such a question may be anywhere
+  (Overmark's side panel, a site's chat).
+- Not a `ui.strings` entry that can be set to empty: that is more API (a key that is not
+  a dialog text, DEC-152 kept it out of the table) and every page with an `onConfirm`
+  would have to know to set it, while the flag is right by default. A page that wants
+  the AI app to know where it asks says so in the tool's description. An `onConfirm` that
+  hands some calls to `confirmInPage` loses the sentence too; it said "may" anyway.
+- Cost in the core: one closure (`ownConfirm`) on the call host.
+
+## DEC-170: What a rejection of `revoke()`, `signOut()` and `newAddress()` tells
+
+2026-11-14, iteration 41. Amends DEC-150.
+
+- `revoke()` and `signOut()`: `InvalidStateError` when nothing was sent (not connected),
+  `NetworkError` when the message was sent and the session ended before the answer, and
+  `TimeoutError` as before. The last two leave open whether the relay did it; `grants`
+  says so after the next connect. A distinct name, not a `code` property:
+  `DOMException.code` is a read-only number.
+- `newAddress()`: every rejection carries `addressChanged`, `false` when the old address
+  could not be taken back (kept with its grants: call `newAddress()` again), `true` when
+  the address changed and only connecting with the new one failed (call `connect()`).
+  A property on the error that caused it, so `reason` (`network`, `replaced`, `policy`)
+  stays as documented.
+- `statechange`'s `reason` keeps DEC-149's rule, now documented exactly: on the change
+  from `connected` and when `disconnect()`/`newAddress()` ends connecting or
+  reconnecting; not on later reconnect attempts (`reconnecting.reason`), a failed
+  `connect()` or the `disconnected` after a refusal. Setting it on every attempt would
+  make `reason !== undefined`, the migration for the old `disconnected` event, fire per
+  attempt.
+
+## DEC-171: The WebMCP mirror is a chunk of its own
+
+2026-11-14, iteration 41. Carries out DEC-119's plan; keeps DEC-115 and DEC-143.
+
+- The constructor still reads `Document.prototype`'s `modelContext` getter
+  (`nativeContext`, now in `tab-mcp.ts`); only when it finds native WebMCP and the page
+  set `webmcp: true` does it import `webmcp.ts` (`mirror`), a chunk of about 0.6 KB gzipped. The
+  call path stays in the connection chunk. Not the connection chunk itself: it is 16 KB
+  with the validator, which a page needs only at the first call.
+- The tools reach `registerTool` once the chunk has loaded, a little later than a
+  microtask; nothing waited for that before either (registration was already async).
+  Builds without splitting (tab-mcp for Chrome's service worker) inline it.
+- Core: 6400 B before, 6082 B with the mirror out, 6176 B with iteration 41's fixes;
+  the budget stays 6400 B.

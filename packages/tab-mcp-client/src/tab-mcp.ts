@@ -423,8 +423,8 @@ export class TabMcp extends EventTarget {
 	 * address at once (identity binding). Call it from the web app's logout.
 	 * `identity` goes to `none` at once. Resolves once the relay removed the
 	 * grants; rejects with an `InvalidStateError` while not connected to a
-	 * relay that pairs by sign-in (`session.pairing` is `oidc`), and when the
-	 * session ends first. Grants that stay work only while a page signed in
+	 * relay that pairs by sign-in (`session.pairing` is `oidc`), and with a
+	 * `NetworkError` when the session ends first. Grants that stay work only while a page signed in
 	 * as the same person is open.
 	 */
 	signOut(): Promise<void> {
@@ -582,8 +582,9 @@ export class TabMcp extends EventTarget {
 	 * the page was connected, connecting or reconnecting, and resolves once
 	 * that is done (the new session is `session`). Rejects, and keeps the old
 	 * secret so that a retry takes it back again, when the old address could
-	 * not be taken back (relay unreachable, taken over again first). Call it
-	 * from a user action.
+	 * not be taken back (relay unreachable, taken over again first). Every
+	 * rejection has `addressChanged`: `false` then, `true` when only
+	 * connecting with the new address failed. Call it from a user action.
 	 */
 	newAddress(): Promise<void> {
 		// Without a relay there is no secret store.
@@ -752,11 +753,12 @@ export class TabMcp extends EventTarget {
 
 	/**
 	 * Disconnect one AI app: its tokens stop working at once. Resolves once
-	 * the relay removed the grant (at once for one that is not in `grants`).
+	 * the relay removed the grant (at once for one that is not in `grants`,
+	 * and when the relay no longer knows it: it leaves `grants` then).
 	 * Rejects with an `InvalidStateError` while not connected (only the relay
-	 * can do it) and when the session ends first, and with the relay's error
-	 * when it refuses (its `code` is `store_unavailable` when it could not
-	 * save the change: try again; `unknown_id` for a grant it does not know).
+	 * can do it), a `NetworkError` when the session ends before the answer,
+	 * and with the relay's error when it refuses (its `code` is
+	 * `store_unavailable` when it could not save the change: try again).
 	 */
 	revoke(grantId: string): Promise<void> {
 		const gone = () => !this.#grants.some((g) => g.grantId === grantId);

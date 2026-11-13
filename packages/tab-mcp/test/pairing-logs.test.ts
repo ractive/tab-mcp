@@ -480,7 +480,7 @@ describe("RQ 5: a store failure is store.error wherever it happens", () => {
 		};
 		store.failing.add("revoke");
 		t.send({ type: "grant.revoke", grantId: added.grant.grantId });
-		const error = (await t.next("error")) as { code: string };
+		const error: unknown = await t.next("error");
 		expect(error).toEqual({
 			type: "error",
 			code: "store_unavailable",
