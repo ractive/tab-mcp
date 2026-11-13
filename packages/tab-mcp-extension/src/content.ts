@@ -46,8 +46,15 @@ const SEND_TOOLS = 256;
 const SEND_NAME = 256;
 const SEND_TEXT = 4000;
 const SEND_SCHEMA_BYTES = 16 * 1024;
-/** At most this many mirrored names are read from `<html>`, each this long. */
-const SEND_MIRRORED = 256;
+/** The page's title and language are cut to these lengths. */
+export const MAX_PAGE_TITLE = 300;
+export const MAX_LANGUAGE = 64;
+/**
+ * A tool's result longer than this (characters) is not passed on: the relay
+ * carries 1 MiB per response by default, and the bridge cuts a result's text
+ * to 100 000 characters anyway. Chrome's own limit for a message is 64 MiB.
+ */
+export const MAX_SEND_RESULT = 2 * 1024 * 1024;
 
 const cutText = (text: string, max: number) =>
 	text.length > max ? text.slice(0, max) : text;
@@ -71,31 +78,13 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 			webmcp.error = message(error);
 		}
 	}
-	const language = doc.documentElement.lang.trim();
+	const language = cutText(doc.documentElement.lang.trim(), MAX_LANGUAGE);
 	return {
 		url: doc.location.href,
-		title: doc.title,
+		title: cutText(doc.title, MAX_PAGE_TITLE),
 		...(language ? { language } : {}),
 		webmcp,
 	};
-}
-
-/**
- * Every name a tab-mcp page mirrors into WebMCP (iteration 25), from
- * `<html>`: all of them, so that none is offered (or called) as the page's
- * own; the library sets no limit (review of PR 103). Only what is sent is
- * capped (`mirroredNames`).
- */
-export function allMirrored(doc: Document = document): Set<string> {
-	const listed = doc.documentElement.getAttribute("data-tab-mcp-webmcp") ?? "";
-	return new Set(listed.split(/[\s,]+/).filter((name) => name !== ""));
-}
-
-/** The mirrored names as sent to the worker: at most `SEND_MIRRORED`, each cut. */
-export function mirroredNames(doc: Document = document): string[] {
-	return [...allMirrored(doc)]
-		.slice(0, SEND_MIRRORED)
-		.map((name) => cutText(name, SEND_NAME));
 }
 
 /** The part of the Navigation API `pageHistory` reads. */
@@ -141,21 +130,21 @@ const hint = (annotations: Record<string, unknown> | undefined, key: string) =>
 	annotations?.[key] === true;
 
 /**
- * The page's tools, as plain data, without the ones it mirrors from tab-mcp;
- * capped, so a page cannot make the message (or the bridge's list) big.
+ * The page's tools, as plain data; capped, so a page cannot make the message
+ * (or the bridge's list) big. Tools a tab-mcp page mirrors into WebMCP are
+ * among them: the extension cannot know whether the AI app is paired with
+ * the page itself (WM 1, DEC-140).
  */
 export async function pageTools(
 	doc: Document = document,
 	documentId: string = DOCUMENT_ID,
 ): Promise<PageTools> {
 	const context = contextOf(doc);
-	const skip = allMirrored(doc);
 	const base = {
 		url: doc.location.href,
 		origin: doc.location.origin,
 		documentId,
 		available: context !== undefined,
-		mirrored: mirroredNames(doc),
 		more: 0,
 	};
 	if (context === undefined) return { ...base, tools: [] };
@@ -168,7 +157,6 @@ export async function pageTools(
 	const tools: PageTool[] = [];
 	let more = 0;
 	for (const tool of listed) {
-		if (skip.has(tool.name)) continue;
 		if (tools.length >= SEND_TOOLS) {
 			more++;
 			continue;
@@ -226,7 +214,7 @@ export async function callTool(
 	if (context === undefined)
 		return { ok: false, error: "WebMCP is not on in this page.", gone: true };
 	const tool = (await context.getTools()).find((t) => t.name === name);
-	if (tool === undefined || allMirrored(doc).has(name))
+	if (tool === undefined)
 		return {
 			ok: false,
 			error: `The page has no tool ${name} (any more).`,
@@ -238,14 +226,18 @@ export async function callTool(
 			error: `The page changed what tool ${name} does since it was listed.`,
 			gone: true,
 		};
+	let value: string | null;
 	try {
-		return {
-			ok: true,
-			value: await context.executeTool(tool, input ?? {}, { signal }),
-		};
+		value = await context.executeTool(tool, input ?? {}, { signal });
 	} catch (error) {
 		return { ok: false, error: message(error) };
 	}
+	if (typeof value === "string" && value.length > MAX_SEND_RESULT)
+		return {
+			ok: false,
+			error: `It returned ${value.length} characters; tab-mcp for Chrome passes on at most ${MAX_SEND_RESULT}.`,
+		};
+	return { ok: true, value };
 }
 
 async function answer(request: ContentRequest): Promise<ContentResponse> {

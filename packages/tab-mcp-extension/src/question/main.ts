@@ -3,7 +3,7 @@
  * panel of the tab's window could not open. It shows the one question the
  * worker opened it for, with the arguments in full, and sends the answer;
  * the worker closes it once the question is settled, and closing it is
- * Don't allow. Allow and Always allow count once the window has been
+ * Don't allow. Allow and "Don't ask again" count once the window has been
  * visible and focused for 750 ms, as in the side panel.
  */
 

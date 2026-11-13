@@ -322,7 +322,7 @@ async function askFirst(
 
 /** The page in tab `tabId` after a navigation, or why it cannot be read. */
 async function readAfter(
-	chrome: NavigationChrome,
+	chrome: Pick<NavigationChrome, "tab" | "page">,
 	tabId: number,
 	loaded: Loaded,
 ): Promise<NavigationResult> {
@@ -493,6 +493,23 @@ const tabEvents: TabEvents = {
 		}
 	},
 };
+
+/**
+ * Tab `tabId` after its page went away during a page tool's call (WM 2):
+ * wait until it has loaded, then its `page_info` (or why it cannot be read).
+ */
+export async function settledPage(
+	chrome: Pick<NavigationChrome, "tab" | "page">,
+	tabId: number,
+	signal: AbortSignal,
+): Promise<NavigationResult> {
+	const loaded = await waitForLoad(tabEvents, tabId, async () => {}, {
+		signal,
+	});
+	if (loaded === "closed")
+		return { readable: false, reason: "The tab was closed." };
+	return readAfter(chrome, tabId, loaded);
+}
 
 /**
  * Take tab `tabId` a step (none needs a permission: `tabs.update`,

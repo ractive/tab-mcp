@@ -175,9 +175,10 @@ Chrome has WebMCP for sites in its
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
   fails: a page that registers tools natively itself leaves `webmcp` off or uses other
   names.
-- `<html data-tab-mcp-webmcp="…">` lists the mirrored names, so that tab-mcp for Chrome
-  does not offer them a second time to an AI app that is connected to the page and to
-  the extension.
+- `<html data-tab-mcp-webmcp="…">` lists the mirrored names. tab-mcp for Chrome does not
+  read it: it offers mirrored tools like any page tool, since it cannot know whether the
+  AI app is also paired with the page, so an AI app connected to the page and to the
+  extension sees such a tool twice.
 
 ### Your own assistant on the page
 

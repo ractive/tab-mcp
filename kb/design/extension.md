@@ -65,17 +65,25 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   since the library's dialog would draw into no page. Commands reach the worker only
   over the panel's port (threat model A13).
 - A page with the client library and `webmcp: true` (client 0.13.0, DEC-115, DEC-119)
-  registers its tools with WebMCP too and lists their names in
-  `<html data-tab-mcp-webmcp>`. The extension leaves every listed name out: an AI app
-  paired with the page reaches those tools through the page's own address, and would
-  otherwise get each twice.
+  registers its tools with WebMCP too. The extension offers them like any other page
+  tool (DEC-140): it cannot know whether the AI app is paired with the page itself. An AI
+  app connected to both gets such a tool twice. (Until iteration 35 it left out the names
+  listed in `<html data-tab-mcp-webmcp>`, which hid them from an AI app connected only
+  to the extension.)
 - Tools that ask first ask in the side panel when it is open in the focused window of the
   tab the call acts on, else in a Chrome notification; the extension asks, not the
   library (iteration 26). A click on a notification's body opens the whole question in
   the side panel of the tab's window (`sidePanel.open` at once in `onClicked`, which
   Chrome dispatches with a user gesture), else in a popup window of the extension's
   (`question/index.html`, whose port may answer only the question of its window).
-  Always allow is kept per AI app, origin, document and tool (ext/review-fixes).
+  The bridge asks itself for both ways of calling a page tool (`page_<name>` is not
+  `consequentialHint`, DEC-141), so the AI app hears why a call did not run. "Don't ask
+  again on <host>" in a question writes the site's "allowed" entry, as the panel's
+  switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
+  notification has Allow only.
+- The origin a page's tools carry (the description's prefix, the "allowed" key, the
+  question's "Site (verified)") is checked against the origin of the address Chrome
+  reports for the tab; a page that says otherwise gets no tools (iteration 35).
 
 A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
 With the window only, Chrome resolved the call and showed nothing when another
@@ -90,11 +98,13 @@ with a second extension).
   not in front), `alarms` (waking the worker while AI access is on). No `storage`: the
   settings are in IndexedDB, and without the permission content scripts have no
   `chrome.storage` area at all (ext/review-fixes).
-- Host access is optional (`<all_urls>` in `optional_host_permissions`): without it the
-  extension runs on a tab only after a click on its icon, as Overmark does, and only for
-  that origin in that tab (Chrome keeps the grant across navigations on the same origin,
-  not to another subdomain). "Allow on all sites" asks for it; the content script is
-  then registered for every page.
+- Host access is optional (`http://*/*` and `https://*/*` in
+  `optional_host_permissions`, not `<all_urls>`: no `file:` pages, iteration 35): without
+  it the extension runs on a tab only after a click on its icon, as Overmark does, and
+  only for that origin in that tab (Chrome keeps the grant across navigations on the same
+  origin, not to another subdomain). "Allow on all sites" asks for it; the content script
+  is then registered for every http(s) page. `"incognito": "not_allowed"`: no Incognito
+  tabs (DEC-142).
 - No remote code.
 
 ## Tools the AI app gets
@@ -102,8 +112,8 @@ with a second extension).
 | Tool | Kind | What it does |
 |---|---|---|
 | `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
-| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, whether it only reads, and why a tool is left out (iteration 20) |
-| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20) |
+| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, and why a tool is left out (iteration 20) |
+| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
 | `webmcp_call` | as the called tool | Calls a tool of the page in front by its WebMCP name, with the same rules (schema check, confirmation, the page it was listed from); for AI apps that read their tool list once (Claude, Codex), which never see the `page_<name>` tools of a later tab (iteration 20 review, `src/worker/tools.ts`) |
 | `navigate` | navigates; another origin asks | Opens an http(s) address in the tab in front, if the extension may read it; waits for the load (30 s) and answers with the new page's `page_info`, or `readable: false` and why (iteration 27, DEC-121, `src/worker/navigation.ts`) |
 | `go_back`, `go_forward` | navigates; another or unknown origin asks | One step in the tab's history; a target on the page's origin is known from the Navigation API (same-origin entries only), any other one asks |

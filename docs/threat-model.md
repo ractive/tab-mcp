@@ -527,17 +527,20 @@ like any other, `chrome-extension://<id>` (A11).
   as is a tool whose name would become one of the extension's own (`info` as
   `page_info`), so a page cannot stand in for them. Every result is marked untrusted
   (`openWorldHint`); its text, all blocks together, is
-  cut to 100,000 characters, with at most 32 blocks, each image up to 1 MB of base64
-  (about 750 KB of image data).
+  cut to 100,000 characters, with at most 32 blocks and the images of one result up to
+  640 KiB of base64 together, so a result fits the relay's default 1 MiB per response;
+  a result over 2 MiB is refused. The page's title and language are cut.
+- **The site is the one Chrome reports.** The origin shown with a page's tools, and
+  under which they are allowed, is checked against the address Chrome reports for the
+  tab; a page that claims another site gets no tools.
 - **Hints can lie.** A tool the page marks read-only runs without asking; every other
-  tool asks the user each time, naming the page's origin. "Always allow" stops the
-  questions for that tool, AI app and page (that very page load: a reload or another tab
-  with a tool of the same name asks again, and an answer given after the page changed
-  under the question is not kept) until the page changes or the AI app is disconnected; "allowed" in the side panel stops them for a tool of one exact http(s)
-  origin until the user takes it back. An allowed tool runs whatever the AI app, or a
-  prompt injection steering it, asks of it. A page can mark only its own tools
-  read-only, so a lie harms that page's own user session, which its scripts could reach
-  anyway.
+  tool asks the user each time, naming the page's origin. "Don't ask again on <host>" in
+  a question, or "allowed" in the side panel, stops the questions for a tool of one
+  exact http(s) origin, for every paired AI app, until the user takes it back. A tool
+  that changed while the question was open does not run. An allowed tool runs whatever
+  the AI app, or a prompt injection steering it, asks of it. A page can mark only its
+  own tools read-only, so a lie harms that page's own user session, which its scripts
+  could reach anyway.
 - **A call runs only where its tool was listed.** A call carries the id of the page its
   tool was listed from and the read-only claim it was offered with; the extension
   refuses it if the tab navigated since or the claim changed. So a page cannot offer a
@@ -546,14 +549,18 @@ like any other, `chrome-extension://<id>` (A11).
 - **Arguments are checked** against the page's schema before the call, without its
   regular expressions, so a page's catastrophic pattern cannot freeze the connection. A
   call ends for the AI app after 60 s or on its cancellation, even if the page never
-  answers. The page's tool changes are read at most every 250 ms, and the number and size
-  of what a page sends are capped.
+  answers, and a page that does not answer the extension's other questions within 5 s
+  is given up, so a stuck page cannot hold the other tabs. The page's tool changes are
+  read at most every 250 ms, and the number and size of what a page sends are capped.
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
 - **Which pages.** The extension asks for no host access at install. Without it, it
   reads a tab only after a click on its icon there, and only on that origin. With "Allow
   on all sites" it reads every page in front: the AI app then gets the tools of whatever
-  site the user looks at, each call to a tool not marked read-only still asked.
+  site the user looks at, each call to a tool not marked read-only still asked. Only
+  http(s) pages, no `file:` pages and no Incognito tabs. The page's address goes to the
+  AI app (`page_info`, navigation results) with its query and fragment, without a
+  question, so a token in a link (a magic link, an OAuth callback) goes with it.
 - **Navigation.** `navigate`, `go_back`, `go_forward` and `reload` act only on a tab the
   extension may read. A page's text could tell the AI app to open another site: on the
   page's own origin a navigation runs without asking (as a link on the page would), to
@@ -580,8 +587,8 @@ like any other, `chrome-extension://<id>` (A11).
   approve, and the page's scripts cannot reach the panel. Otherwise a Chrome notification
   asks. It names the AI app (its declared name beside its verified host), the tool and,
   on a line of its own, the page's site, and the arguments in short, saying so when they
-  are cut; its buttons are Allow and Always allow (where Always allow is offered, also
-  when the arguments are cut), and a click on the notification's body opens the full
+  are cut; its one button is Allow ("Don't ask again" needs the full question), and a
+  click on the notification's body opens the full
   question with all its arguments in the side panel of the tab's window, or in a small
   window of its own where Chrome does not open the panel; the question waits there, its
   60 s still running. Closing the notification is Don't allow, as is closing that
@@ -589,9 +596,9 @@ like any other, `chrome-extension://<id>` (A11).
   as `\uXXXX`, with the same set as the client library's dialog (controls, format and
   other default-ignorable characters such as variation selectors, private-use and
   unassigned code points, every space but U+0020). In the side panel the page's site
-  and the page's title for the tool are on lines of their own, labelled. Only those two
-  buttons allow from a notification, and
-  a click on one right after the notification appeared does not count, so a click meant
+  and the page's title for the tool are on lines of their own, labelled. Only Allow
+  allows from a notification, and
+  a click on it right after the notification appeared does not count, so a click meant
   for something that was there before cannot allow. Each notification answers only its
   own call. A notification is outside any page, so a page cannot cover or click it;
   another program on the computer could, as it could click the panel. No answer in 60 s
@@ -650,9 +657,11 @@ from them.
   `allow="tools"`; which agents and extensions) is the browser's decision.
 - **Names keep their owner.** A name the page or another script registered natively
   first stays theirs (the mirror only warns), and once a name is mirrored the page's own
-  native registration of it fails. The page lists its mirrored names in
-  `<html data-tab-mcp-webmcp>`, so tab-mcp for Chrome (A13) does not offer them, and ask
-  for them, a second time; a page can only hide its own tools that way.
+  native registration of it fails. tab-mcp for Chrome (A13) offers mirrored tools like
+  any other page tool, since it cannot know whether the AI app is also paired with the
+  page: an AI app connected to both sees such a tool twice, and a consequential one asks
+  in the extension and again in the page. (The page still lists its mirrored names in
+  `<html data-tab-mcp-webmcp>`; the extension no longer reads it.)
 
 ### A15: The site's own assistant calling the page's tools over a port (`serve`)
 
@@ -742,7 +751,7 @@ each default.
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
 - With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
-  "Always allow" or "allowed") does whatever the AI app asks of it, and another program on
+  or "allowed" on its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
 - With `webmcp: true`: any agent in the browser calls the mirrored tools without
   pairing, and one that drives the tab can click Allow in the page's dialog for a

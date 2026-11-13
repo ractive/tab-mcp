@@ -14,9 +14,12 @@ import {
 	type BridgeChrome,
 	bridgedName,
 	type CallTarget,
+	type Confirm,
 	describe as describeTool,
+	type LookedUp,
 	MAX_BLOCKS,
 	MAX_DESCRIPTION,
+	MAX_IMAGES_BASE64,
 	MAX_NAME,
 	MAX_RESULT,
 	MAX_SCHEMA_BYTES,
@@ -84,6 +87,47 @@ describe("names, descriptions, schemas", () => {
 			schema: { type: "object", properties: { q: { type: "string" } } },
 		});
 	});
+
+	test("a parameter named pattern stays: only the keyword goes (ES 2)", () => {
+		const schema = {
+			type: "object",
+			properties: {
+				pattern: { type: "string", pattern: "^(a+)+$" },
+				patternProperties: { type: "object" },
+			},
+			required: ["pattern"],
+			additionalProperties: false,
+			$defs: { pattern: { type: "string", pattern: "x" } },
+			dependentSchemas: { pattern: { required: ["patternProperties"] } },
+			dependencies: { pattern: ["patternProperties"] },
+			// Data, not schemas: kept as they are.
+			default: { pattern: "keep" },
+			examples: [{ pattern: "keep" }],
+			enum: [{ pattern: "keep" }],
+			// A keyword the validator does not know but would reach by a $ref.
+			"x-extra": { type: "string", pattern: "(a|a)*$" },
+			anyOf: [{ properties: { q: { pattern: "y" } } }],
+		};
+		expect(schemaFor({ inputSchema: schema })).toEqual({
+			schema: {
+				type: "object",
+				properties: {
+					pattern: { type: "string" },
+					patternProperties: { type: "object" },
+				},
+				required: ["pattern"],
+				additionalProperties: false,
+				$defs: { pattern: { type: "string" } },
+				dependentSchemas: { pattern: { required: ["patternProperties"] } },
+				dependencies: { pattern: ["patternProperties"] },
+				default: { pattern: "keep" },
+				examples: [{ pattern: "keep" }],
+				enum: [{ pattern: "keep" }],
+				"x-extra": { type: "string" },
+				anyOf: [{ properties: { q: {} } }],
+			},
+		});
+	});
 });
 
 describe("results", () => {
@@ -92,10 +136,6 @@ describe("results", () => {
 		expect((resultOf("x".repeat(MAX_RESULT + 10)) as string).length).toBe(
 			MAX_RESULT,
 		);
-	});
-
-	test("a navigation is a note", () => {
-		expect(resultOf(null)).toContain("navigation");
 	});
 
 	test("the JSON of an MCP result passes as its text and image blocks", () => {
@@ -125,6 +165,30 @@ describe("results", () => {
 		const result = resultOf(many) as { content: { text: string }[] };
 		const total = result.content.reduce((n, b) => n + b.text.length, 0);
 		expect(total).toBeLessThanOrEqual(MAX_RESULT);
+	});
+
+	test("images share one budget that fits the relay's 1 MiB; one beyond it is a note (ES 6)", () => {
+		const half = "A".repeat(MAX_IMAGES_BASE64 / 2);
+		const result = resultOf(
+			JSON.stringify({
+				content: [
+					{ type: "image", data: half, mimeType: "image/png" },
+					{ type: "image", data: half, mimeType: "image/png" },
+					{ type: "image", data: "AAAA", mimeType: "image/png" },
+					{ type: "text", text: "after" },
+				],
+			}),
+		) as { content: { type: string; text?: string }[] };
+		expect(result.content.map((b) => b.type)).toEqual([
+			"image",
+			"image",
+			"text",
+			"text",
+		]);
+		expect(result.content[2]?.text).toContain("left out");
+		expect(result.content[3]?.text).toBe("after");
+		// The most a result can carry: under 1 MiB as JSON (text as 3-byte UTF-8).
+		expect(MAX_IMAGES_BASE64 + MAX_RESULT * 3).toBeLessThan(1024 * 1024);
 	});
 
 	test("too many blocks, bad images, other JSON stay (cut) text", () => {
@@ -178,7 +242,6 @@ function page(tools: PageTool[], extra: Partial<PageTools> = {}): PageTools {
 		more: 0,
 		available: true,
 		tools,
-		mirrored: [],
 		...extra,
 	};
 }
@@ -187,14 +250,17 @@ function page(tools: PageTool[], extra: Partial<PageTools> = {}): PageTools {
 function fakeChrome(initial: PageTools) {
 	const state = {
 		tabId: 1,
+		/** The tab's address as Chrome reports it. */
+		url: "https://shop.example/",
 		page: initial as PageTools | Error,
 		calls: [] as { tabId: number; target: CallTarget; input: unknown }[],
 		answer: (async () => ({ ok: true, value: "done" })) as (
 			signal: AbortSignal,
 		) => Promise<CallResult>,
+		settled: [] as number[],
 	};
 	const chrome: BridgeChrome = {
-		current: async () => ({ id: state.tabId, url: "", title: "" }),
+		current: async () => ({ id: state.tabId, url: state.url, title: "" }),
 		list: async () => {
 			if (state.page instanceof Error) throw state.page;
 			return state.page;
@@ -203,8 +269,25 @@ function fakeChrome(initial: PageTools) {
 			state.calls.push({ tabId, target, input });
 			return state.answer(signal);
 		},
+		settled: async (tabId) => {
+			state.settled.push(tabId);
+			return { url: "https://shop.example/thanks", title: "Thanks" };
+		},
 	};
 	return { state, chrome };
+}
+
+/** A confirmation that answers `allow` and records what it was asked. */
+function confirmer(allow: boolean | string = true) {
+	const asked: { request: ConfirmRequest; tool: LookedUp }[] = [];
+	const confirm: Confirm = async (request, tool) => {
+		asked.push({ request, tool });
+		if (allow === true) return;
+		throw new Error(
+			typeof allow === "string" ? allow : "The user did not allow this call.",
+		);
+	};
+	return { asked, confirm };
 }
 
 const client = {
@@ -231,13 +314,14 @@ describe("PageToolBridge", () => {
 		expect([...reg.tools.keys()].sort()).toEqual(["page_buy", "page_search"]);
 		expect(reg.tools.get("page_search")?.annotations).toEqual({
 			readOnlyHint: true,
-			consequentialHint: false,
+			destructiveHint: false,
 			untrustedContentHint: true,
 		});
-		// Not read-only: asks every time; untrusted whatever the page said.
+		// Not read-only: asks every time (the bridge itself, not the library);
+		// untrusted whatever the page said.
 		expect(reg.tools.get("page_buy")?.annotations).toEqual({
 			readOnlyHint: false,
-			consequentialHint: true,
+			destructiveHint: true,
 			untrustedContentHint: true,
 		});
 		expect(reg.tools.get("page_search")?.description).toBe(
@@ -247,6 +331,68 @@ describe("PageToolBridge", () => {
 		expect(bridge.state.tools[0]?.description).toStartWith(
 			"From https://shop.example: ",
 		);
+	});
+
+	test("webmcp_tools gives each offered tool's input schema, as offered (EQ 1)", async () => {
+		const reg = registrar();
+		const schema = {
+			type: "object",
+			properties: { q: { type: "string", pattern: "^x" } },
+			required: ["q"],
+		};
+		const { chrome } = fakeChrome(
+			page([
+				pageTool("search", { inputSchema: schema }),
+				pageTool("odd", { inputSchema: { type: "array" } }),
+			]),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		const listed = createTools(
+			{
+				current: async () => ({ id: 1, url: "", title: "" }),
+				page: async () => ({}) as never,
+			},
+			() => bridge,
+		).find((t) => t.name === "webmcp_tools");
+		const state = (await listed?.execute({}, options())) as typeof bridge.state;
+		const offered = {
+			type: "object",
+			properties: { q: { type: "string" } },
+			required: ["q"],
+		};
+		expect(state.tools.find((t) => t.name === "search")?.inputSchema).toEqual(
+			offered,
+		);
+		// The same schema the page_<name> tool has.
+		expect(reg.tools.get("page_search")?.inputSchema).toEqual(offered);
+		// One that is not offered has none.
+		expect(state.tools.find((t) => t.name === "odd")).not.toHaveProperty(
+			"inputSchema",
+		);
+		expect(state.tabId).toBe(1);
+	});
+
+	test("a page that says it is another site than Chrome reports gets no tools (ES 4)", async () => {
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(
+			page([pageTool("buy", { annotations: {} })], {
+				origin: "https://bank.example",
+				url: "https://bank.example/",
+			}),
+		);
+		const { asked, confirm } = confirmer();
+		const bridge = new PageToolBridge(reg, chrome, { confirm });
+		await bridge.refresh();
+		expect(reg.tools.size).toBe(0);
+		expect(bridge.state.error).toContain("changed while its tools were read");
+		await expect(bridge.callByName("buy", {}, options())).rejects.toThrow(
+			"offers no tool",
+		);
+		expect(asked).toEqual([]);
+		// The same page on its own address: offered.
+		state.url = "https://bank.example/account";
+		await bridge.refresh();
+		expect([...reg.tools.keys()]).toEqual(["page_buy"]);
 	});
 
 	test("follows the page: tools come, go, change, and a new page replaces all", async () => {
@@ -289,13 +435,13 @@ describe("PageToolBridge", () => {
 					pageTool("refused"),
 					...many,
 				],
-				{ more: 10, mirrored: ["m".repeat(5000)] },
+				{ more: 10 },
 			),
 		);
 		const bridge = new PageToolBridge(reg, chrome);
 		await bridge.refresh();
 		await Bun.sleep(0);
-		const { tools, more, mirrored } = bridge.state;
+		const { tools, more } = bridge.state;
 		expect(tools.length).toBe(MAX_TOOLS);
 		expect(more).toBe(10 + 3 + MAX_TOOLS + 2 - MAX_TOOLS);
 		expect(tools[0]?.name.length).toBe(MAX_NAME);
@@ -304,7 +450,10 @@ describe("PageToolBridge", () => {
 		expect(tools.find((t) => t.name === "refused")?.problem).toContain(
 			"refused",
 		);
-		expect(mirrored[0]?.length).toBe(MAX_NAME);
+		// A tool the library refused carries no schema in the list either.
+		expect(tools.find((t) => t.name === "refused")).not.toHaveProperty(
+			"inputSchema",
+		);
 		expect(reg.tools.size).toBeLessThanOrEqual(MAX_TOOLS);
 	});
 
@@ -331,16 +480,17 @@ describe("PageToolBridge", () => {
 		const { state, chrome } = fakeChrome(
 			page([pageTool("info", { annotations: {} }), pageTool("search")]),
 		);
-		const bridge = new PageToolBridge(reg, chrome);
+		const bridge = new PageToolBridge(reg, chrome, {
+			confirm: confirmer().confirm,
+		});
 		await bridge.refresh();
 		expect([...reg.tools.keys()]).toEqual(["page_search"]);
 		const info = bridge.state.tools.find((t) => t.name === "info");
 		expect(info?.tool).toBeUndefined();
 		expect(info?.problem).toContain("page_info");
-		expect(bridge.lookup("page_info")).toBeUndefined();
-		await expect(
-			bridge.callByName("info", {}, options(), async () => true),
-		).rejects.toThrow("not offered");
+		await expect(bridge.callByName("info", {}, options())).rejects.toThrow(
+			"not offered",
+		);
 		expect(state.calls).toEqual([]);
 	});
 
@@ -357,37 +507,98 @@ describe("PageToolBridge", () => {
 		const bridge = new PageToolBridge(reg, chrome);
 		await bridge.refresh();
 		await Bun.sleep(0);
-		expect(bridge.lookup("page_refused")).toBeUndefined();
 		// Read again (webmcp_call refreshes first): not offered again.
 		await bridge.refresh();
 		expect(refusals).toBe(1);
 		expect(
 			bridge.state.tools.find((t) => t.name === "refused")?.problem,
 		).toContain("refused");
-		await expect(
-			bridge.callByName("refused", {}, options(), async () => true),
-		).rejects.toThrow("refused");
+		await expect(bridge.callByName("refused", {}, options())).rejects.toThrow(
+			"refused",
+		);
 		expect(state.calls).toEqual([]);
-		expect(
-			await bridge.callByName("search", {}, options(), async () => true),
-		).toBe("done");
+		expect(await bridge.callByName("search", {}, options())).toBe("done");
 	});
 
-	test("lookup names the page a tool was listed from", async () => {
+	test("a question names the page tool and the page it was listed from", async () => {
 		const reg = registrar();
-		const { state, chrome } = fakeChrome(page([pageTool("buy")]));
-		const bridge = new PageToolBridge(reg, chrome);
+		const { state, chrome } = fakeChrome(
+			page([pageTool("buy", { annotations: {} })]),
+		);
+		const { asked, confirm } = confirmer();
+		const bridge = new PageToolBridge(reg, chrome, { confirm });
 		await bridge.refresh();
-		expect(bridge.lookup("page_buy")).toEqual({
+		await reg.tools.get("page_buy")?.execute({}, options());
+		expect(asked[0]?.tool).toEqual({
 			tabId: 1,
 			origin: "https://shop.example",
 			documentId: "doc-1",
 			name: "buy",
-			readOnly: true,
+			readOnly: false,
 		});
-		state.page = page([pageTool("buy")], { documentId: "doc-2" });
+		state.page = page([pageTool("buy", { annotations: {} })], {
+			documentId: "doc-2",
+		});
 		await bridge.refresh();
-		expect(bridge.lookup("page_buy")?.documentId).toBe("doc-2");
+		await reg.tools.get("page_buy")?.execute({}, options());
+		expect(asked[1]?.tool.documentId).toBe("doc-2");
+	});
+
+	test("page_<name> asks in the bridge; why a call did not run reaches the AI app (EQ 4)", async () => {
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(
+			page([pageTool("buy", { annotations: {} })]),
+		);
+		const answer = {
+			allow: "The user was asked and did not answer within 60 s." as
+				| boolean
+				| string,
+		};
+		const bridge = new PageToolBridge(reg, chrome, {
+			confirm: async () => {
+				if (answer.allow !== true) throw new Error(String(answer.allow));
+			},
+		});
+		await bridge.refresh();
+		const tool = reg.tools.get("page_buy");
+		// Not the library's "The user declined": the bridge's own reason.
+		await expect(Promise.resolve(tool?.execute({}, options()))).rejects.toThrow(
+			"did not answer within 60 s",
+		);
+		answer.allow =
+			"5 calls of this AI app already wait for the user's answer; this one was not asked.";
+		await expect(Promise.resolve(tool?.execute({}, options()))).rejects.toThrow(
+			"was not asked",
+		);
+		expect(state.calls).toEqual([]);
+		answer.allow = true;
+		expect(await tool?.execute({}, options())).toBe("done");
+	});
+
+	test("a page that changed while the user was asked: the tool does not run", async () => {
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(
+			page([pageTool("buy", { annotations: {} })]),
+		);
+		let bridge: PageToolBridge | undefined;
+		let documents = 1;
+		const confirm: Confirm = async () => {
+			// While the question is open, the tab navigates.
+			state.page = page([pageTool("buy", { annotations: {} })], {
+				documentId: `doc-${++documents}`,
+			});
+			await bridge?.refresh();
+		};
+		bridge = new PageToolBridge(reg, chrome, { confirm });
+		await bridge.refresh();
+		const tool = reg.tools.get("page_buy");
+		await expect(Promise.resolve(tool?.execute({}, options()))).rejects.toThrow(
+			"changed while the user was asked",
+		);
+		await expect(bridge.callByName("buy", {}, options())).rejects.toThrow(
+			"changed while the user was asked",
+		);
+		expect(state.calls).toEqual([]);
 	});
 
 	test("a call goes to the page the tool was listed from, with its claim", async () => {
@@ -415,7 +626,7 @@ describe("PageToolBridge", () => {
 	test("a tool that is gone, a failing tool, and one that does not answer", async () => {
 		const reg = registrar();
 		const { state, chrome } = fakeChrome(page([pageTool("search")]));
-		const bridge = new PageToolBridge(reg, chrome, () => {}, 50);
+		const bridge = new PageToolBridge(reg, chrome, { timeoutMs: 50 });
 		await bridge.refresh();
 		const tool = reg.tools.get("page_search");
 		state.answer = async () => ({
@@ -435,6 +646,44 @@ describe("PageToolBridge", () => {
 		await expect(Promise.resolve(tool?.execute({}, options()))).rejects.toThrow(
 			"did not answer within",
 		);
+	});
+
+	test("a tool that navigates the tab is not a failure: the new page's page_info, its tools offered (WM 2)", async () => {
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(page([pageTool("checkout")]));
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		state.answer = async () => {
+			// The tool took the tab to the next page.
+			state.page = page([pageTool("track_order")], {
+				documentId: "doc-2",
+				url: "https://shop.example/thanks",
+			});
+			return {
+				ok: false,
+				error: "The page went away while the tool ran.",
+				navigated: true,
+			};
+		};
+		const result = (await reg.tools
+			.get("page_checkout")
+			?.execute({}, options())) as Record<string, unknown>;
+		expect(result["navigated"]).toBe(true);
+		expect(result["note"]).toContain("may have completed");
+		expect(result["page"]).toEqual({
+			url: "https://shop.example/thanks",
+			title: "Thanks",
+		});
+		expect(state.settled).toEqual([1]);
+		// Offered before the answer.
+		expect([...reg.tools.keys()]).toEqual(["page_track_order"]);
+		// Chrome's own word for it (executeTool resolved with null): the same.
+		state.answer = async () => ({ ok: true, value: null });
+		const tracked = (await reg.tools
+			.get("page_track_order")
+			?.execute({}, options())) as Record<string, unknown>;
+		expect(tracked["navigated"]).toBe(true);
+		expect(state.settled).toEqual([1, 1]);
 	});
 
 	test("cancelling the AI app's call cancels the page's, and ends it", async () => {
@@ -499,20 +748,35 @@ describe("PageToolBridge", () => {
 		// A caller that asked meanwhile sees the state of the later read.
 		expect(bridge.state.tools.map((t) => t.name)).toEqual(["new"]);
 	});
+
+	test("webmcp_call waiting for a page that does not answer ends with the AI app's cancel (ES 1)", async () => {
+		const reg = registrar();
+		const { chrome } = fakeChrome(page([pageTool("search")]));
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		// The page's main thread is blocked: the list never comes.
+		chrome.list = () => new Promise(() => {});
+		const controller = new AbortController();
+		const call = bridge.callByName("search", {}, options(controller.signal));
+		controller.abort();
+		await expect(call).rejects.toThrow("cancelled");
+	});
 });
 
 describe("webmcp_call (by name)", () => {
 	const setup = async (tools: PageTool[]) => {
 		const reg = registrar();
 		const fake = fakeChrome(page(tools));
-		const bridge = new PageToolBridge(reg, fake.chrome);
-		await bridge.refresh();
 		const asked: ConfirmRequest[] = [];
-		const confirm = (answer: boolean) => async (request: ConfirmRequest) => {
-			asked.push(request);
-			return answer;
-		};
-		return { bridge, ...fake, asked, confirm };
+		const answer = { allow: false };
+		const bridge = new PageToolBridge(reg, fake.chrome, {
+			confirm: async (request) => {
+				asked.push(request);
+				if (!answer.allow) throw new Error("The user did not allow this call.");
+			},
+		});
+		await bridge.refresh();
+		return { bridge, ...fake, asked, answer };
 	};
 
 	const searchSchema = {
@@ -522,61 +786,57 @@ describe("webmcp_call (by name)", () => {
 	};
 
 	test("a read-only tool runs without asking", async () => {
-		const { bridge, state, asked, confirm } = await setup([
+		const { bridge, state, asked } = await setup([
 			pageTool("search", { inputSchema: searchSchema }),
 		]);
-		expect(
-			await bridge.callByName(
-				"search",
-				{ q: "tea" },
-				options(),
-				confirm(false),
-			),
-		).toBe("done");
+		expect(await bridge.callByName("search", { q: "tea" }, options())).toBe(
+			"done",
+		);
 		expect(asked).toEqual([]);
 		expect(state.calls[0]?.target.documentId).toBe("doc-1");
 	});
 
 	test("arguments are checked against the page's schema", async () => {
-		const { bridge, state, confirm } = await setup([
+		const { bridge, state, answer } = await setup([
 			pageTool("search", { inputSchema: searchSchema }),
 		]);
+		answer.allow = true;
 		await expect(
-			bridge.callByName("search", { q: 42 }, options(), confirm(true)),
+			bridge.callByName("search", { q: 42 }, options()),
 		).rejects.toThrow("do not match");
 		expect(state.calls).toEqual([]);
 	});
 
 	test("a tool not marked read-only asks first, and runs only if allowed", async () => {
-		const { bridge, state, asked, confirm } = await setup([
+		const { bridge, state, asked, answer } = await setup([
 			pageTool("buy", { annotations: {} }),
 		]);
-		await expect(
-			bridge.callByName("buy", {}, options(), confirm(false)),
-		).rejects.toThrow("did not allow");
+		await expect(bridge.callByName("buy", {}, options())).rejects.toThrow(
+			"did not allow",
+		);
 		expect(state.calls).toEqual([]);
 		expect(asked[0]?.tool.name).toBe("page_buy");
 		expect(asked[0]?.tool.description).toStartWith(
 			"From https://shop.example: ",
 		);
-		expect(await bridge.callByName("buy", {}, options(), confirm(true))).toBe(
-			"done",
-		);
+		answer.allow = true;
+		expect(await bridge.callByName("buy", {}, options())).toBe("done");
 		expect(state.calls[0]?.target.readOnly).toBe(false);
 	});
 
-	test("it asks under the tool's own name (one Always allow for both paths)", async () => {
-		const { bridge, asked, confirm } = await setup([
+	test("it asks under the tool's own name, as page_<name> does", async () => {
+		const { bridge, asked, answer } = await setup([
 			pageTool("place.order", { annotations: {} }),
 		]);
-		await bridge.callByName("place.order", {}, options(), confirm(true));
+		answer.allow = true;
+		await bridge.callByName("place.order", {}, options());
 		expect(asked[0]?.tool.name).toBe("page_place_order");
 	});
 
 	test("a name the page does not offer says so", async () => {
-		const { bridge, confirm } = await setup([pageTool("search")]);
-		await expect(
-			bridge.callByName("nope", {}, options(), confirm(true)),
-		).rejects.toThrow("offers no tool nope");
+		const { bridge } = await setup([pageTool("search")]);
+		await expect(bridge.callByName("nope", {}, options())).rejects.toThrow(
+			"offers no tool nope",
+		);
 	});
 });

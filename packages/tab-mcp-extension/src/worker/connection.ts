@@ -44,11 +44,10 @@ import {
 	setAllowed,
 	setAllowedMany,
 } from "./allowed.ts";
-import { AlwaysAllowed } from "./always.ts";
-import { PageToolBridge } from "./bridge.ts";
+import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import { type Kv, openKv } from "./kv.ts";
-import { goInTab, navigationTools } from "./navigation.ts";
+import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { QuestionWindows } from "./question-windows.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
@@ -115,10 +114,33 @@ async function clearNotifications(): Promise<void> {
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
+/** What the panel's status is made from. */
+export interface StatusInput {
+	state: TabMcp["state"];
+	reconnecting: boolean;
+	grants: number;
+	/** The user left AI access on. */
+	aiOn: boolean;
+	/** The address was taken over: nothing connects by itself. */
+	replaced: boolean;
+}
+
+/**
+ * The status the panel shows. Down while the user left AI access on (and the
+ * address was not taken over) is "retrying", not "off": the alarm connects
+ * again every minute, also after a first connect that failed, which the
+ * library does not retry itself (EQ 3).
+ */
+export function panelStatus(s: StatusInput): PanelState["status"] {
+	if (s.state === "connected") return s.grants > 0 ? "on" : "waiting";
+	if (s.state === "connecting") return "connecting";
+	if (s.reconnecting || (s.aiOn && !s.replaced)) return "retrying";
+	return "off";
+}
+
 export class Connection {
 	readonly #storage: CachedSecretStorage;
 	readonly #icons: Icon[];
-	readonly #always = new AlwaysAllowed();
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
 	/** The windows opened for one question each. */
@@ -140,6 +162,8 @@ export class Connection {
 	#tab: TabView | undefined;
 	#tabRead = 0;
 	#sending = false;
+	/** AI access is on, as last saved. */
+	#aiOn: boolean;
 
 	private constructor(
 		storage: CachedSecretStorage,
@@ -148,8 +172,10 @@ export class Connection {
 		relay: string,
 		replaced: Replaced | undefined,
 		kv: Kv,
+		aiOn: boolean,
 	) {
 		this.#kv = kv;
+		this.#aiOn = aiOn;
 		this.#storage = storage;
 		this.#icons = icons;
 		this.#allowed = allowed;
@@ -203,8 +229,13 @@ export class Connection {
 			relay,
 			replaced,
 			kv,
+			on,
 		);
 		connection.#showBadge();
+		// The alarm too, not only once connected: after an update (which
+		// clears alarms) with the relay out of reach, the first connect fails
+		// and the library does not retry it; the alarm does (EQ 14).
+		if (on) await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 		if (on && replaced === undefined) connection.#connect();
 		return connection;
 	}
@@ -223,21 +254,31 @@ export class Connection {
 			},
 			appName: "tab-mcp for Chrome",
 			storage: this.#storage,
-			onConfirm: (request) => this.#decide(request),
+			// No tool of the extension is consequential: the page tools ask in
+			// the bridge, the navigation tools themselves (DEC-141).
+			onConfirm: () => false,
 		});
 		const bridge = new PageToolBridge(
 			mcp,
-			{ current: tabInFront, list: askTools, call: callInTab },
-			() => void this.#readTab(),
+			{
+				current: tabInFront,
+				list: askTools,
+				call: callInTab,
+				settled: (tabId, signal) =>
+					settledPage({ tab: getTab, page: askPage }, tabId, signal),
+			},
+			{
+				changed: () => void this.#readTab(),
+				confirm: (request, tool) => this.#decide(request, tool),
+			},
 		);
 		for (const tool of createTools(
 			{ current: tabInFront, page: askPage },
 			() => bridge,
-			(request) => this.#decide(request),
 		))
 			void mcp.registerTool(tool);
 		// Navigation (iteration 27, DEC-121): to another origin it asks
-		// through the same questions, never "allowed" or Always allow.
+		// through the same questions, never "allowed".
 		for (const tool of navigationTools(
 			{
 				current: tabInFront,
@@ -255,20 +296,37 @@ export class Connection {
 	}
 
 	/**
-	 * A tool that is not read-only: one the user allowed for its site runs,
-	 * as does one they chose Always allow for (this AI app, this page, this
-	 * tool); anything else asks.
+	 * A page tool that is not read-only: one the user allowed for its site
+	 * runs; anything else asks. "Don't ask again on <host>" in the question
+	 * allows it for its site.
 	 */
-	async #decide(request: ConfirmRequest): Promise<boolean> {
+	#decide(request: ConfirmRequest, tool: LookedUp): Promise<void> {
 		return decide(
 			{
-				lookup: (name) => this.#bridge.lookup(name),
 				allowed: (origin, name) => isAllowed(this.#allowed, origin, name),
-				always: this.#always,
 				ask: (r, where) => this.#questions.ask(r, where),
+				allow: (origin, name) =>
+					this.#queue(async () => {
+						this.#allowed = await setAllowed(this.#kv, origin, name, true);
+						void this.#readTab();
+					}),
 			},
 			request,
+			tool,
 		);
+	}
+
+	/**
+	 * Run `task` after the panel commands before it, as one of them: two
+	 * writes of the allowed tools must not overlap.
+	 */
+	#queue(task: () => Promise<void>): Promise<void> {
+		const done = this.#commands.then(task);
+		this.#commands = done.catch((error: unknown) => {
+			this.#problem = message(error);
+			this.#changed();
+		});
+		return done;
 	}
 
 	#watch(mcp: TabMcp): void {
@@ -276,21 +334,13 @@ export class Connection {
 		this.#listening = new AbortController();
 		const { signal } = this.#listening;
 		const changed = () => this.#changed();
-		for (const type of ["statechange", "reconnecting", "pairingcode"] as const)
-			mcp.addEventListener(type, changed, { signal });
-		mcp.addEventListener(
+		for (const type of [
+			"statechange",
+			"reconnecting",
+			"pairingcode",
 			"grantschange",
-			() => {
-				this.#always.keepGrants(mcp.grants.map((g) => g.grantId));
-				this.#changed();
-			},
-			{ signal },
-		);
-		mcp.addEventListener(
-			"toolschange",
-			() => this.#always.keepTools(mcp.tools),
-			{ signal },
-		);
+		] as const)
+			mcp.addEventListener(type, changed, { signal });
 		mcp.addEventListener(
 			"connected",
 			() => {
@@ -350,6 +400,7 @@ export class Connection {
 	}
 
 	async #setAiOn(on: boolean): Promise<void> {
+		this.#aiOn = on;
 		await saveAiOn(this.#kv, on);
 		if (on) await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 		else await chrome.alarms.clear(ALARM);
@@ -482,12 +533,8 @@ export class Connection {
 			// "allowed" writes overlap.
 			const command = parseCommand(raw);
 			if (command === undefined) return;
-			this.#commands = this.#commands
-				.then(() => this.#command(panel, command))
-				.catch((error: unknown) => {
-					this.#problem = message(error);
-					this.#changed();
-				});
+			// A failure is shown as the problem (`#queue`).
+			this.#queue(() => this.#command(panel, command)).catch(() => {});
 		};
 		for (const raw of early) receive(raw);
 		port.onMessage.addListener(receive);
@@ -672,7 +719,6 @@ export class Connection {
 				host: "",
 				access: "",
 				tools: [],
-				mirrored: 0,
 				canAllow: false,
 			};
 			this.#changed();
@@ -680,21 +726,30 @@ export class Connection {
 		}
 		let view: TabView;
 		let host = "";
+		let tabOrigin: string | undefined;
 		try {
-			host = tab.url ? new URL(tab.url).host || tab.url : "";
+			const url = new URL(tab.url);
+			host = url.host || tab.url;
+			tabOrigin = url.origin;
 		} catch {
 			host = tab.url;
 		}
 		try {
 			const page = await askPage(tab);
 			const state = this.#bridge.state;
-			const current = state.url === tab.url;
+			// The bridge's last read is of this tab and its site. Not the
+			// address: a pushState or #part changes it without a new read
+			// (EQ 12), and the tools stay the page's.
+			const current =
+				state.tabId === tab.id &&
+				state.origin !== undefined &&
+				state.origin === tabOrigin;
 			const origin = state.origin;
 			view = {
 				title: page.title || tab.title || host || "(no title)",
 				host,
-				// The tools the bridge lists for this page, without the page's
-				// tab-mcp mirrors; the page's own count until it has read them.
+				// The tools the bridge lists for this page; the page's own count
+				// until it has read them.
 				webmcp: {
 					available: page.webmcp.available,
 					tools: current ? state.tools.length : page.webmcp.tools,
@@ -713,7 +768,6 @@ export class Connection {
 								isAllowed(this.#allowed, origin, t.name),
 						}))
 					: [],
-				mirrored: current ? state.mirrored.length : 0,
 			};
 		} catch (error) {
 			view = {
@@ -721,7 +775,6 @@ export class Connection {
 				host,
 				access: message(error),
 				tools: [],
-				mirrored: 0,
 				canAllow: false,
 			};
 		}
@@ -735,16 +788,7 @@ export class Connection {
 
 	get state(): PanelState {
 		const mcp = this.#mcp;
-		const connected = mcp.state === "connected";
-		const status: PanelState["status"] = connected
-			? mcp.grants.length
-				? "on"
-				: "waiting"
-			: mcp.state === "connecting"
-				? "connecting"
-				: mcp.reconnecting
-					? "retrying"
-					: "off";
+		const status = this.#status();
 		const address = mcp.address;
 		const code = mcp.pairingCode?.code;
 		const problem = this.#problem;
@@ -767,6 +811,16 @@ export class Connection {
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 		};
+	}
+
+	#status(): PanelState["status"] {
+		return panelStatus({
+			state: this.#mcp.state,
+			reconnecting: this.#mcp.reconnecting !== undefined,
+			grants: this.#mcp.grants.length,
+			aiOn: this.#aiOn,
+			replaced: this.#replaced !== undefined,
+		});
 	}
 
 	/** Tell the panels (once per turn of the event loop) and set the badge. */
@@ -805,7 +859,7 @@ export class Connection {
 	 */
 	#showBadge(): void {
 		const questions = this.#questions.list.length;
-		const state = this.#mcp.state;
+		const status = this.#status();
 		const [text, color, title] =
 			questions > 0
 				? [
@@ -813,9 +867,9 @@ export class Connection {
 						"#b45309",
 						`tab-mcp for Chrome: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the side panel to answer.`,
 					]
-				: state === "connected"
+				: status === "on" || status === "waiting"
 					? ["on", "#15803d", "tab-mcp for Chrome: AI access is on"]
-					: state === "connecting" || this.#mcp.reconnecting
+					: status === "connecting" || status === "retrying"
 						? ["…", "#6b7280", "tab-mcp for Chrome: connecting"]
 						: ["", "#6b7280", "tab-mcp for Chrome"];
 		void chrome.action.setBadgeText({ text }).catch(() => {});

@@ -230,9 +230,10 @@ const args = new Map<string, string>();
 
 /**
  * Until when the panel's buttons that allow something stay off after its
- * layout moved: a question that went away moves what was below it up, under
- * the pointer, and a click meant for it must not land on an Allow or an
- * "asks first" that came there.
+ * layout moved: a question that went away moves what was below it up, and
+ * one that came moves it down, under the pointer; a click meant for what was
+ * there must not land on an Allow, "Allow all" or an "asks first" that came
+ * there instead (ES 5).
  */
 let movedUntil = 0;
 /** "Allow all" as last shown: its visibility, label and tools. */
@@ -261,7 +262,10 @@ function showQuestions(questions: QuestionSummary[]): void {
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
-			cards.set(q.id, { card, shownAt: Date.now() });
+			const now = Date.now();
+			cards.set(q.id, { card, shownAt: now });
+			// Everything below the questions moved down by the card's height.
+			movedUntil = now + ALLOW_DELAY_MS;
 		}
 	arm();
 }
@@ -386,12 +390,7 @@ function showTab(s: PanelState): void {
 							: badge("No WebMCP"),
 				]),
 	);
-	const mirrored = tab?.mirrored ?? 0;
-	$("tab-access").textContent =
-		tab?.access ||
-		(mirrored
-			? `${mirrored} more ${mirrored === 1 ? "comes" : "come"} from the page's own tab-mcp connection.`
-			: "");
+	$("tab-access").textContent = tab?.access ?? "";
 	const allowAll = allowAllView(tab);
 	// The page changed what "Allow all" does (another label, other tools, or
 	// it just came): it and the switches below wait, as when a question went,
@@ -427,11 +426,7 @@ function showTab(s: PanelState): void {
 function show(s: PanelState): void {
 	const relayChanged = state?.relay !== s.relay;
 	state = s;
-	if (relayChanged) {
-		($("relay") as HTMLInputElement).value = s.relay;
-		// For the end-to-end tests: the relay the connection uses now.
-		document.documentElement.dataset["relay"] = s.relay;
-	}
+	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
 	showQuestions(s.questions);
 	showTab(s);

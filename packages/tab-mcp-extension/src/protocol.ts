@@ -29,8 +29,11 @@ export const PANEL_PATH = "/sidepanel/index.html";
 export const QUESTION_PORT = "question";
 export const QUESTION_PATH = "/question/index.html";
 
-/** A question's answer: Always allow holds for the tool and AI app on this page. */
-export type Answer = "allow" | "always" | "deny";
+/**
+ * A question's answer: `site` is "Don't ask again on <host>", which allows
+ * the tool on its site (the panel's "allowed"), for every AI app.
+ */
+export type Answer = "allow" | "site" | "deny";
 
 /** From the side panel. */
 export type PanelCommand =
@@ -85,8 +88,8 @@ export interface QuestionView {
 	navigation?: { to: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
-	/** "Always allow" is offered (a page of an http(s) site). */
-	always: boolean;
+	/** "Don't ask again on <host>" is offered (a page tool of an http(s) site). */
+	site: boolean;
 }
 
 /** A page tool as the panel lists it. */
@@ -114,8 +117,6 @@ export interface TabView {
 	 * "null", would share one entry with every other).
 	 */
 	canAllow: boolean;
-	/** Tools the page's own tab-mcp connection offers, left out. */
-	mirrored: number;
 }
 
 /** Everything the panel shows. */
@@ -220,7 +221,7 @@ export function parseQuestionAnswer(message: unknown): Answer | undefined {
 	const m = message as Record<string, unknown>;
 	return m["type"] === "answer" &&
 		(m["answer"] === "allow" ||
-			m["answer"] === "always" ||
+			m["answer"] === "site" ||
 			m["answer"] === "deny")
 		? m["answer"]
 		: undefined;
@@ -306,7 +307,7 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "answer":
 			return isString(m["id"]) &&
 				(m["answer"] === "allow" ||
-					m["answer"] === "always" ||
+					m["answer"] === "site" ||
 					m["answer"] === "deny")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
 				: undefined;

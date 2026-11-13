@@ -67,7 +67,10 @@ const HINTS = [
 	"debugging",
 ] as const;
 
-/** `<html data-tab-mcp-webmcp="…">`: the names mirrored, for tab-mcp for Chrome. */
+/**
+ * `<html data-tab-mcp-webmcp="…">`: the names mirrored. tab-mcp for Chrome no
+ * longer reads it (DEC-140); pages may (whether mirroring is on).
+ */
 const ATTRIBUTE = "data-tab-mcp-webmcp";
 
 /** The mirrors registered (or being registered) by every `TabMcp` of the page. */
@@ -155,8 +158,7 @@ export function mirror(
 			listed.add(entry);
 			register(tool, entry, true);
 		}
-		// Listed before the browser has them, unlisted after it dropped them:
-		// the extension never sees a mirrored tool as the page's own.
+		// Listed before the browser has them, unlisted after it dropped them.
 		writeAttribute();
 	};
 	registry.onChange(sync);

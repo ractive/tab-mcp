@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Checkout</title>
+</head>
+<body>
+<p>A tool that takes the tab to the next page, as a shop's checkout does.</p>
+<script>
+	"use strict";
+	document.modelContext?.registerTool({
+		name: "checkout",
+		description: "Goes on to the next page and does not answer: the page unloads.",
+		inputSchema: { type: "object" },
+		annotations: { readOnlyHint: true },
+		execute() {
+			location.assign("/plain.html");
+			return new Promise(() => {});
+		},
+	});
+</script>
+</body>
+</html>

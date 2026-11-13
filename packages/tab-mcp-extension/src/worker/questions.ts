@@ -2,7 +2,8 @@
  * The questions of tools that ask first, now that the connection has no page
  * of its own to ask in (DEC-116). A question shows in every open side panel;
  * unless a side panel is open in the focused window of the tab the call acts
- * on, it also goes out as a Chrome notification, with Allow and Always allow.
+ * on, it also goes out as a Chrome notification, with Allow (allowing the
+ * tool on its site needs the whole question, in the panel or its window).
  * A click on its body shows the whole question (the arguments in full) in
  * the side panel of the tab's window, or in a window of its own, where it
  * waits on; closing the notification, nobody answering within the time
@@ -24,7 +25,7 @@ export const QUESTION_TIMEOUT_MS = 60_000;
  * questions (each with up to 1 MiB of arguments) faster than they are read.
  */
 export const MAX_QUESTIONS_PER_APP = 5;
-/** An Allow or Always allow this soon after a notification showed does not count. */
+/** An Allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
 /**
  * The arguments in a notification are cut to this; the side panel and the
@@ -35,11 +36,12 @@ export const MAX_ARGS_NOTIFICATION = 150;
 export const ARGS_CUT_NOTE = "Arguments cut: click to see them in full.";
 
 /**
- * The buttons of a notification, in order. Don't allow is closing it:
- * Chrome gives a notification at most two buttons. A click on its body
- * shows the whole question.
+ * The buttons of a notification. Don't allow is closing it. A click on its
+ * body shows the whole question, where "Don't ask again on <host>" is: a
+ * notification may show the arguments cut, and allowing a tool for good
+ * should not rest on a part of them (DEC-139).
  */
-export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
+export const NOTIFICATION_BUTTONS = ["Allow"] as const;
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -69,7 +71,6 @@ export interface NotificationText {
 	title: string;
 	message: string;
 	contextMessage: string;
-	/** Allow, and Always allow where it is offered (a page of an http(s) site). */
 	buttons: string[];
 }
 
@@ -132,9 +133,7 @@ export function notificationText(
 		contextMessage: site
 			? `${navigation ? "From" : "On"} ${site} · tab-mcp for Chrome`
 			: "tab-mcp for Chrome",
-		buttons: view.always
-			? [...NOTIFICATION_BUTTONS]
-			: [NOTIFICATION_BUTTONS[0]],
+		buttons: [...NOTIFICATION_BUTTONS],
 	};
 }
 
@@ -195,7 +194,7 @@ export class Questions {
 	 * answered in time, `"deny"` when the AI app cancelled, `"busy"` (without
 	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already. A
 	 * navigation to another site (`navigation`, iteration 27) says where to,
-	 * and never offers Always allow.
+	 * and never offers "Don't ask again".
 	 */
 	ask(
 		request: AppRequest,
@@ -219,7 +218,7 @@ export class Questions {
 				: {}),
 			// In full: what the user approves must be there to read.
 			args: json,
-			always:
+			site:
 				where.navigation === undefined &&
 				where.origin !== undefined &&
 				allowable(where.origin),
@@ -323,20 +322,12 @@ export class Questions {
 		return undefined;
 	}
 
-	/**
-	 * A button of notification `id`: 0 Allow, 1 Always allow (only where it
-	 * is offered; elsewhere it counts as nothing).
-	 */
+	/** A button of notification `id`: 0 is Allow; any other counts as nothing. */
 	notificationButton(id: string, index: number): void {
 		const pending = this.#byNotification(id);
 		if (pending === undefined) return; // settled, or an older notification
-		const answer: Answer | undefined =
-			index === 0
-				? "allow"
-				: index === 1 && pending.view.always
-					? "always"
-					: undefined;
-		if (answer === undefined) return;
+		if (index !== 0) return;
+		const answer: Answer = "allow";
 		if (this.#host.now() - pending.shownAt < NOTIFICATION_GUARD_MS) {
 			// Too soon to be read: show it again rather than take it.
 			delete pending.notification;
