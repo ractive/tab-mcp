@@ -2809,3 +2809,54 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
   to 0.9 are gone.
 - The tab drops a relay frame it cannot parse without answering. The relay only
   debug-logged the tab's `error`, which it still accepts from older libraries.
+
+## DEC-146: The connect dialog says why it is not connected, and how to go on
+
+Iteration 33 (review of 2026-11-13, CU 4, CU 7). Amends DEC-028.
+
+- A failure is shown in the user's words, by `reason`: `network` "Could not connect. Check
+  your internet connection.", `rate_limited` "Too many attempts…", any other refusal
+  "The connection was refused.", no reason (no user action, cancelled) "Not connected.".
+  The relay's message names the relay and the origin, which mean nothing to an end user;
+  it goes to `console.warn`. A disconnect says why (`expired`/`idle`: "The session
+  ended.").
+- "Connect again" is shown while the page is not connected, also while it reconnects by
+  itself (then it makes the next attempt at once). It calls `connect()` from its own
+  click, so the user activation check (DEC-009) is met where the page's first call was
+  not.
+- With identity binding (`oidc`), the address is shown only once `identity` is `bound`:
+  before, an address without a signed-in page could not pair, and the dialog invited the
+  user on regardless. The status says what is missing; a refusal shows `identityMessage`
+  in brackets, as the relay worded it.
+
+## DEC-147: Help between the address and the code, closed; New address at the end
+
+Iteration 33 (review of 2026-11-13, CU 23).
+
+- "How do I add it?" comes right after the address, before the code. It stays closed:
+  the review suggested opening it while no app is connected, but its four entries (two
+  with commands) push the code below the fold on a 1000 px tall desktop window and about
+  1500 px down at 320 px, and the code is what the user needs when the AI app asks.
+- "New address" leaves the address row, where it sat as a full button next to the
+  primary Copy without a word on what it does. It goes to the end of the setup, with
+  "Someone else may have this address, or is guessing codes? A new address disconnects
+  every AI app from this one." Not under the Connected list (the review's other option):
+  the relay's lockout page sends users to "New address" when someone may be guessing
+  codes, which is when no app is connected.
+
+## DEC-148: Where the confirmation waits, a failed Copy, the dialogs' language
+
+Iteration 33 (review of 2026-11-13, CU 5 in part, CU 9, CU 12).
+
+- While a confirmation is open in a hidden tab, the document title starts with
+  "Allow? – ", put back when the tab is shown or the dialog closes, unless the page
+  changed the title meanwhile (then the page's title stays).
+- `tools/list` appends "Each call waits until the user allows it in the page's browser
+  tab." to the description of a consequential tool, so the AI app can tell the user
+  where to look. Only there: the WebMCP registration and the registry keep the page's
+  description.
+- A refused Copy says on the button what to do ("Press Ctrl+C", "Press ⌘C" where
+  `navigator.platform` starts with `Mac` or `iP`, "Selected" on a coarse pointer) for 8 s;
+  "Copied" lasts 2 s.
+- Every dialog carries `lang="en"` and `dir="ltr"` until iteration J lets a page pass
+  its own strings.

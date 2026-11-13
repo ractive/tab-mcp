@@ -316,6 +316,12 @@ U+2800) or change the text direction (such as U+202E) are shown in the arguments
 AI app's name as `\uXXXX`, so the AI app cannot make them look like something else; the
 tool gets the arguments unchanged.
 
+While a confirmation is open in a hidden tab, the tab's title starts with "Allow? – ", so
+the user can find the tab that asks; the title is put back when the tab is shown or the
+dialog closes (unless the page changed it meanwhile). In `tools/list`, the description of
+a consequential tool ends with "Each call waits until the user allows it in the page's
+browser tab.", so the AI app can tell the user where to look while it waits.
+
 Pass `onConfirm` to ask in your own UI (it is asked every time; remember answers there if
 you want to). Show the verified `client.host` next to the name the AI app declares, as the
 library's dialog does, since anyone can declare any name. Escape the arguments and the
@@ -355,17 +361,28 @@ handles only some calls itself.
    opens the "Connect your AI app" dialog. A script's `element.click()` has no user
    activation, so tests and browser automation see "connect() must be called from a
    user action"; a click through Playwright or the DevTools protocol has one, and
-   `connect({ resume: true })` skips the check.
-2. The dialog shows the address and short instructions for Claude, ChatGPT, Claude Code
-   and Codex. The commands for Claude Code and Codex each have a Copy. They name the
+   `connect({ resume: true })` skips the check. When it cannot connect, the dialog says
+   why in plain words ("Could not connect. Check your internet connection.", "Too many
+   attempts…", "The connection was refused.", or "Not connected." when the click had no
+   user activation) and offers "Connect again", which connects from its own click; the
+   error itself goes to the console (`console.warn`). After a disconnect it says why
+   ("The session ended." for `expired` and `idle`) and offers the same button. While the
+   library reconnects by itself, it says "Connection lost. Reconnecting…", and "Connect
+   again" tries at once.
+2. The dialog shows the address with Copy and, right below it, "How do I add it?" (closed;
+   open, its steps would push the code out of view): short instructions for Claude,
+   ChatGPT, Claude Code and Codex. The commands for Claude Code and Codex each have a
+   Copy. They name the
    server by a label made from `server.name` that every shell reads as one plain word:
    lower case, letters without marks, each run of other characters as `-`, at most 40
    characters, `tools` if nothing is left ("Bücher" gives `bucher`). The address goes
    into a command only if it has nothing but plain URL characters; otherwise the help
-   shows the steps without commands. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
+   shows the steps without commands. Each entry ends with the step that starts the
+   sign-in: `/mcp` and Authenticate in Claude Code, `codex mcp login <name>` as the third
+   line of Codex's command. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
    revision, so its command turns that on first (for all of Codex's MCP servers;
-   `codex features disable mcp_2026_07_28` turns it off). The user adds the address to
-   their AI app.
+   `codex features disable mcp_2026_07_28` turns it off), and ChatGPT's entry names the
+   same command for its Mac app. The user adds the address to their AI app.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a 6-digit
    code with a Copy button, which the user types or pastes there. The code changes every
    2 minutes and after each use.
@@ -399,7 +416,9 @@ key yourself; the name is URI-encoded, and renaming it changes the address). A s
 existing page keeps its address; on a site with several pages the first one to connect
 keeps it, the others get new ones. The old key stays for pages still on 0.4.
 
-"New address" in the dialog calls `newAddress()`, which disconnects every
+"New address" in the dialog (at the end of the setup, below the code, with a line on what
+it does; not next to Copy, since with no app connected it changes the address at once)
+calls `newAddress()`, which disconnects every
 app and makes a new address; when apps are connected, the dialog asks first. It first
 takes the old address back: it connects with the stored secret, and the relay revokes
 every grant of the address in
@@ -556,6 +575,11 @@ The library asks the function after every connect. `identity` (`none`, `pending`
 `identitychange` tell you whether the relay accepted it; when the function or the relay does not answer within `identityTimeoutMs` (15 s, counted from when the function is asked), it goes back to `none`. An AI app signed in as someone else gets "This AI tool is logged in as someone other
 than the page."
 
+The connect dialog follows `identity`: it shows the address and "When your AI app asks,
+sign in with the account you use on this page" only once it is `bound`. Until then it
+says what is missing: "Checking your sign-in…" (`pending`), "Sign in to this page first."
+(`none`), or that the sign-in was not accepted, with `identityMessage` (`refused`).
+
 ### Your own UI
 
 Instead of `showConnectDialog()`, use `connect()`, `disconnect()`, `newAddress()`,
@@ -584,7 +608,8 @@ add it?", as data for your own UI. An entry of its own, out of the core, and not
 build. `setupInstructions(serverName, address)` returns one entry per AI app (Claude,
 ChatGPT, Claude Code, Codex, in that order): `id` (`claude`, `chatgpt`, `claude-code`,
 `codex`), `app` (its name as shown), `text` (what to do), `command` (lines to run, for
-Claude Code and Codex) and `note` (text and code parts, for Codex). Every string is plain
+Claude Code and Codex) and `note` (text and code parts, for ChatGPT, Claude Code and
+Codex). Every string is plain
 text: set it with `textContent`. The commands name the server by a label made from
 `serverName` and contain the address only when every shell reads both as plain words (see
 step 2 above), so they are safe to show with a Copy button; for an address that is not
@@ -612,8 +637,10 @@ The default dialogs bring their own stylesheet, a constructed stylesheet added t
 `document.adoptedStyleSheets`, so a strict CSP needs no `style-src` exception. It uses
 the page's font and system colours, and follows the page's `color-scheme`: declare
 `color-scheme: light dark` (or `<meta name="color-scheme" content="light dark">`) and the
-dialogs are dark in dark mode. They fit a 360 px wide screen, and they open (and show the
+dialogs are dark in dark mode. They fit a 320 px wide screen (below 30rem the code's Copy goes under the code), and they open (and show the
 check mark of a connected app) without animation when the user prefers reduced motion.
+Their texts are English, so they carry `lang="en"` and `dir="ltr"` whatever the page's
+language and direction.
 
 To adjust single values, set these custom properties on `:root` or on `.tab-mcp-dialog`:
 
@@ -655,7 +682,9 @@ overrides outside cascade layers: the dialogs' rules are not in a layer, so they
 any layered rule. All dialogs are `dialog.tab-mcp-dialog`; the connect dialog is
 `.tab-mcp-connect` (with `.tab-mcp-status`, `.tab-mcp-address`, `.tab-mcp-code`,
 `.tab-mcp-code-value`, `.tab-mcp-code-used`, `.tab-mcp-help`, `.tab-mcp-apps`,
-`.tab-mcp-app`, `.tab-mcp-new-address-question`, `.tab-mcp-actions`; once an app is
+`.tab-mcp-app`, `.tab-mcp-new-address-row` (New address and its line),
+`.tab-mcp-new-address-question`, `.tab-mcp-actions`, the button `.tab-mcp-retry` (Connect
+again, while not connected); once an app is
 connected `.tab-mcp-success`, with `.tab-mcp-success-icon` (the check mark, an inline
 `svg` in `currentColor`), `.tab-mcp-success-title` and `.tab-mcp-success-next`, and the
 button `.tab-mcp-setup-toggle`, "Connect another app", with `aria-expanded`, which shows
@@ -665,7 +694,7 @@ and hides `.tab-mcp-setup`, the address, code and help), the confirmation is
 `.tab-mcp-always`, with `alwaysAllow`), and the notice after `replaced` is
 `.tab-mcp-replaced` (with `.tab-mcp-description`, `.tab-mcp-status`, and the buttons
 `.tab-mcp-replaced-close` and `.tab-mcp-new-address`). Buttons are `.tab-mcp-primary` (the one
-next step: Copy the address until an app is connected, then Done, "Don't allow", the safe choice, and the notice's "New
+next step: Copy the address until an app is connected, then Done, Connect again while not connected, "Don't allow", the safe choice, and the notice's "New
 address", or its "Close" after a sibling tab), `.tab-mcp-danger` (Disconnect and
 "Disconnect and get new address") or plain; every Copy button is also `.tab-mcp-copy`, and
 the Disconnect buttons in the apps list are `.tab-mcp-disconnect`. For example:
