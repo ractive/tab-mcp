@@ -30,7 +30,7 @@ status line that reads it and may then remove it.
 
 The client core was 6397 B gzipped of 6400 B (`test/build.test.ts`). WM 9 and WM 10 alone
 take it to 6313 B (84 B freed); with the rest of this iteration (`outputSchema`'s check,
-`exposedTo`, `destructiveHint` in the mirror, the abort reason) it is 6386 B. The result
+`exposedTo`, `destructiveHint` in the mirror, the abort reason) it is 6385 B. The result
 mapping for WebMCP (WM 4, WM 6) is in the lazy chunk (`webMcpValue` in `mapping.ts`).
 
 ## Tasks
@@ -38,7 +38,8 @@ mapping for WebMCP (WM 4, WM 6) is in the lazy chunk (`webMcpValue` in `mapping.
 ### WM 3: `outputSchema`
 
 - [x] `Tool.outputSchema` (optional, an object schema with `"type": "object"`, copied as
-  JSON; anything else a `TypeError`); kept on `RegisteredTool`
+  JSON and checked like `inputSchema`; anything else a `TypeError`); kept on
+  `RegisteredTool`
 - [x] `tools/list` carries it; the mirror passes it to the native `registerTool`
 - [x] `useTool` registers again when it changes
 - [x] tab-mcp for Chrome: `PageTool.outputSchema` (at most 16 KB), shown in

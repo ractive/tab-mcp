@@ -2816,8 +2816,11 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
 DEC-119 and DEC-120; keeps DEC-115.
 
 - **`outputSchema`.** `Tool` takes it, as the draft's `ModelContextTool` does: an object
-  schema with `"type": "object"` (what MCP wants), copied as JSON; anything else is a
-  `TypeError`. It is listed in `tools/list` and passed to the native registration. The
+  schema with `"type": "object"` (what MCP wants), copied as JSON and checked like
+  `inputSchema` (patterns, `$ref`s; an AI app's MCP SDK compiles every output schema when
+  it lists the tools, and one that does not compile fails the whole list; review of PR
+  123); anything else is a `TypeError`. It is listed in `tools/list` and passed to the
+  native registration. The
   library does not check results against it; the README tells authors to return a plain
   object, since an AI app expects `structuredContent` from every result of such a tool.
 - **`exposedTo`** (owner) is kept on the registered tool and passed to the native
@@ -2852,7 +2855,7 @@ DEC-119 and DEC-120; keeps DEC-115.
   defended against a page script that changes the prototype after the library loads,
   which owns the tools anyway (threat model A14), and they missed WebMCP that an
   origin-trial token added by script turns on later.
-- Core size: 6397 B gzipped before; WM 9 and WM 10 alone 6313 B; with the rest 6386 B of
+- Core size: 6397 B gzipped before; WM 9 and WM 10 alone 6313 B; with the rest 6385 B of
   6400 B.
 
 ## DEC-144: What a page tool keeps through tab-mcp for Chrome

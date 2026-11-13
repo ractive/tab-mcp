@@ -100,8 +100,10 @@ WebMCP draft's `registerTool` (`webmcp` and `exposedTo`: see [WebMCP](#webmcp)):
   registration too, and a tool registered earlier whose schema it refuses (for example a
   `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
 - `outputSchema` (optional): a JSON Schema with `"type": "object"` for the result, listed
-  to AI apps (`tools/list`) and passed on to WebMCP. The library does not check results
-  against it. An AI app expects every result of such a tool to carry
+  to AI apps (`tools/list`) and passed on to WebMCP. `registerTool` checks it as it checks
+  `inputSchema` (an AI app compiles it when it lists the tools, and one that does not
+  compile can cost the whole list), but results are not checked against it. An AI app
+  expects every result of such a tool to carry
   `structuredContent` that matches it (the MCP SDK's client refuses one without), so
   `execute` returns a plain object, not a string;
 - `execute(input, { signal, client })`: runs the tool. `signal` aborts when the caller
