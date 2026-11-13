@@ -3,6 +3,7 @@ import {
 	ANNOTATIONS_META_KEY,
 	isCallToolResult,
 	mapAnnotations,
+	markUntrusted,
 	resultText,
 	thrownResult,
 	toCallToolResult,
@@ -179,6 +180,28 @@ describe("results (DEC-023)", () => {
 		expect(thrownResult("plain")).toEqual({
 			content: [{ type: "text", text: "plain" }],
 			isError: true,
+		});
+	});
+	test("markUntrusted sets the marker, keeps the result's own _meta and changes nothing in place (DEC-166)", () => {
+		const own = {
+			content: [{ type: "text", text: "x" }],
+			_meta: {
+				"example.com/a": 1,
+				[ANNOTATIONS_META_KEY]: { untrustedContentHint: false, other: true },
+			},
+		};
+		const before = structuredClone(own);
+		expect(markUntrusted(own)).toEqual({
+			content: [{ type: "text", text: "x" }],
+			_meta: {
+				"example.com/a": 1,
+				[ANNOTATIONS_META_KEY]: { untrustedContentHint: true, other: true },
+			},
+		});
+		expect(own).toEqual(before);
+		expect(markUntrusted({ content: [] })).toEqual({
+			content: [],
+			_meta: { [ANNOTATIONS_META_KEY]: { untrustedContentHint: true } },
 		});
 	});
 });

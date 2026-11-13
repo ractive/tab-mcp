@@ -41,6 +41,7 @@ export type {
 	ToolAnnotations,
 	ToolCallClient,
 	ToolCallEnd,
+	ToolCaller,
 	ToolCallOutcome,
 	ToolCallResult,
 	ToolCallStart,

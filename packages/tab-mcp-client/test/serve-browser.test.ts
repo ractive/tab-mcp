@@ -296,9 +296,16 @@ test.skipIf(chrome === undefined)(
 				{ tool: "add", outcome: "ok" },
 				{ tool: "wipe", outcome: "cancelled" },
 			]);
-			expect(
-				await page.eval(`document.querySelector("dialog.tab-mcp-confirm")`),
-			).toBeNull();
+			// The call ends at the abort (DEC-167); the dialog goes with its
+			// `close` event, a task later.
+			let shown = true;
+			for (let i = 0; i < 40 && shown; i++) {
+				shown = await page.eval<boolean>(
+					`document.querySelector("dialog.tab-mcp-confirm") !== null`,
+				);
+				if (shown) await Bun.sleep(25);
+			}
+			expect(shown).toBe(false);
 		} finally {
 			await page.close();
 		}

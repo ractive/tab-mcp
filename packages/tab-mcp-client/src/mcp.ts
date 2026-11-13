@@ -21,6 +21,7 @@ import {
 	type CallToolResult,
 	errorResult,
 	mapAnnotations,
+	markUntrusted,
 	resultText,
 	thrownResult,
 	toCallToolResult,
@@ -357,6 +358,10 @@ export async function runCall(
 	};
 	try {
 		run = await decideAndRun(context, tool, raw, signal, client);
+		// The caller learns per result, not only from tools/list, that this
+		// text is not the page's (DEC-166).
+		if (tool.annotations.untrustedContentHint === true)
+			run.result = markUntrusted(run.result);
 		const instead = signal.aborted ? undefined : deliverable?.(run.result);
 		if (instead !== undefined) run = { outcome: "error", result: instead };
 	} finally {
@@ -390,6 +395,14 @@ async function decideAndRun(
 	): CallRun => ({ outcome, result: errorResult(message), stop });
 	const invalid = validate(tool, raw);
 	if (invalid !== undefined) return stopped("error", invalid, "invalid");
+	// Rejects once the call is cancelled (or timed out): the call ends then,
+	// also when a question or a tool does not heed the signal, and what they
+	// answer later is dropped (DEC-167).
+	const cancelled = new Promise<never>((_, reject) => {
+		if (signal.aborted) reject(signal.reason);
+		signal.addEventListener("abort", () => reject(signal.reason));
+	});
+	cancelled.catch(() => {});
 	if (tool.annotations.consequentialHint === true) {
 		const question: ConfirmRequest = {
 			tool: { name: tool.name, description: tool.description },
@@ -400,7 +413,7 @@ async function decideAndRun(
 		if (tool.title !== undefined) question.tool.title = tool.title;
 		let answer: ConfirmAnswer = false;
 		try {
-			answer = await context.confirm(question);
+			answer = await Promise.race([context.confirm(question), cancelled]);
 		} catch {
 			answer = false; // a failing question is a refusal
 		}
@@ -419,7 +432,10 @@ async function decideAndRun(
 		return stopped("error", "The tool is no longer available", "gone");
 	let run: CallRun;
 	try {
-		const value = await tool.execute(raw, { signal, client });
+		const value = await Promise.race([
+			tool.execute(raw, { signal, client }),
+			cancelled,
+		]);
 		run = {
 			outcome: "ok",
 			result: toCallToolResult(value),

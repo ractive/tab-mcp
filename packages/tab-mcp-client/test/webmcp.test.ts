@@ -167,10 +167,10 @@ const wipe = {
 };
 
 describe("off by default", () => {
-	test("without webmcp: true nothing is registered, not even a tool that says webmcp: true", async () => {
+	test("without webmcp: true nothing is registered, not even a tool whose callers list webmcp", async () => {
 		const t = scoped(newTab("https://relay.example"));
 		await t.registerTool(add);
-		await t.registerTool(wipe, { webmcp: true });
+		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		await settle();
 		expect(native.registrations).toBe(0);
 		expect(attribute()).toBeNull();
@@ -237,10 +237,10 @@ describe("mirroring", () => {
 		expect(t.tools).toEqual(["add", "wipe"]);
 	});
 
-	test("a consequential tool with webmcp: true; a tool with webmcp: false never", async () => {
+	test("a consequential tool whose callers list webmcp; a tool whose callers do not, never", async () => {
 		const t = tab();
-		await t.registerTool(wipe, { webmcp: true });
-		await t.registerTool({ ...add, name: "hidden" }, { webmcp: false });
+		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
+		await t.registerTool({ ...add, name: "hidden" }, { callers: ["relay"] });
 		await settle();
 		expect([...native.tools.keys()]).toEqual(["wipe"]);
 	});
@@ -361,7 +361,10 @@ describe("mirroring", () => {
 			execute: () => "removed",
 		};
 		await t.registerTool(remove);
-		await t.registerTool({ ...remove, name: "removeAnyway" }, { webmcp: true });
+		await t.registerTool(
+			{ ...remove, name: "removeAnyway" },
+			{ callers: ["relay", "webmcp"] },
+		);
 		await t.registerTool({
 			...remove,
 			name: "notConsequential",
@@ -624,7 +627,7 @@ describe("calls", () => {
 				return answer;
 			},
 		});
-		await t.registerTool(wipe, { webmcp: true });
+		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		const events = watched(t);
 		await settle();
 		await expect(native.call("wipe", {})).resolves.toEqual({
@@ -640,7 +643,7 @@ describe("calls", () => {
 	test('onConfirm\'s "unanswered" resolves with its own error and outcome; another value is a refusal', async () => {
 		let answer: unknown = "unanswered";
 		const t = tab({ onConfirm: () => answer as boolean });
-		await t.registerTool(wipe, { webmcp: true });
+		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		const events = watched(t);
 		await settle();
 		await expect(native.call("wipe", {})).resolves.toEqual({
@@ -666,7 +669,7 @@ describe("calls", () => {
 				return "unanswered";
 			},
 		});
-		await t.registerTool(wipe, { webmcp: true });
+		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		const events = watched(t);
 		await settle();
 		await expect(
@@ -733,7 +736,10 @@ describe("calls", () => {
 				}),
 		});
 		const controller = new AbortController();
-		await t.registerTool(wipe, { webmcp: true, signal: controller.signal });
+		await t.registerTool(wipe, {
+			callers: ["relay", "webmcp"],
+			signal: controller.signal,
+		});
 		await settle();
 		const call = native.call("wipe", {});
 		await settle();

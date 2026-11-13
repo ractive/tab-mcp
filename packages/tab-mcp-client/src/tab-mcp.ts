@@ -516,7 +516,11 @@ export class TabMcp extends EventTarget {
 	 * carries the relay's `http.*` messages as plain objects; a `MessagePort`
 	 * fits. Whoever holds the other end calls the tools without pairing, as
 	 * `options.client` (`kind: "local"`): hand it out only to a frame whose
-	 * origin you checked. Consequential tools still ask. Resolves once the port
+	 * origin you checked. Consequential tools still ask: `options.onConfirm`
+	 * for this port's calls (in the site's chat, say), else the page's
+	 * `onConfirm` or dialog. Each request may take `options.requestTimeoutMs`
+	 * (300 s). Only tools whose `callers` include `"local"` (by default all)
+	 * are listed and callable. Resolves once the port
 	 * is served; may be called for several ports. Rejects with a `TypeError`
 	 * for options it cannot use.
 	 */

@@ -2446,6 +2446,8 @@ page's own claim; invisible characters in it are shown as escapes like any other
 2026-11-13, iteration 28. As for WebMCP callers (DEC-115): never offered, never applied,
 also with `alwaysAllow: true`. A page that trusts its own assistant answers `onConfirm`
 itself for `client.kind === "local"`. Offering it later is no breaking change.
+Amended by DEC-164: a port gets its own `onConfirm`, and the README advises against
+answering `true` for `kind === "local"`.
 
 ## DEC-125: `createTunnelFetch` answers with the relay's JSON-RPC errors, as an entry of the client package (owner)
 
@@ -3279,3 +3281,98 @@ removal rule of the tools allowed always.
   React's `useTool` has registered it again, and an entry remembers the title and
   description the user saw; a tool registered with other ones is asked again (and leaves
   the list then). Before, any re-registration dropped the entry silently.
+
+## DEC-164: A served port can ask its own question; it never goes over the port (owner)
+
+2026-11-14, iteration 40 (feedback from an integrator: a site's own assistant, whose chat
+in an iframe forwards the port over its WebSocket to the backend). Scope approved by the
+owner on 2026-11-13. Amends DEC-124's advice.
+
+- `serve(port, { client, onConfirm? })`: with it, the consequential calls of that port
+  ask `onConfirm` instead of `TabMcpOptions.onConfirm` and the library's dialog. Calls
+  through the relay and WebMCP keep the page's. Same signature and answers (`true`,
+  `false`, `"unanswered"`; anything else and a throw are a refusal, normalised in the
+  lazy chunk as the core does for the page's). `request.signal` is the request's: it
+  aborts on `http.cancel`, on the time limit (DEC-167) and when the serve closes.
+- Why: the integrator auto-allowed its own assistant (DEC-124 told pages to answer
+  `onConfirm` themselves for `kind: "local"`), because the library's dialog in the page
+  is the wrong place and language for a chat. With a question per port the site asks
+  in its chat, in the user's language, and keeps the check.
+- The question is not sent over the port, and the library has no message for it. The
+  other end of the port is the caller that wants the tool to run; a model that follows
+  injected text would answer yes there. The README says the answer must come from the
+  user's click in UI that the assistant's backend cannot answer for, and no longer
+  suggests `return true` for `kind === "local"` (tool results carry third-party text into
+  the model, and the question is the one check between that text and the tool).
+- In the lazy chunk; no change to the core.
+
+## DEC-165: `callers` per tool replaces the `webmcp` registration option (owner)
+
+2026-11-14, iteration 40. The owner ruled out reusing `exposedTo`: in the WebMCP draft it
+is a list of origins and is passed through to the native registration (DEC-143).
+
+- `RegisterToolOptions.callers?: ("relay" | "local" | "webmcp")[]` (type `ToolCaller`,
+  `ToolCallClient["kind"]`). Without it a tool is for every caller, and WebMCP gets a
+  consequential (or only `destructiveHint`) tool only when `callers` lists `"webmcp"`:
+  the rule of DEC-115 and DEC-143, unchanged.
+- The boolean `webmcp` is folded in, not kept beside it: two options would have states
+  that contradict each other (`webmcp: false` with `callers: ["webmcp"]`), and `webmcp`
+  said only half of what `callers` says. `{ webmcp: true }` is `callers` with
+  `"webmcp"` listed, `{ webmcp: false }` is `callers` without it. A breaking change in
+  the same client minor as iteration 38; the CHANGELOG has the migration.
+  `TabMcpOptions.webmcp` stays: it turns WebMCP on for the page.
+- For a caller that is not listed the tool does not exist: `tools/list` leaves it out,
+  `notifications/tools/list_changed` fires only when that caller's own list changed
+  (`watchTools` compares the visible list before and after each change of the
+  registry), and a call is answered exactly as for an unknown tool
+  (`Tool <name> not found`, -32602), so a caller cannot learn of hidden tools.
+- Built without splitting the core: the relay and a port filter in the lazy chunk
+  (`toolsFor` in `serve.ts`: `callers?.includes(kind) ?? true`), the WebMCP rule stays in
+  the core's mirror, and a WebMCP call comes only for a mirrored tool. A shared helper
+  imported by both would have made the bundler move `registry.ts` into a chunk of its
+  own (6.8 KB core in two files). The list is copied at registration and checked
+  (`TypeError`); `[]` is allowed (a tool for nobody, for now).
+- React's `useTool` registers again when `callers` changes by value.
+
+## DEC-166: Every result of an `untrustedContentHint` tool carries a marker
+
+2026-11-14, iteration 40. Extends DEC-022 and DEC-134.
+
+- MCP has no `untrustedContentHint`. `tools/list` keeps the mapping of DEC-022
+  (`openWorldHint: true` plus the originals in `_meta["ch.ractive.tab-mcp/annotations"]`),
+  and now every result of such a tool has
+  `_meta["ch.ractive.tab-mcp/annotations"]: { untrustedContentHint: true }` as well, next
+  to the tool's own `_meta` (an own entry under the same key is merged, the marker wins).
+- Why per result: the consumer that decides how to show a result to its model often
+  does not hold the tool list at that point (an agent framework's tool wrapper), and
+  `openWorldHint` means something else in MCP (the tool reaches outside), so a consumer
+  could not tell from it that the text is not the page's.
+- Every path: set in `runCall`, before the size check and `toolcallend`, so the relay, a
+  port and the page's own event see the same result; also on error results of such a
+  tool, which is harmless and keeps the rule simple. A WebMCP caller gets `execute`'s
+  value as before (WebMCP results are text; the native registration carries the hint).
+- Tested end to end through `createTunnelFetch` and the MCP SDK client pinned to
+  2026-07-28, and through the relay.
+
+## DEC-167: A page-side time limit per served request; a cancelled call ends at once
+
+2026-11-14, iteration 40.
+
+- `serve(port, { requestTimeoutMs })`, 300 s by default as `createTunnelFetch` and the
+  relay, a number above 0 and below 2^31 (DEC-128's rule; `Infinity` would fire at once),
+  else a `TypeError`. Per request until its answer has ended, as the relay's and
+  `createTunnelFetch`'s; `subscriptions/listen` (by its `mcp-method` header) is not
+  limited. The relay's session has no such limit on the page's side: its relay has one.
+- On expiry the page aborts the request (`execute`'s signal and the question's), sends
+  nothing more for it and answers `-31002` "The page did not answer in time." itself, as
+  `createTunnelFetch` would: as `http.response` with status 200 when no response had
+  started, else as a last event of the stream (between two events) and
+  `http.response.end`. Same code and text, so a consumer sees one error whichever end's
+  limit runs out first. `docs/protocol.md` describes it.
+- A call ends when its signal aborts, also when a question (an own `onConfirm`) or
+  `execute` does not heed it: `decideAndRun` races both against the abort, so
+  `toolcallend` says `cancelled` at that moment and a later answer is dropped. Before,
+  a call that was cancelled ended only when they settled, which the time limit could not
+  then promise ("end the call"). This holds for relay and WebMCP calls too; a tool that
+  ignores the signal still runs on in the page, and its result goes nowhere. The
+  library's dialog closes on its `close` event, a task after the call ended.

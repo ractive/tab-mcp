@@ -51,9 +51,9 @@ const HINTS = [
 
 /**
  * Mirror `registry`'s tools into `context`, now and whenever the registry
- * changes: those registered with `{ webmcp: true }`, and by default those not
- * marked consequential, where MCP's `destructiveHint` counts as
- * `consequentialHint` (DEC-143). Every failure of the native `registerTool()`
+ * changes: those whose `callers` list `"webmcp"`, and without `callers` those
+ * not marked consequential, where MCP's `destructiveHint` counts as
+ * `consequentialHint` (DEC-143, DEC-165). Every failure of the native `registerTool()`
  * stays here: warned once per name, the tool still offered through the relay.
  */
 export function mirror(
@@ -70,10 +70,12 @@ export function mirror(
 			mirrors.delete(tool);
 		}
 		for (const tool of registry.list()) {
-			const { annotations } = tool;
+			const { annotations, callers } = tool;
 			const consequential =
 				annotations.consequentialHint ?? annotations.destructiveHint;
-			if (mirrors.has(tool) || !(tool.webmcp ?? !consequential)) continue;
+			// The one place of the rule for WebMCP (the relay and a port: `toolsFor`).
+			if (mirrors.has(tool) || !(callers?.includes("webmcp") ?? !consequential))
+				continue;
 			const controller = new AbortController();
 			mirrors.set(tool, controller);
 			const hints: Record<string, boolean | undefined> = {

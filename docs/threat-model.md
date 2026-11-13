@@ -667,7 +667,7 @@ from them.
   and the delay before Allow only needs the tab visible and focused. So the page's
   confirmation is weaker against it than against a remote AI app. Hence consequential
   tools (`consequentialHint`, or MCP's `destructiveHint`) are not mirrored unless the
-  page registers them with `{ webmcp: true }`, which says that its own dialog, or the
+  page lists `"webmcp"` in their `callers`, which says that its own dialog, or the
   agent's own confirmation, is enough for that tool; a mirrored `destructiveHint` tool
   carries `consequentialHint: true` in WebMCP. "Allow until reload" is never offered or
   applied for these calls.
@@ -709,18 +709,32 @@ sits beside the AI apps of A2 and A6 and the agents of A14.
   page gave to `serve`. The name is the page's claim about its own assistant, not
   something verified; the page controls it, as it controls everything else it shows.
 - **Consequential tools still ask.** The same argument check and confirmation as for
-  an AI app; the library's dialog says "(this site's assistant)" and never offers
-  "Allow until reload". A page may answer `onConfirm` itself for `kind: "local"` and so let
-  its own assistant run such tools without a question; that is the page's decision
-  about its own backend, with A6's consequences if the assistant follows injected
-  instructions.
+  an AI app. `serve`'s own `onConfirm` asks for the calls of that port (in the site's
+  chat, say) in place of the page's `onConfirm` and the library's dialog, which says
+  "(this site's assistant)" and never offers "Allow until reload"; relay and WebMCP
+  calls keep the page's. The library never sends the question over the port: the other
+  end is the caller that wants the tool to run, and a model that follows injected
+  instructions would answer yes. The page must take the answer from a user action that
+  the assistant's backend cannot produce (a click in the chat's own UI, not a message
+  from the backend). A page may still answer `true` for `kind: "local"` and so let its
+  own assistant run such tools without a question; that is the page's decision about
+  its own backend, with A6's consequences if the assistant follows injected
+  instructions, and the README advises against it.
 - **A6 applies in full.** The assistant's model reads the tools' results and whatever
-  the user or other content tells it; `untrustedContentHint` stays on the results that
-  have it, and the page's tools must not do more for this caller than for the user.
+  the user or other content tells it; the page's tools must not do more for this caller
+  than for the user. A tool marked `untrustedContentHint` says so in `tools/list` and on
+  every result (`_meta["ch.ractive.tab-mcp/annotations"]`, DEC-166); the consumer has to
+  read the marker and keep such text apart from instructions.
+- **Which tools a port sees.** A tool registered with `callers` that leave out
+  `"local"` does not exist for a port: not listed, no `list_changed`, a call answered as
+  for an unknown tool (DEC-165). That limits what a port can reach; it does not make a
+  port safe to give to someone else.
 - **No relay, no relay limits.** There is no request size limit, rate limit or
   concurrency limit on a port: the other end is the site's own code. A page that
   serves a port to code it does not trust has given up more than a limit would save.
-  The library's confirmations are shown one at a time per document, so many
+  Each request has a time limit on the page's side (`requestTimeoutMs`, 300 s by
+  default), after which the call is aborted and ends as cancelled; a listen stream has
+  none. The library's confirmations are shown one at a time per document, so many
   consequential calls at once become a row of questions, each with its own delay, not
   a stack of dialogs.
 - **Nothing is stored.** A `TabMcp` without `relay` creates no address secret and opens
