@@ -10,8 +10,97 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ### Unreleased
 
+#### Breaking
+
+The API before 1.0 (iteration 38). Each item says what to change.
+
+- **`ConnectionState` has `"reconnecting"`, and the `reconnecting` event is gone.** While
+  the library connects again by itself, `state` is `reconnecting` (also during an
+  attempt, which used to be `connecting`); `statechange` fires for each attempt it
+  schedules, and the property `reconnecting` still says which attempt is next and when.
+  Migration: replace `addEventListener("reconnecting", …)` with `statechange` and
+  `mcp.state === "reconnecting"`; replace `mcp.reconnecting !== undefined` tests of the
+  state with `mcp.state === "reconnecting"`. A refusal that stops reconnecting comes as
+  `error` (with `state` already `disconnected`) just before the `statechange` to
+  `disconnected`, where it came before `reconnecting: null`.
+- **The `connected` and `disconnected` events are gone; `statechange` carries the reason.**
+  `statechange` has `{ state, reason? }`: `reason` (a `DisconnectReason`) on the change
+  from `connected`, to `disconnected` or, when the connection broke, to `reconnecting`.
+  The close code is not reported any more; `DisconnectDetail` is gone, `StateChangeDetail`
+  is new. Migration: `connected` → `statechange` with `state === "connected"` and
+  `mcp.session`; `disconnected` → `statechange` with `e.detail.reason !== undefined`
+  (for example `reason === "user"` after `disconnect()`).
+- **Every event detail is an object, and `undefined` stands for nothing.**
+  `pairingcode` has `{ pairingCode }` (was the code or `null`); `identitychange` has
+  `{ identity, identityMessage }` (was `{ state, message? }`). Migration:
+  `e.detail?.code` → `e.detail.pairingCode?.code`; `e.detail === null` →
+  `e.detail.pairingCode === undefined`; `e.detail.state` → `e.detail.identity`.
+- **`revoke(grantId)` returns a promise** that resolves once the relay removed the grant
+  (at once for a grant not in `grants`) and rejects with an `InvalidStateError` while not
+  connected, when the session ends first, and with the relay's error when it refuses
+  (`code` `store_unavailable` or `unknown_id`). It returned `false` when it could not
+  send. Migration: `mcp.revoke(id).catch(showProblem)` instead of checking the boolean.
+- **`signOut()` returns a promise** that resolves once the relay removed the grants, and
+  rejects with an `InvalidStateError` while not connected to a relay that pairs by
+  sign-in; `identity` is cleared in any case. It returned whether it was sent.
+  Migration: `mcp.signOut().catch(() => {})` in a logout that does not wait.
+- **`refreshIdentity()` resolves with the new `identity`** (`"bound"`, `"refused"` or
+  `"none"`) instead of `true`/`false`, and rejects with an `InvalidStateError` while not
+  connected or without `identityAssertion` (it resolved `false`). Migration:
+  `(await mcp.refreshIdentity()) === "bound"`.
+- **`newAddress()` resolves with nothing** (`Promise<void>`); it resolved with the new
+  session or `undefined`. Migration: read `mcp.session` after it.
+- **`confirmInPage(request, { document })`** takes the document like
+  `showConnectDialog`; without it, the global document as before. Nothing to change for
+  pages that use the global one.
+- **The options `confirmDelayMs`, `identityTimeoutMs` and `reconnect.delaysMs` are gone**;
+  the waits are fixed (750 ms, 15 s, about 5, 10, 20, 40, then 60 s). `reconnect` is a
+  boolean; `ReconnectOptions` is gone. Migration: remove them; `reconnect: { … }` becomes
+  `reconnect: true` (the default) or `false`.
+- **The properties `address`, `appName` and `pairing` are gone.** Migration:
+  `mcp.address` → `mcp.session?.address`; `mcp.appName` → `mcp.session?.appName` (the
+  name the relay shows, which is the page's own unless the relay configures one); keep
+  your own flag for whether you called `startPairing()`.
+- **"Always allow" is "Allow until reload"**, left of Allow, with the note "X will run for
+  <app> without asking, with any arguments, until you reload this page or disconnect
+  <app>". The option is still `alwaysAllow`. Migration: tests and guides that look for
+  the button's text.
+- **React: `useTool(tool, options?)`**, without `deps`, which only registered the same tool
+  again. `connectLabel` is no longer exported, `TabMcpSnapshot` has no `address`, and
+  `ConnectButton`'s `data-state` is the state itself. Migration: `useTool(tool, [a], opts)`
+  → `useTool(tool, opts)`; `state.address` → `state.session?.address`; a label of your
+  own as `children` instead of `connectLabel`.
+- **The setup steps are shorter.** ChatGPT's entry has no note (the Mac app's steps are in
+  the guide), and Codex's note no longer explains how to turn the feature off. Migration:
+  none for pages; an extension or page that tests the texts of `setupInstructions`
+  adjusts them.
+- **The dialogs' chunk is split** into the confirmation and the connect dialog (with a
+  shared chunk), so a page without a relay loads no connect dialog. Code that imported the
+  UI chunk's internals from a built file (`ui-<hash>.js`) points at `confirm-<hash>.js`
+  (`confirmInPage(mcp, request, document, { alwaysAllow, ui })`) instead.
+- **Styling: only the dialog classes and the button kinds are documented** (`.tab-mcp-dialog`,
+  `.tab-mcp-connect`, `.tab-mcp-confirm`, `.tab-mcp-replaced`, `.tab-mcp-primary`,
+  `.tab-mcp-danger`, `.tab-mcp-copy`); override with two classes. The check mark of a
+  connected app is drawn by the stylesheet, not an inline `svg`. A Copy button's name is
+  what it shows while it says "Copied" or "Press Ctrl+C", and that is what is announced
+  ("Copied", not "Address copied").
+
 #### Added
 
+- `ui: { strings }`: every text of the dialogs in one table (`DialogStrings`, keys and
+  English texts in `src/strings.ts`), replaceable key by key, with `lang` and `dir`.
+- `ui: { setup: { guide, instructions } }`: the connect dialog's guide link (or none) and
+  its steps per AI app.
+- The connect dialog lists the tools that run without asking under each app, with "Ask
+  again"; a tool registered again unchanged keeps its entry (React's `useTool`), one whose
+  title or description changed is asked again.
+- A Disconnect in the connect dialog that the relay could not save says so ("The relay
+  could not save this. Try again.").
+- The React provider disconnects its instance a moment after it unmounts, unless the
+  effect ran again: under StrictMode a child's `connect({ resume: true })` is no longer
+  cancelled ("The connection was cancelled").
+- The connect dialog names every connected app in its confirmation ("A and B are
+  connected"), not only those that paired while it was open.
 - `Tool.outputSchema` (the WebMCP draft of 12 November 2026 has it): an object schema of
   the result, listed in `tools/list` and passed on to WebMCP.
 - `RegisterToolOptions.exposedTo` is passed on to the native WebMCP registration of a
@@ -48,7 +137,7 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   says how many. Each dialog starts its Allow delay when it is shown, and again when
   another dialog of the page closes over it, so the second click of a double click cannot
   approve the next call. When the arguments overflow their box (now up to
-  `min(50vh, 24rem)`, `--tab-mcp-arguments-height`), Allow and Always allow wait until
+  `min(50vh, 24rem)`, `--tab-mcp-arguments-height`), Allow and Allow until reload wait until
   the box has been scrolled to its end, and the dialog says so. Before the delay has run
   out, Enter or Space on a button and Escape are ignored, so typing meant for the page
   cannot refuse a call either. The dialog is described by its question (and short
@@ -73,8 +162,7 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 - A refusal that stops reconnecting always emits `error`, also when a `connect()` of the
   page waited on that attempt.
 - Close codes 1001, 1011, 1012 and 1013 (a proxy in front of a restarting relay) mean
-  `shutdown`, so the page reconnects. The reconnect waits vary by up to 20 %;
-  `reconnect.delaysMs` entries must be below 2^31 / 1.2 ms.
+  `shutdown`, so the page reconnects. The reconnect waits vary by up to 20 %.
 - `hello` sends an empty page title: the relay never read it.
 - Tabs of a page tell each other which address they claimed, so a tab on another address,
   or one that claimed while this tab was still connecting, no longer makes a takeover
@@ -94,7 +182,7 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
   (`.tab-mcp-new-address-row`), with a line on what it does.
 - The setup steps (`./setup` and the dialog) end with the step that starts the sign-in:
   `/mcp` and Authenticate for Claude Code, `codex mcp login <name>` as the third line of
-  Codex's command. ChatGPT's entry names the Codex feature its Mac app needs.
+  Codex's command.
 - A refused Copy says on the button what to do ("Press Ctrl+C", "Press ⌘C" on Apple
   devices, "Selected" on a touch screen) instead of only telling screen readers.
   "Copied" goes back to "Copy" after 2 seconds.

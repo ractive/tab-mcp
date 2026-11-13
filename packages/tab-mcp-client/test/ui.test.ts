@@ -2142,6 +2142,9 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 	test("Allow waits until the arguments were scrolled to their end (CU 2)", async () => {
 		let scrollTop = 0;
 		const proto = window.HTMLElement.prototype as unknown as object;
+		const saved = ["scrollHeight", "clientHeight", "scrollTop"].map(
+			(key) => [key, Object.getOwnPropertyDescriptor(proto, key)] as const,
+		);
 		const box = (self: unknown) =>
 			(self as HTMLElement).classList?.contains("tab-mcp-arguments");
 		Object.defineProperty(proto, "scrollHeight", {
@@ -2198,6 +2201,11 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 		expect(allow.disabled).toBe(false);
 		allow.click();
 		expect(await answer).toBe("allow");
+		// The prototype is shared by every happy-dom window: later tests get layout-free boxes again.
+		for (const [key, descriptor] of saved) {
+			if (descriptor === undefined) Reflect.deleteProperty(proto, key);
+			else Object.defineProperty(proto, key, descriptor);
+		}
 	});
 
 	test("before the delay has run out, Enter or Space on a button and Escape do not answer (CU 13)", async () => {

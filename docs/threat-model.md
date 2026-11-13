@@ -331,10 +331,11 @@ does not reconnect by itself.
   scrolled to their end: the AI app chooses the order of the keys, so it could put the
   one that matters below the fold.
 - Consent per tool is the page's, not the relay's: the relay has one OAuth scope,
-  `tools`, which covers every tool of the page. "Always allow" in the page's confirmation
-  is off unless the page turns it on (`alwaysAllow: true`, DEC-096), since it lifts the
+  `tools`, which covers every tool of the page. "Allow until reload" in the page's
+  confirmation is off unless the page turns it on (`alwaysAllow: true`, DEC-096), since it lifts the
   only brake at run time for that tool and AI app until the page is reloaded or the app
-  disconnected, which is what a prompt injection needs.
+  disconnected, which is what a prompt injection needs. The connect dialog lists what
+  runs without asking under each app, with "Ask again".
 - Annotations reach the AI app as MCP hints (`readOnlyHint`, `destructiveHint`), so the
   AI app can ask too.
 - Tools marked `untrustedContentHint` are announced with `openWorldHint: true` and the
@@ -668,7 +669,7 @@ from them.
   tools (`consequentialHint`, or MCP's `destructiveHint`) are not mirrored unless the
   page registers them with `{ webmcp: true }`, which says that its own dialog, or the
   agent's own confirmation, is enough for that tool; a mirrored `destructiveHint` tool
-  carries `consequentialHint: true` in WebMCP. "Always allow" is never offered or
+  carries `consequentialHint: true` in WebMCP. "Allow until reload" is never offered or
   applied for these calls.
 - **The same check.** Arguments are checked against the tool's schema before `execute`
   (Chrome does not), a consequential tool asks the page's `onConfirm` or the library's
@@ -709,7 +710,7 @@ sits beside the AI apps of A2 and A6 and the agents of A14.
   something verified; the page controls it, as it controls everything else it shows.
 - **Consequential tools still ask.** The same argument check and confirmation as for
   an AI app; the library's dialog says "(this site's assistant)" and never offers
-  "Always allow". A page may answer `onConfirm` itself for `kind: "local"` and so let
+  "Allow until reload". A page may answer `onConfirm` itself for `kind: "local"` and so let
   its own assistant run such tools without a question; that is the page's decision
   about its own backend, with A6's consequences if the assistant follows injected
   instructions.
