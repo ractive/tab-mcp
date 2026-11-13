@@ -45,7 +45,9 @@ export type ContentEvent = { type: "webmcp-changed" };
 
 /** The page in a tab, as the content script sees it. */
 export interface PageInfo {
+	/** The page's address, its query and fragment included. */
 	url: string;
+	/** The page's title, cut to `MAX_PAGE_TITLE`. */
 	title: string;
 	/** The page's `lang`, if it has one. */
 	language?: string;
@@ -89,19 +91,20 @@ export interface PageTools {
 	/** `document.modelContext` is there. */
 	available: boolean;
 	tools: PageTool[];
-	/**
-	 * Tools left out: those a tab-mcp page mirrors into WebMCP (listed in
-	 * `<html data-tab-mcp-webmcp>`), which an AI app gets from the page itself.
-	 */
-	mirrored: string[];
 	/** Why the tools could not be listed, if they could not. */
 	error?: string;
 }
 
-/** The answer to a call: what `executeTool()` returned (`null`: the tool navigated). */
+/**
+ * The answer to a call: what `executeTool()` returned (`null`: the tool
+ * navigated), or why there is none. `gone`: the tool did not run (the page
+ * changed before, or it has no such tool any more). `navigated`: the page
+ * went away while the tool ran (a tool that navigates), so it may have done
+ * its work.
+ */
 export type CallResult =
 	| { ok: true; value: string | null }
-	| { ok: false; error: string; gone?: true };
+	| { ok: false; error: string; gone?: true; navigated?: true };
 
 export type ContentResponse =
 	| ({ ok: true } & PageInfo)

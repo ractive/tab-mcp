@@ -10,7 +10,7 @@ tags:
   - operations
   - release
   - extension
-timestamp: 2026-11-11T23:30:00+01:00
+timestamp: 2026-11-13T12:00:00+01:00
 ---
 
 # tab-mcp for Chrome in the Chrome Web Store
@@ -24,7 +24,9 @@ after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
 `dist-store/` (so it does not replace a development build in `dist/`) and packs
 `tab-mcp-for-chrome-<version>-store.zip` next to `package.json`. The manifest has no `key`
 (the store gives the item its own id), no `host_permissions` (host access is optional,
-asked for with "Allow on all sites") and the package no source maps. `zipStoreBuild`
+asked for with "Allow on all sites"), the package no source maps, and its scripts not the
+test build's hooks (`TAB_MCP_TEST`, a `define`: the functions through which the
+end-to-end tests answer notifications). `zipStoreBuild`
 refuses to pack a build that has any of these, and `--zip` without `--store` is refused,
 since a zip of the development build would carry the owner's key. Every build holds
 `LICENSES.txt`.
@@ -137,7 +139,12 @@ nothing and installs nothing. Dependabot proposes its updates.
 >
 > A tool the page marks read-only runs at once. Every other tool asks you first, in the
 > side panel or in a notification, with the AI app's name, the site and the arguments.
-> You can allow a tool once, for this page, or per site.
+> You can allow a tool once, or stop being asked for it on that site.
+>
+> The AI app can also open pages in the tab in front: an address, back, forward and
+> reload. On the page's own site this runs at once, as a link on the page would; going to
+> another site asks you first. Each of these answers with the new page's address, title
+> and language.
 >
 > The relay is https://tab-mcp.ractive.ch by default; you can run your own (the relay is
 > open source, MIT) and enter its address in the settings.
@@ -145,23 +152,25 @@ nothing and installs nothing. Dependabot proposes its updates.
 > WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
 > you turn on chrome://flags/#enable-webmcp-testing.
 >
-> The extension reads only tabs you give it, and only the page's address, title, language
-> and its WebMCP tools. It sends data only while AI access is on, only to the relay you
-> chose, and only what your AI app asks for. No analytics.
+> The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
+> tabs, and only the page's address, title, language and its WebMCP tools. It sends data
+> only while AI access is on, only to the relay you chose, and only what your AI app asks
+> for. No analytics.
 
-**Single purpose:** Passing the WebMCP tools that the page in front registered to an AI
-app outside the browser that the user connected, through a tab-mcp relay.
+**Single purpose:** Letting an AI app outside the browser that the user connected work
+with the page in front, through a tab-mcp relay: passing on the WebMCP tools the page
+registered, and opening pages in that tab.
 
 **Permission justifications** (from the README's "Permissions" table):
 
 | Permission | Justification |
 |---|---|
-| `activeTab` | Read the tab the user clicked the icon on: its address, title, language and the WebMCP tools the page registered. No access to other tabs or sites. |
+| `activeTab` | Read the tab the user clicked the icon on: its address, title, language and the WebMCP tools the page registered, also after the AI app opened another page of the same origin in it. No access to other tabs; another origin in that tab needs another click (or the optional host access). Opening pages in the tab (an address, back, forward, reload) needs no permission; to another origin it asks the user first. |
 | `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
-| `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs. |
-| `notifications` | Ask the user before a tool that is not read-only runs while the side panel is not in front (Allow, Always allow; closing it declines). |
+| `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
+| `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front (Allow; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `<all_urls>` (optional) | Asked for only when the user clicks "Allow on all sites": read every tab's WebMCP tools without a click on the icon. |
+| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Allow on all sites": read every http(s) tab's WebMCP tools without a click on the icon. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the
 tools a page registered itself through the browser's WebMCP API; the relay connection
@@ -171,8 +180,11 @@ sends.
 **Data usage (Privacy practices tab):**
 
 - Collected:
-  - **Web history:** the address and title of the tab in front, when the AI app asks for
-    them (`page_info`).
+  - **Web history:** the address (with its query and fragment) and title of the tab in
+    front, when the AI app asks for them (`page_info`) and after it opened a page in the
+    tab (`navigate`, `go_back`, `go_forward`, `reload`) or a page tool took the tab to
+    another page. For back and forward the extension checks, in the page, whether the page
+    before or after is on the same origin; that stays in the browser.
   - **Website content:** the page's WebMCP tools (names, descriptions, schemas), and the
     arguments and results of the calls the AI app makes and the user allows.
 - Not collected: personally identifiable information, health, financial, authentication
@@ -196,14 +208,16 @@ sends.
 > example Claude Code: `claude mcp add --transport http tab-mcp-for-chrome <address>`,
 > then `/mcp` → authenticate, and enter the pairing code in the browser page that opens.
 > Ask Claude to list the page's tools (`webmcp_tools`) or call one; a tool that is not
-> read-only asks in the side panel first. No account is needed for the extension or the
-> relay.
+> read-only asks in the side panel first. Ask it to open another page of the store
+> (`navigate`): on the same site it opens at once; ask it to open another site: the side
+> panel asks first. No account is needed for the extension or the relay.
 
 Check the example storefront and the Chrome version before each submission.
 
 **Screenshots (1280×800):** the side panel with a page's tools and AI access on; the
 pairing address and code with "How do I add it?" open; a question in the side panel
-(Allow, Always allow, Don't allow) with the arguments; Claude Code calling a page tool.
+(Don't allow, Allow, Don't ask again on <host>) with the arguments; Claude Code calling a
+page tool.
 
 # Citations
 

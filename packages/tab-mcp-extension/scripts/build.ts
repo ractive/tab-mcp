@@ -4,8 +4,10 @@
  *
  *   bun scripts/build.ts          development build with the owner's key, so
  *                                 its id is the one the hosted relay allows
- *   bun scripts/build.ts --test   no key, `<all_urls>` host access at install
- *                                 (end-to-end tests: no click on the icon)
+ *   bun scripts/build.ts --test   no key, host access to every http(s) site
+ *                                 at install (end-to-end tests: no click on
+ *                                 the icon), and the hooks the tests answer
+ *                                 notifications with (only this build)
  *   bun scripts/build.ts --store  no key and no source maps, for the Chrome
  *                                 Web Store, into `dist-store/` (so it does
  *                                 not replace a development build in `dist/`)
@@ -25,6 +27,7 @@ import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { CONTENT_SCRIPT } from "../src/messages.ts";
+import { SITE_MATCHES } from "../src/tabs.ts";
 import { ICON_SIZES } from "./icons.ts";
 import { writeZip, zipNames } from "./zip.ts";
 
@@ -35,7 +38,7 @@ export interface BuildOptions {
 	outdir?: string;
 	/** No key, for the Chrome Web Store. */
 	store?: boolean;
-	/** No key, `<all_urls>` granted at install. */
+	/** No key, host access to every http(s) site granted at install. */
 	test?: boolean;
 	minify?: boolean;
 }
@@ -122,10 +125,23 @@ export function createManifest(
 			"scripting",
 			"sidePanel",
 		],
-		optional_host_permissions: ["<all_urls>"],
-		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
+		// Sites only: http(s), the pages "allowed" and the navigation rules
+		// know (ES 9). Not `file:` pages.
+		optional_host_permissions: SITE_MATCHES,
+		...(options.test ? { host_permissions: SITE_MATCHES } : {}),
+		// Incognito tabs are not offered to the AI app, even where the user
+		// allows the extension there.
+		incognito: "not_allowed",
 		...(options.key ? { key: options.key } : {}),
 	};
+}
+
+/** How every entry point is bundled. */
+interface BundleOptions {
+	minify: boolean;
+	sourcemap: "none" | "linked";
+	/** The test build: its hooks for the DevTools Protocol are in. */
+	test: boolean;
 }
 
 /** Bundle one entry point; returns the npm packages it contains. */
@@ -133,8 +149,7 @@ async function bundle(
 	entrypoint: string,
 	outdir: string,
 	format: "esm" | "iife",
-	minify: boolean,
-	sourcemap: "none" | "linked",
+	options: BundleOptions,
 	naming?: string,
 ): Promise<string[]> {
 	const result = await Bun.build({
@@ -143,10 +158,12 @@ async function bundle(
 		target: "browser",
 		format,
 		...(naming ? { naming } : {}),
-		minify,
+		minify: options.minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
-		sourcemap,
+		sourcemap: options.sourcemap,
 		metafile: true,
+		// The test hooks are code only in the test build (ES 7).
+		define: { TAB_MCP_TEST: String(options.test) },
 	});
 	if (!result.success)
 		throw new AggregateError(result.logs, `build of ${entrypoint} failed`);
@@ -189,30 +206,26 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 		version: string;
 	};
 	await rm(outdir, { recursive: true, force: true });
+	const how: BundleOptions = {
+		minify,
+		sourcemap,
+		test: options.test === true,
+	};
 	const packages = new Set([
-		...(await bundle("src/background.ts", outdir, "esm", minify, sourcemap)),
-		...(await bundle(
-			"src/content.ts",
-			outdir,
-			"iife",
-			minify,
-			sourcemap,
-			CONTENT_SCRIPT,
-		)),
+		...(await bundle("src/background.ts", outdir, "esm", how)),
+		...(await bundle("src/content.ts", outdir, "iife", how, CONTENT_SCRIPT)),
 		...(await bundle(
 			"src/sidepanel/index.html",
 			join(outdir, "sidepanel"),
 			"esm",
-			minify,
-			sourcemap,
+			how,
 		)),
 		// A question's own window, where the side panel could not open.
 		...(await bundle(
 			"src/question/index.html",
 			join(outdir, "question"),
 			"esm",
-			minify,
-			sourcemap,
+			how,
 		)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));
@@ -240,14 +253,19 @@ export function storeZipName(version: string): string {
 	return `tab-mcp-for-chrome-${version}-store.zip`;
 }
 
+/** What only the test build's scripts contain: its hooks for the DevTools Protocol. */
+export const TEST_HOOK = "tabMcpNotification";
+
 /**
  * What the Chrome Web Store must not get: a `key` (the store gives the item
- * its own), host access granted at install, or source maps. Returns the
- * problems; none means the package may go to the store.
+ * its own), host access granted at install, source maps, or the test build's
+ * hooks in a script (`scripts`: the text of each script by its name).
+ * Returns the problems; none means the package may go to the store.
  */
 export function storeProblems(
 	manifest: Record<string, unknown>,
 	names: readonly string[],
+	scripts: Readonly<Record<string, string>> = {},
 ): string[] {
 	const problems: string[] = [];
 	if ("key" in manifest) problems.push("the manifest has a key");
@@ -256,6 +274,8 @@ export function storeProblems(
 	for (const name of names.filter((n) => n.endsWith(".map")))
 		problems.push(`source map ${name}`);
 	if (!names.includes("manifest.json")) problems.push("no manifest.json");
+	for (const [name, text] of Object.entries(scripts))
+		if (text.includes(TEST_HOOK)) problems.push(`test hooks in ${name}`);
 	return problems;
 }
 
@@ -308,7 +328,10 @@ export async function zipStoreBuild(
 			manifest = parsed as Record<string, unknown>;
 		else before.push("manifest.json is not a JSON object");
 	}
-	before.push(...storeProblems(manifest, names));
+	const scripts: Record<string, string> = {};
+	for (const name of names.filter((n) => n.endsWith(".js")))
+		scripts[name] = await Bun.file(join(outdir, name)).text();
+	before.push(...storeProblems(manifest, names, scripts));
 	if (before.length > 0)
 		throw new Error(`not a store build: ${before.join("; ")}`);
 	const entries = [];

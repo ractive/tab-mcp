@@ -230,18 +230,27 @@ did, by connecting the extension.
   library refuses to register is not callable through `webmcp_call` either. Every
   result is marked untrusted (`untrustedContentHint`, mapped to MCP's
   `openWorldHint`); its text, all blocks together, is cut to 100,000 characters, with at
-  most 32 blocks and each image up to 1 MB of base64 (about 750 KB of image data). `webmcp_tools` lists names cut to 128 characters
-  and descriptions with the same origin prefix.
+  most 32 blocks and the images of one result up to 640 KiB of base64 together (an image
+  beyond is replaced by a note), so a result stays within the relay's default 1 MiB per
+  response; a result over 2 MiB is refused in the page, and the page's title and
+  language are cut to 300 and 64 characters (iteration 35). `webmcp_tools` lists names
+  cut to 128 characters, descriptions with the same origin prefix, and each offered
+  tool's input schema as offered.
+- **The origin is Chrome's (iteration 35).** The origin that prefixes descriptions, keys
+  "allowed" and is shown as "Site (verified)" comes from the content script's answer, so
+  the bridge compares it with the origin of the address Chrome reports for the tab and
+  offers no tools when they differ. A page with a compromised renderer can therefore not
+  borrow another site's origin, and with it the tools the user allowed there.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user every time (see "Questions" below), naming the page's origin. The user
-  can stop the questions: "Always allow" for that tool, AI app and page (forgotten when
-  the page changes or the AI app is disconnected; kept per grant, origin, the page's
-  document id and tool, and only if the tool looked up after the answer is still the one
-  asked about, so a navigation or another tab in front while the question is open gets
-  nothing from it), or "allowed" in the panel for a
-  tool of one exact origin (kept). An allowed tool runs whatever the AI app (or a prompt
-  injection steering it) asks of it. A page can only mark its own tools read-only, so a lie harms that page's
-  own user session, which its scripts could reach anyway.
+  can stop the questions for a tool of one exact http(s) origin, for every paired AI app
+  and kept until taken back: "Don't ask again on <host>" in a question, or "allowed" in
+  the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always
+  allow" is gone, DEC-139). A tool that changed while the question was open (a
+  navigation, another tab in front with a tool of the same name) does not run. An
+  allowed tool runs whatever the AI app (or a prompt injection steering it) asks of it.
+  A page can only mark its own tools read-only, so a lie harms that page's own user
+  session, which its scripts could reach anyway.
 - **A call runs only where its tool was listed.** Each page's content script has its
   own id; a call carries it and the read-only claim its tool was offered with, and the
   content script refuses if the tab navigated since or the claim changed. So a page
@@ -249,8 +258,11 @@ did, by connecting the extension.
   name changes things.
 - **Arguments are checked by the library** against the page's schema before the call;
   Chrome does not check them. The schema's `pattern` and `patternProperties` are left
-  out, so a page's catastrophic regular expression cannot freeze the connection. Calls end
-  for the AI app after 60 s or on its cancellation even if the page never answers.
+  out in keyword position only (a parameter called `pattern` stays), so a page's
+  catastrophic regular expression cannot freeze the connection. Calls end for the AI app
+  after 60 s or on its cancellation even if the page never answers; a page that does not
+  answer the list, `page_info` or history in 5 s is given up, so a stuck page cannot hold
+  the bridge for every other tab (iteration 35).
 - **Flooding.** The content script reports `toolchange` at most every 250 ms, sends at
   most 256 tools with names cut to 256 and texts to 4000 characters, and drops schemas
   over 16 KB; the bridge reads one list at a time and lists at most 64 tools.
@@ -260,7 +272,13 @@ did, by connecting the extension.
 - **Which page.** Without host access the extension reads a tab only after a click on its
   icon there, and only on that origin. With "Allow on all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
-  a tool not marked read-only still confirmed.
+  a tool not marked read-only still confirmed. Only http(s) pages (the optional host
+  access is `http://*/*` and `https://*/*`, no `file:` pages) and no Incognito tabs
+  (`"incognito": "not_allowed"`, DEC-142). `page_info` and every navigation result give
+  the page's address with its query and fragment, without a question: a paired AI app
+  (and the relay) can read the address of the tab in front, including a token in a
+  magic link or an OAuth callback; PRIVACY.md and the store listing say so (the
+  fragment is kept, as single-page apps route with it).
 - **Navigation (iteration 27, DEC-121).** `navigate`, `go_back`, `go_forward` and `reload`
   act only on the tab in front while the extension may read it, so the AI app cannot
   steer a tab the user never gave it. A page's text (a tool result, a description) can
@@ -316,11 +334,12 @@ did, by connecting the extension.
   U+FE00 to U+FE0F and U+E0100 to U+E01EF, U+034F, the Hangul fillers), private-use,
   unassigned and lone surrogate code points, line and paragraph separators, every space
   but U+0020 and U+2800.
-  Its buttons are Allow and Always allow (the same per-AI-app, per-page, per-tool memory
-  as the panel's; only Allow where Always allow is not offered), also when the arguments
-  are cut: the owner's decision, as the AI app's own chat shows the call and the full
-  arguments are a click away. A click on its body opens the whole question, the
-  arguments in full (scrollable), with Allow, Always allow and Don't allow: in the side
+  Its one button is Allow, also when the arguments are cut: the owner's decision, as the
+  AI app's own chat shows the call and the full arguments are a click away. "Don't ask
+  again" is not on the notification (iteration 35): allowing a tool for good needs the
+  whole question. A click on its body opens the whole question, the
+  arguments in full (scrollable), with Don't allow, Allow and "Don't ask again on
+  <host>": in the side
   panel of the tab's window (`sidePanel.open` from `notifications.onClicked`, which
   Chrome dispatches with a user gesture; called before any `await`), or, where Chrome
   refuses that, in a small popup window of the extension's. The question stays pending
@@ -334,7 +353,7 @@ did, by connecting the extension.
   page's. Each question's arguments go to a panel once, in a message of their own, not in
   every state (several large ones in one state could pass Chrome's message limit and
   leave the panel without any state); at most 5 questions of one AI app wait at once,
-  a further call of that app is declined without asking. A click on either button within 500 ms of showing does not count (it
+  a further call of that app is declined without asking. A click on Allow within 500 ms of showing does not count (it
   shows again), so a click meant for something that was there before cannot allow. Each notification
   carries its call: a click answers only that call, and one on a call already answered,
   timed out or cancelled is dropped, never taken for another. A notification is outside
@@ -347,11 +366,15 @@ did, by connecting the extension.
   user left it on; it starts only from the panel's button. The icon's badge says "on"
   while connected, so the user sees it without opening the panel. Read-only and
   "allowed" tools run with nothing on screen, as they did with the panel open but not
-  looked at. "Allowed" and Always allow exist only for http(s) origins: every opaque
-  origin is `null`, and one entry would cover them all. Panel commands run one after
-  another, so a stop is never overtaken by the connect before it. When the panel's
-  questions move (one is answered), its Allow buttons and "asks first" switches stay off
-  for 750 ms, so a second click lands on nothing that allows.
+  looked at. "Allowed" (and "Don't ask again", which writes it) exists only for http(s)
+  origins: every opaque origin is `null`, and one entry would cover them all. Panel
+  commands, and the "allowed" a question writes, run one after another, so a stop is
+  never overtaken by the connect before it, nor two writes of "allowed" by each other.
+  When the panel's questions move (one is answered, or one comes and pushes the panel
+  down, iteration 35), its Allow buttons, "Allow all" and "asks first" switches stay off
+  for 750 ms, so a click lands on nothing that allows. While AI access is on and the
+  relay cannot be reached, the panel says "retrying" (the alarm, also set at every
+  start, connects again each minute), not "off" (iteration 35).
 - **The extension's settings are out of web pages' reach.** The address secret, the tools
   allowed per site, the relay, whether AI access is on and the takeover flag are in
   IndexedDB in the extension's own origin, opened by the service worker only (the side
@@ -399,9 +422,10 @@ in the browser call them without pairing and without an identity (`client.kind`
 `"webmcp"`). Such an agent often drives the tab and can click Allow itself, so
 consequential tools are mirrored only when registered with `{ webmcp: true }`; calls get
 the same schema check and confirmation, never "Always allow". Only the native object is
-used, and `<html data-tab-mcp-webmcp>` keeps tab-mcp for Chrome from offering a mirrored
-tool a second time. The full analysis is A14 in `docs/threat-model.md` (DEC-115,
-DEC-119).
+used. tab-mcp for Chrome offers mirrored tools like any page tool (DEC-140): an AI app
+connected to both the page and the extension sees such a tool twice, and a consequential
+one asks in the extension and in the page. The full analysis is A14 in
+`docs/threat-model.md` (DEC-115, DEC-119).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 

@@ -227,8 +227,9 @@ await mcp.registerTool(deleteNoteTool, { webmcp: true }); // consequential: only
   native registration (a name already registered natively, a frame without
   `allow="tools"`) only warns in the console; the tool stays offered through the relay.
   A page that registers tools natively itself leaves `webmcp` off or uses other names.
-- `<html data-tab-mcp-webmcp>` lists the mirrored names, so that tab-mcp for Chrome does
-  not offer them a second time.
+- `<html data-tab-mcp-webmcp>` lists the mirrored names. tab-mcp for Chrome offers
+  mirrored tools like any page tool, so an AI app connected to both the page and the
+  extension sees them twice.
 
 ## 6. Security defaults
 

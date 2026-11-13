@@ -969,22 +969,29 @@ First release, version 0.1.0.
   tab-mcp relay (by default `https://tab-mcp.ractive.ch`; another one under "Settings").
 - Tools for the AI app: `page_info` (the tab's address, title, language, whether WebMCP is
   available; the server's instructions and its description ask the AI app to call it
-  first when the user refers to a page in their browser), `webmcp_tools` (the page's tools and why a tool is left out), one
+  first when the user refers to a page in their browser), `webmcp_tools` (the page's tools with their input schemas, and why a tool is left out), one
   `page_<name>` per page tool, following the tab in front and the page's `toolchange`,
-  and `webmcp_call` for AI apps that read their tool list once.
-- The page's tools are the page's word: descriptions start with the page's origin and are
-  cut, results are marked untrusted and cut, arguments are checked against the tool's
-  schema, a call runs only on the page its tool was listed from and ends after 60 s.
+  and `webmcp_call` for AI apps that read their tool list once. Tools a tab-mcp page
+  mirrors into WebMCP are offered like any other.
+- The page's tools are the page's word: descriptions start with the page's origin (the
+  one Chrome reports for the tab) and are cut, results are marked untrusted and cut
+  (images up to 640 KiB of base64 together, within the relay's 1 MiB), arguments are
+  checked against the tool's schema, a call runs only on the page its tool was listed
+  from and ends after 60 s; a page that does not answer the extension within 5 s is
+  given up. A tool that takes the tab to another page answers with the new page's
+  `page_info`.
 - A tool the page does not mark read-only asks first: in the side panel, or in a Chrome
-  notification while the panel is not in front (Allow, Always allow; a click on its body
-  shows the whole question). "Always allow" holds for that tool, AI app and page load; the
-  panel's tool list allows tools per site.
+  notification while the panel is not in front (Allow; a click on its body shows the
+  whole question). "Don't ask again on <host>" in the question, or the panel's tool list,
+  allows a tool on its site for every paired AI app. A question that is not answered in
+  60 s, or not asked because 5 of the AI app's calls wait already, says so to the AI app.
 - Access per tab: a click on the icon lets the extension read that tab (until it goes to
-  another origin); "Allow on all sites" asks for optional access to every tab.
+  another origin); "Allow on all sites" asks for optional access to every http(s) site.
+  No `file:` pages, no Incognito tabs.
 - Navigation tools for the tab in front, while the extension may read it: `navigate` (an
   http(s) address), `go_back`, `go_forward` and `reload`, each answering with the new
   page's `page_info` once it has loaded (at most 30 s). On the page's own origin they run
-  at once; to another origin they ask first (Allow or Don't allow, no Always allow), also
+  at once; to another origin they ask first (Allow or Don't allow, nothing kept), also
   a back or forward whose target the extension cannot see. The answer says when the new
   page needs a click on the icon. No new permission (DEC-121).
 - The side panel: AI access on or off, the address and pairing code for a new AI app with
@@ -992,9 +999,9 @@ First release, version 0.1.0.
   Disconnect, the tab's tools.
 - The connection lives in the service worker: it stays on with the panel closed and comes
   back after a browser start, an update or sleep (an alarm once a minute while AI access is
-  on).
+  on); the panel says "retrying" meanwhile.
 - Permissions: `activeTab`, `scripting`, `sidePanel`, `notifications`, `alarms`, and
-  `<all_urls>` only as an optional permission. No `storage` permission: the settings are
+  `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
 [client-0.15.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.15.0

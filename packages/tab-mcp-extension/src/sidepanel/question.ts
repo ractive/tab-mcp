@@ -3,12 +3,21 @@
  * asks (the AI app's declared name beside its verified host), the tool, the
  * site it acts on on a line of its own (what Chrome reports, the part that
  * is verified), the page's title for the tool apart and labelled as the
- * page's, and the arguments in full. Allow and Always allow start disabled:
- * the page that shows the card enables them once it has been in front long
- * enough.
+ * page's, and the arguments in full. Allow and "Don't ask again on <host>"
+ * start disabled: the page that shows the card enables them once it has been
+ * in front long enough.
  */
 
 import type { Answer, QuestionView } from "../protocol.ts";
+
+/** The host of `origin` for a button's label, or the origin as it is. */
+function hostOf(origin: string): string {
+	try {
+		return new URL(origin).host || origin;
+	} catch {
+		return origin;
+	}
+}
 
 function line(label: string, value: string, className: string): HTMLElement {
 	const p = document.createElement("p");
@@ -64,8 +73,8 @@ export function questionCard(
 		b.textContent = text;
 		b.dataset["answer"] = value;
 		if (primary) b.className = "primary";
-		// Allow and Always allow only once the page has been in front a while:
-		// the click that brings it forward cannot approve.
+		// Allow and "Don't ask again" only once the page has been in front a
+		// while: the click that brings it forward cannot approve.
 		if (value !== "deny") b.disabled = true;
 		b.addEventListener("click", () => {
 			if (!b.disabled) answer(value);
@@ -76,13 +85,13 @@ export function questionCard(
 	card.append(tool, args, buttons);
 	// Not for a page without a site of its own (an opaque origin).
 	// Nor for a navigation: each one to another site asks (DEC-121).
-	if (q.always && !q.navigation) {
-		buttons.append(button("Always allow", "always"));
-		const always = document.createElement("p");
-		always.className = "muted small";
-		always.textContent =
-			"Always allow: this tool runs without asking for this AI app, until the page changes.";
-		card.append(always);
+	if (q.site && q.origin && !q.navigation) {
+		const host = hostOf(q.origin);
+		buttons.append(button(`Don't ask again on ${host}`, "site"));
+		const note = document.createElement("p");
+		note.className = "muted small";
+		note.textContent = `Don't ask again: this tool runs without asking on ${host}, for every paired AI app, until you set it back to "asks first" in the tool list.`;
+		card.append(note);
 	}
 	return card;
 }

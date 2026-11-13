@@ -6,9 +6,16 @@
 import { describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { createManifest, extensionId, mitText } from "../scripts/build.ts";
-import { callTool, pageInfo, pageTools } from "../src/content.ts";
+import {
+	callTool,
+	MAX_LANGUAGE,
+	MAX_PAGE_TITLE,
+	MAX_SEND_RESULT,
+	pageInfo,
+	pageTools,
+} from "../src/content.ts";
 import { relayProblem } from "../src/relay.ts";
-import { noAccess } from "../src/tabs.ts";
+import { ask, callFailed, noAccess } from "../src/tabs.ts";
 import { createTools } from "../src/worker/tools.ts";
 
 describe("manifest", () => {
@@ -16,7 +23,12 @@ describe("manifest", () => {
 		const manifest = createManifest("1.2.3", { key: "KEY" });
 		expect(manifest["key"]).toBe("KEY");
 		expect(manifest["host_permissions"]).toBeUndefined();
-		expect(manifest["optional_host_permissions"]).toEqual(["<all_urls>"]);
+		// Sites only, no file: pages; no Incognito tabs (ES 9).
+		expect(manifest["optional_host_permissions"]).toEqual([
+			"http://*/*",
+			"https://*/*",
+		]);
+		expect(manifest["incognito"]).toBe("not_allowed");
 		expect(manifest["permissions"]).toEqual([
 			"activeTab",
 			"alarms",
@@ -28,7 +40,7 @@ describe("manifest", () => {
 
 	test("the test build has host access and no key; the store build neither", () => {
 		expect(createManifest("1.0.0", { test: true })).toMatchObject({
-			host_permissions: ["<all_urls>"],
+			host_permissions: ["http://*/*", "https://*/*"],
 		});
 		const store = createManifest("1.0.0", {});
 		expect(store["key"]).toBeUndefined();
@@ -56,6 +68,7 @@ describe("manifest", () => {
 /** A document as far as `pageInfo` reads it. */
 function fakeDocument(options: {
 	lang?: string;
+	title?: string;
 	tools?: number | Error;
 }): Document {
 	const context =
@@ -69,7 +82,7 @@ function fakeDocument(options: {
 				};
 	return {
 		location: { href: "https://example.com/a" },
-		title: "Example",
+		title: options.title ?? "Example",
 		documentElement: { lang: options.lang ?? "" },
 		...(context ? { modelContext: context } : {}),
 	} as unknown as Document;
@@ -103,6 +116,14 @@ describe("pageInfo", () => {
 			error: "disallowed by permissions policy",
 		});
 	});
+
+	test("the page's title and language are cut: a 2 MB title cannot fill every answer (ES 6)", async () => {
+		const info = await pageInfo(
+			fakeDocument({ title: "t".repeat(2_000_000), lang: "x".repeat(1000) }),
+		);
+		expect(info.title.length).toBe(MAX_PAGE_TITLE);
+		expect(info.language?.length).toBe(MAX_LANGUAGE);
+	});
 });
 
 describe("page_info", () => {
@@ -121,7 +142,7 @@ describe("page_info", () => {
 				}),
 			},
 			() => ({
-				state: { available: false, tools: [], mirrored: [] },
+				state: { available: false, tools: [] },
 				refresh: async () => {},
 				callByName: async () => undefined,
 			}),
@@ -173,6 +194,7 @@ describe("relay address", () => {
 function toolDocument(
 	tools: { name: string; readOnly: boolean }[],
 	mirrored = "",
+	result = "ran",
 ) {
 	const executed: string[] = [];
 	const registered = tools.map((t) => ({
@@ -193,7 +215,7 @@ function toolDocument(
 			getTools: async () => registered,
 			executeTool: async (tool: { name: string }) => {
 				executed.push(tool.name);
-				return "ran";
+				return result;
 			},
 		},
 	} as unknown as Document;
@@ -246,7 +268,9 @@ describe("calls in the content script", () => {
 		expect(executed).toEqual([]);
 	});
 
-	test("mirrored tools are left out and cannot be called", async () => {
+	test("tools a tab-mcp page mirrors are offered and called like its own (WM 1)", async () => {
+		// `data-tab-mcp-webmcp` says nothing about whether the AI app is paired
+		// with the page itself.
 		const { doc, executed } = toolDocument(
 			[
 				{ name: "own", readOnly: true },
@@ -255,38 +279,37 @@ describe("calls in the content script", () => {
 			"mirror",
 		);
 		const listed = await pageTools(doc, "doc-A");
-		expect(listed.tools.map((t) => t.name)).toEqual(["own"]);
-		expect(listed.mirrored).toEqual(["mirror"]);
-		const result = await callTool(
-			{ documentId: "doc-A", name: "mirror", readOnly: true },
-			{},
-			signal,
-			doc,
-			"doc-A",
-		);
-		expect(result).toMatchObject({ ok: false, gone: true });
-		expect(executed).toEqual([]);
-	});
-
-	test("every mirrored name is left out, also past the 256 sent (review of PR 103)", async () => {
-		const names = Array.from({ length: 300 }, (_, i) => `m${i}`);
-		const { doc, executed } = toolDocument(
-			[...names, "own"].map((name) => ({ name, readOnly: true })),
-			names.join(" "),
-		);
-		const listed = await pageTools(doc, "doc-A");
-		expect(listed.tools.map((t) => t.name)).toEqual(["own"]);
-		expect(listed.mirrored).toHaveLength(256);
+		expect(listed.tools.map((t) => t.name)).toEqual(["own", "mirror"]);
+		expect(listed).not.toHaveProperty("mirrored");
 		expect(
 			await callTool(
-				{ documentId: "doc-A", name: "m299", readOnly: true },
+				{ documentId: "doc-A", name: "mirror", readOnly: true },
 				{},
 				signal,
 				doc,
 				"doc-A",
 			),
-		).toMatchObject({ ok: false, gone: true });
-		expect(executed).toEqual([]);
+		).toEqual({ ok: true, value: "ran" });
+		expect(executed).toEqual(["mirror"]);
+	});
+
+	test("a result over the size passed on is refused with its own error (ES 6)", async () => {
+		const { doc } = toolDocument(
+			[{ name: "big", readOnly: true }],
+			"",
+			"r".repeat(MAX_SEND_RESULT + 1),
+		);
+		const result = await callTool(
+			{ documentId: "doc-A", name: "big", readOnly: true },
+			{},
+			signal,
+			doc,
+			"doc-A",
+		);
+		expect(result).toEqual({
+			ok: false,
+			error: `It returned ${MAX_SEND_RESULT + 1} characters; tab-mcp for Chrome passes on at most ${MAX_SEND_RESULT}.`,
+		});
 	});
 
 	test("what a page sends is capped", async () => {
@@ -299,5 +322,156 @@ describe("calls in the content script", () => {
 		const listed = await pageTools(doc, "doc-A");
 		expect(listed.tools.length).toBe(256);
 		expect(listed.more).toBe(44);
+	});
+});
+
+describe("asking a tab's content script", () => {
+	/** Chrome's tabs and scripting, as `ask` uses them, set by each test. */
+	function stubChrome(stub: {
+		sendMessage: () => Promise<unknown>;
+		status?: string;
+		inject?: () => Promise<unknown>;
+	}) {
+		const injected: number[] = [];
+		const before = (globalThis as { chrome?: unknown }).chrome;
+		(globalThis as { chrome?: unknown }).chrome = {
+			tabs: {
+				sendMessage: stub.sendMessage,
+				get: async () => ({ status: stub.status ?? "complete" }),
+			},
+			scripting: {
+				executeScript: async ({ target }: { target: { tabId: number } }) => {
+					injected.push(target.tabId);
+					return stub.inject?.();
+				},
+			},
+		};
+		return {
+			injected,
+			restore: () => {
+				(globalThis as { chrome?: unknown }).chrome = before;
+			},
+		};
+	}
+	const tab = { id: 4, url: "https://shop.example/", title: "Shop" };
+
+	test("a page that does not answer is given up, so it cannot hold every tab (ES 1)", async () => {
+		const chrome = stubChrome({ sendMessage: () => new Promise(() => {}) });
+		try {
+			await expect(ask(tab, { type: "webmcp-list" }, 50)).rejects.toThrow(
+				"did not answer within",
+			);
+		} finally {
+			chrome.restore();
+		}
+	});
+
+	test("only pages of http(s) sites, also where a click granted a file: page (DEC-142)", async () => {
+		let sent = 0;
+		const chrome = stubChrome({
+			sendMessage: async () => {
+				sent++;
+				return { ok: true };
+			},
+		});
+		try {
+			await expect(
+				ask(
+					{ ...tab, url: "file:///home/me/report.html" },
+					{ type: "page-info" },
+				),
+			).rejects.toThrow("works only on pages of http(s) sites");
+			expect(sent).toBe(0);
+			expect(chrome.injected).toEqual([]);
+		} finally {
+			chrome.restore();
+		}
+	});
+
+	test("a page still loading gets the content script all the same (EQ 15)", async () => {
+		let sent = 0;
+		const chrome = stubChrome({
+			status: "loading",
+			sendMessage: async () => {
+				if (sent++ === 0) throw new Error("Receiving end does not exist.");
+				return { ok: true, value: null };
+			},
+		});
+		try {
+			expect(await ask(tab, { type: "page-info" })).toEqual({
+				ok: true,
+				value: null,
+			});
+			expect(chrome.injected).toEqual([4]);
+		} finally {
+			chrome.restore();
+		}
+	});
+
+	test("putting it in fails: still loading, or not allowed, says which", async () => {
+		const refused = async () => {
+			throw new Error("Cannot access contents of the page.");
+		};
+		const missing = async () => {
+			throw new Error("Receiving end does not exist.");
+		};
+		let chrome = stubChrome({
+			status: "loading",
+			sendMessage: missing,
+			inject: refused,
+		});
+		try {
+			await expect(ask(tab, { type: "page-info" })).rejects.toThrow(
+				"still loading",
+			);
+		} finally {
+			chrome.restore();
+		}
+		chrome = stubChrome({ sendMessage: missing, inject: refused });
+		try {
+			await expect(ask(tab, { type: "page-info" })).rejects.toThrow(
+				"may not read this tab",
+			);
+		} finally {
+			chrome.restore();
+		}
+	});
+
+	test("a call whose page went away: before it ran (gone) or while it ran (navigated, WM 2)", () => {
+		expect(
+			callFailed(
+				new Error(
+					"Could not establish connection. Receiving end does not exist.",
+				),
+			),
+		).toMatchObject({ ok: false, gone: true });
+		expect(callFailed(new Error("No tab with id: 4."))).toMatchObject({
+			gone: true,
+		});
+		expect(
+			callFailed(
+				new Error(
+					"A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received",
+				),
+			),
+		).toMatchObject({ ok: false, navigated: true });
+		expect(
+			callFailed(
+				new Error("The message port closed before a response was received."),
+			),
+		).toMatchObject({ navigated: true });
+		expect(
+			callFailed(
+				new Error(
+					"The page keeping the extension port is moved into back/forward cache, so the message channel is closed.",
+				),
+			),
+		).toMatchObject({ navigated: true });
+		// Anything else: a plain failure, nothing says the tool ran.
+		const other = callFailed(new Error("An unexpected error occurred"));
+		expect(other).toEqual({
+			ok: false,
+			error: "The call did not reach the page: An unexpected error occurred",
+		});
 	});
 });

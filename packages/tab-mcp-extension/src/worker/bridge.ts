@@ -8,12 +8,19 @@
  *
  * Everything that comes from the page is the page's word: names, titles,
  * descriptions, schemas, hints and results. Texts are cut and descriptions
- * start with the page's origin; results are marked untrusted and cut; a tool
- * not marked read-only asks the user every time; a call runs only on the page
- * its tool was listed from, with the read-only claim it was offered with.
+ * start with the page's origin (checked against the address Chrome reports);
+ * results are marked untrusted and cut; a tool not marked read-only asks the
+ * user every time (both ways of calling it ask here, through `confirm`); a
+ * call runs only on the page its tool was listed from, with the read-only
+ * claim it was offered with.
  */
 
-import { Validator } from "@cfworker/json-schema";
+import {
+	ignoredKeyword,
+	schemaArrayKeyword,
+	schemaMapKeyword,
+	Validator,
+} from "@cfworker/json-schema";
 import type {
 	ConfirmRequest,
 	Tool,
@@ -35,9 +42,14 @@ export const MAX_NAME = 128;
 export const MAX_SCHEMA_BYTES = 16 * 1024;
 /** A result's text, all blocks together, is cut to this many characters. */
 export const MAX_RESULT = 100_000;
-/** At most this many content blocks, and image data up to this size. */
+/** At most this many content blocks. */
 export const MAX_BLOCKS = 32;
-export const MAX_IMAGE_BASE64 = 1024 * 1024;
+/**
+ * The image data of one result, all images together (base64 characters).
+ * With the text above, a result stays under the relay's default limit of
+ * 1 MiB per response; an image beyond it is left out with a note.
+ */
+export const MAX_IMAGES_BASE64 = 640 * 1024;
 /** A call the page does not answer in this time is given up. */
 export const CALL_TIMEOUT_MS = 60_000;
 
@@ -64,6 +76,9 @@ export function bridgedName(name: string): string | undefined {
 const cut = (text: string, max: number) =>
 	text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
+const message = (error: unknown) =>
+	error instanceof Error ? error.message : String(error);
+
 /** The page's description, cut, after its origin. */
 export function describe(origin: string, description: string): string {
 	const text = description.trim() || "(no description)";
@@ -73,19 +88,43 @@ export function describe(origin: string, description: string): string {
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+const has = (keywords: Record<string, unknown>, key: string) =>
+	Object.hasOwn(keywords, key);
+
 /**
- * A copy of `schema` without the keywords whose regular expressions the
- * validator would run in the extension (`pattern`, `patternProperties`): a
- * page's catastrophic pattern would freeze the connection. The page still checks
- * its own input as it likes.
+ * A copy of schema `schema` without the keywords whose regular expressions
+ * the validator would run in the extension (`pattern`, `patternProperties`):
+ * a page's catastrophic pattern would freeze the connection. The page still
+ * checks its own input as it likes.
+ *
+ * Only keywords go, never names: the walk follows the validator's own idea of
+ * where a schema is (`dereference` in `@cfworker/json-schema`). Under
+ * `properties`, `$defs`, `dependentSchemas` and the like the keys are names
+ * (a parameter may be called `pattern`), and only their values are schemas;
+ * `enum`, `const`, `default` and the other plain keywords are data and stay
+ * as they are; any other keyword with an object value is walked as a schema,
+ * as the validator would reach it through a `$ref`.
  */
 function withoutPatterns(schema: unknown): unknown {
-	if (Array.isArray(schema)) return schema.map(withoutPatterns);
 	if (!isObject(schema)) return schema;
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(schema)) {
 		if (key === "pattern" || key === "patternProperties") continue;
-		out[key] = withoutPatterns(value);
+		if (
+			(has(schemaMapKeyword, key) || key === "dependencies") &&
+			isObject(value)
+		) {
+			// Names, each with a schema (`dependencies`: or a list of names).
+			const map: Record<string, unknown> = {};
+			for (const [name, sub] of Object.entries(value))
+				map[name] = withoutPatterns(sub);
+			out[key] = map;
+		} else if (Array.isArray(value))
+			out[key] = has(schemaArrayKeyword, key)
+				? value.map(withoutPatterns)
+				: value;
+		else if (has(ignoredKeyword, key)) out[key] = value;
+		else out[key] = withoutPatterns(value);
 	}
 	return out;
 }
@@ -126,6 +165,7 @@ function blocksOf(value: unknown): Block[] | undefined {
 	if (value["content"].length > MAX_BLOCKS) return undefined;
 	const blocks: Block[] = [];
 	let text = MAX_RESULT;
+	let images = MAX_IMAGES_BASE64;
 	for (const item of value["content"]) {
 		if (!isObject(item)) return undefined;
 		if (item["type"] === "text" && typeof item["text"] === "string") {
@@ -136,17 +176,24 @@ function blocksOf(value: unknown): Block[] | undefined {
 		} else if (
 			item["type"] === "image" &&
 			typeof item["data"] === "string" &&
-			item["data"].length <= MAX_IMAGE_BASE64 &&
 			BASE64.test(item["data"]) &&
 			typeof item["mimeType"] === "string" &&
 			/^image\/(png|jpeg|gif|webp)$/.test(item["mimeType"])
-		)
+		) {
+			if (item["data"].length > images) {
+				blocks.push({
+					type: "text",
+					text: `[An image of ${Math.ceil(item["data"].length / 1024)} KiB (base64) was left out: the images of one result may have ${MAX_IMAGES_BASE64 / 1024} KiB together.]`,
+				});
+				continue;
+			}
+			images -= item["data"].length;
 			blocks.push({
 				type: "image",
 				data: item["data"],
 				mimeType: item["mimeType"],
 			});
-		else return undefined;
+		} else return undefined;
 	}
 	return blocks;
 }
@@ -155,11 +202,9 @@ function blocksOf(value: unknown): Block[] | undefined {
  * What `executeTool()` returned, as the tool's result: a string as one text
  * block; the JSON of an MCP result (`{"content": [...]}`, what
  * `@mcp-b/global` pages return) as its text and image blocks within the
- * budget; `null` (the tool navigated) as a note.
+ * budget. (`null`, the tool navigated, is answered with the new page.)
  */
-export function resultOf(value: string | null): unknown {
-	if (value === null)
-		return "The tool started a navigation: the page in the tab has changed.";
+export function resultOf(value: string): unknown {
 	if (value.startsWith("{")) {
 		try {
 			const parsed: unknown = JSON.parse(value);
@@ -185,12 +230,21 @@ export interface Offered {
 	/** The page's description after its origin, cut. */
 	description: string;
 	readOnly: boolean;
+	/**
+	 * The arguments it takes, as offered (`webmcp_call` checks them against
+	 * it): only for a tool that is offered.
+	 */
+	inputSchema?: Record<string, unknown>;
+	/** Why `webmcp_tools` lists no schema for it although it is offered (size). */
+	schemaLeftOut?: string;
 	/** Why it is not offered. */
 	problem?: string;
 }
 
 /** What the bridge knows about the page in front, for `webmcp_tools` and the panel. */
 export interface BridgeState {
+	/** The tab it was read from. */
+	tabId?: number;
 	url?: string;
 	origin?: string;
 	/** `document.modelContext` is there. */
@@ -198,8 +252,6 @@ export interface BridgeState {
 	tools: Offered[];
 	/** Tools the page has beyond those listed. */
 	more?: number;
-	/** Names a tab-mcp page offers itself (iteration 25), left out. */
-	mirrored: string[];
 	/** Why there are no tools: no access, an error. */
 	error?: string;
 }
@@ -221,6 +273,11 @@ export interface BridgeChrome {
 		input: unknown,
 		signal: AbortSignal,
 	): Promise<CallResult>;
+	/**
+	 * Tab `tabId` after its page went away during a call: wait until it has
+	 * loaded and give its `page_info` (or why it cannot be read).
+	 */
+	settled(tabId: number, signal: AbortSignal): Promise<unknown>;
 }
 
 /** Where the bridged tools go: the connection's `TabMcp`. */
@@ -228,12 +285,10 @@ export interface Registrar {
 	registerTool(tool: Tool, options: { signal: AbortSignal }): Promise<void>;
 }
 
-/** Asks the user: `webmcp_call`'s confirmation. */
-export type Confirm = (request: ConfirmRequest) => Promise<boolean>;
-
-/** The page tool behind an offered tool name, as `lookup` gives it. */
+/** The page tool a question is about. */
 export interface LookedUp {
 	tabId: number;
+	/** Its page's origin, as Chrome reports the tab's address. */
 	origin: string;
 	/** The page in the tab it was listed from (the content script's id). */
 	documentId: string;
@@ -241,13 +296,23 @@ export interface LookedUp {
 	readOnly: boolean;
 }
 
-/** Whether two lookups are the same tool of the same page in the same tab. */
-export const sameTool = (a: LookedUp, b: LookedUp): boolean =>
-	a.tabId === b.tabId &&
-	a.origin === b.origin &&
-	a.documentId === b.documentId &&
-	a.name === b.name &&
-	a.readOnly === b.readOnly;
+/**
+ * Asks before a tool that is not read-only runs; resolves if it may run and
+ * rejects, with what to tell the AI app, if not.
+ */
+export type Confirm = (
+	request: ConfirmRequest,
+	tool: LookedUp,
+) => Promise<void>;
+
+/** What a bridge is made with besides its registrar and Chrome. */
+export interface BridgeOptions {
+	/** Called after each refresh (for the panel). */
+	changed?: () => void;
+	/** Asks the user; without it, every tool that is not read-only is refused. */
+	confirm?: Confirm;
+	timeoutMs?: number;
+}
 
 /** A tool of the page in front as the bridge keeps it, to call. */
 interface Callable {
@@ -258,6 +323,14 @@ interface Callable {
 	description: string;
 	validator: Validator;
 }
+
+/** Whether `a` and `b` are the same tool of the same page in the same tab. */
+const sameTool = (a: Callable, b: Callable): boolean =>
+	a.tabId === b.tabId &&
+	a.origin === b.origin &&
+	a.target.documentId === b.target.documentId &&
+	a.target.name === b.target.name &&
+	a.target.readOnly === b.target.readOnly;
 
 /** A page tool's schema and validator, or why it has none. */
 type Compiled =
@@ -273,9 +346,7 @@ function compile(tool: PageTool): Compiled {
 			validator: new Validator(made.schema, "2020-12", false),
 		};
 	} catch (error) {
-		return {
-			problem: `its inputSchema cannot be used: ${error instanceof Error ? error.message : String(error)}`,
-		};
+		return { problem: `its inputSchema cannot be used: ${message(error)}` };
 	}
 }
 
@@ -283,48 +354,25 @@ function compile(tool: PageTool): Compiled {
 const keyOf = (tabId: number, documentId: string, tool: PageTool) =>
 	JSON.stringify([tabId, documentId, tool]);
 
-/** Call a page tool with the timeout and cancellation; the call always ends. */
-async function run(
-	call: BridgeChrome["call"],
-	callable: Callable,
-	input: unknown,
-	options: ToolExecuteOptions,
-	timeoutMs: number,
-): Promise<unknown> {
-	const { target } = callable;
-	const timeout = AbortSignal.timeout(timeoutMs);
-	const signal = AbortSignal.any([options.signal, timeout]);
-	// Ends when the signal aborts, even if the page never answers (a blocked
-	// page cannot even take the cancel message).
-	const aborted = new Promise<"aborted">((resolve) => {
-		if (signal.aborted) resolve("aborted");
-		signal.addEventListener("abort", () => resolve("aborted"), { once: true });
-	});
-	const result = await Promise.race([
-		call(callable.tabId, target, input, signal),
-		aborted,
-	]);
-	if (result === "aborted" || timeout.aborted) {
-		if (timeout.aborted)
-			throw new Error(
-				`The page's tool ${target.name} did not answer within ${Math.round(timeoutMs / 1000)} s.`,
-			);
-		throw new Error(`The call to ${target.name} was cancelled.`);
+/** The origin of `url` as Chrome reports a tab's address; `undefined` if none. */
+function originOf(url: string): string | undefined {
+	try {
+		return new URL(url).origin;
+	} catch {
+		return undefined;
 	}
-	if (!result.ok)
-		throw new Error(
-			result.gone
-				? `${result.error} The page's tools may have changed; webmcp_tools lists them.`
-				: `The page's tool ${target.name} failed: ${result.error}`,
-		);
-	return resultOf(result.value);
 }
+
+const refuse: Confirm = async () => {
+	throw new Error("The user did not allow this call.");
+};
 
 export class PageToolBridge {
 	readonly #registrar: Registrar;
 	readonly #chrome: BridgeChrome;
 	readonly #timeoutMs: number;
 	readonly #changed: () => void;
+	readonly #confirm: Confirm;
 	/** The registered tools by AI app name, with what they were made from. */
 	readonly #registered = new Map<
 		string,
@@ -334,44 +382,26 @@ export class PageToolBridge {
 	#callable = new Map<string, Callable>();
 	/** The schemas and validators of the last read, by `keyOf`. */
 	#compiled = new Map<string, Compiled>();
-	#state: BridgeState = { available: false, tools: [], mirrored: [] };
+	#state: BridgeState = { available: false, tools: [] };
 	/** The refresh running, and whether another was asked for meanwhile. */
 	#running: Promise<void> | undefined;
 	#again = false;
 	#stopped = false;
 
-	/** `changed` is called after each refresh (for the panel). */
 	constructor(
 		registrar: Registrar,
 		chrome: BridgeChrome,
-		changed: () => void = () => {},
-		timeoutMs = CALL_TIMEOUT_MS,
+		options: BridgeOptions = {},
 	) {
 		this.#registrar = registrar;
 		this.#chrome = chrome;
-		this.#changed = changed;
-		this.#timeoutMs = timeoutMs;
+		this.#changed = options.changed ?? (() => {});
+		this.#confirm = options.confirm ?? refuse;
+		this.#timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
 	}
 
 	get state(): BridgeState {
 		return this.#state;
-	}
-
-	/**
-	 * The page tool behind an offered tool name (`page_<name>`): its tab,
-	 * site, page (`documentId`) and name.
-	 */
-	lookup(toolName: string): LookedUp | undefined {
-		for (const callable of this.#callable.values())
-			if (bridgedName(callable.target.name) === toolName)
-				return {
-					tabId: callable.tabId,
-					origin: callable.origin,
-					documentId: callable.target.documentId,
-					name: callable.target.name,
-					readOnly: callable.target.readOnly,
-				};
-		return undefined;
 	}
 
 	/**
@@ -412,9 +442,10 @@ export class PageToolBridge {
 		name: string,
 		args: unknown,
 		options: ToolExecuteOptions,
-		confirm: Confirm,
 	): Promise<unknown> {
-		await this.refresh();
+		// A page that does not answer is given up by the read itself; the AI
+		// app's cancel ends the wait too.
+		await Promise.race([this.refresh(), abortedWith(options.signal)]);
 		const callable = this.#callable.get(name);
 		if (callable === undefined) {
 			const left = this.#state.tools.find(
@@ -435,21 +466,100 @@ export class PageToolBridge {
 					.map((e) => `${e.instanceLocation} ${e.error}`)
 					.join("; ")}`,
 			);
-		if (!callable.target.readOnly) {
-			const allowed = await confirm({
-				tool: {
-					// The tool's own name, so "Always allow" is one entry for both.
-					name: bridgedName(name) ?? `${PREFIX}${name}`,
-					title: callable.title,
-					description: callable.description,
+		return this.#allowedThenRun(callable, input, options);
+	}
+
+	/**
+	 * Ask first for a tool that is not read-only (both ways of calling it),
+	 * then run it if it is still the tool the user was asked about.
+	 */
+	async #allowedThenRun(
+		callable: Callable,
+		input: unknown,
+		options: ToolExecuteOptions,
+	): Promise<unknown> {
+		const { target } = callable;
+		if (!target.readOnly) {
+			await this.#confirm(
+				{
+					tool: {
+						// The AI app's name of the tool, for both ways of calling it.
+						name: bridgedName(target.name) ?? `${PREFIX}${target.name}`,
+						title: callable.title,
+						description: callable.description,
+					},
+					arguments: input as Record<string, unknown>,
+					client: options.client,
+					signal: options.signal,
 				},
-				arguments: input as Record<string, unknown>,
-				client: options.client,
-				signal: options.signal,
-			});
-			if (!allowed) throw new Error("The user did not allow this call.");
+				{
+					tabId: callable.tabId,
+					origin: callable.origin,
+					documentId: target.documentId,
+					name: target.name,
+					readOnly: target.readOnly,
+				},
+			);
+			// A page that changed while the question was open (a navigation,
+			// another tab in front with a tool of the same name) gets nothing.
+			const now = this.#callable.get(target.name);
+			if (now === undefined || !sameTool(now, callable))
+				throw new Error(
+					`The page's tool ${cut(target.name, MAX_NAME)} changed while the user was asked; it did not run. webmcp_tools lists the tools of the page in front.`,
+				);
 		}
-		return run(this.#chrome.call, callable, input, options, this.#timeoutMs);
+		return this.#run(callable, input, options);
+	}
+
+	/** Call a page tool with the timeout and cancellation; the call always ends. */
+	async #run(
+		callable: Callable,
+		input: unknown,
+		options: ToolExecuteOptions,
+	): Promise<unknown> {
+		const { target } = callable;
+		const timeout = AbortSignal.timeout(this.#timeoutMs);
+		const signal = AbortSignal.any([options.signal, timeout]);
+		// Ends when the signal aborts, even if the page never answers (a blocked
+		// page cannot even take the cancel message).
+		const result = await Promise.race([
+			this.#chrome.call(callable.tabId, target, input, signal),
+			abortedWith(signal).catch(() => "aborted" as const),
+		]);
+		if (result === "aborted" || timeout.aborted) {
+			if (timeout.aborted)
+				throw new Error(
+					`The page's tool ${target.name} did not answer within ${Math.round(this.#timeoutMs / 1000)} s.`,
+				);
+			throw new Error(`The call to ${target.name} was cancelled.`);
+		}
+		if (result.ok ? result.value === null : result.navigated === true) {
+			// The tool navigated (Chrome's `null`), or the page went away while
+			// it ran: a tool that navigates (a checkout, a search) ends so. Not
+			// a failure: it may well have done its work (WM 2).
+			// Only the AI app's cancel ends this wait, not what is left of the
+			// call's 60 s: the load has its own limit (then `loading: true`).
+			const page = await this.#chrome
+				.settled(callable.tabId, options.signal)
+				.catch((error: unknown) => ({
+					readable: false,
+					reason: message(error),
+				}));
+			// The new page's page_<name> tools are offered before the answer.
+			await this.refresh().catch(() => {});
+			return {
+				navigated: true,
+				note: `The page in the tab changed while ${target.name} ran (the tool navigated it, or the tab closed): the tool may have completed. page is the tab's page now; webmcp_tools lists its tools.`,
+				page,
+			};
+		}
+		if (!result.ok)
+			throw new Error(
+				result.gone
+					? `${result.error} The page's tools may have changed; webmcp_tools lists them.`
+					: `The page's tool ${target.name} failed: ${result.error}`,
+			);
+		return resultOf(result.value ?? "");
 	}
 
 	async #read(): Promise<void> {
@@ -458,16 +568,18 @@ export class PageToolBridge {
 		try {
 			tab = await this.#chrome.current();
 			tools = await this.#chrome.list(tab);
+			// The origin is the content script's word; what Chrome reports for
+			// the tab is not the page's. A page that says it is another site
+			// (or a tab that navigated meanwhile) gets no tools.
+			if (originOf(tab.url) !== tools.origin)
+				throw new Error(
+					"The page in the tab changed while its tools were read; they are read again once it has loaded.",
+				);
 		} catch (error) {
 			if (this.#stopped) return;
 			this.#offer([]);
 			this.#callable = new Map();
-			this.#state = {
-				available: false,
-				tools: [],
-				mirrored: [],
-				error: error instanceof Error ? error.message : String(error),
-			};
+			this.#state = { available: false, tools: [], error: message(error) };
 			this.#changed();
 			return;
 		}
@@ -521,6 +633,7 @@ export class PageToolBridge {
 			}
 			const { schema, validator } = made;
 			entry.tool = name;
+			entry.inputSchema = schema;
 			const item: Callable = {
 				tabId: tab.id,
 				origin: tools.origin,
@@ -536,12 +649,12 @@ export class PageToolBridge {
 		this.#callable = callable;
 		this.#compiled = compiled;
 		this.#state = {
+			tabId: tab.id,
 			url: tools.url,
 			origin: tools.origin,
 			available: tools.available,
 			tools: offered,
 			...(more ? { more } : {}),
-			mirrored: tools.mirrored.slice(0, MAX_TOOLS).map((m) => cut(m, MAX_NAME)),
 			...(tools.error ? { error: cut(tools.error, MAX_DESCRIPTION) } : {}),
 		};
 		this.#changed();
@@ -571,10 +684,7 @@ export class PageToolBridge {
 					// not callable through webmcp_call either. Kept as this tool's
 					// problem, so the next read neither offers it again nor makes
 					// it callable for a moment.
-					const problem = cut(
-						error instanceof Error ? error.message : String(error),
-						MAX_DESCRIPTION,
-					);
+					const problem = cut(message(error), MAX_DESCRIPTION);
 					this.#registered.delete(name);
 					this.#compiled.set(key, { problem });
 					for (const [pageName, c] of this.#callable)
@@ -583,6 +693,7 @@ export class PageToolBridge {
 					const entry = offered.find((o) => o.tool === name);
 					if (entry) {
 						delete entry.tool;
+						delete entry.inputSchema;
 						entry.problem = problem;
 						this.#changed();
 					}
@@ -590,14 +701,17 @@ export class PageToolBridge {
 		}
 	}
 
-	/** The `page_<name>` tool for a page tool. */
+	/**
+	 * The `page_<name>` tool for a page tool. Not `consequentialHint`: the
+	 * bridge asks itself (`confirm`), as `webmcp_call` does, so that the AI
+	 * app hears why a call did not run (not answered in time, too many
+	 * questions waiting) and not only "declined".
+	 */
 	#tool(
 		callable: Callable,
 		name: string,
 		schema: Record<string, unknown>,
 	): Tool {
-		const call = this.#chrome.call;
-		const timeoutMs = this.#timeoutMs;
 		return {
 			name,
 			title: callable.title,
@@ -605,13 +719,27 @@ export class PageToolBridge {
 			inputSchema: schema,
 			annotations: {
 				readOnlyHint: callable.target.readOnly,
-				// Not read-only: the user confirms every call.
-				consequentialHint: !callable.target.readOnly,
+				// Not read-only: the user confirms every call (MCP's hint for it).
+				destructiveHint: !callable.target.readOnly,
 				// Whatever it answers is the page's.
 				untrustedContentHint: true,
 			},
 			execute: (input, options) =>
-				run(call, callable, input, options, timeoutMs),
+				this.#allowedThenRun(callable, input, options),
 		};
 	}
+}
+
+/**
+ * Rejects once `signal` aborts (never resolves). Meant for `Promise.race`:
+ * a rejection after the race was decided is not reported as unhandled.
+ */
+function abortedWith(signal: AbortSignal): Promise<never> {
+	const aborted = new Promise<never>((_, reject) => {
+		const abort = () => reject(new Error("The call was cancelled."));
+		if (signal.aborted) abort();
+		else signal.addEventListener("abort", abort, { once: true });
+	});
+	aborted.catch(() => {});
+	return aborted;
 }

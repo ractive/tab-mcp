@@ -1,7 +1,8 @@
 /**
  * The connection's pieces in the service worker: who may send what, the
- * questions of tools that ask first, the address secret's storage, Always
- * allow, and a background bundle a service worker can run.
+ * questions of tools that ask first, the address secret's storage, deciding
+ * whether a page tool may run, the panel's status, and a background bundle a
+ * service worker can run.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -25,9 +26,16 @@ import {
 	MAX_EARLY_MESSAGES,
 	Starter,
 } from "../src/starter.ts";
-import { allowable, isAllowed, setAllowedMany } from "../src/worker/allowed.ts";
-import { AlwaysAllowed, type AlwaysKey } from "../src/worker/always.ts";
+import {
+	type AllowedTools,
+	allowable,
+	isAllowed,
+	loadAllowed,
+	setAllowed,
+	setAllowedMany,
+} from "../src/worker/allowed.ts";
 import type { LookedUp } from "../src/worker/bridge.ts";
+import { panelStatus } from "../src/worker/connection.ts";
 import { decide } from "../src/worker/decide.ts";
 import { memoryKv } from "../src/worker/kv.ts";
 import {
@@ -131,11 +139,13 @@ describe("who may send what", () => {
 		expect(
 			isQuestionSender({ id: "other", url: page, tab: { id: 9 } }, ID),
 		).toBe(false);
-		for (const answer of ["allow", "always", "deny"] as const)
+		for (const answer of ["allow", "site", "deny"] as const)
 			expect(parseQuestionAnswer({ type: "answer", answer })).toBe(answer);
 		for (const bad of [
 			null,
 			{ type: "answer", answer: "yes" },
+			// The ephemeral Always allow is gone (EQ 10).
+			{ type: "answer", answer: "always" },
 			{ type: "answer", id: "q", answer: 1 },
 			{ type: "connect" },
 		])
@@ -234,7 +244,7 @@ function request(
 const settle = () => Bun.sleep(5);
 
 describe("questions", () => {
-	test("without a panel in front, a notification asks: Allow, Always allow", async () => {
+	test("without a panel in front, a notification asks: Allow only (allowing for the site needs the whole question)", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
 		const where = { tabId: 7, origin: "https://site.test" };
@@ -247,32 +257,16 @@ describe("questions", () => {
 		expect(text.message).toBe(
 			'Claude (claude.ai) wants to run page_place_order: {"item":"tea"}',
 		);
-		expect(text.buttons).toEqual(["Allow", "Always allow"]);
-		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(id, 0);
-		expect(await answer).toBe("allow");
-		expect(questions.list).toEqual([]);
-		expect(host.shown.size).toBe(0);
-		const always = questions.ask(request(), where);
-		await settle();
-		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton([...host.shown.keys()][0] as string, 1);
-		expect(await always).toBe("always");
-	});
-
-	test("where Always allow is not offered, only Allow, and a second button counts as nothing", async () => {
-		const host = fakeHost();
-		const questions = new Questions(host);
-		const answer = questions.ask(request(), { tabId: 7, origin: "null" });
-		await settle();
-		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text.buttons).toEqual(["Allow"]);
 		host.advance(NOTIFICATION_GUARD_MS);
+		// Any other button counts as nothing.
 		questions.notificationButton(id, 1);
 		await settle();
 		expect(questions.list).toHaveLength(1);
 		questions.notificationButton(id, 0);
 		expect(await answer).toBe("allow");
+		expect(questions.list).toEqual([]);
+		expect(host.shown.size).toBe(0);
 	});
 
 	test("Don't allow is closing it", async () => {
@@ -332,7 +326,7 @@ describe("questions", () => {
 		expect(await answer).toBe("allow");
 	});
 
-	test("arguments cut in a notification: it says so, Allow and Always allow stay", async () => {
+	test("arguments cut in a notification: it says so, Allow stays", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
 		const answer = questions.ask(request({ text: "y".repeat(400) }), {
@@ -341,7 +335,7 @@ describe("questions", () => {
 		});
 		await settle();
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
-		expect(text.buttons).toEqual(["Allow", "Always allow"]);
+		expect(text.buttons).toEqual(["Allow"]);
 		expect(text.message.endsWith(`\n${ARGS_CUT_NOTE}`)).toBe(true);
 		expect(text.message.length).toBeLessThanOrEqual(300);
 		expect(text.message).toContain("y".repeat(MAX_ARGS_NOTIFICATION - 20));
@@ -356,8 +350,8 @@ describe("questions", () => {
 		await short;
 	});
 
-	test("an Allow or Always allow within the guard does not count: the notification shows again", async () => {
-		for (const index of [0, 1]) {
+	test("an Allow within the guard does not count: the notification shows again", async () => {
+		for (const index of [0]) {
 			const host = fakeHost();
 			const questions = new Questions(host);
 			let settled = false;
@@ -383,7 +377,7 @@ describe("questions", () => {
 			expect(settled).toBe(false);
 			host.advance(NOTIFICATION_GUARD_MS);
 			questions.notificationButton(second, index);
-			expect(await answer).toBe(index === 0 ? "allow" : "always");
+			expect(await answer).toBe("allow");
 		}
 	});
 
@@ -464,8 +458,8 @@ describe("questions", () => {
 		expect(questions.list).toHaveLength(1);
 		questions.panelClosed(3);
 		expect(host.shown.size).toBe(1);
-		questions.answer(questions.list[0]?.id as string, "always");
-		expect(await answer).toBe("always");
+		questions.answer(questions.list[0]?.id as string, "site");
+		expect(await answer).toBe("site");
 		// Cleared once its create is done.
 		await settle();
 		expect(host.shown.size).toBe(0);
@@ -570,7 +564,7 @@ describe("questions", () => {
 			host: "claude.ai",
 			tool: "page_x",
 			args: `{"big": "${id.repeat(1000)}"}`,
-			always: true,
+			site: true,
 		});
 		const sent = new Set<string>();
 		expect(argsToSend([view("a"), view("b")], sent).map((m) => m.id)).toEqual([
@@ -610,7 +604,7 @@ describe("questions", () => {
 			title: "A".repeat(200),
 			origin: "https://shop.example",
 			args: "{}",
-			always: true,
+			site: true,
 		};
 		const text = notificationText(view, "{}");
 		expect(text.title).toBe(`Allow ${"A".repeat(59)}…?`);
@@ -619,7 +613,7 @@ describe("questions", () => {
 			"Allow Order?",
 		);
 		const { origin: _, title: __, ...bare } = view;
-		expect(notificationText({ ...bare, always: false }, "{}")).toEqual({
+		expect(notificationText({ ...bare, site: false }, "{}")).toEqual({
 			title: "Allow page_x?",
 			message: "Claude (claude.ai) wants to run page_x.",
 			contextMessage: "tab-mcp for Chrome",
@@ -627,10 +621,19 @@ describe("questions", () => {
 		});
 	});
 
-	test("Always allow is offered only for a page of an http(s) site", async () => {
+	test("Don't ask again is offered only for a page tool of an http(s) site, never for a navigation", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
-		for (const [origin, always] of [
+		const navigation = questions.ask(request(), {
+			tabId: 7,
+			origin: "https://site.test",
+			navigation: { to: "https://other.test/" },
+		});
+		await settle();
+		expect(questions.list.at(-1)?.site).toBe(false);
+		questions.answer(questions.list.at(-1)?.id as string, "deny");
+		await navigation;
+		for (const [origin, site] of [
 			["https://site.test", true],
 			["http://localhost:8080", true],
 			["null", false],
@@ -640,7 +643,7 @@ describe("questions", () => {
 			const answer = questions.ask(request(), { tabId: 7, origin });
 			await settle();
 			const q = questions.list.at(-1);
-			expect(q?.always).toBe(always);
+			expect(q?.site).toBe(site);
 			questions.answer(q?.id as string, "deny");
 			await answer;
 		}
@@ -710,60 +713,29 @@ describe("allowing all of a site's tools in one step", () => {
 	});
 });
 
-describe("Always allow", () => {
-	const key = (over: Partial<AlwaysKey> = {}): AlwaysKey => ({
-		grantId: "g1",
-		origin: "https://site.test",
-		documentId: "doc-1",
-		tool: "page_a",
-		...over,
-	});
-
-	test("per AI app, origin, page and tool, gone with the grant or the tool", () => {
-		const always = new AlwaysAllowed();
-		always.add(key());
-		always.add(key({ grantId: "g2", tool: "page_b" }));
-		expect(always.has(key())).toBe(true);
-		expect(always.has(key({ grantId: "g2" }))).toBe(false);
-		// Another page (a reload, another tab), another site: not that answer.
-		expect(always.has(key({ documentId: "doc-2" }))).toBe(false);
-		expect(always.has(key({ origin: "https://other.test" }))).toBe(false);
-		always.keepTools(["page_b"]);
-		expect(always.has(key())).toBe(false);
-		always.keepGrants(["g1"]);
-		expect(always.has(key({ grantId: "g2", tool: "page_b" }))).toBe(false);
-	});
-
-	/** A decider whose bridge gives `first` until the test sets another tool. */
-	function decider(first: LookedUp | undefined) {
-		let current = first;
-		const always = new AlwaysAllowed();
+describe("deciding whether a page tool may run", () => {
+	/** A decider with a site's allowed tools in a memory kv. */
+	function decider(reply: Answer | "timeout" | "busy" = "allow") {
+		const kv = memoryKv();
+		let allowed: AllowedTools = {};
 		const asked: unknown[] = [];
-		let reply: Answer | "timeout" | "busy" = "always";
-		let during = () => {};
-		return {
-			always,
+		const t = {
+			kv,
 			asked,
-			set tool(tool: LookedUp | undefined) {
-				current = tool;
-			},
-			set reply(answer: Answer | "timeout" | "busy") {
-				reply = answer;
-			},
-			set during(run: () => void) {
-				during = run;
-			},
+			reply,
 			d: {
-				lookup: () => current,
-				allowed: () => false,
-				always,
+				allowed: (origin: string, name: string) =>
+					isAllowed(allowed, origin, name),
 				ask: async (_r: ConfirmRequest, where: unknown) => {
 					asked.push(where);
-					during();
-					return reply;
+					return t.reply;
+				},
+				allow: async (origin: string, name: string) => {
+					allowed = await setAllowed(kv, origin, name, true);
 				},
 			},
 		};
+		return t;
 	}
 	const page1: LookedUp = {
 		tabId: 7,
@@ -773,64 +745,94 @@ describe("Always allow", () => {
 		readOnly: false,
 	};
 
-	test("kept for the page asked about, and checked the same way", async () => {
-		const t = decider(page1);
-		expect(await decide(t.d, request())).toBe(true);
-		expect(t.asked).toHaveLength(1);
-		// The next call on that page runs without asking.
-		expect(await decide(t.d, request())).toBe(true);
-		expect(t.asked).toHaveLength(1);
-		// The same tool name on another page (a reload) asks again.
-		t.tool = { ...page1, documentId: "doc-2" };
-		t.reply = "allow";
-		expect(await decide(t.d, request())).toBe(true);
-		expect(t.asked).toHaveLength(2);
-		// Another AI app asks too.
-		t.tool = page1;
-		expect(
-			await decide(t.d, {
-				...request(),
-				client: { ...request().client, grantId: "g2" },
-			}),
-		).toBe(true);
-		expect(t.asked).toHaveLength(3);
+	test("Allow runs this call; the next one asks again", async () => {
+		const t = decider("allow");
+		await decide(t.d, request(), page1);
+		await decide(t.d, request(), page1);
+		expect(t.asked).toEqual([
+			{ tabId: 7, origin: "https://site.test" },
+			{ tabId: 7, origin: "https://site.test" },
+		]);
 	});
 
-	test("not kept when the page changed while the question was open", async () => {
-		for (const changed of [
-			{ ...page1, documentId: "doc-2" },
-			{ ...page1, tabId: 8, documentId: "doc-3" },
-			{ ...page1, origin: "https://other.test" },
-			undefined,
-		]) {
-			const t = decider(page1);
-			t.during = () => {
-				t.tool = changed;
-			};
-			// The answer still counts for this call.
-			expect(await decide(t.d, request())).toBe(true);
-			// But no Always allow for whatever page came: back on the first, it asks.
-			t.tool = page1;
-			t.during = () => {};
-			t.reply = "deny";
-			expect(await decide(t.d, request())).toBe(false);
-			if (changed !== undefined) {
-				t.tool = changed;
-				expect(await decide(t.d, request())).toBe(false);
-			}
-		}
-	});
-
-	test("never for an opaque origin; a timeout or too many waiting is an error", async () => {
-		const t = decider({ ...page1, origin: "null" });
-		expect(await decide(t.d, request())).toBe(true);
+	test("Don't ask again on <host>: the tool is allowed on its site, for every AI app and page (EQ 10)", async () => {
+		const t = decider("site");
+		await decide(t.d, request(), page1);
+		expect(t.asked).toHaveLength(1);
+		// Written where the panel's "allowed" is, by the page's name of the tool.
+		expect(await loadAllowed(t.kv)).toEqual({
+			"https://site.test": ["place_order"],
+		});
 		t.reply = "deny";
-		expect(await decide(t.d, request())).toBe(false);
+		// Another page of the site (a reload), another AI app: no question.
+		await decide(t.d, request(), { ...page1, documentId: "doc-2" });
+		await decide(
+			t.d,
+			{ ...request(), client: { ...request().client, grantId: "g2" } },
+			page1,
+		);
+		expect(t.asked).toHaveLength(1);
+		// Another site's tool of the same name still asks.
+		await expect(
+			decide(t.d, request(), { ...page1, origin: "https://other.test" }),
+		).rejects.toThrow("did not allow");
+		expect(t.asked).toHaveLength(2);
+	});
+
+	test("never for an opaque origin; a refusal, a timeout or too many waiting say so", async () => {
+		const t = decider("site");
+		const opaque = { ...page1, origin: "null" };
+		// Allowed this once, but nothing is kept.
+		await decide(t.d, request(), opaque);
+		expect(await loadAllowed(t.kv)).toEqual({});
+		t.reply = "deny";
+		await expect(decide(t.d, request(), opaque)).rejects.toThrow(
+			"did not allow",
+		);
 		t.reply = "timeout";
-		await expect(decide(t.d, request())).rejects.toThrow("did not answer");
+		await expect(decide(t.d, request(), page1)).rejects.toThrow(
+			"did not answer within 60 s",
+		);
 		// Too many waiting already: not asked, said so.
 		t.reply = "busy";
-		await expect(decide(t.d, request())).rejects.toThrow("already wait");
+		await expect(decide(t.d, request(), page1)).rejects.toThrow(
+			"this one was not asked",
+		);
+	});
+
+	test("only AI apps through the relay", async () => {
+		const t = decider("allow");
+		await expect(
+			decide(t.d, { ...request(), client: { kind: "webmcp" } }, page1),
+		).rejects.toThrow("did not allow");
+		expect(t.asked).toEqual([]);
+	});
+});
+
+describe("the panel's status", () => {
+	const down = {
+		state: "disconnected" as const,
+		reconnecting: false,
+		grants: 0,
+		aiOn: false,
+		replaced: false,
+	};
+
+	test("down with AI access left on is retrying, not off (EQ 3)", () => {
+		expect(panelStatus(down)).toBe("off");
+		expect(panelStatus({ ...down, aiOn: true })).toBe("retrying");
+		expect(panelStatus({ ...down, reconnecting: true })).toBe("retrying");
+		// Taken over: nothing connects by itself.
+		expect(panelStatus({ ...down, aiOn: true, replaced: true })).toBe("off");
+		expect(panelStatus({ ...down, state: "connecting", aiOn: true })).toBe(
+			"connecting",
+		);
+		expect(panelStatus({ ...down, state: "connected", aiOn: true })).toBe(
+			"waiting",
+		);
+		expect(
+			panelStatus({ ...down, state: "connected", aiOn: true, grants: 1 }),
+		).toBe("on");
 	});
 });
 
@@ -1059,7 +1061,7 @@ describe("a question's own window", () => {
 				host: "claude.ai",
 				tool: "page_x",
 				args: "{}",
-				always: true,
+				site: true,
 			});
 		return { windows, waiting, answers, removed, port, ask };
 	}
@@ -1069,7 +1071,7 @@ describe("a question's own window", () => {
 		host: string;
 		tool: string;
 		args: string;
-		always: boolean;
+		site: boolean;
 	};
 
 	test("a port from a window not opened for a question is disconnected and never heard", async () => {
@@ -1110,7 +1112,7 @@ describe("a question's own window", () => {
 		t.windows.sync();
 		expect(p.posted.at(-1)).toEqual({ type: "question", question: undefined });
 		expect(t.removed).toEqual([100]);
-		p.say({ type: "answer", answer: "always" });
+		p.say({ type: "answer", answer: "site" });
 		t.windows.windowRemoved(100);
 		expect(t.answers).toEqual([["q1", "allow"]]);
 	});

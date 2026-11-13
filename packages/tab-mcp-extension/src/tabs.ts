@@ -13,10 +13,23 @@ import {
 	type PageTools,
 } from "./messages.ts";
 
+/**
+ * The pages the extension acts on: http(s) only, the pages that have a site
+ * ("allowed" and the navigation rules know no other). Not `file:` pages.
+ */
+export const SITE_MATCHES = ["http://*/*", "https://*/*"];
+
 /** Host access on every site: what "Allow on all sites" asks for. */
 export const ALL_SITES: chrome.permissions.Permissions = {
-	origins: ["<all_urls>"],
+	origins: SITE_MATCHES,
 };
+
+/**
+ * A content script that does not answer in this time is given up: a page
+ * whose main thread is blocked would otherwise hold the bridge, `page_info`
+ * and the navigation tools for every tab (ES 1). Calls have their own limit.
+ */
+export const ASK_TIMEOUT_MS = 5_000;
 
 /** Put the content script into a tab's page (it answers once per page). */
 export async function injectInto(tabId: number): Promise<void> {
@@ -67,6 +80,9 @@ export async function tabInFront(): Promise<TargetTab> {
 	return { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" };
 }
 
+/** A page of an http(s) site: the only pages the extension acts on (DEC-142). */
+export const isSitePage = (url: string): boolean => /^https?:\/\//i.test(url);
+
 /** The extension may not run on this tab, and why, with what the user can do. */
 export class NoAccessError extends Error {}
 
@@ -85,6 +101,10 @@ export function noAccess(url: string): NoAccessError {
 		return new NoAccessError(
 			"Chrome does not let extensions read the Chrome Web Store.",
 		);
+	if (!isSitePage(url))
+		return new NoAccessError(
+			"tab-mcp for Chrome works only on pages of http(s) sites (not file: or other pages). Switch to a web page.",
+		);
 	return new NoAccessError(
 		'tab-mcp for Chrome may not read this tab yet. The user can click its icon on the tab, or turn on "Allow on all sites" in its side panel.',
 	);
@@ -97,24 +117,53 @@ function send(tabId: number, request: ContentRequest): Promise<unknown> {
 /**
  * Ask the content script of `tab`. If it is not there yet (granted by a click
  * or host access, but the page changed since), put it in and ask again; if
- * the extension may not, say so.
+ * the extension may not, say so. A page that does not answer within
+ * `timeoutMs` (its main thread blocked, say) is given up.
  */
-export async function ask(
+export function ask(
+	tab: TargetTab,
+	request: ContentRequest,
+	timeoutMs = ASK_TIMEOUT_MS,
+): Promise<ContentResponse> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(
+			() =>
+				reject(
+					new Error(
+						`The page in the tab did not answer within ${timeoutMs / 1000} s (it may be busy or stuck).`,
+					),
+				),
+			timeoutMs,
+		);
+	});
+	return Promise.race([askNow(tab, request), timeout]).finally(() =>
+		clearTimeout(timer),
+	);
+}
+
+async function askNow(
 	tab: TargetTab,
 	request: ContentRequest,
 ): Promise<ContentResponse> {
+	// Only http(s) pages, also where a click granted another (a file: page
+	// with "Allow access to file URLs"). An empty address is a tab Chrome
+	// hides from the extension: asking says so.
+	if (tab.url !== "" && !isSitePage(tab.url)) throw noAccess(tab.url);
 	let response: unknown;
 	try {
 		response = await send(tab.id, request);
 	} catch {
-		// Only into a page that has loaded: during a navigation there is no
-		// page to put it in yet (and Chrome is changing what may be read).
+		// Put in also while the page is still loading: a page with a
+		// subresource that never loads stays "loading", and with only the
+		// click's grant nothing else would ever put the script there (EQ 15).
+		// During a navigation there may be no page to put it in yet.
 		const { status } = await chrome.tabs.get(tab.id);
-		if (status !== "complete")
-			throw new Error("The page in the tab is still loading; try again.");
 		try {
 			await injectInto(tab.id);
 		} catch {
+			if (status !== "complete")
+				throw new Error("The page in the tab is still loading; try again.");
 			throw noAccess(tab.url);
 		}
 		response = await send(tab.id, request);
@@ -158,6 +207,32 @@ export async function askTools(tab: TargetTab): Promise<PageTools> {
 }
 
 /**
+ * A call's message that Chrome rejected. No content script to take it (the
+ * page changed before the call): the tool did not run. The message reached
+ * the page and its channel closed before the answer (Chrome's words for it,
+ * also when the page went into the back/forward cache): the page went away
+ * while the tool ran (it navigated, or the tab closed), and the tool may
+ * have done its work (WM 2). Any other error is a plain failure: nothing
+ * says the tool ran.
+ */
+export function callFailed(error: unknown): CallResult {
+	const text = error instanceof Error ? error.message : String(error);
+	if (/receiving end does not exist|no tab with id/i.test(text))
+		return {
+			ok: false,
+			error: "The page in the tab changed before the call reached it.",
+			gone: true,
+		};
+	if (/message (port|channel) (is )?closed|back\/forward cache/i.test(text))
+		return {
+			ok: false,
+			error: "The page went away while the tool ran.",
+			navigated: true,
+		};
+	return { ok: false, error: `The call did not reach the page: ${text}` };
+}
+
+/**
  * Call a page tool in tab `tabId` (only the content script already there: a
  * call does not inject it). The content script runs it only on the page it
  * was listed from (`target.documentId`), with the claim it was offered with.
@@ -189,13 +264,8 @@ export async function callInTab(
 				gone: true,
 			}
 		);
-	} catch {
-		// The page went away (navigation, closed tab) during the call.
-		return {
-			ok: false,
-			error: "The page changed or closed during the call.",
-			gone: true,
-		};
+	} catch (error) {
+		return callFailed(error);
 	} finally {
 		signal.removeEventListener("abort", cancel);
 	}

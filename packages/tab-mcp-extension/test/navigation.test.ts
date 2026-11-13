@@ -306,7 +306,7 @@ describe("the navigation tools", () => {
 		expect(t.refreshed()).toBe(1);
 	});
 
-	test("to another origin it asks first: From, To, no Always allow; the answer counts", async () => {
+	test("to another origin it asks first: From, To, no Don't ask again; the answer counts", async () => {
 		const chrome = fakeChrome({
 			url: `${SHOP}/products`,
 			readable: true,
@@ -641,7 +641,7 @@ describe("the navigation question", () => {
 		});
 		await Bun.sleep(5);
 		const [view] = questions.list as [QuestionView];
-		expect(view.always).toBe(false);
+		expect(view.site).toBe(false);
 		expect(view.navigation).toEqual({ to: "https://evil.test/login" });
 		const [text] = [...shown.values()] as [NotificationText];
 		expect(text).toEqual({
@@ -665,7 +665,7 @@ describe("the navigation question", () => {
 				origin: SHOP,
 				navigation: { to },
 				args: "{}",
-				always: false,
+				site: false,
 			},
 			"{}",
 		);
@@ -692,7 +692,7 @@ describe("the navigation question", () => {
 		expect(`opening ${hostEnd(host)}`.length).toBeLessThanOrEqual(60);
 	});
 
-	test("the card in the panel: From (verified), To, the arguments; no page title, no Always allow", async () => {
+	test("the card in the panel: From (verified), To, the arguments; no page title, no Don't ask again", async () => {
 		const window = new HappyWindow({
 			url: "chrome-extension://x/sidepanel/index.html",
 		});
@@ -709,7 +709,7 @@ describe("the navigation question", () => {
 					origin: SHOP,
 					navigation: { to: "https://evil.test/" },
 					args: '{\n  "url": "https://evil.test/"\n}',
-					always: true, // not trusted for a navigation: see below
+					site: true, // not trusted for a navigation: see below
 				},
 				() => {},
 			);
@@ -724,6 +724,59 @@ describe("the navigation question", () => {
 			expect(
 				[...card.querySelectorAll("button")].map((b) => b.dataset["answer"]),
 			).toEqual(["deny", "allow"]);
+		} finally {
+			globalThis.document = before;
+			await window.happyDOM.close();
+		}
+	});
+
+	test("a page tool's card: Don't allow, Allow, Don't ask again on <host> (EQ 10)", async () => {
+		const window = new HappyWindow({
+			url: "chrome-extension://x/sidepanel/index.html",
+		});
+		const before = globalThis.document;
+		globalThis.document = window.document as unknown as Document;
+		try {
+			const answers: Answer[] = [];
+			const card = questionCard(
+				{
+					id: "q",
+					app: "Claude (claude.ai)",
+					host: "claude.ai",
+					tool: "page_place_order",
+					title: "Place order",
+					origin: "https://www.shop.example:8443",
+					args: "{}",
+					site: true,
+				},
+				(answer) => answers.push(answer),
+			);
+			const buttons = [...card.querySelectorAll("button")];
+			expect(buttons.map((b) => b.textContent)).toEqual([
+				"Don't allow",
+				"Allow",
+				"Don't ask again on www.shop.example:8443",
+			]);
+			expect(card.textContent).toContain("for every paired AI app");
+			// Disabled until the panel has been in front long enough.
+			expect(buttons[2]?.disabled).toBe(true);
+			(buttons[2] as HTMLButtonElement).disabled = false;
+			buttons[2]?.click();
+			expect(answers).toEqual(["site"]);
+			// Not offered (an opaque origin): two buttons.
+			const opaque = questionCard(
+				{
+					id: "q2",
+					app: "Claude (claude.ai)",
+					host: "claude.ai",
+					tool: "page_place_order",
+					origin: "null",
+					args: "{}",
+					site: false,
+				},
+				() => {},
+			);
+			expect(opaque.querySelectorAll("button")).toHaveLength(2);
 		} finally {
 			globalThis.document = before;
 			await window.happyDOM.close();

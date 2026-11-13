@@ -2680,6 +2680,65 @@ CC 8). Extends DEC-054, DEC-087 and DEC-093.
   port has none of the relay's limits and why, and the README now says it too. The
   queue above turns a burst of consequential calls into one question at a time.
 
+## DEC-139: One way not to be asked again in tab-mcp for Chrome: "Don't ask again on <host>" (owner)
+
+2026-11-13, iteration 35 (review finding EQ 10). The owner: "Almost no-one will have
+more than one AI app connected." The extension's ephemeral "Always allow" (per AI app,
+origin, page load and tool, in the worker's memory: `always.ts`, its key logic in
+`decide`, the `keepGrants`/`keepTools` wiring) is gone. A question's third button,
+"Don't ask again on <host>", writes the per-site "allowed" entry (exact origin and the
+page's tool name, any AI app, kept in IndexedDB until taken back in the panel's tool
+list), the same entry the panel's "asks first" switch writes, through the same command
+queue. Offered only for a page tool of an http(s) origin, never for a navigation
+(DEC-121). The notification keeps Allow as its only button: it may show the arguments
+cut, and a standing permission should rest on the whole question, which a click on the
+notification's body opens. EQ 5 (Always allow lost on a tab switch) is moot with this.
+Lost: per-AI-app scoping and expiry on reload.
+
+## DEC-140: tab-mcp for Chrome no longer leaves out a page's mirrored tools
+
+2026-11-13, iteration 35 (review finding WM 1). The extension dropped every name listed
+in `<html data-tab-mcp-webmcp>`, assuming the AI app reaches those tools through the
+page's own address. It cannot know that: an AI app connected only to the extension saw
+`page_info` count the tools, `webmcp_tools` list none and `webmcp_call` refuse them, and
+the panel said they came from a connection that did not exist; the attribute was also
+read from the top document only. The extension now offers mirrored tools like any page
+tool. An AI app connected to both the page and the extension sees such a tool twice,
+under two connectors, and a consequential one asks in the extension and again in the
+page. The client still writes the attribute (ractive.ch's examples read it to show that
+mirroring is on); whether it stays is for iteration F and EX 11.
+
+## DEC-141: Page tools ask in the bridge, not through the library's confirmation
+
+2026-11-13, iteration 35 (review finding EQ 4). `page_<name>` tools were
+`consequentialHint` when not read-only, so the library asked through `onConfirm`, and a
+throwing `onConfirm` became "The user declined", also for a question that timed out and
+one that was never asked (too many waiting). Now `page_<name>` carries MCP's
+`destructiveHint` instead (the same MCP annotation the AI app saw before) and its
+`execute` asks through the bridge's `confirm`, as `webmcp_call` and the navigation tools
+already did; a refusal rejects with what the AI app is told (did not allow, did not
+answer within 60 s, not asked because 5 calls wait). After the answer the bridge runs
+the tool only if it is still the same tool of the same page in the same tab (what the
+library's own check after a confirmation gave before). The extension's `onConfirm`
+declines: no tool of the extension is consequential any more.
+
+## DEC-142: tab-mcp for Chrome reads only http(s) pages, never Incognito, and takes a page's origin from Chrome
+
+2026-11-13, iteration 35 (review findings ES 9, ES 4, ES 8).
+- **Host access**: `optional_host_permissions` (and the test build's `host_permissions`
+  and the registered content script's `matches`) are `http://*/*` and `https://*/*`,
+  not `<all_urls>`: "allowed", "Don't ask again" and the navigation rules know only
+  http(s) origins, and `<all_urls>` also put the content script on `file:` pages.
+- **Incognito**: `"incognito": "not_allowed"`, so a user who allows the extension in
+  Incognito does not have those tabs offered through the same connection.
+- **Origin**: the bridge compares the origin in the content script's answer with the
+  origin of the address Chrome reports for the tab, and offers no tools when they
+  differ, so a compromised renderer cannot borrow another site's origin (and the tools
+  the user allowed there).
+- **The address**: `page_info` and the navigation results keep the page's query and
+  fragment (single-page apps route with the fragment); PRIVACY.md, the store listing and
+  the threat model say that a token in the address goes with it.
+
 ## DEC-136: `newAddress()` always takes the old address back
 
 Iteration 32 (review of 2026-11-13, CC 4, CC 12, CC 14). Amends DEC-095.

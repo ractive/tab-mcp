@@ -12,6 +12,7 @@ import {
 	sourceDate,
 	storeProblems,
 	storeZipName,
+	TEST_HOOK,
 	zipStoreBuild,
 } from "../scripts/build.ts";
 import { writeZip, zipNames } from "../scripts/zip.ts";
@@ -39,6 +40,26 @@ test("the test build keeps its source maps", async () => {
 	const { outdir } = await build({ outdir: join(dir, "test"), test: true });
 	const files = await readdir(outdir, { recursive: true });
 	expect(files.some((name) => name.endsWith(".map"))).toBe(true);
+}, 60_000);
+
+test("the test hooks are only in the test build, not in the store's or the development build (ES 7)", async () => {
+	const hooks = async (outdir: string) =>
+		(await Bun.file(join(outdir, "background.js")).text()).includes(TEST_HOOK);
+	expect(await hooks(join(dir, "test"))).toBe(true);
+	expect(await hooks(join(dir, "store"))).toBe(false);
+	const dev = await build({ outdir: join(dir, "dev"), minify: false });
+	expect(await hooks(dev.outdir)).toBe(false);
+	// And the panel marks no relay for the tests any more.
+	for (const name of await readdir(join(dir, "store", "sidepanel")))
+		if (name.endsWith(".js"))
+			expect(
+				await Bun.file(join(dir, "store", "sidepanel", name)).text(),
+			).not.toContain("dataset.relay");
+	expect(
+		storeProblems({}, ["manifest.json"], {
+			"background.js": `globalThis.${TEST_HOOK}Button=1`,
+		}),
+	).toEqual(["test hooks in background.js"]);
 }, 60_000);
 
 test("the store zip lists the store build's files, without source maps", async () => {
@@ -111,7 +132,7 @@ test("a build with a key, host access or source maps is not packed for the store
 	const { outdir } = await build({ outdir: join(dir, "test-zip"), test: true });
 	const target = join(dir, "refused.zip");
 	await expect(zipStoreBuild(outdir, target)).rejects.toThrow(
-		/not a store build: the manifest has host_permissions; source map/,
+		/not a store build: the manifest has host_permissions; source map.*; test hooks in background\.js/,
 	);
 	expect(await Bun.file(target).exists()).toBe(false);
 }, 60_000);

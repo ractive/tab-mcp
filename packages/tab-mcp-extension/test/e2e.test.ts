@@ -104,7 +104,7 @@ async function openPanel(browser: Browser, tab: Page): Promise<Page> {
 		(await browser.waitForTarget((t) => t.url === panelUrl(browser))).targetId,
 	);
 	// The state from the worker has come once the relay is shown.
-	await panel.waitFor(`document.documentElement.dataset.relay`);
+	await panel.waitFor(`document.getElementById("relay").value !== ""`);
 	return panel;
 }
 
@@ -132,11 +132,16 @@ async function setRelay(panel: Page, relay: string): Promise<void> {
 		`document.getElementById("relay").value = ${JSON.stringify(relay)}`,
 	);
 	// Saving needs no click of the user's; a click right after "Settings"
-	// opened could land before the layout settled.
-	await panel.eval(`document.getElementById("relay-form").requestSubmit()`);
-	// The panel marks the relay the connection (in the worker) uses.
+	// opened could land before the layout settled. The field is emptied
+	// after: the panel fills it again only from a state whose relay is a new
+	// one, that is once the connection (in the worker) uses it. No hook for
+	// the tests in the panel (ES 7), and the same in the store build.
+	await panel.eval(`(() => {
+		document.getElementById("relay-form").requestSubmit();
+		document.getElementById("relay").value = "";
+	})()`);
 	await panel.waitFor(
-		`document.documentElement.dataset.relay === ${JSON.stringify(relay)}`,
+		`document.getElementById("relay").value === ${JSON.stringify(relay)}`,
 	);
 }
 
@@ -273,6 +278,7 @@ const OWN_TOOLS = [
 const PAGE_TOOLS = [
 	"page_get_greeting",
 	"page_mcp_result",
+	"page_mirrored_tool",
 	"page_place_order",
 	"page_slow_tool",
 ];
@@ -280,7 +286,7 @@ const PAGE_TOOLS = [
 /** Answer the newest question in the side panel with `answer`. */
 async function answerInPanel(
 	stack: Stack,
-	answer: "allow" | "always" | "deny",
+	answer: "allow" | "site" | "deny",
 ): Promise<void> {
 	// Allow counts only once the panel has been focused a while.
 	await stack.panel.send("Emulation.setFocusEmulationEnabled", {
@@ -373,7 +379,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			stack,
 			(n) => n.length >= OWN_TOOLS.length + PAGE_TOOLS.length,
 		);
-		// mirrored_tool is the page's tab-mcp mirror: left out.
+		// mirrored_tool is a tab-mcp page's mirror, offered all the same: the
+		// AI app may not be paired with the page itself (WM 1).
 		expect(names).toEqual([...OWN_TOOLS, ...PAGE_TOOLS].sort());
 		const { tools } = await stack.client.listTools();
 		const byName = (name: string) => tools.find((t) => t.name === name);
@@ -414,20 +421,27 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		});
 	});
 
-	test("webmcp_tools lists them, and what is left out", async () => {
+	test("webmcp_tools lists them with their input schemas", async () => {
 		const result = await call(stack, "webmcp_tools");
 		expect(result.structuredContent).toMatchObject({
 			origin: SITE,
 			available: true,
-			mirrored: ["mirrored_tool"],
 		});
+		expect(result.structuredContent).not.toHaveProperty("mirrored");
 		const tools = result.structuredContent?.["tools"] as {
 			name: string;
 			tool?: string;
 			readOnly: boolean;
+			inputSchema?: unknown;
 		}[];
 		expect(tools.map((t) => t.tool).sort()).toEqual(PAGE_TOOLS);
 		expect(tools.find((t) => t.name === "place_order")?.readOnly).toBe(false);
+		// What webmcp_call needs to call a tool the AI app has no entry for (EQ 1).
+		expect(tools.find((t) => t.name === "get_greeting")?.inputSchema).toEqual({
+			type: "object",
+			properties: { name: { type: "string" } },
+			required: ["name"],
+		});
 	});
 
 	test("a read-only tool runs at once, with the page's answer", async () => {
@@ -454,11 +468,15 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
-		// "Always allow" is offered too (forgotten when the page changes, as
-		// the bridge then registers the tool anew).
+		// "Don't ask again on <host>" is offered too.
 		await stack.panel.waitFor(
-			`document.querySelector('[data-question] button[data-answer="always"]')`,
+			`document.querySelector('[data-question] button[data-answer="site"]')`,
 		);
+		expect(
+			await stack.panel.eval(
+				`document.querySelector('[data-question] button[data-answer="site"]').textContent`,
+			),
+		).toBe(`Don't ask again on ${new URL(SITE).host}`);
 		// The verified site on a line of its own, the page's title apart.
 		const [ask, ...lines] = await stack.panel.eval<string[]>(
 			`[...document.querySelectorAll("[data-question] p")].slice(0, 3).map((p) => p.textContent)`,
@@ -487,6 +505,45 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await declined).isError).toBe(true);
 		expect(await tab.eval("window.calls.map((c) => c[1])")).not.toContain(
 			"coffee",
+		);
+	});
+
+	test("Don't ask again on <host> allows the tool on the site, as the panel's switch does (EQ 10)", async () => {
+		const first = call(stack, "page_place_order", { item: "once more" });
+		await answerInPanel(stack, "site");
+		expect((await first).isError).toBeFalsy();
+		// Kept where the panel's "allowed" is, and shown there.
+		expect(
+			((await kvAll(stack.worker))["allowedTools"] as Record<string, string[]>)[
+				SITE
+			],
+		).toEqual(["place_order"]);
+		await stack.panel.waitFor(
+			`document.querySelector('button[data-tool="place_order"]')?.textContent === "allowed"`,
+		);
+		// The next call runs without a question, also through webmcp_call.
+		expect(
+			(await call(stack, "page_place_order", { item: "unasked" })).isError,
+		).toBeFalsy();
+		expect(
+			(
+				await call(stack, "webmcp_call", {
+					name: "place_order",
+					arguments: { item: "unasked too" },
+				})
+			).isError,
+		).toBeFalsy();
+		expect(
+			await stack.panel.eval(
+				`document.querySelectorAll("[data-question]").length`,
+			),
+		).toBe(0);
+		// Back to "asks first" for the tests after this one.
+		const toggle = `button[data-tool="place_order"]`;
+		await stack.panel.waitFor(`!document.querySelector('${toggle}').disabled`);
+		await stack.panel.click(toggle);
+		await stack.panel.waitFor(
+			`document.querySelector('${toggle}').textContent === "asks first"`,
 		);
 	});
 
@@ -852,6 +909,20 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(names).not.toContain("page_get_greeting");
 	});
 
+	test("a page tool that takes the tab to another page answers with that page, not a failure (WM 2)", async () => {
+		await tab.goto(`${SITE}/checkout.html`);
+		await waitForTools(stack, (n) => n.includes("page_checkout"));
+		const result = await call(stack, "page_checkout");
+		expect(result.isError).toBeFalsy();
+		expect(result.structuredContent).toMatchObject({
+			navigated: true,
+			page: { url: `${SITE}/plain.html`, title: "Plain page" },
+		});
+		expect(String(result.structuredContent?.["note"])).toContain(
+			"may have completed",
+		);
+	});
+
 	test("it follows a navigation", async () => {
 		await tab.goto(`${SITE}/plain.html`);
 		const result = await pageInfo(stack);
@@ -927,6 +998,13 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(
 				`document.querySelectorAll("[data-question]").length === 1`,
 			);
+			// A question that came moved everything below it down: the tools'
+			// switches wait too (ES 5).
+			expect(
+				await stack.panel.eval(
+					`[...document.querySelectorAll("button.badge.toggle")].map((b) => b.disabled)`,
+				),
+			).toEqual([true]);
 			const second = call(stack, "page_place_order", { item: "second" });
 			await stack.panel.waitFor(
 				`document.querySelectorAll("[data-question]").length === 2`,
@@ -976,7 +1054,7 @@ describe.skipIf(chrome === undefined)(
 			expect(await badge()).toBe("on");
 		});
 
-		test("with the panel closed a question is a notification: Allow, closing it, late clicks, Always allow", async () => {
+		test("with the panel closed a question is a notification: Allow, closing it, late clicks, no second button", async () => {
 			const denied = call(stack, "page_place_order", { item: "no" });
 			const first = await newNotification(stack);
 			expect(await badge()).toBe("?");
@@ -1003,19 +1081,39 @@ describe.skipIf(chrome === undefined)(
 			expect(await notifications(stack)).toEqual([second]);
 			await clickNotification(stack, second, 0);
 			expect((await allowed).content[0]?.text).toContain("yes");
-			// Always allow: the next call of the tool runs without asking.
-			const always = call(stack, "page_place_order", { item: "always" });
+			// Allow is its only button: allowing a tool on the site needs the
+			// whole question (the panel or the question's window). A second
+			// button counts as nothing.
+			await stack.worker.eval(`(() => {
+				globalThis.e2eButtons = [];
+				const create = chrome.notifications.create.bind(chrome.notifications);
+				chrome.notifications.create = (id, options) => {
+					globalThis.e2eButtons.push(options.buttons.map((b) => b.title));
+					return create(id, options);
+				};
+			})()`);
+			const once = call(stack, "page_place_order", { item: "once" });
 			const third = await newNotification(stack, [first, second]);
+			expect(await stack.worker.eval("globalThis.e2eButtons")).toEqual([
+				["Allow"],
+			]);
 			await Bun.sleep(600);
 			await clickNotification(stack, third, 1);
-			expect((await always).isError).toBeFalsy();
-			const again = await call(stack, "page_place_order", { item: "again" });
-			expect(again.content[0]?.text).toContain("again");
+			await Bun.sleep(200);
+			expect(await notifications(stack)).toEqual([third]);
+			await clickNotification(stack, third, 0);
+			expect((await once).isError).toBeFalsy();
+			// Allowed once: the next call asks again.
+			const again = call(stack, "page_place_order", { item: "again" });
+			const fourth = await newNotification(stack, [first, second, third]);
+			await stack.worker.eval(
+				`tabMcpNotificationDismissed(${JSON.stringify(fourth)})`,
+			);
+			expect((await again).isError).toBe(true);
 			expect(await notifications(stack)).toEqual([]);
 		});
 
 		test("a click on a notification's body shows the whole question; closing that window is Don't allow", async () => {
-			// A new page: the Always allow of the test before is gone with it.
 			await stack.tab.goto(`${SITE}/webmcp.html`);
 			await call(stack, "webmcp_tools");
 			// What the notifications say.
@@ -1144,7 +1242,7 @@ describe.skipIf(chrome === undefined)(
 				path: join(import.meta.dir, "other-extension"),
 			})) as { id: string };
 			await (await browser.serviceWorker(other)).eval("true");
-			// A new page: the Always allow of the test before is gone with it.
+			// A new page, as the user would have it.
 			await stack.tab.goto(`${SITE}/webmcp.html`);
 			// webmcp_tools reads the page again: its tools are registered anew.
 			await call(stack, "webmcp_tools");
@@ -1450,6 +1548,49 @@ describe.skipIf(chrome === undefined)("a restart", () => {
 			rmSync(profile, { recursive: true, force: true });
 		}
 	}, 90_000);
+
+	test("with the relay out of reach at a start, it keeps trying: the alarm is set and the panel says so (EQ 3, EQ 14)", async () => {
+		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-ext-profile-"));
+		let stack: Stack | undefined;
+		let again: Browser | undefined;
+		try {
+			stack = await start({ store: false, profile }, `${SITE}/plain.html`);
+			await stack.client.close();
+			// As after an update, which clears the alarms.
+			await stack.worker.eval(`chrome.alarms.clear("tab-mcp-keepup")`);
+			await stack.browser.close();
+			// The relay is gone; Chrome starts again with AI access left on.
+			await stack.relay.stop();
+			again = await launch(stack.extension, profile);
+			const tab = await again.newPage(`${SITE}/plain.html`);
+			const worker = await again.serviceWorker(again.extensionId as string);
+			const end = Date.now() + 10_000;
+			while (
+				!(await worker.eval<boolean>(
+					`chrome.alarms.get("tab-mcp-keepup").then((a) => a?.periodInMinutes === 1)`,
+				))
+			) {
+				if (Date.now() > end)
+					throw new Error("no keep-up alarm after the start");
+				await Bun.sleep(100);
+			}
+			const panel = await openPanel(again, tab);
+			// Not "off": the switch stays on, and the alarm brings it back.
+			await panel.waitFor(
+				`document.getElementById("state").dataset.state === "retrying"`,
+			);
+			expect(
+				await panel.eval(`document.getElementById("ai-switch").checked`),
+			).toBe(true);
+			expect(
+				await panel.eval(`document.getElementById("connect").hidden`),
+			).toBe(true);
+		} finally {
+			await again?.close();
+			await stack?.stop().catch(() => {});
+			rmSync(profile, { recursive: true, force: true });
+		}
+	}, 90_000);
 });
 
 /**
@@ -1661,7 +1802,7 @@ describe.skipIf(chrome === undefined)(
 			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
 		});
 
-		test("to another origin it asks in the side panel, without Always allow: Don't allow stays, Allow goes", async () => {
+		test("to another origin it asks in the side panel, without Don't ask again: Don't allow stays, Allow goes", async () => {
 			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			const [ask, ...lines] = await questionLines(stack);
@@ -1674,7 +1815,7 @@ describe.skipIf(chrome === undefined)(
 			]);
 			expect(
 				await stack.panel.eval<boolean>(
-					`!!document.querySelector('[data-question] button[data-answer="always"]')`,
+					`!!document.querySelector('[data-question] button[data-answer="site"]')`,
 				),
 			).toBe(false);
 			await answerInPanel(stack, "deny");

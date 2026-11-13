@@ -161,7 +161,6 @@ describe("Allow all", () => {
 		access: "",
 		origin: "https://shop.example",
 		tools,
-		mirrored: 0,
 		canAllow,
 	});
 	const order = { name: "order", readOnly: false, allowed: false };

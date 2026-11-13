@@ -22,8 +22,11 @@ import {
 	type WorkerMessage,
 } from "./protocol.ts";
 import { attachWhenStarted, Starter } from "./starter.ts";
-import { ALL_SITES, injectInto } from "./tabs.ts";
+import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
+
+/** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
+declare const TAB_MCP_TEST: boolean;
 
 // A start that fails (IndexedDB refused, say) is tried again by the next
 // event or panel; meanwhile a panel shows why.
@@ -52,7 +55,8 @@ chrome.action.onClicked.addListener((tab) => {
 				: { tabId: tab.id, windowId: tab.windowId },
 		)
 		.catch((error: unknown) => console.warn("tab-mcp: side panel", error));
-	if (tab.id !== undefined)
+	// Only into a page of an http(s) site (DEC-142); elsewhere page_info says why.
+	if (tab.id !== undefined && isSitePage(tab.url ?? ""))
 		void injectInto(tab.id)
 			.then(() => withConnection((c) => c.tabChanged()))
 			.catch(() => {
@@ -72,7 +76,7 @@ async function syncRegistration(): Promise<void> {
 			{
 				id: CONTENT_SCRIPT_ID,
 				js: [CONTENT_SCRIPT],
-				matches: ["<all_urls>"],
+				matches: SITE_MATCHES,
 				runAt: "document_idle",
 			},
 		]);
@@ -159,12 +163,12 @@ chrome.windows.onRemoved.addListener((windowId) =>
 );
 
 /**
- * A notification's answer: its button Allow (0) or Always allow (1); its
- * closing is Don't allow; a click on its body shows the whole question (the
- * side panel of the tab's window, else a window of its own). On the worker's
+ * A notification's answer: its button Allow; its closing is Don't allow; a
+ * click on its body shows the whole question (the side panel of the tab's
+ * window, else a window of its own). In the test build on the worker's
  * global object too, for the DevTools Protocol, which cannot click a
  * notification: the end-to-end tests answer through the same functions a
- * click calls.
+ * click calls. Not in the store build (ES 7).
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));
@@ -182,8 +186,9 @@ function notificationClicked(id: string): void {
 chrome.notifications.onButtonClicked.addListener(notificationButton);
 chrome.notifications.onClicked.addListener(notificationClicked);
 chrome.notifications.onClosed.addListener(notificationDismissed);
-Object.assign(globalThis, {
-	tabMcpNotificationButton: notificationButton,
-	tabMcpNotificationDismissed: notificationDismissed,
-	tabMcpNotificationClicked: notificationClicked,
-});
+if (TAB_MCP_TEST)
+	Object.assign(globalThis, {
+		tabMcpNotificationButton: notificationButton,
+		tabMcpNotificationDismissed: notificationDismissed,
+		tabMcpNotificationClicked: notificationClicked,
+	});
