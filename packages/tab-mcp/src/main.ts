@@ -1,6 +1,16 @@
 #!/usr/bin/env bun
-import { ConfigError, configFromEnv } from "./config.ts";
-import { createLogger, installCrashLogging } from "./log.ts";
+import {
+	ConfigError,
+	configFromEnv,
+	describeConfigError,
+	unknownEnvNames,
+} from "./config.ts";
+import {
+	createLogger,
+	errorFields,
+	installCrashLogging,
+	type Logger,
+} from "./log.ts";
 import { createRelay, type Relay, VERSION } from "./relay.ts";
 
 const HELP = `tab-mcp ${VERSION}: relay between AI apps (MCP clients) and tools offered by a web page in a browser tab.
@@ -76,17 +86,34 @@ if (args.length > 0) {
 }
 
 let relay: Relay;
+let logger: Logger | undefined;
 try {
 	const config = configFromEnv(process.env);
-	const logger = createLogger(config.logLevel ?? "info");
+	logger = createLogger(config.logLevel ?? "info");
 	installCrashLogging(logger);
+	for (const name of unknownEnvNames(process.env)) {
+		logger.warn("relay.unknown_setting", {
+			name: name.slice(0, 100),
+			message: "this TAB_MCP_ variable is not a setting of this relay",
+		});
+	}
 	relay = createRelay({ ...config, logger });
 } catch (error) {
 	if (error instanceof ConfigError) {
-		process.stderr.write(`tab-mcp: configuration error: ${error.message}\n`);
+		process.stderr.write(
+			`tab-mcp: configuration error: ${describeConfigError(error)}\n`,
+		);
 		process.exit(2);
 	}
-	throw error;
+	// Nothing ran yet, so the message carries no request data: say what
+	// failed (an unwritable store file, a port in use), not only its class
+	// name (RQ 4, DEC-131).
+	const fields = errorFields(error);
+	logger?.error("relay.start_failed", fields);
+	const message = error instanceof Error ? error.message : String(error);
+	const code = fields.errorCode === undefined ? "" : ` (${fields.errorCode})`;
+	process.stderr.write(`tab-mcp: could not start: ${message}${code}\n`);
+	process.exit(1);
 }
 
 const shutdown = () => {

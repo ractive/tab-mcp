@@ -148,6 +148,7 @@ export type ErrorCode =
 	| "too_large"
 	| "rate_limited"
 	| "identity_refused"
+	| "store_unavailable"
 	| "address_mismatch";
 
 // Tab → relay

@@ -653,7 +653,7 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		// A new request is not even opened while the dialog is closed (DEC-088).
 		const closed = await open(ctx);
 		expect(closed.requestId).toBeUndefined();
-		expect(closed.html).toContain("Open “Connect your AI app” first");
+		expect(closed.html).toContain("not open or not connecting right now");
 	});
 
 	test("malformed input is not counted as a try", async () => {
