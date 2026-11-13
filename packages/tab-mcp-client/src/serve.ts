@@ -339,9 +339,16 @@ export function servePort(
 		}
 	};
 
+	// A `MessagePort` fires `close` when its other end is gone (closed, or its
+	// frame unloaded), where the browser has the event: the calls, listen
+	// streams and an open confirmation end then too, not only on `close()`.
+	const events = port as Partial<
+		Pick<EventTarget, "addEventListener" | "removeEventListener">
+	>;
 	const close = (): void => {
 		if (closed) return;
 		options.signal?.removeEventListener("abort", close);
+		events.removeEventListener?.("close", close);
 		stopWatching();
 		tunnel.close();
 		handler.close();
@@ -356,6 +363,7 @@ export function servePort(
 		return { close };
 	}
 	options.signal?.addEventListener("abort", close);
+	events.addEventListener?.("close", close);
 	served.add(port);
 	port.onmessage = onMessage; // starts a MessagePort
 	return { close };

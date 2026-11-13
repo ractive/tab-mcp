@@ -314,7 +314,12 @@ does not reconnect by itself.
 
 - Read-only and harmless tools run directly. Tools marked `consequentialHint` ask in the
   page before each run, showing the AI app and the arguments. The page's question does
-  not depend on the AI app.
+  not depend on the AI app. A `consequentialHint` that is not a boolean is refused at
+  registration, not dropped, so a typo cannot turn the question off.
+- The library's dialog shows one question at a time, and Allow is enabled only after
+  the page was seen for the delay with that dialog on top and the arguments were
+  scrolled to their end: the AI app chooses the order of the keys, so it could put the
+  one that matters below the fold.
 - Consent per tool is the page's, not the relay's: the relay has one OAuth scope,
   `tools`, which covers every tool of the page. "Always allow" in the page's confirmation
   is off unless the page turns it on (`alwaysAllow: true`, DEC-096), since it lifts the
@@ -680,6 +685,9 @@ sits beside the AI apps of A2 and A6 and the agents of A14.
 - **No relay, no relay limits.** There is no request size limit, rate limit or
   concurrency limit on a port: the other end is the site's own code. A page that
   serves a port to code it does not trust has given up more than a limit would save.
+  The library's confirmations are shown one at a time per document, so many
+  consequential calls at once become a row of questions, each with its own delay, not
+  a stack of dialogs.
 - **Nothing is stored.** A `TabMcp` without `relay` creates no address secret and opens
   no `BroadcastChannel` or WebSocket.
 

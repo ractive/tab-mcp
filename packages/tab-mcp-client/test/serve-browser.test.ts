@@ -159,7 +159,11 @@ beforeAll(async () => {
 	for (const o of build.outputs)
 		lib.set(`/lib/${o.path.replace(/^.*\//, "")}`, await o.text());
 	browser = await Browser.launch(chrome, {
-		args: major >= WEBMCP_MAJOR ? ["--enable-features=WebMCP"] : [],
+		args: [
+			...(major >= WEBMCP_MAJOR ? ["--enable-features=WebMCP"] : []),
+			// A port's `close` event (CC 1); Chrome does not fire it by default.
+			"--enable-blink-features=MessagePortCloseEvent",
+		],
 		serve,
 	});
 }, 30_000);
@@ -256,6 +260,45 @@ test.skipIf(chrome === undefined)(
 			expect(await page.eval("mcp.connect().catch((e) => e.message)")).toBe(
 				"TabMcp: this TabMcp has no relay",
 			);
+		} finally {
+			await page.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(chrome === undefined)(
+	"the chat's frame goes away: the port's close event ends the serve and its open confirmation (CC 1)",
+	async () => {
+		const page = await open();
+		try {
+			await reportsUntil(page, "add");
+			let open = false;
+			for (let i = 0; i < 100 && !open; i++) {
+				await Bun.sleep(50);
+				open = await page.eval<boolean>(
+					`document.querySelector("dialog.tab-mcp-confirm")?.open === true`,
+				);
+			}
+			expect(open).toBe(true);
+			// Chrome 151 fires the event only with the Blink feature that
+			// `beforeAll` turns on; without it, the page must close the serve.
+			expect(await page.eval("'onclose' in MessagePort.prototype")).toBe(true);
+			// Nobody calls close(): the frame is removed, so its port is gone.
+			await page.eval(`document.getElementById("chat").remove()`);
+			let calls: { tool: string; outcome: string }[] = [];
+			for (let i = 0; i < 100; i++) {
+				calls = await page.eval("calls");
+				if (calls.some((c) => c.tool === "wipe")) break;
+				await Bun.sleep(50);
+			}
+			expect(calls.map(({ tool, outcome }) => ({ tool, outcome }))).toEqual([
+				{ tool: "add", outcome: "ok" },
+				{ tool: "wipe", outcome: "cancelled" },
+			]);
+			expect(
+				await page.eval(`document.querySelector("dialog.tab-mcp-confirm")`),
+			).toBeNull();
 		} finally {
 			await page.close();
 		}

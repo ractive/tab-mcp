@@ -480,6 +480,48 @@ describe("results", () => {
 		});
 	});
 
+	test("a result's own _meta is kept next to serverInfo; domain data with content is JSON (CC 3)", async () => {
+		const { registry, handler } = ours();
+		registry.register({
+			name: "meta",
+			description: "Meta",
+			execute: () => ({
+				content: [{ type: "text", text: "a" }],
+				_meta: { "example.com/trace": "t1" },
+			}),
+		});
+		registry.register({
+			name: "doc",
+			description: "A document",
+			execute: () => ({ type: "doc", content: [{ type: "paragraph" }] }),
+		});
+		const call = async (name: string) =>
+			(
+				await outcome(
+					await handler.handle(
+						request({ name: "", body: rpc(1, "tools/call", { name }) }),
+						{ grant: GRANT },
+					),
+				)
+			).message?.["result"];
+		expect(await call("meta")).toEqual({
+			content: [{ type: "text", text: "a" }],
+			resultType: "complete",
+			_meta: {
+				"example.com/trace": "t1",
+				"io.modelcontextprotocol/serverInfo": {
+					name: "probe",
+					version: "1.2.3",
+				},
+			},
+		});
+		const doc = { type: "doc", content: [{ type: "paragraph" }] };
+		expect(await call("doc")).toMatchObject({
+			content: [{ type: "text", text: JSON.stringify(doc) }],
+			structuredContent: doc,
+		});
+	});
+
 	test("execute gets the arguments, an abort signal and the client", async () => {
 		const { registry, handler } = ours();
 		let seen: unknown;

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
 	ANNOTATIONS_META_KEY,
+	isCallToolResult,
 	mapAnnotations,
+	resultText,
 	thrownResult,
 	toCallToolResult,
 } from "../src/mapping.ts";
@@ -64,6 +66,88 @@ describe("results (DEC-023)", () => {
 			isError: false,
 		};
 		expect(toCallToolResult(r)).toBe(r);
+	});
+	test("only an MCP result passes through: domain data with a content array is JSON (CC 3)", () => {
+		const results = [
+			{ content: [] },
+			{ content: [], isError: false, structuredContent: { a: 1 } },
+			// Other keys next to blocks are allowed, as MCP allows them.
+			{ content: [{ type: "text", text: "a" }], invalid: "rows skipped" },
+			{ content: [{ type: "text", text: "a" }], isError: true },
+			{
+				content: [
+					{ type: "resource_link", uri: "https://x.example/a", name: "a" },
+					{ type: "audio", data: "AA==", mimeType: "audio/wav" },
+					{
+						type: "resource",
+						resource: { uri: "file:///a", text: "a" },
+					},
+				],
+				structuredContent: { a: 1 },
+				_meta: { "example.com/k": 1 },
+			},
+		];
+		for (const r of results) {
+			expect(isCallToolResult(r)).toBe(true);
+			expect(toCallToolResult(r)).toBe(r);
+		}
+		const data = [
+			// ProseMirror / TipTap
+			{ type: "doc", content: [{ type: "paragraph", content: [] }] },
+			{ title: "Post", content: ["para 1", "para 2"] },
+			{ content: [{ type: "paragraph" }] },
+			{ content: [{ text: "no type" }] },
+			{ content: [null] },
+			{ content: [{ type: "text", text: "a" }], isError: "yes" },
+			{ content: [], structuredContent: [1] },
+			{ content: [], _meta: "x" },
+			// An empty content with keys a result does not have (review of PR 118)
+			{ title: "Groceries", content: [] },
+			// Blocks without the fields their type needs: a chat message, say
+			{
+				role: "user",
+				content: [{ type: "image", source: { type: "base64", data: "AA==" } }],
+			},
+			{ content: [{ type: "text", text: 5 }] },
+			{ content: [{ type: "image", data: "AA==" }] },
+			{ content: [{ type: "resource_link", uri: "https://x.example/a" }] },
+			{ content: [{ type: "resource", resource: { text: "a" } }] },
+		];
+		for (const d of data) {
+			expect(isCallToolResult(d)).toBe(false);
+			expect(toCallToolResult(d)).toEqual({
+				content: [{ type: "text", text: JSON.stringify(d) }],
+				structuredContent: JSON.parse(JSON.stringify(d)),
+			});
+		}
+		expect(isCallToolResult([{ type: "text" }])).toBe(false);
+		expect(isCallToolResult(null)).toBe(false);
+	});
+	test("a Date or URL is its JSON text, without structuredContent (CC 3)", () => {
+		const date = new Date("2026-11-13T00:00:00.000Z");
+		expect(toCallToolResult(date)).toEqual({
+			content: [{ type: "text", text: '"2026-11-13T00:00:00.000Z"' }],
+		});
+		expect(toCallToolResult(new URL("https://x.example/a"))).toEqual({
+			content: [{ type: "text", text: '"https://x.example/a"' }],
+		});
+		// structuredContent is what the text says: toJSON applied inside too.
+		expect(toCallToolResult({ at: date })).toEqual({
+			content: [{ type: "text", text: '{"at":"2026-11-13T00:00:00.000Z"}' }],
+			structuredContent: { at: "2026-11-13T00:00:00.000Z" },
+		});
+	});
+	test("resultText joins the text blocks", () => {
+		expect(
+			resultText({
+				content: [
+					{ type: "text", text: "a" },
+					{ type: "image", data: "AA==", mimeType: "image/png" },
+					{ type: "text", text: "" },
+					{ type: "text", text: "b" },
+				],
+			}),
+		).toBe("a\nb");
 	});
 	test("other JSON: text with its JSON, structuredContent for objects", () => {
 		expect(toCallToolResult({ x: 1 })).toEqual({

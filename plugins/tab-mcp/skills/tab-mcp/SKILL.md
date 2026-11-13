@@ -83,9 +83,11 @@ Rules for tools:
 - Arguments are validated against `inputSchema` before `execute` runs. Still treat them
   as untrusted input in `execute`.
 - Write `description` for a model: what the tool does, its units, an example.
-- `execute` results: a string becomes one text block; an object with a `content` array is
-  passed through as an MCP result (use it for images); any other JSON value is sent as
-  JSON text and, for objects, as `structuredContent`. A thrown error becomes an error
+- `execute` results: a string becomes one text block; an MCP result (`content` an array
+  of MCP content blocks: `text`, `image`, `audio`, `resource_link`, `resource`) is passed
+  through (use it for images); any other JSON value, also an object whose `content` holds
+  something else, is sent as JSON text and, for objects, as `structuredContent`.
+  Annotation hints must be `true` or `false`; anything else is a `TypeError`. A thrown error becomes an error
   result with its message, so throw errors that tell the model what to do.
 - `signal` aborts when the caller gives up. `client` names the caller:
   `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared

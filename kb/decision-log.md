@@ -2577,3 +2577,105 @@ because the disk was full for a moment.
   body is answered with the 401 (or 503) it would get after the version check, without
   parsing it. DEC-040's order holds for every body that is parsed, and version probes are
   small.
+
+## DEC-133: A hint that is not a boolean is refused; the schema check skips data
+
+2026-11-13, iteration 31 (review 2026-11-13, CC 2 and CC 13). Amends DEC-051 ("Only
+boolean annotations are kept").
+
+- `registerTool` rejects with a `TypeError` an annotation whose key ends in `Hint`, or
+  is `debugging`, when its value is neither a boolean nor `undefined`. Dropping it, as
+  before, turned `consequentialHint: "true"` (plain JavaScript, the CDN build, a JSON
+  config) into a tool that runs without asking: the one brake at run time failed open.
+  Matching by suffix rather than by a list keeps the core small and covers hints a
+  later draft adds. Other keys that are not booleans are still ignored. The
+  `webmcp` option of `registerTool` must be a boolean too.
+- The core's schema check (`schemaProblem`, DEC-051 and DEC-086) walks schema objects
+  only: the values of `default`, `examples`, `const` and `enum` are data, and the keys
+  under `properties`, `patternProperties`, `$defs`, `definitions` and
+  `dependentSchemas` are names. `examples: [{ pattern: "*.ts" }]` was refused as a bad
+  regular expression, and a property named `x-mcp-header` as a header annotation. The
+  `x-mcp-header` check runs in the same walk. A `$ref` with a malformed `%` escape no
+  longer throws a `URIError`; it does not resolve, which is a `TypeError`.
+- Cost: the core grew by about 100 B gzipped (6346 of 6400 B). Moving `schemaProblem`
+  into the lazy chunk (the review's simplification list) was not done: it changes when
+  a bad schema is refused and is for the owner to decide.
+
+## DEC-134: Only an MCP result passes through; its `_meta` is kept
+
+2026-11-13, iteration 31 (review 2026-11-13, CC 3 = WM 12). Amends DEC-023.
+
+- `isCallToolResult` (in `mapping.ts`, exported for the WebMCP mapping of iteration F)
+  is true for an object whose `content` is an array of MCP content blocks with the
+  fields their type requires (`text` a string `text`; `image` and `audio` string `data`
+  and `mimeType`; `resource_link` string `uri` and `name`; `resource` a `resource`
+  object with a string `uri`), with `isError` a boolean and `structuredContent` and
+  `_meta` objects where present. Only such a value passes through. A ProseMirror or
+  TipTap document (`{ type: "doc", content: [{ type: "paragraph" }] }`),
+  `{ title, content: ["…"] }` or a chat message whose image block has a `source` goes
+  the JSON way. Checking only "every item has a string `type`", as the review proposed,
+  would still pass the ProseMirror document. Other keys next to blocks are allowed, as
+  MCP allows them on a result; with an empty `content` only a result's own keys are, so
+  `{ title, content: [] }` is data (review of PR 118).
+- A passed-through result's own `_meta` is merged with the server info
+  (`{ ...result._meta, "io.modelcontextprotocol/serverInfo": … }`); it was overwritten.
+- `structuredContent` is the JSON text parsed again, set when that is an object. So it
+  always says what the text says: a `Date` or `URL` (JSON: a string) has none, `toJSON`
+  is applied inside objects, and class instances arrive as their JSON.
+- `resultText` (the text blocks of a result, one per line) moved from `mcp.ts` to
+  `mapping.ts`, next to it.
+
+## DEC-135: The confirmation: one at a time, arguments seen, no stray keys
+
+2026-11-13, iteration 31 (review 2026-11-13, CU 1, CU 2, CU 3, CU 8, CU 13, CU 14, CC 1,
+CC 8). Extends DEC-054, DEC-087 and DEC-093.
+
+- **One at a time.** `confirmDialog` keeps a queue per document: one dialog is shown,
+  the others wait in order and are shown as each closes, so each starts its Allow delay
+  when it is shown. Two parallel calls could otherwise be approved with one double
+  click, both timers having run out together. A call cancelled while it waits leaves
+  the queue without being shown. The shown dialog says how many wait
+  (`.tab-mcp-waiting`, last in the dialog so that the "X wants to run Y" paragraph stays
+  the first `p`). The queue is per document, not per `TabMcp`, since all dialogs share
+  the top layer. Two calls made before the dialogs' chunk has loaded may reach the
+  queue in either order. A waiting call whose tool the user allowed always on the call
+  before it is answered "allow" when its turn comes, without being shown; a dialog
+  whose `showModal()` throws is removed and the queue goes on (review of PR 118).
+- **Re-armed by another dialog.** The delay also starts again when any other dialog of
+  the document closes (a capture listener for `close`, which does not bubble): the
+  connect dialog or the page's own dialog over a confirmation could otherwise hand the
+  click that closed it to Allow.
+- **Arguments seen.** The box grows to `min(50vh, 24rem)` (`--tab-mcp-arguments-height`,
+  was 12rem). When it still overflows, Allow and Always allow stay disabled until it
+  has been scrolled to its end, once (a later scroll up does not take it back); the
+  dialog says "Scroll to the end of the arguments to allow this call." and the box gets
+  `tabindex="0"` for keyboard scrolling. The caller chooses the order of the keys, so
+  the field that matters (`bcc`) can come last. Without layout (no scroll height) the
+  arguments count as seen. Rejected: a count of hidden lines ("N more lines"), which
+  changes while scrolling and with wrapping.
+- **No stray keys.** Until the delay has run out, Enter and Space on a button and
+  Escape (`keydown`, `keyup`, and `cancel`) are ignored. Typing meant for the page
+  focused "Don't allow" and told the AI app the user declined. Rejected: treating an
+  early dismissal as `"unanswered"`, which closes the question the user has not read.
+  Mouse and programmatic clicks on "Don't allow" still answer at once: refusing is the
+  safe direction, and an agent driving the tab clicks programmatically.
+- **For screen readers.** `aria-describedby` names the "X wants to run Y" paragraph,
+  and the arguments when they are at most 500 characters. Each Disconnect button in the
+  connect dialog has `aria-label="Disconnect <app>"`. An announcement when Allow becomes
+  enabled was not added.
+- **Page rules kept out.** `.tab-mcp-dialog :where(*)` sets `color: inherit`, buttons
+  reset `width`, `text-transform` and `letter-spacing`, and the dialog sets
+  `pointer-events: auto`, so a page's `p { color: #ccc }` on a light dialog, a classless
+  framework's buttons, or Radix's `body { pointer-events: none }` no longer make the
+  dialogs unreadable or unclickable. A shadow root (the review's simplification list)
+  would fix this class of problem for good but changes the styling contract (class
+  names from page CSS) that iteration J revisits; the targeted rules are the smaller
+  change. Checked in headless Chrome.
+- **A served port that closes.** `serve` listens for the port's `close` event where the
+  port has `addEventListener`, and closes itself then: calls, listen streams and an open
+  confirmation end. Bun fires the event; Chrome 151 only with the Blink feature
+  `MessagePortCloseEvent` (the browser test turns it on), so the README still tells the
+  page to close a dead serve itself.
+- **No limits on a port (CC 8).** No cap was added to `serve`: threat model A15 says a
+  port has none of the relay's limits and why, and the README now says it too. The
+  queue above turns a burst of consequential calls into one question at a time.

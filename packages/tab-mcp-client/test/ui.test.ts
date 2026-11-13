@@ -1199,8 +1199,16 @@ describe("showConnectDialog", () => {
 		).toBe(
 			"A new address disconnects Claude (claude.ai). To use this page again, add the new address to it.",
 		);
-		// Both grants are listed, each with its own Disconnect.
+		// Both grants are listed, each with its own Disconnect, named for its app (CU 14).
 		expect(dialog.querySelectorAll(".tab-mcp-apps li")).toHaveLength(2);
+		expect(
+			[...dialog.querySelectorAll(".tab-mcp-disconnect")].map((b) =>
+				b.getAttribute("aria-label"),
+			),
+		).toEqual([
+			"Disconnect Claude (claude.ai)",
+			expect.stringMatching(/^Disconnect /),
+		]);
 		byText(dialog, "Cancel").click();
 		byText(dialog, "Done").click();
 	});
@@ -1778,5 +1786,264 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		} finally {
 			spy.close();
 		}
+	});
+});
+
+describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration 31)", () => {
+	beforeEach(() => {
+		Object.defineProperty(doc, "hasFocus", {
+			configurable: true,
+			value: () => true,
+		});
+		jest.useFakeTimers();
+	});
+	afterEach(() => {
+		jest.useRealTimers();
+	});
+	const confirms = () =>
+		[...doc.querySelectorAll("dialog.tab-mcp-confirm")] as HTMLDialogElement[];
+	const named = (tool: string, signal = new AbortController().signal) => ({
+		...question(signal),
+		tool: { name: tool, description: `Runs ${tool}` },
+	});
+	const key = (target: EventTarget, k: string, type = "keydown") => {
+		const event = new window.KeyboardEvent(type, {
+			key: k,
+			bubbles: true,
+			cancelable: true,
+		}) as unknown as KeyboardEvent;
+		target.dispatchEvent(event);
+		return event.defaultPrevented;
+	};
+
+	test("two calls: one dialog at a time, and the next starts its own delay (CU 1)", async () => {
+		const first = confirmDialog(named("one"), doc, { allowDelayMs: 600 });
+		const second = confirmDialog(named("two"), doc, { allowDelayMs: 600 });
+		expect(confirms()).toHaveLength(1);
+		const waiting = doc.querySelector(".tab-mcp-waiting") as HTMLElement;
+		expect(shown(waiting)).toBe(true);
+		expect(waiting.textContent).toBe("1 more call is waiting after this one.");
+		jest.advanceTimersByTime(600);
+		byText(doc, "Allow").click();
+		expect(await first).toBe("allow");
+		// The second shows now, with Allow disabled again for the full delay.
+		expect(confirms()).toHaveLength(1);
+		expect(confirms()[0]?.querySelector("h2")?.textContent).toBe("Allow two?");
+		expect(shown(doc.querySelector(".tab-mcp-waiting"))).toBe(false);
+		const allow = byText(doc, "Allow");
+		expect(allow.disabled).toBe(true);
+		allow.click(); // the second click of a double click
+		expect(confirms()[0]?.open).toBe(true);
+		jest.advanceTimersByTime(599);
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(1);
+		expect(allow.disabled).toBe(false);
+		byText(doc, "Don't allow").click();
+		expect(await second).toBe("deny");
+		expect(confirms()).toHaveLength(0);
+	});
+
+	test("a call cancelled while it waits is never shown; the count follows (CU 1)", async () => {
+		const first = confirmDialog(named("one"), doc);
+		const cancelled = new AbortController();
+		const second = confirmDialog(named("two", cancelled.signal), doc);
+		const third = confirmDialog(named("three"), doc);
+		const waiting = doc.querySelector(".tab-mcp-waiting") as HTMLElement;
+		expect(waiting.textContent).toBe(
+			"2 more calls are waiting after this one.",
+		);
+		cancelled.abort();
+		expect(await second).toBe("deny");
+		expect(waiting.textContent).toBe("1 more call is waiting after this one.");
+		byText(doc, "Don't allow").click();
+		expect(await first).toBe("deny");
+		expect(confirms()[0]?.querySelector("h2")?.textContent).toBe(
+			"Allow three?",
+		);
+		byText(doc, "Don't allow").click();
+		expect(await third).toBe("deny");
+		// The queue is free again: the next one shows at once.
+		const fourth = confirmDialog(named("four"), doc);
+		expect(confirms()).toHaveLength(1);
+		byText(doc, "Don't allow").click();
+		expect(await fourth).toBe("deny");
+	});
+
+	test("a dialog that cannot be shown does not block the queue (review of PR 118)", async () => {
+		const proto = window.HTMLDialogElement.prototype as unknown as {
+			showModal: () => void;
+		};
+		const original = proto.showModal;
+		proto.showModal = () => {
+			proto.showModal = original;
+			throw new window.DOMException("not active", "InvalidStateError");
+		};
+		const failed = confirmDialog(named("one"), doc);
+		await expect(failed).rejects.toThrow("not active");
+		expect(doc.querySelectorAll("dialog")).toHaveLength(0);
+		const next = confirmDialog(named("two"), doc);
+		expect(confirms()).toHaveLength(1);
+		expect(confirms()[0]?.open).toBe(true);
+		byText(doc, "Don't allow").click();
+		expect(await next).toBe("deny");
+	});
+
+	test("a waiting call allowed always meanwhile is not shown (review of PR 118)", async () => {
+		let always = false;
+		const first = confirmDialog(named("one"), doc, { allowDelayMs: 600 });
+		const second = confirmDialog(named("one"), doc, {
+			allowedNow: () => always,
+		});
+		const third = confirmDialog(named("two"), doc, {
+			allowedNow: () => false,
+		});
+		jest.advanceTimersByTime(600);
+		always = true; // what "Always allow" on the first one does
+		byText(doc, "Allow").click();
+		expect(await first).toBe("allow");
+		expect(await second).toBe("allow");
+		// The next waiting call is shown, and asked.
+		expect(confirms()).toHaveLength(1);
+		expect(confirms()[0]?.querySelector("h2")?.textContent).toBe("Allow two?");
+		byText(doc, "Don't allow").click();
+		expect(await third).toBe("deny");
+	});
+
+	test("another dialog closing over the confirmation starts the delay again (CU 1)", async () => {
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const allow = byText(doc, "Allow");
+		jest.advanceTimersByTime(600);
+		expect(allow.disabled).toBe(false);
+		const other = doc.createElement("dialog");
+		doc.body.append(other);
+		other.showModal();
+		other.close();
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(599);
+		expect(allow.disabled).toBe(true);
+		jest.advanceTimersByTime(1);
+		expect(allow.disabled).toBe(false);
+		allow.click();
+		expect(await answer).toBe("allow");
+	});
+
+	test("Allow waits until the arguments were scrolled to their end (CU 2)", async () => {
+		let scrollTop = 0;
+		const proto = window.HTMLElement.prototype as unknown as object;
+		const box = (self: unknown) =>
+			(self as HTMLElement).classList?.contains("tab-mcp-arguments");
+		Object.defineProperty(proto, "scrollHeight", {
+			configurable: true,
+			get() {
+				return box(this) ? 1000 : 0;
+			},
+		});
+		Object.defineProperty(proto, "clientHeight", {
+			configurable: true,
+			get() {
+				return box(this) ? 200 : 0;
+			},
+		});
+		Object.defineProperty(proto, "scrollTop", {
+			configurable: true,
+			get() {
+				return box(this) ? scrollTop : 0;
+			},
+			set() {},
+		});
+		const answer = confirmDialog(question(), doc, {
+			allowDelayMs: 600,
+			alwaysAllow: true,
+		});
+		const dialog = confirms()[0] as HTMLDialogElement;
+		const args = dialog.querySelector(".tab-mcp-arguments") as HTMLElement;
+		const note = dialog.querySelector(".tab-mcp-scroll-note") as HTMLElement;
+		const allow = byText(dialog, "Allow");
+		const always = byText(dialog, "Always allow");
+		expect(shown(note)).toBe(true);
+		expect(note.textContent).toBe(
+			"Scroll to the end of the arguments to allow this call.",
+		);
+		expect(args.tabIndex).toBe(0);
+		expect(args.style.getPropertyValue("max-height")).toBe(
+			"var(--tab-mcp-arguments-height, min(50vh, 24rem))",
+		);
+		jest.advanceTimersByTime(60_000);
+		expect(allow.disabled).toBe(true);
+		expect(always.disabled).toBe(true);
+		// Half-way is not the end.
+		scrollTop = 400;
+		args.dispatchEvent(new window.Event("scroll") as unknown as Event);
+		expect(allow.disabled).toBe(true);
+		scrollTop = 800;
+		args.dispatchEvent(new window.Event("scroll") as unknown as Event);
+		expect(shown(note)).toBe(false);
+		expect(allow.disabled).toBe(false);
+		expect(always.disabled).toBe(false);
+		// Once seen, scrolling back up does not take it back.
+		scrollTop = 0;
+		args.dispatchEvent(new window.Event("scroll") as unknown as Event);
+		expect(allow.disabled).toBe(false);
+		allow.click();
+		expect(await answer).toBe("allow");
+	});
+
+	test("before the delay has run out, Enter or Space on a button and Escape do not answer (CU 13)", async () => {
+		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
+		const dialog = confirms()[0] as HTMLDialogElement;
+		const deny = byText(dialog, "Don't allow");
+		expect(doc.activeElement).toBe(deny);
+		expect(key(deny, "Enter")).toBe(true);
+		expect(key(deny, " ")).toBe(true);
+		expect(key(deny, " ", "keyup")).toBe(true);
+		expect(key(dialog, "Escape")).toBe(true);
+		const cancel = new window.Event("cancel", {
+			cancelable: true,
+		}) as unknown as Event;
+		dialog.dispatchEvent(cancel);
+		expect(cancel.defaultPrevented).toBe(true);
+		// Other keys, and keys on the arguments box, are not touched.
+		expect(key(deny, "a")).toBe(false);
+		expect(key(dialog.querySelector("pre") as Element, " ")).toBe(false);
+		// A click still answers.
+		jest.advanceTimersByTime(600);
+		expect(key(deny, "Enter")).toBe(false);
+		expect(key(dialog, "Escape")).toBe(false);
+		deny.click();
+		expect(await answer).toBe("deny");
+	});
+
+	test("the question and short arguments describe the dialog for screen readers (CU 14)", async () => {
+		const answer = confirmDialog(question(), doc);
+		const dialog = confirms()[0] as HTMLDialogElement;
+		const ids = (dialog.getAttribute("aria-describedby") ?? "").split(" ");
+		expect(ids.map((id) => doc.getElementById(id)?.textContent)).toEqual([
+			"Claude (claude.ai) wants to run Clear memory.",
+			dialog.querySelector("pre")?.textContent,
+		]);
+		byText(doc, "Don't allow").click();
+		await answer;
+		// Long arguments are not read out; no arguments neither.
+		for (const args of [{ long: "x".repeat(600) }, {}]) {
+			const next = confirmDialog({ ...question(), arguments: args }, doc);
+			const d = confirms()[0] as HTMLDialogElement;
+			expect(
+				(d.getAttribute("aria-describedby") ?? "").split(" "),
+			).toHaveLength(1);
+			byText(doc, "Don't allow").click();
+			await next;
+		}
+	});
+});
+
+describe("DIALOG_CSS: page rules do not reach into the dialogs (CU 3, CU 8)", () => {
+	test("every element inherits the dialog's colour; buttons reset width, case and spacing; pointer events on", () => {
+		expect(DIALOG_CSS).toContain(
+			".tab-mcp-dialog :where(*) { box-sizing: border-box; color: inherit; }",
+		);
+		expect(DIALOG_CSS).toMatch(
+			/\.tab-mcp-dialog :where\(button\) \{[^}]*text-transform: none; letter-spacing: normal; width: auto;/,
+		);
+		expect(DIALOG_CSS).toMatch(/\.tab-mcp-dialog \{[^}]*pointer-events: auto;/);
 	});
 });

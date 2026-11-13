@@ -318,7 +318,10 @@ a port:
   requests in flight, sends nothing more for them, and sends one `bye` with the reason
   `closed`. `createTunnelFetch` then ends its requests in flight, and every later one,
   with `-31003`. A port carries no news of its own closing, so without the `bye` the
-  caller would wait for each request's timeout.
+  caller would wait for each request's timeout. In the other direction, the page closes
+  the serve itself when the port fires `close` (its other end is gone), where the
+  runtime has that event (Bun; Chrome only with the `MessagePortCloseEvent` Blink
+  feature); otherwise the page has to call `close()`.
 - To anything but `http.request` and `http.cancel` the page answers `error` with
   `bad_message` (and the `id`, if the message had one); an `error` message is never
   answered. `createTunnelFetch` ends the request a `bad_message` names with `-31007`.

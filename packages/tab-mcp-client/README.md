@@ -94,7 +94,8 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
 - `name` (1-128 characters of `A-Z a-z 0-9 _ - .`), `title`, `description` (not empty);
 - `inputSchema`: a JSON Schema with `"type": "object"`. Arguments are checked against it
   before `execute` runs. `registerTool` rejects a schema the validator cannot use (a
-  pattern that is not a regular expression, a `$ref` that does not resolve). The
+  pattern that is not a regular expression, a `$ref` that does not resolve; values of
+  `default`, `examples`, `const` and `enum` are data and are not read as schema). The
   validator itself is loaded by `connect()`: from then on it checks each schema at
   registration too, and a tool registered earlier whose schema it refuses (for example a
   `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
@@ -103,11 +104,17 @@ PNG, JPEG, GIF, WebP or ICO `data:` URIs up to 16 KiB (no inline SVG). They go o
   an AI app through the relay (`id`, verified `host`, declared `name`), or
   `{ kind: "webmcp" }` for an agent in the browser ([WebMCP](#webmcp)), of which nothing
   more is known. Check `client.kind` before you read `host`. Return a
-  string (one text block), an MCP result with a `content` array (passed through), or any
-  other JSON value (sent as JSON text, and as `structuredContent` for an object). A thrown
-  error becomes an error result with its message;
+  string (one text block), an MCP result (passed through with its `_meta`: an object
+  whose `content` is an array of MCP content blocks, each with `type` `text`, `image`,
+  `audio`, `resource_link` or `resource` and the fields that type needs), or any other JSON value (sent as JSON text,
+  and as `structuredContent` when that JSON is an object; a `Date` becomes a string, so
+  it has none). Data that only looks like a result, such as a ProseMirror document with
+  its `content` array, is sent as JSON. A thrown error becomes an error result with its
+  message;
 - `annotations`: `readOnlyHint`, `consequentialHint`, `untrustedContentHint`, and the
-  MCP hints `destructiveHint`, `idempotentHint`, `openWorldHint`.
+  MCP hints `destructiveHint`, `idempotentHint`, `openWorldHint`. A hint must be `true`
+  or `false`: `registerTool` rejects any other value with a `TypeError`, since a
+  `consequentialHint: "true"` that was dropped would run the tool without asking.
 
 In TypeScript, `Tool<Input>` types the `input` of `execute`, and `registerTool` and
 `useTool` infer it from the tool or take it explicitly
@@ -259,9 +266,14 @@ const { tools } = await client.listTools();
 - `serve` resolves with `{ close() }`; `options.signal` does the same. Closing aborts the
   calls in flight and tells the other end (`bye`), whose requests then end at once with
   `-31003`. Close a serve whose port is dead, as above: its calls, listen streams and an
-  open confirmation would stay otherwise. `serve` may be called for several ports (each
-  port once at a time), and next to a relay connection and `webmcp: true`: one
-  registration reaches all three.
+  open confirmation would stay otherwise. Where the port fires `close` when its other end
+  goes away (Bun does; Chrome only with the `MessagePortCloseEvent` Blink feature), the
+  serve closes itself then. `serve` may be called for several ports (each port once at a
+  time), and next to a relay connection and `webmcp: true`: one registration reaches all
+  three.
+- A port has none of the relay's limits: no cap on requests in flight, listen streams,
+  body size or rate. The other end is the site's own code (threat model A15). The
+  confirmations of consequential calls are shown one at a time, however many arrive.
 - `createTunnelFetch` answers a request that takes longer than `requestTimeoutMs`
   (300 s by default; a `subscriptions/listen` stream is not limited) with the JSON-RPC
   error `-31002`, and every request after `close()` with `-31003`, at HTTP 200 like the
@@ -290,7 +302,15 @@ Tools are called while the user is in the AI app, so the dialog often opens in a
 the background. "Allow" and "Always allow" can be clicked only once the page has been
 visible and focused for `confirmDelayMs` (750 ms) with the dialog open; leaving the page
 disables them and coming back starts the wait again, so the click that brings the page
-forward cannot approve. Characters that are invisible, blank (such as U+00A0, U+3000 or
+forward cannot approve. One confirmation is shown at a time; the others wait, the shown
+one says how many, and each starts its own wait when it is shown (and again when another
+dialog of the page closes over it), so the second click of a double click cannot approve
+the next call. A call cancelled while it waits is never shown. When the arguments do not
+fit their box (`min(50vh, 24rem)`), the approving buttons also wait until the box has been
+scrolled to its end, and the dialog says so: the AI app chooses the order of the keys, so
+what matters may come last. Before the wait has run out, Enter or Space on a button and
+Escape do nothing, so typing meant for the page cannot refuse a call the user has not
+seen; a click on "Don't allow" works at once. Characters that are invisible, blank (such as U+00A0, U+3000 or
 U+2800) or change the text direction (such as U+202E) are shown in the arguments and the
 AI app's name as `\uXXXX`, so the AI app cannot make them look like something else; the
 tool gets the arguments unchanged.
@@ -600,11 +620,14 @@ To adjust single values, set these custom properties on `:root` or on `.tab-mcp-
 | `--tab-mcp-title-size` | `1.25em` | |
 | `--tab-mcp-mono` | `ui-monospace, …, monospace` | the address, the code, the arguments |
 | `--tab-mcp-code-size` | `2em` | the pairing code |
-| `--tab-mcp-arguments-height` | `12rem` | the arguments scroll beyond this |
+| `--tab-mcp-arguments-height` | `min(50vh, 24rem)` | the arguments scroll beyond this |
 
 For more, write CSS for the class names. Each of the dialogs' rules has the specificity
 of one class, so the page's rules for elements (`button { … }`, a reset's
-`* { border-width: 0 }`) do not change them. The rules for hover, focus and disabled, and
+`* { border-width: 0 }`) do not change them: every element in a dialog inherits the
+dialog's colour, buttons reset `width`, `text-transform` and `letter-spacing`, and the
+dialogs set `pointer-events: auto` (so they work while a modal layer of Radix or shadcn
+sets `body { pointer-events: none }`). The rules for hover, focus and disabled, and
 for the primary and danger buttons, have one class and two elements (0,1,2), so the page's
 `button:hover`, `button:focus` or `button:disabled` (0,1,1) do not change those either. A
 rule with two classes, such as `.tab-mcp-dialog .tab-mcp-primary` (0,2,0), wins over all
@@ -620,7 +643,7 @@ connected `.tab-mcp-success`, with `.tab-mcp-success-icon` (the check mark, an i
 button `.tab-mcp-setup-toggle`, "Connect another app", with `aria-expanded`, which shows
 and hides `.tab-mcp-setup`, the address, code and help), the confirmation is
 `.tab-mcp-confirm` (with `.tab-mcp-description`, `.tab-mcp-arguments`,
-`.tab-mcp-always-note`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
+`.tab-mcp-scroll-note`, `.tab-mcp-always-note`, `.tab-mcp-waiting`, and the buttons `.tab-mcp-deny`, `.tab-mcp-allow`,
 `.tab-mcp-always`, with `alwaysAllow`), and the notice after `replaced` is
 `.tab-mcp-replaced` (with `.tab-mcp-description`, `.tab-mcp-status`, and the buttons
 `.tab-mcp-replaced-close` and `.tab-mcp-new-address`). Buttons are `.tab-mcp-primary` (the one

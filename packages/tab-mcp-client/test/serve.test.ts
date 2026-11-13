@@ -537,6 +537,66 @@ describe("serve and createTunnelFetch over a MessageChannel", () => {
 		expect(third.port1.onmessage).toBeNull();
 	});
 
+	test("the port's close event ends the serve: calls, listen streams and an open confirmation (CC 1)", async () => {
+		const asked: AbortSignal[] = [];
+		const mcp = newPage({
+			onConfirm: ({ signal }) => {
+				asked.push(signal);
+				// As the library's dialog does: closes when the call is cancelled.
+				return new Promise((resolve) =>
+					signal.addEventListener("abort", () => resolve(false)),
+				);
+			},
+		});
+		await mcp.registerTool({
+			name: "wipe",
+			description: "Wipes",
+			annotations: { consequentialHint: true },
+			execute: () => "wiped",
+		});
+		const { port1, port2 } = new MessageChannel();
+		open.push(port1, port2);
+		await mcp.serve(port1, { client: ASSISTANT });
+		const ended = nextEvent<ToolCallEnd>(mcp, "toolcallend");
+		const started = nextEvent(mcp, "toolcall");
+		port2.postMessage({
+			type: "http.request",
+			id: "a",
+			method: "POST",
+			path: "/mcp",
+			headers: {
+				"content-type": "application/json",
+				accept: "application/json, text/event-stream",
+				"mcp-protocol-version": "2026-07-28",
+				"mcp-method": "tools/call",
+				"mcp-name": "wipe",
+			},
+			body: JSON.stringify(rpc(1, "tools/call", { name: "wipe" })),
+		});
+		await started;
+		await wait(10);
+		expect(asked.length).toBe(1);
+		// The other end goes away without a word (its frame unloaded, say).
+		port2.close();
+		expect((await ended).detail.outcome).toBe("cancelled");
+		expect(asked[0]?.aborted).toBe(true);
+		expect(port1.onmessage).toBeNull();
+		// The port can be served again (it was let go).
+		const fake = new (class extends EventTarget {
+			onmessage: ((event: { data: unknown }) => void) | null = null;
+			sent: unknown[] = [];
+			postMessage(message: unknown) {
+				this.sent.push(message);
+			}
+		})();
+		await mcp.serve(fake, { client: ASSISTANT });
+		expect(fake.onmessage).not.toBeNull();
+		fake.dispatchEvent(new Event("close"));
+		expect(fake.onmessage).toBeNull();
+		await mcp.serve(fake, { client: ASSISTANT }); // let go: served again
+		expect(fake.onmessage).not.toBeNull();
+	});
+
 	test("closing the serve ends the caller's requests at once, and its later ones (review of PR 114)", async () => {
 		const mcp = newPage();
 		await mcp.registerTool({
