@@ -21,15 +21,18 @@ import {
 	MAX_DESCRIPTION,
 	MAX_IMAGES_BASE64,
 	MAX_NAME,
+	MAX_PATTERN,
 	MAX_RESULT,
 	MAX_SCHEMA_BYTES,
 	MAX_TOOLS,
+	outputSchemaOf,
 	PageToolBridge,
 	resultOf,
 	schemaFor,
 } from "../src/worker/bridge.ts";
 import {
 	createTools,
+	listing,
 	MAX_LISTED_SCHEMAS,
 	OWN_TOOL_NAMES,
 } from "../src/worker/tools.ts";
@@ -78,17 +81,39 @@ describe("names, descriptions, schemas", () => {
 		expect(schemaFor({ inputSchema: big })).toHaveProperty("problem");
 	});
 
-	test("the page's regular expressions are not run in the panel", () => {
+	test("the page's regular expressions are not run in the panel; a pattern is noted in the description (WM 8)", () => {
 		expect(
 			schemaFor({
 				inputSchema: {
 					type: "object",
-					properties: { q: { type: "string", pattern: "^(a+)+$" } },
+					properties: {
+						q: { type: "string", pattern: "^(a+)+$" },
+						code: {
+							type: "string",
+							description: "The order code.",
+							pattern: `^[A-Z]{3}${"x".repeat(MAX_PATTERN)}`,
+						},
+						// A description that is not a string stays as it is.
+						odd: { type: "string", description: 7, pattern: "^x$" },
+					},
 					patternProperties: { "^x": { type: "number" } },
 				},
 			}),
 		).toEqual({
-			schema: { type: "object", properties: { q: { type: "string" } } },
+			schema: {
+				type: "object",
+				properties: {
+					q: {
+						type: "string",
+						description: "(Must match the regular expression ^(a+)+$.)",
+					},
+					code: {
+						type: "string",
+						description: `The order code. (Must match the regular expression ^[A-Z]{3}${"x".repeat(MAX_PATTERN - 10)}….)`,
+					},
+					odd: { type: "string", description: 7 },
+				},
+			},
 		});
 	});
 
@@ -116,19 +141,36 @@ describe("names, descriptions, schemas", () => {
 			schema: {
 				type: "object",
 				properties: {
-					pattern: { type: "string" },
+					pattern: {
+						type: "string",
+						description: "(Must match the regular expression ^(a+)+$.)",
+					},
 					patternProperties: { type: "object" },
 				},
 				required: ["pattern"],
 				additionalProperties: false,
-				$defs: { pattern: { type: "string" } },
+				$defs: {
+					pattern: {
+						type: "string",
+						description: "(Must match the regular expression x.)",
+					},
+				},
 				dependentSchemas: { pattern: { required: ["patternProperties"] } },
 				dependencies: { pattern: ["patternProperties"] },
 				default: { pattern: "keep" },
 				examples: [{ pattern: "keep" }],
 				enum: [{ pattern: "keep" }],
-				"x-extra": { type: "string" },
-				anyOf: [{ properties: { q: {} } }],
+				"x-extra": {
+					type: "string",
+					description: "(Must match the regular expression (a|a)*$.)",
+				},
+				anyOf: [
+					{
+						properties: {
+							q: { description: "(Must match the regular expression y.)" },
+						},
+					},
+				],
 			},
 		});
 	});
@@ -207,12 +249,36 @@ describe("results", () => {
 			content: [{ type: "image", data: "<svg/>", mimeType: "image/png" }],
 		});
 		expect(resultOf(notBase64)).toBe(notBase64);
-		expect(resultOf('{"ordered":"tea"}')).toBe('{"ordered":"tea"}');
 		const odd = JSON.stringify({
 			content: [{ type: "resource", uri: "file:///etc/passwd" }],
 		});
 		expect(resultOf(odd)).toBe(odd);
+		// Data with a content key that is no MCP result: text, so that the
+		// library cannot take it for one past the budget.
+		const data = JSON.stringify({ title: "Post", content: ["para"] });
+		expect(resultOf(data)).toBe(data);
 		expect(resultOf("{not json")).toBe("{not json");
+		expect(resultOf("[1,2]")).toBe("[1,2]");
+	});
+
+	test("the JSON of another object is that object, so the AI app gets structuredContent (WM 8)", () => {
+		expect(resultOf('{"ordered":"tea","cups":2}')).toEqual({
+			ordered: "tea",
+			cups: 2,
+		});
+		// Past the text budget it stays (cut) text.
+		const big = JSON.stringify({ text: "x".repeat(MAX_RESULT) });
+		expect(typeof resultOf(big)).toBe("string");
+	});
+
+	test("a JSON-encoded string, as the draft serializes every result, is that string (WM 7)", () => {
+		expect(resultOf('"Hello, Ada!"')).toBe("Hello, Ada!");
+		expect(resultOf('"line 1\\nline 2"')).toBe("line 1\nline 2");
+		// Text that only starts with a quote stays as it is.
+		expect(resultOf('"Hello" was said')).toBe('"Hello" was said');
+		expect(
+			(resultOf(JSON.stringify("x".repeat(MAX_RESULT + 10))) as string).length,
+		).toBe(MAX_RESULT);
 	});
 });
 
@@ -363,7 +429,12 @@ describe("PageToolBridge", () => {
 		const state = (await listed?.execute({}, options())) as typeof bridge.state;
 		const offered = {
 			type: "object",
-			properties: { q: { type: "string" } },
+			properties: {
+				q: {
+					type: "string",
+					description: "(Must match the regular expression ^x.)",
+				},
+			},
 			required: ["q"],
 		};
 		expect(state.tools.find((t) => t.name === "search")?.inputSchema).toEqual(
@@ -376,6 +447,67 @@ describe("PageToolBridge", () => {
 			"inputSchema",
 		);
 		expect(state.tabId).toBe(1);
+	});
+
+	test("a page's outputSchema is shown in webmcp_tools, not declared on page_<name> (WM 3, DEC-144)", async () => {
+		const reg = registrar();
+		const outputSchema = {
+			type: "object",
+			properties: { total: { type: "string", pattern: "^\\d+$" } },
+		};
+		const { chrome } = fakeChrome(
+			page([
+				pageTool("order", { outputSchema }),
+				pageTool("plain"),
+				pageTool("odd", { outputSchema: "not a schema" }),
+			]),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		const shown = {
+			type: "object",
+			properties: {
+				total: {
+					type: "string",
+					description: "(Must match the regular expression ^\\d+$.)",
+				},
+			},
+		};
+		expect(bridge.state.tools.map((t) => t.outputSchema)).toEqual([
+			shown,
+			undefined,
+			undefined,
+		]);
+		expect(reg.tools.get("page_order")).not.toHaveProperty("outputSchema");
+		expect(
+			outputSchemaOf({
+				type: "object",
+				description: "z".repeat(MAX_SCHEMA_BYTES),
+			}),
+		).toBeUndefined();
+	});
+
+	test("a tool marked debugging is listed with its problem, not offered and not callable (WM 8)", async () => {
+		const reg = registrar();
+		const { chrome, state } = fakeChrome(
+			page([
+				pageTool("dump_state", { annotations: { debugging: true } }),
+				pageTool("search"),
+			]),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		expect([...reg.tools.keys()]).toEqual(["page_search"]);
+		expect(bridge.state.tools[0]).toMatchObject({
+			name: "dump_state",
+			problem: "it is marked as a debugging tool, for the page's developers",
+		});
+		await expect(
+			bridge.callByName("dump_state", {}, options()),
+		).rejects.toThrow(
+			"The page's tool dump_state is not offered: it is marked as a debugging tool, for the page's developers.",
+		);
+		expect(state.calls).toEqual([]);
 	});
 
 	test("the schemas webmcp_tools lists stay within a budget; past it a tool says where its schema is", async () => {
@@ -415,6 +547,31 @@ describe("PageToolBridge", () => {
 		expect(bridge.state.tools.every((t) => t.inputSchema !== undefined)).toBe(
 			true,
 		);
+	});
+
+	test("output schemas count against the same budget and go first (WM 3)", () => {
+		const schema = (n: number) => ({
+			type: "object",
+			description: "d".repeat(n),
+		});
+		const tool = (name: string, input: number, output: number) => ({
+			name,
+			tool: `page_${name}`,
+			description: "d",
+			readOnly: true,
+			inputSchema: schema(input),
+			outputSchema: schema(output),
+		});
+		const half = MAX_LISTED_SCHEMAS / 2;
+		const listed = listing({
+			available: true,
+			tools: [tool("a", 1000, half), tool("b", half - 2000, 1000)],
+		});
+		// a keeps both; b keeps its input schema, which leaves no room for its output schema.
+		expect(listed.tools[0]?.outputSchema).toBeDefined();
+		expect(listed.tools[1]?.inputSchema).toBeDefined();
+		expect(listed.tools[1]).not.toHaveProperty("outputSchema");
+		expect(listed.tools[1]).not.toHaveProperty("schemaLeftOut");
 	});
 
 	test("a page that says it is another site than Chrome reports gets no tools (ES 4)", async () => {

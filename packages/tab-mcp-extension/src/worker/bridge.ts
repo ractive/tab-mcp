@@ -50,6 +50,8 @@ export const MAX_BLOCKS = 32;
  * 1 MiB per response; an image beyond it is left out with a note.
  */
 export const MAX_IMAGES_BASE64 = 640 * 1024;
+/** A pattern noted in a description (WM 8) is cut to this many characters. */
+export const MAX_PATTERN = 200;
 /** A call the page does not answer in this time is given up. */
 export const CALL_TIMEOUT_MS = 60_000;
 
@@ -104,12 +106,24 @@ const has = (keywords: Record<string, unknown>, key: string) =>
  * `enum`, `const`, `default` and the other plain keywords are data and stay
  * as they are; any other keyword with an object value is walked as a schema,
  * as the validator would reach it through a `$ref`.
+ *
+ * A `pattern` that goes is added to the schema's `description` (cut to
+ * `MAX_PATTERN` characters), so that the AI app still knows the format the
+ * page wants (WM 8).
  */
 function withoutPatterns(schema: unknown): unknown {
 	if (!isObject(schema)) return schema;
 	const out: Record<string, unknown> = {};
+	const { pattern, description } = schema;
+	if (
+		typeof pattern === "string" &&
+		(description === undefined || typeof description === "string")
+	)
+		out["description"] =
+			`${description ? `${description} ` : ""}(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`;
 	for (const [key, value] of Object.entries(schema)) {
 		if (key === "pattern" || key === "patternProperties") continue;
+		if (key === "description" && "description" in out) continue;
 		if (
 			(has(schemaMapKeyword, key) || key === "dependencies") &&
 			isObject(value)
@@ -150,6 +164,20 @@ export function schemaFor(
 			problem: `its inputSchema is bigger than ${MAX_SCHEMA_BYTES} bytes`,
 		};
 	return { schema: JSON.parse(json) as Record<string, unknown> };
+}
+
+/**
+ * The page's `outputSchema` to show (WM 3): an object, patterns noted as in
+ * the input schema, at most `MAX_SCHEMA_BYTES`; `undefined` otherwise.
+ */
+export function outputSchemaOf(
+	schema: unknown,
+): Record<string, unknown> | undefined {
+	if (!isObject(schema)) return undefined;
+	const json = JSON.stringify(withoutPatterns(schema));
+	return new TextEncoder().encode(json).length > MAX_SCHEMA_BYTES
+		? undefined
+		: (JSON.parse(json) as Record<string, unknown>);
 }
 
 /** An MCP content block a page result may carry through. */
@@ -202,17 +230,30 @@ function blocksOf(value: unknown): Block[] | undefined {
  * What `executeTool()` returned, as the tool's result: a string as one text
  * block; the JSON of an MCP result (`{"content": [...]}`, what
  * `@mcp-b/global` pages return) as its text and image blocks within the
- * budget. (`null`, the tool navigated, is answered with the new page.)
+ * budget; the JSON of another object without a `content` key, within
+ * `MAX_RESULT`, as that object, which the library sends as text and as
+ * `structuredContent` (WM 8); a JSON-encoded string as that string: the
+ * draft serializes every result as JSON, Chrome 156 passes a string on as
+ * it is (WM 7). (`null`, the tool navigated, is answered with the new page.)
  */
 export function resultOf(value: string): unknown {
-	if (value.startsWith("{")) {
+	if (value.startsWith("{") || value.startsWith('"')) {
 		try {
 			const parsed: unknown = JSON.parse(value);
+			if (typeof parsed === "string") return cut(parsed, MAX_RESULT);
 			const blocks = blocksOf(parsed);
 			if (blocks !== undefined)
 				return isObject(parsed) && parsed["isError"] === true
 					? { content: blocks, isError: true }
 					: { content: blocks };
+			// Not with a `content` key: the library would take it for an MCP
+			// result past the budget above.
+			if (
+				isObject(parsed) &&
+				!Object.hasOwn(parsed, "content") &&
+				value.length <= MAX_RESULT
+			)
+				return parsed;
 		} catch {
 			// Not JSON: the text as it is.
 		}
@@ -235,6 +276,12 @@ export interface Offered {
 	 * it): only for a tool that is offered.
 	 */
 	inputSchema?: Record<string, unknown>;
+	/**
+	 * The page's schema of the result (the draft's `outputSchema`, patterns
+	 * noted as in `inputSchema`), only for a tool that is offered: shown in
+	 * `webmcp_tools`, not declared on its `page_<name>` tool (DEC-144).
+	 */
+	outputSchema?: Record<string, unknown>;
 	/** Why `webmcp_tools` lists no schema for it although it is offered (size). */
 	schemaLeftOut?: string;
 	/** Why it is not offered. */
@@ -604,6 +651,12 @@ export class PageToolBridge {
 				readOnly,
 			};
 			offered.push(entry);
+			// WebMCP's hint for tools meant for the page's developers (WM 8).
+			if (pageTool.annotations?.debugging === true) {
+				entry.problem =
+					"it is marked as a debugging tool, for the page's developers";
+				continue;
+			}
 			const name = bridgedName(pageTool.name);
 			if (name === undefined) {
 				entry.problem = "its name is too long (page_<name> over 64 characters)";
@@ -634,6 +687,8 @@ export class PageToolBridge {
 			const { schema, validator } = made;
 			entry.tool = name;
 			entry.inputSchema = schema;
+			const output = outputSchemaOf(pageTool.outputSchema);
+			if (output !== undefined) entry.outputSchema = output;
 			const item: Callable = {
 				tabId: tab.id,
 				origin: tools.origin,

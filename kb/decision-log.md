@@ -2809,3 +2809,77 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
   to 0.9 are gone.
 - The tab drops a relay frame it cannot parse without answering. The relay only
   debug-logged the tab's `error`, which it still accepts from older libraries.
+
+## DEC-143: The client follows the WebMCP draft of 2026-11-12
+
+2026-11-13, iteration 34 (review of 2026-11-13, WM 3, 4, 5, 6, 9, 10, 11). Amends
+DEC-119 and DEC-120; keeps DEC-115.
+
+- **`outputSchema`.** `Tool` takes it, as the draft's `ModelContextTool` does: an object
+  schema with `"type": "object"` (what MCP wants), copied as JSON; anything else is a
+  `TypeError`. It is listed in `tools/list` and passed to the native registration. The
+  library does not check results against it; the README tells authors to return a plain
+  object, since an AI app expects `structuredContent` from every result of such a tool.
+- **`exposedTo`** (owner) is kept on the registered tool and passed to the native
+  `registerTool` options of a mirrored tool. The browser checks it; a list it refuses is
+  a failed registration like any other (a warning). Not checked by the library.
+- **An already aborted signal** rejects with the signal's reason, as the draft does; it
+  resolved without registering. `useTool` ignores a rejection after its own abort.
+- **Kept as deviations**, documented in the README's Tools section: an invalid name or
+  empty description is a `TypeError`, as every other invalid tool is (the draft says
+  `InvalidStateError`); both schemas need `"type": "object"`; the arguments are checked
+  before `execute`; `execute` may return an MCP result.
+- **`destructiveHint` counts as consequential for the mirror.** A tool with
+  `consequentialHint ?? destructiveHint` true is left out of WebMCP unless registered
+  with `{ webmcp: true }`, and the native registration gets that value as
+  `consequentialHint` (so `destructiveHint: false` gives `consequentialHint: false`, and
+  an explicit `consequentialHint` wins). The library's own confirmation still asks only
+  for `consequentialHint` (DEC-022).
+- **Results through WebMCP** (`webMcpValue`, lazy chunk): `undefined`, which the draft
+  cannot serialize (the call failed with `OperationError`), and an empty MCP result
+  resolve as `"Done."`. Not `null`: tab-mcp for Chrome reads `null` from
+  `executeTool()` as "the tool navigated". An MCP result goes out as its
+  `structuredContent` if it has one, else as its text blocks, each other block a line
+  "[<type> content left out: WebMCP results are text.]", instead of the JSON of the
+  whole result with base64 images. Other values go out as before.
+- **No retry** (WM 9, owner). A failed native registration warns at once. The draft
+  unregisters synchronously on abort and so does Chrome (DEC-119); a browser that
+  unregisters later loses that mirror until the tool is registered again.
+- **The getter read when a `TabMcp` is made** (WM 10, owner):
+  `Object.getOwnPropertyDescriptor(Document.prototype, "modelContext")?.get?.call(document)`.
+  An own `document.modelContext` (a polyfill) is still passed by (DEC-115). `capture()`,
+  the `instanceof ModelContext` check and the tests' re-capture are gone: they only
+  defended against a page script that changes the prototype after the library loads,
+  which owns the tools anyway (threat model A14), and they missed WebMCP that an
+  origin-trial token added by script turns on later.
+- Core size: 6397 B gzipped before; WM 9 and WM 10 alone 6313 B; with the rest 6386 B of
+  6400 B.
+
+## DEC-144: What a page tool keeps through tab-mcp for Chrome
+
+2026-11-13, iteration 34 (review of 2026-11-13, WM 3, 7, 8). Amends DEC-113 and DEC-141.
+
+- **`outputSchema` is shown, not declared.** The content script sends a page tool's
+  `outputSchema` (where the browser gives one; Chrome 156 does not) when it is at most
+  16 KB; `webmcp_tools` lists it (patterns noted as below, within the listing's budget,
+  dropped first). The `page_<name>` tool does not declare it: an AI app expects every
+  result of a tool with an output schema to carry matching `structuredContent` (the MCP
+  SDK's client refuses a result without), and a page's string result has none, nor can
+  the extension vouch for the page's object matching it.
+- **Results.** A result that is the JSON of a string (the draft JSON-encodes every
+  result; Chrome 156 passes strings on as they are) is that string. The JSON of a plain
+  object without a `content` key, within 100,000 characters, goes to the library as that
+  object, which sends it as text and as `structuredContent` (MCP needs no output schema
+  for that). An object with a `content` key that is not an MCP result within the budget
+  stays text, so that the library cannot pass it through as a result past the budget.
+  Arrays stay text.
+- **Patterns.** The schema the AI app gets has no `pattern` (DEC-113's guard); each one
+  is added to its schema's `description`, "(Must match the regular expression …)", cut to
+  200 characters, so the app still knows the format. `patternProperties` are only
+  dropped.
+- **`debugging`.** A tool marked `debugging: true` (WebMCP's hint for tools meant for the
+  page's developers) is listed with that reason, not offered and not callable through
+  `webmcp_call`.
+- `PageTool` carries `readOnlyHint` and `debugging` only; `consequentialHint` and
+  `untrustedContentHint` were sent and never used (the bridge asks for every tool not
+  marked read-only, DEC-141, and marks every result untrusted).

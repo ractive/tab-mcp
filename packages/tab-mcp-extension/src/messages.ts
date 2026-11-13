@@ -65,18 +65,23 @@ export interface PageInfo {
 	};
 }
 
-/** A tool the page registered, as `getTools()` gives it (Chrome 156: no `outputSchema`). */
+/**
+ * A tool the page registered, as `getTools()` gives it: only what the bridge
+ * uses (WM 8). Chrome 156 gives no `outputSchema`; the draft has it (WM 3).
+ */
 export interface PageTool {
 	name: string;
-	/** Its schema was too big to send (over 16 KB as JSON). */
+	/** Its input schema was too big to send (over 16 KB as JSON). */
 	schemaTooBig?: true;
 	title?: string;
 	description: string;
 	inputSchema?: unknown;
+	/** The result's schema, where the browser gives one and it is at most 16 KB. */
+	outputSchema?: unknown;
 	annotations?: {
 		readOnlyHint?: boolean;
-		consequentialHint?: boolean;
-		untrustedContentHint?: boolean;
+		/** WebMCP's hint for tools meant for developers: not offered (WM 8). */
+		debugging?: boolean;
 	};
 }
 

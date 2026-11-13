@@ -646,19 +646,22 @@ from them.
   into: input it sends through the DevTools Protocol or an extension is trusted input,
   and the delay before Allow only needs the tab visible and focused. So the page's
   confirmation is weaker against it than against a remote AI app. Hence consequential
-  tools are not mirrored unless the page registers them with `{ webmcp: true }`, which
-  says that its own dialog, or the agent's own confirmation, is enough for that tool.
-  "Always allow" is never offered or applied for these calls.
+  tools (`consequentialHint`, or MCP's `destructiveHint`) are not mirrored unless the
+  page registers them with `{ webmcp: true }`, which says that its own dialog, or the
+  agent's own confirmation, is enough for that tool; a mirrored `destructiveHint` tool
+  carries `consequentialHint: true` in WebMCP. "Always allow" is never offered or
+  applied for these calls.
 - **The same check.** Arguments are checked against the tool's schema before `execute`
   (Chrome does not), a consequential tool asks the page's `onConfirm` or the library's
   dialog ("An agent in this browser wants to run …"), and the calls appear in the
   page's `toolcall`/`toolcallend` events like an AI app's.
-- **Only the browser's own object.** The library reads `document.modelContext` through
-  `Document.prototype`'s getter, captured when it loads, and checks that it is a
-  `ModelContext`; an own property (a polyfill, any page script) is passed by. A page that
-  changes `Document.prototype` before the library loads can fool this; it owns the tools
-  anyway. Who may call into the page's WebMCP at all (cross-origin frames need
-  `allow="tools"`; which agents and extensions) is the browser's decision.
+- **Only the browser's own object.** Each `TabMcp` reads `document.modelContext`
+  through `Document.prototype`'s getter when it is made; an own property (a polyfill,
+  any page script) is passed by. A page that changes `Document.prototype` before that
+  can fool this; it owns the tools anyway. Who may call into the page's WebMCP at all
+  (cross-origin frames need `allow="tools"`; other documents of the tab see a tool only
+  if its `exposedTo` names their origin; which agents and extensions) is the browser's
+  decision.
 - **Names keep their owner.** A name the page or another script registered natively
   first stays theirs (the mirror only warns), and once a name is mirrored the page's own
   native registration of it fails. tab-mcp for Chrome (A13) offers mirrored tools like
@@ -716,7 +719,8 @@ sits beside the AI apps of A2 and A6 and the agents of A14.
   accidental connects; it is not a security boundary, since a page can always open a
   WebSocket itself.
 - The browser library registers tools with the browser's WebMCP only with
-  `webmcp: true`, and consequential ones only when the page names them (A14).
+  `webmcp: true`, and consequential (or destructive) ones only when the page names them
+  (A14).
 
 See [configuration](configuration.md#why-the-defaults-are-safe) for the reasons behind
 each default.

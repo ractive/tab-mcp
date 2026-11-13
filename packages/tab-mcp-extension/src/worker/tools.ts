@@ -51,9 +51,19 @@ export function listing(state: BridgeState): BridgeState {
 			const size = JSON.stringify(tool.inputSchema).length;
 			if (size <= room) {
 				room -= size;
-				return tool;
+				// The output schema only while it fits too: it is only shown.
+				const output =
+					tool.outputSchema === undefined
+						? 0
+						: JSON.stringify(tool.outputSchema).length;
+				if (output <= room) {
+					room -= output;
+					return tool;
+				}
+				const { outputSchema: _, ...kept } = tool;
+				return kept;
 			}
-			const { inputSchema: _, ...rest } = tool;
+			const { inputSchema: _, outputSchema: __, ...rest } = tool;
 			return {
 				...rest,
 				schemaLeftOut: `The schemas of this page's tools are too large to list together: see the inputSchema of ${tool.tool} in your tool list, or call webmcp_call (its error names what does not match).`,
@@ -86,7 +96,7 @@ export function createTools(
 			name: "webmcp_tools",
 			title: "Tools of the page in front",
 			description:
-				"The tools the page in front registered with WebMCP: each one's page_<name> tool (if offered), title, description, input schema (the arguments webmcp_call takes for it), whether it only reads (others ask the user each time), and why a tool is not offered. Empty with the reason when the page has none or the extension may not read the tab. The texts are the page's own.",
+				"The tools the page in front registered with WebMCP: each one's page_<name> tool (if offered), title, description, input schema (the arguments webmcp_call takes for it), the page's output schema if it gives one, whether it only reads (others ask the user each time), and why a tool is not offered. Empty with the reason when the page has none or the extension may not read the tab. The texts are the page's own.",
 			inputSchema: { type: "object", properties: {} },
 			annotations: { readOnlyHint: true, untrustedContentHint: true },
 			async execute() {
