@@ -2809,3 +2809,48 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
   to 0.9 are gone.
 - The tab drops a relay frame it cannot parse without answering. The relay only
   debug-logged the tab's `error`, which it still accepts from older libraries.
+
+## DEC-157: When a tool is consequential: what the user cannot undo in the page
+
+2026-11-13, iteration 37 (review finding EX 2, EX 5). The README and the skill said every
+tool that changes data gets `consequentialHint`; the live examples asked only before
+deleting, and the three `add_note` snippets disagreed. The written rule is now the one the
+examples follow: a tool gets `consequentialHint` when the user cannot undo its effect in
+the page, or when it acts outside the page (deletes for good, sends, buys, books,
+publishes, changes data on the server). A change the user sees and can take back gets no
+question, since a question on every call teaches users to click Allow without reading.
+README, skill, the overview's snippet on ractive.ch and `examples/react-todo` say so; the
+three `add_note` snippets are one (typed, `title`, `maxLength`, no cast, no hint), and the
+overview's snippet shows `delete_note` as the consequential one.
+
+The diagram editor's `clear_diagram` stays consequential although Undo takes it back: it
+is the page's demonstration of the question (and of `{ webmcp: true }` for a consequential
+tool). The page now says that, instead of presenting the question as a safeguard while
+`delete_elements` with every id does the same without asking.
+
+`examples/react-todo`, the copy readers take over, leaves `alwaysAllow` off (DEC-096); the
+live pages on ractive.ch keep it.
+
+## DEC-158: The client no longer marks `<html>` with the mirrored tools
+
+2026-11-13, iteration 37 (review finding EX 11, the WebMCP report's list). Amends
+iteration 25's mirror (DEC-115) and DEC-140. `<html data-tab-mcp-webmcp="…">` was made for
+tab-mcp for Chrome, which stopped reading it in iteration 35 (DEC-140); the only other
+reader was ractive.ch's "your browser's own AI" status line (about 185 lines with its test
+and CSS), which repeated what the pages already show: the diagram's status line names the
+browser's AI as the author of a change, the todo's activity list names it per call. Both
+the line and the attribute are gone. A page that wants to know whether its tools reach the
+browser's agent reads `toolcall` with `client.kind === "webmcp"`. Lost: a pulsing dot and
+one sentence on the examples, and a way for a page to see before the first call that the
+browser took its tools.
+
+## DEC-159: "Keep AI access on" starts with the first paired app
+
+2026-11-13, iteration 37 (review finding EX 16). Amends the examples' reading of DEC-050.
+The examples (diagram, todo, sign-in) and the client README's snippet set their "keep on"
+flag as soon as the page was connected, so a visitor who opened the connect dialog,
+paired nothing and closed it opened a WebSocket to the relay at every later visit until
+they found "Turn off AI access". The flag is now set when the page is connected with at
+least one grant (`grantschange`, and `statechange` for a connection whose grants arrived
+first); Turn off still clears it. A page whose apps were all disconnected keeps the flag:
+the user may add another app.
