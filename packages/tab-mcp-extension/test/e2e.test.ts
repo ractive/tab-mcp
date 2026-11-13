@@ -1024,6 +1024,14 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(
 			await waitForTools(stack, (n) => n.length === OWN_TOOLS.length),
 		).toEqual(OWN_TOOLS);
+		// The panel on a page without tools: what still works, instead of a
+		// bare "No WebMCP" (EQ 7).
+		await stack.panel.waitFor(`!document.getElementById("no-tools").hidden`);
+		expect(
+			await stack.panel.eval(
+				`[document.getElementById("no-webmcp").hidden, document.getElementById("tab-badges").textContent]`,
+			),
+		).toEqual([true, ""]);
 	});
 
 	test("it follows a tab switch, tools included", async () => {
@@ -1813,14 +1821,6 @@ describe.skipIf(chrome === undefined)(
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${SITE}/plain.html`,
 			});
-			// A page without tools: what still works, instead of a bare "No
-			// WebMCP" (EQ 7).
-			await stack.panel.waitFor(`!document.getElementById("no-tools").hidden`);
-			expect(
-				await stack.panel.eval(
-					`[document.getElementById("no-webmcp").hidden, document.getElementById("tab-badges").textContent]`,
-				),
-			).toEqual([true, ""]);
 		});
 
 		test("on the same origin after a navigation too (Chrome keeps the grant)", async () => {

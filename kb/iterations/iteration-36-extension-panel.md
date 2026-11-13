@@ -51,8 +51,8 @@ list of paired apps, the notification's wording).
 - [x] "No WebMCP" replaced: "This page offers no WebMCP tools" or "WebMCP is off in this
   tab" (origin trial, `chrome://flags/#enable-webmcp-testing`, a link to Chrome's WebMCP
   docs), each saying that `page_info` and the navigation tools still work
-- [x] Tests: panel (`cardView`, `introText`, `webmcpNote`, `index.html`), e2e (store
-  package: a page without tools)
+- [x] Tests: panel (`cardView`, `introText`, `webmcpNote`, `index.html`), e2e (test
+  build: a page without tools)
 
 ### EQ 8: Disconnect while not connected, and the list that vanishes
 
@@ -144,6 +144,18 @@ list of paired apps, the notification's wording).
   45 TS, 90 CSS and 110 test lines. "Don't ask for these tools" stays: removing it
   drops a capability (a site's tools allowed in one step) and is the owner's call. EQ 18 (the question's
   window) is worker and bridge code, outside this iteration.
+- **Chrome for Testing 157 crashed** (SIGTRAP, the whole browser) in the store package's
+  e2e tests, on the navigation to `https://www.site.test/plain.html`, in 2 of 3 full runs,
+  when the first test of that block waited for the panel's "no tools" line before going
+  on; never on main (3 runs) and never without that wait (4 runs). A timing that reaches
+  a crash in Chrome itself (the log's tail named nothing); the check moved to the test
+  build's "it follows a navigation". Worth a look if it shows again in CI.
+- **Review of PR 124** (claude 3, glm 2; all fixed): a hidden address is its own reason,
+  since Chrome hides browser pages' addresses too, and the panel says so; the worker says
+  which questions ran out (`PanelState.expired`) instead of the panel guessing from the
+  clock; `#useRelay` detaches the old connection's events before it clears the list;
+  announcements that come together are said together; a failed write of the list is
+  shown as the problem.
 - Follow-up for ractive.ch: the published privacy page
   (`src/pages/tab-mcp/privacy/index.vto`) still says "Allow on all sites"; it should say
   "Read all sites without a click", as PRIVACY.md now does.
