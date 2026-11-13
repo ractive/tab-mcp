@@ -25,8 +25,8 @@ comes as a new version, not as a patch to an older one.
 
 | Package | Supported | Not supported |
 |---|---|---|
-| `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.10.0 | older versions |
-| `@ractive-ch/tab-mcp-client` (npm) | 0.15.0 | older versions |
+| `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.10.1 | older versions |
+| `@ractive-ch/tab-mcp-client` (npm) | 0.16.0 | older versions |
 | tab-mcp for Chrome (loaded unpacked; not yet in the Chrome Web Store) | 0.1.0 | older versions |
 
 ## Connecting an AI app to a page means trusting the page
