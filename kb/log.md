@@ -2,6 +2,8 @@
 
 ## 2026-11-13
 
+- Full review of every component (relay, client library, tab-mcp for Chrome, WebMCP integration, example pages) by eight read-only reviewers: 144 findings (1 high, 44 medium, 99 low), a triage and ten proposed iterations in `research/review-2026-11-13.md`
+- Client 0.15.0 released (iteration 28); ractive.ch examples, the sign-in example, saturnus and Overmark moved to it
 - Iteration 28 built (plan/iteration-28, for client 0.15.0): `mcp.serve(port, { client })`, `@ractive-ch/tab-mcp-client/tunnel` with `createTunnelFetch`, `relay` optional, the caller kind `local`; DEC-122 to DEC-126; threat model A15; the core budget is 6.25 KB
 
 ## 2026-11-12
