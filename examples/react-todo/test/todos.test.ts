@@ -8,6 +8,9 @@ test("a todo's text is trimmed and at most MAX_TEXT long; the list holds at most
 	expect(() => list.add("x".repeat(MAX_TEXT + 1))).toThrow(
 		`at most ${MAX_TEXT} characters`,
 	);
+	// Counted as the schema's maxLength counts: code points, not UTF-16 units.
+	expect(list.add("😀".repeat(MAX_TEXT)).text).toHaveLength(2 * MAX_TEXT);
+	list.remove(list.snapshot().at(-1)?.id ?? "");
 	for (let i = list.snapshot().length; i < MAX_TODOS; i++)
 		list.add(`todo ${i}`);
 	expect(() => list.add("one more")).toThrow(`at most ${MAX_TODOS} todos`);

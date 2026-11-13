@@ -71,7 +71,9 @@ const ID = {
 function Todos({ todos }: { todos: TodoList }) {
 	const items = useSyncExternalStore(todos.subscribe, todos.snapshot);
 	const [draft, setDraft] = useState("");
-	const [problem, setProblem] = useState<string | undefined>(undefined);
+	const [refused, setProblem] = useState<string | undefined>(undefined);
+	// The form refuses only a full list: once there is room again, the alert goes.
+	const problem = items.length >= MAX_TODOS ? refused : undefined;
 
 	useTool({
 		name: "list_todos",

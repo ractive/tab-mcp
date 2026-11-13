@@ -29,7 +29,8 @@ export class TodoList {
 	add(text: string): Todo {
 		const trimmed = text.trim().replace(/\s+/g, " ");
 		if (trimmed === "") throw new Error("A todo needs a text");
-		if (trimmed.length > MAX_TEXT)
+		// Characters as JSON Schema's maxLength counts them (code points).
+		if ([...trimmed].length > MAX_TEXT)
 			throw new Error(`A todo has at most ${MAX_TEXT} characters`);
 		if (this.#items.length >= MAX_TODOS)
 			throw new Error(`The list holds at most ${MAX_TODOS} todos`);

@@ -89,8 +89,10 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 - `<html data-tab-mcp-webmcp="…">`: the library no longer lists the tools it mirrors
   into WebMCP on the page's root element. It was made for tab-mcp for Chrome, which has
-  not read it since its own review fixes. A page that watched it for whether its tools are
-  mirrored reads `toolcall` events with `client.kind === "webmcp"` instead.
+  not read it since its own review fixes. The library has no replacement for the list: a
+  name that could not be registered natively is still reported by a console warning, and
+  `toolcall` events with `client.kind === "webmcp"` say that an agent in the browser has
+  called a tool, not that the tools are mirrored.
 
 #### Fixed
 
