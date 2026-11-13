@@ -2,6 +2,7 @@
 
 ## 2026-11-13
 
+- Iteration 29 (iteration A of the review, `iteration/29-relay-dos`): a refresh stores the new pair before it marks the old token used, so a store failure no longer revokes the grant on retry; a full instance evicts open authorization requests (per /56) instead of refusing everyone; uncached client ids are charged to the requesting network first; tab control messages have a budget (`rate_limited`, 4008); every request body has a deadline; timer settings stop at 2^31-1 ms; JWKS keys and candidates are capped and failed assertions refused early; the MCP endpoint reads a large body only for a valid token; DNS inside the metadata timeout; proxy header ports stripped; keep-alives only in event streams; the sweep survives a throwing store, `installCrashLogging` exported; a `Bun.serve` error handler; DEC-127 to DEC-129
 - Full review of every component (relay, client library, tab-mcp for Chrome, WebMCP integration, example pages) by eight read-only reviewers: 144 findings (1 high, 44 medium, 99 low), a triage and ten proposed iterations in `research/review-2026-11-13.md`
 - Client 0.15.0 released (iteration 28); ractive.ch examples, the sign-in example, saturnus and Overmark moved to it
 - Iteration 28 built (plan/iteration-28, for client 0.15.0): `mcp.serve(port, { client })`, `@ractive-ch/tab-mcp-client/tunnel` with `createTunnelFetch`, `relay` optional, the caller kind `local`; DEC-122 to DEC-126; threat model A15; the core budget is 6.25 KB

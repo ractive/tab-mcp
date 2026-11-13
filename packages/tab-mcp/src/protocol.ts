@@ -26,7 +26,7 @@ export const CloseCode = {
 	heartbeatLost: 4003,
 	shuttingDown: 4004,
 	replaced: 4005,
-	/** Reserved in the protocol (`rate_limited`); the relay does not send it yet. */
+	/** The tab sent more control messages than its budget (`rate_limited`). */
 	rateLimited: 4008,
 	/** The address id in the `/tab` URL is not the secret's (DEC-098). */
 	addressMismatch: 4009,

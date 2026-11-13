@@ -76,6 +76,22 @@ export interface ForwardInput {
 	pageGone?: (waiting: boolean) => PageGoneReply;
 }
 
+/**
+ * The control budget of a session (RS 3, DEC-129): every frame from the tab
+ * except `pong` and the `http.response*` answers. A page sends a handful of
+ * these when its dialog opens or its user signs in; a flood of them (each
+ * `grants.revokeAll` is a store write) ends the session with 4008.
+ */
+const CONTROL_BURST = 30;
+const CONTROL_PER_SECOND = 2;
+const UNMETERED_TYPES: ReadonlySet<string> = new Set([
+	"pong",
+	"http.response",
+	"http.response.start",
+	"http.response.chunk",
+	"http.response.end",
+]);
+
 /** The limits announced to the tab (protocol: `session.limits`). */
 export function limitsOf(limits: SiteLimits | RelayConfig): Limits {
 	return {
@@ -157,6 +173,9 @@ export class TabSession {
 	/** The "Connect your AI app" dialog is open (OIDC pairing, DEC-079). */
 	#dialogOpen = false;
 	#identityChain: Promise<void> = Promise.resolve();
+	/** Tokens of the control budget (`CONTROL_BURST`, `CONTROL_PER_SECOND`). */
+	#controlTokens = CONTROL_BURST;
+	#controlAt = Date.now();
 	#lastRequestAt = Date.now();
 	#missedPongs = 0;
 	#nextRequest = 0;
@@ -253,6 +272,18 @@ export class TabSession {
 			return;
 		}
 		const parsed = parseTabMessage(data);
+		// Every frame but the answers to pings and requests counts against the
+		// control budget; past it the session ends with 4008 (RS 3).
+		const exempt =
+			parsed.ok &&
+			!("unknown" in parsed) &&
+			UNMETERED_TYPES.has(parsed.message.type);
+		if (!exempt && !this.#takeControl()) {
+			this.#host.logger.warn("tab.rate_limited", { session: this.sessionId });
+			this.#sendError("rate_limited", "too many messages");
+			this.end(CloseCode.rateLimited, "rate limited");
+			return;
+		}
 		if (!parsed.ok) {
 			if (this.#state === "new") {
 				this.#protocolError("bad_message", parsed.error);
@@ -292,6 +323,20 @@ export class TabSession {
 			});
 			this.#sendError("bad_message", "the relay could not handle this message");
 		});
+	}
+
+	/** Take one token of the control budget; false when it is used up. */
+	#takeControl(): boolean {
+		const now = Date.now();
+		this.#controlTokens = Math.min(
+			CONTROL_BURST,
+			this.#controlTokens +
+				((now - this.#controlAt) / 1000) * CONTROL_PER_SECOND,
+		);
+		this.#controlAt = now;
+		if (this.#controlTokens < 1) return false;
+		this.#controlTokens -= 1;
+		return true;
 	}
 
 	async #handle(msg: TabMessage): Promise<void> {

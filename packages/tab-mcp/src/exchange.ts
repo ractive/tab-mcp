@@ -154,6 +154,12 @@ export class Exchange {
 	#controller: ReadableStreamDefaultController<Uint8Array> | undefined;
 	/** The last write to the AI app ended an SSE event (or nothing was sent). */
 	#atBoundary = true;
+	/**
+	 * The AI app's stream is an event stream: the relay's own, or the tab's
+	 * with `text/event-stream`. Only then are keep-alive comments and error
+	 * events written into it (RS 16); any other body is the tab's bytes alone.
+	 */
+	#eventStream = false;
 	/** Response body bytes received from the tab so far. */
 	#bodyBytes = 0;
 	#startTimer: Timer | undefined;
@@ -312,7 +318,7 @@ export class Exchange {
 				}),
 				200,
 			);
-		} else if (this.#atBoundary) {
+		} else if (this.#eventStream && this.#atBoundary) {
 			this.#write(sseEvent(body));
 		}
 		this.#finish("page_gone");
@@ -336,7 +342,11 @@ export class Exchange {
 				this.#errorResponse(status, code, message, headers),
 				status,
 			);
-		} else if (this.#atBoundary && this.#options.rpcId !== undefined) {
+		} else if (
+			this.#eventStream &&
+			this.#atBoundary &&
+			this.#options.rpcId !== undefined
+		) {
 			this.#write(sseEvent(rpcErrorBody(this.#options.rpcId, code, message)));
 		}
 		if (cancelTab) this.#options.cancel("error");
@@ -417,7 +427,8 @@ export class Exchange {
 				highWaterMark: this.#options.maxBodyBytes,
 			}),
 		);
-		if (isEventStream(Object.fromEntries(headers))) {
+		const eventStream = isEventStream(Object.fromEntries(headers));
+		if (eventStream) {
 			headers.set("x-accel-buffering", "no");
 			if (!headers.has("cache-control"))
 				headers.set("cache-control", "no-cache");
@@ -430,6 +441,7 @@ export class Exchange {
 			return;
 		}
 		this.#state = state;
+		this.#eventStream = eventStream;
 		this.#respond(response, status);
 		this.#scheduleKeepAlive();
 	}
@@ -463,7 +475,7 @@ export class Exchange {
 	/** A keep-alive comment `keepAliveMs` after the last write, at a boundary. */
 	#scheduleKeepAlive(): void {
 		clearTimeout(this.#keepAliveTimer);
-		if (!this.#streaming) return;
+		if (!this.#streaming || !this.#eventStream) return;
 		if (this.#state === "relay_wrapped") {
 			this.#keepAliveTimer = setTimeout(() => {
 				// While buffering a wrapped body nothing has been forwarded since

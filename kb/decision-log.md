@@ -2500,3 +2500,77 @@ does not send a `tools/call` again. Only an aborted `signal` rejects (`AbortErro
   a time (`InvalidStateError` otherwise). `requestTimeoutMs` must be below 2^31
   (`Infinity` would fire at once). A failure on a streamed body that is not an event
   stream is the JSON error as the body, not an SSE event.
+
+## DEC-127: A refresh stores the new pair before it marks the old token used
+
+2026-11-13, iteration 29 (review finding RQ 1). A token store failure between
+`markUsed` and the new pair answered 503 "try again", and the retry with the same
+refresh token was then taken for reuse and revoked the grant: the user paired again
+because the disk was full for a moment.
+
+- **Refresh:** `issueTokenPair` first, `markUsed` last. A store failure at any point
+  leaves the old token unused, so the retry the 503 asks for succeeds. Tokens a failed
+  attempt did store belong to the grant and expire with it or go with its revocation.
+- **Race:** of two refreshes with one token both may store a pair now, but only one
+  marks the token; the other still ends in reuse detection, which revokes the grant and
+  so deletes both new pairs, as before.
+- **Code exchange:** when `issueTokenPair` throws, the code becomes usable again
+  (`used = false`) and keeps its grant id, so the retry makes the same grant and a token
+  the failed attempt stored is not a second grant in the page's list. When the store
+  refuses the pair (a tombstone, `undefined`), the code stays burnt.
+
+## DEC-128: Every request body has a deadline; timer settings stop at 2^31-1 ms
+
+2026-11-13, iteration 29 (review findings RS 4 = RQ 2, RQ 3).
+
+- **One body reader** (`src/body.ts`, `readBodyWithDeadline`) for the MCP endpoint,
+  `/token`, `/revoke` and the pairing form: `TAB_MCP_BODY_TIMEOUT_S`, then 408 with
+  `Connection: close` (an OAuth error at the token endpoints, the error page at
+  `/authorize`). DEC-048's deadline existed for MCP bodies only; a stalled form body held
+  its socket for as long as the client kept it open.
+- **Timer settings** (`requestTimeoutMs`, `keepAliveMs`, `sessionLifetimeMs`,
+  `heartbeatMs`, `helloTimeoutMs`, `bodyTimeoutMs`, `sweepIntervalMs`, and the same site
+  limits) are refused above 2 147 483 647 ms (about 24.8 days) by `resolveConfig`: Bun's
+  timers fire at once beyond that, so a 30-day session lifetime closed every session
+  right after it opened. `idleTimeoutMs` and `unpairedIdleTimeoutMs` are compared with
+  timestamps, not timers, and stay unbounded.
+
+## DEC-129: Limits on what an unauthenticated party can make the relay do
+
+2026-11-13, iteration 29 (review findings RS 1, 2, 3, 5, 8). Amends DEC-088 and DEC-117.
+
+- **Open authorization requests (RS 1).** DEC-088 said the instance-wide cap of 10 000
+  "only affects the network that fills them"; one party with a /48 could fill it and
+  stop all pairing. Now a full instance evicts instead of refusing: first the oldest
+  request whose page is gone or whose dialog is closed, else the oldest of the network
+  holding the most. The per-network caps (10 per instance, 5 per address) count an IPv6
+  /56, as sessions do. Not done: dropping an address's requests 60 s after its session
+  ended (the reviewer's other suggestion); eviction takes those first anyway, and a
+  request kept while the page reconnects still lets "Try again" continue.
+- **New client ids (RS 2).** A fetch for a client id the relay has not cached is charged
+  to the requesting network (IPv4 address, IPv6 /56) first: 5, then one a minute, at
+  `/authorize`, `/token` and `/revoke`, before the overall budget; a fetch the overall
+  budget refuses gives the network its token back. `/authorize` answers 429, the token
+  endpoints 429 `temporarily_unavailable`, answered like the per-IP ceiling (not counted
+  as a failure). Refreshing a document the relay already holds is not charged. Keeping
+  the overall budget empty now takes about 60 networks instead of one; the self-hosting
+  guide recommends `TAB_MCP_CLIENT_ID_HOSTS`, with which none of this is reachable.
+- **Tab control messages (RS 3).** Each session has a budget for every frame except
+  `pong` and `http.response*`: 30, then 2 a second. Past it the relay sends
+  `rate_limited` and closes with 4008, both reserved in the protocol until now; the
+  library already treats 4008 as a reason not to reconnect. A second `grants.revokeAll`
+  of an address within a second is a no-op (tracked apart from sign-outs, which also
+  remember the address, so "New address" right after a sign-out still drops the
+  address's open requests).
+- **Client assertions (RS 5).** The reviewer proposed checking `#tokenFailuresPerIp`
+  before client authentication; that bucket also counts stale refresh tokens of a hosted
+  AI app's users, and checking it first would refuse that app's good refreshes too
+  (against DEC-117). Instead, assertions that fail verification count in a bucket of
+  their own per IP (30, then one every 2 seconds), checked before the metadata and keys
+  are loaded; a client with a working key never fails there. A JWKS is read up to its
+  first 20 keys, and at most 3 keys that fit the token's `kid` and algorithm are tried.
+- **The MCP endpoint (RS 8).** The token is looked up before the body is read. Only a
+  valid token reads up to the page's limit; otherwise the limit is 16 KiB, and a larger
+  body is answered with the 401 (or 503) it would get after the version check, without
+  parsing it. DEC-040's order holds for every body that is parsed, and version probes are
+  small.

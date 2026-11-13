@@ -23,6 +23,10 @@ export type JwtAlgorithm = (typeof JWT_ALGORITHMS)[number];
 /** Longest JWT the relay reads. */
 export const MAX_JWT_BYTES = 8192;
 const MAX_JWKS_BYTES = 65_536;
+/** Keys kept of one JWKS document; providers publish a handful. */
+const MAX_JWKS_KEYS = 20;
+/** Keys tried for one token, however many fit its kid and algorithm. */
+const MAX_CANDIDATES = 3;
 const JWKS_TTL_MS = 10 * 60_000;
 const JWKS_REFETCH_MS = 30_000;
 /** An unknown kid after a good fetch: a rotation is looked for this soon. */
@@ -327,9 +331,11 @@ export class JwksCache implements KeySource {
 				const doc = await this.#load(await this.#url());
 				const keys = (doc as { keys?: unknown } | null)?.keys;
 				if (!Array.isArray(keys)) throw new Error("a JWKS needs keys");
-				this.#keys = keys.filter(
-					(k): k is Jwk => typeof k === "object" && k !== null,
-				);
+				// A set may come from anyone (a client's jwks_uri): only the
+				// first MAX_JWKS_KEYS count (RS 5).
+				this.#keys = keys
+					.filter((k): k is Jwk => typeof k === "object" && k !== null)
+					.slice(0, MAX_JWKS_KEYS);
 				this.#fetchedAt = this.#now();
 				this.#lastError = undefined;
 			} finally {
@@ -375,7 +381,10 @@ export async function verifyJwt(
 	}
 	let candidates: Jwk[];
 	try {
-		candidates = (await source.keys(kid)).filter((k) => keyFits(k, alg));
+		// At most MAX_CANDIDATES keys are tried, however many share a kid (RS 5).
+		candidates = (await source.keys(kid))
+			.filter((k) => keyFits(k, alg))
+			.slice(0, MAX_CANDIDATES);
 	} catch (error) {
 		throw new JwtError(
 			"jwks_unavailable",

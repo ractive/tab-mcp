@@ -190,9 +190,13 @@ the grants of the previous one and ends their requests in flight.
   later `http.response.start` continues on the same stream, and its status and headers
   are dropped. The tab does not need to know. This keeps proxies and CDNs that drop
   requests without response headers after 60 s from cutting long tool calls.
-- On streamed responses the relay writes an SSE comment (`: keep-alive`) to the AI app
-  every `keepAliveMs` while the tab is silent, but only at an event boundary (when the
-  bytes forwarded so far end with a blank line). The tab never sends keep-alives.
+- On streamed responses that are event streams (the relay's own, or the tab's with
+  `content-type: text/event-stream`) the relay writes an SSE comment (`: keep-alive`) to
+  the AI app every `keepAliveMs` while the tab is silent, but only at an event boundary
+  (when the bytes forwarded so far end with a blank line). An error or "page closed"
+  event at the end goes into event streams only as well. A streamed body of any other
+  type gets the tab's bytes and nothing else; if it ends early, it is cut off. The tab
+  never sends keep-alives.
 - A request gets either one `http.response`, or one `http.response.start` followed by
   any number of `http.response.chunk` and one `http.response.end`. An `http.response`
   after `http.response.start`, a second `http.response.start`, or a chunk before
@@ -341,7 +345,7 @@ optional and names the request the error concerns.
 | `unknown_type` | both | Message type not understood, but an answer was expected. |
 | `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's; the error has no `id`. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
-| `rate_limited` | relay | Reserved: the tab sent too much, and the relay may close with 4008. The relay does not send it yet. |
+| `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
 | `address_mismatch` | relay | The address id in the URL (`/tab?a=`) is not the one of the `secret` in `hello`. Followed by close 4009. A tab bug: the library computes both from one secret. |
 
@@ -360,7 +364,7 @@ an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
 | 4003 | Heartbeat lost. |
 | 4004 | The relay is shutting down. |
 | 4005 | Replaced by a newer session for the same address. |
-| 4008 | Rate limited (reserved, see `rate_limited`). |
+| 4008 | Rate limited (see `rate_limited`). The library does not reconnect by itself. |
 | 4009 | The URL's address id is not the secret's (`address_mismatch`). The library treats it as `policy` and does not reconnect by itself. |
 
 On any close the relay ends the session: pending HTTP requests get the answers in
