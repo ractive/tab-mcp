@@ -4,8 +4,8 @@ title: "Iteration 32: client connection edge cases"
 status: completed
 description: >-
   Iteration D of the review of 2026-11-13 (CC 4, 5, 6, 7, 10, 11, 12, 14, 15).
-  newAddress() always takes the old address back with hello.revokeAll, from the secret
-  the tab last connected with, and the take-back fallback for relays of 0.4 and older,
+  newAddress() always takes the old address back with hello.revokeAll, connected or
+  not, and the take-back fallback for relays of 0.4 and older,
   #takenOver and #pageWaits are gone; sibling claims carry the address id; close codes of
   a restarting proxy reconnect, with jitter; an oversized result becomes an error result
   before toolcallend; hello no longer sends the page title and the relay ignores page;
