@@ -1075,7 +1075,13 @@ describe("grants in the tab (protocol: pairing and grants)", () => {
 		await other.connect();
 		other.send({ type: "grant.revoke", grantId: added.grant.grantId });
 		const error = (await other.next("error")) as unknown as { code: string };
-		expect(error.code).toBe("unknown_id");
+		// It names the message it answers (since 0.10.2), so that a page with
+		// several revocations pending settles the right one.
+		expect(error).toMatchObject({
+			code: "unknown_id",
+			for: "grant.revoke",
+			grantId: added.grant.grantId,
+		});
 		expect(
 			ctx.r.store.listGrants(ctx.tab.addressId, Date.now()),
 		).resolves.toHaveLength(1);

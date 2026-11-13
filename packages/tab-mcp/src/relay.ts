@@ -42,7 +42,7 @@ import {
 	type RelayMessage,
 	SUBPROTOCOL,
 } from "./protocol.ts";
-import { TabSession } from "./session.ts";
+import { STORE_UNAVAILABLE_TEXT, TabSession } from "./session.ts";
 import { guardStore } from "./store/guard.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import { SqliteTokenStore } from "./store/sqlite.ts";
@@ -466,7 +466,7 @@ function startRelay(
 		remember(revokedGrants, grantId, Date.now() + REVOCATION_MEMORY_MS);
 		const session = sessions.get(addressId);
 		if (session === undefined) return;
-		if (session.ready) session.send({ type: "grant.removed", grantId, reason });
+		if (session.ready) session.grantRemoved(grantId, reason);
 		const ended = session.failGrant(
 			grantId,
 			401,
@@ -479,6 +479,31 @@ function startRelay(
 				address: shortAddress(addressId),
 				requests: ended,
 			});
+		}
+	}
+
+	/**
+	 * Tell each connected page of the grants it lists that have expired (no
+	 * usable token left), with `grant.removed` `expired`; the store's sweep
+	 * does not say which grants it deleted. One `listGrants` per page that
+	 * lists a grant, one after another. Requests in flight keep running: their
+	 * tokens were valid when they came.
+	 */
+	async function sweepExpiredGrants(): Promise<void> {
+		for (const [addressId, session] of [...sessions]) {
+			if (!session.ready || session.grantIds.size === 0) continue;
+			// Only grants the page knew before the read: one added meanwhile is
+			// not in the list yet, and is not expired.
+			const known = [...session.grantIds];
+			const live = new Set(
+				(await store.listGrants(addressId, Date.now())).map((g) => g.grantId),
+			);
+			if (sessions.get(addressId) !== session || !session.ready) continue;
+			for (const grantId of known) {
+				if (live.has(grantId) || !session.grantIds.has(grantId)) continue;
+				session.grantRemoved(grantId, "expired");
+				logger.info("grant.expired", { address: shortAddress(addressId) });
+			}
 		}
 	}
 
@@ -678,11 +703,8 @@ function startRelay(
 				// The page is told, as for a failed revocation: its `signOut()`
 				// waits for the grants to go.
 				logger.error("store.error", { op: "signOut", ...errorFields(error) });
-				session.send({
-					type: "error",
-					code: "store_unavailable",
-					message:
-						"the relay cannot change grants right now; try again shortly",
+				session.refused("store_unavailable", STORE_UNAVAILABLE_TEXT, {
+					type: "identity.logout",
 				});
 			}
 		},
@@ -1702,6 +1724,8 @@ function startRelay(
 	const port = server.port ?? config.port;
 	if (publicUrl === "") publicUrl = developmentUrl(config.host, port);
 
+	/** The running `sweepExpiredGrants`, if any. */
+	let expiring: Promise<void> | undefined;
 	const sweep = setInterval(() => {
 		auth.sweep();
 		sweepRevocations(Date.now());
@@ -1726,6 +1750,17 @@ function startRelay(
 					...errorFields(error),
 				}),
 			);
+		// The pages hear of their expired grants (one run at a time).
+		expiring ??= sweepExpiredGrants()
+			.catch((error: unknown) =>
+				logger.error("store.error", {
+					op: "listGrants",
+					...errorFields(error),
+				}),
+			)
+			.finally(() => {
+				expiring = undefined;
+			});
 	}, config.sweepIntervalMs);
 
 	const siteCount =
