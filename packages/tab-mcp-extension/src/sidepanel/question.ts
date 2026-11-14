@@ -1,12 +1,13 @@
 /**
- * A question's card, in the side panel and in a question's own window: who
- * asks (the AI app's declared name beside its verified host), the tool, the
- * site it acts on on a line of its own (what Chrome reports, the part that
- * is verified), the page's title for the tool apart and labelled as the
- * page's, the arguments in full, and the time left to answer. "Allow once"
- * and "Don't ask again on <host>" start unavailable (`aria-disabled`, so a
- * focused button keeps its focus): the page that shows the card makes them
- * available once it has been in front long enough (`setReady`).
+ * A question's card in the side panel: who asks (the AI app's declared name
+ * beside its verified host), the tool, the site it acts on on a line of its
+ * own (what Chrome reports, the part that is verified), the page's title for
+ * the tool apart and labelled as the page's, the arguments in full, and the
+ * time left to answer. The answers are buttons of one kind: nothing in their
+ * look leans towards allowing (DEC-180). "Allow once" and "Don't ask again
+ * on <host>" start unavailable (`aria-disabled`, so a focused button keeps
+ * its focus): the panel makes them available once it has been in front long
+ * enough (`setReady`).
  */
 
 import type { Answer, QuestionView } from "../protocol.ts";
@@ -114,12 +115,11 @@ export function questionCard(
 	left.textContent = countdownText(q.expiresAt, now);
 	const buttons = document.createElement("div");
 	buttons.className = "buttons";
-	const button = (text: string, value: Answer, primary = false) => {
+	const button = (text: string, value: Answer) => {
 		const b = document.createElement("button");
 		b.type = "button";
 		b.textContent = text;
 		b.dataset["answer"] = value;
-		if (primary) b.className = "strong";
 		// Allow and "Don't ask again" only once the page has been in front a
 		// while: the click that brings it forward cannot approve.
 		if (value !== "deny") setAvailable(b, false);
@@ -128,11 +128,9 @@ export function questionCard(
 		});
 		return b;
 	};
-	// "Allow once": this call only, beside the one that keeps (EQ 9).
-	buttons.append(
-		button("Don't allow", "deny"),
-		button("Allow once", "allow", true),
-	);
+	// "Allow once": this call only, beside the one that keeps (EQ 9). The
+	// same default kind as "Don't allow": neither answer is pushed (DEC-180).
+	buttons.append(button("Don't allow", "deny"), button("Allow once", "allow"));
 	card.append(tool, args, left, buttons);
 	// Not for a page without a site of its own (an opaque origin).
 	// Nor for a navigation: each one to another site asks (DEC-121).

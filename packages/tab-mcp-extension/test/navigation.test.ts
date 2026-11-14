@@ -616,7 +616,7 @@ function questionsHost() {
 		clear: (id) => {
 			shown.delete(id);
 		},
-		showQuestion: () => {},
+		showQuestion: async () => true,
 		changed: () => {},
 		now: () => 0,
 	};
@@ -765,6 +765,8 @@ describe("the navigation question", () => {
 				"Allow once",
 				"Don't ask again on www.shop.example:8443",
 			]);
+			// One kind of button for every answer: none is pushed (DEC-180).
+			expect(buttons.map((b) => b.className)).toEqual(["", "", ""]);
 			expect(card.textContent).toContain("for every paired AI app");
 			// The time left (EQ 13).
 			expect(card.querySelector(".countdown")?.textContent).toBe(

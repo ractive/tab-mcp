@@ -179,7 +179,9 @@ icon are three more hex values in `worker/connection.ts`.
   strong, and amber stays where it is a status (the waiting dot). The rule that is
   tested: no button is amber. This keeps the AI app card identical in both
   extensions. If the owner wants one amber action for the family resemblance, the only
-  candidate is "Turn on AI access" while off; it is one class on one button.
+  candidate is "Turn on AI access" while off; it is one class on one button. Since
+  iteration 43 "Allow once" is not strong either: the question card's answers are all
+  default buttons, so the card does not lean towards allowing (DEC-180).
 - **The armed button.** "Disconnect? Click again" and the second click of "New
   address" take Overmark's armed look (`data-armed`: fill `--danger`, text
   `--on-danger`), so the second click is seen to be another button. Today the armed
@@ -201,7 +203,7 @@ icon are three more hex values in `worker/connection.ts`.
 - **The question window** (`src/question/index.html`) keeps sharing the style sheet:
   paper, the one question as a sheet, `pre` up to 50vh, "Answered. This window
   closes." as meta text. If H or a later iteration removes the window (EQ 18), its two
-  rules go with it.
+  rules go with it. (Removed in iteration 43, DEC-181, with its two rules.)
 
 ### Not adopted
 
@@ -305,7 +307,7 @@ Every pair passes in both schemes.
 | Section heading (`h2`) | 15 / 20 / 700, `--ink`. With the AI access switch beside it in the first section. |
 | Group heading (`h3`, "Tools") | 12 / 16 / 600, `--ink-2`. |
 | Default button | `--sheet`, text `--ink` 600, 1 px `--edge`, radius 6, 30 px high (26 small). Hover `--wash`. |
-| Strong button | `--strong`, text `--on-strong`. Turn on AI access, Done, Save, Allow. |
+| Strong button | `--strong`, text `--on-strong`. Turn on AI access, Done, Save (Allow once until iteration 43, DEC-180). |
 | Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, New address, + Add another AI app, Stop. |
 | Armed button | `--danger`, text `--on-danger`. Disconnect and New address after the first click. |
 | Disabled, `aria-disabled` | `--wash`, text `--ink-2`, 1 px `--rule`, default cursor. |
@@ -316,7 +318,7 @@ Every pair passes in both schemes.
 | Pairing step | Sheet, 1 px `--rule`, radius 10, 12 px padding; address and code on `--wash`. |
 | Pill | 20 px, 12 / 16 / 600, tint and tone by the table above, 1.5 px transparent border. |
 | Tool row | Name (title, with the name in mono meta), its pill or switch; `--rule` between rows. |
-| Question | Sheet, 1 px `--edge`, radius 10, 12 px padding; arguments mono on `--wash`, at most 12em (50vh in its window); Don't allow (default), Allow once (strong), Don't ask again on <host> (default). |
+| Question | Sheet, 1 px `--edge`, radius 10, 12 px padding; arguments mono on `--wash`, at most 12em; Don't allow, Allow once and Don't ask again on <host>, all default buttons (DEC-180; Allow once was strong until iteration 43). |
 | Notice | `--warn-bg`, 1 px `--warn-edge`, radius 10, text `--ink`, one small default button. |
 | Problem | `--danger-bg`, 1 px `--danger`, radius 10, text `--ink`. |
 | Field | `--sheet`, 1 px `--edge`, radius 6; invalid: border `--danger`. |
@@ -379,7 +381,8 @@ No behaviour changes: no text, no order of controls, no message of the protocol.
   replaced by the tokens, and its tests are kept and re-pointed.
 - **EQ 18 and EQ 20** (the question window, the switch beside a button that does the
   same) are open simplifications. If either is taken, the matching rules and tests of
-  this design go with it; nothing else depends on them.
+  this design go with it; nothing else depends on them. (EQ 18 was taken in iteration
+  43; EQ 20 was kept, DEC-178.)
 - **Density.** 13 px body where 14 px is today, and sections in place of cards: the
   panel gets a little denser. The e2e widths and the screenshots are the check.
 
@@ -415,6 +418,15 @@ Iteration 39, on the panel of iteration 36. The plan held; these points differ.
   crashed Chrome for Testing 157 before.
 - **The store listing's screenshots** show the look before; they are to be taken again
   before the next submission ([Chrome Web Store](../operations/chrome-web-store.md)).
+- **Iteration 43 (DEC-180, owner):** "Allow once" in the question card is a default
+  button, like "Don't allow" and "Don't ask again on <host>": the card must not nudge
+  towards allowing. Its 750 ms wait (`aria-disabled`, flat) stays. The e2e look test
+  holds that "Allow once" and "Don't allow" have no class and the same computed fill,
+  text, edge and weight; the store screenshots with a question card (`3-question.png`,
+  `4-navigation.png`) were taken again. The question pictures below are from iteration
+  39 and still show "Allow once" filled.
+- **Iteration 43 (DEC-181):** the question window is gone, with its two rules
+  (`.question-window`).
 
 The panel at 380 px, with no app paired and with a question, in light and dark:
 

@@ -820,17 +820,6 @@ button.copy {
 	margin-top: var(--s2);
 }
 
-/* --- a question's own window -------------------------------------------------- */
-
-/* The arguments get the room there is. */
-.question-window .question pre {
-	max-height: 50vh;
-}
-
-.question-window #done {
-	padding: var(--s4);
-}
-
 /* Last and one step more specific: `hidden` wins over the display rules above. */
 html [hidden] {
 	display: none;

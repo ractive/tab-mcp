@@ -165,7 +165,7 @@ panel has been in front for 750 ms, so the click that brings it forward cannot a
 no click). The panel's question names the AI app and the tool, then, each on a line of
 its own, the site the tool acts on ("Site (verified)") and the page's title for the tool
 ("Title (from the page)"), the arguments in full (they scroll when long) and the seconds
-left to answer. A question that runs out leaves "Not answered in time: <tool> did not
+left to answer. Its three buttons look alike: none is drawn to be the one to click. A question that runs out leaves "Not answered in time: <tool> did not
 run." for a few seconds. A screen reader hears one short line per question ("<app> asks
 to run <tool>"), not the card. A question that comes or goes moves what is below it: the
 "Ask first" switches and "Turn off Ask first" over the list wait 750 ms after.
@@ -175,11 +175,11 @@ cut to 60 characters) with "On <site> · Closing this is Don't allow" below, nam
 app (its name and its verified host) and the arguments in short (cut to 150 characters;
 when they are cut, the notification says "Arguments cut: click to see them in full."),
 with the button "Allow once". "Don't ask again" is not on the notification: allowing a
-tool for good needs the whole question. A click on the notification's body opens it, the
-arguments in full, with Don't allow, "Allow once" and "Don't ask again on <host>": in the
-side panel of the tab's window, or, where Chrome does not open the panel, in a small
-window of its own (closing that window is Don't allow). The question waits there, its
-60 s still running. Don't allow is closing the
+tool for good needs the whole question. A click on the notification's body opens the side
+panel of the tab's window, where the question waits, the arguments in full, with Don't
+allow, "Allow once" and "Don't ask again on <host>", its 60 s still running. Where Chrome
+does not open the panel, the notification shows again and the icon's "?" opens the
+panel. Don't allow is closing the
 notification or no answer in 60 s. A click on "Allow once" within half a second of the
 notification showing does not count (it shows again). A notification answers only its
 own call. Questions also show in every open side panel, so with notifications off
@@ -274,10 +274,11 @@ setup, the listing, the permission justifications and the review notes:
   every state. A new colour or pair goes into the test's table first.
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
-  questions (notifications, the guard, late clicks, a click on the body, cut arguments,
-  the panel, the time limit), invisible characters, the address secret's storage,
-  "Don't ask again" (the site's "allowed"), the panel's status while the relay is out of
-  reach, a failed start tried again, a bundle without dynamic `import()`.
+  questions (notifications, the guard, late clicks, a click on the body and a panel
+  Chrome refuses, cut arguments, the panel, the time limit), invisible characters, the
+  address secret's storage, "Don't ask again" (the site's "allowed"), the panel's status
+  while the relay is out of reach, a panel's messages across the worker's start (their
+  order, a failed start, a panel gone before it), a bundle without dynamic `import()`.
 - `test/bridge.test.ts`: the bridge's names (also one that becomes the extension's own),
   descriptions, schemas (a parameter called `pattern`), results (the image budget, a
   tool that navigates), the origin checked against Chrome's, why a call did not run, and
@@ -291,7 +292,7 @@ setup, the listing, the permission justifications and the review notes:
   across navigations and tab switches; a `toolchange` read with one `getTools()`, and
   none with AI access off and the panel closed; with the panel closed
   (tools still run, questions as notifications, a panel closed during a question, a click
-  on a notification's body opening the question's own window, reopening it) and after a restart of the same profile (the same address connects
+  on a notification's body where Chrome refuses the panel, reopening it) and after a restart of the same profile (the same address connects
   again by itself; with the relay out of reach the alarm is set and the panel says it
   retries). `TAB_MCP_E2E_IDLE=1` adds a two-minute check that the service
   worker keeps running on a quiet connection and stops once AI access is off. Pages are served

@@ -889,11 +889,14 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			const asked = call(stack, "page_place_order", { item: LONG.repeat(4) });
 			await panel.waitFor(`document.querySelector("[data-question] pre")`);
 			await holds();
-			// It is a sheet with an edge; "Allow once" is ink, not amber, and
-			// while it takes no click it is flat, in colours of its own.
+			// It is a sheet with an edge; "Allow once" is drawn as "Don't
+			// allow" is, the default button (DEC-180), and while it takes no
+			// click it is flat, in colours of its own.
 			const question = await panel.eval<Record<string, string>>(`(() => {
 				const card = getComputedStyle(document.querySelector("[data-question]"));
-				const allow = document.querySelector('[data-question] button[data-answer="allow"]');
+				const button = (answer) => document.querySelector('[data-question] button[data-answer="' + answer + '"]');
+				const allow = button("allow");
+				const deny = button("deny");
 				const was = allow.getAttribute("aria-disabled");
 				const still = document.createElement("style");
 				still.textContent = "button { transition: none !important; }";
@@ -902,14 +905,20 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				const waiting = getComputedStyle(allow).backgroundColor;
 				const opacity = getComputedStyle(allow).opacity;
 				allow.removeAttribute("aria-disabled");
+				const look = (b) => {
+					const s = getComputedStyle(b);
+					return [s.backgroundColor, s.color, s.borderTopColor, s.fontWeight].join(" ");
+				};
 				const ready = getComputedStyle(allow).backgroundColor;
+				const same = look(allow) === look(deny);
 				if (was !== null) allow.setAttribute("aria-disabled", was);
 				still.remove();
 				return {
 					sheet: card.backgroundColor,
 					edge: card.borderTopColor,
 					shadow: card.boxShadow,
-					class: allow.className,
+					class: allow.className + "|" + deny.className,
+					same: String(same),
 					waiting,
 					opacity,
 					ready,
@@ -976,10 +985,11 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				sheet: "rgb(255, 255, 255)",
 				edge: "rgb(123, 130, 145)",
 				shadow: "none",
-				class: "strong",
+				class: "|",
+				same: "true",
 				waiting: "rgb(235, 232, 224)",
 				opacity: "1",
-				ready: "rgb(27, 33, 48)",
+				ready: "rgb(255, 255, 255)",
 			});
 			await scheme("dark");
 			expect(await read()).toEqual({
@@ -1473,7 +1483,7 @@ describe.skipIf(chrome === undefined)(
 			await clickNotification(stack, second, 0);
 			expect((await allowed).content[0]?.text).toContain("yes");
 			// Allow is its only button: allowing a tool on the site needs the
-			// whole question (the panel or the question's window). A second
+			// whole question (the side panel). A second
 			// button counts as nothing.
 			await stack.worker.eval(`(() => {
 				globalThis.e2eButtons = [];
@@ -1504,7 +1514,7 @@ describe.skipIf(chrome === undefined)(
 			expect(await notifications(stack)).toEqual([]);
 		});
 
-		test("a click on a notification's body shows the whole question; closing that window is Don't allow", async () => {
+		test("a click on a notification's body where Chrome refuses the side panel: the notification asks again (EQ 18)", async () => {
 			await stack.tab.goto(`${SITE}/webmcp.html`);
 			await call(stack, "webmcp_tools");
 			// What the notifications say.
@@ -1524,102 +1534,47 @@ describe.skipIf(chrome === undefined)(
 			);
 			expect(text).toEndWith("Arguments cut: click to see them in full.");
 			// The DevTools Protocol gives no user gesture (Chrome gives one to a
-			// real click on a notification): sidePanel.open is refused here, so
-			// the question opens in a window of its own.
+			// real click on a notification): sidePanel.open is refused here.
 			expect(
 				await stack.worker.eval(
 					`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.sidePanel.open({ tabId: t.id, windowId: t.windowId })).then(() => "opened", (e) => e.message)`,
 				),
 			).toContain("user gesture");
-			const questionUrl = `chrome-extension://${stack.browser.extensionId}/question/index.html`;
 			await stack.worker.eval(
 				`tabMcpNotificationClicked(${JSON.stringify(id)})`,
 			);
-			const popup = await stack.browser.attach(
-				(await stack.browser.waitForTarget((t) => t.url === questionUrl))
-					.targetId,
-			);
-			await popup.waitFor(`document.querySelector("[data-question] pre")`);
-			// The notification went; the question waits in the window, whole.
-			expect(await notifications(stack)).toEqual([]);
-			const shown = await popup.eval<string[]>(
-				`[...document.querySelectorAll("[data-question] p, [data-question] pre")].map((e) => e.textContent)`,
-			);
-			expect(shown).toContain(`Site (verified) ${SITE}`);
-			expect(shown).toContain("Title (from the page) place_order");
-			expect(JSON.parse(shown.find((t) => t.startsWith("{")) ?? "")).toEqual({
-				item,
-			});
-			// The arguments scroll.
-			expect(
-				await popup.eval(
-					`(() => { const pre = document.querySelector("[data-question] pre"); return pre.scrollHeight > pre.clientHeight && getComputedStyle(pre).overflowY; })()`,
-				),
-			).toBe("auto");
-			// The panel's look (DEC-160): on paper, the question a sheet, and
-			// nothing past the window's edge, whatever the arguments are.
-			expect(
-				await popup.eval(`(() => {
-					const root = document.scrollingElement;
-					const token = (name) => {
-						const probe = document.createElement("i");
-						probe.style.color = "var(" + name + ")";
-						document.body.append(probe);
-						const colour = getComputedStyle(probe).color;
-						probe.remove();
-						return colour;
-					};
-					return [
-						getComputedStyle(document.body).backgroundColor === token("--paper"),
-						getComputedStyle(document.querySelector("[data-question]")).backgroundColor === token("--sheet"),
-						root.scrollWidth <= root.clientWidth,
-					];
-				})()`),
-			).toEqual([true, true, true]);
-			// Its closing after the click answers nothing: the question waits.
+			// The question waits: a new notification asks again, with Allow
+			// once, and the icon says "?" (a click on it opens the panel).
+			const again = await newNotification(stack, [id]);
+			expect(await notifications(stack)).toEqual([again]);
+			expect(await badge()).toBe("?");
+			// The first one's closing answers nothing now.
 			await stack.worker.eval(
 				`tabMcpNotificationDismissed(${JSON.stringify(id)})`,
 			);
 			await Bun.sleep(200);
-			expect(
-				await popup.eval(`document.querySelectorAll("[data-question]").length`),
-			).toBe(1);
+			expect(await notifications(stack)).toEqual([again]);
 			expect(await stack.tab.eval("window.calls.length")).toBe(0);
-			await popup.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-			const allow = `document.querySelector('[data-question] button[data-answer="allow"]')`;
-			await popup.waitFor(`${allow}.getAttribute("aria-disabled") !== "true"`);
-			await popup.click(`[data-question] button[data-answer="allow"]`);
+			await Bun.sleep(600);
+			await clickNotification(stack, again, 0);
 			const result = await asked;
 			expect(result.isError).toBeFalsy();
 			expect(result.content[0]?.text).toContain("end");
-			// Answered: its window closes.
-			const end = Date.now() + 5000;
-			for (;;) {
-				const { targetInfos } = (await stack.browser.send(
-					"Target.getTargets",
-				)) as { targetInfos: { url: string }[] };
-				if (!targetInfos.some((t) => t.url === questionUrl)) break;
-				if (Date.now() > end) throw new Error("the question window stayed");
-				await Bun.sleep(100);
-			}
-			// Again, and the window closed by the user: Don't allow.
+			// Again, and the notification that came back closed: Don't allow.
 			const declined = call(stack, "page_place_order", { item: "closed" });
-			const second = await newNotification(stack, [id]);
+			const second = await newNotification(stack, [id, again]);
 			await stack.worker.eval(
 				`tabMcpNotificationClicked(${JSON.stringify(second)})`,
 			);
-			const target = await stack.browser.waitForTarget(
-				(t) => t.url === questionUrl,
+			const back = await newNotification(stack, [id, again, second]);
+			await stack.worker.eval(
+				`tabMcpNotificationDismissed(${JSON.stringify(back)})`,
 			);
-			const popup2 = await stack.browser.attach(target.targetId);
-			await popup2.waitFor(`document.querySelector("[data-question]")`);
-			await stack.browser.send("Target.closeTarget", {
-				targetId: target.targetId,
-			});
 			expect((await declined).isError).toBe(true);
 			expect(
 				await stack.tab.eval("window.calls.map((c) => c[1])"),
 			).not.toContain("closed");
+			expect(await notifications(stack)).toEqual([]);
 		});
 
 		test("reopening the panel shows the same connection", async () => {

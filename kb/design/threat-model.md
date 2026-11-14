@@ -305,9 +305,8 @@ did, by connecting the extension.
   "Turn off Ask first" over the tool list,
   answers to questions) come only over the side panel's named port, whose sender Chrome reports: an
   extension page of this extension at the panel's path, not in a tab; any other port is
-  closed at once, and a command that does not parse is dropped. The one other port is a
-  question's own window (`question/index.html`, in a tab): the worker takes it only from
-  a window it opened for one question, and it can only answer that question. "Turn off Ask
+  closed at once, and a command that does not parse is dropped. There is no other port
+  (the question's own window went in iteration 43, DEC-181). "Turn off Ask
   first" carries the
   site and the tool names, at most 64, and the worker allows only those it offers on
   that site itself, now, that are not read-only: names from the panel are not taken on
@@ -340,20 +339,22 @@ did, by connecting the extension.
   Its one button is "Allow once", also when the arguments are cut: the owner's decision, as the
   AI app's own chat shows the call and the full arguments are a click away. "Don't ask
   again" is not on the notification (iteration 35): allowing a tool for good needs the
-  whole question. A click on its body opens the whole question, the
-  arguments in full (scrollable), with Don't allow, "Allow once" and "Don't ask again on
-  <host>": in the side
-  panel of the tab's window (`sidePanel.open` from `notifications.onClicked`, which
-  Chrome dispatches with a user gesture; called before any `await`), or, where Chrome
-  refuses that, in a small popup window of the extension's. The question stays pending
-  there with its 60 s running; the notification is cleared, and its closing after the
-  click answers nothing. Closing the notification, closing that popup window or letting
-  the 60 s run out is Don't allow. The end-to-end tests cannot give the gesture (the
-  DevTools Protocol's `userGesture` does not reach the worker's `sidePanel.open`), so
-  they cover the popup path; the side panel path rests on Chromium dispatching
-  `onClicked` with the gesture. In the panel and the popup, the site is on a line of
-  its own ("Site (verified)") and the page's title for the tool apart, labelled as the
-  page's. Each question's arguments go to a panel once, in a message of their own, not in
+  whole question. A click on its body opens the side panel of the tab's window
+  (`sidePanel.open` from `notifications.onClicked`, which Chrome dispatches with a user
+  gesture; called before any `await`) and brings that window to the front; the whole
+  question waits there, the arguments in full (scrollable), with Don't allow, "Allow
+  once" and "Don't ask again on <host>", its 60 s running. The notification is
+  cleared, and its closing after the click answers nothing. Where Chrome refuses the
+  panel, or the tab is gone, a new notification asks again (with its own 500 ms
+  guard); with the panel's card and the icon's "?" it stays the way to answer
+  (iteration 43, DEC-181: the popup window that showed the whole question in that case
+  is gone). Closing the notification or letting the 60 s run out is Don't allow. The
+  end-to-end tests cannot give the gesture (the DevTools Protocol's `userGesture` does
+  not reach the worker's `sidePanel.open`), so they cover the refused path; the side
+  panel path rests on Chromium dispatching `onClicked` with the gesture. In the panel,
+  the site is on a line of its own ("Site (verified)") and the page's title for the
+  tool apart, labelled as the page's, and the three answers are buttons of one kind, so
+  the card does not lean towards allowing (DEC-180). Each question's arguments go to a panel once, in a message of their own, not in
   every state (several large ones in one state could pass Chrome's message limit and
   leave the panel without any state); at most 5 questions of one AI app wait at once,
   a further call of that app is declined without asking. A click on Allow within 500 ms of showing does not count (it
@@ -396,9 +397,11 @@ did, by connecting the extension.
   Chrome closes it under the worker (a deletion, a version change), instead of being
   used dead. A worker whose start fails (the database refused, say) keeps the error,
   shows it in a panel that connects and tries the start again at the next event or
-  panel message, instead of leaving the panel silently dead; a panel that connected
-  while it failed is attached as soon as any start succeeds, and what it said meanwhile
-  is kept (at most 64 messages).
+  panel message, instead of leaving the panel silently dead. A panel's messages wait
+  on the start in their order (the callbacks of one promise, no buffer of their own);
+  what waited on a start that failed is dropped, apart from the last of what the panel
+  says on connecting (its window, on screen, pairing), which the connection hears when
+  the panel's next message attaches it (iteration 43, DEC-181).
 - **Notifications cleared once made.** A notification is cleared (answered, timed out,
   cancelled, shown again) only after its `create` has finished, so none stays on screen
   with buttons that answer nothing.

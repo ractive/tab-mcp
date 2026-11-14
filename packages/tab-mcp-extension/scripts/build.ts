@@ -220,13 +220,6 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			"esm",
 			how,
 		)),
-		// A question's own window, where the side panel could not open.
-		...(await bundle(
-			"src/question/index.html",
-			join(outdir, "question"),
-			"esm",
-			how,
-		)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));
 	for (const size of ICON_SIZES) {

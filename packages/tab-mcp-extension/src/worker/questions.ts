@@ -3,11 +3,12 @@
  * of its own to ask in (DEC-116). A question shows in every open side panel;
  * unless a side panel is open in the focused window of the tab the call acts
  * on, it also goes out as a Chrome notification, with Allow (allowing the
- * tool on its site needs the whole question, in the panel or its window).
- * A click on its body shows the whole question (the arguments in full) in
- * the side panel of the tab's window, or in a window of its own, where it
- * waits on; closing the notification, nobody answering within the time
- * limit or the AI app cancelling is Don't allow. The first answer counts.
+ * tool on its site needs the whole question, in the panel). A click on its
+ * body opens the side panel of the tab's window, where the whole question
+ * (the arguments in full) waits on; where Chrome refuses the panel, the
+ * notification comes back and the icon's "?" opens the panel. Closing the
+ * notification, nobody answering within the time limit or the AI app
+ * cancelling is Don't allow. The first answer counts.
  * Each notification carries its call: a click answers only that call, and a
  * click on a call that is already settled is dropped.
  */
@@ -30,8 +31,8 @@ export const MAX_QUESTIONS_PER_APP = 5;
 /** An Allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
 /**
- * The arguments in a notification are cut to this; the side panel and the
- * question's window show them in full (the relay caps a request at 1 MiB).
+ * The arguments in a notification are cut to this; the side panel shows
+ * them in full (the relay caps a request at 1 MiB).
  */
 export const MAX_ARGS_NOTIFICATION = 150;
 /** What a notification says when it cut the arguments. */
@@ -39,7 +40,7 @@ export const ARGS_CUT_NOTE = "Arguments cut: click to see them in full.";
 
 /**
  * The buttons of a notification. Don't allow is closing it. A click on its
- * body shows the whole question, where "Don't ask again on <host>" is: a
+ * body opens the panel, where "Don't ask again on <host>" is: a
  * notification may show the arguments cut, and allowing a tool for good
  * should not rest on a part of them (DEC-139).
  */
@@ -58,15 +59,15 @@ export interface QuestionsHost {
 	notify(id: string, text: NotificationText): Promise<void>;
 	clear(id: string): void;
 	/**
-	 * Show question `id` whole, for tab `tabId` in window `windowId`: called
-	 * at once from a click on a notification's body (the user gesture
-	 * `sidePanel.open` needs is only there before any `await`).
+	 * Open the side panel for tab `tabId` in window `windowId`, where the
+	 * whole question is: called at once from a click on a notification's
+	 * body (the user gesture `sidePanel.open` needs is only there before
+	 * any `await`). Resolves `false` if the panel did not open.
 	 */
 	showQuestion(where: {
-		id: string;
 		tabId: number | undefined;
 		windowId: number | undefined;
-	}): void;
+	}): Promise<boolean>;
 	/** The list of questions changed: tell the panels, set the badge. */
 	changed(): void;
 	now(): number;
@@ -361,21 +362,26 @@ export class Questions {
 	}
 
 	/**
-	 * A click on notification `id`'s body: the question, whole, where the
-	 * host shows it (the side panel of the tab's window, or a window of its
-	 * own). It waits there, its time limit running on; the notification goes,
-	 * and closing it after the click answers nothing.
+	 * A click on notification `id`'s body: the side panel of the tab's
+	 * window, where the question waits whole, its time limit running on.
+	 * The notification goes, and closing it after the click answers
+	 * nothing. Where the panel does not open (Chrome refused it, or the tab
+	 * is gone), a new notification asks again: with the panel's card it
+	 * stays a way to answer (EQ 18).
 	 */
 	notificationClicked(id: string): void {
 		const pending = this.#byNotification(id);
 		if (pending === undefined) return; // settled, or an older notification
 		delete pending.notification;
 		this.#clear(id);
-		this.#host.showQuestion({
-			id: pending.view.id,
-			tabId: pending.tabId,
-			windowId: pending.windowId,
-		});
+		void this.#host
+			.showQuestion({ tabId: pending.tabId, windowId: pending.windowId })
+			.then(
+				(shown) => {
+					if (!shown) this.#notify(pending);
+				},
+				() => this.#notify(pending),
+			);
 	}
 
 	/** Notification `id` closed (by the user, or Chrome): Don't allow. */

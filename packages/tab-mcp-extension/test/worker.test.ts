@@ -11,21 +11,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
+import { attachPanel } from "../src/panel-port.ts";
 import {
 	type Answer,
 	isContentEvent,
 	isPanelSender,
-	isQuestionSender,
 	type PanelCommand,
 	parseCommand,
-	parseQuestionAnswer,
 	startProblem,
 } from "../src/protocol.ts";
-import {
-	attachWhenStarted,
-	MAX_EARLY_MESSAGES,
-	Starter,
-} from "../src/starter.ts";
 import {
 	type AllowedTools,
 	allowable,
@@ -38,10 +32,6 @@ import type { LookedUp } from "../src/worker/bridge.ts";
 import { panelStatus } from "../src/worker/connection.ts";
 import { decide } from "../src/worker/decide.ts";
 import { memoryKv } from "../src/worker/kv.ts";
-import {
-	type QuestionPort,
-	QuestionWindows,
-} from "../src/worker/question-windows.ts";
 import {
 	type AppRequest,
 	ARGS_CUT_NOTE,
@@ -128,33 +118,6 @@ describe("who may send what", () => {
 		expect(isContentEvent(null, contentScript, ID)).toBe(false);
 	});
 
-	test("a question window's port: this extension's question page, in a tab; it can only answer", () => {
-		const page = `chrome-extension://${ID}/question/index.html`;
-		expect(isQuestionSender({ id: ID, url: page, tab: { id: 9 } }, ID)).toBe(
-			true,
-		);
-		// Not in a tab (the worker checks the tab's window is one it opened).
-		expect(isQuestionSender({ id: ID, url: page }, ID)).toBe(false);
-		expect(isQuestionSender({ id: ID, url: PANEL, tab: { id: 9 } }, ID)).toBe(
-			false,
-		);
-		expect(isQuestionSender(contentScript, ID)).toBe(false);
-		expect(
-			isQuestionSender({ id: "other", url: page, tab: { id: 9 } }, ID),
-		).toBe(false);
-		for (const answer of ["allow", "site", "deny"] as const)
-			expect(parseQuestionAnswer({ type: "answer", answer })).toBe(answer);
-		for (const bad of [
-			null,
-			{ type: "answer", answer: "yes" },
-			// The ephemeral Always allow is gone (EQ 10).
-			{ type: "answer", answer: "always" },
-			{ type: "answer", id: "q", answer: 1 },
-			{ type: "connect" },
-		])
-			expect(parseQuestionAnswer(bad)).toBeUndefined();
-	});
-
 	test("commands are checked: only well-formed ones pass, as they are", () => {
 		for (const command of COMMANDS)
 			expect(parseCommand(command)).toEqual(command);
@@ -182,13 +145,18 @@ describe("who may send what", () => {
 				on: true,
 			},
 			{ type: "answer", id: "q", answer: "yes" },
+			// The ephemeral Always allow is gone (EQ 10).
+			{ type: "answer", id: "q", answer: "always" },
 		])
 			expect(parseCommand(bad)).toBeUndefined();
 	});
 });
 
-/** A host whose notifications and panels the test controls. */
-function fakeHost(options: { panel?: boolean } = {}) {
+/**
+ * A host whose notifications and panels the test controls. `opens`: whether
+ * a click on a notification's body opens the side panel (Chrome may refuse).
+ */
+function fakeHost(options: { panel?: boolean; opens?: boolean } = {}) {
 	const shown = new Map<string, NotificationText>();
 	const cleared: string[] = [];
 	let now = 1_000_000;
@@ -214,8 +182,9 @@ function fakeHost(options: { panel?: boolean } = {}) {
 			shown.delete(id);
 			cleared.push(id);
 		},
-		showQuestion: (where) => {
+		showQuestion: async (where) => {
 			host.showQuestions.push(where);
+			return options.opens !== false && where.tabId !== undefined;
 		},
 		showQuestions: [],
 		changed: () => {
@@ -285,7 +254,7 @@ describe("questions", () => {
 		expect(await answer).toBe("deny");
 	});
 
-	test("a click on the body shows the whole question for its tab; it waits on there", async () => {
+	test("a click on the body opens the panel of its tab's window; the question waits on there", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host, 200);
 		let settled: Answer | "timeout" | "busy" | undefined;
@@ -301,9 +270,7 @@ describe("questions", () => {
 		const [id] = [...host.shown.keys()] as [string];
 		questions.notificationClicked(id);
 		// At once (the user gesture), with the tab and its window.
-		expect(host.showQuestions).toEqual([
-			{ id: questions.list[0]?.id as string, tabId: 7, windowId: 3 },
-		]);
+		expect(host.showQuestions).toEqual([{ tabId: 7, windowId: 3 }]);
 		await settle();
 		// The notification went; its closing now answers nothing.
 		expect(host.shown.size).toBe(0);
@@ -312,7 +279,7 @@ describe("questions", () => {
 		await settle();
 		expect(settled).toBeUndefined();
 		expect(host.showQuestions).toHaveLength(1);
-		// The arguments in full, for the panel or the question's window.
+		// The arguments in full, for the panel.
 		expect(JSON.parse(questions.list[0]?.args as string)).toEqual(long);
 		// The time limit still runs.
 		expect(await answer).toBe("timeout");
@@ -331,6 +298,44 @@ describe("questions", () => {
 		expect(host.shown.size).toBe(1);
 		questions.answer(questions.list[0]?.id as string, "allow");
 		expect(await answer).toBe("allow");
+	});
+
+	test("where the panel does not open, a new notification asks again: Allow once from it, or closing it (EQ 18)", async () => {
+		for (const [where, options] of [
+			// Chrome refused the panel.
+			[{ tabId: 7 }, { opens: false }],
+			// The tab is not known: no panel to open.
+			[{}, {}],
+		] as const) {
+			const host = fakeHost(options);
+			const questions = new Questions(host);
+			const answer = questions.ask(request(), where);
+			await settle();
+			const [first] = [...host.shown.keys()] as [string];
+			questions.notificationClicked(first);
+			await settle();
+			expect(host.showQuestions).toHaveLength(1);
+			const [second] = [...host.shown.keys()] as [string];
+			expect(second).toBeDefined();
+			expect(second).not.toBe(first);
+			expect(host.cleared).toEqual([first]);
+			// The first one answers nothing now; the new one's guard runs again.
+			questions.notificationDismissed(first);
+			questions.notificationButton(second, 0);
+			await settle();
+			expect(questions.list).toHaveLength(1);
+			const [third] = [...host.shown.keys()] as [string];
+			host.advance(NOTIFICATION_GUARD_MS);
+			questions.notificationButton(third, 0);
+			expect(await answer).toBe("allow");
+			// Closing the one that came back is Don't allow.
+			const denied = questions.ask(request(), where);
+			await settle();
+			questions.notificationClicked([...host.shown.keys()][0] as string);
+			await settle();
+			questions.notificationDismissed([...host.shown.keys()][0] as string);
+			expect(await denied).toBe("deny");
+		}
 	});
 
 	test("arguments cut in a notification: it says so, Allow stays", async () => {
@@ -876,154 +881,6 @@ describe("the panel's status", () => {
 });
 
 describe("the worker's start", () => {
-	test("a start that failed is tried again by the next call, and its error kept", async () => {
-		let attempts = 0;
-		const starter = new Starter(async () => {
-			attempts++;
-			if (attempts < 3) throw new Error(`no database (${attempts})`);
-			return "connection";
-		});
-		await expect(starter.ready()).rejects.toThrow("no database (1)");
-		expect(starter.failed).toBe(true);
-		expect(String(starter.error)).toContain("(1)");
-		// Two calls at once share one start.
-		const [a, b] = [starter.ready(), starter.ready()];
-		expect(a).toBe(b);
-		expect(starter.failed).toBe(false);
-		await expect(a).rejects.toThrow("(2)");
-		expect(await starter.ready()).toBe("connection");
-		expect(starter.value).toBe("connection");
-		expect(starter.failed).toBe(false);
-		// Started: no further start.
-		expect(await starter.ready()).toBe("connection");
-		expect(attempts).toBe(3);
-	});
-
-	test("a start that throws at once counts as failed", async () => {
-		const starter = new Starter<string>(() => {
-			throw new Error("at once");
-		});
-		await expect(starter.ready()).rejects.toThrow("at once");
-		expect(starter.failed).toBe(true);
-	});
-
-	/** A panel's port the test drives. */
-	function fakePort() {
-		const posted: unknown[] = [];
-		let listener: ((m: unknown) => void) | undefined;
-		let disconnect = () => {};
-		return {
-			posted,
-			say(message: unknown) {
-				listener?.(message);
-			},
-			close() {
-				disconnect();
-			},
-			get listening() {
-				return listener !== undefined;
-			},
-			port: {
-				postMessage: (m: unknown) => void posted.push(m),
-				onMessage: (l: (m: unknown) => void) => {
-					listener = l;
-					return () => {
-						listener = undefined;
-					};
-				},
-				onDisconnect: (l: () => void) => {
-					disconnect = l;
-				},
-			},
-		};
-	}
-
-	test("a panel that connected while the start failed is attached once another caller's start succeeds", async () => {
-		let fail = true;
-		const starter = new Starter(async () => {
-			if (fail) throw new Error("no database");
-			return "connection";
-		});
-		await starter.ready().catch(() => {});
-		const panel = fakePort();
-		const attached: [string, unknown[]][] = [];
-		attachWhenStarted(
-			starter,
-			panel.port,
-			(value, early) => attached.push([value, early]),
-			(error) => ({ problem: String(error) }),
-		);
-		await settle();
-		expect(panel.posted).toEqual([{ problem: "Error: no database" }]);
-		panel.say({ type: "hello", windowId: 1 });
-		await settle();
-		expect(attached).toEqual([]);
-		// Another event's retry succeeds: the panel is attached with what it said.
-		fail = false;
-		expect(await starter.ready()).toBe("connection");
-		await settle();
-		expect(attached).toEqual([
-			["connection", [{ type: "hello", windowId: 1 }]],
-		]);
-		// Its port's messages go to the connection now, not into a queue.
-		expect(panel.listening).toBe(false);
-	});
-
-	test("a panel's message retries a failed start; a panel attaches once; what it keeps is capped", async () => {
-		let attempts = 0;
-		const starter = new Starter(async () => {
-			attempts++;
-			if (attempts < 2) throw new Error("no database");
-			return "connection";
-		});
-		const panel = fakePort();
-		const attached: unknown[][] = [];
-		attachWhenStarted(
-			starter,
-			panel.port,
-			(_value, early) => attached.push(early),
-			() => ({ problem: true }),
-		);
-		await settle();
-		expect(attempts).toBe(1);
-		// Hold the next start back with many messages at once: each tries
-		// (sharing one start), at most MAX_EARLY_MESSAGES are kept.
-		for (let i = 0; i < MAX_EARLY_MESSAGES + 10; i++)
-			panel.say({ type: "visible", visible: i % 2 === 0 });
-		await settle();
-		expect(attempts).toBe(2);
-		expect(attached).toHaveLength(1);
-		expect(attached[0]).toHaveLength(MAX_EARLY_MESSAGES);
-		// A panel gone before the start: never attached.
-		const gone = fakePort();
-		const starter2 = new Starter(async () => "connection");
-		const late: unknown[] = [];
-		const slow = new Starter(
-			() =>
-				new Promise<string>((resolve) => setTimeout(() => resolve("c"), 20)),
-		);
-		attachWhenStarted(
-			slow,
-			gone.port,
-			(v) => late.push(v),
-			() => ({}),
-		);
-		gone.close();
-		await Bun.sleep(40);
-		expect(late).toEqual([]);
-		// Already started: attached at once.
-		await starter2.ready();
-		const now = fakePort();
-		const at: unknown[] = [];
-		attachWhenStarted(
-			starter2,
-			now.port,
-			(v) => at.push(v),
-			() => ({}),
-		);
-		expect(at).toEqual(["connection"]);
-	});
-
 	test("the panel's state for a failed start carries the problem and nothing to act on", () => {
 		const state = startProblem(new Error("IndexedDB refused"));
 		expect(state.problem).toContain("IndexedDB refused");
@@ -1034,6 +891,110 @@ describe("the worker's start", () => {
 			expired: [],
 			pairing: false,
 		});
+	});
+
+	/** A panel's port the test drives. */
+	function fakePort() {
+		const posted: unknown[] = [];
+		let listener: (m: unknown) => void = () => {};
+		let disconnect = () => {};
+		return {
+			posted,
+			say: (message: unknown) => listener(message),
+			close: () => disconnect(),
+			port: {
+				postMessage: (m: unknown) => void posted.push(m),
+				onMessage: (l: (m: unknown) => void) => {
+					listener = l;
+				},
+				onDisconnect: (l: () => void) => {
+					disconnect = l;
+				},
+			},
+		};
+	}
+
+	/** A start the test settles by hand, one per call. */
+	function starts() {
+		const pending: {
+			resolve: (c: string) => void;
+			reject: (e: unknown) => void;
+		}[] = [];
+		const ready = () =>
+			new Promise<string>((resolve, reject) =>
+				pending.push({ resolve, reject }),
+			);
+		return { pending, ready };
+	}
+
+	test("a panel's messages wait on the start and arrive in their order (EQ 19)", async () => {
+		const { pending, ready } = starts();
+		const shared = ready();
+		const panel = fakePort();
+		const received: unknown[] = [];
+		attachPanel(
+			() => shared,
+			panel.port,
+			() => (m) => received.push(m),
+		);
+		for (let i = 0; i < 100; i++) panel.say({ type: "visible", visible: i });
+		pending[0]?.resolve("connection");
+		await settle();
+		expect(received).toHaveLength(100);
+		expect(received.map((m) => (m as { visible: number }).visible)).toEqual(
+			Array.from({ length: 100 }, (_, i) => i),
+		);
+		// Attached: further messages go straight on, in order.
+		panel.say({ type: "stop" });
+		await settle();
+		expect(received.at(-1)).toEqual({ type: "stop" });
+	});
+
+	test("a failed start shows the problem; the next message attaches the panel with what it said on connecting", async () => {
+		const { pending, ready } = starts();
+		const panel = fakePort();
+		const attached: string[] = [];
+		const received: unknown[] = [];
+		attachPanel(ready, panel.port, (c) => {
+			attached.push(c);
+			return (m) => received.push(m);
+		});
+		panel.say({ type: "hello", windowId: 4 });
+		panel.say({ type: "pair", on: true });
+		panel.say({ type: "visible", visible: true });
+		pending[0]?.reject(new Error("IndexedDB refused"));
+		await settle();
+		expect(panel.posted).toHaveLength(1);
+		expect(JSON.stringify(panel.posted[0])).toContain("IndexedDB refused");
+		expect(received).toEqual([]);
+		// The panel's next message tries again; once attached, the
+		// connection hears the panel's window and pairing first.
+		panel.say({ type: "connect" });
+		expect(pending).toHaveLength(2);
+		pending[1]?.resolve("connection");
+		await settle();
+		expect(attached).toEqual(["connection"]);
+		expect(received).toEqual([
+			{ type: "hello", windowId: 4 },
+			{ type: "pair", on: true },
+			{ type: "visible", visible: true },
+			{ type: "connect" },
+		]);
+	});
+
+	test("a panel gone before the start is never attached", async () => {
+		const { pending, ready } = starts();
+		const panel = fakePort();
+		const attached: string[] = [];
+		attachPanel(ready, panel.port, (c) => {
+			attached.push(c);
+			return () => {};
+		});
+		panel.close();
+		pending[0]?.resolve("connection");
+		await settle();
+		expect(attached).toEqual([]);
+		expect(panel.posted).toEqual([]);
 	});
 });
 
@@ -1047,144 +1008,5 @@ describe("the service worker's bundle", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
-	});
-});
-
-describe("a question's own window", () => {
-	/** Windows, questions and ports the test drives. */
-	function setup() {
-		const waiting = new Map<string, QuestionViewLike>();
-		const answers: [string, Answer][] = [];
-		const removed: number[] = [];
-		let nextWindow = 100;
-		const windows = new QuestionWindows({
-			create: async () => nextWindow++,
-			remove: (windowId) => void removed.push(windowId),
-			list: () => [...waiting.values()],
-			answer: (id, answer) => {
-				answers.push([id, answer]);
-				waiting.delete(id);
-			},
-			parse: parseQuestionAnswer,
-		});
-		const port = (windowId: number | undefined) => {
-			const posted: unknown[] = [];
-			let listener: (m: unknown) => void = () => {};
-			let gone = () => {};
-			const p: QuestionPort & {
-				posted: unknown[];
-				say(m: unknown): void;
-				disconnected: boolean;
-			} = {
-				windowId,
-				posted,
-				disconnected: false,
-				postMessage: (m) => void posted.push(m),
-				disconnect: () => {
-					p.disconnected = true;
-					gone();
-				},
-				onMessage: (l) => {
-					listener = l;
-				},
-				onDisconnect: (l) => {
-					gone = l;
-				},
-				say: (m) => listener(m),
-			};
-			return p;
-		};
-		const ask = (id: string) =>
-			waiting.set(id, {
-				id,
-				app: "Claude (claude.ai)",
-				host: "claude.ai",
-				tool: "page_x",
-				args: "{}",
-				site: true,
-				expiresAt: 0,
-			});
-		return { windows, waiting, answers, removed, port, ask };
-	}
-	type QuestionViewLike = {
-		id: string;
-		app: string;
-		host: string;
-		tool: string;
-		args: string;
-		site: boolean;
-		expiresAt: number;
-	};
-
-	test("a port from a window not opened for a question is disconnected and never heard", async () => {
-		const t = setup();
-		t.ask("q1");
-		await t.windows.open("q1");
-		const stranger = t.port(555);
-		t.windows.addPort(stranger);
-		expect(stranger.disconnected).toBe(true);
-		stranger.say({ type: "answer", answer: "allow" });
-		const none = t.port(undefined);
-		t.windows.addPort(none);
-		expect(none.disconnected).toBe(true);
-		expect(t.answers).toEqual([]);
-		expect(stranger.posted).toEqual([]);
-	});
-
-	test("a port answers only the question of its window, which it gets once", async () => {
-		const t = setup();
-		t.ask("q1");
-		t.ask("q2");
-		await t.windows.open("q1");
-		await t.windows.open("q2");
-		const p = t.port(100);
-		t.windows.addPort(p);
-		expect(p.posted).toEqual([
-			{ type: "question", question: t.waiting.get("q1") },
-		]);
-		// Unchanged: not posted again.
-		t.windows.sync();
-		expect(p.posted).toHaveLength(1);
-		// Garbage, or something that names another question, answers only q1 or nothing.
-		p.say({ type: "answer", id: "q2", answer: "allow" });
-		expect(t.answers).toEqual([["q1", "allow"]]);
-		p.say({ type: "answer", answer: "maybe" });
-		expect(t.answers).toHaveLength(1);
-		// q1 settled: its window is told, closed, and answers nothing more.
-		t.windows.sync();
-		expect(p.posted.at(-1)).toEqual({ type: "question", question: undefined });
-		expect(t.removed).toEqual([100]);
-		p.say({ type: "answer", answer: "site" });
-		t.windows.windowRemoved(100);
-		expect(t.answers).toEqual([["q1", "allow"]]);
-	});
-
-	test("closing the window is Don't allow, once", async () => {
-		const t = setup();
-		t.ask("q1");
-		await t.windows.open("q1");
-		const p = t.port(100);
-		t.windows.addPort(p);
-		t.windows.windowRemoved(100);
-		t.windows.windowRemoved(100);
-		expect(t.answers).toEqual([["q1", "deny"]]);
-		expect(p.disconnected).toBe(true);
-		p.say({ type: "answer", answer: "allow" });
-		expect(t.answers).toEqual([["q1", "deny"]]);
-	});
-
-	test("a question settled while its window opened closes the window at once", async () => {
-		const t = setup();
-		t.ask("q1");
-		const opening = t.windows.open("q1");
-		t.waiting.delete("q1");
-		await opening;
-		expect(t.removed).toEqual([100]);
-		const p = t.port(100);
-		t.windows.addPort(p);
-		expect(p.disconnected).toBe(true);
-		// No window for a question that is not waiting.
-		await t.windows.open("gone");
-		expect(t.removed).toEqual([100]);
 	});
 });

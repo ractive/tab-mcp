@@ -3329,6 +3329,9 @@ connection that is connecting, retrying or waiting for an app, with a ring
 (`--accent-edge`), since amber alone is 1.67:1 on paper. The AI app card then looks the
 same in both extensions.
 
+Amended by DEC-180 (iteration 43): "Allow once" is no longer strong; the question card's
+answers are all default buttons. No button is amber still holds.
+
 ## DEC-162: What a colour says in tab-mcp for Chrome's panel
 
 2026-11-13, iteration 39. Overmark's status colours are a mark's status; here a colour
@@ -3694,3 +3697,43 @@ the npm packages (trusted publishing) and the relay image (BuildKit) have it. Bu
 - **What it does not cover:** the installed extension. The Chrome Web Store serves a CRX it
   builds and signs itself, so the attestation covers the GitHub release's zip and the
   upload only.
+
+## DEC-180: The question card's answers are buttons of one kind (owner)
+
+The owner, 2026-11-14: the question card in tab-mcp for Chrome's side panel must not nudge
+towards allowing. Until now "Allow once" was the filled ink `strong` button (DEC-161,
+iteration 39) beside the default "Don't allow". Built in
+[iteration 43](iterations/iteration-43-extension-simplification.md).
+
+- "Don't allow", "Allow once" and "Don't ask again on <host>" are all default buttons
+  (sheet, `--edge`, ink text); none carries a class.
+- The 750 ms guard stays: "Allow once" and "Don't ask again" take no click until the
+  panel has been in front that long (`aria-disabled`, drawn flat), so for that moment
+  they look waiting, not stronger.
+- DEC-161 is amended to match; no button is amber still holds. "Turn on AI access",
+  "Done" and "Save" stay strong.
+
+## DEC-181: tab-mcp for Chrome without the question window and without `Starter`
+
+The owner, 2026-11-14, on the two extension rows DEC-178 left to a separate PR (review of
+2026-11-13, EQ 18 and EQ 19). Built in
+[iteration 43](iterations/iteration-43-extension-simplification.md).
+
+- **The question window is gone (EQ 18).** A click on a notification's body opens the side
+  panel of the tab's window and brings the window to the front. Where Chrome refuses
+  the panel (or the tab is gone), a new notification asks again, with "Allow once", its
+  own 500 ms guard, and closing it is Don't allow; the panel's card (the icon's "?"
+  opens the panel with a real click) is the other way to answer. Lost: the full
+  arguments one click sooner in that case. The extension has one answering channel
+  besides notifications: the side panel's port.
+- **`Starter` and `attachWhenStarted` are gone (EQ 19).** The worker keeps one start
+  promise, dropped when it rejects so the next event or panel message tries again. A
+  panel's messages wait on that port's attachment as callbacks of one promise, which
+  keeps their order with no buffer. The cap of 64 early messages is not kept: nothing
+  is buffered by hand, the callbacks live only while one start runs, and only the
+  extension's own panel page can send them. Messages that waited on a failed start are
+  dropped (before, they were replayed once a start succeeded), and such a panel is
+  attached at its next message. What a panel says once on connecting (its window,
+  whether it is on screen, whether it pairs) is kept, the last of each of the three, and
+  said again to the connection that attaches it after a failed start
+  (`src/panel-port.ts`).
