@@ -47,6 +47,14 @@ describe("manifest", () => {
 		expect(store["host_permissions"]).toBeUndefined();
 	});
 
+	test("the description is the store summary: at most 132 characters", () => {
+		const description = String(createManifest("1.0.0", {})["description"]);
+		expect(description.length).toBeLessThanOrEqual(132);
+		// It names both things the extension does: the tools and navigation.
+		expect(description).toContain("WebMCP tools");
+		expect(description).toContain("open pages");
+	});
+
 	test("the id is Chrome's: the SHA-256 of the key, written with a to p", () => {
 		const der = generateKeyPairSync("rsa", {
 			modulusLength: 2048,

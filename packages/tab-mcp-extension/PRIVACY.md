@@ -10,7 +10,7 @@ https://ractive.ch/tab-mcp/privacy/#chrome.
 
 Only tabs the user gave it, and only pages of http(s) sites (no `file:` pages, no
 Incognito tabs): the tab where the user clicked the extension's icon (until that tab goes
-to another origin), or every tab after the user turned on "Read all sites without a click". From such
+to another origin; example.com and www.example.com are two origins), or every tab after the user turned on "Read all sites without a click". From such
 a tab it reads the page's address (with its query and fragment, as the browser shows it),
 title and language, and the tools the page registered itself with WebMCP
 (`document.modelContext`): their names, titles, descriptions, input schemas and
@@ -30,8 +30,9 @@ In the extension's own IndexedDB in the browser, used by its service worker only
 - whether AI access is on, and whether another tab or program took the connection's
   address over;
 - a random secret from which the connection's address is derived;
-- the tools the user allowed per site (with "Don't ask again" in a question or in the
-  side panel's tool list): the site's origin and the tool names.
+- the tools the user allowed per site ("Don't ask again on …" in a question, or "Ask
+  first" switched off in the side panel's tool list): the site's origin and the tool
+  names.
 
 None of this is synced to a Google account or kept outside the browser, and removing the
 extension deletes it. The grants the relay holds for paired AI apps end when the user

@@ -2,7 +2,7 @@
 	"name": "tab-mcp-extension",
 	"version": "0.1.0",
 	"private": true,
-	"description": "tab-mcp for Chrome: offers a page's own WebMCP tools to AI apps outside the browser, through a tab-mcp relay",
+	"description": "tab-mcp for Chrome: offers a page's own WebMCP tools to AI apps outside the browser, and lets them open pages in that tab, through a tab-mcp relay",
 	"type": "module",
 	"scripts": {
 		"build": "bun scripts/build.ts",

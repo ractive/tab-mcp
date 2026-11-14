@@ -559,7 +559,7 @@ like any other, `chrome-extension://<id>` (A11).
   tab; a page that claims another site gets no tools.
 - **Hints can lie.** A tool the page marks read-only runs without asking; every other
   tool asks the user each time, naming the page's origin. "Don't ask again on <host>" in
-  a question, or "allowed" in the side panel, stops the questions for a tool of one
+  a question, or the tool's "Ask first" switched off in the side panel, stops the questions for a tool of one
   exact http(s) origin, for every paired AI app, until the user takes it back. A tool
   that changed while the question was open does not run. An allowed tool runs whatever
   the AI app, or a prompt injection steering it, asks of it. A page can mark only its
@@ -579,8 +579,8 @@ like any other, `chrome-extension://<id>` (A11).
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
 - **Which pages.** The extension asks for no host access at install. Without it, it
-  reads a tab only after a click on its icon there, and only on that origin. With "Allow
-  on all sites" it reads every page in front: the AI app then gets the tools of whatever
+  reads a tab only after a click on its icon there, and only on that origin. With "Read all
+  sites without a click" it reads every page in front: the AI app then gets the tools of whatever
   site the user looks at, each call to a tool not marked read-only still asked. Only
   http(s) pages, no `file:` pages and no Incognito tabs. The page's address goes to the
   AI app (`page_info`, navigation results) with its query and fragment, without a
@@ -589,7 +589,7 @@ like any other, `chrome-extension://<id>` (A11).
   extension may read. A page's text could tell the AI app to open another site: on the
   page's own origin a navigation runs without asking (as a link on the page would), to
   another origin it asks the user, showing the site the tab is on and the address, with
-  Allow and Don't allow only. Back or forward to a page the extension cannot see asks
+  "Allow once" and Don't allow only. Back or forward to a page the extension cannot see asks
   too. Only `http:` and `https:` addresses, without a user name or password. An open
   redirect on the page's own origin can still lead elsewhere without a question; the
   answer then shows where the tab landed, or that the extension may not read it.
@@ -620,7 +620,7 @@ like any other, `chrome-extension://<id>` (A11).
   as `\uXXXX`, with the same set as the client library's dialog (controls, format and
   other default-ignorable characters such as variation selectors, private-use and
   unassigned code points, every space but U+0020). In the side panel the page's site
-  and the page's title for the tool are on lines of their own, labelled. Only Allow
+  and the page's title for the tool are on lines of their own, labelled. Only "Allow once"
   allows from a notification, and
   a click on it right after the notification appeared does not count, so a click meant
   for something that was there before cannot allow. Each notification answers only its
@@ -792,7 +792,7 @@ each default.
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
 - With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
-  or "allowed" on its site) does whatever the AI app asks of it, and another program on
+  or with its "Ask first" switch off on its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
 - With `webmcp: true`: any agent in the browser calls the mirrored tools without
   pairing, and one that drives the tab can click Allow in the page's dialog for a

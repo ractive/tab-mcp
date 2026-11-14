@@ -285,7 +285,7 @@ did, by connecting the extension.
   tell the AI app to open another site: within the page's origin a navigation runs
   without asking (a link on the page could do the same), to another origin it asks the
   user, with the tab's origin ("From", verified) and the address ("To", invisible
-  characters escaped); Allow and Don't allow only, so one click is no standing
+  characters escaped); "Allow once" and Don't allow only, so one click is no standing
   permission, and a tab that changed origin while the question was open is not
   navigated, nor one that is no longer the tab in front. Back or forward to an entry the Navigation API does not list (it lists only
   the page's origin) asks as well, the address not being known. Only `http:` and
