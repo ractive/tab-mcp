@@ -9,17 +9,18 @@ import { SETUP_GUIDE } from "@ractive-ch/tab-mcp-client/setup";
 import { Window } from "happy-dom";
 import type { PanelState, TabView } from "../src/protocol.ts";
 import {
+	allowAllLabel,
 	allowAllView,
 	askFirstNote,
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
-	DONT_ASK_ALL,
 	introText,
 	noAccessText,
 	type SwitchIntent,
 	switchExpiry,
 	switchShown,
+	TURN_OFF_ASK_FIRST,
 	webmcpNote,
 } from "../src/sidepanel/card.ts";
 import {
@@ -269,7 +270,7 @@ describe("the tab card's texts", () => {
 			expect(text("host-access")).toContain(
 				'"Read and change all your data on all websites"',
 			);
-			expect(text("allow-tools")).toBe(DONT_ASK_ALL);
+			expect(text("allow-tools")).toBe(TURN_OFF_ASK_FIRST);
 			// Problems are announced; a question's card is not a live region
 			// (its arguments can be 1 MiB), a short line is.
 			expect(doc.getElementById("problem")?.getAttribute("role")).toBe("alert");
@@ -337,7 +338,7 @@ describe("the tab card's texts", () => {
 	});
 });
 
-describe("Don't ask for these tools", () => {
+describe("Turn off Ask first, over the tool list", () => {
 	const tab = (tools: TabView["tools"], canAllow = true): TabView => ({
 		title: "Shop",
 		host: "shop.example",
@@ -359,15 +360,15 @@ describe("Don't ask for these tools", () => {
 	test("for the listed tools that ask first, not read-only or left-out ones", () => {
 		expect(allowAllView(tab([order, pay, read, broken]))).toEqual({
 			shown: true,
-			label: "Don't ask for these tools",
+			label: "Turn off Ask first",
 			names: ["order", "pay"],
 			on: true,
 		});
 	});
 
-	test("some allowed: still Don't ask; none asks: Ask first for these tools", () => {
+	test("some allowed: still Turn off Ask first; none asks: Turn on Ask first", () => {
 		expect(allowAllView(tab([{ ...order, allowed: true }, pay])).label).toBe(
-			DONT_ASK_ALL,
+			TURN_OFF_ASK_FIRST,
 		);
 		expect(
 			allowAllView(
@@ -375,10 +376,22 @@ describe("Don't ask for these tools", () => {
 			),
 		).toEqual({
 			shown: true,
-			label: "Ask first for these tools",
+			label: "Turn on Ask first",
 			names: ["order", "pay"],
 			on: false,
 		});
+	});
+
+	test("its accessible name: the count, the site and every paired AI app", () => {
+		const site = "https://shop.example";
+		expect(allowAllLabel(allowAllView(tab([order, pay, read])), site)).toBe(
+			"Turn off Ask first for the 2 tools listed on https://shop.example, for every paired AI app",
+		);
+		expect(
+			allowAllLabel(allowAllView(tab([{ ...order, allowed: true }])), site),
+		).toBe(
+			"Turn on Ask first for the 1 tool listed on https://shop.example, for every paired AI app",
+		);
 	});
 
 	test("hidden where tools cannot be allowed, or none asks first", () => {

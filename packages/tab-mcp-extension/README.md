@@ -45,10 +45,9 @@ The page's tools are the page's word:
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Don't ask again on <host>" in a question, or switching off
   the tool's "Ask first" in the panel's list, allows the tool on that site (exact origin)
-  for every paired AI app, kept until you switch "Ask first" on again. "Don't ask for
-  these tools" over the list does that for every tool listed at that moment that asks
-  first, in one step; once none asks, it reads "Ask first for these tools" and turns them
-  all back. A tool the page registers later asks first. When the page changes what the
+  for every paired AI app, kept until you switch "Ask first" on again. "Turn off Ask
+  first" over the list does that for every tool listed at that moment that asks first,
+  in one step; once none asks, it reads "Turn on Ask first" and turns them all back. A tool the page registers later asks first. When the page changes what the
   button would do, it waits 750 ms before it takes a click. All of these only for pages
   of an http(s) site: pages with an opaque origin (`null`, such as sandboxed pages)
   always ask ("asks first", no switch).
@@ -162,7 +161,7 @@ its own, the site the tool acts on ("Site (verified)") and the page's title for 
 left to answer. A question that runs out leaves "Not answered in time: <tool> did not
 run." for a few seconds. A screen reader hears one short line per question ("<app> asks
 to run <tool>"), not the card. A question that comes or goes moves what is below it: the
-"Ask first" switches and "Don't ask for these tools" wait 750 ms after.
+"Ask first" switches and "Turn off Ask first" over the list wait 750 ms after.
 
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site> · Closing this is Don't allow" below, naming the AI
@@ -249,8 +248,8 @@ setup, the listing, the permission justifications and the review notes:
   not packed; `--zip` needs `--store`.
 - `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
   while pairing, the first look, Disconnect only while connected), "How do I add it?" and
-  its Copy buttons, its clicks (Disconnect's double click, the switch), "Don't ask for
-  these tools", the tab card's texts (an unreadable tab, no tools), the labels and live
+  its Copy buttons, its clicks (Disconnect's double click, the switch), "Turn off Ask
+  first" over the tool list, the tab card's texts (an unreadable tab, no tools), the labels and live
   regions of `index.html`, a question's countdown and its end.
 - `test/contrast.test.ts`: the panel's look (`kb/design/extension-look.md`). Every pair
   of colours the style sheet uses, from its two token blocks (light and dark): text at

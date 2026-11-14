@@ -302,16 +302,16 @@ did, by connecting the extension.
 - **Who may send what (iteration 26).** The connection lives in the service worker,
   which content scripts in every granted tab can message too. Commands (connect, turn
   off, pairing, disconnect an app, new address, the relay, the "Ask first" switches,
-  "Don't ask for these tools",
+  "Turn off Ask first" over the tool list,
   answers to questions) come only over the side panel's named port, whose sender Chrome reports: an
   extension page of this extension at the panel's path, not in a tab; any other port is
   closed at once, and a command that does not parse is dropped. The one other port is a
   question's own window (`question/index.html`, in a tab): the worker takes it only from
-  a window it opened for one question, and it can only answer that question. "Don't ask for
-  these tools" carries the
+  a window it opened for one question, and it can only answer that question. "Turn off Ask
+  first" carries the
   site and the tool names, at most 64, and the worker allows only those it offers on
   that site itself, now, that are not read-only: names from the panel are not taken on
-  trust, and a tool the page registers later still asks first. "Ask first for these tools"
+  trust, and a tool the page registers later still asks first. "Turn on Ask first"
   takes away
   every name it carries on that site, offered now or not, so a tool the page dropped
   or marked read-only since cannot come back allowed. When the page changes what the
@@ -374,7 +374,7 @@ did, by connecting the extension.
   commands, and the "allowed" a question writes, run one after another, so a stop is
   never overtaken by the connect before it, nor two writes of "allowed" by each other.
   When the panel's questions move (one is answered, or one comes and pushes the panel
-  down, iteration 35), its "Allow once" buttons, "Don't ask for these tools" and the
+  down, iteration 35), its "Allow once" buttons, "Turn off Ask first" and the
   "Ask first" switches take no click
   for 750 ms, so a click lands on nothing that allows. While AI access is on and the
   relay cannot be reached, the panel says "retrying" (the alarm, also set at every

@@ -173,16 +173,19 @@ export function switchExpiry(
 /** The button over the tab's tool list, or why it is not there. */
 export interface AllowAllView {
 	shown: boolean;
-	label: typeof DONT_ASK_ALL | typeof ASK_ALL;
+	label: typeof TURN_OFF_ASK_FIRST | typeof TURN_ON_ASK_FIRST;
 	/** The tools it is for: listed, offered, not read-only. */
 	names: string[];
 	/** What a click asks for: allow them (true), or ask first again. */
 	on: boolean;
 }
 
-/** The labels say what they act on (EQ 9): the tools listed, on this site. */
-export const DONT_ASK_ALL = "Don't ask for these tools";
-export const ASK_ALL = "Ask first for these tools";
+/**
+ * The labels use the per-tool switch's word, "Ask first" (DEC-176); the line
+ * under the button names the site and every paired AI app (EQ 9).
+ */
+export const TURN_OFF_ASK_FIRST = "Turn off Ask first";
+export const TURN_ON_ASK_FIRST = "Turn on Ask first";
 
 /**
  * What a tool's "Ask first" switch does on `site`: a line over the tool
@@ -192,9 +195,9 @@ export const askFirstNote = (site: string): string =>
 	`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${site}, for every paired AI app.`;
 
 /**
- * "Don't ask for these tools" for the tools listed now on a site whose tools
- * can be allowed; once none asks, "Ask first for these tools". A tool the
- * page adds later is not among them: it asks first.
+ * "Turn off Ask first" for the tools listed now on a site whose tools can be
+ * allowed; once none asks, "Turn on Ask first". A tool the page adds later is
+ * not among them: it asks first.
  */
 export function allowAllView(tab: TabView | undefined): AllowAllView {
 	const names = (tab?.tools ?? [])
@@ -207,8 +210,17 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
 		);
 	return {
 		shown: tab?.canAllow === true && names.length > 0,
-		label: all ? ASK_ALL : DONT_ASK_ALL,
+		label: all ? TURN_ON_ASK_FIRST : TURN_OFF_ASK_FIRST,
 		names,
 		on: !all,
 	};
+}
+
+/**
+ * The button's accessible name: what it does, how many tools, which site and
+ * for whom, as the line under it says to a sighted user.
+ */
+export function allowAllLabel(view: AllowAllView, site: string): string {
+	const n = view.names.length;
+	return `${view.label} for the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
 }

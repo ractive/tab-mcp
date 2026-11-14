@@ -3542,3 +3542,19 @@ is a list of origins and is passed through to the native registration (DEC-143).
   Builds without splitting (tab-mcp for Chrome's service worker) inline it.
 - Core: 6400 B before, 6082 B with the mirror out, 6216 B with iteration 41's fixes;
   the budget stays 6400 B.
+
+## DEC-176: The button over the tool list reads "Turn off Ask first" / "Turn on Ask first" (owner)
+
+2026-11-14, `extension/ask-first-button`; amends the button of DEC-154.
+
+- tab-mcp for Chrome's button over the tab's tool list was "Don't ask for these tools" /
+  "Ask first for these tools". It is now "Turn off Ask first" / "Turn on Ask first": the
+  same word as each tool's "Ask first" switch, so the button reads as all the switches at
+  once. The line under it already names the site and "every paired AI app".
+- Its accessible name says the same with the count, the site and every paired AI app,
+  both ways: "Turn off Ask first for the 2 tools listed on https://shop.example, for every
+  paired AI app" (one tool: "the 1 tool"). Before, the "Ask first" way left out "for every
+  paired AI app".
+- Behaviour, protocol (`set-allowed-all`) and storage do not change. The constants are
+  `TURN_OFF_ASK_FIRST` / `TURN_ON_ASK_FIRST` in `src/sidepanel/card.ts`. No change to
+  the privacy notice (owner).

@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- tab-mcp for Chrome's button over the tool list (`extension/ask-first-button`, owner): "Turn off Ask first" / "Turn on Ask first" instead of "Don't ask for these tools" / "Ask first for these tools", the word of the per-tool switch; its accessible name names the count, the site and every paired AI app both ways (`allowAllLabel`, "1 tool" for one); README, threat models, `design/extension-look.md` and the four store screenshots (each shows the button) follow; DEC-176
+
 - Review follow-ups (`docs/review-followups`): PRIVACY.md, the threat models, the README and the store doc use the panel's names ("Don't ask again on <host>", the "Ask first" switch, "Read all sites without a click", "Allow once"); the manifest's `description` names the navigation (130 of 132 characters, checked in `test/unit.test.ts`); the store screenshots taken again in the look of iteration 39 (`assets/store/`, `scripts/screenshots.ts`); an Outcome section on the review of 2026-11-13 (iterations 29 to 41, PRs, releases, what stays open)
 
 - Iteration 41 (iteration M, `iteration/41-client-016-fixes`, Overmark's migration review of client 0.16.0): the relay's revocation errors name the message they answer (`for`, `grantId`) and the client settles only that `revoke()`/`signOut()` (all of them with relay 0.10.1); the relay's sweep sends `grant.removed` `expired` and the client drops a grant on `unknown_id`; no "usually in the page's browser tab" sentence in `tools/list` when an `onConfirm` answers; `NetworkError` for a session that ended after sending, `addressChanged` on `newAddress()`'s rejections, `statechange`'s `reason` documented; the WebMCP mirror in a chunk of its own, core 6400 to 6082 B (6216 B with the fixes); DEC-168 to DEC-171
