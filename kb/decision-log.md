@@ -3552,7 +3552,7 @@ is a list of origins and is passed through to the native registration (DEC-143).
   `document.modelContext.getTools()` pending while its tab goes to another origin. Chrome
   for Testing 156 and 157 and Chromium 160 (trunk) all crash this way.
 - The tests in "the store package (no host access)" call `readsSettled(tab)` before each
-  such navigation: no `getTools()` of the content script pending or started for 300 ms,
+  such navigation: no `getTools()` of the content script pending or started for 1 s,
   watched from its isolated world over the DevTools Protocol. The tests check what they
   checked before; the build has no hook (ES 7).
 - Not a retry: the trigger is known, and a retry would rebuild the whole block and hide

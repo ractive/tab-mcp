@@ -62,13 +62,14 @@ report to Chromium (follow-up; the owner decides, it is public).
 
 `readsSettled(tab)` in `e2e.test.ts` waits, before each navigation to another origin in
 the store block, until the content script has had no `getTools()` pending and started none
-for 300 ms. It wraps `document.modelContext.getTools` in the content script's isolated
+for 1 s (a read that began before the first poll is not counted; `getTools()` takes milliseconds). It wraps `document.modelContext.getTools` in the content script's isolated
 world through the DevTools Protocol, so the build has no hook (ES 7). What the tests check
 is unchanged: the same navigations, the same refusals and clicks. Not a retry: the crash
 has a known trigger, and the wait takes it out.
 
-With the wait: Chromium snapshot 20 of 20 and, with Chrome's log on (worse timing), 10 of
-10, against 4 of 6 passing without it. CI on `ci/chrome-sigill`: CI_RESULTS.
+With the wait (300 ms, then 1 s after review), both store blocks passed locally on the
+Chromium snapshot in 35 of 35 runs, and in 16 of 16 with Chrome's log on (worse timing).
+Without the wait, 4 of 6 passed. CI on `ci/chrome-sigill`: CI_RESULTS.
 CI keeps Chrome for Testing 156.0.8078.80: 157 and 160 crash alike (DEC-172).
 
 The other timeout of that day ("a takeover is kept across a restart", once in CI, 19.8 s)

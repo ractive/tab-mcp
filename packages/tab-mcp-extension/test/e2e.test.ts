@@ -2128,10 +2128,18 @@ describe.skipIf(chrome === undefined || !process.env["TAB_MCP_E2E_IDLE"])(
  * load the worker reads the page several times (the load, `toolchange`, the
  * panel), so a navigation right after one runs into that. Only through the
  * DevTools Protocol, in the content script's world: nothing in the build.
+ *
+ * The wrapper counts the reads from the first poll on; one that started
+ * just before is not counted. `getTools()` answers within milliseconds, so
+ * `quietMs` (1 s) covers it, and also the content script's 250 ms throttle
+ * of `toolchange` plus the worker's round trip before the next read.
  */
-async function readsSettled(tab: Page, quietMs = 300): Promise<void> {
+async function readsSettled(tab: Page, quietMs = 1000): Promise<void> {
 	const world = await tab.isolatedWorld("tab-mcp for Chrome");
+	// Strict: a wrapper that does not stick throws instead of re-arming the
+	// wait at every poll.
 	const settled = `(() => {
+		"use strict";
 		const context = document.modelContext;
 		if (context === undefined) return true;
 		if (context.e2eReads === undefined) {
