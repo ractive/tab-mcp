@@ -66,6 +66,69 @@ const contextOf = (doc: Document) =>
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
+/**
+ * A read of the page's tools is shared for this long after it started
+ * (DEC-177): after a load the worker asks several times within some 300 ms
+ * (the load, the content script's first `webmcp-changed`, the panel after
+ * each), and each `getTools()` pending while the tab navigates is a moment
+ * in which Chrome's browser process can crash (Chromium issue 585631961).
+ */
+export const SHARE_READ_MS = 1_000;
+
+/**
+ * The page's `getTools()`, called as rarely as the answers allow: a read
+ * that started less than `SHARE_READ_MS` ago is shared, in flight or done,
+ * unless the page fired `toolchange` since (then the next read is a new
+ * one). A call to a tool (`fresh`) shares only a read still in flight.
+ */
+export class ToolReads {
+	readonly #context: ModelContext;
+	readonly #now: () => number;
+	#read: Promise<RegisteredTool[]> | undefined;
+	#startedAt = 0;
+	#pending = false;
+
+	constructor(context: ModelContext, now: () => number = Date.now) {
+		this.#context = context;
+		this.#now = now;
+		// Optional: a page's own stand-in (a test's) may not be an EventTarget.
+		context.addEventListener?.("toolchange", () => {
+			this.#read = undefined;
+		});
+	}
+
+	get(options: { fresh?: boolean } = {}): Promise<RegisteredTool[]> {
+		const read = this.#read;
+		if (
+			read !== undefined &&
+			this.#now() - this.#startedAt < SHARE_READ_MS &&
+			(this.#pending || !options.fresh)
+		)
+			return read;
+		const started = this.#context.getTools();
+		this.#read = started;
+		this.#startedAt = this.#now();
+		this.#pending = true;
+		const settled = () => {
+			if (this.#read === started) this.#pending = false;
+		};
+		started.then(settled, settled);
+		return started;
+	}
+}
+
+const reads = new WeakMap<ModelContext, ToolReads>();
+
+/** The shared reads of `context`'s tools. */
+function readsOf(context: ModelContext): ToolReads {
+	let found = reads.get(context);
+	if (found === undefined) {
+		found = new ToolReads(context);
+		reads.set(context, found);
+	}
+	return found;
+}
+
 export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 	const context = contextOf(doc);
 	const webmcp: PageInfo["webmcp"] = {
@@ -74,7 +137,7 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 	};
 	if (context !== undefined) {
 		try {
-			webmcp.tools = (await context.getTools()).length;
+			webmcp.tools = (await readsOf(context).get()).length;
 		} catch (error) {
 			webmcp.error = message(error);
 		}
@@ -151,7 +214,7 @@ export async function pageTools(
 	if (context === undefined) return { ...base, tools: [] };
 	let listed: RegisteredTool[];
 	try {
-		listed = await context.getTools();
+		listed = await readsOf(context).get();
 	} catch (error) {
 		return { ...base, tools: [], error: message(error) };
 	}
@@ -217,7 +280,10 @@ export async function callTool(
 	const context = contextOf(doc);
 	if (context === undefined)
 		return { ok: false, error: "WebMCP is not on in this page.", gone: true };
-	const tool = (await context.getTools()).find((t) => t.name === name);
+	// Not a list read earlier: only one still in flight is as new as this call.
+	const tool = (await readsOf(context).get({ fresh: true })).find(
+		(t) => t.name === name,
+	);
 	if (tool === undefined)
 		return {
 			ok: false,

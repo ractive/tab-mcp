@@ -13,6 +13,8 @@ import {
 	MAX_SEND_RESULT,
 	pageInfo,
 	pageTools,
+	SHARE_READ_MS,
+	ToolReads,
 } from "../src/content.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
@@ -386,6 +388,135 @@ describe("calls in the content script", () => {
 		const listed = await pageTools(doc, "doc-A");
 		expect(listed.tools.length).toBe(256);
 		expect(listed.more).toBe(44);
+	});
+});
+
+/** A `document.modelContext` that counts its `getTools()` calls. */
+class CountingContext extends EventTarget {
+	calls = 0;
+	/** Resolves the calls still waiting, if `hold` kept them waiting. */
+	readonly waiting: (() => void)[] = [];
+	hold = false;
+	tools = [
+		{ name: "a", description: "A.", annotations: { readOnlyHint: true } },
+	];
+
+	getTools(): Promise<typeof this.tools> {
+		this.calls++;
+		const tools = [...this.tools];
+		if (!this.hold) return Promise.resolve(tools);
+		return new Promise((resolve) => this.waiting.push(() => resolve(tools)));
+	}
+
+	executeTool(): Promise<string> {
+		return Promise.resolve("ran");
+	}
+
+	release(): void {
+		for (const resolve of this.waiting.splice(0)) resolve();
+	}
+}
+
+describe("reading the page's tools rarely (DEC-177)", () => {
+	const setup = () => {
+		const context = new CountingContext();
+		let now = 1_000;
+		const reads = new ToolReads(context, () => now);
+		return {
+			context,
+			reads,
+			advance: (ms: number) => {
+				now += ms;
+			},
+		};
+	};
+
+	test("the reads after a load (list, page info, again) are one getTools()", async () => {
+		const context = new CountingContext();
+		const doc = {
+			location: {
+				href: "https://shop.example/",
+				origin: "https://shop.example",
+			},
+			title: "Shop",
+			documentElement: { lang: "" },
+			modelContext: context,
+		} as unknown as Document;
+		context.hold = true;
+		const first = Promise.all([pageTools(doc, "doc-A"), pageInfo(doc)]);
+		context.release();
+		const [listed, info] = await first;
+		expect(listed.tools.map((t) => t.name)).toEqual(["a"]);
+		expect(info.webmcp).toEqual({ available: true, tools: 1 });
+		await pageTools(doc, "doc-A");
+		await pageInfo(doc);
+		expect(context.calls).toBe(1);
+	});
+
+	test("a read is shared for SHARE_READ_MS after it started, then read again", async () => {
+		const { context, reads, advance } = setup();
+		await reads.get();
+		advance(SHARE_READ_MS - 1);
+		await reads.get();
+		expect(context.calls).toBe(1);
+		advance(1);
+		await reads.get();
+		expect(context.calls).toBe(2);
+	});
+
+	test("toolchange: the next read is a new one, also over a read still in flight", async () => {
+		const { context, reads } = setup();
+		await reads.get();
+		context.tools.push({
+			name: "b",
+			description: "B.",
+			annotations: { readOnlyHint: true },
+		});
+		context.dispatchEvent(new Event("toolchange"));
+		expect((await reads.get()).map((t) => t.name)).toEqual(["a", "b"]);
+		expect(context.calls).toBe(2);
+		// In flight when the page's tools change: not shared after.
+		context.hold = true;
+		const old = reads.get();
+		context.tools.pop();
+		context.dispatchEvent(new Event("toolchange"));
+		const now = reads.get();
+		expect(context.calls).toBe(3);
+		context.release();
+		expect((await old).map((t) => t.name)).toEqual(["a", "b"]);
+		expect((await now).map((t) => t.name)).toEqual(["a"]);
+		expect((await reads.get()).map((t) => t.name)).toEqual(["a"]);
+		expect(context.calls).toBe(3);
+	});
+
+	test("a call shares only a read in flight, never one that is done", async () => {
+		const { context, reads, advance } = setup();
+		await reads.get();
+		await reads.get({ fresh: true });
+		expect(context.calls).toBe(2);
+		advance(SHARE_READ_MS);
+		context.hold = true;
+		const listing = reads.get();
+		const calling = reads.get({ fresh: true });
+		expect(context.calls).toBe(3);
+		context.release();
+		await Promise.all([listing, calling]);
+		await reads.get();
+		expect(context.calls).toBe(3);
+	});
+
+	test("a failed read is shared like an answer", async () => {
+		const failing = {
+			calls: 0,
+			getTools() {
+				this.calls++;
+				return Promise.reject(new Error("disallowed"));
+			},
+		};
+		const reads = new ToolReads(failing as unknown as CountingContext, () => 0);
+		await expect(reads.get()).rejects.toThrow("disallowed");
+		await expect(reads.get()).rejects.toThrow("disallowed");
+		expect(failing.calls).toBe(1);
 	});
 });
 
