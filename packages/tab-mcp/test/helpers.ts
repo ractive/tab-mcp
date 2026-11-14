@@ -20,10 +20,44 @@ import {
 	type Relay,
 } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
-import type { TokenStore } from "../src/store/types.ts";
-import { issueAccessToken } from "../src/tokens.ts";
+import type { TokenRecord, TokenStore } from "../src/store/types.ts";
+import { hashToken, newId, newToken } from "../src/tokens.ts";
 
 export const ORIGIN = "https://page.example";
+
+/**
+ * An access token for a grant, written straight into the store without
+ * OAuth, for tests that need a token but not the flow.
+ */
+export async function issueAccessToken(
+	store: TokenStore,
+	grant: {
+		grantId?: string;
+		addressId: string;
+		clientId: string;
+		clientName: string;
+		subject?: string;
+	},
+	options: { ttlMs: number; now?: number },
+): Promise<{ token: string; record: TokenRecord }> {
+	const now = options.now ?? Date.now();
+	const token = newToken("access");
+	const record: TokenRecord = {
+		hash: hashToken(token),
+		kind: "access",
+		grantId: grant.grantId ?? newId("g"),
+		addressId: grant.addressId,
+		clientId: grant.clientId,
+		clientName: grant.clientName,
+		scopes: ["tools"],
+		grantCreatedAt: now,
+		issuedAt: now,
+		expiresAt: now + options.ttlMs,
+	};
+	if (grant.subject !== undefined) record.subject = grant.subject;
+	await store.put(record);
+	return { token, record };
+}
 
 /** Collects log lines in memory. */
 export class LogCapture {

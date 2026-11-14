@@ -5,6 +5,8 @@
  * token's header (`jwk`, `jku`, `x5u` are ignored).
  */
 
+import { readCapped } from "./body.ts";
+
 /** The accepted algorithms; never `none` or HMAC. */
 export const JWT_ALGORITHMS = [
 	"RS256",
@@ -198,27 +200,8 @@ export async function fetchJson(
 	});
 	const length = Number(res.headers.get("content-length") ?? "0");
 	if (length > maxBytes) throw new Error(`response too large (${url})`);
-	// Counted while it arrives: a body without Content-Length (chunked) is cut
-	// off at the limit instead of being buffered whole first.
-	const chunks: Uint8Array[] = [];
-	let size = 0;
-	const reader = res.body?.getReader();
-	while (reader !== undefined) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		size += value.byteLength;
-		if (size > maxBytes) {
-			await reader.cancel();
-			throw new Error(`response too large (${url})`);
-		}
-		chunks.push(value);
-	}
-	const bytes = new Uint8Array(size);
-	let offset = 0;
-	for (const chunk of chunks) {
-		bytes.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
+	const bytes = await readCapped(res.body?.getReader(), maxBytes);
+	if (bytes === "too_large") throw new Error(`response too large (${url})`);
 	const text = new TextDecoder().decode(bytes);
 	let value: unknown;
 	try {
@@ -432,6 +415,65 @@ export function numericDate(
 		throw new JwtError("claims", `${name} must be a number`);
 	}
 	return v * 1000;
+}
+
+/** How `checkTimes` reads an assertion's `exp`, `iat` and `nbf`. */
+export interface TimeRules {
+	leewayMs: number;
+	/** The latest `exp` accepted, from now. */
+	maxLifetimeMs: number;
+	/** The refusal's text for an `exp` beyond `maxLifetimeMs`. */
+	lifetimeText: string;
+	/**
+	 * How long after its `iat` an assertion is usable; without `iat`, its
+	 * `exp` at most this far ahead (refused with `withoutIatText`).
+	 */
+	maxAge?: { ms: number; withoutIatText: string };
+}
+
+/**
+ * `exp` required, live and at most `maxLifetimeMs` ahead; `iat`, if given,
+ * not in the future (and with `maxAge` not older than that); `nbf`, if
+ * given, passed. Returns when the assertion stops being usable, leeway
+ * included: how long its `jti` must be remembered. Throws `JwtError`.
+ */
+export function checkTimes(
+	payload: Record<string, unknown>,
+	now: number,
+	rules: TimeRules,
+): number {
+	const leeway = rules.leewayMs;
+	const exp = numericDate(payload, "exp");
+	if (exp === undefined) throw new JwtError("exp", "the assertion has no exp");
+	if (exp <= now - leeway) {
+		throw new JwtError("expired", "the assertion has expired");
+	}
+	if (exp > now + rules.maxLifetimeMs + leeway) {
+		throw new JwtError("lifetime", rules.lifetimeText);
+	}
+	const iat = numericDate(payload, "iat");
+	const maxAge = rules.maxAge;
+	let end = exp;
+	if (iat === undefined) {
+		if (maxAge !== undefined && exp > now + maxAge.ms + leeway) {
+			throw new JwtError("lifetime", maxAge.withoutIatText);
+		}
+	} else {
+		if (iat > now + leeway) {
+			throw new JwtError("iat", "the assertion was issued in the future");
+		}
+		if (maxAge !== undefined) {
+			if (iat + maxAge.ms <= now - leeway) {
+				throw new JwtError("too_old", "the assertion was issued too long ago");
+			}
+			end = Math.min(exp, iat + maxAge.ms);
+		}
+	}
+	const nbf = numericDate(payload, "nbf");
+	if (nbf !== undefined && nbf > now + leeway) {
+		throw new JwtError("nbf", "the assertion is not valid yet");
+	}
+	return end + leeway;
 }
 
 /** `aud` as a list (a string or an array of strings). */

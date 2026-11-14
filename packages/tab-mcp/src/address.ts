@@ -3,6 +3,8 @@
  * `base32(sha256(secret))`. The relay stores nothing to recognise an address.
  */
 
+import { randomBase64url } from "./crypto.ts";
+
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
 /** RFC 4648 base32, lower case, without padding. */
@@ -47,9 +49,7 @@ export function addressIdFromSecret(secret: string): string {
 
 /** A new page secret (what the browser library does; used by tests and tools). */
 export function newSecret(): string {
-	return crypto
-		.getRandomValues(new Uint8Array(32))
-		.toBase64({ alphabet: "base64url", omitPadding: true });
+	return randomBase64url(32);
 }
 
 /** Shortened address id for logs: enough to correlate, too short to use. */

@@ -23,6 +23,7 @@ import {
 	type CimdServer,
 	quietLogger,
 	startCimdServer,
+	testUrls,
 } from "../../../packages/tab-mcp/test/oauth-helpers.ts";
 import {
 	Browser,
@@ -201,7 +202,7 @@ export async function startStack(chrome: string): Promise<Stack> {
 			store: new MemoryTokenStore(),
 			logger: quietLogger,
 		},
-		{ cimd: { ca: cimd.ca } },
+		{ cimdUrls: testUrls(cimd.ca) },
 	);
 	relayUrl = relay.url;
 	let browser: Browser;

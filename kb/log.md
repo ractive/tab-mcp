@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- Iteration 42 (`simplify/relay-client`, owner decisions on the review's simplification table, DEC-178): the relay's duplicated helpers in `crypto.ts`, `readCapped`, `checkTimes` and `clientHost` (RQ 14, no change in behaviour); no hung-read bookkeeping in `/healthz` (RQ 17); the CIMD test mode as an injected `UrlPolicy`, no token helper or unused options in production code (RQ 18); no "Already connected" page, a double submit gets the expired-or-used page (RQ 16); the client no longer copies the secret from the 0.4 key, so a visitor last seen with 0.4 pairs again (DEC-083 amended); `TAB_MCP_CLIENT_ID_HOSTS` stays unset on the hosted relay; relay source net −157 lines, client −40, core 6216 to 6143 B
+
 - Chrome's WebMCP crash reported as [Chromium issue 585631961](https://issues.chromium.org/issues/585631961): a standalone repro shows the trigger is the back/forward cache (any document with a tool and a pending `getTools()` that navigates away; frames in `ModelContextUserData::GetScriptTools`), not `activeTab`; `operations/chrome-webmcp-crash.md` and DEC-172 corrected
 - tab-mcp for Chrome's button over the tool list (`extension/ask-first-button`, owner): "Turn off Ask first" / "Turn on Ask first" instead of "Don't ask for these tools" / "Ask first for these tools", the word of the per-tool switch; its accessible name names the count, the site and every paired AI app both ways (`allowAllLabel`, "1 tool" for one); README, threat models, `design/extension-look.md` and the four store screenshots (each shows the button) follow; DEC-176
 

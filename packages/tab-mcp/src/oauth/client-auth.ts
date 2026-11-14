@@ -9,11 +9,12 @@
 import { ipPrefixKey } from "../ip.ts";
 import {
 	audiences,
+	checkTimes,
 	decodeJwt,
 	JwksCache,
 	JwtError,
 	type KeySource,
-	numericDate,
+	type TimeRules,
 	verifyJwt,
 } from "../jwt.ts";
 import { hashToken } from "../tokens.ts";
@@ -113,7 +114,7 @@ export async function verifyClientAssertion(
 	if (!audiences(payload).some((a) => check.audiences.includes(a))) {
 		throw new JwtError("aud", "the assertion is not for this relay");
 	}
-	const usableUntil = checkTimes(payload, check.now);
+	const usableUntil = checkTimes(payload, check.now, CLIENT_ASSERTION_TIMES);
 	const jti = payload["jti"];
 	if (typeof jti !== "string" || jti === "" || jti.length > MAX_JTI) {
 		throw new JwtError("jti", "the assertion needs a jti");
@@ -125,45 +126,18 @@ export async function verifyClientAssertion(
 }
 
 /**
- * `exp` required, live and at most an hour ahead; `iat`, if given, not in
- * the future and at most five minutes old, else `exp` at most five minutes
- * ahead; `nbf`, if given, passed. Returns when the assertion stops being
- * usable (leeway included): how long its `jti` must be remembered.
+ * `exp` at most an hour ahead; usable five minutes from `iat`, and without
+ * `iat`, `exp` at most five minutes ahead (`checkTimes`).
  */
-function checkTimes(payload: Record<string, unknown>, now: number): number {
-	const leeway = CLIENT_ASSERTION_LEEWAY_MS;
-	const exp = numericDate(payload, "exp");
-	if (exp === undefined) throw new JwtError("exp", "the assertion has no exp");
-	if (exp <= now - leeway) {
-		throw new JwtError("expired", "the assertion has expired");
-	}
-	if (exp > now + CLIENT_ASSERTION_MAX_LIFETIME_MS + leeway) {
-		throw new JwtError("lifetime", "the assertion lives longer than an hour");
-	}
-	const iat = numericDate(payload, "iat");
-	let end = exp;
-	if (iat === undefined) {
-		if (exp > now + CLIENT_ASSERTION_MAX_AGE_MS + leeway) {
-			throw new JwtError(
-				"lifetime",
-				"an assertion without iat may live five minutes",
-			);
-		}
-	} else {
-		if (iat > now + leeway) {
-			throw new JwtError("iat", "the assertion was issued in the future");
-		}
-		if (iat + CLIENT_ASSERTION_MAX_AGE_MS <= now - leeway) {
-			throw new JwtError("too_old", "the assertion was issued too long ago");
-		}
-		end = Math.min(exp, iat + CLIENT_ASSERTION_MAX_AGE_MS);
-	}
-	const nbf = numericDate(payload, "nbf");
-	if (nbf !== undefined && nbf > now + leeway) {
-		throw new JwtError("nbf", "the assertion is not valid yet");
-	}
-	return end + leeway;
-}
+const CLIENT_ASSERTION_TIMES: TimeRules = {
+	leewayMs: CLIENT_ASSERTION_LEEWAY_MS,
+	maxLifetimeMs: CLIENT_ASSERTION_MAX_LIFETIME_MS,
+	lifetimeText: "the assertion lives longer than an hour",
+	maxAge: {
+		ms: CLIENT_ASSERTION_MAX_AGE_MS,
+		withoutIatText: "an assertion without iat may live five minutes",
+	},
+};
 
 /**
  * The key a client's replay share is counted under (review of PR 65): its

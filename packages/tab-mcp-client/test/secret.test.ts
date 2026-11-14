@@ -77,43 +77,6 @@ test("without storage, or with storage that throws, the secret lives as long as 
 	expect(got(throwing)).toBe(s);
 });
 
-const OLD = "tab-mcp:secret:https://relay.example";
-const store = (storage: MemoryStorage, name: string) =>
-	new SecretStore(storage, `${OLD}:${name}`, OLD);
-
-test("the old shared key's secret is copied once: the first page keeps the address, the next gets its own, 0.4 pages keep theirs (DEC-083)", () => {
-	const storage = new MemoryStorage();
-	const old = newSecret();
-	storage.setItem(OLD, old);
-	expect(got(store(storage, "saturnus"))).toBe(old);
-	expect(storage.items.get(`${OLD}:saturnus`)).toBe(old);
-	// Copied, not moved: a page still on 0.4 (or a rollback) reads it as before.
-	expect(storage.items.get(OLD)).toBe(old);
-	const second = got(store(storage, "todo"));
-	expect(second).not.toBe(old);
-	// The first page keeps it on the next load.
-	expect(got(store(storage, "saturnus"))).toBe(old);
-});
-
-test("New address before the first connect marks the old secret taken, so no other page picks up the abandoned address", () => {
-	const storage = new MemoryStorage();
-	const old = newSecret();
-	storage.setItem(OLD, old);
-	const fresh = store(storage, "a").rotate();
-	expect(fresh).not.toBe(old);
-	expect(got(store(storage, "b"))).not.toBe(old);
-});
-
-test("a secret that was read is kept even when writing the copy fails", () => {
-	const storage = new MemoryStorage();
-	const old = newSecret();
-	storage.setItem(OLD, old);
-	storage.setItem = () => {
-		throw new Error("QuotaExceededError");
-	};
-	expect(got(store(storage, "page"))).toBe(old);
-});
-
 test("TabMcp keys the secret by relay origin and the URI-encoded server name; an explicit storageKey is used as given", async () => {
 	const relay = new StubRelay();
 	try {
@@ -130,14 +93,31 @@ test("TabMcp keys the secret by relay origin and the URI-encoded server name; an
 		).toBe(true);
 
 		const own = new MemoryStorage();
-		const shared = newSecret();
-		own.setItem(`tab-mcp:secret:${origin}`, shared);
 		const b = newTab(relay.url, { storage: own, storageKey: "mine" });
 		await b.connect({ resume: true });
 		b.disconnect();
-		// No copy from the old default when the page names its key.
-		expect(own.items.get("mine")).not.toBe(shared);
-		expect(own.items.has(`tab-mcp:secret:${origin}#moved`)).toBe(false);
+		expect(isSecret(own.items.get("mine"))).toBe(true);
+		expect(own.items.size).toBe(1);
+	} finally {
+		await relay.stop();
+	}
+});
+
+test("a secret under the key of client 0.4 and older is not read: that page pairs again (DEC-083, DEC-178)", async () => {
+	const relay = new StubRelay();
+	try {
+		const origin = new URL(relay.url).origin;
+		const storage = new MemoryStorage();
+		const old = newSecret();
+		storage.setItem(`tab-mcp:secret:${origin}`, old);
+		const t = newTab(relay.url, { storage });
+		await t.connect({ resume: true });
+		const hello = await relay.next("hello");
+		t.disconnect();
+		expect(hello["secret"]).not.toBe(old);
+		// The old key is left alone and nothing marks it taken.
+		expect(storage.items.get(`tab-mcp:secret:${origin}`)).toBe(old);
+		expect(storage.items.has(`tab-mcp:secret:${origin}#moved`)).toBe(false);
 	} finally {
 		await relay.stop();
 	}

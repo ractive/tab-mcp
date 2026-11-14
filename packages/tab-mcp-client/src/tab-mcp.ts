@@ -262,18 +262,11 @@ export class TabMcp extends EventTarget {
 		this.#identityAssertion = options.identityAssertion;
 		this.#reconnect = options.reconnect !== false;
 		if (relay !== undefined) {
-			// One address per relay and page (server name); the default of 0.4 and
-			// older, per relay only, is moved over once (DEC-083).
+			// One address per relay and page (server name, DEC-083).
 			const key =
 				options.storageKey ??
 				`tab-mcp:secret:${relay.origin}:${encodeURIComponent(server.name)}`;
-			this.#secrets = new SecretStore(
-				options.storage,
-				key,
-				options.storageKey === undefined
-					? `tab-mcp:secret:${relay.origin}`
-					: undefined,
-			);
+			this.#secrets = new SecretStore(options.storage, key);
 			// Tabs that share the secret share this channel; with `storage: null`
 			// every tab has an address of its own (DEC-095).
 			this.#tabs = options.storage === null ? undefined : `${key}#tabs`;

@@ -36,6 +36,7 @@ import {
 	startCimdServer,
 	startOAuthRelay,
 	TestBrowser,
+	testUrls,
 } from "./oauth-helpers.ts";
 import { type SigningKey, signingKey, signJwt } from "./oidc-fixture.ts";
 
@@ -349,7 +350,7 @@ describe("CIMD: which documents may use private_key_jwt", () => {
 			expect(() => validateDocument(doc, clientId, u)).toThrow(
 				ClientMetadataError,
 			);
-			const meta = validateDocument(doc, clientId, u, { test: true });
+			const meta = validateDocument(doc, clientId, u, { urls: testUrls() });
 			expect(meta.auth.method === "private_key_jwt" && meta.auth.jwksUri).toBe(
 				jwksUri,
 			);

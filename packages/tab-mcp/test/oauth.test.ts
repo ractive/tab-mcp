@@ -1187,7 +1187,7 @@ describe("threat model A7: the /authorize page", () => {
 		).toBe(303);
 	});
 
-	test("the same browser sending a paired request's form again: sent, then connected once the code is exchanged", async () => {
+	test("a paired request's form sent again gets the expired-or-used page; the first code still works (DEC-178)", async () => {
 		const ctx = await setup();
 		const { verifier, challenge } = pkce();
 		const page = await ctx.browser.open(
@@ -1201,11 +1201,10 @@ describe("threat model A7: the /authorize page", () => {
 		const code = await currentCode(ctx);
 		const first = await ctx.browser.submit(page, { action: "connect", code });
 		expect(first.status).toBe(303);
-		// A double click: the app has not taken its code, so not "connected".
+		// A double click, before and after the app took its code.
 		const sent = await ctx.browser.submit(page, { action: "connect", code });
-		expect(sent.status).toBe(200);
-		expect(sent.html).toContain("Already sent");
-		expect(sent.html).not.toContain("Already connected");
+		expect(sent.status).toBe(400);
+		expect(sent.html).toContain("expired or was already used");
 		const location = new URL(first.location ?? "");
 		const tokens = await exchange(ctx, {
 			code: location.searchParams.get("code") ?? "",
@@ -1214,14 +1213,8 @@ describe("threat model A7: the /authorize page", () => {
 		});
 		expect(tokens.status).toBe(200);
 		const again = await ctx.browser.submit(page, { action: "connect", code });
-		expect(again.status).toBe(200);
-		expect(again.html).toContain("Already connected");
-		// Another browser with the same form learns nothing.
-		const stranger = new TestBrowser(ctx.r.url);
-		const foreign = await stranger.submit(page, { action: "connect", code });
-		expect(foreign.status).toBe(400);
-		expect(foreign.html).toContain("expired or was already used");
-		expect(foreign.html).not.toContain("Already");
+		expect(again.status).toBe(400);
+		expect(again.html).toContain("expired or was already used");
 	});
 
 	test("an unknown or used request id is refused", async () => {
