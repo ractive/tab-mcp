@@ -1,13 +1,13 @@
 ---
 type: operations
 title: "Chrome crash in the store package's e2e tests (SIGILL in CI)"
-description: "Why tab-mcp for Chrome's e2e tests lost Chrome with SIGILL in CI (SIGTRAP on macOS): a bug in Chrome's WebMCP when a document with a tool has getTools() pending while it goes into the back/forward cache (Chromium issue 585631961); how it was found, the evidence, and the test's wait that avoids it."
+description: "Why tab-mcp for Chrome's e2e tests lost Chrome with SIGILL in CI (SIGTRAP on macOS): a bug in Chrome's WebMCP when a document with a tool has getTools() pending while it goes into the back/forward cache (Chromium issue 585631961); how it was found, the evidence, the test's wait that avoids it, and how the extension reads less (DEC-177)."
 tags:
   - operations
   - ci
   - extension
   - webmcp
-timestamp: 2026-11-14T13:30:00+01:00
+timestamp: 2026-11-14T18:00:00+01:00
 ---
 
 # Chrome crash in the store package's e2e tests (SIGILL in CI)
@@ -104,7 +104,57 @@ The other timeout of that day ("a takeover is kept across a restart", once in CI
 did not reproduce in 27 local runs; its wait now says what the panel showed when it
 times out.
 
+## Fewer reads in the extension (DEC-177)
+
+Users hit the crash too, so the extension reads less (`extension/fewer-tool-reads`):
+
+- The content script shares one `getTools()` (`ToolReads`, `src/content.ts`): a read
+  that started less than 1 s ago answers `page-info` and `webmcp-list`, unless the page
+  fired `toolchange` since; a call to a tool shares only a read in flight.
+- The worker reads the page only while the side panel is open or the connection to the
+  relay is not `disconnected`.
+
+Measured with an instrumented test build (host access; a few lines put before
+`content.js` count its `getTools()` calls in the DOM), Chrome for Testing 157.0.8103.78,
+macOS arm64, 10 loads each:
+
+| Setup | `getTools()` per load, before | after |
+| --- | --- | --- |
+| no panel, AI access off | 2.1 (at about 20 and 265 ms) | 0 |
+| panel open, AI access off | 4 (two at about 30 ms, two at about 260 ms) | 1 |
+| panel open, connected to a relay | 4 | 1 |
+
+The second pair came from the content script's first `webmcp-changed` (250 ms after it
+started), the first from the load (`tabs.onUpdated`); each was doubled by the panel's
+`page-info` after the bridge's `webmcp-list`.
+
+Crash rate: each round loads `https://site.test/webmcp.html` (five tools), waits a random
+0 to 400 ms after its load event and navigates to `plain.html` on the same origin (the
+first page goes into the back/forward cache).
+
+| Setup | Crashes before | after |
+| --- | --- | --- |
+| panel open, connected to a relay, 0 to 400 ms | 16 in 600 (2.7 %) | 0 in 600 |
+| no panel, AI access off, 0 to 400 ms | 9 in 300 (3 %) | 0 in 300 (no reads) |
+| panel open, connected to a relay, 0 to 50 ms | 26 in 300 (8.7 %) | 2 in 300 (0.7 %, at 5 and 7 ms) |
+
+Before, the crashes fell at 7 to 44 ms and at 233 to 242 ms after the load event: where
+the two pairs of reads were. After, none in 0 to 400 ms, but the run that navigates
+within 50 ms of the load, where the one remaining read is, still crashes.
+
+Fewer reads make the crash rarer; they cannot rule it out. A navigation while the one
+remaining read is pending still crashes Chrome (2 in 300 above), and the AI app's own
+calls (`page_info`,
+`webmcp_tools`, the navigation tools) read when it asks. Only a fix in Chrome removes
+it. `readsSettled` in the e2e tests stays.
+
+The e2e block "reading the page's tools rarely (DEC-177)" checks both parts through the
+same isolated-world wrapper as `readsSettled`: a `toolchange` with the AI app's
+`page_info` and `webmcp_tools` around it costs one `getTools()` (five before), and with
+AI access off and the panel closed a `toolchange` costs none (one before).
+
 # Citations
 
 - [Decision log, DEC-172](../decision-log.md)
+- [Decision log, DEC-177: fewer reads in the extension](../decision-log.md)
 - [Iteration 36: the panel (the first sighting, SIGTRAP)](../iterations/iteration-36-extension-panel.md)

@@ -308,7 +308,9 @@ export class Connection {
 			() => bridge.refresh(),
 		))
 			void mcp.registerTool(tool);
-		void bridge.refresh();
+		// A new connection is not up yet: it reads the page once it is, or
+		// for a panel (`#readsWanted`).
+		if (this.#panels.size > 0) void bridge.refresh();
 		return [mcp, bridge];
 	}
 
@@ -379,6 +381,12 @@ export class Connection {
 			"statechange",
 			(event) => {
 				const { state, reason } = event.detail;
+				// Not read while nobody needed the tools (`#readsWanted`): read as
+				// the connection is being made, so that the tools offered once it
+				// is up are the tab's in front, and again once it is (the content
+				// script answers both with one `getTools()`).
+				if (state === "connecting" || state === "connected")
+					void this.#bridge.refresh();
 				if (state === "connected") {
 					this.#problem = undefined;
 					void this.#setReplaced(undefined);
@@ -466,7 +474,18 @@ export class Connection {
 	/** The tab in front changed, or what may be read of it. */
 	tabChanged(): void {
 		// The bridge reads the tab again for the panels after its refresh.
-		void this.#bridge.refresh();
+		if (this.#readsWanted()) void this.#bridge.refresh();
+	}
+
+	/**
+	 * Whether anyone needs the page's tools now: an open panel, or a
+	 * connection to the relay (up or on its way). Otherwise the page is not
+	 * read at all (DEC-177): every `getTools()` is a moment in which a
+	 * navigation can crash Chrome (Chromium issue 585631961). A panel that
+	 * opens and a connection that comes up read the page then.
+	 */
+	#readsWanted(): boolean {
+		return this.#panels.size > 0 || this.#mcp.state !== "disconnected";
 	}
 
 	/** The worker woke for the alarm: connect if the connection is down. */
@@ -583,7 +602,11 @@ export class Connection {
 				this.#questions.panelClosed(panel.windowId);
 		});
 		this.#send(panel);
+		// The tab now, and again after the bridge's refresh: its tools may be
+		// old (not read while nobody needed them, `#readsWanted`). The content
+		// script answers both with one `getTools()`.
 		void this.#readTab();
+		void this.#bridge.refresh();
 	}
 
 	async #command(panel: Panel, command: PanelCommand): Promise<void> {

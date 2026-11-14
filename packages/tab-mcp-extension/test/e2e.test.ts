@@ -2143,10 +2143,11 @@ async function readsSettled(tab: Page, quietMs = 1000): Promise<void> {
 		const context = document.modelContext;
 		if (context === undefined) return true;
 		if (context.e2eReads === undefined) {
-			const reads = { pending: 0, last: Date.now() };
+			const reads = { pending: 0, last: Date.now(), count: 0 };
 			const getTools = context.getTools.bind(context);
 			context.getTools = (...args) => {
 				reads.pending++;
+				reads.count++;
 				reads.last = Date.now();
 				return getTools(...args).finally(() => {
 					reads.pending--;
@@ -2277,6 +2278,96 @@ describe.skipIf(chrome === undefined)(
 				webmcp: { available: true, tools: 5 },
 			});
 			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		});
+	},
+);
+
+/**
+ * The content script's `getTools()` calls since the last time this was
+ * asked (or since `readsSettled` wrapped it), counted by that wrapper.
+ */
+async function toolReads(tab: Page): Promise<number> {
+	const world = await tab.isolatedWorld("tab-mcp for Chrome");
+	return tab.eval<number>(
+		`(() => { const reads = document.modelContext.e2eReads; const n = reads.count; reads.count = 0; return n; })()`,
+		world,
+	);
+}
+
+/** Register a WebMCP tool from the page's own world, after its `toolchange`. */
+const registerLater = (tab: Page, name: string) =>
+	tab.eval(`new Promise((resolve) => {
+		document.modelContext.addEventListener("toolchange", () => resolve(true), { once: true });
+		document.modelContext.registerTool({
+			name: ${JSON.stringify(name)},
+			description: "Registered after the load.",
+			inputSchema: { type: "object" },
+			annotations: { readOnlyHint: true },
+			async execute() { return "later"; },
+		});
+	})`);
+
+describe.skipIf(chrome === undefined)(
+	"reading the page's tools rarely (DEC-177)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start({ store: false }, `${SITE}/webmcp.html`);
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("a toolchange and the reads around it (AI app, worker, panel) cost one getTools()", async () => {
+			await readsSettled(stack.tab);
+			await toolReads(stack.tab);
+			await registerLater(stack.tab, "later_one");
+			// The AI app asks at once; the worker reads after the content
+			// script's message (250 ms), the panel after each of the bridge's
+			// reads. Before DEC-177 that was five calls.
+			const [info] = await Promise.all([
+				pageInfo(stack),
+				call(stack, "webmcp_tools"),
+			]);
+			expect(info.structuredContent).toMatchObject({
+				webmcp: { available: true, tools: 6 },
+			});
+			await waitForTools(stack, (n) => n.includes("page_later_one"));
+			await stack.panel.waitFor(
+				`[...document.querySelectorAll("#tools li")].some((li) => li.textContent.includes("later_one"))`,
+			);
+			await readsSettled(stack.tab);
+			// One where all of it comes within SHARE_READ_MS of the first read
+			// (locally and in CI so far); a slow runner may need a second.
+			expect(await toolReads(stack.tab)).toBeLessThanOrEqual(2);
+		});
+
+		test("with AI access off and the panel closed the page is not read; the panel opened reads it", async () => {
+			await stack.panel.click("#ai-switch");
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "off"`,
+			);
+			await closePanel(stack);
+			await readsSettled(stack.tab);
+			await toolReads(stack.tab);
+			await registerLater(stack.tab, "later_two");
+			// The content script tells the worker after 250 ms; nobody reads.
+			await Bun.sleep(1500);
+			expect(await toolReads(stack.tab)).toBe(0);
+			// The panel shows the page's tools as they are now.
+			stack.panel = await openPanel(stack.browser, stack.tab);
+			await stack.panel.waitFor(
+				`[...document.querySelectorAll("#tools li")].some((li) => li.textContent.includes("later_two"))`,
+			);
+			await readsSettled(stack.tab);
+			// One (the panel's tab and the bridge's refresh share it); as above.
+			const reads = await toolReads(stack.tab);
+			expect(reads).toBeGreaterThanOrEqual(1);
+			expect(reads).toBeLessThanOrEqual(2);
 		});
 	},
 );
