@@ -9,7 +9,7 @@
  *   --target=bun`, one self-contained file each (the relay has no runtime
  *   dependencies; `bun:*` modules stay imports);
  * - `dist/**\/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
- * - `dist/package.json`, LICENSE, AI_NOTICE, README.md.
+ * - `dist/package.json`, LICENSE, AI_NOTICE, README.md, CHANGELOG.md.
  *
  * `--no-declarations` skips `tsc` (the Docker build, which has no
  * `node_modules`, needs only `main.js`).
@@ -95,6 +95,7 @@ for (const [from, to] of [
 	[join(root, "../../LICENSE"), "LICENSE"],
 	[join(root, "../../AI_NOTICE"), "AI_NOTICE"],
 	[join(root, "README.md"), "README.md"],
+	[join(root, "CHANGELOG.md"), "CHANGELOG.md"],
 ] as const) {
 	const file = Bun.file(from);
 	if (await file.exists()) await Bun.write(join(dist, to), file);

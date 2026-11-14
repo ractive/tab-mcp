@@ -3666,8 +3666,9 @@ The owner, 2026-11-14, on the table "Simplification, for the owner to decide" of
 - **In a separate extension PR:** the extension's question window (EQ 18) and
   `Starter` / `attachWhenStarted` (EQ 19).
 - **Done before:** the rows the review's Outcome lists for iterations 32 to 38.
-- **Not decided:** the hand-written zip writer and reader (EQ 21) and moving
-  `schemaProblem` / `resolvePointer` into the lazy chunk (CC).
+- **Kept (owner, 2026-11-15, [DEC-183](#dec-183-each-npm-package-ships-its-own-changelog-owner)):**
+  the hand-written zip writer and reader (EQ 21), and `schemaProblem` /
+  `resolvePointer` in the core (CC).
 
 ## DEC-182: The store zip gets build provenance in the release job, and only a zip that verifies is uploaded
 
@@ -3737,3 +3738,26 @@ The owner, 2026-11-14, on the two extension rows DEC-178 left to a separate PR (
   whether it is on screen, whether it pairs) is kept, the last of each of the three, and
   said again to the connection that attaches it after a failed start
   (`src/panel-port.ts`).
+
+## DEC-183: Each npm package ships its own changelog (owner)
+
+The owner, 2026-11-15: a developer who installs `@ractive-ch/tab-mcp-client` or
+`@ractive-ch/tab-mcp` reads what changed from the package itself. No release and no
+version bump with it; the next release of each package is the first to carry the file.
+Branch `release/per-package-changelog`.
+
+- Each package has its own `packages/<package>/CHANGELOG.md` with its full history and
+  its link references, moved from the root `CHANGELOG.md` with the wording unchanged.
+  Headings move up one level (versions `## [x.y.z][tag] - date`, kinds `### Added`),
+  as Keep a Changelog has them in a file of one package.
+- The build scripts copy it into `dist/`, it is in the workspace `files`, and
+  `scripts/npm-pack.ts` expects it in the tarball (the pack fails without it).
+- tab-mcp for Chrome, not on npm, gets `packages/tab-mcp-extension/CHANGELOG.md` the same
+  way, so every package keeps its history beside its code and the root holds none.
+- The root `CHANGELOG.md` is an index of the three.
+- `scripts/bump-version.ts` dates `## Unreleased` in the package's own changelog; the
+  release skill takes the release notes from there. A test checks that each npm
+  package's changelog names its current version first and has a link for every version.
+- On DEC-178's two open rows: both stay as they are. The extension build keeps its
+  hand-written zip writer (EQ 21, reproducible store zips), and `schemaProblem` /
+  `resolvePointer` stay in the client's core (CC).

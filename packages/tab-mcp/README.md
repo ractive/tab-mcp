@@ -164,7 +164,7 @@ the details.
 
 - [Repository and overview](https://github.com/ractive/tab-mcp)
 - [Tab–relay protocol](https://github.com/ractive/tab-mcp/blob/main/docs/protocol.md)
-- [Changelog](https://github.com/ractive/tab-mcp/blob/main/CHANGELOG.md)
+- [Changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md), also in the package as `CHANGELOG.md`
 
 ## Licence
 

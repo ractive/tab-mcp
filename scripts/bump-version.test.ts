@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import {
+	changelogPath,
 	compareVersions,
 	datedChangelog,
 	replaceVersion,
@@ -33,44 +35,93 @@ test("compareVersions orders releases and pre-releases", () => {
 	expect(compareVersions("0.14.0-1", "0.14.0-alpha")).toBe(-1);
 });
 
-const CHANGELOG = `# Changelog
+const RELAY_CHANGELOG = `# Changelog of @ractive-ch/tab-mcp
 
-## @ractive-ch/tab-mcp-client
-
-### Unreleased
-
-#### Added
-
-- x
-
-### [0.13.0][client-0.13.0] - 2026-11-12
-
-## @ractive-ch/tab-mcp
+All notable changes to the relay.
 
 The relay. Each relay release is also a Docker image.
 
-### Unreleased
+## Unreleased
 
-### [0.9.0][relay-0.9.0] - 2026-11-11
+### Added
 
-[client-0.13.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.13.0
+- x
+
+## [0.9.0][relay-0.9.0] - 2026-11-11
+
+### Fixed
+
+- y
+
 [relay-0.9.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.9.0
 `;
 
-test("datedChangelog dates the package's Unreleased section and adds its link", () => {
-	const out = datedChangelog(CHANGELOG, "relay", "0.10.0", "2026-11-13");
-	expect(out).toContain(
-		"## @ractive-ch/tab-mcp\n\nThe relay. Each relay release is also a Docker image.\n\n### [0.10.0][relay-0.10.0] - 2026-11-13\n",
-	);
-	expect(out).toContain("## @ractive-ch/tab-mcp-client\n\n### Unreleased\n");
-	expect(out).toContain(
-		"[relay-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.0\n[relay-0.9.0]:",
+test("datedChangelog dates the Unreleased section and adds its link", () => {
+	const out = datedChangelog(RELAY_CHANGELOG, "relay", "0.10.0", "2026-11-13");
+	expect(out).toBe(
+		RELAY_CHANGELOG.replace(
+			"## Unreleased\n",
+			"## [0.10.0][relay-0.10.0] - 2026-11-13\n",
+		).replace(
+			"[relay-0.9.0]:",
+			"[relay-0.10.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.0\n[relay-0.9.0]:",
+		),
 	);
 });
 
-test("datedChangelog refuses a package without an Unreleased section", () => {
-	const released = datedChangelog(CHANGELOG, "client", "0.14.0", "2026-11-13");
+test("datedChangelog appends the first link of a changelog without one", () => {
+	const out = datedChangelog(
+		"# Changelog of @ractive-ch/tab-mcp-client\n\n## Unreleased\n\n- x\n",
+		"client",
+		"0.1.0",
+		"2026-11-13",
+	);
+	expect(out).toBe(
+		"# Changelog of @ractive-ch/tab-mcp-client\n\n## [0.1.0][client-0.1.0] - 2026-11-13\n\n- x\n\n[client-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.1.0\n",
+	);
+});
+
+test("datedChangelog refuses a changelog without an Unreleased section", () => {
+	const released = datedChangelog(
+		RELAY_CHANGELOG,
+		"relay",
+		"0.10.0",
+		"2026-11-13",
+	);
 	expect(() =>
-		datedChangelog(released, "client", "0.15.0", "2026-11-14"),
-	).toThrow('is not "### Unreleased"');
+		datedChangelog(released, "relay", "0.11.0", "2026-11-14"),
+	).toThrow(
+		'packages/tab-mcp/CHANGELOG.md: the first section is not "## Unreleased"',
+	);
+	// A "### Unreleased" under a version is not the package's Unreleased.
+	expect(() =>
+		datedChangelog(
+			"# C\n\n## [0.1.0][relay-0.1.0] - 2026-11-13\n\n### Unreleased\n",
+			"relay",
+			"0.2.0",
+			"2026-11-14",
+		),
+	).toThrow("is not");
+});
+
+test("each package's changelog names its current version first, with a link for every version", async () => {
+	const root = join(import.meta.dir, "..");
+	for (const pkg of ["client", "relay"] as const) {
+		const path = changelogPath(pkg);
+		const text = await Bun.file(join(root, path)).text();
+		const { version } = (await Bun.file(
+			join(root, path.replace("CHANGELOG.md", "package.json")),
+		).json()) as { version: string };
+		const headings = [...text.matchAll(/^## (.*)$/gm)].map((m) => m[1] ?? "");
+		const released = headings.filter((h) => h !== "Unreleased");
+		expect(headings.indexOf("Unreleased")).toBeLessThanOrEqual(0);
+		expect(released[0]).toStartWith(`[${version}][${pkg}-${version}] - `);
+		for (const h of released) {
+			const m = /^\[([^\]]+)\]\[([^\]]+)\] - \d{4}-\d{2}-\d{2}$/.exec(h);
+			expect(m?.[2], `${path}: ${h}`).toBe(`${pkg}-${m?.[1]}`);
+			expect(text, `${path}: link for ${h}`).toContain(
+				`\n[${m?.[2]}]: https://`,
+			);
+		}
+	}
 });

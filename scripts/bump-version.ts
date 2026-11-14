@@ -8,13 +8,14 @@
  * - every mention of the old version in the pinned docs (scripts/pinned-files.ts),
  *   including `@ractive-ch/<package>@<v>` and, for the relay, image tags;
  * - for the client, the plugin manifests' version (it follows the client);
- * - CHANGELOG.md: the package's "### Unreleased" becomes the new version with
- *   today's date, and its link is added;
+ * - the package's own CHANGELOG.md (packages/<package>/CHANGELOG.md, shipped in
+ *   its npm package): "## Unreleased" becomes the new version with today's
+ *   date, and its link is added;
  * - bun.lock, through `bun install`.
  *
  * Refuses when the old version is also the other package's current version
  * (a bare "0.9.0" in the docs could then mean either), when the new version
- * is not greater, or when the package has no "### Unreleased" section.
+ * is not greater, or when the package's changelog has no "## Unreleased" section.
  * The release itself (PR, merge, `gh release create`) stays manual: see
  * .claude/skills/release/SKILL.md.
  */
@@ -81,10 +82,15 @@ export function replaceVersion(text: string, from: string, to: string): string {
 	);
 }
 
+/** The package's changelog, shipped in its npm package. */
+export function changelogPath(pkg: Package): string {
+	return `${DIRS[pkg]}/CHANGELOG.md`;
+}
+
 /**
- * The package's "### Unreleased" (its first "###" heading; an intro paragraph
- * may come before it) as the dated version, and its link above the first one
- * of its kind.
+ * The package changelog's "## Unreleased" (its first "##" heading; the title
+ * and intro paragraphs come before it) as the dated version, and its link
+ * above the first one of its kind.
  */
 export function datedChangelog(
 	text: string,
@@ -92,25 +98,20 @@ export function datedChangelog(
 	version: string,
 	date: string,
 ): string {
-	const start = text.indexOf(`\n## ${NAMES[pkg]}\n`);
-	const sub = start === -1 ? -1 : text.indexOf("\n### ", start + 1);
-	const nextSection = start === -1 ? -1 : text.indexOf("\n## ", start + 1);
-	const unreleased = "\n### Unreleased\n";
-	if (
-		sub === -1 ||
-		(nextSection !== -1 && nextSection < sub) ||
-		!text.startsWith(unreleased, sub)
-	)
+	const sub = text.indexOf("\n## ");
+	const unreleased = "\n## Unreleased\n";
+	if (sub === -1 || !text.startsWith(unreleased, sub))
 		throw new Error(
-			`CHANGELOG.md: the first section under "## ${NAMES[pkg]}" is not "### Unreleased"`,
+			`${changelogPath(pkg)}: the first section is not "## Unreleased"`,
 		);
 	const tag = `${pkg}-${version}`;
-	let out = `${text.slice(0, sub)}\n### [${version}][${tag}] - ${date}\n${text.slice(sub + unreleased.length)}`;
+	let out = `${text.slice(0, sub)}\n## [${version}][${tag}] - ${date}\n${text.slice(sub + unreleased.length)}`;
 	const link = `[${tag}]: https://github.com/ractive/tab-mcp/releases/tag/${pkg}-v${version}\n`;
 	const first = out.search(new RegExp(`^\\[${pkg}-`, "m"));
 	out =
 		first === -1
-			? `${out.trimEnd()}\n${link}`
+			? // A blank line first: a definition cannot interrupt a paragraph.
+				`${out.trimEnd()}\n\n${link}`
 			: out.slice(0, first) + link + out.slice(first);
 	return out;
 }
@@ -154,9 +155,10 @@ async function main(): Promise<void> {
 	const edits = new Map<string, string>();
 	// The local date (YYYY-MM-DD), not UTC's.
 	const date = new Date().toLocaleDateString("sv-SE");
+	const changelog = changelogPath(pkg);
 	edits.set(
-		"CHANGELOG.md",
-		datedChangelog(await file("CHANGELOG.md").text(), pkg, next, date),
+		changelog,
+		datedChangelog(await file(changelog).text(), pkg, next, date),
 	);
 	const manifest = `${DIRS[pkg]}/package.json`;
 	edits.set(

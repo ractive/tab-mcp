@@ -182,7 +182,7 @@ jobs:
           set -euo pipefail
           gh release create "$TAG" "$ZIP" --repo "$GITHUB_REPOSITORY" \
             --verify-tag --latest=false --title "tab-mcp for Chrome $VERSION" \
-            --notes "The Chrome Web Store package of tab-mcp for Chrome $VERSION (no key, no install-time host access, no source maps). What changed: the \"tab-mcp for Chrome\" section of CHANGELOG.md. Verify it before uploading: gh attestation verify $ZIP -R $GITHUB_REPOSITORY"
+            --notes "The Chrome Web Store package of tab-mcp for Chrome $VERSION (no key, no install-time host access, no source maps). What changed: packages/tab-mcp-extension/CHANGELOG.md. Verify it before uploading: gh attestation verify $ZIP -R $GITHUB_REPOSITORY"
       - name: The release's asset is the attested zip
         env:
           GH_TOKEN: ${{ github.token }}
