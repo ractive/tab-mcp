@@ -9,6 +9,9 @@ name: Extension publish
 # only updates an existing item. Setup and secrets:
 # kb/operations/chrome-web-store.md.
 #
+# Only a zip whose build provenance verifies (signed by extension-release.yml
+# for this tag, DEC-182) is uploaded.
+#
 # The upload uses mnao305/chrome-extension-upload (Chrome Web Store API v2),
 # pinned to a commit, because it receives the store's credentials. Nothing
 # else runs in this job: no checkout, no bun install.
@@ -35,6 +38,10 @@ jobs:
     # Holds the secrets; required reviewer and "tags extension-v*" only in the
     # repository's environment settings.
     environment: chrome-web-store
+    permissions:
+      contents: read
+      # gh attestation verify reads the zip's attestation.
+      attestations: read
     steps:
       - name: Download the release's store zip
         env:
@@ -61,6 +68,16 @@ jobs:
           # grep -c reads all of its input, so unzip never gets SIGPIPE.
           maps="$(unzip -Z1 store.zip | grep -c '\.map$' || true)"
           test "$maps" = 0 || { echo "::error::the zip has $maps source maps"; exit 1; }
+      - name: The zip's attestation verifies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha256sum store.zip
+          # Built and attested by extension-release.yml for this tag (DEC-182).
+          gh attestation verify store.zip --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/extension-release.yml" \
+            --source-ref "$GITHUB_REF"
       - uses: mnao305/chrome-extension-upload@f549d5d654694a7722d6abfa64c97409ad5e64c1 # v7.0.0
         with:
           file-path: store.zip
