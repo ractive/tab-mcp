@@ -142,7 +142,9 @@ held to their contrast in light and dark, no amber button, what each colour says
 ## Releases
 
 Own version and tags (`extension-v0.1.0`), published to the Chrome Web Store from a
-release, like Overmark (DEC-109). Relay and client releases stay as they are.
+release, like Overmark (DEC-109). Relay and client releases stay as they are. The
+release's store zip carries a build provenance attestation, and the publish workflow
+uploads only a zip that verifies (DEC-182).
 
 # Citations
 

@@ -1,16 +1,12 @@
 ---
 type: operations
 title: "tab-mcp for Chrome in the Chrome Web Store"
-description: >-
-  The release path of tab-mcp for Chrome: the store package, the release and publish
-  workflows, the owner's one-time setup, the listing texts, single purpose, permission
-  justifications, data disclosures and review notes, and adding the store id to the
-  hosted relay before the listing goes public.
+description: "The release path of tab-mcp for Chrome: the store package, the release and publish workflows, the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
 tags:
   - operations
   - release
   - extension
-timestamp: 2026-11-14T12:00:00+01:00
+timestamp: 2026-11-14T17:30:00+01:00
 ---
 
 # tab-mcp for Chrome in the Chrome Web Store
@@ -51,9 +47,42 @@ gives the zip whose SHA-256 `extension-release.yml` prints, with the same Bun ve
    then creates the GitHub release `extension-v<version>` with the zip attached (not
    marked latest, so the relay and client releases stay the latest). A failed build leaves
    no release; the release job stops if the tag moved off the commit it built.
+4. Before it creates the release, the release job attests the zip's build provenance
+   (below) and verifies the attestation; after it, it checks that the release's asset has
+   the SHA-256 of the attested zip. A zip that does not verify leaves no release.
 
 Do not create the release with `gh release create`: then nothing builds the zip
 (`release.yml` treats `extension-v*` releases as a no-op). The tag push is the release.
+
+## Build provenance
+
+The release job signs a [SLSA build provenance](https://slsa.dev/provenance/v1)
+attestation for `tab-mcp-for-chrome-<version>-store.zip` with
+[actions/attest](https://github.com/actions/attest) (DEC-182): a Sigstore certificate
+issued to the workflow run, binding the zip's SHA-256 to the repository, the workflow file
+(`extension-release.yml`), the tag and the commit. GitHub keeps it with the repository's
+attestations; the run's summary links it. The build job, which runs third-party code,
+keeps its read-only token: the zip goes from it to the release job as an artifact, and the
+release job prints the zip's SHA-256 next to the one the build job printed.
+
+Check a release's zip by hand before uploading it (GitHub CLI, signed in; any account):
+
+```sh
+gh release download extension-v0.1.0 -R ractive/tab-mcp --pattern '*-store.zip'
+gh attestation verify tab-mcp-for-chrome-0.1.0-store.zip -R ractive/tab-mcp \
+  --signer-workflow ractive/tab-mcp/.github/workflows/extension-release.yml \
+  --source-ref refs/tags/extension-v0.1.0
+```
+
+`-R ractive/tab-mcp` alone accepts any workflow of the repository; `--signer-workflow`
+and `--source-ref` also pin the release workflow and the tag, which is what the publish
+workflow checks. A zip built locally from the tag has the same SHA-256 (the zip is
+reproducible, above) and so verifies too.
+
+What it covers: the zip on the GitHub release and the zip the publish workflow uploads.
+It does not cover the installed extension: the Chrome Web Store serves a CRX it builds and
+signs itself (its own signature and the item's id), so a user's copy has another digest and
+no attestation of ours.
 
 Chrome takes a version of one to four integers (0 to 65535), no suffixes; the store
 rejects an upload whose version is not higher than the last one.
@@ -64,7 +93,9 @@ The API only updates an item that exists, so the first version goes in by hand (
 After that: Actions → "Extension publish" → Run workflow, and pick the release's tag under
 "Use workflow from" (the default, `main`, fails: the tag the workflow runs on is the tag
 it uploads). It downloads the release's store zip, checks that its manifest has the tag's
-version, no key, no host access and the zip no source maps, and uploads it with
+version, no key, no host access and the zip no source maps, verifies its build provenance
+(signed by `extension-release.yml` for that tag; an unattested zip stops the run), and
+uploads it with
 [mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload)
 (Chrome Web Store API v2), pinned to the same commit as Overmark's. With "submit" off the
 upload stays a draft in the dashboard; with it on, the version is submitted for review.
@@ -86,7 +117,8 @@ nothing and installs nothing. Dependabot proposes its updates.
    `client-v*` and `relay-v*`), so only the owner can create, move or delete extension
    release tags.
 4. **First version by hand:** download the zip from the `extension-v0.1.0` release (or
-   build it locally), New item in the
+   build it locally) and verify it (`gh attestation verify`, "Build provenance" above),
+   New item in the
    [developer dashboard](https://chrome.google.com/webstore/devconsole), upload the zip,
    fill in the listing below. The item's id now exists.
 5. **The hosted relay:** add `chrome-extension://<store id>` to the hosted relay's allowed

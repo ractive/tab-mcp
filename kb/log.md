@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- Build provenance for tab-mcp for Chrome's store zip (`ci/extension-attestation`, owner): the release job of `extension-release.yml` attests the zip with `actions/attest` v4.2.2, verifies it with `gh attestation verify` (signer workflow and tag) before creating the release and checks the release asset's SHA-256 afterwards; the build job keeps its read-only token; `extension-publish.yml` uploads only a zip that verifies; how to verify by hand in `operations/chrome-web-store.md` and the extension README; DEC-182
+
 - Iteration 42 (`simplify/relay-client`, owner decisions on the review's simplification table, DEC-178): the relay's duplicated helpers in `crypto.ts`, `readCapped`, `checkTimes` and `clientHost` (RQ 14, no change in behaviour); no hung-read bookkeeping in `/healthz` (RQ 17); the CIMD test mode as an injected `UrlPolicy`, no token helper or unused options in production code (RQ 18); no "Already connected" page, a double submit gets the expired-or-used page (RQ 16); the client no longer copies the secret from the 0.4 key, so a visitor last seen with 0.4 pairs again (DEC-083 amended); `TAB_MCP_CLIENT_ID_HOSTS` stays unset on the hosted relay; relay source net −124 lines, client −40, core 6216 to 6143 B
 
 - Chrome's WebMCP crash reported as [Chromium issue 585631961](https://issues.chromium.org/issues/585631961): a standalone repro shows the trigger is the back/forward cache (any document with a tool and a pending `getTools()` that navigates away; frames in `ModelContextUserData::GetScriptTools`), not `activeTab`; `operations/chrome-webmcp-crash.md` and DEC-172 corrected
