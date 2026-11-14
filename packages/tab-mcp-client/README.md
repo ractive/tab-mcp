@@ -596,10 +596,9 @@ double click) opens no second one; the call resolves when that one closes. A cal
 The address stays the same across visits: the library keeps a secret per relay and page
 in `localStorage`, under `tab-mcp:secret:<relay origin>:<server.name>`, so two pages of one
 site with different server names get different addresses (set `storageKey` to choose the
-key yourself; the name is URI-encoded, and renaming it changes the address). A secret that
-0.4 or older kept under `tab-mcp:secret:<relay origin>` is copied to the new key once, so an
-existing page keeps its address; on a site with several pages the first one to connect
-keeps it, the others get new ones. The old key stays for pages still on 0.4.
+key yourself; the name is URI-encoded, and renaming it changes the address). The key of 0.4
+and older, `tab-mcp:secret:<relay origin>`, is not read: a visitor whose last visit predates
+0.5 gets a new address and pairs their AI apps again.
 
 "New address" in the dialog (at the end of the setup, below the code, with a line on what
 it does; not next to Copy, since with no app connected it changes the address at once)

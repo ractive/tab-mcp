@@ -21,7 +21,9 @@ import {
 } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenStore } from "../src/store/types.ts";
-import { issueAccessToken } from "../src/tokens.ts";
+import { issueAccessToken } from "../src/test-token.ts";
+
+export { issueAccessToken };
 
 export const ORIGIN = "https://page.example";
 

@@ -6,8 +6,8 @@
  * OpenID Connect provider (`oidc.ts`, DEC-079).
  */
 
-import { timingSafeEqual } from "node:crypto";
 import type { PairingKind } from "../config.ts";
+import { constantTimeEqual } from "../crypto.ts";
 
 /** What a pairing method sees of a tab session. */
 export interface PairingTarget {
@@ -100,12 +100,6 @@ export function newPairingCode(): string {
 	}
 }
 
-function sameCode(a: string, b: string): boolean {
-	const x = Buffer.from(a);
-	const y = Buffer.from(b);
-	return x.length === y.length && timingSafeEqual(x, y);
-}
-
 /**
  * Why the relay sends a code (`pairing.code` `reason`): `start` the dialog
  * opened (a new code, or the current one again), `used` the last one was
@@ -121,18 +115,16 @@ export type CodeReason = "start" | "used" | "locked" | "expired";
 export class PairingCodes {
 	readonly #send: (code: string, expiresAt: number, reason: CodeReason) => void;
 	readonly #ttlMs: number;
-	readonly #maxAttempts: number;
 	#current: { code: string; expiresAt: number; attempts: number } | undefined;
 	#previous: string | undefined;
 	#timer: Timer | undefined;
 
 	constructor(
 		send: (code: string, expiresAt: number, reason: CodeReason) => void,
-		options: { ttlMs?: number; maxAttempts?: number } = {},
+		options: { ttlMs?: number } = {},
 	) {
 		this.#send = send;
 		this.#ttlMs = options.ttlMs ?? PAIRING_CODE_TTL_MS;
-		this.#maxAttempts = options.maxAttempts ?? PAIRING_MAX_ATTEMPTS;
 	}
 
 	/** Whether the tab is showing codes. */
@@ -144,7 +136,7 @@ export class PairingCodes {
 	get attemptsLeft(): number {
 		return this.#current === undefined
 			? 0
-			: this.#maxAttempts - this.#current.attempts;
+			: PAIRING_MAX_ATTEMPTS - this.#current.attempts;
 	}
 
 	start(): void {
@@ -182,15 +174,15 @@ export class PairingCodes {
 			this.#issue("expired");
 			return "expired";
 		}
-		if (sameCode(typed, current.code)) {
+		if (constantTimeEqual(typed, current.code)) {
 			this.#previous = undefined;
 			this.#issue("used");
 			return "ok";
 		}
 		current.attempts++;
 		const expired =
-			this.#previous !== undefined && sameCode(typed, this.#previous);
-		if (current.attempts >= this.#maxAttempts) {
+			this.#previous !== undefined && constantTimeEqual(typed, this.#previous);
+		if (current.attempts >= PAIRING_MAX_ATTEMPTS) {
 			this.#previous = undefined;
 			this.#issue("locked");
 			return "locked";

@@ -42,7 +42,7 @@ import {
 	type RelayMessage,
 	SUBPROTOCOL,
 } from "./protocol.ts";
-import { STORE_UNAVAILABLE_TEXT, TabSession } from "./session.ts";
+import { clientHost, STORE_UNAVAILABLE_TEXT, TabSession } from "./session.ts";
 import { guardStore } from "./store/guard.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import { SqliteTokenStore } from "./store/sqlite.ts";
@@ -158,8 +158,6 @@ type StoreHealth = "ok" | "store_unavailable" | "store_timeout";
 const HEALTH_STORE_TIMEOUT_MS = 1000;
 /** How long a probe's answer is reused. */
 const HEALTH_REUSE_MS = 1000;
-/** While an earlier read hangs, how long before a new one is tried. */
-const HEALTH_HUNG_RETRY_MS = 30_000;
 /** A store key no token ever has (a token's hash is of `tmcp_…`). */
 const HEALTH_PROBE_HASH = hashToken("tab-mcp /healthz probe");
 
@@ -214,8 +212,6 @@ export interface RelayTestHooks extends AuthorizationTestMode {
 	assertionKeys?: KeySource;
 	/** A smaller relay-wide replay cache for tab assertions. */
 	maxSeenAssertions?: number;
-	/** How long `/healthz` waits before a new read while one hangs. */
-	healthRetryMs?: number;
 }
 
 interface Body {
@@ -1242,13 +1238,7 @@ function startRelay(
 		}
 		headers["mcp-protocol-version"] = version.forwardVersion;
 
-		const clientHostName = (() => {
-			try {
-				return new URL(auth.clientId).host;
-			} catch {
-				return "";
-			}
-		})();
+		const clientHostName = clientHost(auth.clientId);
 		const isListen = body.value["method"] === "subscriptions/listen";
 		// `server/discover` does not wait: clients use it as the protocol-era
 		// probe with a short timeout (Claude Code: 5 s, then it falls back to
@@ -1537,15 +1527,9 @@ function startRelay(
 	 * Whether the token store answers (DEC-099): one cheap read of a hash that
 	 * never exists, with a deadline. One probe at a time, and its answer is
 	 * reused for a second, so a flood of `/healthz` does not reach the store.
-	 * While a read that missed its deadline still hangs, a new one starts only
-	 * every `healthRetryMs` (30 s): a store that lost one command recovers, and
-	 * a hung store holds at most one read per window.
 	 */
-	const healthRetryMs = hooks?.healthRetryMs ?? HEALTH_HUNG_RETRY_MS;
 	let probe: Promise<StoreHealth> | undefined;
 	let probed: { at: number; result: StoreHealth } | undefined;
-	let hungReads = 0;
-	let lastHungAt = 0;
 	async function runProbe(): Promise<StoreHealth> {
 		let timer: Timer | undefined;
 		const deadline = new Promise<"store_timeout">((resolve) => {
@@ -1564,12 +1548,6 @@ function startRelay(
 			const result = await Promise.race([read, deadline]);
 			if (result === "store_timeout") {
 				logger.warn("health.store", { error: "timeout" });
-				hungReads++;
-				lastHungAt = Date.now();
-				const settled = () => {
-					hungReads--;
-				};
-				read.then(settled, settled);
 			}
 			return result;
 		} catch (error) {
@@ -1584,9 +1562,6 @@ function startRelay(
 		const now = Date.now();
 		if (probed !== undefined && now - probed.at < HEALTH_REUSE_MS) {
 			return Promise.resolve(probed.result);
-		}
-		if (hungReads > 0 && now - lastHungAt < healthRetryMs) {
-			return Promise.resolve("store_timeout");
 		}
 		const current = runProbe().catch((): StoreHealth => "store_unavailable");
 		probe = current;

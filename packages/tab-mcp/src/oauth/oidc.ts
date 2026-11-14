@@ -6,6 +6,7 @@
  */
 
 import type { OidcConfig } from "../config.ts";
+import { randomBase64url, sha256Base64url } from "../crypto.ts";
 import { CLOCK_LEEWAY_MS, identityKey, MISMATCH_TEXT } from "../identity.ts";
 import {
 	audiences,
@@ -60,19 +61,6 @@ export class OidcError extends Error {
 		super(message);
 		this.reason = reason;
 	}
-}
-
-function random(bytes: number): string {
-	return crypto
-		.getRandomValues(new Uint8Array(bytes))
-		.toBase64({ alphabet: "base64url", omitPadding: true });
-}
-
-function s256(verifier: string): string {
-	return new Bun.CryptoHasher("sha256")
-		.update(verifier)
-		.digest()
-		.toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
 function str(v: unknown): string | undefined {
@@ -335,9 +323,9 @@ export class OidcPairing implements PairingMethod {
 		// The provider sends the state back to /authorize/callback, whose URL is
 		// fixed: the address id in front lets a load balancer route the callback
 		// to this instance, which holds the flow (DEC-098).
-		const state = `${context.addressId}.${random(24)}`;
-		const nonce = random(24);
-		const verifier = random(32);
+		const state = `${context.addressId}.${randomBase64url(24)}`;
+		const nonce = randomBase64url(24);
+		const verifier = randomBase64url(32);
 		this.#flowOf.set(context.requestId, state);
 		this.#flows.set(state, {
 			requestId: context.requestId,
@@ -354,7 +342,7 @@ export class OidcPairing implements PairingMethod {
 			scope: "openid",
 			state,
 			nonce,
-			code_challenge: s256(verifier),
+			code_challenge: sha256Base64url(verifier),
 			code_challenge_method: "S256",
 		};
 		if (this.#mismatched.has(context.requestId)) params["prompt"] = "login";

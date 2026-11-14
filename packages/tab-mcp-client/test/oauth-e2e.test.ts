@@ -29,6 +29,7 @@ import {
 	quietLogger,
 	startCimdServer,
 	TestBrowser,
+	testUrls,
 } from "../../tab-mcp/test/oauth-helpers.ts";
 import type { Grant } from "../src/types.ts";
 import { MemoryStorage, mcpPost, newTab, rpc } from "./helpers.ts";
@@ -104,7 +105,7 @@ beforeAll(async () => {
 			store: new MemoryTokenStore(),
 			logger: quietLogger,
 		},
-		{ cimd: { ca: cimd.ca } },
+		{ cimdUrls: testUrls(cimd.ca) },
 	);
 	window = new Window({ url: "https://page.example/" });
 });

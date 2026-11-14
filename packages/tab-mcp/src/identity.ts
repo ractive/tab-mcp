@@ -4,12 +4,13 @@
  */
 
 import type { OidcConfig } from "./config.ts";
+import { sha256Base64url } from "./crypto.ts";
 import {
 	audiences,
+	checkTimes,
 	JwksCache,
 	JwtError,
 	type KeySource,
-	numericDate,
 	verifyJwt,
 } from "./jwt.ts";
 
@@ -38,17 +39,13 @@ export const MISMATCH_TEXT =
  * subject is never stored in the clear (DEC-077).
  */
 export function identityKey(issuer: string, subject: string): string {
-	return new Bun.CryptoHasher("sha256")
-		.update(`${issuer}\n${subject}`)
-		.digest()
-		.toBase64({ alphabet: "base64url", omitPadding: true });
+	return sha256Base64url(`${issuer}\n${subject}`);
 }
 
 /** Verifies tab assertions (DEC-076) and remembers used `jti`s. */
 export class TabAssertionVerifier {
 	readonly #oidc: OidcConfig;
 	readonly #keys: KeySource;
-	/** (binding key, jti) → expiry; insertion order is roughly expiry order (all live ≤ 65 s). */
 	/** (person, jti) → until when it counts as used. */
 	readonly #seen = new Map<string, number>();
 	/** Entries in `#seen` per person. */
@@ -89,26 +86,11 @@ export class TabAssertionVerifier {
 		if (aud.length !== 1 || aud[0] !== address) {
 			throw new JwtError("aud", "the assertion is not for this address");
 		}
-		const exp = numericDate(payload, "exp");
-		if (exp === undefined)
-			throw new JwtError("exp", "the assertion has no exp");
-		if (exp <= now - CLOCK_LEEWAY_MS) {
-			throw new JwtError("expired", "the assertion has expired");
-		}
-		if (exp > now + TAB_ASSERTION_MAX_LIFETIME_MS + CLOCK_LEEWAY_MS) {
-			throw new JwtError(
-				"lifetime",
-				"the assertion lives longer than 60 seconds",
-			);
-		}
-		const iat = numericDate(payload, "iat");
-		if (iat !== undefined && iat > now + CLOCK_LEEWAY_MS) {
-			throw new JwtError("iat", "the assertion was issued in the future");
-		}
-		const nbf = numericDate(payload, "nbf");
-		if (nbf !== undefined && nbf > now + CLOCK_LEEWAY_MS) {
-			throw new JwtError("nbf", "the assertion is not valid yet");
-		}
+		const usableUntil = checkTimes(payload, now, {
+			leewayMs: CLOCK_LEEWAY_MS,
+			maxLifetimeMs: TAB_ASSERTION_MAX_LIFETIME_MS,
+			lifetimeText: "the assertion lives longer than 60 seconds",
+		});
 		const sub = payload["sub"];
 		if (typeof sub !== "string" || sub === "" || sub.length > MAX_SUBJECT) {
 			throw new JwtError("sub", "the assertion needs a subject");
@@ -135,7 +117,7 @@ export class TabAssertionVerifier {
 				"the relay is checking too many assertions; try again shortly",
 			);
 		}
-		this.#seen.set(seenKey, exp + CLOCK_LEEWAY_MS);
+		this.#seen.set(seenKey, usableUntil);
 		this.#perPerson.set(key, mine + 1);
 		return key;
 	}

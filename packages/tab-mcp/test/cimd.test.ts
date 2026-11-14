@@ -11,7 +11,7 @@ import {
 	limitKey,
 	redirectUriMatches,
 } from "../src/oauth/cimd.ts";
-import { type CimdServer, startCimdServer } from "./oauth-helpers.ts";
+import { type CimdServer, startCimdServer, testUrls } from "./oauth-helpers.ts";
 
 const DOC = (id: string, extra: Record<string, unknown> = {}) => ({
 	client_id: id,
@@ -843,7 +843,7 @@ describe("the test-only switch", () => {
 			"invalid_client_id",
 		); // port
 		const meta = await new ClientMetadataFetcher({
-			testMode: { ca: server.ca },
+			urls: testUrls(server.ca),
 		}).get(id);
 		expect(meta.name).toBe("Test AI");
 	});

@@ -1209,6 +1209,11 @@ The copy costs about 80 bytes gzipped and takes the core to 5.1 KB; the budget i
 `build.test.ts` goes from 5 to 5.25 KB (DEC-082 said the next core feature would have to
 raise it).
 
+**Amended by DEC-178 (owner, 2026-11-14):** the copy from the old key is removed. A
+visitor whose last visit to a page was while it ran client 0.4 or older gets a new
+address and pairs again. The per-relay-and-page key, `storageKey` and everything else
+about the secret stay.
+
 ## DEC-084: The official MCP conformance suite in verify and CI
 
 2026-10-24, the owner asked whether the implementation follows the 2026-07-28
@@ -3583,3 +3588,50 @@ is a list of origins and is passed through to the native registration (DEC-143).
 - Behaviour, protocol (`set-allowed-all`) and storage do not change. The constants are
   `TURN_OFF_ASK_FIRST` / `TURN_ON_ASK_FIRST` in `src/sidepanel/card.ts`. No change to
   the privacy notice (owner).
+
+## DEC-178: The review's simplification table decided; the hosted relay stays open to any client host (owner)
+
+The owner, 2026-11-14, on the table "Simplification, for the owner to decide" of the
+[review of 2026-11-13](research/review-2026-11-13.md) and its open point on
+`TAB_MCP_CLIENT_ID_HOSTS`. Built in [iteration 42](iterations/iteration-42-simplification.md)
+(`simplify/relay-client`) except where a row says otherwise.
+
+- **`TAB_MCP_CLIENT_ID_HOSTS` stays unset on `tab-mcp.ractive.ch`.** Pairing stays open
+  to any AI app that publishes a client metadata document; DEC-006 and DEC-100 stand.
+  The residual of RS 2 (unknown client ids can use up the shared "new client" budget,
+  bounded by iteration 29's per-network charge, DEC-129) is accepted. The log shows such
+  attempts: `oauth.rate_limited` for the per-network limits, `oauth.client_refused`
+  with `rate_limited` or `requester_limited` for the metadata budget, `oauth.cimd_failed`
+  for documents that did not load. Setting the host list is the remedy if they show up.
+- **Done in iteration 42:**
+  - The relay's duplicated small helpers (RQ 14): random values, SHA-256 and the
+    constant-time comparison in `crypto.ts`; one bounded reader (`readCapped` in
+    `body.ts`) for request bodies, the JWKS fetch and the CIMD fetch; `checkTimes` in
+    `jwt.ts` for the tab assertion and the client assertion; `clientHost` once. No change
+    in behaviour. The ID token's checks stay where they are: they throw `OidcError` with
+    reasons of their own (`id_token_exp`, `id_token_iat`) and require `iat`.
+  - The hung-read bookkeeping of `/healthz` (RQ 17): the single probe, the one-second
+    deadline and the one-second reuse stay (DEC-099); while a read hangs, each probe
+    after the reused second reads again instead of every 30 seconds.
+  - Test hooks and unused options out of the production code (RQ 18): the CIMD fetch
+    takes a `UrlPolicy` (`PUBLIC_HTTPS` in the relay; the loopback policy lives in the
+    tests) instead of a test-mode flag checked in eight places; the token helper for
+    tests moved out of `tokens.ts`; `PairingCodes`' `maxAttempts` and the fetcher's
+    `maxBytes` are gone. `createTestRelay` stays the one seam for the remaining hooks
+    (code lifetimes, caps, clocks), unexported and refused outside development.
+  - The "Already connected" / "Already sent" page and its map of up to 10 000 paired
+    requests (RQ 16, RS list): a second submit of a pairing form gets "This connection
+    request has expired or was already used."
+  - The 0.4 secret key migration (CC list): DEC-083 amended. A visitor whose last visit
+    to a page was while it ran client 0.4 or older pairs again.
+- **Kept:** `private_key_jwt` (RS 19, DEC-106); the CIMD defences against strangers'
+  documents (RS 20; follows from the open host list above); `page_<name>` registration
+  in tab-mcp for Chrome (WM 15); the shadow-root question for the dialogs stays with the
+  specificity scheme (CU); the user-activation check in `connect()` and `resume`
+  (DEC-009, DEC-050); the extension's switch (EQ 20) and its "Turn off Ask first" button
+  (the review's "Allow all", DEC-176).
+- **In a separate extension PR:** the extension's question window (EQ 18) and
+  `Starter` / `attachWhenStarted` (EQ 19).
+- **Done before:** the rows the review's Outcome lists for iterations 32 to 38.
+- **Not decided:** the hand-written zip writer and reader (EQ 21) and moving
+  `schemaProblem` / `resolvePointer` into the lazy chunk (CC).

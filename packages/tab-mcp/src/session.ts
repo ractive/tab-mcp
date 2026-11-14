@@ -112,7 +112,8 @@ export function limitsOf(limits: SiteLimits | RelayConfig): Limits {
 	};
 }
 
-function clientHost(clientId: string): string {
+/** The host of an AI app's client id (a URL), or `""`. */
+export function clientHost(clientId: string): string {
 	try {
 		return new URL(clientId).host;
 	} catch {

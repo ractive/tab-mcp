@@ -46,6 +46,14 @@ test("the build produces a runnable bin and declarations that type-check", async
 	expect(main.startsWith("#!/usr/bin/env bun\n")).toBe(true);
 	// Only the version is taken from package.json, not the whole file.
 	expect(main).not.toContain("devDependencies");
+	// The token helper for tests is in testing.js only (RQ 18).
+	expect(main).not.toContain("issueAccessToken");
+	expect(await Bun.file(join(dist, "index.js")).text()).not.toContain(
+		"issueAccessToken",
+	);
+	expect(await Bun.file(join(dist, "testing.js")).text()).toContain(
+		"issueAccessToken",
+	);
 	const version = Bun.spawnSync(["bun", join(dist, "main.js"), "--version"]);
 	expect(version.stdout.toString()).toBe(`${source["version"]}\n`);
 

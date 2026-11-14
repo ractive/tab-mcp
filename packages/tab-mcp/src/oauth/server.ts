@@ -12,7 +12,6 @@
  * - `/revoke` (RFC 7009).
  */
 
-import { timingSafeEqual } from "node:crypto";
 import { isAddressId, shortAddress } from "../address.ts";
 import { readBodyWithDeadline } from "../body.ts";
 import {
@@ -21,6 +20,11 @@ import {
 	type RelayConfig,
 	type Site,
 } from "../config.ts";
+import {
+	constantTimeEqual,
+	randomBase64url,
+	sha256Base64url,
+} from "../crypto.ts";
 import { networkKey } from "../ip.ts";
 import { JWT_ALGORITHMS, JwtError } from "../jwt.ts";
 import { errorFields, type Logger, truncateKey } from "../log.ts";
@@ -31,13 +35,13 @@ import { NonceSet } from "../store/memory.ts";
 import type { TokenRecord, TokenStore } from "../store/types.ts";
 import { hashToken, issueTokenPair, newId } from "../tokens.ts";
 import {
-	type CimdTestMode,
 	type ClientAuth,
 	type ClientMetadata,
 	ClientMetadataError,
 	ClientMetadataFetcher,
 	isTransient,
 	redirectUriMatches,
+	type UrlPolicy,
 } from "./cimd.ts";
 import {
 	assertionSubject,
@@ -72,11 +76,6 @@ const MAX_PENDING_PER_ADDRESS_IP = 5;
 /** How long a used refresh token is kept to detect its reuse (DEC-091). */
 const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
-/**
- * Requests that paired, kept as long as their page could still be sent, so a
- * second submit of the same form says it was used instead of "expired".
- */
-const MAX_USED_REQUESTS = 10_000;
 const MAX_FORM_BYTES = 8192;
 const MAX_STATE_LENGTH = 1024;
 /**
@@ -119,7 +118,8 @@ export interface AuthorizationHost {
 
 /** Test-only settings; never reachable from configuration. */
 export interface AuthorizationTestMode {
-	cimd?: CimdTestMode;
+	/** What the CIMD fetch accepts instead of `PUBLIC_HTTPS` (a loopback test server). */
+	cimdUrls?: UrlPolicy;
 	authCodeTtlMs?: number;
 	/** A smaller cap on open authorization requests on the instance. */
 	maxPending?: number;
@@ -150,16 +150,6 @@ interface Pending extends AuthorizationRequest {
 	ip: string;
 }
 
-/** A request that paired, until its page could no longer be sent. */
-interface UsedRequest {
-	expiresAt: number;
-	/** The AI app's declared name and verified host, for the page. */
-	name: string;
-	host: string;
-	/** The app exchanged the request's code: it is connected. */
-	connected: boolean;
-}
-
 interface IssuedCode extends AuthorizationRequest {
 	/**
 	 * When the code was issued: the grant's creation time, so a revocation of
@@ -168,8 +158,6 @@ interface IssuedCode extends AuthorizationRequest {
 	issuedAt: number;
 	expiresAt: number;
 	used: boolean;
-	/** The `/authorize` request it was issued for. */
-	requestId: string;
 	grantId?: string;
 	/** The binding key the grant is made for (identity binding, DEC-077). */
 	subject?: string;
@@ -229,21 +217,10 @@ const TOO_MANY_REQUESTS = () =>
 		"too many requests; try again shortly",
 	);
 
-function constantTimeEqual(a: string, b: string): boolean {
-	const x = Buffer.from(a);
-	const y = Buffer.from(b);
-	return x.length === y.length && timingSafeEqual(x, y);
-}
-
-/** BASE64URL(SHA256(verifier)) (RFC 7636 §4.6). */
-export function s256(verifier: string): string {
-	return new Bun.CryptoHasher("sha256")
-		.update(verifier)
-		.digest()
-		.toBase64({ alphabet: "base64url", omitPadding: true });
-}
-
-/** RFC 7636 §4.1: 43-128 unreserved characters. */
+/**
+ * RFC 7636 §4.1: 43-128 unreserved characters. A code verifier, and the form
+ * `/authorize` accepts for a code challenge.
+ */
 const VERIFIER = /^[A-Za-z0-9\-._~]{43,128}$/;
 
 /** Parameters, refusing duplicates (RFC 6749 §3.1, §3.2). */
@@ -259,12 +236,6 @@ function single(
 		out[name] = value === undefined || value === "" ? undefined : value;
 	}
 	return out;
-}
-
-function random(bytes: number): string {
-	return crypto
-		.getRandomValues(new Uint8Array(bytes))
-		.toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
 /**
@@ -316,12 +287,10 @@ export class AuthorizationServer {
 	readonly #pendingPerIp = new Map<string, number>();
 	readonly #pendingPerAddress = new Map<string, number>();
 	readonly #codes = new Map<string, IssuedCode>();
-	/** Insertion order is pairing order, not expiry order: sweeps look at all. */
-	readonly #usedRequests = new Map<string, UsedRequest>();
 	readonly #authCodeTtlMs: number;
 	readonly #maxPending: number;
 	readonly #methods: Partial<Record<PairingKind, PairingMethod>>;
-	readonly #csrfSecret = random(32);
+	readonly #csrfSecret = randomBase64url(32);
 	/** `/authorize` page loads per IP. */
 	readonly #viewsPerIp = new RateLimiter({
 		capacity: 30,
@@ -425,7 +394,7 @@ export class AuthorizationServer {
 		this.#cimd = new ClientMetadataFetcher({
 			allowedHosts: host.config.clientIdHosts,
 			logger: host.logger,
-			...(testMode?.cimd === undefined ? {} : { testMode: testMode.cimd }),
+			...(testMode?.cimdUrls === undefined ? {} : { urls: testMode.cimdUrls }),
 		});
 		const cimd = this.#cimd;
 		this.#clientKeys = new ClientKeySets(
@@ -568,32 +537,6 @@ export class AuthorizationServer {
 			`<h1>This connection cannot be made</h1>
 <p role="alert">${escapeHtml(message)}</p>
 <p>Go back to your AI app and try again. If it keeps happening, the AI app may not work with this relay.</p>`,
-		);
-	}
-
-	/**
-	 * The same browser sent the form of a request that already paired (a
-	 * second click, the back button): say so instead of "expired".
-	 */
-	#usedPage(used: UsedRequest): Response {
-		const who = `<strong>${escapeHtml(used.name)}</strong> (${escapeHtml(used.host)})`;
-		if (used.connected) {
-			return this.#page(
-				200,
-				"Already connected",
-				`<h1>Already connected</h1>
-<p>This connection request was already used: ${who} is connected to the page.</p>
-<p>You can close this page.</p>`,
-			);
-		}
-		// Approved, but the app has not taken its code (yet): after a double
-		// click the browser drops the first answer, which carried it.
-		return this.#page(
-			200,
-			"Already sent",
-			`<h1>Already sent</h1>
-<p>This connection request was already approved and sent to ${who}.</p>
-<p>If your AI app does not show the connection, start again from your AI app.</p>`,
 		);
 	}
 
@@ -753,7 +696,7 @@ export class AuthorizationServer {
 		if (p["code_challenge_method"] !== "S256") {
 			return fail("invalid_request", "code_challenge_method must be S256");
 		}
-		if (!/^[A-Za-z0-9\-._~]{43,128}$/.test(challenge)) {
+		if (!VERIFIER.test(challenge)) {
 			return fail("invalid_request", "code_challenge is malformed");
 		}
 		const resource = p["resource"];
@@ -812,7 +755,7 @@ export class AuthorizationServer {
 		this.#makeRoom(addressId, network);
 		if (this.#pending.size >= this.#maxPending) this.#evictOne();
 		const pending: Pending = {
-			id: random(24),
+			id: randomBase64url(24),
 			expiresAt: Date.now() + PENDING_TTL_MS,
 			ip: network,
 			client,
@@ -966,16 +909,14 @@ export class AuthorizationServer {
 		const form = new URLSearchParams(text);
 		const requestId = form.get("request_id") ?? "";
 		const pending = this.#pending.get(requestId);
-		const browser = this.#browserId(req);
-		const csrf = form.get("csrf") ?? "";
 		if (pending === undefined || pending.expiresAt <= Date.now()) {
-			const used = this.#usedRequest(requestId, browser, csrf);
-			if (used !== undefined) return this.#usedPage(used);
 			return this.#errorPage(
 				400,
 				"This connection request has expired or was already used.",
 			);
 		}
+		const browser = this.#browserId(req);
+		const csrf = form.get("csrf") ?? "";
 		if (
 			browser.cookie !== undefined ||
 			!Bun.CSRF.verify(csrf, {
@@ -1091,10 +1032,9 @@ export class AuthorizationServer {
 		result: Extract<PairingResult, { ok: true }>,
 	): Response {
 		this.#dropPending(pending);
-		this.#rememberUsed(pending);
 		// The address id first, so a load balancer that reads the `/token` body
 		// can route the exchange to this instance, which holds the code (DEC-098).
-		const code = `${pending.addressId}.${random(32)}`;
+		const code = `${pending.addressId}.${randomBase64url(32)}`;
 		if (this.#codes.size >= MAX_CODES) this.#sweepCodes(true);
 		const { id: _id, expiresAt: _expires, ip: _ip, ...request } = pending;
 		const now = Date.now();
@@ -1103,7 +1043,6 @@ export class AuthorizationServer {
 			issuedAt: now,
 			expiresAt: now + this.#authCodeTtlMs,
 			used: false,
-			requestId: pending.id,
 			...(result.subject === undefined ? {} : { subject: result.subject }),
 		});
 		this.#host.logger.info("oauth.paired", {
@@ -1202,7 +1141,7 @@ export class AuthorizationServer {
 				return { id: v };
 			}
 		}
-		const id = random(16);
+		const id = randomBase64url(16);
 		return { id, cookie: this.#visitCookie(id) };
 	}
 
@@ -1687,7 +1626,7 @@ ${cancel}
 		}
 		if (
 			!VERIFIER.test(verifier) ||
-			!constantTimeEqual(s256(verifier), issued.codeChallenge)
+			!constantTimeEqual(sha256Base64url(verifier), issued.codeChallenge)
 		) {
 			throw invalid("code_verifier does not match the code_challenge");
 		}
@@ -1743,8 +1682,6 @@ ${cancel}
 			// Revoked after the code was issued (code reuse, New address).
 			throw invalid("the connection was revoked");
 		}
-		const used = this.#usedRequests.get(issued.requestId);
-		if (used !== undefined) used.connected = true;
 		this.#host.logger.info("oauth.grant_created", {
 			address: shortAddress(issued.addressId),
 			client: issued.client.host,
@@ -2020,51 +1957,6 @@ ${cancel}
 		}
 	}
 
-	/** Note that `pending` paired, for as long as its page could still be sent. */
-	#rememberUsed(pending: Pending): void {
-		if (this.#usedRequests.size >= MAX_USED_REQUESTS) this.#sweepUsed();
-		// Still full of live ones: the oldest pairing goes.
-		const oldest = this.#usedRequests.keys().next();
-		if (this.#usedRequests.size >= MAX_USED_REQUESTS && !oldest.done)
-			this.#usedRequests.delete(oldest.value);
-		this.#usedRequests.set(pending.id, {
-			expiresAt: pending.expiresAt,
-			name: pending.client.name,
-			host: pending.client.host,
-			connected: false,
-		});
-	}
-
-	#sweepUsed(): void {
-		const now = Date.now();
-		for (const [id, used] of this.#usedRequests) {
-			if (used.expiresAt <= now) this.#usedRequests.delete(id);
-		}
-	}
-
-	/**
-	 * The request `id` paired, and this browser is the one its page was made
-	 * for (the form's token checks out); `undefined` otherwise.
-	 */
-	#usedRequest(
-		id: string,
-		browser: { id: string; cookie?: string },
-		csrf: string,
-	): UsedRequest | undefined {
-		const used = this.#usedRequests.get(id);
-		if (used === undefined || used.expiresAt <= Date.now()) return undefined;
-		if (
-			browser.cookie !== undefined ||
-			!Bun.CSRF.verify(csrf, {
-				secret: this.#csrfSecret,
-				sessionId: `${id}.${browser.id}`,
-				maxAge: PENDING_TTL_MS,
-			})
-		)
-			return undefined;
-		return used;
-	}
-
 	/** Drop expired requests; insertion order is expiry order, so stop at the first live one. */
 	#sweepPending(): void {
 		const now = Date.now();
@@ -2092,7 +1984,6 @@ ${cancel}
 	sweep(): void {
 		this.#sweepPending();
 		this.#sweepCodes();
-		this.#sweepUsed();
 		const now = Date.now();
 		this.#viewsPerIp.sweep(now);
 		this.#attemptsPerIp.sweep(now);

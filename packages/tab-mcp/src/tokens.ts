@@ -1,4 +1,5 @@
-import type { TokenKind, TokenRecord, TokenStore } from "./store/types.ts";
+import { randomBase64url, sha256Base64url } from "./crypto.ts";
+import type { TokenKind, TokenStore } from "./store/types.ts";
 
 /** Prefixes make leaked tokens recognisable to secret scanners. */
 const PREFIX: Record<TokenKind, string> = {
@@ -6,71 +7,33 @@ const PREFIX: Record<TokenKind, string> = {
 	refresh: "tmcp_rt_",
 };
 
-function random(bytes: number): string {
-	return crypto
-		.getRandomValues(new Uint8Array(bytes))
-		.toBase64({ alphabet: "base64url", omitPadding: true });
-}
-
 /** A new opaque token with 256 bits of randomness. */
 export function newToken(kind: TokenKind): string {
-	return PREFIX[kind] + random(32);
+	return PREFIX[kind] + randomBase64url(32);
 }
 
 /** A random identifier with a readable prefix, e.g. `g_…`, `s_…`. */
 export function newId(prefix: string): string {
-	return `${prefix}_${random(12)}`;
+	return `${prefix}_${randomBase64url(12)}`;
 }
 
 /** SHA-256 of a token, base64url without padding: the store key. */
 export function hashToken(token: string): string {
-	return new Bun.CryptoHasher("sha256")
-		.update(token)
-		.digest()
-		.toBase64({ alphabet: "base64url", omitPadding: true });
+	return sha256Base64url(token);
 }
 
 /** The parts of a grant needed to issue tokens for it. */
 export interface GrantInput {
-	grantId?: string;
+	grantId: string;
 	addressId: string;
 	clientId: string;
 	clientName: string;
-	scopes?: string[];
-	grantCreatedAt?: number;
+	scopes: string[];
+	grantCreatedAt: number;
 	/** The hashed identity of an identity-bound grant (DEC-077). */
 	subject?: string;
 	/** Refreshes need a client assertion (DEC-106). */
 	clientAuth?: "private_key_jwt";
-}
-
-/**
- * Issue an access token for a grant and store its hash, without OAuth. An
- * internal helper for tests that need a token but not the flow; the token
- * endpoint issues through `issueTokenPair`.
- */
-export async function issueAccessToken(
-	store: TokenStore,
-	grant: GrantInput,
-	options: { ttlMs: number; now?: number },
-): Promise<{ token: string; record: TokenRecord }> {
-	const now = options.now ?? Date.now();
-	const token = newToken("access");
-	const record: TokenRecord = {
-		hash: hashToken(token),
-		kind: "access",
-		grantId: grant.grantId ?? newId("g"),
-		addressId: grant.addressId,
-		clientId: grant.clientId,
-		clientName: grant.clientName,
-		scopes: grant.scopes ?? ["tools"],
-		grantCreatedAt: grant.grantCreatedAt ?? now,
-		issuedAt: now,
-		expiresAt: now + options.ttlMs,
-	};
-	if (grant.subject !== undefined) record.subject = grant.subject;
-	await store.put(record);
-	return { token, record };
 }
 
 /**
@@ -80,11 +43,7 @@ export async function issueAccessToken(
  */
 export async function issueTokenPair(
 	store: TokenStore,
-	grant: Required<Omit<GrantInput, "scopes" | "subject" | "clientAuth">> & {
-		scopes: string[];
-		subject?: string;
-		clientAuth?: "private_key_jwt";
-	},
+	grant: GrantInput,
 	options: {
 		accessTtlMs: number;
 		refreshTtlMs: number;
