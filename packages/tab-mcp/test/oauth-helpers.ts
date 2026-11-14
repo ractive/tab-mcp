@@ -7,7 +7,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isLoopbackHost, isPublicIp } from "../src/ip.ts";
 import { createLogger } from "../src/log.ts";
+import type { UrlPolicy } from "../src/oauth/cimd.ts";
 import {
 	type CreateRelayOptions,
 	createTestRelay,
@@ -17,6 +19,19 @@ import {
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenStore } from "../src/store/types.ts";
 import { LogCapture } from "./helpers.ts";
+
+/**
+ * The CIMD fetch's rules for a test server on loopback: `http:` too, any
+ * port, loopback addresses, and the test certificate's CA.
+ */
+export function testUrls(ca?: string): UrlPolicy {
+	return {
+		schemes: ["https:", "http:"],
+		anyPort: true,
+		allowsAddress: (a) => isPublicIp(a) || isLoopbackHost(a),
+		...(ca === undefined ? {} : { ca }),
+	};
+}
 
 let certificate: Promise<{ cert: string; key: string }> | undefined;
 
@@ -152,7 +167,7 @@ export function startOAuthRelay(
 			logger: logs.logger,
 			...options,
 		},
-		{ cimd: { ca: cimd.ca }, ...hooks },
+		{ cimdUrls: testUrls(cimd.ca), ...hooks },
 	);
 	return {
 		relay,

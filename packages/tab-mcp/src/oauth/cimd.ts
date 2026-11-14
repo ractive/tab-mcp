@@ -11,7 +11,8 @@
  * is fetched under the same rules (DEC-106).
  */
 
-import { isLoopbackHost, isPublicIp, parseIpv4, parseIpv6 } from "../ip.ts";
+import { readCapped } from "../body.ts";
+import { isPublicIp, parseIpv4, parseIpv6 } from "../ip.ts";
 import { isAlgorithm, JWT_ALGORITHMS, type JwtAlgorithm } from "../jwt.ts";
 import type { Logger } from "../log.ts";
 import { RateLimiter } from "../ratelimit.ts";
@@ -56,30 +57,48 @@ export class ClientMetadataError extends Error {
 }
 
 /**
- * Test-only relaxations (never from configuration): loopback hosts, any port,
- * `http:`, and an extra CA for a self-signed test server.
+ * Which client ids, `jwks_uri`s and addresses the fetch accepts. The relay
+ * always uses `PUBLIC_HTTPS`; only tests pass another (through
+ * `createTestRelay`, never from configuration).
  */
-export interface CimdTestMode {
-	ca?: string;
+export interface UrlPolicy {
+	/** The schemes a client id or `jwks_uri` may have. */
+	readonly schemes: readonly string[];
+	/** Whether a client id or `jwks_uri` may name a port. */
+	readonly anyPort: boolean;
+	/** Whether the fetch may connect to this IP address. */
+	allowsAddress(address: string): boolean;
+	/** An extra CA for TLS. */
+	readonly ca?: string;
 }
+
+/** `https:` on the default port, public addresses only. */
+export const PUBLIC_HTTPS: UrlPolicy = {
+	schemes: ["https:"],
+	anyPort: false,
+	allowsAddress: isPublicIp,
+};
+
+/** Longest client metadata document or JWKS document read. */
+const MAX_DOCUMENT_BYTES = 65_536;
 
 export interface ClientMetadataFetcherOptions {
 	/** Accepted client id hosts; empty = any. */
 	allowedHosts?: readonly string[];
 	logger?: Logger;
 	timeoutMs?: number;
-	maxBytes?: number;
 	/** Resolve a host name to its addresses (tests replace it). */
 	lookup?: (hostname: string) => Promise<string[]>;
 	fetch?: typeof fetch;
-	testMode?: CimdTestMode;
+	/** `PUBLIC_HTTPS` unless a test says otherwise. */
+	urls?: UrlPolicy;
 	now?: () => number;
 }
 
 /** How `validateDocument` reads a document. */
 export interface DocumentOptions {
-	/** Test mode: a `jwks_uri` may use `http:` and any port, like the client id. */
-	test?: boolean;
+	/** What a `jwks_uri` may be, as the client id (`PUBLIC_HTTPS`). */
+	urls?: UrlPolicy;
 	/** A `private_key_jwt` document fell back to `none` (DEC-104), and why. */
 	onFallback?: (reason: string) => void;
 }
@@ -263,20 +282,18 @@ export class ClientMetadataFetcher {
 	readonly #allowedHosts: readonly string[];
 	readonly #logger: Logger | undefined;
 	readonly #timeoutMs: number;
-	readonly #maxBytes: number;
 	readonly #lookup: (hostname: string) => Promise<string[]>;
 	readonly #fetch: typeof fetch;
-	readonly #testMode: CimdTestMode | undefined;
+	readonly #urls: UrlPolicy;
 	readonly #now: () => number;
 
 	constructor(options: ClientMetadataFetcherOptions = {}) {
 		this.#allowedHosts = options.allowedHosts ?? [];
 		this.#logger = options.logger;
 		this.#timeoutMs = options.timeoutMs ?? 5000;
-		this.#maxBytes = options.maxBytes ?? 65_536;
 		this.#lookup = options.lookup ?? defaultLookup;
 		this.#fetch = options.fetch ?? fetch;
-		this.#testMode = options.testMode;
+		this.#urls = options.urls ?? PUBLIC_HTTPS;
 		this.#now = options.now ?? Date.now;
 	}
 
@@ -340,7 +357,7 @@ export class ClientMetadataFetcher {
 				signal,
 			);
 			meta = validateDocument(response.doc, clientId, url, {
-				test: this.#testMode !== undefined,
+				urls: this.#urls,
 				onFallback: (reason) =>
 					this.#logger?.info("oauth.cimd_auth_fallback", {
 						host: url.host,
@@ -450,7 +467,7 @@ export class ClientMetadataFetcher {
 	}
 
 	#checkJwksUri(jwksUri: string): URL {
-		const url = parseJwksUri(jwksUri, this.#testMode !== undefined);
+		const url = parseJwksUri(jwksUri, this.#urls);
 		if (url === undefined) {
 			throw new ClientMetadataError(
 				"invalid_jwks_uri",
@@ -466,7 +483,7 @@ export class ClientMetadataFetcher {
 				`This relay does not accept AI apps from ${url.host}.`,
 			);
 		}
-		if (isIpLiteral(url.hostname) && !this.#addressAllowed(url.hostname)) {
+		if (isIpLiteral(url.hostname) && !this.#urls.allowsAddress(url.hostname)) {
 			throw this.#notLoaded("private_address", url);
 		}
 		return url;
@@ -485,10 +502,7 @@ export class ClientMetadataFetcher {
 		} catch {
 			throw refuse("The AI app's client_id is not a URL.");
 		}
-		const test = this.#testMode !== undefined;
-		const scheme =
-			url.protocol === "https:" || (test && url.protocol === "http:");
-		if (!scheme) {
+		if (!this.#urls.schemes.includes(url.protocol)) {
 			throw refuse("The AI app's client_id must be an https:// URL.");
 		}
 		// Canonical form only: this rejects dot segments, fragments' oddities,
@@ -504,7 +518,7 @@ export class ClientMetadataFetcher {
 		if (url.pathname === "/" || url.pathname === "") {
 			throw refuse("The AI app's client_id must have a path.");
 		}
-		if (url.port !== "" && !test) {
+		if (url.port !== "" && !this.#urls.anyPort) {
 			throw refuse("The AI app's client_id must use the default port.");
 		}
 		if (
@@ -516,15 +530,10 @@ export class ClientMetadataFetcher {
 				`This relay does not accept AI apps from ${url.host}.`,
 			);
 		}
-		if (isIpLiteral(url.hostname) && !this.#addressAllowed(url.hostname)) {
+		if (isIpLiteral(url.hostname) && !this.#urls.allowsAddress(url.hostname)) {
 			throw this.#notLoaded("private_address", url);
 		}
 		return url;
-	}
-
-	#addressAllowed(address: string): boolean {
-		if (isPublicIp(address)) return true;
-		return this.#testMode !== undefined && isLoopbackHost(address);
 	}
 
 	/**
@@ -558,7 +567,7 @@ export class ClientMetadataFetcher {
 		}
 		if (
 			addresses.length === 0 ||
-			!addresses.every((a) => this.#addressAllowed(a))
+			!addresses.every((a) => this.#urls.allowsAddress(a))
 		) {
 			throw this.#notLoaded("private_address", url);
 		}
@@ -586,9 +595,7 @@ export class ClientMetadataFetcher {
 				? {
 						tls: {
 							...(isIpLiteral(hostname) ? {} : { serverName: hostname }),
-							...(this.#testMode?.ca === undefined
-								? {}
-								: { ca: this.#testMode.ca }),
+							...(this.#urls.ca === undefined ? {} : { ca: this.#urls.ca }),
 						},
 					}
 				: {};
@@ -631,25 +638,14 @@ export class ClientMetadataFetcher {
 	async #readLimited(response: Response, url: URL): Promise<string> {
 		const tooLarge = () => this.#notLoaded("too_large", url);
 		const length = Number(response.headers.get("content-length") ?? "0");
-		if (length > this.#maxBytes) throw tooLarge();
-		const reader = response.body?.getReader();
-		if (reader === undefined) return "";
-		const chunks: Uint8Array[] = [];
-		let total = 0;
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			total += value.byteLength;
-			if (total > this.#maxBytes) {
-				await reader.cancel().catch(() => {});
-				throw tooLarge();
-			}
-			chunks.push(value);
-		}
+		if (length > MAX_DOCUMENT_BYTES) throw tooLarge();
+		const bytes = await readCapped(
+			response.body?.getReader(),
+			MAX_DOCUMENT_BYTES,
+		);
+		if (bytes === "too_large") throw tooLarge();
 		try {
-			return new TextDecoder("utf-8", { fatal: true }).decode(
-				Buffer.concat(chunks),
-			);
+			return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 		} catch {
 			throw this.#notLoaded("fetch_failed", url, "bad_utf8");
 		}
@@ -803,7 +799,7 @@ function clientAuth(
 	if (method === undefined || method === "none") return { method: "none" };
 	const checked: KeysOrProblem =
 		method === "private_key_jwt"
-			? privateKeyJwt(d, url, options.test === true)
+			? privateKeyJwt(d, url, options.urls ?? PUBLIC_HTTPS)
 			: {
 					problem: "unsupported_method",
 					message:
@@ -833,7 +829,7 @@ type KeysOrProblem =
 function privateKeyJwt(
 	d: Record<string, unknown>,
 	url: URL,
-	test: boolean,
+	urls: UrlPolicy,
 ): KeysOrProblem {
 	const jwksUri = d["jwks_uri"];
 	if (jwksUri === undefined) {
@@ -853,7 +849,7 @@ function privateKeyJwt(
 	// The scheme and host of the client id, which passed the client id rules:
 	// the keys are the verified host's own.
 	const parsed =
-		typeof jwksUri === "string" ? parseJwksUri(jwksUri, test) : undefined;
+		typeof jwksUri === "string" ? parseJwksUri(jwksUri, urls) : undefined;
 	if (
 		parsed === undefined ||
 		parsed.protocol !== url.protocol ||
@@ -881,11 +877,11 @@ function privateKeyJwt(
 }
 
 /**
- * A `jwks_uri` as the relay accepts it: an absolute `https:` URL (`http:`
- * only in test mode) of at most 2048 characters, in canonical form, without
- * credentials or fragment, on the default port (any port in test mode).
+ * A `jwks_uri` as the relay accepts it: an absolute URL with a scheme of
+ * `urls` (`https:`) of at most 2048 characters, in canonical form, without
+ * credentials or fragment, on the default port (unless `urls` allows any).
  */
-function parseJwksUri(value: string, test: boolean): URL | undefined {
+function parseJwksUri(value: string, urls: UrlPolicy): URL | undefined {
 	if (value.length > MAX_CLIENT_ID_LENGTH) return undefined;
 	let url: URL;
 	try {
@@ -893,13 +889,13 @@ function parseJwksUri(value: string, test: boolean): URL | undefined {
 	} catch {
 		return undefined;
 	}
-	const scheme =
-		url.protocol === "https:" || (test && url.protocol === "http:");
-	if (!scheme || url.href !== value) return undefined;
+	if (!urls.schemes.includes(url.protocol) || url.href !== value) {
+		return undefined;
+	}
 	if (url.username !== "" || url.password !== "" || url.hash !== "") {
 		return undefined;
 	}
-	if (url.port !== "" && !test) return undefined;
+	if (url.port !== "" && !urls.anyPort) return undefined;
 	return url;
 }
 

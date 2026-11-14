@@ -16,8 +16,9 @@ import type { HttpRequestMessage } from "../src/protocol.ts";
 import { RateLimiter } from "../src/ratelimit.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
-import { issueAccessToken, issueTokenPair, newId } from "../src/tokens.ts";
+import { issueTokenPair, newId } from "../src/tokens.ts";
 import {
+	issueAccessToken,
 	mcpPost,
 	rpc,
 	ScriptedTab,

@@ -8,7 +8,7 @@ import { createLogger } from "./log.ts";
 import { type CreateRelayOptions, createRelay, type Relay } from "./relay.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import type { TokenStore } from "./store/types.ts";
-import { issueAccessToken } from "./tokens.ts";
+import { issueAccessToken } from "./test-token.ts";
 
 export { tokenStoreConformance } from "./store/conformance.ts";
 

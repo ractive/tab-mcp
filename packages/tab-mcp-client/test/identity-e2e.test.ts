@@ -28,6 +28,7 @@ import {
 	quietLogger,
 	startCimdServer,
 	TestBrowser,
+	testUrls,
 } from "../../tab-mcp/test/oauth-helpers.ts";
 import {
 	type OidcProvider,
@@ -124,7 +125,7 @@ beforeAll(async () => {
 			store: new MemoryTokenStore(),
 			logger: quietLogger,
 		},
-		{ cimd: { ca: cimd.ca } },
+		{ cimdUrls: testUrls(cimd.ca) },
 	);
 	window = new Window({ url: `${PAGE_ORIGIN}/` });
 	clientId = cimd.serve(

@@ -579,9 +579,7 @@ store fails or does not answer in time, it answers `503`:
 `reason` is `store_unavailable` (the store threw) or `store_timeout` (no answer within
 a second). The answer never carries the store's error; the log line `health.store` has
 its name (`error`, or `timeout`). One probe runs at a time and its result is reused for
-a second, so a flood of `/healthz` does not reach the store. After a timeout, while
-that read still hangs, the next read is tried after 30 seconds (until then the answer
-stays `store_timeout`). While the store fails, MCP
+a second, so a flood of `/healthz` does not reach the store. While the store fails, MCP
 requests get 503 too, so AI apps keep their tokens and retry; tab sessions stay open.
 
 A `503` means that the process runs but cannot check tokens. Restarting rarely fixes

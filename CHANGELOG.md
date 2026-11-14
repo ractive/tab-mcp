@@ -8,6 +8,17 @@ with the Git tag `client-v<version>`, `relay-v<version>` or, for tab-mcp for Chr
 
 ## @ractive-ch/tab-mcp-client
 
+### Unreleased
+
+#### Removed
+
+- The copy of an address secret from the key of 0.4 and older
+  (`tab-mcp:secret:<relay origin>`, DEC-083): the library reads only
+  `tab-mcp:secret:<relay origin>:<server.name>` (or `storageKey`). A visitor whose last
+  visit to a page was while the page ran client 0.4 or older gets a new address there
+  and pairs their AI apps again; anyone whose page has loaded client 0.5 or later since
+  keeps their address. The core is 73 bytes smaller (6143 B gzipped).
+
 ### [0.16.1][client-0.16.1] - 2026-11-13
 
 #### Fixed
@@ -770,6 +781,30 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
 
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
+
+### Unreleased
+
+#### Removed
+
+- The "Already connected" / "Already sent" page and the memory of up to 10 000 paired
+  requests behind it. A pairing form sent again after it paired (a double click, the
+  back button) gets the page every expired request gets: "This connection request has
+  expired or was already used." The first submit's code is not affected.
+- `/healthz` no longer counts reads that missed their one-second deadline: each probe
+  after the reused second reads the store again, also while an earlier read still
+  hangs. Before, a new read was tried only every 30 seconds while one hung. The
+  built-in stores answer synchronously and never hang; a custom store that hangs for
+  good now collects one pending read per second of probing.
+
+#### Changed
+
+- Internal: one module each for random values, SHA-256 and the constant-time
+  comparison (`crypto.ts`), the bounded body reader (`body.ts`), the `exp`/`iat`/`nbf`
+  checks of tab and client assertions (`checkTimes` in `jwt.ts`) and a client id's
+  host; the CIMD fetch takes its URL and address rules as one policy object instead of
+  a test-mode flag; unused options (`PairingCodes`' `maxAttempts`, the fetcher's
+  `maxBytes`) and the token helper for tests are gone from the production code. No
+  change in behaviour.
 
 ### [0.10.2][relay-0.10.2] - 2026-11-13
 
