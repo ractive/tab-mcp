@@ -27,8 +27,8 @@ there, or "Read all sites without a click"); on any other tab they do nothing an
 - On the page's own origin (scheme, host and port) they run at once, as a link on the
   page would.
 - To another origin they ask you first, in the side panel or a notification as page tools
-  do, naming the site the tab is on and the address it would open; Allow and Don't allow
-  only, no "Don't ask again" (a page's text could tell the AI app to go anywhere). Back or
+  do, naming the site the tab is on and the address it would open; "Allow once" and Don't
+  allow only, no "Don't ask again" (a page's text could tell the AI app to go anywhere). Back or
   forward to a page the extension cannot see (another origin: Chrome lists only the
   page's own) asks too, saying its address is not known. A reload never asks.
 - Only `http:` and `https:` addresses, without a user name or password.
@@ -238,7 +238,8 @@ A tag `extension-v<version>` on main (the version in `package.json`) builds the 
 and creates the GitHub release with it (`.github/workflows/extension-release.yml`); the
 "Extension publish" workflow uploads a release's zip to the Chrome Web Store. The owner's
 setup, the listing, the permission justifications and the review notes:
-`kb/operations/chrome-web-store.md`.
+`kb/operations/chrome-web-store.md`. The listing's screenshots are in `assets/store/`;
+`bun scripts/screenshots.ts` takes them again (Chrome for Testing, `CHROME_PATH`).
 
 ## Tests
 

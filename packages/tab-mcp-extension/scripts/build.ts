@@ -112,7 +112,7 @@ export function createManifest(
 		name: "tab-mcp for Chrome",
 		version,
 		description:
-			"Offers the WebMCP tools of the page in front to your AI app outside the browser, through a tab-mcp relay.",
+			"Lets an AI app outside the browser call the WebMCP tools of the page in front and open pages in that tab, through a tab-mcp relay.",
 		minimum_chrome_version: "116",
 		icons,
 		action: { default_title: "tab-mcp for Chrome", default_icon: icons },

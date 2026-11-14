@@ -10,7 +10,7 @@ tags:
   - operations
   - release
   - extension
-timestamp: 2026-11-13T12:00:00+01:00
+timestamp: 2026-11-14T12:00:00+01:00
 ---
 
 # tab-mcp for Chrome in the Chrome Web Store
@@ -119,8 +119,9 @@ nothing and installs nothing. Dependabot proposes its updates.
 
 - **Name:** tab-mcp for Chrome (from the manifest)
 - **Summary:** the manifest's `description`, set in `createManifest`
-  (`scripts/build.ts`): "Offers the WebMCP tools of the page in front to your AI app
-  outside the browser, through a tab-mcp relay." (at most 132 characters)
+  (`scripts/build.ts`): "Lets an AI app outside the browser call the WebMCP tools of the
+  page in front and open pages in that tab, through a tab-mcp relay." (130 characters; at
+  most 132, which `test/unit.test.ts` checks)
 - **Category:** Developer Tools
 - **Language:** English
 - **Homepage:** <https://ractive.ch/tab-mcp/>
@@ -168,7 +169,7 @@ registered, and opening pages in that tab.
 | `activeTab` | Read the tab the user clicked the icon on: its address, title, language and the WebMCP tools the page registered, also after the AI app opened another page of the same origin in it. No access to other tabs; another origin in that tab needs another click (or the optional host access). Opening pages in the tab (an address, back, forward, reload) needs no permission; to another origin it asks the user first. |
 | `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
-| `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front (Allow; closing it declines). |
+| `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
 | `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Read all sites without a click": read every http(s) tab's WebMCP tools without a click on the icon. |
 
@@ -214,12 +215,22 @@ sends.
 
 Check the example storefront and the Chrome version before each submission.
 
-**Screenshots (1280×800):** the side panel with a page's tools and AI access on; the
-pairing address and code with "How do I add it?" open; a question in the side panel
-(Don't allow, Allow once, Don't ask again on <host>) with the arguments; Claude Code
-calling a page tool. The panel's look changed with iteration 39
-([the look](../design/extension-look.md)): screenshots taken before it are to be taken
-again before the next submission.
+**Screenshots (1280×800, light):** in `packages/tab-mcp-extension/assets/store/`, each an
+example shop page (`https://bakery.example`, made up) beside the side panel, in the look
+of iteration 39 ([the look](../design/extension-look.md)):
+
+1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads" and the
+   "Ask first" switches) and "Read all sites without a click";
+2. `2-pairing.png`: no AI app paired yet, the address and the pairing code;
+3. `3-question.png`: a question for a page tool with its arguments (Don't allow, "Allow
+   once", "Don't ask again on bakery.example");
+4. `4-navigation.png`: a question before the tab goes to another site.
+
+`bun scripts/screenshots.ts` in `packages/tab-mcp-extension` takes them again, from the
+store build in Chrome for Testing (`CHROME_PATH`, as for the end-to-end tests), with a relay
+in the process whose addresses read as the hosted relay's. Take them again when the panel's
+look changes, and look at each before the upload. A fifth one, an AI app calling a page
+tool, is taken by hand if wanted.
 
 # Citations
 
