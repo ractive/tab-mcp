@@ -955,7 +955,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 					features: [{ name: "prefers-color-scheme", value }],
 				});
 			await scheme("light");
-			// Wait for the "Don't ask for these tools" button to take clicks
+			// Wait for the "Turn off Ask first" button to take clicks
 			// again: it is flat for a moment after the question went.
 			await panel.waitFor(takesClicks("#allow-tools"));
 			expect(await read()).toEqual({
@@ -1032,16 +1032,16 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		}
 	}, 90_000);
 
-	test("Don't ask for these tools and Ask first for these tools, for the tools listed at the click only", async () => {
+	test("Turn off Ask first and Turn on Ask first, for the tools listed at the click only", async () => {
 		const head = `document.getElementById("allow-tools")`;
-		const DONT_ASK = JSON.stringify("Don't ask for these tools");
-		const ASK = JSON.stringify("Ask first for these tools");
+		const TURN_OFF = JSON.stringify("Turn off Ask first");
+		const TURN_ON = JSON.stringify("Turn on Ask first");
 		// Off for a moment after a question went (the layout moved).
 		await stack.panel.waitFor(
-			`!document.getElementById("tools-head").hidden && ${head}.textContent === ${DONT_ASK} && ${takesClicks("#allow-tools")}`,
+			`!document.getElementById("tools-head").hidden && ${head}.textContent === ${TURN_OFF} && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === ${ASK}`);
+		await stack.panel.waitFor(`${head}.textContent === ${TURN_ON}`);
 		expect(await stack.panel.eval(asksFirst("place_order", false))).toBe(true);
 		const allowed = await call(stack, "page_place_order", { item: "all" });
 		expect(allowed.content[0]?.text).toContain("all");
@@ -1056,7 +1056,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The button changed under the pointer (another label, one more tool):
 		// a click right then allows nothing.
 		await stack.panel.waitFor(
-			`${head}.getAttribute("aria-label") === "Don't ask for the 2 tools listed on ${SITE}, for every paired AI app"`,
+			`${head}.getAttribute("aria-label") === "Turn off Ask first for the 2 tools listed on ${SITE}, for every paired AI app"`,
 		);
 		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
 		// Not `disabled`: it stays in the tab order (EQ 11).
@@ -1072,18 +1072,18 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");
 		expect((await late).isError).toBe(true);
-		// One asks again: "Don't ask" again takes the late one too.
+		// One asks again: "Turn off Ask first" again takes the late one too.
 		await stack.panel.waitFor(
-			`${head}.textContent === ${DONT_ASK} && ${takesClicks("#allow-tools")}`,
+			`${head}.textContent === ${TURN_OFF} && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === ${ASK}`);
+		await stack.panel.waitFor(`${head}.textContent === ${TURN_ON}`);
 		expect((await call(stack, "page_late_order")).isError).toBeFalsy();
-		// "Ask first" (once it may be clicked: its label just changed): every
+		// "Turn on Ask first" (once it may be clicked: its label just changed): every
 		// one asks first again.
 		await stack.panel.waitFor(takesClicks("#allow-tools"));
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === ${DONT_ASK}`);
+		await stack.panel.waitFor(`${head}.textContent === ${TURN_OFF}`);
 		const asks = call(stack, "page_place_order", { item: "asks" });
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");

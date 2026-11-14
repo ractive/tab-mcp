@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- tab-mcp for Chrome's button over the tool list (`extension/ask-first-button`, owner): "Turn off Ask first" / "Turn on Ask first" instead of "Don't ask for these tools" / "Ask first for these tools", the word of the per-tool switch; its accessible name names the count, the site and every paired AI app both ways (`allowAllLabel`, "1 tool" for one); README, threat models, `design/extension-look.md` and the four store screenshots (each shows the button) follow; DEC-176
+
 - Review follow-ups (`docs/review-followups`): PRIVACY.md, the threat models, the README and the store doc use the panel's names ("Don't ask again on <host>", the "Ask first" switch, "Read all sites without a click", "Allow once"); the manifest's `description` names the navigation (130 of 132 characters, checked in `test/unit.test.ts`); the store screenshots taken again in the look of iteration 39 (`assets/store/`, `scripts/screenshots.ts`); an Outcome section on the review of 2026-11-13 (iterations 29 to 41, PRs, releases, what stays open)
 - CI's SIGILL in the store package's e2e tests (`ci/chrome-sigill`): a Chrome bug, a libc++ assertion in the browser process when a content script on `activeTab` alone has `document.modelContext.getTools()` pending while its tab goes to another origin (156, 157 and Chromium 160 alike; SIGTRAP on macOS); the tests wait for the extension's reads to settle before such a navigation (`readsSettled`), the takeover test's timeout says what the panel showed; `operations/chrome-webmcp-crash.md`, DEC-172
 
