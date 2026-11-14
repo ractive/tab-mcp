@@ -3604,8 +3604,10 @@ is a list of origins and is passed through to the native registration (DEC-143).
   flight at a `toolchange` is not shared after it.
 - The worker reads the page only while someone needs it: an open side panel, or a
   connection to the relay that is not `disconnected`. A tab switch, a load or a
-  `toolchange` with AI access off and no panel reads nothing; a panel that opens and a
-  connection that comes up read the page then.
+  `toolchange` with AI access off and no panel reads nothing; a panel that opens reads the
+  page then, and a connection reads it at `connecting` (so the tools offered once it is
+  up are the tab's in front) and again at `connected`. The sharing window uses a
+  monotonic clock (`performance.now()`).
 - Per page load in the test build (host access), counted in the content script:
   4 calls before, 1 after with the panel or the connection; 2.1 before, 0 after with
   neither. Navigating 0 to 400 ms after the load crashed Chrome for Testing 157 in 16 of

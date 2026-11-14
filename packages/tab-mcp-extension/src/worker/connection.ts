@@ -381,12 +381,16 @@ export class Connection {
 			"statechange",
 			(event) => {
 				const { state, reason } = event.detail;
+				// Not read while nobody needed the tools (`#readsWanted`): read as
+				// the connection is being made, so that the tools offered once it
+				// is up are the tab's in front, and again once it is (the content
+				// script answers both with one `getTools()`).
+				if (state === "connecting" || state === "connected")
+					void this.#bridge.refresh();
 				if (state === "connected") {
 					this.#problem = undefined;
 					void this.#setReplaced(undefined);
 					void this.#setAiOn(true);
-					// Not read while nobody needed the tools (`#readsWanted`).
-					void this.#bridge.refresh();
 				} else if (reason === "user") void this.#setAiOn(false);
 				this.#changed();
 			},

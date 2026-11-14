@@ -88,7 +88,11 @@ export class ToolReads {
 	#startedAt = 0;
 	#pending = false;
 
-	constructor(context: ModelContext, now: () => number = Date.now) {
+	/** `now`: a monotonic clock (milliseconds); the wall clock can step back. */
+	constructor(
+		context: ModelContext,
+		now: () => number = () => performance.now(),
+	) {
 		this.#context = context;
 		this.#now = now;
 		// Optional: a page's own stand-in (a test's) may not be an EventTarget.
