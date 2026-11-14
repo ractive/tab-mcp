@@ -12,13 +12,8 @@
  */
 
 import { CONTENT_SCRIPT, CONTENT_SCRIPT_ID } from "./messages.ts";
-import {
-	isContentEvent,
-	isPanelSender,
-	PANEL_PORT,
-	startProblem,
-	type WorkerMessage,
-} from "./protocol.ts";
+import { attachPanel } from "./panel-port.ts";
+import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 
@@ -136,40 +131,15 @@ chrome.runtime.onConnect.addListener((port) => {
 		port.disconnect();
 		return;
 	}
-	let gone = false;
-	port.onDisconnect.addListener(() => {
-		gone = true;
-	});
-	// Chrome hands a message only to the listeners there are, so the panel's
-	// messages are taken now and each waits on the panel's attachment: the
-	// callbacks of one promise run in the order they were added, so the
-	// messages keep theirs, with no buffer of their own. A failed start
-	// shows the panel why and drops what waited on it; the panel's next
-	// message tries again.
-	let attached: Promise<((message: unknown) => void) | undefined> | undefined;
-	const attach = () => {
-		attached ??= ready().then(
-			(connection) => (gone ? undefined : connection.addPanel(port)),
-			(error: unknown) => {
-				attached = undefined;
-				const message: WorkerMessage = {
-					type: "state",
-					state: startProblem(error),
-				};
-				try {
-					if (!gone) port.postMessage(message);
-				} catch {
-					// Closed meanwhile.
-				}
-				return undefined;
-			},
-		);
-		return attached;
-	};
-	port.onMessage.addListener((message: unknown) => {
-		void attach().then((receive) => receive?.(message));
-	});
-	void attach();
+	attachPanel(
+		ready,
+		{
+			postMessage: (message) => port.postMessage(message),
+			onMessage: (listener) => port.onMessage.addListener(listener),
+			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
+		},
+		(connection) => connection.addPanel(port),
+	);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -179,10 +149,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 /**
  * A notification's answer: its button Allow; its closing is Don't allow; a
  * click on its body opens the side panel of the tab's window, where the
- * whole question is (if Chrome refuses, the notification comes back). In the test build on the worker's
- * global object too, for the DevTools Protocol, which cannot click a
- * notification: the end-to-end tests answer through the same functions a
- * click calls. Not in the store build (ES 7).
+ * whole question is (if Chrome refuses, the notification comes back). In
+ * the test build on the worker's global object too, for the DevTools
+ * Protocol, which cannot click a notification: the end-to-end tests answer
+ * through the same functions a click calls. Not in the store build (ES 7).
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));

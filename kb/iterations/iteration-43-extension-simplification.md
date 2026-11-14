@@ -8,8 +8,8 @@ description: >-
   Chrome refuses the side panel after a click on a notification, the notification asks
   again (EQ 18, DEC-181). Starter and attachWhenStarted are gone: a panel's messages wait
   on the start as callbacks of one promise, with no buffer and no cap (EQ 19, DEC-181).
-  "Allow once" is a default button like "Don't allow" (DEC-180). About 420 lines of
-  source and 330 of tests fewer.
+  "Allow once" is a default button like "Don't allow" (DEC-180). About 370 lines of
+  source and 220 of tests fewer.
 timestamp: 2026-11-14T20:00:00+01:00
 tags: [iteration, extension, review, simplification]
 ---
@@ -51,20 +51,24 @@ because the DevTools Protocol gives no user gesture.
 - [x] `background.ts` keeps one start promise (`ready()`), forgotten when it rejects, so
   the next Chrome event or panel message tries again; `started` holds the connection
   for the notification click, which must not wait
-- [x] A panel's port: the worker listens from the moment it connects; each message waits
-  on the port's attachment (`attach()`, one promise per port, reset on a failed start),
-  so Chrome's order is kept by the order of the callbacks. `Connection.addPanel` returns
-  the receiver instead of taking an `early` list
+- [x] A panel's port (`attachPanel` in `src/panel-port.ts`, about 40 lines with its
+  comments): the worker listens from the moment it connects; each message waits on the
+  port's attachment (one promise per port, reset on a failed start), so Chrome's order
+  is kept by the order of the callbacks. `Connection.addPanel` returns the receiver
+  instead of taking an `early` list
 - [x] The cap on early messages (64) is not needed and is gone: nothing is buffered by
   hand; the waiting callbacks live only while one start runs (opening IndexedDB), and
   only the extension's own panel page can send them
-- [x] Tests: the `Starter` and `attachWhenStarted` unit tests removed; the e2e suite
-  opens panels through this path in every block
+- [x] Tests: the `Starter` and `attachWhenStarted` unit tests replaced by three for
+  `attachPanel` (order across a start, a failed start and the next message, a port gone
+  before the start); the e2e suite opens panels through this path in every block
 
 What changes on a failed start: messages that waited on it are dropped (before, they were
 kept and replayed), and a panel that connected meanwhile is attached at its next message,
-not as soon as another event's start succeeds. Its `hello` (its window) can be lost that
-way; the panel says "Close and open this panel to try again", which sends it again.
+not as soon as another event's start succeeds. What the panel says once on connecting
+(`hello` with its window, `visible`, `pair`) is kept, the last of each, and said again
+when the panel is attached after a failed start (review of PR 140: without it the panel's
+window was lost, and every question also went out as a notification).
 
 ## The question card's buttons (DEC-180)
 
@@ -81,8 +85,8 @@ way; the panel says "Close and open this panel to try again", which sends it aga
 
 | | removed | added | net |
 |---|---|---|---|
-| Source (`src/`, `scripts/build.ts`) | 548 | 130 | −418 |
-| Tests (`test/`) | 413 | 87 | −326 |
+| Source (`src/`, `scripts/build.ts`) | 556 | 183 | −373 |
+| Tests (`test/`) | 391 | 170 | −221 |
 
 ## Checks
 

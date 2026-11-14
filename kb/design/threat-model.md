@@ -399,8 +399,9 @@ did, by connecting the extension.
   shows it in a panel that connects and tries the start again at the next event or
   panel message, instead of leaving the panel silently dead. A panel's messages wait
   on the start in their order (the callbacks of one promise, no buffer of their own);
-  what waited on a start that failed is dropped, and the panel says to close and open
-  it (iteration 43, DEC-181).
+  what waited on a start that failed is dropped, apart from the last of what the panel
+  says on connecting (its window, on screen, pairing), which the connection hears when
+  the panel's next message attaches it (iteration 43, DEC-181).
 - **Notifications cleared once made.** A notification is cleared (answered, timed out,
   cancelled, shown again) only after its `create` has finished, so none stays on screen
   with buttons that answer nothing.

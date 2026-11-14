@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
+import { attachPanel } from "../src/panel-port.ts";
 import {
 	type Answer,
 	isContentEvent,
@@ -890,6 +891,110 @@ describe("the worker's start", () => {
 			expired: [],
 			pairing: false,
 		});
+	});
+
+	/** A panel's port the test drives. */
+	function fakePort() {
+		const posted: unknown[] = [];
+		let listener: (m: unknown) => void = () => {};
+		let disconnect = () => {};
+		return {
+			posted,
+			say: (message: unknown) => listener(message),
+			close: () => disconnect(),
+			port: {
+				postMessage: (m: unknown) => void posted.push(m),
+				onMessage: (l: (m: unknown) => void) => {
+					listener = l;
+				},
+				onDisconnect: (l: () => void) => {
+					disconnect = l;
+				},
+			},
+		};
+	}
+
+	/** A start the test settles by hand, one per call. */
+	function starts() {
+		const pending: {
+			resolve: (c: string) => void;
+			reject: (e: unknown) => void;
+		}[] = [];
+		const ready = () =>
+			new Promise<string>((resolve, reject) =>
+				pending.push({ resolve, reject }),
+			);
+		return { pending, ready };
+	}
+
+	test("a panel's messages wait on the start and arrive in their order (EQ 19)", async () => {
+		const { pending, ready } = starts();
+		const shared = ready();
+		const panel = fakePort();
+		const received: unknown[] = [];
+		attachPanel(
+			() => shared,
+			panel.port,
+			() => (m) => received.push(m),
+		);
+		for (let i = 0; i < 100; i++) panel.say({ type: "visible", visible: i });
+		pending[0]?.resolve("connection");
+		await settle();
+		expect(received).toHaveLength(100);
+		expect(received.map((m) => (m as { visible: number }).visible)).toEqual(
+			Array.from({ length: 100 }, (_, i) => i),
+		);
+		// Attached: further messages go straight on, in order.
+		panel.say({ type: "stop" });
+		await settle();
+		expect(received.at(-1)).toEqual({ type: "stop" });
+	});
+
+	test("a failed start shows the problem; the next message attaches the panel with what it said on connecting", async () => {
+		const { pending, ready } = starts();
+		const panel = fakePort();
+		const attached: string[] = [];
+		const received: unknown[] = [];
+		attachPanel(ready, panel.port, (c) => {
+			attached.push(c);
+			return (m) => received.push(m);
+		});
+		panel.say({ type: "hello", windowId: 4 });
+		panel.say({ type: "pair", on: true });
+		panel.say({ type: "visible", visible: true });
+		pending[0]?.reject(new Error("IndexedDB refused"));
+		await settle();
+		expect(panel.posted).toHaveLength(1);
+		expect(JSON.stringify(panel.posted[0])).toContain("IndexedDB refused");
+		expect(received).toEqual([]);
+		// The panel's next message tries again; once attached, the
+		// connection hears the panel's window and pairing first.
+		panel.say({ type: "connect" });
+		expect(pending).toHaveLength(2);
+		pending[1]?.resolve("connection");
+		await settle();
+		expect(attached).toEqual(["connection"]);
+		expect(received).toEqual([
+			{ type: "hello", windowId: 4 },
+			{ type: "pair", on: true },
+			{ type: "visible", visible: true },
+			{ type: "connect" },
+		]);
+	});
+
+	test("a panel gone before the start is never attached", async () => {
+		const { pending, ready } = starts();
+		const panel = fakePort();
+		const attached: string[] = [];
+		attachPanel(ready, panel.port, (c) => {
+			attached.push(c);
+			return () => {};
+		});
+		panel.close();
+		pending[0]?.resolve("connection");
+		await settle();
+		expect(attached).toEqual([]);
+		expect(panel.posted).toEqual([]);
 	});
 });
 

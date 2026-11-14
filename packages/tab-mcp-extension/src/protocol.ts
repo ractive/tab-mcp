@@ -154,8 +154,9 @@ export type WorkerMessage =
 
 /**
  * What a panel shows when the worker could not start: the problem, and
- * nothing else to act on. The panel's next message, a panel that opens or
- * the next Chrome event tries again.
+ * nothing else to act on. The panel's next message or a panel that opens
+ * tries again (`attachPanel`); a start that a Chrome event made meanwhile
+ * attaches the panel at its next message.
  */
 export function startProblem(error: unknown): PanelState {
 	const why = error instanceof Error ? error.message : String(error);

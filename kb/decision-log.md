@@ -3733,5 +3733,7 @@ The owner, 2026-11-14, on the two extension rows DEC-178 left to a separate PR (
   is buffered by hand, the callbacks live only while one start runs, and only the
   extension's own panel page can send them. Messages that waited on a failed start are
   dropped (before, they were replayed once a start succeeded), and such a panel is
-  attached at its next message; it says to close and open it, which sends its window
-  again.
+  attached at its next message. What a panel says once on connecting (its window,
+  whether it is on screen, whether it pairs) is kept, the last of each of the three, and
+  said again to the connection that attaches it after a failed start
+  (`src/panel-port.ts`).

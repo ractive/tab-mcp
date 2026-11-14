@@ -277,8 +277,8 @@ setup, the listing, the permission justifications and the review notes:
   questions (notifications, the guard, late clicks, a click on the body and a panel
   Chrome refuses, cut arguments, the panel, the time limit), invisible characters, the
   address secret's storage, "Don't ask again" (the site's "allowed"), the panel's status
-  while the relay is out of reach, the panel's state for a failed start, a bundle without
-  dynamic `import()`.
+  while the relay is out of reach, a panel's messages across the worker's start (their
+  order, a failed start, a panel gone before it), a bundle without dynamic `import()`.
 - `test/bridge.test.ts`: the bridge's names (also one that becomes the extension's own),
   descriptions, schemas (a parameter called `pattern`), results (the image budget, a
   tool that navigates), the origin checked against Chrome's, why a call did not run, and
