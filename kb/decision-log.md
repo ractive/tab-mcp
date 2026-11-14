@@ -3560,6 +3560,13 @@ is a list of origins and is passed through to the native registration (DEC-143).
 - The extension does not change. Users of the store package with WebMCP on can hit the
   crash too; a report to Chromium is the remedy. Waiting in the extension before a
   navigation would cover only its own navigation tools, not the user's clicks.
+- Corrected the same day, after a standalone repro: the trigger is broader. Any document
+  with a WebMCP tool registered that has `getTools()` pending when it goes into the
+  back/forward cache crashes the browser (page world or extension, `activeTab` or host
+  access, same-origin or cross-origin); with the back/forward cache off it never crashes.
+  The browser-process frames point at `ModelContextUserData::GetScriptTools`. Reported to
+  Chromium as [issue 585631961](https://issues.chromium.org/issues/585631961). The test's
+  wait stays: it removes the pending call, which is what the crash needs.
 
 ## DEC-176: The button over the tool list reads "Turn off Ask first" / "Turn on Ask first" (owner)
 

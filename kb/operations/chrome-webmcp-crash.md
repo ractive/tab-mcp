@@ -1,11 +1,7 @@
 ---
 type: operations
 title: "Chrome crash in the store package's e2e tests (SIGILL in CI)"
-description: >-
-  Why tab-mcp for Chrome's e2e tests lost Chrome with SIGILL in CI (SIGTRAP on macOS):
-  a bug in Chrome's WebMCP when a content script on activeTab alone has getTools()
-  pending while its tab goes to another origin; how it was found, the evidence, and the
-  test's wait that avoids it.
+description: "Why tab-mcp for Chrome's e2e tests lost Chrome with SIGILL in CI (SIGTRAP on macOS): a bug in Chrome's WebMCP when a document with a tool has getTools() pending while it goes into the back/forward cache (Chromium issue 585631961); how it was found, the evidence, and the test's wait that avoids it."
 tags:
   - operations
   - ci
@@ -57,6 +53,38 @@ snapshot build:
 Users can hit this too: tab-mcp for Chrome from the store, WebMCP on in Chrome, and a
 navigation to another origin while the extension reads the page's tools. It needs a
 report to Chromium (follow-up; the owner decides, it is public).
+
+## Root cause (standalone repro, 2026-11-14)
+
+The narrowing above was too narrow. A standalone repro (one page, no extension; and a
+minimal extension with only `activeTab` and `scripting`) shows the trigger is the
+back/forward cache:
+
+- Any document with at least one WebMCP tool registered that has
+  `document.modelContext.getTools()` pending while it navigates away crashes the whole
+  browser: the page's own world, an extension on `activeTab` or with host permissions,
+  same-origin or cross-origin, browser- or renderer-initiated. A page that registers a
+  tool, loops `getTools()` and sets `location.href` to a same-origin page after 0.5 s
+  crashes 5/5 to 10/10 in Chrome for Testing 157 and 159 and Chromium 157 and 160.
+- No crash without a pending call, without a navigation, without a tool, or with
+  `--disable-features=BackForwardCache`. The earlier "page world and host access do not
+  crash" results most likely came from setups where the page was not eligible for the
+  back/forward cache (not tested).
+- Frames from an ASan build at the trunk revision: `__libcpp_verbose_abort` in a lambda of
+  `content::ModelContextUserData::GetScriptTools`, under
+  `RenderFrameHostImpl::ForEachRenderFrameHostWithAction`, from
+  `ModelContextHostStubDispatch`. In `content/browser/renderer_host/model_context_user_data.cc`
+  the lambda dereferences `GetFrameTokenForSiteInstanceGroup()` under the comment "token
+  will never be nullopt"; for a call that arrives from the old document after commit, its
+  SiteInstanceGroup has no proxy and the optional is empty (read from the code, not
+  checked in a debugger).
+
+Reported as [Chromium issue 585631961](https://issues.chromium.org/issues/585631961)
+(component Blink > Agentic Platform > WebMCP), with the repro attached.
+
+The test's wait (below) stays as it is: it removes the pending call, which the crash
+needs. What the extension can do on its own is only to make its reads rarer; it cannot
+close the window for a user's navigation.
 
 ## Fix in the tests
 
