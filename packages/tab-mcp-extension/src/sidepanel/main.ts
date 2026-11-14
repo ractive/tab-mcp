@@ -18,11 +18,11 @@ import {
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
 import {
+	allowAllLabel,
 	allowAllView,
 	askFirstNote,
 	cardView,
 	confirms,
-	DONT_ASK_ALL,
 	introText,
 	noAccessText,
 	SWITCH_WAIT_MS,
@@ -273,11 +273,11 @@ const NOTICE_MS = 6000;
  * Until when the panel's controls that allow something take no click after
  * its layout moved: a question that went away moves what was below it up,
  * and one that came moves it down, under the pointer; a click meant for what
- * was there must not land on an "Allow once", "Don't ask for these tools" or
+ * was there must not land on an "Allow once", "Turn off Ask first" or
  * an "Ask first" switch that came there instead (ES 5).
  */
 let movedUntil = 0;
-/** "Don't ask for these tools" as last shown: its visibility, label and tools. */
+/** The button over the tool list as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
 function showQuestions(questions: QuestionSummary[], expired: string[]): void {
@@ -516,13 +516,9 @@ function showTab(s: PanelState): void {
 	// What a tool's "Ask first" switch does, where there is one.
 	$("ask-first-note").hidden = !allowAll.shown;
 	setText($("ask-first-note"), allowAll.shown ? askFirstNote(scope) : "");
-	const label =
-		allowAll.label === DONT_ASK_ALL
-			? `Don't ask for the ${allowAll.names.length} tools listed on ${scope}, for every paired AI app`
-			: `Ask first again for the ${allowAll.names.length} tools listed on ${scope}`;
 	// No tooltip (DEC-160): the line under the button names the site and
 	// "every paired AI app"; the count is the list below.
-	button.setAttribute("aria-label", label);
+	button.setAttribute("aria-label", allowAllLabel(allowAll, scope));
 	setAvailable(button, Date.now() >= movedUntil);
 	// The list is made anew: a keyboard user's focus goes back to the same
 	// tool's switch, not to the page's body (EQ 11).

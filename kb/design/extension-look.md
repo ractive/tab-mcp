@@ -403,7 +403,7 @@ Iteration 39, on the panel of iteration 36. The plan held; these points differ.
 - **The badge's text is set to white** (`chrome.action.setBadgeTextColor`): on
   `#a06c00` white is 4.53:1 and black 4.63:1, so Chrome's own choice could be either.
 - **A wait is flat, not dimmed.** The 750 ms waits of iteration 36 (`aria-disabled` on
-  "Allow once", "Don't ask again", "Don't ask for these tools" and the "Ask first"
+  "Allow once", "Don't ask again", "Turn off Ask first" and the "Ask first"
   switches) take the disabled colours; every hover rule leaves `:disabled` and
   `[aria-disabled="true"]` out, and a test holds that.
 - **The switch's contrast** (EQ 17) is measured in Chrome for both switches against the

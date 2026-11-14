@@ -735,7 +735,7 @@ button.copy {
 	font-weight: 600;
 }
 
-/* The tool list's heading, with "Don't ask for these tools" / "Ask first for these tools". */
+/* The tool list's heading, with "Turn off Ask first" / "Turn on Ask first". */
 .tools-head {
 	display: flex;
 	flex-wrap: wrap;
