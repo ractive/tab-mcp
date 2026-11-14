@@ -3635,3 +3635,32 @@ The owner, 2026-11-14, on the table "Simplification, for the owner to decide" of
 - **Done before:** the rows the review's Outcome lists for iterations 32 to 38.
 - **Not decided:** the hand-written zip writer and reader (EQ 21) and moving
   `schemaProblem` / `resolvePointer` into the lazy chunk (CC).
+
+## DEC-182: The store zip gets build provenance in the release job, and only a zip that verifies is uploaded
+
+The owner, 2026-11-14, asked for build provenance for tab-mcp for Chrome's store zip, as
+the npm packages (trusted publishing) and the relay image (BuildKit) have it. Built in
+`ci/extension-attestation`; how to check it: [chrome-web-store](operations/chrome-web-store.md#build-provenance).
+
+- **Where:** the release job of `extension-release.yml` signs the attestation, not the build
+  job. The build job runs third-party code (bun install, the tests, Chrome) and keeps its
+  read-only token; the release job runs none and gets `id-token: write` and
+  `attestations: write` next to `contents: write`. It attests the zip it downloaded from the
+  build job, verifies the attestation (`gh attestation verify`, pinned to
+  `extension-release.yml` and the tag), and only then creates the release; afterwards it
+  compares the release asset's SHA-256, as GitHub recorded it, with the attested zip's. The
+  certificate names the workflow run, not the job, so signing in the release job attests
+  the same workflow, repository, tag and commit. The attestation says where the zip was
+  built, not that the build was clean: code that subverted the build job would get its
+  zip attested too.
+- **`actions/attest`, not `actions/attest-build-provenance`:** from v4 the latter is a
+  wrapper on top of `actions/attest`, and its release notes say new workflows should use
+  `actions/attest`. With only `subject-path` it signs the same SLSA build provenance
+  (`https://slsa.dev/provenance/v1`). v4.2.2, pinned by commit. No `artifact-metadata`
+  permission: that is for storage records of registry images (`push-to-registry`).
+- **Upload:** `extension-publish.yml` verifies the release's zip the same way (job
+  permission `attestations: read`) before the upload action sees it; an unattested zip
+  stops the run. There is no extension release yet, so no earlier zip is left out.
+- **What it does not cover:** the installed extension. The Chrome Web Store serves a CRX it
+  builds and signs itself, so the attestation covers the GitHub release's zip and the
+  upload only.
