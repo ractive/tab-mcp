@@ -47,10 +47,11 @@ The page's tools are the page's word:
   the tool's "Ask first" in the panel's list, allows the tool on that site (exact origin)
   for every paired AI app, kept until you switch "Ask first" on again. "Turn off Ask
   first" over the list does that for every tool listed at that moment that asks first,
-  in one step; once none asks, it reads "Turn on Ask first" and turns them all back. A tool the page registers later asks first. When the page changes what the
-  button would do, it waits 750 ms before it takes a click. All of these only for pages
-  of an http(s) site: pages with an opaque origin (`null`, such as sandboxed pages)
-  always ask ("asks first", no switch).
+  in one step; once none asks, it reads "Turn on Ask first" and turns them all back. A
+  tool the page registers later asks first. When the page changes what the button would
+  do, it waits 750 ms before it takes a click. All of these only for pages of an http(s)
+  site: pages with an opaque origin (`null`, such as sandboxed pages) always ask ("asks
+  first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
   changed (also while you were asked), the AI app is told to list the tools again.
@@ -249,8 +250,8 @@ setup, the listing, the permission justifications and the review notes:
 - `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
   while pairing, the first look, Disconnect only while connected), "How do I add it?" and
   its Copy buttons, its clicks (Disconnect's double click, the switch), "Turn off Ask
-  first" over the tool list, the tab card's texts (an unreadable tab, no tools), the labels and live
-  regions of `index.html`, a question's countdown and its end.
+  first" over the tool list, the tab card's texts (an unreadable tab, no tools), the
+  labels and live regions of `index.html`, a question's countdown and its end.
 - `test/contrast.test.ts`: the panel's look (`kb/design/extension-look.md`). Every pair
   of colours the style sheet uses, from its two token blocks (light and dark): text at
   least 4.5:1, edges, dots and the switches' parts at least 3:1; the badge's colours
