@@ -49,7 +49,9 @@ gives the zip whose SHA-256 `extension-release.yml` prints, with the same Bun ve
    no release; the release job stops if the tag moved off the commit it built.
 4. Before it creates the release, the release job attests the zip's build provenance
    (below) and verifies the attestation; after it, it checks that the release's asset has
-   the SHA-256 of the attested zip. A zip that does not verify leaves no release.
+   the SHA-256 of the attested zip. A zip that does not verify leaves no release; a
+   release whose asset has another SHA-256 fails the run after the release exists, and
+   is deleted by hand.
 
 Do not create the release with `gh release create`: then nothing builds the zip
 (`release.yml` treats `extension-v*` releases as a no-op). The tag push is the release.

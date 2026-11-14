@@ -150,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           zip="tab-mcp-for-chrome-$VERSION-store.zip"
-          test -f "$zip"
+          test -f "$zip" || { echo "::error::no $zip in the store-zip artifact"; exit 1; }
           # The build job printed the same line.
           sha256sum "$zip"
           echo "path=$zip" >> "$GITHUB_OUTPUT"
@@ -191,7 +191,8 @@ jobs:
           SHA256: ${{ steps.zip.outputs.sha256 }}
         run: |
           set -euo pipefail
-          # GitHub records each release asset's SHA-256 on upload.
+          # GitHub records each release asset's SHA-256 on upload. This runs
+          # after the release exists: on a mismatch, delete that release by hand.
           digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
             --jq ".assets[] | select(.name == \"$ZIP\") | .digest")"
           echo "release asset $ZIP: $digest"
