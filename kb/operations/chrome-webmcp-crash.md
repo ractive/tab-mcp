@@ -69,7 +69,7 @@ has a known trigger, and the wait takes it out.
 
 With the wait (300 ms, then 1 s after review), both store blocks passed locally on the
 Chromium snapshot in 35 of 35 runs, and in 16 of 16 with Chrome's log on (worse timing).
-Without the wait, 4 of 6 passed. CI on `ci/chrome-sigill`: CI_RESULTS.
+Without the wait, 4 of 6 passed. CI on `ci/chrome-sigill`: 9 of 9 green (run 43594333418 with 300 ms; run 43594833642, attempts 1 to 8, with 1 s), against about one failure in ten on 2026-11-13.
 CI keeps Chrome for Testing 156.0.8078.80: 157 and 160 crash alike (DEC-172).
 
 The other timeout of that day ("a takeover is kept across a restart", once in CI, 19.8 s)
