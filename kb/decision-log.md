@@ -3542,3 +3542,21 @@ is a list of origins and is passed through to the native registration (DEC-143).
   Builds without splitting (tab-mcp for Chrome's service worker) inline it.
 - Core: 6400 B before, 6082 B with the mirror out, 6216 B with iteration 41's fixes;
   the budget stays 6400 B.
+
+## DEC-172: The store package's e2e tests wait out the extension's tool reads before leaving an origin
+
+2026-11-14, `ci/chrome-sigill` ([chrome-webmcp-crash](operations/chrome-webmcp-crash.md)).
+
+- Chrome's browser process crashes (a libc++ assertion; SIGILL on Linux x64, SIGTRAP on
+  macOS arm64) when a content script on `activeTab` alone has
+  `document.modelContext.getTools()` pending while its tab goes to another origin. Chrome
+  for Testing 156 and 157 and Chromium 160 (trunk) all crash this way.
+- The tests in "the store package (no host access)" call `readsSettled(tab)` before each
+  such navigation: no `getTools()` of the content script pending or started for 300 ms,
+  watched from its isolated world over the DevTools Protocol. The tests check what they
+  checked before; the build has no hook (ES 7).
+- Not a retry: the trigger is known, and a retry would rebuild the whole block and hide
+  a new crash. Not a Chrome bump: no version fixes it yet; CI stays on 156.0.8078.80.
+- The extension does not change. Users of the store package with WebMCP on can hit the
+  crash too; a report to Chromium is the remedy. Waiting in the extension before a
+  navigation would cover only its own navigation tools, not the user's clicks.

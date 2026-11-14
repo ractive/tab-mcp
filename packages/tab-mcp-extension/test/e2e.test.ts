@@ -1897,10 +1897,23 @@ describe.skipIf(chrome === undefined)(
 				).toBe("off");
 				// New address: the old one is taken back, then a new one made.
 				await stack.panel.click("#replaced-new-address");
-				const fresh = await stack.panel.waitFor<string>(
-					`(() => { const a = document.getElementById("address").textContent; return a && a !== ${JSON.stringify(stack.address)} && a; })()`,
-					15_000,
-				);
+				// Timed out once in CI (2026-11-13), never in 27 local runs: the
+				// error says what the panel showed then.
+				const fresh = await stack.panel
+					.waitFor<string>(
+						`(() => { const a = document.getElementById("address").textContent; return a && a !== ${JSON.stringify(stack.address)} && a; })()`,
+						15_000,
+					)
+					.catch(async (error: unknown) => {
+						const shown = await stack.panel
+							.eval<string[]>(
+								`["state", "state-text", "problem", "local-problem", "replaced", "address"].map((id) => { const e = document.getElementById(id); return id + ": " + (e.hidden ? "(hidden) " : "") + (e.dataset.state ?? "") + " " + e.textContent.trim(); })`,
+							)
+							.catch((e: unknown) => [`(no answer: ${e})`]);
+						throw new Error(
+							`${error}; impostor ${impostor.state}; the panel: ${shown.join(" | ")}`,
+						);
+					});
 				expect(fresh).not.toBe(stack.address);
 				expect(impostor.state).toBe("disconnected");
 				expect(await stored("replaced")).toBeNull();
@@ -2104,6 +2117,47 @@ describe.skipIf(chrome === undefined || !process.env["TAB_MCP_E2E_IDLE"])(
 	},
 );
 
+/**
+ * Wait until the content script in `tab` has read the page's WebMCP tools
+ * for the last time: no `getTools()` of its own pending, and none started,
+ * for `quietMs`. Chrome (156 to 160 at least) crashes its whole browser
+ * process (a libc++ assertion, `optional operator*` on a disengaged value:
+ * SIGILL on Linux x64, SIGTRAP on macOS arm64) when a tab whose content script
+ * runs on `activeTab` alone goes to another origin while that script's
+ * `getTools()` is pending (kb/operations/chrome-webmcp-crash.md). After a
+ * load the worker reads the page several times (the load, `toolchange`, the
+ * panel), so a navigation right after one runs into that. Only through the
+ * DevTools Protocol, in the content script's world: nothing in the build.
+ */
+async function readsSettled(tab: Page, quietMs = 300): Promise<void> {
+	const world = await tab.isolatedWorld("tab-mcp for Chrome");
+	const settled = `(() => {
+		const context = document.modelContext;
+		if (context === undefined) return true;
+		if (context.e2eReads === undefined) {
+			const reads = { pending: 0, last: Date.now() };
+			const getTools = context.getTools.bind(context);
+			context.getTools = (...args) => {
+				reads.pending++;
+				reads.last = Date.now();
+				return getTools(...args).finally(() => {
+					reads.pending--;
+					reads.last = Date.now();
+				});
+			};
+			context.e2eReads = reads;
+		}
+		const { pending, last } = context.e2eReads;
+		return pending === 0 && Date.now() - last >= ${quietMs};
+	})()`;
+	const end = Date.now() + 10_000;
+	while (!(await tab.eval<boolean>(settled, world))) {
+		if (Date.now() > end)
+			throw new Error("the extension kept reading the page's tools");
+		await Bun.sleep(50);
+	}
+}
+
 describe.skipIf(chrome === undefined)(
 	"the store package (no host access)",
 	() => {
@@ -2135,6 +2189,7 @@ describe.skipIf(chrome === undefined)(
 		});
 
 		test("another origin of the same site needs a click too", async () => {
+			await readsSettled(tab);
 			await tab.goto(`${SUBDOMAIN}/plain.html`);
 			const refused = await pageInfo(stack);
 			expect(refused.isError).toBe(true);
@@ -2166,6 +2221,7 @@ describe.skipIf(chrome === undefined)(
 		});
 
 		test("on another site it may not, until the next click there", async () => {
+			await readsSettled(tab);
 			await tab.goto(`${OTHER}/webmcp.html`);
 			const refused = await pageInfo(stack);
 			expect(refused.isError).toBe(true);

@@ -149,7 +149,9 @@ list of paired apps, the notification's wording).
   when the first test of that block waited for the panel's "no tools" line before going
   on; never on main (3 runs) and never without that wait (4 runs). A timing that reaches
   a crash in Chrome itself (the log's tail named nothing); the check moved to the test
-  build's "it follows a navigation". Worth a look if it shows again in CI.
+  build's "it follows a navigation". Worth a look if it shows again in CI. It did (SIGILL
+  on Linux); the cause, a Chrome bug with a pending `getTools()` of a content script on
+  `activeTab`, is in [chrome-webmcp-crash](../operations/chrome-webmcp-crash.md).
 - **Review of PR 124** (claude 3, glm 2; all fixed): a hidden address is its own reason,
   since Chrome hides browser pages' addresses too, and the panel says so; the worker says
   which questions ran out (`PanelState.expired`) instead of the panel guessing from the
