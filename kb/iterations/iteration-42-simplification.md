@@ -7,7 +7,7 @@ description: >-
   duplicated small helpers in one module each (RQ 14), no hung-read bookkeeping in
   /healthz (RQ 17), the CIMD test mode as an injected URL policy and no unused options
   or test helper in production code (RQ 18), no "Already connected" page (RQ 16).
-  Client: no copy of the secret from the 0.4 key (DEC-083 amended). About 160 lines of
+  Client: no copy of the secret from the 0.4 key (DEC-083 amended). About 120 lines of
   relay source and 40 of client source fewer; the client core 6216 to 6143 B.
 timestamp: 2026-11-14T18:00:00+01:00
 tags: [iteration, relay, client, review, simplification]
@@ -53,9 +53,10 @@ Nothing may change in behaviour.
       `CimdTestMode` and eight `#testMode` checks; the relay uses `PUBLIC_HTTPS`, the
       loopback policy is `testUrls()` in `test/oauth-helpers.ts`; `validateDocument` takes
       `urls` instead of `test`
-- [x] `issueAccessToken` out of `tokens.ts`: the tests' copy is in `test/helpers.ts`,
-      `tokenFor` (`@ractive-ch/tab-mcp/testing`) writes its record itself; `GrantInput`
-      is the full grant `issueTokenPair` needs
+- [x] `issueAccessToken` out of `tokens.ts` into `src/test-token.ts`, imported only by
+      `testing.ts` (`tokenFor`) and the tests; `build.test.ts` checks it is in
+      `testing.js` and not in `main.js` or `index.js`; `GrantInput` is the full grant
+      `issueTokenPair` needs
 - [x] `PairingCodes`' `maxAttempts` and the fetcher's `maxBytes` removed (never passed)
 - [x] Kept: `createTestRelay` and its remaining hooks (code lifetimes, caps, clocks,
       pairing methods). It is the test-only seam: not exported, refused outside
@@ -88,7 +89,10 @@ Nothing may change in behaviour.
 
 ## Outcome
 
-Lines (from `git diff --numstat`, before the review of the PR): relay source 270 added,
-427 removed (net −157); client source 4 added, 44 removed (net −40); tests 105 added, 92
-removed (net +13: the token helper and the loopback URL policy moved into the tests). Client core 6216 B to 6143 B
-gzipped.
+Lines (from `git diff --numstat` against `main`, after the review fixes): relay source
+296 added, 420 removed (net −124; 38 of the added lines are `src/test-token.ts`, which
+only `testing.js` and the tests load); client source 4 added, 44 removed (net −40); tests
+79 added, 91 removed (net −12). Client core 6216 B to 6143 B gzipped.
+
+Review of the PR: claude 3 findings (all low: the token record built twice, the browser
+id read before the expired check, a blank line in an import block), all fixed; glm 0.

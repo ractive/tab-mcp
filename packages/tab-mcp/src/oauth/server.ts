@@ -909,14 +909,14 @@ export class AuthorizationServer {
 		const form = new URLSearchParams(text);
 		const requestId = form.get("request_id") ?? "";
 		const pending = this.#pending.get(requestId);
-		const browser = this.#browserId(req);
-		const csrf = form.get("csrf") ?? "";
 		if (pending === undefined || pending.expiresAt <= Date.now()) {
 			return this.#errorPage(
 				400,
 				"This connection request has expired or was already used.",
 			);
 		}
+		const browser = this.#browserId(req);
+		const csrf = form.get("csrf") ?? "";
 		if (
 			browser.cookie !== undefined ||
 			!Bun.CSRF.verify(csrf, {

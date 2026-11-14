@@ -17,7 +17,6 @@ import { JwksCache, type KeySource } from "../src/jwt.ts";
 import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { RevokeOptions, RevokeSelector } from "../src/store/types.ts";
-
 import {
 	issueAccessToken,
 	mcpPost,

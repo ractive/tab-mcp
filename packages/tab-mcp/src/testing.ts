@@ -8,7 +8,7 @@ import { createLogger } from "./log.ts";
 import { type CreateRelayOptions, createRelay, type Relay } from "./relay.ts";
 import { MemoryTokenStore } from "./store/memory.ts";
 import type { TokenStore } from "./store/types.ts";
-import { hashToken, newId, newToken } from "./tokens.ts";
+import { issueAccessToken } from "./test-token.ts";
 
 export { tokenStoreConformance } from "./store/conformance.ts";
 
@@ -59,19 +59,14 @@ export async function tokenFor(
 	const addressId = /\/a\/([a-z2-7]{52})\/mcp$/.exec(address)?.[1];
 	if (addressId === undefined)
 		throw new TypeError(`not an MCP address: ${address}`);
-	const now = Date.now();
-	const token = newToken("access");
-	await store.put({
-		hash: hashToken(token),
-		kind: "access",
-		grantId: newId("g"),
-		addressId,
-		clientId: options.clientId ?? "https://client.example/cimd.json",
-		clientName: options.clientName ?? "Test client",
-		scopes: ["tools"],
-		grantCreatedAt: now,
-		issuedAt: now,
-		expiresAt: now + (options.ttlMs ?? 3_600_000),
-	});
+	const { token } = await issueAccessToken(
+		store,
+		{
+			addressId,
+			clientId: options.clientId ?? "https://client.example/cimd.json",
+			clientName: options.clientName ?? "Test client",
+		},
+		{ ttlMs: options.ttlMs ?? 3_600_000 },
+	);
 	return token;
 }
