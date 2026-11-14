@@ -23,14 +23,6 @@ export const PANEL_PORT = "panel";
 export const PANEL_PATH = "/sidepanel/index.html";
 
 /**
- * A question's own window (a click on a notification, where the side panel
- * could not open): its page and its port, which may only answer the
- * question of the window the worker opened for it.
- */
-export const QUESTION_PORT = "question";
-export const QUESTION_PATH = "/question/index.html";
-
-/**
  * A question's answer: `site` is "Don't ask again on <host>", which allows
  * the tool on its site (the panel's "allowed"), for every AI app.
  */
@@ -158,13 +150,12 @@ export type QuestionSummary = Omit<QuestionView, "args">;
 export type WorkerMessage =
 	| { type: "state"; state: PanelState }
 	/** A question's arguments, in full, once per panel. */
-	| { type: "question-args"; id: string; args: string }
-	/** To a question's window: its question, `undefined` once it is settled. */
-	| { type: "question"; question: QuestionView | undefined };
+	| { type: "question-args"; id: string; args: string };
 
 /**
  * What a panel shows when the worker could not start: the problem, and
- * nothing else to act on. The next panel or Chrome event tries again.
+ * nothing else to act on. The panel's next message, a panel that opens or
+ * the next Chrome event tries again.
  */
 export function startProblem(error: unknown): PanelState {
 	const why = error instanceof Error ? error.message : String(error);
@@ -203,37 +194,6 @@ export function isPanelSender(sender: Sender, extensionId: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-/**
- * A port from a question's window: this extension's page at the question
- * page's path, in a tab (of the popup window the worker opened; the worker
- * checks the window). A content script's `url` is its page's.
- */
-export function isQuestionSender(sender: Sender, extensionId: string): boolean {
-	if (sender.id !== extensionId || sender.tab === undefined) return false;
-	try {
-		const url = new URL(sender.url ?? "");
-		return (
-			url.protocol === "chrome-extension:" &&
-			url.host === extensionId &&
-			url.pathname === QUESTION_PATH
-		);
-	} catch {
-		return false;
-	}
-}
-
-/** An answer from a question's window, checked; `undefined` for anything else. */
-export function parseQuestionAnswer(message: unknown): Answer | undefined {
-	if (typeof message !== "object" || message === null) return undefined;
-	const m = message as Record<string, unknown>;
-	return m["type"] === "answer" &&
-		(m["answer"] === "allow" ||
-			m["answer"] === "site" ||
-			m["answer"] === "deny")
-		? m["answer"]
-		: undefined;
 }
 
 /**

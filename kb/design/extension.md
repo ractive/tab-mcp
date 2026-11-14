@@ -74,8 +74,9 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   tab the call acts on, else in a Chrome notification; the extension asks, not the
   library (iteration 26). A click on a notification's body opens the whole question in
   the side panel of the tab's window (`sidePanel.open` at once in `onClicked`, which
-  Chrome dispatches with a user gesture), else in a popup window of the extension's
-  (`question/index.html`, whose port may answer only the question of its window).
+  Chrome dispatches with a user gesture); where Chrome refuses the panel, a new
+  notification asks again (iteration 43, DEC-181; the popup window of the extension's
+  that showed the question in that case is gone).
   The bridge asks itself for both ways of calling a page tool (`page_<name>` is not
   `consequentialHint`, DEC-141), so the AI app hears why a call did not run. "Don't ask
   again on <host>" in a question writes the site's "allowed" entry, as the panel's "Ask first"

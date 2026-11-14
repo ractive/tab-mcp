@@ -598,9 +598,8 @@ like any other, `chrome-extension://<id>` (A11).
   (turning AI access on or off, pairing, disconnecting an AI app, a new address, the
   relay, allowing tools, answers to questions) are taken only from the extension's own
   side panel, as Chrome reports the sender; anything else is dropped. Besides the panel,
-  only the buttons of the extension's own notifications and a question's own window,
-  which the extension opened for that one question and which can answer only it, answer
-  questions (see Questions). "Turn off Ask first" over the tool list allows
+  only the buttons of the extension's own notifications answer questions (see
+  Questions). "Turn off Ask first" over the tool list allows
   only the tools the extension itself offers on that site at that moment that are not
   read-only, so a tool the page registers later still asks. From a page, the one message
   accepted says that the page's tools changed. A compromised page can therefore not turn
@@ -608,15 +607,15 @@ like any other, `chrome-extension://<id>` (A11).
 - **Questions.** When the side panel is open, on screen and in front in the window of the
   tab the call acts on, the question is there: its Allow buttons take a click only after
   the panel has been in front for 750 ms, so the click that brings it forward cannot
-  approve, and the page's scripts cannot reach the panel. Otherwise a Chrome notification
+  approve, and the page's scripts cannot reach the panel. Its three answers are buttons
+  that look alike, so the card does not lean towards allowing. Otherwise a Chrome notification
   asks. It names the AI app (its declared name beside its verified host), the tool and,
   on a line of its own, the page's site, and the arguments in short, saying so when they
   are cut; its one button is "Allow once" ("Don't ask again" needs the full question), and a
-  click on the notification's body opens the full
-  question with all its arguments in the side panel of the tab's window, or in a small
-  window of its own where Chrome does not open the panel; the question waits there, its
-  60 s still running. Closing the notification is Don't allow, as is closing that
-  window. Invisible, blank and direction characters in the arguments and names are shown
+  click on the notification's body opens the side panel of the tab's window, where the
+  full question with all its arguments waits, its 60 s still running; where Chrome does
+  not open the panel, the notification shows again. Closing the notification is Don't
+  allow. Invisible, blank and direction characters in the arguments and names are shown
   as `\uXXXX`, with the same set as the client library's dialog (controls, format and
   other default-ignorable characters such as variation selectors, private-use and
   unassigned code points, every space but U+0020). In the side panel the page's site

@@ -20,8 +20,6 @@ import {
 	type PanelCommand,
 	type PanelState,
 	parseCommand,
-	parseQuestionAnswer,
-	QUESTION_PATH,
 	SERVER_NAME,
 	type TabView,
 	type WorkerMessage,
@@ -50,7 +48,6 @@ import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
-import { QuestionWindows } from "./question-windows.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
@@ -150,8 +147,6 @@ export class Connection {
 	readonly #icons: Icon[];
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
-	/** The windows opened for one question each. */
-	readonly #questionWindows: QuestionWindows;
 	#allowed: AllowedTools;
 	#relay: string;
 	#mcp: TabMcp;
@@ -196,23 +191,6 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
-		this.#questionWindows = new QuestionWindows({
-			create: async () =>
-				(
-					await chrome.windows.create({
-						url: chrome.runtime.getURL(QUESTION_PATH),
-						type: "popup",
-						width: 440,
-						height: 560,
-						focused: true,
-					})
-				)?.id,
-			remove: (windowId) =>
-				void chrome.windows.remove(windowId).catch(() => {}),
-			list: () => this.#questions.list,
-			answer: (id, answer) => this.#questions.answer(id, answer),
-			parse: parseQuestionAnswer,
-		});
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -511,54 +489,33 @@ export class Connection {
 		this.#questions.notificationClicked(id);
 	}
 
-	/** A window closed: one opened for a question is its Don't allow. */
-	windowRemoved(windowId: number): void {
-		this.#questionWindows.windowRemoved(windowId);
-	}
-
 	/**
-	 * Question `id`, whole: in the side panel of its tab's window (opened
-	 * now, while Chrome's event still counts as the user's gesture), or, if
-	 * that is refused or there is no tab, in a small window of its own.
+	 * The side panel of the tab's window, opened now, while Chrome's event
+	 * still counts as the user's gesture, and its window brought to the
+	 * front (the panel's Allow needs it there; where the panel is refused,
+	 * the icon's "?" is there to click). Resolves `false` if Chrome refused
+	 * the panel or the tab is not known.
 	 */
 	#showQuestion(
-		id: string,
 		tabId: number | undefined,
 		windowId: number | undefined,
-	): void {
-		const ownWindow = (error?: unknown) => {
-			if (error !== undefined)
-				console.warn("tab-mcp: side panel for a question", error);
-			this.#questionWindows.open(id).catch((error: unknown) =>
-				// The question stays in the panels and the badge says so.
-				console.warn("tab-mcp: question window", error),
-			);
-		};
-		if (tabId === undefined || windowId === undefined) {
-			ownWindow();
-			return;
-		}
+	): Promise<boolean> {
+		if (tabId === undefined || windowId === undefined)
+			return Promise.resolve(false);
+		const toFront = () =>
+			void chrome.windows.update(windowId, { focused: true }).catch(() => {});
 		// No await before this: the gesture would be gone.
-		chrome.sidePanel.open({ tabId, windowId }).then(
-			// The panel's Allow needs its window in front.
-			() =>
-				void chrome.windows.update(windowId, { focused: true }).catch(() => {}),
-			ownWindow,
+		return chrome.sidePanel.open({ tabId, windowId }).then(
+			() => {
+				toFront();
+				return true;
+			},
+			(error: unknown) => {
+				console.warn("tab-mcp: side panel for a question", error);
+				toFront();
+				return false;
+			},
 		);
-	}
-
-	/**
-	 * The port of a question window's page, its sender already checked: it
-	 * gets the question of the window it is in, and may answer that one only.
-	 */
-	addQuestionWindow(port: chrome.runtime.Port): void {
-		this.#questionWindows.addPort({
-			windowId: port.sender?.tab?.windowId,
-			postMessage: (message) => port.postMessage(message),
-			disconnect: () => port.disconnect(),
-			onMessage: (listener) => port.onMessage.addListener(listener),
-			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
-		});
 	}
 
 	notificationButton(id: string, index: number): void {
@@ -572,10 +529,12 @@ export class Connection {
 	// --- The side panels ---
 
 	/**
-	 * A side panel's port, its sender already checked, with the messages it
-	 * sent before the connection had started.
+	 * A side panel's port, its sender already checked. Returns what takes
+	 * the panel's messages: the service worker listens on the port from the
+	 * moment it connects, before the connection has started, and hands
+	 * them over in their order.
 	 */
-	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
+	addPanel(port: chrome.runtime.Port): (message: unknown) => void {
 		const panel: Panel = {
 			port,
 			pairing: false,
@@ -593,8 +552,6 @@ export class Connection {
 			// A failure is shown as the problem (`#queue`).
 			this.#queue(() => this.#command(panel, command)).catch(() => {});
 		};
-		for (const raw of early) receive(raw);
-		port.onMessage.addListener(receive);
 		port.onDisconnect.addListener(() => {
 			this.#panels.delete(panel);
 			if (panel.pairing) this.#pairingOff();
@@ -607,6 +564,7 @@ export class Connection {
 		// script answers both with one `getTools()`.
 		void this.#readTab();
 		void this.#bridge.refresh();
+		return receive;
 	}
 
 	async #command(panel: Panel, command: PanelCommand): Promise<void> {
@@ -766,8 +724,8 @@ export class Connection {
 				});
 			},
 			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
-			showQuestion: ({ id, tabId, windowId }) =>
-				this.#showQuestion(id, tabId, windowId),
+			showQuestion: ({ tabId, windowId }) =>
+				this.#showQuestion(tabId, windowId),
 			changed: () => this.#changed(),
 			now: () => Date.now(),
 		};
@@ -899,7 +857,6 @@ export class Connection {
 		queueMicrotask(() => {
 			this.#sending = false;
 			for (const panel of this.#panels) this.#send(panel);
-			this.#questionWindows.sync();
 		});
 	}
 

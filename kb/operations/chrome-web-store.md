@@ -257,7 +257,8 @@ of iteration 39 ([the look](../design/extension-look.md)):
    "Ask first" switches) and "Read all sites without a click";
 2. `2-pairing.png`: no AI app paired yet, the address and the pairing code;
 3. `3-question.png`: a question for a page tool with its arguments (Don't allow, "Allow
-   once", "Don't ask again on bakery.example");
+   once", "Don't ask again on bakery.example", all of one button kind since iteration 43,
+   DEC-180; `3-question.png` and `4-navigation.png` were taken again then);
 4. `4-navigation.png`: a question before the tab goes to another site.
 
 `bun scripts/screenshots.ts` in `packages/tab-mcp-extension` takes them again, from the

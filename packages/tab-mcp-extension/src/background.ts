@@ -15,27 +15,39 @@ import { CONTENT_SCRIPT, CONTENT_SCRIPT_ID } from "./messages.ts";
 import {
 	isContentEvent,
 	isPanelSender,
-	isQuestionSender,
 	PANEL_PORT,
-	QUESTION_PORT,
 	startProblem,
 	type WorkerMessage,
 } from "./protocol.ts";
-import { attachWhenStarted, Starter } from "./starter.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
 declare const TAB_MCP_TEST: boolean;
 
-// A start that fails (IndexedDB refused, say) is tried again by the next
-// event or panel; meanwhile a panel shows why.
-const connection = new Starter(() => Connection.start());
-const ready = () => {
-	const starting = connection.ready();
-	starting.catch((error: unknown) => console.error("tab-mcp: start", error));
+/** The connection, once its start has succeeded. */
+let started: Connection | undefined;
+let starting: Promise<Connection> | undefined;
+
+/**
+ * The connection's start, shared by every caller. A start that fails
+ * (IndexedDB refused, say) is forgotten, so the next Chrome event or panel
+ * message tries again; meanwhile a panel shows why.
+ */
+function ready(): Promise<Connection> {
+	starting ??= Connection.start().then(
+		(connection) => {
+			started = connection;
+			return connection;
+		},
+		(error: unknown) => {
+			starting = undefined;
+			console.error("tab-mcp: start", error);
+			throw error;
+		},
+	);
 	return starting;
-};
+}
 void ready().catch(() => {});
 
 const withConnection = (use: (connection: Connection) => void) =>
@@ -117,17 +129,6 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
 });
 
 chrome.runtime.onConnect.addListener((port) => {
-	// A question's own window (a notification clicked where the side panel
-	// could not open): the connection checks that it opened that window.
-	if (
-		port.name === QUESTION_PORT &&
-		isQuestionSender(port.sender ?? {}, chrome.runtime.id)
-	) {
-		const c = connection.value;
-		if (c === undefined) port.disconnect();
-		else c.addQuestionWindow(port);
-		return;
-	}
 	if (
 		port.name !== PANEL_PORT ||
 		!isPanelSender(port.sender ?? {}, chrome.runtime.id)
@@ -135,37 +136,50 @@ chrome.runtime.onConnect.addListener((port) => {
 		port.disconnect();
 		return;
 	}
-	// Until the connection has started (a worker that just woke, or a start
-	// that failed), keep what the panel says: Chrome hands a message only to
-	// the listeners there are. Attached once any start succeeds.
-	attachWhenStarted<Connection, WorkerMessage>(
-		connection,
-		{
-			postMessage: (message) => port.postMessage(message),
-			onMessage: (listener) => {
-				port.onMessage.addListener(listener);
-				return () => port.onMessage.removeListener(listener);
+	let gone = false;
+	port.onDisconnect.addListener(() => {
+		gone = true;
+	});
+	// Chrome hands a message only to the listeners there are, so the panel's
+	// messages are taken now and each waits on the panel's attachment: the
+	// callbacks of one promise run in the order they were added, so the
+	// messages keep theirs, with no buffer of their own. A failed start
+	// shows the panel why and drops what waited on it; the panel's next
+	// message tries again.
+	let attached: Promise<((message: unknown) => void) | undefined> | undefined;
+	const attach = () => {
+		attached ??= ready().then(
+			(connection) => (gone ? undefined : connection.addPanel(port)),
+			(error: unknown) => {
+				attached = undefined;
+				const message: WorkerMessage = {
+					type: "state",
+					state: startProblem(error),
+				};
+				try {
+					if (!gone) port.postMessage(message);
+				} catch {
+					// Closed meanwhile.
+				}
+				return undefined;
 			},
-			onDisconnect: (listener) => port.onDisconnect.addListener(listener),
-		},
-		(c, early) => c.addPanel(port, early),
-		(error) => ({ type: "state", state: startProblem(error) }),
-	);
+		);
+		return attached;
+	};
+	port.onMessage.addListener((message: unknown) => {
+		void attach().then((receive) => receive?.(message));
+	});
+	void attach();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
 	if (alarm.name === ALARM) withConnection((c) => c.keepUp());
 });
 
-// A window opened for a question, closed: Don't allow.
-chrome.windows.onRemoved.addListener((windowId) =>
-	connection.value?.windowRemoved(windowId),
-);
-
 /**
  * A notification's answer: its button Allow; its closing is Don't allow; a
- * click on its body shows the whole question (the side panel of the tab's
- * window, else a window of its own). In the test build on the worker's
+ * click on its body opens the side panel of the tab's window, where the
+ * whole question is (if Chrome refuses, the notification comes back). In the test build on the worker's
  * global object too, for the DevTools Protocol, which cannot click a
  * notification: the end-to-end tests answer through the same functions a
  * click calls. Not in the store build (ES 7).
@@ -181,7 +195,7 @@ function notificationClicked(id: string): void {
 	// gesture, which this event carries only until the first `await`. A
 	// worker that is still starting has no question of this notification:
 	// a start clears them all.
-	connection.value?.notificationClicked(id);
+	started?.notificationClicked(id);
 }
 chrome.notifications.onButtonClicked.addListener(notificationButton);
 chrome.notifications.onClicked.addListener(notificationClicked);
