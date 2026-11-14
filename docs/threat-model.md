@@ -660,7 +660,7 @@ from them.
   can call the mirrored ones; the relay, its grants and its pairing are not involved,
   and the page learns nothing about the caller (`client.kind` is `"webmcp"`). Turning
   `webmcp` on is a change in what the page exposes; the library treats it as one (off by
-  default, the CHANGELOG says so).
+  default, the client's [changelog](../packages/tab-mcp-client/CHANGELOG.md) says so).
 - **It can operate the page's dialog.** Such an agent often drives the very tab it calls
   into: input it sends through the DevTools Protocol or an extension is trusted input,
   and the delay before Allow only needs the tab visible and focused. So the page's
