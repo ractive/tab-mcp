@@ -3583,3 +3583,31 @@ is a list of origins and is passed through to the native registration (DEC-143).
 - Behaviour, protocol (`set-allowed-all`) and storage do not change. The constants are
   `TURN_OFF_ASK_FIRST` / `TURN_ON_ASK_FIRST` in `src/sidepanel/card.ts`. No change to
   the privacy notice (owner).
+
+## DEC-177: tab-mcp for Chrome reads a page's tools as rarely as its answers allow
+
+2026-11-14, `extension/fewer-tool-reads` (owner: "try it";
+[chrome-webmcp-crash](operations/chrome-webmcp-crash.md)).
+
+- Every `document.modelContext.getTools()` pending while the tab navigates can crash
+  Chrome's browser process (Chromium issue 585631961). Only Chrome can fix it; the
+  extension makes the window smaller.
+- The content script shares one read (`ToolReads` in `src/content.ts`): a read that
+  started less than 1 s ago (`SHARE_READ_MS`) answers `page-info` and `webmcp-list`, in
+  flight or done, unless the page fired `toolchange` since. A call to a tool shares only
+  a read still in flight, so it never runs against a list older than the call. A read in
+  flight at a `toolchange` is not shared after it.
+- The worker reads the page only while someone needs it: an open side panel, or a
+  connection to the relay that is not `disconnected`. A tab switch, a load or a
+  `toolchange` with AI access off and no panel reads nothing; a panel that opens and a
+  connection that comes up read the page then.
+- Per page load in the test build (host access), counted in the content script:
+  4 calls before, 1 after with the panel or the connection; 2.1 before, 0 after with
+  neither. Navigating 0 to 400 ms after the load crashed Chrome for Testing 157 in 16 of
+  600 rounds before and 0 of 600 after (connected); within 50 ms, where the remaining
+  read is, 26 of 300 before and 2 of 300 after. Rarer, not gone.
+- Not done: a debounce in the worker (the shared read already takes the burst, and a
+  debounce delays every answer); skipping hidden tabs (the bridge reads only the tab in
+  front). `readsSettled` in the e2e tests stays: it removes the pending call itself.
+- What the AI app and the panel see does not change: lists follow `toolchange` (a new
+  read), the 5 s give-up (ES 1) and the navigation handling (WM 2) are as before.

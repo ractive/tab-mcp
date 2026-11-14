@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- tab-mcp for Chrome reads a page's tools less (`extension/fewer-tool-reads`, owner: "try it", Chromium issue 585631961): the content script shares one `getTools()` for 1 s unless `toolchange` (`ToolReads`; a call shares only a read in flight), and the worker reads only while the panel is open or the relay connection is not `disconnected`; per page load 4 calls to 1 (panel or connection), 2.1 to 0 (neither); navigating 0 to 400 ms after the load crashed Chrome for Testing 157 in 16 of 600 rounds before and 0 of 600 after (connected), 9 of 300 and 0 of 300 (idle), 0 to 50 ms 26 of 300 and 2 of 300 (not zero: only Chrome can fix it); e2e block "reading the page's tools rarely"; `operations/chrome-webmcp-crash.md`, DEC-177
+
 - Chrome's WebMCP crash reported as [Chromium issue 585631961](https://issues.chromium.org/issues/585631961): a standalone repro shows the trigger is the back/forward cache (any document with a tool and a pending `getTools()` that navigates away; frames in `ModelContextUserData::GetScriptTools`), not `activeTab`; `operations/chrome-webmcp-crash.md` and DEC-172 corrected
 - tab-mcp for Chrome's button over the tool list (`extension/ask-first-button`, owner): "Turn off Ask first" / "Turn on Ask first" instead of "Don't ask for these tools" / "Ask first for these tools", the word of the per-tool switch; its accessible name names the count, the site and every paired AI app both ways (`allowAllLabel`, "1 tool" for one); README, threat models, `design/extension-look.md` and the four store screenshots (each shows the button) follow; DEC-176
 

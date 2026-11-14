@@ -99,6 +99,12 @@ The page's tools are the page's word:
   replacement `document.modelContext` (or a polyfill without native WebMCP) is not used.
 - Only pages of http(s) sites, not `file:` pages, and not Incognito tabs (the extension
   cannot be allowed there).
+- The extension reads a page's tools (`getTools()`) only while the side panel is open or
+  the connection to the relay is up (or being made), and one read answers everything it
+  asks the page within 1 s, unless the page's tools change (`toolchange`) meanwhile; a
+  call to a tool reads them anew. Chrome can crash when a tab navigates while such a read
+  is pending (Chromium issue 585631961, `kb/operations/chrome-webmcp-crash.md`); fewer
+  reads make that rarer, but only Chrome can fix it.
 
 ## Load it unpacked
 
@@ -243,7 +249,9 @@ setup, the listing, the permission justifications and the review notes:
 
 ## Tests
 
-- `test/unit.test.ts`: manifests, the key's id, reading a page, the tool, the refusals.
+- `test/unit.test.ts`: manifests, the key's id, reading a page (one `getTools()` shared
+  by the reads of a second, a new one after `toolchange` and for a call), the tool, the
+  refusals.
 - `test/build.test.ts`: the store build has no key, no `host_permissions`, no source
   maps and no test hooks; its zip lists the build's files; a build with any of these is
   not packed; `--zip` needs `--store`.
@@ -275,7 +283,8 @@ setup, the listing, the permission justifications and the review notes:
   tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
   colours as computed, both switches' contrast; confirmation in the panel, cancellation, `toolchange`, a forged
   `document.modelContext`, a tool that takes the tab to another page, "Don't ask again")
-  across navigations and tab switches; with the panel closed
+  across navigations and tab switches; a `toolchange` read with one `getTools()`, and
+  none with AI access off and the panel closed; with the panel closed
   (tools still run, questions as notifications, a panel closed during a question, a click
   on a notification's body opening the question's own window, reopening it) and after a restart of the same profile (the same address connects
   again by itself; with the relay out of reach the alarm is set and the panel says it
