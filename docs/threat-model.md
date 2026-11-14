@@ -620,7 +620,7 @@ like any other, `chrome-extension://<id>` (A11).
   as `\uXXXX`, with the same set as the client library's dialog (controls, format and
   other default-ignorable characters such as variation selectors, private-use and
   unassigned code points, every space but U+0020). In the side panel the page's site
-  and the page's title for the tool are on lines of their own, labelled. Only Allow
+  and the page's title for the tool are on lines of their own, labelled. Only "Allow once"
   allows from a notification, and
   a click on it right after the notification appeared does not count, so a click meant
   for something that was there before cannot allow. Each notification answers only its
@@ -792,7 +792,7 @@ each default.
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
 - With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
-  or "allowed" on its site) does whatever the AI app asks of it, and another program on
+  or with its "Ask first" switch off on its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
 - With `webmcp: true`: any agent in the browser calls the mirrored tools without
   pairing, and one that drives the tab can click Allow in the page's dialog for a

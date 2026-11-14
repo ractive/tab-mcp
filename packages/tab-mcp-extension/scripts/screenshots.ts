@@ -185,9 +185,9 @@ const chrome = findChromeForTesting();
 if (chrome === undefined)
 	throw new Error("Chrome for Testing is needed: set CHROME_PATH");
 
-const port = 20_000 + Math.floor(Math.random() * 20_000);
-const relay = startTestRelay({ port, publicUrl: PUBLIC_RELAY });
-const local = `http://127.0.0.1:${port}`;
+// A free port; `relay.url` is the public one, the bound port is the relay's.
+const relay = startTestRelay({ publicUrl: PUBLIC_RELAY });
+const local = `http://127.0.0.1:${relay.relay.port}`;
 const dir = mkdtempSync(join(tmpdir(), "tab-mcp-shots-"));
 let browser: Browser | undefined;
 let client: Client | undefined;
@@ -223,11 +223,22 @@ try {
 	);
 	// The line under the heading names the relay in the settings, this
 	// process's: the hosted relay's name, as the store build shows by default.
-	await panel.eval(`(() => {
-		const intro = document.getElementById("intro");
-		intro.textContent = intro.textContent.replace(${JSON.stringify(new URL(local).host)}, ${JSON.stringify(new URL(PUBLIC_RELAY).host)});
-	})()`);
-	await take("2-pairing", tab, panel);
+	// The panel writes the line again on each state it gets: take the shot
+	// again until the line still reads so after it.
+	const hosted = new URL(PUBLIC_RELAY).host;
+	for (let attempt = 0; ; attempt++) {
+		await panel.eval(`(() => {
+			const intro = document.getElementById("intro");
+			intro.textContent = intro.textContent.replace(${JSON.stringify(new URL(local).host)}, ${JSON.stringify(hosted)});
+		})()`);
+		await take("2-pairing", tab, panel);
+		const intro = await panel.eval<string>(
+			`document.getElementById("intro").textContent`,
+		);
+		if (intro.includes(hosted)) break;
+		if (attempt === 4)
+			throw new Error(`the panel names another relay: ${intro}`);
+	}
 
 	const token = await tokenFor(relay.store, address, {
 		clientId: "https://claude.ai/oauth/claude-code-client-metadata",
