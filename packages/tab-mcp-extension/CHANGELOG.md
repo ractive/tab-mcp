@@ -11,7 +11,9 @@ release `extension-v<version>`.
 
 ## Unreleased
 
-First release, version 0.1.0.
+## [0.1.0][extension-0.1.0] - 2026-11-15
+
+First release.
 
 ### Added
 
@@ -58,3 +60,5 @@ First release, version 0.1.0.
 - Permissions: `activeTab`, `scripting`, `sidePanel`, `notifications`, `alarms`, and
   `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
+
+[extension-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.1.0

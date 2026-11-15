@@ -52,11 +52,11 @@ tags: [iteration, extension, release]
 - [x] Listing texts, single purpose, permission justifications, data usage, review notes
   ([chrome-web-store](../operations/chrome-web-store.md)) and the privacy policy
   (`packages/tab-mcp-extension/PRIVACY.md`) (2026-11-11, `ext/release-23`)
-- [ ] Screenshots (1280×800), and the privacy policy published on ractive.ch
-- [ ] `refs/tags/extension-v*` in the "release tags" tag ruleset (owner)
+- [x] Screenshots (1280×800), and the privacy policy published on ractive.ch
+- [x] `refs/tags/extension-v*` in the "release tags" tag ruleset (owner)
 - [x] CHANGELOG section for the extension (2026-11-11, `ext/release-23`)
 - [ ] Docs page content for ractive.ch (its own PR there)
-- [ ] First release on the owner's word
+- [x] First release on the owner's word
 
 # Citations
 
