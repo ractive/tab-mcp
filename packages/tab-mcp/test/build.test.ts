@@ -38,7 +38,7 @@ test("the build produces a runnable bin and declarations that type-check", async
 	});
 	expect(pkg["dependencies"]).toBeUndefined();
 	expect(pkg["publishConfig"]).toEqual({ access: "public" });
-	for (const file of ["README.md", "LICENSE", "AI_NOTICE"]) {
+	for (const file of ["README.md", "CHANGELOG.md", "LICENSE", "AI_NOTICE"]) {
 		expect(await Bun.file(join(dist, file)).exists()).toBe(true);
 	}
 

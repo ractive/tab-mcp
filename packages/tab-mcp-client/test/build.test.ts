@@ -156,6 +156,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"LICENSE",
 		"AI_NOTICE",
 		"README.md",
+		"CHANGELOG.md",
 		"THIRD-PARTY-NOTICES.txt",
 	]) {
 		expect(await Bun.file(join(dist, file)).exists()).toBe(true);

@@ -6,7 +6,7 @@
  *   connection and the UI stay separate chunks loaded by `connect()`;
  * - `dist/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
  * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`;
- * - `dist/package.json`, README, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
+ * - `dist/package.json`, README, CHANGELOG, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
  *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
  *
  * Prints the gzipped sizes of the core and the lazily loaded chunks.
@@ -135,6 +135,7 @@ for (const [from, to] of [
 	[join(root, "../../LICENSE"), "LICENSE"],
 	[join(root, "../../AI_NOTICE"), "AI_NOTICE"],
 	[join(root, "README.md"), "README.md"],
+	[join(root, "CHANGELOG.md"), "CHANGELOG.md"],
 	[join(root, "THIRD-PARTY-NOTICES.txt"), "THIRD-PARTY-NOTICES.txt"],
 ] as const) {
 	const file = Bun.file(from);

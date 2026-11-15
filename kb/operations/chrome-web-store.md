@@ -33,8 +33,8 @@ gives the zip whose SHA-256 `extension-release.yml` prints, with the same Bun ve
 
 ## Releases
 
-1. Bump `version` in `packages/tab-mcp-extension/package.json` and move the CHANGELOG's
-   "tab-mcp for Chrome" Unreleased section to that version, in a PR; merge it.
+1. Bump `version` in `packages/tab-mcp-extension/package.json` and move the Unreleased
+   section of `packages/tab-mcp-extension/CHANGELOG.md` to that version, in a PR; merge it.
 2. Tag the merge commit and push the tag:
 
    ```sh

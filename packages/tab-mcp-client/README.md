@@ -1091,7 +1091,7 @@ only to `localhost`). See
 - [Live examples](https://ractive.ch/tab-mcp/)
 - [Example: a React todo app](https://github.com/ractive/tab-mcp/tree/main/examples/react-todo)
 - [Tab–relay protocol](https://github.com/ractive/tab-mcp/blob/main/docs/protocol.md)
-- [Changelog](https://github.com/ractive/tab-mcp/blob/main/CHANGELOG.md)
+- [Changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp-client/CHANGELOG.md), also in the package as `CHANGELOG.md`
 
 ## Licence
 

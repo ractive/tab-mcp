@@ -18,6 +18,7 @@
 	"files": [
 		"src",
 		"README.md",
+		"CHANGELOG.md",
 		"THIRD-PARTY-NOTICES.txt",
 		"LICENSE",
 		"AI_NOTICE"

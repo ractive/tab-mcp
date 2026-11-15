@@ -167,12 +167,13 @@ commands in an up-to-date checkout of `main`.
 
 ## Later releases
 
-1. With the release in `CHANGELOG.md` under `### Unreleased`, run
+1. With the release in `packages/tab-mcp-client/CHANGELOG.md` (shipped in the package,
+   DEC-183) under `## Unreleased`, run
    `bun scripts/bump-version.ts client <version>`: it sets
    `packages/tab-mcp-client/package.json` (`src/version.ts` reads it), the pinned versions
    in the docs and plugin manifests (`scripts/pinned-files.ts`; the test "docs and plugin
    manifests name only the current package versions" fails on any other version), dates
-   the CHANGELOG section and runs `bun install`. Merge to `main`. The whole release,
+   the changelog section and runs `bun install`. Merge to `main`. The whole release,
    including updating the apps that use the client, is the project skill
    `.claude/skills/release/SKILL.md`.
 2. Create a GitHub release with the tag `client-v<version>` on exactly that merge commit,
@@ -311,7 +312,7 @@ the client only). Then:
 ### Later relay releases
 
 Run `bun scripts/bump-version.ts relay <version>` (package.json, the pinned docs and image
-tags, the CHANGELOG date, `bun install`), merge, create the release `relay-v<version>` on the merge commit (pre-release flag
+tags, the date in `packages/tab-mcp/CHANGELOG.md`, `bun install`), merge, create the release `relay-v<version>` on the merge commit (pre-release flag
 exactly when the version is one) and approve both jobs. To retry without a new release:
 `gh workflow run release.yml --ref relay-v<version> -f package=relay -f mode=publish -f
 version=<version>`; an identical npm version is skipped and the image is pushed again with

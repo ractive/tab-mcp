@@ -292,12 +292,12 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 - [Token store](docs/token-store.md): the `TokenStore` interface and its conformance suite
 - [Protocol](docs/protocol.md): the WebSocket protocol `tab-mcp.v1` between page and relay
 - [Threat model](docs/threat-model.md) and [security policy](SECURITY.md)
-- [Changelog](CHANGELOG.md)
+- Changelogs: [browser library](packages/tab-mcp-client/CHANGELOG.md), [relay](packages/tab-mcp/CHANGELOG.md), [tab-mcp for Chrome](packages/tab-mcp-extension/CHANGELOG.md)
 
 ## Status
 
 **0.16.2**. Until 1.0, a new minor version can still change
-settings, the protocol or the API; the [changelog](CHANGELOG.md) says what changed.
+settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what changed.
 
 - Released: relay `@ractive-ch/tab-mcp` 0.10.3 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.16.2, on the npm tag `latest`.

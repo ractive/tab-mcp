@@ -23,13 +23,15 @@ the Write tool, then use `git commit -F`, `gh pr create --body-file`,
 
 1. A worktree on a fresh branch from `origin/main`, e.g.
    `git worktree add -b release/client-0.14.0 ../tab-mcp-wt/rel origin/main`.
-2. The CHANGELOG must have a `### Unreleased` section under the package's heading with what
-   the release contains. Every breaking change goes under "Changed", including run-time
+2. The package's own changelog (`packages/tab-mcp-client/CHANGELOG.md` or
+   `packages/tab-mcp/CHANGELOG.md`, shipped in its npm package; the root `CHANGELOG.md` is
+   only an index) must start with a `## Unreleased` section with what the release
+   contains. Every breaking change goes under "Changed", including run-time
    behaviour that a type check does not catch (0.13.0's `confirmInPage` and hand-built
    clients without `kind` were missed and found by saturnus).
 3. `bun scripts/bump-version.ts client 0.14.0` (or `relay 0.10.0`). It sets package.json,
    every pinned doc in `scripts/pinned-files.ts`, the plugin manifests (client only), the
-   CHANGELOG date and link, and `bun.lock`. It refuses, writing nothing, when the old version
+   date and link in the package's changelog, and `bun.lock`. It refuses, writing nothing, when the old version
    is also the other package's version: then edit by hand.
 4. `bun run verify`, and check its exit code (never through a pipe). The test "docs and
    plugin manifests name only the current package versions" fails on any version left over.
@@ -41,7 +43,9 @@ the Write tool, then use `git commit -F`, `gh pr create --body-file`,
 
 ## 2. GitHub release and publication
 
-1. Release notes: the new CHANGELOG section's body, written to a file.
+1. Release notes: the body of the new version's section in the package's changelog
+   (`packages/<package>/CHANGELOG.md`, from below its `## [x.y.z]` heading to the next `## `),
+   written to a file.
 2. On exactly the merge commit (`gh pr view <n> --json mergeCommit`), not on `main`:
    `gh release create client-v0.14.0 --target <sha> --title "Client 0.14.0" --notes-file <f>`
    (`relay-v…`, "Relay 0.14.0"; `--prerelease` exactly for a pre-release version).

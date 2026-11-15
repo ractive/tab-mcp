@@ -727,9 +727,10 @@ deleted at the next sweep. Keep backups as private as the file itself.
 
 ### Upgrading
 
-1. Read the [changelog](../CHANGELOG.md) for every version between yours and the new one:
-   new, renamed or removed `TAB_MCP_*` settings, changed defaults, store changes. Until
-   1.0, a minor version can change settings and the protocol.
+1. Read the relay's [changelog](../packages/tab-mcp/CHANGELOG.md) (also in the npm
+   package) for every version between yours and the new one: new, renamed or removed
+   `TAB_MCP_*` settings, changed defaults, store changes. Until 1.0, a minor version can
+   change settings and the protocol.
 2. Back up the SQLite file if you keep backups.
 3. Change the settings the changelog asks for. The relay stops at start on a value it
    cannot use and names the variable. A `TAB_MCP_*` variable it does not read is
@@ -760,8 +761,10 @@ backup instead, or accept that those grants become public. Since the release tha
 added `private_key_jwt` (see the changelog), the file records the oldest relay version
 that may open it, and a relay refuses a file marked as needing a newer one.
 
-Relay and browser library (`@ractive-ch/tab-mcp-client`) are released on their own. The
-changelog says when a release of one needs a new version of the other.
+Relay and browser library (`@ractive-ch/tab-mcp-client`) are released on their own, each
+with its own changelog ([relay](../packages/tab-mcp/CHANGELOG.md),
+[browser library](../packages/tab-mcp-client/CHANGELOG.md)). They say when a release of
+one needs a new version of the other.
 
 ### Rollback
 
