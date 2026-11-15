@@ -5,7 +5,8 @@ through a tab-mcp relay. It is the WebMCP bridge of tab-mcp (DEC-114 in `kb/`): 
 register tools with [WebMCP](https://webmachinelearning.github.io/webmcp/)
 (`document.modelContext.registerTool()`) offer them only to agents in the browser; the
 extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp for
-this.
+this. How the extension, the relay and the client library fit together, with a picture:
+[How the parts fit together](../../README.md#how-the-parts-fit-together).
 
 Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](PRIVACY.md).
 
