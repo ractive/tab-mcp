@@ -390,12 +390,12 @@ describe("Always allow all, over the tool list", () => {
 	test("its accessible name: the count, the site and every paired AI app", () => {
 		const site = "https://shop.example";
 		expect(allowAllLabel(allowAllView(tab([order, pay, read])), site)).toBe(
-			"Always allow the 2 tools listed on https://shop.example, for every paired AI app",
+			"Always allow all: the 2 tools listed on https://shop.example, for every paired AI app",
 		);
 		expect(
 			allowAllLabel(allowAllView(tab([{ ...order, allowed: true }])), site),
 		).toBe(
-			"Ask again for the 1 tool listed on https://shop.example, for every paired AI app",
+			"Ask again for all: the 1 tool listed on https://shop.example, for every paired AI app",
 		);
 	});
 

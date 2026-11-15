@@ -229,6 +229,6 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
  */
 export function allowAllLabel(view: AllowAllView, site: string): string {
 	const n = view.names.length;
-	const tools = `the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
-	return view.on ? `Always allow ${tools}` : `Ask again for ${tools}`;
+	// Starts with the visible label, so speech input finds it (WCAG 2.5.3).
+	return `${view.label}: the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
 }

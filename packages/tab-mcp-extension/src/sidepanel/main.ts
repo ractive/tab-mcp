@@ -300,7 +300,7 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 		// Every question left waits again, as if just shown.
 		for (const entry of cards.values()) entry.shownAt = now;
 	}
-	let firstNew: HTMLElement | undefined;
+	let lastNew: HTMLElement | undefined;
 	for (const q of questions)
 		if (!cards.has(q.id)) {
 			const card = questionCard(
@@ -308,7 +308,7 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
-			firstNew ??= card;
+			lastNew = card;
 			const now = Date.now();
 			cards.set(q.id, { card, shownAt: now, question: q });
 			// A short line for screen readers, not the card with its arguments
@@ -322,7 +322,9 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	// notification is sent, so it ran out unseen. Brought into view only if
 	// it is not (nothing moves otherwise); what moves under the pointer waits
 	// ALLOW_DELAY_MS as above, and the card's Allow waits from `shownAt`.
-	firstNew?.scrollIntoView({ block: "nearest" });
+	// The last new one: the cards stack downwards, so the ones above it come
+	// into view with it, as far as the panel is tall.
+	lastNew?.scrollIntoView({ block: "nearest" });
 	arm();
 }
 

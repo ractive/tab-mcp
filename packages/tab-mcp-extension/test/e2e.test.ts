@@ -312,11 +312,11 @@ const takesClicks = (selector: string) =>
 	`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e !== null && e.getAttribute("aria-disabled") !== "true"; })()`;
 
 /** A tool's "Always allow" switch in the panel's tool list. */
-const askFirst = (name: string) => `input.always-allow[data-tool="${name}"]`;
+const alwaysAllow = (name: string) => `input.always-allow[data-tool="${name}"]`;
 
-/** An expression: tool `name` asks first (`true`: its "Always allow" is off) or not. */
-const asksFirst = (name: string, asks: boolean) =>
-	`document.querySelector(${JSON.stringify(askFirst(name))})?.checked === ${!asks}`;
+/** An expression: tool `name`'s "Always allow" switch is on (`true`) or off. */
+const alwaysAllowed = (name: string, on: boolean) =>
+	`document.querySelector(${JSON.stringify(alwaysAllow(name))})?.checked === ${on}`;
 
 /** The worker's settings in its IndexedDB, read in the worker (`kv.ts`). */
 const kvAll = (worker: Worker) =>
@@ -535,7 +535,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				SITE
 			],
 		).toEqual(["place_order"]);
-		await stack.panel.waitFor(asksFirst("place_order", false));
+		await stack.panel.waitFor(alwaysAllowed("place_order", true));
 		// The next call runs without a question, also through webmcp_call.
 		expect(
 			(await call(stack, "page_place_order", { item: "unasked" })).isError,
@@ -554,11 +554,11 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			),
 		).toBe(0);
 		// Back to asking first for the tests after this one.
-		await stack.panel.waitFor(takesClicks(askFirst("place_order")));
-		await stack.panel.click(askFirst("place_order"));
+		await stack.panel.waitFor(takesClicks(alwaysAllow("place_order")));
+		await stack.panel.click(alwaysAllow("place_order"));
 		// The click flips the switch at once; the worker's write comes after.
 		await allowedOn(SITE, (n) => !n.includes("place_order"));
-		await stack.panel.waitFor(asksFirst("place_order", true));
+		await stack.panel.waitFor(alwaysAllowed("place_order", false));
 	});
 
 	test("webmcp_call calls a page tool by name, with the same confirmation", async () => {
@@ -1052,7 +1052,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		);
 		await stack.panel.click("#allow-tools");
 		await stack.panel.waitFor(`${head}.textContent === ${ASK_ALL}`);
-		expect(await stack.panel.eval(asksFirst("place_order", false))).toBe(true);
+		expect(await stack.panel.eval(alwaysAllowed("place_order", true))).toBe(
+			true,
+		);
 		const allowed = await call(stack, "page_place_order", { item: "all" });
 		expect(allowed.content[0]?.text).toContain("all");
 		// A tool the page registers later asks first.
@@ -1066,7 +1068,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The button changed under the pointer (another label, one more tool):
 		// a click right then allows nothing.
 		await stack.panel.waitFor(
-			`${head}.getAttribute("aria-label") === "Always allow the 2 tools listed on ${SITE}, for every paired AI app"`,
+			`${head}.getAttribute("aria-label") === "Always allow all: the 2 tools listed on ${SITE}, for every paired AI app"`,
 		);
 		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
 		// Not `disabled`: it stays in the tab order (EQ 11).
@@ -1194,7 +1196,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("a tool whose Always allow is switched on in the panel runs without asking, for that site", async () => {
-		const toggle = askFirst("place_order");
+		const toggle = alwaysAllow("place_order");
 		// Off for a moment after the last question went (the layout moved).
 		await stack.panel.waitFor(takesClicks(toggle));
 		// A switch with a label that stays (EQ 11).
@@ -1236,7 +1238,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// Switched back: it asks again.
 		await stack.panel.click(toggle);
 		await allowedOn(SITE, (n) => !n.includes("place_order"));
-		await stack.panel.waitFor(asksFirst("place_order", true));
+		await stack.panel.waitFor(alwaysAllowed("place_order", false));
 		const asked = call(stack, "page_place_order", { item: "asked" });
 		await answerInPanel(stack, "deny");
 		expect((await asked).isError).toBe(true);
@@ -1420,9 +1422,11 @@ describe.skipIf(chrome === undefined)(
 				),
 			).toEqual(["true", "true", "true"]);
 			// A click on the waiting switch changes nothing.
-			await stack.panel.click(askFirst("place_order"));
+			await stack.panel.click(alwaysAllow("place_order"));
 			await Bun.sleep(300);
-			expect(await stack.panel.eval(asksFirst("place_order", true))).toBe(true);
+			expect(await stack.panel.eval(alwaysAllowed("place_order", false))).toBe(
+				true,
+			);
 			await stack.panel.waitFor(
 				`![...document.querySelectorAll("input.always-allow")].some((b) => b.getAttribute("aria-disabled") === "true")`,
 			);
