@@ -91,7 +91,8 @@ body {
 	outline-offset: 2px;
 }
 
-/* For screen readers only: the short line a new question is announced with. */
+/* For screen readers only: the line a new question is announced with, and the
+   connection's state while the apps' rows show it. */
 .visually-hidden {
 	position: absolute;
 	width: 1px;
@@ -270,7 +271,7 @@ input:is([type="text"], [type="url"]) {
 }
 
 .switch,
-.ask-switch {
+.allow-switch {
 	display: inline-flex;
 	align-items: center;
 	flex: none;
@@ -284,10 +285,10 @@ input:is([type="text"], [type="url"]) {
 }
 
 /*
- * A tool's "Ask first": a switch with a label that stays, not a badge that
+ * A tool's "Always allow": a switch with a label that stays, not a badge that
  * changes its text (EQ 11); smaller, as one of a list.
  */
-.ask-switch {
+.allow-switch {
 	gap: 6px;
 	font-size: 12px;
 	line-height: 16px;
@@ -300,7 +301,7 @@ input:is([type="text"], [type="url"]) {
  * track is an edge, on it is ink; the knob is at least 3:1 on both, in both
  * schemes (EQ 17).
  */
-:is(.switch, .ask-switch) input {
+:is(.switch, .allow-switch) input {
 	--track: 34px;
 	--knob: 16px;
 	--gap: 2px;
@@ -320,12 +321,12 @@ input:is([type="text"], [type="url"]) {
 	transition: background-color 0.15s;
 }
 
-.ask-switch input {
+.allow-switch input {
 	--track: 28px;
 	--knob: 12px;
 }
 
-:is(.switch, .ask-switch) input::after {
+:is(.switch, .allow-switch) input::after {
 	content: "";
 	position: absolute;
 	top: var(--gap);
@@ -337,29 +338,29 @@ input:is([type="text"], [type="url"]) {
 	transition: transform 0.15s;
 }
 
-:is(.switch, .ask-switch) input:checked {
+:is(.switch, .allow-switch) input:checked {
 	background: var(--strong);
 }
 
-:is(.switch, .ask-switch) input:checked::after {
+:is(.switch, .allow-switch) input:checked::after {
 	transform: translateX(
 		calc(var(--track) - 2 * var(--border) - var(--knob) - 2 * var(--gap))
 	);
 }
 
 /* Taking no click yet (the wait after the layout moved): flat, as a button. */
-.ask-switch:has(input[aria-disabled="true"]) {
+.allow-switch:has(input[aria-disabled="true"]) {
 	color: var(--ink-2);
 	cursor: default;
 }
 
-.ask-switch input[aria-disabled="true"] {
+.allow-switch input[aria-disabled="true"] {
 	background: var(--wash);
 	box-shadow: inset 0 0 0 1px var(--rule);
 	cursor: default;
 }
 
-.ask-switch input[aria-disabled="true"]::after {
+.allow-switch input[aria-disabled="true"]::after {
 	background: var(--ink-2);
 }
 
@@ -735,7 +736,7 @@ button.copy {
 	font-weight: 600;
 }
 
-/* The tool list's heading, with "Turn off Ask first" / "Turn on Ask first". */
+/* The tool list's heading, with "Always allow all" / "Ask again for all". */
 .tools-head {
 	display: flex;
 	flex-wrap: wrap;
@@ -829,8 +830,8 @@ html [hidden] {
 
 @media (prefers-reduced-motion: reduce) {
 	button,
-	:is(.switch, .ask-switch) input,
-	:is(.switch, .ask-switch) input::after {
+	:is(.switch, .allow-switch) input,
+	:is(.switch, .allow-switch) input::after {
 		transition: none;
 	}
 }
@@ -856,33 +857,33 @@ html [hidden] {
 		color: GrayText;
 	}
 
-	:is(.switch, .ask-switch) input {
+	:is(.switch, .allow-switch) input {
 		--border: 1px;
 		--gap: 1px;
 		border-color: CanvasText;
 	}
 
-	:is(.switch, .ask-switch) input::after {
+	:is(.switch, .allow-switch) input::after {
 		background: CanvasText;
 		forced-color-adjust: none;
 	}
 
-	:is(.switch, .ask-switch) input:checked {
+	:is(.switch, .allow-switch) input:checked {
 		background: Highlight;
 		forced-color-adjust: none;
 	}
 
 	/* On Highlight the knob is its text colour: CanvasText need not show there. */
-	:is(.switch, .ask-switch) input:checked::after {
+	:is(.switch, .allow-switch) input:checked::after {
 		background: HighlightText;
 	}
 
-	.ask-switch input[aria-disabled="true"] {
+	.allow-switch input[aria-disabled="true"] {
 		border-color: GrayText;
 		box-shadow: none;
 	}
 
-	.ask-switch input[aria-disabled="true"]::after {
+	.allow-switch input[aria-disabled="true"]::after {
 		background: GrayText;
 	}
 

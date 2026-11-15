@@ -294,7 +294,7 @@ export class Connection {
 
 	/**
 	 * A page tool that is not read-only: one the user allowed for its site
-	 * runs; anything else asks. "Don't ask again on <host>" in the question
+	 * runs; anything else asks. "Always allow on <host>" in the question
 	 * allows it for its site.
 	 */
 	#decide(request: ConfirmRequest, tool: LookedUp): Promise<void> {

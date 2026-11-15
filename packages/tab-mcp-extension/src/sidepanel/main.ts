@@ -20,7 +20,7 @@ import { ALL_SITES } from "../tabs.ts";
 import {
 	allowAllLabel,
 	allowAllView,
-	askFirstNote,
+	alwaysAllowNote,
 	cardView,
 	confirms,
 	introText,
@@ -163,6 +163,7 @@ function showConnection(s: PanelState): void {
 	const view = cardView(s, addingApp);
 	$("state").dataset["state"] = s.status;
 	setText($("state-text"), view.stateText);
+	$("state").classList.toggle("visually-hidden", !view.stateShown);
 	$("intro").hidden = !view.intro;
 	setText($("intro"), view.intro ? introText(s.relay) : "");
 	$("grants-note").hidden = view.grantsNote === "";
@@ -273,8 +274,8 @@ const NOTICE_MS = 6000;
  * Until when the panel's controls that allow something take no click after
  * its layout moved: a question that went away moves what was below it up,
  * and one that came moves it down, under the pointer; a click meant for what
- * was there must not land on an "Allow once", "Turn off Ask first" or
- * an "Ask first" switch that came there instead (ES 5).
+ * was there must not land on an "Allow once", "Always allow all" or
+ * an "Always allow" switch that came there instead (ES 5).
  */
 let movedUntil = 0;
 /** The button over the tool list as last shown: its visibility, label and tools. */
@@ -299,6 +300,7 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 		// Every question left waits again, as if just shown.
 		for (const entry of cards.values()) entry.shownAt = now;
 	}
+	let lastNew: HTMLElement | undefined;
 	for (const q of questions)
 		if (!cards.has(q.id)) {
 			const card = questionCard(
@@ -306,6 +308,7 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
+			lastNew = card;
 			const now = Date.now();
 			cards.set(q.id, { card, shownAt: now, question: q });
 			// A short line for screen readers, not the card with its arguments
@@ -314,6 +317,14 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 			// Everything below the questions moved down by the card's height.
 			movedUntil = now + ALLOW_DELAY_MS;
 		}
+	// The questions are above the cards: in a panel scrolled down to the tool
+	// list a new one came out of sight, and with the panel in front no
+	// notification is sent, so it ran out unseen. Brought into view only if
+	// it is not (nothing moves otherwise); what moves under the pointer waits
+	// ALLOW_DELAY_MS as above, and the card's Allow waits from `shownAt`.
+	// The last new one: the cards stack downwards, so the ones above it come
+	// into view with it, as far as the panel is tall.
+	lastNew?.scrollIntoView({ block: "nearest" });
 	arm();
 }
 
@@ -369,7 +380,7 @@ function arm(): void {
 	// `aria-disabled`, not `disabled`: a focused control keeps its focus and
 	// its place in the tab order during the wait (EQ 11).
 	for (const control of document.querySelectorAll<HTMLElement>(
-		"input.ask-first, #allow-tools",
+		"input.always-allow, #allow-tools",
 	))
 		setAvailable(control, now >= movedUntil);
 }
@@ -396,22 +407,23 @@ function badge(text: string, kind = ""): HTMLElement {
 }
 
 /**
- * The tool's "Ask first" switch, for this site: on, it asks before each
- * call; off, it runs without asking, for every paired AI app. A switch with
- * a label that stays, not a badge that changes its text (EQ 9, EQ 11).
+ * The tool's "Always allow" switch, for this site: on, it runs without
+ * asking, for every paired AI app; off (the default), it asks before each
+ * call. A switch with a label that stays, not a badge that changes its text
+ * (EQ 9, EQ 11). On grants, as a permission switch does (DEC-184).
  */
-function askFirstSwitch(origin: string, tool: ToolView): HTMLElement {
+function alwaysAllowSwitch(origin: string, tool: ToolView): HTMLElement {
 	const label = document.createElement("label");
-	label.className = "ask-switch";
+	label.className = "allow-switch";
 	const input = document.createElement("input");
 	input.type = "checkbox";
-	input.className = "ask-first";
+	input.className = "always-allow";
 	input.setAttribute("role", "switch");
-	input.checked = !tool.allowed;
+	input.checked = tool.allowed;
 	input.dataset["tool"] = tool.name;
-	input.setAttribute("aria-label", `Ask first: ${tool.title ?? tool.name}`);
+	input.setAttribute("aria-label", `Always allow: ${tool.title ?? tool.name}`);
 	// What on and off do is a line over the list, not a tooltip (DEC-160).
-	input.setAttribute("aria-describedby", "ask-first-note");
+	input.setAttribute("aria-describedby", "always-allow-note");
 	setAvailable(input, Date.now() >= movedUntil);
 	input.addEventListener("click", (event) => {
 		// During the wait after the layout moved the click does nothing.
@@ -423,11 +435,11 @@ function askFirstSwitch(origin: string, tool: ToolView): HTMLElement {
 			type: "set-allowed",
 			origin,
 			name: tool.name,
-			on: !input.checked,
+			on: input.checked,
 		});
 	});
 	const text = document.createElement("span");
-	text.textContent = "Ask first";
+	text.textContent = "Always allow";
 	text.setAttribute("aria-hidden", "true");
 	label.append(input, text);
 	return label;
@@ -461,7 +473,7 @@ function toolItem(
 			: tool.readOnly
 				? badge("reads")
 				: canAllow
-					? askFirstSwitch(origin, tool)
+					? alwaysAllowSwitch(origin, tool)
 					: badge("asks first", "asks"),
 	);
 	return li;
@@ -513,9 +525,9 @@ function showTab(s: PanelState): void {
 	const button = $("allow-tools") as HTMLButtonElement;
 	setText(button, allowAll.label);
 	const scope = tab?.origin ?? "this site";
-	// What a tool's "Ask first" switch does, where there is one.
-	$("ask-first-note").hidden = !allowAll.shown;
-	setText($("ask-first-note"), allowAll.shown ? askFirstNote(scope) : "");
+	// What a tool's "Always allow" switch does, where there is one.
+	$("always-allow-note").hidden = !allowAll.shown;
+	setText($("always-allow-note"), allowAll.shown ? alwaysAllowNote(scope) : "");
 	// No tooltip (DEC-160): the line under the button names the site and
 	// "every paired AI app"; the count is the list below.
 	button.setAttribute("aria-label", allowAllLabel(allowAll, scope));

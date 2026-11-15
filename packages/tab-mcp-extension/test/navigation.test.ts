@@ -310,7 +310,7 @@ describe("the navigation tools", () => {
 		expect(t.refreshed()).toBe(1);
 	});
 
-	test("to another origin it asks first: From, To, no Don't ask again; the answer counts", async () => {
+	test("to another origin it asks first: From, To, no Always allow on <host>; the answer counts", async () => {
 		const chrome = fakeChrome({
 			url: `${SHOP}/products`,
 			readable: true,
@@ -697,7 +697,7 @@ describe("the navigation question", () => {
 		expect(`opening ${hostEnd(host)}`.length).toBeLessThanOrEqual(60);
 	});
 
-	test("the card in the panel: From (verified), To, the arguments; no page title, no Don't ask again", async () => {
+	test("the card in the panel: From (verified), To, the arguments; no page title, no Always allow on <host>", async () => {
 		const window = new HappyWindow({
 			url: "chrome-extension://x/sidepanel/index.html",
 		});
@@ -736,7 +736,7 @@ describe("the navigation question", () => {
 		}
 	});
 
-	test("a page tool's card: Don't allow, Allow once, Don't ask again on <host> (EQ 10, EQ 9)", async () => {
+	test("a page tool's card: Don't allow, Allow once, Always allow on <host> (EQ 10, EQ 9)", async () => {
 		const window = new HappyWindow({
 			url: "chrome-extension://x/sidepanel/index.html",
 		});
@@ -763,7 +763,7 @@ describe("the navigation question", () => {
 			expect(buttons.map((b) => b.textContent)).toEqual([
 				"Don't allow",
 				"Allow once",
-				"Don't ask again on www.shop.example:8443",
+				"Always allow on www.shop.example:8443",
 			]);
 			// One kind of button for every answer: none is pushed (DEC-180).
 			expect(buttons.map((b) => b.className)).toEqual(["", "", ""]);

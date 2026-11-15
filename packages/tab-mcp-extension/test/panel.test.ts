@@ -9,9 +9,10 @@ import { SETUP_GUIDE } from "@ractive-ch/tab-mcp-client/setup";
 import { Window } from "happy-dom";
 import type { PanelState, TabView } from "../src/protocol.ts";
 import {
+	ALWAYS_ALLOW_ALL,
 	allowAllLabel,
 	allowAllView,
-	askFirstNote,
+	alwaysAllowNote,
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
@@ -20,7 +21,6 @@ import {
 	type SwitchIntent,
 	switchExpiry,
 	switchShown,
-	TURN_OFF_ASK_FIRST,
 	webmcpNote,
 } from "../src/sidepanel/card.ts";
 import {
@@ -51,6 +51,7 @@ describe("the AI app card", () => {
 		expect(cardView(base, false)).toEqual({
 			// Nothing paired: no promise about paired apps (EQ 7).
 			stateText: "AI access is off",
+			stateShown: true,
 			switchOn: false,
 			turnOn: true,
 			pairing: false,
@@ -67,6 +68,7 @@ describe("the AI app card", () => {
 		const view = cardView({ ...base, grants: [claude] }, false);
 		expect(view).toMatchObject({
 			stateText: "AI access is off · paired apps stay paired",
+			stateShown: true,
 			intro: false,
 			disconnect: false,
 			grantsNote: "Turn on AI access to disconnect an app.",
@@ -93,6 +95,7 @@ describe("the AI app card", () => {
 		const view = cardView({ ...base, status: "connecting" }, false);
 		expect(view).toMatchObject({
 			stateText: "Connecting…",
+			stateShown: true,
 			switchOn: true,
 			turnOn: false,
 			pairing: false,
@@ -106,6 +109,7 @@ describe("the AI app card", () => {
 		);
 		expect(view).toEqual({
 			stateText: "On · no AI app paired yet",
+			stateShown: true,
 			switchOn: true,
 			turnOn: false,
 			pairing: true,
@@ -127,6 +131,7 @@ describe("the AI app card", () => {
 		};
 		expect(cardView(state, false)).toEqual({
 			stateText: "Connected · Claude, chatgpt.com",
+			stateShown: false,
 			switchOn: true,
 			turnOn: false,
 			pairing: false,
@@ -270,7 +275,7 @@ describe("the tab card's texts", () => {
 			expect(text("host-access")).toContain(
 				'"Read and change all your data on all websites"',
 			);
-			expect(text("allow-tools")).toBe(TURN_OFF_ASK_FIRST);
+			expect(text("allow-tools")).toBe(ALWAYS_ALLOW_ALL);
 			// Problems are announced; a question's card is not a live region
 			// (its arguments can be 1 MiB), a short line is.
 			expect(doc.getElementById("problem")?.getAttribute("role")).toBe("alert");
@@ -295,7 +300,7 @@ describe("the tab card's texts", () => {
 			expect(text("pairing")).toContain("outside this Chrome profile");
 			// The look (DEC-160, DEC-161): the main actions are ink ("strong"),
 			// none is "primary" (amber in Overmark); nothing is in a tooltip
-			// alone; the line for the "Ask first" switches is there to be filled.
+			// alone; the line for the "Always allow" switches is there to be filled.
 			expect(
 				[...doc.querySelectorAll("button.strong")].map((b) =>
 					b.textContent?.trim(),
@@ -303,7 +308,7 @@ describe("the tab card's texts", () => {
 			).toEqual(["Turn on AI access", "Done", "Save"]);
 			expect(doc.querySelector(".primary")).toBeNull();
 			expect(doc.querySelectorAll("[title]").length).toBe(0);
-			expect(doc.getElementById("ask-first-note")?.hidden).toBe(true);
+			expect(doc.getElementById("always-allow-note")?.hidden).toBe(true);
 			expect(
 				[...doc.querySelectorAll("h2, h3")].map((h) => h.textContent),
 			).toEqual(["AI app", "Pair an AI app", "Tab in front", "Tools"]);
@@ -312,9 +317,9 @@ describe("the tab card's texts", () => {
 		}
 	});
 
-	test("what Ask first does is a line for everyone, with the site (DEC-160)", () => {
-		expect(askFirstNote("https://shop.example")).toBe(
-			"Ask first, on: the tool asks you before each call. Off: it runs without asking on https://shop.example, for every paired AI app.",
+	test("what Always allow does is a line for everyone, with the site (DEC-160)", () => {
+		expect(alwaysAllowNote("https://shop.example")).toBe(
+			"Always allow, on: the tool runs without asking on https://shop.example, for every paired AI app. Off: it asks you before each call.",
 		);
 	});
 
@@ -338,7 +343,7 @@ describe("the tab card's texts", () => {
 	});
 });
 
-describe("Turn off Ask first, over the tool list", () => {
+describe("Always allow all, over the tool list", () => {
 	const tab = (tools: TabView["tools"], canAllow = true): TabView => ({
 		title: "Shop",
 		host: "shop.example",
@@ -360,15 +365,15 @@ describe("Turn off Ask first, over the tool list", () => {
 	test("for the listed tools that ask first, not read-only or left-out ones", () => {
 		expect(allowAllView(tab([order, pay, read, broken]))).toEqual({
 			shown: true,
-			label: "Turn off Ask first",
+			label: "Always allow all",
 			names: ["order", "pay"],
 			on: true,
 		});
 	});
 
-	test("some allowed: still Turn off Ask first; none asks: Turn on Ask first", () => {
+	test("some allowed: still Always allow all; none asks: Ask again for all", () => {
 		expect(allowAllView(tab([{ ...order, allowed: true }, pay])).label).toBe(
-			TURN_OFF_ASK_FIRST,
+			ALWAYS_ALLOW_ALL,
 		);
 		expect(
 			allowAllView(
@@ -376,7 +381,7 @@ describe("Turn off Ask first, over the tool list", () => {
 			),
 		).toEqual({
 			shown: true,
-			label: "Turn on Ask first",
+			label: "Ask again for all",
 			names: ["order", "pay"],
 			on: false,
 		});
@@ -385,12 +390,12 @@ describe("Turn off Ask first, over the tool list", () => {
 	test("its accessible name: the count, the site and every paired AI app", () => {
 		const site = "https://shop.example";
 		expect(allowAllLabel(allowAllView(tab([order, pay, read])), site)).toBe(
-			"Turn off Ask first for the 2 tools listed on https://shop.example, for every paired AI app",
+			"Always allow all: the 2 tools listed on https://shop.example, for every paired AI app",
 		);
 		expect(
 			allowAllLabel(allowAllView(tab([{ ...order, allowed: true }])), site),
 		).toBe(
-			"Turn on Ask first for the 1 tool listed on https://shop.example, for every paired AI app",
+			"Ask again for all: the 1 tool listed on https://shop.example, for every paired AI app",
 		);
 	});
 

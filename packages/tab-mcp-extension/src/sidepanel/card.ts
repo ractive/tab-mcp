@@ -19,6 +19,12 @@ const STATUS_TEXT: Record<PanelState["status"], string> = {
 
 export interface CardView {
 	stateText: string;
+	/**
+	 * The state line is shown. Not while connected with apps paired: their
+	 * rows' green dots say it, and a line with a dot and their names above
+	 * them reads as one more app. It stays for screen readers (a status).
+	 */
+	stateShown: boolean;
 	/** The AI access switch is on (also while connecting or retrying). */
 	switchOn: boolean;
 	/** The primary "Turn on AI access". */
@@ -52,6 +58,7 @@ export function cardView(state: PanelState, adding: boolean): CardView {
 				: state.status === "off" && paired
 					? "AI access is off · paired apps stay paired"
 					: STATUS_TEXT[state.status],
+		stateShown: !(state.status === "on" && paired),
 		switchOn: state.status !== "off",
 		turnOn: state.status === "off",
 		pairing,
@@ -173,7 +180,7 @@ export function switchExpiry(
 /** The button over the tab's tool list, or why it is not there. */
 export interface AllowAllView {
 	shown: boolean;
-	label: typeof TURN_OFF_ASK_FIRST | typeof TURN_ON_ASK_FIRST;
+	label: typeof ALWAYS_ALLOW_ALL | typeof ASK_AGAIN_ALL;
 	/** The tools it is for: listed, offered, not read-only. */
 	names: string[];
 	/** What a click asks for: allow them (true), or ask first again. */
@@ -181,22 +188,22 @@ export interface AllowAllView {
 }
 
 /**
- * The labels use the per-tool switch's word, "Ask first" (DEC-176); the line
- * under the button names the site and every paired AI app (EQ 9).
+ * The labels use the per-tool switch's words, "Always allow" (DEC-184); the
+ * line under the button names the site and every paired AI app (EQ 9).
  */
-export const TURN_OFF_ASK_FIRST = "Turn off Ask first";
-export const TURN_ON_ASK_FIRST = "Turn on Ask first";
+export const ALWAYS_ALLOW_ALL = "Always allow all";
+export const ASK_AGAIN_ALL = "Ask again for all";
 
 /**
- * What a tool's "Ask first" switch does on `site`: a line over the tool
+ * What a tool's "Always allow" switch does on `site`: a line over the tool
  * list, for everyone, not a tooltip on each switch (DEC-160).
  */
-export const askFirstNote = (site: string): string =>
-	`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${site}, for every paired AI app.`;
+export const alwaysAllowNote = (site: string): string =>
+	`Always allow, on: the tool runs without asking on ${site}, for every paired AI app. Off: it asks you before each call.`;
 
 /**
- * "Turn off Ask first" for the tools listed now on a site whose tools can be
- * allowed; once none asks, "Turn on Ask first". A tool the page adds later is
+ * "Always allow all" for the tools listed now on a site whose tools can be
+ * allowed; once none asks, "Ask again for all". A tool the page adds later is
  * not among them: it asks first.
  */
 export function allowAllView(tab: TabView | undefined): AllowAllView {
@@ -210,7 +217,7 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
 		);
 	return {
 		shown: tab?.canAllow === true && names.length > 0,
-		label: all ? TURN_ON_ASK_FIRST : TURN_OFF_ASK_FIRST,
+		label: all ? ASK_AGAIN_ALL : ALWAYS_ALLOW_ALL,
 		names,
 		on: !all,
 	};
@@ -222,5 +229,6 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
  */
 export function allowAllLabel(view: AllowAllView, site: string): string {
 	const n = view.names.length;
-	return `${view.label} for the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
+	// Starts with the visible label, so speech input finds it (WCAG 2.5.3).
+	return `${view.label}: the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
 }

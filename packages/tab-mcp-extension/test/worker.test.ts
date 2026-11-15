@@ -647,7 +647,7 @@ describe("questions", () => {
 		});
 	});
 
-	test("Don't ask again is offered only for a page tool of an http(s) site, never for a navigation", async () => {
+	test("Always allow on <host> is offered only for a page tool of an http(s) site, never for a navigation", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
 		const navigation = questions.ask(request(), {
@@ -800,7 +800,7 @@ describe("deciding whether a page tool may run", () => {
 		]);
 	});
 
-	test("Don't ask again on <host>: the tool is allowed on its site, for every AI app and page (EQ 10)", async () => {
+	test("Always allow on <host>: the tool is allowed on its site, for every AI app and page (EQ 10)", async () => {
 		const t = decider("site");
 		await decide(t.d, request(), page1);
 		expect(t.asked).toHaveLength(1);

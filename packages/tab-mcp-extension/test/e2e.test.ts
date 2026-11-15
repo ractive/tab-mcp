@@ -311,12 +311,12 @@ async function answerInPanel(
 const takesClicks = (selector: string) =>
 	`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e !== null && e.getAttribute("aria-disabled") !== "true"; })()`;
 
-/** A tool's "Ask first" switch in the panel's tool list. */
-const askFirst = (name: string) => `input.ask-first[data-tool="${name}"]`;
+/** A tool's "Always allow" switch in the panel's tool list. */
+const alwaysAllow = (name: string) => `input.always-allow[data-tool="${name}"]`;
 
-/** An expression: tool `name`'s "Ask first" switch is on (`true`) or off. */
-const asksFirst = (name: string, on: boolean) =>
-	`document.querySelector(${JSON.stringify(askFirst(name))})?.checked === ${on}`;
+/** An expression: tool `name`'s "Always allow" switch is on (`true`) or off. */
+const alwaysAllowed = (name: string, on: boolean) =>
+	`document.querySelector(${JSON.stringify(alwaysAllow(name))})?.checked === ${on}`;
 
 /** The worker's settings in its IndexedDB, read in the worker (`kv.ts`). */
 const kvAll = (worker: Worker) =>
@@ -485,7 +485,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
-		// "Don't ask again on <host>" is offered too.
+		// "Always allow on <host>" is offered too.
 		await stack.panel.waitFor(
 			`document.querySelector('[data-question] button[data-answer="site"]')`,
 		);
@@ -493,7 +493,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			await stack.panel.eval(
 				`document.querySelector('[data-question] button[data-answer="site"]').textContent`,
 			),
-		).toBe(`Don't ask again on ${new URL(SITE).host}`);
+		).toBe(`Always allow on ${new URL(SITE).host}`);
 		// The verified site on a line of its own, the page's title apart.
 		const [ask, ...lines] = await stack.panel.eval<string[]>(
 			`[...document.querySelectorAll("[data-question] p")].slice(0, 3).map((p) => p.textContent)`,
@@ -525,7 +525,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		);
 	});
 
-	test("Don't ask again on <host> allows the tool on the site, as the panel's switch does (EQ 10)", async () => {
+	test("Always allow on <host> allows the tool on the site, as the panel's switch does (EQ 10)", async () => {
 		const first = call(stack, "page_place_order", { item: "once more" });
 		await answerInPanel(stack, "site");
 		expect((await first).isError).toBeFalsy();
@@ -535,7 +535,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				SITE
 			],
 		).toEqual(["place_order"]);
-		await stack.panel.waitFor(asksFirst("place_order", false));
+		await stack.panel.waitFor(alwaysAllowed("place_order", true));
 		// The next call runs without a question, also through webmcp_call.
 		expect(
 			(await call(stack, "page_place_order", { item: "unasked" })).isError,
@@ -553,12 +553,12 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				`document.querySelectorAll("[data-question]").length`,
 			),
 		).toBe(0);
-		// Back to "Ask first" for the tests after this one.
-		await stack.panel.waitFor(takesClicks(askFirst("place_order")));
-		await stack.panel.click(askFirst("place_order"));
+		// Back to asking first for the tests after this one.
+		await stack.panel.waitFor(takesClicks(alwaysAllow("place_order")));
+		await stack.panel.click(alwaysAllow("place_order"));
 		// The click flips the switch at once; the worker's write comes after.
 		await allowedOn(SITE, (n) => !n.includes("place_order"));
-		await stack.panel.waitFor(asksFirst("place_order", true));
+		await stack.panel.waitFor(alwaysAllowed("place_order", false));
 	});
 
 	test("webmcp_call calls a page tool by name, with the same confirmation", async () => {
@@ -640,7 +640,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
 	});
 
-	test("the AI access switch and a tool's Ask first: knob on track and track on the paper at least 3:1, light and dark, on and off (EQ 17, DEC-160)", async () => {
+	test("the AI access switch and a tool's Always allow: knob on track and track on the paper at least 3:1, light and dark, on and off (EQ 17, DEC-160)", async () => {
 		/** The contrast ratios Chrome's computed colours give, on and off. */
 		const contrast = (selector: string) =>
 			stack.panel.eval<{
@@ -686,8 +686,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				still.remove();
 				return result;
 			})()`);
-		await stack.panel.waitFor(`document.querySelector("input.ask-first")`);
-		for (const selector of ["#ai-switch", "input.ask-first"]) {
+		await stack.panel.waitFor(`document.querySelector("input.always-allow")`);
+		for (const selector of ["#ai-switch", "input.always-allow"]) {
 			const measured: Record<string, unknown> = {};
 			for (const value of ["light", "dark"]) {
 				await stack.panel.send("Emulation.setEmulatedMedia", {
@@ -846,7 +846,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			// The tab's tools with their switches, and the address and the code.
 			if (adding) await panel.click("#add-app");
 			await panel.waitFor(
-				`!document.getElementById("pairing").hidden && !document.getElementById("tools-head").hidden && document.querySelector("input.ask-first") !== null`,
+				`!document.getElementById("pairing").hidden && !document.getElementById("tools-head").hidden && document.querySelector("input.always-allow") !== null`,
 			);
 			await holds();
 			// "How do I add it?" (its commands) and Settings open, and the two
@@ -964,7 +964,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 					features: [{ name: "prefers-color-scheme", value }],
 				});
 			await scheme("light");
-			// Wait for the "Turn off Ask first" button to take clicks
+			// Wait for the "Always allow all" button to take clicks
 			// again: it is flat for a moment after the question went.
 			await panel.waitFor(takesClicks("#allow-tools"));
 			expect(await read()).toEqual({
@@ -1006,17 +1006,17 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				onArmed: "rgb(17, 20, 26)",
 			});
 			// Nothing is said in a tooltip alone: the address is shown whole,
-			// and what "Ask first" does is a line over the list.
+			// and what "Always allow" does is a line over the list.
 			expect(
 				await panel.eval(`(() => {
 					const address = document.getElementById("address");
-					const input = document.querySelector("input.ask-first");
+					const input = document.querySelector("input.always-allow");
 					return [
 						address.title,
 						address.scrollWidth <= address.clientWidth,
 						input.closest("label").title,
 						input.getAttribute("aria-describedby"),
-						document.getElementById("ask-first-note").textContent,
+						document.getElementById("always-allow-note").textContent,
 						// As the panel is drawn now, not only as its HTML is.
 						[...document.querySelectorAll("[title]")].map((e) => e.id || e.className),
 					];
@@ -1025,8 +1025,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				"",
 				true,
 				"",
-				"ask-first-note",
-				`Ask first, on: the tool asks you before each call. Off: it runs without asking on ${SITE}, for every paired AI app.`,
+				"always-allow-note",
+				`Always allow, on: the tool runs without asking on ${SITE}, for every paired AI app. Off: it asks you before each call.`,
 				[],
 			]);
 		} finally {
@@ -1042,17 +1042,19 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		}
 	}, 90_000);
 
-	test("Turn off Ask first and Turn on Ask first, for the tools listed at the click only", async () => {
+	test("Always allow all and Ask again for all, for the tools listed at the click only", async () => {
 		const head = `document.getElementById("allow-tools")`;
-		const TURN_OFF = JSON.stringify("Turn off Ask first");
-		const TURN_ON = JSON.stringify("Turn on Ask first");
+		const ALLOW_ALL = JSON.stringify("Always allow all");
+		const ASK_ALL = JSON.stringify("Ask again for all");
 		// Off for a moment after a question went (the layout moved).
 		await stack.panel.waitFor(
-			`!document.getElementById("tools-head").hidden && ${head}.textContent === ${TURN_OFF} && ${takesClicks("#allow-tools")}`,
+			`!document.getElementById("tools-head").hidden && ${head}.textContent === ${ALLOW_ALL} && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === ${TURN_ON}`);
-		expect(await stack.panel.eval(asksFirst("place_order", false))).toBe(true);
+		await stack.panel.waitFor(`${head}.textContent === ${ASK_ALL}`);
+		expect(await stack.panel.eval(alwaysAllowed("place_order", true))).toBe(
+			true,
+		);
 		const allowed = await call(stack, "page_place_order", { item: "all" });
 		expect(allowed.content[0]?.text).toContain("all");
 		// A tool the page registers later asks first.
@@ -1066,7 +1068,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The button changed under the pointer (another label, one more tool):
 		// a click right then allows nothing.
 		await stack.panel.waitFor(
-			`${head}.getAttribute("aria-label") === "Turn off Ask first for the 2 tools listed on ${SITE}, for every paired AI app"`,
+			`${head}.getAttribute("aria-label") === "Always allow all: the 2 tools listed on ${SITE}, for every paired AI app"`,
 		);
 		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
 		// Not `disabled`: it stays in the tab order (EQ 11).
@@ -1082,18 +1084,18 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");
 		expect((await late).isError).toBe(true);
-		// One asks again: "Turn off Ask first" again takes the late one too.
+		// One asks again: "Always allow all" again takes the late one too.
 		await stack.panel.waitFor(
-			`${head}.textContent === ${TURN_OFF} && ${takesClicks("#allow-tools")}`,
+			`${head}.textContent === ${ALLOW_ALL} && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === ${TURN_ON}`);
+		await stack.panel.waitFor(`${head}.textContent === ${ASK_ALL}`);
 		expect((await call(stack, "page_late_order")).isError).toBeFalsy();
-		// "Turn on Ask first" (once it may be clicked: its label just changed): every
+		// "Ask again for all" (once it may be clicked: its label just changed): every
 		// one asks first again.
 		await stack.panel.waitFor(takesClicks("#allow-tools"));
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.textContent === ${TURN_OFF}`);
+		await stack.panel.waitFor(`${head}.textContent === ${ALLOW_ALL}`);
 		const asks = call(stack, "page_place_order", { item: "asks" });
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 		await answerInPanel(stack, "deny");
@@ -1193,8 +1195,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await asked).isError).toBe(true);
 	});
 
-	test("a tool whose Ask first is switched off in the panel runs without asking, for that site", async () => {
-		const toggle = askFirst("place_order");
+	test("a tool whose Always allow is switched on in the panel runs without asking, for that site", async () => {
+		const toggle = alwaysAllow("place_order");
 		// Off for a moment after the last question went (the layout moved).
 		await stack.panel.waitFor(takesClicks(toggle));
 		// A switch with a label that stays (EQ 11).
@@ -1203,7 +1205,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				const e = document.querySelector(${JSON.stringify(toggle)});
 				return [e.type, e.getAttribute("role"), e.getAttribute("aria-label"), e.checked];
 			})()`),
-		).toEqual(["checkbox", "switch", "Ask first: place_order", true]);
+		).toEqual(["checkbox", "switch", "Always allow: place_order", false]);
 		// The switch as drawn now: the click flips it at once, the worker's
 		// state then draws the list anew.
 		await stack.panel.eval(
@@ -1213,13 +1215,13 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// Written by the worker, then shown from its state.
 		await allowedOn(SITE, (n) => n.includes("place_order"));
 		await stack.panel.waitFor(
-			`(() => { const e = document.querySelector(${JSON.stringify(toggle)}); return e !== null && e.dataset.e2eOld === undefined && !e.checked; })()`,
+			`(() => { const e = document.querySelector(${JSON.stringify(toggle)}); return e !== null && e.dataset.e2eOld === undefined && e.checked; })()`,
 		);
 		expect(
 			await stack.panel.eval(
 				`document.querySelector(${JSON.stringify(toggle)}).getAttribute("aria-label")`,
 			),
-		).toBe("Ask first: place_order");
+		).toBe("Always allow: place_order");
 		// The list was made anew with the state: the focus is on the same
 		// tool's switch, not on the page's body (EQ 11).
 		expect(
@@ -1236,7 +1238,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// Switched back: it asks again.
 		await stack.panel.click(toggle);
 		await allowedOn(SITE, (n) => !n.includes("place_order"));
-		await stack.panel.waitFor(asksFirst("place_order", true));
+		await stack.panel.waitFor(alwaysAllowed("place_order", false));
 		const asked = call(stack, "page_place_order", { item: "asked" });
 		await answerInPanel(stack, "deny");
 		expect((await asked).isError).toBe(true);
@@ -1393,7 +1395,7 @@ describe.skipIf(chrome === undefined)(
 			// switches wait too (ES 5).
 			expect(
 				await stack.panel.eval(
-					`[...document.querySelectorAll("input.ask-first")].map((b) => b.getAttribute("aria-disabled"))`,
+					`[...document.querySelectorAll("input.always-allow")].map((b) => b.getAttribute("aria-disabled"))`,
 				),
 			).toEqual(["true"]);
 			const second = call(stack, "page_place_order", { item: "second" });
@@ -1416,15 +1418,17 @@ describe.skipIf(chrome === undefined)(
 			// The question left, and the tools' switches, wait again.
 			expect(
 				await stack.panel.eval(
-					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), input.ask-first')].map((b) => b.getAttribute("aria-disabled"))`,
+					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), input.always-allow')].map((b) => b.getAttribute("aria-disabled"))`,
 				),
 			).toEqual(["true", "true", "true"]);
 			// A click on the waiting switch changes nothing.
-			await stack.panel.click(askFirst("place_order"));
+			await stack.panel.click(alwaysAllow("place_order"));
 			await Bun.sleep(300);
-			expect(await stack.panel.eval(asksFirst("place_order", true))).toBe(true);
+			expect(await stack.panel.eval(alwaysAllowed("place_order", false))).toBe(
+				true,
+			);
 			await stack.panel.waitFor(
-				`![...document.querySelectorAll("input.ask-first")].some((b) => b.getAttribute("aria-disabled") === "true")`,
+				`![...document.querySelectorAll("input.always-allow")].some((b) => b.getAttribute("aria-disabled") === "true")`,
 			);
 			const allowedTools = (await kvAll(stack.worker))["allowedTools"] as
 				| Record<string, string[]>
@@ -1682,9 +1686,9 @@ describe.skipIf(chrome === undefined)(
 			);
 			expect(
 				await stack.panel.eval(
-					`[document.getElementById("state-text").textContent, document.getElementById("pairing").hidden, document.getElementById("add-app").hidden, document.querySelector("#grants button")?.textContent]`,
+					`[document.getElementById("state-text").textContent, document.getElementById("state").classList.contains("visually-hidden"), document.getElementById("pairing").hidden, document.getElementById("add-app").hidden, document.querySelector("#grants button")?.textContent]`,
 				),
-			).toEqual(["Connected · Test client", true, false, "Disconnect"]);
+			).toEqual(["Connected · Test client", true, true, false, "Disconnect"]);
 			// The row shows the state (a green dot), Disconnect is a button
 			// with an outline, not grey text that reads as a state.
 			expect(
@@ -2384,7 +2388,7 @@ describe.skipIf(chrome === undefined)(
 			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
 		});
 
-		test("to another origin it asks in the side panel, without Don't ask again: Don't allow stays, Allow goes", async () => {
+		test("to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes", async () => {
 			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			const [ask, ...lines] = await questionLines(stack);

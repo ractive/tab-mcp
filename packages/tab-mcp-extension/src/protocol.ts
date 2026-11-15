@@ -23,7 +23,7 @@ export const PANEL_PORT = "panel";
 export const PANEL_PATH = "/sidepanel/index.html";
 
 /**
- * A question's answer: `site` is "Don't ask again on <host>", which allows
+ * A question's answer: `site` is "Always allow on <host>", which allows
  * the tool on its site (the panel's "allowed"), for every AI app.
  */
 export type Answer = "allow" | "site" | "deny";
@@ -81,7 +81,7 @@ export interface QuestionView {
 	navigation?: { to: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
-	/** "Don't ask again on <host>" is offered (a page tool of an http(s) site). */
+	/** "Always allow on <host>" is offered (a page tool of an http(s) site). */
 	site: boolean;
 	/** When it ends unanswered as Don't allow (epoch ms, the worker's clock). */
 	expiresAt: number;

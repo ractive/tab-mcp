@@ -40,7 +40,7 @@ export const ARGS_CUT_NOTE = "Arguments cut: click to see them in full.";
 
 /**
  * The buttons of a notification. Don't allow is closing it. A click on its
- * body opens the panel, where "Don't ask again on <host>" is: a
+ * body opens the panel, where "Always allow on <host>" is: a
  * notification may show the arguments cut, and allowing a tool for good
  * should not rest on a part of them (DEC-139).
  */
@@ -214,7 +214,7 @@ export class Questions {
 	 * answered in time, `"deny"` when the AI app cancelled, `"busy"` (without
 	 * asking) when that AI app has MAX_QUESTIONS_PER_APP waiting already. A
 	 * navigation to another site (`navigation`, iteration 27) says where to,
-	 * and never offers "Don't ask again".
+	 * and never offers "Always allow on <host>".
 	 */
 	ask(
 		request: AppRequest,

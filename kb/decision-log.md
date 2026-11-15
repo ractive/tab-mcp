@@ -3761,3 +3761,29 @@ Branch `release/per-package-changelog`.
 - On DEC-178's two open rows: both stay as they are. The extension build keeps its
   hand-written zip writer (EQ 21, reproducible store zips), and `schemaProblem` /
   `resolvePointer` stay in the client's core (CC).
+
+## DEC-184: A tool's switch in tab-mcp for Chrome is "Always allow", off by default (owner)
+
+2026-11-15, before the first store release; amends DEC-154 and DEC-176.
+
+- Each tool's switch in the side panel's tool list was "Ask first", on by default: the
+  switch that is on asked, and turning it off allowed. A permission switch that is on
+  grants, in Chrome's site settings, macOS and iOS; a list of switches that are all on
+  read as "all enabled"; and "Turn off Ask first" read as a double negative (owner).
+- Now the switch is "Always allow", off by default, labelled "Always allow: <tool>";
+  on, the tool runs without asking on that site for every paired AI app. Only the tools
+  the user allowed show a switch that is on. The line over the list: "Always allow, on:
+  the tool runs without asking on <origin>, for every paired AI app. Off: it asks you
+  before each call."
+- The button over the list: "Always allow all" / "Ask again for all"; its accessible
+  name "Always allow the 2 tools listed on <origin>, for every paired AI app" / "Ask
+  again for the 1 tool listed on …".
+- The question's third button, "Don't ask again on <host>", is "Always allow on <host>"
+  (owner): the same words as the switch it turns on. Its note: "Always allow on <host>:
+  this tool runs without asking there, for every paired AI app, until you turn off its
+  'Always allow' in the tool list."
+- Behaviour, protocol (`set-allowed`, `set-allowed-all`) and storage do not change: the
+  switch on is the site's "allowed" entry, as the switch off was before. The library's
+  "Always allow" (now "Allow until reload", DEC-096) is a different thing and keeps its
+  history. PRIVACY.md and the ractive.ch privacy page no longer name the controls, only
+  the data: the tools allowed to run without asking, per site (owner).
