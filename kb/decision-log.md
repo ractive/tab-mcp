@@ -3782,6 +3782,10 @@ Branch `release/per-package-changelog`.
   (owner): the same words as the switch it turns on. Its note: "Always allow on <host>:
   this tool runs without asking there, for every paired AI app, until you turn off its
   'Always allow' in the tool list."
+- A tool's switch that is on has the green track `--ok` (the connected dots' colour; the
+  knob `--on-strong` on it is above 3:1 in both schemes); off it keeps the neutral
+  `--edge` track. Not red when off (owner, after the question): off is the safe default,
+  and a list of red switches would read as an error. The AI access switch keeps ink.
 - Behaviour, protocol (`set-allowed`, `set-allowed-all`) and storage do not change: the
   switch on is the site's "allowed" entry, as the switch off was before. The library's
   "Always allow" (now "Allow until reload", DEC-096) is a different thing and keeps its

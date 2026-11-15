@@ -1423,15 +1423,18 @@ describe.skipIf(chrome === undefined)(
 			).toEqual(["true", "true"]);
 			// The last answer closes the dialog; a click on the switch right
 			// after it (the second click of a double click) changes nothing.
+			// Clicked at once, before the AI app's answer is awaited, and the
+			// quiet time checked as the click goes: a late click would be a
+			// slow runner, not the panel.
 			await answerInPanel(stack, "deny");
-			expect((await second).isError).toBe(true);
 			await stack.panel.waitFor(`!document.getElementById("questions").open`);
 			expect(
 				await stack.panel.eval(
-					`document.querySelector(${JSON.stringify(alwaysAllow("place_order"))}).getAttribute("aria-disabled")`,
+					`[document.querySelector(${JSON.stringify(alwaysAllow("place_order"))}).getAttribute("aria-disabled"), document.body.hasAttribute("data-quiet")]`,
 				),
-			).toBe(null);
+			).toEqual([null, true]);
 			await stack.panel.click(alwaysAllow("place_order"));
+			expect((await second).isError).toBe(true);
 			await Bun.sleep(300);
 			expect(await stack.panel.eval(alwaysAllowed("place_order", false))).toBe(
 				true,

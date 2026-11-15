@@ -293,16 +293,13 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	const ids = new Set(questions.map((q) => q.id));
 	for (const id of args.keys()) if (!ids.has(id)) args.delete(id);
 	let removed = false;
+	const ranOut: { card: HTMLElement; notice: HTMLElement }[] = [];
 	for (const [id, { card, question }] of cards)
 		if (!ids.has(id)) {
-			// The worker says it ran out unanswered: the tool did not run. Said
-			// for a few seconds where the card was.
-			if (expired.includes(id)) {
-				$("question-notices").append(expiredNotice(question));
-				// The notice at the top moved the panel down.
-				movedUntil = Date.now() + ALLOW_DELAY_MS;
-			}
-			card.remove();
+			// The worker says it ran out unanswered: the tool did not run.
+			if (expired.includes(id))
+				ranOut.push({ card, notice: expiredNotice(question) });
+			else card.remove();
 			cards.delete(id);
 			removed = true;
 		}
@@ -325,8 +322,22 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 			// (up to 1 MiB) as a live region (EQ 11).
 			announce(questionAnnouncement(q));
 		}
+	// Said for a few seconds where the card was while the dialog stays open
+	// for other questions (it covers the panel's top), else at the top.
+	for (const { card, notice } of ranOut)
+		if (cards.size > 0) card.replaceWith(notice);
+		else {
+			card.remove();
+			noticeAtTop(notice);
+		}
 	showDialog(cards.size > 0);
 	arm();
+}
+
+/** A notice at the panel's top: what was below moves down. */
+function noticeAtTop(notice: Element): void {
+	$("question-notices").append(notice);
+	movedUntil = Date.now() + ALLOW_DELAY_MS;
 }
 
 /**
@@ -339,13 +350,25 @@ function showDialog(open: boolean): void {
 	const dialog = $("questions") as HTMLDialogElement;
 	if (open && !dialog.open) dialog.showModal();
 	else if (!open && dialog.open) {
+		// Its notices stay for their time, at the panel's top.
+		for (const notice of dialog.querySelectorAll(".question-notice"))
+			noticeAtTop(notice);
 		dialog.close();
-		quietUntil = Date.now() + ALLOW_DELAY_MS;
 	}
 }
 
 // Escape does not close it: a question ends with an answer or its time.
+// `cancel` is not always cancelable (Chrome's close watchers, without a
+// user activation), so the key is stopped too, and a dialog closed while
+// questions wait opens again.
+$("questions").addEventListener("keydown", (event) => {
+	if (event.key === "Escape") event.preventDefault();
+});
 $("questions").addEventListener("cancel", (event) => event.preventDefault());
+$("questions").addEventListener("close", () => {
+	if (cards.size > 0) ($("questions") as HTMLDialogElement).showModal();
+	else quietUntil = Date.now() + ALLOW_DELAY_MS;
+});
 
 /**
  * Say `text` in the questions' status line, for screen readers: emptied
@@ -356,12 +379,16 @@ $("questions").addEventListener("cancel", (event) => event.preventDefault());
 let announcing: ReturnType<typeof setTimeout> | undefined;
 const toAnnounce: string[] = [];
 function announce(text: string): void {
-	const status = $("question-status");
-	status.textContent = "";
+	$("question-status").textContent = "";
+	$("question-status-modal").textContent = "";
 	toAnnounce.push(text);
 	clearTimeout(announcing);
 	announcing = setTimeout(() => {
-		status.textContent = toAnnounce.splice(0).join(" ");
+		// While the dialog is open the rest of the panel is inert, and out of
+		// the accessibility tree: the line goes to the dialog's own.
+		const open = ($("questions") as HTMLDialogElement).open;
+		$(open ? "question-status-modal" : "question-status").textContent =
+			toAnnounce.splice(0).join(" ");
 	}, 50);
 }
 
@@ -372,9 +399,13 @@ function expiredNotice(q: QuestionSummary): HTMLElement {
 	notice.textContent = `Not answered in time: ${q.tool} did not run.`;
 	announce(notice.textContent);
 	setTimeout(() => {
+		const atTop = notice.parentElement?.id === "question-notices";
 		notice.remove();
-		// What was below moves up again.
-		movedUntil = Date.now() + ALLOW_DELAY_MS;
+		// What was below moves up again: in the panel, or in the dialog,
+		// where the questions below it wait again as if just shown.
+		const now = Date.now();
+		if (atTop) movedUntil = now + ALLOW_DELAY_MS;
+		else for (const entry of cards.values()) entry.shownAt = now;
 		arm();
 	}, NOTICE_MS);
 	return notice;

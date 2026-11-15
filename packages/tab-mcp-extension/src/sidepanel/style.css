@@ -345,6 +345,11 @@ input:is([type="text"], [type="url"]) {
 	background: var(--strong);
 }
 
+/* A tool allowed without asking: green, as the connected dots (DEC-184). */
+.allow-switch input:checked {
+	background: var(--ok);
+}
+
 :is(.switch, .allow-switch) input:checked::after {
 	transform: translateX(
 		calc(var(--track) - 2 * var(--border) - var(--knob) - 2 * var(--gap))
@@ -914,7 +919,8 @@ html [hidden] {
 		forced-color-adjust: none;
 	}
 
-	:is(.switch, .allow-switch) input:checked {
+	:is(.switch, .allow-switch) input:checked,
+	.allow-switch input:checked {
 		background: Highlight;
 		forced-color-adjust: none;
 	}

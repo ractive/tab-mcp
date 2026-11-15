@@ -292,6 +292,13 @@ describe("the tab card's texts", () => {
 			expect(doc.getElementById("question-status")?.getAttribute("role")).toBe(
 				"status",
 			);
+			// The dialog's own, for while the rest of the panel is inert.
+			expect(
+				doc
+					.getElementById("questions")
+					?.querySelector("#question-status-modal")
+					?.getAttribute("role"),
+			).toBe("status");
 			// Where WebMCP comes from, and what works without it.
 			expect(text("no-webmcp")).toContain(
 				"chrome://flags/#enable-webmcp-testing",

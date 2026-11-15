@@ -165,8 +165,8 @@ icon are three more hex values in `worker/connection.ts`.
   forced colours the border shows and is the pill's shape). Where H turns the
   "asks first"/"allowed" toggle into a `role="switch"`, it is drawn as the small
   switch, not as a pill: a control does not look like a static badge (EQ 11).
-- **The switch.** Colours from Overmark (track off `--edge`, on `--strong`, knob
-  `--on-strong`, disabled `--wash` with an inset `--rule` and a knob in `--ink-2`).
+- **The switch.** Colours from Overmark (track off `--edge`, on `--strong`; a tool's
+  "Always allow" on `--ok` since DEC-184; knob `--on-strong`, disabled `--wash` with an inset `--rule` and a knob in `--ink-2`).
   The geometry stays this extension's (`--track`, `--knob`, `--gap`, `--border`, the
   forced-colours branch): it is what the e2e test of the knob's position holds, and it
   is more exact than Overmark's fixed pixels. The knob is then 16.07:1 (light) and
