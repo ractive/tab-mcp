@@ -267,8 +267,8 @@ const cards = new Map<
 >();
 /** Each question's arguments, sent once before the state that lists it. */
 const args = new Map<string, string>();
-/** How long the notice of a question nobody answered stays (EQ 13). */
-const NOTICE_MS = 6000;
+/** How long the notice of a question nobody answered stays, unless dismissed (EQ 13). */
+const NOTICE_MS = 15_000;
 
 /**
  * Until when the panel's controls that allow something take no click after
@@ -334,10 +334,9 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	arm();
 }
 
-/** A notice at the panel's top: what was below moves down. */
+/** A notice over the panel's top, wherever it is scrolled to. */
 function noticeAtTop(notice: Element): void {
 	$("question-notices").append(notice);
-	movedUntil = Date.now() + ALLOW_DELAY_MS;
 }
 
 /**
@@ -394,20 +393,31 @@ function announce(text: string): void {
 
 /** What is left of a question that nobody answered in time (EQ 13). */
 function expiredNotice(q: QuestionSummary): HTMLElement {
-	const notice = document.createElement("p");
-	notice.className = "question-notice muted small";
-	notice.textContent = `Not answered in time: ${q.tool} did not run.`;
-	announce(notice.textContent);
-	setTimeout(() => {
-		const atTop = notice.parentElement?.id === "question-notices";
+	const notice = document.createElement("div");
+	notice.className = "question-notice";
+	const text = document.createElement("p");
+	text.textContent = `Not answered in time: ${q.tool} did not run.`;
+	const dismiss = document.createElement("button");
+	dismiss.type = "button";
+	dismiss.className = "quiet small";
+	dismiss.textContent = "OK";
+	dismiss.setAttribute("aria-label", "Dismiss");
+	notice.append(text, dismiss);
+	announce(text.textContent);
+	const remove = () => {
+		if (!notice.isConnected) return;
+		const inDialog = notice.parentElement?.id === "questions";
 		notice.remove();
-		// What was below moves up again: in the panel, or in the dialog,
-		// where the questions below it wait again as if just shown.
-		const now = Date.now();
-		if (atTop) movedUntil = now + ALLOW_DELAY_MS;
-		else for (const entry of cards.values()) entry.shownAt = now;
-		arm();
-	}, NOTICE_MS);
+		// In the dialog the questions below it moved up: they wait again as
+		// if just shown. At the top it floats over the panel: nothing moves.
+		if (inDialog) {
+			const now = Date.now();
+			for (const entry of cards.values()) entry.shownAt = now;
+			arm();
+		}
+	};
+	dismiss.addEventListener("click", remove);
+	setTimeout(remove, NOTICE_MS);
 	return notice;
 }
 

@@ -168,8 +168,9 @@ its own, the site the tool acts on ("Site (verified)") and the page's title for 
 left to answer. Its three buttons look alike: none is drawn to be the one to click.
 Questions open in a modal dialog over the panel, wherever it is scrolled to; the rest of
 the panel is inert until the last one is answered or runs out, and Escape does not close
-it. A question that runs out leaves "Not answered in time: <tool> did not run." at the
-panel's top for a few seconds. A screen reader hears one short line per question ("<app>
+it. A question that runs out leaves "Not answered in time: <tool> did not run." in the
+warning's tint: in the dialog in its card's place while other questions wait, else over
+the panel's top wherever it is scrolled to, for 15 s or until its OK. A screen reader hears one short line per question ("<app>
 asks to run <tool>"), not the card. For 750 ms after the dialog goes, the "Always allow"
 switches and "Always allow all" under it ignore a click, without changing their look, so
 the second click of a double click on "Allow once" does nothing there.
@@ -184,7 +185,8 @@ panel of the tab's window, where the question waits, the arguments in full, with
 allow, "Allow once" and "Always allow on <host>", its 60 s still running. Where Chrome
 does not open the panel, the notification shows again and the icon's "?" opens the
 panel. Don't allow is closing the
-notification or no answer in 60 s. A click on "Allow once" within half a second of the
+notification or no answer in 60 s; on macOS, Chrome's own "Settings" button on the
+notification closes it too, so it also counts as Don't allow. A click on "Allow once" within half a second of the
 notification showing does not count (it shows again). A notification answers only its
 own call. Questions also show in every open side panel, so with notifications off
 (Focus, Do Not Disturb, notifications off for Chrome) open the panel when the icon shows

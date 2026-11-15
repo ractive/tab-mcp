@@ -577,6 +577,25 @@ describe("PageToolBridge", () => {
 		expect(listed.tools[1]).not.toHaveProperty("schemaLeftOut");
 	});
 
+	test("a read that caught the tab between two pages reads once more by itself (back/forward cache)", async () => {
+		const reg = registrar();
+		// Chrome still reports the page before; the page is the next one.
+		const { state, chrome } = fakeChrome(
+			page([pageTool("buy", { annotations: {} })]),
+		);
+		state.url = "https://other.example/";
+		const bridge = new PageToolBridge(reg, chrome, { pageChangedRetryMs: 10 });
+		await bridge.refresh();
+		expect(bridge.state.error).toContain("changed while its tools were read");
+		// No event comes (a page shown again from the cache loads nothing):
+		// the bridge reads again on its own once the tab has settled.
+		state.url = "https://shop.example/";
+		await Bun.sleep(60);
+		expect([...reg.tools.keys()]).toEqual(["page_buy"]);
+		expect(bridge.state.error).toBeUndefined();
+		bridge.stop();
+	});
+
 	test("a page that says it is another site than Chrome reports gets no tools (ES 4)", async () => {
 		const reg = registrar();
 		const { state, chrome } = fakeChrome(

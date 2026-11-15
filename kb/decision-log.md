@@ -3810,8 +3810,14 @@ Branch `release/per-package-changelog`.
   close it (the `cancel` event is prevented): a question ends with an answer or its
   60 s. The first focusable element takes the focus (the arguments); Allow waits as
   before (DEC-180's buttons, iteration 35's wait).
-- "Not answered in time" goes to the panel's top, outside the dialog, so it does not
-  hold the panel for its 6 s.
+- "Not answered in time" takes its card's place in the dialog while other questions
+  wait, else it floats over the panel's top (`position: fixed`), wherever the panel is
+  scrolled to: in the warning's tint, bold, for 15 s or until its OK (owner: at 6 s in
+  `--wash` it was gone before it was seen). Floating, it moves nothing.
+- A page Chrome shows again from its back/forward cache loads nothing, so the
+  extension did not read its tools again after Back ("changed while its tools were
+  read" for good). The content script reports `pageshow` with `persisted` as a change,
+  and a read that caught the tab between two pages reads once more after 1 s.
 - The controls under the dialog ignore a click for 750 ms after it goes (ES 5): a double
   click on its last Allow must not land on an "Always allow" switch below. This wait is
   not shown (no `aria-disabled`, no disabled look; `data-quiet` on the body for the

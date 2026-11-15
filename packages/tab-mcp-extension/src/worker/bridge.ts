@@ -357,7 +357,15 @@ export interface BridgeOptions {
 	/** Asks the user; without it, every tool that is not read-only is refused. */
 	confirm?: Confirm;
 	timeoutMs?: number;
+	/** How long after a read that caught the tab between two pages it reads once more. */
+	pageChangedRetryMs?: number;
 }
+
+/** A read that caught the tab between two pages, or a page that says it is another site. */
+class PageChangedError extends Error {}
+
+/** See `BridgeOptions.pageChangedRetryMs`. */
+export const PAGE_CHANGED_RETRY_MS = 1000;
 
 /** A tool of the page in front as the bridge keeps it, to call. */
 interface Callable {
@@ -416,6 +424,9 @@ export class PageToolBridge {
 	readonly #registrar: Registrar;
 	readonly #chrome: BridgeChrome;
 	readonly #timeoutMs: number;
+	readonly #pageChangedRetryMs: number;
+	/** A read again after a PageChangedError is planned or done, until a read succeeds. */
+	#retried = false;
 	readonly #changed: () => void;
 	readonly #confirm: Confirm;
 	/** The registered tools by AI app name, with what they were made from. */
@@ -443,6 +454,8 @@ export class PageToolBridge {
 		this.#changed = options.changed ?? (() => {});
 		this.#confirm = options.confirm ?? refuse;
 		this.#timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
+		this.#pageChangedRetryMs =
+			options.pageChangedRetryMs ?? PAGE_CHANGED_RETRY_MS;
 	}
 
 	get state(): BridgeState {
@@ -617,7 +630,7 @@ export class PageToolBridge {
 			// the tab is not the page's. A page that says it is another site
 			// (or a tab that navigated meanwhile) gets no tools.
 			if (originOf(tab.url) !== tools.origin)
-				throw new Error(
+				throw new PageChangedError(
 					"The page in the tab changed while its tools were read; they are read again once it has loaded.",
 				);
 		} catch (error) {
@@ -626,8 +639,19 @@ export class PageToolBridge {
 			this.#callable = new Map();
 			this.#state = { available: false, tools: [], error: message(error) };
 			this.#changed();
+			// Caught between two pages (a page Chrome shows again from its
+			// back/forward cache loads nothing, so no later event reads it):
+			// once more shortly after. A page that keeps saying it is another
+			// site stays without tools.
+			if (error instanceof PageChangedError && !this.#retried) {
+				this.#retried = true;
+				setTimeout(() => {
+					if (!this.#stopped) this.refresh().catch(() => {});
+				}, this.#pageChangedRetryMs);
+			}
 			return;
 		}
+		this.#retried = false;
 		if (this.#stopped) return;
 		const offered: Offered[] = [];
 		const wanted: { name: string; key: string; tool: Tool }[] = [];

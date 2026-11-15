@@ -501,12 +501,19 @@ main > .card ~ .settings {
 	background: var(--scrim);
 }
 
-/* The notices of questions nobody answered, at the panel's top. */
+/*
+ * The notices of questions nobody answered: over the panel's top wherever it
+ * is scrolled to, as the questions were in the dialog.
+ */
 .question-notices {
+	position: fixed;
+	top: var(--s3);
+	left: var(--s3);
+	right: var(--s3);
+	z-index: 1;
 	display: flex;
 	flex-direction: column;
 	gap: var(--s2);
-	padding: var(--s3) var(--s4) 0;
 }
 
 .question-notices:empty {
@@ -561,12 +568,22 @@ main > .card ~ .settings {
 	background: var(--ink-2);
 }
 
-/* A question nobody answered, for a few seconds. */
+/* A question nobody answered: the warning's tint, until OK or 15 s. */
 .question-notice {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2);
 	padding: var(--s2) var(--s3);
-	border: 1px solid transparent;
+	border: 1px solid var(--edge);
 	border-radius: var(--r-card);
-	background: var(--wash);
+	background: var(--warn-bg);
+	color: var(--warn);
+	font-weight: 600;
+}
+
+.question-notice p {
+	margin: 0;
 }
 
 /* --- the AI app --------------------------------------------------------------- */
