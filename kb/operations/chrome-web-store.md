@@ -255,6 +255,14 @@ extension's icon at 96×96 with 16 px transparent on each side, as the
 manifest's `icons/icon-128.png` fills its square. `bun scripts/icons.ts` renders both
 from the relay's `favicon.svg`.
 
+**Promo tiles (24-bit PNG, no alpha):** `assets/store/promo-small.png` (440×280) and
+`assets/store/promo-marquee.png` (1400×560, with "AI app → tab-mcp relay → Page tools"):
+the icon's blue, the icon with its colours swapped, the name and "Let your AI app use the
+tab in front", no screenshots and little text, as the
+[image guidelines](https://developer.chrome.com/docs/webstore/images#promo) ask.
+`bun scripts/promo.ts` draws them as HTML in Chrome for Testing (`CHROME_PATH`) and
+flattens them with ImageMagick.
+
 **Screenshots (1280×800, light):** in `packages/tab-mcp-extension/assets/store/`, each the
 diagram editor example on ractive.ch (live) beside the side panel, in the look of
 iteration 39 ([the look](../design/extension-look.md)):
