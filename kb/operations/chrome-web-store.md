@@ -20,7 +20,7 @@ after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
 `dist-store/` (so it does not replace a development build in `dist/`) and packs
 `tab-mcp-for-chrome-<version>-store.zip` next to `package.json`. The manifest has no `key`
 (the store gives the item its own id), no `host_permissions` (host access is optional,
-asked for with "Read all sites without a click"), the package no source maps, and its scripts not the
+asked for with "Give access to all sites"), the package no source maps, and its scripts not the
 test build's hooks (`TAB_MCP_TEST`, a `define`: the functions through which the
 end-to-end tests answer notifications). `zipStoreBuild`
 refuses to pack a build that has any of these, and `--zip` without `--store` is refused,
@@ -205,7 +205,7 @@ registered, and opening pages in that tab.
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Read all sites without a click": read every http(s) tab's WebMCP tools without a click on the icon. |
+| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Give access to all sites": read every http(s) tab's WebMCP tools without a click on the icon. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the
 tools a page registered itself through the browser's WebMCP API; the relay connection
@@ -253,13 +253,16 @@ Check the example storefront and the Chrome version before each submission.
 example shop page (`https://bakery.example`, made up) beside the side panel, in the look
 of iteration 39 ([the look](../design/extension-look.md)):
 
-1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads" and the
-   "Always allow" switches) and "Read all sites without a click";
+1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads", the
+   "Always allow" switches and "Always allow all") and "Give access to all sites";
 2. `2-pairing.png`: no AI app paired yet, the address and the pairing code;
-3. `3-question.png`: a question for a page tool with its arguments (Don't allow, "Allow
-   once", "Always allow on bakery.example", all of one button kind since iteration 43,
-   DEC-180; `3-question.png` and `4-navigation.png` were taken again then);
+3. `3-question.png`: a question for a page tool in the dialog over the panel, with its
+   arguments, the time left and its bar (Don't allow, "Allow once", "Always allow on
+   bakery.example", all of one button kind, DEC-180);
 4. `4-navigation.png`: a question before the tab goes to another site.
+
+All four were taken again on 2026-11-15 for DEC-184 to DEC-186 (the switches, the
+dialog, the wording); the script moves the pointer off the dialog before shots 3 and 4.
 
 `bun scripts/screenshots.ts` in `packages/tab-mcp-extension` takes them again, from the
 store build in Chrome for Testing (`CHROME_PATH`, as for the end-to-end tests), with a relay

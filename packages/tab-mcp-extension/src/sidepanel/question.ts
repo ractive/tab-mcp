@@ -10,7 +10,11 @@
  * enough (`setReady`).
  */
 
-import type { Answer, QuestionView } from "../protocol.ts";
+import {
+	type Answer,
+	QUESTION_TIMEOUT_MS,
+	type QuestionView,
+} from "../protocol.ts";
 
 /** The host of `origin` for a button's label, or the origin as it is. */
 function hostOf(origin: string): string {
@@ -40,12 +44,19 @@ export function countdownText(expiresAt: number, now: number): string {
 	return `${left} s left to answer; no answer is Don't allow.`;
 }
 
-/** Bring every countdown under `root` to `now`. */
+/** The share of the time to answer that is left, 1 to 0: the bar's width. */
+export function timeLeftShare(expiresAt: number, now: number): number {
+	return Math.min(1, Math.max(0, (expiresAt - now) / QUESTION_TIMEOUT_MS));
+}
+
+/** Bring every countdown under `root` to `now`: its line and its bar. */
 export function updateCountdowns(root: ParentNode, now: number): void {
 	for (const p of root.querySelectorAll<HTMLElement>("[data-expires]")) {
 		const text = countdownText(Number(p.dataset["expires"]), now);
 		if (p.textContent !== text) p.textContent = text;
 	}
+	for (const fill of root.querySelectorAll<HTMLElement>("[data-drains]"))
+		fill.style.width = `${timeLeftShare(Number(fill.dataset["drains"]), now) * 100}%`;
 }
 
 /** A button that is shown but takes no click yet (EQ 11: keeps its focus). */
@@ -110,9 +121,19 @@ export function questionCard(
 	args.tabIndex = 0;
 	args.setAttribute("aria-label", "Arguments");
 	const left = document.createElement("p");
-	left.className = "countdown muted small";
+	// The time left stands out: a line of normal size, in bold, and a bar at
+	// the card's top that drains (only seen: the line says it).
+	left.className = "countdown";
 	left.dataset["expires"] = String(q.expiresAt);
 	left.textContent = countdownText(q.expiresAt, now);
+	const bar = document.createElement("div");
+	bar.className = "countdown-bar";
+	bar.setAttribute("aria-hidden", "true");
+	const fill = document.createElement("span");
+	fill.dataset["drains"] = String(q.expiresAt);
+	fill.style.width = `${timeLeftShare(q.expiresAt, now) * 100}%`;
+	bar.append(fill);
+	card.prepend(bar);
 	const buttons = document.createElement("div");
 	buttons.className = "buttons";
 	const button = (text: string, value: Answer) => {

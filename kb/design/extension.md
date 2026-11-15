@@ -103,7 +103,7 @@ with a second extension).
   `optional_host_permissions`, not `<all_urls>`: no `file:` pages, iteration 35): without
   it the extension runs on a tab only after a click on its icon, as Overmark does, and
   only for that origin in that tab (Chrome keeps the grant across navigations on the same
-  origin, not to another subdomain). "Read all sites without a click" asks for it; the content script
+  origin, not to another subdomain). "Give access to all sites" asks for it; the content script
   is then registered for every http(s) page. `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).
 - No remote code.

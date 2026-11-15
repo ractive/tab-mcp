@@ -12,6 +12,8 @@
 	--paper: #f6f4ee;
 	--sheet: #ffffff;
 	--wash: #ebe8e0;
+	/* Behind the questions' dialog: dims the panel */
+	--scrim: #1b213066;
 	/* Text; meta and placeholders */
 	--ink: #1b2130;
 	--ink-2: #535c6e;
@@ -54,6 +56,7 @@
 		--paper: #11141a;
 		--sheet: #1a1e27;
 		--wash: #242a37;
+		--scrim: #000000a3;
 		--ink: #eceef3;
 		--ink-2: #a6aebd;
 		--rule: #2b313d;
@@ -191,7 +194,7 @@ button.strong:hover:not(:disabled, [aria-disabled="true"]) {
 	background: color-mix(in srgb, var(--strong) 84%, var(--paper));
 }
 
-/* A quiet one is its words: Copy, New address, Stop reading all sites. */
+/* A quiet one is its words: Copy, New address, Remove access to all sites. */
 button.quiet,
 button.link {
 	min-height: 24px;
@@ -342,6 +345,11 @@ input:is([type="text"], [type="url"]) {
 	background: var(--strong);
 }
 
+/* A tool allowed without asking: green, as the connected dots (DEC-184). */
+.allow-switch input:checked {
+	background: var(--ok);
+}
+
 :is(.switch, .allow-switch) input:checked::after {
 	transform: translateX(
 		calc(var(--track) - 2 * var(--border) - var(--knob) - 2 * var(--gap))
@@ -416,6 +424,18 @@ input:is([type="text"], [type="url"]) {
 	color: var(--ink);
 }
 
+/*
+ * The tab cannot be read, or its tools could not be: a notice with the way
+ * out (the icon's click, "Give access to all sites").
+ */
+.tab-access:not(:empty) {
+	padding: 10px var(--s3);
+	border: 1px solid var(--warn-edge);
+	border-radius: var(--r-card);
+	background: var(--warn-bg);
+	color: var(--ink);
+}
+
 /* Something stands in the way and there is a way out: the address is in use elsewhere. */
 .replaced {
 	display: flex;
@@ -467,17 +487,48 @@ main > .card ~ .settings {
 	gap: var(--s2);
 }
 
-/* --- tools that ask first, above the sections --------------------------------- */
+/* --- questions: a modal dialog over the panel ---------------------------------- */
 
 .questions {
+	box-sizing: border-box;
+	width: auto;
+	max-width: none;
+	max-height: calc(100% - 2 * var(--s3));
+	margin: var(--s3);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	overflow: auto;
 	display: flex;
 	flex-direction: column;
 	gap: var(--s3);
-	padding: var(--s3) var(--s4);
-	border-bottom: 1px solid var(--rule);
 }
 
-.questions:empty {
+.questions:not([open]) {
+	display: none;
+}
+
+.questions::backdrop {
+	background: var(--scrim);
+}
+
+/*
+ * The notices of questions nobody answered: over the panel's top wherever it
+ * is scrolled to, as the questions were in the dialog.
+ */
+.question-notices {
+	position: fixed;
+	top: var(--s3);
+	left: var(--s3);
+	right: var(--s3);
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	gap: var(--s2);
+}
+
+.question-notices:empty {
 	display: none;
 }
 
@@ -512,14 +563,39 @@ main > .card ~ .settings {
 /* The seconds left: figures of one width, so the line does not move. */
 .countdown {
 	font-variant-numeric: tabular-nums;
+	font-weight: 600;
 }
 
-/* Where a question nobody answered was, for a few seconds. */
-.question-notice {
-	padding: var(--s2) var(--s3);
-	border: 1px solid transparent;
-	border-radius: var(--r-card);
+/* The time left as a bar that drains, at the card's top. */
+.countdown-bar {
+	height: 4px;
+	border-radius: 2px;
 	background: var(--wash);
+	overflow: hidden;
+}
+
+.countdown-bar span {
+	display: block;
+	height: 100%;
+	background: var(--ink-2);
+}
+
+/* A question nobody answered: the warning's tint, until OK or 15 s. */
+.question-notice {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--s2);
+	padding: var(--s2) var(--s3);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-card);
+	background: var(--warn-bg);
+	color: var(--warn);
+	font-weight: 600;
+}
+
+.question-notice p {
+	margin: 0;
 }
 
 /* --- the AI app --------------------------------------------------------------- */
@@ -845,6 +921,10 @@ html [hidden] {
  * selectors that are more specific outside this block.
  */
 @media (forced-colors: active) {
+	.countdown-bar span {
+		background: CanvasText;
+	}
+
 	button.strong,
 	button.strong:hover:not(:disabled, [aria-disabled="true"]),
 	button[data-armed],
@@ -868,7 +948,8 @@ html [hidden] {
 		forced-color-adjust: none;
 	}
 
-	:is(.switch, .allow-switch) input:checked {
+	:is(.switch, .allow-switch) input:checked,
+	.allow-switch input:checked {
 		background: Highlight;
 		forced-color-adjust: none;
 	}

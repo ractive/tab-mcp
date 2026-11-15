@@ -22,7 +22,7 @@ Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](
 | `reload` | Reloads the page in that tab, with its `page_info`. |
 
 The navigation tools act only on a tab the extension may read now (a click on its icon
-there, or "Read all sites without a click"); on any other tab they do nothing and say why:
+there, or "Give access to all sites"); on any other tab they do nothing and say why:
 
 - On the page's own origin (scheme, host and port) they run at once, as a link on the
   page would.
@@ -32,7 +32,7 @@ there, or "Read all sites without a click"); on any other tab they do nothing an
   forward to a page the extension cannot see (another origin: Chrome lists only the
   page's own) asks too, saying its address is not known. A reload never asks.
 - Only `http:` and `https:` addresses, without a user name or password.
-- Without "Read all sites without a click", Chrome lets the extension read the new page of another
+- Without "Give access to all sites", Chrome lets the extension read the new page of another
   origin only after a click on its icon there; the answer says so.
 - They wait up to 30 s for the page to load; after that the answer says it is still
   loading.
@@ -45,11 +45,11 @@ The page's tools are the page's word:
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Always allow on <host>" in a question, or switching on
   the tool's "Always allow" in the panel's list, allows the tool on that site (exact origin)
-  for every paired AI app, kept until you switch it off again. "Always allow all" over
-  the list does that for every tool listed at that moment that asks first,
-  in one step; once none asks, it reads "Ask again for all" and turns them all back. A
-  tool the page registers later asks first. When the page changes what the button would
-  do, it waits 750 ms before it takes a click. All of these only for pages of an http(s)
+  for every paired AI app, kept until you switch it off again. The switch
+  "Always allow all" over the list does that for every tool listed at that moment that
+  asks first, in one step. It is on once none asks; turned off, every one asks again. A
+  tool the page registers later asks first, and the switch is off again. When the page
+  changes which tools it is for, it waits 750 ms before it takes a click. All of these only for pages of an http(s)
   site: pages with an opaque origin (`null`, such as sandboxed pages) always ask ("asks
   first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still
@@ -118,10 +118,12 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   extension's panel for that tab, such as Claude in Chrome's), and the extension may read
   that tab, also after navigations on the same origin, until the tab goes to another
   origin (`www.example.com` is another origin than `example.com`).
-  "Read all sites without a click" in the side panel lets it read every http(s) tab
-  without a click; the panel says before the button what Chrome will ask ("Read and
-  change all your data on all websites"). On a tab it may not read, the panel says to
-  click the icon in the toolbar (or that Chrome does not let extensions read the page).
+  "Give access to all sites" in the side panel lets it read every http(s) tab
+  without a click; Chrome asks first ("Read and change all your data on all
+  websites"). On a tab it may not read, a notice in the
+  panel says to click the icon in the toolbar (or that Chrome does not let extensions
+  read the page); on a tab it may read whose tools could not be read
+  (the page changed meanwhile, or says it is another site), the notice says that.
   On a page without tools it says so, that `page_info` and the navigation tools still
   work, and, where WebMCP is off, how Chrome turns it on.
 - "Turn on AI access" (or the "AI access" switch) connects to the relay. While no AI app
@@ -165,10 +167,15 @@ panel has been in front for 750 ms, so the click that brings it forward cannot a
 no click). The panel's question names the AI app and the tool, then, each on a line of
 its own, the site the tool acts on ("Site (verified)") and the page's title for the tool
 ("Title (from the page)"), the arguments in full (they scroll when long) and the seconds
-left to answer. Its three buttons look alike: none is drawn to be the one to click. A question that runs out leaves "Not answered in time: <tool> did not
-run." for a few seconds. A screen reader hears one short line per question ("<app> asks
-to run <tool>"), not the card. A question that comes or goes moves what is below it: the
-"Always allow" switches and "Always allow all" over the list wait 750 ms after.
+left to answer. Its three buttons look alike: none is drawn to be the one to click.
+Questions open in a modal dialog over the panel, wherever it is scrolled to; the rest of
+the panel is inert until the last one is answered or runs out, and Escape does not close
+it. A question that runs out leaves "Not answered in time: <tool> did not run." in the
+warning's tint: in the dialog in its card's place while other questions wait, else over
+the panel's top wherever it is scrolled to, for 15 s or until its OK. A screen reader hears one short line per question ("<app>
+asks to run <tool>"), not the card. For 750 ms after the dialog goes, the "Always allow"
+switches and "Always allow all" under it ignore a click, without changing their look, so
+the second click of a double click on "Allow once" does nothing there.
 
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site> · Closing this is Don't allow" below, naming the AI
@@ -180,7 +187,8 @@ panel of the tab's window, where the question waits, the arguments in full, with
 allow, "Allow once" and "Always allow on <host>", its 60 s still running. Where Chrome
 does not open the panel, the notification shows again and the icon's "?" opens the
 panel. Don't allow is closing the
-notification or no answer in 60 s. A click on "Allow once" within half a second of the
+notification or no answer in 60 s; on macOS, Chrome's own "Settings" button on the
+notification closes it too, so it also counts as Don't allow. A click on "Allow once" within half a second of the
 notification showing does not count (it shows again). A notification answers only its
 own call. Questions also show in every open side panel, so with notifications off
 (Focus, Do Not Disturb, notifications off for Chrome) open the panel when the icon shows
@@ -201,7 +209,7 @@ switch it off again there.
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Only after "Read all sites without a click": read every tab of an http(s) site without a click. |
+| `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
 app.

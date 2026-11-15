@@ -267,17 +267,25 @@ const cards = new Map<
 >();
 /** Each question's arguments, sent once before the state that lists it. */
 const args = new Map<string, string>();
-/** How long the notice of a question nobody answered stays (EQ 13). */
-const NOTICE_MS = 6000;
+/** How long the notice of a question nobody answered stays, unless dismissed (EQ 13). */
+const NOTICE_MS = 15_000;
 
 /**
  * Until when the panel's controls that allow something take no click after
- * its layout moved: a question that went away moves what was below it up,
- * and one that came moves it down, under the pointer; a click meant for what
- * was there must not land on an "Allow once", "Always allow all" or
- * an "Always allow" switch that came there instead (ES 5).
+ * its layout moved under the pointer (a notice at the top came or went, the
+ * button over the list changed): a click meant for what was there must not
+ * land on "Always allow all" or an "Always allow" switch that came there
+ * instead (ES 5). Shown: they wait in the disabled look.
  */
 let movedUntil = 0;
+/**
+ * Until when the same controls ignore a click after the questions' dialog
+ * closed: the second click of a double click on its last "Allow once" lands
+ * on the panel under it. Not shown: nothing moved, and the switches would
+ * flicker after every answer.
+ */
+let quietUntil = 0;
+const quiet = (): boolean => Date.now() < quietUntil;
 /** The button over the tool list as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
@@ -285,22 +293,22 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	const ids = new Set(questions.map((q) => q.id));
 	for (const id of args.keys()) if (!ids.has(id)) args.delete(id);
 	let removed = false;
+	const ranOut: { card: HTMLElement; notice: HTMLElement }[] = [];
 	for (const [id, { card, question }] of cards)
 		if (!ids.has(id)) {
-			// The worker says it ran out unanswered: the tool did not run. Said
-			// for a few seconds where the card was.
-			if (expired.includes(id)) card.replaceWith(expiredNotice(question));
+			// The worker says it ran out unanswered: the tool did not run.
+			if (expired.includes(id))
+				ranOut.push({ card, notice: expiredNotice(question) });
 			else card.remove();
 			cards.delete(id);
 			removed = true;
 		}
 	if (removed) {
+		// Every question left moved up in the dialog: it waits again, as if
+		// just shown.
 		const now = Date.now();
-		movedUntil = now + ALLOW_DELAY_MS;
-		// Every question left waits again, as if just shown.
 		for (const entry of cards.values()) entry.shownAt = now;
 	}
-	let lastNew: HTMLElement | undefined;
 	for (const q of questions)
 		if (!cards.has(q.id)) {
 			const card = questionCard(
@@ -308,25 +316,65 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
-			lastNew = card;
 			const now = Date.now();
 			cards.set(q.id, { card, shownAt: now, question: q });
 			// A short line for screen readers, not the card with its arguments
 			// (up to 1 MiB) as a live region (EQ 11).
 			announce(questionAnnouncement(q));
-			// Everything below the questions moved down by the card's height.
-			movedUntil = now + ALLOW_DELAY_MS;
 		}
-	// The questions are above the cards: in a panel scrolled down to the tool
-	// list a new one came out of sight, and with the panel in front no
-	// notification is sent, so it ran out unseen. Brought into view only if
-	// it is not (nothing moves otherwise); what moves under the pointer waits
-	// ALLOW_DELAY_MS as above, and the card's Allow waits from `shownAt`.
-	// The last new one: the cards stack downwards, so the ones above it come
-	// into view with it, as far as the panel is tall.
-	lastNew?.scrollIntoView({ block: "nearest" });
+	// Said for a few seconds where the card was while the dialog stays open
+	// for other questions (it covers the panel's top), else at the top.
+	for (const { card, notice } of ranOut)
+		if (cards.size > 0) card.replaceWith(notice);
+		else {
+			card.remove();
+			noticeAtTop(notice);
+		}
+	showDialog(cards.size > 0);
 	arm();
 }
+
+/** A notice over the panel's top, wherever it is scrolled to. */
+function noticeAtTop(notice: Element): void {
+	$("question-notices").append(notice);
+}
+
+/**
+ * The questions in a modal dialog, over the panel wherever it is scrolled to
+ * (the panel's top was out of sight, scrolled down to the tool list or opened
+ * from a notification there): the rest of the panel is inert while one waits.
+ * The first focusable element takes the focus; Allow waits as before.
+ */
+function showDialog(open: boolean): void {
+	const dialog = $("questions") as HTMLDialogElement;
+	if (open && !dialog.open) dialog.showModal();
+	else if (!open && dialog.open) {
+		// Its notices stay for their time, at the panel's top.
+		for (const notice of dialog.querySelectorAll(".question-notice"))
+			noticeAtTop(notice);
+		// With the close, not at its event a task later.
+		quietUntil = Date.now() + ALLOW_DELAY_MS;
+		dialog.close();
+		arm();
+	}
+}
+
+// Escape does not close it: a question ends with an answer or its time.
+// `cancel` is not always cancelable (Chrome's close watchers, without a
+// user activation), so the key is stopped too, and a dialog closed while
+// questions wait opens again.
+$("questions").addEventListener("keydown", (event) => {
+	if (event.key === "Escape") event.preventDefault();
+});
+$("questions").addEventListener("cancel", (event) => event.preventDefault());
+$("questions").addEventListener("close", () => {
+	if (cards.size > 0) ($("questions") as HTMLDialogElement).showModal();
+	else {
+		// A close showDialog did not make (Escape): the quiet time from now.
+		quietUntil = Math.max(quietUntil, Date.now() + ALLOW_DELAY_MS);
+		arm();
+	}
+});
 
 /**
  * Say `text` in the questions' status line, for screen readers: emptied
@@ -337,27 +385,46 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 let announcing: ReturnType<typeof setTimeout> | undefined;
 const toAnnounce: string[] = [];
 function announce(text: string): void {
-	const status = $("question-status");
-	status.textContent = "";
+	$("question-status").textContent = "";
+	$("question-status-modal").textContent = "";
 	toAnnounce.push(text);
 	clearTimeout(announcing);
 	announcing = setTimeout(() => {
-		status.textContent = toAnnounce.splice(0).join(" ");
+		// While the dialog is open the rest of the panel is inert, and out of
+		// the accessibility tree: the line goes to the dialog's own.
+		const open = ($("questions") as HTMLDialogElement).open;
+		$(open ? "question-status-modal" : "question-status").textContent =
+			toAnnounce.splice(0).join(" ");
 	}, 50);
 }
 
 /** What is left of a question that nobody answered in time (EQ 13). */
 function expiredNotice(q: QuestionSummary): HTMLElement {
-	const notice = document.createElement("p");
-	notice.className = "question-notice muted small";
-	notice.textContent = `Not answered in time: ${q.tool} did not run.`;
-	announce(notice.textContent);
-	setTimeout(() => {
+	const notice = document.createElement("div");
+	notice.className = "question-notice";
+	const text = document.createElement("p");
+	text.textContent = `Not answered in time: ${q.tool} did not run.`;
+	const dismiss = document.createElement("button");
+	dismiss.type = "button";
+	dismiss.className = "quiet small";
+	dismiss.textContent = "OK";
+	dismiss.setAttribute("aria-label", "Dismiss");
+	notice.append(text, dismiss);
+	announce(text.textContent);
+	const remove = () => {
+		if (!notice.isConnected) return;
+		const inDialog = notice.parentElement?.id === "questions";
 		notice.remove();
-		// What was below moves up again.
-		movedUntil = Date.now() + ALLOW_DELAY_MS;
-		arm();
-	}, NOTICE_MS);
+		// In the dialog the questions below it moved up: they wait again as
+		// if just shown. At the top it floats over the panel: nothing moves.
+		if (inDialog) {
+			const now = Date.now();
+			for (const entry of cards.values()) entry.shownAt = now;
+			arm();
+		}
+	};
+	dismiss.addEventListener("click", remove);
+	setTimeout(remove, NOTICE_MS);
 	return notice;
 }
 
@@ -383,10 +450,13 @@ function arm(): void {
 		"input.always-allow, #allow-tools",
 	))
 		setAvailable(control, now >= movedUntil);
+	// The quiet after the dialog, for the end-to-end tests: no look.
+	document.body.toggleAttribute("data-quiet", now < quietUntil);
 }
 
 setInterval(() => {
-	if (cards.size > 0 || Date.now() < movedUntil + 200) arm();
+	const now = Date.now();
+	if (cards.size > 0 || now < Math.max(movedUntil, quietUntil) + 200) arm();
 }, 100);
 for (const type of ["focus", "blur", "visibilitychange"])
 	window.addEventListener(type, arm);
@@ -427,7 +497,7 @@ function alwaysAllowSwitch(origin: string, tool: ToolView): HTMLElement {
 	setAvailable(input, Date.now() >= movedUntil);
 	input.addEventListener("click", (event) => {
 		// During the wait after the layout moved the click does nothing.
-		if (isUnavailable(input)) {
+		if (isUnavailable(input) || quiet()) {
 			event.preventDefault();
 			return;
 		}
@@ -507,28 +577,25 @@ function showTab(s: PanelState): void {
 	$("no-tools").hidden = note !== "no-tools";
 	$("no-webmcp").hidden = note !== "no-webmcp";
 	const allowAll = allowAllView(tab);
-	// The page changed what the button over the list does (another label,
-	// other tools, or it just came): it and the switches below wait, as when
-	// a question went, so a click meant for the button as it was cannot allow
-	// what it is now.
-	const shownAs = JSON.stringify([
-		allowAll.shown,
-		allowAll.label,
-		allowAll.names,
-	]);
+	// The page changed what the switch over the list is for (other tools, so
+	// also on or off, or it just came): it and the switches below wait, so a
+	// click meant to turn it off cannot turn on a tool the page just added.
+	// Not when only the user's own click turned it: that would flicker.
+	const shownAs = JSON.stringify([allowAll.shown, allowAll.names]);
 	if (allowAll.shown && shownAs !== allowAllShown) {
 		movedUntil = Date.now() + ALLOW_DELAY_MS;
 		arm();
 	}
 	allowAllShown = shownAs;
 	$("tools-head").hidden = !allowAll.shown;
-	const button = $("allow-tools") as HTMLButtonElement;
-	setText(button, allowAll.label);
+	const button = $("allow-tools") as HTMLInputElement;
+	button.checked = allowAll.checked;
+	button.setAttribute("aria-checked", String(allowAll.checked));
 	const scope = tab?.origin ?? "this site";
 	// What a tool's "Always allow" switch does, where there is one.
 	$("always-allow-note").hidden = !allowAll.shown;
 	setText($("always-allow-note"), allowAll.shown ? alwaysAllowNote(scope) : "");
-	// No tooltip (DEC-160): the line under the button names the site and
+	// No tooltip (DEC-160): the line under the switch names the site and
 	// "every paired AI app"; the count is the list below.
 	button.setAttribute("aria-label", allowAllLabel(allowAll, scope));
 	setAvailable(button, Date.now() >= movedUntil);
@@ -667,11 +734,19 @@ $("copy-code").addEventListener("click", () =>
 	copy($("copy-code"), $("code"), state?.code, "code"),
 );
 
-$("allow-tools").addEventListener("click", () => {
-	const button = $("allow-tools") as HTMLButtonElement;
+$("allow-tools").addEventListener("click", (event) => {
+	const button = $("allow-tools") as HTMLInputElement;
 	const tab = state?.tab;
 	const view = allowAllView(tab);
-	if (isUnavailable(button) || !view.shown || tab?.origin === undefined) return;
+	if (
+		isUnavailable(button) ||
+		quiet() ||
+		!view.shown ||
+		tab?.origin === undefined
+	) {
+		event.preventDefault();
+		return;
+	}
 	send({
 		type: "set-allowed-all",
 		origin: tab.origin,

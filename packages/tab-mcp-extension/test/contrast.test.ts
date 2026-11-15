@@ -412,7 +412,7 @@ describe("the style sheet's rules", () => {
 			)
 			.flatMap((r) => selectors(r.selector))
 			.filter((s) => s.includes("input"));
-		expect(coloured.length).toBe(5);
+		expect(coloured.length).toBe(6);
 		const named = forced.flatMap((r) => selectors(r.selector));
 		for (const s of coloured) expect(named).toContain(s);
 	});

@@ -782,7 +782,12 @@ export class Connection {
 					available: page.webmcp.available,
 					tools: current ? state.tools.length : page.webmcp.tools,
 				},
-				access: "",
+				// Readable, but reading its tools failed: why, instead of an
+				// empty list.
+				access:
+					!current && state.tabId === tab.id && state.error !== undefined
+						? state.error
+						: "",
 				...(current && origin ? { origin } : {}),
 				canAllow: current && origin !== undefined && allowable(origin),
 				tools: current

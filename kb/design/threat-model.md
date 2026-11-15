@@ -270,7 +270,7 @@ did, by connecting the extension.
   script, which sees only the browser's own object (iteration 18). Only the extension's
   own pages talk to the content script.
 - **Which page.** Without host access the extension reads a tab only after a click on its
-  icon there, and only on that origin. With "Read all sites without a click" it reads every page in
+  icon there, and only on that origin. With "Give access to all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
   a tool not marked read-only still confirmed. Only http(s) pages (the optional host
   access is `http://*/*` and `https://*/*`, no `file:` pages) and no Incognito tabs
@@ -310,12 +310,12 @@ did, by connecting the extension.
   all" carries the
   site and the tool names, at most 64, and the worker allows only those it offers on
   that site itself, now, that are not read-only: names from the panel are not taken on
-  trust, and a tool the page registers later still asks first. "Ask again for all"
+  trust, and a tool the page registers later still asks first. Turned off, it
   takes away
   every name it carries on that site, offered now or not, so a tool the page dropped
   or marked read-only since cannot come back allowed. When the page changes what the
-  button would do (its label, its tools, or it just appeared), the button and the
-  switches stay off for 750 ms. The one message a
+  switch is for (its tools, so also on or off, or it just appeared), it and the
+  tools' switches take no click for 750 ms. The one message a
   content script may send is `webmcp-changed`, which only makes the bridge read the
   tools again. A compromised page can therefore not turn AI access on, allow a tool or
   answer a question; a compromised extension page could, but then the extension is
@@ -374,10 +374,11 @@ did, by connecting the extension.
   origins: every opaque origin is `null`, and one entry would cover them all. Panel
   commands, and the "allowed" a question writes, run one after another, so a stop is
   never overtaken by the connect before it, nor two writes of "allowed" by each other.
-  When the panel's questions move (one is answered, or one comes and pushes the panel
-  down, iteration 35), its "Allow once" buttons, "Always allow all" and the
-  "Always allow" switches take no click
-  for 750 ms, so a click lands on nothing that allows. While AI access is on and the
+  The questions are a modal dialog over the panel (DEC-185). When one goes and others
+  move up in it, their "Allow once" buttons take no click for 750 ms; when the dialog
+  closes, "Always allow all" and the "Always allow" switches under it ignore a click for
+  750 ms, and when a notice at the panel's top moves it, they wait the same time, so a
+  click lands on nothing that allows (iteration 35). While AI access is on and the
   relay cannot be reached, the panel says "retrying" (the alarm, also set at every
   start, connects again each minute), not "off" (iteration 35).
 - **The extension's settings are out of web pages' reach.** The address secret, the tools

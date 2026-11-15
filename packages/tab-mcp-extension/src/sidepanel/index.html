@@ -9,7 +9,8 @@
 <body>
 <main>
 	<p id="question-status" class="visually-hidden" role="status"></p>
-	<section id="questions" class="questions" aria-label="Tools that ask first"></section>
+	<dialog id="questions" class="questions" aria-label="Questions from AI apps"><p id="question-status-modal" class="visually-hidden" role="status"></p></dialog>
+	<div id="question-notices" class="question-notices"></div>
 
 	<section class="card" aria-labelledby="ai-heading">
 		<div class="card-head">
@@ -70,23 +71,23 @@
 		<p id="tab-title" class="tab-title">–</p>
 		<p id="tab-host" class="muted"></p>
 		<p id="tab-badges" class="badges"></p>
-		<p id="tab-access" class="muted" role="status"></p>
+		<p id="tab-access" class="tab-access" role="status"></p>
 		<p id="no-tools" class="muted small" hidden>This page offers no WebMCP tools. page_info and the navigation tools still work.</p>
 		<p id="no-webmcp" class="muted small" hidden>WebMCP is off in this tab: Chrome turns it on for sites in its origin trial, or everywhere with <code>chrome://flags/#enable-webmcp-testing</code> (<a href="https://developer.chrome.com/docs/ai/webmcp" target="_blank" rel="noopener">WebMCP in Chrome</a>). page_info and the navigation tools still work.</p>
 		<div id="tools-head" class="tools-head" hidden>
 			<h3>Tools</h3>
-			<button id="allow-tools" type="button" class="small" aria-controls="tools">Always allow all</button>
+			<label class="allow-switch"><input id="allow-tools" type="checkbox" role="switch" aria-checked="false" aria-controls="tools" aria-describedby="always-allow-note"><span aria-hidden="true">Always allow all</span></label>
 		</div>
 		<p id="always-allow-note" class="muted small" hidden></p>
 		<ul id="tools" class="tools" aria-label="The page's WebMCP tools"></ul>
 		<div id="host-access" class="host-access" hidden>
-			<p class="muted small">tab-mcp reads a tab only after you click its icon in Chrome's toolbar there. To read every http(s) site without that click, Chrome asks you first to let it "Read and change all your data on all websites".</p>
 			<div class="buttons">
-				<button id="allow-all" type="button">Read all sites without a click</button>
+				<button id="allow-all" type="button">Give access to all sites</button>
 			</div>
+			<p class="muted small">Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.</p>
 		</div>
 		<p id="allowed-all" class="muted small" hidden>
-			Reads all sites without a click. <button id="disallow-all" type="button" class="link">Stop reading all sites</button>
+			tab-mcp has access to all sites. <button id="disallow-all" type="button" class="link">Remove access to all sites</button>
 		</p>
 	</section>
 

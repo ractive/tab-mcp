@@ -26,6 +26,7 @@ import {
 import {
 	countdownText,
 	questionAnnouncement,
+	timeLeftShare,
 } from "../src/sidepanel/question.ts";
 import {
 	COPIED_MS,
@@ -220,10 +221,10 @@ describe("the tab card's texts", () => {
 		expect(noAccessText("no-grant", false)).toBe(
 			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 		);
-		// A hidden address may be a browser page, where the click cannot help;
-		// with host access on all sites it can only be one.
+		// A hidden address may be a browser page, where the click cannot help
+		// (not worth a sentence); with host access on all sites it can only be one.
 		expect(noAccessText("hidden", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab. Chrome's own pages, such as a new tab, cannot be read at all.",
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 		);
 		expect(noAccessText("hidden", true)).toBe(
 			"Chrome does not let extensions read browser pages.",
@@ -269,13 +270,16 @@ describe("the tab card's texts", () => {
 		try {
 			const text = (id: string) =>
 				doc.getElementById(id)?.textContent?.replace(/\s+/g, " ").trim();
-			expect(text("allow-all")).toBe("Read all sites without a click");
-			expect(text("disallow-all")).toBe("Stop reading all sites");
-			// What Chrome will ask, before its prompt.
+			expect(text("allow-all")).toBe("Give access to all sites");
+			expect(text("disallow-all")).toBe("Remove access to all sites");
+			// What changes, and that Chrome asks first.
 			expect(text("host-access")).toContain(
-				'"Read and change all your data on all websites"',
+				"Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.",
 			);
-			expect(text("allow-tools")).toBe(ALWAYS_ALLOW_ALL);
+			// A switch for all the tools' switches, named as they are.
+			const allowTools = doc.getElementById("allow-tools");
+			expect(allowTools?.getAttribute("role")).toBe("switch");
+			expect(allowTools?.closest("label")?.textContent).toBe(ALWAYS_ALLOW_ALL);
 			// Problems are announced; a question's card is not a live region
 			// (its arguments can be 1 MiB), a short line is.
 			expect(doc.getElementById("problem")?.getAttribute("role")).toBe("alert");
@@ -291,6 +295,13 @@ describe("the tab card's texts", () => {
 			expect(doc.getElementById("question-status")?.getAttribute("role")).toBe(
 				"status",
 			);
+			// The dialog's own, for while the rest of the panel is inert.
+			expect(
+				doc
+					.getElementById("questions")
+					?.querySelector("#question-status-modal")
+					?.getAttribute("role"),
+			).toBe("status");
 			// Where WebMCP comes from, and what works without it.
 			expect(text("no-webmcp")).toContain(
 				"chrome://flags/#enable-webmcp-testing",
@@ -341,6 +352,14 @@ describe("the tab card's texts", () => {
 			"0 s left to answer; no answer is Don't allow.",
 		);
 	});
+
+	test("the countdown's bar: the share of the 60 s left, from 1 to 0", () => {
+		expect(timeLeftShare(60_000, 0)).toBe(1);
+		expect(timeLeftShare(60_000, 45_000)).toBe(0.25);
+		expect(timeLeftShare(60_000, 61_000)).toBe(0);
+		// A clock that went back does not overfill it.
+		expect(timeLeftShare(60_000, -5_000)).toBe(1);
+	});
 });
 
 describe("Always allow all, over the tool list", () => {
@@ -365,15 +384,15 @@ describe("Always allow all, over the tool list", () => {
 	test("for the listed tools that ask first, not read-only or left-out ones", () => {
 		expect(allowAllView(tab([order, pay, read, broken]))).toEqual({
 			shown: true,
-			label: "Always allow all",
+			checked: false,
 			names: ["order", "pay"],
 			on: true,
 		});
 	});
 
-	test("some allowed: still Always allow all; none asks: Ask again for all", () => {
-		expect(allowAllView(tab([{ ...order, allowed: true }, pay])).label).toBe(
-			ALWAYS_ALLOW_ALL,
+	test("some allowed: off, a click allows the rest; none asks: on, a click asks again", () => {
+		expect(allowAllView(tab([{ ...order, allowed: true }, pay]))).toMatchObject(
+			{ checked: false, on: true },
 		);
 		expect(
 			allowAllView(
@@ -381,7 +400,7 @@ describe("Always allow all, over the tool list", () => {
 			),
 		).toEqual({
 			shown: true,
-			label: "Ask again for all",
+			checked: true,
 			names: ["order", "pay"],
 			on: false,
 		});
@@ -395,7 +414,7 @@ describe("Always allow all, over the tool list", () => {
 		expect(
 			allowAllLabel(allowAllView(tab([{ ...order, allowed: true }])), site),
 		).toBe(
-			"Ask again for all: the 1 tool listed on https://shop.example, for every paired AI app",
+			"Always allow all: the 1 tool listed on https://shop.example, for every paired AI app",
 		);
 	});
 

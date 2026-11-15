@@ -381,5 +381,10 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
+	// A page Chrome shows again from its back/forward cache loads nothing:
+	// its tools are read again as after a change.
+	globalThis.addEventListener?.("pageshow", (event) => {
+		if ((event as PageTransitionEvent).persisted) changed();
+	});
 	changed();
 }

@@ -3775,15 +3775,69 @@ Branch `release/per-package-changelog`.
   the user allowed show a switch that is on. The line over the list: "Always allow, on:
   the tool runs without asking on <origin>, for every paired AI app. Off: it asks you
   before each call."
-- The button over the list: "Always allow all" / "Ask again for all"; its accessible
-  name "Always allow the 2 tools listed on <origin>, for every paired AI app" / "Ask
-  again for the 1 tool listed on …".
+- Over the list, "Always allow all" is a switch too (owner; it was a button "Always allow
+  all" / "Ask again for all"), as a "select all": on once every listed tool that asks
+  is allowed, off while one asks (a click then allows the rest), turned off every one
+  asks again; `set-allowed-all` as before. Its accessible name starts with its label:
+  "Always allow all: the 2 tools listed on <origin>, for every paired AI app". It waits
+  750 ms when the page changes which tools it is for, not after the user's own click.
 - The question's third button, "Don't ask again on <host>", is "Always allow on <host>"
   (owner): the same words as the switch it turns on. Its note: "Always allow on <host>:
   this tool runs without asking there, for every paired AI app, until you turn off its
   'Always allow' in the tool list."
+- A tool's switch that is on has the green track `--ok` (the connected dots' colour; the
+  knob `--on-strong` on it is above 3:1 in both schemes); off it keeps the neutral
+  `--edge` track. Not red when off (owner, after the question): off is the safe default,
+  and a list of red switches would read as an error. The AI access switch keeps ink.
 - Behaviour, protocol (`set-allowed`, `set-allowed-all`) and storage do not change: the
   switch on is the site's "allowed" entry, as the switch off was before. The library's
   "Always allow" (now "Allow until reload", DEC-096) is a different thing and keeps its
   history. PRIVACY.md and the ractive.ch privacy page no longer name the controls, only
   the data: the tools allowed to run without asking, per site (owner).
+
+## DEC-185: tab-mcp for Chrome shows questions in a modal dialog (owner)
+
+2026-11-15, before the first store release.
+
+- The questions were cards at the panel's top. In a panel scrolled down to the tool list,
+  or opened from a notification while it was scrolled down there, a new one was out of
+  sight; with the panel in front no notification is sent, so it ran out unseen (seen by
+  the owner twice). Scrolling the card into view did not help when the panel was shown
+  from a notification.
+- Now the cards are in a native `<dialog>` opened with `showModal()`: in the top layer,
+  over the panel wherever it is scrolled to, the rest inert, the backdrop the token
+  `--scrim`. It opens with the first question and closes with the last; Escape does not
+  close it (the `cancel` event is prevented): a question ends with an answer or its
+  60 s. The first focusable element takes the focus (the arguments); Allow waits as
+  before (DEC-180's buttons, iteration 35's wait).
+- "Not answered in time" takes its card's place in the dialog while other questions
+  wait, else it floats over the panel's top (`position: fixed`), wherever the panel is
+  scrolled to: in the warning's tint, bold, for 15 s or until its OK (owner: at 6 s in
+  `--wash` it was gone before it was seen). Floating, it moves nothing.
+- A page Chrome shows again from its back/forward cache loads nothing, so the
+  extension did not read its tools again after Back ("changed while its tools were
+  read" for good). The content script reports `pageshow` with `persisted` as a change,
+  and a read that caught the tab between two pages reads once more after 1 s.
+- The controls under the dialog ignore a click for 750 ms after it goes (ES 5): a double
+  click on its last Allow must not land on an "Always allow" switch below. This wait is
+  not shown (no `aria-disabled`, no disabled look; `data-quiet` on the body for the
+  tests): nothing moved, and the switches flickered grey after every answer (owner). The
+  shown wait stays where the panel moves: the notice at the top, the button's new label.
+
+## DEC-186: tab-mcp for Chrome's access to all sites in plain words (owner)
+
+2026-11-15, before the first store release; amends DEC-154's host-access wording.
+
+- The button "Read all sites without a click" read like a search phrase, and the
+  paragraph before it (the click on the icon, then Chrome's prompt quoted) was longer
+  than what it explains (owner). Now the button is "Give access to all sites", with one
+  line under it: "Then tab-mcp reads every tab without a click on its icon. Chrome asks
+  you first." Granted: "tab-mcp has access to all sites." with "Remove access to all
+  sites". Not "Allow on all sites" (Overmark's), which would mix with "Always allow".
+- Not pushed (owner asked; declined after the question): no "for the best experience".
+  With it every site in front is visible to the paired AI apps while AI access is on,
+  not only the tabs clicked; the panel states the option, the user chooses.
+- The notice for a tab it may not read says only "Click the tab-mcp icon in Chrome's
+  toolbar to let it read this tab." (the sentence on Chrome's own pages goes); it is a
+  notice in the warning's tint, and a readable tab whose tools could not be read says
+  why there instead of an empty list. The AI app's texts name the new button.
