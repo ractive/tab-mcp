@@ -276,7 +276,10 @@ describe("the tab card's texts", () => {
 			expect(text("host-access")).toContain(
 				'"Read and change all your data on all websites"',
 			);
-			expect(text("allow-tools")).toBe(ALWAYS_ALLOW_ALL);
+			// A switch for all the tools' switches, named as they are.
+			const allowTools = doc.getElementById("allow-tools");
+			expect(allowTools?.getAttribute("role")).toBe("switch");
+			expect(allowTools?.closest("label")?.textContent).toBe(ALWAYS_ALLOW_ALL);
 			// Problems are announced; a question's card is not a live region
 			// (its arguments can be 1 MiB), a short line is.
 			expect(doc.getElementById("problem")?.getAttribute("role")).toBe("alert");
@@ -381,15 +384,15 @@ describe("Always allow all, over the tool list", () => {
 	test("for the listed tools that ask first, not read-only or left-out ones", () => {
 		expect(allowAllView(tab([order, pay, read, broken]))).toEqual({
 			shown: true,
-			label: "Always allow all",
+			checked: false,
 			names: ["order", "pay"],
 			on: true,
 		});
 	});
 
-	test("some allowed: still Always allow all; none asks: Ask again for all", () => {
-		expect(allowAllView(tab([{ ...order, allowed: true }, pay])).label).toBe(
-			ALWAYS_ALLOW_ALL,
+	test("some allowed: off, a click allows the rest; none asks: on, a click asks again", () => {
+		expect(allowAllView(tab([{ ...order, allowed: true }, pay]))).toMatchObject(
+			{ checked: false, on: true },
 		);
 		expect(
 			allowAllView(
@@ -397,7 +400,7 @@ describe("Always allow all, over the tool list", () => {
 			),
 		).toEqual({
 			shown: true,
-			label: "Ask again for all",
+			checked: true,
 			names: ["order", "pay"],
 			on: false,
 		});
@@ -411,7 +414,7 @@ describe("Always allow all, over the tool list", () => {
 		expect(
 			allowAllLabel(allowAllView(tab([{ ...order, allowed: true }])), site),
 		).toBe(
-			"Ask again for all: the 1 tool listed on https://shop.example, for every paired AI app",
+			"Always allow all: the 1 tool listed on https://shop.example, for every paired AI app",
 		);
 	});
 

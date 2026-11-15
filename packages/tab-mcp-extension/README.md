@@ -45,11 +45,11 @@ The page's tools are the page's word:
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Always allow on <host>" in a question, or switching on
   the tool's "Always allow" in the panel's list, allows the tool on that site (exact origin)
-  for every paired AI app, kept until you switch it off again. "Always allow all" over
-  the list does that for every tool listed at that moment that asks first,
-  in one step; once none asks, it reads "Ask again for all" and turns them all back. A
-  tool the page registers later asks first. When the page changes what the button would
-  do, it waits 750 ms before it takes a click. All of these only for pages of an http(s)
+  for every paired AI app, kept until you switch it off again. The switch
+  "Always allow all" over the list does that for every tool listed at that moment that
+  asks first, in one step. It is on once none asks; turned off, every one asks again. A
+  tool the page registers later asks first, and the switch is off again. When the page
+  changes which tools it is for, it waits 750 ms before it takes a click. All of these only for pages of an http(s)
   site: pages with an opaque origin (`null`, such as sandboxed pages) always ask ("asks
   first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still

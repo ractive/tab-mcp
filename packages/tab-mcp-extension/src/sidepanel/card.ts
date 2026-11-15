@@ -177,10 +177,11 @@ export function switchExpiry(
 	);
 }
 
-/** The button over the tab's tool list, or why it is not there. */
+/** The switch over the tab's tool list, or why it is not there. */
 export interface AllowAllView {
 	shown: boolean;
-	label: typeof ALWAYS_ALLOW_ALL | typeof ASK_AGAIN_ALL;
+	/** On: every tool it is for is allowed. */
+	checked: boolean;
 	/** The tools it is for: listed, offered, not read-only. */
 	names: string[];
 	/** What a click asks for: allow them (true), or ask first again. */
@@ -188,11 +189,11 @@ export interface AllowAllView {
 }
 
 /**
- * The labels use the per-tool switch's words, "Always allow" (DEC-184); the
- * line under the button names the site and every paired AI app (EQ 9).
+ * A switch for all the tools' "Always allow" switches (DEC-184), as a
+ * "select all": the line over the list names the site and every paired AI
+ * app (EQ 9).
  */
 export const ALWAYS_ALLOW_ALL = "Always allow all";
-export const ASK_AGAIN_ALL = "Ask again for all";
 
 /**
  * What a tool's "Always allow" switch does on `site`: a line over the tool
@@ -203,8 +204,9 @@ export const alwaysAllowNote = (site: string): string =>
 
 /**
  * "Always allow all" for the tools listed now on a site whose tools can be
- * allowed; once none asks, "Ask again for all". A tool the page adds later is
- * not among them: it asks first.
+ * allowed: on once none asks; turned off, every one asks again. Off while
+ * one asks, and a click allows the rest. A tool the page adds later is not
+ * among them: it asks first, and the switch is off again.
  */
 export function allowAllView(tab: TabView | undefined): AllowAllView {
 	const names = (tab?.tools ?? [])
@@ -217,18 +219,19 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
 		);
 	return {
 		shown: tab?.canAllow === true && names.length > 0,
-		label: all ? ASK_AGAIN_ALL : ALWAYS_ALLOW_ALL,
+		checked: all,
 		names,
 		on: !all,
 	};
 }
 
 /**
- * The button's accessible name: what it does, how many tools, which site and
- * for whom, as the line under it says to a sighted user.
+ * The switch's accessible name: what it is for, how many tools, which site
+ * and for whom, as the line over the list says to a sighted user; on or off
+ * is its own state.
  */
 export function allowAllLabel(view: AllowAllView, site: string): string {
 	const n = view.names.length;
 	// Starts with the visible label, so speech input finds it (WCAG 2.5.3).
-	return `${view.label}: the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
+	return `${ALWAYS_ALLOW_ALL}: the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
 }

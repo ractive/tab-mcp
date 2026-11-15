@@ -3775,9 +3775,12 @@ Branch `release/per-package-changelog`.
   the user allowed show a switch that is on. The line over the list: "Always allow, on:
   the tool runs without asking on <origin>, for every paired AI app. Off: it asks you
   before each call."
-- The button over the list: "Always allow all" / "Ask again for all"; its accessible
-  name "Always allow the 2 tools listed on <origin>, for every paired AI app" / "Ask
-  again for the 1 tool listed on …".
+- Over the list, "Always allow all" is a switch too (owner; it was a button "Always allow
+  all" / "Ask again for all"), as a "select all": on once every listed tool that asks
+  is allowed, off while one asks (a click then allows the rest), turned off every one
+  asks again; `set-allowed-all` as before. Its accessible name starts with its label:
+  "Always allow all: the 2 tools listed on <origin>, for every paired AI app". It waits
+  750 ms when the page changes which tools it is for, not after the user's own click.
 - The question's third button, "Don't ask again on <host>", is "Always allow on <host>"
   (owner): the same words as the switch it turns on. Its note: "Always allow on <host>:
   this tool runs without asking there, for every paired AI app, until you turn off its

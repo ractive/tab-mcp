@@ -560,28 +560,25 @@ function showTab(s: PanelState): void {
 	$("no-tools").hidden = note !== "no-tools";
 	$("no-webmcp").hidden = note !== "no-webmcp";
 	const allowAll = allowAllView(tab);
-	// The page changed what the button over the list does (another label,
-	// other tools, or it just came): it and the switches below wait, as when
-	// a question went, so a click meant for the button as it was cannot allow
-	// what it is now.
-	const shownAs = JSON.stringify([
-		allowAll.shown,
-		allowAll.label,
-		allowAll.names,
-	]);
+	// The page changed what the switch over the list is for (other tools, so
+	// also on or off, or it just came): it and the switches below wait, so a
+	// click meant to turn it off cannot turn on a tool the page just added.
+	// Not when only the user's own click turned it: that would flicker.
+	const shownAs = JSON.stringify([allowAll.shown, allowAll.names]);
 	if (allowAll.shown && shownAs !== allowAllShown) {
 		movedUntil = Date.now() + ALLOW_DELAY_MS;
 		arm();
 	}
 	allowAllShown = shownAs;
 	$("tools-head").hidden = !allowAll.shown;
-	const button = $("allow-tools") as HTMLButtonElement;
-	setText(button, allowAll.label);
+	const button = $("allow-tools") as HTMLInputElement;
+	button.checked = allowAll.checked;
+	button.setAttribute("aria-checked", String(allowAll.checked));
 	const scope = tab?.origin ?? "this site";
 	// What a tool's "Always allow" switch does, where there is one.
 	$("always-allow-note").hidden = !allowAll.shown;
 	setText($("always-allow-note"), allowAll.shown ? alwaysAllowNote(scope) : "");
-	// No tooltip (DEC-160): the line under the button names the site and
+	// No tooltip (DEC-160): the line under the switch names the site and
 	// "every paired AI app"; the count is the list below.
 	button.setAttribute("aria-label", allowAllLabel(allowAll, scope));
 	setAvailable(button, Date.now() >= movedUntil);
@@ -720,8 +717,8 @@ $("copy-code").addEventListener("click", () =>
 	copy($("copy-code"), $("code"), state?.code, "code"),
 );
 
-$("allow-tools").addEventListener("click", () => {
-	const button = $("allow-tools") as HTMLButtonElement;
+$("allow-tools").addEventListener("click", (event) => {
+	const button = $("allow-tools") as HTMLInputElement;
 	const tab = state?.tab;
 	const view = allowAllView(tab);
 	if (
@@ -729,8 +726,10 @@ $("allow-tools").addEventListener("click", () => {
 		quiet() ||
 		!view.shown ||
 		tab?.origin === undefined
-	)
+	) {
+		event.preventDefault();
 		return;
+	}
 	send({
 		type: "set-allowed-all",
 		origin: tab.origin,
