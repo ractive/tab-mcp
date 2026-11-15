@@ -43,9 +43,9 @@ tags: [iteration, extension, release]
   hosted relay's allowed origins (ractive/ractive.ch `infra/tab-mcp`, through tofu) before
   the listing goes public, and check it with a live handshake (the store build connects
   to `https://tab-mcp.ractive.ch` and shows an address and a pairing code)
-- [ ] Afterwards, if wanted, remove the development build's id
+- [ ] Once the store build works from the store, remove the old development build's id
   (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`) from the hosted relay's allowed
-  origins, the same way
+  origins, the same way: development builds have the store id since DEC-187
 - [x] Publish workflow (`extension-publish.yml`, 2026-11-11, `ext/release-23`)
 - [ ] The `chrome-web-store` environment and its credentials, set up by the owner
   ([chrome-web-store](../operations/chrome-web-store.md))

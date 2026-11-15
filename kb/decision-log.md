@@ -3841,3 +3841,23 @@ Branch `release/per-package-changelog`.
   toolbar to let it read this tab." (the sentence on Chrome's own pages goes); it is a
   notice in the warning's tint, and a readable tab whose tools could not be read says
   why there instead of an empty list. The AI app's texts name the new button.
+
+## DEC-187: The development build has the Chrome Web Store id (owner)
+
+2026-11-16. The Chrome Web Store gave tab-mcp for Chrome the id
+`jjhddplkjikmbpcobcnfebnglgjomfgh`. The development build had its own id,
+`handeaggdjdkpniflkjlknlcfbjifkng`, from a key outside the repository
+(`~/.config/tab-mcp/extension-key.txt`), and the hosted relay allowed both.
+
+- The development build's manifest carries the store item's public key,
+  `packages/tab-mcp-extension/manifest-key.txt` (dashboard: Package → "View public key"),
+  so every development build has the store id, on every machine and in CI. A test checks
+  that the key gives that id.
+- The key is public: the store ships it in every copy of the extension. Anyone can load
+  an unpacked extension with this id, as with any store extension; the relay's origin
+  list limits abuse and is no security boundary (DEC-108).
+- A development build and the store's cannot be installed in the same Chrome profile;
+  the store's is tried in another profile.
+- The store build still has no `key` (the store adds it), and `--zip` still refuses one.
+- The old development id leaves the relay's allowed origins once the store build works
+  from the store. `TAB_MCP_EXTENSION_KEY_FILE` and the key file in `~/.config` are gone.

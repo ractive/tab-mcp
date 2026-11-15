@@ -232,13 +232,14 @@ The relay accepts an extension only if its origin, `chrome-extension://<id>`, is
 extensions" in `docs/configuration.md`). An unpacked extension's id comes from the public
 key in its manifest, or, without one, from the folder it was loaded from.
 
-- `bun run build` writes the owner's key into the manifest, read from
-  `~/.config/tab-mcp/extension-key.txt` (or `TAB_MCP_EXTENSION_KEY_FILE`). That build's
-  id, `handeaggdjdkpniflkjlknlcfbjifkng`, is the one the hosted relay
-  (`https://tab-mcp.ractive.ch`, the side panel's default) allows. The key is not in this
-  repository: anyone with it could load an extension with that id.
-- Without the key the build gets an id of its own; run your own relay
-  (`docs/self-hosting.md`) and allow that id, or use the relay's development mode.
+- `bun run build` writes the Chrome Web Store item's public key, `manifest-key.txt`, into
+  the manifest, so the development build has the store's id,
+  `jjhddplkjikmbpcobcnfebnglgjomfgh`, the one the hosted relay
+  (`https://tab-mcp.ractive.ch`, the side panel's default) allows. The key is public: the
+  store ships it in every copy. A development build and the store's cannot be installed in
+  the same Chrome profile; try the store's in another profile.
+- With your own relay (`docs/self-hosting.md`), allow that id, or use the relay's
+  development mode.
 - `bun scripts/build.ts --store` builds the Chrome Web Store package into `dist-store/`
   (no key, no host access, no source maps); `--store --zip` also packs it as
   `tab-mcp-for-chrome-<version>-store.zip` and refuses a build with a key, host access,
