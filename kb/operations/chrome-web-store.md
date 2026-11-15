@@ -249,6 +249,12 @@ sends.
 
 Check the example storefront and the Chrome version before each submission.
 
+**Store icon (128×128):** `packages/tab-mcp-extension/assets/store/icon-128.png`, the
+extension's icon at 96×96 with 16 px transparent on each side, as the
+[image guidelines](https://developer.chrome.com/docs/webstore/images#icons) ask; the
+manifest's `icons/icon-128.png` fills its square. `bun scripts/icons.ts` renders both
+from the relay's `favicon.svg`.
+
 **Screenshots (1280×800, light):** in `packages/tab-mcp-extension/assets/store/`, each an
 example shop page (`https://bakery.example`, made up) beside the side panel, in the look
 of iteration 39 ([the look](../design/extension-look.md)):
