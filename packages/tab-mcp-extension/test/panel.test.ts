@@ -221,10 +221,10 @@ describe("the tab card's texts", () => {
 		expect(noAccessText("no-grant", false)).toBe(
 			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 		);
-		// A hidden address may be a browser page, where the click cannot help;
-		// with host access on all sites it can only be one.
+		// A hidden address may be a browser page, where the click cannot help
+		// (not worth a sentence); with host access on all sites it can only be one.
 		expect(noAccessText("hidden", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab. Chrome's own pages, such as a new tab, cannot be read at all.",
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 		);
 		expect(noAccessText("hidden", true)).toBe(
 			"Chrome does not let extensions read browser pages.",
@@ -270,11 +270,11 @@ describe("the tab card's texts", () => {
 		try {
 			const text = (id: string) =>
 				doc.getElementById(id)?.textContent?.replace(/\s+/g, " ").trim();
-			expect(text("allow-all")).toBe("Read all sites without a click");
-			expect(text("disallow-all")).toBe("Stop reading all sites");
-			// What Chrome will ask, before its prompt.
+			expect(text("allow-all")).toBe("Give access to all sites");
+			expect(text("disallow-all")).toBe("Remove access to all sites");
+			// What changes, and that Chrome asks first.
 			expect(text("host-access")).toContain(
-				'"Read and change all your data on all websites"',
+				"Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.",
 			);
 			// A switch for all the tools' switches, named as they are.
 			const allowTools = doc.getElementById("allow-tools");

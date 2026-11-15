@@ -179,7 +179,7 @@ describe("refusals", () => {
 		// The icon is in the toolbar, not on the tab; the host access button
 		// by its label (EQ 6, EQ 9).
 		expect(noAccess("").message).toContain("icon in Chrome's toolbar");
-		expect(noAccess("").message).toContain("Read all sites without a click");
+		expect(noAccess("").message).toContain("Give access to all sites");
 	});
 
 	test("browser pages and the Web Store cannot be read at all", () => {

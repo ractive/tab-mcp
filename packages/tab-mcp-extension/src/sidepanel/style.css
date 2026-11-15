@@ -194,7 +194,7 @@ button.strong:hover:not(:disabled, [aria-disabled="true"]) {
 	background: color-mix(in srgb, var(--strong) 84%, var(--paper));
 }
 
-/* A quiet one is its words: Copy, New address, Stop reading all sites. */
+/* A quiet one is its words: Copy, New address, Remove access to all sites. */
 button.quiet,
 button.link {
 	min-height: 24px;
@@ -426,7 +426,7 @@ input:is([type="text"], [type="url"]) {
 
 /*
  * The tab cannot be read, or its tools could not be: a notice with the way
- * out (the icon's click, "Read all sites without a click").
+ * out (the icon's click, "Give access to all sites").
  */
 .tab-access:not(:empty) {
 	padding: 10px var(--s3);

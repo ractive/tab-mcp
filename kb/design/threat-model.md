@@ -270,7 +270,7 @@ did, by connecting the extension.
   script, which sees only the browser's own object (iteration 18). Only the extension's
   own pages talk to the content script.
 - **Which page.** Without host access the extension reads a tab only after a click on its
-  icon there, and only on that origin. With "Read all sites without a click" it reads every page in
+  icon there, and only on that origin. With "Give access to all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
   a tool not marked read-only still confirmed. Only http(s) pages (the optional host
   access is `http://*/*` and `https://*/*`, no `file:` pages) and no Incognito tabs

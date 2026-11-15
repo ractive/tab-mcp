@@ -133,7 +133,7 @@ export interface PanelState {
 	problem?: string;
 	/** Another tab or program took the address over. */
 	replaced?: { sibling: boolean };
-	/** Host access on all sites ("Read all sites without a click") is granted. */
+	/** Host access on all sites ("Give access to all sites") is granted. */
 	allSites: boolean;
 	tab?: TabView;
 	/**

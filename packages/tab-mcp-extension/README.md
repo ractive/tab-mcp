@@ -22,7 +22,7 @@ Not in the Chrome Web Store yet; load it unpacked. Privacy policy: [PRIVACY.md](
 | `reload` | Reloads the page in that tab, with its `page_info`. |
 
 The navigation tools act only on a tab the extension may read now (a click on its icon
-there, or "Read all sites without a click"); on any other tab they do nothing and say why:
+there, or "Give access to all sites"); on any other tab they do nothing and say why:
 
 - On the page's own origin (scheme, host and port) they run at once, as a link on the
   page would.
@@ -32,7 +32,7 @@ there, or "Read all sites without a click"); on any other tab they do nothing an
   forward to a page the extension cannot see (another origin: Chrome lists only the
   page's own) asks too, saying its address is not known. A reload never asks.
 - Only `http:` and `https:` addresses, without a user name or password.
-- Without "Read all sites without a click", Chrome lets the extension read the new page of another
+- Without "Give access to all sites", Chrome lets the extension read the new page of another
   origin only after a click on its icon there; the answer says so.
 - They wait up to 30 s for the page to load; after that the answer says it is still
   loading.
@@ -118,9 +118,9 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   extension's panel for that tab, such as Claude in Chrome's), and the extension may read
   that tab, also after navigations on the same origin, until the tab goes to another
   origin (`www.example.com` is another origin than `example.com`).
-  "Read all sites without a click" in the side panel lets it read every http(s) tab
-  without a click; the panel says before the button what Chrome will ask ("Read and
-  change all your data on all websites"). On a tab it may not read, a notice in the
+  "Give access to all sites" in the side panel lets it read every http(s) tab
+  without a click; Chrome asks first ("Read and change all your data on all
+  websites"). On a tab it may not read, a notice in the
   panel says to click the icon in the toolbar (or that Chrome does not let extensions
   read the page); on a tab it may read whose tools could not be read
   (the page changed meanwhile, or says it is another site), the notice says that.
@@ -209,7 +209,7 @@ switch it off again there.
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Only after "Read all sites without a click": read every tab of an http(s) site without a click. |
+| `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
 app.

@@ -2177,15 +2177,11 @@ describe.skipIf(chrome === undefined)(
 				`[document.getElementById("tab-access").textContent, document.getElementById("host-access").hidden, document.getElementById("allow-all").textContent]`,
 			);
 			// Chrome reports the address of this tab or hides it, depending on
-			// when it is asked; hidden, the line adds that browser pages cannot
-			// be read either.
-			expect(access).toStartWith(
+			// when it is asked: the same line either way.
+			expect(access).toBe(
 				"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 			);
-			expect([hidden, button]).toEqual([
-				false,
-				"Read all sites without a click",
-			]);
+			expect([hidden, button]).toEqual([false, "Give access to all sites"]);
 			await stack.browser.clickIcon(tab);
 			expect((await pageInfo(stack)).structuredContent).toMatchObject({
 				url: `${SUBDOMAIN}/plain.html`,

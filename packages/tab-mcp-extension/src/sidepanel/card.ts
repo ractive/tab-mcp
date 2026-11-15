@@ -103,9 +103,7 @@ export function noAccessText(
 ): string {
 	switch (reason) {
 		case "hidden":
-			return allSites
-				? BROWSER_PAGE
-				: `${CLICK_ICON} Chrome's own pages, such as a new tab, cannot be read at all.`;
+			return allSites ? BROWSER_PAGE : CLICK_ICON;
 		case "no-grant":
 			return CLICK_ICON;
 		case "browser-page":

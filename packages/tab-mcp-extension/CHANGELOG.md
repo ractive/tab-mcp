@@ -41,7 +41,7 @@ First release, version 0.1.0.
   "Always allow all" over the list does it for every tool listed. A question that is not answered in
   60 s, or not asked because 5 of the AI app's calls wait already, says so to the AI app.
 - Access per tab: a click on the icon lets the extension read that tab (until it goes to
-  another origin); "Read all sites without a click" asks for optional access to every http(s) site.
+  another origin); "Give access to all sites" asks for optional access to every http(s) site.
   No `file:` pages, no Incognito tabs.
 - Navigation tools for the tab in front, while the extension may read it: `navigate` (an
   http(s) address), `go_back`, `go_forward` and `reload`, each answering with the new

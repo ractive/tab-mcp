@@ -19,7 +19,7 @@ import {
  */
 export const SITE_MATCHES = ["http://*/*", "https://*/*"];
 
-/** Host access on every site: what "Read all sites without a click" asks for. */
+/** Host access on every site: what "Give access to all sites" asks for. */
 export const ALL_SITES: chrome.permissions.Permissions = {
 	origins: SITE_MATCHES,
 };
@@ -109,7 +109,7 @@ export class NoAccessError extends Error {
 }
 
 const NO_GRANT =
-	'tab-mcp for Chrome may not read this tab yet. The user can click the tab-mcp for Chrome icon in Chrome\'s toolbar while on this tab, or turn on "Read all sites without a click" in its side panel.';
+	'tab-mcp for Chrome may not read this tab yet. The user can click the tab-mcp for Chrome icon in Chrome\'s toolbar while on this tab, or click "Give access to all sites" in its side panel.';
 
 /** The answer to an access problem: its reason, and what the AI app is told. */
 export function noAccess(url: string): NoAccessError {

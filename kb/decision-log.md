@@ -3823,3 +3823,21 @@ Branch `release/per-package-changelog`.
   not shown (no `aria-disabled`, no disabled look; `data-quiet` on the body for the
   tests): nothing moved, and the switches flickered grey after every answer (owner). The
   shown wait stays where the panel moves: the notice at the top, the button's new label.
+
+## DEC-186: tab-mcp for Chrome's access to all sites in plain words (owner)
+
+2026-11-15, before the first store release; amends DEC-154's host-access wording.
+
+- The button "Read all sites without a click" read like a search phrase, and the
+  paragraph before it (the click on the icon, then Chrome's prompt quoted) was longer
+  than what it explains (owner). Now the button is "Give access to all sites", with one
+  line under it: "Then tab-mcp reads every tab without a click on its icon. Chrome asks
+  you first." Granted: "tab-mcp has access to all sites." with "Remove access to all
+  sites". Not "Allow on all sites" (Overmark's), which would mix with "Always allow".
+- Not pushed (owner asked; declined after the question): no "for the best experience".
+  With it every site in front is visible to the paired AI apps while AI access is on,
+  not only the tabs clicked; the panel states the option, the user chooses.
+- The notice for a tab it may not read says only "Click the tab-mcp icon in Chrome's
+  toolbar to let it read this tab." (the sentence on Chrome's own pages goes); it is a
+  notice in the warning's tint, and a readable tab whose tools could not be read says
+  why there instead of an empty list. The AI app's texts name the new button.
