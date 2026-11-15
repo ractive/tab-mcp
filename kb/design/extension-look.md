@@ -318,7 +318,7 @@ Every pair passes in both schemes.
 | Pairing step | Sheet, 1 px `--rule`, radius 10, 12 px padding; address and code on `--wash`. |
 | Pill | 20 px, 12 / 16 / 600, tint and tone by the table above, 1.5 px transparent border. |
 | Tool row | Name (title, with the name in mono meta), its pill or switch; `--rule` between rows. |
-| Question | Sheet, 1 px `--edge`, radius 10, 12 px padding; arguments mono on `--wash`, at most 12em; Don't allow, Allow once and Always allow on <host>, all default buttons (DEC-180; Allow once was strong until iteration 43). |
+| Question | Sheet, 1 px `--edge`, radius 10, 12 px padding; arguments mono on `--wash`, at most 12em; Don't allow, Allow once and Always allow on <host>, all default buttons (DEC-180; Allow once was strong until iteration 43). In a modal `<dialog>` over the panel, the backdrop `--scrim` (DEC-185). |
 | Notice | `--warn-bg`, 1 px `--warn-edge`, radius 10, text `--ink`, one small default button. |
 | Problem | `--danger-bg`, 1 px `--danger`, radius 10, text `--ink`. |
 | Field | `--sheet`, 1 px `--edge`, radius 6; invalid: border `--danger`. |

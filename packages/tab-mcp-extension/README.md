@@ -165,10 +165,14 @@ panel has been in front for 750 ms, so the click that brings it forward cannot a
 no click). The panel's question names the AI app and the tool, then, each on a line of
 its own, the site the tool acts on ("Site (verified)") and the page's title for the tool
 ("Title (from the page)"), the arguments in full (they scroll when long) and the seconds
-left to answer. Its three buttons look alike: none is drawn to be the one to click. A question that runs out leaves "Not answered in time: <tool> did not
-run." for a few seconds. A screen reader hears one short line per question ("<app> asks
-to run <tool>"), not the card. A question that comes or goes moves what is below it: the
-"Always allow" switches and "Always allow all" over the list wait 750 ms after.
+left to answer. Its three buttons look alike: none is drawn to be the one to click.
+Questions open in a modal dialog over the panel, wherever it is scrolled to; the rest of
+the panel is inert until the last one is answered or runs out, and Escape does not close
+it. A question that runs out leaves "Not answered in time: <tool> did not run." at the
+panel's top for a few seconds. A screen reader hears one short line per question ("<app>
+asks to run <tool>"), not the card. When the dialog goes, the "Always allow" switches and
+"Always allow all" under it wait 750 ms, so a second click meant for the dialog does
+nothing there.
 
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site> · Closing this is Don't allow" below, naming the AI

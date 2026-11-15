@@ -3787,3 +3787,23 @@ Branch `release/per-package-changelog`.
   "Always allow" (now "Allow until reload", DEC-096) is a different thing and keeps its
   history. PRIVACY.md and the ractive.ch privacy page no longer name the controls, only
   the data: the tools allowed to run without asking, per site (owner).
+
+## DEC-185: tab-mcp for Chrome shows questions in a modal dialog (owner)
+
+2026-11-15, before the first store release.
+
+- The questions were cards at the panel's top. In a panel scrolled down to the tool list,
+  or opened from a notification while it was scrolled down there, a new one was out of
+  sight; with the panel in front no notification is sent, so it ran out unseen (seen by
+  the owner twice). Scrolling the card into view did not help when the panel was shown
+  from a notification.
+- Now the cards are in a native `<dialog>` opened with `showModal()`: in the top layer,
+  over the panel wherever it is scrolled to, the rest inert, the backdrop the token
+  `--scrim`. It opens with the first question and closes with the last; Escape does not
+  close it (the `cancel` event is prevented): a question ends with an answer or its
+  60 s. The first focusable element takes the focus (the arguments); Allow waits as
+  before (DEC-180's buttons, iteration 35's wait).
+- "Not answered in time" goes to the panel's top, outside the dialog, so it does not
+  hold the panel for its 6 s.
+- The controls under the dialog keep the 750 ms wait after it goes (ES 5): a double
+  click on its last Allow must not land on an "Always allow" switch below.

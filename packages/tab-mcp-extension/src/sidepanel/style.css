@@ -12,6 +12,8 @@
 	--paper: #f6f4ee;
 	--sheet: #ffffff;
 	--wash: #ebe8e0;
+	/* Behind the questions' dialog: dims the panel */
+	--scrim: #1b213066;
 	/* Text; meta and placeholders */
 	--ink: #1b2130;
 	--ink-2: #535c6e;
@@ -54,6 +56,7 @@
 		--paper: #11141a;
 		--sheet: #1a1e27;
 		--wash: #242a37;
+		--scrim: #000000a3;
 		--ink: #eceef3;
 		--ink-2: #a6aebd;
 		--rule: #2b313d;
@@ -467,17 +470,41 @@ main > .card ~ .settings {
 	gap: var(--s2);
 }
 
-/* --- tools that ask first, above the sections --------------------------------- */
+/* --- questions: a modal dialog over the panel ---------------------------------- */
 
 .questions {
+	box-sizing: border-box;
+	width: auto;
+	max-width: none;
+	max-height: calc(100% - 2 * var(--s3));
+	margin: var(--s3);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	overflow: auto;
 	display: flex;
 	flex-direction: column;
 	gap: var(--s3);
-	padding: var(--s3) var(--s4);
-	border-bottom: 1px solid var(--rule);
 }
 
-.questions:empty {
+.questions:not([open]) {
+	display: none;
+}
+
+.questions::backdrop {
+	background: var(--scrim);
+}
+
+/* The notices of questions nobody answered, at the panel's top. */
+.question-notices {
+	display: flex;
+	flex-direction: column;
+	gap: var(--s2);
+	padding: var(--s3) var(--s4) 0;
+}
+
+.question-notices:empty {
 	display: none;
 }
 
@@ -514,7 +541,7 @@ main > .card ~ .settings {
 	font-variant-numeric: tabular-nums;
 }
 
-/* Where a question nobody answered was, for a few seconds. */
+/* A question nobody answered, for a few seconds. */
 .question-notice {
 	padding: var(--s2) var(--s3);
 	border: 1px solid transparent;

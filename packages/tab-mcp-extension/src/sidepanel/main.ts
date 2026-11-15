@@ -289,8 +289,9 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 		if (!ids.has(id)) {
 			// The worker says it ran out unanswered: the tool did not run. Said
 			// for a few seconds where the card was.
-			if (expired.includes(id)) card.replaceWith(expiredNotice(question));
-			else card.remove();
+			if (expired.includes(id))
+				$("question-notices").append(expiredNotice(question));
+			card.remove();
 			cards.delete(id);
 			removed = true;
 		}
@@ -300,7 +301,6 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 		// Every question left waits again, as if just shown.
 		for (const entry of cards.values()) entry.shownAt = now;
 	}
-	let lastNew: HTMLElement | undefined;
 	for (const q of questions)
 		if (!cards.has(q.id)) {
 			const card = questionCard(
@@ -308,25 +308,33 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
 			$("questions").append(card);
-			lastNew = card;
 			const now = Date.now();
 			cards.set(q.id, { card, shownAt: now, question: q });
 			// A short line for screen readers, not the card with its arguments
 			// (up to 1 MiB) as a live region (EQ 11).
 			announce(questionAnnouncement(q));
-			// Everything below the questions moved down by the card's height.
+			// The dialog came over the panel: what is under it waits too, for
+			// when it goes.
 			movedUntil = now + ALLOW_DELAY_MS;
 		}
-	// The questions are above the cards: in a panel scrolled down to the tool
-	// list a new one came out of sight, and with the panel in front no
-	// notification is sent, so it ran out unseen. Brought into view only if
-	// it is not (nothing moves otherwise); what moves under the pointer waits
-	// ALLOW_DELAY_MS as above, and the card's Allow waits from `shownAt`.
-	// The last new one: the cards stack downwards, so the ones above it come
-	// into view with it, as far as the panel is tall.
-	lastNew?.scrollIntoView({ block: "nearest" });
+	showDialog(cards.size > 0);
 	arm();
 }
+
+/**
+ * The questions in a modal dialog, over the panel wherever it is scrolled to
+ * (the panel's top was out of sight, scrolled down to the tool list or opened
+ * from a notification there): the rest of the panel is inert while one waits.
+ * The first focusable element takes the focus; Allow waits as before.
+ */
+function showDialog(open: boolean): void {
+	const dialog = $("questions") as HTMLDialogElement;
+	if (open && !dialog.open) dialog.showModal();
+	else if (!open && dialog.open) dialog.close();
+}
+
+// Escape does not close it: a question ends with an answer or its time.
+$("questions").addEventListener("cancel", (event) => event.preventDefault());
 
 /**
  * Say `text` in the questions' status line, for screen readers: emptied
