@@ -352,7 +352,10 @@ function showDialog(open: boolean): void {
 		// Its notices stay for their time, at the panel's top.
 		for (const notice of dialog.querySelectorAll(".question-notice"))
 			noticeAtTop(notice);
+		// With the close, not at its event a task later.
+		quietUntil = Date.now() + ALLOW_DELAY_MS;
 		dialog.close();
+		arm();
 	}
 }
 
@@ -366,7 +369,11 @@ $("questions").addEventListener("keydown", (event) => {
 $("questions").addEventListener("cancel", (event) => event.preventDefault());
 $("questions").addEventListener("close", () => {
 	if (cards.size > 0) ($("questions") as HTMLDialogElement).showModal();
-	else quietUntil = Date.now() + ALLOW_DELAY_MS;
+	else {
+		// A close showDialog did not make (Escape): the quiet time from now.
+		quietUntil = Math.max(quietUntil, Date.now() + ALLOW_DELAY_MS);
+		arm();
+	}
 });
 
 /**

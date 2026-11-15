@@ -276,7 +276,16 @@ try {
 		arguments: { product: "Sourdough loaf", quantity: 2 },
 	});
 	const ready = `document.querySelector('[data-question] button[data-answer="allow"]')?.hasAttribute("aria-disabled") === false`;
+	// The questions' dialog opens where the last click was: the pointer off
+	// it, so no button is drawn hovered.
+	const pointerAway = () =>
+		panel.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: 1,
+			y: 1,
+		});
 	await panel.waitFor(ready);
+	await pointerAway();
 	await take("3-question", tab, panel);
 	await panel.eval(
 		`document.querySelector('[data-question] button[data-answer="deny"]').click()`,
@@ -289,6 +298,7 @@ try {
 		arguments: { url: `${OTHER}/` },
 	});
 	await panel.waitFor(ready);
+	await pointerAway();
 	await take("4-navigation", tab, panel);
 	await panel.eval(
 		`document.querySelector('[data-question] button[data-answer="deny"]').click()`,

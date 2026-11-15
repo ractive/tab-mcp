@@ -699,17 +699,23 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 					expect(ratio).toBeGreaterThanOrEqual(3);
 			}
 			// The tokens' pairs (test/contrast.test.ts): on, the knob
-			// (--on-strong) on the ink track (--strong), which is ink on paper;
+			// (--on-strong) on the ink track (--strong), which is ink on paper,
+			// or for a tool's "Always allow" on the green track (--ok, DEC-184);
 			// off, the knob on the edge (--edge), and the edge on paper. Before
 			// the tokens: 5.02 / 3.77 in light, 9.48 / 3.42 in dark; before
 			// EQ 17 the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
+			const green = selector === "input.always-allow";
 			expect(measured).toEqual({
 				light: {
-					on: { knob: 16.07, track: 14.61 },
+					on: green
+						? { knob: 6.44, track: 5.86 }
+						: { knob: 16.07, track: 14.61 },
 					off: { knob: 3.86, track: 3.51 },
 				},
 				dark: {
-					on: { knob: 15.89, track: 15.89 },
+					on: green
+						? { knob: 9.85, track: 9.85 }
+						: { knob: 15.89, track: 15.89 },
 					off: { knob: 4.39, track: 4.39 },
 				},
 			});
@@ -891,7 +897,14 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			await holds();
 			// It is a sheet with an edge; "Allow once" is drawn as "Don't
 			// allow" is, the default button (DEC-180), and while it takes no
-			// click it is flat, in colours of its own.
+			// click it is flat, in colours of its own. The pointer off the
+			// dialog first: it opens where the last click was, and a button
+			// under the pointer takes its hover colour.
+			await panel.send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				x: 1,
+				y: 1,
+			});
 			const question = await panel.eval<Record<string, string>>(`(() => {
 				const card = getComputedStyle(document.querySelector("[data-question]"));
 				const button = (answer) => document.querySelector('[data-question] button[data-answer="' + answer + '"]');
@@ -1049,9 +1062,11 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			`!document.getElementById("tools-head").hidden && ${head}.getAttribute("role") === "switch" && !${head}.checked && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
-		await stack.panel.waitFor(`${head}.checked`);
-		expect(await stack.panel.eval(alwaysAllowed("place_order", true))).toBe(
-			true,
+		// The switch flips at the click; the worker's write, and the state
+		// drawn from it, come after.
+		await allowedOn(SITE, (n) => n.includes("place_order"));
+		await stack.panel.waitFor(
+			`${head}.checked && ${alwaysAllowed("place_order", true)}`,
 		);
 		const allowed = await call(stack, "page_place_order", { item: "all" });
 		expect(allowed.content[0]?.text).toContain("all");
@@ -1087,11 +1102,13 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			`!${head}.checked && ${takesClicks("#allow-tools")}`,
 		);
 		await stack.panel.click("#allow-tools");
+		await allowedOn(SITE, (n) => n.includes("late_order"));
 		await stack.panel.waitFor(`${head}.checked`);
 		expect((await call(stack, "page_late_order")).isError).toBeFalsy();
 		// Off: every one asks first again.
 		await stack.panel.waitFor(takesClicks("#allow-tools"));
 		await stack.panel.click("#allow-tools");
+		await allowedOn(SITE, (n) => n.length === 0);
 		await stack.panel.waitFor(`!${head}.checked`);
 		const asks = call(stack, "page_place_order", { item: "asks" });
 		await stack.panel.waitFor(`document.querySelector("[data-question]")`);
@@ -1364,11 +1381,12 @@ describe.skipIf(chrome === undefined)(
 			const asked = call(stack, "page_place_order", { item: "panel" });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			expect(await badge()).toBe("?");
-			// A short line for screen readers, not the card (EQ 11); the time
-			// left on the card (EQ 13).
+			// A short line for screen readers, not the card (EQ 11), in the
+			// dialog's own status line (the panel's is inert while it is
+			// open); the time left on the card (EQ 13).
 			expect(
 				await stack.panel.waitFor<string>(
-					`document.getElementById("question-status").textContent`,
+					`document.getElementById("question-status-modal").textContent`,
 				),
 			).toEndWith("asks to run page_place_order.");
 			expect(

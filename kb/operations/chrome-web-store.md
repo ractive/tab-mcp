@@ -253,13 +253,16 @@ Check the example storefront and the Chrome version before each submission.
 example shop page (`https://bakery.example`, made up) beside the side panel, in the look
 of iteration 39 ([the look](../design/extension-look.md)):
 
-1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads" and the
-   "Always allow" switches) and "Give access to all sites";
+1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads", the
+   "Always allow" switches and "Always allow all") and "Give access to all sites";
 2. `2-pairing.png`: no AI app paired yet, the address and the pairing code;
-3. `3-question.png`: a question for a page tool with its arguments (Don't allow, "Allow
-   once", "Always allow on bakery.example", all of one button kind since iteration 43,
-   DEC-180; `3-question.png` and `4-navigation.png` were taken again then);
+3. `3-question.png`: a question for a page tool in the dialog over the panel, with its
+   arguments, the time left and its bar (Don't allow, "Allow once", "Always allow on
+   bakery.example", all of one button kind, DEC-180);
 4. `4-navigation.png`: a question before the tab goes to another site.
+
+All four were taken again on 2026-11-15 for DEC-184 to DEC-186 (the switches, the
+dialog, the wording); the script moves the pointer off the dialog before shots 3 and 4.
 
 `bun scripts/screenshots.ts` in `packages/tab-mcp-extension` takes them again, from the
 store build in Chrome for Testing (`CHROME_PATH`, as for the end-to-end tests), with a relay
