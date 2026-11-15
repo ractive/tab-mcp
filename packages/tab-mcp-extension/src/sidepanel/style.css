@@ -426,7 +426,7 @@ input:is([type="text"], [type="url"]) {
 
 /*
  * The tab cannot be read, or its tools could not be: a notice with the way
- * out (the icon's click, Alt+Shift+Q, "Read all sites without a click").
+ * out (the icon's click, "Read all sites without a click").
  */
 .tab-access:not(:empty) {
 	padding: 10px var(--s3);

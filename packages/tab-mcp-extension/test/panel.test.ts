@@ -219,12 +219,12 @@ describe("the tab card's texts", () => {
 
 	test("an unreadable tab in the user's words: the toolbar icon, no AI app wording (EQ 6)", () => {
 		expect(noAccessText("no-grant", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar (or press Alt+Shift+Q) to let it read this tab.",
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
 		);
 		// A hidden address may be a browser page, where the click cannot help;
 		// with host access on all sites it can only be one.
 		expect(noAccessText("hidden", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar (or press Alt+Shift+Q) to let it read this tab. Chrome's own pages, such as a new tab, cannot be read at all.",
+			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab. Chrome's own pages, such as a new tab, cannot be read at all.",
 		);
 		expect(noAccessText("hidden", true)).toBe(
 			"Chrome does not let extensions read browser pages.",

@@ -88,7 +88,7 @@ export function introText(relay: string): string {
 }
 
 const CLICK_ICON =
-	"Click the tab-mcp icon in Chrome's toolbar (or press Alt+Shift+Q) to let it read this tab.";
+	"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.";
 const BROWSER_PAGE = "Chrome does not let extensions read browser pages.";
 
 /**
