@@ -28,7 +28,7 @@ there, or "Read all sites without a click"); on any other tab they do nothing an
   page would.
 - To another origin they ask you first, in the side panel or a notification as page tools
   do, naming the site the tab is on and the address it would open; "Allow once" and Don't
-  allow only, no "Don't ask again" (a page's text could tell the AI app to go anywhere). Back or
+  allow only, no "Always allow on <host>" (a page's text could tell the AI app to go anywhere). Back or
   forward to a page the extension cannot see (another origin: Chrome lists only the
   page's own) asks too, saying its address is not known. A reload never asks.
 - Only `http:` and `https:` addresses, without a user name or password.
@@ -43,11 +43,11 @@ The page's tools are the page's word:
   https://shop.example: …`), cut to 1000 characters; titles to 100. The origin is the one
   Chrome reports for the tab: a page that says it is another site gets no tools.
 - A tool the page marks read-only runs at once; every other one asks you each time
-  (see "Questions" below). "Don't ask again on <host>" in a question, or switching off
-  the tool's "Ask first" in the panel's list, allows the tool on that site (exact origin)
-  for every paired AI app, kept until you switch "Ask first" on again. "Turn off Ask
-  first" over the list does that for every tool listed at that moment that asks first,
-  in one step; once none asks, it reads "Turn on Ask first" and turns them all back. A
+  (see "Questions" below). "Always allow on <host>" in a question, or switching on
+  the tool's "Always allow" in the panel's list, allows the tool on that site (exact origin)
+  for every paired AI app, kept until you switch it off again. "Always allow all" over
+  the list does that for every tool listed at that moment that asks first,
+  in one step; once none asks, it reads "Ask again for all" and turns them all back. A
   tool the page registers later asks first. When the page changes what the button would
   do, it waits 750 ms before it takes a click. All of these only for pages of an http(s)
   site: pages with an opaque origin (`null`, such as sandboxed pages) always ask ("asks
@@ -159,7 +159,7 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 A tool that asks first asks in the side panel when the panel is open in the window of the
 tab the tool acts on, that window is in front, and the panel is not covered by another
 extension's panel for the tab (a question it shows goes out as a notification once it is
-covered): "Allow once" and "Don't ask again on <host>" work once the
+covered): "Allow once" and "Always allow on <host>" work once the
 panel has been in front for 750 ms, so the click that brings it forward cannot approve
 (until then they keep their focus and place in the tab order, `aria-disabled`, and take
 no click). The panel's question names the AI app and the tool, then, each on a line of
@@ -168,16 +168,16 @@ its own, the site the tool acts on ("Site (verified)") and the page's title for 
 left to answer. Its three buttons look alike: none is drawn to be the one to click. A question that runs out leaves "Not answered in time: <tool> did not
 run." for a few seconds. A screen reader hears one short line per question ("<app> asks
 to run <tool>"), not the card. A question that comes or goes moves what is below it: the
-"Ask first" switches and "Turn off Ask first" over the list wait 750 ms after.
+"Always allow" switches and "Always allow all" over the list wait 750 ms after.
 
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site> · Closing this is Don't allow" below, naming the AI
 app (its name and its verified host) and the arguments in short (cut to 150 characters;
 when they are cut, the notification says "Arguments cut: click to see them in full."),
-with the button "Allow once". "Don't ask again" is not on the notification: allowing a
+with the button "Allow once". "Always allow on <host>" is not on the notification: allowing a
 tool for good needs the whole question. A click on the notification's body opens the side
 panel of the tab's window, where the question waits, the arguments in full, with Don't
-allow, "Allow once" and "Don't ask again on <host>", its 60 s still running. Where Chrome
+allow, "Allow once" and "Always allow on <host>", its 60 s still running. Where Chrome
 does not open the panel, the notification shows again and the icon's "?" opens the
 panel. Don't allow is closing the
 notification or no answer in 60 s. A click on "Allow once" within half a second of the
@@ -188,9 +188,9 @@ own call. Questions also show in every open side panel, so with notifications of
 not answer. At most 5 questions of one AI app wait at once; a further call of that app is
 declined without asking, and the app is told why.
 
-"Don't ask again on <host>" allows the tool on that site (exact origin) for every paired
-AI app, as switching off its "Ask first" in the panel's tool list does, until you switch
-it on again there.
+"Always allow on <host>" allows the tool on that site (exact origin) for every paired
+AI app, as switching on its "Always allow" in the panel's tool list does, until you
+switch it off again there.
 
 ## Permissions
 
@@ -262,8 +262,8 @@ setup, the listing, the permission justifications and the review notes:
   not packed; `--zip` needs `--store`.
 - `test/panel.test.ts`: the side panel's AI app card (the next step, the address only
   while pairing, the first look, Disconnect only while connected), "How do I add it?" and
-  its Copy buttons, its clicks (Disconnect's double click, the switch), "Turn off Ask
-  first" over the tool list, the tab card's texts (an unreadable tab, no tools), the
+  its Copy buttons, its clicks (Disconnect's double click, the switch), "Always allow
+  all" over the tool list, the tab card's texts (an unreadable tab, no tools), the
   labels and live regions of `index.html`, a question's countdown and its end.
 - `test/contrast.test.ts`: the panel's look (`kb/design/extension-look.md`). Every pair
   of colours the style sheet uses, from its two token blocks (light and dark): text at
@@ -276,7 +276,7 @@ setup, the listing, the permission justifications and the review notes:
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, a click on the body and a panel
   Chrome refuses, cut arguments, the panel, the time limit), invisible characters, the
-  address secret's storage, "Don't ask again" (the site's "allowed"), the panel's status
+  address secret's storage, "Always allow on <host>" (the site's "allowed"), the panel's status
   while the relay is out of reach, a panel's messages across the worker's start (their
   order, a failed start, a panel gone before it), a bundle without dynamic `import()`.
 - `test/bridge.test.ts`: the bridge's names (also one that becomes the extension's own),
@@ -288,7 +288,7 @@ setup, the listing, the permission justifications and the review notes:
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
   colours as computed, both switches' contrast; confirmation in the panel, cancellation, `toolchange`, a forged
-  `document.modelContext`, a tool that takes the tab to another page, "Don't ask again")
+  `document.modelContext`, a tool that takes the tab to another page, "Always allow on <host>")
   across navigations and tab switches; a `toolchange` read with one `getTools()`, and
   none with AI access off and the panel closed; with the panel closed
   (tools still run, questions as notifications, a panel closed during a question, a click

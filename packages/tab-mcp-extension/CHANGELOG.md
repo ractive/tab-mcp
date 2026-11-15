@@ -36,11 +36,12 @@ First release, version 0.1.0.
   is shown in `webmcp_tools`; tools marked `debugging` are left out.
 - A tool the page does not mark read-only asks first: in the side panel, or in a Chrome
   notification while the panel is not in front (Allow; a click on its body shows the
-  whole question). "Don't ask again on <host>" in the question, or the panel's tool list,
-  allows a tool on its site for every paired AI app. A question that is not answered in
+  whole question). "Always allow on <host>" in the question, or the tool's "Always allow"
+  switch in the panel's tool list, allows a tool on its site for every paired AI app;
+  "Always allow all" over the list does it for every tool listed. A question that is not answered in
   60 s, or not asked because 5 of the AI app's calls wait already, says so to the AI app.
 - Access per tab: a click on the icon lets the extension read that tab (until it goes to
-  another origin); "Allow on all sites" asks for optional access to every http(s) site.
+  another origin); "Read all sites without a click" asks for optional access to every http(s) site.
   No `file:` pages, no Incognito tabs.
 - Navigation tools for the tab in front, while the extension may read it: `navigate` (an
   http(s) address), `go_back`, `go_forward` and `reload`, each answering with the new

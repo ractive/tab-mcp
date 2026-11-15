@@ -174,7 +174,7 @@ nothing and installs nothing. Dependabot proposes its updates.
 >
 > A tool the page marks read-only runs at once. Every other tool asks you first, in the
 > side panel or in a notification, with the AI app's name, the site and the arguments.
-> You can allow a tool once, or stop being asked for it on that site.
+> You can allow a tool once, or always allow it on that site.
 >
 > The AI app can also open pages in the tab in front: an address, back, forward and
 > reload. On the page's own site this runs at once, as a link on the page would; going to
@@ -254,10 +254,10 @@ example shop page (`https://bakery.example`, made up) beside the side panel, in 
 of iteration 39 ([the look](../design/extension-look.md)):
 
 1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads" and the
-   "Ask first" switches) and "Read all sites without a click";
+   "Always allow" switches) and "Read all sites without a click";
 2. `2-pairing.png`: no AI app paired yet, the address and the pairing code;
 3. `3-question.png`: a question for a page tool with its arguments (Don't allow, "Allow
-   once", "Don't ask again on bakery.example", all of one button kind since iteration 43,
+   once", "Always allow on bakery.example", all of one button kind since iteration 43,
    DEC-180; `3-question.png` and `4-navigation.png` were taken again then);
 4. `4-navigation.png`: a question before the tab goes to another site.
 

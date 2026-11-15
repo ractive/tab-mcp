@@ -159,7 +159,7 @@ icon are three more hex values in `worker/connection.ts`.
   | tool: read-only / not offered; a tab that cannot be read | pill `--wash`, text `--ink-2` | its word |
   | tool: asks first, where it has no switch | pill `--warn-bg`, text `--warn` | its word |
   | page: offers WebMCP tools | pill `--ok-bg`, text `--ok` | its words |
-  | tool: allowed on this site | the "Ask first" switch, off (iteration 36) | its label |
+  | tool: allowed on this site | the "Always allow" switch, on (iteration 36; DEC-184) | its label |
 
   A pill is 20 px high, 12/16/600, pill radius, with a 1.5 px transparent border (in
   forced colours the border shows and is the pill's shape). Where H turns the
@@ -318,7 +318,7 @@ Every pair passes in both schemes.
 | Pairing step | Sheet, 1 px `--rule`, radius 10, 12 px padding; address and code on `--wash`. |
 | Pill | 20 px, 12 / 16 / 600, tint and tone by the table above, 1.5 px transparent border. |
 | Tool row | Name (title, with the name in mono meta), its pill or switch; `--rule` between rows. |
-| Question | Sheet, 1 px `--edge`, radius 10, 12 px padding; arguments mono on `--wash`, at most 12em; Don't allow, Allow once and Don't ask again on <host>, all default buttons (DEC-180; Allow once was strong until iteration 43). |
+| Question | Sheet, 1 px `--edge`, radius 10, 12 px padding; arguments mono on `--wash`, at most 12em; Don't allow, Allow once and Always allow on <host>, all default buttons (DEC-180; Allow once was strong until iteration 43). |
 | Notice | `--warn-bg`, 1 px `--warn-edge`, radius 10, text `--ink`, one small default button. |
 | Problem | `--danger-bg`, 1 px `--danger`, radius 10, text `--ink`. |
 | Field | `--sheet`, 1 px `--edge`, radius 6; invalid: border `--danger`. |
@@ -391,22 +391,23 @@ No behaviour changes: no text, no order of controls, no message of the protocol.
 Iteration 39, on the panel of iteration 36. The plan held; these points differ.
 
 - **The "allowed" pill is gone before this iteration** (iteration 36, DEC-154): a tool
-  that can be allowed on the site has an "Ask first" switch. It is drawn as the small
+  that can be allowed on the site has an "Ask first" switch ("Always allow" since
+  DEC-184). It is drawn as the small
   switch (track 28 px, knob 12 px, the same rules as the AI access switch), where it was
   a native checkbox. `--ok-bg` and `--ok` are the pill of a page that offers tools
   ("WebMCP · n tools"); "reads", "left out" and "Not readable" are plain; "asks first"
   (a tool without a switch) is the warning's tint.
 - **One line of text is new.** Each "Ask first" label had a `title` that said what on
-  and off do, the only place it was said. It is now one line over the tool list ("Ask
-  first, on: the tool asks you before each call. Off: it runs without asking on
-  <origin>, for every paired AI app."), which every switch names with
+  and off do, the only place it was said. It is now one line over the tool list (since
+  DEC-184: "Always allow, on: the tool runs without asking on <origin>, for every paired
+  AI app. Off: it asks you before each call."), which every switch names with
   `aria-describedby`. No other text changed.
 - **`--s5` and `--s6` are not copied**: nothing in this panel is 24 or 32 px apart, and
   the test fails on a token that no rule reads.
 - **The badge's text is set to white** (`chrome.action.setBadgeTextColor`): on
   `#a06c00` white is 4.53:1 and black 4.63:1, so Chrome's own choice could be either.
 - **A wait is flat, not dimmed.** The 750 ms waits of iteration 36 (`aria-disabled` on
-  "Allow once", "Don't ask again", "Turn off Ask first" and the "Ask first"
+  "Allow once", "Always allow on <host>", "Always allow all" and the "Always allow"
   switches) take the disabled colours; every hover rule leaves `:disabled` and
   `[aria-disabled="true"]` out, and a test holds that.
 - **The switch's contrast** (EQ 17) is measured in Chrome for both switches against the
@@ -419,7 +420,7 @@ Iteration 39, on the panel of iteration 36. The plan held; these points differ.
 - **The store listing's screenshots** show the look before; they are to be taken again
   before the next submission ([Chrome Web Store](../operations/chrome-web-store.md)).
 - **Iteration 43 (DEC-180, owner):** "Allow once" in the question card is a default
-  button, like "Don't allow" and "Don't ask again on <host>": the card must not nudge
+  button, like "Don't allow" and "Always allow on <host>": the card must not nudge
   towards allowing. Its 750 ms wait (`aria-disabled`, flat) stays. The e2e look test
   holds that "Allow once" and "Don't allow" have no class and the same computed fill,
   text, edge and weight; the store screenshots with a question card (`3-question.png`,

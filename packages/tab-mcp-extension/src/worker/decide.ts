@@ -1,7 +1,7 @@
 /**
  * Whether a call of a page tool that is not read-only may run: allowed for
- * its site, or the user's answer to a question. "Don't ask again on <host>"
- * in a question allows the tool for its site, as the panel's "asks first"
+ * its site, or the user's answer to a question. "Always allow on <host>"
+ * in a question allows the tool for its site, as the panel's "Always allow"
  * switch does (EQ 10, DEC-139: one way of not being asked, not two).
  */
 

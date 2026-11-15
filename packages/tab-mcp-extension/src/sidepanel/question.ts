@@ -4,8 +4,8 @@
  * own (what Chrome reports, the part that is verified), the page's title for
  * the tool apart and labelled as the page's, the arguments in full, and the
  * time left to answer. The answers are buttons of one kind: nothing in their
- * look leans towards allowing (DEC-180). "Allow once" and "Don't ask again
- * on <host>" start unavailable (`aria-disabled`, so a focused button keeps
+ * look leans towards allowing (DEC-180). "Allow once" and "Always allow on
+ * <host>" start unavailable (`aria-disabled`, so a focused button keeps
  * its focus): the panel makes them available once it has been in front long
  * enough (`setReady`).
  */
@@ -58,7 +58,7 @@ export function setAvailable(button: HTMLElement, ready: boolean): void {
 	else button.setAttribute("aria-disabled", "true");
 }
 
-/** "Allow once" and "Don't ask again" of the cards under `root`: ready or not. */
+/** "Allow once" and "Always allow on <host>" of the cards under `root`: ready or not. */
 export function setReady(root: ParentNode, ready: boolean): void {
 	for (const b of root.querySelectorAll<HTMLButtonElement>(
 		'button[data-answer]:not([data-answer="deny"])',
@@ -120,7 +120,7 @@ export function questionCard(
 		b.type = "button";
 		b.textContent = text;
 		b.dataset["answer"] = value;
-		// Allow and "Don't ask again" only once the page has been in front a
+		// Allow and "Always allow on <host>" only once the page has been in front a
 		// while: the click that brings it forward cannot approve.
 		if (value !== "deny") setAvailable(b, false);
 		b.addEventListener("click", () => {
@@ -136,10 +136,10 @@ export function questionCard(
 	// Nor for a navigation: each one to another site asks (DEC-121).
 	if (q.site && q.origin && !q.navigation) {
 		const host = hostOf(q.origin);
-		buttons.append(button(`Don't ask again on ${host}`, "site"));
+		buttons.append(button(`Always allow on ${host}`, "site"));
 		const note = document.createElement("p");
 		note.className = "muted small";
-		note.textContent = `Don't ask again: this tool runs without asking on ${host}, for every paired AI app, until you turn "Ask first" back on in the tool list.`;
+		note.textContent = `Always allow on ${host}: this tool runs without asking there, for every paired AI app, until you turn off its "Always allow" in the tool list.`;
 		card.append(note);
 	}
 	return card;

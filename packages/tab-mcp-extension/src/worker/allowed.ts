@@ -1,6 +1,6 @@
 /**
  * The page tools the user allowed to run without asking, per site: in the
- * side panel a tool's "asks first" turns into "allowed". Kept in the
+ * side panel a tool's "Always allow" switch, on. Kept in the
  * worker's IndexedDB by exact origin and the page's tool name, so another
  * site's tool of the same name still asks.
  */

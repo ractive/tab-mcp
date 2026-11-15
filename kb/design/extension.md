@@ -79,7 +79,7 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   that showed the question in that case is gone).
   The bridge asks itself for both ways of calling a page tool (`page_<name>` is not
   `consequentialHint`, DEC-141), so the AI app hears why a call did not run. "Don't ask
-  again on <host>" in a question writes the site's "allowed" entry, as the panel's "Ask first"
+  again on <host>" in a question writes the site's "allowed" entry, as the panel's "Always allow"
   switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
   notification has "Allow once" only.
 - The origin a page's tools carry (the description's prefix, the "allowed" key, the
@@ -121,7 +121,7 @@ with a second extension).
 | `reload` | navigates, never asks | Reloads the page in front, with its `page_info` |
 
 The side panel shows the connection and its apps, the pairing view, questions, the tab in
-front with its tools ("reads", "asks first", or an "Ask first" switch where a tool can be
+front with its tools ("reads", "asks first", or an "Always allow" switch where a tool can be
 allowed on the site), and the relay address under
 Settings. The icon's badge shows "on", "…" or "?" (a question waits). The connector
 carries the extension's icon. The panel's look (paper and ink on tokens whose pairs are

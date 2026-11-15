@@ -30,9 +30,8 @@ In the extension's own IndexedDB in the browser, used by its service worker only
 - whether AI access is on, and whether another tab or program took the connection's
   address over;
 - a random secret from which the connection's address is derived;
-- the tools the user allowed per site ("Don't ask again on …" in a question, or "Ask
-  first" switched off in the side panel's tool list): the site's origin and the tool
-  names.
+- the tools the user allowed to run without asking, per site: the site's origin and the
+  tool names.
 
 None of this is synced to a Google account or kept outside the browser, and removing the
 extension deletes it. The grants the relay holds for paired AI apps end when the user

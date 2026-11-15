@@ -558,8 +558,8 @@ like any other, `chrome-extension://<id>` (A11).
   under which they are allowed, is checked against the address Chrome reports for the
   tab; a page that claims another site gets no tools.
 - **Hints can lie.** A tool the page marks read-only runs without asking; every other
-  tool asks the user each time, naming the page's origin. "Don't ask again on <host>" in
-  a question, or the tool's "Ask first" switched off in the side panel, stops the questions for a tool of one
+  tool asks the user each time, naming the page's origin. "Always allow on <host>" in
+  a question, or the tool's "Always allow" switched on in the side panel, stops the questions for a tool of one
   exact http(s) origin, for every paired AI app, until the user takes it back. A tool
   that changed while the question was open does not run. An allowed tool runs whatever
   the AI app, or a prompt injection steering it, asks of it. A page can mark only its
@@ -599,7 +599,7 @@ like any other, `chrome-extension://<id>` (A11).
   relay, allowing tools, answers to questions) are taken only from the extension's own
   side panel, as Chrome reports the sender; anything else is dropped. Besides the panel,
   only the buttons of the extension's own notifications answer questions (see
-  Questions). "Turn off Ask first" over the tool list allows
+  Questions). "Always allow all" over the tool list allows
   only the tools the extension itself offers on that site at that moment that are not
   read-only, so a tool the page registers later still asks. From a page, the one message
   accepted says that the page's tools changed. A compromised page can therefore not turn
@@ -611,7 +611,7 @@ like any other, `chrome-extension://<id>` (A11).
   that look alike, so the card does not lean towards allowing. Otherwise a Chrome notification
   asks. It names the AI app (its declared name beside its verified host), the tool and,
   on a line of its own, the page's site, and the arguments in short, saying so when they
-  are cut; its one button is "Allow once" ("Don't ask again" needs the full question), and a
+  are cut; its one button is "Allow once" ("Always allow on <host>" needs the full question), and a
   click on the notification's body opens the side panel of the tab's window, where the
   full question with all its arguments waits, its 60 s still running; where Chrome does
   not open the panel, the notification shows again. Closing the notification is Don't
@@ -791,7 +791,7 @@ each default.
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
 - With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
-  or with its "Ask first" switch off on its site) does whatever the AI app asks of it, and another program on
+  or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
 - With `webmcp: true`: any agent in the browser calls the mirrored tools without
   pairing, and one that drives the tab can click Allow in the page's dialog for a

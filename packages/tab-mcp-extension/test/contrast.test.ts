@@ -312,7 +312,7 @@ describe("the style sheet's rules", () => {
 			expect(index(kind)).toBeLessThan(plain.indexOf(off as Rule));
 		expect(
 			plain.find(
-				(r) => r.selector === '.ask-switch input[aria-disabled="true"]',
+				(r) => r.selector === '.allow-switch input[aria-disabled="true"]',
 			)?.body,
 		).toContain("background: var(--wash);");
 	});
@@ -354,8 +354,8 @@ describe("the style sheet's rules", () => {
 			.flatMap((r) => selectors(r.selector));
 		expect(moving).toEqual([
 			"button",
-			":is(.switch, .ask-switch) input",
-			":is(.switch, .ask-switch) input::after",
+			":is(.switch, .allow-switch) input",
+			":is(.switch, .allow-switch) input::after",
 		]);
 		const reduced = all.filter((r) => r.media === REDUCED);
 		expect(reduced.length).toBe(1);
@@ -378,19 +378,19 @@ describe("the style sheet's rules", () => {
 		expect(of('button:is(:disabled, [aria-disabled="true"])')).toContain(
 			"color: GrayText;",
 		);
-		expect(of(":is(.switch, .ask-switch) input")).toContain(
+		expect(of(":is(.switch, .allow-switch) input")).toContain(
 			"border-color: CanvasText;",
 		);
-		expect(of(":is(.switch, .ask-switch) input:checked")).toContain(
+		expect(of(":is(.switch, .allow-switch) input:checked")).toContain(
 			"background: Highlight;",
 		);
 		// The unavailable switch's knob: its rule outside the block outweighs
 		// the knob's rule inside it, so the block names it, after that rule.
 		const knob = forced.findIndex(
-			(r) => r.selector === ":is(.switch, .ask-switch) input::after",
+			(r) => r.selector === ":is(.switch, .allow-switch) input::after",
 		);
 		const unavailable = forced.findIndex(
-			(r) => r.selector === '.ask-switch input[aria-disabled="true"]::after',
+			(r) => r.selector === '.allow-switch input[aria-disabled="true"]::after',
 		);
 		expect(knob).toBeGreaterThanOrEqual(0);
 		expect(unavailable).toBeGreaterThan(knob);
@@ -399,7 +399,7 @@ describe("the style sheet's rules", () => {
 		// (CanvasText on Highlight is a pair no theme promises); before the
 		// unavailable knob's rule, which weighs the same and wins.
 		const onKnob = forced.findIndex(
-			(r) => r.selector === ":is(.switch, .ask-switch) input:checked::after",
+			(r) => r.selector === ":is(.switch, .allow-switch) input:checked::after",
 		);
 		expect(forced[onKnob]?.body).toBe("background: HighlightText;");
 		expect(onKnob).toBeGreaterThan(knob);

@@ -244,7 +244,7 @@ did, by connecting the extension.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user every time (see "Questions" below), naming the page's origin. The user
   can stop the questions for a tool of one exact http(s) origin, for every paired AI app
-  and kept until taken back: "Don't ask again on <host>" in a question, or the "Ask first" switch in
+  and kept until taken back: "Always allow on <host>" in a question, or the "Always allow" switch in
   the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always
   allow" is gone, DEC-139). A tool that changed while the question was open (a
   navigation, another tab in front with a tool of the same name) does not run. An
@@ -301,16 +301,16 @@ did, by connecting the extension.
   with the id the hosted relay allows; the Chrome Web Store keeps its own key.
 - **Who may send what (iteration 26).** The connection lives in the service worker,
   which content scripts in every granted tab can message too. Commands (connect, turn
-  off, pairing, disconnect an app, new address, the relay, the "Ask first" switches,
-  "Turn off Ask first" over the tool list,
+  off, pairing, disconnect an app, new address, the relay, the "Always allow" switches,
+  "Always allow all" over the tool list,
   answers to questions) come only over the side panel's named port, whose sender Chrome reports: an
   extension page of this extension at the panel's path, not in a tab; any other port is
   closed at once, and a command that does not parse is dropped. There is no other port
-  (the question's own window went in iteration 43, DEC-181). "Turn off Ask
-  first" carries the
+  (the question's own window went in iteration 43, DEC-181). "Always allow
+  all" carries the
   site and the tool names, at most 64, and the worker allows only those it offers on
   that site itself, now, that are not read-only: names from the panel are not taken on
-  trust, and a tool the page registers later still asks first. "Turn on Ask first"
+  trust, and a tool the page registers later still asks first. "Ask again for all"
   takes away
   every name it carries on that site, offered now or not, so a tool the page dropped
   or marked read-only since cannot come back allowed. When the page changes what the
@@ -343,7 +343,7 @@ did, by connecting the extension.
   (`sidePanel.open` from `notifications.onClicked`, which Chrome dispatches with a user
   gesture; called before any `await`) and brings that window to the front; the whole
   question waits there, the arguments in full (scrollable), with Don't allow, "Allow
-  once" and "Don't ask again on <host>", its 60 s running. The notification is
+  once" and "Always allow on <host>", its 60 s running. The notification is
   cleared, and its closing after the click answers nothing. Where Chrome refuses the
   panel, or the tab is gone, a new notification asks again (with its own 500 ms
   guard); with the panel's card and the icon's "?" it stays the way to answer
@@ -370,13 +370,13 @@ did, by connecting the extension.
   user left it on; it starts only from the panel's button. The icon's badge says "on"
   while connected, so the user sees it without opening the panel. Read-only and
   "allowed" tools run with nothing on screen, as they did with the panel open but not
-  looked at. "Allowed" (and "Don't ask again", which writes it) exists only for http(s)
+  looked at. "Allowed" (and "Always allow on <host>", which writes it) exists only for http(s)
   origins: every opaque origin is `null`, and one entry would cover them all. Panel
   commands, and the "allowed" a question writes, run one after another, so a stop is
   never overtaken by the connect before it, nor two writes of "allowed" by each other.
   When the panel's questions move (one is answered, or one comes and pushes the panel
-  down, iteration 35), its "Allow once" buttons, "Turn off Ask first" and the
-  "Ask first" switches take no click
+  down, iteration 35), its "Allow once" buttons, "Always allow all" and the
+  "Always allow" switches take no click
   for 750 ms, so a click lands on nothing that allows. While AI access is on and the
   relay cannot be reached, the panel says "retrying" (the alarm, also set at every
   start, connects again each minute), not "off" (iteration 35).
