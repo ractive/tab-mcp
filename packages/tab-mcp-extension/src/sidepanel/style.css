@@ -539,6 +539,21 @@ main > .card ~ .settings {
 /* The seconds left: figures of one width, so the line does not move. */
 .countdown {
 	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+/* The time left as a bar that drains, at the card's top. */
+.countdown-bar {
+	height: 4px;
+	border-radius: 2px;
+	background: var(--wash);
+	overflow: hidden;
+}
+
+.countdown-bar span {
+	display: block;
+	height: 100%;
+	background: var(--ink-2);
 }
 
 /* A question nobody answered, for a few seconds. */
@@ -872,6 +887,10 @@ html [hidden] {
  * selectors that are more specific outside this block.
  */
 @media (forced-colors: active) {
+	.countdown-bar span {
+		background: CanvasText;
+	}
+
 	button.strong,
 	button.strong:hover:not(:disabled, [aria-disabled="true"]),
 	button[data-armed],

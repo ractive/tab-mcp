@@ -15,11 +15,14 @@
 
 import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
-import type { Answer, QuestionView } from "../protocol.ts";
+import {
+	type Answer,
+	QUESTION_TIMEOUT_MS,
+	type QuestionView,
+} from "../protocol.ts";
 import { allowable } from "./allowed.ts";
 
-/** A question nobody answers in this time is Don't allow. */
-export const QUESTION_TIMEOUT_MS = 60_000;
+export { QUESTION_TIMEOUT_MS };
 /** How long the panels hear that a question ran out (its notice shows for less). */
 export const EXPIRED_KEEP_MS = 10_000;
 /**

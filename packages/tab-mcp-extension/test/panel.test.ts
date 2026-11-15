@@ -26,6 +26,7 @@ import {
 import {
 	countdownText,
 	questionAnnouncement,
+	timeLeftShare,
 } from "../src/sidepanel/question.ts";
 import {
 	COPIED_MS,
@@ -340,6 +341,14 @@ describe("the tab card's texts", () => {
 		expect(countdownText(10_000, 12_000)).toBe(
 			"0 s left to answer; no answer is Don't allow.",
 		);
+	});
+
+	test("the countdown's bar: the share of the 60 s left, from 1 to 0", () => {
+		expect(timeLeftShare(60_000, 0)).toBe(1);
+		expect(timeLeftShare(60_000, 45_000)).toBe(0.25);
+		expect(timeLeftShare(60_000, 61_000)).toBe(0);
+		// A clock that went back does not overfill it.
+		expect(timeLeftShare(60_000, -5_000)).toBe(1);
 	});
 });
 

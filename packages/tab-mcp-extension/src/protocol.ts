@@ -22,6 +22,9 @@ export const PANEL_PORT = "panel";
 /** The side panel's page in the build. */
 export const PANEL_PATH = "/sidepanel/index.html";
 
+/** A question nobody answers in this time is Don't allow. */
+export const QUESTION_TIMEOUT_MS = 60_000;
+
 /**
  * A question's answer: `site` is "Always allow on <host>", which allows
  * the tool on its site (the panel's "allowed"), for every AI app.
