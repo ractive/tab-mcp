@@ -129,6 +129,14 @@ export function createManifest(
 		// know (ES 9). Not `file:` pages.
 		optional_host_permissions: SITE_MATCHES,
 		...(options.test ? { host_permissions: SITE_MATCHES } : {}),
+		// The keyboard's click on the icon (it grants activeTab as the click
+		// does); changed under chrome://extensions/shortcuts.
+		commands: {
+			_execute_action: {
+				suggested_key: { default: "Alt+Shift+Q" },
+				description: "Open tab-mcp for Chrome on this tab",
+			},
+		},
 		// Incognito tabs are not offered to the AI app, even where the user
 		// allows the extension there.
 		incognito: "not_allowed",

@@ -623,8 +623,10 @@ export class PageToolBridge {
 	async #read(): Promise<void> {
 		let tab: TargetTab;
 		let tools: PageTools;
+		let readFrom: number | undefined;
 		try {
 			tab = await this.#chrome.current();
+			readFrom = tab.id;
 			tools = await this.#chrome.list(tab);
 			// The origin is the content script's word; what Chrome reports for
 			// the tab is not the page's. A page that says it is another site
@@ -637,7 +639,13 @@ export class PageToolBridge {
 			if (this.#stopped) return;
 			this.#offer([]);
 			this.#callable = new Map();
-			this.#state = { available: false, tools: [], error: message(error) };
+			// The tab it failed on, so the panel can say why its tools are missing.
+			this.#state = {
+				...(readFrom !== undefined ? { tabId: readFrom } : {}),
+				available: false,
+				tools: [],
+				error: message(error),
+			};
 			this.#changed();
 			// Caught between two pages (a page Chrome shows again from its
 			// back/forward cache loads nothing, so no later event reads it):

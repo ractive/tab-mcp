@@ -168,7 +168,7 @@ nothing and installs nothing. Dependabot proposes its updates.
 > page in front on to an AI app outside the browser, such as Claude, ChatGPT, Claude Code
 > or Codex, through a tab-mcp relay.
 >
-> Click the extension's icon on a tab to let it read that tab, then turn on AI access in
+> Click the extension's icon on a tab (or press Alt+Shift+Q) to let it read that tab, then turn on AI access in
 > the side panel. It shows an address and a pairing code to add in your AI app. The AI app
 > then sees the page's tools, follows the tab in front and can call them.
 >

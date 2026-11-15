@@ -114,14 +114,17 @@ bun run build            # in packages/tab-mcp-extension: writes dist/
 
 Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 
-- Click the extension's icon on a tab: the side panel opens (also over another
+- Click the extension's icon on a tab (or press Alt+Shift+Q; Chrome lets you change it
+  under `chrome://extensions/shortcuts`): the side panel opens (also over another
   extension's panel for that tab, such as Claude in Chrome's), and the extension may read
   that tab, also after navigations on the same origin, until the tab goes to another
   origin (`www.example.com` is another origin than `example.com`).
   "Read all sites without a click" in the side panel lets it read every http(s) tab
   without a click; the panel says before the button what Chrome will ask ("Read and
-  change all your data on all websites"). On a tab it may not read, the panel says to
-  click the icon in the toolbar (or that Chrome does not let extensions read the page).
+  change all your data on all websites"). On a tab it may not read, a notice in the
+  panel says to click the icon in the toolbar or press Alt+Shift+Q (or that Chrome does
+  not let extensions read the page); on a tab it may read whose tools could not be read
+  (the page changed meanwhile, or says it is another site), the notice says that.
   On a page without tools it says so, that `page_info` and the navigation tools still
   work, and, where WebMCP is off, how Chrome turns it on.
 - "Turn on AI access" (or the "AI access" switch) connects to the relay. While no AI app

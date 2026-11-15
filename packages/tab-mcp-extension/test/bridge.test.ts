@@ -587,6 +587,8 @@ describe("PageToolBridge", () => {
 		const bridge = new PageToolBridge(reg, chrome, { pageChangedRetryMs: 10 });
 		await bridge.refresh();
 		expect(bridge.state.error).toContain("changed while its tools were read");
+		// The tab it failed on, for the panel to say why the list is empty.
+		expect(bridge.state.tabId).toBe(1);
 		// No event comes (a page shown again from the cache loads nothing):
 		// the bridge reads again on its own once the tab has settled.
 		state.url = "https://shop.example/";

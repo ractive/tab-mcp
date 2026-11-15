@@ -2180,7 +2180,7 @@ describe.skipIf(chrome === undefined)(
 			// when it is asked; hidden, the line adds that browser pages cannot
 			// be read either.
 			expect(access).toStartWith(
-				"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+				"Click the tab-mcp icon in Chrome's toolbar (or press Alt+Shift+Q) to let it read this tab.",
 			);
 			expect([hidden, button]).toEqual([
 				false,

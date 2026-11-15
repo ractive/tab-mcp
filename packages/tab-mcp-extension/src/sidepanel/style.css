@@ -424,6 +424,18 @@ input:is([type="text"], [type="url"]) {
 	color: var(--ink);
 }
 
+/*
+ * The tab cannot be read, or its tools could not be: a notice with the way
+ * out (the icon's click, Alt+Shift+Q, "Read all sites without a click").
+ */
+.tab-access:not(:empty) {
+	padding: 10px var(--s3);
+	border: 1px solid var(--warn-edge);
+	border-radius: var(--r-card);
+	background: var(--warn-bg);
+	color: var(--ink);
+}
+
 /* Something stands in the way and there is a way out: the address is in use elsewhere. */
 .replaced {
 	display: flex;
