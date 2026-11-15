@@ -272,12 +272,20 @@ const NOTICE_MS = 6000;
 
 /**
  * Until when the panel's controls that allow something take no click after
- * its layout moved: a question that went away moves what was below it up,
- * and one that came moves it down, under the pointer; a click meant for what
- * was there must not land on an "Allow once", "Always allow all" or
- * an "Always allow" switch that came there instead (ES 5).
+ * its layout moved under the pointer (a notice at the top came or went, the
+ * button over the list changed): a click meant for what was there must not
+ * land on "Always allow all" or an "Always allow" switch that came there
+ * instead (ES 5). Shown: they wait in the disabled look.
  */
 let movedUntil = 0;
+/**
+ * Until when the same controls ignore a click after the questions' dialog
+ * closed: the second click of a double click on its last "Allow once" lands
+ * on the panel under it. Not shown: nothing moved, and the switches would
+ * flicker after every answer.
+ */
+let quietUntil = 0;
+const quiet = (): boolean => Date.now() < quietUntil;
 /** The button over the tool list as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 
@@ -289,16 +297,19 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 		if (!ids.has(id)) {
 			// The worker says it ran out unanswered: the tool did not run. Said
 			// for a few seconds where the card was.
-			if (expired.includes(id))
+			if (expired.includes(id)) {
 				$("question-notices").append(expiredNotice(question));
+				// The notice at the top moved the panel down.
+				movedUntil = Date.now() + ALLOW_DELAY_MS;
+			}
 			card.remove();
 			cards.delete(id);
 			removed = true;
 		}
 	if (removed) {
+		// Every question left moved up in the dialog: it waits again, as if
+		// just shown.
 		const now = Date.now();
-		movedUntil = now + ALLOW_DELAY_MS;
-		// Every question left waits again, as if just shown.
 		for (const entry of cards.values()) entry.shownAt = now;
 	}
 	for (const q of questions)
@@ -313,9 +324,6 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 			// A short line for screen readers, not the card with its arguments
 			// (up to 1 MiB) as a live region (EQ 11).
 			announce(questionAnnouncement(q));
-			// The dialog came over the panel: what is under it waits too, for
-			// when it goes.
-			movedUntil = now + ALLOW_DELAY_MS;
 		}
 	showDialog(cards.size > 0);
 	arm();
@@ -330,7 +338,10 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 function showDialog(open: boolean): void {
 	const dialog = $("questions") as HTMLDialogElement;
 	if (open && !dialog.open) dialog.showModal();
-	else if (!open && dialog.open) dialog.close();
+	else if (!open && dialog.open) {
+		dialog.close();
+		quietUntil = Date.now() + ALLOW_DELAY_MS;
+	}
 }
 
 // Escape does not close it: a question ends with an answer or its time.
@@ -391,10 +402,13 @@ function arm(): void {
 		"input.always-allow, #allow-tools",
 	))
 		setAvailable(control, now >= movedUntil);
+	// The quiet after the dialog, for the end-to-end tests: no look.
+	document.body.toggleAttribute("data-quiet", now < quietUntil);
 }
 
 setInterval(() => {
-	if (cards.size > 0 || Date.now() < movedUntil + 200) arm();
+	const now = Date.now();
+	if (cards.size > 0 || now < Math.max(movedUntil, quietUntil) + 200) arm();
 }, 100);
 for (const type of ["focus", "blur", "visibilitychange"])
 	window.addEventListener(type, arm);
@@ -435,7 +449,7 @@ function alwaysAllowSwitch(origin: string, tool: ToolView): HTMLElement {
 	setAvailable(input, Date.now() >= movedUntil);
 	input.addEventListener("click", (event) => {
 		// During the wait after the layout moved the click does nothing.
-		if (isUnavailable(input)) {
+		if (isUnavailable(input) || quiet()) {
 			event.preventDefault();
 			return;
 		}
@@ -679,7 +693,13 @@ $("allow-tools").addEventListener("click", () => {
 	const button = $("allow-tools") as HTMLButtonElement;
 	const tab = state?.tab;
 	const view = allowAllView(tab);
-	if (isUnavailable(button) || !view.shown || tab?.origin === undefined) return;
+	if (
+		isUnavailable(button) ||
+		quiet() ||
+		!view.shown ||
+		tab?.origin === undefined
+	)
+		return;
 	send({
 		type: "set-allowed-all",
 		origin: tab.origin,

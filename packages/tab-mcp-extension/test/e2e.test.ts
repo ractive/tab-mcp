@@ -309,7 +309,7 @@ async function answerInPanel(
  * (not `aria-disabled` during a wait after the layout moved, EQ 11).
  */
 const takesClicks = (selector: string) =>
-	`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e !== null && e.getAttribute("aria-disabled") !== "true"; })()`;
+	`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e !== null && e.getAttribute("aria-disabled") !== "true" && !document.body.hasAttribute("data-quiet"); })()`;
 
 /** A tool's "Always allow" switch in the panel's tool list. */
 const alwaysAllow = (name: string) => `input.always-allow[data-tool="${name}"]`;
@@ -1386,18 +1386,18 @@ describe.skipIf(chrome === undefined)(
 			expect(await stack.worker.eval("globalThis.e2eCreated")).toEqual([]);
 		});
 
-		test("when a question goes, what moves up under the pointer cannot allow at once", async () => {
+		test("questions are a modal dialog; a click right after it closed allows nothing, and the switches keep their look", async () => {
 			const first = call(stack, "page_place_order", { item: "first" });
 			await stack.panel.waitFor(
 				`document.querySelectorAll("[data-question]").length === 1`,
 			);
-			// A question that came moved everything below it down: the tools'
-			// switches wait too (ES 5).
+			// Over the panel, the rest inert; the switches under it do not
+			// wait in the disabled look (nothing moved).
 			expect(
 				await stack.panel.eval(
-					`[...document.querySelectorAll("input.always-allow")].map((b) => b.getAttribute("aria-disabled"))`,
+					`[document.getElementById("questions").open, document.getElementById("questions").matches(":modal"), [...document.querySelectorAll("input.always-allow")].map((b) => b.getAttribute("aria-disabled"))]`,
 				),
-			).toEqual(["true"]);
+			).toEqual([true, true, [null]]);
 			const second = call(stack, "page_place_order", { item: "second" });
 			await stack.panel.waitFor(
 				`document.querySelectorAll("[data-question]").length === 2`,
@@ -1415,27 +1415,31 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(
 				`document.querySelectorAll("[data-question]").length === 1`,
 			);
-			// The question left, and the tools' switches, wait again.
+			// The question left moved up in the dialog: its Allow waits again.
 			expect(
 				await stack.panel.eval(
-					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"]), input.always-allow')].map((b) => b.getAttribute("aria-disabled"))`,
+					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"])')].map((b) => b.getAttribute("aria-disabled"))`,
 				),
-			).toEqual(["true", "true", "true"]);
-			// A click on the waiting switch changes nothing.
+			).toEqual(["true", "true"]);
+			// The last answer closes the dialog; a click on the switch right
+			// after it (the second click of a double click) changes nothing.
+			await answerInPanel(stack, "deny");
+			expect((await second).isError).toBe(true);
+			await stack.panel.waitFor(`!document.getElementById("questions").open`);
+			expect(
+				await stack.panel.eval(
+					`document.querySelector(${JSON.stringify(alwaysAllow("place_order"))}).getAttribute("aria-disabled")`,
+				),
+			).toBe(null);
 			await stack.panel.click(alwaysAllow("place_order"));
 			await Bun.sleep(300);
 			expect(await stack.panel.eval(alwaysAllowed("place_order", false))).toBe(
 				true,
 			);
-			await stack.panel.waitFor(
-				`![...document.querySelectorAll("input.always-allow")].some((b) => b.getAttribute("aria-disabled") === "true")`,
-			);
 			const allowedTools = (await kvAll(stack.worker))["allowedTools"] as
 				| Record<string, string[]>
 				| undefined;
 			expect(allowedTools?.[SITE] ?? []).not.toContain("place_order");
-			await answerInPanel(stack, "deny");
-			expect((await second).isError).toBe(true);
 		});
 
 		test("a panel closed during a question hands it to a notification", async () => {

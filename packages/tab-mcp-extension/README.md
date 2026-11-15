@@ -170,9 +170,9 @@ Questions open in a modal dialog over the panel, wherever it is scrolled to; the
 the panel is inert until the last one is answered or runs out, and Escape does not close
 it. A question that runs out leaves "Not answered in time: <tool> did not run." at the
 panel's top for a few seconds. A screen reader hears one short line per question ("<app>
-asks to run <tool>"), not the card. When the dialog goes, the "Always allow" switches and
-"Always allow all" under it wait 750 ms, so a second click meant for the dialog does
-nothing there.
+asks to run <tool>"), not the card. For 750 ms after the dialog goes, the "Always allow"
+switches and "Always allow all" under it ignore a click, without changing their look, so
+the second click of a double click on "Allow once" does nothing there.
 
 Otherwise it asks in a Chrome notification, "Allow <tool>?" (the page's title of the tool,
 cut to 60 characters) with "On <site> · Closing this is Don't allow" below, naming the AI

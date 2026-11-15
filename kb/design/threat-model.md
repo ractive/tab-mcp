@@ -374,10 +374,11 @@ did, by connecting the extension.
   origins: every opaque origin is `null`, and one entry would cover them all. Panel
   commands, and the "allowed" a question writes, run one after another, so a stop is
   never overtaken by the connect before it, nor two writes of "allowed" by each other.
-  When the panel's questions move (one is answered, or one comes and pushes the panel
-  down, iteration 35), its "Allow once" buttons, "Always allow all" and the
-  "Always allow" switches take no click
-  for 750 ms, so a click lands on nothing that allows. While AI access is on and the
+  The questions are a modal dialog over the panel (DEC-185). When one goes and others
+  move up in it, their "Allow once" buttons take no click for 750 ms; when the dialog
+  closes, "Always allow all" and the "Always allow" switches under it ignore a click for
+  750 ms, and when a notice at the panel's top moves it, they wait the same time, so a
+  click lands on nothing that allows (iteration 35). While AI access is on and the
   relay cannot be reached, the panel says "retrying" (the alarm, also set at every
   start, connects again each minute), not "off" (iteration 35).
 - **The extension's settings are out of web pages' reach.** The address secret, the tools

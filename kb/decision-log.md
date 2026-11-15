@@ -3805,5 +3805,8 @@ Branch `release/per-package-changelog`.
   before (DEC-180's buttons, iteration 35's wait).
 - "Not answered in time" goes to the panel's top, outside the dialog, so it does not
   hold the panel for its 6 s.
-- The controls under the dialog keep the 750 ms wait after it goes (ES 5): a double
-  click on its last Allow must not land on an "Always allow" switch below.
+- The controls under the dialog ignore a click for 750 ms after it goes (ES 5): a double
+  click on its last Allow must not land on an "Always allow" switch below. This wait is
+  not shown (no `aria-disabled`, no disabled look; `data-quiet` on the body for the
+  tests): nothing moved, and the switches flickered grey after every answer (owner). The
+  shown wait stays where the panel moves: the notice at the top, the button's new label.
