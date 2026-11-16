@@ -49,17 +49,18 @@ Community Group ([explainer](https://github.com/webmachinelearning/webmcp)). Its
 reach only agents inside the browser, and only where the browser has WebMCP turned on.
 Chrome has it for sites in its
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) and behind a
-flag (`chrome://flags/#enable-webmcp-testing`); Firefox and Safari do not have it.
+flag (`chrome://flags/#enable-webmcp-testing`), Edge for sites in its own origin trial;
+Firefox and Safari do not have it.
 
 A page's tools reach an AI app outside the browser on one of two paths. Which one
 depends on how the page offers its tools:
 
 | | Page with the client library | Page with WebMCP tools only |
 |---|---|---|
-| The site | builds in `@ractive-ch/tab-mcp-client` and has a relay that allows its origin | calls `document.modelContext.registerTool()` and needs nothing of tab-mcp |
-| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | Chrome with WebMCP on, and the tab-mcp extension (tab-mcp for Chrome) installed |
+| The site | builds in `@ractive-ch/tab-mcp-client` and has a relay that allows its origin | calls `document.modelContext.registerTool()` and takes part in Chrome's WebMCP origin trial (or its users turn on the flag); needs nothing of tab-mcp |
+| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | Chrome with WebMCP on, and the tab-mcp extension (tab-mcp for Chrome) installed: in review for the Chrome Web Store, until then loaded unpacked |
 | The user connects | in the page: "Connect your AI app" shows the address and the code | in the extension's side panel, once: one address for whatever page is in front |
-| The user is asked | by the page, before a tool the site marked as consequential | by the extension, before a tool the page did not mark read-only, and before the tab goes to another site |
+| The user is asked | by the page, before a tool the site marked as consequential | by the extension, before a tool the page did not mark read-only, and before its navigation tools take the tab to another site |
 
 **If you run a site**, the client library reaches the most users: it works in every
 current browser and your users install nothing. You run a relay for it
@@ -331,7 +332,7 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | "tab-mcp for Chrome" 0.1.0 (not yet in the Chrome Web Store; load it unpacked) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | "tab-mcp for Chrome" 0.1.0 (in review for the Chrome Web Store; until then, load it unpacked) | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
@@ -355,8 +356,9 @@ settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what chang
 
 - Released: relay `@ractive-ch/tab-mcp` 0.10.3 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.16.2, on the npm tag `latest`.
-- tab-mcp for Chrome 0.1.0 is not in the Chrome Web Store yet; load it unpacked
-  ([README](packages/tab-mcp-extension/README.md)).
+- tab-mcp for Chrome 0.1.0 is in review for the Chrome Web Store (submitted 2026-11-16);
+  until then, load it unpacked ([README](packages/tab-mcp-extension/README.md)). An
+  unpacked build has the store's id, which the hosted relay allows.
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
   through OAuth Client ID Metadata Documents. Claude Code, claude.ai, Claude Desktop,
   ChatGPT (web and Mac) and Codex work (Codex and ChatGPT for Mac with the
