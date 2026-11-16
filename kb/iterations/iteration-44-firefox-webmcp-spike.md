@@ -210,8 +210,10 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   time limit now); a question's notification clicked while another Firefox window is in
   front opened that window's sidebar (the question's window first now, and a refusal
   when the sidebar is not open there); the restricted-sites wording in the panel.
-- **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org), the
-  fingerprint every page sees.
+- **The fingerprint** (owner, 2026-11-16: accepted): a page the extension may read can
+  tell it is installed (the API where the browser has none, and its behaviour). Said in
+  `PRIVACY.md` and the README; not hidden, since the behaviour gives it away anyway.
+- **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org).
 
 # Citations
 

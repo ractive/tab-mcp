@@ -22,6 +22,13 @@ in the tab, it checks, in the page, whether the page before or after is on the s
 origin (and its address if so), and how many entries the tab's history has; that stays
 in the browser.
 
+Pages it may read can tell that it is installed. Where the browser has no WebMCP of its
+own (Firefox, and Chrome without its WebMCP flag or a site's origin trial), the extension
+gives these pages `document.modelContext` as they start loading, so that they can
+register their tools. A page's script can see that the API is there and, from how it
+behaves, that it is this extension's. It learns nothing else from it: not who the user
+is, not the relay, not the AI app.
+
 ## What it stores
 
 In the extension's own IndexedDB in the browser, used by its service worker only:

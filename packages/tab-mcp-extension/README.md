@@ -255,6 +255,8 @@ page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188),
 that register their tools wherever the API exists (Shopify's storefronts, Mintlify, GitBook
 and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
 the extension offers them to the AI app as in Chrome. Iteration 44; not released.
+A page can therefore tell that the extension is installed: the API is there where Firefox
+has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`).
 
 1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
