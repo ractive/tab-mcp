@@ -1,9 +1,9 @@
 /**
  * A check by hand against the hosted relay, not part of `bun test`: the
- * development build (the owner's key, so the id the relay allows) connects
- * through its service worker to https://tab-mcp.ractive.ch, and the side
- * panel shows the address and a pairing code. Needs
- * ~/.config/tab-mcp/extension-key.txt and Chrome for Testing (CHROME_PATH).
+ * development build (the store's public key, so the id the relay allows)
+ * connects through its service worker to https://tab-mcp.ractive.ch, and the
+ * side panel shows the address and a pairing code. Needs Chrome for Testing
+ * (CHROME_PATH).
  *
  *   bun packages/tab-mcp-extension/test/hosted.ts
  */
@@ -18,8 +18,6 @@ const binary = findChromeForTesting();
 if (binary === undefined) throw new Error("no Chrome for Testing");
 const outdir = join(mkdtempSync(join(tmpdir(), "tab-mcp-ext-")), "dist");
 const built = await build({ outdir, minify: false });
-if (built.id === undefined)
-	throw new Error("no key: the hosted relay would refuse this build");
 const browser = await Browser.launch(binary, { extension: outdir });
 try {
 	if (browser.extensionId !== built.id)

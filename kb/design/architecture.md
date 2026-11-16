@@ -25,6 +25,13 @@ WebMCP tools of the page in front, in a tab the user gave it (a click on its ico
 "Give access to all sites"), top frame only, through the relay
 ([extension](/design/extension.md)).
 
+The overview for readers, with the two paths in one picture (a page with the library in
+any browser; a page with WebMCP tools only, in Chrome with the extension), is the
+README's "How the parts fit together" and `docs/overview.svg`. ractive.ch shows a copy
+of the picture with a short version of the text (`static/images/tab-mcp-overview.svg`
+and `src/pages/tab-mcp/index.vto` in ractive.ch). A change to the parts or to what a
+path needs goes into all of them.
+
 ## Components
 
 | Component | Package | Runs | Knows |

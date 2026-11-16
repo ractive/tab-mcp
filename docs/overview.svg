@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 286" width="980" height="286" role="img" aria-labelledby="tmo-title tmo-desc">
+  <title id="tmo-title">tab-mcp: how the parts connect</title>
+  <desc id="tmo-desc">Two paths lead through the tab-mcp relay to AI apps such as Claude, ChatGPT, Claude Code and Codex. First path: a page with tab-mcp-client, in any browser, with nothing for the user to install, connects to the relay with a WebSocket. Second path: in Chrome with WebMCP on and the tab-mcp extension installed, the extension tab-mcp for Chrome reads the WebMCP tools of a page and connects to the relay with a WebSocket. The AI apps reach the relay over MCP.</desc>
+  <!-- Drawn by hand in the look of the diagrams on https://ractive.ch/tab-mcp/
+       (scripts/flowchart.ts and src/css/tab-mcp-overview.css in ractive/ractive.ch):
+       their boxes, arrows, label tags and colours, light and dark. It is a file of
+       its own, not that renderer's output, because the README needs a picture that
+       stands by itself. A copy of this file is static/images/tab-mcp-overview.svg
+       in ractive.ch; keep the two in step. Text is set in the reader's own font:
+       leave room in the boxes. -->
+  <style>
+    .card { fill: #fffcf1; stroke: #d9d3b8; }
+    .box { fill: #faf4d4; stroke: #00362a; stroke-width: 1.5; }
+    .window { fill: none; stroke: #45655b; stroke-width: 1.25; }
+    .bar { fill: #efe9c9; }
+    .field { fill: #fffcf1; }
+    .line { fill: none; stroke: #1e1c09; stroke-width: 1.5; }
+    .head { fill: #1e1c09; }
+    .tag { fill: #fffcf1; }
+    .icon { fill: none; stroke: #00362a; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .logo { stroke-width: 11; }
+    .dot { fill: #00362a; }
+    text { fill: #1e1c09; font-family: Inter, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 12.5px; }
+    .label { font-size: 14px; font-weight: 600; }
+    .muted { fill: #45655b; }
+    .dot.muted { fill: #45655b; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #1e1c14; stroke: #2e2c22; }
+      .box { fill: #222018; stroke: #7abfa8; }
+      .window { stroke: #8a9a92; }
+      .bar { fill: #2a2820; }
+      .field { fill: #1e1c14; }
+      .line { stroke: #e8e2c8; }
+      .head { fill: #e8e2c8; }
+      .tag { fill: #1e1c14; }
+      .icon { stroke: #7abfa8; }
+      .dot { fill: #7abfa8; }
+      text { fill: #e8e2c8; }
+      .muted { fill: #8a9a92; }
+      .dot.muted { fill: #8a9a92; }
+    }
+  </style>
+  <defs>
+    <marker id="tmo-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0 0L10 5L0 10z"/>
+    </marker>
+    <!-- a browser window, for a page -->
+    <g id="tmo-page">
+      <rect class="icon" x="1.5" y="3.5" width="21" height="17" rx="3"/>
+      <path class="icon" d="M1.5 9 H22.5"/>
+      <circle class="dot" cx="5" cy="6.3" r="1"/>
+      <circle class="dot" cx="8.2" cy="6.3" r="1"/>
+    </g>
+    <!-- a puzzle piece, for the extension -->
+    <path id="tmo-extension" class="icon" d="M4 8 H8.5 A2.6 2.6 0 1 1 12.5 8 H17 V12.5 A2.6 2.6 0 1 1 17 16.5 V21 H4 Z"/>
+    <!-- the MCP logo, for the relay -->
+    <g id="tmo-relay" class="icon logo" transform="translate(-1.2 -1.8) scale(0.135)">
+      <path d="M25 97.85L92.88 29.97C102.26 20.6 117.45 20.6 126.82 29.97C136.2 39.34 136.2 54.54 126.82 63.91L75.56 115.18"/>
+      <path d="M76.27 114.47L126.82 63.91C136.2 54.54 151.39 54.54 160.77 63.91L161.12 64.27C170.49 73.64 170.49 88.83 161.12 98.21L99.72 159.6C96.6 162.72 96.6 167.79 99.72 170.91L112.33 183.52"/>
+      <path d="M109.85 46.94L59.65 97.15C50.28 106.52 50.28 121.71 59.65 131.09C69.02 140.46 84.22 140.46 93.59 131.09L143.79 80.88"/>
+    </g>
+    <!-- the AI app of tab-mcp's card image: an app icon with the AI's spark -->
+    <g id="tmo-ai" transform="scale(0.2308)">
+      <rect width="104" height="104" rx="25" fill="#ffb03a"/>
+      <path d="M52 17 Q56 48 87 52 Q56 56 52 87 Q48 56 17 52 Q48 48 52 17 Z" fill="#fffae3"/>
+      <path d="M81 15 Q82.5 24 91 25.5 Q82.5 27 81 36 Q79.5 27 71 25.5 Q79.5 24 81 15 Z" fill="#fffae3"/>
+    </g>
+  </defs>
+  <rect class="card" x="0.5" y="0.5" width="979" height="285" rx="12"/>
+
+  <!-- what the user's browser needs: one browser window per path, drawn as a
+       toolbar with its address field, which holds the caption -->
+  <path class="bar" d="M24 54 V34 a10 10 0 0 1 10 -10 H490 a10 10 0 0 1 10 10 V54 Z"/>
+  <path class="window" d="M24 54 H500"/>
+  <rect class="window" x="24" y="24" width="476" height="110" rx="10"/>
+  <circle class="dot muted" cx="39" cy="39" r="3"/>
+  <circle class="dot muted" cx="49" cy="39" r="3"/>
+  <circle class="dot muted" cx="59" cy="39" r="3"/>
+  <rect class="field" x="72" y="29" width="416" height="20" rx="10"/>
+  <text class="muted" x="84" y="43.5">Any browser, nothing for the user to install</text>
+  <path class="bar" d="M24 182 V162 a10 10 0 0 1 10 -10 H490 a10 10 0 0 1 10 10 V182 Z"/>
+  <path class="window" d="M24 182 H500"/>
+  <rect class="window" x="24" y="152" width="476" height="110" rx="10"/>
+  <circle class="dot muted" cx="39" cy="167" r="3"/>
+  <circle class="dot muted" cx="49" cy="167" r="3"/>
+  <circle class="dot muted" cx="59" cy="167" r="3"/>
+  <rect class="field" x="72" y="157" width="416" height="20" rx="10"/>
+  <text class="muted" x="84" y="171.5">Chrome with WebMCP on, and the tab-mcp extension installed</text>
+
+  <!-- the links, and their labels on them. The two to the relay leave their
+       browser window straight through its side and turn into the relay from
+       above and from below; their labels sit outside the windows. -->
+  <g marker-start="url(#tmo-arrow)" marker-end="url(#tmo-arrow)">
+    <path class="line" d="M208 94 H686 Q694 94 694 102 V128"/>
+    <line class="line" x1="208" y1="222" x2="336" y2="222"/>
+    <path class="line" d="M488 222 H686 Q694 222 694 214 V188"/>
+    <line class="line" x1="762" y1="158" x2="840" y2="158"/>
+  </g>
+  <g text-anchor="middle">
+    <rect class="tag" x="553" y="83.5" width="74" height="21" rx="4"/>
+    <text x="590" y="98.5">WebSocket</text>
+    <rect class="tag" x="242" y="211.5" width="60" height="21" rx="4"/>
+    <text x="272" y="226.5">WebMCP</text>
+    <rect class="tag" x="553" y="211.5" width="74" height="21" rx="4"/>
+    <text x="590" y="226.5">WebSocket</text>
+    <rect class="tag" x="782" y="147.5" width="38" height="21" rx="4"/>
+    <text x="801" y="162.5">MCP</text>
+  </g>
+
+  <!-- the page with the client library -->
+  <rect class="box" x="38" y="66" width="168" height="56" rx="10"/>
+  <use href="#tmo-page" x="50" y="82"/>
+  <text class="label" x="84" y="89">Page with</text>
+  <text class="label" x="84" y="107">tab-mcp-client</text>
+
+  <!-- the page with WebMCP tools only, and the extension that reads them -->
+  <rect class="box" x="38" y="194" width="168" height="56" rx="10"/>
+  <use href="#tmo-page" x="50" y="210"/>
+  <text class="label" x="84" y="217">Page with</text>
+  <text class="label" x="84" y="235">WebMCP tools</text>
+  <rect class="box" x="338" y="194" width="148" height="56" rx="10"/>
+  <use href="#tmo-extension" x="350" y="210"/>
+  <text class="label" x="384" y="217">tab-mcp</text>
+  <text class="label" x="384" y="235">for Chrome</text>
+
+  <!-- the relay, halfway between the two paths -->
+  <rect class="box" x="628" y="130" width="132" height="56" rx="10"/>
+  <use href="#tmo-relay" x="640" y="146"/>
+  <text class="label" x="674" y="153">tab-mcp</text>
+  <text class="label" x="674" y="171">relay</text>
+
+  <!-- the AI apps -->
+  <rect class="box" x="842" y="130" width="112" height="56" rx="10"/>
+  <use href="#tmo-ai" x="854" y="146"/>
+  <text class="label" x="888" y="163">AI apps</text>
+  <text class="muted" x="898" y="207" text-anchor="middle">Claude, ChatGPT,</text>
+  <text class="muted" x="898" y="224" text-anchor="middle">Claude Code, Codex</text>
+</svg>

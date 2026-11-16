@@ -10,6 +10,10 @@ and gets an MCP address. The user adds that address to an AI app and pairs it by
 a code from the page on the relay's sign-in page. The relay then forwards the AI app's
 requests to the page. It knows nothing about the tools themselves.
 
+How the relay, the browser library and the extension tab-mcp for Chrome fit together,
+with a picture:
+[How the parts fit together](https://github.com/ractive/tab-mcp#how-the-parts-fit-together).
+
 **Status: 0.10.3.** Until 1.0, a new minor version can still change settings and the API.
 The relay speaks MCP revision 2026-07-28 only and accepts AI apps that register through
 OAuth Client ID Metadata Documents; see [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md)

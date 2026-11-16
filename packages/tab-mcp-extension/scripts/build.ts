@@ -2,8 +2,8 @@
  * Builds the unpacked extension into `dist/` (or `--outdir`), after
  * Overmark's `scripts/build.ts`.
  *
- *   bun scripts/build.ts          development build with the owner's key, so
- *                                 its id is the one the hosted relay allows
+ *   bun scripts/build.ts          development build with the store's public
+ *                                 key, so it has the Chrome Web Store id
  *   bun scripts/build.ts --test   no key, host access to every http(s) site
  *                                 at install (end-to-end tests: no click on
  *                                 the icon), and the hooks the tests answer
@@ -16,14 +16,14 @@
  *                                 (`--zip` only with `--store`: a zip of the
  *                                 development build would carry the key)
  *
- * The key is not in the repository: anyone with it could load an extension
- * with the development build's id and use the hosted relay as it. It is read
- * from `TAB_MCP_EXTENSION_KEY_FILE`, else `~/.config/tab-mcp/extension-key.txt`;
- * without it the development build gets an id of its own.
+ * The key is the Chrome Web Store item's public key, `manifest-key.txt`
+ * (DEC-187): public, since the store ships it in every copy, so it is in the
+ * repository and every development build has the store's id,
+ * `jjhddplkjikmbpcobcnfebnglgjomfgh`, the one the hosted relay allows. Such a
+ * build and the store's cannot be installed in the same Chrome profile.
  */
 
 import { readdir, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { CONTENT_SCRIPT } from "../src/messages.ts";
@@ -66,13 +66,15 @@ export function extensionId(base64Key: string): string {
 		.join("");
 }
 
-/** The owner's key, or `undefined` if this machine has none. */
-export async function readKey(): Promise<string | undefined> {
-	const path =
-		process.env["TAB_MCP_EXTENSION_KEY_FILE"] ??
-		join(homedir(), ".config/tab-mcp/extension-key.txt");
-	const file = Bun.file(path);
-	return (await file.exists()) ? (await file.text()).trim() : undefined;
+/** The Chrome Web Store item's public key (base64 DER), DEC-187. */
+export const KEY_FILE = join(ROOT, "manifest-key.txt");
+
+/** The id the store gave tab-mcp for Chrome: the one `KEY_FILE` gives. */
+export const STORE_ID = "jjhddplkjikmbpcobcnfebnglgjomfgh";
+
+/** The store's public key, for the development build. */
+export async function readKey(): Promise<string> {
+	return (await Bun.file(KEY_FILE).text()).trim();
 }
 
 /** The licences of all that a build contains, in the build. */
@@ -453,9 +455,7 @@ if (import.meta.main) {
 			? `Built ${where} (extension ID ${result.id})`
 			: values.firefox
 				? `Built ${where} for Firefox (add-on id ${FIREFOX_ID})`
-				: values.store || values.test
-					? `Built ${where} (no key)`
-					: `Built ${where} without a key: no ~/.config/tab-mcp/extension-key.txt, so the hosted relay will not accept this build's id`,
+				: `Built ${where} (no key)`,
 	);
 	if (values.zip) {
 		const target = join(ROOT, storeZipName(String(result.manifest["version"])));
