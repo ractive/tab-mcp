@@ -46,7 +46,7 @@ test("the Chrome build carries none of the Firefox build's code (iteration 44)",
 	}
 }, 60_000);
 
-test("the Firefox build: an event page, a sidebar, the add-on id, no store package", async () => {
+test("the Firefox build: an event page, a sidebar, the add-on id", async () => {
 	const { outdir, manifest } = await build({
 		outdir: join(dir, "firefox"),
 		firefox: true,
@@ -73,9 +73,35 @@ test("the Firefox build: an event page, a sidebar, the add-on id, no store packa
 	expect(await Bun.file(join(outdir, "content.js")).text()).toContain(
 		"exportFunction",
 	);
+}, 60_000);
+
+test("the Firefox store package: no source maps, no host access at install, its own zip name", async () => {
+	const { outdir, manifest } = await build({
+		outdir: join(dir, "firefox-store"),
+		firefox: true,
+		store: true,
+	});
+	expect(
+		(manifest["browser_specific_settings"] as { gecko: { id: string } }).gecko
+			.id,
+	).toBe("tab-mcp@ractive.ch");
+	expect(storeZipName("0.2.0", true)).toBe(
+		"tab-mcp-browser-extension-firefox-0.2.0-store.zip",
+	);
+	const target = join(dir, storeZipName(String(manifest["version"]), true));
+	await zipStoreBuild(outdir, target);
+	const names = zipNames(new Uint8Array(await Bun.file(target).arrayBuffer()));
+	expect(names).toContain("manifest.json");
+	expect(names).toContain("background.js");
+	expect(names.filter((name) => name.endsWith(".map"))).toEqual([]);
 	await expect(
-		build({ outdir: join(dir, "x"), firefox: true, store: true }),
-	).rejects.toThrow("no store package");
+		build({
+			outdir: join(dir, "x"),
+			firefox: true,
+			store: true,
+			allSites: true,
+		}),
+	).rejects.toThrow("--all-sites is for development");
 }, 60_000);
 
 test("the Firefox development build (--all-sites): host access at install, no test hooks", async () => {

@@ -7,6 +7,7 @@ dist
 dist-store
 dist-firefox
 dist-firefox-dev
+dist-firefox-store
 *.tgz
 # the extension's store package (bun scripts/build.ts --store --zip)
 tab-mcp-browser-extension-*.zip

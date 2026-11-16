@@ -289,7 +289,7 @@ has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`
    (`http://localhost:8080`). Then **Give access to all sites** (Firefox asks): only then does
    every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
 5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
-   to your AI app (`claude mcp add --transport http tab-mcp-firefox <address>`), with the
+   to your AI app (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
    pairing code from the sidebar.
 
 **While developing**, `bun scripts/firefox-dev.ts [URL] [--headless] [--port N]` does steps 1,
@@ -302,6 +302,12 @@ replaces the running Firefox. With `--reload` it rebuilds and reloads the add-on
 running Firefox instead (`ff-rdp addon reload`, ff-rdp 0.4.4 or later): the tabs stay open,
 and their pages keep their tools, which is what an update does to them. ff-rdp's commands
 reach it with `--port N` (6000 by default).
+
+**For addons.mozilla.org**, `bun scripts/build.ts --firefox --store --zip` builds
+`dist-firefox-store/` (no source maps, no host access at install) and packs
+`tab-mcp-browser-extension-firefox-<version>-store.zip`, with the same checks as the Chrome
+store zip. The scripts are bundled and minified, so the listing needs the source as well:
+the repository at that commit, built with `bun install` and that command.
 
 `bun scripts/build.ts --firefox --test` builds the end-to-end tests' build (host access at
 install, the panel opened in a tab at install). `bun test/firefox-sites.ts` loads real

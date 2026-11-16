@@ -11,7 +11,7 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ## Unreleased
 
-## [0.2.0][extension-0.2.0] - 2026-11-16
+## [0.2.0][extension-0.2.0] - 2026-11-17
 
 ### Added
 
@@ -46,8 +46,8 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 - Pages it may read can tell that it is installed (`document.modelContext` where Chrome
   has none); `PRIVACY.md` says so.
 
-The repository also builds it for Firefox from the same code (`--firefox`, not released;
-README).
+The repository also builds it for Firefox from the same code (`--firefox`), with a store
+package for addons.mozilla.org (`--firefox --store --zip`; README).
 
 ## [0.1.0][extension-0.1.0] - 2026-11-15
 
