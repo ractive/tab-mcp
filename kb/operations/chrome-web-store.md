@@ -178,13 +178,14 @@ serves.
    PEM of the signing key); variable `CWS_PUBLISHER_ID` (Publisher → Settings in the
    dashboard); yourself as required reviewer; deployments limited to tags `extension-v*`.
    Then opt in to Verified CRX uploads (Package tab) with the key's public key, after the
-   secret is set: from then on the store refuses a zip.
-9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (item submitted 2026-11-16). The
+   secret is set: from then on the store refuses a zip (opted in 2026-11-16).
+9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (submitted 2026-11-16, published
+   public the same day: <https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh>). The
    hosted relay allows it (ractive/ractive.ch#120). The development build has the same id
    since DEC-187: its manifest carries the item's public key (`manifest-key.txt`, from
-   Package → "View public key" in the dashboard). Once the store build works from the
-   store, remove the old development id (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`)
-   from the relay's allowed origins.
+   Package → "View public key" in the dashboard). The old development id
+   (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`) left the relay's allowed origins
+   with ractive/ractive.ch#120.
 
 ## Listing
 
