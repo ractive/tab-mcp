@@ -94,7 +94,7 @@ rejects an upload whose version is not higher than the last one.
 The API only updates an item that exists, so the first version went in by hand (below).
 Since then a release publishes itself: after `extension-release.yml` has created the
 release, its job `publish` runs
-[chrome-extension-publish.yml](https://github.com/ractive/release-workflows/blob/main/.github/workflows/chrome-extension-publish.yml)
+[chrome-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.6.0/.github/workflows/chrome-extension-publish.yml)
 of ractive/release-workflows (pinned to a commit) in the environment `chrome-web-store`,
 which waits for the owner's approval. That job:
 
