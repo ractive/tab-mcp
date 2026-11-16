@@ -284,6 +284,14 @@ the extension offers them to the AI app as in Chrome. Iteration 44; not released
    to your AI app (`claude mcp add --transport http tab-mcp-firefox <address>`), with the
    pairing code from the sidebar.
 
+**While developing**, `bun scripts/firefox-dev.ts [URL] [--headless] [--port N]` does steps 1,
+2 and the host access in one: it builds `dist-firefox-dev/` with host access granted at
+install (`--all-sites`), and starts Firefox through [ff-rdp](https://github.com/ractive/ff-rdp)
+with the build as a temporary add-on and one kept profile (`TAB_MCP_FIREFOX_PROFILE`, else
+`~/.cache/tab-mcp/firefox-dev-profile`) that has the two prefs above. Every launch then has
+the same UUID and storage, so the AI app stays paired; running it again rebuilds and
+replaces the running Firefox. ff-rdp's commands reach it with `--port N` (6000 by default).
+
 `bun scripts/build.ts --firefox --test` builds the end-to-end tests' build (host access at
 install, the panel opened in a tab at install). `bun test/firefox-sites.ts` loads real
 WebMCP sites with it and lists the tools each registers (needs the network).

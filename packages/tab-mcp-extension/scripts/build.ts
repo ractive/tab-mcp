@@ -4,6 +4,10 @@
  *
  *   bun scripts/build.ts          development build with the store's public
  *                                 key, so it has the Chrome Web Store id
+ *   bun scripts/build.ts --firefox [--all-sites]
+ *                                 tab-mcp for Firefox into `dist-firefox/`;
+ *                                 `--all-sites` grants host access at install
+ *                                 (`scripts/firefox-dev.ts`)
  *   bun scripts/build.ts --test   no key, host access to every http(s) site
  *                                 at install (end-to-end tests: no click on
  *                                 the icon), and the hooks the tests answer
@@ -47,6 +51,12 @@ export interface BuildOptions {
 	store?: boolean;
 	/** No key, host access to every http(s) site granted at install. */
 	test?: boolean;
+	/**
+	 * The Firefox build with host access to every http(s) site granted at
+	 * install, without the test hooks (`scripts/firefox-dev.ts`): a temporary
+	 * add-on loses the user's grant whenever it goes.
+	 */
+	allSites?: boolean;
 	minify?: boolean;
 }
 
@@ -157,7 +167,7 @@ export const FIREFOX_ID = "tab-mcp@ractive.ch";
  */
 export function createFirefoxManifest(
 	version: string,
-	options: { test?: boolean },
+	options: { test?: boolean; allSites?: boolean },
 ): Record<string, unknown> {
 	const icons = Object.fromEntries(
 		ICON_SIZES.map((s) => [String(s), `icons/icon-${s}.png`]),
@@ -190,7 +200,9 @@ export function createFirefoxManifest(
 		},
 		permissions: ["activeTab", "alarms", "notifications", "scripting"],
 		optional_host_permissions: SITE_MATCHES,
-		...(options.test ? { host_permissions: SITE_MATCHES } : {}),
+		...(options.test || options.allSites
+			? { host_permissions: SITE_MATCHES }
+			: {}),
 		incognito: "not_allowed",
 		// Chrome's default for Manifest V3. Firefox's adds
 		// `upgrade-insecure-requests`, which turns a relay on the loopback
@@ -267,6 +279,8 @@ export async function checkOutdir(outdir: string): Promise<void> {
 export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	if (options.firefox && options.store)
 		throw new Error("no store package of the Firefox build yet");
+	if (options.allSites && !options.firefox)
+		throw new Error("--all-sites is for the Firefox build");
 	const outdir = resolve(
 		options.outdir ??
 			join(
@@ -327,6 +341,7 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	const manifest = options.firefox
 		? createFirefoxManifest(pkg.version, {
 				...(options.test ? { test: true } : {}),
+				...(options.allSites ? { allSites: true } : {}),
 			})
 		: createManifest(pkg.version, {
 				...(key ? { key } : {}),
@@ -445,6 +460,7 @@ if (import.meta.main) {
 			store: { type: "boolean" },
 			test: { type: "boolean" },
 			firefox: { type: "boolean" },
+			"all-sites": { type: "boolean" },
 			zip: { type: "boolean" },
 			outdir: { type: "string" },
 		},
@@ -458,6 +474,7 @@ if (import.meta.main) {
 		...(values.store ? { store: true } : {}),
 		...(values.test ? { test: true } : {}),
 		...(values.firefox ? { firefox: true } : {}),
+		...(values["all-sites"] ? { allSites: true } : {}),
 	});
 	const where = relative(process.cwd(), result.outdir) || ".";
 	console.log(
