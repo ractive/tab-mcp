@@ -23,8 +23,12 @@ name: Extension release
 #
 #   gh attestation verify tab-mcp-for-chrome-<version>-store.zip -R ractive/tab-mcp
 #
-# Uploading to the Chrome Web Store is a separate, manual workflow
-# (extension-publish.yml), which uploads only a zip that verifies.
+# Then the job publish uploads that zip to the Chrome Web Store as a CRX
+# signed with the item's verified-upload key and submits it for review
+# (ractive/release-workflows chrome-extension-publish.yml): only a zip whose
+# attestation verifies for this tag, in the environment chrome-web-store
+# (required reviewer, tags extension-v* only). extension-publish.yml runs the
+# same job by hand, for a release whose publish failed.
 
 on:
   push:
@@ -198,3 +202,20 @@ jobs:
           echo "release asset $ZIP: $digest"
           test "$digest" = "sha256:$SHA256" \
             || { echo "::error::the release's $ZIP is $digest, the attested zip sha256:$SHA256"; exit 1; }
+
+  publish:
+    needs: release
+    uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@v0.6.0
+    permissions:
+      contents: read
+      # gh attestation verify reads the zip's attestation.
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      tag-prefix: extension-v
+      asset: tab-mcp-for-chrome-{version}-store.zip
+      extension-id: jjhddplkjikmbpcobcnfebnglgjomfgh
+      attest-signer-workflow: .github/workflows/extension-release.yml
+      # The CRX id of CWS_CRX_PRIVATE_KEY, whose public key the item has under
+      # "Verified CRX uploads" (kb/operations/chrome-web-store.md).
+      signing-key-id: jbpcbkngalkckpjgonfkhhcipjmnnofh
