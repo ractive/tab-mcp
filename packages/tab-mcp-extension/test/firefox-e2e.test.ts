@@ -505,12 +505,19 @@ describe.skipIf(!firefoxOk)("an extension reload or update", () => {
 			`document.modelContext.getTools().then((t) => t.map((x) => x.name))`,
 		);
 		expect(before).toHaveLength(5);
-		// What the page holds: its object, and a handler on it.
-		await stack.tab.eval(`(() => {
-			window.held = document.modelContext;
-			window.changes = 0;
-			document.modelContext.ontoolchange = () => { window.changes++; };
-		})()`);
+		// What the page holds: its object, and handlers on it. A handler
+		// runs for an event the page dispatches itself too.
+		expect(
+			await stack.tab.eval(`(() => {
+				window.held = document.modelContext;
+				window.changes = 0;
+				window.activated = 0;
+				document.modelContext.ontoolchange = () => { window.changes++; };
+				document.modelContext.ontoolactivated = () => { window.activated++; };
+				document.modelContext.dispatchEvent(new Event("toolactivated"));
+				return window.activated;
+			})()`),
+		).toBe(1);
 		await stack.firefox.send("webExtension.uninstall", {
 			extension: FIREFOX_ID,
 		});
@@ -541,7 +548,9 @@ describe.skipIf(!firefoxOk)("an extension reload or update", () => {
 				const context = document.modelContext;
 				const greeting = await context.executeTool({ name: "get_greeting" }, { name: "Ada" });
 				await context.registerTool({ name: "after_reload", description: "d", execute: () => "x" });
+				context.dispatchEvent(new Event("toolactivated"));
 				return {
+					activated: window.activated,
 					same: context === window.held && navigator.modelContext === context,
 					greeting,
 					changes: window.changes,
@@ -550,6 +559,7 @@ describe.skipIf(!firefoxOk)("an extension reload or update", () => {
 				};
 			})()`),
 		).toEqual({
+			activated: 2,
 			same: true,
 			greeting: "Hello, Ada!",
 			changes: 1,

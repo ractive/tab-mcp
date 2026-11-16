@@ -17,10 +17,12 @@
  * function it exported a dead object. The page's `modelContext` object, its
  * tools and its `on…` handlers are kept in a `Map` of the page's realm, and
  * the getters on the prototypes are the page's own `Map.prototype.get` bound
- * to it (a bound native function outlives the script; the page cannot read
- * what it is bound to). The next content script finds the map through the
- * getter (`keptState`), registers the tools again and puts its own methods
- * on the same object, so the page's references to it work on.
+ * to it (a bound native function outlives the script). The page can reach
+ * the map too, by calling the getter with its key: everything in it is the
+ * page's own (its object, tools and handlers), which it can change anyway.
+ * The next content script finds the map through the getter (`keptState`),
+ * registers the tools again and puts its own methods and listeners on the
+ * same object, so the page's references to it work on.
  *
  * Objects the page passes arrive as Xrays, which hide functions and getters:
  * a tool is read through `wrappedJSObject` and copied with this world's own
@@ -82,6 +84,7 @@ const waive = (value: unknown): PageObject =>
 const STATE = "tab-mcp:webmcp";
 const TOOLS = "tab-mcp:tools";
 const HANDLER = "tab-mcp:on";
+const LISTENER = "tab-mcp:listener:";
 
 /**
  * The state an earlier content script of this extension left in the page
@@ -160,18 +163,7 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	};
 	const tools = new ToolRegistry(() => {
 		save();
-		const event = new PageEvent("toolchange");
-		context.dispatchEvent(event);
-		// The handler from here, not a listener on the page's object: one
-		// of this script's would be dead after an extension reload.
-		const handler = state.get(`${HANDLER}toolchange`);
-		if (typeof handler === "function") {
-			try {
-				handler.call(pageContext, waive(event));
-			} catch {
-				// The page's handler threw: its own affair.
-			}
-		}
+		context.dispatchEvent(new PageEvent("toolchange"));
 		for (const listener of listeners) {
 			try {
 				listener();
@@ -292,9 +284,25 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	);
 	exportFunction(() => tools.clear(), context, { defineAs: "clearContext" });
 
-	// `ontoolchange` and the others, kept in the map (only `toolchange` is
-	// ever dispatched here).
-	for (const type of EVENTS)
+	// `ontoolchange` and the others, kept in the map, called by one listener
+	// per type for every event on the object, as WebIDL's handlers are (only
+	// `toolchange` is dispatched here; a page or its polyfill may dispatch
+	// the others). The listener is in the map too: the next content script
+	// takes the dead one off.
+	for (const type of EVENTS) {
+		const dead = state.get(`${LISTENER}${type}`);
+		if (typeof dead === "function") context.removeEventListener(type, dead);
+		const listener = exportFunction((event: Event) => {
+			const handler = state.get(`${HANDLER}${type}`);
+			if (typeof handler !== "function") return;
+			try {
+				handler.call(pageContext, waive(event));
+			} catch {
+				// The page's handler threw: its own affair.
+			}
+		}, win);
+		context.addEventListener(type, listener);
+		state.set(`${LISTENER}${type}`, listener);
 		Reflect.defineProperty(pageContext, `on${type}`, {
 			get: exportFunction(() => state.get(`${HANDLER}${type}`) ?? null, win),
 			set: exportFunction((value: unknown) => {
@@ -304,6 +312,7 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 			configurable: true,
 			enumerable: true,
 		});
+	}
 
 	if (kept) {
 		// The tools the page registered with the script that ended.

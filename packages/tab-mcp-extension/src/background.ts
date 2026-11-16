@@ -127,7 +127,10 @@ chrome.runtime.onStartup.addListener(sync);
  * ended in the page (`firefox/webmcp.ts`), but its methods are dead objects
  * until a new script takes over, and the page's own calls throw meanwhile.
  * Chrome keeps the tools itself, and its page-world polyfill outlives the
- * extension's reload.
+ * extension's reload. Not after a disable and enable: Firefox tells the
+ * extension nothing of it, and without the `storage` permission (DEC-116) a
+ * first start can't be told from the event page waking; a page gets the
+ * script when the worker reads its tab (`tabs.ts`) or at a click.
  */
 async function reviveOpenPages(): Promise<void> {
 	const tabs = await chrome.tabs.query({ url: SITE_MATCHES });

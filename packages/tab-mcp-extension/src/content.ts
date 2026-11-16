@@ -386,8 +386,14 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	// First of all, at `document_start`: the page's scripts look for it as
 	// they load. Where Firefox has WebMCP of its own, the native one is used.
 	// The build's `define` itself, not `FIREFOX`: so Chrome's bundle drops it.
-	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX)
-		ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
+	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) {
+		try {
+			ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
+		} catch {
+			// The page broke what a takeover needs (a frozen object, its own
+			// records): no WebMCP of ours, but the script still answers.
+		}
+	}
 	chrome.runtime.onMessage.addListener(
 		(request: ContentRequest, sender, sendResponse) => {
 			// Only the extension itself (its service worker) asks; a content

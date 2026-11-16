@@ -146,6 +146,11 @@ export class ToolRegistry {
 
 	/** `registerTool(tool, { signal })`: throws a `PageError`. */
 	register(raw: PageObject, signal?: SignalLike | null): void {
+		this.#add(raw, signal);
+	}
+
+	/** `register`, giving the name it added (none for an aborted signal). */
+	#add(raw: PageObject, signal?: SignalLike | null): string | undefined {
 		const entry = readTool(raw);
 		const name = entry.info.name;
 		if (this.#tools.has(name))
@@ -156,7 +161,7 @@ export class ToolRegistry {
 			if (typeof signal.aborted !== "boolean")
 				throw new PageError("TypeError", "signal is not an AbortSignal");
 			// Aborted already: nothing to register (the draft).
-			if (signal.aborted) return;
+			if (signal.aborted) return undefined;
 			const onAbort = () => this.unregister(name);
 			signal.addEventListener("abort", onAbort, { once: true });
 			entry.signal = signal;
@@ -164,6 +169,7 @@ export class ToolRegistry {
 		}
 		this.#tools.set(name, entry);
 		this.#notify();
+		return name;
 	}
 
 	/** The older `unregisterTool(name)`, and a registration's signal. */
@@ -218,28 +224,20 @@ export class ToolRegistry {
 	/**
 	 * Register `records` again, in their order (a registry taking over the
 	 * tools of one that ended), without `changed`: the page's tools did not
-	 * change. A tool that no longer reads as one is left out.
+	 * change. A tool that no longer reads as one is left out, alone.
 	 */
 	restore(records: readonly ToolRecord[]): void {
 		this.#quiet = true;
 		try {
-			const provided: PageObject[] = [];
 			for (const record of records) {
-				if (record.provided) {
-					provided.push(record.tool);
-					continue;
-				}
 				try {
-					this.register(record.tool, record.signal);
+					const name = this.#add(
+						record.tool,
+						record.provided ? undefined : record.signal,
+					);
+					if (record.provided && name !== undefined) this.#provided.push(name);
 				} catch {
 					// Changed meanwhile so that it is no tool: left out.
-				}
-			}
-			if (provided.length > 0) {
-				try {
-					this.provide(provided);
-				} catch {
-					// As above.
 				}
 			}
 		} finally {

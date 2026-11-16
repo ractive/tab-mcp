@@ -769,17 +769,17 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 	test("records and restore keep the order, signals and provideContext's tools, without a change event", () => {
 		const first = new ToolRegistry(() => {});
 		const controller = new AbortController();
+		first.provide([tool("c"), tool("e")]);
 		first.register(tool("a"));
 		first.register(tool("b"), controller.signal);
-		first.provide([tool("c")]);
 		let changes = 0;
 		const next = new ToolRegistry(() => changes++);
 		next.restore(first.records());
 		expect(changes).toBe(0);
-		expect(next.list().map((t) => t.name)).toEqual(["a", "b", "c"]);
+		expect(next.list().map((t) => t.name)).toEqual(["c", "e", "a", "b"]);
 		// The signal still ends its tool; provideContext still replaces its own.
 		controller.abort();
-		expect(next.list().map((t) => t.name)).toEqual(["a", "c"]);
+		expect(next.list().map((t) => t.name)).toEqual(["c", "e", "a"]);
 		next.provide([tool("d")]);
 		expect(next.list().map((t) => t.name)).toEqual(["a", "d"]);
 		expect(changes).toBe(2);
@@ -790,7 +790,11 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 		next.restore([
 			{ tool: { name: "" }, provided: false },
 			{ tool: tool("ok"), provided: false },
+			{ tool: { name: "" }, provided: true },
+			{ tool: tool("given"), provided: true },
 		]);
+		expect(next.list().map((t) => t.name)).toEqual(["ok", "given"]);
+		next.provide([]);
 		expect(next.list().map((t) => t.name)).toEqual(["ok"]);
 	});
 });

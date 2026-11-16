@@ -28,11 +28,27 @@ export const DEV_PREFS: Readonly<Record<string, boolean>> = {
 	"extensions.webextensions.keepStorageOnUninstall": true,
 };
 
-/** `user.js` with `DEV_PREFS` added, keeping whatever it set already. */
+/**
+ * The value `user.js` sets `name` to, as written, or `undefined`: its last
+ * `user_pref` line for it that is not commented out (Firefox reads them in
+ * order, the last one wins).
+ */
+export function userPref(userJs: string, name: string): string | undefined {
+	let value: string | undefined;
+	for (const line of userJs.split("\n")) {
+		const match =
+			/^\s*user_pref\(\s*("(?:[^"\\]|\\.)*")\s*,\s*(.*?)\s*\)\s*;/.exec(line);
+		if (match?.[1] !== undefined && JSON.parse(match[1]) === name)
+			value = match[2];
+	}
+	return value;
+}
+
+/** `user.js` with `DEV_PREFS` added, keeping what it sets already. */
 export function withDevPrefs(userJs: string): string {
 	const lines = userJs === "" ? [] : userJs.replace(/\n$/, "").split("\n");
 	for (const [name, value] of Object.entries(DEV_PREFS))
-		if (!userJs.includes(JSON.stringify(name)))
+		if (userPref(userJs, name) === undefined)
 			lines.push(`user_pref(${JSON.stringify(name)}, ${value});`);
 	return `${lines.join("\n")}\n`;
 }
@@ -51,8 +67,9 @@ if (import.meta.main) {
 		);
 		process.exit(2);
 	}
+	// An empty variable is no profile (`resolve("")` is the working directory).
 	const profile = resolve(
-		process.env["TAB_MCP_FIREFOX_PROFILE"] ??
+		process.env["TAB_MCP_FIREFOX_PROFILE"] ||
 			join(homedir(), ".cache/tab-mcp/firefox-dev-profile"),
 	);
 	await mkdir(profile, { recursive: true });
@@ -60,6 +77,13 @@ if (import.meta.main) {
 	const before = (await userJs.exists()) ? await userJs.text() : "";
 	const after = withDevPrefs(before);
 	if (after !== before) await Bun.write(userJs, after);
+	for (const [name, value] of Object.entries(DEV_PREFS)) {
+		const set = userPref(after, name);
+		if (set !== String(value))
+			console.error(
+				`${join(profile, "user.js")} sets ${name} to ${set}: each launch may get a new UUID or empty storage`,
+			);
+	}
 	const { outdir } = await build({
 		firefox: true,
 		allSites: true,

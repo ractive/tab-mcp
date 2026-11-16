@@ -15,7 +15,7 @@ import {
 	TEST_HOOK,
 	zipStoreBuild,
 } from "../scripts/build.ts";
-import { DEV_PREFS, withDevPrefs } from "../scripts/firefox-dev.ts";
+import { DEV_PREFS, userPref, withDevPrefs } from "../scripts/firefox-dev.ts";
 import { writeZip, zipNames } from "../scripts/zip.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "tab-mcp-extension-build-"));
@@ -104,6 +104,16 @@ test("the development profile keeps the add-on's UUID and storage, and what user
 	expect(kept.startsWith(own)).toBe(true);
 	expect(kept).not.toContain('keepUuidOnUninstall", true');
 	expect(kept).toContain("keepStorageOnUninstall");
+	// A line commented out sets nothing; the last live one wins.
+	const commented =
+		'// user_pref("extensions.webextensions.keepUuidOnUninstall", true);\n';
+	expect(withDevPrefs(commented)).toContain(
+		'\nuser_pref("extensions.webextensions.keepUuidOnUninstall", true);',
+	);
+	const name = "extensions.webextensions.keepUuidOnUninstall";
+	expect(userPref(commented, name)).toBeUndefined();
+	expect(userPref(`${own}user_pref("${name}", true);\n`, name)).toBe("true");
+	expect(userPref(own, name)).toBe("false");
 });
 
 test("the test build keeps its source maps", async () => {
