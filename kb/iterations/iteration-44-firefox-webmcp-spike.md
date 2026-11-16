@@ -181,6 +181,12 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   build opens the panel in a tab and the tests open their pages in another window. CI
   runs it where Firefox is installed. ff-rdp's `launch --temporary-addon` (ff-rdp#371)
   installs the build too and found allbirds' 12 tools on the first page.
+- **Review** (Claude 5, GLM 2): Firefox's notifications close by themselves, and a close
+  counted as Don't allow; on Linux CI the question was gone before the panel showed it
+  (the confirmation test failed twice). In the Firefox build a close is no answer now.
+  Also fixed: the polyfill keeps the page's order of calls, `provideContext` checks
+  every tool and the limit before it changes anything, a late injection leaves a page's
+  own polyfill alone, and Firefox's restricted hosts and words in `noAccess`.
 - **Not tested**: the development build's own flow in a real (not headless) Firefox:
   the icon opening the sidebar, "Give access to all sites" and Firefox's prompt, a
   real AI app's pairing (the relay's pairing is the same as for Chrome).
