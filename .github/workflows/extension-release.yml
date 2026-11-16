@@ -1,10 +1,10 @@
 name: Extension release
 
-# tab-mcp for Chrome (iteration 23, kb/operations/chrome-web-store.md).
+# The tab-mcp browser extension (iteration 23, kb/operations/chrome-web-store.md).
 #
 # Pushing a tag extension-v<version> (on a commit of main, with that version in
 # packages/tab-mcp-extension/package.json) runs verify, builds the store
-# package tab-mcp-for-chrome-<version>-store.zip, and only then creates the
+# package tab-mcp-browser-extension-<version>-store.zip, and only then creates the
 # GitHub release with the zip attached. A failed build leaves no release, and a
 # published release is never changed afterwards (so this also works with
 # immutable releases on).
@@ -21,7 +21,7 @@ name: Extension release
 # release job attests the zip's build provenance, verifies the attestation and
 # only then creates the release (DEC-182); check a release's zip with
 #
-#   gh attestation verify tab-mcp-for-chrome-<version>-store.zip -R ractive/tab-mcp
+#   gh attestation verify tab-mcp-browser-extension-<version>-store.zip -R ractive/tab-mcp
 #
 # Then the job publish uploads that zip to the Chrome Web Store as a CRX
 # signed with the item's verified-upload key and submits it for review
@@ -105,7 +105,7 @@ jobs:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
-          zip="tab-mcp-for-chrome-$VERSION-store.zip"
+          zip="tab-mcp-browser-extension-$VERSION-store.zip"
           manifest="$(unzip -p "$zip" manifest.json)"
           test "$(jq -r .version <<<"$manifest")" = "$VERSION" \
             || { echo "::error::the manifest's version is not $VERSION"; exit 1; }
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: store-zip
-          path: packages/tab-mcp-extension/tab-mcp-for-chrome-*-store.zip
+          path: packages/tab-mcp-extension/tab-mcp-browser-extension-*-store.zip
           if-no-files-found: error
 
   release:
@@ -153,7 +153,7 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -euo pipefail
-          zip="tab-mcp-for-chrome-$VERSION-store.zip"
+          zip="tab-mcp-browser-extension-$VERSION-store.zip"
           test -f "$zip" || { echo "::error::no $zip in the store-zip artifact"; exit 1; }
           # The build job printed the same line.
           sha256sum "$zip"
@@ -185,8 +185,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$TAG" "$ZIP" --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --latest=false --title "tab-mcp for Chrome $VERSION" \
-            --notes "The Chrome Web Store package of tab-mcp for Chrome $VERSION (no key, no install-time host access, no source maps). What changed: packages/tab-mcp-extension/CHANGELOG.md. Verify it before uploading: gh attestation verify $ZIP -R $GITHUB_REPOSITORY"
+            --verify-tag --latest=false --title "tab-mcp browser extension $VERSION" \
+            --notes "The Chrome Web Store package of the tab-mcp browser extension $VERSION (no key, no install-time host access, no source maps). What changed: packages/tab-mcp-extension/CHANGELOG.md. Verify it before uploading: gh attestation verify $ZIP -R $GITHUB_REPOSITORY"
       - name: The release's asset is the attested zip
         env:
           GH_TOKEN: ${{ github.token }}
@@ -213,7 +213,7 @@ jobs:
     with:
       tag: ${{ github.ref_name }}
       tag-prefix: extension-v
-      asset: tab-mcp-for-chrome-{version}-store.zip
+      asset: tab-mcp-browser-extension-{version}-store.zip
       extension-id: jjhddplkjikmbpcobcnfebnglgjomfgh
       attest-signer-workflow: .github/workflows/extension-release.yml
       # The CRX id of CWS_CRX_PRIVATE_KEY, whose public key the item has under

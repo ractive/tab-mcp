@@ -1,6 +1,6 @@
-# tab-mcp for Chrome: privacy policy
+# tab-mcp browser extension: privacy policy
 
-tab-mcp for Chrome passes the WebMCP tools of the page in front on to an AI app the user
+The tab-mcp browser extension passes the WebMCP tools of the page in front on to an AI app the user
 connects, through a tab-mcp relay, and lets that AI app open pages in that tab. This page
 says what the extension reads, stores and sends. It is published by Jean-Pierre Bergamin,
 Zurich, Switzerland (james@ractive.ch), and online at

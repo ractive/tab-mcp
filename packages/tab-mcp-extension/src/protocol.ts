@@ -13,12 +13,12 @@ import type { NoAccessReason } from "./tabs.ts";
 
 /**
  * The extension's MCP server name: the worker's connection gives it to the
- * relay, and the side panel's setup commands name the server by it
- * ("tab-mcp-for-firefox" in the Firefox build).
+ * relay, and the side panel's setup commands name the server by it (its own
+ * in the Firefox build, so one AI app can pair with both browsers).
  */
 export const SERVER_NAME = FIREFOX
-	? "tab-mcp-for-firefox"
-	: "tab-mcp-for-chrome";
+	? "tab-mcp-browser-extension-firefox"
+	: "tab-mcp-browser-extension";
 
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "panel";
@@ -172,7 +172,7 @@ export function startProblem(error: unknown): PanelState {
 		status: "off",
 		grants: [],
 		pairing: false,
-		problem: `${PRODUCT} could not start: ${why}. Close and open this panel to try again.`,
+		problem: `The ${PRODUCT} could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],
 		expired: [],

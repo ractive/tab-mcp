@@ -10,7 +10,7 @@ tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A sit
 assistant can call the same tools over a port, without a relay:
 [Your own assistant on the page](#your-own-assistant-on-the-page).
 
-How the library, the relay and the extension tab-mcp for Chrome fit together, with a
+How the library, the relay and the tab-mcp browser extension fit together, with a
 picture:
 [How the parts fit together](https://github.com/ractive/tab-mcp#how-the-parts-fit-together).
 
@@ -230,7 +230,7 @@ trial token that a script adds later counts for a `TabMcp` made after it.
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
   fails: a page that registers tools natively itself leaves `webmcp` off or uses other
   names.
-- tab-mcp for Chrome offers mirrored tools like any page tool, since it cannot know
+- The tab-mcp browser extension offers mirrored tools like any page tool, since it cannot know
   whether the AI app is also paired with the page, so an AI app connected to the page and
   to the extension sees such a tool twice.
 

@@ -20,7 +20,7 @@ open. Nothing is installed on the user's computer.
 
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) offers a
 page's tools to agents in the browser; tab-mcp offers them to AI apps outside it. The
-library can do both (`webmcp: true`, DEC-115), and tab-mcp for Chrome passes on the
+library can do both (`webmcp: true`, DEC-115), and the tab-mcp browser extension passes on the
 WebMCP tools of the page in front, in a tab the user gave it (a click on its icon, or
 "Give access to all sites"), top frame only, through the relay
 ([extension](/design/extension.md)).
@@ -41,7 +41,7 @@ path needs goes into all of them.
 | Token store | `TokenStore` interface in the relay package | SQLite file (default), memory, or the library user's own | grants and token hashes per address |
 | Browser's WebMCP (optional) | none: the browser's `document.modelContext` | in the page, with `webmcp: true` | the tools the library mirrors there, for agents in the browser; calls never pass the relay (DEC-115, DEC-119) |
 | The site's own assistant (optional) | `@ractive-ch/tab-mcp-client/tunnel` (`createTunnelFetch`) at the caller's end | wherever the site runs it, e.g. its backend behind a chat frame on the page | the tools, through `mcp.serve(port)`: the relay's `http.*` messages over a port the page hands out; no relay, pairing or address, and `relay` may be left out (iteration 28, DEC-122 to DEC-126); its own question per port and a time limit per request, and `callers` per tool says which of the three callers see a tool (iteration 40, DEC-164 to DEC-167) |
-| tab-mcp for Chrome | `packages/tab-mcp-extension` | Chrome extension, connected to the relay as `chrome-extension://<id>` | the WebMCP tools of the tab in front, the address secret of its own address ([extension](/design/extension.md)) |
+| tab-mcp browser extension | `packages/tab-mcp-extension` | Chrome extension, connected to the relay as `chrome-extension://<id>` | the WebMCP tools of the tab in front, the address secret of its own address ([extension](/design/extension.md)) |
 | End-to-end test page | `test/e2e` | served by the e2e test, against a relay the test starts | four-function calculator with `press_keys`, `read_display`, `clear`, `clear_memory` (consequential); the live examples are on ractive.ch (DEC-080) |
 
 The relay is a dumb pipe for MCP: it authenticates the AI app, checks a few HTTP-level

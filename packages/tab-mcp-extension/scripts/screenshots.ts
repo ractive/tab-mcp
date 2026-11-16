@@ -237,7 +237,7 @@ try {
 			{
 				id: "ext",
 				kind: "rounded",
-				label: "tab-mcp for Chrome",
+				label: "tab-mcp browser extension",
 				color: "green",
 			},
 			{

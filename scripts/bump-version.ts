@@ -133,7 +133,7 @@ async function main(): Promise<void> {
 			.version;
 	const current = await versionOf(pkg);
 	const other = await versionOf(pkg === "client" ? "relay" : "client");
-	// tab-mcp for Chrome's version is named in the pinned docs too.
+	// the tab-mcp browser extension's version is named in the pinned docs too.
 	const extension = (
 		(await file("packages/tab-mcp-extension/package.json").json()) as {
 			version: string;
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
 	] as const)
 		if (v === other || v === extension)
 			throw new Error(
-				`the ${what} version ${v} is also another package's version (relay, client or tab-mcp for Chrome); edit the pinned docs by hand`,
+				`the ${what} version ${v} is also another package's version (relay, client or the tab-mcp browser extension); edit the pinned docs by hand`,
 			);
 
 	// Everything is worked out first, so a refusal leaves no file half done.

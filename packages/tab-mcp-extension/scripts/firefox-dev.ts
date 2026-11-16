@@ -1,5 +1,5 @@
 /**
- * tab-mcp for Firefox while developing it: builds the Firefox build with host
+ * The Firefox build while developing it: builds the Firefox build with host
  * access granted at install (`--all-sites`) into `dist-firefox-dev/` and
  * starts Firefox through ff-rdp (https://github.com/ractive/ff-rdp) with one
  * profile that is kept, with the build as a temporary add-on.

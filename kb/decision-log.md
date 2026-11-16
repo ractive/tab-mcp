@@ -3980,3 +3980,23 @@ descriptions; 1000 characters cut saturnus's (5.1 KB) off.
   common length and the shorter stay whole. Without it 64 tools of 8000 characters were
   about 512 KB in ASCII and up to about 1.5 MB in scripts of 3 bytes a character, past the
   relay's 1 MiB message, and far past what an AI app's context should carry. A total budget across a page's descriptions would prevent it; not decided.
+
+## DEC-193: The extension is called "tab-mcp browser extension" (owner)
+
+2026-11-16, before the Edge Add-ons listing. "tab-mcp for Chrome" read wrong in the Edge
+store and may not pass Microsoft's certification, and the Firefox build (DEC-188) was
+"tab-mcp for Firefox". The owner chose one name for every store and every build.
+
+- The manifest name, the toolbar button, the side panel's title, the notifications and
+  what AI apps get (`PRODUCT`, the server's title and instructions); in prose "the
+  tab-mcp browser extension". The store zip is
+  `tab-mcp-browser-extension-<version>-store.zip` from 0.2.0.
+- The MCP server name is `tab-mcp-browser-extension`, and
+  `tab-mcp-browser-extension-firefox` in the Firefox build, so one AI app can pair with
+  both. The library derives the address secret's storage key from the server name, so
+  the update gives the extension a new address and AI apps pair again: accepted by the
+  owner, no compatibility code.
+- The Chrome Web Store item keeps its id; the listing takes the name from the manifest
+  with 0.2.0. Any slug in a store URL redirects to the item.
+- History keeps the old name: the decision log, iterations, research and the changelog's
+  0.1.0 entry.

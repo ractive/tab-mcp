@@ -24,8 +24,7 @@ Facts to keep in mind (version 0.16.2):
 - [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) is the
   browser's own API for tools that agents in the browser call. tab-mcp is for AI apps
   outside the browser. With `webmcp: true` the library offers the page's tools both ways
-  (section 5). A page that only registers WebMCP tools natively needs no library: the
-  extension tab-mcp for Chrome passes them on to an AI app through a relay.
+  (section 5). A page that only registers WebMCP tools natively needs no library: the tab-mcp browser extension passes them on to an AI app through a relay.
 - tab-mcp fits state that lives only in the browser, and acting as the signed-in user in
   their open tab. If the state lives on the site's server, suggest an MCP server on that
   backend instead: it works without an open tab and without a relay.
@@ -295,7 +294,7 @@ await mcp.registerTool(deleteNoteTool, { callers: ["relay", "webmcp"] }); // con
   native registration (a name already registered natively, a frame without
   `allow="tools"`) only warns in the console; the tool stays offered through the relay.
   A page that registers tools natively itself leaves `webmcp` off or uses other names.
-- tab-mcp for Chrome offers mirrored tools like any page tool, so an AI app connected to
+- The tab-mcp browser extension offers mirrored tools like any page tool, so an AI app connected to
   both the page and the extension sees them twice.
 
 ## 6. Security defaults

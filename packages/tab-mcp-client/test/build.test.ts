@@ -296,7 +296,7 @@ test("docs and plugin manifests name only the current package versions", async (
 		(await Bun.file(join(repo, dir, "package.json")).json()).version as string;
 	const client = await version("packages/tab-mcp-client");
 	const relay = await version("packages/tab-mcp");
-	// tab-mcp for Chrome (Chrome Web Store), named in SECURITY.md and the docs:
+	// the tab-mcp browser extension (Chrome Web Store), named in SECURITY.md and the docs:
 	// its version is accepted only where it follows the extension's name.
 	const extension = await version("packages/tab-mcp-extension");
 	const current = new Set([client, relay]);
@@ -318,9 +318,9 @@ test("docs and plugin manifests name only the current package versions", async (
 		// widen the pattern when a package reaches 1.0. The extension's version
 		// only right after its name.
 		const named = new Set(
-			[...text.matchAll(/tab-mcp for Chrome[^\n]{0,60}?(0\.\d+\.\d+)/g)].map(
-				(m) => m.index + m[0].length - (m[1] ?? "").length,
-			),
+			[
+				...text.matchAll(/tab-mcp browser extension[^\n]{0,60}?(0\.\d+\.\d+)/g),
+			].map((m) => m.index + m[0].length - (m[1] ?? "").length),
 		);
 		for (const m of text.matchAll(
 			/(?<![\d.])(0\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?![.\d])/g,

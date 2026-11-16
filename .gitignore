@@ -9,7 +9,7 @@ dist-firefox
 dist-firefox-dev
 *.tgz
 # the extension's store package (bun scripts/build.ts --store --zip)
-tab-mcp-for-chrome-*.zip
+tab-mcp-browser-extension-*.zip
 
 # code coverage
 coverage

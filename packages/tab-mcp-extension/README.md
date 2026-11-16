@@ -1,4 +1,4 @@
-# tab-mcp for Chrome
+# The tab-mcp browser extension
 
 A Chrome extension that offers the page in front to your AI app outside the browser,
 through a tab-mcp relay. It is the WebMCP bridge of tab-mcp (DEC-114 in `kb/`): pages that
@@ -8,7 +8,7 @@ extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp
 this. How the extension, the relay and the client library fit together, with a picture:
 [How the parts fit together](../../README.md#how-the-parts-fit-together).
 
-Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh). Privacy policy: [PRIVACY.md](PRIVACY.md).
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh). Privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## Tools
 
@@ -109,7 +109,7 @@ The page's tools are the page's word:
 
 ## Install and use it
 
-Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh),
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh),
 or build it and load it unpacked (development; it has the store's id, so the two can't
 share a Chrome profile):
 
@@ -148,7 +148,7 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   while pairing. Off with apps paired, the panel says "AI access is off · paired apps stay
   paired". The relay address is under "Settings". Where you name the connector
   yourself (Claude, ChatGPT), a name such as "Browser" helps: "in my browser" then leads
-  the AI to it (the Claude Code and Codex commands name it `tab-mcp-for-chrome`). The
+  the AI to it (the Claude Code and Codex commands name it `tab-mcp-browser-extension`). The
   extension's instructions and `page_info` tell the AI to call `page_info` first when you
   refer to a page in your browser.
 - The connection lives in the extension's service worker, not in the side panel: close
@@ -247,12 +247,12 @@ key in its manifest, or, without one, from the folder it was loaded from.
   development mode.
 - `bun scripts/build.ts --store` builds the Chrome Web Store package into `dist-store/`
   (no key, no host access, no source maps); `--store --zip` also packs it as
-  `tab-mcp-for-chrome-<version>-store.zip` and refuses a build with a key, host access,
+  `tab-mcp-browser-extension-<version>-store.zip` and refuses a build with a key, host access,
   source maps or the test build's hooks. `--test` builds the end-to-end tests' build (no
   key, host access at install, and the hooks through which the tests answer
   notifications, which no other build has).
 
-## tab-mcp for Firefox (a spike)
+## In Firefox (a spike)
 
 Firefox has no WebMCP. The Firefox build gives every page `document.modelContext` as the
 page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188), so pages
@@ -313,7 +313,7 @@ A tag `extension-v<version>` on main (the version in `package.json`) builds the 
 creates the GitHub release with it and then, after the owner's approval, publishes it to
 the Chrome Web Store (`.github/workflows/extension-release.yml`). The release job attests
 the zip's build provenance; check a release's zip with
-`gh attestation verify tab-mcp-for-chrome-<version>-store.zip -R ractive/tab-mcp`. The
+`gh attestation verify tab-mcp-browser-extension-<version>-store.zip -R ractive/tab-mcp`. The
 publish job takes only a zip that verifies, packs it into a CRX signed with the item's
 verified-upload key and submits it for review. The
 "Extension publish" workflow repeats that publish by hand, for a release whose publish

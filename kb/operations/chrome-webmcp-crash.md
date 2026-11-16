@@ -1,7 +1,7 @@
 ---
 type: operations
 title: "Chrome crash in the store package's e2e tests (SIGILL in CI)"
-description: "Why tab-mcp for Chrome's e2e tests lost Chrome with SIGILL in CI (SIGTRAP on macOS): a bug in Chrome's WebMCP when a document with a tool has getTools() pending while it goes into the back/forward cache (Chromium issue 585631961); how it was found, the evidence, the test's wait that avoids it, and how the extension reads less (DEC-177)."
+description: "Why the tab-mcp browser extension's e2e tests lost Chrome with SIGILL in CI (SIGTRAP on macOS): a bug in Chrome's WebMCP when a document with a tool has getTools() pending while it goes into the back/forward cache (Chromium issue 585631961); how it was found, the evidence, the test's wait that avoids it, and how the extension reads less (DEC-177)."
 tags:
   - operations
   - ci
@@ -50,7 +50,7 @@ snapshot build:
   or browser-initiated navigation, did not crash in 120 rounds. Only an extension's
   content script on `activeTab` hits it.
 
-Users can hit this too: tab-mcp for Chrome from the store, WebMCP on in Chrome, and a
+Users can hit this too: the tab-mcp browser extension from the store, WebMCP on in Chrome, and a
 navigation to another origin while the extension reads the page's tools. It needs a
 report to Chromium (follow-up; the owner decides, it is public).
 

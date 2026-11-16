@@ -1,11 +1,11 @@
 ---
 type: design
-title: "tab-mcp for Chrome: the look"
+title: "tab-mcp browser extension: the look"
 description: >-
   Overmark's design language (paper and ink, tokens with computed contrast for light
   and dark, edges that reach 3:1, one type and spacing scale, forced colours, reduced
   motion, tests that guard the look) mapped onto the side panel and the question
-  window of tab-mcp for Chrome: what is adopted as it is, what is adapted, what is
+  window of the tab-mcp browser extension: what is adopted as it is, what is adapted, what is
   left out and why, and the changes and tests of iteration 39.
 tags:
   - design
@@ -15,7 +15,7 @@ tags:
 timestamp: 2026-11-13T16:00:00+01:00
 ---
 
-# tab-mcp for Chrome: the look
+# tab-mcp browser extension: the look
 
 ## Why
 
@@ -438,7 +438,7 @@ The panel at 380 px, with no app paired and with a question, in light and dark:
 
 # Citations
 
-- [tab-mcp for Chrome: the browser extension](extension.md)
+- [The tab-mcp browser extension](extension.md)
 - [Full review of 2026-11-13: tab-mcp for Chrome, code quality and UX (EQ 11, 17, 18, 20)](../research/review-2026-11-13.md)
 - [Overmark PR 51: The look](https://github.com/ractive/overmark/pull/51)
 - [Overmark: UX review, November 2026 (Visual direction)](https://github.com/ractive/overmark/blob/main/kb/design/ux-review-2026-11.md)

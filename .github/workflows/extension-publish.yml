@@ -31,7 +31,7 @@ jobs:
     with:
       tag: ${{ github.ref_name }}
       tag-prefix: extension-v
-      asset: tab-mcp-for-chrome-{version}-store.zip
+      asset: tab-mcp-browser-extension-{version}-store.zip
       extension-id: jjhddplkjikmbpcobcnfebnglgjomfgh
       attest-signer-workflow: .github/workflows/extension-release.yml
       signing-key-id: jbpcbkngalkckpjgonfkhhcipjmnnofh

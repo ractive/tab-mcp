@@ -10,7 +10,7 @@ and gets an MCP address. The user adds that address to an AI app and pairs it by
 a code from the page on the relay's sign-in page. The relay then forwards the AI app's
 requests to the page. It knows nothing about the tools themselves.
 
-How the relay, the browser library and the extension tab-mcp for Chrome fit together,
+How the relay, the browser library and the tab-mcp browser extension fit together,
 with a picture:
 [How the parts fit together](https://github.com/ractive/tab-mcp#how-the-parts-fit-together).
 

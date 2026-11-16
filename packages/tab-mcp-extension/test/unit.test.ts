@@ -25,6 +25,7 @@ import {
 	SHARE_READ_MS,
 	ToolReads,
 } from "../src/content.ts";
+import { SERVER_NAME } from "../src/protocol.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
 import { ToolRegistry } from "../src/webmcp/registry.ts";
@@ -223,9 +224,13 @@ describe("refusals", () => {
 		expect(noAccess("file:///tmp/a.html").reason).toBe("not-site");
 	});
 
+	test("the MCP server name is the product's (DEC-193)", () => {
+		expect(SERVER_NAME).toBe("tab-mcp-browser-extension");
+	});
+
 	test("a web page needs a click or host access", () => {
 		expect(noAccess("https://example.com/").message).toContain(
-			"click the tab-mcp for Chrome icon in Chrome's toolbar",
+			"The tab-mcp browser extension may not read this tab yet. The user can click its icon in Chrome's toolbar",
 		);
 	});
 });
@@ -358,7 +363,7 @@ describe("calls in the content script", () => {
 		);
 		expect(result).toEqual({
 			ok: false,
-			error: `It returned ${MAX_SEND_RESULT + 1} characters; tab-mcp for Chrome passes on at most ${MAX_SEND_RESULT}.`,
+			error: `It returned ${MAX_SEND_RESULT + 1} characters; the tab-mcp browser extension passes on at most ${MAX_SEND_RESULT}.`,
 		});
 	});
 

@@ -5,7 +5,7 @@
  *   bun scripts/build.ts          development build with the store's public
  *                                 key, so it has the Chrome Web Store id
  *   bun scripts/build.ts --firefox [--all-sites]
- *                                 tab-mcp for Firefox into `dist-firefox/`;
+ *                                 the Firefox build into `dist-firefox/`;
  *                                 `--all-sites` grants host access at install
  *                                 (`scripts/firefox-dev.ts`)
  *   bun scripts/build.ts --test   no key, host access to every http(s) site
@@ -16,7 +16,7 @@
  *                                 Web Store, into `dist-store/` (so it does
  *                                 not replace a development build in `dist/`)
  *   bun scripts/build.ts --store --zip
- *                                 also packs tab-mcp-for-chrome-<version>-store.zip
+ *                                 also packs tab-mcp-browser-extension-<version>-store.zip
  *                                 (`--zip` only with `--store`: a zip of the
  *                                 development build would carry the key)
  *
@@ -79,7 +79,7 @@ export function extensionId(base64Key: string): string {
 /** The Chrome Web Store item's public key (base64 DER), DEC-187. */
 export const KEY_FILE = join(ROOT, "manifest-key.txt");
 
-/** The id the store gave tab-mcp for Chrome: the one `KEY_FILE` gives. */
+/** The id the store gave the tab-mcp browser extension: the one `KEY_FILE` gives. */
 export const STORE_ID = "jjhddplkjikmbpcobcnfebnglgjomfgh";
 
 /** The store's public key, for the development build. */
@@ -108,7 +108,7 @@ export function mitText(name: string, file: string): string {
 export async function notices(packages: Iterable<string>): Promise<string> {
 	const text = (path: string) => Bun.file(join(REPOSITORY, path)).text();
 	const parts = [
-		`tab-mcp for Chrome (with @ractive-ch/tab-mcp-client)\n\n${await text("LICENSE")}\n${await text("AI_NOTICE")}`,
+		`tab-mcp browser extension (with @ractive-ch/tab-mcp-client)\n\n${await text("LICENSE")}\n${await text("AI_NOTICE")}`,
 	];
 	for (const name of [...packages].sort()) {
 		const path = LICENCES[name];
@@ -128,13 +128,13 @@ export function createManifest(
 	);
 	return {
 		manifest_version: 3,
-		name: "tab-mcp for Chrome",
+		name: "tab-mcp browser extension",
 		version,
 		description:
 			"Lets an AI app outside the browser call the WebMCP tools of the page in front and open pages in that tab, through a tab-mcp relay.",
 		minimum_chrome_version: "116",
 		icons,
-		action: { default_title: "tab-mcp for Chrome", default_icon: icons },
+		action: { default_title: "tab-mcp browser extension", default_icon: icons },
 		background: { service_worker: "background.js", type: "module" },
 		side_panel: { default_path: "sidepanel/index.html" },
 		permissions: [
@@ -174,7 +174,7 @@ export function createFirefoxManifest(
 	);
 	return {
 		manifest_version: 3,
-		name: "tab-mcp for Firefox",
+		name: "tab-mcp browser extension",
 		version,
 		description:
 			"Gives pages the WebMCP Firefox lacks and lets an AI app outside the browser call the page's tools and open pages in that tab, through a tab-mcp relay.",
@@ -190,7 +190,7 @@ export function createFirefoxManifest(
 			},
 		},
 		icons,
-		action: { default_title: "tab-mcp for Firefox", default_icon: icons },
+		action: { default_title: "tab-mcp browser extension", default_icon: icons },
 		background: { scripts: ["background.js"], type: "module" },
 		sidebar_action: {
 			default_title: "tab-mcp",
@@ -356,7 +356,7 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 
 /** The store package's file name for `version`. */
 export function storeZipName(version: string): string {
-	return `tab-mcp-for-chrome-${version}-store.zip`;
+	return `tab-mcp-browser-extension-${version}-store.zip`;
 }
 
 /** What only the test build's scripts contain: its hooks for the DevTools Protocol. */
