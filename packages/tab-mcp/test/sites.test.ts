@@ -248,3 +248,52 @@ describe("extension origins (DEC-108)", () => {
 		expect((await t.connect()).origin).toBe(other);
 	});
 });
+
+describe("any Firefox extension (moz-extension://*, iteration 44)", () => {
+	const firefox = "moz-extension://3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f";
+
+	test("admits a Firefox extension's page, which pairs by code and keeps its origin", async () => {
+		const r = relay({
+			allowedOrigins: ["https://page.example", "MOZ-EXTENSION://*"],
+		});
+		expect(r.relay.config.allowedOrigins).toContain("moz-extension://*");
+		const t = new ScriptedTab(r.wsUrl, { origin: firefox, app: "tab-mcp" });
+		tabs.push(t);
+		expect((await t.connect()).origin).toBe(firefox);
+		expect(siteFor(r.relay.config, firefox)).toMatchObject({
+			origin: firefox,
+			pairing: "code",
+		});
+	});
+
+	test("admits nothing else: not a made-up moz-extension origin, not Chrome's, not the web", async () => {
+		const r = relay({ allowedOrigins: ["moz-extension://*"] });
+		for (const origin of [
+			"moz-extension://*",
+			"moz-extension://not-a-uuid",
+			`${firefox}/`,
+			"moz-extension://3F9A6C2E-1B7D-4E8A-9C5F-2D4B6A8E0C1F",
+			"safari-web-extension://3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f",
+			"chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+			"https://page.example",
+		]) {
+			expect(siteFor(r.relay.config, origin)).toBeUndefined();
+			const res = await fetch(`http://127.0.0.1:${r.relay.port}/tab`, {
+				headers: { origin, "sec-websocket-protocol": "tab-mcp.v1" },
+			});
+			expect(res.status).toBe(403);
+		}
+	});
+
+	test("one Firefox extension cannot be listed, nor named in TAB_MCP_SITES", () => {
+		expect(() => relay({ allowedOrigins: [firefox] })).toThrow(
+			"moz-extension://* in TAB_MCP_ALLOWED_ORIGINS",
+		);
+		expect(() =>
+			relay({
+				allowedOrigins: [],
+				sites: [{ origin: "moz-extension://*", name: "tab-mcp for Firefox" }],
+			}),
+		).toThrow();
+	});
+});

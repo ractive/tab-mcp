@@ -3,6 +3,7 @@ import { version } from "../package.json" with { type: "json" };
 import { addressIdFromSecret, isAddressId, shortAddress } from "./address.ts";
 import { readBodyWithDeadline } from "./body.ts";
 import {
+	ANY_FIREFOX_EXTENSION,
 	largestMessageBytes,
 	MIN_MESSAGE_BYTES,
 	type RelayConfig,
@@ -1768,6 +1769,10 @@ function startRelay(
 		logger.warn("relay.no_origins", {
 			message:
 				"TAB_MCP_ALLOWED_ORIGINS and TAB_MCP_SITES are empty: no page can connect",
+		});
+	} else if (config.allowedOrigins.includes(ANY_FIREFOX_EXTENSION)) {
+		logger.info("relay.firefox_extensions", {
+			message: `${ANY_FIREFOX_EXTENSION} lets any Firefox extension's pages open tab sessions on this relay (paired by code)`,
 		});
 	}
 	logger.info("relay.start", {

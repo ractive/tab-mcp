@@ -23,7 +23,8 @@ Configuration is read from environment variables:
   TAB_MCP_PORT                listen port (8080)
   TAB_MCP_HOST                listen address (0.0.0.0)
   TAB_MCP_ALLOWED_ORIGINS     comma-separated page origins allowed to connect; empty = none;
-                              * = any website (open relay, logs a warning)
+                              * = any website (open relay, logs a warning);
+                              moz-extension://* = any Firefox extension's pages (by code)
   TAB_MCP_SITES               JSON array of sites with their own app name or limits, e.g.
                               [{"origin":"https://ractive.ch","name":"saturnus",
                                 "limits":{"maxConcurrentRequests":4}}]

@@ -3861,3 +3861,64 @@ Branch `release/per-package-changelog`.
 - The store build still has no `key` (the store adds it), and `--zip` still refuses one.
 - The old development id leaves the relay's allowed origins once the store build works
   from the store. `TAB_MCP_EXTENSION_KEY_FILE` and the key file in `~/.config` are gone.
+
+## DEC-188: tab-mcp for Firefox gives pages WebMCP from its content script (spike)
+
+2026-11-16, iteration 44 ([research](/research/firefox-webmcp.md)). Firefox has no
+WebMCP; the owner's idea: the extension supplies it.
+
+- **One codebase, a build flag.** `bun scripts/build.ts --firefox` builds tab-mcp for
+  Firefox from `packages/tab-mcp-extension` (`dist-firefox/`, add-on id
+  `tab-mcp@ractive.ch`). What differs is in `src/browser.ts` and the manifest: the
+  sidebar for the side panel, an event page (`background.scripts`) for the service
+  worker, notifications without buttons, Chrome's extension CSP (Firefox's default
+  `upgrade-insecure-requests` turned a relay on the loopback into `wss:`), and Firefox's
+  words in the panel. The Chrome build carries none of it (a build test).
+- **The polyfill runs in the content script, with `exportFunction`** (`src/firefox/webmcp.ts`),
+  registered at `document_start`: it defines `document.modelContext` and
+  `navigator.modelContext` on the page's prototypes, an `EventTarget` of the page's realm
+  whose methods run in the content script, which keeps the tools. No main-world script
+  and no channel through the page: the page sees that the API exists and can use its own
+  tools, nothing else. `content.ts` gets an object with what it reads from Chrome's
+  native WebMCP, so the bridge is unchanged. Where Firefox has WebMCP of its own (a
+  native attribute is visible through the Xrays) the polyfill steps aside.
+- **Why not the others**: a main-world script exposes its code, data and channel to the
+  page (MDN: "the web page can detect and interfere"); `userScripts` is for user script
+  managers only on AMO; MCP-B's `postMessage` channel can be read and forged by the page.
+- **Host access is needed for it to matter.** Pages look for the API once, while
+  loading (Shopify, Hydrogen, the polyfills, Mintlify, GitBook, ReadMe): the script must
+  be there at `document_start`, which only the registered content script is; a click on
+  the icon injects it too late for them.
+- **The event page is kept up while AI access is on**: Firefox stops an idle event page
+  after 30 s, WebSocket or not; a port from a content script does not keep it, Manifest
+  V3 ignores `persistent`. An extension API call every 20 s resets Firefox's timer.
+- **The cost no mechanism avoids**: in Firefox a `document.modelContext` tells every
+  page the polyfill runs on that the user has the extension (DEC-113 counted this
+  against registering recipes). Open for the owner, with whether the build goes on.
+- **Tests**: `test/firefox.ts` drives Firefox over WebDriver BiDi (built in, no driver):
+  the test build installed as a temporary add-on, the panel opened by the test build in
+  a tab (BiDi reaches neither the sidebar nor an extension page by navigation).
+  `test/firefox-e2e.test.ts` runs Chrome's test page through a relay and an MCP client.
+  `test/firefox-sites.ts` checks real sites by hand. ff-rdp's `launch --temporary-addon`
+  (ff-rdp#371) works with the build too.
+
+## DEC-189: A relay can admit any Firefox extension (`moz-extension://*`) (owner)
+
+2026-11-16, iteration 44, question 5; amends DEC-108. The owner asked for the hosted
+relay to admit tab-mcp for Firefox.
+
+- Firefox sends `Origin: moz-extension://<UUID>` from an extension's pages (checked:
+  the background's WebSocket), and the UUID is made up for each installation, not the
+  add-on id. No list can name one Firefox extension; it is all or none.
+- `TAB_MCP_ALLOWED_ORIGINS` takes the entry `moz-extension://*`: an `Origin` of
+  `moz-extension://` and a lower-case UUID, nothing else (not the entry itself sent as
+  a header, not Safari's scheme). The session keeps the real origin, which the pairing
+  page shows as "the browser extension moz-extension://…". It pairs by code always: no
+  identity provider can vouch for any extension's users. The relay logs
+  `relay.firefox_extensions` at start.
+- Not in `TAB_MCP_SITES`: a site's name would be given to every Firefox extension.
+- What it admits beyond tab-mcp for Firefox: any Firefox extension's pages, never a
+  website. DEC-108 already holds that a Chrome id is no proof of the publisher; the
+  pairing code, read in the extension's panel, ties an AI app to it.
+- The hosted relay's setting is the owner's to apply (the ractive.ch repository, with
+  tofu), after a relay release with this change.

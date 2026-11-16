@@ -299,11 +299,27 @@ export function isExtensionOrigin(origin: string): boolean {
 }
 
 /**
+ * The `TAB_MCP_ALLOWED_ORIGINS` entry for any Firefox extension's pages
+ * (iteration 44): Firefox gives every installation its own UUID, so a list
+ * cannot name one extension. Websites cannot send such an origin, as with
+ * `chrome-extension://`; any Firefox extension can.
+ */
+export const ANY_FIREFOX_EXTENSION = "moz-extension://*";
+
+/** Whether `origin` is what Firefox sends from an extension's page. */
+export function isFirefoxExtensionOrigin(origin: string): boolean {
+	return /^moz-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+		origin,
+	);
+}
+
+/**
  * Normalise a page origin, or throw: a web origin (`normalizeOrigin`), or a
  * Chrome or Edge extension's `chrome-extension://<id>`, in lower case without
  * a trailing slash, as Chrome sends it in `Origin` (DEC-108). Firefox and
  * Safari give every installation of an extension its own id, so no list can
- * name them.
+ * name them (`ANY_FIREFOX_EXTENSION` admits all of Firefox's, in
+ * `TAB_MCP_ALLOWED_ORIGINS` only).
  */
 export function normalizePageOrigin(value: string): string {
 	const trimmed = value.trim();
@@ -319,7 +335,7 @@ export function normalizePageOrigin(value: string): string {
 	}
 	if (scheme === "moz-extension" || scheme === "safari-web-extension") {
 		throw new ConfigError(
-			`only Chrome and Edge extensions can be listed (Firefox and Safari give every installation its own id): ${value}`,
+			`only Chrome and Edge extensions can be listed (Firefox and Safari give every installation its own id; ${ANY_FIREFOX_EXTENSION} in TAB_MCP_ALLOWED_ORIGINS admits any Firefox extension): ${value}`,
 		);
 	}
 	if (scheme !== undefined && scheme !== "http" && scheme !== "https") {
@@ -414,7 +430,11 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	const origins = config.allowedOrigins;
 	if (origins !== "*") {
 		config.allowedOrigins = withKey("allowedOrigins", () =>
-			origins.map(normalizePageOrigin),
+			origins.map((origin) =>
+				origin.trim().toLowerCase() === ANY_FIREFOX_EXTENSION
+					? ANY_FIREFOX_EXTENSION
+					: normalizePageOrigin(origin),
+			),
 		);
 	}
 	config.sites = withKey("sites", () =>
@@ -614,7 +634,8 @@ function validateIdentity(config: RelayConfig): void {
 		config.sites.some((s) => (s.pairing ?? config.identity) === "oidc") ||
 		(config.identity === "oidc" &&
 			config.allowedOrigins !== "*" &&
-			config.allowedOrigins.length > 0);
+			// Firefox's extensions pair by code (`siteFor`).
+			config.allowedOrigins.some((o) => o !== ANY_FIREFOX_EXTENSION));
 	if (config.identity === "oidc" && config.allowedOrigins === "*") {
 		throw new ConfigError(
 			"TAB_MCP_IDENTITY=oidc cannot be used with TAB_MCP_ALLOWED_ORIGINS=* (one provider cannot vouch for any website's users)",
@@ -693,7 +714,9 @@ export function siteFor(
 	}
 	if (
 		config.allowedOrigins === "*" ||
-		(origin !== null && config.allowedOrigins.includes(origin))
+		(origin !== null &&
+			origin !== ANY_FIREFOX_EXTENSION &&
+			config.allowedOrigins.includes(origin))
 	) {
 		return {
 			origin: config.allowedOrigins === "*" ? "*" : (origin ?? ""),
@@ -701,6 +724,14 @@ export function siteFor(
 			limits: defaults,
 		};
 	}
+	// Any Firefox extension's page: by pairing code, as on an open relay
+	// (no identity provider can vouch for any extension's users).
+	if (
+		origin !== null &&
+		config.allowedOrigins.includes(ANY_FIREFOX_EXTENSION) &&
+		isFirefoxExtensionOrigin(origin)
+	)
+		return { origin, pairing: "code", limits: defaults };
 	return undefined;
 }
 
