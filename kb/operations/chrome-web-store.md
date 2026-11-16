@@ -239,37 +239,59 @@ sends.
 
 > The extension only passes on tools that a web page registered itself with WebMCP
 > (`document.modelContext.registerTool`). To test: in Chrome 149 or later, turn on
-> chrome://flags/#enable-webmcp-testing and restart. Open a page that registers WebMCP
-> tools (for example any Shopify Liquid storefront, which registers its tools by default).
-> Click the extension's icon: the side panel shows the page's tools. Turn on "AI access":
+> chrome://flags/#enable-webmcp-testing and restart. Open
+> https://ractive.ch/tab-mcp/examples/diagram/, a diagram editor that registers its tools
+> with WebMCP (by the extension's developer). Click the extension's icon: the side panel shows the page's tools. Turn on "AI access":
 > the panel shows an address and a pairing code. Add the address in an MCP client, for
 > example Claude Code: `claude mcp add --transport http tab-mcp-for-chrome <address>`,
 > then `/mcp` → authenticate, and enter the pairing code in the browser page that opens.
-> Ask Claude to list the page's tools (`webmcp_tools`) or call one; a tool that is not
-> read-only asks in the side panel first. Ask it to open another page of the store
+> Ask Claude to draw a small flowchart in the page; a tool that is not read-only (such as
+> `page_add_shapes`) asks in the side panel first. Ask it to open https://ractive.ch/tab-mcp/
 > (`navigate`): on the same site it opens at once; ask it to open another site: the side
 > panel asks first. No account is needed for the extension or the relay.
 
-Check the example storefront and the Chrome version before each submission.
+Check the diagram example and the Chrome version before each submission.
 
-**Screenshots (1280×800, light):** in `packages/tab-mcp-extension/assets/store/`, each an
-example shop page (`https://bakery.example`, made up) beside the side panel, in the look
-of iteration 39 ([the look](../design/extension-look.md)):
+**Store icon (128×128):** `packages/tab-mcp-extension/assets/store/icon-128.png`, the
+extension's icon at 96×96 with 16 px transparent on each side, as the
+[image guidelines](https://developer.chrome.com/docs/webstore/images#icons) ask; the
+manifest's `icons/icon-128.png` fills its square. `bun scripts/icons.ts` renders both
+from the relay's `favicon.svg`.
 
-1. `1-tools.png`: AI access on, Claude Code paired, the page's tools ("reads", the
-   "Always allow" switches and "Always allow all") and "Give access to all sites";
-2. `2-pairing.png`: no AI app paired yet, the address and the pairing code;
-3. `3-question.png`: a question for a page tool in the dialog over the panel, with its
-   arguments, the time left and its bar (Don't allow, "Allow once", "Always allow on
-   bakery.example", all of one button kind, DEC-180);
-4. `4-navigation.png`: a question before the tab goes to another site.
+**Promo tiles (24-bit PNG, no alpha):** `assets/store/promo-small.png` (440×280) and
+`assets/store/promo-marquee.png` (1400×560), in the look of tab-mcp's card image on
+ractive.ch (`static/images/tab-mcp-preview.svg`): its green, the wordmark "tab-mcp" with
+"for Chrome" and "let your AI app use the tab in front", and its drawing of a browser tab
+and an AI app joined through the relay as the MCP logo; no screenshots and little text,
+as the [image guidelines](https://developer.chrome.com/docs/webstore/images#promo) ask.
+`bun scripts/promo.ts` draws them in Chrome for Testing (`CHROME_PATH`) and flattens them
+with ImageMagick; the drawing is copied into the script, so take them again when the card
+image changes.
 
-All four were taken again on 2026-11-15 for DEC-184 to DEC-186 (the switches, the
-dialog, the wording); the script moves the pointer off the dialog before shots 3 and 4.
+**Screenshots (1280×800, light):** in `packages/tab-mcp-extension/assets/store/`, each the
+diagram editor example on ractive.ch (live) beside the side panel, in the look of
+iteration 39 ([the look](../design/extension-look.md)):
+
+1. `1-tools.png`: AI access on, Claude Code paired, the page's 8 tools ("reads", the
+   "Always allow" switches, three of them on, and "Always allow all") and "Give access
+   to all sites"; in the page, the diagram the AI app drew through them (AI app → relay
+   → extension → "You allow?" → page tools);
+2. `2-pairing.png`: no AI app paired yet, the address and the pairing code; the diagram
+   still empty;
+3. `3-question.png`: a question for `page_update_elements` in the dialog over the panel,
+   with its arguments, the time left and its bar (Don't allow, "Allow once", "Always
+   allow on ractive.ch", all of one button kind, DEC-180);
+4. `4-navigation.png`: a question before the tab goes to another site (the repository
+   on GitHub).
+
+Taken again on 2026-11-15 on the diagram example instead of a made-up shop page (owner:
+a real page the reviewer can open); the script moves the pointer off the dialog before
+shots 3 and 4 and scrolls the page to its heading.
 
 `bun scripts/screenshots.ts` in `packages/tab-mcp-extension` takes them again, from the
 store build in Chrome for Testing (`CHROME_PATH`, as for the end-to-end tests), with a relay
-in the process whose addresses read as the hosted relay's. Take them again when the panel's
+in the process whose addresses read as the hosted relay's; the page's requests (ractive.ch
+and its CDN) go to the network. Take them again when the panel's
 look changes, and look at each before the upload. A fifth one, an AI app calling a page
 tool, is taken by hand if wanted.
 
