@@ -230,7 +230,7 @@ async function answerInPanel(
 		)
 		.catch(async (error: unknown) => {
 			const seen = await stack.panel.eval(
-				`({ button: Boolean(${selector}), focus: document.hasFocus(), visibility: document.visibilityState })`,
+				`({ button: Boolean(${selector}), focus: document.hasFocus(), visibility: document.visibilityState, text: document.body.innerText.slice(0, 1500) })`,
 			);
 			throw new Error(`${String(error)}\nThe panel: ${JSON.stringify(seen)}`);
 		});
@@ -323,7 +323,14 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 
 	test("a tool not marked read-only asks in the panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
-		await answerInPanel(stack, "allow");
+		await answerInPanel(stack, "allow").catch(async (error: unknown) => {
+			// How the call ended, if it did: why no question showed.
+			const ended = await Promise.race([
+				allowed,
+				Bun.sleep(1000).then(() => "pending"),
+			]);
+			throw new Error(`${String(error)}\nThe call: ${JSON.stringify(ended)}`);
+		});
 		const result = await allowed;
 		expect(result.content[0]?.text).toContain("tea");
 		expect(result.isError).toBeFalsy();
