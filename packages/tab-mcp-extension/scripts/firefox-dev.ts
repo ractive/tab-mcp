@@ -5,14 +5,18 @@
  * profile that is kept, with the build as a temporary add-on.
  *
  *   bun scripts/firefox-dev.ts [URL] [--headless] [--port N]
+ *   bun scripts/firefox-dev.ts --reload [--port N]
  *
- * A temporary add-on is gone when Firefox quits, and Firefox gives the next
- * one a new UUID and empty storage: a new address for the AI app to pair
- * with. The profile sets `extensions.webextensions.keepUuidOnUninstall` and
- * `keepStorageOnUninstall`, so every launch has the same UUID, relay address
- * and settings; running the script again rebuilds and replaces the running
- * Firefox (ff-rdp's `--replace`). The profile: `TAB_MCP_FIREFOX_PROFILE`, or
- * `~/.cache/tab-mcp/firefox-dev-profile`. ff-rdp's commands reach this
+ * A temporary add-on is gone when Firefox quits, and one loaded again after
+ * its removal gets a new UUID and empty storage: a new address for the AI app
+ * to pair with. The profile sets `extensions.webextensions.keepUuidOnUninstall`
+ * and `keepStorageOnUninstall` against that. (ff-rdp ends Firefox with a
+ * signal, which removes nothing, and a reload keeps both: there the prefs
+ * change nothing.) Running the script again rebuilds and replaces the
+ * running Firefox (ff-rdp's `--replace`); with `--reload` it rebuilds and
+ * reloads the add-on in the running Firefox (`ff-rdp addon reload`, ff-rdp
+ * 0.4.4), tabs open, as an update does. The profile: `TAB_MCP_FIREFOX_PROFILE`,
+ * or `~/.cache/tab-mcp/firefox-dev-profile`. ff-rdp's commands reach this
  * Firefox with `--port N` (6000 unless given).
  */
 
@@ -58,6 +62,7 @@ if (import.meta.main) {
 		allowPositionals: true,
 		options: {
 			headless: { type: "boolean" },
+			reload: { type: "boolean" },
 			port: { type: "string", default: "6000" },
 		},
 	});
@@ -81,7 +86,7 @@ if (import.meta.main) {
 		const set = userPref(after, name);
 		if (set !== String(value))
 			console.error(
-				`${join(profile, "user.js")} sets ${name} to ${set}: each launch may get a new UUID or empty storage`,
+				`${join(profile, "user.js")} sets ${name} to ${set}: loaded again after a removal, the add-on may get a new UUID or empty storage`,
 			);
 	}
 	const { outdir } = await build({
@@ -90,21 +95,29 @@ if (import.meta.main) {
 		outdir: join(import.meta.dir, "..", "dist-firefox-dev"),
 	});
 	console.error(`built ${outdir}\nprofile ${profile}`);
-	const launch = Bun.spawn(
-		[
-			"ff-rdp",
-			"launch",
-			"--profile",
-			profile,
-			"--debug-port",
-			String(values.port),
-			"--replace",
-			"--temporary-addon",
-			outdir,
-			...(values.headless ? ["--headless"] : []),
-			...positionals.slice(0, 1),
-		],
-		{ stdout: "inherit", stderr: "inherit" },
-	);
-	process.exit(await launch.exited);
+	const command = values.reload
+		? ["ff-rdp", "--port", String(values.port), "addon", "reload", outdir]
+		: [
+				"ff-rdp",
+				"launch",
+				"--profile",
+				profile,
+				"--debug-port",
+				String(values.port),
+				"--replace",
+				"--temporary-addon",
+				outdir,
+				...(values.headless ? ["--headless"] : []),
+				...positionals.slice(0, 1),
+			];
+	const launch = Bun.spawn(command, {
+		stdout: "inherit",
+		stderr: "inherit",
+	});
+	const code = await launch.exited;
+	if (code !== 0 && values.reload)
+		console.error(
+			`no reload: is this Firefox running (bun scripts/firefox-dev.ts first), on --port ${values.port}, with ff-rdp 0.4.4 or later (ff-rdp addon)?`,
+		);
+	process.exit(code);
 }

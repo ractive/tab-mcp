@@ -261,11 +261,13 @@ has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`
 1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
    `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
-   A temporary add-on is gone when Firefox quits, and **Reload** gives it a new UUID and
-   empty storage, so a new address the AI app has to pair with again. To keep them while
-   developing, set `extensions.webextensions.keepUuidOnUninstall` and
-   `extensions.webextensions.keepStorageOnUninstall` to `true` in `about:config` (checked
-   in Firefox 160). Open pages keep their WebMCP tools across a reload or update of the
+   **Reload** keeps its UUID and storage, so the address and the AI app's pairing (checked
+   in Firefox 160: `storage.local` and IndexedDB). **Remove** and loading it again is a new
+   installation: a new UUID and empty storage, so a new address the AI app has to pair
+   with, unless `extensions.webextensions.keepUuidOnUninstall` and
+   `extensions.webextensions.keepStorageOnUninstall` are `true` in `about:config`. A
+   temporary add-on is gone when Firefox quits; the two prefs are meant to keep it the
+   same when loaded again (not checked for a quit). Open pages keep their WebMCP tools across a reload or update of the
    extension: the polyfill keeps them in the page, and the new content script, put into
    every open page at once, takes them over (DEC-188).
 3. A relay that admits Firefox extensions. Firefox's origin, `moz-extension://<UUID>`, is
@@ -292,7 +294,10 @@ install (`--all-sites`), and starts Firefox through [ff-rdp](https://github.com/
 with the build as a temporary add-on and one kept profile (`TAB_MCP_FIREFOX_PROFILE`, else
 `~/.cache/tab-mcp/firefox-dev-profile`) that has the two prefs above. Every launch then has
 the same UUID and storage, so the AI app stays paired; running it again rebuilds and
-replaces the running Firefox. ff-rdp's commands reach it with `--port N` (6000 by default).
+replaces the running Firefox. With `--reload` it rebuilds and reloads the add-on in the
+running Firefox instead (`ff-rdp addon reload`, ff-rdp 0.4.4 or later): the tabs stay open,
+and their pages keep their tools, which is what an update does to them. ff-rdp's commands
+reach it with `--port N` (6000 by default).
 
 `bun scripts/build.ts --firefox --test` builds the end-to-end tests' build (host access at
 install, the panel opened in a tab at install). `bun test/firefox-sites.ts` loads real
