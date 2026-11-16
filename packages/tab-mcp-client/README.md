@@ -10,6 +10,10 @@ tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A sit
 assistant can call the same tools over a port, without a relay:
 [Your own assistant on the page](#your-own-assistant-on-the-page).
 
+How the library, the relay and the extension tab-mcp for Chrome fit together, with a
+picture:
+[How the parts fit together](https://github.com/ractive/tab-mcp#how-the-parts-fit-together).
+
 **Status: 0.16.2.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
