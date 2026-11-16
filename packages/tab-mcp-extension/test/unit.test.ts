@@ -5,7 +5,13 @@
 
 import { describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { createManifest, extensionId, mitText } from "../scripts/build.ts";
+import {
+	createManifest,
+	extensionId,
+	mitText,
+	readKey,
+	STORE_ID,
+} from "../scripts/build.ts";
 import {
 	callTool,
 	MAX_LANGUAGE,
@@ -55,6 +61,10 @@ describe("manifest", () => {
 		// It names both things the extension does: the tools and navigation.
 		expect(description).toContain("WebMCP tools");
 		expect(description).toContain("open pages");
+	});
+
+	test("the development build's key gives the Chrome Web Store id", async () => {
+		expect(extensionId(await readKey())).toBe(STORE_ID);
 	});
 
 	test("the id is Chrome's: the SHA-256 of the key, written with a to p", () => {

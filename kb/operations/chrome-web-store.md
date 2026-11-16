@@ -24,7 +24,7 @@ asked for with "Give access to all sites"), the package no source maps, and its 
 test build's hooks (`TAB_MCP_TEST`, a `define`: the functions through which the
 end-to-end tests answer notifications). `zipStoreBuild`
 refuses to pack a build that has any of these, and `--zip` without `--store` is refused,
-since a zip of the development build would carry the owner's key. Every build holds
+since a zip of the development build would carry a `key`. Every build holds
 `LICENSES.txt`.
 
 The zip is reproducible: its entries are sorted, deflated in one zlib call and dated with
@@ -145,9 +145,12 @@ nothing and installs nothing. Dependabot proposes its updates.
    `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`; variables `CWS_PUBLISHER_ID`
    (Publisher → Settings in the dashboard) and `CWS_EXTENSION_ID` (the item's id); yourself
    as required reviewer; deployments limited to tags `extension-v*`.
-9. **Afterwards, if wanted:** remove the development build's id
-   (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`) from the hosted relay's allowed
-   origins the same way. The development build then needs a relay of its own.
+9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (item submitted 2026-11-16). The
+   hosted relay allows it (ractive/ractive.ch#120). The development build has the same id
+   since DEC-187: its manifest carries the item's public key (`manifest-key.txt`, from
+   Package → "View public key" in the dashboard). Once the store build works from the
+   store, remove the old development id (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`)
+   from the relay's allowed origins.
 
 ## Listing
 
