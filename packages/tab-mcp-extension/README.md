@@ -8,7 +8,7 @@ extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp
 this. How the extension, the relay and the client library fit together, with a picture:
 [How the parts fit together](../../README.md#how-the-parts-fit-together).
 
-In review for the Chrome Web Store (submitted 2026-11-16); until then, load it unpacked. Privacy policy: [PRIVACY.md](PRIVACY.md).
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh). Privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## Tools
 
@@ -107,7 +107,11 @@ The page's tools are the page's word:
   is pending (Chromium issue 585631961, `kb/operations/chrome-webmcp-crash.md`); fewer
   reads make that rarer, but only Chrome can fix it.
 
-## Load it unpacked
+## Install and use it
+
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh),
+or build it and load it unpacked (development; it has the store's id, so the two can't
+share a Chrome profile):
 
 ```sh
 bun run build            # in packages/tab-mcp-extension: writes dist/

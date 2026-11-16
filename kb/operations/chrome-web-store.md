@@ -145,12 +145,13 @@ nothing and installs nothing. Dependabot proposes its updates.
    `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`; variables `CWS_PUBLISHER_ID`
    (Publisher → Settings in the dashboard) and `CWS_EXTENSION_ID` (the item's id); yourself
    as required reviewer; deployments limited to tags `extension-v*`.
-9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (item submitted 2026-11-16). The
+9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (submitted 2026-11-16, published
+   public the same day: <https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh>). The
    hosted relay allows it (ractive/ractive.ch#120). The development build has the same id
    since DEC-187: its manifest carries the item's public key (`manifest-key.txt`, from
-   Package → "View public key" in the dashboard). Once the store build works from the
-   store, remove the old development id (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`)
-   from the relay's allowed origins.
+   Package → "View public key" in the dashboard). The old development id
+   (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`) left the relay's allowed origins
+   with ractive/ractive.ch#120.
 
 ## Listing
 
