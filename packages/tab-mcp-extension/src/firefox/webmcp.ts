@@ -104,6 +104,10 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	if (!hasExportHelpers() || !win.isSecureContext) return undefined;
 	if ("modelContext" in win.document) return undefined;
 	const page = (win as Waived).wrappedJSObject as Waived;
+	// Injected after the page set up its own (a click on the icon, after the
+	// load): the page's polyfill stays; the Xray above does not see it.
+	if ("modelContext" in page.document || "modelContext" in page.navigator)
+		return undefined;
 	// The page's realm: what the page gets is made from these.
 	const PagePromise = (win as Waived).Promise as PromiseConstructor;
 	const PageEvent = (win as Waived).Event as typeof Event;
@@ -118,16 +122,23 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	const tools = new Map<string, Entry>();
 	const listeners = new Set<() => void>();
 
+	/**
+	 * A promise of the page's realm settled by `work`, which runs at once (a
+	 * promise's executor runs synchronously): a registration takes effect
+	 * before the page's next call, in the order the page makes them.
+	 */
 	const pagePromise = <T>(work: () => T | Promise<T>): Promise<T> =>
 		new PagePromise<T>(
 			exportFunction(
 				(resolve: (value: T) => void, reject: (reason: unknown) => void) => {
-					Promise.resolve()
-						.then(work)
-						.then(
+					try {
+						Promise.resolve(work()).then(
 							(value) => resolve(value),
 							(error: unknown) => reject(toPage(error)),
 						);
+					} catch (error) {
+						reject(toPage(error));
+					}
 				},
 				win,
 			),
@@ -157,13 +168,17 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 		}
 	};
 
-	const unregister = (name: string) => {
+	/** Take tool `name` out, without telling anyone; whether it was there. */
+	const remove = (name: string) => {
 		const entry = tools.get(name);
 		if (entry === undefined) return false;
 		tools.delete(name);
 		entry.stop?.();
-		changed();
 		return true;
+	};
+
+	const unregister = (name: string) => {
+		if (remove(name)) changed();
 	};
 
 	/** Read the page's tool into an entry, or throw a `PageError`. */
@@ -295,26 +310,37 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	// The older `provideContext({ tools })`: these tools instead of the last ones given so.
 	let provided: string[] = [];
 	const provideContext = (value: unknown) =>
-		pagePromise(async () => {
-			for (const name of provided) unregister(name);
-			provided = [];
+		pagePromise(() => {
 			const raw = (value as Waived)?.wrappedJSObject ?? value;
 			const given = raw?.tools;
 			const count = Number(given?.length ?? 0);
+			// All read and checked first: an invalid tool changes nothing. At
+			// most MAX_TOOLS entries are read (a made-up `length`).
+			const fresh = new Map<string, Entry>();
 			for (let i = 0; i < Math.min(count, MAX_TOOLS); i++) {
 				const entry = read(given[i]);
-				if (tools.has(entry.info.name)) continue;
-				tools.set(entry.info.name, entry);
-				provided.push(entry.info.name);
+				const name = entry.info.name;
+				// A name registered with registerTool keeps its tool.
+				if (tools.has(name) && !provided.includes(name)) continue;
+				if (!fresh.has(name)) fresh.set(name, entry);
 			}
+			// The same limit as registerTool's, over all the page's tools.
+			const kept = tools.size - provided.filter((n) => tools.has(n)).length;
+			if (kept + fresh.size > MAX_TOOLS)
+				throw new PageError("QuotaExceededError", "too many tools");
+			for (const name of provided) remove(name);
+			provided = [...fresh.keys()];
+			for (const [name, entry] of fresh) tools.set(name, entry);
 			changed();
 			return undefined;
 		});
 	exportFunction(provideContext, context, { defineAs: "provideContext" });
 	exportFunction(
 		() => {
-			for (const name of [...tools.keys()]) unregister(name);
+			const any = tools.size > 0;
+			for (const name of [...tools.keys()]) remove(name);
 			provided = [];
+			if (any) changed();
 		},
 		context,
 		{ defineAs: "clearContext" },

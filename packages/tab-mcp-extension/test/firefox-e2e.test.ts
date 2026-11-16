@@ -377,6 +377,51 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 			tools: 5,
 		});
 	});
+
+	// navigator.modelContext from here: the test before replaced the document's getter.
+	test("registerTool then unregisterTool in one tick: the page's order holds", async () => {
+		const names = await stack.tab.eval<string[]>(`(async () => {
+			const context = navigator.modelContext;
+			const done = context.registerTool({ name: "short_lived", description: "d", execute: () => "x" });
+			context.unregisterTool("short_lived");
+			await done;
+			return (await context.getTools()).map((t) => t.name);
+		})()`);
+		expect(names).not.toContain("short_lived");
+	});
+
+	test("provideContext with an invalid tool changes nothing; at most 1024 tools over all calls", async () => {
+		const seen = await stack.tab.eval<{
+			invalid: string;
+			afterInvalid: number;
+			quota: string;
+			total: number;
+		}>(`(async () => {
+			const context = navigator.modelContext;
+			const tool = (name) => ({ name, description: "d", execute: () => "x" });
+			const count = async () => (await context.getTools()).length;
+			const before = await count();
+			let invalid = "none";
+			try {
+				await context.provideContext({ tools: [tool("ok_one"), { name: "broken" }] });
+			} catch (e) {
+				invalid = e.name;
+			}
+			const afterInvalid = (await count()) - before;
+			for (let i = 0; i < 1000; i++) await context.registerTool(tool("r" + i));
+			let quota = "none";
+			try {
+				await context.provideContext({ tools: Array.from({ length: 1000 }, (_, i) => tool("p" + i)) });
+			} catch (e) {
+				quota = e.name;
+			}
+			return { invalid, afterInvalid, quota, total: await count() };
+		})()`);
+		expect(seen.invalid).toBe("TypeError");
+		expect(seen.afterInvalid).toBe(0);
+		expect(seen.quota).toBe("QuotaExceededError");
+		expect(seen.total).toBeLessThanOrEqual(1024);
+	});
 });
 
 describe.skipIf(!firefoxOk)(

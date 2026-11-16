@@ -189,7 +189,11 @@ function notificationClicked(id: string): void {
 }
 chrome.notifications.onButtonClicked.addListener(notificationButton);
 chrome.notifications.onClicked.addListener(notificationClicked);
-chrome.notifications.onClosed.addListener(notificationDismissed);
+// Not in Firefox: its notifications have no `requireInteraction` and close by
+// themselves, which fires `onClosed` too (Firefox gives no `byUser`), so a
+// close is no answer there; the question's own time limit, the panel and
+// the badge stay.
+if (!FIREFOX) chrome.notifications.onClosed.addListener(notificationDismissed);
 // The Firefox test build opens the panel at install, in a tab in front (the
 // tests open their pages in another window; the tab in front is then the
 // page's, `tabInFront`): WebDriver BiDi can neither reach the sidebar nor

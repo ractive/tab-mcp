@@ -3,7 +3,7 @@
  * and asking it.
  */
 
-import { BROWSER, PANEL, PRODUCT } from "./browser.ts";
+import { BROWSER, FIREFOX, PANEL, PRODUCT } from "./browser.ts";
 import {
 	type CallResult,
 	CONTENT_SCRIPT,
@@ -111,28 +111,64 @@ export class NoAccessError extends Error {
 
 const NO_GRANT = `${PRODUCT} may not read this tab yet. The user can click the ${PRODUCT} icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.`;
 
+/**
+ * The hosts Firefox keeps extensions out of (its default
+ * `extensions.webextensions.restrictedDomains`).
+ */
+const FIREFOX_RESTRICTED = new Set([
+	"accounts-static.cdn.mozilla.net",
+	"accounts.firefox.com",
+	"addons.cdn.mozilla.net",
+	"addons.mozilla.org",
+	"api.accounts.firefox.com",
+	"content.cdn.mozilla.net",
+	"discovery.addons.mozilla.org",
+	"install.mozilla.org",
+	"oauth.accounts.firefox.com",
+	"profile.accounts.firefox.com",
+	"support.mozilla.org",
+	"sync.services.mozilla.com",
+]);
+
+/** A page of the browser's add-on store (or Firefox's other restricted hosts). */
+function isStorePage(url: string): boolean {
+	if (!FIREFOX) return /^https:\/\/chromewebstore\.google\.com\//i.test(url);
+	try {
+		const { protocol, hostname } = new URL(url);
+		return protocol === "https:" && FIREFOX_RESTRICTED.has(hostname);
+	} catch {
+		return false;
+	}
+}
+
 /** The answer to an access problem: its reason, and what the AI app is told. */
 export function noAccess(url: string): NoAccessError {
 	// Without a grant Chrome hides the tab's address: "" is any page.
 	if (url === "")
 		return new NoAccessError(
 			"hidden",
-			`${NO_GRANT} (Browser pages such as chrome:// cannot be read at all.)`,
+			`${NO_GRANT} (Browser pages such as ${FIREFOX ? "about:" : "chrome://"} cannot be read at all.)`,
 		);
-	if (/^(chrome|edge|about|devtools|view-source):/i.test(url))
+	if (
+		/^(chrome|edge|about|devtools|view-source|moz-extension|resource):/i.test(
+			url,
+		)
+	)
 		return new NoAccessError(
 			"browser-page",
-			"Chrome does not let extensions read this tab (a browser page). Switch to a web page.",
+			`${BROWSER} does not let extensions read this tab (a browser page). Switch to a web page.`,
 		);
-	if (/^https:\/\/chromewebstore\.google\.com\//i.test(url))
+	if (isStorePage(url))
 		return new NoAccessError(
 			"web-store",
-			"Chrome does not let extensions read the Chrome Web Store.",
+			FIREFOX
+				? "Firefox does not let extensions read addons.mozilla.org and Mozilla's account and support sites."
+				: "Chrome does not let extensions read the Chrome Web Store.",
 		);
 	if (!isSitePage(url))
 		return new NoAccessError(
 			"not-site",
-			"tab-mcp for Chrome works only on pages of http(s) sites (not file: or other pages). Switch to a web page.",
+			`${PRODUCT} works only on pages of http(s) sites (not file: or other pages). Switch to a web page.`,
 		);
 	return new NoAccessError("no-grant", NO_GRANT);
 }
