@@ -1,15 +1,15 @@
 ---
 type: research
 title: "WebMCP in Firefox through an extension: the ways, and which sites register"
-description: "Iteration 44, questions 0 and 1 from sources and code, nothing run in Firefox yet: an isolated content script that defines document.modelContext for the page with exportFunction at document_start is the way (no channel through the page); a main-world script with a channel is for Chrome only, userScripts is barred by AMO; Mozilla is neutral and has only an old prototype behind a pref. Shopify storefronts, Hydrogen, the MCP-B and W3C polyfills, Mintlify, GitBook and ReadMe all detect WebMCP by presence alone, so they would register with it; what the object must do for them."
+description: "Iteration 44, questions 0 and 1, then confirmed in Firefox 160: an isolated content script that defines document.modelContext for the page with exportFunction at document_start is the way (no channel through the page); a main-world script with a channel is for Chrome only, userScripts is barred by AMO; Mozilla is neutral and has only an old prototype behind a pref. Shopify storefronts, Hydrogen, the MCP-B and W3C polyfills, Mintlify, GitBook and ReadMe detect WebMCP by presence alone and register with it (eight real sites did in Firefox); what the object must do for them; what Firefox sends to the relay and how its event page lives."
 timestamp: 2026-11-16T18:00:00+01:00
 tags: [webmcp, extension, firefox, research]
 ---
 # WebMCP in Firefox through an extension
 
 Iteration 44's questions 0 and 1, answered from documentation, Firefox's source, bugs and the
-sites' own scripts on 2026-11-16 (Firefox 160 is the release). Nothing here was run in Firefox:
-the list at the end is what the spike's test extension has to confirm.
+sites' own scripts on 2026-11-16 (Firefox 160 is the release); the last section is what the
+spike then confirmed in Firefox.
 
 ## The way: `exportFunction` from the content script
 
@@ -134,16 +134,34 @@ pages before load, the same idea, and found 13,352 sites registering; of 400 it 
 5. Take both an MCP `CallToolResult` (Shopify, Mintlify, GitBook) and a plain object (ReadMe)
    as a result: the bridge already maps both (DEC-113, iteration 34).
 
-## For the test extension to confirm
+## Confirmed in Firefox 160 (the spike)
 
-1. `exportFunction` and `wrappedJSObject` in a Manifest V3 content script on Firefox 160.
-2. Events: `new window.EventTarget()`, page listeners, `instanceof EventTarget`, the `on…`
-   handlers as exported accessors.
-3. Awaiting the page's promise from `execute`, and handing it a signal.
-4. Errors: `new window.DOMException(…)` reaches the page as it is.
-5. `@mcp-b/global` 6.x and 5.x on top of the getter; the Shopify script on a real storefront.
-6. Whether a page's stack trace through an exported function shows a `moz-extension://` URL.
-7. Host access after reloading a temporary add-on.
+Iteration 44 built the Firefox build and ran it headless over WebDriver BiDi (and with
+ff-rdp's `launch --temporary-addon`):
+
+1. `exportFunction`, `cloneInto` and `wrappedJSObject` are there in a Manifest V3 content
+   script; `execute` is hidden by the Xray and reached through `wrappedJSObject`.
+2. Events: an `EventTarget` made with `new window.EventTarget()` is one in the page;
+   `toolchange` dispatched from the content script reaches the page's listeners.
+3. The content script awaits the page's promise from `execute`; a signal made with
+   `new window.AbortController()` is `instanceof AbortSignal` in the page, and its abort
+   reaches the page.
+4. Errors: `InvalidStateError` for a taken name reaches the page with its name and
+   message (made with the page's `DOMException`).
+5. `@mcp-b/global` 6.2.0, 4.0.0 and 2.2.0 and `@mcp-b/webmcp-polyfill` 6.2.0, 5.1.0 and
+   3.0.0 register through the getter; `@mcp-b/global` 5.1.0 throws `SecurityError` in
+   Firefox on its own (npm-packages#357). Four Shopify storefronts, two Mintlify, a
+   GitBook and a ReadMe site register; two pages without a WebMCP loader do not.
+6. No `moz-extension://` URL in what the page sees: the exported functions read as
+   `[native code]`, errors made for the page have an empty stack, and a stack taken in
+   `execute` has only the page's frames. The page learns that the extension is there,
+   not which installation.
+7. Not checked: host access after reloading a temporary add-on.
+
+Also found: Firefox sends `Origin: moz-extension://<UUID>` on the background's
+WebSocket; an idle event page is stopped after 30 s, WebSocket and all, unless an
+extension API is called (a content script's port and `persistent` do not keep it);
+Firefox's default extension CSP upgrades `ws://127.0.0.1` to `wss:`.
 
 # Citations
 

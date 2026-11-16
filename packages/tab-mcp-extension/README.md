@@ -248,6 +248,39 @@ key in its manifest, or, without one, from the folder it was loaded from.
   key, host access at install, and the hooks through which the tests answer
   notifications, which no other build has).
 
+## tab-mcp for Firefox (a spike)
+
+Firefox has no WebMCP. The Firefox build gives every page `document.modelContext` as the
+page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188), so pages
+that register their tools wherever the API exists (Shopify's storefronts, Mintlify, GitBook
+and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
+the extension offers them to the AI app as in Chrome. Iteration 44; not released.
+
+1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
+2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
+   `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
+   A temporary add-on is gone when Firefox quits.
+3. A relay that admits Firefox extensions. Firefox's origin, `moz-extension://<UUID>`, is
+   made up for each installation, so a relay admits all Firefox extensions or none
+   (DEC-189). The hosted relay does not yet; run one locally:
+
+   ```sh
+   NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 \
+     TAB_MCP_ALLOWED_ORIGINS='moz-extension://*' TAB_MCP_STORE=memory \
+     bun packages/tab-mcp/src/main.ts
+   ```
+
+4. Click the tab-mcp icon: the sidebar opens. Under **Settings** set the relay to
+   `http://localhost:8080`, then **Give access to all sites** (Firefox asks): only then does
+   every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
+5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
+   to your AI app (`claude mcp add --transport http tab-mcp-firefox <address>`), with the
+   pairing code from the sidebar.
+
+`bun scripts/build.ts --firefox --test` builds the end-to-end tests' build (host access at
+install, the panel opened in a tab at install). `bun test/firefox-sites.ts` loads real
+WebMCP sites with it and lists the tools each registers (needs the network).
+
 ## Releases
 
 A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip
@@ -310,6 +343,14 @@ setup, the listing, the permission justifications and the review notes:
   run in CI on every change.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
+- `test/firefox-e2e.test.ts`: the Firefox test build in Firefox 128 or newer
+  (`FIREFOX_PATH`, else where it is installed; skipped without it) over WebDriver BiDi
+  (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
+  extension's `document.modelContext` as it loads, and a relay and an MCP client list,
+  call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page replacing
+  the getter); the event page outlasts Firefox's idle timeout with the panel closed; the
+  panel says Firefox, not Chrome. Pages on http://localhost. `test/firefox-sites.ts` (by
+  hand, the network): real sites.
 
 ## Licence
 

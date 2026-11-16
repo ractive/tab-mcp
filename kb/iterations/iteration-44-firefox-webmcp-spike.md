@@ -113,32 +113,80 @@ A spike: a research note and a decision, not a feature.
 ## Tasks
 
 - [x] Question 0: the ways, compared in the research note, with sources
-- [ ] The test harness: `ff-rdp` (the owner's Firefox Remote Debugging Protocol CLI)
+- [x] The test harness: `ff-rdp` (the owner's Firefox Remote Debugging Protocol CLI)
       launches Firefox, opens the sites and reads what the page sees (`eval`,
       `console`). It does not install an unsigned extension yet: a profile's
       `extensions/` folder takes only signed ones (as `--auto-consent` does with
       Consent-O-Matic) in release Firefox. Either `ff-rdp` gains a temporary install
       (the root actor's `installTemporaryAddon`, what `web-ext run` and
       `about:debugging` use), or the spike uses `web-ext`; decide by which one CI can run
-- [ ] Questions 1 and 2: a minimal polyfill that only records registrations,
+- [x] Questions 1 and 2: a minimal polyfill that only records registrations,
       defined from the content script with `exportFunction` at `document_start`, run in
       Firefox on the diagram example and on a list of WebMCP sites; write down which
       register, how and when, and whether `@mcp-b/global` registers through it
-- [ ] A test extension in `test/firefox-spike/` (the polyfill, its object
+- [x] A test extension in `test/firefox-spike/` (the polyfill, its object
       for `content.ts`, a sidebar, the connection to a relay), run automatically in
       Firefox with that harness
-- [ ] Only if question 6 is worth it: the main-world script and its `MessageChannel` in
+- [-] Only if question 6 is worth it: the main-world script and its `MessageChannel` in
       Chrome without WebMCP
-- [ ] Try a local relay with an open origin list and a `moz-extension://` origin
-- [ ] Research note `research/firefox-webmcp.md` with versions, quotes and the counts
+- [x] Try a local relay with an open origin list and a `moz-extension://` origin
+- [x] Research note `research/firefox-webmcp.md` with versions, quotes and the counts
       of question 1
 - [ ] A decision: whether a Firefox build goes ahead, with or without the polyfill for
       Chrome (question 6), and what the relay accepts (question 5, owner)
 
 ## Out of scope
 
-Building the Firefox extension; Safari (`safari-web-extension://`, an App Store app);
-changing the relay before the decision.
+Releasing the Firefox build (addons.mozilla.org); Safari (`safari-web-extension://`, an
+App Store app). Built after all, on the owner's request (2026-11-16): a working Firefox
+build as the spike's sample, and the relay's `moz-extension://*` (DEC-189).
+
+## Results
+
+2026-11-16, Firefox 160 on macOS. The owner asked for a sample by the morning: a Firefox
+build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
+
+- **The way (questions 0, 2, 3): DEC-188.** Not a test extension in `test/firefox-spike/`
+  but a Firefox build of tab-mcp for Chrome itself (`bun scripts/build.ts --firefox`):
+  the content script defines `document.modelContext` for the page with `exportFunction`
+  (`src/firefox/webmcp.ts`) and hands `content.ts` the same interface Chrome's WebMCP
+  has, so the bridge, the panel, the questions and the relay connection are unchanged.
+  Confirmed in Firefox, the research note's open points: the export helpers in a
+  Manifest V3 content script; the page's tool object read through `wrappedJSObject`
+  (`execute` is hidden by the Xray); promises, errors (`InvalidStateError` for a name
+  taken) and events (`toolchange`) made in the page's realm reach the page intact; a page
+  `AbortSignal` handed to `execute` (`instanceof AbortSignal` in the page).
+- **Real sites (question 1)**, `test/firefox-sites.ts`: allbirds, kyliecosmetics,
+  brooklinen, colourpop (Shopify Liquid, 12 tools each), launchdarkly and openrouter docs
+  (Mintlify, 5), gitbook.com/docs (3), developer.themoviedb.org (ReadMe, 3) register in
+  Firefox. gymshark.com and fashionnova.com register nothing: their pages have no WebMCP
+  loader at all (the research read Gymshark's checkout host).
+- **Page polyfills on top**: `@mcp-b/global` 6.2.0, 4.0.0 and 2.2.0 and
+  `@mcp-b/webmcp-polyfill` 6.2.0, 5.1.0 and 3.0.0 all bring the page's tool into the
+  extension's object, and a call with a signal works. `@mcp-b/global` 5.1.0 fails in
+  Firefox with or without the extension: its own polyfill throws `SecurityError`
+  (npm-packages#357).
+- **Firefox's extension APIs (question 4)**: the sidebar for the side panel; the event
+  page is stopped after 30 s idle, WebSocket and all, unless an extension API is called
+  (every 20 s while AI access is on; a content script's port and `persistent` do not
+  help); notifications without buttons; Firefox's default extension CSP upgrades
+  `ws://127.0.0.1` to `wss:` (the build sets Chrome's CSP).
+- **The relay (question 5)**: Firefox sends `Origin: moz-extension://<UUID>`, a UUID
+  per installation (the add-on id is not in it). On the owner's request a relay now
+  takes `moz-extension://*` (DEC-189); checked with the real relay and the build.
+- **Harness**: WebDriver BiDi, built into Firefox (`test/firefox.ts`): temporary
+  install (`webExtension.install`), evaluation in pages and, with
+  `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS`, in the panel. BiDi cannot open or reach the sidebar,
+  navigate to an extension page or focus a second window in headless Firefox, so the test
+  build opens the panel in a tab and the tests open their pages in another window. CI
+  runs it where Firefox is installed. ff-rdp's `launch --temporary-addon` (ff-rdp#371)
+  installs the build too and found allbirds' 12 tools on the first page.
+- **Not tested**: the development build's own flow in a real (not headless) Firefox:
+  the icon opening the sidebar, "Give access to all sites" and Firefox's prompt, a
+  real AI app's pairing (the relay's pairing is the same as for Chrome).
+- **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org), the
+  fingerprint every page sees, whether the hosted relay sets `moz-extension://*` (after
+  a relay release), and question 6 (Chrome without WebMCP), not tried.
 
 # Citations
 
