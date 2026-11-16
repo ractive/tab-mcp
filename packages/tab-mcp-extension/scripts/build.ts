@@ -15,6 +15,11 @@
  *   bun scripts/build.ts --store  no key and no source maps, for the Chrome
  *                                 Web Store, into `dist-store/` (so it does
  *                                 not replace a development build in `dist/`)
+ *   bun scripts/build.ts --firefox --store [--zip]
+ *                                 the Firefox store package for
+ *                                 addons.mozilla.org into `dist-firefox-store/`,
+ *                                 without source maps; `--zip` packs
+ *                                 tab-mcp-browser-extension-firefox-<version>-store.zip
  *   bun scripts/build.ts --store --zip
  *                                 also packs tab-mcp-browser-extension-<version>-store.zip
  *                                 (`--zip` only with `--store`: a zip of the
@@ -277,8 +282,8 @@ export async function checkOutdir(outdir: string): Promise<void> {
 }
 
 export async function build(options: BuildOptions = {}): Promise<BuildResult> {
-	if (options.firefox && options.store)
-		throw new Error("no store package of the Firefox build yet");
+	if (options.firefox && options.store && options.allSites)
+		throw new Error("--all-sites is for development, not the store package");
 	if (options.allSites && !options.firefox)
 		throw new Error("--all-sites is for the Firefox build");
 	const outdir = resolve(
@@ -286,7 +291,9 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			join(
 				ROOT,
 				options.firefox
-					? "dist-firefox"
+					? options.store
+						? "dist-firefox-store"
+						: "dist-firefox"
 					: options.store
 						? "dist-store"
 						: "dist",
@@ -354,9 +361,9 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	return { outdir, manifest, id: key ? extensionId(key) : undefined };
 }
 
-/** The store package's file name for `version`. */
-export function storeZipName(version: string): string {
-	return `tab-mcp-browser-extension-${version}-store.zip`;
+/** The store package's file name for `version` (the Firefox build's for addons.mozilla.org). */
+export function storeZipName(version: string, firefox = false): string {
+	return `tab-mcp-browser-extension-${firefox ? "firefox-" : ""}${version}-store.zip`;
 }
 
 /** What only the test build's scripts contain: its hooks for the DevTools Protocol. */
@@ -485,7 +492,10 @@ if (import.meta.main) {
 				: `Built ${where} (no key)`,
 	);
 	if (values.zip) {
-		const target = join(ROOT, storeZipName(String(result.manifest["version"])));
+		const target = join(
+			ROOT,
+			storeZipName(String(result.manifest["version"]), values.firefox === true),
+		);
 		await zipStoreBuild(result.outdir, target);
 		console.log(`Packed ${relative(process.cwd(), target)}`);
 	}
