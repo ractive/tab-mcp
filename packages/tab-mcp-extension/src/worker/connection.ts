@@ -14,7 +14,7 @@ import {
 	type ReplacedDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
-import { notificationOptions, openPanel } from "../browser.ts";
+import { notificationOptions, openPanel, PANEL, PRODUCT } from "../browser.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	type GrantView,
@@ -243,12 +243,12 @@ export class Connection {
 			relay,
 			server: {
 				name: SERVER_NAME,
-				title: "tab-mcp for Chrome",
+				title: PRODUCT,
 				version: chrome.runtime.getManifest().version,
 				instructions: INSTRUCTIONS,
 				icons: this.#icons,
 			},
-			appName: "tab-mcp for Chrome",
+			appName: PRODUCT,
 			storage: this.#storage,
 			// No tool of the extension is consequential: the page tools ask in
 			// the bridge, the navigation tools themselves (DEC-141).
@@ -825,6 +825,11 @@ export class Connection {
 
 	// --- State ---
 
+	/** Whether the user left AI access on. */
+	get aiOn(): boolean {
+		return this.#aiOn;
+	}
+
 	get state(): PanelState {
 		const mcp = this.#mcp;
 		const status = this.#status();
@@ -899,13 +904,13 @@ export class Connection {
 				? [
 						"?",
 						BADGE_LOOK.question,
-						`tab-mcp for Chrome: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the side panel to answer.`,
+						`${PRODUCT}: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the ${PANEL} to answer.`,
 					]
 				: status === "on" || status === "waiting"
-					? ["on", BADGE_LOOK.on, "tab-mcp for Chrome: AI access is on"]
+					? ["on", BADGE_LOOK.on, `${PRODUCT}: AI access is on`]
 					: status === "connecting" || status === "retrying"
-						? ["…", BADGE_LOOK.idle, "tab-mcp for Chrome: connecting"]
-						: ["", BADGE_LOOK.idle, "tab-mcp for Chrome"];
+						? ["…", BADGE_LOOK.idle, `${PRODUCT}: connecting`]
+						: ["", BADGE_LOOK.idle, PRODUCT];
 		void chrome.action.setBadgeText({ text }).catch(() => {});
 		// Said, not left to Chrome's choice between black and white.
 		void chrome.action

@@ -7,6 +7,7 @@
  * pairing, which stops.
  */
 
+import { FIREFOX, FIREFOX_PANEL_TEXTS, PRODUCT } from "../browser.ts";
 import {
 	PANEL_PORT,
 	type PanelCommand,
@@ -56,6 +57,15 @@ function setText(element: HTMLElement, text: string): void {
 	if (element.textContent !== text) element.textContent = text;
 }
 
+// Firefox's words where the panel's page names Chrome (iteration 44).
+if (FIREFOX) {
+	document.title = PRODUCT;
+	for (const [id, text] of Object.entries(FIREFOX_PANEL_TEXTS)) {
+		const element = document.getElementById(id);
+		if (element) element.textContent = text;
+	}
+}
+
 const { id: windowId } = await chrome.windows.getCurrent();
 
 let port: chrome.runtime.Port | undefined;
@@ -97,7 +107,7 @@ function connect(): void {
 		// to the version before and can reach nothing any more.
 		port = undefined;
 		problem(
-			"tab-mcp for Chrome was updated or reloaded: close and open this panel again.",
+			`${PRODUCT} was updated or reloaded: close and open this panel again.`,
 		);
 		return;
 	}

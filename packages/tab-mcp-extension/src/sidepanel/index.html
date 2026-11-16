@@ -42,7 +42,7 @@
 		<div id="pairing" class="pairing" hidden>
 			<h3>Pair an AI app</h3>
 			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
-			<p class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
+			<p id="pairing-profile" class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
 			<div class="address">
 				<code id="address"></code>
 				<button id="copy" type="button" class="quiet small copy" aria-label="Copy address">Copy</button>
@@ -84,7 +84,7 @@
 			<div class="buttons">
 				<button id="allow-all" type="button">Give access to all sites</button>
 			</div>
-			<p class="muted small">Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.</p>
+			<p id="host-access-note" class="muted small">Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.</p>
 		</div>
 		<p id="allowed-all" class="muted small" hidden>
 			tab-mcp has access to all sites. <button id="disallow-all" type="button" class="link">Remove access to all sites</button>

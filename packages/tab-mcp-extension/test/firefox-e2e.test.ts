@@ -119,7 +119,10 @@ async function mcpClient(relay: TestRelay, address: string): Promise<Client> {
 	return client;
 }
 
-async function start(page: string): Promise<Stack> {
+async function start(
+	page: string,
+	prefs: Record<string, string | number | boolean> = {},
+): Promise<Stack> {
 	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-ext-"));
 	const relay = startTestRelay();
 	const server = serve();
@@ -138,6 +141,7 @@ async function start(page: string): Promise<Stack> {
 				"extensions.webextensions.uuids": JSON.stringify({
 					[FIREFOX_ID]: UUID,
 				}),
+				...prefs,
 			},
 		});
 		expect(await firefox.installExtension(outdir)).toBe(FIREFOX_ID);
@@ -263,6 +267,15 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 		]);
 	});
 
+	test("the panel speaks of Firefox, not Chrome", async () => {
+		expect(await stack.panel.eval("document.title")).toBe(
+			"tab-mcp for Firefox",
+		);
+		const html = await stack.panel.eval<string>("document.body.innerHTML");
+		expect(html).not.toContain("Chrome");
+		expect(html).not.toContain("chrome://");
+	});
+
 	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {
 		const names = await waitForTools(
 			stack,
@@ -365,3 +378,35 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 		});
 	});
 });
+
+describe.skipIf(!firefoxOk)(
+	"the event page (Firefox has no extension service workers)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			// Firefox stops an idle event page after 30 s; here after 3 s.
+			stack = await start("webmcp.html", {
+				"extensions.background.idle.timeout": 3_000,
+			});
+		}, 90_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("with the panel open, the connection outlasts the idle timeout", async () => {
+			await Bun.sleep(10_000);
+			const result = await call(stack, "page_info");
+			expect(result.structuredContent?.["webmcp"]).toMatchObject({ tools: 5 });
+		}, 30_000);
+
+		test("with the panel closed too", async () => {
+			await stack.panel.eval("window.close()").catch(() => {});
+			await Bun.sleep(10_000);
+			const result = await call(stack, "page_info");
+			expect(result.structuredContent?.["webmcp"]).toMatchObject({ tools: 5 });
+		}, 30_000);
+	},
+);

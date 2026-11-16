@@ -3,6 +3,7 @@
  * and asking it.
  */
 
+import { BROWSER, PANEL, PRODUCT } from "./browser.ts";
 import {
 	type CallResult,
 	CONTENT_SCRIPT,
@@ -108,8 +109,7 @@ export class NoAccessError extends Error {
 	}
 }
 
-const NO_GRANT =
-	'tab-mcp for Chrome may not read this tab yet. The user can click the tab-mcp for Chrome icon in Chrome\'s toolbar while on this tab, or click "Give access to all sites" in its side panel.';
+const NO_GRANT = `${PRODUCT} may not read this tab yet. The user can click the ${PRODUCT} icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.`;
 
 /** The answer to an access problem: its reason, and what the AI app is told. */
 export function noAccess(url: string): NoAccessError {

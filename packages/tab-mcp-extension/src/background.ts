@@ -153,6 +153,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 /**
+ * Firefox stops an idle event page after 30 s (`extensions.background.idle.timeout`),
+ * its WebSocket with it; Chrome keeps a worker whose WebSocket is busy. A call
+ * to an extension API resets Firefox's idle timer (a port from a content
+ * script does not, nor does `persistent`, which Manifest V3 ignores), so
+ * while AI access is on the event page makes one this often (iteration 44).
+ * The test build every second: its tests cut Firefox's timeout to 3 s.
+ */
+const FIREFOX_KEEPALIVE_MS = TAB_MCP_TEST ? 1_000 : 20_000;
+if (FIREFOX)
+	setInterval(() => {
+		if (started?.aiOn) void chrome.runtime.getPlatformInfo().catch(() => {});
+	}, FIREFOX_KEEPALIVE_MS);
+
+/**
  * A notification's answer: its button Allow; its closing is Don't allow; a
  * click on its body opens the side panel of the tab's window, where the
  * whole question is (if Chrome refuses, the notification comes back). In

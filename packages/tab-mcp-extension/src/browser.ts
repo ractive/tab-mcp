@@ -11,6 +11,28 @@ declare const TAB_MCP_FIREFOX: boolean | undefined;
 export const FIREFOX: boolean =
 	typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX;
 
+/** The browser's name, in the panel's and the notifications' words. */
+export const BROWSER: string = FIREFOX ? "Firefox" : "Chrome";
+
+/** What the panel is called: Chrome's side panel, Firefox's sidebar. */
+export const PANEL: string = FIREFOX ? "sidebar" : "side panel";
+
+/** The extension's name: "tab-mcp for Chrome" or "tab-mcp for Firefox". */
+export const PRODUCT = `tab-mcp for ${BROWSER}`;
+
+/**
+ * The panel's static texts that name the browser, for Firefox: by element
+ * id, the text (or HTML of the extension's own) that replaces Chrome's.
+ */
+export const FIREFOX_PANEL_TEXTS: Readonly<Record<string, string>> = {
+	"no-webmcp":
+		"This page has no WebMCP: tab-mcp gives a page its WebMCP as the page starts loading, so reload it if it loaded before tab-mcp had access to the site. Only https pages (and localhost) get it. page_info and the navigation tools still work.",
+	"pairing-profile":
+		"Use the AI app outside this Firefox profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.",
+	"host-access-note":
+		"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Firefox asks you first.",
+};
+
 /** Firefox's `browser.sidebarAction`, the part used here. */
 interface SidebarAction {
 	open(): Promise<void>;
