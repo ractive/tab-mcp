@@ -32,8 +32,13 @@ import { OWN_TOOL_NAMES } from "./tools.ts";
 
 /** At most this many page tools are offered (and listed). */
 export const MAX_TOOLS = 64;
-/** A description (after the origin) is cut to this many characters. */
-export const MAX_DESCRIPTION = 1000;
+/**
+ * A description (after the origin) is cut to this many characters: room for
+ * a page's how-to, which WebMCP has no server instructions for.
+ */
+export const MAX_DESCRIPTION = 8000;
+/** A page's error, and why a tool is not offered, is cut to this many characters. */
+export const MAX_ERROR = 1000;
 /** A title is cut to this many characters. */
 export const MAX_TITLE = 100;
 /** A name shown (also one that does not fit `page_<name>`) is cut to this. */
@@ -740,7 +745,7 @@ export class PageToolBridge {
 			available: tools.available,
 			tools: offered,
 			...(more ? { more } : {}),
-			...(tools.error ? { error: cut(tools.error, MAX_DESCRIPTION) } : {}),
+			...(tools.error ? { error: cut(tools.error, MAX_ERROR) } : {}),
 		};
 		this.#changed();
 	}
@@ -769,7 +774,7 @@ export class PageToolBridge {
 					// not callable through webmcp_call either. Kept as this tool's
 					// problem, so the next read neither offers it again nor makes
 					// it callable for a moment.
-					const problem = cut(message(error), MAX_DESCRIPTION);
+					const problem = cut(message(error), MAX_ERROR);
 					this.#registered.delete(name);
 					this.#compiled.set(key, { problem });
 					for (const [pageName, c] of this.#callable)

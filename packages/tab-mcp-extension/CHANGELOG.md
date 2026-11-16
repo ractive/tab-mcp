@@ -11,6 +11,12 @@ release `extension-v<version>`.
 
 ## Unreleased
 
+### Changed
+
+- A page tool's description is cut at 8000 characters instead of 1000, so a page without
+  server instructions (WebMCP has none) can say how to use its tools in them. A page's
+  errors stay cut at 1000.
+
 ## [0.1.0][extension-0.1.0] - 2026-11-15
 
 First release.

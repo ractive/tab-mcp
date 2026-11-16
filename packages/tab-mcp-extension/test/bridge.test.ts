@@ -19,6 +19,7 @@ import {
 	type LookedUp,
 	MAX_BLOCKS,
 	MAX_DESCRIPTION,
+	MAX_ERROR,
 	MAX_IMAGES_BASE64,
 	MAX_NAME,
 	MAX_PATTERN,
@@ -51,7 +52,8 @@ describe("names, descriptions, schemas", () => {
 		expect(describeTool("https://shop.example", "Finds things.")).toBe(
 			"From https://shop.example: Finds things.",
 		);
-		const long = describeTool("https://x.example", "y".repeat(5000));
+		expect(MAX_DESCRIPTION).toBe(8000);
+		const long = describeTool("https://x.example", "y".repeat(20_000));
 		expect(long.length).toBe(
 			"From https://x.example: ".length + MAX_DESCRIPTION,
 		);
@@ -738,6 +740,25 @@ describe("PageToolBridge", () => {
 			"not offered",
 		);
 		expect(state.calls).toEqual([]);
+	});
+
+	test("a page's error and a refusal stay cut at MAX_ERROR, not at the descriptions' limit", async () => {
+		expect(MAX_ERROR).toBe(1000);
+		const reg = {
+			async registerTool(tool: Tool) {
+				if (tool.name === "page_refused") throw new TypeError("r".repeat(5000));
+			},
+		};
+		const { chrome } = fakeChrome(
+			page([pageTool("refused")], { error: "e".repeat(5000) }),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		await Bun.sleep(0);
+		expect(bridge.state.error?.length).toBe(MAX_ERROR);
+		expect(
+			bridge.state.tools.find((t) => t.name === "refused")?.problem?.length,
+		).toBe(MAX_ERROR);
 	});
 
 	test("a tool the library refuses is not callable through webmcp_call either", async () => {
