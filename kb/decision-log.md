@@ -3861,3 +3861,24 @@ Branch `release/per-package-changelog`.
 - The store build still has no `key` (the store adds it), and `--zip` still refuses one.
 - The old development id leaves the relay's allowed origins once the store build works
   from the store. `TAB_MCP_EXTENSION_KEY_FILE` and the key file in `~/.config` are gone.
+
+## DEC-189: A relay can admit any Firefox extension (`moz-extension://*`) (owner)
+
+2026-11-16, iteration 44, question 5; amends DEC-108. The owner asked for the hosted
+relay to admit tab-mcp for Firefox.
+
+- Firefox sends `Origin: moz-extension://<UUID>` from an extension's pages (checked:
+  the background's WebSocket), and the UUID is made up for each installation, not the
+  add-on id. No list can name one Firefox extension; it is all or none.
+- `TAB_MCP_ALLOWED_ORIGINS` takes the entry `moz-extension://*`: an `Origin` of
+  `moz-extension://` and a lower-case UUID, nothing else (not the entry itself sent as
+  a header, not Safari's scheme). The session keeps the real origin, which the pairing
+  page shows as "the browser extension moz-extension://…". It pairs by code always: no
+  identity provider can vouch for any extension's users. The relay logs
+  `relay.firefox_extensions` at start.
+- Not in `TAB_MCP_SITES`: a site's name would be given to every Firefox extension.
+- What it admits beyond tab-mcp for Firefox: any Firefox extension's pages, never a
+  website. DEC-108 already holds that a Chrome id is no proof of the publisher; the
+  pairing code, read in the extension's panel, ties an AI app to it.
+- The hosted relay's setting is the owner's to apply (the ractive.ch repository, with
+  tofu), after a relay release with this change.

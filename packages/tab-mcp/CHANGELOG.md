@@ -9,6 +9,19 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Added
+
+- `TAB_MCP_ALLOWED_ORIGINS` takes `moz-extension://*`: the pages of any Firefox extension
+  may open tab sessions (DEC-189). Firefox sends `Origin: moz-extension://<UUID>` with a
+  UUID made up for each installation, so no list can name one Firefox extension. The
+  entry admits an origin of `moz-extension://` and a lower-case UUID, nothing else (no
+  website, no Safari extension, not the entry itself sent as a header); such a page always
+  pairs by code and keeps its own origin for the pairing page. Not allowed in
+  `TAB_MCP_SITES` (its name would go to every Firefox extension). The relay logs
+  `relay.firefox_extensions` at start.
+
 ## [0.10.3][relay-0.10.3] - 2026-11-14
 
 ### Removed
