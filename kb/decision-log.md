@@ -3933,3 +3933,25 @@ relay to admit tab-mcp for Firefox.
   pairing code, read in the extension's panel, ties an AI app to it.
 - Released in relay 0.11.0; the hosted relay has `moz-extension://*` since 2026-11-16
   (ractive.ch#123, applied with tofu after the deploy of 0.11.0).
+
+## DEC-190: A release publishes itself to the Chrome Web Store, as a CRX we sign (owner)
+
+2026-11-16, after 0.1.0 went public. The owner asked for the extensions (tab-mcp for
+Chrome, Sitegloss) to deploy automatically, with Verified CRX uploads, through
+ractive/release-workflows, keeping the GitHub attestation.
+
+- `extension-release.yml` runs the job `publish` after it creates the release:
+  `chrome-extension-publish.yml` of ractive/release-workflows, pinned to a commit, in the
+  environment `chrome-web-store` (the owner approves each run). It replaces
+  mnao305/chrome-extension-upload; `extension-publish.yml` runs the same job by hand.
+- The zip's build provenance (DEC-182) is verified before anything is signed, and the
+  CRX wraps exactly the verified bytes: the attestation stays the record of what the
+  store got.
+- Verified CRX uploads: the item takes only uploads signed with our RSA key (CRX id
+  `jbpcbkngalkckpjgonfkhhcipjmnnofh`), so the Google account alone cannot publish an
+  update. The key lives on the owner's machine, in the password manager and as an
+  environment secret; never in the Google account. A secret with another key fails
+  before the upload (`signing-key-id`).
+- No third-party code where the keys are: the CRX is packed by inline Python (standard
+  library, `openssl`), byte for byte Chrome's `--pack-extension` (release-workflows'
+  selftest compares the two on every change); the API is called with `curl`.

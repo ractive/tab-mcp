@@ -1,20 +1,15 @@
 name: Extension publish
 
-# Uploads the store zip of an extension-v<version> GitHub release to the
-# Chrome Web Store item and, when asked, submits it for review. Run it by hand
-# after extension-release.yml has created the release: Actions → Extension
-# publish → Run workflow, and pick the release's tag under "Use workflow
-# from". The tag it runs on is the tag it uploads; a run from a branch fails.
-# The first version is uploaded by hand in the developer dashboard: the API
-# only updates an existing item. Setup and secrets:
-# kb/operations/chrome-web-store.md.
+# Publishes the store zip of an extension-v<version> GitHub release to the
+# Chrome Web Store by hand: the same job extension-release.yml runs after it
+# creates the release, for a release whose publish failed or was rejected.
+# Actions → Extension publish → Run workflow, and pick the release's tag under
+# "Use workflow from"; a run from a branch fails.
 #
-# Only a zip whose build provenance verifies (signed by extension-release.yml
-# for this tag, DEC-182) is uploaded.
-#
-# The upload uses mnao305/chrome-extension-upload (Chrome Web Store API v2),
-# pinned to a commit, because it receives the store's credentials. Nothing
-# else runs in this job: no checkout, no bun install.
+# ractive/release-workflows chrome-extension-publish.yml: only a zip whose
+# build provenance verifies (signed by extension-release.yml for this tag,
+# DEC-182), as a CRX signed with the item's verified-upload key, from the
+# environment chrome-web-store. Setup: kb/operations/chrome-web-store.md.
 
 on:
   workflow_dispatch:
@@ -22,68 +17,22 @@ on:
       submit:
         description: "Submit for review after the upload (otherwise it stays a draft in the dashboard)"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: chrome-web-store
-  cancel-in-progress: false
-
 jobs:
   publish:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Holds the secrets; required reviewer and "tags extension-v*" only in the
-    # repository's environment settings.
-    environment: chrome-web-store
+    uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
     permissions:
       contents: read
-      # gh attestation verify reads the zip's attestation.
       attestations: read
-    steps:
-      - name: Download the release's store zip
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF_TYPE" = tag \
-            || { echo "::error::$TAG is no tag: pick the release's tag under \"Use workflow from\""; exit 1; }
-          echo "$TAG" | grep -Eq '^extension-v(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){0,3}$' \
-            || { echo "::error::not an extension version tag: $TAG"; exit 1; }
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "tab-mcp-for-chrome-${TAG#extension-v}-store.zip" --output store.zip
-      - name: The zip is a store build of that version
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          manifest="$(unzip -p store.zip manifest.json)"
-          test "$(jq -r .version <<<"$manifest")" = "${TAG#extension-v}" \
-            || { echo "::error::the manifest's version is not ${TAG#extension-v}"; exit 1; }
-          jq -e 'has("key") or has("host_permissions") | not' <<<"$manifest" >/dev/null \
-            || { echo "::error::not a store build (a key or install-time host access)"; exit 1; }
-          # grep -c reads all of its input, so unzip never gets SIGPIPE.
-          maps="$(unzip -Z1 store.zip | grep -c '\.map$' || true)"
-          test "$maps" = 0 || { echo "::error::the zip has $maps source maps"; exit 1; }
-      - name: The zip's attestation verifies
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          sha256sum store.zip
-          # Built and attested by extension-release.yml for this tag (DEC-182).
-          gh attestation verify store.zip --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/extension-release.yml" \
-            --source-ref "$GITHUB_REF"
-      - uses: mnao305/chrome-extension-upload@f549d5d654694a7722d6abfa64c97409ad5e64c1 # v7.0.0
-        with:
-          file-path: store.zip
-          extension-id: ${{ vars.CWS_EXTENSION_ID }}
-          publisher-id: ${{ vars.CWS_PUBLISHER_ID }}
-          client-id: ${{ secrets.CWS_CLIENT_ID }}
-          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
-          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
-          publish: ${{ inputs.submit }}
+    with:
+      tag: ${{ github.ref_name }}
+      tag-prefix: extension-v
+      asset: tab-mcp-for-chrome-{version}-store.zip
+      extension-id: jjhddplkjikmbpcobcnfebnglgjomfgh
+      attest-signer-workflow: .github/workflows/extension-release.yml
+      signing-key-id: jbpcbkngalkckpjgonfkhhcipjmnnofh
+      submit: ${{ inputs.submit }}
