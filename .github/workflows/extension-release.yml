@@ -205,7 +205,7 @@ jobs:
 
   publish:
     needs: release
-    uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@v0.6.0
+    uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
     permissions:
       contents: read
       # gh attestation verify reads the zip's attestation.
