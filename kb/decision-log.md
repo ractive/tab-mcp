@@ -3882,6 +3882,17 @@ WebMCP; the owner's idea: the extension supplies it.
   tools, nothing else. `content.ts` gets an object with what it reads from Chrome's
   native WebMCP, so the bridge is unchanged. Where Firefox has WebMCP of its own (a
   native attribute is visible through the Xrays) the polyfill steps aside.
+- **What must outlast the content script lives in the page** (added the same day, after
+  the owner found open pages without tools after a reload of the add-on): an extension
+  reload or update ends the content script, Firefox makes every function it exported a
+  dead object, and the page registered its tools once, while loading. So the page's
+  `modelContext` object, its tools (each with its signal) and its `on…` handlers are kept
+  in a `Map` of the page's realm, and the prototypes' getters are the page's own
+  `Map.prototype.get` bound to it, which outlives the script. The next content script
+  (put into every open page at the install or update) finds the map through the getter,
+  registers the tools again and puts its methods on the same object: references the page
+  or its polyfill hold work on. The page can reach the map too (the getter with its key):
+  what it finds there is its own tools, which it can change anyway.
 - **Why not the others**: a main-world script exposes its code, data and channel to the
   page (MDN: "the web page can detect and interfere"); `userScripts` is for user script
   managers only on AMO; MCP-B's `postMessage` channel can be read and forged by the page.

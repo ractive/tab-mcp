@@ -194,17 +194,18 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   (search_catalog, get_cart, ask_business). Allow seemed dead: it counts only after a
   click into the sidebar (DEC-087), and Firefox leaves the focus in the page, so the
   question now says "Click into the sidebar to answer."
-- **An extension reload or update takes open pages' tools**: they lived in the content
-  script that ended, and the page registered them once as it loaded. Firefox makes the
-  old script's getters dead objects: every read of `document.modelContext` or
-  `navigator.modelContext` throws "can't access dead object" in the page. The new
-  content script (put in when the worker next reads the tab) replaces them, so the
-  page's reads work and new tools register, and marks the page `stale` while it has no
-  tools: the sidebar and `page_info` ask for a reload, the only thing that brings the
-  old tools back (Chrome, and Chrome's page-world polyfill, keep them). Reloading the
-  user's tabs unasked is not an option. Once on addons.mozilla.org, every automatic
-  update does this. Firefox test: "an extension reload or update".
-- **Second review** (Claude 2, GLM 3): the dead getters above; Chrome's polyfill had
+- **An extension reload or update took open pages' tools** (the owner, in a real
+  Firefox): they lived in the content script that ended, Firefox made its exports dead
+  objects (every read of `document.modelContext` threw "can't access dead object" in
+  the page), and the page registers its tools once, as it loads. Now the polyfill keeps
+  its object, the tools and the handlers in a `Map` of the page's realm behind a bound
+  `Map.prototype.get` getter, which outlives the script; at an install or update the
+  background puts the content script into every open page, and it takes them over
+  (DEC-188). Firefox test "an extension reload or update": the same object, the same
+  tools in their order, an old tool runs, `ontoolchange` still fires. Chrome keeps the
+  tools itself, and Chrome's page-world polyfill outlives the extension's reload.
+- **Second review** (Claude 2, GLM 3): the dead getters above (first replaced, then
+  made unnecessary by keeping the state in the page); Chrome's polyfill had
   one second to answer the handover, so a page busy after its load had no WebMCP (no
   time limit now); a question's notification clicked while another Firefox window is in
   front opened that window's sidebar (the question's window first now, and a refusal

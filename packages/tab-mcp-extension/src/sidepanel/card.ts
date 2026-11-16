@@ -118,11 +118,10 @@ export function noAccessText(
 /** The tab card's line about the page's tools, when it has none to list (EQ 7). */
 export function webmcpNote(
 	tab: TabView | undefined,
-): "no-webmcp" | "no-tools" | "stale-webmcp" | undefined {
+): "no-webmcp" | "no-tools" | undefined {
 	if (tab?.webmcp === undefined) return undefined;
 	if (!tab.webmcp.available) return "no-webmcp";
-	if (tab.webmcp.tools !== 0) return undefined;
-	return tab.webmcp.stale ? "stale-webmcp" : "no-tools";
+	return tab.webmcp.tools === 0 ? "no-tools" : undefined;
 }
 
 /** A confirming click this soon after the first one (a double click) counts as nothing. */

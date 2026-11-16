@@ -263,12 +263,9 @@ the extension offers them to the AI app as in Chrome. Iteration 44; not released
    empty storage, so a new address the AI app has to pair with again. To keep them while
    developing, set `extensions.webextensions.keepUuidOnUninstall` and
    `extensions.webextensions.keepStorageOnUninstall` to `true` in `about:config` (checked
-   in Firefox 160). Open pages lose their WebMCP tools at every reload or update of the
-   extension, until they are reloaded: the tools were kept by the content script that
-   ended, and the page registers them only as it loads (Chrome keeps them itself). The
-   new content script replaces the dead `modelContext` the old one left (every read of
-   it threw in the page), and the sidebar and `page_info` (`webmcp.stale`) ask for a
-   reload.
+   in Firefox 160). Open pages keep their WebMCP tools across a reload or update of the
+   extension: the polyfill keeps them in the page, and the new content script, put into
+   every open page at once, takes them over (DEC-188).
 3. A relay that admits Firefox extensions. Firefox's origin, `moz-extension://<UUID>`, is
    made up for each installation, so a relay admits all Firefox extensions or none
    (`moz-extension://*`, relay 0.11.0, DEC-189). The hosted relay

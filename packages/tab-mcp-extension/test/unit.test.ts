@@ -27,6 +27,7 @@ import {
 } from "../src/content.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
+import { ToolRegistry } from "../src/webmcp/registry.ts";
 import { createTools } from "../src/worker/tools.ts";
 
 describe("manifest", () => {
@@ -120,7 +121,7 @@ describe("pageInfo", () => {
 		});
 	});
 
-	test("Firefox: a page without WebMCP says to reload it (the tools of a page that loaded before an extension reload are gone)", async () => {
+	test("Firefox: a page without WebMCP says to reload it (it loaded before tab-mcp had access)", async () => {
 		const global = globalThis as { TAB_MCP_FIREFOX?: boolean };
 		global.TAB_MCP_FIREFOX = true;
 		try {
@@ -136,7 +137,6 @@ describe("pageInfo", () => {
 		} finally {
 			delete global.TAB_MCP_FIREFOX;
 		}
-		expect(FIREFOX_NO_WEBMCP_NOTE).toContain("reloaded or updated");
 	});
 
 	test("a page with WebMCP and its tools, and its language", async () => {
@@ -756,5 +756,41 @@ describe("Chrome's page-world polyfill: the content script's port", () => {
 		} as unknown as Window;
 		const context = await connectPolyfill(win);
 		expect(await context.getTools()).toEqual([]);
+	});
+});
+
+describe("the polyfill's registry: taken over by the next content script (Firefox)", () => {
+	const tool = (name: string) => ({
+		name,
+		description: name,
+		execute: () => name,
+	});
+
+	test("records and restore keep the order, signals and provideContext's tools, without a change event", () => {
+		const first = new ToolRegistry(() => {});
+		const controller = new AbortController();
+		first.register(tool("a"));
+		first.register(tool("b"), controller.signal);
+		first.provide([tool("c")]);
+		let changes = 0;
+		const next = new ToolRegistry(() => changes++);
+		next.restore(first.records());
+		expect(changes).toBe(0);
+		expect(next.list().map((t) => t.name)).toEqual(["a", "b", "c"]);
+		// The signal still ends its tool; provideContext still replaces its own.
+		controller.abort();
+		expect(next.list().map((t) => t.name)).toEqual(["a", "c"]);
+		next.provide([tool("d")]);
+		expect(next.list().map((t) => t.name)).toEqual(["a", "d"]);
+		expect(changes).toBe(2);
+	});
+
+	test("a record that no longer reads as a tool is left out", () => {
+		const next = new ToolRegistry(() => {});
+		next.restore([
+			{ tool: { name: "" }, provided: false },
+			{ tool: tool("ok"), provided: false },
+		]);
+		expect(next.list().map((t) => t.name)).toEqual(["ok"]);
 	});
 });

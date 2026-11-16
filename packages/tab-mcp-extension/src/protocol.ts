@@ -110,12 +110,7 @@ export interface TabView {
 	title: string;
 	host: string;
 	/** `undefined`: the extension may not read it, `noAccess` or `access` says why. */
-	webmcp?: {
-		available: boolean;
-		tools: number;
-		/** Its tools went with an extension reload (Firefox; `PageInfo`). */
-		stale?: true;
-	};
+	webmcp?: { available: boolean; tools: number };
 	/** Why it may not be read, for the panel to put in its own words (EQ 6). */
 	noAccess?: NoAccessReason;
 	/** Any other reason it could not be read (a page that did not answer). */

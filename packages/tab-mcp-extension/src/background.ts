@@ -121,6 +121,32 @@ const sync = () =>
 chrome.runtime.onInstalled.addListener(sync);
 chrome.runtime.onStartup.addListener(sync);
 
+/**
+ * Firefox, after an install, reload or update: the content script into every
+ * open page it may read, at once. The page's tools outlived the script that
+ * ended in the page (`firefox/webmcp.ts`), but its methods are dead objects
+ * until a new script takes over, and the page's own calls throw meanwhile.
+ * Chrome keeps the tools itself, and its page-world polyfill outlives the
+ * extension's reload.
+ */
+async function reviveOpenPages(): Promise<void> {
+	const tabs = await chrome.tabs.query({ url: SITE_MATCHES });
+	await Promise.all(
+		tabs.map((tab) =>
+			tab.id === undefined
+				? undefined
+				: injectInto(tab.id).catch(() => {
+						// No access to its site, or a page Firefox keeps to itself.
+					}),
+		),
+	);
+}
+
+if (FIREFOX)
+	chrome.runtime.onInstalled.addListener(
+		() => void reviveOpenPages().catch(() => {}),
+	);
+
 const tabChanged = () => withConnection((c) => c.tabChanged());
 const permissionsChanged = () => {
 	sync();

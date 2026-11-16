@@ -795,7 +795,6 @@ export class Connection {
 				webmcp: {
 					available: page.webmcp.available,
 					tools: current ? state.tools.length : page.webmcp.tools,
-					...(page.webmcp.stale ? { stale: true as const } : {}),
 				},
 				// Readable, but reading its tools failed: why, instead of an
 				// empty list.

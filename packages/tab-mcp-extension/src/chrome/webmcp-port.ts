@@ -63,8 +63,6 @@ export function connectPolyfill(win: Window): Promise<ExtensionContext> {
 		addEventListener: (_type, listener) => {
 			listeners.add(listener);
 		},
-		// Chrome's polyfill keeps the page's tools across an extension reload.
-		revived: false,
 	};
 	return new Promise((resolve) => {
 		port.onmessage = (event) => {

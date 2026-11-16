@@ -26,7 +26,7 @@ export const PRODUCT = `tab-mcp for ${BROWSER}`;
  */
 export const FIREFOX_PANEL_TEXTS: Readonly<Record<string, string>> = {
 	"no-webmcp":
-		"This page has no WebMCP: tab-mcp gives a page its WebMCP as the page starts loading, so reload it if it loaded before tab-mcp had access to the site, or before tab-mcp was reloaded or updated. Only https pages (and localhost) get it. page_info and the navigation tools still work.",
+		"This page has no WebMCP: tab-mcp gives a page its WebMCP as the page starts loading, so reload it if it loaded before tab-mcp had access to the site. Only https pages (and localhost) get it. page_info and the navigation tools still work.",
 	"pairing-profile":
 		"Use the AI app outside this Firefox profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.",
 	"host-access-note":

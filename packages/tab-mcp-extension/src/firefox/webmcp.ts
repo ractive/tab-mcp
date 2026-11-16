@@ -12,6 +12,16 @@
  * which is what the API is for. The content script gets an object of its own
  * (`ExtensionContext`) with what `content.ts` reads from Chrome's WebMCP.
  *
+ * What has to outlast this content script lives in the page (DEC-188): an
+ * extension reload or update ends the script, and Firefox makes every
+ * function it exported a dead object. The page's `modelContext` object, its
+ * tools and its `on…` handlers are kept in a `Map` of the page's realm, and
+ * the getters on the prototypes are the page's own `Map.prototype.get` bound
+ * to it (a bound native function outlives the script; the page cannot read
+ * what it is bound to). The next content script finds the map through the
+ * getter (`keptState`), registers the tools again and puts its own methods
+ * on the same object, so the page's references to it work on.
+ *
  * Objects the page passes arrive as Xrays, which hide functions and getters:
  * a tool is read through `wrappedJSObject` and copied with this world's own
  * `JSON`. What goes back to the page is made in the page's realm (promises,
@@ -20,6 +30,7 @@
 
 import {
 	copyJson,
+	MAX_TOOLS,
 	messageOf,
 	PageError,
 	type PageObject,
@@ -37,6 +48,8 @@ declare function exportFunction<F extends (...args: never[]) => unknown>(
 	target: object,
 	options?: { defineAs?: string },
 ): F;
+/** Firefox: an object of the page seen through an Xray again. */
+declare function XPCNativeWrapper<T>(value: T): T;
 declare function cloneInto<T>(
 	value: T,
 	target: object,
@@ -56,12 +69,6 @@ export interface ExtensionContext {
 		options?: { signal?: AbortSignal },
 	): Promise<string | null>;
 	addEventListener(type: "toolchange", listener: () => void): void;
-	/**
-	 * It replaced the dead `modelContext` of an earlier content script (an
-	 * extension reload or update while the page was open): the tools the
-	 * page registered before are gone.
-	 */
-	readonly revived: boolean;
 }
 
 /** The events the page's object has `on…` handlers for. */
@@ -71,19 +78,35 @@ const EVENTS = ["toolchange", "toolactivated", "toolcancel"] as const;
 const waive = (value: unknown): PageObject =>
 	(value as PageObject)?.wrappedJSObject ?? value;
 
+/** The state map's key for itself, and for the tools and the handlers. */
+const STATE = "tab-mcp:webmcp";
+const TOOLS = "tab-mcp:tools";
+const HANDLER = "tab-mcp:on";
+
 /**
- * The page has a `modelContext` on `target` that works: not one left by an
- * earlier content script of this extension, whose getter Firefox made a
- * dead object when the extension was reloaded or updated (every read throws
- * "can't access dead object" in the page).
+ * The state an earlier content script of this extension left in the page
+ * (`STATE`, through the getter it put on `Document.prototype`): the map and
+ * the page's `modelContext` object, or `undefined`. A page that fakes it
+ * gives only its own tools, which it can register anyway.
  */
-function hasLiveContext(target: PageObject): boolean {
-	if (!("modelContext" in target)) return false;
+function keptState(
+	page: PageObject,
+): { state: PageObject; context: PageObject } | undefined {
 	try {
-		void target.modelContext;
-		return true;
+		const get = Reflect.getOwnPropertyDescriptor(
+			page.Document.prototype,
+			"modelContext",
+		)?.get as ((key?: string) => PageObject) | undefined;
+		if (typeof get !== "function") return undefined;
+		const state = get(STATE);
+		if (typeof state?.get !== "function" || state.get(STATE) !== state)
+			return undefined;
+		const context = state.get(undefined);
+		return context !== null && typeof context === "object"
+			? { state, context }
+			: undefined;
 	} catch {
-		return false;
+		return undefined;
 	}
 }
 
@@ -93,9 +116,8 @@ function hasLiveContext(target: PageObject): boolean {
  * has WebMCP of its own (a native attribute is visible through the Xrays,
  * a page's getter is not), where the page set up its own already, in an
  * insecure context, or without the export helpers: `content.ts` then reads
- * `document.modelContext` as in Chrome. The dead getters an extension reload
- * leaves are replaced: the page's tools from before are gone with the old
- * content script, but its reads stop throwing and new tools register.
+ * `document.modelContext` as in Chrome. An earlier content script's state is
+ * taken over, tools and all (`keptState`).
  */
 export function installWebMCP(win: Window): ExtensionContext | undefined {
 	if (!hasExportHelpers() || !win.isSecureContext) return undefined;
@@ -103,10 +125,12 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	const page = waive(win);
 	// Injected after the page set up its own (a click on the icon, after the
 	// load): the page's polyfill stays; the Xray above does not see it.
-	if (hasLiveContext(page.document) || hasLiveContext(page.navigator))
+	const kept = keptState(page);
+	if (
+		kept === undefined &&
+		("modelContext" in page.document || "modelContext" in page.navigator)
+	)
 		return undefined;
-	const revived =
-		"modelContext" in page.document || "modelContext" in page.navigator;
 	// The page's realm: what the page gets is made from these.
 	const pageWindow = win as PageObject;
 	const PagePromise = pageWindow.Promise as PromiseConstructor;
@@ -115,12 +139,39 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	const PageTypeError = pageWindow.TypeError as TypeErrorConstructor;
 	const PageAbortController =
 		pageWindow.AbortController as typeof AbortController;
-	const context: EventTarget = new (
-		pageWindow.EventTarget as typeof EventTarget
-	)();
+	// The page's object (through an Xray, for `exportFunction`) and the map.
+	const context: EventTarget = kept
+		? XPCNativeWrapper(kept.context as EventTarget)
+		: new (pageWindow.EventTarget as typeof EventTarget)();
+	const pageContext = waive(context);
+	const state: PageObject = kept?.state ?? new page.Map();
 	const listeners = new Set<() => void>();
+	/** The tools as the page's records, for the next content script. */
+	const save = () => {
+		const list = new page.Array();
+		for (const record of tools.records()) {
+			const kept = new page.Object();
+			kept.tool = record.tool;
+			kept.signal = record.signal ?? null;
+			kept.provided = record.provided;
+			list.push(kept);
+		}
+		state.set(TOOLS, list);
+	};
 	const tools = new ToolRegistry(() => {
-		context.dispatchEvent(new PageEvent("toolchange"));
+		save();
+		const event = new PageEvent("toolchange");
+		context.dispatchEvent(event);
+		// The handler from here, not a listener on the page's object: one
+		// of this script's would be dead after an extension reload.
+		const handler = state.get(`${HANDLER}toolchange`);
+		if (typeof handler === "function") {
+			try {
+				handler.call(pageContext, waive(event));
+			} catch {
+				// The page's handler threw: its own affair.
+			}
+		}
 		for (const listener of listeners) {
 			try {
 				listener();
@@ -241,38 +292,52 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	);
 	exportFunction(() => tools.clear(), context, { defineAs: "clearContext" });
 
-	// `ontoolchange` and the others: one listener each, calling the handler set.
-	const pageContext = waive(context);
-	for (const type of EVENTS) {
-		let handler: PageObject = null;
-		context.addEventListener(type, (event) => {
-			if (typeof handler === "function") {
-				try {
-					handler.call(pageContext, waive(event));
-				} catch {
-					// The page's handler threw: its own affair.
-				}
-			}
-		});
+	// `ontoolchange` and the others, kept in the map (only `toolchange` is
+	// ever dispatched here).
+	for (const type of EVENTS)
 		Reflect.defineProperty(pageContext, `on${type}`, {
-			get: exportFunction(() => handler, win),
+			get: exportFunction(() => state.get(`${HANDLER}${type}`) ?? null, win),
 			set: exportFunction((value: unknown) => {
 				const raw = waive(value);
-				handler = typeof raw === "function" ? raw : null;
+				state.set(`${HANDLER}${type}`, typeof raw === "function" ? raw : null);
 			}, win),
 			configurable: true,
 			enumerable: true,
 		});
-	}
 
-	// Accessors on the prototypes, as WebIDL attributes are: a page or its
-	// polyfill can shadow them (`@mcp-b/global` does, and wraps this object).
-	for (const proto of [page.Document.prototype, page.Navigator.prototype])
-		Reflect.defineProperty(proto, "modelContext", {
-			get: exportFunction(() => context, win),
-			configurable: true,
-			enumerable: true,
-		});
+	if (kept) {
+		// The tools the page registered with the script that ended.
+		try {
+			const list = state.get(TOOLS);
+			const records = [];
+			for (let i = 0; i < Math.min(Number(list?.length ?? 0), MAX_TOOLS); i++) {
+				const record = list[i];
+				records.push({
+					tool: record.tool,
+					...(record.signal ? { signal: XPCNativeWrapper(record.signal) } : {}),
+					provided: record.provided === true,
+				});
+			}
+			tools.restore(records);
+		} catch {
+			// The page broke its own records: it registers again or has none.
+		}
+		save();
+	} else {
+		state.set(STATE, state);
+		state.set(undefined, pageContext);
+		// Accessors on the prototypes, as WebIDL attributes are: a page or
+		// its polyfill can shadow them (`@mcp-b/global` does, and wraps this
+		// object). The page's `Map.prototype.get` bound to the map, called
+		// with no argument: `state.get(undefined)`, the object.
+		const get = page.Map.prototype.get.bind(state);
+		for (const proto of [page.Document.prototype, page.Navigator.prototype])
+			Reflect.defineProperty(proto, "modelContext", {
+				get,
+				configurable: true,
+				enumerable: true,
+			});
+	}
 
 	return {
 		getTools: () => Promise.resolve(tools.list()),
@@ -281,6 +346,5 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 		addEventListener: (_type, listener) => {
 			listeners.add(listener);
 		},
-		revived,
 	};
 }

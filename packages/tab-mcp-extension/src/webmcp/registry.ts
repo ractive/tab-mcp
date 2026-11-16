@@ -32,8 +32,18 @@ export interface Entry {
 	tool: PageObject;
 	/** The page's `execute`. */
 	execute: PageObject;
+	/** The registration's signal, if it had one. */
+	signal?: SignalLike;
 	/** Stops listening to its signal; `undefined` without one. */
 	stop?: () => void;
+}
+
+/** A tool as `records` gives it and `restore` takes it back. */
+export interface ToolRecord {
+	tool: PageObject;
+	signal?: SignalLike;
+	/** Given with `provideContext`, not `registerTool`. */
+	provided: boolean;
 }
 
 /** The part of an `AbortSignal` a registration uses. */
@@ -127,6 +137,8 @@ export class ToolRegistry {
 	readonly #changed: () => void;
 	/** The names the last `provide` gave (the older `provideContext`). */
 	#provided: string[] = [];
+	/** While `restore` runs: no `changed`. */
+	#quiet = false;
 
 	constructor(changed: () => void) {
 		this.#changed = changed;
@@ -147,15 +159,16 @@ export class ToolRegistry {
 			if (signal.aborted) return;
 			const onAbort = () => this.unregister(name);
 			signal.addEventListener("abort", onAbort, { once: true });
+			entry.signal = signal;
 			entry.stop = () => signal.removeEventListener("abort", onAbort);
 		}
 		this.#tools.set(name, entry);
-		this.#changed();
+		this.#notify();
 	}
 
 	/** The older `unregisterTool(name)`, and a registration's signal. */
 	unregister(name: string): void {
-		if (this.#remove(name)) this.#changed();
+		if (this.#remove(name)) this.#notify();
 	}
 
 	/**
@@ -182,7 +195,7 @@ export class ToolRegistry {
 		for (const name of this.#provided) this.#remove(name);
 		this.#provided = [...fresh.keys()];
 		for (const [name, entry] of fresh) this.#tools.set(name, entry);
-		this.#changed();
+		this.#notify();
 	}
 
 	/** The older `clearContext()`: every tool goes. */
@@ -190,7 +203,48 @@ export class ToolRegistry {
 		const any = this.#tools.size > 0;
 		for (const name of [...this.#tools.keys()]) this.#remove(name);
 		this.#provided = [];
-		if (any) this.#changed();
+		if (any) this.#notify();
+	}
+
+	/** The tools in their order, with what `restore` needs to register them again. */
+	records(): ToolRecord[] {
+		return [...this.#tools.values()].map((entry) => ({
+			tool: entry.tool,
+			...(entry.signal ? { signal: entry.signal } : {}),
+			provided: this.#provided.includes(entry.info.name),
+		}));
+	}
+
+	/**
+	 * Register `records` again, in their order (a registry taking over the
+	 * tools of one that ended), without `changed`: the page's tools did not
+	 * change. A tool that no longer reads as one is left out.
+	 */
+	restore(records: readonly ToolRecord[]): void {
+		this.#quiet = true;
+		try {
+			const provided: PageObject[] = [];
+			for (const record of records) {
+				if (record.provided) {
+					provided.push(record.tool);
+					continue;
+				}
+				try {
+					this.register(record.tool, record.signal);
+				} catch {
+					// Changed meanwhile so that it is no tool: left out.
+				}
+			}
+			if (provided.length > 0) {
+				try {
+					this.provide(provided);
+				} catch {
+					// As above.
+				}
+			}
+		} finally {
+			this.#quiet = false;
+		}
 	}
 
 	get(name: string): Entry | undefined {
@@ -202,6 +256,10 @@ export class ToolRegistry {
 		return [...this.#tools.values()].map(
 			(entry) => copyJson(entry.info) as ToolInfo,
 		);
+	}
+
+	#notify(): void {
+		if (!this.#quiet) this.#changed();
 	}
 
 	#remove(name: string): boolean {
