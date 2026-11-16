@@ -14,7 +14,7 @@
     .window { fill: none; stroke: #45655b; stroke-width: 1.25; }
     .bar { fill: #efe9c9; }
     .field { fill: #fffcf1; }
-    .line { stroke: #1e1c09; stroke-width: 1.5; }
+    .line { fill: none; stroke: #1e1c09; stroke-width: 1.5; }
     .head { fill: #1e1c09; }
     .tag { fill: #fffcf1; }
     .icon { fill: none; stroke: #00362a; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -87,22 +87,24 @@
   <rect class="field" x="72" y="157" width="416" height="20" rx="10"/>
   <text class="muted" x="84" y="171.5">Chrome with WebMCP on, and the tab-mcp extension installed</text>
 
-  <!-- the links, and their labels on them -->
+  <!-- the links, and their labels on them. The two to the relay leave their
+       browser window straight through its side and turn into the relay from
+       above and from below; their labels sit outside the windows. -->
   <g marker-start="url(#tmo-arrow)" marker-end="url(#tmo-arrow)">
-    <line class="line" x1="208" y1="94" x2="626" y2="129"/>
+    <path class="line" d="M208 94 H686 Q694 94 694 102 V128"/>
     <line class="line" x1="208" y1="222" x2="336" y2="222"/>
-    <line class="line" x1="488" y1="222" x2="626" y2="157"/>
-    <line class="line" x1="762" y1="143" x2="840" y2="143"/>
+    <path class="line" d="M488 222 H686 Q694 222 694 214 V188"/>
+    <line class="line" x1="762" y1="158" x2="840" y2="158"/>
   </g>
   <g text-anchor="middle">
-    <rect class="tag" x="380" y="101" width="74" height="21" rx="4"/>
-    <text x="417" y="116">WebSocket</text>
+    <rect class="tag" x="553" y="83.5" width="74" height="21" rx="4"/>
+    <text x="590" y="98.5">WebSocket</text>
     <rect class="tag" x="242" y="211.5" width="60" height="21" rx="4"/>
     <text x="272" y="226.5">WebMCP</text>
-    <rect class="tag" x="520" y="179" width="74" height="21" rx="4"/>
-    <text x="557" y="194">WebSocket</text>
-    <rect class="tag" x="782" y="132.5" width="38" height="21" rx="4"/>
-    <text x="801" y="147.5">MCP</text>
+    <rect class="tag" x="553" y="211.5" width="74" height="21" rx="4"/>
+    <text x="590" y="226.5">WebSocket</text>
+    <rect class="tag" x="782" y="147.5" width="38" height="21" rx="4"/>
+    <text x="801" y="162.5">MCP</text>
   </g>
 
   <!-- the page with the client library -->
@@ -121,16 +123,16 @@
   <text class="label" x="384" y="217">tab-mcp</text>
   <text class="label" x="384" y="235">for Chrome</text>
 
-  <!-- the relay -->
-  <rect class="box" x="628" y="115" width="132" height="56" rx="10"/>
-  <use href="#tmo-relay" x="640" y="131"/>
-  <text class="label" x="674" y="138">tab-mcp</text>
-  <text class="label" x="674" y="156">relay</text>
+  <!-- the relay, halfway between the two paths -->
+  <rect class="box" x="628" y="130" width="132" height="56" rx="10"/>
+  <use href="#tmo-relay" x="640" y="146"/>
+  <text class="label" x="674" y="153">tab-mcp</text>
+  <text class="label" x="674" y="171">relay</text>
 
   <!-- the AI apps -->
-  <rect class="box" x="842" y="115" width="112" height="56" rx="10"/>
-  <use href="#tmo-ai" x="854" y="131"/>
-  <text class="label" x="888" y="148">AI apps</text>
-  <text class="muted" x="898" y="192" text-anchor="middle">Claude, ChatGPT,</text>
-  <text class="muted" x="898" y="209" text-anchor="middle">Claude Code, Codex</text>
+  <rect class="box" x="842" y="130" width="112" height="56" rx="10"/>
+  <use href="#tmo-ai" x="854" y="146"/>
+  <text class="label" x="888" y="163">AI apps</text>
+  <text class="muted" x="898" y="207" text-anchor="middle">Claude, ChatGPT,</text>
+  <text class="muted" x="898" y="224" text-anchor="middle">Claude Code, Codex</text>
 </svg>
