@@ -3,9 +3,12 @@
  * frame: injected at a click on the icon, or registered for every page with
  * host access. It answers the service worker (where the connection lives,
  * DEC-116) about the page and its WebMCP tools and calls them. In this world `document.modelContext` is the browser's own,
- * whatever the page put on its own `document` (iteration 18).
+ * whatever the page put on its own `document` (iteration 18). Firefox has
+ * none: there this script defines one for the page and keeps its tools
+ * (`firefox/webmcp.ts`, iteration 44).
  */
 
+import { installWebMCP } from "./firefox/webmcp.ts";
 import type {
 	CallResult,
 	ContentEvent,
@@ -60,7 +63,19 @@ export const MAX_SEND_RESULT = 2 * 1024 * 1024;
 const cutText = (text: string, max: number) =>
 	text.length > max ? text.slice(0, max) : text;
 
+/** `true` in the Firefox build (`scripts/build.ts`, a `define`). */
+declare const TAB_MCP_FIREFOX: boolean | undefined;
+
+/**
+ * Firefox's stand-in for the browser's own WebMCP: the content script's side
+ * of the `document.modelContext` it defines for this page (`firefox/webmcp.ts`).
+ */
+let firefoxContext: ModelContext | undefined;
+
 const contextOf = (doc: Document) =>
+	(firefoxContext !== undefined && doc === globalThis.document
+		? firefoxContext
+		: undefined) ??
 	(doc as Document & { modelContext?: ModelContext }).modelContext;
 
 const message = (error: unknown) =>
@@ -352,6 +367,13 @@ declare global {
 // Injected again on each click: answer once per page.
 if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	globalThis.tabMcpContentScript = true;
+	// First of all, at `document_start`: the page's scripts look for it as
+	// they load. Where Firefox has WebMCP of its own, the native one is used.
+	// The build's `define` itself, not `FIREFOX`: so Chrome's bundle drops it.
+	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX)
+		firefoxContext = installWebMCP(window) as unknown as
+			| ModelContext
+			| undefined;
 	chrome.runtime.onMessage.addListener(
 		(request: ContentRequest, sender, sendResponse) => {
 			// Only the extension itself (its service worker) asks; a content

@@ -5,6 +5,7 @@ node_modules
 out
 dist
 dist-store
+dist-firefox
 *.tgz
 # the extension's store package (bun scripts/build.ts --store --zip)
 tab-mcp-for-chrome-*.zip

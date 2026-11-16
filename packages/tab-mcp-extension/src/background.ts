@@ -11,6 +11,7 @@
  * user left AI access on (after a browser start, an update, a reload).
  */
 
+import { FIREFOX, openPanel } from "./browser.ts";
 import { CONTENT_SCRIPT, CONTENT_SCRIPT_ID } from "./messages.ts";
 import { attachPanel } from "./panel-port.ts";
 import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
@@ -55,13 +56,10 @@ chrome.action.onClicked.addListener((tab) => {
 	// shows nothing. The panel stays the global one, for every tab without a
 	// panel of its own. (`openPanelOnActionClick` would show it too, but then
 	// the click grants no `activeTab`.)
-	void chrome.sidePanel
-		.open(
-			tab.id === undefined
-				? { windowId: tab.windowId }
-				: { tabId: tab.id, windowId: tab.windowId },
-		)
-		.catch((error: unknown) => console.warn("tab-mcp: side panel", error));
+	void openPanel({
+		...(tab.id === undefined ? {} : { tabId: tab.id }),
+		windowId: tab.windowId,
+	}).catch((error: unknown) => console.warn("tab-mcp: side panel", error));
 	// Only into a page of an http(s) site (DEC-142); elsewhere page_info says why.
 	if (tab.id !== undefined && isSitePage(tab.url ?? ""))
 		void injectInto(tab.id)
@@ -84,7 +82,10 @@ async function syncRegistration(): Promise<void> {
 				id: CONTENT_SCRIPT_ID,
 				js: [CONTENT_SCRIPT],
 				matches: SITE_MATCHES,
-				runAt: "document_idle",
+				// Firefox: before the page's scripts, which look for
+				// `document.modelContext` while they load (the polyfill,
+				// `firefox/webmcp.ts`).
+				runAt: FIREFOX ? "document_start" : "document_idle",
 			},
 		]);
 	else if (!granted && registered.length > 0)
@@ -126,7 +127,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
 chrome.runtime.onConnect.addListener((port) => {
 	if (
 		port.name !== PANEL_PORT ||
-		!isPanelSender(port.sender ?? {}, chrome.runtime.id)
+		!isPanelSender(port.sender ?? {}, chrome.runtime.id, {
+			origin: chrome.runtime.getURL("/").replace(/\/$/, ""),
+			// The Firefox test build: the tests open the panel in a tab
+			// (WebDriver BiDi cannot reach the sidebar).
+			inTab: FIREFOX && TAB_MCP_TEST,
+		})
 	) {
 		port.disconnect();
 		return;
@@ -170,6 +176,19 @@ function notificationClicked(id: string): void {
 chrome.notifications.onButtonClicked.addListener(notificationButton);
 chrome.notifications.onClicked.addListener(notificationClicked);
 chrome.notifications.onClosed.addListener(notificationDismissed);
+// The Firefox test build opens the panel at install, in a tab in front (the
+// tests open their pages in another window; the tab in front is then the
+// page's, `tabInFront`): WebDriver BiDi can neither reach the sidebar nor
+// navigate a tab to an extension's page, and headless Firefox shows one
+// window only.
+if (TAB_MCP_TEST && FIREFOX)
+	chrome.runtime.onInstalled.addListener(
+		() =>
+			void chrome.tabs.create({
+				url: chrome.runtime.getURL("sidepanel/index.html"),
+				active: true,
+			}),
+	);
 if (TAB_MCP_TEST)
 	Object.assign(globalThis, {
 		tabMcpNotificationButton: notificationButton,

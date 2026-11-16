@@ -14,6 +14,7 @@ import {
 	type ReplacedDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
+import { notificationOptions, openPanel } from "../browser.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	type GrantView,
@@ -505,7 +506,7 @@ export class Connection {
 		const toFront = () =>
 			void chrome.windows.update(windowId, { focused: true }).catch(() => {});
 		// No await before this: the gesture would be gone.
-		return chrome.sidePanel.open({ tabId, windowId }).then(
+		return openPanel({ tabId, windowId }).then(
 			() => {
 				toFront();
 				return true;
@@ -712,16 +713,19 @@ export class Connection {
 				return (await chrome.windows.get(windowId)).focused;
 			},
 			notify: async (id, text) => {
-				await chrome.notifications.create(id, {
-					type: "basic",
-					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-					title: text.title,
-					message: text.message,
-					contextMessage: text.contextMessage,
-					buttons: text.buttons.map((title) => ({ title })),
-					requireInteraction: true,
-					priority: 2,
-				});
+				await chrome.notifications.create(
+					id,
+					notificationOptions({
+						type: "basic",
+						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+						title: text.title,
+						message: text.message,
+						contextMessage: text.contextMessage,
+						buttons: text.buttons.map((title) => ({ title })),
+						requireInteraction: true,
+						priority: 2,
+					}),
+				);
 			},
 			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
 			showQuestion: ({ tabId, windowId }) =>

@@ -36,6 +36,47 @@ test("the store build has no key, no host_permissions and no source maps", async
 		);
 }, 60_000);
 
+test("the Chrome build carries none of the Firefox build's code (iteration 44)", async () => {
+	const { outdir } = await build({ outdir: join(dir, "chrome"), store: true });
+	for (const name of ["content.js", "background.js"]) {
+		const text = await Bun.file(join(outdir, name)).text();
+		expect(text).not.toContain("exportFunction");
+		expect(text).not.toContain("sidebarAction");
+	}
+}, 60_000);
+
+test("the Firefox build: an event page, a sidebar, the add-on id, no store package", async () => {
+	const { outdir, manifest } = await build({
+		outdir: join(dir, "firefox"),
+		firefox: true,
+	});
+	expect(manifest["background"]).toEqual({
+		scripts: ["background.js"],
+		type: "module",
+	});
+	expect(manifest["sidebar_action"]).toMatchObject({
+		default_panel: "sidepanel/index.html",
+	});
+	expect(manifest["side_panel"]).toBeUndefined();
+	expect(manifest["permissions"]).not.toContain("sidePanel");
+	expect(manifest["key"]).toBeUndefined();
+	expect(manifest["host_permissions"]).toBeUndefined();
+	expect(
+		(manifest["browser_specific_settings"] as { gecko: { id: string } }).gecko
+			.id,
+	).toBe("tab-mcp@ractive.ch");
+	// No upgrade-insecure-requests: a relay on the loopback stays ws:.
+	expect(JSON.stringify(manifest["content_security_policy"])).not.toContain(
+		"upgrade-insecure-requests",
+	);
+	expect(await Bun.file(join(outdir, "content.js")).text()).toContain(
+		"exportFunction",
+	);
+	await expect(
+		build({ outdir: join(dir, "x"), firefox: true, store: true }),
+	).rejects.toThrow("no store package");
+}, 60_000);
+
 test("the test build keeps its source maps", async () => {
 	const { outdir } = await build({ outdir: join(dir, "test"), test: true });
 	const files = await readdir(outdir, { recursive: true });

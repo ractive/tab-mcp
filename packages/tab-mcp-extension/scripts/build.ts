@@ -36,6 +36,13 @@ const REPOSITORY = join(ROOT, "../..");
 
 export interface BuildOptions {
 	outdir?: string;
+	/**
+	 * The Firefox build (iteration 44, a spike): a sidebar for the side
+	 * panel, an event page for the service worker, the content script at
+	 * `document_start` with WebMCP of its own for the page; into
+	 * `dist-firefox/`. No key: Firefox ids come from `browser_specific_settings`.
+	 */
+	firefox?: boolean;
 	/** No key, for the Chrome Web Store. */
 	store?: boolean;
 	/** No key, host access to every http(s) site granted at install. */
@@ -136,12 +143,70 @@ export function createManifest(
 	};
 }
 
+/** The Firefox build's add-on id (`browser_specific_settings.gecko.id`). */
+export const FIREFOX_ID = "tab-mcp@ractive.ch";
+
+/**
+ * The Firefox build's manifest (iteration 44): Manifest V3 as Firefox has it.
+ * The background is an event page (`background.scripts`; Firefox has no
+ * extension service workers), the side panel a sidebar (`sidebar_action`),
+ * no `sidePanel` permission. Host access in Manifest V3 is asked for at
+ * install since Firefox 127.
+ */
+export function createFirefoxManifest(
+	version: string,
+	options: { test?: boolean },
+): Record<string, unknown> {
+	const icons = Object.fromEntries(
+		ICON_SIZES.map((s) => [String(s), `icons/icon-${s}.png`]),
+	);
+	return {
+		manifest_version: 3,
+		name: "tab-mcp for Firefox",
+		version,
+		description:
+			"Gives pages the WebMCP Firefox lacks and lets an AI app outside the browser call the page's tools and open pages in that tab, through a tab-mcp relay.",
+		browser_specific_settings: {
+			gecko: {
+				id: FIREFOX_ID,
+				strict_min_version: "128.0",
+				// Required for new add-ons on addons.mozilla.org since 2025-11:
+				// the page's tools, their inputs and results go to the AI app.
+				data_collection_permissions: {
+					required: ["websiteContent", "websiteActivity"],
+				},
+			},
+		},
+		icons,
+		action: { default_title: "tab-mcp for Firefox", default_icon: icons },
+		background: { scripts: ["background.js"], type: "module" },
+		sidebar_action: {
+			default_title: "tab-mcp",
+			default_panel: "sidepanel/index.html",
+			default_icon: icons,
+			open_at_install: false,
+		},
+		permissions: ["activeTab", "alarms", "notifications", "scripting"],
+		optional_host_permissions: SITE_MATCHES,
+		...(options.test ? { host_permissions: SITE_MATCHES } : {}),
+		incognito: "not_allowed",
+		// Chrome's default for Manifest V3. Firefox's adds
+		// `upgrade-insecure-requests`, which turns a relay on the loopback
+		// (ws://127.0.0.1, which the library allows) into wss: and fails.
+		content_security_policy: {
+			extension_pages: "script-src 'self'; object-src 'self'",
+		},
+	};
+}
+
 /** How every entry point is bundled. */
 interface BundleOptions {
 	minify: boolean;
 	sourcemap: "none" | "linked";
 	/** The test build: its hooks for the DevTools Protocol are in. */
 	test: boolean;
+	/** The Firefox build. */
+	firefox: boolean;
 }
 
 /** Bundle one entry point; returns the npm packages it contains. */
@@ -163,7 +228,10 @@ async function bundle(
 		sourcemap: options.sourcemap,
 		metafile: true,
 		// The test hooks are code only in the test build (ES 7).
-		define: { TAB_MCP_TEST: String(options.test) },
+		define: {
+			TAB_MCP_TEST: String(options.test),
+			TAB_MCP_FIREFOX: String(options.firefox),
+		},
 	});
 	if (!result.success)
 		throw new AggregateError(result.logs, `build of ${entrypoint} failed`);
@@ -195,8 +263,18 @@ export async function checkOutdir(outdir: string): Promise<void> {
 }
 
 export async function build(options: BuildOptions = {}): Promise<BuildResult> {
+	if (options.firefox && options.store)
+		throw new Error("no store package of the Firefox build yet");
 	const outdir = resolve(
-		options.outdir ?? join(ROOT, options.store ? "dist-store" : "dist"),
+		options.outdir ??
+			join(
+				ROOT,
+				options.firefox
+					? "dist-firefox"
+					: options.store
+						? "dist-store"
+						: "dist",
+			),
 	);
 	await checkOutdir(outdir);
 	const minify = options.minify ?? true;
@@ -210,6 +288,7 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 		minify,
 		sourcemap,
 		test: options.test === true,
+		firefox: options.firefox === true,
 	};
 	const packages = new Set([
 		...(await bundle("src/background.ts", outdir, "esm", how)),
@@ -229,11 +308,18 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			Bun.file(join(ROOT, "assets/icons", name)),
 		);
 	}
-	const key = options.store || options.test ? undefined : await readKey();
-	const manifest = createManifest(pkg.version, {
-		...(key ? { key } : {}),
-		...(options.test ? { test: true } : {}),
-	});
+	const key =
+		options.store || options.test || options.firefox
+			? undefined
+			: await readKey();
+	const manifest = options.firefox
+		? createFirefoxManifest(pkg.version, {
+				...(options.test ? { test: true } : {}),
+			})
+		: createManifest(pkg.version, {
+				...(key ? { key } : {}),
+				...(options.test ? { test: true } : {}),
+			});
 	await Bun.write(
 		join(outdir, "manifest.json"),
 		`${JSON.stringify(manifest, null, "\t")}\n`,
@@ -346,6 +432,7 @@ if (import.meta.main) {
 		options: {
 			store: { type: "boolean" },
 			test: { type: "boolean" },
+			firefox: { type: "boolean" },
 			zip: { type: "boolean" },
 			outdir: { type: "string" },
 		},
@@ -358,14 +445,17 @@ if (import.meta.main) {
 		...(values.outdir ? { outdir: values.outdir } : {}),
 		...(values.store ? { store: true } : {}),
 		...(values.test ? { test: true } : {}),
+		...(values.firefox ? { firefox: true } : {}),
 	});
 	const where = relative(process.cwd(), result.outdir) || ".";
 	console.log(
 		result.id
 			? `Built ${where} (extension ID ${result.id})`
-			: values.store || values.test
-				? `Built ${where} (no key)`
-				: `Built ${where} without a key: no ~/.config/tab-mcp/extension-key.txt, so the hosted relay will not accept this build's id`,
+			: values.firefox
+				? `Built ${where} for Firefox (add-on id ${FIREFOX_ID})`
+				: values.store || values.test
+					? `Built ${where} (no key)`
+					: `Built ${where} without a key: no ~/.config/tab-mcp/extension-key.txt, so the hosted relay will not accept this build's id`,
 	);
 	if (values.zip) {
 		const target = join(ROOT, storeZipName(String(result.manifest["version"])));
