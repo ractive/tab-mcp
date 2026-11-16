@@ -3920,5 +3920,5 @@ relay to admit tab-mcp for Firefox.
 - What it admits beyond tab-mcp for Firefox: any Firefox extension's pages, never a
   website. DEC-108 already holds that a Chrome id is no proof of the publisher; the
   pairing code, read in the extension's panel, ties an AI app to it.
-- The hosted relay's setting is the owner's to apply (the ractive.ch repository, with
-  tofu), after a relay release with this change.
+- Released in relay 0.11.0; the hosted relay has `moz-extension://*` since 2026-11-16
+  (ractive.ch#123, applied with tofu after the deploy of 0.11.0).

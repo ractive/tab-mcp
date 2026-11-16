@@ -173,7 +173,8 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   `ws://127.0.0.1` to `wss:` (the build sets Chrome's CSP).
 - **The relay (question 5)**: Firefox sends `Origin: moz-extension://<UUID>`, a UUID
   per installation (the add-on id is not in it). On the owner's request a relay now
-  takes `moz-extension://*` (DEC-189); checked with the real relay and the build.
+  takes `moz-extension://*` (DEC-189), released as relay 0.11.0 and set on the hosted
+  relay the same day; the build connects to tab-mcp.ractive.ch with its defaults.
 - **Harness**: WebDriver BiDi, built into Firefox (`test/firefox.ts`): temporary
   install (`webExtension.install`), evaluation in pages and, with
   `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS`, in the panel. BiDi cannot open or reach the sidebar,
@@ -191,8 +192,7 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   the icon opening the sidebar, "Give access to all sites" and Firefox's prompt, a
   real AI app's pairing (the relay's pairing is the same as for Chrome).
 - **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org), the
-  fingerprint every page sees, whether the hosted relay sets `moz-extension://*` (after
-  a relay release), and question 6 (Chrome without WebMCP), not tried.
+  fingerprint every page sees.
 
 # Citations
 

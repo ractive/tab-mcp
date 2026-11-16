@@ -7,14 +7,18 @@
  * page's tools changed.
  */
 
+import { FIREFOX } from "./browser.ts";
 import type { ContentEvent } from "./messages.ts";
 import type { NoAccessReason } from "./tabs.ts";
 
 /**
  * The extension's MCP server name: the worker's connection gives it to the
- * relay, and the side panel's setup commands name the server by it.
+ * relay, and the side panel's setup commands name the server by it
+ * ("tab-mcp-for-firefox" in the Firefox build).
  */
-export const SERVER_NAME = "tab-mcp-for-chrome";
+export const SERVER_NAME = FIREFOX
+	? "tab-mcp-for-firefox"
+	: "tab-mcp-for-chrome";
 
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "panel";

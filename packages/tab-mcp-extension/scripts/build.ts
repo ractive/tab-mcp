@@ -26,7 +26,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
-import { CONTENT_SCRIPT } from "../src/messages.ts";
+import { CONTENT_SCRIPT, WEBMCP_MAIN_SCRIPT } from "../src/messages.ts";
 import { SITE_MATCHES } from "../src/tabs.ts";
 import { ICON_SIZES } from "./icons.ts";
 import { writeZip, zipNames } from "./zip.ts";
@@ -295,6 +295,16 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	const packages = new Set([
 		...(await bundle("src/background.ts", outdir, "esm", how)),
 		...(await bundle("src/content.ts", outdir, "iife", how, CONTENT_SCRIPT)),
+		// Chrome's page-world polyfill; Firefox's lives in the content script.
+		...(how.firefox
+			? []
+			: await bundle(
+					"src/chrome/webmcp-main.ts",
+					outdir,
+					"iife",
+					how,
+					WEBMCP_MAIN_SCRIPT,
+				)),
 		...(await bundle(
 			"src/sidepanel/index.html",
 			join(outdir, "sidepanel"),

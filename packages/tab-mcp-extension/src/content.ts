@@ -8,6 +8,7 @@
  * (`firefox/webmcp.ts`, iteration 44).
  */
 
+import { connectPolyfill } from "./chrome/webmcp-port.ts";
 import { installWebMCP } from "./firefox/webmcp.ts";
 import type {
 	CallResult,
@@ -67,16 +68,18 @@ const cutText = (text: string, max: number) =>
 declare const TAB_MCP_FIREFOX: boolean | undefined;
 
 /**
- * Firefox's stand-in for the browser's own WebMCP: the content script's side
- * of the `document.modelContext` it defines for this page (`firefox/webmcp.ts`).
+ * The extension's stand-in for the browser's own WebMCP, where there is none:
+ * in Firefox the content script's side of the `document.modelContext` it
+ * defines (`firefox/webmcp.ts`), in Chrome without WebMCP the port to the
+ * page-world polyfill (`chrome/webmcp-port.ts`). The browser's own wins.
  */
-let firefoxContext: ModelContext | undefined;
+let ownContext: ModelContext | undefined;
 
 const contextOf = (doc: Document) =>
-	(firefoxContext !== undefined && doc === globalThis.document
-		? firefoxContext
-		: undefined) ??
-	(doc as Document & { modelContext?: ModelContext }).modelContext;
+	(doc as Document & { modelContext?: ModelContext }).modelContext ??
+	(ownContext !== undefined && doc === globalThis.document
+		? ownContext
+		: undefined);
 
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
@@ -371,9 +374,7 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	// they load. Where Firefox has WebMCP of its own, the native one is used.
 	// The build's `define` itself, not `FIREFOX`: so Chrome's bundle drops it.
 	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX)
-		firefoxContext = installWebMCP(window) as unknown as
-			| ModelContext
-			| undefined;
+		ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
 	chrome.runtime.onMessage.addListener(
 		(request: ContentRequest, sender, sendResponse) => {
 			// Only the extension itself (its service worker) asks; a content
@@ -403,6 +404,18 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
+	// Chrome without WebMCP of its own: the page-world polyfill, if it is
+	// there (registered with host access), answers on a port.
+	if (
+		!(typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) &&
+		!("modelContext" in document)
+	)
+		void connectPolyfill(window).then((context) => {
+			if (context === undefined || "modelContext" in document) return;
+			ownContext = context as unknown as ModelContext;
+			context.addEventListener("toolchange", changed);
+			changed();
+		});
 	// A page Chrome shows again from its back/forward cache loads nothing:
 	// its tools are read again as after a change.
 	globalThis.addEventListener?.("pageshow", (event) => {

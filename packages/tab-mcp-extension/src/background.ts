@@ -12,7 +12,12 @@
  */
 
 import { FIREFOX, openPanel } from "./browser.ts";
-import { CONTENT_SCRIPT, CONTENT_SCRIPT_ID } from "./messages.ts";
+import {
+	CONTENT_SCRIPT,
+	CONTENT_SCRIPT_ID,
+	WEBMCP_MAIN_ID,
+	WEBMCP_MAIN_SCRIPT,
+} from "./messages.ts";
 import { attachPanel } from "./panel-port.ts";
 import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
@@ -73,25 +78,40 @@ chrome.action.onClicked.addListener((tab) => {
 /** Register the content script for every page while host access is granted. */
 async function syncRegistration(): Promise<void> {
 	const granted = await chrome.permissions.contains(ALL_SITES);
-	const registered = await chrome.scripting.getRegisteredContentScripts({
-		ids: [CONTENT_SCRIPT_ID],
-	});
-	if (granted && registered.length === 0)
-		await chrome.scripting.registerContentScripts([
-			{
-				id: CONTENT_SCRIPT_ID,
-				js: [CONTENT_SCRIPT],
-				matches: SITE_MATCHES,
-				// Firefox: before the page's scripts, which look for
-				// `document.modelContext` while they load (the polyfill,
-				// `firefox/webmcp.ts`).
-				runAt: FIREFOX ? "document_start" : "document_idle",
-			},
-		]);
-	else if (!granted && registered.length > 0)
-		await chrome.scripting.unregisterContentScripts({
-			ids: [CONTENT_SCRIPT_ID],
+	const scripts: chrome.scripting.RegisteredContentScript[] = [
+		{
+			id: CONTENT_SCRIPT_ID,
+			js: [CONTENT_SCRIPT],
+			matches: SITE_MATCHES,
+			// Firefox: before the page's scripts, which look for
+			// `document.modelContext` while they load (the polyfill,
+			// `firefox/webmcp.ts`).
+			runAt: FIREFOX ? "document_start" : "document_idle",
+		},
+	];
+	// Chrome: the polyfill for pages without Chrome's WebMCP, in the page's
+	// own world before its scripts (`chrome/webmcp-main.ts`).
+	if (!FIREFOX)
+		scripts.push({
+			id: WEBMCP_MAIN_ID,
+			js: [WEBMCP_MAIN_SCRIPT],
+			matches: SITE_MATCHES,
+			runAt: "document_start",
+			world: "MAIN",
 		});
+	const ids = scripts.map((s) => s.id);
+	const registered = new Set(
+		(await chrome.scripting.getRegisteredContentScripts({ ids })).map(
+			(s) => s.id,
+		),
+	);
+	if (granted) {
+		// Also after an update that added a script: the missing ones.
+		const missing = scripts.filter((s) => !registered.has(s.id));
+		if (missing.length > 0)
+			await chrome.scripting.registerContentScripts(missing);
+	} else if (registered.size > 0)
+		await chrome.scripting.unregisterContentScripts({ ids: [...registered] });
 }
 
 const sync = () =>

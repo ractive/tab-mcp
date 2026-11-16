@@ -274,6 +274,9 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 		const html = await stack.panel.eval<string>("document.body.innerHTML");
 		expect(html).not.toContain("Chrome");
 		expect(html).not.toContain("chrome://");
+		// The setup commands, made once the address is there.
+		expect(html).toContain("tab-mcp-for-firefox");
+		expect(html.toLowerCase()).not.toContain("for-chrome");
 	});
 
 	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {

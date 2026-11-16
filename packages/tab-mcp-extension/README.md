@@ -262,7 +262,8 @@ the extension offers them to the AI app as in Chrome. Iteration 44; not released
    A temporary add-on is gone when Firefox quits.
 3. A relay that admits Firefox extensions. Firefox's origin, `moz-extension://<UUID>`, is
    made up for each installation, so a relay admits all Firefox extensions or none
-   (DEC-189). The hosted relay does not yet; run one locally:
+   (`moz-extension://*`, relay 0.11.0, DEC-189). The hosted relay
+   (`https://tab-mcp.ractive.ch`, the default) does since 2026-11-16; or run one locally:
 
    ```sh
    NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 \
@@ -270,8 +271,8 @@ the extension offers them to the AI app as in Chrome. Iteration 44; not released
      bun packages/tab-mcp/src/main.ts
    ```
 
-4. Click the tab-mcp icon: the sidebar opens. Under **Settings** set the relay to
-   `http://localhost:8080`, then **Give access to all sites** (Firefox asks): only then does
+4. Click the tab-mcp icon: the sidebar opens. For a local relay, set it under **Settings**
+   (`http://localhost:8080`). Then **Give access to all sites** (Firefox asks): only then does
    every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
 5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
    to your AI app (`claude mcp add --transport http tab-mcp-firefox <address>`), with the

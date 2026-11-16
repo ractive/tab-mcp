@@ -9,6 +9,13 @@ export const CONTENT_SCRIPT = "content.js";
 /** Its id for `chrome.scripting.registerContentScripts` (with host access). */
 export const CONTENT_SCRIPT_ID = "tab-mcp-page";
 
+/**
+ * Chrome's page-world polyfill for pages without Chrome's WebMCP
+ * (`chrome/webmcp-main.ts`, iteration 44): its file and registration id.
+ */
+export const WEBMCP_MAIN_SCRIPT = "webmcp-main.js";
+export const WEBMCP_MAIN_ID = "tab-mcp-webmcp-main";
+
 export type ContentRequest =
 	| { type: "page-info" }
 	| { type: "webmcp-list" }
