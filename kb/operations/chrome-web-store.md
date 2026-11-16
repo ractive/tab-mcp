@@ -91,20 +91,52 @@ rejects an upload whose version is not higher than the last one.
 
 ## Updates through the publish workflow
 
-The API only updates an item that exists, so the first version goes in by hand (below).
-After that: Actions → "Extension publish" → Run workflow, and pick the release's tag under
-"Use workflow from" (the default, `main`, fails: the tag the workflow runs on is the tag
-it uploads). It downloads the release's store zip, checks that its manifest has the tag's
-version, no key, no host access and the zip no source maps, verifies its build provenance
-(signed by `extension-release.yml` for that tag; an unattested zip stops the run), and
-uploads it with
-[mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload)
-(Chrome Web Store API v2), pinned to the same commit as Overmark's. With "submit" off the
-upload stays a draft in the dashboard; with it on, the version is submitted for review.
+The API only updates an item that exists, so the first version went in by hand (below).
+Since then a release publishes itself: after `extension-release.yml` has created the
+release, its job `publish` runs
+[chrome-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.6.0/.github/workflows/chrome-extension-publish.yml)
+of ractive/release-workflows (pinned to a commit) in the environment `chrome-web-store`,
+which waits for the owner's approval. That job:
 
-The action receives the client secret and the refresh token, which can publish every item
-of the developer account: it is pinned to a commit and runs in a job that checks out
-nothing and installs nothing. Dependabot proposes its updates.
+1. checks that it runs on the release's tag and downloads the release's store zip;
+2. checks that its manifest has the tag's version, no key, no host access and the zip no
+   source maps;
+3. verifies its build provenance (signed by `extension-release.yml` for that tag; an
+   unattested zip stops the run, so the attestation of the release is what the store
+   gets);
+4. packs it as a CRX3 signed with `CWS_CRX_PRIVATE_KEY` (Verified CRX uploads, below), whose
+   CRX id must be `jbpcbkngalkckpjgonfkhhcipjmnnofh`; the CRX wraps exactly the verified
+   zip's bytes;
+5. uploads the CRX with the Chrome Web Store API v2 and submits it for review.
+
+No third-party code runs in that job: the CRX is packed by Python of the standard library
+and `openssl` (byte for byte what `chrome --pack-extension` writes, which release-workflows'
+selftest checks against Chrome), the API is called with `curl`. The client secret and the
+refresh token can publish every item of the developer account; the signing key can sign
+uploads of this item only.
+
+If the publish fails or is rejected, fix the cause and run it again by hand: Actions →
+"Extension publish" → Run workflow, and pick the release's tag under "Use workflow from"
+(the default, `main`, fails). "Submit" off leaves the upload as a draft in the dashboard.
+
+### Verified CRX uploads
+
+The item accepts only uploads signed with our key (dashboard → Package → "Verified CRX
+uploads"), so whoever gets into the Google account cannot push an update without it. The
+key is an RSA key of its own (not the item's key, which Google holds):
+`~/.config/chrome-web-store/tab-mcp-crx-key.pem` on the owner's machine, a copy in the
+owner's password manager, and the environment secret `CWS_CRX_PRIVATE_KEY`. It is never
+stored in the Google account. Losing it means a week with Chrome Web Store support. Its
+public key and CRX id:
+
+```sh
+openssl rsa -in tab-mcp-crx-key.pem -pubout                     # pasted into the dashboard
+openssl pkey -in tab-mcp-crx-key.pem -pubout -outform DER | shasum -a 256 | head -c 32 | tr 0-9a-f a-p
+```
+
+The CRX id is `signing-key-id` in both workflows: a secret with another key fails before
+the upload. The installed extension still has the item's id; the store re-signs what it
+serves.
 
 ## Owner's one-time setup
 
@@ -142,9 +174,11 @@ nothing and installs nothing. Dependabot proposes its updates.
    and exchange the code for a refresh token. Overmark's client and token can be reused:
    they cover every item of the account.
 8. **Environment:** Settings → Environments → new environment `chrome-web-store`: secrets
-   `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`; variables `CWS_PUBLISHER_ID`
-   (Publisher → Settings in the dashboard) and `CWS_EXTENSION_ID` (the item's id); yourself
-   as required reviewer; deployments limited to tags `extension-v*`.
+   `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_CRX_PRIVATE_KEY` (the
+   PEM of the signing key); variable `CWS_PUBLISHER_ID` (Publisher → Settings in the
+   dashboard); yourself as required reviewer; deployments limited to tags `extension-v*`.
+   Then opt in to Verified CRX uploads (Package tab) with the key's public key, after the
+   secret is set: from then on the store refuses a zip.
 9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (item submitted 2026-11-16). The
    hosted relay allows it (ractive/ractive.ch#120). The development build has the same id
    since DEC-187: its manifest carries the item's public key (`manifest-key.txt`, from
