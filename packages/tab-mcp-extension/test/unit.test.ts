@@ -14,6 +14,7 @@ import {
 } from "../scripts/build.ts";
 import {
 	callTool,
+	FIREFOX_NO_WEBMCP_NOTE,
 	MAX_LANGUAGE,
 	MAX_PAGE_TITLE,
 	MAX_SEND_RESULT,
@@ -115,6 +116,25 @@ describe("pageInfo", () => {
 			title: "Example",
 			webmcp: { available: false, tools: 0 },
 		});
+	});
+
+	test("Firefox: a page without WebMCP says to reload it (the tools of a page that loaded before an extension reload are gone)", async () => {
+		const global = globalThis as { TAB_MCP_FIREFOX?: boolean };
+		global.TAB_MCP_FIREFOX = true;
+		try {
+			expect((await pageInfo(fakeDocument({}))).webmcp).toEqual({
+				available: false,
+				tools: 0,
+				note: FIREFOX_NO_WEBMCP_NOTE,
+			});
+			expect((await pageInfo(fakeDocument({ tools: 1 }))).webmcp).toEqual({
+				available: true,
+				tools: 1,
+			});
+		} finally {
+			delete global.TAB_MCP_FIREFOX;
+		}
+		expect(FIREFOX_NO_WEBMCP_NOTE).toContain("reloaded or updated");
 	});
 
 	test("a page with WebMCP and its tools, and its language", async () => {

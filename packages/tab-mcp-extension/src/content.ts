@@ -85,6 +85,15 @@ const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
 /**
+ * `page_info`'s word on a page without WebMCP in Firefox: the page's tools
+ * lived in the content script that defined its `document.modelContext`, and
+ * an extension reload or update ended that script; the new one leaves the
+ * dead object alone, so only a reload of the page brings them back.
+ */
+export const FIREFOX_NO_WEBMCP_NOTE =
+	"tab-mcp gives a page its WebMCP as the page starts loading: ask the user to reload the page if it loaded before tab-mcp had access to the site, or before tab-mcp was reloaded or updated. Only https pages (and localhost) get it.";
+
+/**
  * A read of the page's tools is shared for this long after it started
  * (DEC-177): after a load the worker asks several times within some 300 ms
  * (the load, the content script's first `webmcp-changed`, the panel after
@@ -157,6 +166,12 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 		available: context !== undefined,
 		tools: 0,
 	};
+	if (
+		context === undefined &&
+		typeof TAB_MCP_FIREFOX !== "undefined" &&
+		TAB_MCP_FIREFOX
+	)
+		webmcp.note = FIREFOX_NO_WEBMCP_NOTE;
 	if (context !== undefined) {
 		try {
 			webmcp.tools = (await readsOf(context).get()).length;

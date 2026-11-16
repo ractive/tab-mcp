@@ -69,6 +69,11 @@ export interface PageInfo {
 		tools: number;
 		/** Why the tools could not be counted, if they could not. */
 		error?: string;
+		/**
+		 * What to do about a page without WebMCP, in the Firefox build: its
+		 * WebMCP comes from tab-mcp as the page loads (iteration 44).
+		 */
+		note?: string;
 	};
 }
 

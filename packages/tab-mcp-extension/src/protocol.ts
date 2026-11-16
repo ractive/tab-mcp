@@ -7,7 +7,7 @@
  * page's tools changed.
  */
 
-import { FIREFOX } from "./browser.ts";
+import { FIREFOX, PRODUCT } from "./browser.ts";
 import type { ContentEvent } from "./messages.ts";
 import type { NoAccessReason } from "./tabs.ts";
 
@@ -172,7 +172,7 @@ export function startProblem(error: unknown): PanelState {
 		status: "off",
 		grants: [],
 		pairing: false,
-		problem: `tab-mcp for Chrome could not start: ${why}. Close and open this panel to try again.`,
+		problem: `${PRODUCT} could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],
 		expired: [],

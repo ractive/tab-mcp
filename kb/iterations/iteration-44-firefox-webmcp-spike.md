@@ -188,9 +188,18 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   Also fixed: the polyfill keeps the page's order of calls, `provideContext` checks
   every tool and the limit before it changes anything, a late injection leaves a page's
   own polyfill alone, and Firefox's restricted hosts and words in `noAccess`.
-- **Not tested**: the development build's own flow in a real (not headless) Firefox:
-  the icon opening the sidebar, "Give access to all sites" and Firefox's prompt, a
-  real AI app's pairing (the relay's pairing is the same as for Chrome).
+- **The owner's test in a real Firefox**: the development build paired with Claude Code
+  through tab-mcp.ractive.ch, "Give access to all sites" and Firefox's prompt, the
+  diagram example's 8 tools (shapes and connectors added) and allbirds.ch's tools
+  (search_catalog, get_cart, ask_business). Allow seemed dead: it counts only after a
+  click into the sidebar (DEC-087), and Firefox leaves the focus in the page, so the
+  question now says "Click into the sidebar to answer."
+- **An extension reload or update takes open pages' tools**: they lived in the content
+  script that ended, the page registered them once as it loaded, and the new content
+  script finds the dead `document.modelContext` and leaves it alone. Only a reload of
+  the page brings them back (Chrome keeps the tools itself). The sidebar and
+  `page_info` (`webmcp.note`) ask for a reload; reloading the user's tabs unasked is
+  not an option. Once on addons.mozilla.org, every automatic update does this.
 - **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org), the
   fingerprint every page sees.
 
