@@ -266,7 +266,9 @@ the extension offers them to the AI app as in Chrome. Iteration 44; not released
    in Firefox 160). Open pages lose their WebMCP tools at every reload or update of the
    extension, until they are reloaded: the tools were kept by the content script that
    ended, and the page registers them only as it loads (Chrome keeps them itself). The
-   sidebar and `page_info` say so.
+   new content script replaces the dead `modelContext` the old one left (every read of
+   it threw in the page), and the sidebar and `page_info` (`webmcp.stale`) ask for a
+   reload.
 3. A relay that admits Firefox extensions. Firefox's origin, `moz-extension://<UUID>`, is
    made up for each installation, so a relay admits all Firefox extensions or none
    (`moz-extension://*`, relay 0.11.0, DEC-189). The hosted relay

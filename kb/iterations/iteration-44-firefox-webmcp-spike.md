@@ -195,11 +195,20 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   click into the sidebar (DEC-087), and Firefox leaves the focus in the page, so the
   question now says "Click into the sidebar to answer."
 - **An extension reload or update takes open pages' tools**: they lived in the content
-  script that ended, the page registered them once as it loaded, and the new content
-  script finds the dead `document.modelContext` and leaves it alone. Only a reload of
-  the page brings them back (Chrome keeps the tools itself). The sidebar and
-  `page_info` (`webmcp.note`) ask for a reload; reloading the user's tabs unasked is
-  not an option. Once on addons.mozilla.org, every automatic update does this.
+  script that ended, and the page registered them once as it loaded. Firefox makes the
+  old script's getters dead objects: every read of `document.modelContext` or
+  `navigator.modelContext` throws "can't access dead object" in the page. The new
+  content script (put in when the worker next reads the tab) replaces them, so the
+  page's reads work and new tools register, and marks the page `stale` while it has no
+  tools: the sidebar and `page_info` ask for a reload, the only thing that brings the
+  old tools back (Chrome, and Chrome's page-world polyfill, keep them). Reloading the
+  user's tabs unasked is not an option. Once on addons.mozilla.org, every automatic
+  update does this. Firefox test: "an extension reload or update".
+- **Second review** (Claude 2, GLM 3): the dead getters above; Chrome's polyfill had
+  one second to answer the handover, so a page busy after its load had no WebMCP (no
+  time limit now); a question's notification clicked while another Firefox window is in
+  front opened that window's sidebar (the question's window first now, and a refusal
+  when the sidebar is not open there); the restricted-sites wording in the panel.
 - **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org), the
   fingerprint every page sees.
 

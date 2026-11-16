@@ -32,6 +32,7 @@ import {
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
+import { FIREFOX_STALE_NOTE } from "../src/content.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
 
 setDefaultTimeout(30_000);
@@ -58,6 +59,8 @@ interface Stack {
 	panel: Tab;
 	address: string;
 	client: Client;
+	/** The test build, installed from here. */
+	outdir: string;
 	stop(): Promise<void>;
 }
 
@@ -158,7 +161,18 @@ async function start(
 				throw new Error(`${String(error)}\nThe panel says:\n${text}`);
 			});
 		const client = await mcpClient(relay, address);
-		return { firefox, relay, server, site, tab, panel, address, client, stop };
+		return {
+			firefox,
+			relay,
+			server,
+			site,
+			tab,
+			panel,
+			address,
+			client,
+			outdir,
+			stop,
+		};
 	} catch (error) {
 		await stop();
 		throw error;
@@ -472,3 +486,66 @@ describe.skipIf(!firefoxOk)(
 		}, 30_000);
 	},
 );
+
+describe.skipIf(!firefoxOk)("an extension reload or update", () => {
+	let stack: Stack;
+
+	beforeAll(async () => {
+		stack = await start("webmcp.html", {
+			"extensions.webextensions.keepUuidOnUninstall": true,
+		});
+	}, 90_000);
+
+	afterAll(async () => {
+		await stack?.client.close().catch(() => {});
+		await stack?.stop();
+	});
+
+	/** What the page's own code meets on `document` and `navigator`. */
+	const probe = `(async () => {
+		const out = {};
+		try { out.document = typeof document.modelContext; } catch (e) { out.document = String(e); }
+		try { out.navigator = typeof navigator.modelContext; } catch (e) { out.navigator = String(e); }
+		try {
+			await document.modelContext.registerTool({ name: "after_reload", description: "d", execute: () => "x" });
+			out.tools = (await document.modelContext.getTools()).map((t) => t.name);
+		} catch (e) { out.tools = String(e); }
+		return out;
+	})()`;
+
+	test("the page's reads stop throwing once the new content script is in; tools register again", async () => {
+		await stack.firefox.send("webExtension.uninstall", {
+			extension: FIREFOX_ID,
+		});
+		// Firefox makes the old content script's exports dead objects.
+		expect(await stack.tab.eval(probe)).toMatchObject({
+			document: "TypeError: can't access dead object",
+		});
+		await stack.firefox.installExtension(stack.outdir);
+		const panel = await findPanel(stack.firefox);
+		// As the worker does when it reads a tab with no content script.
+		const [injected] = await panel.eval<{ error?: string }[]>(`(async () => {
+			const [tab] = await chrome.tabs.query({ url: "http://localhost/*" });
+			return chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["/content.js"] });
+		})()`);
+		expect(injected?.error).toBeUndefined();
+		// The new content script knows the page's tools are gone (page_info,
+		// the panel), before the page registers any.
+		const info = await panel.eval<{ webmcp: unknown }>(`(async () => {
+			const [tab] = await chrome.tabs.query({ url: "http://localhost/*" });
+			return chrome.tabs.sendMessage(tab.id, { type: "page-info" });
+		})()`);
+		expect(info.webmcp).toEqual({
+			available: true,
+			tools: 0,
+			stale: true,
+			note: FIREFOX_STALE_NOTE,
+		});
+		// The tools from before the reload are gone with the old script.
+		expect(await stack.tab.eval(probe)).toEqual({
+			document: "object",
+			navigator: "object",
+			tools: ["after_reload"],
+		});
+	}, 60_000);
+});

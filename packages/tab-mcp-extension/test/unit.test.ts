@@ -12,6 +12,8 @@ import {
 	readKey,
 	STORE_ID,
 } from "../scripts/build.ts";
+import { openSidebar, type SidebarAction } from "../src/browser.ts";
+import { connectPolyfill } from "../src/chrome/webmcp-port.ts";
 import {
 	callTool,
 	FIREFOX_NO_WEBMCP_NOTE,
@@ -698,5 +700,61 @@ describe("asking a tab's content script", () => {
 			ok: false,
 			error: "The call did not reach the page: An unexpected error occurred",
 		});
+	});
+});
+
+describe("Firefox's sidebar for a question", () => {
+	const action = (open: boolean[]) => {
+		const calls: string[] = [];
+		const fake: SidebarAction = {
+			open: () => {
+				calls.push("open");
+				return Promise.resolve();
+			},
+			isOpen: ({ windowId }) => {
+				calls.push(`isOpen ${windowId}`);
+				return Promise.resolve(open.shift() ?? false);
+			},
+		};
+		return { fake, calls };
+	};
+
+	test("opened at once (in the gesture), and open in the question's window", async () => {
+		const { fake, calls } = action([true]);
+		const opened = openSidebar(fake, 7);
+		expect(calls).toEqual(["open"]);
+		await opened;
+		expect(calls).toEqual(["open", "isOpen 7"]);
+	});
+
+	test("opened in another window (the one in front): refused, so a notification follows", async () => {
+		const { fake } = action([false]);
+		await expect(openSidebar(fake, 7)).rejects.toThrow("another window");
+	});
+
+	test("no sidebarAction: refused", async () => {
+		await expect(openSidebar(undefined, 7)).rejects.toThrow("no sidebarAction");
+	});
+});
+
+describe("Chrome's page-world polyfill: the content script's port", () => {
+	test("a hello that comes late (a page busy after its load) still counts", async () => {
+		const win = {
+			postMessage: (
+				_message: unknown,
+				_origin: string,
+				ports: MessagePort[],
+			) => {
+				const port = ports[0] as MessagePort;
+				port.onmessage = (event) => {
+					const request = event.data as { type: string; id: number };
+					if (request.type === "list")
+						port.postMessage({ type: "tools", id: request.id, tools: [] });
+				};
+				setTimeout(() => port.postMessage({ type: "hello" }), 1_500);
+			},
+		} as unknown as Window;
+		const context = await connectPolyfill(win);
+		expect(await context.getTools()).toEqual([]);
 	});
 });

@@ -3,7 +3,7 @@
  * and asking it.
  */
 
-import { BROWSER, FIREFOX, PANEL, PRODUCT } from "./browser.ts";
+import { BROWSER, FIREFOX, PANEL, PRODUCT, STORE_TEXT } from "./browser.ts";
 import {
 	type CallResult,
 	CONTENT_SCRIPT,
@@ -158,13 +158,7 @@ export function noAccess(url: string): NoAccessError {
 			"browser-page",
 			`${BROWSER} does not let extensions read this tab (a browser page). Switch to a web page.`,
 		);
-	if (isStorePage(url))
-		return new NoAccessError(
-			"web-store",
-			FIREFOX
-				? "Firefox does not let extensions read addons.mozilla.org and Mozilla's account and support sites."
-				: "Chrome does not let extensions read the Chrome Web Store.",
-		);
+	if (isStorePage(url)) return new NoAccessError("web-store", STORE_TEXT);
 	if (!isSitePage(url))
 		return new NoAccessError(
 			"not-site",

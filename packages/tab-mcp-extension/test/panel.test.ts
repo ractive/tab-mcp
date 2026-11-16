@@ -256,6 +256,13 @@ describe("the tab card's texts", () => {
 		expect(
 			webmcpNote(tab({ webmcp: { available: true, tools: 2 } })),
 		).toBeUndefined();
+		// Firefox: the page's tools went with an extension reload.
+		expect(
+			webmcpNote(tab({ webmcp: { available: true, tools: 0, stale: true } })),
+		).toBe("stale-webmcp");
+		expect(
+			webmcpNote(tab({ webmcp: { available: true, tools: 1, stale: true } })),
+		).toBeUndefined();
 	});
 
 	test("the panel's texts in index.html: by what they act on (EQ 9), roles for what changes (EQ 11)", async () => {

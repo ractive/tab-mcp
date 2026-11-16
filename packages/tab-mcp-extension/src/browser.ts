@@ -33,28 +33,50 @@ export const FIREFOX_PANEL_TEXTS: Readonly<Record<string, string>> = {
 		"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Firefox asks you first.",
 };
 
+/** The pages the browser keeps extensions out of, in the user's words. */
+export const STORE_TEXT: string = FIREFOX
+	? "Firefox does not let extensions read addons.mozilla.org and Mozilla's account and support sites."
+	: "Chrome does not let extensions read the Chrome Web Store.";
+
 /** Firefox's `browser.sidebarAction`, the part used here. */
-interface SidebarAction {
+export interface SidebarAction {
 	open(): Promise<void>;
+	isOpen(details: { windowId?: number }): Promise<boolean>;
+}
+
+/**
+ * Open Firefox's sidebar: `open()` takes no window and opens it in the
+ * window in front, which need not be `windowId` (a question's notification
+ * clicked while another window is in front). Rejects unless `windowId`'s
+ * sidebar is open after it. `open()` is called at once, in the gesture.
+ */
+export function openSidebar(
+	action: SidebarAction | undefined,
+	windowId: number,
+): Promise<void> {
+	if (action === undefined)
+		return Promise.reject(new Error("no sidebarAction"));
+	return action.open().then(async () => {
+		if (!(await action.isOpen({ windowId })))
+			throw new Error("the sidebar opened in another window");
+	});
 }
 
 /**
  * Open the panel for `tabId` in `windowId`: Chrome's side panel, or
- * Firefox's sidebar (of the window in front; it needs the user's gesture,
- * as Chrome's does, so no `await` before this).
+ * Firefox's sidebar (`openSidebar`; it needs the user's gesture, as Chrome's
+ * does, so no `await` before this).
  */
 export function openPanel(options: {
 	tabId?: number;
 	windowId: number;
 }): Promise<void> {
-	if (FIREFOX) {
-		const browser = (
-			globalThis as { browser?: { sidebarAction?: SidebarAction } }
-		).browser;
-		return browser?.sidebarAction
-			? browser.sidebarAction.open()
-			: Promise.reject(new Error("no sidebarAction"));
-	}
+	if (FIREFOX)
+		return openSidebar(
+			(globalThis as { browser?: { sidebarAction?: SidebarAction } }).browser
+				?.sidebarAction,
+			options.windowId,
+		);
 	return chrome.sidePanel.open(
 		options.tabId === undefined
 			? { windowId: options.windowId }

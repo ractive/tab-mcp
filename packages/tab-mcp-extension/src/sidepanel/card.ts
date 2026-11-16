@@ -6,7 +6,7 @@
  * card's texts, in the user's words.
  */
 
-import { BROWSER, FIREFOX } from "../browser.ts";
+import { BROWSER, STORE_TEXT } from "../browser.ts";
 import type { PanelState, TabView } from "../protocol.ts";
 import type { NoAccessReason } from "../tabs.ts";
 
@@ -109,9 +109,7 @@ export function noAccessText(
 		case "browser-page":
 			return BROWSER_PAGE;
 		case "web-store":
-			return FIREFOX
-				? "Firefox does not let extensions read addons.mozilla.org."
-				: "Chrome does not let extensions read the Chrome Web Store.";
+			return STORE_TEXT;
 		case "not-site":
 			return "tab-mcp reads only pages of http(s) sites.";
 	}
@@ -120,10 +118,11 @@ export function noAccessText(
 /** The tab card's line about the page's tools, when it has none to list (EQ 7). */
 export function webmcpNote(
 	tab: TabView | undefined,
-): "no-webmcp" | "no-tools" | undefined {
+): "no-webmcp" | "no-tools" | "stale-webmcp" | undefined {
 	if (tab?.webmcp === undefined) return undefined;
 	if (!tab.webmcp.available) return "no-webmcp";
-	return tab.webmcp.tools === 0 ? "no-tools" : undefined;
+	if (tab.webmcp.tools !== 0) return undefined;
+	return tab.webmcp.stale ? "stale-webmcp" : "no-tools";
 }
 
 /** A confirming click this soon after the first one (a double click) counts as nothing. */

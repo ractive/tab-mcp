@@ -56,6 +56,12 @@ export interface ExtensionContext {
 		options?: { signal?: AbortSignal },
 	): Promise<string | null>;
 	addEventListener(type: "toolchange", listener: () => void): void;
+	/**
+	 * It replaced the dead `modelContext` of an earlier content script (an
+	 * extension reload or update while the page was open): the tools the
+	 * page registered before are gone.
+	 */
+	readonly revived: boolean;
 }
 
 /** The events the page's object has `on…` handlers for. */
@@ -66,12 +72,30 @@ const waive = (value: unknown): PageObject =>
 	(value as PageObject)?.wrappedJSObject ?? value;
 
 /**
+ * The page has a `modelContext` on `target` that works: not one left by an
+ * earlier content script of this extension, whose getter Firefox made a
+ * dead object when the extension was reloaded or updated (every read throws
+ * "can't access dead object" in the page).
+ */
+function hasLiveContext(target: PageObject): boolean {
+	if (!("modelContext" in target)) return false;
+	try {
+		void target.modelContext;
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Define `document.modelContext` (and `navigator.modelContext`, which older
  * pages use) in `win`'s page for its own scripts. `undefined` where Firefox
  * has WebMCP of its own (a native attribute is visible through the Xrays,
  * a page's getter is not), where the page set up its own already, in an
  * insecure context, or without the export helpers: `content.ts` then reads
- * `document.modelContext` as in Chrome.
+ * `document.modelContext` as in Chrome. The dead getters an extension reload
+ * leaves are replaced: the page's tools from before are gone with the old
+ * content script, but its reads stop throwing and new tools register.
  */
 export function installWebMCP(win: Window): ExtensionContext | undefined {
 	if (!hasExportHelpers() || !win.isSecureContext) return undefined;
@@ -79,8 +103,10 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 	const page = waive(win);
 	// Injected after the page set up its own (a click on the icon, after the
 	// load): the page's polyfill stays; the Xray above does not see it.
-	if ("modelContext" in page.document || "modelContext" in page.navigator)
+	if (hasLiveContext(page.document) || hasLiveContext(page.navigator))
 		return undefined;
+	const revived =
+		"modelContext" in page.document || "modelContext" in page.navigator;
 	// The page's realm: what the page gets is made from these.
 	const pageWindow = win as PageObject;
 	const PagePromise = pageWindow.Promise as PromiseConstructor;
@@ -255,5 +281,6 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 		addEventListener: (_type, listener) => {
 			listeners.add(listener);
 		},
+		revived,
 	};
 }

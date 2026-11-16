@@ -14,7 +14,13 @@ import {
 	type ReplacedDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
-import { notificationOptions, openPanel, PANEL, PRODUCT } from "../browser.ts";
+import {
+	FIREFOX,
+	notificationOptions,
+	openPanel,
+	PANEL,
+	PRODUCT,
+} from "../browser.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	type GrantView,
@@ -505,6 +511,10 @@ export class Connection {
 			return Promise.resolve(false);
 		const toFront = () =>
 			void chrome.windows.update(windowId, { focused: true }).catch(() => {});
+		// Firefox opens the sidebar in the window in front: that window first
+		// (if it is not in front in time, `openPanel` rejects, and the next
+		// notification's click finds it there).
+		if (FIREFOX) toFront();
 		// No await before this: the gesture would be gone.
 		return openPanel({ tabId, windowId }).then(
 			() => {
@@ -785,6 +795,7 @@ export class Connection {
 				webmcp: {
 					available: page.webmcp.available,
 					tools: current ? state.tools.length : page.webmcp.tools,
+					...(page.webmcp.stale ? { stale: true as const } : {}),
 				},
 				// Readable, but reading its tools failed: why, instead of an
 				// empty list.

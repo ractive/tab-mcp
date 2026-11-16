@@ -70,8 +70,14 @@ export interface PageInfo {
 		/** Why the tools could not be counted, if they could not. */
 		error?: string;
 		/**
-		 * What to do about a page without WebMCP, in the Firefox build: its
-		 * WebMCP comes from tab-mcp as the page loads (iteration 44).
+		 * Firefox build: the page loaded before tab-mcp was reloaded or
+		 * updated, and it has no tools now (the ones it registered went with
+		 * the old content script; iteration 44).
+		 */
+		stale?: true;
+		/**
+		 * What to do about a page without WebMCP or with `stale`, in the
+		 * Firefox build: its WebMCP comes from tab-mcp as the page loads.
 		 */
 		note?: string;
 	};

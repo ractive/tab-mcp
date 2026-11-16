@@ -93,6 +93,13 @@ const message = (error: unknown) =>
 export const FIREFOX_NO_WEBMCP_NOTE =
 	"tab-mcp gives a page its WebMCP as the page starts loading: ask the user to reload the page if it loaded before tab-mcp had access to the site, or before tab-mcp was reloaded or updated. Only https pages (and localhost) get it.";
 
+/** `page_info`'s word on a page whose tools went with an extension reload. */
+export const FIREFOX_STALE_NOTE =
+	"The page loaded before tab-mcp was reloaded or updated, and the WebMCP tools it registered then are gone: ask the user to reload the page.";
+
+/** This content script's WebMCP replaced a dead one (`ExtensionContext.revived`). */
+let ownRevived = false;
+
 /**
  * A read of the page's tools is shared for this long after it started
  * (DEC-177): after a load the worker asks several times within some 300 ms
@@ -177,6 +184,10 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 			webmcp.tools = (await readsOf(context).get()).length;
 		} catch (error) {
 			webmcp.error = message(error);
+		}
+		if (context === ownContext && ownRevived && webmcp.tools === 0) {
+			webmcp.stale = true;
+			webmcp.note = FIREFOX_STALE_NOTE;
 		}
 	}
 	const language = cutText(doc.documentElement.lang.trim(), MAX_LANGUAGE);
@@ -388,8 +399,11 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	// First of all, at `document_start`: the page's scripts look for it as
 	// they load. Where Firefox has WebMCP of its own, the native one is used.
 	// The build's `define` itself, not `FIREFOX`: so Chrome's bundle drops it.
-	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX)
-		ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
+	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) {
+		const own = installWebMCP(window);
+		ownContext = own as unknown as ModelContext | undefined;
+		ownRevived = own?.revived === true;
+	}
 	chrome.runtime.onMessage.addListener(
 		(request: ContentRequest, sender, sendResponse) => {
 			// Only the extension itself (its service worker) asks; a content
@@ -426,7 +440,7 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		!("modelContext" in document)
 	)
 		void connectPolyfill(window).then((context) => {
-			if (context === undefined || "modelContext" in document) return;
+			if ("modelContext" in document) return;
 			ownContext = context as unknown as ModelContext;
 			context.addEventListener("toolchange", changed);
 			changed();

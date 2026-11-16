@@ -9,18 +9,14 @@ import type { ExtensionContext } from "../firefox/webmcp.ts";
 import { CONNECT, type PortMessage, type PortRequest } from "../webmcp/port.ts";
 import type { ToolInfo } from "../webmcp/registry.ts";
 
-/** How long the polyfill has to answer the handover before there is none. */
-export const HELLO_MS = 1_000;
-
 /**
- * The page-world polyfill's tools, or `undefined` when it does not answer
- * within `HELLO_MS` (not registered for this page, Chrome has WebMCP of its
- * own, or the page set up its own first).
+ * The page-world polyfill's tools, once it answers the handover. It may
+ * never (not registered for this page, Chrome has WebMCP of its own, or the
+ * page set up its own first): then the promise stays pending and the port
+ * open. No time limit: a page busy for a while after it loaded (a long
+ * hydration) answers late, and its tools count from then.
  */
-export function connectPolyfill(
-	win: Window,
-	helloMs = HELLO_MS,
-): Promise<ExtensionContext | undefined> {
+export function connectPolyfill(win: Window): Promise<ExtensionContext> {
 	const channel = new MessageChannel();
 	const port = channel.port1;
 	const listeners = new Set<() => void>();
@@ -67,17 +63,14 @@ export function connectPolyfill(
 		addEventListener: (_type, listener) => {
 			listeners.add(listener);
 		},
+		// Chrome's polyfill keeps the page's tools across an extension reload.
+		revived: false,
 	};
 	return new Promise((resolve) => {
-		const timer = setTimeout(() => {
-			port.close();
-			resolve(undefined);
-		}, helloMs);
 		port.onmessage = (event) => {
 			const message = event.data as PortMessage;
 			switch (message?.type) {
 				case "hello":
-					clearTimeout(timer);
 					resolve(context);
 					break;
 				case "changed":
