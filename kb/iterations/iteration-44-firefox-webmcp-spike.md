@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 44: can an extension give Firefox the WebMCP a page needs?"
-status: planned
+status: completed
 description: "A spike: a Firefox build of tab-mcp for Chrome that supplies document.modelContext itself, defined for each page by its content script, so pages that register WebMCP tools where the API exists register them in Firefox too, and the extension passes them on to AI apps through the relay. Researches the ways Firefox allows it and what each lets the page do, finds out whether real sites (Shopify above all) register with it, what Firefox's extension APIs need, and what the relay must accept for a moz-extension:// origin; decides whether it is built."
 timestamp: 2026-11-16T12:00:00+01:00
 tags: [iteration, extension, firefox, webmcp, research]
@@ -127,13 +127,16 @@ A spike: a research note and a decision, not a feature.
 - [x] A test extension in `test/firefox-spike/` (the polyfill, its object
       for `content.ts`, a sidebar, the connection to a relay), run automatically in
       Firefox with that harness
-- [-] Only if question 6 is worth it: the main-world script and its `MessageChannel` in
-      Chrome without WebMCP
+- [x] Only if question 6 is worth it: the main-world script and its `MessageChannel` in
+      Chrome without WebMCP (built, d3b8716; the owner keeps it)
 - [x] Try a local relay with an open origin list and a `moz-extension://` origin
 - [x] Research note `research/firefox-webmcp.md` with versions, quotes and the counts
       of question 1
-- [ ] A decision: whether a Firefox build goes ahead, with or without the polyfill for
-      Chrome (question 6), and what the relay accepts (question 5, owner)
+- [x] A decision: whether a Firefox build goes ahead, with or without the polyfill for
+      Chrome (question 6), and what the relay accepts (question 5, owner). The Firefox
+      build goes ahead as code, its release on addons.mozilla.org is undecided; Chrome
+      keeps the polyfill; the relay takes `moz-extension://*` (DEC-189); pages may tell
+      that it is installed (DEC-191)
 
 ## Out of scope
 
@@ -214,6 +217,23 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   tell it is installed (the API where the browser has none, and its behaviour). Said in
   `PRIVACY.md` and the README; not hidden, since the behaviour gives it away anyway.
 - **Open for the owner**: whether the Firefox build goes on (to addons.mozilla.org).
+
+
+- **The owner's hand test, 2026-11-16.** Firefox: allbirds.ch (12 tools, `search_catalog`
+  ran) and the openrouter.ai docs (5); Chrome, unpacked: the openrouter.ai docs' 5 tools
+  through the main-world polyfill. In both, the tools survive an extension reload.
+- **Chrome's polyfill needs "Give access to all sites" and a page loaded after the
+  grant**: access by a click on the icon comes after the page's scripts have looked for
+  `document.modelContext`. The panel's texts say so (dadf63f).
+- **Reload keeps a temporary add-on's UUID**, its `storage.local` and IndexedDB
+  (measured with ff-rdp 0.4.4's addon reload, Firefox 160, no prefs); only Remove and
+  Load give a new UUID. `firefox-dev.ts --reload` uses it (b2fb5c4), and a WebMCP tool on
+  an open page survives that reload.
+- **Page tool descriptions up to 8000 characters** (DEC-192, f9f782a); a page's error
+  and why a tool is not offered stay at 1000. The risk: 64 tools of 8000 characters are
+  about 512 KB in ASCII but up to about 1.5 MB in scripts that take 3 bytes a character
+  in UTF-8, past the relay's 1 MiB message for `webmcp_tools` or the tool list.
+  There is no total budget yet; the owner has not decided on one.
 
 # Citations
 

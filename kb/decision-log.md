@@ -3955,3 +3955,25 @@ ractive/release-workflows, keeping the GitHub attestation.
 - No third-party code where the keys are: the CRX is packed by inline Python (standard
   library, `openssl`), byte for byte Chrome's `--pack-extension` (release-workflows'
   selftest compares the two on every change); the API is called with `curl`.
+
+## DEC-191: Pages may tell that the extension is installed (owner)
+
+2026-11-16, iteration 44. Where the browser has no WebMCP of its own (Firefox, and
+Chrome without its flag or a site's origin trial), the extension gives the pages it may
+read `document.modelContext` as they start loading (DEC-188). A page's script can see
+that the API is there and, from how it behaves, that it is this extension's.
+
+- Accepted by the owner: the page learns that it is installed, nothing else (not the
+  user, the relay or the AI app), and only on pages the user gave it.
+- PRIVACY.md and the README say so; the published policy on ractive.ch has to say it
+  before a release with the polyfill.
+
+## DEC-192: Page tool descriptions up to 8000 characters (owner)
+
+2026-11-16. WebMCP has no server instructions, so a page explains its tools in their
+descriptions; 1000 characters cut saturnus's (5.1 KB) off.
+
+- `MAX_DESCRIPTION` is 8000; a page's error and why a tool is not offered keep 1000
+  (`MAX_ERROR`).
+- Open: 64 tools of 8000 characters are about 512 KB in ASCII but up to about 1.5 MB in
+  scripts that take 3 bytes a character, past the relay's 1 MiB message. A total budget across a page's descriptions would prevent it; not decided.
