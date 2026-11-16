@@ -11,6 +11,34 @@ release `extension-v<version>`.
 
 ## Unreleased
 
+### Added
+
+- WebMCP for pages where Chrome has none (no WebMCP flag, no origin trial token): with
+  access to all sites, the extension gives every page `document.modelContext` as it
+  starts loading (a script in the page's own world, `chrome/webmcp-main.ts`), so pages
+  that register their tools wherever the API exists (Mintlify, GitBook and ReadMe docs,
+  pages with the MCP-B polyfill) offer them to the AI app. Chrome's own WebMCP wins
+  where it is on. A page that loaded before the grant gets it after a reload.
+
+### Changed
+
+- Open pages keep their WebMCP tools across a reload or update of the extension.
+- A page busy for a while after it loaded still gets its tools: no time limit for the
+  polyfill's answer.
+- A page tool's description is cut at 8000 characters instead of 1000, so a page without
+  server instructions (WebMCP has none) can say how to use its tools in them. A page's
+  errors stay cut at 1000. All of a page's descriptions together keep at most 64 KiB
+  (UTF-8): past it the longest are cut to one common length, the shorter stay whole.
+- The side panel: a question waiting while the panel has no focus says "Click into the
+  side panel to answer." (Allow counts only from a click into it); a page without
+  WebMCP says to give access to all sites and reload the page; the line under "Give
+  access to all sites" says pages then get WebMCP as they load.
+- Pages it may read can tell that it is installed (`document.modelContext` where Chrome
+  has none); `PRIVACY.md` says so.
+
+The repository also builds tab-mcp for Firefox from the same code (`--firefox`, not
+released; README).
+
 ## [0.1.0][extension-0.1.0] - 2026-11-15
 
 First release.

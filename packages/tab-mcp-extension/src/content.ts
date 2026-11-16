@@ -3,9 +3,13 @@
  * frame: injected at a click on the icon, or registered for every page with
  * host access. It answers the service worker (where the connection lives,
  * DEC-116) about the page and its WebMCP tools and calls them. In this world `document.modelContext` is the browser's own,
- * whatever the page put on its own `document` (iteration 18).
+ * whatever the page put on its own `document` (iteration 18). Firefox has
+ * none: there this script defines one for the page and keeps its tools
+ * (`firefox/webmcp.ts`, iteration 44).
  */
 
+import { connectPolyfill } from "./chrome/webmcp-port.ts";
+import { installWebMCP } from "./firefox/webmcp.ts";
 import type {
 	CallResult,
 	ContentEvent,
@@ -60,11 +64,32 @@ export const MAX_SEND_RESULT = 2 * 1024 * 1024;
 const cutText = (text: string, max: number) =>
 	text.length > max ? text.slice(0, max) : text;
 
+/** `true` in the Firefox build (`scripts/build.ts`, a `define`). */
+declare const TAB_MCP_FIREFOX: boolean | undefined;
+
+/**
+ * The extension's stand-in for the browser's own WebMCP, where there is none:
+ * in Firefox the content script's side of the `document.modelContext` it
+ * defines (`firefox/webmcp.ts`), in Chrome without WebMCP the port to the
+ * page-world polyfill (`chrome/webmcp-port.ts`). The browser's own wins.
+ */
+let ownContext: ModelContext | undefined;
+
 const contextOf = (doc: Document) =>
-	(doc as Document & { modelContext?: ModelContext }).modelContext;
+	(doc as Document & { modelContext?: ModelContext }).modelContext ??
+	(ownContext !== undefined && doc === globalThis.document
+		? ownContext
+		: undefined);
 
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
+
+/**
+ * `page_info`'s word on a page without WebMCP in Firefox: tab-mcp gives a
+ * page its WebMCP as it loads (`firefox/webmcp.ts`).
+ */
+export const FIREFOX_NO_WEBMCP_NOTE =
+	"tab-mcp gives a page its WebMCP as the page starts loading: ask the user to reload the page if it loaded before tab-mcp had access to the site. Only https pages (and localhost) get it.";
 
 /**
  * A read of the page's tools is shared for this long after it started
@@ -139,6 +164,12 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 		available: context !== undefined,
 		tools: 0,
 	};
+	if (
+		context === undefined &&
+		typeof TAB_MCP_FIREFOX !== "undefined" &&
+		TAB_MCP_FIREFOX
+	)
+		webmcp.note = FIREFOX_NO_WEBMCP_NOTE;
 	if (context !== undefined) {
 		try {
 			webmcp.tools = (await readsOf(context).get()).length;
@@ -352,6 +383,17 @@ declare global {
 // Injected again on each click: answer once per page.
 if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	globalThis.tabMcpContentScript = true;
+	// First of all, at `document_start`: the page's scripts look for it as
+	// they load. Where Firefox has WebMCP of its own, the native one is used.
+	// The build's `define` itself, not `FIREFOX`: so Chrome's bundle drops it.
+	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) {
+		try {
+			ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
+		} catch {
+			// The page broke what a takeover needs (a frozen object, its own
+			// records): no WebMCP of ours, but the script still answers.
+		}
+	}
 	chrome.runtime.onMessage.addListener(
 		(request: ContentRequest, sender, sendResponse) => {
 			// Only the extension itself (its service worker) asks; a content
@@ -381,6 +423,18 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
+	// Chrome without WebMCP of its own: the page-world polyfill, if it is
+	// there (registered with host access), answers on a port.
+	if (
+		!(typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) &&
+		!("modelContext" in document)
+	)
+		void connectPolyfill(window).then((context) => {
+			if ("modelContext" in document) return;
+			ownContext = context as unknown as ModelContext;
+			context.addEventListener("toolchange", changed);
+			changed();
+		});
 	// A page Chrome shows again from its back/forward cache loads nothing:
 	// its tools are read again as after a change.
 	globalThis.addEventListener?.("pageshow", (event) => {

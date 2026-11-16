@@ -9,7 +9,7 @@
 <body>
 <main>
 	<p id="question-status" class="visually-hidden" role="status"></p>
-	<dialog id="questions" class="questions" aria-label="Questions from AI apps"><p id="question-status-modal" class="visually-hidden" role="status"></p></dialog>
+	<dialog id="questions" class="questions" aria-label="Questions from AI apps"><p id="question-status-modal" class="visually-hidden" role="status"></p><p id="focus-hint" class="muted small" hidden>Click into the side panel to answer.</p></dialog>
 	<div id="question-notices" class="question-notices"></div>
 
 	<section class="card" aria-labelledby="ai-heading">
@@ -42,7 +42,7 @@
 		<div id="pairing" class="pairing" hidden>
 			<h3>Pair an AI app</h3>
 			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
-			<p class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
+			<p id="pairing-profile" class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
 			<div class="address">
 				<code id="address"></code>
 				<button id="copy" type="button" class="quiet small copy" aria-label="Copy address">Copy</button>
@@ -73,7 +73,7 @@
 		<p id="tab-badges" class="badges"></p>
 		<p id="tab-access" class="tab-access" role="status"></p>
 		<p id="no-tools" class="muted small" hidden>This page offers no WebMCP tools. page_info and the navigation tools still work.</p>
-		<p id="no-webmcp" class="muted small" hidden>WebMCP is off in this tab: Chrome turns it on for sites in its origin trial, or everywhere with <code>chrome://flags/#enable-webmcp-testing</code> (<a href="https://developer.chrome.com/docs/ai/webmcp" target="_blank" rel="noopener">WebMCP in Chrome</a>). page_info and the navigation tools still work.</p>
+		<p id="no-webmcp" class="muted small" hidden>This page has no WebMCP: with access to all sites, tab-mcp gives a page its WebMCP as the page starts loading, so reload a page that loaded before (a click on the icon comes too late for it). Only https pages (and localhost) get it. Chrome's own WebMCP is on for sites in its origin trial, or everywhere with <code>chrome://flags/#enable-webmcp-testing</code> (<a href="https://developer.chrome.com/docs/ai/webmcp" target="_blank" rel="noopener">WebMCP in Chrome</a>). page_info and the navigation tools still work.</p>
 		<div id="tools-head" class="tools-head" hidden>
 			<h3>Tools</h3>
 			<label class="allow-switch"><input id="allow-tools" type="checkbox" role="switch" aria-checked="false" aria-controls="tools" aria-describedby="always-allow-note"><span aria-hidden="true">Always allow all</span></label>
@@ -84,7 +84,7 @@
 			<div class="buttons">
 				<button id="allow-all" type="button">Give access to all sites</button>
 			</div>
-			<p class="muted small">Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.</p>
+			<p id="host-access-note" class="muted small">Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Chrome asks you first.</p>
 		</div>
 		<p id="allowed-all" class="muted small" hidden>
 			tab-mcp has access to all sites. <button id="disallow-all" type="button" class="link">Remove access to all sites</button>

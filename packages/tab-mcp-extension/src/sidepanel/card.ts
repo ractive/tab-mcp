@@ -6,6 +6,7 @@
  * card's texts, in the user's words.
  */
 
+import { BROWSER, STORE_TEXT } from "../browser.ts";
 import type { PanelState, TabView } from "../protocol.ts";
 import type { NoAccessReason } from "../tabs.ts";
 
@@ -87,9 +88,8 @@ export function introText(relay: string): string {
 	return `Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay ${host}.`;
 }
 
-const CLICK_ICON =
-	"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.";
-const BROWSER_PAGE = "Chrome does not let extensions read browser pages.";
+const CLICK_ICON = `Click the tab-mcp icon in ${BROWSER}'s toolbar to let it read this tab.`;
+const BROWSER_PAGE = `${BROWSER} does not let extensions read browser pages.`;
 
 /**
  * Why the tab cannot be read, in the panel's words (EQ 6). Chrome hides the
@@ -109,7 +109,7 @@ export function noAccessText(
 		case "browser-page":
 			return BROWSER_PAGE;
 		case "web-store":
-			return "Chrome does not let extensions read the Chrome Web Store.";
+			return STORE_TEXT;
 		case "not-site":
 			return "tab-mcp reads only pages of http(s) sites.";
 	}

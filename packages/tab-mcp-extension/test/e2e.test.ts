@@ -166,7 +166,7 @@ async function mcpClient(relay: TestRelay, address: string): Promise<Client> {
  * and an MCP client with a token for the connection's address.
  */
 async function start(
-	options: { store: boolean; profile?: string },
+	options: { store: boolean; profile?: string; webmcp?: boolean },
 	first: string,
 ): Promise<Stack> {
 	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-ext-"));
@@ -183,7 +183,7 @@ async function start(
 			outdir,
 			...(options.store ? { store: true } : { test: true, minify: false }),
 		});
-		browser = await launch(outdir, options.profile);
+		browser = await launch(outdir, options.profile, options.webmcp ?? true);
 		const tab = await browser.newPage(first);
 		const panel = await openPanel(browser, tab);
 		await setRelay(panel, relay.url);
@@ -211,11 +211,16 @@ async function start(
 	}
 }
 
-function launch(extension: string, profile?: string): Promise<Browser> {
+/** Chrome; with its own WebMCP unless `webmcp` is `false` (iteration 44's polyfill). */
+function launch(
+	extension: string,
+	profile?: string,
+	webmcp = true,
+): Promise<Browser> {
 	return Browser.launch(chrome as string, {
 		extension,
 		args: [
-			"--enable-features=WebMCP",
+			...(webmcp ? ["--enable-features=WebMCP"] : []),
 			...(process.env["CHROME_LOG"]
 				? ["--enable-logging=stderr", "--v=0"]
 				: []),
@@ -2529,6 +2534,86 @@ describe.skipIf(chrome === undefined)(
 				(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
 					.structuredContent,
 			).toMatchObject({ url: `${OTHER}/webmcp.html` });
+		});
+	},
+);
+
+describe.skipIf(chrome === undefined)(
+	"Chrome without WebMCP: the page-world polyfill (iteration 44)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start(
+				{ store: false, webmcp: false },
+				`${SITE}/plain.html`,
+			);
+			// Loaded after the install registered the polyfill for every page.
+			await stack.tab.goto(`${SITE}/webmcp.html`);
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("Chrome has no WebMCP here; the page finds the polyfill's as it loads", async () => {
+			const world = await stack.tab.isolatedWorld("tab-mcp for Chrome");
+			// The content script's world: no document.modelContext of Chrome's.
+			expect(await stack.tab.eval(`"modelContext" in document`, world)).toBe(
+				false,
+			);
+			expect(
+				await stack.tab.eval<string[]>(
+					"document.modelContext.getTools().then((t) => t.map((x) => x.name).sort())",
+				),
+			).toEqual([
+				"get_greeting",
+				"mcp_result",
+				"mirrored_tool",
+				"place_order",
+				"slow_tool",
+			]);
+		});
+
+		test("the AI app gets the page's tools and calls them", async () => {
+			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+			const result = await call(stack, "page_get_greeting", { name: "Ada" });
+			expect(result.isError).toBeFalsy();
+			expect(result.content).toEqual([{ type: "text", text: "Hello, Ada!" }]);
+			expect((await call(stack, "page_mcp_result")).content).toEqual([
+				{ type: "text", text: "from an MCP result" },
+			]);
+			expect(
+				(await call(stack, "page_info")).structuredContent?.["webmcp"],
+			).toEqual({
+				available: true,
+				tools: 5,
+			});
+		});
+
+		test("cancelling a call aborts the page's signal", async () => {
+			const controller = new AbortController();
+			const pending = call(
+				stack,
+				"page_slow_tool",
+				{},
+				{ signal: controller.signal },
+			);
+			await stack.tab.waitFor("window.slowStarted === true");
+			controller.abort();
+			await pending.catch(() => {});
+			await stack.tab.waitFor("window.aborted === true");
+		});
+
+		test("the list follows toolchange", async () => {
+			await stack.tab.eval(`document.modelContext.registerTool({
+				name: "registered_later",
+				description: "Registered after the load.",
+				annotations: { readOnlyHint: true },
+				execute: () => "later",
+			})`);
+			await waitForTools(stack, (n) => n.includes("page_registered_later"));
 		});
 	},
 );

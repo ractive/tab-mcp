@@ -7,6 +7,7 @@
  * pairing, which stops.
  */
 
+import { FIREFOX, FIREFOX_PANEL_TEXTS, PANEL, PRODUCT } from "../browser.ts";
 import {
 	PANEL_PORT,
 	type PanelCommand,
@@ -56,6 +57,17 @@ function setText(element: HTMLElement, text: string): void {
 	if (element.textContent !== text) element.textContent = text;
 }
 
+$("focus-hint").textContent = `Click into the ${PANEL} to answer.`;
+
+// Firefox's words where the panel's page names Chrome (iteration 44).
+if (FIREFOX) {
+	document.title = PRODUCT;
+	for (const [id, text] of Object.entries(FIREFOX_PANEL_TEXTS)) {
+		const element = document.getElementById(id);
+		if (element) element.textContent = text;
+	}
+}
+
 const { id: windowId } = await chrome.windows.getCurrent();
 
 let port: chrome.runtime.Port | undefined;
@@ -97,7 +109,7 @@ function connect(): void {
 		// to the version before and can reach nothing any more.
 		port = undefined;
 		problem(
-			"tab-mcp for Chrome was updated or reloaded: close and open this panel again.",
+			`${PRODUCT} was updated or reloaded: close and open this panel again.`,
 		);
 		return;
 	}
@@ -444,6 +456,9 @@ function arm(): void {
 				now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS,
 		);
 	updateCountdowns($("questions"), now);
+	// Why Allow waits while the focus is elsewhere (the page, the AI app): the
+	// wait starts only with a click into the panel (DEC-087).
+	$("focus-hint").hidden = cards.size === 0 || focusedSince !== undefined;
 	// `aria-disabled`, not `disabled`: a focused control keeps its focus and
 	// its place in the tab order during the wait (EQ 11).
 	for (const control of document.querySelectorAll<HTMLElement>(

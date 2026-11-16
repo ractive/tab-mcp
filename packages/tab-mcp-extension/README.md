@@ -41,7 +41,7 @@ there, or "Give access to all sites"); on any other tab they do nothing and say 
 The page's tools are the page's word:
 
 - Their descriptions reach the AI app starting with the page's origin (`From
-  https://shop.example: …`), cut to 1000 characters; titles to 100. The origin is the one
+  https://shop.example: …`), cut to 8000 characters (room for a page's how-to, as WebMCP has no server instructions), and all of a page's descriptions together to 64 KiB, the longest cut first; titles to 100. The origin is the one
   Chrome reports for the tab: a page that says it is another site gets no tools.
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Always allow on <host>" in a question, or switching on
@@ -252,6 +252,61 @@ key in its manifest, or, without one, from the folder it was loaded from.
   key, host access at install, and the hooks through which the tests answer
   notifications, which no other build has).
 
+## tab-mcp for Firefox (a spike)
+
+Firefox has no WebMCP. The Firefox build gives every page `document.modelContext` as the
+page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188), so pages
+that register their tools wherever the API exists (Shopify's storefronts, Mintlify, GitBook
+and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
+the extension offers them to the AI app as in Chrome. Iteration 44; not released.
+A page can therefore tell that the extension is installed: the API is there where Firefox
+has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`).
+
+1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
+2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
+   `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
+   **Reload** keeps its UUID and storage, so the address and the AI app's pairing (checked
+   in Firefox 160: `storage.local` and IndexedDB). **Remove** and loading it again is a new
+   installation: a new UUID and empty storage, so a new address the AI app has to pair
+   with, unless `extensions.webextensions.keepUuidOnUninstall` and
+   `extensions.webextensions.keepStorageOnUninstall` are `true` in `about:config`. A
+   temporary add-on is gone when Firefox quits; the two prefs are meant to keep it the
+   same when loaded again (not checked for a quit). Open pages keep their WebMCP tools across a reload or update of the
+   extension: the polyfill keeps them in the page, and the new content script, put into
+   every open page at once, takes them over (DEC-188).
+3. A relay that admits Firefox extensions. Firefox's origin, `moz-extension://<UUID>`, is
+   made up for each installation, so a relay admits all Firefox extensions or none
+   (`moz-extension://*`, relay 0.11.0, DEC-189). The hosted relay
+   (`https://tab-mcp.ractive.ch`, the default) does since 2026-11-16; or run one locally:
+
+   ```sh
+   NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 \
+     TAB_MCP_ALLOWED_ORIGINS='moz-extension://*' TAB_MCP_STORE=memory \
+     bun packages/tab-mcp/src/main.ts
+   ```
+
+4. Click the tab-mcp icon: the sidebar opens. For a local relay, set it under **Settings**
+   (`http://localhost:8080`). Then **Give access to all sites** (Firefox asks): only then does
+   every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
+5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
+   to your AI app (`claude mcp add --transport http tab-mcp-firefox <address>`), with the
+   pairing code from the sidebar.
+
+**While developing**, `bun scripts/firefox-dev.ts [URL] [--headless] [--port N]` does steps 1,
+2 and the host access in one: it builds `dist-firefox-dev/` with host access granted at
+install (`--all-sites`), and starts Firefox through [ff-rdp](https://github.com/ractive/ff-rdp)
+with the build as a temporary add-on and one kept profile (`TAB_MCP_FIREFOX_PROFILE`, else
+`~/.cache/tab-mcp/firefox-dev-profile`) that has the two prefs above. Every launch then has
+the same UUID and storage, so the AI app stays paired; running it again rebuilds and
+replaces the running Firefox. With `--reload` it rebuilds and reloads the add-on in the
+running Firefox instead (`ff-rdp addon reload`, ff-rdp 0.4.4 or later): the tabs stay open,
+and their pages keep their tools, which is what an update does to them. ff-rdp's commands
+reach it with `--port N` (6000 by default).
+
+`bun scripts/build.ts --firefox --test` builds the end-to-end tests' build (host access at
+install, the panel opened in a tab at install). `bun test/firefox-sites.ts` loads real
+WebMCP sites with it and lists the tools each registers (needs the network).
+
 ## Releases
 
 A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip,
@@ -315,6 +370,14 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   run in CI on every change.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
+- `test/firefox-e2e.test.ts`: the Firefox test build in Firefox 128 or newer
+  (`FIREFOX_PATH`, else where it is installed; skipped without it) over WebDriver BiDi
+  (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
+  extension's `document.modelContext` as it loads, and a relay and an MCP client list,
+  call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page replacing
+  the getter); the event page outlasts Firefox's idle timeout with the panel closed; the
+  panel says Firefox, not Chrome. Pages on http://localhost. `test/firefox-sites.ts` (by
+  hand, the network): real sites.
 
 ## Licence
 

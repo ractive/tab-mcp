@@ -3862,6 +3862,57 @@ Branch `release/per-package-changelog`.
 - The old development id leaves the relay's allowed origins once the store build works
   from the store. `TAB_MCP_EXTENSION_KEY_FILE` and the key file in `~/.config` are gone.
 
+## DEC-188: tab-mcp for Firefox gives pages WebMCP from its content script (spike)
+
+2026-11-16, iteration 44 ([research](/research/firefox-webmcp.md)). Firefox has no
+WebMCP; the owner's idea: the extension supplies it.
+
+- **One codebase, a build flag.** `bun scripts/build.ts --firefox` builds tab-mcp for
+  Firefox from `packages/tab-mcp-extension` (`dist-firefox/`, add-on id
+  `tab-mcp@ractive.ch`). What differs is in `src/browser.ts` and the manifest: the
+  sidebar for the side panel, an event page (`background.scripts`) for the service
+  worker, notifications without buttons, Chrome's extension CSP (Firefox's default
+  `upgrade-insecure-requests` turned a relay on the loopback into `wss:`), and Firefox's
+  words in the panel. The Chrome build carries none of it (a build test).
+- **The polyfill runs in the content script, with `exportFunction`** (`src/firefox/webmcp.ts`),
+  registered at `document_start`: it defines `document.modelContext` and
+  `navigator.modelContext` on the page's prototypes, an `EventTarget` of the page's realm
+  whose methods run in the content script, which keeps the tools. No main-world script
+  and no channel through the page: the page sees that the API exists and can use its own
+  tools, nothing else. `content.ts` gets an object with what it reads from Chrome's
+  native WebMCP, so the bridge is unchanged. Where Firefox has WebMCP of its own (a
+  native attribute is visible through the Xrays) the polyfill steps aside.
+- **What must outlast the content script lives in the page** (added the same day, after
+  the owner found open pages without tools after a reload of the add-on): an extension
+  reload or update ends the content script, Firefox makes every function it exported a
+  dead object, and the page registered its tools once, while loading. So the page's
+  `modelContext` object, its tools (each with its signal) and its `on…` handlers are kept
+  in a `Map` of the page's realm, and the prototypes' getters are the page's own
+  `Map.prototype.get` bound to it, which outlives the script. The next content script
+  (put into every open page at the install or update) finds the map through the getter,
+  registers the tools again and puts its methods on the same object: references the page
+  or its polyfill hold work on. The page can reach the map too (the getter with its key):
+  what it finds there is its own tools, which it can change anyway.
+- **Why not the others**: a main-world script exposes its code, data and channel to the
+  page (MDN: "the web page can detect and interfere"); `userScripts` is for user script
+  managers only on AMO; MCP-B's `postMessage` channel can be read and forged by the page.
+- **Host access is needed for it to matter.** Pages look for the API once, while
+  loading (Shopify, Hydrogen, the polyfills, Mintlify, GitBook, ReadMe): the script must
+  be there at `document_start`, which only the registered content script is; a click on
+  the icon injects it too late for them.
+- **The event page is kept up while AI access is on**: Firefox stops an idle event page
+  after 30 s, WebSocket or not; a port from a content script does not keep it, Manifest
+  V3 ignores `persistent`. An extension API call every 20 s resets Firefox's timer.
+- **The cost no mechanism avoids**: in Firefox a `document.modelContext` tells every
+  page the polyfill runs on that the user has the extension (DEC-113 counted this
+  against registering recipes). Open for the owner, with whether the build goes on.
+- **Tests**: `test/firefox.ts` drives Firefox over WebDriver BiDi (built in, no driver):
+  the test build installed as a temporary add-on, the panel opened by the test build in
+  a tab (BiDi reaches neither the sidebar nor an extension page by navigation).
+  `test/firefox-e2e.test.ts` runs Chrome's test page through a relay and an MCP client.
+  `test/firefox-sites.ts` checks real sites by hand. ff-rdp's `launch --temporary-addon`
+  (ff-rdp#371) works with the build too.
+
 ## DEC-189: A relay can admit any Firefox extension (`moz-extension://*`) (owner)
 
 2026-11-16, iteration 44, question 5; amends DEC-108. The owner asked for the hosted
@@ -3880,8 +3931,8 @@ relay to admit tab-mcp for Firefox.
 - What it admits beyond tab-mcp for Firefox: any Firefox extension's pages, never a
   website. DEC-108 already holds that a Chrome id is no proof of the publisher; the
   pairing code, read in the extension's panel, ties an AI app to it.
-- The hosted relay's setting is the owner's to apply (the ractive.ch repository, with
-  tofu), after a relay release with this change.
+- Released in relay 0.11.0; the hosted relay has `moz-extension://*` since 2026-11-16
+  (ractive.ch#123, applied with tofu after the deploy of 0.11.0).
 
 ## DEC-190: A release publishes itself to the Chrome Web Store, as a CRX we sign (owner)
 
@@ -3904,3 +3955,28 @@ ractive/release-workflows, keeping the GitHub attestation.
 - No third-party code where the keys are: the CRX is packed by inline Python (standard
   library, `openssl`), byte for byte Chrome's `--pack-extension` (release-workflows'
   selftest compares the two on every change); the API is called with `curl`.
+
+## DEC-191: Pages may tell that the extension is installed (owner)
+
+2026-11-16, iteration 44. Where the browser has no WebMCP of its own (Firefox, and
+Chrome without its flag or a site's origin trial), the extension gives the pages it may
+read `document.modelContext` as they start loading (DEC-188). A page's script can see
+that the API is there and, from how it behaves, that it is this extension's.
+
+- Accepted by the owner: the page learns that it is installed, nothing else (not the
+  user, the relay or the AI app), and only on pages the user gave it.
+- PRIVACY.md and the README say so; the published policy on ractive.ch has to say it
+  before a release with the polyfill.
+
+## DEC-192: Page tool descriptions up to 8000 characters (owner)
+
+2026-11-16. WebMCP has no server instructions, so a page explains its tools in their
+descriptions; 1000 characters cut saturnus's (5.1 KB) off.
+
+- `MAX_DESCRIPTION` is 8000; a page's error and why a tool is not offered keep 1000
+  (`MAX_ERROR`).
+- All of a page's descriptions together keep at most 65536 bytes (UTF-8, after the origin;
+  `MAX_DESCRIPTIONS_BYTES`, the owner's number): past it the longest are cut to one
+  common length and the shorter stay whole. Without it 64 tools of 8000 characters were
+  about 512 KB in ASCII and up to about 1.5 MB in scripts of 3 bytes a character, past the
+  relay's 1 MiB message, and far past what an AI app's context should carry. A total budget across a page's descriptions would prevent it; not decided.

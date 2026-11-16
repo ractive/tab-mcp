@@ -98,6 +98,41 @@ describe("who may send what", () => {
 		expect(isPanelSender({ id: ID }, ID)).toBe(false);
 	});
 
+	test("in Firefox the panel's origin is the installation's moz-extension:// UUID, not the id", () => {
+		const id = "tab-mcp@ractive.ch";
+		const origin = "moz-extension://3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f";
+		const panel = `${origin}/sidepanel/index.html`;
+		expect(isPanelSender({ id, url: panel }, id, { origin })).toBe(true);
+		// The id is not the host there.
+		expect(
+			isPanelSender(
+				{ id, url: `moz-extension://${id}/sidepanel/index.html` },
+				id,
+				{ origin },
+			),
+		).toBe(false);
+		expect(
+			isPanelSender({ id, url: `${origin}/other.html` }, id, { origin }),
+		).toBe(false);
+		// From a tab only where the build allows it (the Firefox test build).
+		expect(
+			isPanelSender({ id, url: panel, tab: { id: 2 } }, id, { origin }),
+		).toBe(false);
+		expect(
+			isPanelSender({ id, url: panel, tab: { id: 2 } }, id, {
+				origin,
+				inTab: true,
+			}),
+		).toBe(true);
+		// A content script in a tab is at the page's address, not the panel's.
+		expect(
+			isPanelSender({ id, url: "https://site.test/", tab: { id: 2 } }, id, {
+				origin,
+				inTab: true,
+			}),
+		).toBe(false);
+	});
+
 	test("a content script's message counts only as webmcp-changed; no command does anything", () => {
 		expect(isContentEvent({ type: "webmcp-changed" }, contentScript, ID)).toBe(
 			true,

@@ -11,7 +11,13 @@
  * user left AI access on (after a browser start, an update, a reload).
  */
 
-import { CONTENT_SCRIPT, CONTENT_SCRIPT_ID } from "./messages.ts";
+import { FIREFOX, openPanel } from "./browser.ts";
+import {
+	CONTENT_SCRIPT,
+	CONTENT_SCRIPT_ID,
+	WEBMCP_MAIN_ID,
+	WEBMCP_MAIN_SCRIPT,
+} from "./messages.ts";
 import { attachPanel } from "./panel-port.ts";
 import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
@@ -55,13 +61,10 @@ chrome.action.onClicked.addListener((tab) => {
 	// shows nothing. The panel stays the global one, for every tab without a
 	// panel of its own. (`openPanelOnActionClick` would show it too, but then
 	// the click grants no `activeTab`.)
-	void chrome.sidePanel
-		.open(
-			tab.id === undefined
-				? { windowId: tab.windowId }
-				: { tabId: tab.id, windowId: tab.windowId },
-		)
-		.catch((error: unknown) => console.warn("tab-mcp: side panel", error));
+	void openPanel({
+		...(tab.id === undefined ? {} : { tabId: tab.id }),
+		windowId: tab.windowId,
+	}).catch((error: unknown) => console.warn("tab-mcp: side panel", error));
 	// Only into a page of an http(s) site (DEC-142); elsewhere page_info says why.
 	if (tab.id !== undefined && isSitePage(tab.url ?? ""))
 		void injectInto(tab.id)
@@ -75,22 +78,40 @@ chrome.action.onClicked.addListener((tab) => {
 /** Register the content script for every page while host access is granted. */
 async function syncRegistration(): Promise<void> {
 	const granted = await chrome.permissions.contains(ALL_SITES);
-	const registered = await chrome.scripting.getRegisteredContentScripts({
-		ids: [CONTENT_SCRIPT_ID],
-	});
-	if (granted && registered.length === 0)
-		await chrome.scripting.registerContentScripts([
-			{
-				id: CONTENT_SCRIPT_ID,
-				js: [CONTENT_SCRIPT],
-				matches: SITE_MATCHES,
-				runAt: "document_idle",
-			},
-		]);
-	else if (!granted && registered.length > 0)
-		await chrome.scripting.unregisterContentScripts({
-			ids: [CONTENT_SCRIPT_ID],
+	const scripts: chrome.scripting.RegisteredContentScript[] = [
+		{
+			id: CONTENT_SCRIPT_ID,
+			js: [CONTENT_SCRIPT],
+			matches: SITE_MATCHES,
+			// Firefox: before the page's scripts, which look for
+			// `document.modelContext` while they load (the polyfill,
+			// `firefox/webmcp.ts`).
+			runAt: FIREFOX ? "document_start" : "document_idle",
+		},
+	];
+	// Chrome: the polyfill for pages without Chrome's WebMCP, in the page's
+	// own world before its scripts (`chrome/webmcp-main.ts`).
+	if (!FIREFOX)
+		scripts.push({
+			id: WEBMCP_MAIN_ID,
+			js: [WEBMCP_MAIN_SCRIPT],
+			matches: SITE_MATCHES,
+			runAt: "document_start",
+			world: "MAIN",
 		});
+	const ids = scripts.map((s) => s.id);
+	const registered = new Set(
+		(await chrome.scripting.getRegisteredContentScripts({ ids })).map(
+			(s) => s.id,
+		),
+	);
+	if (granted) {
+		// Also after an update that added a script: the missing ones.
+		const missing = scripts.filter((s) => !registered.has(s.id));
+		if (missing.length > 0)
+			await chrome.scripting.registerContentScripts(missing);
+	} else if (registered.size > 0)
+		await chrome.scripting.unregisterContentScripts({ ids: [...registered] });
 }
 
 const sync = () =>
@@ -99,6 +120,35 @@ const sync = () =>
 	);
 chrome.runtime.onInstalled.addListener(sync);
 chrome.runtime.onStartup.addListener(sync);
+
+/**
+ * Firefox, after an install, reload or update: the content script into every
+ * open page it may read, at once. The page's tools outlived the script that
+ * ended in the page (`firefox/webmcp.ts`), but its methods are dead objects
+ * until a new script takes over, and the page's own calls throw meanwhile.
+ * Chrome keeps the tools itself, and its page-world polyfill outlives the
+ * extension's reload. Not after a disable and enable: Firefox tells the
+ * extension nothing of it, and without the `storage` permission (DEC-116) a
+ * first start can't be told from the event page waking; a page gets the
+ * script when the worker reads its tab (`tabs.ts`) or at a click.
+ */
+async function reviveOpenPages(): Promise<void> {
+	const tabs = await chrome.tabs.query({ url: SITE_MATCHES });
+	await Promise.all(
+		tabs.map((tab) =>
+			tab.id === undefined
+				? undefined
+				: injectInto(tab.id).catch(() => {
+						// No access to its site, or a page Firefox keeps to itself.
+					}),
+		),
+	);
+}
+
+if (FIREFOX)
+	chrome.runtime.onInstalled.addListener(
+		() => void reviveOpenPages().catch(() => {}),
+	);
 
 const tabChanged = () => withConnection((c) => c.tabChanged());
 const permissionsChanged = () => {
@@ -126,7 +176,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
 chrome.runtime.onConnect.addListener((port) => {
 	if (
 		port.name !== PANEL_PORT ||
-		!isPanelSender(port.sender ?? {}, chrome.runtime.id)
+		!isPanelSender(port.sender ?? {}, chrome.runtime.id, {
+			origin: chrome.runtime.getURL("/").replace(/\/$/, ""),
+			// The Firefox test build: the tests open the panel in a tab
+			// (WebDriver BiDi cannot reach the sidebar).
+			inTab: FIREFOX && TAB_MCP_TEST,
+		})
 	) {
 		port.disconnect();
 		return;
@@ -145,6 +200,20 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
 	if (alarm.name === ALARM) withConnection((c) => c.keepUp());
 });
+
+/**
+ * Firefox stops an idle event page after 30 s (`extensions.background.idle.timeout`),
+ * its WebSocket with it; Chrome keeps a worker whose WebSocket is busy. A call
+ * to an extension API resets Firefox's idle timer (a port from a content
+ * script does not, nor does `persistent`, which Manifest V3 ignores), so
+ * while AI access is on the event page makes one this often (iteration 44).
+ * The test build every second: its tests cut Firefox's timeout to 3 s.
+ */
+const FIREFOX_KEEPALIVE_MS = TAB_MCP_TEST ? 1_000 : 20_000;
+if (FIREFOX)
+	setInterval(() => {
+		if (started?.aiOn) void chrome.runtime.getPlatformInfo().catch(() => {});
+	}, FIREFOX_KEEPALIVE_MS);
 
 /**
  * A notification's answer: its button Allow; its closing is Don't allow; a
@@ -169,7 +238,24 @@ function notificationClicked(id: string): void {
 }
 chrome.notifications.onButtonClicked.addListener(notificationButton);
 chrome.notifications.onClicked.addListener(notificationClicked);
-chrome.notifications.onClosed.addListener(notificationDismissed);
+// Not in Firefox: its notifications have no `requireInteraction` and close by
+// themselves, which fires `onClosed` too (Firefox gives no `byUser`), so a
+// close is no answer there; the question's own time limit, the panel and
+// the badge stay.
+if (!FIREFOX) chrome.notifications.onClosed.addListener(notificationDismissed);
+// The Firefox test build opens the panel at install, in a tab in front (the
+// tests open their pages in another window; the tab in front is then the
+// page's, `tabInFront`): WebDriver BiDi can neither reach the sidebar nor
+// navigate a tab to an extension's page, and headless Firefox shows one
+// window only.
+if (TAB_MCP_TEST && FIREFOX)
+	chrome.runtime.onInstalled.addListener(
+		() =>
+			void chrome.tabs.create({
+				url: chrome.runtime.getURL("sidepanel/index.html"),
+				active: true,
+			}),
+	);
 if (TAB_MCP_TEST)
 	Object.assign(globalThis, {
 		tabMcpNotificationButton: notificationButton,

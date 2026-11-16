@@ -7,14 +7,18 @@
  * page's tools changed.
  */
 
+import { FIREFOX, PRODUCT } from "./browser.ts";
 import type { ContentEvent } from "./messages.ts";
 import type { NoAccessReason } from "./tabs.ts";
 
 /**
  * The extension's MCP server name: the worker's connection gives it to the
- * relay, and the side panel's setup commands name the server by it.
+ * relay, and the side panel's setup commands name the server by it
+ * ("tab-mcp-for-firefox" in the Firefox build).
  */
-export const SERVER_NAME = "tab-mcp-for-chrome";
+export const SERVER_NAME = FIREFOX
+	? "tab-mcp-for-firefox"
+	: "tab-mcp-for-chrome";
 
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "panel";
@@ -168,7 +172,7 @@ export function startProblem(error: unknown): PanelState {
 		status: "off",
 		grants: [],
 		pairing: false,
-		problem: `tab-mcp for Chrome could not start: ${why}. Close and open this panel to try again.`,
+		problem: `${PRODUCT} could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],
 		expired: [],
@@ -185,14 +189,23 @@ export interface Sender {
 /**
  * A port from the side panel: this extension's page at the panel's path, not
  * in a tab. A content script's port has `tab`, and its `url` is the page's.
+ * `origin`: the extension's pages' origin, `chrome-extension://<id>` unless
+ * given (Firefox's is `moz-extension://<a UUID of this installation>`, not
+ * the id). `inTab`: a panel page in a tab counts too (the Firefox test build).
  */
-export function isPanelSender(sender: Sender, extensionId: string): boolean {
-	if (sender.id !== extensionId || sender.tab !== undefined) return false;
+export function isPanelSender(
+	sender: Sender,
+	extensionId: string,
+	options: { origin?: string; inTab?: boolean } = {},
+): boolean {
+	if (sender.id !== extensionId) return false;
+	if (sender.tab !== undefined && !options.inTab) return false;
 	try {
 		const url = new URL(sender.url ?? "");
+		// Not `url.origin`: it is "null" for these schemes in some engines.
 		return (
-			url.protocol === "chrome-extension:" &&
-			url.host === extensionId &&
+			`${url.protocol}//${url.host}` ===
+				(options.origin ?? `chrome-extension://${extensionId}`) &&
 			url.pathname === PANEL_PATH
 		);
 	} catch {

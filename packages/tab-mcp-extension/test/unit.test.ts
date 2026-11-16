@@ -12,8 +12,11 @@ import {
 	readKey,
 	STORE_ID,
 } from "../scripts/build.ts";
+import { openSidebar, type SidebarAction } from "../src/browser.ts";
+import { connectPolyfill } from "../src/chrome/webmcp-port.ts";
 import {
 	callTool,
+	FIREFOX_NO_WEBMCP_NOTE,
 	MAX_LANGUAGE,
 	MAX_PAGE_TITLE,
 	MAX_SEND_RESULT,
@@ -24,6 +27,7 @@ import {
 } from "../src/content.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
+import { ToolRegistry } from "../src/webmcp/registry.ts";
 import { createTools } from "../src/worker/tools.ts";
 
 describe("manifest", () => {
@@ -115,6 +119,24 @@ describe("pageInfo", () => {
 			title: "Example",
 			webmcp: { available: false, tools: 0 },
 		});
+	});
+
+	test("Firefox: a page without WebMCP says to reload it (it loaded before tab-mcp had access)", async () => {
+		const global = globalThis as { TAB_MCP_FIREFOX?: boolean };
+		global.TAB_MCP_FIREFOX = true;
+		try {
+			expect((await pageInfo(fakeDocument({}))).webmcp).toEqual({
+				available: false,
+				tools: 0,
+				note: FIREFOX_NO_WEBMCP_NOTE,
+			});
+			expect((await pageInfo(fakeDocument({ tools: 1 }))).webmcp).toEqual({
+				available: true,
+				tools: 1,
+			});
+		} finally {
+			delete global.TAB_MCP_FIREFOX;
+		}
 	});
 
 	test("a page with WebMCP and its tools, and its language", async () => {
@@ -678,5 +700,101 @@ describe("asking a tab's content script", () => {
 			ok: false,
 			error: "The call did not reach the page: An unexpected error occurred",
 		});
+	});
+});
+
+describe("Firefox's sidebar for a question", () => {
+	const action = (open: boolean[]) => {
+		const calls: string[] = [];
+		const fake: SidebarAction = {
+			open: () => {
+				calls.push("open");
+				return Promise.resolve();
+			},
+			isOpen: ({ windowId }) => {
+				calls.push(`isOpen ${windowId}`);
+				return Promise.resolve(open.shift() ?? false);
+			},
+		};
+		return { fake, calls };
+	};
+
+	test("opened at once (in the gesture), and open in the question's window", async () => {
+		const { fake, calls } = action([true]);
+		const opened = openSidebar(fake, 7);
+		expect(calls).toEqual(["open"]);
+		await opened;
+		expect(calls).toEqual(["open", "isOpen 7"]);
+	});
+
+	test("opened in another window (the one in front): refused, so a notification follows", async () => {
+		const { fake } = action([false]);
+		await expect(openSidebar(fake, 7)).rejects.toThrow("another window");
+	});
+
+	test("no sidebarAction: refused", async () => {
+		await expect(openSidebar(undefined, 7)).rejects.toThrow("no sidebarAction");
+	});
+});
+
+describe("Chrome's page-world polyfill: the content script's port", () => {
+	test("a hello that comes late (a page busy after its load) still counts", async () => {
+		const win = {
+			postMessage: (
+				_message: unknown,
+				_origin: string,
+				ports: MessagePort[],
+			) => {
+				const port = ports[0] as MessagePort;
+				port.onmessage = (event) => {
+					const request = event.data as { type: string; id: number };
+					if (request.type === "list")
+						port.postMessage({ type: "tools", id: request.id, tools: [] });
+				};
+				setTimeout(() => port.postMessage({ type: "hello" }), 1_500);
+			},
+		} as unknown as Window;
+		const context = await connectPolyfill(win);
+		expect(await context.getTools()).toEqual([]);
+	});
+});
+
+describe("the polyfill's registry: taken over by the next content script (Firefox)", () => {
+	const tool = (name: string) => ({
+		name,
+		description: name,
+		execute: () => name,
+	});
+
+	test("records and restore keep the order, signals and provideContext's tools, without a change event", () => {
+		const first = new ToolRegistry(() => {});
+		const controller = new AbortController();
+		first.provide([tool("c"), tool("e")]);
+		first.register(tool("a"));
+		first.register(tool("b"), controller.signal);
+		let changes = 0;
+		const next = new ToolRegistry(() => changes++);
+		next.restore(first.records());
+		expect(changes).toBe(0);
+		expect(next.list().map((t) => t.name)).toEqual(["c", "e", "a", "b"]);
+		// The signal still ends its tool; provideContext still replaces its own.
+		controller.abort();
+		expect(next.list().map((t) => t.name)).toEqual(["c", "e", "a"]);
+		next.provide([tool("d")]);
+		expect(next.list().map((t) => t.name)).toEqual(["a", "d"]);
+		expect(changes).toBe(2);
+	});
+
+	test("a record that no longer reads as a tool is left out", () => {
+		const next = new ToolRegistry(() => {});
+		next.restore([
+			{ tool: { name: "" }, provided: false },
+			{ tool: tool("ok"), provided: false },
+			{ tool: { name: "" }, provided: true },
+			{ tool: tool("given"), provided: true },
+		]);
+		expect(next.list().map((t) => t.name)).toEqual(["ok", "given"]);
+		next.provide([]);
+		expect(next.list().map((t) => t.name)).toEqual(["ok"]);
 	});
 });

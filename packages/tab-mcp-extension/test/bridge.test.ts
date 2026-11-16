@@ -15,10 +15,14 @@ import {
 	bridgedName,
 	type CallTarget,
 	type Confirm,
+	cutBytes,
 	describe as describeTool,
+	descriptionCap,
 	type LookedUp,
 	MAX_BLOCKS,
 	MAX_DESCRIPTION,
+	MAX_DESCRIPTIONS_BYTES,
+	MAX_ERROR,
 	MAX_IMAGES_BASE64,
 	MAX_NAME,
 	MAX_PATTERN,
@@ -51,13 +55,29 @@ describe("names, descriptions, schemas", () => {
 		expect(describeTool("https://shop.example", "Finds things.")).toBe(
 			"From https://shop.example: Finds things.",
 		);
-		const long = describeTool("https://x.example", "y".repeat(5000));
+		expect(MAX_DESCRIPTION).toBe(8000);
+		const long = describeTool("https://x.example", "y".repeat(20_000));
 		expect(long.length).toBe(
 			"From https://x.example: ".length + MAX_DESCRIPTION,
 		);
 		expect(long.endsWith("…")).toBe(true);
 		expect(describeTool("https://x.example", "  ")).toBe(
 			"From https://x.example: (no description)",
+		);
+	});
+
+	test("descriptions share a byte budget: the longest are cut to one length, short ones stay whole (DEC-192)", () => {
+		expect(MAX_DESCRIPTIONS_BYTES).toBe(65_536);
+		expect(descriptionCap([10, 20], 100)).toBe(Number.POSITIVE_INFINITY);
+		expect(descriptionCap([10, 100, 100], 150)).toBe(70);
+		expect(descriptionCap([100, 10, 100], 150)).toBe(70);
+		// Cut by bytes, never half a character, "…" counted.
+		const cut = cutBytes("ab語語語", 9);
+		expect(cut).toBe("ab語…");
+		expect(new TextEncoder().encode(cut).length).toBeLessThanOrEqual(9);
+		expect(cutBytes("short", 9)).toBe("short");
+		expect(describeTool("https://x.example", "語".repeat(100), 30)).toBe(
+			`From https://x.example: ${"語".repeat(9)}…`,
 		);
 	});
 
@@ -552,6 +572,36 @@ describe("PageToolBridge", () => {
 		);
 	});
 
+	test("64 long descriptions, Latin or not, stay within the budget together; a short one stays whole", async () => {
+		for (const char of ["d", "語"]) {
+			const reg = registrar();
+			const { chrome } = fakeChrome(
+				page([
+					pageTool("short", { description: "Finds things." }),
+					...Array.from({ length: MAX_TOOLS - 1 }, (_, i) =>
+						pageTool(`t${i}`, { description: char.repeat(MAX_DESCRIPTION) }),
+					),
+				]),
+			);
+			const bridge = new PageToolBridge(reg, chrome);
+			await bridge.refresh();
+			const prefix = "From https://shop.example: ";
+			const texts = bridge.state.tools.map((t) =>
+				(t.description ?? "").slice(prefix.length),
+			);
+			expect(texts[0]).toBe("Finds things.");
+			const bytes = texts.map((t) => new TextEncoder().encode(t).length);
+			expect(bytes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(
+				MAX_DESCRIPTIONS_BYTES,
+			);
+			expect(texts.slice(1).every((t) => t.endsWith("…"))).toBe(true);
+			// The offered tools carry the same cut description.
+			expect(reg.tools.get("page_t0")?.description).toBe(
+				bridge.state.tools[1]?.description,
+			);
+		}
+	});
+
 	test("output schemas count against the same budget and go first (WM 3)", () => {
 		const schema = (n: number) => ({
 			type: "object",
@@ -738,6 +788,25 @@ describe("PageToolBridge", () => {
 			"not offered",
 		);
 		expect(state.calls).toEqual([]);
+	});
+
+	test("a page's error and a refusal stay cut at MAX_ERROR, not at the descriptions' limit", async () => {
+		expect(MAX_ERROR).toBe(1000);
+		const reg = {
+			async registerTool(tool: Tool) {
+				if (tool.name === "page_refused") throw new TypeError("r".repeat(5000));
+			},
+		};
+		const { chrome } = fakeChrome(
+			page([pageTool("refused")], { error: "e".repeat(5000) }),
+		);
+		const bridge = new PageToolBridge(reg, chrome);
+		await bridge.refresh();
+		await Bun.sleep(0);
+		expect(bridge.state.error?.length).toBe(MAX_ERROR);
+		expect(
+			bridge.state.tools.find((t) => t.name === "refused")?.problem?.length,
+		).toBe(MAX_ERROR);
 	});
 
 	test("a tool the library refuses is not callable through webmcp_call either", async () => {

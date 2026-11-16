@@ -14,6 +14,13 @@ import {
 	type ReplacedDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
+import {
+	FIREFOX,
+	notificationOptions,
+	openPanel,
+	PANEL,
+	PRODUCT,
+} from "../browser.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	type GrantView,
@@ -242,12 +249,12 @@ export class Connection {
 			relay,
 			server: {
 				name: SERVER_NAME,
-				title: "tab-mcp for Chrome",
+				title: PRODUCT,
 				version: chrome.runtime.getManifest().version,
 				instructions: INSTRUCTIONS,
 				icons: this.#icons,
 			},
-			appName: "tab-mcp for Chrome",
+			appName: PRODUCT,
 			storage: this.#storage,
 			// No tool of the extension is consequential: the page tools ask in
 			// the bridge, the navigation tools themselves (DEC-141).
@@ -504,8 +511,12 @@ export class Connection {
 			return Promise.resolve(false);
 		const toFront = () =>
 			void chrome.windows.update(windowId, { focused: true }).catch(() => {});
+		// Firefox opens the sidebar in the window in front: that window first
+		// (if it is not in front in time, `openPanel` rejects, and the next
+		// notification's click finds it there).
+		if (FIREFOX) toFront();
 		// No await before this: the gesture would be gone.
-		return chrome.sidePanel.open({ tabId, windowId }).then(
+		return openPanel({ tabId, windowId }).then(
 			() => {
 				toFront();
 				return true;
@@ -712,16 +723,19 @@ export class Connection {
 				return (await chrome.windows.get(windowId)).focused;
 			},
 			notify: async (id, text) => {
-				await chrome.notifications.create(id, {
-					type: "basic",
-					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-					title: text.title,
-					message: text.message,
-					contextMessage: text.contextMessage,
-					buttons: text.buttons.map((title) => ({ title })),
-					requireInteraction: true,
-					priority: 2,
-				});
+				await chrome.notifications.create(
+					id,
+					notificationOptions({
+						type: "basic",
+						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+						title: text.title,
+						message: text.message,
+						contextMessage: text.contextMessage,
+						buttons: text.buttons.map((title) => ({ title })),
+						requireInteraction: true,
+						priority: 2,
+					}),
+				);
 			},
 			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
 			showQuestion: ({ tabId, windowId }) =>
@@ -821,6 +835,11 @@ export class Connection {
 
 	// --- State ---
 
+	/** Whether the user left AI access on. */
+	get aiOn(): boolean {
+		return this.#aiOn;
+	}
+
 	get state(): PanelState {
 		const mcp = this.#mcp;
 		const status = this.#status();
@@ -895,13 +914,13 @@ export class Connection {
 				? [
 						"?",
 						BADGE_LOOK.question,
-						`tab-mcp for Chrome: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the side panel to answer.`,
+						`${PRODUCT}: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the ${PANEL} to answer.`,
 					]
 				: status === "on" || status === "waiting"
-					? ["on", BADGE_LOOK.on, "tab-mcp for Chrome: AI access is on"]
+					? ["on", BADGE_LOOK.on, `${PRODUCT}: AI access is on`]
 					: status === "connecting" || status === "retrying"
-						? ["…", BADGE_LOOK.idle, "tab-mcp for Chrome: connecting"]
-						: ["", BADGE_LOOK.idle, "tab-mcp for Chrome"];
+						? ["…", BADGE_LOOK.idle, `${PRODUCT}: connecting`]
+						: ["", BADGE_LOOK.idle, PRODUCT];
 		void chrome.action.setBadgeText({ text }).catch(() => {});
 		// Said, not left to Chrome's choice between black and white.
 		void chrome.action

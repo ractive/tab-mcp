@@ -15,6 +15,7 @@ import {
 	TEST_HOOK,
 	zipStoreBuild,
 } from "../scripts/build.ts";
+import { DEV_PREFS, userPref, withDevPrefs } from "../scripts/firefox-dev.ts";
 import { writeZip, zipNames } from "../scripts/zip.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "tab-mcp-extension-build-"));
@@ -35,6 +36,85 @@ test("the store build has no key, no host_permissions and no source maps", async
 			"sourceMappingURL",
 		);
 }, 60_000);
+
+test("the Chrome build carries none of the Firefox build's code (iteration 44)", async () => {
+	const { outdir } = await build({ outdir: join(dir, "chrome"), store: true });
+	for (const name of ["content.js", "background.js"]) {
+		const text = await Bun.file(join(outdir, name)).text();
+		expect(text).not.toContain("exportFunction");
+		expect(text).not.toContain("sidebarAction");
+	}
+}, 60_000);
+
+test("the Firefox build: an event page, a sidebar, the add-on id, no store package", async () => {
+	const { outdir, manifest } = await build({
+		outdir: join(dir, "firefox"),
+		firefox: true,
+	});
+	expect(manifest["background"]).toEqual({
+		scripts: ["background.js"],
+		type: "module",
+	});
+	expect(manifest["sidebar_action"]).toMatchObject({
+		default_panel: "sidepanel/index.html",
+	});
+	expect(manifest["side_panel"]).toBeUndefined();
+	expect(manifest["permissions"]).not.toContain("sidePanel");
+	expect(manifest["key"]).toBeUndefined();
+	expect(manifest["host_permissions"]).toBeUndefined();
+	expect(
+		(manifest["browser_specific_settings"] as { gecko: { id: string } }).gecko
+			.id,
+	).toBe("tab-mcp@ractive.ch");
+	// No upgrade-insecure-requests: a relay on the loopback stays ws:.
+	expect(JSON.stringify(manifest["content_security_policy"])).not.toContain(
+		"upgrade-insecure-requests",
+	);
+	expect(await Bun.file(join(outdir, "content.js")).text()).toContain(
+		"exportFunction",
+	);
+	await expect(
+		build({ outdir: join(dir, "x"), firefox: true, store: true }),
+	).rejects.toThrow("no store package");
+}, 60_000);
+
+test("the Firefox development build (--all-sites): host access at install, no test hooks", async () => {
+	const { outdir, manifest } = await build({
+		outdir: join(dir, "firefox-dev"),
+		firefox: true,
+		allSites: true,
+	});
+	expect(manifest["host_permissions"]).toEqual(["http://*/*", "https://*/*"]);
+	expect(await Bun.file(join(outdir, "background.js")).text()).not.toContain(
+		TEST_HOOK,
+	);
+	await expect(
+		build({ outdir: join(dir, "y"), allSites: true }),
+	).rejects.toThrow("for the Firefox build");
+}, 60_000);
+
+test("the development profile keeps the add-on's UUID and storage, and what user.js set", () => {
+	const fresh = withDevPrefs("");
+	for (const name of Object.keys(DEV_PREFS))
+		expect(fresh).toContain(`user_pref(${JSON.stringify(name)}, true);`);
+	expect(withDevPrefs(fresh)).toBe(fresh);
+	const own =
+		'user_pref("extensions.webextensions.keepUuidOnUninstall", false);\n';
+	const kept = withDevPrefs(own);
+	expect(kept.startsWith(own)).toBe(true);
+	expect(kept).not.toContain('keepUuidOnUninstall", true');
+	expect(kept).toContain("keepStorageOnUninstall");
+	// A line commented out sets nothing; the last live one wins.
+	const commented =
+		'// user_pref("extensions.webextensions.keepUuidOnUninstall", true);\n';
+	expect(withDevPrefs(commented)).toContain(
+		'\nuser_pref("extensions.webextensions.keepUuidOnUninstall", true);',
+	);
+	const name = "extensions.webextensions.keepUuidOnUninstall";
+	expect(userPref(commented, name)).toBeUndefined();
+	expect(userPref(`${own}user_pref("${name}", true);\n`, name)).toBe("true");
+	expect(userPref(own, name)).toBe("false");
+});
 
 test("the test build keeps its source maps", async () => {
 	const { outdir } = await build({ outdir: join(dir, "test"), test: true });
