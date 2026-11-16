@@ -1,7 +1,7 @@
 ---
 type: operations
-title: "tab-mcp for Chrome in the Chrome Web Store"
-description: "The release path of tab-mcp for Chrome: the store package, the release and publish workflows, the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
+title: "The tab-mcp browser extension in the Chrome Web Store"
+description: "The release path of the tab-mcp browser extension: the store package, the release and publish workflows, the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
 tags:
   - operations
   - release
@@ -9,7 +9,7 @@ tags:
 timestamp: 2026-11-14T17:30:00+01:00
 ---
 
-# tab-mcp for Chrome in the Chrome Web Store
+# The tab-mcp browser extension in the Chrome Web Store
 
 Iteration 23 ([iteration-23-extension-release](../iterations/iteration-23-extension-release.md)),
 after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
@@ -18,7 +18,7 @@ after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
 
 `bun scripts/build.ts --store --zip` in `packages/tab-mcp-extension` builds into
 `dist-store/` (so it does not replace a development build in `dist/`) and packs
-`tab-mcp-for-chrome-<version>-store.zip` next to `package.json`. The manifest has no `key`
+`tab-mcp-browser-extension-<version>-store.zip` next to `package.json`. The manifest has no `key`
 (the store gives the item its own id), no `host_permissions` (host access is optional,
 asked for with "Give access to all sites"), the package no source maps, and its scripts not the
 test build's hooks (`TAB_MCP_TEST`, a `define`: the functions through which the
@@ -59,7 +59,7 @@ Do not create the release with `gh release create`: then nothing builds the zip
 ## Build provenance
 
 The release job signs a [SLSA build provenance](https://slsa.dev/provenance/v1)
-attestation for `tab-mcp-for-chrome-<version>-store.zip` with
+attestation for `tab-mcp-browser-extension-<version>-store.zip` with
 [actions/attest](https://github.com/actions/attest) (DEC-182): a Sigstore certificate
 issued to the workflow run, binding the zip's SHA-256 to the repository, the workflow file
 (`extension-release.yml`), the tag and the commit. GitHub keeps it with the repository's
@@ -71,7 +71,7 @@ Check a release's zip by hand before uploading it (GitHub CLI, signed in; any ac
 
 ```sh
 gh release download extension-v0.1.0 -R ractive/tab-mcp --pattern '*-store.zip'
-gh attestation verify tab-mcp-for-chrome-0.1.0-store.zip -R ractive/tab-mcp \
+gh attestation verify tab-mcp-browser-extension-0.1.0-store.zip -R ractive/tab-mcp \
   --signer-workflow ractive/tab-mcp/.github/workflows/extension-release.yml \
   --source-ref refs/tags/extension-v0.1.0
 ```
@@ -180,7 +180,7 @@ serves.
    Then opt in to Verified CRX uploads (Package tab) with the key's public key, after the
    secret is set: from then on the store refuses a zip (opted in 2026-11-16).
 9. **The store id:** `jjhddplkjikmbpcobcnfebnglgjomfgh` (submitted 2026-11-16, published
-   public the same day: <https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh>). The
+   public the same day: <https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh>). The
    hosted relay allows it (ractive/ractive.ch#120). The development build has the same id
    since DEC-187: its manifest carries the item's public key (`manifest-key.txt`, from
    Package → "View public key" in the dashboard). The old development id
@@ -189,7 +189,7 @@ serves.
 
 ## Listing
 
-- **Name:** tab-mcp for Chrome (from the manifest)
+- **Name:** tab-mcp browser extension (from the manifest)
 - **Summary:** the manifest's `description`, set in `createManifest`
   (`scripts/build.ts`): "Lets an AI app outside the browser call the WebMCP tools of the
   page in front and open pages in that tab, through a tab-mcp relay." (130 characters; at
@@ -278,7 +278,7 @@ sends.
 > https://ractive.ch/tab-mcp/examples/diagram/, a diagram editor that registers its tools
 > with WebMCP (by the extension's developer). Click the extension's icon: the side panel shows the page's tools. Turn on "AI access":
 > the panel shows an address and a pairing code. Add the address in an MCP client, for
-> example Claude Code: `claude mcp add --transport http tab-mcp-for-chrome <address>`,
+> example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension <address>`,
 > then `/mcp` → authenticate, and enter the pairing code in the browser page that opens.
 > Ask Claude to draw a small flowchart in the page; a tool that is not read-only (such as
 > `page_add_shapes`) asks in the side panel first. Ask it to open https://ractive.ch/tab-mcp/

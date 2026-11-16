@@ -340,7 +340,7 @@ export async function callTool(
 	if (typeof value === "string" && value.length > MAX_SEND_RESULT)
 		return {
 			ok: false,
-			error: `It returned ${value.length} characters; tab-mcp for Chrome passes on at most ${MAX_SEND_RESULT}.`,
+			error: `It returned ${value.length} characters; the tab-mcp browser extension passes on at most ${MAX_SEND_RESULT}.`,
 		};
 	return { ok: true, value };
 }

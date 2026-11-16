@@ -148,7 +148,9 @@ test("the store zip lists the store build's files, without source maps", async (
 		store: true,
 	});
 	const target = join(dir, storeZipName(String(manifest["version"])));
-	expect(storeZipName("0.1.0")).toBe("tab-mcp-for-chrome-0.1.0-store.zip");
+	expect(storeZipName("0.1.0")).toBe(
+		"tab-mcp-browser-extension-0.1.0-store.zip",
+	);
 	await zipStoreBuild(outdir, target);
 	const names = zipNames(new Uint8Array(await Bun.file(target).arrayBuffer()));
 	expect(names).toContain("manifest.json");

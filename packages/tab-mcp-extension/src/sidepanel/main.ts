@@ -109,7 +109,7 @@ function connect(): void {
 		// to the version before and can reach nothing any more.
 		port = undefined;
 		problem(
-			`${PRODUCT} was updated or reloaded: close and open this panel again.`,
+			`The ${PRODUCT} was updated or reloaded: close and open this panel again.`,
 		);
 		return;
 	}

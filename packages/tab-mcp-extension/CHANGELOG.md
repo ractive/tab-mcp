@@ -1,15 +1,17 @@
-# Changelog of tab-mcp for Chrome
+# Changelog of the tab-mcp browser extension
 
-All notable changes to tab-mcp for Chrome, released with the Git tag
-`extension-v<version>`. The format follows
+All notable changes to the tab-mcp browser extension (called tab-mcp for Chrome up to
+0.1.0), released with the Git tag `extension-v<version>`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-The Chrome extension (`packages/tab-mcp-extension`), in the Chrome Web Store. Each release
-attaches its store package, `tab-mcp-for-chrome-<version>-store.zip`, to the GitHub
-release `extension-v<version>`.
+The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store. Each release
+attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
+`tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`.
 
 ## Unreleased
+
+## [0.2.0][extension-0.2.0] - 2026-11-16
 
 ### Added
 
@@ -22,6 +24,14 @@ release `extension-v<version>`.
 
 ### Changed
 
+- The extension is called "tab-mcp browser extension" (was "tab-mcp for Chrome"), the
+  same name in every browser's store: in its manifest, the toolbar button, the side
+  panel, its notifications and what it tells AI apps. Its MCP server name, which the
+  setup commands use, is `tab-mcp-browser-extension`. The address derives from it, so
+  the update gives the extension a new address: pair the AI apps again. The store package is
+  `tab-mcp-browser-extension-<version>-store.zip`.
+- The first release through the publish workflow: the store gets a CRX signed with the
+  item's verified-upload key.
 - Open pages keep their WebMCP tools across a reload or update of the extension.
 - A page busy for a while after it loaded still gets its tools: no time limit for the
   polyfill's answer.
@@ -36,8 +46,8 @@ release `extension-v<version>`.
 - Pages it may read can tell that it is installed (`document.modelContext` where Chrome
   has none); `PRIVACY.md` says so.
 
-The repository also builds tab-mcp for Firefox from the same code (`--firefox`, not
-released; README).
+The repository also builds it for Firefox from the same code (`--firefox`, not released;
+README).
 
 ## [0.1.0][extension-0.1.0] - 2026-11-15
 
@@ -89,4 +99,5 @@ First release.
   `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[extension-0.2.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.2.0
 [extension-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.1.0

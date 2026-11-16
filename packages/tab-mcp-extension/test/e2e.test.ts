@@ -420,7 +420,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(
 			await stack.worker.eval("chrome.runtime.getManifest().permissions"),
 		).not.toContain("storage");
-		const world = await tab.isolatedWorld("tab-mcp for Chrome");
+		const world = await tab.isolatedWorld("tab-mcp browser extension");
 		// The world is the content script's: it has the extension's runtime.
 		expect(await tab.eval("typeof chrome.runtime?.sendMessage", world)).toBe(
 			"function",
@@ -781,8 +781,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				"Codex",
 			]);
 			expect(m.commands).toEqual([
-				`claude mcp add --transport http tab-mcp-for-chrome ${stack.address}`,
-				`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-for-chrome --url ${stack.address}\ncodex mcp login tab-mcp-for-chrome`,
+				`claude mcp add --transport http tab-mcp-browser-extension ${stack.address}`,
+				`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-browser-extension --url ${stack.address}\ncodex mcp login tab-mcp-browser-extension`,
 			]);
 			expect(m.overflow).toBe(false);
 			expect(m.widths[1]).toBe(m.widths[0]);
@@ -1837,7 +1837,7 @@ describe.skipIf(chrome === undefined)(
 			) as Record<string, string>;
 			const impostor = new TabMcp({
 				relay: stack.relay.url,
-				server: { name: "tab-mcp-for-chrome", version: "1.0.0" },
+				server: { name: "tab-mcp-browser-extension", version: "1.0.0" },
 				storage: {
 					getItem: (key) => secrets[key] ?? null,
 					setItem: () => {},
@@ -2121,7 +2121,7 @@ describe.skipIf(chrome === undefined || !process.env["TAB_MCP_E2E_IDLE"])(
  * of `toolchange` plus the worker's round trip before the next read.
  */
 async function readsSettled(tab: Page, quietMs = 1000): Promise<void> {
-	const world = await tab.isolatedWorld("tab-mcp for Chrome");
+	const world = await tab.isolatedWorld("tab-mcp browser extension");
 	// Strict: a wrapper that does not stick throws instead of re-arming the
 	// wait at every poll.
 	const settled = `(() => {
@@ -2269,7 +2269,7 @@ describe.skipIf(chrome === undefined)(
  * asked (or since `readsSettled` wrapped it), counted by that wrapper.
  */
 async function toolReads(tab: Page): Promise<number> {
-	const world = await tab.isolatedWorld("tab-mcp for Chrome");
+	const world = await tab.isolatedWorld("tab-mcp browser extension");
 	return tab.eval<number>(
 		`(() => { const reads = document.modelContext.e2eReads; const n = reads.count; reads.count = 0; return n; })()`,
 		world,
@@ -2558,7 +2558,7 @@ describe.skipIf(chrome === undefined)(
 		});
 
 		test("Chrome has no WebMCP here; the page finds the polyfill's as it loads", async () => {
-			const world = await stack.tab.isolatedWorld("tab-mcp for Chrome");
+			const world = await stack.tab.isolatedWorld("tab-mcp browser extension");
 			// The content script's world: no document.modelContext of Chrome's.
 			expect(await stack.tab.eval(`"modelContext" in document`, world)).toBe(
 				false,

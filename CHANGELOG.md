@@ -7,5 +7,5 @@ npm packages ship theirs in the package (`node_modules/<package>/CHANGELOG.md`).
   library, tags `client-v<version>`.
 - [@ractive-ch/tab-mcp](packages/tab-mcp/CHANGELOG.md): the relay and its Docker image,
   tags `relay-v<version>`.
-- [tab-mcp for Chrome](packages/tab-mcp-extension/CHANGELOG.md): the Chrome extension,
+- [tab-mcp browser extension](packages/tab-mcp-extension/CHANGELOG.md): the browser extension,
   tags `extension-v<version>`.

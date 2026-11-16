@@ -692,7 +692,9 @@ describe("PageToolBridge", () => {
 		});
 		await bridge.refresh();
 		expect(reg.tools.get("page_a")).not.toBe(beforeNavigation);
-		state.page = new Error("tab-mcp for Chrome may not read this tab yet.");
+		state.page = new Error(
+			"The tab-mcp browser extension may not read this tab yet.",
+		);
 		await bridge.refresh();
 		expect(reg.tools.size).toBe(0);
 		expect(bridge.state.error).toContain("may not read");

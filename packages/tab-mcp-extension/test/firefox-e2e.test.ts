@@ -256,7 +256,7 @@ async function answerInPanel(
 	await stack.panel.eval(`${selector}.click()`);
 }
 
-describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
+describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 	let stack: Stack;
 
 	beforeAll(async () => {
@@ -288,13 +288,13 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 
 	test("the panel speaks of Firefox, not Chrome", async () => {
 		expect(await stack.panel.eval("document.title")).toBe(
-			"tab-mcp for Firefox",
+			"tab-mcp browser extension",
 		);
 		const html = await stack.panel.eval<string>("document.body.innerHTML");
 		expect(html).not.toContain("Chrome");
 		expect(html).not.toContain("chrome://");
 		// The setup commands, made once the address is there.
-		expect(html).toContain("tab-mcp-for-firefox");
+		expect(html).toContain("tab-mcp-browser-extension-firefox");
 		expect(html).toContain("Click into the sidebar to answer.");
 		expect(html.toLowerCase()).not.toContain("for-chrome");
 	});

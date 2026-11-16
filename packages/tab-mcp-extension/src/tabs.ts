@@ -109,7 +109,7 @@ export class NoAccessError extends Error {
 	}
 }
 
-const NO_GRANT = `${PRODUCT} may not read this tab yet. The user can click the ${PRODUCT} icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.`;
+const NO_GRANT = `The ${PRODUCT} may not read this tab yet. The user can click its icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.`;
 
 /**
  * The hosts Firefox keeps extensions out of (its default
@@ -162,7 +162,7 @@ export function noAccess(url: string): NoAccessError {
 	if (!isSitePage(url))
 		return new NoAccessError(
 			"not-site",
-			`${PRODUCT} works only on pages of http(s) sites (not file: or other pages). Switch to a web page.`,
+			`The ${PRODUCT} works only on pages of http(s) sites (not file: or other pages). Switch to a web page.`,
 		);
 	return new NoAccessError("no-grant", NO_GRANT);
 }

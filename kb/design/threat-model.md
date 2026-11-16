@@ -217,7 +217,7 @@ trustworthy. `SECURITY.md` says this plainly.
 
 ### A13: The browser extension and the pages it bridges (iterations 19, 20 and 26)
 
-tab-mcp for Chrome ([design](/design/extension.md)) offers the WebMCP tools of the page
+The tab-mcp browser extension ([design](/design/extension.md)) offers the WebMCP tools of the page
 in front to the user's AI app. That page did not choose the relay or the AI app: the user
 did, by connecting the extension.
 
@@ -430,7 +430,7 @@ in the browser call them without pairing and without an identity (`client.kind`
 `"webmcp"`). Such an agent often drives the tab and can click Allow itself, so
 consequential tools are mirrored only when their `callers` list `"webmcp"`; calls get
 the same schema check and confirmation, never "Always allow". Only the native object is
-used. tab-mcp for Chrome offers mirrored tools like any page tool (DEC-140): an AI app
+used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice, and a consequential
 one asks in the extension and in the page. The full analysis is A14 in
 `docs/threat-model.md` (DEC-115, DEC-119).

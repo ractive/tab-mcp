@@ -1,6 +1,6 @@
 ---
 type: design
-title: "tab-mcp for Chrome: the browser extension"
+title: "The tab-mcp browser extension"
 description: >-
   A small Chrome extension in this repository that bridges a page's own WebMCP tools
   to AI apps outside the browser, through the relay. Recipes (tools an AI app builds
@@ -12,7 +12,7 @@ tags:
 timestamp: 2026-11-12T16:30:00+01:00
 ---
 
-# tab-mcp for Chrome: the browser extension
+# The tab-mcp browser extension
 
 ## What it is
 
@@ -35,7 +35,7 @@ DEC-113). That is all it does: a small bridge (DEC-114).
 - Letting an AI app write user scripts that the extension runs (`chrome.userScripts`) is
   an experiment of its own, iteration 24, not part of the extension until it is decided.
 
-Name: **tab-mcp for Chrome**; docs at `ractive.ch/tab-mcp`, no domain of its own (DEC-109).
+Name: **tab-mcp browser extension**; docs at `ractive.ch/tab-mcp`, no domain of its own (DEC-109).
 
 ## How it fits tab-mcp
 
@@ -126,7 +126,7 @@ allowed on the site), and the relay address under
 Settings. The icon's badge shows "on", "…" or "?" (a question waits). The connector
 carries the extension's icon. The panel's look (paper and ink on tokens whose pairs are
 held to their contrast in light and dark, no amber button, what each colour says) is
-[tab-mcp for Chrome: the look](extension-look.md) (iteration 39, DEC-160 to DEC-163).
+[tab-mcp browser extension: the look](extension-look.md) (iteration 39, DEC-160 to DEC-163).
 
 ## Risks and how the design meets them
 

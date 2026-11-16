@@ -2,8 +2,7 @@
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
 relay `@ractive-ch/tab-mcp` 0.11.0, browser library `@ractive-ch/tab-mcp-client` 0.16.2
-and the browser extension tab-mcp for Chrome 0.1.0 (not yet in the Chrome Web Store,
-A13).
+and the tab-mcp browser extension 0.2.0 (in the Chrome Web Store, A13).
 To report a vulnerability,
 see [SECURITY.md](../SECURITY.md).
 
@@ -537,9 +536,9 @@ who signed in at `/authorize` (an ID token).
   (see [configuration](configuration.md#identity-binding)); comparing an e-mail address
   instead is refused, because e-mail addresses change hands.
 
-### A13: tab-mcp for Chrome and the pages it bridges
+### A13: the tab-mcp browser extension and the pages it bridges
 
-tab-mcp for Chrome, a browser extension, offers the WebMCP tools of the page in front to
+The tab-mcp browser extension offers the WebMCP tools of the page in front to
 the user's AI app, through a relay. That page did not choose the relay or the AI app: the
 user did, by turning on AI access in the extension. To the relay the extension is a site
 like any other, `chrome-extension://<id>` (A11).
@@ -683,7 +682,7 @@ from them.
   decision.
 - **Names keep their owner.** A name the page or another script registered natively
   first stays theirs (the mirror only warns), and once a name is mirrored the page's own
-  native registration of it fails. tab-mcp for Chrome (A13) offers mirrored tools like
+  native registration of it fails. The tab-mcp browser extension (A13) offers mirrored tools like
   any other page tool, since it cannot know whether the AI app is also paired with the
   page: an AI app connected to both sees such a tool twice, and a consequential one asks
   in the extension and again in the page.
@@ -790,7 +789,7 @@ each default.
 
 - With identity binding: a taken-over account at the provider, a leaked assertion key or
   a web app that vouches for the wrong user (A12).
-- With tab-mcp for Chrome: a tool that runs without asking (marked read-only by the page,
+- With the tab-mcp browser extension: a tool that runs without asking (marked read-only by the page,
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
 - With `webmcp: true`: any agent in the browser calls the mirrored tools without

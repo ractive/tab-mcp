@@ -2,7 +2,7 @@
  * Text an AI app or a page wrote, made safe to show to the user before they
  * approve something: characters that are invisible, blank or turn the text's
  * direction are written as escapes, so the text cannot look like something
- * else. Shared by the library's confirmation dialog and tab-mcp for Chrome.
+ * else. Shared by the library's confirmation dialog and the tab-mcp browser extension.
  */
 
 /**

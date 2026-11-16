@@ -15,7 +15,7 @@
 #   signs the tarball with GitHub OIDC provenance and uploads it for the
 #   owner's one-time manual `npm publish --provenance-file`; `publish`
 #   publishes like a release (run it on the release tag).
-# - A release `extension-v<version>` (tab-mcp for Chrome, Chrome Web Store)
+# - A release `extension-v<version>` (the tab-mcp browser extension, Chrome Web Store)
 #   is a no-op: the plan job succeeds with package `none` and every other
 #   job is skipped. Those releases, and their Chrome Web Store publish, come
 #   from extension-release.yml (on the tag push; extension-publish.yml
@@ -113,7 +113,7 @@ jobs:
               client-v*) package=client; version=${RELEASE_TAG#client-v} ;;
               relay-v*) package=relay; version=${RELEASE_TAG#relay-v} ;;
               extension-v*)
-                # tab-mcp for Chrome has its own release path to the Chrome
+                # The tab-mcp browser extension has its own release path to the Chrome
                 # Web Store (extension-release.yml, extension-publish.yml);
                 # nothing to publish here, so every other job is skipped.
                 echo "release $RELEASE_TAG is the extension's: nothing to publish to npm or Docker"

@@ -17,8 +17,8 @@ export const BROWSER: string = FIREFOX ? "Firefox" : "Chrome";
 /** What the panel is called: Chrome's side panel, Firefox's sidebar. */
 export const PANEL: string = FIREFOX ? "sidebar" : "side panel";
 
-/** The extension's name: "tab-mcp for Chrome" or "tab-mcp for Firefox". */
-export const PRODUCT = `tab-mcp for ${BROWSER}`;
+/** The extension's name, the same in every browser (DEC-193). */
+export const PRODUCT = "tab-mcp browser extension";
 
 /**
  * The panel's static texts that name the browser, for Firefox: by element

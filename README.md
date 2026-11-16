@@ -10,7 +10,7 @@ tools through the relay while the tab stays open. Nothing has to be installed on
 computer.
 
 The page does this with the tab-mcp client library. A page that offers its tools only
-with the browser's WebMCP reaches an AI app through the extension tab-mcp for Chrome:
+with the browser's WebMCP reaches an AI app through the tab-mcp browser extension:
 [How the parts fit together](#how-the-parts-fit-together).
 
 <!-- The GIF lives on ractive.ch (static/tab-mcp/demo/ in ractive.ch), not in this
@@ -26,7 +26,7 @@ Claude Desktop, then Claude calling the page's tools (45 s; waiting cut, Claude'
      https://ractive.ch/tab-mcp/ (boxes, arrows, label tags; light and dark). A copy is
      static/images/tab-mcp-overview.svg in ractive.ch, shown there with a short version
      of this text; keep them in step. -->
-![Two paths lead through the tab-mcp relay to AI apps. A page with tab-mcp-client, in any browser with nothing for the user to install, connects to the relay with a WebSocket. A page with WebMCP tools, in Chrome with WebMCP on and the tab-mcp extension installed, is read by tab-mcp for Chrome, which connects to the relay with a WebSocket. The AI apps reach the relay over MCP.](docs/overview.svg)
+![Two paths lead through the tab-mcp relay to AI apps. A page with tab-mcp-client, in any browser with nothing for the user to install, connects to the relay with a WebSocket. A page with WebMCP tools, in Chrome with WebMCP on and the tab-mcp extension installed, is read by the tab-mcp browser extension, which connects to the relay with a WebSocket. The AI apps reach the relay over MCP.](docs/overview.svg)
 
 tab-mcp has three parts:
 
@@ -38,7 +38,7 @@ tab-mcp has three parts:
 - **The client library** ([`@ractive-ch/tab-mcp-client`](packages/tab-mcp-client/README.md))
   is for site owners. The site builds it into a page and registers tools with it. The
   page then connects to the relay itself.
-- **tab-mcp for Chrome** ([`packages/tab-mcp-extension`](packages/tab-mcp-extension/README.md))
+- **tab-mcp browser extension** ([`packages/tab-mcp-extension`](packages/tab-mcp-extension/README.md))
   is a browser extension for users. It reads the
   [WebMCP](https://webmachinelearning.github.io/webmcp/) tools of the page in front and
   offers them to the AI app through the relay.
@@ -58,7 +58,7 @@ depends on how the page offers its tools:
 | | Page with the client library | Page with WebMCP tools only |
 |---|---|---|
 | The site | builds in `@ractive-ch/tab-mcp-client` and has a relay that allows its origin | calls `document.modelContext.registerTool()` and takes part in Chrome's WebMCP origin trial (or its users turn on the flag); needs nothing of tab-mcp |
-| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | Chrome with WebMCP on, and the tab-mcp extension (tab-mcp for Chrome) installed from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh) |
+| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | Chrome with WebMCP on, and the tab-mcp browser extension installed from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) |
 | The user connects | in the page: "Connect your AI app" shows the address and the code | in the extension's side panel, once: one address for whatever page is in front |
 | The user is asked | by the page, before a tool the site marked as consequential | by the extension, before a tool the page did not mark read-only, and before its navigation tools take the tab to another site |
 
@@ -72,7 +72,7 @@ the library's tools with WebMCP. The
 both paths.
 
 **If you use a site**, look for "Connect your AI app" in the page: that page has the
-client library and you need nothing else. On a page without it, tab-mcp for Chrome
+client library and you need nothing else. On a page without it, the tab-mcp browser extension
 offers your AI app the page's WebMCP tools, if the page has any. It reads a tab only
 after you click its icon there, or after you give it access to all sites. The extension
 also has tools of its own, which work on pages without tools too: `page_info` says
@@ -332,7 +332,7 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh): "tab-mcp for Chrome" 0.1.0 | the Chrome extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh): "tab-mcp browser extension" 0.2.0 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
@@ -347,7 +347,7 @@ sessions live in the relay's memory, so each address still needs exactly one pro
 - [Token store](docs/token-store.md): the `TokenStore` interface and its conformance suite
 - [Protocol](docs/protocol.md): the WebSocket protocol `tab-mcp.v1` between page and relay
 - [Threat model](docs/threat-model.md) and [security policy](SECURITY.md)
-- Changelogs: [browser library](packages/tab-mcp-client/CHANGELOG.md), [relay](packages/tab-mcp/CHANGELOG.md), [tab-mcp for Chrome](packages/tab-mcp-extension/CHANGELOG.md)
+- Changelogs: [browser library](packages/tab-mcp-client/CHANGELOG.md), [relay](packages/tab-mcp/CHANGELOG.md), [the tab-mcp browser extension](packages/tab-mcp-extension/CHANGELOG.md)
 
 ## Status
 
@@ -356,7 +356,7 @@ settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what chang
 
 - Released: relay `@ractive-ch/tab-mcp` 0.11.0 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.16.2, on the npm tag `latest`.
-- tab-mcp for Chrome 0.1.0 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-for-chrome/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
+- The tab-mcp browser extension 0.2.0 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16). A development build loaded unpacked has the store's id, which the hosted
   relay allows ([README](packages/tab-mcp-extension/README.md)).
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
