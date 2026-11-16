@@ -72,8 +72,8 @@ A spike: a research note and a decision, not a feature.
 3. **From the page to the extension.** With exported functions there is no channel: the
    page calls the API and the call runs in the content script, as with Chrome's own
    WebMCP. The page cannot read or forge messages, nor change the content script's
-   globals (`JSON`, `Promise`), and `registerTool()` can throw at once for a name that is
-   taken, as Chrome does. The content script keeps the tools itself and gives
+   globals (`JSON`, `Promise`), and `registerTool()` rejects at once for a name that is
+   taken (it returns a promise in the draft of 2026-11-13). The content script keeps the tools itself and gives
    `content.ts` an object with the `ModelContext` it uses today (in Firefox
    `document.modelContext` is `undefined` there: the Xrays hide what is defined for the
    page), so the reading, the timeout and the result mapping stay as they are. What
@@ -112,7 +112,7 @@ A spike: a research note and a decision, not a feature.
 
 ## Tasks
 
-- [ ] Question 0: the ways, compared in the research note, with sources
+- [x] Question 0: the ways, compared in the research note, with sources
 - [ ] The test harness: `ff-rdp` (the owner's Firefox Remote Debugging Protocol CLI)
       launches Firefox, opens the sites and reads what the page sees (`eval`,
       `console`). It does not install an unsigned extension yet: a profile's
