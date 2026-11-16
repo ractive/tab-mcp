@@ -37,6 +37,12 @@ export const MAX_TOOLS = 64;
  * a page's how-to, which WebMCP has no server instructions for.
  */
 export const MAX_DESCRIPTION = 8000;
+/**
+ * All of a page's descriptions together (after the origin, in UTF-8 bytes).
+ * Past it the longest are cut to one common length, so 64 long descriptions
+ * cannot fill the AI app's context or the relay's 1 MiB message (DEC-192).
+ */
+export const MAX_DESCRIPTIONS_BYTES = 65_536;
 /** A page's error, and why a tool is not offered, is cut to this many characters. */
 export const MAX_ERROR = 1000;
 /** A title is cut to this many characters. */
@@ -86,10 +92,54 @@ const cut = (text: string, max: number) =>
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
-/** The page's description, cut, after its origin. */
-export function describe(origin: string, description: string): string {
-	const text = description.trim() || "(no description)";
-	return `From ${origin}: ${cut(text, MAX_DESCRIPTION)}`;
+const encoder = new TextEncoder();
+const byteLength = (text: string) => encoder.encode(text).length;
+
+/** The page's text of a description: trimmed, cut to `MAX_DESCRIPTION`. */
+const pageText = (description: string) =>
+	cut(description.trim() || "(no description)", MAX_DESCRIPTION);
+
+/** `text` in at most `max` UTF-8 bytes, ending in "…" when cut; never half a character. */
+export function cutBytes(text: string, max: number): string {
+	if (byteLength(text) <= max) return text;
+	const room = max - byteLength("…");
+	let used = 0;
+	let end = 0;
+	for (const char of text) {
+		const size = byteLength(char);
+		if (used + size > room) break;
+		used += size;
+		end += char.length;
+	}
+	return `${text.slice(0, end)}…`;
+}
+
+/**
+ * The most bytes one description may keep so that all of them together fit
+ * `budget`: those shorter than that stay whole, the longest share the rest
+ * equally. `Infinity` when they fit as they are.
+ */
+export function descriptionCap(
+	lengths: readonly number[],
+	budget = MAX_DESCRIPTIONS_BYTES,
+): number {
+	const sorted = [...lengths].sort((a, b) => a - b);
+	let left = budget;
+	for (const [i, length] of sorted.entries()) {
+		const share = Math.floor(left / (sorted.length - i));
+		if (length > share) return share;
+		left -= length;
+	}
+	return Number.POSITIVE_INFINITY;
+}
+
+/** The page's description, cut (to `maxBytes` too), after its origin. */
+export function describe(
+	origin: string,
+	description: string,
+	maxBytes = Number.POSITIVE_INFINITY,
+): string {
+	return `From ${origin}: ${cutBytes(pageText(description), maxBytes)}`;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -671,6 +721,12 @@ export class PageToolBridge {
 		const callable = new Map<string, Callable>();
 		const compiled = new Map<string, Compiled>();
 		let more = tools.more;
+		// The descriptions of the tools offered share one budget.
+		const cap = descriptionCap(
+			tools.tools
+				.slice(0, MAX_TOOLS)
+				.map((t) => byteLength(pageText(t.description))),
+		);
 		for (const pageTool of tools.tools) {
 			if (offered.length >= MAX_TOOLS) {
 				more++;
@@ -678,7 +734,7 @@ export class PageToolBridge {
 			}
 			const readOnly = pageTool.annotations?.readOnlyHint === true;
 			const title = cut(pageTool.title ?? pageTool.name, MAX_TITLE);
-			const description = describe(tools.origin, pageTool.description);
+			const description = describe(tools.origin, pageTool.description, cap);
 			const entry: Offered = {
 				name: cut(pageTool.name, MAX_NAME),
 				...(pageTool.title ? { title: cut(pageTool.title, MAX_TITLE) } : {}),

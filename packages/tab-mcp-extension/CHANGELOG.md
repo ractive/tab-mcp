@@ -27,7 +27,8 @@ release `extension-v<version>`.
   polyfill's answer.
 - A page tool's description is cut at 8000 characters instead of 1000, so a page without
   server instructions (WebMCP has none) can say how to use its tools in them. A page's
-  errors stay cut at 1000.
+  errors stay cut at 1000. All of a page's descriptions together keep at most 64 KiB
+  (UTF-8): past it the longest are cut to one common length, the shorter stay whole.
 - The side panel: a question waiting while the panel has no focus says "Click into the
   side panel to answer." (Allow counts only from a click into it); a page without
   WebMCP says to give access to all sites and reload the page; the line under "Give

@@ -41,7 +41,7 @@ there, or "Give access to all sites"); on any other tab they do nothing and say 
 The page's tools are the page's word:
 
 - Their descriptions reach the AI app starting with the page's origin (`From
-  https://shop.example: …`), cut to 8000 characters (room for a page's how-to, as WebMCP has no server instructions); titles to 100. The origin is the one
+  https://shop.example: …`), cut to 8000 characters (room for a page's how-to, as WebMCP has no server instructions), and all of a page's descriptions together to 64 KiB, the longest cut first; titles to 100. The origin is the one
   Chrome reports for the tab: a page that says it is another site gets no tools.
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Always allow on <host>" in a question, or switching on

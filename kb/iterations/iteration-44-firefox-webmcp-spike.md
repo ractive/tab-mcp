@@ -233,7 +233,8 @@ build that gives Firefox WebMCP through a tab-mcp relay. It works, end to end.
   and why a tool is not offered stay at 1000. The risk: 64 tools of 8000 characters are
   about 512 KB in ASCII but up to about 1.5 MB in scripts that take 3 bytes a character
   in UTF-8, past the relay's 1 MiB message for `webmcp_tools` or the tool list.
-  There is no total budget yet; the owner has not decided on one.
+  The owner's answer: all of a page's descriptions together at most 65536 bytes, the
+  longest cut first (DEC-192).
 
 # Citations
 

@@ -3975,5 +3975,8 @@ descriptions; 1000 characters cut saturnus's (5.1 KB) off.
 
 - `MAX_DESCRIPTION` is 8000; a page's error and why a tool is not offered keep 1000
   (`MAX_ERROR`).
-- Open: 64 tools of 8000 characters are about 512 KB in ASCII but up to about 1.5 MB in
-  scripts that take 3 bytes a character, past the relay's 1 MiB message. A total budget across a page's descriptions would prevent it; not decided.
+- All of a page's descriptions together keep at most 65536 bytes (UTF-8, after the origin;
+  `MAX_DESCRIPTIONS_BYTES`, the owner's number): past it the longest are cut to one
+  common length and the shorter stay whole. Without it 64 tools of 8000 characters were
+  about 512 KB in ASCII and up to about 1.5 MB in scripts of 3 bytes a character, past the
+  relay's 1 MiB message, and far past what an AI app's context should carry. A total budget across a page's descriptions would prevent it; not decided.
