@@ -223,9 +223,11 @@ async function answerInPanel(
 	await stack.panel.eval(
 		"chrome.windows.getCurrent().then((w) => chrome.windows.update(w.id, { focused: true })).then(() => true)",
 	);
+	// Asked again on every check: headless Firefox hands the focus to a
+	// window it created after the panel's, at times.
 	await stack.panel
 		.waitFor(
-			`${selector} && ${selector}.getAttribute("aria-disabled") !== "true"`,
+			`(void chrome.windows.getCurrent().then((w) => chrome.windows.update(w.id, { focused: true })), ${selector} && ${selector}.getAttribute("aria-disabled") !== "true")`,
 			10_000,
 		)
 		.catch(async (error: unknown) => {
@@ -234,6 +236,10 @@ async function answerInPanel(
 			);
 			throw new Error(`${String(error)}\nThe panel: ${JSON.stringify(seen)}`);
 		});
+	// Allow takes clicks: the hint why it waits is gone.
+	expect(
+		await stack.panel.eval(`document.getElementById("focus-hint").hidden`),
+	).toBe(true);
 	await stack.panel.eval(`${selector}.click()`);
 }
 
@@ -276,6 +282,7 @@ describe.skipIf(!firefoxOk)("tab-mcp for Firefox (the test build)", () => {
 		expect(html).not.toContain("chrome://");
 		// The setup commands, made once the address is there.
 		expect(html).toContain("tab-mcp-for-firefox");
+		expect(html).toContain("Click into the sidebar to answer.");
 		expect(html.toLowerCase()).not.toContain("for-chrome");
 	});
 

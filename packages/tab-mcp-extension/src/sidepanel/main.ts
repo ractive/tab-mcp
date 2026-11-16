@@ -7,7 +7,7 @@
  * pairing, which stops.
  */
 
-import { FIREFOX, FIREFOX_PANEL_TEXTS, PRODUCT } from "../browser.ts";
+import { FIREFOX, FIREFOX_PANEL_TEXTS, PANEL, PRODUCT } from "../browser.ts";
 import {
 	PANEL_PORT,
 	type PanelCommand,
@@ -56,6 +56,8 @@ const $ = <T extends HTMLElement>(id: string) =>
 function setText(element: HTMLElement, text: string): void {
 	if (element.textContent !== text) element.textContent = text;
 }
+
+$("focus-hint").textContent = `Click into the ${PANEL} to answer.`;
 
 // Firefox's words where the panel's page names Chrome (iteration 44).
 if (FIREFOX) {
@@ -454,6 +456,9 @@ function arm(): void {
 				now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS,
 		);
 	updateCountdowns($("questions"), now);
+	// Why Allow waits while the focus is elsewhere (the page, the AI app): the
+	// wait starts only with a click into the panel (DEC-087).
+	$("focus-hint").hidden = cards.size === 0 || focusedSince !== undefined;
 	// `aria-disabled`, not `disabled`: a focused control keeps its focus and
 	// its place in the tab order during the wait (EQ 11).
 	for (const control of document.querySelectorAll<HTMLElement>(
