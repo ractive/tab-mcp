@@ -614,6 +614,7 @@ The logs are JSON lines on stdout. Events worth an alert or a look:
 | `relay.unknown_setting` | At start: a `TAB_MCP_*` variable the relay does not read (`name`), such as a misspelled or removed setting. It is ignored. |
 | `relay.no_origins` | No page is allowed; every page is refused. A missing or misspelled setting. |
 | `relay.open_relay` | `TAB_MCP_ALLOWED_ORIGINS=*` is set. |
+| `relay.firefox_extensions` | `TAB_MCP_ALLOWED_ORIGINS` has `moz-extension://*`: any Firefox extension's pages may connect. |
 | `tab.refused` | A page was refused: `origin` (not listed), `max_sessions`, `max_sessions_per_ip`, `bad_address` (a malformed `?a=`), `address_mismatch` (the URL's address id is not the secret's). Many per-IP refusals from one address may mean `TAB_MCP_TRUST_PROXY` is not set and every page appears to come from the proxy. Many `max_sessions` refusals while few real pages are open may be the attack in [Known limit: session slots](#known-limit-session-slots). |
 | `health.store` | The `/healthz` probe of the token store failed (`error` is the error's name, or `timeout`). |
 | `oauth.refresh_reuse` | An old refresh token was used again, so the relay revoked that grant. A sign of a stolen token, or of a client that lost its newest token. |

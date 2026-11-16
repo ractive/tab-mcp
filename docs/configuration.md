@@ -40,7 +40,7 @@ than 0.
 | `TAB_MCP_PUBLIC_URL` | required | External origin of the relay, e.g. `https://relay.example.com`. Only the origin counts: no path, query or credentials. `https:` unless `NODE_ENV=development`. |
 | `TAB_MCP_PORT` | `8080` | Port to listen on. |
 | `TAB_MCP_HOST` | `0.0.0.0` | Address to listen on. |
-| `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | Comma-separated page origins (`https://app.example.com`, or a Chrome or Edge extension's `chrome-extension://<id>`, see [Browser extensions](#browser-extensions)) allowed to open tab sessions with the default limits. `*` admits any website and any extension (an open relay, see below). |
+| `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | Comma-separated page origins (`https://app.example.com`, or a Chrome or Edge extension's `chrome-extension://<id>`, or `moz-extension://*` for any Firefox extension, see [Browser extensions](#browser-extensions)) allowed to open tab sessions with the default limits. `*` admits any website and any extension (an open relay, see below). |
 | `TAB_MCP_SITES` | empty | JSON array of sites with their own app name or limits (see [Sites](#sites)). A site listed here needs no entry in `TAB_MCP_ALLOWED_ORIGINS`; an origin may appear in only one of the two. |
 | `TAB_MCP_CLIENT_ID_HOSTS` | empty: any AI app | Comma-separated hosts whose AI apps may connect, compared exactly with the host of the app's client id URL. For example `claude.ai` admits Claude Code, whose client id is `https://claude.ai/oauth/claude-code-client-metadata`. An app that authenticates with `private_key_jwt` (ChatGPT) publishes its keys on the same host, so the list covers them too (DEC-106). |
 | `TAB_MCP_TRUST_PROXY` | `none` | Where the client IP for rate limits comes from: `none` (the TCP peer), `x-real-ip`, or `x-forwarded-for` (its last entry, the one your proxy added). Set it only behind a proxy that sets the header; otherwise clients can choose their own IP. A value with a port (`203.0.113.7:51234`, `[2001:db8::1]:443`) counts as its address; a value that is not an address is ignored for the TCP peer, logged once as `relay.bad_forwarded_ip`. |
@@ -134,10 +134,14 @@ TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop",
   relay refuses it.
 - **Connect from an extension page, not a content script.** A content script's requests
   carry the origin of the website it runs in, so the relay would see that website.
-- **Chrome and Edge only.** Firefox (`moz-extension://`) and Safari
+- **Firefox: all extensions or none.** Firefox (`moz-extension://`) and Safari
   (`safari-web-extension://`) give every installation of an extension its own id, so no
-  list can name them; the relay refuses those schemes at start. On a relay of your own,
-  `TAB_MCP_ALLOWED_ORIGINS=*` admits them anyway (see [Open relay](#open-relay)).
+  list can name one; the relay refuses such an origin at start. The entry
+  `moz-extension://*` in `TAB_MCP_ALLOWED_ORIGINS` admits the pages of any Firefox
+  extension (an `Origin` of `moz-extension://` and a UUID, which websites cannot send),
+  always paired by code, and is not allowed in `TAB_MCP_SITES` (its name would go to
+  every Firefox extension). `TAB_MCP_ALLOWED_ORIGINS=*` admits Safari's too (see
+  [Open relay](#open-relay)).
 - **Pairing.** Pair by code. Identity binding (`pairing: "oidc"`) works only if a backend
   signs tab assertions for the extension's user (see [Identity binding](#identity-binding)),
   which an extension usually does not have.
