@@ -1,7 +1,7 @@
 /**
  * The Chrome Web Store screenshots (1280×800, light): the store build in
- * Chrome for Testing (`CHROME_PATH`, as for the end-to-end tests), an example
- * shop page on a made-up origin served through the DevTools Protocol, a relay
+ * Chrome for Testing (`CHROME_PATH`, as for the end-to-end tests), the diagram
+ * editor example on ractive.ch (live, through the DevTools Protocol), a relay
  * in this process whose addresses read as the hosted relay's, and an MCP
  * client as the AI app. Each shot puts the page and the side panel side by
  * side, as Chrome shows them. Writes `assets/store/*.png`; look at each one
@@ -23,109 +23,48 @@ import { build } from "./build.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const OUT = join(ROOT, "assets/store");
-const SHOP = "https://bakery.example";
-const OTHER = "https://other.example";
+/**
+ * The page: tab-mcp's diagram editor example on ractive.ch, a real page whose
+ * tools are registered with WebMCP too. Its requests (and its CDN's) go to the
+ * network, so the shots show the live page.
+ */
+const SITE = "https://ractive.ch";
+const PAGE_URL = `${SITE}/tab-mcp/examples/diagram/`;
+const LIVE = new Set([SITE, "https://ractive.b-cdn.net"]);
+/** Another site, for the question before the tab goes there; never opened. */
+const OTHER = "https://github.com/ractive/tab-mcp";
 /** What the panel shows as the AI app's address: the hosted relay's form. */
 const PUBLIC_RELAY = "https://tab-mcp.ractive.ch";
 const WIDTH = 1280;
 const HEIGHT = 800;
 const PANEL = 400;
 const PAGE = WIDTH - PANEL - 1;
-
-const SHOP_PAGE = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Corner Bakery</title>
-<style>
-	body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #2b2622; background: #fffaf3; }
-	header { padding: 20px 40px; border-bottom: 1px solid #eadfce; display: flex; justify-content: space-between; align-items: center; }
-	header h1 { margin: 0; font-size: 24px; }
-	nav a { margin-left: 20px; color: #7a4a1d; text-decoration: none; }
-	main { padding: 32px 40px; }
-	.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-	.item { background: #fff; border: 1px solid #eadfce; border-radius: 10px; padding: 16px; }
-	.item .pic { height: 110px; border-radius: 6px; margin-bottom: 12px; }
-	.item h2 { font-size: 17px; margin: 0 0 4px; }
-	.item p { margin: 0; color: #6b6158; font-size: 14px; }
-	.price { font-weight: 600; color: #2b2622; margin-top: 8px !important; }
-	button { margin-top: 10px; font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 6px; border: 1px solid #7a4a1d; background: #fff; color: #7a4a1d; }
-	.hours { margin-top: 28px; color: #6b6158; font-size: 14px; }
-</style>
-</head>
-<body>
-<header><h1>Corner Bakery</h1><nav><a href="/">Bread</a><a href="/">Pastries</a><a href="/">Cart (0)</a></nav></header>
-<main>
-	<div class="grid">
-		<div class="item"><div class="pic" style="background:#d9b48a"></div><h2>Sourdough loaf</h2><p>Rye and wheat, 800 g</p><p class="price">CHF 7.50</p><button>Add to cart</button></div>
-		<div class="item"><div class="pic" style="background:#e8c99b"></div><h2>Butter croissant</h2><p>Baked every morning</p><p class="price">CHF 2.40</p><button>Add to cart</button></div>
-		<div class="item"><div class="pic" style="background:#c99a6b"></div><h2>Walnut bread</h2><p>Whole wheat, 500 g</p><p class="price">CHF 6.80</p><button>Add to cart</button></div>
-		<div class="item"><div class="pic" style="background:#f0d9b5"></div><h2>Lemon tart</h2><p>Shortcrust, lemon curd</p><p class="price">CHF 5.20</p><button>Add to cart</button></div>
-		<div class="item"><div class="pic" style="background:#b98a5e"></div><h2>Pretzel</h2><p>Lye-dipped, coarse salt</p><p class="price">CHF 2.10</p><button>Add to cart</button></div>
-		<div class="item"><div class="pic" style="background:#e3bf8f"></div><h2>Apple strudel</h2><p>By the slice</p><p class="price">CHF 4.60</p><button>Add to cart</button></div>
-	</div>
-	<p class="hours">Open Monday to Saturday, 7:00 to 18:30.</p>
-</main>
-<script>
-	"use strict";
-	const register = (tool) => document.modelContext?.registerTool(tool);
-	const products = ["Sourdough loaf", "Butter croissant", "Walnut bread", "Lemon tart", "Pretzel", "Apple strudel"];
-	register({
-		name: "search_products",
-		title: "Search products",
-		description: "Finds products by name.",
-		inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
-		annotations: { readOnlyHint: true },
-		async execute({ query }) {
-			return products.filter((p) => p.toLowerCase().includes(String(query).toLowerCase()));
-		},
-	});
-	register({
-		name: "opening_hours",
-		title: "Opening hours",
-		description: "The shop's opening hours.",
-		inputSchema: { type: "object" },
-		annotations: { readOnlyHint: true },
-		async execute() {
-			return "Monday to Saturday, 7:00 to 18:30";
-		},
-	});
-	register({
-		name: "add_to_cart",
-		title: "Add to cart",
-		description: "Adds a product to the cart.",
-		inputSchema: {
-			type: "object",
-			properties: { product: { type: "string" }, quantity: { type: "integer" } },
-			required: ["product"],
-		},
-		async execute({ product, quantity = 1 }) {
-			return { cart: [{ product, quantity }] };
-		},
-	});
-	register({
-		name: "place_order",
-		title: "Place order",
-		description: "Orders what is in the cart, for pickup.",
-		inputSchema: { type: "object", properties: { pickup: { type: "string" } }, required: ["pickup"] },
-		async execute() {
-			return { order: "A-1042" };
-		},
-	});
-</script>
-</body>
-</html>`;
-
 const shots = new Map<string, Uint8Array>();
 
-function serve(url: string) {
+/** An expression: `selector` is there and takes clicks (as in the e2e tests). */
+const takesClicks = (selector: string) =>
+	`(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e !== null && e.getAttribute("aria-disabled") !== "true" && !document.body.hasAttribute("data-quiet"); })()`;
+
+async function serve(url: string) {
 	const { origin, pathname } = new URL(url);
-	if (origin === SHOP && pathname === "/")
+	if (LIVE.has(origin)) {
+		const response = await fetch(url);
+		// Its headers as sent (the CDN's CORS header for the page's module
+		// chunks), less those of the encoding `fetch` already undid.
+		const headers: Record<string, string> = {};
+		for (const [name, value] of response.headers)
+			if (
+				!["content-encoding", "content-length", "transfer-encoding"].includes(
+					name,
+				)
+			)
+				headers[name] = value;
 		return {
-			status: 200,
-			headers: { "content-type": "text/html; charset=utf-8" },
-			body: SHOP_PAGE,
+			status: response.status,
+			headers,
+			body: new Uint8Array(await response.arrayBuffer()),
 		};
+	}
 	const shot = shots.get(pathname.slice(1));
 	if (origin === "https://shots.test" && shot)
 		return {
@@ -143,6 +82,7 @@ async function capture(page: Page, width: number): Promise<Uint8Array> {
 		deviceScaleFactor: 1,
 		mobile: false,
 	});
+	await page.send("Emulation.setScrollbarsHidden", { hidden: true });
 	await page.send("Emulation.setEmulatedMedia", {
 		features: [{ name: "prefers-color-scheme", value: "light" }],
 	});
@@ -153,15 +93,19 @@ async function capture(page: Page, width: number): Promise<Uint8Array> {
 	return Buffer.from(data, "base64");
 }
 
-/** The shop page and the panel as they are now, under `name`. */
+/** The page and the panel as they are now, under `name`. */
 async function take(name: string, tab: Page, panel: Page): Promise<void> {
+	// The page from its heading, so the editor and the whole diagram show.
+	await tab.eval(
+		`window.scrollTo(0, document.querySelector("h1").getBoundingClientRect().top + window.scrollY - 24)`,
+	);
 	shots.set(`${name}-page.png`, await capture(tab, PAGE));
 	shots.set(`${name}-panel.png`, await capture(panel, PANEL));
 }
 
 /** Put each page beside its panel, 1280×800, and write the PNGs. */
 async function compose(browser: Browser, names: string[]): Promise<void> {
-	const page = await browser.newPage(`${SHOP}/`, { window: true });
+	const page = await browser.newPage("https://shots.test/", { window: true });
 	for (const name of names) {
 		await page.send("Emulation.setDeviceMetricsOverride", {
 			width: WIDTH,
@@ -200,7 +144,7 @@ try {
 		serve,
 	});
 	const panelUrl = `chrome-extension://${browser.extensionId}/sidepanel/index.html`;
-	const tab = await browser.newPage(`${SHOP}/`);
+	const tab = await browser.newPage(PAGE_URL);
 	await browser.clickIcon(tab);
 	const panel = await browser.attach(
 		(await browser.waitForTarget((t) => t.url === panelUrl)).targetId,
@@ -252,6 +196,14 @@ try {
 	await panel.waitFor(state("off"));
 	await panel.click("#ai-switch");
 	await panel.waitFor(state("on"), 15_000);
+	// The questions' dialog opens where the last click was: the pointer off
+	// it, so no button is drawn hovered.
+	const pointerAway = () =>
+		panel.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: 1,
+			y: 1,
+		});
 	client = new Client(
 		{ name: "claude-code", version: "1.0.0" },
 		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
@@ -262,28 +214,63 @@ try {
 			{ requestInit: { headers: { authorization: `Bearer ${token}` } } },
 		),
 	);
-	await client.callTool({
-		name: "page_search_products",
-		arguments: { query: "bread" },
+	// The AI app draws how the extension works; the drawing tools run without
+	// asking ("Always allow" on), the others still ask.
+	await panel.waitFor(`document.querySelectorAll("#tools li").length === 8`);
+	for (const name of ["add_shapes", "add_connectors", "layout"]) {
+		const toggle = `input.always-allow[data-tool="${name}"]`;
+		await panel.waitFor(takesClicks(toggle));
+		await panel.click(toggle);
+		await panel.waitFor(
+			`document.querySelector(${JSON.stringify(toggle)}).checked`,
+		);
+	}
+	const draw = async (name: string, args: Record<string, unknown>) => {
+		const result = await client?.callTool({ name, arguments: args });
+		if (result?.isError) throw new Error(`${name}: ${JSON.stringify(result)}`);
+	};
+	await draw("page_get_diagram", {});
+	await draw("page_add_shapes", {
+		shapes: [
+			{ id: "app", kind: "rounded", label: "AI app", color: "purple" },
+			{ id: "relay", kind: "rounded", label: "tab-mcp relay", color: "blue" },
+			{
+				id: "ext",
+				kind: "rounded",
+				label: "tab-mcp for Chrome",
+				color: "green",
+			},
+			{
+				id: "page",
+				kind: "rounded",
+				label: "Page tools (WebMCP)",
+				color: "yellow",
+			},
+			{ id: "you", kind: "diamond", label: "You allow?", color: "white" },
+		],
 	});
-	await panel.waitFor(
-		`document.querySelectorAll("#tools li").length === 4 && document.getElementById("pairing").hidden`,
-	);
+	await draw("page_add_connectors", {
+		connectors: [
+			{ from: "app", to: "relay", label: "MCP" },
+			{ from: "relay", to: "ext" },
+			{ from: "ext", to: "you" },
+			{ from: "you", to: "page", label: "yes" },
+		],
+	});
+	await draw("page_layout", { direction: "down" });
+	await panel.waitFor(takesClicks("#allow-tools"));
+	await pointerAway();
+	// The panel from its top, as it opens (the switches scrolled it).
+	await panel.eval(`window.scrollTo(0, 0)`);
 	await take("1-tools", tab, panel);
 
 	const asked = client.callTool({
-		name: "page_add_to_cart",
-		arguments: { product: "Sourdough loaf", quantity: 2 },
+		name: "page_update_elements",
+		arguments: {
+			changes: [{ id: "you", color: "orange" }],
+		},
 	});
 	const ready = `document.querySelector('[data-question] button[data-answer="allow"]')?.hasAttribute("aria-disabled") === false`;
-	// The questions' dialog opens where the last click was: the pointer off
-	// it, so no button is drawn hovered.
-	const pointerAway = () =>
-		panel.send("Input.dispatchMouseEvent", {
-			type: "mouseMoved",
-			x: 1,
-			y: 1,
-		});
 	await panel.waitFor(ready);
 	await pointerAway();
 	await take("3-question", tab, panel);
@@ -295,7 +282,7 @@ try {
 
 	const navigating = client.callTool({
 		name: "navigate",
-		arguments: { url: `${OTHER}/` },
+		arguments: { url: OTHER },
 	});
 	await panel.waitFor(ready);
 	await pointerAway();
