@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 44: can an extension give Firefox the WebMCP a page needs?"
 status: planned
-description: "A spike: a Firefox build of tab-mcp for Chrome that supplies document.modelContext itself, as a script in each page's own world, so pages that register WebMCP tools where the API exists register them in Firefox too, and the extension passes them on to AI apps through the relay. Finds out whether real sites (Shopify above all) register with it, how the polyfill reaches the extension, what Firefox's extension APIs need, and what the relay must accept for a moz-extension:// origin; decides whether it is built."
+description: "A spike: a Firefox build of tab-mcp for Chrome that supplies document.modelContext itself, defined for each page by its content script, so pages that register WebMCP tools where the API exists register them in Firefox too, and the extension passes them on to AI apps through the relay. Researches the ways Firefox allows it and what each lets the page do, finds out whether real sites (Shopify above all) register with it, what Firefox's extension APIs need, and what the relay must accept for a moz-extension:// origin; decides whether it is built."
 timestamp: 2026-11-16T12:00:00+01:00
 tags: [iteration, extension, firefox, webmcp, research]
 ---
@@ -16,37 +16,74 @@ Firefox lacks are the pages that use **WebMCP alone**: about 13,000 sites, Shopi
 Liquid storefronts above all, on by default since August 2026
 ([adoption](/research/webmcp-adoption.md)).
 
-The idea (owner, 2026-11-16): the extension supplies the missing API itself. A script
-injected into each page's own world at `document_start` defines `document.modelContext`
-(`registerTool()` with its `signal`, `getTools()`, `executeTool()`, `toolchange`), the
-page registers its tools with it as in Chrome, and the extension offers them to AI apps
-through the relay as tab-mcp for Chrome does. MCP-B, the project WebMCP grew out of, was
-an extension of this kind (a polyfill and a bridge).
+The idea (owner, 2026-11-16): the extension supplies the missing API itself. At
+`document_start` it defines `document.modelContext` for the page (`registerTool()` with
+its `signal`, `getTools()`, `executeTool()`, `toolchange`), the page registers its tools
+with it as in Chrome, and the extension offers them to AI apps through the relay as
+tab-mcp for Chrome does. MCP-B, the project WebMCP grew out of, was an extension of this
+kind (a polyfill and a bridge). The first candidate is Firefox's own way for a content
+script to define objects for the page (question 2), which needs no channel through the
+page; question 0 weighs it against the others.
 
 A spike: a research note and a decision, not a feature.
 
 ## Questions
 
+0. **The ways Firefox allows it.** Research before building, from Mozilla's documentation,
+   Firefox's source and bugs, with versions: `exportFunction`/`cloneInto` from the
+   content script (question 2); a `"world": "MAIN"` content script with a channel
+   (question 6); the `userScripts` API (its worlds, and whether its messaging reaches
+   the extension without passing through the page); `wrappedJSObject`; how MCP-B's
+   extension and `@mcp-b/global` did it (their transport over `postMessage`), and what
+   went wrong for them. For each: what the page can read, forge or break, whether it
+   runs before the page's scripts, what Manifest V3 and AMO's review allow, and whether
+   Mozilla plans to keep it. Also Mozilla's own plans for WebMCP (standards position,
+   bugs), since a native `document.modelContext` in Firefox would make the polyfill
+   step aside, as in question 6.
 1. **Do pages register?** The polyfill only helps where a page registers whenever
    `document.modelContext` is there. A page may also need its origin trial token to be
    valid (which only Chrome checks), test for Chrome, or register late. Try it on the
    diagram example (`tab-mcp-client` with `webmcp: true`), a few Shopify storefronts and
    other sites from the adoption crawl; count how many register, and with which tools.
-   This answer decides the rest.
-2. **The polyfill.** Firefox's main-world content scripts (`"world": "MAIN"` in
-   `content_scripts` or `scripting.registerContentScripts`; which version), run at
-   `document_start`, before the page's scripts. The API as the WebMCP draft has it now
-   (the draft of 2026-11-12, iteration 34), on `Document.prototype` as a getter, since
-   that is where `tab-mcp-client` looks for the browser's own WebMCP (`nativeContext()`,
-   DEC-115); a page's own polyfill (such as `@mcp-b/global`) next to it; frames;
+   Also **when**: a page that looks for `document.modelContext` only while it loads has
+   decided before a click on the icon could inject anything (`activeTab`), so the
+   polyfill must be there at `document_start`, which needs lasting host access to the
+   site and a reload after it is granted. Whether pages look again later (Shopify above
+   all) decides whether a click can ever be enough. The answer shapes the design rather
+   than deciding whether to go on (owner, 2026-11-16: WebMCP will spread fast): which
+   pages register on any `document.modelContext`, which bring their own polyfill (and
+   whether it wraps ours or replaces it), and which only register for Chrome or a valid
+   token. Reading the sites' scripts answers most of it before any extension runs.
+2. **The polyfill, from the content script.** Firefox lets a content script, in its own
+   isolated world, define objects in the page's world: `exportFunction()` and
+   `cloneInto()` ([sharing objects with page scripts](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Sharing_objects_with_page_scripts)).
+   The content script puts a getter for `modelContext` on the page's
+   `Document.prototype` (where `tab-mcp-client` looks for the browser's own WebMCP,
+   `nativeContext()`, DEC-115) whose object's `registerTool()` (with its `signal`),
+   `getTools()` and `executeTool()` are exported functions of the content script, and
+   which is an `EventTarget` of the page's world for `toolchange`. The API as the WebMCP
+   draft has it now (the draft of 2026-11-12, iteration 34). To find out: whether
+   `exportFunction` is there for Manifest V3 content scripts and in which Firefox
+   version; what the Xrays let through (a tool's `execute` is a function the page made,
+   called through `wrappedJSObject`; its `inputSchema` copied out, the page's getters
+   running; promises and events made in the page's world); a page's own polyfill (does
+   `@mcp-b/global` wrap the getter as it wraps Chrome's own object); frames;
    `SecureContext` only.
-3. **From the page's world to the extension.** Firefox's content scripts see the page's
-   objects through Xray wrappers, so the content script cannot read what the polyfill put
-   on `document` (unless through `wrappedJSObject`). The channel: `postMessage` or a
-   `CustomEvent`, which the page can read and forge. What stays on the extension's side
-   whatever the page sends: the site from the tab's address, the check that a call goes
-   to the page its tools were listed from (the content script's id per document), the questions before
-   a tool that is not read-only and before another site.
+3. **From the page to the extension.** With exported functions there is no channel: the
+   page calls the API and the call runs in the content script, as with Chrome's own
+   WebMCP. The page cannot read or forge messages, nor change the content script's
+   globals (`JSON`, `Promise`), and `registerTool()` can throw at once for a name that is
+   taken, as Chrome does. The content script keeps the tools itself and gives
+   `content.ts` an object with the `ModelContext` it uses today (in Firefox
+   `document.modelContext` is `undefined` there: the Xrays hide what is defined for the
+   page), so the reading, the timeout and the result mapping stay as they are. What
+   stays on the extension's side whatever the page does: the site from the tab's
+   address, the check that a call goes to the page its tools were listed from (the
+   content script's id per document), the questions before a tool that is not
+   read-only and before another site. What no mechanism avoids: in Firefox a
+   `document.modelContext` tells every page it runs on that the user has the extension,
+   which DEC-113 counted against registering recipes; the owner decides whether that is
+   acceptable, and on which sites the polyfill runs.
 4. **Firefox's extension APIs.** `sidebar_action` for the side panel; Manifest V3's
    background as an event page instead of a service worker, and whether the WebSocket
    to the relay survives it (iteration 26 relies on the connection staying with the
@@ -62,18 +99,36 @@ A spike: a research note and a decision, not a feature.
    another origin; find out what Firefox sends.
 6. **Chrome without WebMCP.** The same polyfill would help Chrome users who have neither
    the flag nor a site with a token. Whether that is worth it, and how it steps aside
-   when Chrome's own `document.modelContext` is there.
+   when Chrome's own `document.modelContext` is there. Chrome has no `exportFunction`,
+   so there it is a main-world script (`"world": "MAIN"`) with a channel to the content
+   script: not `window.postMessage` (any frame or opener posts into the window, and
+   every listener of the page reads it) but a `MessageChannel` port handed over at
+   `document_start`, before any page script runs, and kept in the script's closure,
+   which also keeps its own copies of the built-ins it uses. The channel carries data
+   only (the tools, a call, its result), never anything that makes the extension act on
+   its own; what the page could forge on it, the page can already do by registering.
 7. **Distribution.** addons.mozilla.org: its review and signing, what the listing must
    say about a script in every page.
 
 ## Tasks
 
-- [ ] Question 1 first: a minimal main-world polyfill that only records registrations,
-      run in Firefox on the diagram example and on a list of WebMCP sites; write down
-      which register and how
-- [ ] If enough do: a test extension in `test/firefox-spike/` (the polyfill, the channel
-      to the content script, a sidebar, the connection to a relay), run automatically in
-      Firefox (Firefox's WebDriver BiDi or `web-ext`; which one CI can run)
+- [ ] Question 0: the ways, compared in the research note, with sources
+- [ ] The test harness: `ff-rdp` (the owner's Firefox Remote Debugging Protocol CLI)
+      launches Firefox, opens the sites and reads what the page sees (`eval`,
+      `console`). It does not install an unsigned extension yet: a profile's
+      `extensions/` folder takes only signed ones (as `--auto-consent` does with
+      Consent-O-Matic) in release Firefox. Either `ff-rdp` gains a temporary install
+      (the root actor's `installTemporaryAddon`, what `web-ext run` and
+      `about:debugging` use), or the spike uses `web-ext`; decide by which one CI can run
+- [ ] Questions 1 and 2: a minimal polyfill that only records registrations,
+      defined from the content script with `exportFunction` at `document_start`, run in
+      Firefox on the diagram example and on a list of WebMCP sites; write down which
+      register, how and when, and whether `@mcp-b/global` registers through it
+- [ ] A test extension in `test/firefox-spike/` (the polyfill, its object
+      for `content.ts`, a sidebar, the connection to a relay), run automatically in
+      Firefox with that harness
+- [ ] Only if question 6 is worth it: the main-world script and its `MessageChannel` in
+      Chrome without WebMCP
 - [ ] Try a local relay with an open origin list and a `moz-extension://` origin
 - [ ] Research note `research/firefox-webmcp.md` with versions, quotes and the counts
       of question 1
