@@ -274,7 +274,7 @@ describe("the tab card's texts", () => {
 			expect(text("disallow-all")).toBe("Remove access to all sites");
 			// What changes, and that Chrome asks first.
 			expect(text("host-access")).toContain(
-				"Then tab-mcp reads every tab without a click on its icon. Chrome asks you first.",
+				"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Chrome asks you first.",
 			);
 			// A switch for all the tools' switches, named as they are.
 			const allowTools = doc.getElementById("allow-tools");
@@ -306,6 +306,8 @@ describe("the tab card's texts", () => {
 			expect(text("no-webmcp")).toContain(
 				"chrome://flags/#enable-webmcp-testing",
 			);
+			// The polyfill's condition first: all sites, and a page loaded since.
+			expect(text("no-webmcp")).toContain("with access to all sites");
 			expect(text("no-tools")).toContain("page_info and the navigation tools");
 			// The chat in a tab of this profile (EQ 2).
 			expect(text("pairing")).toContain("outside this Chrome profile");
