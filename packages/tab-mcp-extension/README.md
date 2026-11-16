@@ -254,15 +254,16 @@ key in its manifest, or, without one, from the folder it was loaded from.
 
 ## Releases
 
-A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip
-and creates the GitHub release with it (`.github/workflows/extension-release.yml`); the
-"Extension publish" workflow uploads a release's zip to the Chrome Web Store. The release
-job attests the zip's build provenance; check a release's zip with
-`gh attestation verify tab-mcp-for-chrome-<version>-store.zip -R ractive/tab-mcp` (the
-publish workflow uploads only a zip that verifies). This covers the GitHub release's zip
-and the upload, not the installed extension: the Chrome Web Store signs what it serves
-itself. The owner's
-setup, the listing, the permission justifications and the review notes:
+A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip,
+creates the GitHub release with it and then, after the owner's approval, publishes it to
+the Chrome Web Store (`.github/workflows/extension-release.yml`). The release job attests
+the zip's build provenance; check a release's zip with
+`gh attestation verify tab-mcp-for-chrome-<version>-store.zip -R ractive/tab-mcp`. The
+publish job takes only a zip that verifies, packs it into a CRX signed with the item's
+verified-upload key and submits it for review. The
+"Extension publish" workflow repeats that publish by hand, for a release whose publish
+failed. The attestation covers the GitHub release's zip and the upload, not the installed
+extension: the Chrome Web Store signs what it serves itself. The owner's setup, the listing, the permission justifications and the review notes:
 `kb/operations/chrome-web-store.md`. The listing's screenshots are in `assets/store/`;
 `bun scripts/screenshots.ts` takes them again (Chrome for Testing, `CHROME_PATH`).
 
