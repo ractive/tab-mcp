@@ -108,7 +108,7 @@ jobs:
       # or a source map (zipStoreBuild in scripts/build.ts).
       - run: bun scripts/build.ts --store --zip
         working-directory: packages/tab-mcp-extension
-      # The same for Firefox: not minified (addons.mozilla.org reads it).
+      # The same for Firefox (minified too: AMO's reviewers get the source archive).
       - run: bun scripts/build.ts --firefox --store --zip
         working-directory: packages/tab-mcp-extension
       - name: The zips are the store builds of that version

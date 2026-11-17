@@ -4024,7 +4024,7 @@ for the Edge upload to be automated as well.
 2026-11-17. The Firefox build (DEC-188) went to addons.mozilla.org by hand with 0.2.0;
 the owner asked for the next items in order, this one after the privacy text.
 
-- `extension-release.yml` builds the Firefox store zip (not minified) beside the Chrome
+- `extension-release.yml` builds the Firefox store zip (minified, no source maps) beside the Chrome
   one, and the source archive `tab-mcp-<version>-source.zip`: `git archive` of the built
   commit plus a `SOURCE_DATE_EPOCH` file. It builds the Firefox zip from that archive
   again, as AMO's reviewers are told to, and stops when the bytes differ; then it attests
@@ -4039,4 +4039,3 @@ the owner asked for the next items in order, this one after the privacy text.
   which AMO requires of new add-ons, is read from 140 on, and 140 is the current ESR.
 - No third-party code in the job: AMO's API is called with `curl`, each request with a JWT
   made by Python's standard library (release-workflows).
-

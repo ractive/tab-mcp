@@ -263,9 +263,9 @@ extension is installed: the API is there where Firefox has none, and it behaves 
 extension's (accepted, 2026-11-16; `PRIVACY.md`).
 
 It is on its way to addons.mozilla.org (add-on id `tab-mcp@ractive.ch`; 0.2.0 went in by
-hand). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (not
-minified) and the source archive `tab-mcp-<version>-source.zip` AMO's reviewers build it
-from, and publishes both there (DEC-195, "Releases" below).
+hand). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (minified,
+no source maps) and the source archive `tab-mcp-<version>-source.zip` AMO's reviewers build
+it from, and publishes both there (DEC-195, "Releases" below).
 
 1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 140 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →

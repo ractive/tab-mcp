@@ -203,8 +203,10 @@ On failure the log shows AMO's answer.
   the environment secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` of `firefox-add-ons`; both
   workflows pass `secrets: inherit`. The key's account must be an author of the add-on.
 - **By hand:** Actions → "Extension publish" → Run workflow, the release's tag under "Use
-  workflow from", store `firefox` (or `all`). A version AMO already has is refused: AMO
-  takes each version number once.
+  workflow from", store `firefox` (or `all`). A version AMO already has as a listed version, awaiting
+  review or approved, uploads nothing and the run succeeds (a rerun after a run that
+  failed past the upload); in any other state (unlisted, rejected, deleted) it is refused,
+  since AMO takes each version number once: release a higher version.
 
 ## Owner's one-time setup
 
