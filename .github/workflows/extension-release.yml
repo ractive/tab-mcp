@@ -4,10 +4,13 @@ name: Extension release
 #
 # Pushing a tag extension-v<version> (on a commit of main, with that version in
 # packages/tab-mcp-extension/package.json) runs verify, builds the store
-# package tab-mcp-browser-extension-<version>-store.zip, and only then creates the
-# GitHub release with the zip attached. A failed build leaves no release, and a
-# published release is never changed afterwards (so this also works with
-# immutable releases on).
+# packages tab-mcp-browser-extension-<version>-store.zip (Chrome Web Store,
+# Edge Add-ons) and tab-mcp-browser-extension-firefox-<version>-store.zip
+# (addons.mozilla.org), and the source archive tab-mcp-<version>-source.zip
+# (for AMO's reviewers; the build checks that it builds the same Firefox zip),
+# and only then creates the GitHub release with the three attached. A failed
+# build leaves no release, and a published release is never changed afterwards
+# (so this also works with immutable releases on).
 #
 #   git tag extension-v0.1.0 <merge commit on main>
 #   git push origin extension-v0.1.0
@@ -18,20 +21,23 @@ name: Extension release
 #
 # The build job runs third-party code (bun install, the tests, Chrome) with a
 # read-only token; only the release job, which runs none, may write. The
-# release job attests the zip's build provenance, verifies the attestation and
+# release job attests the zips' build provenance, verifies the attestations and
 # only then creates the release (DEC-182); check a release's zip with
 #
 #   gh attestation verify tab-mcp-browser-extension-<version>-store.zip -R ractive/tab-mcp
 #
-# Then two jobs publish that zip, each in its own environment (required
-# reviewer, tags extension-v* only), only a zip whose attestation verifies for
-# this tag: publish uploads it to the Chrome Web Store as a CRX signed with the
-# item's verified-upload key and submits it for review
+# Then three jobs publish them, each in its own environment (required
+# reviewer, tags extension-v* only), only zips whose attestations verify for
+# this tag: publish uploads the store zip to the Chrome Web Store as a CRX
+# signed with the item's verified-upload key and submits it for review
 # (ractive/release-workflows chrome-extension-publish.yml, environment
 # chrome-web-store); publish-edge uploads it to Microsoft Edge Add-ons and
 # submits it for certification (edge-extension-publish.yml, environment
-# edge-add-ons). extension-publish.yml runs either by hand, for a release whose
-# publish failed.
+# edge-add-ons); publish-firefox uploads the Firefox zip to addons.mozilla.org
+# as a new version for review, with the source archive attached
+# (firefox-extension-publish.yml, DEC-195, environment firefox-add-ons).
+# extension-publish.yml runs any of them by hand, for a release whose publish
+# failed.
 
 on:
   push:
@@ -102,26 +108,62 @@ jobs:
       # or a source map (zipStoreBuild in scripts/build.ts).
       - run: bun scripts/build.ts --store --zip
         working-directory: packages/tab-mcp-extension
-      - name: The zip is the store build of that version
+      # The same for Firefox (minified too: AMO's reviewers get the source archive).
+      - run: bun scripts/build.ts --firefox --store --zip
+        working-directory: packages/tab-mcp-extension
+      - name: The zips are the store builds of that version
         working-directory: packages/tab-mcp-extension
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
-          zip="tab-mcp-browser-extension-$VERSION-store.zip"
-          manifest="$(unzip -p "$zip" manifest.json)"
-          test "$(jq -r .version <<<"$manifest")" = "$VERSION" \
-            || { echo "::error::the manifest's version is not $VERSION"; exit 1; }
-          jq -e 'has("key") or has("host_permissions") | not' <<<"$manifest" >/dev/null \
-            || { echo "::error::not a store build (a key or install-time host access)"; exit 1; }
-          # grep -c reads all of its input, so unzip never gets SIGPIPE.
-          maps="$(unzip -Z1 "$zip" | grep -c '\.map$' || true)"
-          test "$maps" = 0 || { echo "::error::the zip has $maps source maps"; exit 1; }
-          sha256sum "$zip"
+          for zip in "tab-mcp-browser-extension-$VERSION-store.zip" "tab-mcp-browser-extension-firefox-$VERSION-store.zip"; do
+            manifest="$(unzip -p "$zip" manifest.json)"
+            test "$(jq -r .version <<<"$manifest")" = "$VERSION" \
+              || { echo "::error::$zip: the manifest's version is not $VERSION"; exit 1; }
+            jq -e 'has("key") or has("host_permissions") | not' <<<"$manifest" >/dev/null \
+              || { echo "::error::$zip: not a store build (a key or install-time host access)"; exit 1; }
+            # grep -c reads all of its input, so unzip never gets SIGPIPE.
+            maps="$(unzip -Z1 "$zip" | grep -c '\.map$' || true)"
+            test "$maps" = 0 || { echo "::error::$zip has $maps source maps"; exit 1; }
+            sha256sum "$zip"
+          done
+      # For addons.mozilla.org's reviewers, who must be able to build the
+      # Firefox zip from source: the built commit's files, and the time its zip
+      # entries carry (the archive has no Git history, sourceDate in build.ts).
+      - name: The source archive of the built commit
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          BUILT: ${{ steps.tag.outputs.commit }}
+        run: |
+          set -euo pipefail
+          epoch="$(git log -1 --format=%ct "$BUILT")"
+          git archive --format=zip --prefix="tab-mcp-$VERSION/" \
+            --add-virtual-file="tab-mcp-$VERSION/SOURCE_DATE_EPOCH:$epoch" \
+            -o "packages/tab-mcp-extension/tab-mcp-$VERSION-source.zip" "$BUILT"
+          sha256sum "packages/tab-mcp-extension/tab-mcp-$VERSION-source.zip"
+      - name: The source archive builds the same Firefox zip
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The steps the reviewers' notes give, in an empty directory.
+          dir="$RUNNER_TEMP/from-source"
+          mkdir "$dir"
+          unzip -q "packages/tab-mcp-extension/tab-mcp-$VERSION-source.zip" -d "$dir"
+          cd "$dir/tab-mcp-$VERSION"
+          bun install --frozen-lockfile
+          cd packages/tab-mcp-extension
+          SOURCE_DATE_EPOCH="$(cat ../../SOURCE_DATE_EPOCH)" bun scripts/build.ts --firefox --store --zip
+          zip="tab-mcp-browser-extension-firefox-$VERSION-store.zip"
+          cmp "$zip" "$GITHUB_WORKSPACE/packages/tab-mcp-extension/$zip" \
+            || { echo "::error::the source archive builds another $zip"; exit 1; }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: store-zip
-          path: packages/tab-mcp-extension/tab-mcp-browser-extension-*-store.zip
+          name: release-zips
+          path: |
+            packages/tab-mcp-extension/tab-mcp-browser-extension-*-store.zip
+            packages/tab-mcp-extension/tab-mcp-*-source.zip
           if-no-files-found: error
 
   release:
@@ -130,14 +172,15 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
-      # Build provenance for the zip (DEC-182): the OIDC token signs it with a
+      # Build provenance for the zips (DEC-182): the OIDC token signs it with a
       # Sigstore certificate, attestations: write stores it in the repository.
       id-token: write
       attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: store-zip
+          name: release-zips
+          path: release-zips
       - name: The tag still points at the commit that was built
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,66 +188,71 @@ jobs:
           BUILT: ${{ needs.build.outputs.commit }}
         run: |
           set -euo pipefail
-          # A tag moved since the push would get a zip of another commit. This
+          # A tag moved since the push would get zips of another commit. This
           # API peels an annotated tag to its commit.
           tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
           test "$tagged" = "$BUILT" \
             || { echo "::error::tag $TAG is at $tagged, this run built $BUILT"; exit 1; }
-      - name: The downloaded zip is the store zip of that version
-        id: zip
+      - name: The downloaded zips are that version's, and nothing else
         env:
           VERSION: ${{ needs.build.outputs.version }}
+        working-directory: release-zips
         run: |
           set -euo pipefail
-          zip="tab-mcp-browser-extension-$VERSION-store.zip"
-          test -f "$zip" || { echo "::error::no $zip in the store-zip artifact"; exit 1; }
-          # The build job printed the same line.
-          sha256sum "$zip"
-          echo "path=$zip" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      # SLSA build provenance for exactly the file the next steps attach
+          expected="$(printf '%s\n' "tab-mcp-$VERSION-source.zip" \
+            "tab-mcp-browser-extension-$VERSION-store.zip" \
+            "tab-mcp-browser-extension-firefox-$VERSION-store.zip")"
+          actual="$(find . -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          test "$actual" = "$(LC_ALL=C sort <<<"$expected")" \
+            || { echo "::error::the release-zips artifact holds: $actual"; exit 1; }
+          # The build job printed the same lines.
+          sha256sum -- *.zip
+      # SLSA build provenance for exactly the files the next steps attach
       # (DEC-182). It is signed here, in the job that runs no third-party code,
       # not in the build job, which keeps its read-only token.
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: ${{ steps.zip.outputs.path }}
-      - name: The zip's attestation verifies
+          subject-path: release-zips/*.zip
+      - name: The zips' attestations verify
         env:
           GH_TOKEN: ${{ github.token }}
-          ZIP: ${{ steps.zip.outputs.path }}
+        working-directory: release-zips
         run: |
           set -euo pipefail
-          # Fetched from the repository's attestations, as anyone checks it:
+          # Fetched from the repository's attestations, as anyone checks them:
           # signed by this workflow, for this tag.
-          gh attestation verify "$ZIP" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/extension-release.yml" \
-            --source-ref "$GITHUB_REF"
-      - name: Create the release with the store zip
+          for zip in *.zip; do
+            gh attestation verify "$zip" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/extension-release.yml" \
+              --source-ref "$GITHUB_REF"
+          done
+      - name: Create the release with the zips
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
-          ZIP: ${{ steps.zip.outputs.path }}
+        working-directory: release-zips
         run: |
           set -euo pipefail
-          gh release create "$TAG" "$ZIP" --repo "$GITHUB_REPOSITORY" \
+          gh release create "$TAG" ./*.zip --repo "$GITHUB_REPOSITORY" \
             --verify-tag --latest=false --title "tab-mcp browser extension $VERSION" \
-            --notes "The store package (Chrome Web Store, Microsoft Edge Add-ons) of the tab-mcp browser extension $VERSION (no key, no install-time host access, no source maps). What changed: packages/tab-mcp-extension/CHANGELOG.md. Verify it before uploading: gh attestation verify $ZIP -R $GITHUB_REPOSITORY"
-      - name: The release's asset is the attested zip
+            --notes "The store packages of the tab-mcp browser extension $VERSION (no key, no install-time host access, no source maps): tab-mcp-browser-extension-$VERSION-store.zip for the Chrome Web Store and Microsoft Edge Add-ons, tab-mcp-browser-extension-firefox-$VERSION-store.zip for addons.mozilla.org, and tab-mcp-$VERSION-source.zip, the source of the built commit, from which the Firefox zip builds byte for byte. What changed: packages/tab-mcp-extension/CHANGELOG.md. Verify a zip before uploading it: gh attestation verify <zip> -R $GITHUB_REPOSITORY"
+      - name: The release's assets are the attested zips
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          ZIP: ${{ steps.zip.outputs.path }}
-          SHA256: ${{ steps.zip.outputs.sha256 }}
+        working-directory: release-zips
         run: |
           set -euo pipefail
           # GitHub records each release asset's SHA-256 on upload. This runs
           # after the release exists: on a mismatch, delete that release by hand.
-          digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" \
-            --jq ".assets[] | select(.name == \"$ZIP\") | .digest")"
-          echo "release asset $ZIP: $digest"
-          test "$digest" = "sha256:$SHA256" \
-            || { echo "::error::the release's $ZIP is $digest, the attested zip sha256:$SHA256"; exit 1; }
+          assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.assets[] | "\(.name) \(.digest)"')"
+          for zip in *.zip; do
+            digest="$(awk -v n="$zip" '$1 == n { print $2 }' <<<"$assets")"
+            echo "release asset $zip: $digest"
+            test "$digest" = "sha256:$(sha256sum "$zip" | cut -d' ' -f1)" \
+              || { echo "::error::the release's $zip is $digest, not the attested zip"; exit 1; }
+          done
 
   publish:
     needs: release
@@ -257,3 +305,50 @@ jobs:
         Source: https://github.com/ractive/tab-mcp (packages/tab-mcp-extension); the package
         is the release zip of tag ${{ github.ref_name }}, with GitHub build provenance
         (gh attestation verify <zip> -R ractive/tab-mcp).
+
+  publish-firefox:
+    # Beside the other two, not after them: one store's failure does not hold
+    # back the others. Waits for the owner's approval in its own environment.
+    needs: release
+    uses: ractive/release-workflows/.github/workflows/firefox-extension-publish.yml@d69f242378f228560fdf2fb7ce851c2d8fb6a11e # v0.8.1
+    # The environment firefox-add-ons (required reviewer, tags extension-v*
+    # only) holds AMO_JWT_ISSUER and AMO_JWT_SECRET; inherit passes them on.
+    secrets: inherit
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      tag-prefix: extension-v
+      asset: tab-mcp-browser-extension-firefox-{version}-store.zip
+      source-asset: tab-mcp-{version}-source.zip
+      addon-id: tab-mcp@ractive.ch
+      attest-signer-workflow: .github/workflows/extension-release.yml
+      notes: >-
+        Build (the scripts are bundled and minified with Bun's bundler; no other tools):
+        install Bun 1.4.4 (https://bun.sh); unzip the attached tab-mcp-<version>-source.zip
+        and cd into tab-mcp-<version>; bun install --frozen-lockfile; cd
+        packages/tab-mcp-extension; SOURCE_DATE_EPOCH=$(cat ../../SOURCE_DATE_EPOCH) bun
+        scripts/build.ts --firefox --store --zip. This writes
+        tab-mcp-browser-extension-firefox-<version>-store.zip, byte for byte the uploaded
+        file (the release workflow checks that); dist-firefox-store/ holds the unpacked
+        files. SOURCE_DATE_EPOCH only sets the zip entries' time (the archive has no Git
+        history). Sources: packages/tab-mcp-extension/src (background: worker/, content
+        script: content.ts and firefox/webmcp.ts, sidebar: sidepanel/), and the library
+        packages/tab-mcp-client/src, which it bundles.
+        What it does: it gives pages document.modelContext (WebMCP), which Firefox lacks,
+        from its content script, so pages can register tools for AI agents. When the user
+        turns on AI access in the sidebar and pairs an AI app (Claude, ChatGPT, ...) with a
+        code, the extension connects to a tab-mcp relay (default https://tab-mcp.ractive.ch,
+        run by the developer) over a WebSocket and lets that AI app list and call the tools
+        of the page in front. A tool that is not marked read-only asks the user first. No
+        remote code is executed: the relay connection carries data only (tool lists, calls,
+        results). Host access is optional and asked for at runtime: per tab with a click on
+        the toolbar icon, or for all sites when the user clicks "Give access to all sites".
+        Testing: open https://ractive.ch/tab-mcp/examples/diagram/ (a page with WebMCP
+        tools), click the toolbar icon, the sidebar shows its tools. Pairing an AI app needs
+        an MCP client such as Claude Code: claude mcp add --transport http
+        tab-mcp-browser-extension-firefox <address shown in the sidebar>.
+        Privacy policy: https://ractive.ch/tab-mcp/privacy/. Source and issues:
+        https://github.com/ractive/tab-mcp; this is the release of tag ${{ github.ref_name }},
+        with GitHub build provenance (gh attestation verify <zip> -R ractive/tab-mcp).

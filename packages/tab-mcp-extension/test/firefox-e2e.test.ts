@@ -7,7 +7,7 @@
  * app. Firefox has no WebMCP: the page's tools reach the AI app only through
  * the extension's own `document.modelContext` (`src/firefox/webmcp.ts`).
  *
- * Needs Firefox 128 or newer (`FIREFOX_PATH`, or where it is installed);
+ * Needs Firefox 140 or newer (`FIREFOX_PATH`, or where it is installed);
  * skipped without it.
  */
 
@@ -37,7 +37,7 @@ import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
 setDefaultTimeout(30_000);
 
 const binary = findFirefox();
-const firefoxOk = binary !== undefined && firefoxMajor(binary) >= 128;
+const firefoxOk = binary !== undefined && firefoxMajor(binary) >= 140;
 
 /** The add-on's UUID in the test profile, so the panel's address is known. */
 const UUID = "3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f";

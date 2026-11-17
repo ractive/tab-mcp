@@ -252,17 +252,22 @@ key in its manifest, or, without one, from the folder it was loaded from.
   key, host access at install, and the hooks through which the tests answer
   notifications, which no other build has).
 
-## In Firefox (a spike)
+## In Firefox
 
 Firefox has no WebMCP. The Firefox build gives every page `document.modelContext` as the
 page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188), so pages
 that register their tools wherever the API exists (Shopify's storefronts, Mintlify, GitBook
 and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
-the extension offers them to the AI app as in Chrome. Iteration 44; not released.
-A page can therefore tell that the extension is installed: the API is there where Firefox
-has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`).
+the extension offers them to the AI app as in Chrome. A page can therefore tell that the
+extension is installed: the API is there where Firefox has none, and it behaves as this
+extension's (accepted, 2026-11-16; `PRIVACY.md`).
 
-1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
+It is on its way to addons.mozilla.org (add-on id `tab-mcp@ractive.ch`; 0.2.0 went in by
+hand). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (minified,
+no source maps) and the source archive `tab-mcp-<version>-source.zip` AMO's reviewers build
+it from, and publishes both there (DEC-195, "Releases" below).
+
+1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 140 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
    `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
    **Reload** keeps its UUID and storage, so the address and the AI app's pairing (checked
@@ -316,14 +321,17 @@ WebMCP sites with it and lists the tools each registers (needs the network).
 ## Releases
 
 A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip,
-creates the GitHub release with it and then, after the owner's approval, publishes it to
-the Chrome Web Store (`.github/workflows/extension-release.yml`). The release job attests
-the zip's build provenance; check a release's zip with
+the Firefox store zip and the source archive, creates the GitHub release with them and
+then, after the owner's approval in each store's environment, publishes them to the
+Chrome Web Store, Microsoft Edge Add-ons and addons.mozilla.org
+(`.github/workflows/extension-release.yml`). The release job attests the zips' build
+provenance; check a release's zip with
 `gh attestation verify tab-mcp-browser-extension-<version>-store.zip -R ractive/tab-mcp`. The
-publish job takes only a zip that verifies, packs it into a CRX signed with the item's
-verified-upload key and submits it for review. The
-"Extension publish" workflow repeats that publish by hand, for a release whose publish
-failed. The attestation covers the GitHub release's zip and the upload, not the installed
+publish jobs take only zips that verify: the Chrome job packs the store zip into a CRX
+signed with the item's verified-upload key, the Edge job uploads it as it is, the Firefox
+job uploads the Firefox zip with the source archive; each submits for review. The
+"Extension publish" workflow repeats a store's publish by hand, for a release whose
+publish failed. The attestation covers the GitHub release's zip and the upload, not the installed
 extension: the Chrome Web Store signs what it serves itself. The owner's setup, the listing, the permission justifications and the review notes:
 `kb/operations/chrome-web-store.md`. The listing's screenshots are in `assets/store/`;
 `bun scripts/screenshots.ts` takes them again (Chrome for Testing, `CHROME_PATH`).
@@ -376,7 +384,7 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   run in CI on every change.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
-- `test/firefox-e2e.test.ts`: the Firefox test build in Firefox 128 or newer
+- `test/firefox-e2e.test.ts`: the Firefox test build in Firefox 140 or newer
   (`FIREFOX_PATH`, else where it is installed; skipped without it) over WebDriver BiDi
   (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
   extension's `document.modelContext` as it loads, and a relay and an MCP client list,

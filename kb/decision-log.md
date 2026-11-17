@@ -4018,3 +4018,24 @@ for the Edge upload to be automated as well.
   holds the API key could upload another zip; the key lives only in the environment and
   in the owner's password manager, and it expires.
 - No third-party code in the job: the API is called with `curl`, as for Chrome (DEC-190).
+
+## DEC-195: A release publishes itself to addons.mozilla.org, with its source (owner)
+
+2026-11-17. The Firefox build (DEC-188) went to addons.mozilla.org by hand with 0.2.0;
+the owner asked for the next items in order, this one after the privacy text.
+
+- `extension-release.yml` builds the Firefox store zip (minified, no source maps) beside the Chrome
+  one, and the source archive `tab-mcp-<version>-source.zip`: `git archive` of the built
+  commit plus a `SOURCE_DATE_EPOCH` file. It builds the Firefox zip from that archive
+  again, as AMO's reviewers are told to, and stops when the bytes differ; then it attests
+  all three and attaches them to the release.
+- The job `publish-firefox`, beside the Chrome and Edge jobs: `firefox-extension-publish.yml`
+  of ractive/release-workflows (v0.8.1, pinned to a commit), in the environment
+  `firefox-add-ons` (required reviewer, tags `extension-v*` only), with
+  `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. It uploads the Firefox zip as a new listed
+  version with the source archive and the reviewers' notes. `extension-publish.yml` runs it
+  by hand (store `firefox` or `all`, which replaces `both`).
+- The Firefox build needs Firefox 140 or later (was 128): `data_collection_permissions`,
+  which AMO requires of new add-ons, is read from 140 on, and 140 is the current ESR.
+- No third-party code in the job: AMO's API is called with `curl`, each request with a JWT
+  made by Python's standard library (release-workflows).

@@ -1,7 +1,7 @@
 /**
  * The extension's publish jobs: extension-release.yml runs them after the
  * release, extension-publish.yml by hand, and both must call the same store
- * items the same way (DEC-190, DEC-194).
+ * items the same way (DEC-190, DEC-194, DEC-195).
  */
 
 import { expect, test } from "bun:test";
@@ -16,36 +16,87 @@ interface Job {
 	with?: Record<string, string | boolean>;
 }
 
-const jobs = async (name: string): Promise<Record<string, Job>> =>
-	(
-		Bun.YAML.parse(
-			await Bun.file(
-				join(import.meta.dir, "../.github/workflows", name),
-			).text(),
-		) as { jobs: Record<string, Job> }
-	).jobs;
+interface Workflow {
+	on: { workflow_dispatch?: { inputs: Record<string, unknown> } };
+	jobs: Record<string, Job>;
+}
+
+const workflow = async (name: string): Promise<Workflow> =>
+	Bun.YAML.parse(
+		await Bun.file(join(import.meta.dir, "../.github/workflows", name)).text(),
+	) as Workflow;
+
+/** The job of that name in the release workflow and in the by-hand one. */
+const both = async (
+	name: string,
+): Promise<[Job | undefined, Job | undefined]> => [
+	(await workflow("extension-release.yml")).jobs[name],
+	(await workflow("extension-publish.yml")).jobs[name],
+];
+
+const shared = (file: string) =>
+	new RegExp(
+		`^ractive/release-workflows/\\.github/workflows/${file.replace(".", "\\.")}@[0-9a-f]{40}$`,
+	);
+
+/** What every publish job has: the release's tag, its attestation, the environment's secrets. */
+function expectPublishJob(job: Job | undefined, uses: string | undefined) {
+	expect(job?.uses).toBe(uses);
+	expect(job?.secrets).toBe("inherit");
+	expect(job?.permissions).toEqual({ contents: "read", attestations: "read" });
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template
+	expect(job?.with?.["tag"]).toBe("${{ github.ref_name }}");
+	expect(job?.with?.["tag-prefix"]).toBe("extension-v");
+	expect(job?.with?.["attest-signer-workflow"]).toBe(
+		".github/workflows/extension-release.yml",
+	);
+}
+
+test("the by-hand workflow publishes to the store picked, or to all", async () => {
+	const w = await workflow("extension-publish.yml");
+	expect(w.on.workflow_dispatch?.inputs["store"]).toMatchObject({
+		type: "choice",
+		options: ["chrome", "edge", "firefox", "all"],
+		default: "chrome",
+	});
+	expect(w.jobs["publish"]?.if).toBe(
+		"inputs.store == 'chrome' || inputs.store == 'all'",
+	);
+	expect(w.jobs["publish-edge"]?.if).toBe(
+		"inputs.store == 'edge' || inputs.store == 'all'",
+	);
+	expect(w.jobs["publish-firefox"]?.if).toBe(
+		"inputs.store == 'firefox' || inputs.store == 'all'",
+	);
+});
+
+test("both workflows publish to the Chrome Web Store with the same call", async () => {
+	const [release, byHand] = await both("publish");
+	expect(release?.uses).toMatch(shared("chrome-extension-publish.yml"));
+	expect(release?.needs).toBe("release");
+	for (const job of [release, byHand]) {
+		expectPublishJob(job, release?.uses);
+		expect(job?.with?.["extension-id"]).toBe(
+			"jjhddplkjikmbpcobcnfebnglgjomfgh",
+		);
+		expect(job?.with?.["signing-key-id"]).toBe(
+			"jbpcbkngalkckpjgonfkhhcipjmnnofh",
+		);
+		expect(job?.with?.["asset"]).toBe(
+			"tab-mcp-browser-extension-{version}-store.zip",
+		);
+	}
+});
 
 test("both workflows publish to Edge with the same call and the same notes", async () => {
-	const release = (await jobs("extension-release.yml"))["publish-edge"];
-	const byHand = (await jobs("extension-publish.yml"))["publish-edge"];
-	expect(release?.uses).toMatch(
-		/^ractive\/release-workflows\/\.github\/workflows\/edge-extension-publish\.yml@[0-9a-f]{40}$/,
-	);
+	const [release, byHand] = await both("publish-edge");
+	expect(release?.uses).toMatch(shared("edge-extension-publish.yml"));
 	// Beside the Chrome Web Store job, not after it.
 	expect(release?.needs).toBe("release");
-	expect(byHand?.if).toBe("inputs.store != 'chrome'");
 	for (const job of [release, byHand]) {
-		expect(job?.uses).toBe(release?.uses);
-		expect(job?.secrets).toBe("inherit");
-		expect(job?.permissions).toEqual({
-			contents: "read",
-			attestations: "read",
-		});
+		expectPublishJob(job, release?.uses);
 		expect(job?.with?.["product-id"]).toBe(
 			"a9ff25ac-7200-4573-8eee-69473a630ae7",
-		);
-		expect(job?.with?.["attest-signer-workflow"]).toBe(
-			".github/workflows/extension-release.yml",
 		);
 		expect(job?.with?.["asset"]).toBe(
 			"tab-mcp-browser-extension-{version}-store.zip",
@@ -56,13 +107,34 @@ test("both workflows publish to Edge with the same call and the same notes", asy
 	}
 });
 
-test("both workflows publish to the Chrome Web Store with the same call", async () => {
-	const release = (await jobs("extension-release.yml"))["publish"];
-	const byHand = (await jobs("extension-publish.yml"))["publish"];
-	expect(byHand?.if).toBe("inputs.store != 'edge'");
-	for (const key of ["extension-id", "signing-key-id", "asset"]) {
-		expect(byHand?.with?.[key]).toBe(release?.with?.[key] as string);
+test("both workflows publish to addons.mozilla.org with the source and the same notes", async () => {
+	const [release, byHand] = await both("publish-firefox");
+	expect(release?.uses).toMatch(shared("firefox-extension-publish.yml"));
+	// Beside the other two, not after them.
+	expect(release?.needs).toBe("release");
+	for (const job of [release, byHand]) {
+		expectPublishJob(job, release?.uses);
+		expect(job?.with?.["addon-id"]).toBe("tab-mcp@ractive.ch");
+		expect(job?.with?.["asset"]).toBe(
+			"tab-mcp-browser-extension-firefox-{version}-store.zip",
+		);
+		expect(job?.with?.["source-asset"]).toBe("tab-mcp-{version}-source.zip");
+		// The reviewers get the same instructions either way; AMO takes 3000.
+		expect(job?.with?.["notes"]).toBe(release?.with?.["notes"]);
+		expect(String(job?.with?.["notes"]).length).toBeLessThanOrEqual(3000);
 	}
-	expect(byHand?.uses).toBe(release?.uses);
-	expect(byHand?.secrets).toBe("inherit");
+});
+
+test("the release attaches what the publish jobs download", async () => {
+	const text = await Bun.file(
+		join(import.meta.dir, "../.github/workflows/extension-release.yml"),
+	).text();
+	// The names the release job expects in its artifact, which the jobs
+	// above download from the release by their {version} patterns.
+	for (const name of [
+		'"tab-mcp-$VERSION-source.zip"',
+		'"tab-mcp-browser-extension-$VERSION-store.zip"',
+		'"tab-mcp-browser-extension-firefox-$VERSION-store.zip"',
+	])
+		expect(text).toContain(name);
 });
