@@ -92,7 +92,7 @@ const TILES: Tile[] = [
 		height: 280,
 		viewBox: [500, 318],
 		body: `
-  <text x="40" y="74" ${FONT} font-weight="800" font-size="50" letter-spacing="-1.4" fill="${CREAM}">tab-mcp<tspan dx="12" font-weight="600" font-size="30" letter-spacing="0" fill="${MINT}">for Chrome</tspan></text>
+  <text x="40" y="74" ${FONT} font-weight="800" font-size="50" letter-spacing="-1.4" fill="${CREAM}">tab-mcp<tspan dx="12" font-weight="600" font-size="30" letter-spacing="0" fill="${MINT}">extension</tspan></text>
   <text x="42" y="106" ${FONT} font-weight="600" font-size="21" letter-spacing="0.2" fill="${MINT}">${LINE}</text>
   <g transform="translate(0 16)">${DRAWING}</g>`,
 	},
@@ -104,7 +104,7 @@ const TILES: Tile[] = [
 		viewBox: [1000, 400],
 		body: `
   <text x="64" y="172" ${FONT} font-weight="800" font-size="88" letter-spacing="-2.4" fill="${CREAM}">tab-mcp</text>
-  <text x="68" y="226" ${FONT} font-weight="600" font-size="44" fill="${MINT}">for Chrome</text>
+  <text x="68" y="226" ${FONT} font-weight="600" font-size="44" fill="${MINT}">browser extension</text>
   <text x="68" y="276" ${FONT} font-weight="600" font-size="21" letter-spacing="0.2" fill="${MINT}">${LINE}</text>
   <g transform="translate(441 9.4) scale(1.05)">${DRAWING}</g>`,
 	},
