@@ -27,7 +27,7 @@ comes as a new version, not as a patch to an older one.
 |---|---|---|
 | `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.11.0 | older versions |
 | `@ractive-ch/tab-mcp-client` (npm) | 0.16.2 | older versions |
-| tab-mcp browser extension (Chrome Web Store) | 0.2.0 | older versions |
+| tab-mcp browser extension (Chrome Web Store) | 0.2.1 | older versions |
 
 ## Connecting an AI app to a page means trusting the page
 

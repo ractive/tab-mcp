@@ -11,6 +11,12 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ## Unreleased
 
+## [0.2.1][extension-0.2.1] - 2026-11-17
+
+The extension is 0.2.0's. 0.2.0's publish to the Chrome Web Store stopped before the
+upload: the release workflow did not pass the environment's secrets to the shared
+publish job. It does now (`secrets: inherit`), and 0.2.1 is the release that goes out.
+
 ## [0.2.0][extension-0.2.0] - 2026-11-17
 
 ### Added
@@ -99,5 +105,6 @@ First release.
   `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[extension-0.2.1]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.2.1
 [extension-0.2.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.2.0
 [extension-0.1.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.1.0

@@ -206,6 +206,10 @@ jobs:
   publish:
     needs: release
     uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
+    # The job runs in the environment chrome-web-store, whose secrets a
+    # reusable workflow sees only when the caller passes them on: inherit
+    # (the repository has no secrets of its own, so only the environment's).
+    secrets: inherit
     permissions:
       contents: read
       # gh attestation verify reads the zip's attestation.
