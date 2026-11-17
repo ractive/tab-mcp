@@ -1,6 +1,6 @@
 ---
 type: operations
-title: "The tab-mcp browser extension in the Chrome Web Store"
+title: The tab-mcp browser extension in the Chrome Web Store and Microsoft Edge Add-ons
 description: "The release path of the tab-mcp browser extension: the store package, the release and publish workflows (Chrome Web Store and Microsoft Edge Add-ons), the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
 tags:
   - operations
@@ -9,7 +9,7 @@ tags:
 timestamp: 2026-11-14T17:30:00+01:00
 ---
 
-# The tab-mcp browser extension in the Chrome Web Store
+# The tab-mcp browser extension in the Chrome Web Store and Microsoft Edge Add-ons
 
 Iteration 23 ([iteration-23-extension-release](../iterations/iteration-23-extension-release.md)),
 after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
