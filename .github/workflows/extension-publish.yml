@@ -1,17 +1,19 @@
 name: Extension publish
 
-# Publishes the store zip of an extension-v<version> GitHub release to the
-# Chrome Web Store or Microsoft Edge Add-ons by hand: the jobs
-# extension-release.yml runs after it creates the release, for a release whose
-# publish failed or was rejected. Actions → Extension publish → Run workflow,
-# pick the release's tag under "Use workflow from" (a run from a branch fails)
-# and the store.
+# Publishes the store zips of an extension-v<version> GitHub release to the
+# Chrome Web Store, Microsoft Edge Add-ons or addons.mozilla.org by hand: the
+# jobs extension-release.yml runs after it creates the release, for a release
+# whose publish failed or was rejected. Actions → Extension publish → Run
+# workflow, pick the release's tag under "Use workflow from" (a run from a
+# branch fails) and the store.
 #
-# ractive/release-workflows chrome-extension-publish.yml and
-# edge-extension-publish.yml: only a zip whose build provenance verifies
-# (signed by extension-release.yml for this tag, DEC-182); for Chrome as a CRX
-# signed with the item's verified-upload key, from the environment
-# chrome-web-store; for Edge the zip, from the environment edge-add-ons.
+# ractive/release-workflows chrome-extension-publish.yml,
+# edge-extension-publish.yml and firefox-extension-publish.yml: only zips
+# whose build provenance verifies (signed by extension-release.yml for this
+# tag, DEC-182); for Chrome as a CRX signed with the item's verified-upload
+# key, from the environment chrome-web-store; for Edge the zip, from the
+# environment edge-add-ons; for Firefox the Firefox zip with the source
+# archive, from the environment firefox-add-ons.
 # Setup: kb/operations/chrome-web-store.md.
 
 on:
@@ -20,10 +22,10 @@ on:
       store:
         description: "The store to publish to"
         type: choice
-        options: [chrome, edge, both]
+        options: [chrome, edge, firefox, all]
         default: chrome
       submit:
-        description: "Submit for review after the upload (otherwise it stays a draft in the store's dashboard)"
+        description: "Chrome and Edge: submit for review after the upload (otherwise it stays a draft in the store's dashboard); Firefox always submits"
         type: boolean
         default: true
 
@@ -32,7 +34,7 @@ permissions:
 
 jobs:
   publish:
-    if: inputs.store != 'edge'
+    if: inputs.store == 'chrome' || inputs.store == 'all'
     uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
     # The job runs in the environment chrome-web-store, whose secrets a
     # reusable workflow sees only when the caller passes them on: inherit
@@ -51,7 +53,7 @@ jobs:
       submit: ${{ inputs.submit }}
 
   publish-edge:
-    if: inputs.store != 'chrome'
+    if: inputs.store == 'edge' || inputs.store == 'all'
     uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@f1fde0fc2dfb016201659084f5d9d4f2ad2cea5a # v0.7.0
     secrets: inherit
     permissions:
@@ -75,3 +77,47 @@ jobs:
         Source: https://github.com/ractive/tab-mcp (packages/tab-mcp-extension); the package
         is the release zip of tag ${{ github.ref_name }}, with GitHub build provenance
         (gh attestation verify <zip> -R ractive/tab-mcp).
+
+  publish-firefox:
+    if: inputs.store == 'firefox' || inputs.store == 'all'
+    uses: ractive/release-workflows/.github/workflows/firefox-extension-publish.yml@d69f242378f228560fdf2fb7ce851c2d8fb6a11e # v0.8.1
+    secrets: inherit
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      tag-prefix: extension-v
+      asset: tab-mcp-browser-extension-firefox-{version}-store.zip
+      source-asset: tab-mcp-{version}-source.zip
+      addon-id: tab-mcp@ractive.ch
+      attest-signer-workflow: .github/workflows/extension-release.yml
+      # The same notes for AMO's reviewers as extension-release.yml's.
+      notes: >-
+        Build (the scripts are bundled and minified with Bun's bundler; no other tools):
+        install Bun 1.4.4 (https://bun.sh); unzip the attached tab-mcp-<version>-source.zip
+        and cd into tab-mcp-<version>; bun install --frozen-lockfile; cd
+        packages/tab-mcp-extension; SOURCE_DATE_EPOCH=$(cat ../../SOURCE_DATE_EPOCH) bun
+        scripts/build.ts --firefox --store --zip. This writes
+        tab-mcp-browser-extension-firefox-<version>-store.zip, byte for byte the uploaded
+        file (the release workflow checks that); dist-firefox-store/ holds the unpacked
+        files. SOURCE_DATE_EPOCH only sets the zip entries' time (the archive has no Git
+        history). Sources: packages/tab-mcp-extension/src (background: worker/, content
+        script: content.ts and firefox/webmcp.ts, sidebar: sidepanel/), and the library
+        packages/tab-mcp-client/src, which it bundles.
+        What it does: it gives pages document.modelContext (WebMCP), which Firefox lacks,
+        from its content script, so pages can register tools for AI agents. When the user
+        turns on AI access in the sidebar and pairs an AI app (Claude, ChatGPT, ...) with a
+        code, the extension connects to a tab-mcp relay (default https://tab-mcp.ractive.ch,
+        run by the developer) over a WebSocket and lets that AI app list and call the tools
+        of the page in front. A tool that is not marked read-only asks the user first. No
+        remote code is executed: the relay connection carries data only (tool lists, calls,
+        results). Host access is optional and asked for at runtime: per tab with a click on
+        the toolbar icon, or for all sites when the user clicks "Give access to all sites".
+        Testing: open https://ractive.ch/tab-mcp/examples/diagram/ (a page with WebMCP
+        tools), click the toolbar icon, the sidebar shows its tools. Pairing an AI app needs
+        an MCP client such as Claude Code: claude mcp add --transport http
+        tab-mcp-browser-extension-firefox <address shown in the sidebar>.
+        Privacy policy: https://ractive.ch/tab-mcp/privacy/. Source and issues:
+        https://github.com/ractive/tab-mcp; this is the release of tag ${{ github.ref_name }},
+        with GitHub build provenance (gh attestation verify <zip> -R ractive/tab-mcp).

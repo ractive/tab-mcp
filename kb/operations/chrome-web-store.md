@@ -1,7 +1,7 @@
 ---
 type: operations
-title: The tab-mcp browser extension in the Chrome Web Store and Microsoft Edge Add-ons
-description: "The release path of the tab-mcp browser extension: the store package, the release and publish workflows (Chrome Web Store and Microsoft Edge Add-ons), the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
+title: The tab-mcp browser extension in the Chrome Web Store, Microsoft Edge Add-ons and addons.mozilla.org
+description: "The release path of the tab-mcp browser extension: the store package, the release and publish workflows (Chrome Web Store, Microsoft Edge Add-ons, addons.mozilla.org), the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
 tags:
   - operations
   - release
@@ -9,7 +9,7 @@ tags:
 timestamp: 2026-11-14T17:30:00+01:00
 ---
 
-# The tab-mcp browser extension in the Chrome Web Store and Microsoft Edge Add-ons
+# The tab-mcp browser extension in the Chrome Web Store, Microsoft Edge Add-ons and addons.mozilla.org
 
 Iteration 23 ([iteration-23-extension-release](../iterations/iteration-23-extension-release.md)),
 after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
@@ -43,15 +43,18 @@ gives the zip whose SHA-256 `extension-release.yml` prints, with the same Bun ve
    ```
 
 3. `extension-release.yml` checks that the tag is a Chrome version on main and matches
-   `package.json`, runs `verify`, builds the store zip, checks its manifest again, and only
-   then creates the GitHub release `extension-v<version>` with the zip attached (not
-   marked latest, so the relay and client releases stay the latest). A failed build leaves
-   no release; the release job stops if the tag moved off the commit it built.
-4. Before it creates the release, the release job attests the zip's build provenance
-   (below) and verifies the attestation; after it, it checks that the release's asset has
-   the SHA-256 of the attested zip. A zip that does not verify leaves no release; a
-   release whose asset has another SHA-256 fails the run after the release exists, and
-   is deleted by hand.
+   `package.json`, runs `verify`, builds the store zip and the Firefox store zip, checks
+   their manifests again, packs the source archive `tab-mcp-<version>-source.zip` (the
+   built commit, with a `SOURCE_DATE_EPOCH` file) and builds the Firefox zip from it again,
+   which must give the same bytes; only then does it create the GitHub release
+   `extension-v<version>` with the three attached (not marked latest, so the relay and
+   client releases stay the latest). A failed build leaves no release; the release job
+   stops if the tag moved off the commit it built.
+4. Before it creates the release, the release job attests the three files' build
+   provenance (below) and verifies the attestations; after it, it checks that each release
+   asset has the SHA-256 of the attested file. A file that does not verify leaves no
+   release; a release whose asset has another SHA-256 fails the run after the release
+   exists, and is deleted by hand.
 
 Do not create the release with `gh release create`: then nothing builds the zip
 (`release.yml` treats `extension-v*` releases as a no-op). The tag push is the release.
@@ -169,8 +172,39 @@ code and message.
   refused with `InProgressSubmission`; the upload to the draft has gone through. Run it
   again by hand once certification is over.
 - **By hand:** Actions → "Extension publish" → Run workflow, the release's tag under "Use
-  workflow from", store `edge` (or `both`). "Submit" off leaves the package in the item's
+  workflow from", store `edge` (or `all`). "Submit" off leaves the package in the item's
   draft in Partner Center.
+
+## addons.mozilla.org
+
+The Firefox build goes to its add-on on addons.mozilla.org (DEC-195):
+`extension-release.yml`'s job `publish-firefox` runs beside the other two, after the
+release, and calls
+[firefox-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.8.1/.github/workflows/firefox-extension-publish.yml)
+of ractive/release-workflows (pinned to a commit) in the environment `firefox-add-ons`
+(required reviewer, tags `extension-v*` only). It checks the tag, the Firefox zip's
+manifest (the version, the gecko id `tab-mcp@ractive.ch`, no key, no install-time host
+access, no source maps) and both files' build provenance, then uploads the zip through
+AMO's API v5 as a new listed version, with the source archive and the notes for the
+reviewers in the workflow (how to build it from the source, what it does, how to test it).
+On failure the log shows AMO's answer.
+
+- **Add-on:** id `tab-mcp@ractive.ch` (the manifest's `browser_specific_settings.gecko.id`
+  and the workflows' `addon-id`). It was created by hand with 0.2.0 (the API adds versions,
+  it does not create add-ons). Firefox's extension origin is `moz-extension://<a UUID per
+  installation>`, so the hosted relay admits `moz-extension://*` (DEC-189).
+- **Source archive:** AMO's reviewers need the source of minified code and the steps to
+  build it. `tab-mcp-<version>-source.zip` is `git archive` of the built commit plus a
+  file `SOURCE_DATE_EPOCH` with its commit time, which the zip's entries carry (the archive
+  has no Git history for `sourceDate`). The release workflow builds the Firefox zip from
+  that archive, as the notes tell the reviewers to, and stops when the bytes differ.
+- **Credentials:** AMO → Developer Hub → Manage API Keys
+  (<https://addons.mozilla.org/developers/addon/api/key/>): the JWT issuer and secret, as
+  the environment secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` of `firefox-add-ons`; both
+  workflows pass `secrets: inherit`. The key's account must be an author of the add-on.
+- **By hand:** Actions → "Extension publish" → Run workflow, the release's tag under "Use
+  workflow from", store `firefox` (or `all`). A version AMO already has is refused: AMO
+  takes each version number once.
 
 ## Owner's one-time setup
 
