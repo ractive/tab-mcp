@@ -1,7 +1,7 @@
 ---
 type: operations
-title: "The tab-mcp browser extension in the Chrome Web Store"
-description: "The release path of the tab-mcp browser extension: the store package, the release and publish workflows, the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
+title: The tab-mcp browser extension in the Chrome Web Store and Microsoft Edge Add-ons
+description: "The release path of the tab-mcp browser extension: the store package, the release and publish workflows (Chrome Web Store and Microsoft Edge Add-ons), the zip's build provenance and how to verify it, the owner's one-time setup, the listing texts, single purpose, permission justifications, data disclosures and review notes, and adding the store id to the hosted relay before the listing goes public."
 tags:
   - operations
   - release
@@ -9,7 +9,7 @@ tags:
 timestamp: 2026-11-14T17:30:00+01:00
 ---
 
-# The tab-mcp browser extension in the Chrome Web Store
+# The tab-mcp browser extension in the Chrome Web Store and Microsoft Edge Add-ons
 
 Iteration 23 ([iteration-23-extension-release](../iterations/iteration-23-extension-release.md)),
 after Overmark's `kb/operations/chrome-web-store.md` (ractive/overmark).
@@ -120,8 +120,9 @@ repository has no secrets of its own, so only the environment's reach the job (0
 publish failed for the lack of it, before the upload; a dry run reads no secrets).
 
 If the publish fails or is rejected, fix the cause and run it again by hand: Actions →
-"Extension publish" → Run workflow, and pick the release's tag under "Use workflow from"
-(the default, `main`, fails). "Submit" off leaves the upload as a draft in the dashboard.
+"Extension publish" → Run workflow, pick the release's tag under "Use workflow from"
+(the default, `main`, fails) and store `chrome`. "Submit" off leaves the upload as a draft
+in the dashboard.
 
 ### Verified CRX uploads
 
@@ -141,6 +142,35 @@ openssl pkey -in tab-mcp-crx-key.pem -pubout -outform DER | shasum -a 256 | head
 The CRX id is `signing-key-id` in both workflows: a secret with another key fails before
 the upload. The installed extension still has the item's id; the store re-signs what it
 serves.
+
+## Microsoft Edge Add-ons
+
+The same release goes to its Edge Add-ons item (DEC-194): `extension-release.yml`'s job
+`publish-edge` runs beside `publish`, after the release, and calls
+[edge-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.7.0/.github/workflows/edge-extension-publish.yml)
+of ractive/release-workflows (pinned to a commit) in the environment `edge-add-ons`
+(required reviewer, tags `extension-v*` only). It runs the same checks of the tag, the
+manifest and the zip's build provenance, then uploads the zip itself (Edge takes no CRX
+and has no signed uploads) through the Edge Add-ons API v1.1 and submits it for
+certification with the notes in the workflow. On failure the log shows Microsoft's error
+code and message.
+
+- **Item:** Product ID `a9ff25ac-7200-4573-8eee-69473a630ae7` (the workflows' `product-id`),
+  Store ID `0RDCKD10ZWD4`, CRX id `dajcihibbfmlghajafpckpgefkkjgogn`. Edge's store signs with
+  its own key, so the id differs from the Chrome Web Store's, and the hosted relay allows
+  `chrome-extension://dajcihibbfmlghajafpckpgefkkjgogn` separately. The item was created by
+  hand with 0.2.1 (the API updates items, it cannot create one).
+- **Credentials:** Partner Center → Microsoft Edge → Publish API: the Client ID and an API
+  key, as the environment secrets `EDGE_CLIENT_ID` and `EDGE_API_KEY` of `edge-add-ons`; both
+  workflows pass `secrets: inherit`. The key works for every item of the account. **API keys
+  expire** (the date is on that page): before then "Create API credentials" makes a new
+  key, and the secret takes it. An expired key fails the upload at once with HTTP 401.
+- **One submission at a time:** while a version is in certification, a new submission is
+  refused with `InProgressSubmission`; the upload to the draft has gone through. Run it
+  again by hand once certification is over.
+- **By hand:** Actions → "Extension publish" → Run workflow, the release's tag under "Use
+  workflow from", store `edge` (or `both`). "Submit" off leaves the package in the item's
+  draft in Partner Center.
 
 ## Owner's one-time setup
 

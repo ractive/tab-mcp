@@ -4000,3 +4000,21 @@ store and may not pass Microsoft's certification, and the Firefox build (DEC-188
   with 0.2.0. Any slug in a store URL redirects to the item.
 - History keeps the old name: the decision log, iterations, research and the changelog's
   0.1.0 entry.
+
+## DEC-194: A release publishes itself to Microsoft Edge Add-ons too (owner)
+
+2026-11-17, after the Edge Add-ons item was created by hand with 0.2.1. The owner asked
+for the Edge upload to be automated as well.
+
+- `extension-release.yml` runs the job `publish-edge` after it creates the release:
+  `edge-extension-publish.yml` of ractive/release-workflows (v0.7.0, pinned to a commit), in
+  the environment `edge-add-ons` (required reviewer, tags `extension-v*` only), with the
+  Publish API's `EDGE_CLIENT_ID` and `EDGE_API_KEY`. `extension-publish.yml` runs it by hand
+  (store `edge` or `both`).
+- Beside the Chrome Web Store job, not after it: one store's failure or rejection does not
+  hold back the other, and each waits for its own approval.
+- The same verified zip: its build provenance (DEC-182) is checked before the upload, so the
+  attestation is the record of what Edge got too. Edge has no signed uploads, so whoever
+  holds the API key could upload another zip; the key lives only in the environment and
+  in the owner's password manager, and it expires.
+- No third-party code in the job: the API is called with `curl`, as for Chrome (DEC-190).
