@@ -113,7 +113,11 @@ No third-party code runs in that job: the CRX is packed by Python of the standar
 and `openssl` (byte for byte what `chrome --pack-extension` writes, which release-workflows'
 selftest checks against Chrome), the API is called with `curl`. The client secret and the
 refresh token can publish every item of the developer account; the signing key can sign
-uploads of this item only.
+uploads of this item only. Both callers pass `secrets: inherit`: a reusable workflow sees
+an environment's secrets only when the caller passes them on, even though its own job runs
+in that environment, and a caller outside the environment cannot name them one by one. The
+repository has no secrets of its own, so only the environment's reach the job (0.2.0's
+publish failed for the lack of it, before the upload; a dry run reads no secrets).
 
 If the publish fails or is rejected, fix the cause and run it again by hand: Actions →
 "Extension publish" → Run workflow, and pick the release's tag under "Use workflow from"
