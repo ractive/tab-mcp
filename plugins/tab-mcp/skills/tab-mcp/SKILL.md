@@ -14,7 +14,7 @@ the same for every page of the app. The user adds that address to their AI app a
 it with a code shown in the page, which says which page is meant. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.16.2):
+Facts to keep in mind (version 0.17.0):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code, claude.ai, Claude Desktop, ChatGPT and Codex work
@@ -40,7 +40,7 @@ Without a bundler, import the self-contained build from a CDN:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.16.2/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.17.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -336,7 +336,7 @@ Local development (a page on `http://localhost:3000`):
 docker run --rm -p 8080:8080 -e NODE_ENV=development \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
-  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.11.0
+  -e TAB_MCP_STORE=memory ractive/tab-mcp:0.12.0
 ```
 
 Production: name the image version (pre-releases have no `latest` tag), keep `/data` on
@@ -346,7 +346,7 @@ a volume, and put the relay behind TLS:
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.11.0
+  -e TAB_MCP_TRUST_PROXY=x-real-ip ractive/tab-mcp:0.12.0
 ```
 
 `x-real-ip` fits an nginx proxy that sets `X-Real-IP $remote_addr`; behind Caddy use
