@@ -374,8 +374,8 @@ grant of a `grant.revoke` in `grantId`:
 ```
 
 A page with several of these pending settles only the one named. Without `for` (relays
-up to 0.12.0) the error may answer any of them; the library (after 0.17.0) then
-settles every pending one, as 0.17.0 did. Older libraries ignore the two fields.
+up to 0.12.0) the error may answer any of them; the library (after 0.18.0) then
+settles every pending one, as 0.18.0 did. Older libraries ignore the two fields.
 
 | Code | Sent by | Meaning |
 |---|---|---|
