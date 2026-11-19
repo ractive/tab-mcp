@@ -254,7 +254,7 @@ test("reconnecting asks for the identity again and resumes pairing", async () =>
 	expect(t.identity).toBe("bound");
 });
 
-test("newAddress() while waiting connects with the new address", async () => {
+test("newAddress() while waiting connects with the new secret", async () => {
 	waits([600_000]);
 	const t = newTab(relay.url);
 	tab = t;
@@ -265,16 +265,19 @@ test("newAddress() while waiting connects with the new address", async () => {
 	await t.newAddress();
 	expect(t.state).toBe("connected");
 	expect(t.reconnecting).toBeUndefined();
-	// The old address is taken back first (DEC-136).
+	// The old secret's grants are revoked first (DEC-136).
 	expect(await relay.next("hello")).toMatchObject({
 		secret: before["secret"],
 		revokeAll: true,
 	});
 	const after = await relay.next("hello");
 	expect(after["secret"]).not.toBe(before["secret"]);
+	expect(after["revokeAll"]).toBeUndefined();
+	// The address names the app: it is the one from before.
+	expect(t.session?.address).toBe(relay.addressOf("test-page"));
 });
 
-test("a restarted relay: the tab is back on the same address, and the AI app's tools work again", async () => {
+test("a restarted relay: the tab is back with the same secret, and the AI app's token from before works again", async () => {
 	const first = startRelay();
 	const port = first.relay.port;
 	waits([50]);
@@ -286,18 +289,21 @@ test("a restarted relay: the tab is back on the same address, and the AI app's t
 		execute: () => "pong",
 	});
 	const before = await t.connect({ resume: true });
+	const [page] = first.relay.pagesOf("test-page");
+	// The AI app paired before the restart; the relay keeps its token store.
+	const token = await tokenFor(first, before.address);
 	const back = nextState(t, "connected");
 	await first.stop(); // bye shutdown, close 4004
 	expect(t.reconnecting?.reason).toBe("shutdown");
-	const second = startRelay({ port });
+	const second = startRelay({ port, store: first.store });
 	try {
 		await back;
 		const after = t.session?.address ?? "";
 		expect(after).toBe(before.address);
-		const client = await connectClient(
-			after,
-			await tokenFor(second.store, after),
-		);
+		// The address is the app's either way: the secret is what came back.
+		expect(page).toMatch(/^[a-z2-7]{52}$/);
+		expect(second.relay.pagesOf("test-page")).toEqual([page as string]);
+		const client = await connectClient(after, token);
 		const result = await client.callTool({ name: "ping", arguments: {} });
 		expect(result.content).toEqual([{ type: "text", text: "pong" }]);
 		await client.close();

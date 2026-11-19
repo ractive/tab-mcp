@@ -4,7 +4,8 @@
  * `identityAssertion` hook; the MCP SDK client hits the address, gets 401,
  * registers by CIMD and opens `/authorize`; the user signs in at a local
  * OpenID Connect provider as the same person and the app connects without a
- * code. Someone else gets the mismatch error; `signOut()` cuts the
+ * code: the relay finds the page by who signed in (DEC-196). Someone else is
+ * told that no page is connecting with that account; `signOut()` cuts the
  * connection at once.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -19,7 +20,7 @@ import {
 	UnauthorizedError,
 } from "@modelcontextprotocol/client";
 import { Window } from "happy-dom";
-import { MISMATCH_TEXT } from "../../tab-mcp/src/identity.ts";
+import { NO_PAGE_TEXT } from "../../tab-mcp/src/oauth/oidc.ts";
 import type { Relay } from "../../tab-mcp/src/relay.ts";
 import { createTestRelay } from "../../tab-mcp/src/relay.ts";
 import { MemoryTokenStore } from "../../tab-mcp/src/store/memory.ts";
@@ -161,12 +162,14 @@ async function until(condition: () => boolean, what: string): Promise<void> {
 }
 
 /** A page signed in as `user`, with one tool and its dialog open. */
-async function signedInPage(user: string): Promise<{
+async function signedInPage(
+	user: string,
+	doc = window.document as unknown as Document,
+): Promise<{
 	tab: TabMcp;
 	doc: Document;
 	closed: Promise<void>;
 }> {
-	const doc = window.document as unknown as Document;
 	const tab = newTab(`http://127.0.0.1:${relay.port}`, {
 		appName: "calculator",
 		storage: new MemoryStorage(),
@@ -232,6 +235,7 @@ test("the page's user connects an SDK client without a code, calls a tool, and s
 		(dialog()?.querySelector(".tab-mcp-code") as HTMLElement | null)?.hidden,
 	).toBe(true);
 	const address = tab.session?.address ?? "";
+	expect(address).toBe(`${relay.url}/s/test-page/mcp`);
 
 	const { provider, transport, url } = await startAuth(address);
 	const done = await signInAtProvider(url, "alice");
@@ -269,18 +273,79 @@ test("the page's user connects an SDK client without a code, calls a tool, and s
 	tab.disconnect();
 }, 30_000);
 
-test("an AI app signed in as someone else gets the mismatch error and no code", async () => {
+test("an AI app signed in as someone else is told that no page is connecting with that account, and gets no code", async () => {
 	const { tab, doc, closed } = await signedInPage("alice");
 	const { url } = await startAuth(tab.session?.address ?? "");
 	const done = await signInAtProvider(url, "bob");
 	expect(done.status).toBe(403);
 	expect(done.location).toBeUndefined();
-	expect(done.html).toContain(MISMATCH_TEXT);
+	expect(done.html).toContain(NO_PAGE_TEXT);
+	// Nothing of alice's page is on it: the relay does not say whose page is open.
+	expect(done.html).not.toContain("calculator");
+	expect(done.html).not.toContain("alice");
 	expect(tab.grants).toEqual([]);
 	(doc.querySelector(".tab-mcp-connect") as HTMLDialogElement | null)?.close();
 	await closed;
 	tab.disconnect();
 }, 30_000);
+
+test("two people have the app open at the one address: the AI app gets the page of whoever signs in (DEC-196)", async () => {
+	const other = new Window({ url: `${PAGE_ORIGIN}/` });
+	const alice = await signedInPage("alice");
+	const bob = await signedInPage("bob", other.document as unknown as Document);
+	const ran: string[] = [];
+	alice.tab.addEventListener("toolcall", () => ran.push("alice"));
+	bob.tab.addEventListener("toolcall", () => ran.push("bob"));
+	try {
+		const address = bob.tab.session?.address ?? "";
+		expect(alice.tab.session?.address).toBe(address);
+		expect(alice.tab.state).toBe("connected");
+
+		const { provider, transport, url } = await startAuth(address);
+		const done = await signInAtProvider(url, "bob");
+		expect(done.status).toBe(303);
+		await transport.finishAuth(new URL(done.location ?? "").searchParams);
+		await until(() => bob.tab.grants.length === 1, "grant.added");
+		expect(alice.tab.grants).toEqual([]);
+
+		const call = await mcpPost(
+			address,
+			rpc(1, "tools/call", { name: "add", arguments: { a: 1, b: 2 } }),
+			{ token: provider.tokens()?.access_token ?? "" },
+		);
+		expect(call.status).toBe(200);
+		expect(await call.text()).toContain('"text":"3"');
+		expect(ran).toEqual(["bob"]);
+	} finally {
+		for (const { tab, doc, closed } of [alice, bob]) {
+			(
+				doc.querySelector(".tab-mcp-connect") as HTMLDialogElement | null
+			)?.close();
+			await closed;
+			tab.disconnect();
+		}
+		await other.happyDOM.close();
+	}
+}, 30_000);
+
+// Where an app pairs by sign-in only, the page has no code field and does not
+// speak of a code the page would show.
+test("where no code is needed, the relay's page does not speak of a page that shows the code", async () => {
+	const { tab, doc, closed } = await signedInPage("alice");
+	try {
+		const { url } = await startAuth(tab.session?.address ?? "");
+		const page = await new TestBrowser(relay.url).open(url.href);
+		expect(page.html).toContain("No code is needed");
+		expect(page.html).not.toContain('name="code"');
+		expect(page.html).not.toContain("shows the code");
+	} finally {
+		(
+			doc.querySelector(".tab-mcp-connect") as HTMLDialogElement | null
+		)?.close();
+		await closed;
+		tab.disconnect();
+	}
+});
 
 test("a refused assertion is reported; refreshIdentity() binds after sign-in", async () => {
 	let user: string | null = null;

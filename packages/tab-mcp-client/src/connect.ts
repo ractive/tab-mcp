@@ -669,7 +669,7 @@ export function showConnectDialog(
 					announce(s.codeUsed);
 				}
 			} else if (usedTimer !== undefined) {
-				// Locked or expired meanwhile: the user needs this one now.
+				// Expired meanwhile: the user needs this one now.
 				clearTimeout(usedTimer);
 				usedTimer = undefined;
 			}

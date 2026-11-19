@@ -3,11 +3,12 @@
 Connect your AI app to a web page open in a browser tab.
 
 A web page offers some of its functions as [MCP](https://modelcontextprotocol.io) tools.
-The page connects to a tab-mcp relay and gets an address. You add the address to your AI
-app (Claude, ChatGPT, Claude Code, Codex; see [compatibility](docs/compatibility.md) for
-which apps work) and type a code that the page shows. The AI app then calls the page's
-tools through the relay while the tab stays open. Nothing has to be installed on your
-computer.
+The page connects to a tab-mcp relay and shows its address, which is the same for every
+page of that app. You add the address to your AI app (Claude, ChatGPT, Claude Code,
+Codex; see [compatibility](docs/compatibility.md) for which apps work) and type a code
+that the page shows: the code tells the relay which open page is yours. The AI app then
+calls the page's tools through the relay while the tab stays open. Nothing has to be
+installed on your computer.
 
 The page does this with the tab-mcp client library. A page that offers its tools only
 with the browser's WebMCP reaches an AI app through the tab-mcp browser extension:
@@ -117,20 +118,22 @@ sequenceDiagram
     Note over You,App: 1. Connect the page
     You->>Page: click "Connect your AI app"
     Page->>Relay: WebSocket /tab (tab-mcp.v1)
-    Relay-->>Page: address /a/{id}/mcp and a 6-digit code
+    Relay-->>Page: address /s/{app}/mcp and a code of 8 letters
     Page-->>You: show the address and the code
 
     Note over You,App: 2-3. Pair the AI app
     You->>App: add the address
     App->>You: open the relay's /authorize page in your browser
-    You->>Relay: check the AI app and the page, type the code
-    Relay-->>App: token for this address
+    You->>Relay: check the AI app, type the code
+    Note over Relay: the code finds the page among the app's open pages
+    Relay-->>App: token for this page
     Relay-->>Page: grant.added
     Page-->>You: list the AI app as connected, with Disconnect
 
     Note over You,App: 4. Call a tool
-    App->>Relay: POST /a/{id}/mcp with the token: tools/call
+    App->>Relay: POST /s/{app}/mcp with the token: tools/call
     Note over Relay: checks the token and limits, knows no tools, stores no arguments
+    Note over Relay: the token says which page the request is for
     Relay->>Page: http.request over the WebSocket
     opt the tool cannot be undone in the page
         Page->>You: ask first
@@ -147,14 +150,17 @@ sequenceDiagram
 ```
 
 1. You click "Connect your AI app" in the page. The page opens a WebSocket to the relay
-   and shows an address and a 6-digit code.
+   and shows an address and a code of 8 letters. The address names the app
+   (`https://<relay>/s/<app>/mcp`) and is the same for everyone who has a page of that
+   app open; the code belongs to your page.
 2. You add the address to your AI app. The AI app opens the relay's sign-in page in your
-   browser. It names the AI app and the page; you type the code.
-3. The AI app gets a token for that address. The page lists it as connected, with a
+   browser. It names the AI app and the app of the address; you type the code. The
+   relay finds your page by the code.
+3. The AI app gets a token for your page. The page lists it as connected, with a
    Disconnect button.
-4. When the AI app calls a tool, the relay forwards the request to the page. The page
-   runs the tool and answers. Tools whose effect you cannot undo in the page (deleting
-   for good, sending, buying) ask you in the page first.
+4. When the AI app calls a tool, the relay finds the page by the token and forwards the
+   request to it. The page runs the tool and answers. Tools whose effect you cannot undo
+   in the page (deleting for good, sending, buying) ask you in the page first.
 5. When you close the tab, the tools are gone. The AI app stays paired and can use the
    tools again the next time you connect the page.
 
@@ -185,8 +191,8 @@ You need a page that offers tab-mcp, such as the [live diagram editor](https://r
 
    Step by step for each app, and what to do when it fails:
    [connecting an AI app](https://ractive.ch/tab-mcp/connect/).
-3. Your browser opens the relay's page "Connect … from …". Check the AI app and the
-   page's address, then type the code shown in the page.
+3. Your browser opens the relay's page "Connect … from …". Check the AI app it names,
+   then type the code shown in the page.
 4. Ask your AI app to use the page. To stop, click Disconnect in the page, or close the
    tab.
 
@@ -323,8 +329,9 @@ default, or in memory. Embed it in your own Bun program with `createRelay()` and
 any object that implements the `TokenStore` interface: PostgreSQL, Redis, Prisma or
 whatever your stack already runs. The package ships a conformance suite to check your
 store; [token store](docs/token-store.md) has the interface, the guarantees a store must
-give and an example. A shared store does not let several relays serve one address: tab
-sessions live in the relay's memory, so each address still needs exactly one process.
+give and an example. A shared store does not let several relay instances serve one
+relay URL: tab sessions and the pairing codes the pages show live in the relay's memory,
+so a relay is exactly one process.
 
 ## Packages
 

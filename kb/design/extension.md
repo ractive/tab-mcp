@@ -61,8 +61,14 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   the last focused normal window) and returns its answer. Overmark does the same in its
   side panel.
 - Pairing, grants and the relay are tab-mcp's as they are; the side panel shows them
-  with its own pairing view (the address, the code, the connected apps, New address),
-  since the library's dialog would draw into no page. Commands reach the worker only
+  with its own pairing view (the address, the code, the connected apps, "Disconnect all
+  apps"), since the library's dialog would draw into no page. The extension sets its app
+  id itself (`APP_ID` in `src/protocol.ts`: `tab-mcp-extension`, and
+  `tab-mcp-extension-firefox` in the Firefox build, as its server name there is longer
+  than an app id may be), so its address `<relay>/s/tab-mcp-extension/mcp` is the same
+  for everyone who has it, and the code pairs an AI app with one installation (DEC-196).
+  A relay can reserve the first id for the extension's origins; the Firefox id stays
+  unreserved, as no list can name a Firefox extension (DEC-197). Commands reach the worker only
   over the panel's port (threat model A13).
 - A page with the client library and `webmcp: true` (client 0.13.0, DEC-115, DEC-119)
   registers its tools with WebMCP too. The extension offers them like any other page

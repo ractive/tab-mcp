@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { newSecret } from "../src/address.ts";
 import { resolveConfig, siteFor } from "../src/config.ts";
+import { CodeIndex } from "../src/oauth/pairing.ts";
 import { TabSession } from "../src/session.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
-import { LogCapture } from "./helpers.ts";
+import { APP, LogCapture } from "./helpers.ts";
 
 /** A socket whose sends can be made to fail like Bun's under backpressure. */
 class FakeSocket {
@@ -39,6 +40,7 @@ async function readySession(socket: FakeSocket, logs = new LogCapture()) {
 			logger: logs.logger,
 			store: new MemoryTokenStore(),
 			publicUrl: () => "http://relay.test",
+			codes: new CodeIndex<TabSession>(),
 			claimAddress: () => undefined,
 			released: () => {},
 			ready: () => {},
@@ -53,13 +55,22 @@ async function readySession(socket: FakeSocket, logs = new LogCapture()) {
 		JSON.stringify({
 			type: "hello",
 			library: { name: "t", version: "1" },
-			page: { title: "" },
+			app: { id: APP },
 			secret: newSecret(),
 		}),
 	);
 	while (!session.ready) await Bun.sleep(1);
 	return { session, logs };
 }
+
+test("the session message gives the app's address, built from the host's URL", async () => {
+	const socket = new FakeSocket();
+	const { session } = await readySession(socket);
+	expect(session.app).toBe(APP);
+	expect(socket.sent.find((m) => m["type"] === "session")?.["address"]).toBe(
+		`http://relay.test/s/${APP}/mcp`,
+	);
+});
 
 const forwardInput = {
 	method: "POST",

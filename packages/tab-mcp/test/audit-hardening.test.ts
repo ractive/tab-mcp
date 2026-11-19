@@ -11,7 +11,7 @@ import {
 	expect,
 	test,
 } from "bun:test";
-import type { CreateRelayOptions } from "../src/relay.ts";
+import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
 import { hashToken } from "../src/tokens.ts";
 import { ScriptedTab } from "./helpers.ts";
 import {
@@ -46,8 +46,15 @@ afterEach(async () => {
 	current = undefined;
 });
 
-async function setup(options: CreateRelayOptions = {}) {
-	const r = startOAuthRelay(cimd, { trustProxy: "x-real-ip", ...options });
+async function setup(
+	options: CreateRelayOptions = {},
+	hooks: RelayTestHooks = {},
+) {
+	const r = startOAuthRelay(
+		cimd,
+		{ trustProxy: "x-real-ip", ...options },
+		hooks,
+	);
 	current = r;
 	const tab = new ScriptedTab(r.wsUrl);
 	tabs.push(tab);
@@ -75,48 +82,108 @@ function openPage(
 	);
 }
 
+/**
+ * The address is public now: it names the app (DEC-196). The audit's worry
+ * stays, in another form: whoever knows an address must not be able to keep
+ * the people of that app off `/authorize`. Requests are counted per network
+ * and in all, never per address, so there is no share of an address a
+ * stranger could use up.
+ */
 describe("1: knowing an address does not keep its owner off /authorize", () => {
-	test("while the page's dialog is closed, /authorize keeps no request; the owner pairs once it opens", async () => {
+	/** Whether the request of `page` is still open: an action the form does not know shows the form again. */
+	async function isOpen(
+		browser: TestBrowser,
+		page: AuthorizePage,
+	): Promise<boolean> {
+		return (await browser.submit(page, { action: "show" })).status === 200;
+	}
+
+	test("a network at its cap of 10 open requests loses its own oldest to the next; nobody is refused, and another network pairs", async () => {
 		const { r, tab, address } = await setup();
-		for (const ip of ["203.0.113.1", "203.0.113.2", "203.0.113.3"]) {
-			const attacker = browserAt(r, ip);
-			for (let i = 0; i < 10; i++) {
-				const page = await openPage(attacker, r, address);
-				expect(page.status).toBe(200);
-				expect(page.requestId).toBeUndefined();
-				expect(page.html).toContain("Connect your AI app");
-			}
-		}
 		const code = await tab.startPairing();
+		const firsts: { browser: TestBrowser; page: AuthorizePage }[] = [];
+		const seconds: { browser: TestBrowser; page: AuthorizePage }[] = [];
+		for (const ip of ["203.0.113.1", "203.0.113.2", "203.0.113.3"]) {
+			const browser = browserAt(r, ip);
+			for (let i = 0; i < 10; i++) {
+				const page = await openPage(browser, r, address);
+				expect(page.status).toBe(200);
+				expect(page.requestId).toBeDefined();
+				if (i === 0) firsts.push({ browser, page });
+				if (i === 1) seconds.push({ browser, page });
+			}
+			// The eleventh: someone loading the pairing page again, or the next
+			// person of an office behind one address. It opens.
+			const eleventh = await openPage(browser, r, address);
+			expect(eleventh.status).toBe(200);
+			expect(eleventh.requestId).toBeDefined();
+		}
+		// Each network paid with its own oldest request, and only that one.
+		for (const first of firsts) {
+			expect(await isOpen(first.browser, first.page)).toBe(false);
+		}
+		for (const second of seconds) {
+			expect(await isOpen(second.browser, second.page)).toBe(true);
+		}
+		// 30 requests are open; the owner's is the 31st.
 		const owner = browserAt(r, "198.51.100.7");
 		const page = await openPage(owner, r, address);
 		expect(page.status).toBe(200);
-		expect(page.requestId).toBeDefined();
 		const done = await owner.submit(page, { action: "connect", code });
 		expect(done.status).toBe(303);
 	});
 
-	test("Try again on the closed-dialog page opens the request once the dialog is open", async () => {
-		const { r, tab, address } = await setup();
-		const owner = browserAt(r, "198.51.100.7");
-		const closed = await openPage(owner, r, address);
-		const retry = /href="(\/authorize\?[^"]+)"/.exec(closed.html)?.[1];
-		expect(retry).toBeDefined();
-		const code = await tab.startPairing();
-		const page = await owner.open(
-			`${r.url}${(retry ?? "").replaceAll("&amp;", "&")}`,
-		);
-		expect(page.requestId).toBeDefined();
-		const done = await owner.submit(page, { action: "connect", code });
-		expect(done.status).toBe(303);
+	test("the cap counts an IPv6 /56 as one network, and every app together", async () => {
+		const { r, address } = await setup();
+		const other = r.relay.addressFor("another-app");
+		const opened: { browser: TestBrowser; page: AuthorizePage }[] = [];
+		for (let i = 0; i < 10; i++) {
+			// Ten /64s of one /56, alternating between two apps.
+			const browser = browserAt(r, `2001:db8:a:1${i.toString(16)}0::1`);
+			const page = await openPage(browser, r, i % 2 === 0 ? address : other);
+			expect(page.status).toBe(200);
+			opened.push({ browser, page });
+		}
+		// Two more from the /56, one for each app: its two oldest go, whichever
+		// app and /64 they were for.
+		for (const resource of [address, other]) {
+			const page = await openPage(
+				browserAt(r, "2001:db8:a:1ff::1"),
+				r,
+				resource,
+			);
+			expect(page.status).toBe(200);
+		}
+		const open: boolean[] = [];
+		for (const o of opened) open.push(await isOpen(o.browser, o.page));
+		expect(open).toEqual([
+			false,
+			false,
+			true,
+			true,
+			true,
+			true,
+			true,
+			true,
+			true,
+			true,
+		]);
+		// The next /56 is another network: it takes nothing from this one.
+		const next = await openPage(browserAt(r, "2001:db8:a:200::1"), r, address);
+		expect(next.status).toBe(200);
+		const [, , third] = opened;
+		if (third === undefined) throw new Error("no request");
+		expect(await isOpen(third.browser, third.page)).toBe(true);
 	});
 
-	test("at the cap per address, requests are evicted, not refused: a flood from many networks leaves the owner's request", async () => {
-		const { r, tab, address } = await setup();
+	test("with the relay full, a flood from many networks evicts its own requests, not the one of a network with one", async () => {
+		const { r, tab, address } = await setup({}, { maxPending: 20 });
 		const code = await tab.startPairing();
 		const owner = browserAt(r, "198.51.100.7");
 		const ownerPage = await openPage(owner, r, address);
 		expect(ownerPage.requestId).toBeDefined();
+		// 64 requests from 8 networks for 20 places: none is refused, each
+		// pushes out the oldest of the network that holds the most.
 		for (let n = 0; n < 8; n++) {
 			const attacker = browserAt(r, `203.0.113.${n + 10}`);
 			for (let i = 0; i < 8; i++) {
@@ -128,38 +195,18 @@ describe("1: knowing an address does not keep its owner off /authorize", () => {
 		// A late owner still gets a request ...
 		const late = browserAt(r, "198.51.100.8");
 		expect((await openPage(late, r, address)).requestId).toBeDefined();
-		// ... and the owner's first one was not the one evicted.
+		// ... and the owner's first one was not among those evicted.
 		const done = await owner.submit(ownerPage, { action: "connect", code });
 		expect(done.status).toBe(303);
 	});
 
-	test("review of PR 32: with equal shares the network that came last loses, not the owner who came first", async () => {
-		const { r, tab, address } = await setup();
-		const code = await tab.startPairing();
-		const owner = browserAt(r, "198.51.100.7");
-		const ownerPage = await openPage(owner, r, address);
-		await openPage(owner, r, address);
-		for (let n = 0; n < 9; n++) {
-			const attacker = browserAt(r, `203.0.113.${n + 10}`);
-			await openPage(attacker, r, address);
-			await openPage(attacker, r, address);
-		}
-		// 20 open, two per network: the next one evicts.
-		await openPage(browserAt(r, "203.0.113.50"), r, address);
-		const done = await owner.submit(ownerPage, { action: "connect", code });
-		expect(done.status).toBe(303);
-	});
-
-	test("one network that reloads past its share of an address loses its own oldest request", async () => {
-		const { r, tab, address } = await setup();
-		await tab.startPairing();
-		const browser = browserAt(r, "198.51.100.7");
-		const first = await openPage(browser, r, address);
-		for (let i = 0; i < 5; i++) await openPage(browser, r, address);
-		const stale = await browser.submit(first, { action: "connect" });
-		expect(stale.status).toBe(400);
-		expect(stale.html).toContain("expired or was already used");
-	});
+	// What "review of PR 32" pinned here is gone with the cap per address:
+	// among networks holding equally many, the one that came last lost, so an
+	// equal flood never evicted the owner who came first. The relay-wide
+	// eviction that is left takes the oldest request of the network holding
+	// the most (dos-hardening.test.ts, RS 1): 10 000 open requests, one or
+	// equally many per network, push a user's request out in the order they
+	// came.
 });
 
 /** Pair through /authorize and exchange the code; returns the token response. */

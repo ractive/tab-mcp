@@ -84,14 +84,15 @@ test.skipIf(chrome === undefined)(
 		// Pairing: the dialog's address and code, the code typed on /authorize.
 		const pairing: Pairing = await pair(stack, page, stack.clientId());
 		expect(pairing.address).toMatch(
-			new RegExp(`^${stack.relay.url}/a/[a-z2-7]{52}/mcp$`),
+			new RegExp(`^${stack.relay.url}/s/calculator/mcp$`),
 		);
 		expect(pairing.authorizeText).toContain(
 			`Connect ${CLIENT_NAME} from localhost:`,
 		);
-		expect(pairing.authorizeText).toContain(
-			`to Calculator on ${new URL(stack.pageUrl).origin}`,
-		);
+		// The relay names the app of the address, not the page: it does not know
+		// the page before the code is typed (DEC-196).
+		expect(pairing.authorizeText).toContain("to calculator: to the page");
+		expect(pairing.authorizeText).not.toContain(new URL(stack.pageUrl).origin);
 		// While the code is shown only a small Close; once paired, Done.
 		expect(pairing.buttonsBefore).toEqual(["Close"]);
 		expect(pairing.buttonsAfter).toEqual(["Done"]);

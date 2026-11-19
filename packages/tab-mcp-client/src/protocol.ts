@@ -54,11 +54,11 @@ export interface PairingCodeMessage {
 	type: "pairing.code";
 	code: string;
 	expiresAt: string;
-	/** Why it came; left out by older relays, and when it is not one of these. */
-	reason?: "start" | "used" | "locked" | "expired";
+	/** Why it came; left out when it is not one of these. */
+	reason?: "start" | "used" | "expired";
 }
 
-const CODE_REASONS = new Set(["start", "used", "locked", "expired"]);
+const CODE_REASONS = new Set(["start", "used", "expired"]);
 export interface GrantAddedMessage {
 	type: "grant.added";
 	grant: Grant;
@@ -107,8 +107,8 @@ export type TabMessage =
 	| {
 			type: "hello";
 			library: { name: string; version: string };
-			page: { title: string };
-			app?: { name: string };
+			/** `id`: the `<app>` of the address `/s/<app>/mcp` (DEC-196). */
+			app: { id: string; name?: string };
 			secret: string;
 			/** Take the address back: the relay revokes its grants as it claims it (DEC-095). */
 			revokeAll?: true;

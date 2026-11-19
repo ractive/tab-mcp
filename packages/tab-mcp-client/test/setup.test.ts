@@ -39,23 +39,23 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 	});
 
 	test("an address goes into a command only when every character is plain", () => {
-		expect(commandAddress("https://relay.example/a/abc234/mcp")).toBe(
-			"https://relay.example/a/abc234/mcp",
+		expect(commandAddress("https://relay.example/s/abc234/mcp")).toBe(
+			"https://relay.example/s/abc234/mcp",
 		);
-		expect(commandAddress("http://127.0.0.1:8080/a/x/mcp")).toBe(
-			"http://127.0.0.1:8080/a/x/mcp",
+		expect(commandAddress("http://127.0.0.1:8080/s/x/mcp")).toBe(
+			"http://127.0.0.1:8080/s/x/mcp",
 		);
-		expect(commandAddress("http://[::1]:8080/a/x/mcp")).toBe(
-			"http://[::1]:8080/a/x/mcp",
+		expect(commandAddress("http://[::1]:8080/s/x/mcp")).toBe(
+			"http://[::1]:8080/s/x/mcp",
 		);
 		for (const unsafe of [
-			"https://relay.example/a/x/mcp?q=1&calc",
-			"https://relay.example/a/$(calc)/mcp",
-			"https://relay.example/a/x%0Acalc/mcp",
-			"https://relay.example/a/'x'/mcp",
-			"https://relay.example/a/x/mcp#frag",
-			"https://user:pw@relay.example/a/x/mcp",
-			"ftp://relay.example/a/x/mcp",
+			"https://relay.example/s/x/mcp?q=1&calc",
+			"https://relay.example/s/$(calc)/mcp",
+			"https://relay.example/s/x%0Acalc/mcp",
+			"https://relay.example/s/'x'/mcp",
+			"https://relay.example/s/x/mcp#frag",
+			"https://user:pw@relay.example/s/x/mcp",
+			"ftp://relay.example/s/x/mcp",
 			"not an address",
 		])
 			expect({ unsafe, command: commandAddress(unsafe) }).toEqual({
@@ -67,24 +67,24 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {
 		const codex = setupInstructions(
 			"calc",
-			"https://relay.example/a/x/mcp",
+			"https://relay.example/s/x/mcp",
 		).find(({ id }) => id === "codex");
 		expect(codex?.command).toBe(
-			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp\ncodex mcp login calc",
+			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/s/x/mcp\ncodex mcp login calc",
 		);
 		const claudeCode = setupInstructions(
 			"x' ; calc ; 'y$",
-			"https://r.example/a/x/mcp",
+			"https://r.example/s/x/mcp",
 		).find(({ id }) => id === "claude-code");
 		expect(claudeCode?.command).toBe(
-			"claude mcp add --transport http x-calc-y https://r.example/a/x/mcp",
+			"claude mcp add --transport http x-calc-y https://r.example/s/x/mcp",
 		);
 	});
 
 	test("with an address that is not plain, no commands: only the steps", () => {
 		const steps = setupInstructions(
 			"calc",
-			"https://relay.example/a/x/mcp?a=1&b",
+			"https://relay.example/s/x/mcp?a=1&b",
 		);
 		expect(steps.every((step) => !("command" in step))).toBe(true);
 		expect(steps.map(({ app }) => app)).toEqual([
@@ -101,7 +101,7 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 });
 
 describe("setupInstructions, the public API", () => {
-	const ADDRESS = "https://relay.example/a/abc234/mcp";
+	const ADDRESS = "https://relay.example/s/abc234/mcp";
 
 	test("one entry per app, in order, each a readable object", () => {
 		const steps: SetupInstruction[] = setupInstructions("My notes", ADDRESS);
@@ -162,8 +162,8 @@ describe("setupInstructions, the public API", () => {
 
 	test("an address that is not shell-plain: no command key at all, the note stays", () => {
 		for (const unsafe of [
-			"https://relay.example/a/$(calc)/mcp",
-			"https://relay.example/a/x/mcp?a=1&b",
+			"https://relay.example/s/$(calc)/mcp",
+			"https://relay.example/s/x/mcp?a=1&b",
 			"not an address",
 		]) {
 			const steps = setupInstructions("calc", unsafe);

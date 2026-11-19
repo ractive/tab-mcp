@@ -108,7 +108,7 @@ async function setRelay(panel: Tab, relay: string): Promise<void> {
 }
 
 async function mcpClient(relay: TestRelay, address: string): Promise<Client> {
-	const token = await tokenFor(relay.store, address);
+	const token = await tokenFor(relay, address);
 	const client = new Client(
 		{ name: "firefox-e2e", version: "1.0.0" },
 		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },

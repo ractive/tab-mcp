@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
+	appAllowed,
 	ConfigError,
 	configFromEnv,
 	DEFAULT_CONFIG,
+	describeConfigError,
+	isAppId,
 	isExtensionOrigin,
+	MAX_APP_ID,
 	normalizePageOrigin,
+	pairingKindsOf,
+	type RelayConfig,
 	resolveConfig,
+	siteFor,
 } from "../src/config.ts";
 
 describe("config", () => {
@@ -113,6 +120,291 @@ describe("config", () => {
 
 	test("DEFAULT_CONFIG has no public URL", () => {
 		expect(DEFAULT_CONFIG.publicUrl).toBeUndefined();
+	});
+});
+
+describe("app ids (DEC-196): the <app> of /s/<app>/mcp", () => {
+	test("1 to 32 characters of a-z, 0-9 and -, neither starting nor ending with -", () => {
+		expect(MAX_APP_ID).toBe(32);
+		for (const id of [
+			"a",
+			"0",
+			"ab",
+			"a-b",
+			"a--b",
+			"sitegloss",
+			"hp-48gx",
+			"42",
+			"a".repeat(32),
+			`a${"-".repeat(30)}b`,
+		]) {
+			expect(isAppId(id)).toBe(true);
+		}
+		for (const id of [
+			"",
+			"-",
+			"--",
+			"-a",
+			"a-",
+			"A",
+			"Sitegloss",
+			"a b",
+			"a_b",
+			"a.b",
+			"a/b",
+			"a%2fb",
+			"a\n",
+			"\na",
+			" a",
+			"ä",
+			"а", // a Cyrillic a
+			"a".repeat(33),
+			`${"a".repeat(32)}\n`,
+			"..",
+			"mcp/../x",
+		]) {
+			expect(isAppId(id)).toBe(false);
+		}
+		for (const notText of [undefined, null, 1, ["a"], { id: "a" }, true]) {
+			expect(isAppId(notText)).toBe(false);
+		}
+	});
+});
+
+describe("the apps a site reserves (DEC-197)", () => {
+	const A = "https://a.example";
+	const B = "https://b.example";
+	const C = "https://c.example";
+	// The provider is never asked: these settings only pass validation.
+	const oidc = {
+		issuer: "https://idp.example",
+		clientId: "relay",
+		clientSecret: "not-a-secret",
+		assertionIssuer: "https://app.example",
+		assertionJwksUrl: "https://app.example/jwks",
+	};
+	const config = (input: Partial<RelayConfig>) =>
+		resolveConfig({ publicUrl: "https://relay.example", ...input });
+
+	/** Whether a page of `origin` may serve `app`; `undefined`: no such site. */
+	function allowed(c: RelayConfig, origin: string, app: string) {
+		const site = siteFor(c, origin);
+		return site === undefined ? undefined : appAllowed(c, site, app);
+	}
+
+	test("appAllowed: a site that lists apps serves only those; a listed app is served only by the sites that list it", () => {
+		const c = config({
+			allowedOrigins: [C],
+			sites: [
+				{ origin: A, apps: ["notes", "shared"] },
+				{ origin: B, apps: ["shared"] },
+				{ origin: "https://plain.example", name: "Plain" },
+			],
+		});
+		const table: [string, string, boolean][] = [
+			[A, "notes", true],
+			[A, "shared", true],
+			[A, "free", false],
+			[B, "shared", true],
+			[B, "notes", false],
+			[B, "free", false],
+			["https://plain.example", "free", true],
+			["https://plain.example", "notes", false],
+			["https://plain.example", "shared", false],
+			[C, "free", true],
+			[C, "notes", false],
+			[C, "shared", false],
+		];
+		for (const [origin, app, expected] of table) {
+			expect([origin, app, allowed(c, origin, app)]).toEqual([
+				origin,
+				app,
+				expected,
+			]);
+		}
+		expect(allowed(c, "https://unknown.example", "free")).toBeUndefined();
+	});
+
+	test("appAllowed on an open relay: any origin serves what nobody lists, only the listing site what is listed", () => {
+		const c = config({
+			allowedOrigins: "*",
+			sites: [{ origin: A, apps: ["notes"] }],
+		});
+		expect(allowed(c, "https://anyone.example", "free")).toBe(true);
+		expect(allowed(c, "https://anyone.example", "notes")).toBe(false);
+		expect(allowed(c, A, "notes")).toBe(true);
+		expect(allowed(c, A, "free")).toBe(false);
+	});
+
+	test("without any list every app is open to every site", () => {
+		const c = config({ allowedOrigins: [C], sites: [{ origin: A }] });
+		for (const origin of [A, C]) {
+			for (const app of ["notes", "free", "a"]) {
+				expect(allowed(c, origin, app)).toBe(true);
+			}
+		}
+	});
+
+	test("a bad list is a configuration error of TAB_MCP_SITES", () => {
+		let error: unknown;
+		try {
+			config({ sites: [{ origin: A, apps: [] }] });
+		} catch (e) {
+			error = e;
+		}
+		expect(error).toBeInstanceOf(ConfigError);
+		expect(describeConfigError(error as ConfigError)).toBe(
+			`TAB_MCP_SITES: site apps must be a list of app ids (1-32 characters of a-z, 0-9 and -): ${A}`,
+		);
+	});
+
+	describe("pairingKindsOf: the ways an app's pages can pair, from the configuration alone", () => {
+		test("a reserved app: the methods of the sites that list it, code first", () => {
+			const c = config({
+				oidc,
+				allowedOrigins: [C],
+				sites: [
+					{ origin: B, pairing: "oidc", apps: ["both", "bound"] },
+					{ origin: A, pairing: "code", apps: ["both", "plain"] },
+				],
+			});
+			expect(pairingKindsOf(c, "plain")).toEqual(["code"]);
+			expect(pairingKindsOf(c, "bound")).toEqual(["oidc"]);
+			// Whatever the order of the sites.
+			expect(pairingKindsOf(c, "both")).toEqual(["code", "oidc"]);
+		});
+
+		test("a reserved app takes nothing from the origins that may not serve it", () => {
+			// The allowed origin pairs by code and so does the open relay, but
+			// neither may serve an app the oidc site reserves.
+			for (const allowedOrigins of [[C], "*"] as const) {
+				const c = config({
+					oidc,
+					allowedOrigins: allowedOrigins as RelayConfig["allowedOrigins"],
+					sites: [
+						{ origin: B, pairing: "oidc", apps: ["bound"] },
+						{ origin: A, pairing: "code" },
+					],
+				});
+				expect(pairingKindsOf(c, "bound")).toEqual(["oidc"]);
+			}
+		});
+
+		test("a site without a method of its own has the instance's (identity)", () => {
+			const c = config({
+				oidc,
+				identity: "oidc",
+				sites: [
+					{ origin: A, apps: ["inherits"] },
+					{ origin: B, pairing: "code", apps: ["plain"] },
+				],
+			});
+			expect(pairingKindsOf(c, "inherits")).toEqual(["oidc"]);
+			expect(pairingKindsOf(c, "plain")).toEqual(["code"]);
+		});
+
+		test("an app nobody lists: the methods of the sites without a list and of the allowed origins", () => {
+			const code = config({ allowedOrigins: [C] });
+			expect(pairingKindsOf(code, "free")).toEqual(["code"]);
+			const bound = config({ oidc, identity: "oidc", allowedOrigins: [C] });
+			expect(pairingKindsOf(bound, "free")).toEqual(["oidc"]);
+			const both = config({
+				oidc,
+				identity: "oidc",
+				allowedOrigins: [C],
+				sites: [{ origin: A, pairing: "code" }],
+			});
+			expect(pairingKindsOf(both, "free")).toEqual(["code", "oidc"]);
+			const siteOnly = config({
+				oidc,
+				sites: [{ origin: A, pairing: "oidc" }],
+			});
+			expect(pairingKindsOf(siteOnly, "free")).toEqual(["oidc"]);
+		});
+
+		test("an app nobody lists takes nothing from the sites that list others: they may not serve it", () => {
+			const c = config({
+				oidc,
+				allowedOrigins: [C],
+				sites: [{ origin: B, pairing: "oidc", apps: ["bound"] }],
+			});
+			expect(pairingKindsOf(c, "free")).toEqual(["code"]);
+		});
+
+		test("an open relay: code for an app nobody lists, and the method of a site without a list", () => {
+			expect(pairingKindsOf(config({ allowedOrigins: "*" }), "free")).toEqual([
+				"code",
+			]);
+			const c = config({
+				oidc,
+				allowedOrigins: "*",
+				sites: [{ origin: A, pairing: "oidc" }],
+			});
+			expect(pairingKindsOf(c, "free")).toEqual(["code", "oidc"]);
+		});
+
+		test("moz-extension://* pairs by code, whatever the instance's identity", () => {
+			const firefox = config({
+				oidc,
+				identity: "oidc",
+				allowedOrigins: ["moz-extension://*"],
+			});
+			expect(pairingKindsOf(firefox, "free")).toEqual(["code"]);
+			const mixed = config({
+				oidc,
+				identity: "oidc",
+				allowedOrigins: ["moz-extension://*", C],
+			});
+			expect(pairingKindsOf(mixed, "free")).toEqual(["code", "oidc"]);
+			// A reserved app is not Firefox's extensions' to serve.
+			const reserved = config({
+				oidc,
+				allowedOrigins: ["moz-extension://*"],
+				sites: [{ origin: B, pairing: "oidc", apps: ["bound"] }],
+			});
+			expect(pairingKindsOf(reserved, "bound")).toEqual(["oidc"]);
+		});
+
+		test("an app no origin may serve has no method", () => {
+			const c = config({ sites: [{ origin: A, apps: ["notes"] }] });
+			expect(pairingKindsOf(c, "free")).toEqual([]);
+			expect(pairingKindsOf(config({}), "free")).toEqual([]);
+		});
+
+		test("what it says is what siteFor and appAllowed let a page do", () => {
+			// For every origin that may serve the app, its method is offered;
+			// no method is offered that none of them has.
+			const c = config({
+				oidc,
+				identity: "oidc",
+				allowedOrigins: [C, "moz-extension://*"],
+				sites: [
+					{ origin: A, pairing: "code", apps: ["plain", "both"] },
+					{ origin: B, apps: ["both", "bound"] },
+					{ origin: "https://d.example", pairing: "code" },
+				],
+			});
+			const origins = [
+				A,
+				B,
+				C,
+				"https://d.example",
+				"moz-extension://3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f",
+			];
+			for (const app of ["plain", "both", "bound", "free"]) {
+				const served = new Set<string>();
+				for (const origin of origins) {
+					const site = siteFor(c, origin);
+					if (site !== undefined && appAllowed(c, site, app)) {
+						served.add(site.pairing);
+					}
+				}
+				expect([app, pairingKindsOf(c, app)]).toEqual([
+					app,
+					(["code", "oidc"] as const).filter((k) => served.has(k)),
+				]);
+			}
+		});
 	});
 });
 

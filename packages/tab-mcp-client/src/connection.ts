@@ -16,8 +16,8 @@ import type { RegisteredTool } from "./registry.ts";
 import { callContext, createTunnel, watchTools } from "./serve.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
-/** For the core: the address id in the `/tab` URL (DEC-098). */
-export { addressIdOf, withAddress } from "./address.ts";
+/** For the core: the address id the page's tabs tell each other by (DEC-095). */
+export { addressIdOf } from "./address.ts";
 /** For the core: compiles the schemas once this chunk (and the validator) is loaded. */
 export { compileRegistry } from "./mcp.ts";
 /** For the core: `TabMcp.serve`, the tunnel over a port (iteration 28). */
@@ -58,8 +58,6 @@ const CLOSE_REASONS: Record<number, DisconnectReason> = {
 	4004: "shutdown",
 	4005: "replaced",
 	4008: "rate_limited",
-	/** The URL's address id is not the secret's (DEC-098): retrying cannot help. */
-	4009: "policy",
 };
 
 const BYE_REASONS: Record<string, DisconnectReason> = {
@@ -119,13 +117,13 @@ export const SIBLING_GRACE_MS = 1_000;
  * `BroadcastChannel` when the relay accepted their claim of an address
  * (`claimed`, once their `session` arrived), so that a replaced tab can tell
  * a sibling from an impostor. A sibling whose `hello` failed says nothing.
- * The message carries the address id (as in the `/tab` URL; no secret), and
+ * The message carries the address id of the secret (`addressIdOf`; never the
+ * secret), and
  * only a claim of this tab's own address, heard after this tab's own
  * `session`, counts: one heard while this tab was still connecting, or from
  * a tab on another address (after `newAddress()` there), cannot have caused
- * the replacement (CC 5). A claim without an address, from a tab still on a
- * library up to 0.15, counts as before. Without `BroadcastChannel` nothing is heard, and
- * every `replaced` counts as unknown.
+ * the replacement (CC 5). A claim without an address counts for any. Without
+ * `BroadcastChannel` nothing is heard, and every `replaced` counts as unknown.
  */
 function siblingTabs(
 	name: string | undefined,
@@ -435,17 +433,16 @@ export function openConnection(
 			);
 			return;
 		}
-		const hello: TabMessage = {
+		send({
 			type: "hello",
 			library: host.library,
-			// The relay never read the title (CC 6); relays up to 0.9 still
-			// require the field.
-			page: { title: "" },
+			app:
+				host.appName === undefined
+					? { id: host.app }
+					: { id: host.app, name: host.appName },
 			secret,
-		};
-		if (host.appName !== undefined) hello.app = { name: host.appName };
-		if (revokeAll) hello.revokeAll = true;
-		send(hello);
+			...(revokeAll ? { revokeAll: true } : {}),
+		});
 	});
 	ws.addEventListener("message", (event: MessageEvent) => {
 		if (typeof event.data !== "string") return;

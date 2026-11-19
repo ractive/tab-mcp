@@ -23,6 +23,7 @@ import {
 } from "../browser.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
+	APP_ID,
 	type GrantView,
 	type PanelCommand,
 	type PanelState,
@@ -254,6 +255,7 @@ export class Connection {
 				instructions: INSTRUCTIONS,
 				icons: this.#icons,
 			},
+			app: APP_ID,
 			appName: PRODUCT,
 			storage: this.#storage,
 			// No tool of the extension is consequential: the page tools ask in

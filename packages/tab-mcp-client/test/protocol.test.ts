@@ -11,7 +11,13 @@ import type {
 	ToolCallClient,
 	ToolCallEnd,
 } from "../src/types.ts";
-import { MemoryStorage, newTab, nextEnd, nextEvent } from "./helpers.ts";
+import {
+	MemoryStorage,
+	newTab,
+	nextEnd,
+	nextEvent,
+	startRelay,
+} from "./helpers.ts";
 import { STUB_LIMITS, StubRelay } from "./stub-relay.ts";
 
 let relay: StubRelay;
@@ -36,8 +42,8 @@ afterEach(async () => {
 	await relay.stop();
 });
 
-test("hello carries the library, the page title, the app name and the secret", async () => {
-	await t.connect();
+test("hello carries the library, the app (its id from the server name, its name) and the secret, and nothing else", async () => {
+	const session = await t.connect();
 	const hello = await relay.next("hello");
 	expect(hello).toEqual({
 		type: "hello",
@@ -45,19 +51,50 @@ test("hello carries the library, the page title, the app name and the secret", a
 			name: "@ractive-ch/tab-mcp-client",
 			version: expect.any(String),
 		},
-		page: { title: "" },
-		app: { name: "saturnus" },
+		app: { id: "test-page", name: "saturnus" },
 		secret: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
 	});
 	expect(t.session?.appName).toBe("saturnus");
+	// The address is the app's (DEC-196): the relay made it from hello.app.id.
+	expect(session.address).toBe(`${relay.url}/s/test-page/mcp`);
 });
 
-test("hello never sends the page title (CC 6)", async () => {
+test("hello.app without appName has only the id", async () => {
+	t = newTab(relay.url);
+	await t.connect();
+	const hello = await relay.next("hello");
+	expect(hello["app"]).toEqual({ id: "test-page" });
+	expect(Object.keys(hello["app"] as object)).toEqual(["id"]);
+	expect(t.session?.appName).toBeUndefined();
+});
+
+test("hello.app.id is the app option where given, else made from server.name; the name for people is left as it is", async () => {
+	t = newTab(relay.url, {
+		app: "calc-2",
+		appName: "Über Calc 2",
+		server: { name: "Something else", version: "1.0.0" },
+	});
+	expect((await t.connect()).address).toBe(`${relay.url}/s/calc-2/mcp`);
+	expect((await relay.next("hello"))["app"]).toEqual({
+		id: "calc-2",
+		name: "Über Calc 2",
+	});
+	t.disconnect();
+	t = newTab(relay.url, {
+		server: { name: "  Über Calc: v2!  ", version: "1.0.0" },
+	});
+	expect((await t.connect()).address).toBe(`${relay.url}/s/uber-calc-v2/mcp`);
+	expect((await relay.next("hello"))["app"]).toEqual({ id: "uber-calc-v2" });
+});
+
+test("hello never sends the page title, not even an empty one (CC 6)", async () => {
 	const g = globalThis as { document?: unknown };
 	g.document = { title: "Inbox (3): a private subject" };
 	try {
 		await t.connect();
-		expect((await relay.next("hello"))["page"]).toEqual({ title: "" });
+		const hello = await relay.next("hello");
+		expect(hello).not.toHaveProperty("page");
+		expect(JSON.stringify(hello)).not.toContain("Inbox");
 	} finally {
 		delete g.document;
 	}
@@ -102,7 +139,8 @@ test.each([
 	[4002, "idle"],
 	[4003, "heartbeat"],
 	[4008, "rate_limited"],
-	[4009, "policy"],
+	// No code of its own any more (DEC-098 withdrawn): like any unknown one.
+	[4009, "closed"],
 	[1008, "policy"],
 	[3999, "closed"],
 	// What a proxy sends when the relay behind it restarts (CC 11).
@@ -157,22 +195,64 @@ describe("errors", () => {
 		expect(t.state).toBe("disconnected");
 	});
 
-	test("address_mismatch and close 4009 reject connect() as policy, not retried (DEC-098)", async () => {
+	test("app_not_allowed and close 1008 reject connect() as policy, with the relay's text, not retried (DEC-197)", async () => {
 		relay.answerHello = false;
 		void relay.next("hello").then(() => {
 			relay.send({
 				type: "error",
-				code: "address_mismatch",
-				message: "the address id in the URL is not the one of the secret",
+				code: "app_not_allowed",
+				message:
+					'this relay does not let https://page.example serve the app "test-page"',
 			});
-			relay.close(4009, "address mismatch");
+			relay.close(1008, "app not allowed");
 		});
 		const error = (await t.connect().catch((e: unknown) => e)) as Error & {
 			reason?: string;
 		};
-		expect(error.message).toContain("address id in the URL");
+		expect(error.message).toBe(
+			'The relay refused the connection: this relay does not let https://page.example serve the app "test-page"',
+		);
 		expect(error.reason).toBe("policy");
 		expect(t.state).toBe("disconnected");
+		expect(t.reconnecting).toBeUndefined();
+		await Bun.sleep(30);
+		expect(relay.sockets).toHaveLength(1);
+	});
+
+	test("a hello without an app id, as a library up to 0.16 sends it, is refused: by the relay, and by this stand-in alike", async () => {
+		const real = startRelay();
+		try {
+			for (const url of [real.url, relay.url]) {
+				const ws = new WebSocket(
+					`${url.replace("http", "ws")}/tab`,
+					"tab-mcp.v1",
+				);
+				await new Promise((resolve) => ws.addEventListener("open", resolve));
+				const answer = new Promise<MessageEvent>((resolve) =>
+					ws.addEventListener("message", resolve, { once: true }),
+				);
+				const closed = new Promise<CloseEvent>((resolve) =>
+					ws.addEventListener("close", resolve, { once: true }),
+				);
+				ws.send(
+					JSON.stringify({
+						type: "hello",
+						library: { name: "@ractive-ch/tab-mcp-client", version: "0.16.2" },
+						page: { title: "" },
+						app: { name: "saturnus" },
+						secret: "a".repeat(43),
+					}),
+				);
+				const error = JSON.parse(String((await answer).data)) as {
+					message: string;
+				};
+				expect(error).toMatchObject({ type: "error", code: "bad_message" });
+				expect(error.message).toStartWith("hello.app.id must be");
+				expect((await closed).code).toBe(1008);
+			}
+		} finally {
+			await real.stop();
+		}
 	});
 });
 
@@ -205,14 +285,14 @@ describe("pairing (DEC-028)", () => {
 		);
 		relay.send({
 			type: "pairing.code",
-			code: "123456",
+			code: "BCDF-GHJK",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		expect((await code).detail.pairingCode).toEqual({
-			code: "123456",
+			code: "BCDF-GHJK",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
-		expect(t.pairingCode?.code).toBe("123456");
+		expect(t.pairingCode?.code).toBe("BCDF-GHJK");
 		const cleared = nextEvent<{ pairingCode: PairingCode | undefined }>(
 			t,
 			"pairingcode",
@@ -228,14 +308,15 @@ describe("pairing (DEC-028)", () => {
 		await t.connect();
 		await relay.next("pairing.start");
 		const sent: unknown[] = [];
-		for (const reason of ["start", "used", "locked", "expired", "later", 7]) {
+		// "locked" is no reason any more (DEC-196): unknown, like any other word.
+		for (const reason of ["start", "used", "expired", "locked", "later", 7]) {
 			const code = nextEvent<{ pairingCode: PairingCode | undefined }>(
 				t,
 				"pairingcode",
 			);
 			relay.send({
 				type: "pairing.code",
-				code: "123456",
+				code: "BCDF-GHJK",
 				expiresAt: "2026-10-20T10:00:00.000Z",
 				reason,
 			});
@@ -244,8 +325,8 @@ describe("pairing (DEC-028)", () => {
 		expect(sent).toEqual([
 			"start",
 			"used",
-			"locked",
 			"expired",
+			undefined,
 			undefined,
 			undefined,
 		]);
@@ -256,7 +337,7 @@ describe("pairing (DEC-028)", () => {
 		await t.connect();
 		relay.send({
 			type: "pairing.code",
-			code: "111111",
+			code: "BBBB-CCCC",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		relay.send({ type: "ping", t: 1 });
@@ -266,7 +347,7 @@ describe("pairing (DEC-028)", () => {
 		expect(t.pairingCode).toBeUndefined();
 		relay.send({
 			type: "pairing.code",
-			code: "222222",
+			code: "DDDD-FFFF",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		await nextEvent(t, "pairingcode");
@@ -429,11 +510,11 @@ describe("grants", () => {
 		expect(relay.received.filter((m) => m["id"] === "r2")).toEqual([]);
 	});
 
-	test("newAddress takes the address back (hello.revokeAll), then connects with a new secret (DEC-136)", async () => {
+	test("newAddress revokes the old secret's grants (hello.revokeAll), then connects with a new secret at the same address (DEC-136, DEC-196)", async () => {
 		relay.grants = [GRANT];
-		await t.connect();
+		const before = (await t.connect()).address;
 		expect(t.grants.map((g) => g.grantId)).toEqual(["g_1"]);
-		relay.grants = []; // the new address has none
+		relay.grants = []; // the new secret has none
 		const firstSecret = (await relay.next("hello"))["secret"];
 		const states: string[] = [];
 		t.addEventListener("statechange", (e) => states.push(e.detail.state));
@@ -447,8 +528,11 @@ describe("grants", () => {
 		const hello = await relay.next("hello");
 		expect(hello["secret"]).not.toBe(firstSecret);
 		expect(hello["revokeAll"]).toBeUndefined();
+		// Both name the same app: the address the AI apps have stays.
+		expect(hello["app"]).toEqual({ id: "test-page", name: "saturnus" });
 		await again;
 		expect(t.state).toBe("connected");
+		expect(t.session?.address).toBe(before);
 		expect(t.grants).toEqual([]);
 		expect(relay.received.some((m) => m.type === "grants.revokeAll")).toBe(
 			false,
@@ -758,7 +842,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		expect((await relay.next("hello"))["secret"]).toBe(secret);
 	});
 
-	test("taken back, but connecting with the new address fails: rejects with addressChanged (DEC-170)", async () => {
+	test("taken back, but connecting with the new secret fails: rejects with addressChanged (DEC-170)", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		relay.answerHello = false;
@@ -769,7 +853,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		relay.send({
 			type: "session",
 			sessionId: "s_back",
-			address: `${relay.url}/a/${"a".repeat(52)}/mcp`,
+			address: relay.addressOf("test-page"),
 			origin: "https://page.example",
 			expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
 			limits: relay.limits,
@@ -809,7 +893,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		}
 	});
 
-	test("connect() while newAddress() runs waits for it and connects with the new address", async () => {
+	test("connect() while newAddress() runs waits for it and connects with the new secret", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		t.disconnect();
@@ -818,7 +902,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		const connecting = t.connect();
 		await renewing;
 		const session = await connecting;
-		expect(session.address).toBeDefined();
+		expect(session.address).toBe(relay.addressOf("test-page"));
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
@@ -876,7 +960,11 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		const sibling = newTab(relay.url, { storage });
 		const failed = sibling.connect();
 		failed.catch(() => {});
-		await relay.next("hello", (m) => m["app"] === undefined);
+		// The sibling's hello: the one without an app name.
+		await relay.next(
+			"hello",
+			(m) => (m["app"] as { name?: string }).name === undefined,
+		);
 		sibling.disconnect();
 		await failed.catch(() => {});
 		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
@@ -944,7 +1032,7 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 			JSON.stringify({
 				type: "session",
 				sessionId: "s_t",
-				address: `${relay.url}/a/${"a".repeat(52)}/mcp`,
+				address: relay.addressOf("test-page"),
 				origin: "https://page.example",
 				expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
 				limits: STUB_LIMITS,

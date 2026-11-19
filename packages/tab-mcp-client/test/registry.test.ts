@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { isAppId } from "../../tab-mcp/src/config.ts";
 import { compileRegistry } from "../src/mcp.ts";
 import { ToolRegistry } from "../src/registry.ts";
 import { toolsFor } from "../src/serve.ts";
-import { TabMcp } from "../src/tab-mcp.ts";
+import { appIdOf, TabMcp } from "../src/tab-mcp.ts";
 import type { Tool, ToolCaller } from "../src/types.ts";
 import { MemoryStorage } from "./helpers.ts";
 
@@ -469,5 +470,165 @@ describe("TabMcp options", () => {
 		expect(make({ appName: "  " })).toThrow(/appName/);
 		expect(make({ appName: "a\nb" })).toThrow(/appName/);
 		expect(make({ server: { name: "t" } })).toThrow(/server/);
+	});
+
+	test("app is an app id as the relay takes it: 1-32 of a-z, 0-9 and -, none at either end; with or without a relay", () => {
+		for (const relay of [{ relay: "https://r.example" }, {}]) {
+			const make = (app: unknown) => () =>
+				new TabMcp({
+					...relay,
+					server: { name: "t", version: "1" },
+					storage: null,
+					app: app as string,
+				});
+			for (const app of ["a", "0", "a-b", "a--b", "calc-2", "x".repeat(32)]) {
+				expect(isAppId(app)).toBe(true);
+				expect(make(app)).not.toThrow();
+			}
+			for (const app of [
+				"",
+				"A",
+				"Calc",
+				"-a",
+				"a-",
+				"-",
+				"a b",
+				"a_b",
+				"a.b",
+				"a/b",
+				"ü",
+				" a",
+				"a\n",
+				"x".repeat(33),
+			]) {
+				expect(isAppId(app)).toBe(false);
+				expect(make(app)).toThrow(TypeError);
+				expect(make(app)).toThrow(/^TabMcp: app must be 1-32 characters/);
+			}
+		}
+	});
+
+	// A regular expression alone would take these: it tests them as strings,
+	// and hello would carry a number or an array as `app.id`.
+	test("app that is not a string is refused, even if it reads like an app id", () => {
+		const make = (app: unknown) => () =>
+			new TabMcp({
+				relay: "https://r.example",
+				server: { name: "t", version: "1" },
+				storage: null,
+				app: app as string,
+			});
+		for (const app of [123, ["calc"], { toString: () => "calc" }, true])
+			expect(make(app)).toThrow(/^TabMcp: app must be/);
+	});
+
+	test("a server.name that gives no app id needs app when there is a relay, and only then", () => {
+		const make = (o: object) => () =>
+			new TabMcp({
+				server: { name: "日本語", version: "1" },
+				storage: null,
+				...o,
+			});
+		for (const name of ["日本語", "", "   ", "---", "🙂"]) {
+			const server = { name, version: "1" };
+			expect(make({ relay: "https://r.example", server })).toThrow(TypeError);
+			expect(make({ relay: "https://r.example", server })).toThrow(
+				/^TabMcp: server\.name has no letter a-z and no digit .*: set app$/,
+			);
+			// `app` says it instead.
+			expect(
+				make({ relay: "https://r.example", server, app: "nihongo" }),
+			).not.toThrow();
+			// Without a relay there is no address: `serve()` and WebMCP need none.
+			expect(make({ server })).not.toThrow();
+			expect(make({ server })().hasRelay).toBe(false);
+		}
+	});
+});
+
+describe("appIdOf: the app id a server name gives (DEC-196)", () => {
+	// The id is part of the address every AI app keeps: a name must give the
+	// same id in every release.
+	test.each([
+		// Case.
+		["saturnus", "saturnus"],
+		["Saturnus", "saturnus"],
+		["HP-48GX", "hp-48gx"],
+		["42", "42"],
+		// Letters without their marks, composed or not.
+		["Über Café", "uber-cafe"],
+		["Ångström", "angstrom"],
+		["Cafe\u0301", "cafe"],
+		["İstanbul", "istanbul"],
+		["Crème brûlée", "creme-brulee"],
+		// A letter that is no a-z without a mark is like any other character.
+		["Straße", "stra-e"],
+		["Søren", "s-ren"],
+		// Each run of anything else is one "-".
+		["test page", "test-page"],
+		["a  --__  b", "a-b"],
+		["calc: v2.1", "calc-v2-1"],
+		["a:b#c", "a-b-c"],
+		["my_app/tools", "my-app-tools"],
+		["日本語 calc", "calc"],
+		// None at either end.
+		["--calc--", "calc"],
+		["  (calc)  ", "calc"],
+		["!a", "a"],
+		["a!", "a"],
+		["\u0301calc", "calc"],
+	])("%p gives %p", (name, id) => {
+		expect(appIdOf(name)).toBe(id);
+		expect(isAppId(id)).toBe(true);
+	});
+
+	test("at most 32 characters, and the cut does not end in -", () => {
+		expect(appIdOf("a".repeat(32))).toBe("a".repeat(32));
+		expect(appIdOf("a".repeat(40))).toBe("a".repeat(32));
+		// The 32nd character would be the "-" of a run: 31 are left.
+		expect(appIdOf(`${"a".repeat(31)} b`)).toBe("a".repeat(31));
+		expect(appIdOf(`${"a".repeat(31)}  --  b`)).toBe("a".repeat(31));
+		// The run right after the cut does not matter.
+		expect(appIdOf(`${"a".repeat(32)} b`)).toBe("a".repeat(32));
+		expect(appIdOf(`${"a".repeat(30)} bc`)).toBe(`${"a".repeat(30)}-b`);
+		// The 32 are counted after the marks went and the ends were cut.
+		expect(appIdOf(`  ${"é".repeat(32)}`)).toBe("e".repeat(32));
+	});
+
+	test("nothing left: the empty string", () => {
+		for (const name of ["", " ", "---", "_", "日本語", "🙂", "\u0301", "ß"])
+			expect(appIdOf(name)).toBe("");
+	});
+
+	test("whatever the name, the result is empty or an app id the relay takes, and gives itself", () => {
+		const parts = [
+			"a",
+			"Z",
+			"9",
+			"-",
+			" ",
+			"_",
+			".",
+			"é",
+			"\u0301",
+			"ß",
+			"語",
+			"🙂",
+			"İ",
+			"\u0000",
+		];
+		let seed = 45;
+		const next = () => {
+			seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+			return seed;
+		};
+		for (let i = 0; i < 2000; i++) {
+			let name = "";
+			for (let n = next() % 45; n > 0; n--)
+				name += parts[next() % parts.length] as string;
+			const id = appIdOf(name);
+			if (id !== "") expect([name, isAppId(id)]).toEqual([name, true]);
+			expect(appIdOf(id)).toBe(id);
+		}
 	});
 });

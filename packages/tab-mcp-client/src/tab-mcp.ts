@@ -98,6 +98,25 @@ function isAppName(value: unknown): value is string {
 	);
 }
 
+/** An app id as the relay takes it (DEC-196). */
+const APP_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+
+/**
+ * The app id a server name gives: lower case, letters without their marks,
+ * each run of anything but a-z and 0-9 as one `-`, none at either end, at
+ * most 32 characters; `""` when nothing is left.
+ */
+export function appIdOf(name: string): string {
+	return name
+		.normalize("NFKD")
+		.replace(/\p{M}/gu, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "")
+		.slice(0, 32)
+		.replace(/-$/, "");
+}
+
 /** `wss://host/tab` for a relay given as `https://host`, `wss://host` or with `/tab`. */
 export function tabUrl(relay: string): { url: string; origin: string } {
 	let u: URL;
@@ -186,6 +205,7 @@ type Listener<K extends keyof TabMcpEventMap> = (
 export class TabMcp extends EventTarget {
 	readonly #registry = new ToolRegistry();
 	readonly #server: ServerInfo;
+	readonly #app: string;
 	readonly #appName: string | undefined;
 	readonly #onConfirm: ConfirmHandler | undefined;
 	readonly #alwaysAllow: boolean;
@@ -253,6 +273,19 @@ export class TabMcp extends EventTarget {
 				"TabMcp: appName must be 1-64 characters without control characters",
 			);
 		}
+		const app = options.app ?? appIdOf(server.name);
+		if (
+			options.app !== undefined
+				? typeof app !== "string" || !APP_ID.test(app)
+				: relay && app === ""
+		) {
+			throw new TypeError(
+				options.app !== undefined
+					? "TabMcp: app must be 1-32 characters of a-z, 0-9 and -, not starting or ending with -"
+					: "TabMcp: server.name has no letter a-z and no digit to make the address of: set app",
+			);
+		}
+		this.#app = app;
 		this.#relayUrl = relay?.url;
 		this.#server = { ...server };
 		this.#appName = appName;
@@ -511,7 +544,7 @@ export class TabMcp extends EventTarget {
 	 * session and events stay unseen, but `#end` closes it.
 	 */
 	async #open(generation: number, takeBack?: string): Promise<SessionInfo> {
-		const { openConnection, addressIdOf, withAddress } = await this.#load();
+		const { openConnection, addressIdOf } = await this.#load();
 		const relayUrl = this.#relayUrl;
 		if (relayUrl === undefined || this.#secrets === undefined) return noRelay();
 		const secret =
@@ -521,12 +554,10 @@ export class TabMcp extends EventTarget {
 			throw new DOMException("The connection was cancelled", "AbortError");
 		}
 		const ref: { connection?: ConnectionHandle } = {};
-		const connection = openConnection(
-			this.#host(ref),
-			withAddress(relayUrl, address),
-			secret,
-			{ address, revokeAll: !!takeBack },
-		);
+		const connection = openConnection(this.#host(ref), relayUrl, secret, {
+			address,
+			revokeAll: !!takeBack,
+		});
 		if (!takeBack) ref.connection = connection;
 		this.#connection = connection;
 		return connection.ready;
@@ -572,7 +603,10 @@ export class TabMcp extends EventTarget {
 	}
 
 	/**
-	 * A new address. If the page has one already, it first takes it back: it
+	 * Disconnect every AI app and start over with a new secret. The address
+	 * people add to an AI app names the app and stays the same (DEC-196);
+	 * what changes is the page behind it, so every AI app has to pair again.
+	 * If the page has a secret already, it first takes its address back: it
 	 * connects with the old secret and the relay revokes every grant of it in
 	 * the same step (`hello.revokeAll`, DEC-095, DEC-136), connected or not,
 	 * taken over or not. Then it makes a new secret and connects with it if
@@ -976,6 +1010,7 @@ export class TabMcp extends EventTarget {
 		return {
 			...this.#calls,
 			server: this.#server,
+			app: this.#app,
 			appName: this.#appName,
 			tabs: this.#tabs,
 			library: { name: LIBRARY_NAME, version: VERSION },

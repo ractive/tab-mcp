@@ -28,6 +28,7 @@ export function tokenStoreConformance(
 				kind: "access",
 				grantId: "g_1",
 				addressId: "addr-a",
+				app: "app-a",
 				clientId: "https://client.example/cimd",
 				clientName: "Client",
 				scopes: ["tools"],

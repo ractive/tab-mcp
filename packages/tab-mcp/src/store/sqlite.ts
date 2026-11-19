@@ -9,17 +9,17 @@ import type {
 	TokenStore,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 /**
  * The oldest schema a relay must know to use a file of this version safely,
  * kept in the file's `meta` table (review of PR 65). A relay refuses a file
  * whose value is above its own `SCHEMA_VERSION`: a later release that adds
  * a column an older relay would drop raises it, and older relays from this
  * one on refuse to open that file rather than quietly lose the column.
- * Relays before this one do not read it: one of them drops `client_auth`
- * (DEC-106), so bound grants come back unbound.
+ * Version 6 added `app` (DEC-196): an older relay would drop it, and it
+ * serves addresses that no longer exist.
  */
-const MIN_READER_VERSION = 5;
+const MIN_READER_VERSION = 6;
 /** The reuse window of used refresh tokens (DEC-091), for the version 4 step. */
 const REUSE_WINDOW_MS = 86_400_000;
 
@@ -28,6 +28,7 @@ interface Row {
 	kind: string;
 	grant_id: string;
 	address_id: string;
+	app: string;
 	client_id: string;
 	client_name: string;
 	scopes: string;
@@ -45,6 +46,7 @@ function toRecord(row: Row): TokenRecord {
 		kind: row.kind as TokenKind,
 		grantId: row.grant_id,
 		addressId: row.address_id,
+		app: row.app,
 		clientId: row.client_id,
 		clientName: row.client_name,
 		scopes: JSON.parse(row.scopes) as string[],
@@ -131,7 +133,8 @@ export class SqliteTokenStore implements TokenStore {
 				expires_at INTEGER NOT NULL,
 				used_at INTEGER,
 				subject TEXT,
-				client_auth TEXT
+				client_auth TEXT,
+				app TEXT NOT NULL DEFAULT ''
 			) STRICT`);
 			// Version 3: the subject of identity-bound grants (DEC-077).
 			const columns = this.#db.query("PRAGMA table_info(tokens)").all() as {
@@ -144,6 +147,15 @@ export class SqliteTokenStore implements TokenStore {
 			// used client assertion ids (DEC-106).
 			if (!columns.some((c) => c.name === "client_auth")) {
 				this.#db.run("ALTER TABLE tokens ADD COLUMN client_auth TEXT");
+			}
+			// Version 6: the app of a grant's address (DEC-196). Tokens from
+			// before it were for addresses that no longer exist, so they go:
+			// none could be used, and a refresh would keep making more of them.
+			if (!columns.some((c) => c.name === "app")) {
+				this.#db.run("DELETE FROM tokens");
+				this.#db.run(
+					"ALTER TABLE tokens ADD COLUMN app TEXT NOT NULL DEFAULT ''",
+				);
 			}
 			this.#db.run(`CREATE TABLE IF NOT EXISTS nonces (
 				key TEXT PRIMARY KEY,
@@ -193,10 +205,10 @@ export class SqliteTokenStore implements TokenStore {
 			.query(
 				`INSERT OR REPLACE INTO tokens (hash, kind, grant_id, address_id, client_id,
 				client_name, scopes, grant_created_at, issued_at, expires_at, used_at, subject,
-				client_auth)
+				client_auth, app)
 				VALUES ($hash, $kind, $grant_id, $address_id, $client_id, $client_name,
 				$scopes, $grant_created_at, $issued_at, $expires_at, $used_at, $subject,
-				$client_auth)`,
+				$client_auth, $app)`,
 			)
 			.run({
 				hash: r.hash,
@@ -212,6 +224,7 @@ export class SqliteTokenStore implements TokenStore {
 				used_at: r.usedAt ?? null,
 				subject: r.subject ?? null,
 				client_auth: r.clientAuth ?? null,
+				app: r.app,
 			});
 	}
 

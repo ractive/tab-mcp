@@ -1,9 +1,10 @@
 import type { Server, ServerWebSocket } from "bun";
 import { version } from "../package.json" with { type: "json" };
-import { addressIdFromSecret, isAddressId, shortAddress } from "./address.ts";
+import { shortAddress } from "./address.ts";
 import { readBodyWithDeadline } from "./body.ts";
 import {
 	ANY_FIREFOX_EXTENSION,
+	isAppId,
 	largestMessageBytes,
 	MIN_MESSAGE_BYTES,
 	type RelayConfig,
@@ -31,6 +32,7 @@ import {
 	type RelayInfo,
 } from "./notopen.ts";
 import { STYLESHEET } from "./oauth/html.ts";
+import { CodeIndex, type PairingPool } from "./oauth/pairing.ts";
 import {
 	AuthorizationServer,
 	type AuthorizationTestMode,
@@ -145,8 +147,10 @@ export interface Relay {
 	/** The port the server listens on. */
 	readonly port: number;
 	readonly config: RelayConfig;
-	/** The MCP address a page with this secret gets. */
-	addressFor(secret: string): string;
+	/** The MCP address of an app's pages: `<url>/s/<app>/mcp` (DEC-196). */
+	addressFor(app: string): string;
+	/** The address ids of the pages of an app that are connected now. */
+	pagesOf(app: string): string[];
 	/** Number of connected tab sessions. */
 	readonly sessionCount: number;
 	/** Close all sessions (bye `shutdown`, close 4004) and stop the server. */
@@ -162,34 +166,6 @@ const HEALTH_REUSE_MS = 1000;
 /** A store key no token ever has (a token's hash is of `tmcp_…`). */
 const HEALTH_PROBE_HASH = hashToken("tab-mcp /healthz probe");
 
-/**
- * The `a` parameter of a `/tab` query, read from the raw text: `undefined`
- * when absent, `false` when malformed or repeated. Only the literal id
- * counts, never a percent-encoded one, so the relay agrees with a load
- * balancer that matches the URL as sent (review of PR 38).
- */
-function rawAddressParam(search: string): string | undefined | false {
-	let found: string | undefined;
-	for (const pair of search.replace(/^\?/, "").split("&")) {
-		if (pair === "") continue;
-		const eq = pair.indexOf("=");
-		const rawName = eq < 0 ? pair : pair.slice(0, eq);
-		let name: string;
-		try {
-			name = decodeURIComponent(rawName.replaceAll("+", " "));
-		} catch {
-			continue; // not ours: other parameters are ignored
-		}
-		if (name !== "a") continue;
-		const value = eq < 0 ? "" : pair.slice(eq + 1);
-		if (rawName !== "a" || found !== undefined || !isAddressId(value)) {
-			return false;
-		}
-		found = value;
-	}
-	return found;
-}
-
 interface WsData {
 	/** The first of `ipKeys`: the IP (prefix) key the session counts under. */
 	ip: string;
@@ -197,8 +173,6 @@ interface WsData {
 	ipKeys: string[];
 	origin: string;
 	site: Site;
-	/** The address id the URL named (`/tab?a=`, DEC-098). */
-	address?: string;
 	session?: TabSession;
 }
 
@@ -279,7 +253,7 @@ const INDEX_HTML = `<!doctype html>
 <div class="flow" role="img" aria-label="An AI app sends MCP requests to the relay, which passes them over a WebSocket to the browser tab.">
 <span class="node">AI app</span><span class="link">MCP</span><span class="node relay">relay</span><span class="link">WebSocket</span><span class="node">browser tab</span>
 </div>
-<p>A page connects to the relay and gets an address of its own. An AI app added with that address can call the page's tools while the tab is open, once the person at the page has approved it. The relay does not log request contents.</p>
+<p>A page connects to the relay under its app's address. An AI app added with that address is paired with one page by a code that page shows; it can then call that page's tools while the tab is open. The relay does not log request contents.</p>
 <p class="actions"><a class="button primary" href="${DOCS_URL}">Documentation</a><a class="button" href="${DOCS_URL}connect/">Connect an AI app</a></p>
 <footer>Source code: <a href="https://github.com/ractive/tab-mcp">github.com/ractive/tab-mcp</a>. Status: <a href="/healthz">/healthz</a>.</footer>
 </main></body></html>`;
@@ -338,6 +312,8 @@ function startRelay(
 
 	const sessions = new Map<string, TabSession>();
 	const allSessions = new Set<TabSession>();
+	/** The pairing codes the pages show now, each with its session (DEC-196). */
+	const codes = new CodeIndex<TabSession>();
 	const perIp = new Map<string, number>();
 	/** The per-IP keys each session counts under, released with it. */
 	const sessionIpKeys = new Map<TabSession, string[]>();
@@ -433,8 +409,8 @@ function startRelay(
 	/**
 	 * Every grant of an address was revoked at `at` (New address, revoke all,
 	 * sign-out): remember it. With `dropRequests` (New address, revoke all)
-	 * the address's open authorization requests and codes go too, so none of
-	 * them makes a grant afterwards; after a sign-out they stay, to tell the
+	 * the authorization codes made for the address go too, so none of them
+	 * makes a grant afterwards; after a sign-out they stay, to tell the
 	 * browser that nobody is signed in (a code is refused by the store's
 	 * tombstone, which dates from after it).
 	 */
@@ -469,7 +445,7 @@ function startRelay(
 			401,
 			RelayErrorCode.signedOut,
 			reason === "expired" ? EXPIRED_TEXT : REVOKED_TEXT,
-			{ "www-authenticate": wwwAuthenticate(addressId, true) },
+			{ "www-authenticate": wwwAuthenticate(session.app ?? "", true) },
 		);
 		if (ended > 0) {
 			logger.info("grant.requests_ended", {
@@ -520,6 +496,7 @@ function startRelay(
 		config,
 		logger,
 		store,
+		codes,
 		...(hooks?.pairingCodeTtlMs === undefined
 			? {}
 			: { pairingCodeTtlMs: hooks.pairingCodeTtlMs }),
@@ -635,7 +612,7 @@ function startRelay(
 			try {
 				key = await assertions.verify(
 					assertion,
-					`${publicUrl}/a/${addressId}/mcp`,
+					`${publicUrl}/s/${session.app}/mcp`,
 				);
 			} catch (error) {
 				// JwtError messages are fixed texts; what an inner error says
@@ -769,12 +746,11 @@ function startRelay(
 		message: string,
 		transient = false,
 	): void {
-		const addressId = session.addressId;
 		const headers: Record<string, string> = transient
 			? { "retry-after": RETRY_AFTER_S }
-			: addressId === undefined
+			: session.app === undefined
 				? {}
-				: { "www-authenticate": wwwAuthenticate(addressId, true) };
+				: { "www-authenticate": wwwAuthenticate(session.app, true) };
 		for (const exchange of [...session.pending.values()]) {
 			exchange.fail(
 				transient ? 503 : 401,
@@ -784,6 +760,47 @@ function startRelay(
 				headers,
 			);
 		}
+	}
+
+	/**
+	 * The pages of an app, as pairing finds one among them (DEC-196). A code
+	 * counts only at the address of its page's app, and is not used up by a
+	 * try at another app's.
+	 */
+	function pool(app: string): PairingPool {
+		return {
+			redeem(code) {
+				const s = codes.owner(code);
+				if (
+					s === undefined ||
+					!s.ready ||
+					s.app !== app ||
+					s.addressId === undefined ||
+					s.site.pairing !== "code"
+				) {
+					return undefined;
+				}
+				return s.codes.redeem(code) ? { addressId: s.addressId } : undefined;
+			},
+			signedIn(identity) {
+				let found: TabSession | undefined;
+				for (const s of sessions.values()) {
+					if (
+						s.ready &&
+						s.app === app &&
+						s.site.pairing === "oidc" &&
+						s.pairingOpen &&
+						s.identity === identity &&
+						(found === undefined || s.openedAt >= found.openedAt)
+					) {
+						found = s;
+					}
+				}
+				return found?.addressId === undefined
+					? undefined
+					: { addressId: found.addressId };
+			},
+		};
 	}
 
 	function readySession(
@@ -905,10 +922,8 @@ function startRelay(
 			logger,
 			store,
 			publicUrl: () => publicUrl,
-			session: (addressId) => {
-				const s = sessions.get(addressId);
-				return s?.ready === true ? s : undefined;
-			},
+			pool,
+			identityOf: (addressId) => readySession(addressId)?.identity,
 			grantAdded: (addressId: string, grant: GrantInfo) => {
 				const session = sessions.get(addressId);
 				if (session?.ready) session.grantAdded(grant);
@@ -947,14 +962,6 @@ function startRelay(
 				supported: [SUBPROTOCOL],
 			});
 		}
-		// The address id for a load balancer to route by (DEC-098). Optional
-		// (libraries before 0.8 do not send it); checked against the secret
-		// in hello. Never the secret itself: URLs end up in access logs.
-		const address = rawAddressParam(new URL(req.url).search);
-		if (address === false) {
-			logger.info("tab.refused", { reason: "bad_address" });
-			return json(400, { error: "bad_address" });
-		}
 		const realIp = clientIp(req, server);
 		// Counted per /64 and per /56 for IPv6 (DEC-061): one subscriber owns
 		// a whole /64, often a whole /56 (256 /64s).
@@ -978,7 +985,6 @@ function startRelay(
 				ipKeys,
 				origin: shownOrigin(site, origin),
 				site,
-				...(address === undefined ? {} : { address }),
 			},
 			headers: { "Sec-WebSocket-Protocol": SUBPROTOCOL },
 		});
@@ -987,15 +993,19 @@ function startRelay(
 		return json(400, { error: "websocket_upgrade_expected" });
 	}
 
-	function wwwAuthenticate(id: string, presented: boolean): string {
-		const metadata = `${publicUrl}/.well-known/oauth-protected-resource/a/${id}/mcp`;
+	function wwwAuthenticate(app: string, presented: boolean): string {
+		const metadata = `${publicUrl}/.well-known/oauth-protected-resource/s/${app}/mcp`;
 		const error = presented ? ', error="invalid_token"' : "";
 		return `Bearer resource_metadata="${metadata}", scope="tools"${error}`;
 	}
 
+	/**
+	 * The token's record: it says which page the request is for (its address
+	 * id), and is valid only at the address of that page's app (DEC-196).
+	 */
 	async function authenticate(
 		req: Request,
-		addressId: string,
+		app: string,
 	): Promise<TokenRecord | "missing" | "invalid" | "unavailable"> {
 		const header = req.headers.get("authorization");
 		if (header === null) return "missing";
@@ -1012,7 +1022,7 @@ function startRelay(
 		if (
 			record === undefined ||
 			record.kind !== "access" ||
-			record.addressId !== addressId ||
+			record.app !== app ||
 			record.expiresAt <= Date.now() ||
 			!record.scopes.includes("tools")
 		) {
@@ -1146,16 +1156,19 @@ function startRelay(
 	async function handleMcp(
 		req: Request,
 		server: Server<WsData>,
-		addressId: string,
+		app: string,
 	): Promise<Response> {
 		const started = Date.now();
+		/** The page the token is for, once the token is known. */
+		let page: string | undefined;
 		const logDone = (
 			status: number,
 			method: string,
 			extra: Record<string, string | number> = {},
 		) =>
 			logger.info("mcp.request", {
-				address: shortAddress(addressId),
+				app,
+				...(page === undefined ? {} : { address: shortAddress(page) }),
 				method,
 				status,
 				durationMs: Date.now() - started,
@@ -1194,7 +1207,7 @@ function startRelay(
 				},
 				{
 					...corsHeaders,
-					"www-authenticate": wwwAuthenticate(addressId, result === "invalid"),
+					"www-authenticate": wwwAuthenticate(app, result === "invalid"),
 				},
 			);
 		};
@@ -1206,18 +1219,18 @@ function startRelay(
 		// may be MIN_MESSAGE_BYTES, which every version probe fits; a larger
 		// one is not parsed and gets the 401 (or 503) it would get after the
 		// version check anyway (DEC-040 keeps that order for what is parsed).
-		const auth = await authenticate(req, addressId);
-		const authenticated = typeof auth !== "string";
+		const auth = await authenticate(req, app);
+		if (typeof auth !== "string") page = auth.addressId;
 		const body = await readBody(
 			req,
-			authenticated
-				? (sessions.get(addressId)?.limits.maxMessageBytes ??
-						lastSeen.get(addressId)?.maxMessageBytes ??
+			page !== undefined
+				? (sessions.get(page)?.limits.maxMessageBytes ??
+						lastSeen.get(page)?.maxMessageBytes ??
 						config.maxMessageBytes)
 				: MIN_MESSAGE_BYTES,
 		);
 		if (body instanceof Response) {
-			if (!authenticated && body.status === 413) return refused(auth);
+			if (typeof auth === "string" && body.status === 413) return refused(auth);
 			logDone(body.status, "?");
 			return body;
 		}
@@ -1230,6 +1243,7 @@ function startRelay(
 			return version;
 		}
 		if (typeof auth === "string") return refused(auth);
+		const addressId = auth.addressId;
 
 		const headers: Record<string, string> = {};
 		for (const [k, v] of req.headers) {
@@ -1283,7 +1297,7 @@ function startRelay(
 				// The token was checked before the wait (up to pageWaitMs): its
 				// grant may have been revoked meanwhile, also on another
 				// instance, or by the page that just connected (New address).
-				const again = await authenticate(req, addressId);
+				const again = await authenticate(req, app);
 				if (typeof again === "string") return refused(again, "revoked");
 				if (req.signal.aborted) return closed();
 				found = readySession(addressId, usable);
@@ -1303,7 +1317,7 @@ function startRelay(
 					{ error: "invalid_token", error_description: MISMATCH_TEXT },
 					{
 						...corsHeaders,
-						"www-authenticate": `${wwwAuthenticate(addressId, true)}, error_description="${MISMATCH_TEXT}"`,
+						"www-authenticate": `${wwwAuthenticate(app, true)}, error_description="${MISMATCH_TEXT}"`,
 					},
 				);
 			}
@@ -1630,8 +1644,8 @@ function startRelay(
 				GET: () => auth.metadata(),
 				OPTIONS: () => auth.preflight("GET"),
 			},
-			"/.well-known/oauth-protected-resource/a/:id/mcp": {
-				GET: (req) => auth.protectedResource(req.params.id),
+			"/.well-known/oauth-protected-resource/s/:app/mcp": {
+				GET: (req) => auth.protectedResource(req.params.app),
 				OPTIONS: () => auth.preflight("GET"),
 			},
 			"/authorize": {
@@ -1652,12 +1666,11 @@ function startRelay(
 				OPTIONS: () => auth.preflight("POST"),
 				GET: postOnly,
 			},
-			"/a/:id/mcp": {
+			"/s/:app/mcp": {
 				POST: (req, srv) => {
-					const id = req.params.id;
-					if (!isAddressId(id))
-						return new Response("Not found", { status: 404 });
-					return handleMcp(req, srv, id);
+					const app = req.params.app;
+					if (!isAppId(app)) return new Response("Not found", { status: 404 });
+					return handleMcp(req, srv, app);
 				},
 				OPTIONS: (req) => preflight(req),
 				GET: methodNotAllowed,
@@ -1691,7 +1704,6 @@ function startRelay(
 					ws.data.origin,
 					ws.data.site,
 					host,
-					ws.data.address,
 				);
 				ws.data.session = session;
 				allSessions.add(session);
@@ -1787,7 +1799,11 @@ function startRelay(
 		url: publicUrl,
 		port,
 		config,
-		addressFor: (secret) => `${publicUrl}/a/${addressIdFromSecret(secret)}/mcp`,
+		addressFor: (app) => `${publicUrl}/s/${app}/mcp`,
+		pagesOf: (app) =>
+			[...sessions].flatMap(([id, s]) =>
+				s.ready && s.app === app ? [id] : [],
+			),
 		get sessionCount() {
 			return allSessions.size;
 		},

@@ -223,6 +223,9 @@ Credentials: [release credentials](/operations/release-secrets.md).
 
 ## DEC-027: Stable address from a secret kept in the page (owner)
 
+**Amended by DEC-196:** the secret and the address id stay as what a tab is, but the
+address is `https://<relay>/s/<app>/mcp` and no longer contains the id.
+
 The page keeps a random secret (32 bytes, base64url, 43 characters) in `localStorage`. The
 address id is `base32(sha256(secret))`: SHA-256 over the secret's UTF-8 text, RFC 4648
 base32, lower case, no padding (52 characters); the address is
@@ -235,6 +238,9 @@ session wins, the older tab gets `bye` with reason `replaced` and close code 400
 DEC-017.
 
 ## DEC-028: Pairing like a TV sign-in (owner)
+
+**Amended by DEC-196:** the code has 8 letters and alone finds the page; no attempts per
+code; the pairing page names the app, not the page's origin.
 
 Replaces the code comparison (DEC-007). When the user clicks "Connect your AI tool", the tab
 shows the MCP address to paste into the AI app and "When asked, enter the code 123456".
@@ -1363,6 +1369,9 @@ client's name and host are escaped the same way, in case a relay does not strip 
 
 ## DEC-088: Connection requests only while the page is connecting; evict at the caps
 
+**Amended by DEC-196:** a request no longer names a page, so every valid request is kept
+and the caps per address are gone; the caps per network and in all stay.
+
 From the security audit of 2026-10-24 (finding 1), iteration 12. DEC-061 kept a pending
 authorization for any address with a connected tab and refused with 429 past 20 per
 address. Anyone who knew an address (A1) could therefore keep it full from two networks
@@ -1834,6 +1843,8 @@ flood, so a CDN in front does not see it.
   networks at the proxy, lower the per-IP limit). Iteration 11 task 10 stays open.
 
 ## DEC-098: The address id in the `/tab` URL, for several instances
+
+**Withdrawn by DEC-198.**
 
 Owner decision of 2026-10-25 on the architecture note of iteration 11 (F9): carry the
 address id (never the secret) in the tab's URL, so that others can run several relay
@@ -4018,3 +4029,153 @@ for the Edge upload to be automated as well.
   holds the API key could upload another zip; the key lives only in the environment and
   in the owner's password manager, and it expires.
 - No third-party code in the job: the API is called with `curl`, as for Chrome (DEC-190).
+
+## DEC-196: One fixed address per app; the code alone finds the page (owner)
+
+2026-11-19, [iteration 45](/iterations/iteration-45-fixed-address.md). The owner gave
+Sitegloss to a colleague whose company does not let members add custom connectors to
+Claude. An Owner can add one for the organisation, by one exact URL without a pattern;
+every member then signs in to it by themselves
+([add a custom connector](https://claude.com/docs/connectors/custom/add-unlisted), read
+2026-11-19). An address that names the tab (DEC-027) cannot be allowed that way. Request
+headers exist there (beta) only as one credential for the whole organisation, so what
+differs per user has to come from the OAuth sign-in. Owner: "Let's do it. No backwards
+compatibility. We can start fresh."
+
+- **Address** `https://<relay>/s/<app>/mcp`, the same for every page of an app. `<app>`
+  is the app id: 1 to 32 characters of `a-z`, `0-9` and `-`, not starting or ending with
+  `-`. `/a/{id}/mcp` is gone.
+- **The page names its app** in `hello.app.id` (required). The library takes the `app`
+  option, or derives the id from `server.name` (lower case, letters without their marks,
+  each run of other characters one `-`, at most 32), which already decides the storage
+  key of the secret. The relay's site list cannot name it: Firefox gives every
+  installation of an extension its own origin, and one origin can run several apps (the
+  examples on ractive.ch). The tab-mcp browser extension sets `tab-mcp-extension` and
+  `tab-mcp-extension-firefox`.
+- **The secret stays, and the address id is of the app and the secret together**:
+  `base32(sha256(app + "\n" + secret))` (amends DEC-027). Sessions, grants and tokens
+  are keyed by it as before; it is no longer part of a URL. The same secret under
+  another app is another page, with its own session and no grant of the first: a token
+  never reaches a page that names another app than the one it was made for, and an
+  origin with a copied secret cannot take over the page of an app it may not serve
+  (DEC-197). Found by the reviews of the first version, where the id was the secret's
+  alone and the token's app was only compared with the URL.
+- **Pairing**: `/authorize` takes the app's address as `resource` and always shows the
+  form; it no longer looks whether a page is open, so it tells nothing about that. The
+  typed code finds the session among the app's pages (one index of the relay's live
+  codes; a code counts only at the address of its page's app and is not used up
+  elsewhere). The authorization code, and then the grant, are for that session's address
+  id.
+- **Tool calls**: the bearer token's record gives the address id and with it the
+  session. `TokenRecord` carries the app (RFC 8707): a token is refused at another app's
+  address, and a refresh naming another `resource` is `invalid_target`. The SQLite store
+  is at schema 6; the step to it deletes the tokens from before, which were for
+  addresses that no longer exist.
+- **The code** is 8 letters of `BCDFGHJKLMNPQRSTVWXZ` (RFC 8628 §6.1; 2.56 × 10¹⁰
+  values), sent to the page as `XXXX-XXXX`, typed in any case with or without the dash,
+  unique among the relay's live codes, 2 minutes, single use. No attempts per code and
+  no `locked` (amends DEC-028, DEC-060): a wrong guess does not belong to a code any
+  more. One text for a wrong and an expired code.
+- **Guess limits per network** (an IPv6 /56): 10, then one a minute; a right code is
+  given back, malformed input is not a guess (DEC-061 kept). A sign-in is charged when
+  it starts and given back when it pairs, so the people of one office signing in one
+  after another are no guesses. No limit per address
+  (there is none to charge) and none across networks: a limit anyone can use up locks
+  the owners out (the lesson of DEC-061). One network's 1 450 guesses a day hit one of
+  N open dialogs with probability N × 5.7 × 10⁻⁸ a day.
+- **Open requests** are capped per network (10: the eleventh pushes out that network's
+  own oldest, so nobody is refused for loading the page again) and in all (10 000,
+  evicting the oldest request among those of the networks that hold the most). The caps
+  per address, and "no request while the page's dialog is closed", are gone (amends
+  DEC-088): a request no longer names a page.
+- **What the pairing page says**: the AI app's name and verified host, and the app id
+  from the address. Not the page's origin or its own name for itself: the relay does not
+  know the page before the code, and after it the browser goes back to the AI app. The
+  code is the proof that the user sees the page they mean.
+- **Identity binding** (`oidc`, DEC-079): the sign-in comes first. The grant is for the
+  app's page whose user is the signed-in person and whose dialog is open (of several, the
+  one that connected last). No such page, a closed dialog, a signed-out page and another
+  person are one answer, as the relay cannot tell them apart. An app whose pages can pair
+  both ways gets both on one page: the code field, and "Sign in instead".
+- **A tab assertion's audience** (DEC-076) is the app's address, so it no longer names
+  one page. Its single use (`jti`), its 60 seconds and its issuer still bind it; whoever
+  holds a person's assertion could bind any page of the app as that person, which before
+  took the page's address too.
+- **"New address"** still makes a new secret and revokes every grant (DEC-095), but the
+  address people see stays: the library's dialog and the extension's panel call it
+  "Disconnect all apps". The method is still `newAddress()`; renaming it is open.
+
+What gets weaker, recorded in the threat model:
+
+- The code is the only thing that selects a page.
+- A user who reads their code out to someone gives that person's AI app access. Before,
+  the address was needed too. Identity binding is the cure where a site has it.
+- A tab assertion is not bound to one page.
+- With identity binding, anyone can open `/authorize` for an app with a client of their
+  own. If a user follows such a link and clicks Connect while their page's dialog is
+  open, a single sign-on that asks nothing pairs that client with their page. Before,
+  it took the page's address to get that far. The page names the client's verified
+  host, and the dialog must be open, which for `oidc` has no time limit. Open: a time
+  limit on the open dialog, or a confirmation in the page.
+- Everyone behind one address shares its guess limit and its ten open requests, as
+  they already shared the limits on page loads and form posts: someone on the same
+  network can keep it out of pairing. Before, that took the victim's address for the
+  guess limit.
+
+## DEC-197: Sites may reserve apps
+
+Iteration 45. The app id in an address is the page's own word (DEC-196), so on a relay
+that serves several origins any of them could serve `/s/sitegloss/mcp`. An organisation
+that allows that URL allows an app, not a relay.
+
+- `sites[].apps` lists the app ids an origin serves. Its pages may name only these, and
+  no origin that does not list an app may serve it: not another site, not an origin of
+  `TAB_MCP_ALLOWED_ORIGINS`, not a Firefox extension, not anyone on an open relay.
+- An app no site lists is open to every origin the relay allows, as an app name was
+  before (DEC-045).
+- A page whose origin may not serve the app it names gets `error` `app_not_allowed` and
+  close 1008, before anything is claimed, so it cannot end the session of a page that
+  may.
+- **Firefox**: no list can name one Firefox extension (DEC-189), so an app reserved for
+  a Chrome extension's origin cannot also be served by its Firefox build. That build
+  needs an app id of its own, which the operator leaves unreserved.
+- Which pairing methods the page for an app offers comes from this configuration alone
+  (`pairingKindsOf`): the methods of the sites that list the app, or, for an unreserved
+  app, of every origin that could serve it.
+
+## DEC-198: One relay instance; DEC-098 is withdrawn
+
+Iteration 45. DEC-098 let a load balancer send every request of one address to the
+instance that holds its tab, by the address id in the URL. With DEC-196 the request that
+matters carries no address: a typed code must reach the instance whose page shows it, and
+a form post cannot be routed by its body's code.
+
+- `/tab?a=`, `bad_address`, close code 4009 and `address_mismatch` are gone, and the
+  address id no longer leads the authorization code or the OIDC `state`.
+- "Running several instances" leaves `docs/self-hosting.md`. One process serves 500
+  sessions by default and far more when asked; the token store may still be shared.
+- If it is ever needed again: a shared index of live codes and sessions, and tokens
+  that name their instance. Not built.
+
+## DEC-199: The pairing form has hooks for an extension in the same browser (owner)
+
+Iteration 45; the owner, 2026-11-19: "That would be cool", and "the 'type in the code
+manually' flow still needs to work. I also had the case, where I did the pairing in
+another browser".
+
+- An extension that is the page (Sitegloss, the tab-mcp browser extension) can see the
+  relay's `/authorize` page when it opens in its own browser, ask its user ("Connect
+  Claude (claude.ai)?"), and on Allow write its own code into the form and submit it.
+  The relay still checks a real code; nothing about the relay's checks changes.
+- The page cannot call the extension (no scripts, DEC-057), so the extension reads the
+  page. The hooks, version 1: on the form `data-tab-mcp-pairing="1"`, `data-app`,
+  `data-client-name`, `data-client-host`; on the field `data-tab-mcp-field="code"`; on
+  the button `data-tab-mcp-action="connect"`. They say what the page says and never hold
+  a code. A relay test pins them.
+- An extension must act only on a top-level page of its relay's origin, only for its own
+  `data-app`, and only after its user said yes: one click is less than opening the
+  dialog and typing, and any site can be a client with a name of its choice, so the
+  question must show the verified host.
+- Typing the code stays the way that always works: another browser, another profile,
+  another device, or a user who ignores the question.
+- Built in Sitegloss, after this release; the tab-mcp browser extension may follow.

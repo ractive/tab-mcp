@@ -2,23 +2,24 @@
  * The relay's OAuth 2.1 authorization server (DEC-006, DEC-015, DEC-031),
  * written without an OAuth library:
  *
- * - RFC 9728 protected-resource metadata per address, RFC 8414 server metadata;
+ * - RFC 9728 protected-resource metadata per app, RFC 8414 server metadata;
  * - clients only through Client ID Metadata Documents (`cimd.ts`);
  * - `/authorize` with PKCE S256 only, exact redirect URIs (loopback port
- *   relaxed), `resource` bound to one address (RFC 8707), `iss` in every
- *   response (RFC 9207), and the pairing step of the address's site (DEC-042);
+ *   relaxed), `resource` bound to one app's address (RFC 8707), `iss` in
+ *   every response (RFC 9207), and the pairing step that finds the page among
+ *   the app's and binds the grant to it (DEC-042, DEC-196);
  * - `/token` for the authorization code and rotating refresh tokens (DEC-029);
  * - client authentication `none` or `private_key_jwt` (DEC-106);
  * - `/revoke` (RFC 7009).
  */
 
-import { isAddressId, shortAddress } from "../address.ts";
+import { shortAddress } from "../address.ts";
 import { readBodyWithDeadline } from "../body.ts";
 import {
-	isExtensionOrigin,
+	isAppId,
 	type PairingKind,
+	pairingKindsOf,
 	type RelayConfig,
-	type Site,
 } from "../config.ts";
 import {
 	constantTimeEqual,
@@ -56,8 +57,8 @@ import { OidcPairing } from "./oidc.ts";
 import {
 	PAIRING_METHODS,
 	type PairingMethod,
+	type PairingPool,
 	type PairingResult,
-	type PairingTarget,
 } from "./pairing.ts";
 
 /** The only scope: calling the page's tools. */
@@ -68,11 +69,13 @@ const PENDING_TTL_MS = 10 * 60_000;
 /** Authorization codes are single-use and short-lived (RFC 6749 §4.1.2). */
 const AUTH_CODE_TTL_MS = 60_000;
 const MAX_PENDING = 10_000;
-/** Open authorization requests per IP (prefix) and per address (DEC-061). */
+/**
+ * Open authorization requests per IP (prefix) (DEC-061). A network at its
+ * cap loses its own oldest request to a new one (DEC-088): someone who
+ * loads the pairing page again and again, or an office behind one address,
+ * is not refused, and no network can hold more of the relay's total.
+ */
 const MAX_PENDING_PER_IP = 10;
-const MAX_PENDING_PER_ADDRESS = 20;
-/** One network's share of an address's open requests (DEC-088). */
-const MAX_PENDING_PER_ADDRESS_IP = 5;
 /** How long a used refresh token is kept to detect its reuse (DEC-091). */
 const REFRESH_REUSE_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_CODES = 10_000;
@@ -84,8 +87,6 @@ const MAX_STATE_LENGTH = 1024;
  * so a host's share allows about 30 token requests a second.
  */
 const MAX_NONCES_PER_HOST = 10_000;
-/** Keys each pairing-guess limit keeps; when full, new keys are refused. */
-const GUESS_LIMIT_KEYS = 100_000;
 /**
  * `/token` and `/revoke` requests per IP, successes included (DEC-117): access
  * tokens live an hour, so one AI app's users refresh about once an hour each;
@@ -97,20 +98,18 @@ const MAX_NONCES = 100_000;
 /** The one text of every client authentication failure; the reason is logged. */
 const CLIENT_AUTH_FAILED = "client authentication failed";
 
-/** A tab session as the authorization server sees it. */
-export interface AuthorizeSession extends PairingTarget {
-	readonly origin: string;
-	readonly appName: string | undefined;
-	readonly site: Site;
-}
-
 export interface AuthorizationHost {
 	readonly config: RelayConfig;
 	readonly logger: Logger;
 	readonly store: TokenStore;
 	publicUrl(): string;
-	/** The connected (ready) tab session of an address. */
-	session(addressId: string): AuthorizeSession | undefined;
+	/** The connected pages of an app, as pairing finds one among them (DEC-196). */
+	pool(app: string): PairingPool;
+	/**
+	 * Who the user of the address's connected page is (DEC-077); `undefined`
+	 * when the page is not connected or nobody is signed in.
+	 */
+	identityOf(addressId: string): string | undefined;
 	/** Tell the address's tab, if connected. */
 	grantAdded(addressId: string, grant: GrantInfo): void;
 	grantRemoved(addressId: string, grantId: string, reason: string): void;
@@ -138,19 +137,27 @@ interface AuthorizationRequest {
 	redirectUri: string;
 	state: string | undefined;
 	codeChallenge: string;
-	addressId: string;
+	/** The app of `resource`: the `<app>` of `/s/<app>/mcp` (DEC-196). */
+	app: string;
 	resource: string;
 	scopes: string[];
 }
 
+/** A request whose page is not known yet: pairing finds it (DEC-196). */
 interface Pending extends AuthorizationRequest {
 	id: string;
 	expiresAt: number;
 	/** The network that opened it (`networkKey`, a /56 for IPv6), for the per-network caps. */
 	ip: string;
+	/** The pairing methods the page offers, `code` first (`pairingKindsOf`). */
+	kinds: PairingKind[];
+	/** The guess limit's key a sign-in under way was charged to. */
+	charged?: string;
 }
 
 interface IssuedCode extends AuthorizationRequest {
+	/** The address of the page pairing found: the grant is made for it. */
+	addressId: string;
 	/**
 	 * When the code was issued: the grant's creation time, so a revocation of
 	 * every grant of the address after it (its tombstone) refuses the code.
@@ -285,7 +292,6 @@ export class AuthorizationServer {
 	/** Insertion order is expiry order (one lifetime for all), so sweeps stop early. */
 	readonly #pending = new Map<string, Pending>();
 	readonly #pendingPerIp = new Map<string, number>();
-	readonly #pendingPerAddress = new Map<string, number>();
 	readonly #codes = new Map<string, IssuedCode>();
 	readonly #authCodeTtlMs: number;
 	readonly #maxPending: number;
@@ -304,29 +310,21 @@ export class AuthorizationServer {
 		onLimited: (key) => this.#limited("authorize_posts", key),
 	});
 	/**
-	 * Wrong code guesses (well-formed, against an active code) per address and
-	 * IP: one network cannot use up an address's allowance alone (DEC-061).
-	 * When full it drops its oldest bucket: that only lets one network use
-	 * more of the allowance `#guessesPerAddress` still caps, and failing
-	 * closed here would let a few networks refuse everyone's first guess.
+	 * Wrong pairing guesses (a well-formed code, a sign-in that could pair)
+	 * per network (`networkKey`: an IPv6 /56), the brute-force cap (DEC-061,
+	 * DEC-196): 10, then one a minute. A guess no longer belongs to an
+	 * address, so there is no cap per address or across networks that a
+	 * stranger could use up for a page's owner; the code's 2.56 × 10^10
+	 * values carry the rest. When full it drops its oldest bucket: failing
+	 * closed would let a party with that many networks refuse everyone's
+	 * first guess, and dropping only gives it its networks' first ten
+	 * guesses again, as often as `#attemptsPerIp` lets a network post.
 	 */
-	readonly #guessesPerAddressIp = new RateLimiter({
+	readonly #guessesPerIp = new RateLimiter({
 		capacity: 10,
 		refillPerSecond: 1 / 60,
+		maxKeys: 100_000,
 		onLimited: (key) => this.#limited("code_guesses", key),
-	});
-	/**
-	 * Wrong code guesses per address from everywhere: the brute-force cap
-	 * (A1). Fails closed when full: a drained bucket is never dropped to make
-	 * room, so churning through keys cannot reset it. Its keys are addresses
-	 * with a live code and an open request, which a flood cannot multiply
-	 * cheaply.
-	 */
-	readonly #guessesPerAddress = new RateLimiter({
-		capacity: 30,
-		refillPerSecond: 1 / 30,
-		maxKeys: GUESS_LIMIT_KEYS,
-		whenFull: "fail-closed",
 	});
 	/**
 	 * Failed `/token` and `/revoke` requests per IP (prefix): once drained, a
@@ -461,14 +459,13 @@ export class AuthorizationServer {
 
 	// RFC 9728 and RFC 8414
 
-	/** `/.well-known/oauth-protected-resource/a/{id}/mcp`. */
-	protectedResource(addressId: string): Response {
-		if (!isAddressId(addressId))
-			return new Response("Not found", { status: 404 });
+	/** `/.well-known/oauth-protected-resource/s/{app}/mcp`. */
+	protectedResource(app: string): Response {
+		if (!isAppId(app)) return new Response("Not found", { status: 404 });
 		return this.#json(
 			200,
 			{
-				resource: `${this.#issuer}/a/${addressId}/mcp`,
+				resource: `${this.#issuer}/s/${app}/mcp`,
 				authorization_servers: [this.#issuer],
 				scopes_supported: [SCOPE],
 				bearer_methods_supported: ["header"],
@@ -700,11 +697,11 @@ export class AuthorizationServer {
 			return fail("invalid_request", "code_challenge is malformed");
 		}
 		const resource = p["resource"];
-		const addressId = this.#addressOf(resource);
-		if (resource === undefined || addressId === undefined) {
+		const app = this.#appOf(resource);
+		if (resource === undefined || app === undefined) {
 			return fail(
 				"invalid_target",
-				"resource must be the MCP address of a page on this relay",
+				"resource must be the MCP address of an app on this relay",
 			);
 		}
 		const scopes = this.#grantedScopes(p["scope"]);
@@ -712,57 +709,55 @@ export class AuthorizationServer {
 			return fail("invalid_scope", `the only scope is "${SCOPE}"`);
 		}
 
-		// No connected tab, or its dialog is closed: nothing to pair with, so
-		// nothing is kept (DEC-061, DEC-088). Pairing needs the dialog open
-		// anyway, so a stranger who knows the address cannot fill its slots.
-		const session = this.#host.session(addressId);
-		if (session === undefined || !session.pairingOpen) {
-			return this.#offlinePage(
-				client,
-				`/authorize${new URL(req.url).search}`,
-				this.#errorUrl(
-					redirectUri,
-					state,
-					"access_denied",
-					"the user cancelled the connection",
-				),
-			);
-		}
-		const method = this.#methods[session.site.pairing];
-		if (method?.prepare !== undefined) {
+		// The address names an app, not a page (DEC-196): which page is meant
+		// comes out of the pairing step. What the page offers depends on the
+		// configuration alone, so a request tells nothing about which pages
+		// are open (RS 10).
+		const kinds: PairingKind[] = [];
+		let unreachable = false;
+		for (const kind of pairingKindsOf(this.#host.config, app)) {
+			const method = this.#methods[kind];
+			if (method === undefined) continue;
 			try {
-				await method.prepare();
+				await method.prepare?.();
+				kinds.push(kind);
 			} catch (error) {
+				unreachable = true;
 				this.#host.logger.warn("oidc.discovery_failed", {
 					message:
 						error instanceof Error ? error.message.slice(0, 200) : "unknown",
 				});
-				return this.#errorPage(
-					503,
-					"The sign-in provider of this page cannot be reached right now. Wait a minute and try again.",
-				);
 			}
+		}
+		if (kinds.length === 0) {
+			return unreachable
+				? this.#errorPage(
+						503,
+						"The sign-in provider of this app cannot be reached right now. Wait a minute and try again.",
+					)
+				: fail("invalid_target", "this relay has no pages of that app");
 		}
 		this.#sweepPending();
 		// Counted per /56 for IPv6, as tab sessions are (RS 1).
 		const network = networkKey(ip);
 		if ((this.#pendingPerIp.get(network) ?? 0) >= MAX_PENDING_PER_IP) {
-			return this.#errorPage(
-				429,
-				"Too many connection requests are open right now. Wait a few minutes and try again.",
-			);
+			for (const p of this.#pending.values()) {
+				if (p.ip !== network) continue;
+				this.#dropPending(p);
+				break;
+			}
 		}
-		this.#makeRoom(addressId, network);
 		if (this.#pending.size >= this.#maxPending) this.#evictOne();
 		const pending: Pending = {
 			id: randomBase64url(24),
 			expiresAt: Date.now() + PENDING_TTL_MS,
 			ip: network,
+			kinds,
 			client,
 			redirectUri,
 			state,
 			codeChallenge: challenge,
-			addressId,
+			app,
 			resource,
 			scopes,
 		};
@@ -773,69 +768,23 @@ export class AuthorizationServer {
 	#addPending(p: Pending): void {
 		this.#pending.set(p.id, p);
 		this.#pendingPerIp.set(p.ip, (this.#pendingPerIp.get(p.ip) ?? 0) + 1);
-		this.#pendingPerAddress.set(
-			p.addressId,
-			(this.#pendingPerAddress.get(p.addressId) ?? 0) + 1,
-		);
-	}
-
-	/**
-	 * An address at its caps evicts instead of refusing (DEC-088): a network
-	 * past its share loses its own oldest request; a full address loses the
-	 * oldest request of the network holding the most, so a flood from a few
-	 * networks does not push out the owner's one request.
-	 */
-	#makeRoom(addressId: string, ip: string): void {
-		const count = this.#pendingPerAddress.get(addressId) ?? 0;
-		if (count < MAX_PENDING_PER_ADDRESS_IP) return;
-		const byIp = new Map<string, Pending[]>();
-		for (const p of this.#pending.values()) {
-			if (p.addressId !== addressId) continue;
-			const list = byIp.get(p.ip);
-			if (list === undefined) byIp.set(p.ip, [p]);
-			else list.push(p);
-		}
-		const own = byIp.get(ip) ?? [];
-		if (own.length >= MAX_PENDING_PER_ADDRESS_IP) {
-			if (own[0] !== undefined) this.#dropPending(own[0]);
-			return;
-		}
-		if (count < MAX_PENDING_PER_ADDRESS) return;
-		// Networks come in order of their first request: `>=` breaks a tie
-		// toward the one that came last, so an equal flood never evicts the
-		// owner who was there first (review of PR 32).
-		let most: Pending[] = [];
-		for (const list of byIp.values()) {
-			if (list.length >= most.length) most = list;
-		}
-		if (most[0] !== undefined) this.#dropPending(most[0]);
 	}
 
 	/**
 	 * Every open request on this instance is taken: evict one instead of
-	 * refusing everyone (RS 1, DEC-129). First the oldest request whose page
-	 * is gone or whose dialog is closed (it cannot pair now), else the
-	 * oldest request of the network holding the most. A party that fills the
-	 * total from many networks then pushes out its own requests, not the one
-	 * of a user whose dialog is open.
+	 * refusing everyone (RS 1, DEC-129): the oldest request among those of
+	 * the networks that hold the most. A request no longer names a page
+	 * (DEC-196), so none is preferred for its page: a party that fills the
+	 * total from many networks, one request each, pushes requests out in the
+	 * order they came, and a user's request lasts as long as it takes to open
+	 * that many again.
 	 */
 	#evictOne(): void {
-		for (const p of this.#pending.values()) {
-			if (this.#host.session(p.addressId)?.pairingOpen !== true) {
-				this.#dropPending(p);
-				return;
-			}
-		}
-		let network: string | undefined;
 		let most = 0;
-		for (const [key, n] of this.#pendingPerIp) {
-			if (n > most) {
-				most = n;
-				network = key;
-			}
-		}
+		for (const n of this.#pendingPerIp.values()) most = Math.max(most, n);
+		// Insertion order is age: the first one of such a network is the oldest.
 		for (const p of this.#pending.values()) {
-			if (p.ip === network) {
+			if (this.#pendingPerIp.get(p.ip) === most) {
 				this.#dropPending(p);
 				return;
 			}
@@ -850,30 +799,7 @@ export class AuthorizationServer {
 			else map.set(key, n);
 		};
 		dec(this.#pendingPerIp, p.ip);
-		dec(this.#pendingPerAddress, p.addressId);
 		for (const method of Object.values(this.#methods)) method?.forget?.(p.id);
-	}
-
-	/**
-	 * The tab is not connected, or its dialog is closed: try again by loading
-	 * the page again. One text for both, so whoever knows an address cannot
-	 * tell whether its page is open (RS 10); what to do is the same anyway.
-	 */
-	#offlinePage(
-		client: ClientMetadata,
-		retryUrl: string,
-		cancelUrl: string,
-	): Response {
-		const who = `<strong>${escapeHtml(client.name)}</strong> (${escapeHtml(client.host)})`;
-		const title = "Open the page first";
-		const body = `<h1>${title}</h1>
-<p>${who} wants to use the tools of a web page, but that page is not open or not connecting right now.</p>
-<p>Open the page, click “Connect your AI app”, then try again here.</p>
-<div class="actions">
-<a class="button primary" href="${escapeHtml(retryUrl)}">Try again</a>
-<a class="button" href="${escapeHtml(cancelUrl)}">Cancel</a>
-</div>`;
-		return this.#page(200, title, body);
 	}
 
 	/** POST `/authorize`: the pairing form (connect, cancel, try again). */
@@ -936,7 +862,7 @@ export class AuthorizationServer {
 		if (action === "cancel") {
 			this.#dropPending(pending);
 			this.#host.logger.info("oauth.cancelled", {
-				address: shortAddress(pending.addressId),
+				app: pending.app,
 				client: pending.client.host,
 			});
 			return this.#redirectError(
@@ -946,52 +872,42 @@ export class AuthorizationServer {
 				"the user cancelled the connection",
 			);
 		}
-		if (action !== "connect") {
+		// `connect` is the first method the page offers (the code, where the
+		// app has it); `signin` is the sign-in beside a code field.
+		const kind =
+			action === "connect"
+				? pending.kinds[0]
+				: action === "signin" && pending.kinds.includes("oidc")
+					? "oidc"
+					: undefined;
+		const method = kind === undefined ? undefined : this.#methods[kind];
+		if (method === undefined) {
 			return this.#pairingPage(pending, browser.id);
 		}
-
-		const session = this.#host.session(pending.addressId);
-		if (session === undefined) {
-			return this.#pairingPage(
-				pending,
-				browser.id,
-				"The page is still not open.",
-			);
-		}
-		const method = this.#methods[session.site.pairing];
-		if (method === undefined) {
-			return this.#errorPage(
-				500,
-				"This page's pairing method is not available.",
-			);
-		}
 		// Only a real guess is charged: the method calls this right before it
-		// compares a well-formed answer (DEC-061); a right one is given back.
-		// The network's share counts an IPv6 /56, as sessions do (RS 9): one
-		// subscriber's /64s are not separate networks.
-		const guessKey = `${pending.addressId}|${networkKey(ip)}`;
+		// judges a well-formed answer (DEC-061); a right one is given back.
+		// Per network, an IPv6 /56 as for sessions (RS 9): one subscriber's
+		// /64s are not separate networks.
+		const guessKey = networkKey(ip);
 		let charged = false;
 		const admit = () => {
-			if (!this.#guessesPerAddressIp.take(guessKey)) return false;
-			if (!this.#guessesPerAddress.take(pending.addressId)) {
-				this.#guessesPerAddressIp.refund(guessKey);
-				return false;
-			}
+			if (!this.#guessesPerIp.take(guessKey)) return false;
 			charged = true;
 			return true;
 		};
-		const result = await method.check(session, form, admit, {
-			requestId: pending.id,
-			browserId: browser.id,
-			addressId: pending.addressId,
-		});
-		if (result.ok === true && charged) {
-			this.#guessesPerAddressIp.refund(guessKey);
-			this.#guessesPerAddress.refund(pending.addressId);
-		}
+		const result = await method.check(
+			this.#host.pool(pending.app),
+			form,
+			admit,
+			{ requestId: pending.id, browserId: browser.id },
+		);
+		if (result.ok === true && charged) this.#guessesPerIp.refund(guessKey);
 		if (result.ok === "redirect") {
+			// Given back if the sign-in pairs (the callback): the people of one
+			// office signing in one after another are no guesses.
+			if (charged) pending.charged = guessKey;
 			this.#host.logger.info("oauth.pairing_redirect", {
-				address: shortAddress(pending.addressId),
+				app: pending.app,
 				client: pending.client.host,
 				method: method.kind,
 			});
@@ -1008,7 +924,7 @@ export class AuthorizationServer {
 		}
 		if (!result.ok) {
 			this.#host.logger.info("oauth.pairing_failed", {
-				address: shortAddress(pending.addressId),
+				app: pending.app,
 				client: pending.client.host,
 				reason: result.reason,
 			});
@@ -1032,21 +948,28 @@ export class AuthorizationServer {
 		result: Extract<PairingResult, { ok: true }>,
 	): Response {
 		this.#dropPending(pending);
-		// The address id first, so a load balancer that reads the `/token` body
-		// can route the exchange to this instance, which holds the code (DEC-098).
-		const code = `${pending.addressId}.${randomBase64url(32)}`;
+		const code = randomBase64url(32);
 		if (this.#codes.size >= MAX_CODES) this.#sweepCodes(true);
-		const { id: _id, expiresAt: _expires, ip: _ip, ...request } = pending;
+		const {
+			id: _id,
+			expiresAt: _expires,
+			ip: _ip,
+			kinds: _kinds,
+			charged: _charged,
+			...request
+		} = pending;
 		const now = Date.now();
 		this.#codes.set(hashToken(code), {
 			...request,
+			addressId: result.addressId,
 			issuedAt: now,
 			expiresAt: now + this.#authCodeTtlMs,
 			used: false,
 			...(result.subject === undefined ? {} : { subject: result.subject }),
 		});
 		this.#host.logger.info("oauth.paired", {
-			address: shortAddress(pending.addressId),
+			address: shortAddress(result.addressId),
+			app: pending.app,
 			client: pending.client.host,
 			method: kind,
 		});
@@ -1084,7 +1007,7 @@ export class AuthorizationServer {
 			browser.id,
 			(id) => {
 				const p = this.#pending.get(id);
-				return p === undefined ? undefined : this.#host.session(p.addressId);
+				return p === undefined ? undefined : this.#host.pool(p.app);
 			},
 		);
 		const pending =
@@ -1096,12 +1019,17 @@ export class AuthorizationServer {
 					: "This connection request has expired or was already used.";
 			return this.#errorPage(400, message);
 		}
-		if (result.ok === true) return this.#paired(pending, method.kind, result);
+		if (result.ok === true) {
+			if (pending.charged !== undefined) {
+				this.#guessesPerIp.refund(pending.charged);
+			}
+			return this.#paired(pending, method.kind, result);
+		}
 		const message =
 			result.ok === false ? result.message : "Something went wrong.";
 		const reason = result.ok === false ? result.reason : "unexpected";
 		this.#host.logger.info("oauth.pairing_failed", {
-			address: shortAddress(pending.addressId),
+			app: pending.app,
 			client: pending.client.host,
 			reason,
 		});
@@ -1113,14 +1041,15 @@ export class AuthorizationServer {
 		);
 	}
 
-	#addressOf(resource: string | undefined): string | undefined {
+	/** The app of an MCP address of this relay, `<issuer>/s/<app>/mcp`. */
+	#appOf(resource: string | undefined): string | undefined {
 		if (resource === undefined) return undefined;
-		const prefix = `${this.#issuer}/a/`;
+		const prefix = `${this.#issuer}/s/`;
 		if (!resource.startsWith(prefix) || !resource.endsWith("/mcp")) {
 			return undefined;
 		}
-		const id = resource.slice(prefix.length, -"/mcp".length);
-		return isAddressId(id) ? id : undefined;
+		const app = resource.slice(prefix.length, -"/mcp".length);
+		return isAppId(app) ? app : undefined;
 	}
 
 	/** Requested scopes reduced to what exists; `undefined` = none of them. */
@@ -1201,59 +1130,48 @@ export class AuthorizationServer {
 		const targets: string[] = [formTarget(pending.redirectUri)];
 		const cancel = `<button type="submit" class="secondary" name="action" value="cancel" formnovalidate>Cancel</button>`;
 
-		const session = this.#host.session(pending.addressId);
-		if (session === undefined) {
-			// The tab went away after the page was opened: keep the request,
-			// so Try again (a post) can continue once the tab is back.
-			const body = `<h1>Open the page first</h1>
-${errorHtml}
-<p>${clientLabel} wants to use the tools of a web page, but that page is not open right now.</p>
-<p>Open the page, click “Connect your AI app”, then try again here.</p>
-<form method="post" action="/authorize?a=${pending.addressId}">
-${hidden}
-<div class="actions">
-<button type="submit" class="primary" name="action" value="retry">Try again</button>
-${cancel}
-</div>
-</form>`;
-			return this.#page(status, "Open the page first", body, targets, extra);
+		const methods = pending.kinds.flatMap((kind) => {
+			const method = this.#methods[kind];
+			return method === undefined ? [] : [method];
+		});
+		for (const method of methods) {
+			targets.push(...(method.formTargets?.() ?? []));
 		}
-
-		const method = this.#methods[session.site.pairing];
-		if (method === undefined) {
-			return this.#errorPage(
-				500,
-				"This page's pairing method is not available.",
-			);
-		}
-		targets.push(...(method.formTargets?.() ?? []));
-		// A browser always sends an Origin; only a non-browser tab on an open
-		// relay has none. An extension's page is named as one (DEC-108).
-		const origin = `<span class="origin">${escapeHtml(session.origin)}</span>`;
-		const page =
-			session.origin === ""
-				? "a page that did not say where it runs"
-				: isExtensionOrigin(session.origin)
-					? `the browser extension ${origin}`
-					: origin;
-		const target =
-			session.appName === undefined
-				? `tools from ${page}`
-				: `<strong>${escapeHtml(session.appName)}</strong> on ${page}`;
-		// The verified host is part of the heading and title, so a
-		// self-declared name never stands alone (DEC-065).
+		// The app is named by its id, as in the address the user added: the
+		// relay does not know which page is meant before the pairing step
+		// finds it, and a page's own name for itself could not be checked
+		// here (DEC-196). The verified host is part of the heading and
+		// title, so a self-declared client name never stands alone (DEC-065).
+		const app = `<strong>${escapeHtml(pending.app)}</strong>`;
 		const heading = `Connect ${client.name} from ${client.host}`;
-		const body = `<h1>${escapeHtml(heading)}</h1>
-<p>You're connecting ${clientLabel} to ${target}.</p>
-<p>${escapeHtml(client.name)} can then use this page's tools while the page is open. You can disconnect it in the page at any time.</p>
-${errorHtml}
-<form method="post" action="/authorize?a=${pending.addressId}">
-${hidden}
-${method.render(session)}
+		const [first, ...others] = methods;
+		// A second method (the sign-in beside a code field) has its own button,
+		// which must not ask for the code.
+		const alternatives = others
+			.map(
+				(method) => `<div class="alternative">
+${method.render()}
 <div class="actions">
-<button type="submit" class="primary" name="action" value="connect">Connect</button>
+<button type="submit" class="secondary" name="action" value="signin" formnovalidate>Sign in instead</button>
+</div>
+</div>`,
+			)
+			.join("\n");
+		// `data-tab-mcp-*`: for a browser extension in this browser that fills
+		// in its own code after asking its user (DEC-199). Version 1; the
+		// attributes say what the page above says and never hold a code.
+		const body = `<h1>${escapeHtml(heading)}</h1>
+<p>You're connecting ${clientLabel} to ${app}: to the page or app that is open in your browser and ${first?.kind === "oidc" ? "signed in with your account" : "shows the code"}.</p>
+<p>${escapeHtml(client.name)} can then use that page's tools while it is open. You can disconnect it there at any time.</p>
+${errorHtml}
+<form method="post" action="/authorize" data-tab-mcp-pairing="1" data-app="${escapeHtml(pending.app)}" data-client-name="${escapeHtml(client.name)}" data-client-host="${escapeHtml(client.host)}">
+${hidden}
+${first?.render() ?? ""}
+<div class="actions">
+<button type="submit" class="primary" name="action" value="connect" data-tab-mcp-action="connect">Connect</button>
 ${cancel}
 </div>
+${alternatives}
 </form>
 <p class="help">After you connect, your browser goes back to ${escapeHtml(hostOf(pending.redirectUri))}. Only connect AI apps you started yourself.</p>`;
 		return this.#page(status, heading, body, targets, extra);
@@ -1634,7 +1552,7 @@ ${cancel}
 		// a code issued before a sign-out or a change of user buys nothing.
 		if (
 			issued.subject !== undefined &&
-			this.#host.session(issued.addressId)?.identity !== issued.subject
+			this.#host.identityOf(issued.addressId) !== issued.subject
 		) {
 			throw invalid("the page's user signed out or changed");
 		}
@@ -1655,6 +1573,7 @@ ${cancel}
 				{
 					grantId,
 					addressId: issued.addressId,
+					app: issued.app,
 					clientId: issued.client.clientId,
 					clientName: issued.client.name,
 					scopes: issued.scopes,
@@ -1745,7 +1664,7 @@ ${cancel}
 		}
 		if (
 			p["resource"] !== undefined &&
-			p["resource"] !== `${this.#issuer}/a/${record.addressId}/mcp`
+			p["resource"] !== `${this.#issuer}/s/${record.app}/mcp`
 		) {
 			throw new OAuthError(
 				400,
@@ -1776,6 +1695,7 @@ ${cancel}
 			{
 				grantId: record.grantId,
 				addressId: record.addressId,
+				app: record.app,
 				clientId: record.clientId,
 				clientName: record.clientName,
 				scopes: record.scopes,
@@ -1944,14 +1864,13 @@ ${cancel}
 	// Housekeeping
 
 	/**
-	 * Every grant of `addressId` was revoked (New address, revoke all): its
-	 * open authorization requests and its codes go too, so none of them
-	 * makes a grant afterwards.
+	 * Every grant of `addressId` was revoked (New address, revoke all): the
+	 * authorization codes made for it go too, so none of them makes a grant
+	 * afterwards. An open request names no page yet (DEC-196): it can only
+	 * become a grant through a pairing code typed after this, which is a new
+	 * connection the page's user makes.
 	 */
 	addressRevoked(addressId: string): void {
-		for (const p of [...this.#pending.values()]) {
-			if (p.addressId === addressId) this.#dropPending(p);
-		}
 		for (const [key, c] of this.#codes) {
 			if (c.addressId === addressId) this.#codes.delete(key);
 		}
@@ -1987,8 +1906,7 @@ ${cancel}
 		const now = Date.now();
 		this.#viewsPerIp.sweep(now);
 		this.#attemptsPerIp.sweep(now);
-		this.#guessesPerAddressIp.sweep(now);
-		this.#guessesPerAddress.sweep(now);
+		this.#guessesPerIp.sweep(now);
 		this.#tokenPerIp.sweep(now);
 		this.#tokenFailuresPerIp.sweep(now);
 		this.#assertionFailuresPerIp.sweep(now);

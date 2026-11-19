@@ -3,7 +3,12 @@ import {
 	isWellFormedSecret,
 	shortAddress,
 } from "./address.ts";
-import type { RelayConfig, Site, SiteLimits } from "./config.ts";
+import {
+	appAllowed,
+	type RelayConfig,
+	type Site,
+	type SiteLimits,
+} from "./config.ts";
 import {
 	Exchange,
 	type PageGoneReply,
@@ -12,7 +17,7 @@ import {
 } from "./exchange.ts";
 import { errorFields, type Logger } from "./log.ts";
 import { displayName, foreignDomain } from "./oauth/cimd.ts";
-import { PairingCodes } from "./oauth/pairing.ts";
+import { type CodeIndex, PairingCodes } from "./oauth/pairing.ts";
 import {
 	type ByeReason,
 	CloseCode,
@@ -43,6 +48,8 @@ export interface SessionHost {
 	readonly store: TokenStore;
 	/** The external origin, e.g. `https://relay.ractive.ch`. */
 	publicUrl(): string;
+	/** The codes the relay's pages show, each with its session (DEC-196). */
+	readonly codes: CodeIndex<TabSession>;
 	/** Register a session for its address; returns the session it replaced. */
 	claimAddress(session: TabSession): TabSession | undefined;
 	/** Called once when a session is over. */
@@ -161,17 +168,14 @@ export class TabSession {
 	/** The site this session's origin belongs to (DEC-045). */
 	readonly site: Site;
 	readonly openedAt: number = Date.now();
-	/**
-	 * The address id the `/tab` URL named (`?a=`, DEC-098), checked against
-	 * the secret in `hello`; `undefined` for libraries that do not send it.
-	 */
-	readonly expectedAddress: string | undefined;
 	/** Set once `hello` was accepted. */
 	addressId: string | undefined;
+	/** The app the page named in `hello`: the `<app>` of its address (DEC-196). */
+	app: string | undefined;
 	/** The app name `/authorize` shows: the site's name, else the page's claim. */
 	appName: string | undefined;
 	/** Pairing codes while the tab's dialog is open (DEC-028). */
-	readonly codes: PairingCodes;
+	readonly codes: PairingCodes<TabSession>;
 	/**
 	 * The binding key of the page's user, once an assertion was accepted
 	 * (DEC-077); `undefined` while nobody is signed in.
@@ -226,15 +230,15 @@ export class TabSession {
 		origin: string,
 		site: Site,
 		host: SessionHost,
-		expectedAddress?: string,
 	) {
 		this.#ws = ws;
 		this.ip = ip;
 		this.origin = origin;
 		this.site = site;
 		this.#host = host;
-		this.expectedAddress = expectedAddress;
 		this.codes = new PairingCodes(
+			host.codes,
+			this,
 			(code, expiresAt, reason) => {
 				this.send({
 					type: "pairing.code",
@@ -401,7 +405,7 @@ export class TabSession {
 			await this.#hello(
 				msg.secret,
 				msg.library,
-				msg.app?.name,
+				msg.app,
 				msg.revokeAll === true,
 			);
 			return;
@@ -479,7 +483,7 @@ export class TabSession {
 	async #hello(
 		secret: string,
 		library: { name: string; version: string },
-		appName: string | undefined,
+		app: { id: string; name?: string },
 		revokeAll = false,
 	): Promise<void> {
 		if (!isWellFormedSecret(secret)) {
@@ -489,25 +493,26 @@ export class TabSession {
 			);
 			return;
 		}
-		const addressId = addressIdFromSecret(secret);
-		if (
-			this.expectedAddress !== undefined &&
-			this.expectedAddress !== addressId
-		) {
-			// A load balancer routed this socket by the URL's id (DEC-098): a
-			// session for another address must not open on this instance.
-			// Nothing was claimed, so the address's real session stays.
-			this.#host.logger.warn("tab.refused", { reason: "address_mismatch" });
-			this.#sendError(
-				"address_mismatch",
-				"the address id in the URL is not the one of the secret",
+		// Before anything is claimed: an origin that may not serve this app
+		// must not end the session of the page that may (DEC-197).
+		if (!appAllowed(this.#host.config, this.site, app.id)) {
+			this.#host.logger.warn("tab.refused", {
+				reason: "app_not_allowed",
+				origin: this.origin,
+				app: app.id,
+			});
+			this.#protocolError(
+				"app_not_allowed",
+				`this relay does not let ${this.origin || "this page"} serve the app "${app.id}"`,
 			);
-			this.end(CloseCode.addressMismatch, "address mismatch");
 			return;
 		}
+		const addressId = addressIdFromSecret(secret, app.id);
 		clearTimeout(this.#helloTimer);
 		this.#state = "hello";
 		this.addressId = addressId;
+		this.app = app.id;
+		const appName = app.name;
 		const claimed = pageAppName(appName, this.origin);
 		const appNameDropped = appName !== undefined && claimed === undefined;
 		this.appName = this.site.name ?? claimed;
@@ -568,7 +573,7 @@ export class TabSession {
 		const sent = this.send({
 			type: "session",
 			sessionId: this.sessionId,
-			address: `${this.#host.publicUrl()}/a/${this.addressId}/mcp`,
+			address: `${this.#host.publicUrl()}/s/${this.app}/mcp`,
 			origin: this.origin,
 			...(this.appName === undefined ? {} : { appName: this.appName }),
 			pairing: this.site.pairing,
@@ -593,6 +598,7 @@ export class TabSession {
 		this.#host.logger.info("tab.session", {
 			session: this.sessionId,
 			address: shortAddress(this.addressId),
+			app: this.app,
 			origin: this.origin,
 			library: `${library.name}@${library.version}`,
 			replaced: replaced !== undefined,

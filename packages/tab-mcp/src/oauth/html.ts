@@ -44,6 +44,7 @@ label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
 input[type="text"] { font: 1.5rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; width: 10ch; padding: 0.4rem 0.5rem; border: 2px solid GrayText; border-radius: 0.4rem; background: Field; color: FieldText; }
 input[type="text"]:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 1.25rem; }
+.alternative { border-top: 1px solid GrayText; margin-top: 1.5rem; padding-top: 0.25rem; }
 button, .button { font: inherit; padding: 0.5rem 1.25rem; border-radius: 0.4rem; border: 2px solid var(--accent); cursor: pointer; text-decoration: none; display: inline-block; }
 button.primary, .button.primary { background: var(--accent); color: Canvas; }
 button.secondary, .button:not(.primary) { background: transparent; color: var(--accent); }

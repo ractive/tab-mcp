@@ -12,23 +12,13 @@ and the heartbeat. It knows nothing about MCP tools. The tab runs the MCP server
 requests.
 
 ```text
-AI app ──HTTPS POST /a/{id}/mcp──▶ relay ──WebSocket /tab (tab-mcp.v1)──▶ page
-       ◀──JSON or event stream───        ◀──http.response* messages─────
+AI app ──HTTPS POST /s/{app}/mcp──▶ relay ──WebSocket /tab (tab-mcp.v1)──▶ page
+       ◀──JSON or event stream────        ◀──http.response* messages─────
 ```
 
 ## Connection
 
-- URL: `wss://<relay>/tab?a=<address id>`. The query parameter `a` is the session's
-  address id (see [the address secret](#session)), never the secret. It lets a load
-  balancer in front of several relay instances send every request of one address to the
-  same instance ([self-hosting](self-hosting.md#running-several-instances)). It is
-  optional: without it (`wss://<relay>/tab`, libraries before 0.8 and pages without Web
-  Crypto) one relay works as before, but a load balancer cannot route the session. A
-  value that is not literally 52 characters of `[a-z2-7]` (a percent-encoded name or value is refused, so the relay reads the id exactly as a load balancer matching the URL does), or `a` given twice, gets HTTP 400 with
-  `{"error":"bad_address"}` and no upgrade. If the id is not the one derived from the
-  `secret` in `hello`, the relay answers `error` `address_mismatch` and closes with 4009;
-  no session opens and an open session of either address stays. Other query parameters
-  are ignored.
+- URL: `wss://<relay>/tab`. Query parameters are ignored.
 - The relay checks the `Origin` header against its allow-list first (empty by default).
   An origin that is not on it gets HTTP 403 with `{"error":"origin_not_allowed"}` and no
   upgrade.
@@ -56,35 +46,47 @@ T→R is tab to relay, R→T is relay to tab.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `hello` | T→R | `library: {name, version}`, `app?: {name}`, `secret`, `revokeAll?` | First message after the open. The relay ignores a `page` field; relays up to 0.9 require `page: {title}`, so the library sends `page: {title: ""}` (it sent the page title before, which no relay read). `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim; the relay shows it on `/authorize` unless the relay configures a name for the site. The relay removes bidi, zero-width and other invisible characters from it, and ignores a name that is empty then or names a domain other than the page origin's host (`session` then has no `appName`). Any dotted word that ends in two or more letters counts as a domain, as in AI apps' names (DEC-092): "Node.js tools" on `https://example.com` is ignored; a page that wants such a name configures it as the site's `name`. `revokeAll: true` takes the address back after a takeover (DEC-095): the relay claims the address and revokes every grant of it before it lists the grants for `session`, whatever session claims the address next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `newAddress()` rejects (DEC-136). |
-| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app. `pairing` is `code` or `oidc` (identity binding). |
+| `hello` | T→R | `library: {name, version}`, `app: {id, name?}`, `secret`, `revokeAll?` | First message after the open. `app.id` names the app whose address the page serves, `https://<relay>/s/<app.id>/mcp` (see [the app id](#session)): 1 to 32 characters of `a-z`, `0-9` and `-`, not starting or ending with `-`. A `hello` without it (libraries before 0.17 send none) gets `bad_message` and close 1008. If the relay's configuration does not let the page's origin serve that app ([`sites[].apps`](configuration.md#sites)), the relay answers `error` `app_not_allowed` and closes with 1008; no session opens, and no open session is replaced. The relay ignores a `page` field, which libraries before 0.17 sent. `app.name` (for example `saturnus`) must be 1-64 characters without control characters, else `bad_message` and close 1008. It is the page's own claim, a name for people; the relay uses it in its ["the page is not open"](#when-the-page-is-not-open) answers unless the relay configures a name for the site. The relay removes bidi, zero-width and other invisible characters from it, and ignores a name that is empty then or names a domain other than the page origin's host (`session` then has no `appName`). Any dotted word that ends in two or more letters counts as a domain, as in AI apps' names (DEC-092): "Node.js tools" on `https://example.com` is ignored; a page that wants such a name configures it as the site's `name`. `revokeAll: true` takes the page's address id back after a takeover (DEC-095): the relay claims the address id for this session and revokes every grant of it before it lists the grants for `session`, whatever session claims it next, and `session` then lists none, which confirms it. A store error ends the session with 1008 instead. Anything but a boolean is `bad_message`. Only a holder of the secret can send it, and it could send `grants.revokeAll` anyway. Relays 0.4 and older ignore the field and list the grants: the library then closes the connection and `newAddress()` rejects (DEC-136). |
+| `session` | R→T | `sessionId`, `address`, `origin`, `appName?`, `pairing`, `expiresAt`, `limits`, `grants` | The session exists. `address` is the MCP URL the user gives to the AI app: the app's, `https://<relay>/s/<app.id>/mcp`, the same for every page of the app. `pairing` is `code` or `oidc` (identity binding). |
 | `ping` | R→T | `t` | Heartbeat, every `limits.heartbeatMs`. |
 | `pong` | T→R | `t` | Answer to `ping` with the same `t`. |
 | `bye` | both | `reason` | Orderly end; the sender closes the socket after it. Reasons from the relay: `replaced`, `expired`, `idle`, `shutdown`. |
 
-**The address secret.** `secret` makes the address stable across sessions. It is 32
-random bytes as base64url without padding (43 characters), kept by the library in the
-page's `localStorage` under `tab-mcp:secret:<relay origin>:<server name>`. The relay derives the
-address id as `base32(sha256(secret))`: SHA-256 over the secret's UTF-8 text, RFC 4648
-base32, lower case, no padding, 52 characters. The relay therefore stores nothing to
-recognise an address, and the address does not reveal the secret. A `hello` without a
-well-formed `secret` gets `error` `bad_message` and close 1008. The derivation is public,
-so the tab computes the id for the URL itself (the library uses Web Crypto,
-`crypto.subtle.digest("SHA-256", …)`, before it opens the WebSocket).
+**The app id.** `app.id` is the page's own word for which app it is, and the `<app>` of
+its address `https://<relay>/s/<app>/mcp`. Every page of an app has that one address, so
+the address names no tab; which page an AI app talks to is decided when it pairs (see
+[Pairing and grants](#pairing-and-grants)). The library takes the id from its `app`
+option, or derives it from the server name: lower case, letters without their marks,
+each run of other characters as one `-`, at most 32 characters. An app that no site of
+the relay's configuration lists may be served by any origin the relay allows.
 
-If a session with the same address is already connected, the new one replaces it: the
+**The address secret.** `secret` is what makes a page the same page across sessions. It
+is 32 random bytes as base64url without padding (43 characters), kept by the library in
+the page's `localStorage` under `tab-mcp:secret:<relay origin>:<server name>`. The relay
+derives the address id from the app id and the secret together, as
+`base32(sha256(app.id + "\n" + secret))`: SHA-256 over the UTF-8 text of the app id, a
+line feed and the secret, RFC 4648 base32, lower case, no padding, 52 characters.
+Sessions, grants and tokens are keyed by the address id, so the relay stores nothing to
+recognise a page, and a page that connects again with its secret and its app id has its
+grants again. A page is one pair of secret and app: the same secret under another app id
+is another page, with its own session and none of the first one's grants, and it does
+not replace the first. The address id is part of no URL; the relay's logs name it by its
+first 8 characters. A `hello` without a well-formed `secret` gets `error` `bad_message`
+and close 1008.
+
+If a session with the same address id is already connected, the new one replaces it: the
 old tab gets `bye` with reason `replaced` and close 4005.
 
 **The session message.** `sessionId` is a fresh random id per WebSocket. It appears only
 in logs and in this protocol, never in URLs. `origin` is the page origin the relay saw on
-the upgrade; `/authorize` shows it. On an open relay (`TAB_MCP_ALLOWED_ORIGINS=*`) only a
-serialised web origin (`https://host[:port]`, as browsers send it) or a browser
-extension's origin of at most 255 characters is kept; anything else is `""`, as for a
-client that sends no `Origin`. `appName` is the name `/authorize` will show: the
+the upgrade. On an open relay (`TAB_MCP_ALLOWED_ORIGINS=*`) only a serialised web origin
+(`https://host[:port]`, as browsers send it) or a browser extension's origin of at most
+255 characters is kept; anything else is `""`, as for a client that sends no `Origin`.
+`appName` is the name the relay uses for the page in "the page is not open" answers: the
 site's configured name, else the page's `app.name`, absent if neither exists. `pairing`
 says how AI apps pair with this page: `code` (the tab shows codes) or `oidc` (the same
-sign-in, see [Identity binding](#identity-binding)); older relays omit it, which
-means `code`. `grants` lists the AI apps already connected to this address (see below).
+sign-in, see [Identity binding](#identity-binding)). `grants` lists the AI apps already
+connected to this page, that is, the grants of its address id (see below).
 
 `limits` carries `maxMessageBytes`, `maxBodyBytes`, `requestTimeoutMs`, `idleTimeoutMs`,
 `heartbeatMs`, `keepAliveMs` and `maxConcurrentRequests`, so the tab can show and respect
@@ -94,7 +96,7 @@ so that the AI app does not read a transport error (`-31006`) for a tool that ra
 
 ```json
 {"type":"session","sessionId":"s_6Gx…","origin":"https://ractive.ch","pairing":"code",
- "address":"https://relay.ractive.ch/a/mzxw6ytboi4dmnrqgq3tm…/mcp",
+ "address":"https://relay.ractive.ch/s/saturnus/mcp",
  "expiresAt":"2026-10-20T08:00:00.000Z","grants":[],
  "limits":{"maxMessageBytes":1048576,"maxBodyBytes":1048576,"requestTimeoutMs":300000,
            "idleTimeoutMs":3600000,"heartbeatMs":25000,"keepAliveMs":20000,
@@ -103,18 +105,20 @@ so that the AI app does not read a transport error (`-31006`) for a tool that ra
 
 ### Pairing and grants
 
-Pairing works like signing in on a TV: the tab shows the address and a code, and the user
-types the code on the relay's `/authorize` page when the AI app opens it.
+Pairing works like signing in on a TV: the tab shows a code, and the user types it on the
+relay's `/authorize` page when the AI app opens it. The address the AI app was given
+names the app; the code selects the page among the app's pages, and the grant is made
+for that page's address id.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
 | `pairing.start` | T→R | none | The page's "Connect your AI app" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. With `oidc` it only marks the dialog as open: pairing needs it open. |
-| `pairing.code` | R→T | `code`, `expiresAt`, optional `reason` | The code to show: 6 digits, single-use, valid 2 minutes, 5 attempts. A fresh one follows by itself after expiry, use or 5 failed attempts while pairing is on. Guesses are also limited per address and network and per address overall; malformed input does not count. `reason` says why this code comes: `start` (after `pairing.start`, a new code or the current one again), `used` (the last code was entered; its AI app is about to finish pairing), `locked` (5 wrong attempts) or `expired`. Relays before it leave it out; a tab treats a missing or unknown `reason` as no reason given. |
+| `pairing.code` | R→T | `code`, `expiresAt`, optional `reason` | The code to show: 8 letters of `BCDFGHJKLMNPQRSTVWXZ`, sent as `XXXX-XXXX`; single-use, valid 2 minutes, and no two pages of the relay show the same code at once. A fresh one follows by itself after expiry or use while pairing is on. `/authorize` takes it in any case, with or without the dash and spaces. A code counts only at the address of its page's app; typed at another app's address it is a wrong code and stays valid. Wrong codes are limited per network (10, then one a minute), not per code or page; input that is not 8 of these letters does not count. `reason` says why this code comes: `start` (after `pairing.start`, a new code or the current one again), `used` (the last code was entered; its AI app is about to finish pairing) or `expired`. A tab treats a missing or unknown `reason` as no reason given. |
 | `pairing.stop` | T→R | none | The dialog closed; the current code becomes invalid and no more codes come. |
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
-| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this address, or has expired, gets `error` `unknown_id` with `for` and `grantId` ([Errors](#errors-between-tab-and-relay)). |
-| `grants.revokeAll` | T→R | none | Revoke every grant of this address (sent before "New address"). |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "New address", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every 10 minutes) tells each connected page of its grants that no longer have a usable token, so it comes up to that long after the last token ran out; with several instances, a grant revoked through another instance also comes as `expired` (relays up to 0.11.0 announced neither). The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
+| `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this page's address id, or has expired, gets `error` `unknown_id` with `for` and `grantId` ([Errors](#errors-between-tab-and-relay)). |
+| `grants.revokeAll` | T→R | none | Revoke every grant of this page's address id. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "Disconnect all apps", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every 10 minutes) tells each connected page of its grants that no longer have a usable token, so it comes up to that long after the last token ran out (relays up to 0.11.0 did not announce it). The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
 
 A grant as the tab sees it:
 
@@ -136,9 +140,9 @@ signed in to the page, proved by the web app's backend
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `identity` | T→R | `assertion`, `round?` | A tab assertion for the page's signed-in user: a JWT of at most 8 192 bytes, `typ` `tab-mcp-identity+jwt`, `aud` this session's `address`, `exp` at most 60 s ahead, a single-use `jti`. Sent after `session` (every connection) and again after a sign-in. `round` (a non-negative integer) is the page's number for this assertion; the answer echoes it. |
-| `identity.bound` | R→T | `round?` | The assertion was accepted; the address is bound to this person for the session. `round` is the one of the `identity` it answers, when that had one. |
-| `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the address (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. A store failure is answered with `error` `store_unavailable`. |
+| `identity` | T→R | `assertion`, `round?` | A tab assertion for the page's signed-in user: a JWT of at most 8 192 bytes, `typ` `tab-mcp-identity+jwt`, `aud` this session's `address` (the app's address, so the assertion names the app and not one page), `exp` at most 60 s ahead, a single-use `jti`. Sent after `session` (every connection) and again after a sign-in. `round` (a non-negative integer) is the page's number for this assertion; the answer echoes it. |
+| `identity.bound` | R→T | `round?` | The assertion was accepted; the session is bound to this person. `round` is the one of the `identity` it answers, when that had one. |
+| `identity.logout` | T→R | none | The page's user signed out: the relay revokes every grant of the page's address id (`grant.removed` for each), ends their requests in flight (`-31009`) and forgets the binding. A store failure is answered with `error` `store_unavailable`. |
 
 The relay handles `identity` and `identity.logout` one after another, in the order they
 came, and answers every `identity` exactly once. A refused assertion gets `error`
@@ -249,19 +253,22 @@ so at the latest after one keep-alive interval. It then sends `http.cancel`.
 Before a request reaches the tab, the relay checks, in this order: the method (POST,
 else 405), the body size and JSON (413, 400), the `MCP-Protocol-Version` header (400 with
 JSON-RPC error `-32022` naming the supported version `2026-07-28`, or `-32020` when the
-header is missing), the bearer token for this address (401 with `WWW-Authenticate`), that
-that the tab is online (see below), the concurrency limit and, for
-`subscriptions/listen`, the listen streams of the grant (429, `-31004`). An unknown
-address and an address whose tab is offline look the same without a token, so addresses
-cannot be probed.
+header is missing), the bearer token (401 with `WWW-Authenticate`), that
+the tab is online (see below), the concurrency limit and, for
+`subscriptions/listen`, the listen streams of the grant (429, `-31004`). The token's
+record names the page the request is for (its address id) and the app; a token is valid
+only at the address of its app, and gets 401 at any other. Without a valid token every
+address `/s/<app>/mcp` with a well-formed app id answers alike, whether or not a page of
+that app is connected, so the address tells nothing about open pages. A path whose app
+id is not well-formed is 404.
 
 ### When the page is not open
 
 Phones pause a tab in the background, so "not open" is often brief. A request with a valid
-token for an address without a connected tab waits up to `TAB_MCP_PAGE_WAIT_S` (10 s by
+token whose page has no connected tab waits up to `TAB_MCP_PAGE_WAIT_S` (10 s by
 default; 0 turns it off) for the page's session and is then forwarded as usual. The wait
 ends when the AI app closes its request. At most `maxConcurrentRequests` requests wait per
-address (the limit of the page's site, as far as the relay has seen the page since it
+page (the limit of the page's site, as far as the relay has seen the page since it
 started) and at most `maxSessions` in all; beyond that the relay answers at once.
 `server/discover` does not wait: clients use it as a quick protocol-version probe.
 
@@ -372,14 +379,14 @@ settles every pending one, as 0.16.2 did. Older libraries ignore the two fields.
 
 | Code | Sent by | Meaning |
 |---|---|---|
-| `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`. The library sends none to the relay: it drops a message it cannot read. |
+| `bad_message` | relay | Not JSON, missing fields, a binary frame, a malformed `secret`, a missing or malformed `app.id`. The library sends none to the relay: it drops a message it cannot read. |
 | `unknown_type` | relay | Message type not understood, but an answer was expected. |
-| `unknown_id` | relay | A `grant.revoke` named a grant that is not this address's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
+| `unknown_id` | relay | A `grant.revoke` named a grant that is not this page's or has no usable token left (it expired, or was revoked elsewhere); the error has no `id`, and names the grant (`for`, `grantId`, above). The library removes that grant from its list. Late `http.response*` messages for a finished or cancelled `id` get no answer: the relay drops them. |
 | `too_large` | relay | A message exceeded `maxMessageBytes`; the relay answers the AI app with 502. The relay refuses it by its length, without parsing it; the error's `id` is taken from the start of the message (send `type` and `id` first). A frame over four times the largest `maxMessageBytes` of any site closes the socket with 1009 instead. |
 | `rate_limited` | relay | The tab sent more control messages than its budget: every message except `pong` and `http.response*` counts, 30 at once, then 2 a second per session. Followed by close 4008. A page sends a handful of these when its dialog opens or its user signs in. |
 | `identity_refused` | relay | An `identity` assertion was refused (bad signature, type, issuer, audience, expiry, a reused `jti`), or `identity`/`identity.logout` came on a site without identity binding. |
 | `store_unavailable` | relay | A `grant.revoke`, `grants.revokeAll` or `identity.logout` failed because the relay's token store failed (for `identity.logout` the binding and the requests in flight end anyway). Nothing was wrong with the message; the session stays, and the tab may send it again later. Relays up to 0.9 answered `bad_message`. |
-| `address_mismatch` | relay | The address id in the URL (`/tab?a=`) is not the one of the `secret` in `hello`. Followed by close 4009. A tab bug: the library computes both from one secret. |
+| `app_not_allowed` | relay | The relay's configuration does not let the page's origin serve the app named in `hello.app.id`: the app is reserved for other origins, or the origin's site lists other apps ([`sites[].apps`](configuration.md#sites)). Followed by close 1008, before a session exists. The library reports it as `policy` and does not reconnect by itself. |
 
 Failures of an MCP request inside the tab are not protocol errors: the tab answers with
 an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
@@ -389,20 +396,19 @@ an HTTP status and a JSON-RPC error body, as its MCP handler produced it.
 | Code | Meaning |
 |---|---|
 | 1000 | Normal close (`bye`, the user pressed Disconnect). |
-| 1008 | Policy violation (bad message, no `hello` in time). |
+| 1008 | Policy violation (bad message, no `hello` in time, `app_not_allowed`). |
 | 1009 | Message too large. |
 | 4001 | Session expired (absolute lifetime). |
 | 4002 | Idle timeout: no MCP request for `idleTimeoutMs` and nothing in flight. An open `subscriptions/listen` stream counts as activity. |
 | 4003 | Heartbeat lost. |
 | 4004 | The relay is shutting down. |
-| 4005 | Replaced by a newer session for the same address. |
+| 4005 | Replaced by a newer session with the same address id (the same secret and app id). |
 | 4008 | Rate limited (see `rate_limited`). The library does not reconnect by itself. |
-| 4009 | The URL's address id is not the secret's (`address_mismatch`). The library treats it as `policy` and does not reconnect by itself. |
 
 On any close the relay ends the session: pending HTTP requests get the answers in
 [When the page is not open](#when-the-page-is-not-open), listen streams end, and the
-pairing code becomes invalid. Grants and tokens stay: they belong to the address, not to
-the WebSocket. While no tab is connected, MCP requests with a valid token get "the page
+pairing code becomes invalid. Grants and tokens stay: they belong to the address id, not
+to the WebSocket. While the page's tab is not connected, MCP requests with a valid token get "the page
 is not open". After a close with 4003 or 4004 (or `bye` `shutdown`) or a broken
 connection, the library opens a new session by itself with growing waits (5, 10, 20,
 40 s, then every 60 s, each varied by up to 20 % so that tabs do not all come back at

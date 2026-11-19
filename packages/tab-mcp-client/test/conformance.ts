@@ -145,7 +145,7 @@ function registerFixtures(): void {
 
 registerFixtures();
 const session = await tab.connect();
-const token = await tokenFor(r.store, session.address);
+const token = await tokenFor(r, session.address);
 const address = new URL(session.address);
 
 // Passes Origin through; Host becomes the relay's (fetch sets it).

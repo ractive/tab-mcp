@@ -6,6 +6,53 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Breaking
+
+For relays with one fixed MCP address per app, `https://<relay>/s/<app>/mcp` (the relay
+release after 0.11.0; DEC-196). Relays up to 0.11.0 are not supported, and that relay
+release refuses clients before this one.
+
+- **The address names the app, not the tab.** `session.address` is
+  `https://<relay>/s/<app>/mcp`, the same for every page of the app and every visitor;
+  the pairing code alone says which page an AI app is paired with. Every address from
+  before is gone: users add the new one to their AI apps and pair again.
+- **`hello` carries `app: { id, name? }`**, which the relay requires. The `page` field
+  is no longer sent, and the `/tab` URL has no `?a=<address id>`.
+- **`newAddress()` no longer changes the address.** It still takes the page back,
+  revokes every grant and makes a new secret, and `addressChanged` on its rejection
+  still says whether the secret changed. The dialogs call it "Disconnect all apps"
+  (was "New address"); every AI app then connects again at the same address with a new
+  code. The keys of `ui.strings` are unchanged (`newAddress`, `newAddressNote`,
+  `newAddressQuestionOne`, `newAddressQuestionMany`, `newAddressConfirm`,
+  `gettingNewAddress`, `newAddressDone`, `closeNote`, `replaced`); their English texts
+  changed. A page with its own texts for them should say the same.
+- **`PairingCodeReason` has no `"locked"`.** The relay's codes have no attempts of their
+  own any more: `reason` is `start`, `used` or `expired`.
+
+### Added
+
+- The option `app`: the app id, the `<app>` of the address. 1 to 32 characters of `a-z`,
+  `0-9` and `-`, not starting or ending with `-`; anything else is a `TypeError`.
+  Without it the id is made from `server.name`: lower case, letters without their marks,
+  each run of other characters as one `-`, at most 32 characters ("Bücher" gives
+  `bucher`). A `server.name` that leaves nothing, with `relay` set, is a `TypeError`
+  that says to set `app`. A relay may reserve an app id for certain origins; a page of
+  another origin that names it is refused (`connect()` rejects with reason `policy`).
+  The relay knows a page by its app id and its secret together, so a page that changes
+  its app id is a new page to the relay, and its AI apps pair again.
+
+### Changed
+
+- The pairing code is 8 letters, shown as the relay sends it: `XXXX-XXXX`.
+- The storage key of the secret is unchanged (`tab-mcp:secret:<relay origin>:<server.name>`
+  or `storageKey`).
+
+### Removed
+
+- Close code 4009 (`address_mismatch`) is no longer known: relays do not send it.
+
 ## [0.16.2][client-0.16.2] - 2026-11-14
 
 ### Removed
