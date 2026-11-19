@@ -14,6 +14,7 @@ import {
 	type MouseEvent,
 	type ReactElement,
 	type ReactNode,
+	useCallback,
 	useContext,
 	useEffect,
 	useInsertionEffect,
@@ -21,6 +22,11 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import {
+	type AllowedTool,
+	type AllowedTools,
+	allowedTools,
+} from "./allowed.ts";
 import {
 	type ConfirmRequest,
 	type ConnectionState,
@@ -260,6 +266,58 @@ export function useTabMcpState(): TabMcpSnapshot {
 		store.getSnapshot,
 		() => SERVER_SNAPSHOT,
 	);
+}
+
+/** What `useAllowedTools(grantId)` returns: one object per change, the same object otherwise. */
+export interface AllowedToolsSnapshot {
+	/** The page's tools that ask, each with whether it runs without asking for this app. */
+	tools: (AllowedTool & { allowed: boolean })[];
+	/** "Allow everything, no questions asked" is on for this app. */
+	everything: boolean;
+	/** To change them: `allow`, `ask`, `setEverything`, `forget`. */
+	allowedTools: AllowedTools;
+}
+
+/**
+ * The tools that run without asking for one connected AI app
+ * (`grant.grantId`), for switches of the page's own: `allowedTools(mcp)` of
+ * `@ractive-ch/tab-mcp-client/allowed` as state. Re-renders when they or the
+ * tools change; the server and hydration see none.
+ */
+export function useAllowedTools(grantId: string): AllowedToolsSnapshot {
+	const allowed = allowedTools(useTabMcp());
+	const subscribe = useCallback(
+		(changed: () => void) => allowed.onChange(changed),
+		[allowed],
+	);
+	const last = useRef<{ key: string; snapshot: AllowedToolsSnapshot }>(
+		undefined,
+	);
+	const server = useRef<AllowedToolsSnapshot>(undefined);
+	// Reads only: a changed tool left the list already.
+	const getSnapshot = () => {
+		const everything = allowed.everything(grantId);
+		const listed = new Set(allowed.list(grantId));
+		const tools = allowed
+			.tools()
+			.map((t) => ({ ...t, allowed: everything || listed.has(t.name) }));
+		const key = JSON.stringify([grantId, everything, tools]);
+		if (
+			last.current?.key !== key ||
+			last.current.snapshot.allowedTools !== allowed
+		)
+			last.current = {
+				key,
+				snapshot: { tools, everything, allowedTools: allowed },
+			};
+		return last.current.snapshot;
+	};
+	const getServerSnapshot = () => {
+		if (server.current?.allowedTools !== allowed)
+			server.current = { tools: [], everything: false, allowedTools: allowed };
+		return server.current;
+	};
+	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 /** Options of `useTool`: `RegisterToolOptions` without the signal (the hook has its own). */

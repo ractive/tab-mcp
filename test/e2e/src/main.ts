@@ -245,7 +245,7 @@ loadConfig()
 						"press_keys and take the result from its answer; the user sees every key.",
 				},
 				appName: "Calculator",
-				// The test page offers "Allow until reload" (opt-in, DEC-096).
+				// The test page offers "Always allow" (opt-in, DEC-096, DEC-200).
 				alwaysAllow: true,
 			});
 			await registerTools(mcp);

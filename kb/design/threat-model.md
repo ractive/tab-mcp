@@ -172,6 +172,14 @@ does not export and which refuses to run outside development (DEC-059).
 - `untrustedContentHint` tools mark their results so AI apps can treat them as untrusted
   data (mapping in the decision log).
 - The user sees connected apps in the page and can revoke them or disconnect at any time.
+- Tools that run without asking (DEC-096, DEC-200) are off unless the page turns them on
+  (`alwaysAllow`): "Always allow" in the confirmation, a switch per tool and "Allow
+  everything, no questions asked" in the connect dialog, or the page's own switches
+  (`./allowed`). Kept per grant in the page's `storage` until the relay reports the grant
+  gone, so an allowance outlives the user's attention for up to the grant's 90 days;
+  "everything" also covers tools the user has not seen. A tool whose title or
+  description changed asks again; the page's own `onConfirm` is not asked for an
+  allowed call. Only relay AI apps can be allowed, never WebMCP agents or served ports.
 
 ### A7: Cross-site attacks on the relay's pages
 

@@ -370,11 +370,20 @@ stops script on another origin of the relay; a program can send any `Origin`.
   scrolled to their end: the AI app chooses the order of the keys, so it could put the
   one that matters below the fold.
 - Consent per tool is the page's, not the relay's: the relay has one OAuth scope,
-  `tools`, which covers every tool of the page. "Allow until reload" in the page's
-  confirmation is off unless the page turns it on (`alwaysAllow: true`, DEC-096), since it lifts the
-  only brake at run time for that tool and AI app until the page is reloaded or the app
-  disconnected, which is what a prompt injection needs. The connect dialog lists what
-  runs without asking under each app, with "Ask again".
+  `tools`, which covers every tool of the page. Letting a tool run without asking is off
+  unless the page turns it on (`alwaysAllow`, DEC-096, DEC-200), since it lifts the only
+  brake at run time for that tool and AI app, which is what a prompt injection needs.
+  With `alwaysAllow: true` the confirmation offers "Always allow", and the connect
+  dialog a switch per tool and "Allow everything, no questions asked" under each app,
+  which also covers tools the user has not seen and ones the page adds later. Such an
+  allowance is kept in the page's `storage` until the relay reports the grant gone
+  (disconnected, "Disconnect all apps", expired, signed out): it outlives the user's
+  attention for up to the grant's 90 days. `"until-reload"` keeps it in memory only. A
+  tool whose title or description changed since it was allowed asks again; a page's own
+  `onConfirm` is not asked for an allowed call either. Whoever can write the page's
+  `storage` (a script in the page, XSS) can allow tools as it can take the secret.
+  Only AI apps through the relay can be allowed; WebMCP agents and served ports always
+  ask.
 - Annotations reach the AI app as MCP hints (`readOnlyHint`, `destructiveHint`), so the
   AI app can ask too.
 - Tools marked `untrustedContentHint` are announced with `openWorldHint: true` and the
@@ -766,7 +775,7 @@ from them.
   tools (`consequentialHint`, or MCP's `destructiveHint`) are not mirrored unless the
   page lists `"webmcp"` in their `callers`, which says that its own dialog, or the
   agent's own confirmation, is enough for that tool; a mirrored `destructiveHint` tool
-  carries `consequentialHint: true` in WebMCP. "Allow until reload" is never offered or
+  carries `consequentialHint: true` in WebMCP. "Always allow" is never offered or
   applied for these calls.
 - **The same check.** Arguments are checked against the tool's schema before `execute`
   (Chrome does not), a consequential tool asks the page's `onConfirm` or the library's
@@ -808,7 +817,7 @@ sits beside the AI apps of A2 and A6 and the agents of A14.
 - **Consequential tools still ask.** The same argument check and confirmation as for
   an AI app. `serve`'s own `onConfirm` asks for the calls of that port (in the site's
   chat, say) in place of the page's `onConfirm` and the library's dialog, which says
-  "(this site's assistant)" and never offers "Allow until reload"; relay and WebMCP
+  "(this site's assistant)" and never offers "Always allow"; relay and WebMCP
   calls keep the page's. The library never sends the question over the port: the other
   end is the caller that wants the tool to run, and a model that follows injected
   instructions would answer yes. The page must take the answer from a user action that
@@ -902,7 +911,9 @@ each default.
   apps the previous one paired (A1).
 - A model can be steered by content (prompt injection) into calling tools the user did
   not intend. The page's confirmation covers consequential tools only, and consent per
-  tool is the page's: one `tools` scope covers every tool (A6).
+  tool is the page's: one `tools` scope covers every tool (A6). A tool the user allowed
+  for an AI app (or "everything") runs on that app's say until the app is disconnected,
+  up to 90 days, with nobody looking (A6).
 - AI app names are self-declared; only hosts are verified.
 - The relay accepts one known client bug: the header `MCP-Protocol-Version: 2025-11-25`
   with a body that declares `2026-07-28`. It is limited to this exact pair.

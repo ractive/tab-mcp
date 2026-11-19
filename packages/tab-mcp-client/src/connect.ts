@@ -3,7 +3,7 @@
  * lost its address, loaded on demand when a page opens the dialog.
  */
 
-import { allowedFor } from "./always-allowed.ts";
+import { type Allowances, allowedFor } from "./always-allowed.ts";
 import {
 	button,
 	clientLabel,
@@ -28,6 +28,158 @@ import type {
 	SessionInfo,
 	StateChangeDetail,
 } from "./types.ts";
+
+/** A switch: a checkbox with `role="switch"` in its label, which a click on the text turns too. */
+function switchOf(
+	doc: Document,
+	text: HTMLElement,
+	onToggle: (on: boolean) => void,
+): { label: HTMLLabelElement; input: HTMLInputElement } {
+	const input = el(doc, "input");
+	input.type = "checkbox";
+	input.setAttribute("role", "switch");
+	input.addEventListener("change", () => onToggle(input.checked));
+	const label = el(doc, "label", { className: "tab-mcp-switch" }, input, text);
+	return { label, input };
+}
+
+/**
+ * Under a connected app, the switches for what runs without asking. With
+ * `alwaysAllow` (`offered`): a switch per tool that asks (its title or
+ * name, destructive ones marked) and "Allow everything, no questions asked"
+ * with what it means. Without it, only what is allowed now, as switches that
+ * can only be turned off ("everything" only while it is on): the user sees
+ * what runs without asking and can end it, and is never offered more than
+ * the page chose to offer. Tools allowed but not registered right now are
+ * listed by name, also only to turn off. Each switch's accessible name names
+ * the app: the list has one set per app. `render` updates it in place, so a
+ * focused switch keeps its focus.
+ */
+function allowedSwitches(
+	doc: Document,
+	s: DialogStrings,
+	allowed: Allowances,
+	grantId: string,
+	app: string,
+): { box: HTMLElement; render: () => void } {
+	const title = el(doc, "p", {
+		className: "tab-mcp-allowed-title",
+		id: `${nextId()}-allowed`,
+		text: s.runsWithoutAsking,
+	});
+	const list = el(doc, "div", { className: "tab-mcp-switches" });
+	// Turning on only where the page offers it; the store decides the rest.
+	const all = switchOf(
+		doc,
+		el(doc, "span", { text: s.allowEverything }),
+		(on) => {
+			if (!on || allowed.offered) allowed.setEverything(grantId, on);
+			render();
+		},
+	);
+	all.label.classList.add("tab-mcp-everything");
+	all.input.setAttribute("aria-label", format(s.allowEverythingApp, { app }));
+	const note = el(
+		doc,
+		"small",
+		{ className: "tab-mcp-everything-note", id: `${title.id}-note` },
+		...fill(doc, s.allowEverythingNote, { app }),
+	);
+	all.input.setAttribute("aria-describedby", note.id);
+	// Filled when first shown: a page without it has no switches in its DOM.
+	const box = el(doc, "div", { className: "tab-mcp-allowed" });
+	box.setAttribute("role", "group");
+	box.setAttribute("aria-labelledby", title.id);
+	const switches = new Map<
+		string,
+		ReturnType<typeof switchOf> & {
+			name: HTMLElement;
+			mark: HTMLElement;
+			offOnly: boolean;
+		}
+	>();
+	const render = () => {
+		const everything = allowed.everything(grantId);
+		const listed = allowed.list(grantId);
+		const on = new Set(listed);
+		const asking = new Map(allowed.tools().map((t) => [t.name, t]));
+		const rows: {
+			name: string;
+			shown: string;
+			destructive: boolean;
+			offOnly: boolean;
+		}[] = [];
+		if (allowed.offered)
+			for (const t of asking.values())
+				rows.push({
+					name: t.name,
+					shown: t.title ?? t.name,
+					destructive: t.destructive,
+					offOnly: false,
+				});
+		for (const name of listed) {
+			if (allowed.offered && asking.has(name)) continue;
+			const t = asking.get(name);
+			rows.push({
+				name,
+				shown: t?.title ?? name,
+				destructive: t?.destructive === true,
+				offOnly: true,
+			});
+		}
+		const showAll = allowed.offered || everything;
+		box.hidden = rows.length === 0 && !everything;
+		if (box.hidden) return;
+		if (!box.hasChildNodes()) box.append(title, list, all.label, note);
+		const names = new Set(rows.map((r) => r.name));
+		for (const [name, { label }] of switches) {
+			if (names.has(name)) continue;
+			label.remove();
+			switches.delete(name);
+		}
+		rows.forEach((row, i) => {
+			let entry = switches.get(row.name);
+			if (entry === undefined) {
+				const name = el(doc, "span");
+				const mark = el(doc, "small", {
+					className: "tab-mcp-destructive",
+					text: s.destructive,
+				});
+				const made = switchOf(
+					doc,
+					el(doc, "span", {}, name, " ", mark),
+					(turnedOn) => {
+						if (!turnedOn) allowed.ask(grantId, row.name);
+						else if (switches.get(row.name)?.offOnly === false)
+							allowed.allow(grantId, row.name);
+						render(); // also when nothing changed: the switch says the truth
+					},
+				);
+				entry = { ...made, name, mark, offOnly: row.offOnly };
+				switches.set(row.name, entry);
+			}
+			entry.offOnly = row.offOnly;
+			const shown = visible(row.shown);
+			entry.name.textContent = shown;
+			entry.mark.hidden = !row.destructive;
+			entry.input.setAttribute(
+				"aria-label",
+				format(row.destructive ? s.allowDestructiveToolApp : s.allowToolApp, {
+					tool: shown,
+					app,
+				}),
+			);
+			// What runs without asking now: also every tool under "everything".
+			entry.input.checked = everything || on.has(row.name);
+			entry.input.disabled = everything;
+			if (list.children[i] !== entry.label)
+				list.insertBefore(entry.label, list.children[i] ?? null);
+		});
+		all.label.hidden = note.hidden = !showAll;
+		all.input.checked = everything;
+	};
+	return { box, render };
+}
 
 /**
  * The labels of the apps behind these grants, each once: an app can hold
@@ -199,8 +351,8 @@ export const CODE_USED_WAIT_MS = 10_000;
 /**
  * The "Connect your AI app" dialog: the address with Copy, how to add it,
  * the pairing code (with Copy) while the relay sends one, New address, and
- * the connected apps with Disconnect (and the tools allowed until reload
- * for each, with Ask again). Pairing is on while it is open, so closing it
+ * the connected apps with Disconnect (and, for each, switches for the tools
+ * that run without asking). Pairing is on while it is open, so closing it
  * ends the code; the connection and the address stay. Until an app is
  * connected, only a small Close (and Escape) close it. Once one is, a
  * confirmation leads, the setup moves behind "Connect another app" and
@@ -526,14 +678,13 @@ export function showConnectDialog(
 	const start = () => (connectedView ? done : copy);
 
 	// One item per grant, kept while the grant is: a focused Disconnect keeps
-	// its focus. Under it, the tools allowed until reload, with Ask again.
+	// its focus. Under it, the switches for what runs without asking.
 	const items = new Map<
 		string,
 		{
 			item: HTMLLIElement;
 			disconnect: HTMLButtonElement;
-			allowedText: HTMLElement;
-			allowedBox: HTMLElement;
+			renderAllowed: () => void;
 		}
 	>();
 	const appItem = (grant: Grant) => {
@@ -559,22 +710,7 @@ export function showConnectDialog(
 		);
 		// One name per button: each list item has its own Disconnect.
 		disconnect.setAttribute("aria-label", format(s.disconnectApp, { app }));
-		const askAgain = button(
-			doc,
-			s.askAgain,
-			() => allowed.forget(grant.grantId),
-			"tab-mcp-ask-again",
-		);
-		askAgain.setAttribute("aria-label", format(s.askAgainApp, { app }));
-		const allowedText = el(doc, "span");
-		const allowedBox = el(
-			doc,
-			"div",
-			{ className: "tab-mcp-allowed" },
-			allowedText,
-			" ",
-			askAgain,
-		);
+		const switches = allowedSwitches(doc, s, allowed, grant.grantId, app);
 		const item = el(
 			doc,
 			"li",
@@ -587,9 +723,9 @@ export function showConnectDialog(
 			),
 			" ",
 			disconnect,
-			allowedBox,
+			switches.box,
 		);
-		return { item, disconnect, allowedText, allowedBox };
+		return { item, disconnect, renderAllowed: switches.render };
 	};
 
 	/** The steps for `address` in the help, made again when it changes. */
@@ -778,11 +914,7 @@ export function showConnectDialog(
 				items.set(grant.grantId, entry);
 			}
 			entry.disconnect.disabled = !connected;
-			const tools = allowed.list(grant.grantId);
-			entry.allowedBox.hidden = tools.length === 0;
-			entry.allowedText.textContent = format(s.runsWithoutAsking, {
-				tools: tools.map(visible).join(", "),
-			});
+			entry.renderAllowed();
 			if (appList.children[i] !== entry.item)
 				appList.insertBefore(entry.item, appList.children[i] ?? null);
 		});
