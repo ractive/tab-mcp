@@ -56,11 +56,13 @@ export const PACKAGES: Record<string, PackageSpec> = {
 		tagPrefix: "client-v",
 		exports: {
 			".": { types: "./index.d.ts", default: "./index.js" },
+			"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
 			"./react": { types: "./react.d.ts", default: "./react.js" },
 			"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 			"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 			"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 			"./cdn": "./cdn/tab-mcp-client.min.js",
+			"./cdn/allowed": "./cdn/allowed.min.js",
 		},
 		types: "./index.d.ts",
 		peerDependencies: { react: ">=18.3.0 <20" },
@@ -81,9 +83,13 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"tunnel.js.map",
 			"visible.js",
 			"visible.js.map",
+			// The tools that run without asking (DEC-200).
+			"allowed.js",
+			"allowed.js.map",
 			// Chunks of this name: the escaping, shared by the dialogs and
 			// `./visible`, the setup steps, shared by the connect dialog and
-			// `./setup`, and what the two dialogs share (iteration 38).
+			// `./setup`, what the two dialogs share (iteration 38), and the
+			// allowances, shared by the dialogs, `./allowed` and `./react` (DEC-200).
 			"index-[hash].js",
 			"index-[hash].js.map",
 			"connection-[hash].js",
@@ -105,8 +111,15 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"cdn/connect-[hash].min.js.map",
 			"cdn/webmcp-[hash].min.js",
 			"cdn/webmcp-[hash].min.js.map",
-			"cdn/index-[hash].min.js",
-			"cdn/index-[hash].min.js.map",
+			// `./allowed` beside the CDN core, in the same build (DEC-200).
+			"cdn/allowed.min.js",
+			"cdn/allowed.min.js.map",
+			// Chunks of this name: what the dialogs share, and the allowances,
+			// shared by the dialogs and `allowed.min.js`. Named after the CDN
+			// core's entry (`scripts/cdn/tab-mcp-client.ts`) since that build has
+			// two entries (DEC-200).
+			"cdn/tab-mcp-client-[hash].min.js",
+			"cdn/tab-mcp-client-[hash].min.js.map",
 		],
 		declarationsFrom: "src",
 	},
