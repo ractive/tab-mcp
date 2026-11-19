@@ -6,6 +6,49 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- **`@ractive-ch/tab-mcp-client/allowed`**, an entry of its own (not in the core):
+  `allowedTools(mcp)` returns the tools that run without asking, per connected AI app,
+  for a page that draws its own switches: `tools()` (the tools that ask, each with
+  `destructive`), `has`, `list`, `allow`, `ask`, `everything`, `setEverything`,
+  `forget`, `onChange` and `kept`. Types `AllowedTools`, `AllowedTool` (DEC-200). It
+  works with `alwaysAllow` unset too, kept in `storage`.
+- **"Allow everything, no questions asked"** per AI app: every tool runs without asking,
+  also ones registered later, changed and destructive ones.
+- **Switches in the connect dialog**: under each connected app, a switch per tool that
+  asks (destructive ones marked) and "Allow everything, no questions asked" with a
+  sentence on what it means; checkboxes with `role="switch"` whose accessible names name
+  the app. Shown with `alwaysAllow`, and without it while something is allowed for that
+  app.
+- `useAllowedTools(grantId)` in `@ractive-ch/tab-mcp-client/react`: the tools that ask,
+  each with `allowed`, `everything` and the `allowedTools` object to change them.
+- `alwaysAllow: "until-reload"`.
+- `ui.strings`: `alwaysAllow`, `alwaysAllowNote`, `destructive`, `allowToolApp`,
+  `allowDestructiveToolApp`, `allowEverything`, `allowEverythingApp`,
+  `allowEverythingNote`.
+
+### Changed
+
+- **`alwaysAllow: true` keeps allowances until the app is disconnected**, in `storage`
+  under the secret's key with `#allowed` appended (grant ids, tool names, the title and
+  description the user saw, a fingerprint of the secret; no arguments). They end when
+  the relay reports the grant gone (disconnected, "Disconnect all apps", expired, signed
+  out), not on a dropped connection or a reload. With `storage: null` they are kept in
+  memory. `alwaysAllow: "until-reload"` is the old behaviour.
+- **The confirmation's third button** says "Always allow" with `alwaysAllow: true`, and
+  "Allow until reload" with `"until-reload"` or `storage: null`, each with its own note.
+- **An allowed call no longer reaches the page's own `onConfirm`**: it runs without
+  asking. React's provider always installs an `onConfirm`, so this holds there too.
+- **A tool that is unregistered keeps its allowance** (a reload registers every tool
+  again); one registered again with another title or description is asked again, as
+  before.
+- `ui.strings`: `runsWithoutAsking` is the heading over the switches ("Runs without
+  asking", without `{tools}`); `askAgain` and `askAgainApp` are gone ("Ask again" is
+  replaced by the switches).
+
 ## [0.17.0][client-0.17.0] - 2026-11-19
 
 ### Breaking
