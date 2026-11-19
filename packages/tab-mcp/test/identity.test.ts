@@ -449,6 +449,72 @@ describe("identity binding: no page of the signed-in person is connecting", () =
 			new URL(done.location ?? "").searchParams.get("code"),
 		).not.toBeNull();
 	});
+
+	/**
+	 * Connect with page A, then A closes and a page that connects only now
+	 * (`secret` its own or A's) is open and signed in as alice. The callback
+	 * must not pair it; a second Connect on the same request pairs it.
+	 */
+	async function connectedAfterTheSignIn(sameSecret: boolean) {
+		const ctx = await setup();
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const back = await provider.signIn(await connect(ctx, flow.page));
+		ctx.tab.close();
+		await ctx.tab.closed;
+		await waitFor(() => ctx.r.relay.sessionCount === 0, "the tab to go");
+		// openedAt and the sign-in's start are milliseconds apart at least.
+		await Bun.sleep(5);
+		const next = await newTab(
+			ctx.r,
+			sameSecret ? { secret: ctx.tab.secret } : {},
+		);
+		await signInTab(next, "alice");
+		next.send({ type: "pairing.start" });
+		await settled(ctx.r, next);
+		expect(next.addressId === ctx.tab.addressId).toBe(sameSecret);
+
+		const refused = await ctx.browser.open(back);
+		expect(refused.status).toBe(403);
+		expect(refused.location).toBeUndefined();
+		expect(refused.html).toContain(NO_PAGE_TEXT);
+		const failed = ctx.r.logs.events("oauth.pairing_failed");
+		expect(failed).toHaveLength(1);
+		expect(failed[0]).toMatchObject({ app: APP, reason: "mismatch" });
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
+		for (const t of [ctx.tab, next]) {
+			expect(await ctx.r.store.listGrants(t.addressId, Date.now())).toEqual([]);
+		}
+
+		// A new sign-in starts after the page connected: it pairs.
+		const done = await ctx.browser.open(
+			await provider.signIn(await connect(ctx, refused)),
+		);
+		expect(done.status).toBe(303);
+		// The grant is made when the code is redeemed.
+		await tokenFrom(ctx, done.location ?? "", flow.verifier);
+		return { ctx, next };
+	}
+
+	test("a sign-in under way does not pair with a page that connected after it started", async () => {
+		const { ctx, next } = await connectedAfterTheSignIn(false);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(1);
+		expect(
+			await ctx.r.store.listGrants(next.addressId, Date.now()),
+		).toHaveLength(1);
+		expect(await ctx.r.store.listGrants(ctx.tab.addressId, Date.now())).toEqual(
+			[],
+		);
+	});
+
+	test("a page that connects again with the same secret after the sign-in started is not paired by it either", async () => {
+		const { ctx, next } = await connectedAfterTheSignIn(true);
+		expect(next.addressId).toBe(ctx.tab.addressId);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(1);
+		expect(
+			await ctx.r.store.listGrants(next.addressId, Date.now()),
+		).toHaveLength(1);
+	});
 });
 
 describe("identity binding: someone else gets the mismatch error", () => {

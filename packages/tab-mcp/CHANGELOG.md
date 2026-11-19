@@ -72,7 +72,8 @@ This release is breaking, with no compatibility with what was before:
   address are gone.
 - **Identity binding (`oidc`).** Connect redirects to the provider at once; at the
   callback the relay pairs with the app's page whose user is the signed-in person and
-  whose "Connect your AI app" dialog is open (of several, the one that connected last).
+  whose "Connect your AI app" dialog is open (of several, the one that connected last;
+  only a page that was connected when the sign-in started).
   No such page, a closed dialog, a signed-out page and another person get one answer
   (403, log reason `mismatch`), and the next sign-in asks for the account again
   (`prompt=login`). The provider `state` and the authorization code no longer start

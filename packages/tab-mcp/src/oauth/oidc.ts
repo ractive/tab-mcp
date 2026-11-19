@@ -60,6 +60,8 @@ interface Flow {
 	browserId: string;
 	nonce: string;
 	verifier: string;
+	/** When Connect sent the browser to the provider. */
+	startedAt: number;
 	expiresAt: number;
 }
 
@@ -316,6 +318,7 @@ export class OidcPairing implements PairingMethod {
 			browserId: context.browserId,
 			nonce,
 			verifier,
+			startedAt: Date.now(),
 			expiresAt: Date.now() + FLOW_TTL_MS,
 		});
 		const url = new URL(metadata.authorizationEndpoint);
@@ -425,7 +428,7 @@ export class OidcPairing implements PairingMethod {
 		// cannot tell a page signed in as someone else from no page at all, and
 		// says so in one text.
 		const key = identityKey(this.#config.issuer, subject);
-		const target = pool.signedIn(key);
+		const target = pool.signedIn(key, flow.startedAt);
 		if (target === undefined) {
 			// The next sign-in asks for the account again (`prompt=login`).
 			this.#mismatched.add(requestId);

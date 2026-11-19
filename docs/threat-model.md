@@ -572,7 +572,9 @@ page (a tab assertion), the provider says who signed in at `/authorize` (an ID t
 - **Someone else signs in.** The sign-in comes first. When the provider sends the
   browser back, the relay looks among the app's pages for one whose user is the
   signed-in person and whose "Connect your AI app" dialog is open; of several, it takes
-  the one that connected last. Anyone without such a page gets "No page is connecting
+  the one that connected last. Only a page that was connected when the sign-in started
+  counts, so a sign-in under way does not pair with the page that "Disconnect all apps"
+  has just made new. Anyone without such a page gets "No page is connecting
   with the account you signed in with. …" and nothing is issued. No page, a closed
   dialog, a signed-out page and a page signed in as someone else get this one answer,
   as the relay cannot tell them apart; it therefore says nothing about other people's

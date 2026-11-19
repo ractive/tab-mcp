@@ -58,7 +58,8 @@ without rebuilding the OAuth server (DEC-042).
 - `/authorize` (still the relay's MCP authorization server) redirects the user's browser to
   the provider, gets the ID token back, and looks among the app's pages for the one whose
   user is that `iss` + `sub` and whose "Connect your AI app" dialog is open; of several,
-  the one that connected last (DEC-196).
+  the one that connected last; only a page connected when the sign-in started counts
+  (DEC-196).
 - With such a page the relay issues the MCP authorization code and tokens as today, for
   that page's address id; the code step is replaced by the identity check. An app whose
   pages can pair both ways gets both on one pairing page: the code field, and "Sign in

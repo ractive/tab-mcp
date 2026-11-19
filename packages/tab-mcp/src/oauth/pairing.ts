@@ -23,10 +23,14 @@ export interface PairingPool {
 	 */
 	redeem(code: string): PairingTarget | undefined;
 	/**
-	 * The page whose user is `identity` (DEC-077) and whose "Connect your AI
-	 * app" dialog is open; of several, the one that connected last.
+	 * The page whose user is `identity` (DEC-077), whose "Connect your AI
+	 * app" dialog is open, and whose session was open at `since` already (when
+	 * the sign-in started); of several, the one that connected last. A page
+	 * that connected after the sign-in began is not it: "Disconnect all apps"
+	 * makes the page a new one, and a sign-in under way from before must not
+	 * pair with that.
 	 */
-	signedIn(identity: string): PairingTarget | undefined;
+	signedIn(identity: string, since: number): PairingTarget | undefined;
 }
 
 /** The pending request a check belongs to (for methods that leave the page). */

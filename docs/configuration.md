@@ -208,7 +208,8 @@ With identity binding, an AI app connects to a page without a code: the person w
 the app's address to the AI app signs in at an OpenID Connect provider (your
 organisation's login, Google, Keycloak, Auth0, Okta, Microsoft Entra ID), and the relay
 pairs the AI app with the app's page whose user is that person and whose "Connect your
-AI app" dialog is open; of several such pages, the one that connected last. If there is
+AI app" dialog is open, and which was connected already when the sign-in started; of
+several such pages, the one that connected last. If there is
 none, the pairing page says "No page is connecting with the account you signed in with.
 …" and nothing is connected. The relay cannot tell apart a page that is not open, one
 whose dialog is closed, one that is signed out and one that is signed in as someone

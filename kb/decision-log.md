@@ -4082,7 +4082,8 @@ compatibility. We can start fresh."
   after another are no guesses. No limit per address
   (there is none to charge) and none across networks: a limit anyone can use up locks
   the owners out (the lesson of DEC-061). One network's 1 450 guesses a day hit one of
-  N open dialogs with probability N × 5.7 × 10⁻⁸ a day.
+  N open dialogs with probability N × 5.7 × 10⁻⁸ a day; a party with M networks has M
+  times that, and nothing but the code's length stands against it.
 - **Open requests** are capped per network (10: the eleventh pushes out that network's
   own oldest, so nobody is refused for loading the page again) and in all (10 000,
   evicting the oldest request among those of the networks that hold the most). The caps
@@ -4093,8 +4094,10 @@ compatibility. We can start fresh."
   know the page before the code, and after it the browser goes back to the AI app. The
   code is the proof that the user sees the page they mean.
 - **Identity binding** (`oidc`, DEC-079): the sign-in comes first. The grant is for the
-  app's page whose user is the signed-in person and whose dialog is open (of several, the
-  one that connected last). No such page, a closed dialog, a signed-out page and another
+  app's page whose user is the signed-in person, whose dialog is open and whose session
+  was open already when the sign-in started (of several, the one that connected last).
+  So a sign-in under way does not pair with the page that "Disconnect all apps" just
+  made new (review of PR 164). No such page, a closed dialog, a signed-out page and another
   person are one answer, as the relay cannot tell them apart. An app whose pages can pair
   both ways gets both on one page: the code field, and "Sign in instead".
 - **A tab assertion's audience** (DEC-076) is the app's address, so it no longer names

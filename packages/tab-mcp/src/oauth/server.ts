@@ -1868,7 +1868,9 @@ ${alternatives}
 	 * authorization codes made for it go too, so none of them makes a grant
 	 * afterwards. An open request names no page yet (DEC-196): it can only
 	 * become a grant through a pairing code typed after this, which is a new
-	 * connection the page's user makes.
+	 * connection the page's user makes, or through a sign-in, which pairs
+	 * only with a session that was open when it started (`signedIn`): a page
+	 * that got a new secret is a new session.
 	 */
 	addressRevoked(addressId: string): void {
 		for (const [key, c] of this.#codes) {

@@ -782,7 +782,7 @@ function startRelay(
 				}
 				return s.codes.redeem(code) ? { addressId: s.addressId } : undefined;
 			},
-			signedIn(identity) {
+			signedIn(identity, since) {
 				let found: TabSession | undefined;
 				for (const s of sessions.values()) {
 					if (
@@ -791,6 +791,7 @@ function startRelay(
 						s.site.pairing === "oidc" &&
 						s.pairingOpen &&
 						s.identity === identity &&
+						s.openedAt <= since &&
 						(found === undefined || s.openedAt >= found.openedAt)
 					) {
 						found = s;
