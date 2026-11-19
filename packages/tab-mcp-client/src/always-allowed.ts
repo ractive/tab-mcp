@@ -205,15 +205,45 @@ const counts = (kept: ToolSeen, now: ToolNow | undefined) =>
 	now === undefined || sameSeen(kept, now);
 
 /**
- * The allowances of one `TabMcp`. The public methods are arrow fields, so
- * that they work taken off the object; the queries never write.
+ * A caller's own stand-in for a `TabMcp` in the confirmation chunk's
+ * `confirmInPage` (a desktop app with an MCP endpoint of its own, say): the
+ * AI apps it allows for, and optionally `grantschange` events (with
+ * `detail.grants`) when they change. Its allowances live in memory, for
+ * those grants only, until the page is reloaded.
+ */
+export interface ConfirmHost {
+	readonly grants: readonly { readonly grantId: string }[];
+	addEventListener?(type: string, listener: (event: Event) => void): void;
+}
+
+/** What the allowances read of their host's tools. */
+type ToolsOf = Pick<ToolRegistry, "list" | "get" | "onChange">;
+
+/** A stand-in has no tools to list: a tool is allowed as its question showed it. */
+const NO_TOOLS: ToolsOf = {
+	list: () => [],
+	get: () => undefined,
+	onChange: () => () => {},
+};
+
+/** The host's tools, secret store and `alwaysAllow`: a `TabMcp`'s, or none for a stand-in. */
+function internalsOf(
+	host: TabMcp | ConfirmHost,
+): TabMcp["_allowed"] | [ToolsOf, undefined, undefined] {
+	return "_allowed" in host ? host._allowed : [NO_TOOLS, undefined, undefined];
+}
+
+/**
+ * The allowances of one `TabMcp` (or a caller's stand-in, `ConfirmHost`).
+ * The public methods are arrow fields, so that they work taken off the
+ * object; the queries never write.
  */
 export class Allowances implements AllowedTools {
 	readonly kept: boolean;
 	/** The library's dialogs offer allowing (`alwaysAllow` on). */
 	readonly offered: boolean;
-	readonly #mcp: TabMcp;
-	readonly #registry: ToolRegistry;
+	readonly #mcp: TabMcp | ConfirmHost;
+	readonly #registry: ToolsOf;
 	readonly #secret: () => string;
 	/** `null`: in memory only. */
 	readonly #storage: SecretStorage | null;
@@ -228,8 +258,8 @@ export class Allowances implements AllowedTools {
 	readonly #listeners = new Set<() => void>();
 	#unwatch: (() => void) | undefined;
 
-	constructor(mcp: TabMcp) {
-		const [registry, secrets, alwaysAllow] = mcp._allowed;
+	constructor(mcp: TabMcp | ConfirmHost) {
+		const [registry, secrets, alwaysAllow] = internalsOf(mcp);
 		this.#mcp = mcp;
 		this.#registry = registry;
 		this.#secret = () => fingerprint(secrets?.current());
@@ -441,25 +471,30 @@ export class Allowances implements AllowedTools {
 	}
 }
 
-/** The allowances per `TabMcp`. */
-const allowances = new WeakMap<TabMcp, Allowances>();
+/** The allowances per `TabMcp` or stand-in. */
+const allowances = new WeakMap<TabMcp | ConfirmHost, Allowances>();
 
 /**
  * The allowances of `mcp`, made on first use. They follow its grants (only
- * when the relay names them, see above) and its tools.
+ * when the relay names them, see above; a stand-in's `grantschange`) and
+ * its tools.
  */
-export function allowedFor(mcp: TabMcp): Allowances {
+export function allowedFor(mcp: TabMcp | ConfirmHost): Allowances {
 	const kept = allowances.get(mcp);
 	if (kept !== undefined) return kept;
 	const made = new Allowances(mcp);
 	allowances.set(mcp, made);
-	mcp.addEventListener("grantschange", (e) =>
-		made.keepGrants(e.detail.grants.map((g) => g.grantId)),
+	mcp.addEventListener?.("grantschange", (e) =>
+		made.keepGrants(
+			(e as CustomEvent<{ grants: ConfirmHost["grants"] }>).detail.grants.map(
+				(g) => g.grantId,
+			),
+		),
 	);
-	mcp._allowed[0].onChange(() => made.toolsChanged());
+	internalsOf(mcp)[0].onChange(() => made.toolsChanged());
 	made.toolsChanged(); // tools may have changed since the last page kept them
 	// Made while connected: the grants are the relay's, the others ended.
-	if (mcp.session !== undefined)
+	if ("session" in mcp && mcp.session !== undefined)
 		made.keepGrants(mcp.grants.map((g) => g.grantId));
 	return made;
 }

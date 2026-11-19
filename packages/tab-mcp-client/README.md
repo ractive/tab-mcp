@@ -546,6 +546,17 @@ outcome `unanswered`. Any other value, and a throw, is a refusal.
 
 `mcp.confirmInPage(request, { document })` is the library's own dialog, for an
 `onConfirm` that handles only some calls itself (`document` defaults to the global one).
+A call the user allowed for its AI app resolves `true` without the dialog.
+
+An app that shows the dialog for an MCP endpoint of its own, without a `TabMcp` (a
+desktop app, say), can load the built confirmation chunk (`confirm-<hash>.js`; its name
+changes with each build) and call its `confirmInPage(host, request, document, options)`.
+`host` is a stand-in with `grants` (the AI apps it allows for, `{ grantId }`), optionally
+an `EventTarget` that sends `grantschange` with `detail.grants`. `options` are
+`alwaysAllow` (`true` or `"until-reload"` offers "Allow until reload" for that call;
+without it nothing is allowed or kept), `ui` (the dialog's texts) and `allowDelayMs`
+(tests only). Such allowances live in memory, for the host's grants, until a reload; only
+a client with `kind: "relay"` can be allowed.
 
 ### Tools that run without asking
 

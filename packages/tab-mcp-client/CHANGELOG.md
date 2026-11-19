@@ -6,6 +6,32 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Fixed
+
+- **The confirmation chunk's `confirmInPage` works with a host of the caller's own
+  again.** Code that loads the built confirmation chunk (`confirm-<hash>.js`) and calls
+  its `confirmInPage(mcp, request, document, options)` with a stand-in for the `TabMcp`
+  (a desktop app's own MCP endpoint, say) broke in 0.18.0, which the 0.18.0 entry did
+  not say:
+  - it read the internal `_allowed` of the host, so a host without it threw;
+  - its fourth argument became the dialog texts (`ui`) alone, so the 0.17 options
+    `{ alwaysAllow, ui, allowDelayMs }` were silently ignored: no third button per
+    call, no translated texts, no other delay.
+
+  Now the fourth argument is again `{ alwaysAllow?, ui?, allowDelayMs? }`, as in 0.17.
+  A host needs only `grants` (and may send `grantschange` with `detail.grants`); it
+  needs no `_allowed` and no `session`. For a host that is not a `TabMcp`, nothing is
+  allowed or kept unless the call offers it with `alwaysAllow`; then the button says
+  "Allow until reload" (`true` and `"until-reload"` alike: nothing of a stand-in
+  outlives a reload), and an allowance is kept in memory for the host's grants only,
+  until a reload or until its grant leaves `grants`, and applies to that app's later
+  calls of the tool. For a `TabMcp`, `alwaysAllow` overrides the page's option for
+  that call. As since 0.13, only a client with `kind: "relay"` can be allowed. Hosts
+  that added `_allowed` or `session` for 0.18.0 can drop them.
+  `TabMcp.confirmInPage(request, { document })` is unchanged.
+
 ## [0.18.0][client-0.18.0] - 2026-11-20
 
 ### Added
