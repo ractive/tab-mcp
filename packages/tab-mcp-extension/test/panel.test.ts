@@ -44,7 +44,7 @@ const base: PanelState = {
 	questions: [],
 	expired: [],
 };
-const ADDRESS = "https://relay.example/a/x/mcp";
+const ADDRESS = "https://relay.example/s/tab-mcp/mcp";
 const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
 
 describe("the AI app card", () => {

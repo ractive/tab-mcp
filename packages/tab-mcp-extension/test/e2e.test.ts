@@ -147,7 +147,7 @@ async function setRelay(panel: Page, relay: string): Promise<void> {
 
 /** An MCP client (the AI app) with a token for `address`. */
 async function mcpClient(relay: TestRelay, address: string): Promise<Client> {
-	const token = await tokenFor(relay.store, address);
+	const token = await tokenFor(relay, address);
 	const client = new Client(
 		{ name: "extension-e2e", version: "1.0.0" },
 		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
@@ -1838,6 +1838,7 @@ describe.skipIf(chrome === undefined)(
 			const impostor = new TabMcp({
 				relay: stack.relay.url,
 				server: { name: "tab-mcp-browser-extension", version: "1.0.0" },
+				app: "tab-mcp-extension",
 				storage: {
 					getItem: (key) => secrets[key] ?? null,
 					setItem: () => {},
@@ -1881,13 +1882,15 @@ describe.skipIf(chrome === undefined)(
 						`document.getElementById("state").dataset.state`,
 					),
 				).toBe("off");
-				// New address: the old one is taken back, then a new one made.
+				// Disconnect all apps: the connection is taken back with a new
+				// secret behind it. The address names the app and stays
+				// (DEC-196); the notice going away says it is done.
 				await stack.panel.click("#replaced-new-address");
 				// Timed out once in CI (2026-11-13), never in 27 local runs: the
 				// error says what the panel showed then.
-				const fresh = await stack.panel
-					.waitFor<string>(
-						`(() => { const a = document.getElementById("address").textContent; return a && a !== ${JSON.stringify(stack.address)} && a; })()`,
+				await stack.panel
+					.waitFor(
+						`document.getElementById("replaced").hidden && ["on", "waiting"].includes(document.getElementById("state").dataset.state)`,
 						15_000,
 					)
 					.catch(async (error: unknown) => {
@@ -1900,7 +1903,6 @@ describe.skipIf(chrome === undefined)(
 							`${error}; impostor ${impostor.state}; the panel: ${shown.join(" | ")}`,
 						);
 					});
-				expect(fresh).not.toBe(stack.address);
 				expect(impostor.state).toBe("disconnected");
 				expect(await stored("replaced")).toBeNull();
 				expect(

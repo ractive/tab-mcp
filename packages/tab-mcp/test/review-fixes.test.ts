@@ -18,6 +18,7 @@ import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import { issueTokenPair, newId } from "../src/tokens.ts";
 import {
+	APP,
 	issueAccessToken,
 	mcpPost,
 	rpc,
@@ -81,6 +82,7 @@ async function grant(r: TestRelay, addressId: string) {
 		r.store,
 		{
 			addressId,
+			app: APP,
 			clientId: "https://client.example/cimd.json",
 			clientName: "Test client",
 		},
@@ -144,7 +146,7 @@ describe("1: a revoked grant's requests do not reach the page", () => {
 		});
 		let forwarded = 0;
 		const { token } = await grant(r, owner.addressId);
-		const address = r.relay.addressFor(secret);
+		const address = r.relay.addressFor(APP);
 		// The page is not open: the request waits for it (pageWaitMs).
 		const pending = mcpPost(address, rpc(1, "tools/list"), { token });
 		await Bun.sleep(100);
@@ -161,7 +163,7 @@ describe("1: a revoked grant's requests do not reach the page", () => {
 		const page = tab(r, { onRequest: () => forwarded++ });
 		let forwarded = 0;
 		const { token, grantId } = await grant(r, page.addressId);
-		const address = r.relay.addressFor(page.secret);
+		const address = r.relay.addressFor(APP);
 		const pending = mcpPost(address, rpc(1, "tools/list"), { token });
 		await Bun.sleep(100);
 		// Another instance (or the store directly): only the store knows.
@@ -258,6 +260,7 @@ describe("1: a revoked grant's requests do not reach the page", () => {
 			store,
 			{
 				addressId: page.addressId,
+				app: APP,
 				clientId: "https://client.example/cimd.json",
 				clientName: "Test client",
 			},
@@ -483,9 +486,120 @@ describe("6: a pairing-guess limit cannot be reset by churning keys", () => {
 	});
 });
 
+describe("6, since the fixed address (DEC-196): wrong codes are limited per network and by nothing else", () => {
+	const WRONG_TEXT = "That code is not right, or it has expired";
+	const LIMITED_TEXT = "Too many wrong codes from your network";
+
+	/** The pairing form opened from `ip` (behind the trusted proxy); returns its Connect. */
+	async function formAt(r: OAuthTestRelay, ip: string) {
+		const browser = new TestBrowser(r.url, { "x-real-ip": ip });
+		const page = await browser.open(
+			authorizeUrl(r.url, {
+				client_id: clientId,
+				redirect_uri: REDIRECT,
+				code_challenge: pkce().challenge,
+				resource: r.relay.addressFor(APP),
+			}),
+		);
+		expect(page.status).toBe(200);
+		return (code: string) => browser.submit(page, { action: "connect", code });
+	}
+
+	/** A well-formed code that is not the one the page shows. */
+	const wrongFor = (shown: string) =>
+		shown.startsWith("B") ? "CCCC-CCCC" : "BBBB-BBBB";
+
+	async function pairingTab(r: OAuthTestRelay) {
+		const t = tab(r);
+		await t.connect();
+		const code = await t.startPairing();
+		return { t, code, wrong: wrongFor(code) };
+	}
+
+	test("10 wrong codes, then 429 for the right one too, which is not used up; malformed input is not charged", async () => {
+		const r = oauthRelay({ trustProxy: "x-real-ip" });
+		const { t, code, wrong } = await pairingTab(r);
+		const connect = await formAt(r, "198.51.100.50");
+		for (const malformed of ["", "BCDF", "1234-5678"]) {
+			const res = await connect(malformed);
+			expect(res.status).toBe(400);
+			expect(res.html).toContain("Enter the 8 letters");
+		}
+		for (let i = 0; i < 10; i++) {
+			const res = await connect(wrong);
+			expect(res.status).toBe(400);
+			expect(res.html).toContain(WRONG_TEXT);
+		}
+		const eleventh = await connect(wrong);
+		expect(eleventh.status).toBe(429);
+		expect(eleventh.html).toContain(LIMITED_TEXT);
+		// The limit comes before the code is judged: the right one pairs
+		// nobody and stays the page's code.
+		const right = await connect(code);
+		expect(right.status).toBe(429);
+		expect(right.location).toBeUndefined();
+		expect(t.pairingCode).toBe(code);
+		expect(r.logs.events("oauth.paired")).toHaveLength(0);
+		expect(r.logs.events("oauth.pairing_failed").at(-1)?.["reason"]).toBe(
+			"rate_limited",
+		);
+		// One warning per episode, naming the limit.
+		expect(r.logs.events("oauth.rate_limited").map((e) => e["limit"])).toEqual([
+			"code_guesses",
+		]);
+	});
+
+	test("an IPv6 /56 is one network: a second /64 of it gets no new share, the next /56 does", async () => {
+		const r = oauthRelay({ trustProxy: "x-real-ip" });
+		const { wrong } = await pairingTab(r);
+		const first = await formAt(r, "2001:db8:b:100::1");
+		for (let i = 0; i < 10; i++) expect((await first(wrong)).status).toBe(400);
+		const sameNetwork = await formAt(r, "2001:db8:b:1ff::1");
+		const refused = await sameNetwork(wrong);
+		expect(refused.status).toBe(429);
+		expect(refused.html).toContain(LIMITED_TEXT);
+		const nextNetwork = await formAt(r, "2001:db8:b:200::1");
+		const judged = await nextNetwork(wrong);
+		expect(judged.status).toBe(400);
+		expect(judged.html).toContain(WRONG_TEXT);
+	});
+
+	test("networks at their limit do not stop another network's right code", async () => {
+		const r = oauthRelay({ trustProxy: "x-real-ip" });
+		const { code, wrong } = await pairingTab(r);
+		// Four networks use up their ten each: 40 wrong codes at one app whose
+		// one page shows a code. Before DEC-196 the address had a cap of its
+		// own across networks (30, then one every 30 seconds), which the
+		// fourth network would have met, and the owner after it.
+		for (const ip of [
+			"203.0.113.1",
+			"203.0.113.2",
+			"203.0.113.3",
+			"203.0.113.4",
+		]) {
+			const connect = await formAt(r, ip);
+			for (let i = 0; i < 10; i++)
+				expect((await connect(wrong)).status).toBe(400);
+			expect((await connect(wrong)).status).toBe(429);
+		}
+		const owner = await formAt(r, "198.51.100.51");
+		const done = await owner(code);
+		expect(done.status).toBe(303);
+		expect(
+			new URL(done.location ?? "").searchParams.get("code"),
+		).not.toBeNull();
+	});
+
+	// There is no cap across networks any more, on purpose: a guess belongs
+	// to no address (the typed code is what finds the page), so a cap per
+	// address has nothing to count, and one for the whole relay would let
+	// strangers lock everyone out. What bounds a guesser with many networks
+	// is the code alone: 20^8 = 2.56 × 10^10 values, two minutes each.
+});
+
 describe("7: /token is limited by failures per network, not by successes", () => {
 	async function refreshTokens(r: OAuthTestRelay, n: number) {
-		const addressId = addressIdFromSecret(newSecret());
+		const addressId = addressIdFromSecret(newSecret(), APP);
 		const tokens: string[] = [];
 		for (let i = 0; i < n; i++) {
 			const pair = await issueTokenPair(
@@ -493,6 +607,7 @@ describe("7: /token is limited by failures per network, not by successes", () =>
 				{
 					grantId: newId("g"),
 					addressId,
+					app: APP,
 					clientId,
 					clientName: "Test AI",
 					scopes: ["tools"],
@@ -574,7 +689,7 @@ describe("7: /token is limited by failures per network, not by successes", () =>
 });
 
 describe("review of tab-mcp#94", () => {
-	test("a right code is not charged: one network pairs an address more than 10 times", async () => {
+	test("a right code is not charged: one network pairs a page more than 10 times", async () => {
 		const r = oauthRelay({ trustProxy: "x-real-ip" });
 		const t = tab(r);
 		const s = await t.connect();

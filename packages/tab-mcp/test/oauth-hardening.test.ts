@@ -12,10 +12,11 @@ import {
 	test,
 } from "bun:test";
 import { ipPrefixKey } from "../src/ip.ts";
+import { normalizeCode } from "../src/oauth/pairing.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenRecord } from "../src/store/types.ts";
-import { mcpPost, rpc, ScriptedTab, waitFor } from "./helpers.ts";
+import { mcpPost, rpc, ScriptedTab } from "./helpers.ts";
 import {
 	type AuthorizePage,
 	authorizeUrl,
@@ -78,22 +79,34 @@ async function openPage(
 	);
 }
 
-const wrongFor = (code: string) => (code === "000000" ? "000001" : "000000");
+/** A well-formed code that none of `codes` is. */
+function wrongFor(...codes: string[]): string {
+	const live = new Set(codes.map((c) => normalizeCode(c)));
+	for (const candidate of ["BBBB-BBBB", "CCCC-CCCC", "DDDD-DDDD"]) {
+		if (!live.has(normalizeCode(candidate))) return candidate;
+	}
+	return "FFFF-FFFF";
+}
 
-describe("1: only real guesses count against an address; one network cannot lock out the owner", () => {
-	test("junk and malformed input from many networks leaves the owner able to pair", async () => {
+const LIMITED_TEXT = "Too many wrong codes from your network.";
+
+describe("1: only real guesses count, per network; one network cannot lock out the owner (DEC-061, DEC-196)", () => {
+	test("junk and malformed input from many networks, the owner's too, leaves the owner able to pair", async () => {
 		const { r, tab, address } = await setup();
-		for (let n = 0; n < 4; n++) {
-			const attacker = browserAt(r, `203.0.113.${n + 1}`);
-			let page = await openPage(attacker, r, address);
-			for (let i = 0; i < 10; i++) {
-				page = await attacker.submit(page, {
+		const junk = async (ip: string) => {
+			const browser = browserAt(r, ip);
+			let page = await openPage(browser, r, address);
+			for (let i = 0; i < 12; i++) {
+				page = await browser.submit(page, {
 					action: "connect",
-					code: i % 2 === 0 ? "junk" : "",
+					code: ["junk", "", "123456", "BCDF-GHJ"][i % 4] ?? "",
 				});
 				expect(page.status).toBe(400);
+				expect(page.html).toContain("Enter the 8 letters shown in the page.");
 			}
-		}
+		};
+		for (let n = 0; n < 4; n++) await junk(`203.0.113.${n + 1}`);
+		await junk("198.51.100.7");
 		const owner = browserAt(r, "198.51.100.7");
 		const page = await openPage(owner, r, address);
 		const done = await owner.submit(page, {
@@ -101,54 +114,146 @@ describe("1: only real guesses count against an address; one network cannot lock
 			code: tab.pairingCode ?? "",
 		});
 		expect(done.status).toBe(303);
+		expect(r.logs.events("oauth.rate_limited")).toHaveLength(0);
 	});
 
-	test("a network that guesses wrong is stopped; the owner on another network still pairs", async () => {
+	test("a network that guesses wrong is stopped: its eleventh code is refused unjudged, a right one too; the owner on another network pairs with that same code", async () => {
 		const { r, tab, address } = await setup();
+		const code = tab.pairingCode ?? "";
 		const attacker = browserAt(r, "203.0.113.9");
 		let page = await openPage(attacker, r, address);
 		const statuses: number[] = [];
 		for (let i = 0; i < 11; i++) {
 			page = await attacker.submit(page, {
 				action: "connect",
-				code: wrongFor(tab.pairingCode ?? ""),
+				code: wrongFor(code),
 			});
 			statuses.push(page.status);
 		}
 		expect(statuses.slice(0, 10).every((s) => s === 400)).toBe(true);
 		expect(statuses[10]).toBe(429);
-		expect(page.html).toContain("New address");
+		expect(page.html).toContain(LIMITED_TEXT);
+		// The limited network guesses right: refused without a look at the
+		// code, which is therefore not used up.
+		const right = await attacker.submit(page, { action: "connect", code });
+		expect(right.status).toBe(429);
+		expect(right.html).toContain(LIMITED_TEXT);
+		// A new request does not help it either.
+		const fresh = await openPage(attacker, r, address);
+		expect(
+			(await attacker.submit(fresh, { action: "connect", code })).status,
+		).toBe(429);
+		await Bun.sleep(20);
+		expect(tab.pairingCode).toBe(code);
+		expect(r.logs.events("oauth.paired")).toHaveLength(0);
 
-		await waitFor(() => tab.pairingCode !== undefined, "a code");
 		const owner = browserAt(r, "198.51.100.7");
 		const ownerPage = await openPage(owner, r, address);
-		const done = await owner.submit(ownerPage, {
-			action: "connect",
-			code: tab.pairingCode ?? "",
-		});
+		const done = await owner.submit(ownerPage, { action: "connect", code });
 		expect(done.status).toBe(303);
+		expect(r.logs.events("oauth.rate_limited")).toEqual([
+			expect.objectContaining({
+				limit: "code_guesses",
+				ip: "203.0.113.0/24",
+			}),
+		]);
 	});
 
-	test("the brute-force cap per address still holds across networks", async () => {
+	// "The brute-force cap per address still holds across networks" stood
+	// here. That cap is gone (DEC-196) and none across networks took its
+	// place: guesses are limited per network only (10, then one a minute).
+	// The test below pins that there is none, not a new cap.
+	test("wrong guesses from many networks are no cap on the page: there is no limit per address that strangers could use up for its owner", async () => {
 		const { r, tab, address } = await setup();
-		for (let n = 0; n < 3; n++) {
+		const code = tab.pairingCode ?? "";
+		// Before, the fourth network was refused here (30 guesses per address
+		// from everywhere), which let strangers who knew an address lock its
+		// owner out. The code's 20^8 values carry that now.
+		for (let n = 0; n < 5; n++) {
 			const attacker = browserAt(r, `203.0.113.${20 + n}`);
 			let page = await openPage(attacker, r, address);
 			for (let i = 0; i < 10; i++) {
 				page = await attacker.submit(page, {
 					action: "connect",
-					code: wrongFor(tab.pairingCode ?? ""),
+					code: wrongFor(code),
 				});
 				expect(page.status).toBe(400);
 			}
 		}
-		const fourth = browserAt(r, "203.0.113.99");
-		const page = await openPage(fourth, r, address);
-		const res = await fourth.submit(page, {
+		// Fifty wrong codes later the page shows the code it showed.
+		await Bun.sleep(20);
+		expect(tab.pairingCode).toBe(code);
+		const owner = browserAt(r, "203.0.113.99");
+		const page = await openPage(owner, r, address);
+		const res = await owner.submit(page, { action: "connect", code });
+		expect(res.status).toBe(303);
+	});
+
+	test("the ten guesses are the network's for every app and page: another address buys no new ones", async () => {
+		const { r, tab, address } = await setup();
+		const second = new ScriptedTab(r.wsUrl, { appId: "other" });
+		tabs.push(second);
+		const other = (await second.connect()).address;
+		const otherCode = await second.startPairing();
+		const attacker = browserAt(r, "203.0.113.9");
+		let page = await openPage(attacker, r, address);
+		for (let i = 0; i < 10; i++) {
+			page = await attacker.submit(page, {
+				action: "connect",
+				code: wrongFor(tab.pairingCode ?? "", otherCode),
+			});
+			expect(page.status).toBe(400);
+		}
+		// Before DEC-196 each address had its own share for a network.
+		const elsewhere = await openPage(attacker, r, other);
+		const wrong = await attacker.submit(elsewhere, {
 			action: "connect",
-			code: tab.pairingCode ?? "",
+			code: wrongFor(tab.pairingCode ?? "", otherCode),
 		});
-		expect(res.status).toBe(429);
+		expect(wrong.status).toBe(429);
+		expect(
+			(await attacker.submit(wrong, { action: "connect", code: otherCode }))
+				.status,
+		).toBe(429);
+		const nobody = await openPage(attacker, r, r.relay.addressFor("nobody"));
+		expect(
+			(await attacker.submit(nobody, { action: "connect", code: "BCDF-GHJK" }))
+				.status,
+		).toBe(429);
+		// The other app's owner, on another network, is not touched.
+		const owner = browserAt(r, "198.51.100.7");
+		const ownerPage = await openPage(owner, r, other);
+		const done = await owner.submit(ownerPage, {
+			action: "connect",
+			code: otherCode,
+		});
+		expect(done.status).toBe(303);
+	});
+
+	test("a right code is given back: a network that pairs often keeps its ten guesses", async () => {
+		const { r, tab, address } = await setup();
+		const browser = browserAt(r, "198.51.100.7");
+		let last: string | undefined;
+		for (let i = 0; i < 6; i++) {
+			const code = await tab.nextCode(last);
+			const page = await openPage(browser, r, address);
+			const done = await browser.submit(page, { action: "connect", code });
+			expect(done.status).toBe(303);
+			last = code;
+		}
+		const code = await tab.nextCode(last);
+		let page = await openPage(browser, r, address);
+		for (let i = 0; i < 10; i++) {
+			page = await browser.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
+			expect(page.status).toBe(400);
+		}
+		expect(
+			(await browser.submit(page, { action: "connect", code: wrongFor(code) }))
+				.status,
+		).toBe(429);
 	});
 });
 
@@ -216,56 +321,74 @@ describe("3: per-IP limits count IPv6 by /64 (open requests by /56); open reques
 		expect(ipPrefixKey("::ffff:203.0.113.5")).toBe("203.0.113.5");
 	});
 
-	test("open authorization requests per /56 are capped; another /56 is not affected (RS 1)", async () => {
+	test("open authorization requests per /56 are capped, whatever address they are for: the eleventh pushes out the network's oldest; another /56 is not affected (RS 1)", async () => {
 		const { r, address } = await setup();
-		// A second page: one network holds at most 5 requests per address (DEC-088).
-		const second = new ScriptedTab(r.wsUrl);
-		tabs.push(second);
-		const other = (await second.connect()).address;
-		await second.startPairing();
-		for (let i = 1; i <= 10; i++) {
-			const page = await openPage(
-				browserAt(r, `2001:db8:1:2::${i}`),
-				r,
-				i <= 5 ? address : other,
-			);
+		/** Still open: an action the form does not know shows the form again. */
+		const isOpen = async (browser: TestBrowser, page: AuthorizePage) =>
+			(await browser.submit(page, { action: "show" })).status === 200;
+		// A request is kept for an app nobody serves too (DEC-196), and counts.
+		const nobody = r.relay.addressFor("nobody");
+		const first = browserAt(r, "2001:db8:1:2::1");
+		const kept = await openPage(first, r, address);
+		expect(kept.status).toBe(200);
+		const second = browserAt(r, "2001:db8:1:2::2");
+		const next = await openPage(second, r, address);
+		expect(next.status).toBe(200);
+		const others: { browser: TestBrowser; page: AuthorizePage }[] = [];
+		for (let i = 3; i <= 10; i++) {
+			const browser = browserAt(r, `2001:db8:1:2::${i}`);
+			const page = await openPage(browser, r, i <= 6 ? address : nobody);
 			expect(page.status).toBe(200);
+			expect(page.requestId).toBeDefined();
+			others.push({ browser, page });
 		}
-		const same = await openPage(browserAt(r, "2001:db8:1:2::ffff"), r, address);
-		expect(same.status).toBe(429);
-		// Another /64 of the same /56: one subscriber's, refused too.
-		const sibling = await openPage(browserAt(r, "2001:db8:1:3::1"), r, address);
-		expect(sibling.status).toBe(429);
+		// Another network first: it takes none of this one's ten.
 		const elsewhere = await openPage(
 			browserAt(r, "2001:db8:1:100::1"),
 			r,
 			address,
 		);
 		expect(elsewhere.status).toBe(200);
+		expect(await isOpen(first, kept)).toBe(true);
+		// Another /64 of the same /56 is the same subscriber: the eleventh
+		// request opens, and the /56's oldest goes for it.
+		const sibling = await openPage(browserAt(r, "2001:db8:1:3::1"), r, nobody);
+		expect(sibling.status).toBe(200);
+		expect(sibling.requestId).toBeDefined();
+		expect(await isOpen(first, kept)).toBe(false);
+		expect(await isOpen(second, next)).toBe(true);
+		// A request that ends gives its place back: the next one evicts nothing.
+		expect((await second.submit(next, { action: "cancel" })).status).toBe(303);
+		expect((await openPage(second, r, address)).status).toBe(200);
+		const [oldest] = others;
+		if (oldest === undefined) throw new Error("no request");
+		expect(await isOpen(oldest.browser, oldest.page)).toBe(true);
+		// And the one after that takes the oldest again.
+		expect((await openPage(second, r, nobody)).status).toBe(200);
+		expect(await isOpen(oldest.browser, oldest.page)).toBe(false);
 	});
 
-	test("an address at its cap evicts the oldest request of the network holding the most (DEC-088)", async () => {
+	test("there is no cap per address: requests of many networks for one address all stay open", async () => {
 		const { r, address } = await setup();
-		const pages: AuthorizePage[] = [];
-		// Networks are /56s (RS 1): a:100, a:200, ... are four of them.
+		// Before DEC-196 an address held 20 requests, 5 per network, and the
+		// 21st pushed one out (DEC-088).
+		const opened: { browser: TestBrowser; page: AuthorizePage }[] = [];
 		for (const prefix of [
 			"2001:db8:a:100",
 			"2001:db8:a:200",
 			"2001:db8:a:300",
 		]) {
-			for (let i = 1; i <= 5; i++) {
+			for (let i = 1; i <= 8; i++) {
 				const browser = browserAt(r, `${prefix}::${i}`);
-				pages.push(await openPage(browser, r, address));
+				const page = await openPage(browser, r, address);
+				expect(page.status).toBe(200);
+				opened.push({ browser, page });
 			}
 		}
-		const fourth = browserAt(r, "2001:db8:a:400::1");
-		for (let i = 0; i < 5; i++) {
-			expect((await openPage(fourth, r, address)).status).toBe(200);
+		// Each form is still good: an action it does not know shows it again.
+		for (const { browser, page } of opened) {
+			expect((await browser.submit(page, { action: "" })).status).toBe(200);
 		}
-		// 20 open: the next one evicts, it is not refused.
-		const fifth = await openPage(browserAt(r, "2001:db8:a:500::1"), r, address);
-		expect(fifth.status).toBe(200);
-		expect(fifth.requestId).toBeDefined();
 	});
 
 	test("the token endpoint counts a /64 as one client", async () => {

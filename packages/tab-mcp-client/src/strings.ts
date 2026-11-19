@@ -75,17 +75,17 @@ export const STRINGS = {
 	codeUsed: "Code used. Waiting for your AI app…",
 	signIn:
 		"When your AI app asks, sign in with the account you use on this page. No code is needed.",
-	newAddress: "New address",
+	newAddress: "Disconnect all apps",
 	newAddressNote:
-		"Someone else may have this address, or is guessing codes? A new address disconnects every AI app from this one.",
+		"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again with a new code.",
 	newAddressQuestionOne:
-		"A new address disconnects {apps}. To use this page again, add the new address to it.",
+		"This disconnects {apps}. To use this page with it again, connect it again and enter a new code.",
 	newAddressQuestionMany:
-		"A new address disconnects {apps}. To use this page again, add the new address to them.",
-	newAddressConfirm: "Disconnect and get new address",
+		"This disconnects {apps}. To use this page with them again, connect them again and enter a new code.",
+	newAddressConfirm: "Disconnect all",
 	cancel: "Cancel",
-	gettingNewAddress: "Getting a new address…",
-	newAddressDone: "This is a new address. Add it to your AI app again.",
+	gettingNewAddress: "Disconnecting…",
+	newAddressDone: "Every AI app is disconnected. Connect yours again.",
 	connectedOne: "{apps} is connected",
 	connectedMany: "{apps} are connected",
 	connectedNextOne:
@@ -107,7 +107,7 @@ export const STRINGS = {
 	askAgain: "Ask again",
 	askAgainApp: "Ask again before {app} runs a tool",
 	closeNote:
-		"Closing this stops the code. The address stays the same: to connect later, open this again from the page.",
+		"Closing this stops the code. To connect later, open this again from the page.",
 	close: "Close",
 	done: "Done",
 
@@ -117,10 +117,10 @@ export const STRINGS = {
 		"This page is open in another tab, and your AI apps now use that one. To use them here, connect this page again.",
 	replacedTitle: "Another tab or program took over this page",
 	replaced:
-		"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or browser, someone may have copied its address. A new address disconnects every AI app from the old one; then add the new address to your AI apps again.",
+		"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
 	takenOverAgain:
 		"It was taken over again before its AI apps were disconnected. Try again.",
-	/** `{reason}`: why getting a new address failed, one of the texts above. */
+	/** `{reason}`: why disconnecting all apps failed, one of the texts above. */
 	tryAgainOrClose: "{reason} Try again, or close this.",
 };
 

@@ -14,6 +14,7 @@ import {
 	test,
 } from "bun:test";
 import { join } from "node:path";
+import { shortAddress } from "../src/address.ts";
 import {
 	ConfigError,
 	configFromEnv,
@@ -24,6 +25,7 @@ import {
 import { errorFields, truncateKey } from "../src/log.ts";
 import { AUTHORIZE_CSS } from "../src/oauth/html.ts";
 import { ProviderDiscovery } from "../src/oauth/oidc.ts";
+import { normalizeCode } from "../src/oauth/pairing.ts";
 import type { SessionMessage } from "../src/protocol.ts";
 import { RateLimiter } from "../src/ratelimit.ts";
 import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
@@ -35,6 +37,7 @@ import type {
 	TokenRecord,
 } from "../src/store/types.ts";
 import {
+	APP,
 	mcpPost,
 	ORIGIN,
 	rpc,
@@ -151,6 +154,39 @@ async function pair(
 	return (await res.json()) as { access_token: string; refresh_token: string };
 }
 
+/** A well-formed code that is not `code`. */
+const wrongFor = (code: string) =>
+	normalizeCode(code) === "BBBBBBBB" ? "CCCC-CCCC" : "BBBB-BBBB";
+
+/** A log line without what the logger adds to every line. */
+function fields(line: Record<string, unknown> | undefined) {
+	if (line === undefined) return undefined;
+	const { time: _time, level: _level, event: _event, ...rest } = line;
+	return rest;
+}
+
+/**
+ * What the model is told about a page that connected and went away: the text
+ * of a tool call's result (src/notopen.ts).
+ */
+async function awayText(r: TestRelay, t: ScriptedTab): Promise<string> {
+	const session = await t.connect();
+	const token = await tokenFor(r.store, t.addressId);
+	t.close();
+	await waitFor(() => r.relay.sessionCount === 0, "the tab to close");
+	const res = await mcpPost(
+		session.address,
+		rpc(1, "tools/call", { name: "add", arguments: { a: 1, b: 2 } }),
+		{ token },
+	);
+	expect(res.status).toBe(200);
+	const body = (await res.json()) as {
+		result?: { isError?: boolean; content: { text: string }[] };
+	};
+	expect(body.result?.isError).toBe(true);
+	return body.result?.content[0]?.text ?? "";
+}
+
 describe("RS 6: on an open relay the page origin is a serialised origin or nothing", () => {
 	const cases: [string, string][] = [
 		["https://ractive.ch (verified by the relay)", ""],
@@ -181,15 +217,43 @@ describe("RS 6: on an open relay the page origin is a serialised origin or nothi
 		expect(session.origin).toBe(ORIGIN);
 	});
 
-	test("the pairing page names no origin for free text", async () => {
+	test("what the model is told while the page is away names no origin, kept or not", async () => {
+		for (const origin of [
+			"https://ractive.ch (verified by the relay)",
+			"https://ok.example",
+		]) {
+			const r = relay({ allowedOrigins: "*", pageWaitMs: 0 });
+			const text = await awayText(r, tab(r, { origin }));
+			expect(text).toBe(
+				"The page is not open, or not in front. Ask the user to open the web page and keep it in front (on a phone, in split screen), then try again.",
+			);
+		}
+	});
+
+	test("the pairing page names no origin at all: not free text, not a serialised one (DEC-196)", async () => {
 		const r = oauthRelay({ allowedOrigins: "*" });
-		const t = tab(r, { origin: "https://ractive.ch (verified by the relay)" });
-		await t.connect();
-		await t.startPairing();
-		const page = await open(r, t.session?.address ?? "");
+		// The relay does not know which page is meant before the code is
+		// typed, so nothing a page sent is on the pairing page: only the app
+		// of the address, and the client.
+		const free = tab(r, {
+			origin: "https://ractive.ch (verified by the relay)",
+			app: "Your Bank",
+		});
+		await free.connect();
+		await free.startPairing();
+		const proper = tab(r, { origin: "https://ok.example" });
+		await proper.connect();
+		await proper.startPairing();
+		const page = await open(r, free.session?.address ?? "");
 		expect(page.status).toBe(200);
 		expect(page.html).not.toContain("verified by the relay");
-		expect(page.html).toContain("a page that did not say where it runs");
+		expect(page.html).not.toContain("ractive.ch");
+		expect(page.html).not.toContain("ok.example");
+		expect(page.html).not.toContain("Your Bank");
+		expect(page.html).not.toContain('class="origin"');
+		expect(page.html).toContain(
+			"to <strong>test</strong>: to the page or app that is open in your browser and shows the code.",
+		);
 	});
 });
 
@@ -208,10 +272,13 @@ describe("RS 7: the page's app name is cleaned and may not name another domain",
 		const session = (await t.connect()) as SessionMessage;
 		expect(session.appName).toBeUndefined();
 		expect(r.logs.events("tab.session").at(-1)?.["appNameDropped"]).toBe(true);
+		// The name is not in the log either, and not on the pairing page
+		// (which shows no page's name since DEC-196).
+		expect(r.logs.lines.join("\n")).not.toContain("saturnus");
 		await t.startPairing();
 		const page = await open(r, t.session?.address ?? "");
 		expect(page.html).not.toContain("saturnus");
-		expect(page.html).toContain(`tools from <span class="origin">${ORIGIN}`);
+		expect(page.html).not.toContain("ractive.ch");
 	});
 
 	test("the page's own host in its name is kept", async () => {
@@ -226,6 +293,35 @@ describe("RS 7: the page's app name is cleaned and may not name another domain",
 		expect(session.appName).toBeUndefined();
 	});
 
+	test("the model is asked to open the page by its cleaned name; a dropped name is 'the web page'", async () => {
+		const cases: [string, string][] = [
+			["My​ App‮", "My App"],
+			["Tools of page.example", "Tools of page.example"],
+			["saturnus on https://ractive.ch‮", "the web page"],
+			["​⠀", "the web page"],
+		];
+		for (const [sent, named] of cases) {
+			const r = relay({ pageWaitMs: 0 });
+			const text = await awayText(r, tab(r, { app: sent }));
+			expect(text).toBe(
+				`The page is not open, or not in front. Ask the user to open ${named} and keep it in front (on a phone, in split screen), then try again.`,
+			);
+		}
+	});
+
+	test("a site's configured name is the one the model is told, whatever the page calls itself", async () => {
+		const r = relay({
+			pageWaitMs: 0,
+			allowedOrigins: [],
+			sites: [{ origin: ORIGIN, name: "saturnus" }],
+		});
+		const text = await awayText(r, tab(r, { app: "Your Bank" }));
+		expect(text).toContain(
+			"Ask the user to open saturnus and keep it in front",
+		);
+		expect(text).not.toContain("Your Bank");
+	});
+
 	test("names and origins are isolated from the text around them", () => {
 		expect(AUTHORIZE_CSS).toContain(
 			"strong, .origin { unicode-bidi: isolate; }",
@@ -233,49 +329,108 @@ describe("RS 7: the page's app name is cleaned and may not name another domain",
 	});
 });
 
-describe("RS 9: a network's share of an address's code guesses counts an IPv6 /56", () => {
+describe("RS 9: a network's code guesses count an IPv6 /56", () => {
 	test("a second /64 of the same /56 gets no new share", async () => {
 		const r = oauthRelay({ trustProxy: "x-real-ip" });
 		const t = tab(r);
 		await t.connect();
-		await t.startPairing();
+		const code = await t.startPairing();
 		const address = t.session?.address ?? "";
-		const guess = async (ip: string) => {
+		const guess = async (ip: string, typed = wrongFor(code)) => {
 			const browser = new TestBrowser(r.url, { "x-real-ip": ip });
 			const page = await open(r, address, browser);
-			const wrong = t.pairingCode === "000000" ? "000001" : "000000";
-			return browser.submit(page, { action: "connect", code: wrong });
+			return browser.submit(page, { action: "connect", code: typed });
 		};
+		// On one request: a network holds at most ten open ones.
+		const first = new TestBrowser(r.url, { "x-real-ip": "2001:db8:1:100::1" });
+		let page = await open(r, address, first);
 		for (let i = 0; i < 10; i++) {
-			const res = await guess("2001:db8:1:100::1");
-			expect(res.status).toBe(400);
+			page = await first.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
+			expect(page.status).toBe(400);
 		}
 		const other = await guess("2001:db8:1:1ff::1");
 		expect(other.status).toBe(429);
-		expect(other.html).toContain("Too many attempts for this page");
-		// Another /56 still has its own share.
+		expect(other.html).toContain("Too many wrong codes from your network.");
+		// The warning names the network as every logged IP is shortened.
+		expect(r.logs.events("oauth.rate_limited")).toEqual([
+			expect.objectContaining({
+				limit: "code_guesses",
+				ip: "2001:db8:1::/48",
+			}),
+		]);
+		// Another /56 still has its own share, for a wrong code and a right one.
 		const elsewhere = await guess("2001:db8:1:200::1");
 		expect(elsewhere.status).toBe(400);
+		expect((await guess("2001:db8:1:200::2", code)).status).toBe(303);
 	});
 });
 
-describe("RS 10: one page for a closed page and a closed dialog", () => {
-	test("both answer the same text", async () => {
+describe("RS 10: the pairing page says nothing about the app's pages", () => {
+	// Before DEC-196 a closed page and a closed dialog got one page ("Open
+	// the page first"); now every request gets the form, so neither can be
+	// told from a page that shows a code, nor from each other.
+	test("no page, a closed page, a closed dialog and an open one get the same page", async () => {
 		const r = oauthRelay();
+		const address = r.relay.addressFor(APP);
+		const stable = (page: AuthorizePage) =>
+			page.html
+				.replace(/name="request_id" value="[^"]+"/, "")
+				.replace(/name="csrf" value="[^"]+"/, "");
+		const never = await open(r, address);
 		const t = tab(r);
 		await t.connect();
-		const dialogClosed = await open(r, t.session?.address ?? "");
-		const gone = tab(r);
-		await gone.connect();
-		const address = gone.session?.address ?? "";
-		gone.close();
-		await waitFor(() => r.relay.sessionCount === 1, "the tab to close");
-		const notOpen = await open(r, address);
-		const text = (html: string) =>
-			[...html.matchAll(/<(h1|p)>([\s\S]*?)<\/\1>/g)].map((m) => m[2]);
-		expect(dialogClosed.status).toBe(notOpen.status);
-		expect(text(dialogClosed.html)).toEqual(text(notOpen.html));
-		expect(dialogClosed.html).not.toContain("Open “Connect your AI app” first");
+		const dialogClosed = await open(r, address);
+		await t.startPairing();
+		const dialogOpen = await open(r, address);
+		t.close();
+		await waitFor(() => r.relay.sessionCount === 0, "the tab to close");
+		const gone = await open(r, address);
+		for (const page of [never, dialogClosed, dialogOpen, gone]) {
+			expect(page.status).toBe(200);
+			expect(page.requestId).toBeDefined();
+			expect(stable(page)).toBe(stable(never));
+		}
+		expect(never.html).not.toContain("Open the page first");
+		expect(never.html).not.toContain("Open “Connect your AI app” first");
+	});
+
+	test("a code typed for no page, a closed dialog or a closed page gets the text of a wrong code, and one log reason", async () => {
+		const r = oauthRelay();
+		const address = r.relay.addressFor(APP);
+		const browser = new TestBrowser(r.url);
+		const answers: string[] = [];
+		const type = async (code: string) => {
+			const res = await browser.submit(await open(r, address, browser), {
+				action: "connect",
+				code,
+			});
+			expect(res.status).toBe(400);
+			answers.push(
+				/role="alert" id="error">([^<]*)</.exec(res.html)?.[1] ?? "",
+			);
+		};
+		await type("BCDF-GHJK"); // no page
+		const t = tab(r);
+		await t.connect();
+		await type("BCDF-GHJK"); // a page whose dialog is closed
+		const code = await t.startPairing();
+		await type(wrongFor(code)); // a wrong code
+		t.send({ type: "pairing.stop" });
+		await Bun.sleep(20);
+		await type(code); // the code of a dialog closed since
+		t.close();
+		await waitFor(() => r.relay.sessionCount === 0, "the tab to close");
+		await type(code); // the code of a page closed since
+		expect(new Set(answers).size).toBe(1);
+		expect(answers[0]).toStartWith(
+			"That code is not right, or it has expired.",
+		);
+		expect(r.logs.events("oauth.pairing_failed")).toEqual(
+			new Array(5).fill(expect.objectContaining({ app: APP, reason: "wrong" })),
+		);
 	});
 });
 
@@ -294,9 +449,21 @@ describe("RS 17: the visit cookie is renewed with every pairing page", () => {
 		const renewed = second.headers.getSetCookie()[0] ?? "";
 		expect(renewed).toContain(`=${id};`);
 		expect(renewed).toContain("Max-Age=600");
-		// A page sent again after a post renews it too.
-		const retry = await browser.submit(second, { action: "retry" });
-		expect(retry.headers.getSetCookie()[0]).toContain(`=${id};`);
+		// A page sent again after a post renews it too: after input that is no
+		// code, and after a wrong code.
+		const malformed = await browser.submit(second, {
+			action: "connect",
+			code: "",
+		});
+		expect(malformed.status).toBe(400);
+		expect(malformed.headers.getSetCookie()[0]).toContain(`=${id};`);
+		const wrong = await browser.submit(malformed, {
+			action: "connect",
+			code: wrongFor(t.pairingCode ?? ""),
+		});
+		expect(wrong.status).toBe(400);
+		expect(wrong.headers.getSetCookie()[0]).toContain(`=${id};`);
+		expect(wrong.headers.getSetCookie()[0]).toContain("Max-Age=600");
 	});
 });
 
@@ -810,5 +977,147 @@ describe("RQ 13: provider discovery serves its last metadata through an outage",
 		} finally {
 			await server.stop(true);
 		}
+	});
+});
+
+describe("iteration 45: the log names the app; a page's address only once the page is known", () => {
+	test("tab.session carries the app and the address", async () => {
+		const r = relay();
+		const t = tab(r, { appId: "notes" });
+		const session = await t.connect();
+		expect(fields(r.logs.events("tab.session").at(-1))).toEqual({
+			session: session.sessionId,
+			address: shortAddress(t.addressId),
+			app: "notes",
+			origin: ORIGIN,
+			library: "scripted-tab@0.0.0",
+			replaced: false,
+		});
+	});
+
+	test("a failed or cancelled pairing is logged with the app and the client's host, and with no address: none is known", async () => {
+		const r = oauthRelay();
+		const t = tab(r, { appId: "notes" });
+		await t.connect();
+		const code = await t.startPairing();
+		const address = t.session?.address ?? "";
+		const client = new URL(clientId).host;
+		const browser = new TestBrowser(r.url);
+		let page = await open(r, address, browser);
+		page = await browser.submit(page, { action: "connect", code: "12ab" });
+		page = await browser.submit(page, {
+			action: "connect",
+			code: wrongFor(code),
+		});
+		expect(r.logs.events("oauth.pairing_failed").map(fields)).toEqual([
+			{ app: "notes", client, reason: "malformed" },
+			{ app: "notes", client, reason: "wrong" },
+		]);
+		const cancelled = await browser.submit(page, { action: "cancel" });
+		expect(cancelled.status).toBe(303);
+		expect(r.logs.events("oauth.cancelled").map(fields)).toEqual([
+			{ app: "notes", client },
+		]);
+		// The page's address is in none of these lines, and no code is.
+		const lines = r.logs.lines.filter((l) => l.includes('"event":"oauth.'));
+		expect(lines).toHaveLength(3);
+		for (const line of lines) {
+			expect(line).not.toContain(shortAddress(t.addressId));
+			expect(line.toUpperCase()).not.toContain(code);
+			expect(line.toUpperCase()).not.toContain(normalizeCode(code) ?? code);
+			expect(line.toUpperCase()).not.toContain("BBBB");
+		}
+	});
+
+	test("the limit that refuses a guess is logged as rate_limited, with the app", async () => {
+		const r = oauthRelay();
+		const t = tab(r);
+		await t.connect();
+		const code = await t.startPairing();
+		const browser = new TestBrowser(r.url);
+		let page = await open(r, t.session?.address ?? "", browser);
+		for (let i = 0; i < 11; i++) {
+			page = await browser.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
+		}
+		expect(page.status).toBe(429);
+		expect(fields(r.logs.events("oauth.pairing_failed").at(-1))).toEqual({
+			app: APP,
+			client: new URL(clientId).host,
+			reason: "rate_limited",
+		});
+		expect(r.logs.events("oauth.rate_limited").map(fields)).toEqual([
+			{ limit: "code_guesses", ip: "127.0.0.0/24" },
+		]);
+	});
+
+	test("oauth.paired carries both: the app of the address and the page the code found", async () => {
+		const r = oauthRelay();
+		const other = tab(r, { appId: "notes" });
+		await other.connect();
+		await other.startPairing();
+		const t = tab(r, { appId: "notes" });
+		await t.connect();
+		await t.startPairing();
+		await pair(r, t);
+		const client = new URL(clientId).host;
+		expect(r.logs.events("oauth.paired").map(fields)).toEqual([
+			{
+				address: shortAddress(t.addressId),
+				app: "notes",
+				client,
+				method: "code",
+			},
+		]);
+		expect(r.logs.events("oauth.grant_created").map(fields)).toEqual([
+			{ address: shortAddress(t.addressId), client },
+		]);
+	});
+
+	test("mcp.request carries the app, and the page's address once a token says which page", async () => {
+		const r = relay({ pageWaitMs: 0 });
+		const t = tab(r, { appId: "notes" });
+		await t.connect();
+		const address = t.session?.address ?? "";
+		const token = await tokenFor(r.store, t.addressId, { app: "notes" });
+		const request = async (
+			at: string,
+			options: { token?: string },
+		): Promise<Record<string, unknown> | undefined> => {
+			const before = r.logs.events("mcp.request").length;
+			await (await mcpPost(at, rpc(1, "tools/list"), options)).text();
+			await waitFor(
+				() => r.logs.events("mcp.request").length > before,
+				"mcp.request",
+			);
+			return fields(r.logs.events("mcp.request").at(-1));
+		};
+		expect(await request(address, { token })).toMatchObject({
+			app: "notes",
+			address: shortAddress(t.addressId),
+			method: "tools/list",
+			status: 200,
+		});
+		// No token, a token nobody issued, and a token of another app: no page
+		// is known, so no address; in particular not the token's own.
+		for (const [at, options] of [
+			[address, {}],
+			[address, { token: "tmcp_at_nobodys" }],
+			[r.relay.addressFor("other"), { token }],
+		] as const) {
+			const line = await request(at, options);
+			expect(line?.["status"]).toBe(401);
+			expect(line?.["app"]).toBe(at === address ? "notes" : "other");
+			expect(line).not.toHaveProperty("address");
+		}
+		// The address is the token's page also while that page is away.
+		t.close();
+		await waitFor(() => r.relay.sessionCount === 0, "the tab to close");
+		expect(await request(address, { token })).toMatchObject({
+			app: "notes",
+			address: shortAddress(t.addressId),
+		});
 	});
 });

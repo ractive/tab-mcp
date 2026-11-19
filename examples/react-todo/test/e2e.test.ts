@@ -89,10 +89,7 @@ test.skipIf(chrome === undefined)(
 		await page.press("Escape");
 		await waitFor(page, "!document.querySelector('dialog[open]')");
 
-		let client = await connectClient(
-			address,
-			await tokenFor(relay.store, address),
-		);
+		let client = await connectClient(address, await tokenFor(relay, address));
 		// The page's <link rel="icon"> reaches the AI app as serverInfo.icons.
 		expect(client.getServerVersion()?.icons?.[0]).toMatchObject({
 			src: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/.*\.svg$/),
@@ -174,7 +171,7 @@ test.skipIf(chrome === undefined)(
 			page,
 			"document.querySelector('button.connect').dataset.state === 'connected'",
 		);
-		client = await connectClient(address, await tokenFor(relay.store, address));
+		client = await connectClient(address, await tokenFor(relay, address));
 		const listed = json(
 			await client.callTool({ name: "list_todos", arguments: {} }),
 		) as { todos: { text: string }[] };

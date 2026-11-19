@@ -11,6 +11,20 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ## Unreleased
 
+### Changed
+
+- **A new address, the same for every installation** (DEC-196): the extension names its
+  app to the relay, `tab-mcp-extension` (`tab-mcp-extension-firefox` in the Firefox
+  build), and its MCP address is `<relay>/s/tab-mcp-extension/mcp`. The pairing code
+  says which installation an AI app is paired with. The address from before,
+  `<relay>/a/<address id>/mcp`, is gone: add the new address to each AI app and pair
+  again. Needs a relay with the fixed address (the relay release after 0.11.0).
+- The pairing code is 8 letters, shown as `XXXX-XXXX`.
+- "New address" in the side panel is "Disconnect all apps": it disconnects every AI app
+  and makes a new secret, and the address stays. Each AI app connects again with a new
+  code. Its note and the notice after a takeover say so ("Another tab or program took
+  over this extension's connection … Disconnect all apps to end that.").
+
 ## [0.2.1][extension-0.2.1] - 2026-11-17
 
 The extension is 0.2.0's. 0.2.0's publish to the Chrome Web Store stopped before the

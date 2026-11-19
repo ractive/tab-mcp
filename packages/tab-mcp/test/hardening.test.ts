@@ -3,13 +3,13 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { newSecret } from "../src/address.ts";
 import { Exchange } from "../src/exchange.ts";
 import { truncateIp } from "../src/log.ts";
 import { parseTabMessage } from "../src/protocol.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import {
+	APP,
 	mcpPost,
 	rpc,
 	ScriptedTab,
@@ -211,7 +211,7 @@ async function stalledRequest(
 describe("2: unauthenticated requests keep Bun's idle timeout", () => {
 	test("a stalled unauthenticated POST to the MCP endpoint is closed after the idle timeout", async () => {
 		const r = relay({ httpIdleTimeoutS: 1, bodyTimeoutMs: 500 });
-		const address = new URL(r.relay.addressFor(newSecret()));
+		const address = new URL(r.relay.addressFor(APP));
 		const { closedAfterMs, received } = await stalledRequest(
 			r.relay.port,
 			`POST ${address.pathname} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nContent-Length: 100\r\n\r\n{"jsonrpc":`,
@@ -416,11 +416,9 @@ describe("5: a failing token store is not an invalid token", () => {
 			throw new Error("database is locked");
 		};
 		const r = relay({ store });
-		const res = await mcpPost(
-			r.relay.addressFor(newSecret()),
-			rpc(4, "tools/list"),
-			{ token: "tmcp_at_whatever" },
-		);
+		const res = await mcpPost(r.relay.addressFor(APP), rpc(4, "tools/list"), {
+			token: "tmcp_at_whatever",
+		});
 		expect(res.status).toBe(503);
 		expect(res.headers.get("retry-after")).toBe("5");
 		expect(res.headers.get("www-authenticate")).toBeNull();

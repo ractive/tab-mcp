@@ -1,7 +1,9 @@
 /**
  * A scripted relay for protocol cases that are hard to provoke from the real
  * relay (exact message orders, malformed frames): it answers `hello` with a
- * `session`, records what the tab sends, and sends what a test tells it to.
+ * `session` (or, like the relay, with `bad_message` and close 1008 when
+ * `hello.app.id` is missing), records what the tab sends, and sends what a
+ * test tells it to.
  */
 
 import type { Server, ServerWebSocket } from "bun";
@@ -18,6 +20,9 @@ export const STUB_LIMITS: Limits = {
 };
 
 type Message = Record<string, unknown> & { type: string };
+
+/** An app id as the relay takes it (`isAppId` of its `config.ts`, DEC-196). */
+const APP_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 
 export class StubRelay {
 	readonly server: Server<undefined>;
@@ -68,24 +73,38 @@ export class StubRelay {
 					this.frameBytes.push(Buffer.byteLength(String(data)));
 					const m = JSON.parse(String(data)) as Message;
 					if (m.type === "hello" && this.answerHello) {
-						ws.send(
-							JSON.stringify({
-								type: "session",
-								sessionId: "s_stub",
-								address: `http://127.0.0.1:${this.server.port}/a/${"a".repeat(52)}/mcp`,
-								origin: "https://page.example",
-								appName: (m["app"] as { name?: string } | undefined)?.name,
-								expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-								limits: this.limits,
-								grants:
-									m["revokeAll"] === true && !this.ignoreRevokeAll
-										? []
-										: this.grants,
-								...(this.pairing === undefined
-									? {}
-									: { pairing: this.pairing }),
-							}),
-						);
+						const app = m["app"] as { id?: unknown; name?: string } | undefined;
+						if (typeof app?.id !== "string" || !APP_ID.test(app.id)) {
+							// As the relay does: no session without an app id (DEC-196).
+							ws.send(
+								JSON.stringify({
+									type: "error",
+									code: "bad_message",
+									message:
+										"hello.app.id must be 1-32 characters of a-z, 0-9 and -",
+								}),
+							);
+							ws.close(1008, "hello.app.id");
+						} else {
+							ws.send(
+								JSON.stringify({
+									type: "session",
+									sessionId: "s_stub",
+									address: this.addressOf(app.id),
+									origin: "https://page.example",
+									appName: app.name,
+									expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+									limits: this.limits,
+									grants:
+										m["revokeAll"] === true && !this.ignoreRevokeAll
+											? []
+											: this.grants,
+									...(this.pairing === undefined
+										? {}
+										: { pairing: this.pairing }),
+								}),
+							);
+						}
 					}
 					const i = this.#waiters.findIndex((w) => w.match(m));
 					if (i >= 0) this.#waiters.splice(i, 1)[0]?.resolve(m);
@@ -97,6 +116,11 @@ export class StubRelay {
 
 	get url(): string {
 		return `http://127.0.0.1:${this.server.port}`;
+	}
+
+	/** The MCP address of an app, as `session.address` carries it (DEC-196). */
+	addressOf(app: string): string {
+		return `${this.url}/s/${app}/mcp`;
 	}
 
 	/** The next message of `type` from the tab (already received or future). */

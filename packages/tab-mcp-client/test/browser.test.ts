@@ -10,6 +10,8 @@ import type { Client } from "@modelcontextprotocol/client";
 import { Browser, findChrome, type Page } from "./cdp.ts";
 import {
 	connectClient,
+	mcpPost,
+	rpc,
 	startRelay,
 	type TestRelay,
 	tokenFor,
@@ -139,9 +141,21 @@ test.skipIf(chrome === undefined)(
 		const connected = page.eval<string>(
 			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
 		);
+		await page.send("Network.enable");
+		const socket = (browser as Browser).event(
+			"Network.webSocketCreated",
+			page.sessionId,
+		);
 		await page.click("#connect");
 		const address = await connected;
-		expect(address).toMatch(/\/a\/[a-z2-7]{52}\/mcp$/);
+		// The app's address: the server name as an app id (DEC-196).
+		expect(address).toBe(`${relay.url}/s/browser-test/mcp`);
+		// The socket Chrome opened: /tab and nothing else, no query (DEC-196).
+		expect((await socket)["url"]).toBe(
+			`${relay.url.replace("http", "ws")}/tab`,
+		);
+		const [oldId] = relay.relay.pagesOf("browser-test");
+		expect(oldId).toMatch(/^[a-z2-7]{52}$/);
 		const after = await page.eval<string[]>(
 			"performance.getEntriesByType('resource').map((e) => e.name)",
 		);
@@ -170,7 +184,7 @@ test.skipIf(chrome === undefined)(
 		).toBe(true);
 
 		let client: Client | undefined;
-		const token = await tokenFor(relay.store, address);
+		const token = await tokenFor(relay, address);
 		try {
 			client = await connectClient(address, token);
 			expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
@@ -208,7 +222,7 @@ test.skipIf(chrome === undefined)(
 			await client?.close();
 		}
 
-		// New address in the dialog: it asks, revokes the app and connects again.
+		// "Disconnect all apps" in the dialog: it asks, revokes the app and connects again.
 		await page.eval("mcp.disconnect()");
 		const reconnected = page.eval<string>(
 			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
@@ -218,7 +232,7 @@ test.skipIf(chrome === undefined)(
 		await page.eval(
 			"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps li') ? r(true) : setTimeout(w, 10)); w(); })",
 		);
-		// An app is connected: New address is behind "Connect another app".
+		// An app is connected: "Disconnect all apps" is behind "Connect another app".
 		expect(
 			await page.eval(
 				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-new-address').checkVisibility()",
@@ -231,25 +245,36 @@ test.skipIf(chrome === undefined)(
 				"document.querySelector('.tab-mcp-new-address-question p').textContent",
 			),
 		).toBe(
-			"A new address disconnects Test client (client.example). To use this page again, add the new address to it.",
+			"This disconnects Test client (client.example). To use this page with it again, connect it again and enter a new code.",
 		);
 		const renewed = page.eval<string>(
 			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
 		);
 		// A real click: the reconnect needs the user action.
 		await page.click("dialog.tab-mcp-connect .tab-mcp-new-address-confirm");
-		const newAddress = await renewed;
-		expect(newAddress).toMatch(/\/a\/[a-z2-7]{52}\/mcp$/);
-		expect(newAddress).not.toBe(address);
+		// The address names the app and stays; the page's secret is new.
+		expect(await renewed).toBe(address);
 		expect(
 			await page.eval(
 				"document.querySelector('dialog.tab-mcp-connect input').value",
 			),
-		).toBe(newAddress);
+		).toBe(address);
+		expect(
+			await page.eval(
+				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-status').textContent",
+			),
+		).toBe("Every AI app is disconnected. Connect yours again.");
 		expect(await page.eval("mcp.grants.length")).toBe(0);
-		// The relay revoked the old address's grant.
-		const oldId = /\/a\/([a-z2-7]{52})\/mcp$/.exec(address)?.[1] ?? "";
-		expect(await relay.store.listGrants(oldId, Date.now())).toEqual([]);
+		const [newId] = relay.relay.pagesOf("browser-test");
+		expect(newId).toMatch(/^[a-z2-7]{52}$/);
+		expect(newId).not.toBe(oldId);
+		// The relay revoked the old secret's grant: its token is refused.
+		expect(await relay.store.listGrants(oldId as string, Date.now())).toEqual(
+			[],
+		);
+		expect(
+			(await mcpPost(address, rpc(1, "tools/list"), { token })).status,
+		).toBe(401);
 		await page.press("Escape");
 
 		await page.eval("mcp.disconnect()");

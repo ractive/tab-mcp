@@ -7,6 +7,7 @@ import { addressIdFromSecret, newSecret } from "../src/address.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import {
+	APP,
 	mcpPost,
 	ORIGIN,
 	rpc,
@@ -185,8 +186,8 @@ describe("2: Bun's idle timeout comes back after an authenticated request", () =
 	test("after a page-not-open answer the keep-alive socket is closed when idle", async () => {
 		const r = relay({ httpIdleTimeoutS: 1, pageWaitMs: 200 });
 		const secret = newSecret();
-		const address = new URL(r.relay.addressFor(secret));
-		const token = await tokenFor(r.store, addressIdFromSecret(secret));
+		const address = new URL(r.relay.addressFor(APP));
+		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
 		const probe = await rawRequest(
 			r.relay.port,
 			address.pathname,
@@ -258,7 +259,7 @@ describe("4: requests wait for a page within its site's limit", () => {
 		first.close();
 		await waitFor(() => r.relay.sessionCount === 0, "the page to go");
 		const token = await tokenFor(r.store, first.addressId);
-		const address = r.relay.addressFor(secret);
+		const address = r.relay.addressFor(APP);
 		const answered: number[] = [];
 		const requests = [1, 2, 3, 4].map((i) =>
 			mcpPost(address, rpc(i, "tools/list"), { token }).then(async (res) => {
@@ -280,9 +281,9 @@ describe("5: during shutdown AI apps are told the relay restarts", () => {
 	test("a request waiting for the page gets the restarting answer", async () => {
 		const r = relay({ pageWaitMs: 5000 });
 		const secret = newSecret();
-		const token = await tokenFor(r.store, addressIdFromSecret(secret));
+		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
 		const pending = mcpPost(
-			r.relay.addressFor(secret),
+			r.relay.addressFor(APP),
 			rpc(1, "tools/call", { name: "add", arguments: { a: 1, b: 2 } }),
 			{ token },
 		);
@@ -315,9 +316,9 @@ describe("5: during shutdown AI apps are told the relay restarts", () => {
 	test("a notification during shutdown gets 503 with Retry-After", async () => {
 		const r = relay({ pageWaitMs: 5000 });
 		const secret = newSecret();
-		const token = await tokenFor(r.store, addressIdFromSecret(secret));
+		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
 		const { id: _id, ...notification } = rpc(1, "notifications/x");
-		const pending = mcpPost(r.relay.addressFor(secret), notification, {
+		const pending = mcpPost(r.relay.addressFor(APP), notification, {
 			token,
 		});
 		await Bun.sleep(100);
@@ -373,11 +374,9 @@ describe("7: store errors are logged by name only", () => {
 			throw new Error("connection postgres://user:hunter2@db failed");
 		};
 		const r = relay({ store });
-		const res = await mcpPost(
-			r.relay.addressFor(newSecret()),
-			rpc(1, "tools/list"),
-			{ token: "tmcp_at_whatever" },
-		);
+		const res = await mcpPost(r.relay.addressFor(APP), rpc(1, "tools/list"), {
+			token: "tmcp_at_whatever",
+		});
 		expect(res.status).toBe(503);
 		expect(r.logs.events("store.error")).toEqual([
 			expect.objectContaining({ op: "get", error: "Error" }),
@@ -448,7 +447,7 @@ describe("9: the body deadline is cleared when reading the body fails", () => {
 			realClear(timer);
 		}) as typeof clearTimeout;
 		try {
-			const address = new URL(r.relay.addressFor(newSecret()));
+			const address = new URL(r.relay.addressFor(APP));
 			const socket = await Bun.connect({
 				hostname: "127.0.0.1",
 				port: r.relay.port,

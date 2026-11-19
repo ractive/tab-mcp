@@ -294,7 +294,21 @@ export interface TabMcpOptions {
 	relay?: string;
 	/** Name, version and instructions of the page's MCP server. */
 	server: ServerInfo;
-	/** The page's app name (e.g. `saturnus`), shown when an AI app pairs; at most 64 characters. */
+	/**
+	 * The app id: the `<app>` of the page's MCP address
+	 * `https://<relay>/s/<app>/mcp`, which every page of the app shares (an AI
+	 * app is paired with one page by the code that page shows). 1 to 32
+	 * characters of `a-z`, `0-9` and `-`, not starting or ending with `-`.
+	 * Default: `server.name` in lower case, letters without their marks, each
+	 * run of other characters as one `-`, cut to 32; a name that leaves
+	 * nothing (no letter a-z, no digit) needs `app`. The relay may allow a
+	 * page's origin only certain apps.
+	 */
+	app?: string;
+	/**
+	 * The page's app name for people (e.g. `saturnus`): what an AI app is told
+	 * to open when the page is not open; at most 64 characters.
+	 */
 	appName?: string;
 	/** Approves consequential tool calls; default: a dialog in the page. */
 	onConfirm?: ConfirmHandler;
@@ -417,7 +431,7 @@ export interface SessionInfo {
 }
 
 /** Why the relay sent a pairing code (`PairingCode.reason`). */
-export type PairingCodeReason = "start" | "used" | "locked" | "expired";
+export type PairingCodeReason = "start" | "used" | "expired";
 
 /** A pairing code to show (DEC-028). */
 export interface PairingCode {

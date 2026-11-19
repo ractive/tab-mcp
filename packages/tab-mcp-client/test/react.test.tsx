@@ -415,7 +415,7 @@ test("a tool call reaches the latest execute; useToolCalls lists it with its end
 		const session = await act(() => t.connect({ resume: true }));
 		const client = await connectClient(
 			session.address,
-			await tokenFor(relay.store, session.address),
+			await tokenFor(relay, session.address),
 		);
 		const ended = nextEvent(t, "toolcallend");
 		const result = await act(() =>
@@ -657,7 +657,7 @@ test("the provider uses the latest onConfirm", async () => {
 		const session = await act(() => t.connect({ resume: true }));
 		const client = await connectClient(
 			session.address,
-			await tokenFor(relay.store, session.address),
+			await tokenFor(relay, session.address),
 		);
 		await act(() => client.callTool({ name: "clear", arguments: {} }));
 		expect(asked).toEqual(["second"]);
@@ -754,7 +754,7 @@ test("an onConfirm added after the first render is used; without one, the page's
 		const session = await act(() => t.connect({ resume: true }));
 		const client = await connectClient(
 			session.address,
-			await tokenFor(relay.store, session.address),
+			await tokenFor(relay, session.address),
 		);
 		// No onConfirm yet: the library's dialog asks; "Don't allow" declines.
 		const first = client.callTool({ name: "clear", arguments: {} });

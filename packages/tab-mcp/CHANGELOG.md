@@ -9,6 +9,114 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+One fixed MCP address per app, `https://<relay>/s/<app>/mcp`, instead of one per tab
+(`/a/<address id>/mcp`); the pairing code alone finds the page (DEC-196 to DEC-199). An
+organisation that allows custom connectors only by exact URL can then allow an app.
+This release is breaking, with no compatibility with what was before:
+
+- Every address changes. Users add the new address to their AI apps and pair again.
+- Pages need `@ractive-ch/tab-mcp-client` 0.17 or later.
+- Tokens from before stop working.
+- A custom `TokenStore` must store the new field `app`.
+- The relay runs as one instance only.
+
+### Changed
+
+- **The address.** MCP requests go to `/s/<app>/mcp`, the same URL for every page of an
+  app. `<app>` is the app id: 1 to 32 characters of `a-z`, `0-9` and `-`, not starting
+  or ending with `-`. The protected-resource metadata is at
+  `/.well-known/oauth-protected-resource/s/<app>/mcp`, and `WWW-Authenticate` names it
+  per app. `/a/<address id>/mcp` and its metadata answer 404.
+- **The address id is of the app and the secret together:**
+  `base32(sha256(app + "\n" + secret))`, no longer of the secret alone, and no URL
+  carries it. Sessions, grants and tokens are keyed by it as before. The same secret
+  under another app id is another page, with its own session and none of the first
+  one's grants, and cannot replace it. `addressIdFromSecret(secret, app)` takes the app
+  id as its second argument.
+- **`hello` needs `app: { id, name? }`.** The page names its app in `hello.app.id`; a
+  `hello` without a valid one gets `error` `bad_message` and close 1008
+  (tab-mcp-client 0.17 or later sends it). `session.address` is the app's address.
+- **Tool calls.** The bearer token's record says which page a request is for.
+  `TokenRecord` has a new required field `app`, and a token is valid only at the address
+  of its app (401 otherwise). A refresh that names another `resource` is
+  `invalid_target`.
+- **`TokenStore`s must store and return `app` unchanged.** A store that drops it makes
+  every token invalid. The conformance suite (`tokenStoreConformance`) writes records
+  with `app` and expects them back equal.
+- **SQLite schema 6** (a column `app`), with `min_reader_version` 6: relays from 0.6.0
+  to 0.11.0 refuse a file this release has opened. The step to schema 6 deletes every
+  token in the file: they were for addresses that no longer exist.
+- **Pairing codes** are 8 letters of `BCDFGHJKLMNPQRSTVWXZ` (2.56 × 10¹⁰ values), sent to
+  the page as `XXXX-XXXX` in `pairing.code` and typed in any case, with or without the
+  dash and spaces. A code is unique among the relay's live codes; the typed code finds
+  its page among the pages of the address's app. Still 2 minutes and single use. A code
+  has no attempts of its own any more: `pairing.code` `reason` is `start`, `used` or
+  `expired`, never `locked`. A wrong and an expired code get the same text; input that
+  is not 8 of those letters is not a guess.
+- **Guess limits** are per network only (an IPv6 /56): 10 wrong guesses, then one a
+  minute, answered with 429. A right code is given back; a sign-in (`oidc`) is charged
+  when it starts and given back when it pairs. There is no limit per address. The limit
+  keeps 100 000 networks and drops its oldest when full.
+- **`/authorize`** takes an app's address as `resource` (anything else is
+  `invalid_target`) and always shows the pairing form: it no longer looks whether a page
+  is connected or its dialog open, and the "Open the page first" page is gone. The form
+  posts to `/authorize` without `?a=`. The page names the AI app with its verified host
+  and the app id of the address; it no longer names the page's origin or the page's own
+  app name, which the relay does not know before the code is typed.
+- **Open authorization requests** are capped per network (10) and in all (10 000), and
+  neither cap refuses a request any more. A network's eleventh request pushes out that
+  network's own oldest (it got 429 before); when the relay holds 10 000, the oldest
+  request among those of the networks that hold the most is dropped. The caps per
+  address are gone.
+- **Identity binding (`oidc`).** Connect redirects to the provider at once; at the
+  callback the relay pairs with the app's page whose user is the signed-in person and
+  whose "Connect your AI app" dialog is open (of several, the one that connected last;
+  only a page that was connected when the sign-in started).
+  No such page, a closed dialog, a signed-out page and another person get one answer
+  (403, log reason `mismatch`), and the next sign-in asks for the account again
+  (`prompt=login`). The provider `state` and the authorization code no longer start
+  with the address id. A tab assertion's `aud` is the app's address, so it no longer
+  names one page.
+- **An app whose pages can pair by code and by `oidc`** gets both on one page: the code
+  field with Connect, and "Sign in instead". Which methods an app's page offers comes
+  from the configuration alone.
+- **Log fields.** `oauth.cancelled`, `oauth.pairing_failed` and `oauth.pairing_redirect`
+  carry `app` instead of `address`; `oauth.paired` and `tab.session` carry both;
+  `mcp.request` carries `app` and, once the token is known, `address`.
+- **`Relay.addressFor(app)`** takes an app id (it took the secret).
+- **`tokenFor`** in `@ractive-ch/tab-mcp/testing` has two forms, both with an address
+  `/s/<app>/mcp`. `tokenFor(relay, address, options?)` takes the `TestRelay`: the token
+  is for the one page of that app that is connected; with several connected, or none
+  yet, pass the page's secret as `options.secret`. `tokenFor(store, address, { secret })`
+  takes a token store, for a relay in another process, and needs the secret (a
+  `TypeError` without it).
+
+### Removed
+
+- **Several relay instances** behind a load balancer (DEC-198; DEC-098 is withdrawn): a
+  typed code must reach the instance whose page shows it, and a form post cannot be
+  routed by its body. Gone with it: the `a` parameter of `/tab` (ignored now), HTTP 400
+  `bad_address`, the tab error `address_mismatch`, close code 4009, and "Running several
+  instances" in the self-hosting guide. The token store may still be shared.
+
+### Added
+
+- **Sites may reserve apps** (DEC-197): `apps` in an entry of `TAB_MCP_SITES` lists the
+  app ids that origin serves. Its pages may name only these, and no origin that does not
+  list an app may serve it. An app no site lists is open to every origin the relay
+  allows. A page whose origin may not serve the app it names gets `error`
+  `app_not_allowed` and close 1008, before its session claims anything; the log has
+  `tab.refused` with reason `app_not_allowed`, the origin and the app.
+- **Hooks on the pairing form** for a browser extension in the same browser that fills
+  in its own code after asking its user (DEC-199): on the form
+  `data-tab-mcp-pairing="1"`, `data-app`, `data-client-name` and `data-client-host`; on
+  the code field `data-tab-mcp-field="code"`; on the Connect button
+  `data-tab-mcp-action="connect"`. They never hold a code, and the relay checks a typed
+  and a filled-in code alike.
+- `Relay.pagesOf(app)`: the address ids of the app's pages that are connected now.
+
 ## [0.11.0][relay-0.11.0] - 2026-11-16
 
 ### Added

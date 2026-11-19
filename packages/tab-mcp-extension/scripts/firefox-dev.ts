@@ -8,8 +8,8 @@
  *   bun scripts/firefox-dev.ts --reload [--port N]
  *
  * A temporary add-on is gone when Firefox quits, and one loaded again after
- * its removal gets a new UUID and empty storage: a new address for the AI app
- * to pair with. The profile sets `extensions.webextensions.keepUuidOnUninstall`
+ * its removal gets a new UUID and empty storage: every AI app has to pair
+ * again. The profile sets `extensions.webextensions.keepUuidOnUninstall`
  * and `keepStorageOnUninstall` against that. (ff-rdp ends Firefox with a
  * signal, which removes nothing, and a reload keeps both: there the prefs
  * change nothing.) Running the script again rebuilds and replaces the

@@ -83,7 +83,7 @@ const disconnectArmed = new Map<
 >();
 /** The user's flip of the AI access switch, while the worker acts on it. */
 let switchIntent: SwitchIntent | undefined;
-/** "New address" with apps connected asks first: a second click makes it. */
+/** "Disconnect all apps" with apps connected asks first: a second click does it. */
 let newAddressArmed = false;
 /** The address the setup steps were made for. */
 let stepsFor = "";
@@ -192,8 +192,8 @@ function showConnection(s: PanelState): void {
 	setText(
 		$("replaced-text"),
 		s.replaced?.sibling
-			? "Opened elsewhere in this browser: the address is in use there."
-			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.",
+			? "Opened elsewhere in this browser: the AI apps talk to that one now."
+			: "Another tab or program took over this extension's connection, and the AI apps paired with it may now talk to it. Disconnect all apps to end that.",
 	);
 	$("grants").setAttribute(
 		"aria-label",

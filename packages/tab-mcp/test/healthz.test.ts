@@ -1,24 +1,16 @@
 /**
- * Several relay instances behind a load balancer (DEC-098): the address id in
- * the `/tab` URL, checked against the secret in `hello`; and `/healthz`
- * checking the token store (DEC-099).
+ * `/healthz` checks the token store (DEC-099): what a load balancer or an
+ * uptime check reads. From multi-instance.test.ts, whose other half (the
+ * address id in the `/tab` URL, DEC-098) went with the fixed address
+ * (DEC-196).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { addressIdFromSecret, newSecret } from "../src/address.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenRecord } from "../src/store/types.ts";
-import {
-	ORIGIN,
-	ScriptedTab,
-	startRelay,
-	type TestRelay,
-	waitFor,
-} from "./helpers.ts";
+import { startRelay, type TestRelay } from "./helpers.ts";
 
 const relays: TestRelay[] = [];
-const tabs: ScriptedTab[] = [];
 afterEach(async () => {
-	for (const t of tabs.splice(0)) if (t.ws.readyState <= 1) t.close();
 	for (const r of relays.splice(0)) await r.stop();
 });
 
@@ -27,114 +19,6 @@ function relay(options: Parameters<typeof startRelay>[0] = {}): TestRelay {
 	relays.push(r);
 	return r;
 }
-
-function tab(url: string, secret?: string): ScriptedTab {
-	const t = new ScriptedTab(url, secret === undefined ? {} : { secret });
-	tabs.push(t);
-	return t;
-}
-
-/** A WebSocket handshake by hand, to see the answer before an upgrade. */
-function handshake(r: TestRelay, query: string): Promise<Response> {
-	return fetch(`${r.relay.url}/tab${query}`, {
-		headers: {
-			origin: ORIGIN,
-			connection: "Upgrade",
-			upgrade: "websocket",
-			"sec-websocket-version": "13",
-			"sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
-			"sec-websocket-protocol": "tab-mcp.v1",
-		},
-	});
-}
-
-describe("the address id in the /tab URL", () => {
-	test("a matching ?a= connects; the session is the same as without it", async () => {
-		const r = relay();
-		const secret = newSecret();
-		const id = addressIdFromSecret(secret);
-		const t = tab(`${r.wsUrl}?a=${id}`, secret);
-		const session = await t.connect();
-		expect(session.address).toBe(`${r.relay.url}/a/${id}/mcp`);
-	});
-
-	test("without ?a= (older libraries) the session still opens", async () => {
-		const r = relay();
-		const t = tab(r.wsUrl);
-		const session = await t.connect();
-		expect(session.address).toContain(`/a/${t.addressId}/mcp`);
-	});
-
-	test("an id that is not the secret's: error address_mismatch, close 4009, no session", async () => {
-		const r = relay();
-		const other = addressIdFromSecret(newSecret());
-		const t = tab(`${r.wsUrl}?a=${other}`);
-		await t.opened;
-		t.send({
-			type: "hello",
-			library: { name: "scripted-tab", version: "0.0.0" },
-			page: { title: "Test page" },
-			secret: t.secret,
-		});
-		const error = await t.next("error");
-		expect(error).toMatchObject({ type: "error", code: "address_mismatch" });
-		// The message never echoes the secret or the derived address.
-		expect(JSON.stringify(error)).not.toContain(t.secret);
-		expect(JSON.stringify(error)).not.toContain(t.addressId);
-		const closed = await t.closed;
-		expect(closed.code).toBe(4009);
-		expect(t.received.some((m) => m.type === "session")).toBe(false);
-		// The address was never claimed: a correct tab of that secret is not
-		// "replaced", and the address is not taken by the refused one.
-		await waitFor(() => r.relay.sessionCount === 0, "the session to end");
-		expect(r.logs.events("tab.refused").at(-1)).toMatchObject({
-			reason: "address_mismatch",
-		});
-	});
-
-	test("a mismatched tab does not replace the address's open session", async () => {
-		const r = relay();
-		const secret = newSecret();
-		const good = tab(`${r.wsUrl}?a=${addressIdFromSecret(secret)}`, secret);
-		await good.connect();
-		// Same secret, the id of another address in the URL.
-		const bad = tab(`${r.wsUrl}?a=${addressIdFromSecret(newSecret())}`, secret);
-		await bad.opened;
-		bad.send({
-			type: "hello",
-			library: { name: "scripted-tab", version: "0.0.0" },
-			page: { title: "Test page" },
-			secret,
-		});
-		expect((await bad.closed).code).toBe(4009);
-		expect(good.ws.readyState).toBe(WebSocket.OPEN);
-		expect(good.received.some((m) => m.type === "bye")).toBe(false);
-	});
-
-	test("a malformed or repeated ?a= is refused before the upgrade (400 bad_address)", async () => {
-		const r = relay();
-		const id = addressIdFromSecret(newSecret());
-		for (const query of [
-			"?a=",
-			"?a=nope",
-			`?a=${id.toUpperCase()}`,
-			`?a=${id}&a=${id}`,
-			// Percent-encoded: decodes to a valid id, but a load balancer
-			// matching the literal id would route it elsewhere (review of PR 38).
-			`?a=${[...id].map((c) => `%${c.charCodeAt(0).toString(16)}`).join("")}`,
-			`?a=%61${id.slice(1)}`,
-			`?%61=${id}`,
-			`?a=${id}&%61=${id}`,
-		]) {
-			const res = await handshake(r, query);
-			expect(res.status).toBe(400);
-			expect(await res.json()).toEqual({ error: "bad_address" });
-		}
-		// A well-formed id upgrades (101), other parameters are ignored.
-		const ok = await handshake(r, `?a=${id}&v=1`);
-		expect(ok.status).toBe(101);
-	});
-});
 
 /** A memory store whose `get` can fail or hang (the health probe reads). */
 class FlakyStore extends MemoryTokenStore {

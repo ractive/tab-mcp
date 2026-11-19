@@ -41,7 +41,7 @@ afterEach(async () => {
 
 test("discovery, authorization code + PKCE + iss, refresh rotation, reuse detection, revocation", async () => {
 	r = startOAuthRelay(cimd);
-	const tab = new ScriptedTab(r.wsUrl, { app: "conformance" });
+	const tab = new ScriptedTab(r.wsUrl, { appId: "strict-app" });
 	tabs.push(tab);
 	const session = await tab.connect();
 	const pairingCode = await tab.startPairing();
@@ -87,7 +87,9 @@ test("discovery, authorization code + PKCE + iss, refresh rotation, reuse detect
 	// The user's browser: open the page, type the code from the tab.
 	const browser = new TestBrowser(r.url);
 	const page = await browser.open(authorizationUrl.href);
-	expect(page.html).toContain("conformance");
+	// The page names the app of the address the library discovered.
+	expect(resource.pathname).toBe("/s/strict-app/mcp");
+	expect(page.html).toContain("<strong>strict-app</strong>");
 	const done = await browser.submit(page, {
 		action: "connect",
 		code: pairingCode,
@@ -227,7 +229,7 @@ test("private_key_jwt (DEC-106): oauth4webapi's client assertions at /token and 
 		}),
 	);
 	r = startOAuthRelay(cimd);
-	const tab = new ScriptedTab(r.wsUrl, { app: "conformance" });
+	const tab = new ScriptedTab(r.wsUrl, { appId: "strict-app" });
 	tabs.push(tab);
 	const session = await tab.connect();
 	const pairingCode = await tab.startPairing();

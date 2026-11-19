@@ -65,8 +65,17 @@ test("the build produces a runnable bin and declarations that type-check", async
 	await Bun.write(
 		join(consumer, "server.ts"),
 		`import { createRelay, MemoryTokenStore, type Relay, type RevokeOptions, type TokenStore, VERSION } from "@ractive-ch/tab-mcp";
-import { tokenStoreConformance } from "@ractive-ch/tab-mcp/testing";
+import { startTestRelay, tokenFor, tokenStoreConformance } from "@ractive-ch/tab-mcp/testing";
 const store: TokenStore = new MemoryTokenStore();
+// The address names an app, and tokenFor takes the test relay to find the app's page (DEC-196).
+const testRelay = startTestRelay({ store });
+const address: string = testRelay.relay.addressFor("my-app");
+export const pages: string[] = testRelay.relay.pagesOf("my-app");
+export const token: Promise<string> = tokenFor(testRelay, address);
+export const tokenOfPage: Promise<string> = tokenFor(testRelay, address, { secret: "s", ttlMs: 1000 });
+export const tokenInStore: Promise<string> = tokenFor(store, address, { secret: "s" });
+// @ts-expect-error: a store alone cannot say which page; it needs the secret
+tokenFor(store, address);
 const revokeOptions: RevokeOptions = { now: 0, keepUntil: 1 };
 export const revoked: Promise<number> = store.revoke({ grantId: "g" }, revokeOptions);
 export const relay: Relay = createRelay({ publicUrl: "https://relay.example", allowedOrigins: ["https://app.example"], store });

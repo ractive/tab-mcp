@@ -135,7 +135,9 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   is paired, a line under the heading says what the extension does and names the relay.
   With no AI app paired yet, the panel shows the address for your AI app and a pairing
   code at once, with a note to use the AI app outside this Chrome profile (a chat in a
-  tab of the same profile becomes the tab in front while you type in it).
+  tab of the same profile becomes the tab in front while you type in it). The address
+  is `<relay>/s/tab-mcp-extension/mcp`, the same for everyone who has the extension;
+  the code (8 letters, `XXXX-XXXX`) pairs the AI app with this installation.
   "How do I add it?" under the address says how to add it in Claude, ChatGPT, Claude Code
   and Codex (the client library's steps, the commands each with a Copy), and links to the
   [connect page](https://ractive.ch/tab-mcp/connect/). A Copy the clipboard refuses
@@ -157,9 +159,12 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   relay cannot be reached, the panel says "Connection lost · retrying" and the extension
   tries again every minute. The icon
   shows "on" while it is connected, "…" while it connects or retries, "?" while a tool asks. If
-  another tab or program takes the address over, the extension does not take it back by
-  itself, also after a restart: the panel says so and offers "New address" (or Connect,
-  to take it back).
+  another tab or program takes the extension's connection over (it connects with the
+  extension's secret), the extension does not take it back by itself, also after a
+  restart: the panel says so and offers "Disconnect all apps" (or Connect, to take it
+  back). "Disconnect all apps", also under the pairing code, disconnects every AI app
+  and makes a new secret; the address stays, and each AI app connects again with a new
+  code. With apps paired, the button under the code asks for a second click first.
 
 ## Questions
 
@@ -220,9 +225,9 @@ The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered
 app.
 
 No `storage` permission: the relay address, whether AI access is on, the tools allowed per
-site and the secret behind the connection's address are in IndexedDB, used by the service
-worker only, which content scripts (in the page's origin) cannot reach; there is no
-`chrome.storage` area for them to read or write.
+site and the secret by which the relay knows this installation are in IndexedDB, used by
+the service worker only, which content scripts (in the page's origin) cannot reach; there
+is no `chrome.storage` area for them to read or write.
 
 WebMCP is on in Chrome only where a site takes part in Chrome's
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
@@ -236,6 +241,14 @@ The relay accepts an extension only if its origin, `chrome-extension://<id>`, is
 (`TAB_MCP_ALLOWED_ORIGINS` or `TAB_MCP_SITES`, relay 0.7.0 or later; see "Browser
 extensions" in `docs/configuration.md`). An unpacked extension's id comes from the public
 key in its manifest, or, without one, from the folder it was loaded from.
+
+The extension names its app to the relay (`APP_ID` in `src/protocol.ts`):
+`tab-mcp-extension`, and `tab-mcp-extension-firefox` in the Firefox build. Its MCP
+address is therefore `<relay>/s/tab-mcp-extension/mcp` for every installation; the
+pairing code says which installation an AI app is paired with. A relay can reserve
+`tab-mcp-extension` for the extension's origin (`apps` of its entry in `TAB_MCP_SITES`),
+so that no other origin the relay allows can serve that address. The Firefox build's id
+cannot be reserved for it: no list can name one Firefox extension.
 
 - `bun run build` writes the Chrome Web Store item's public key, `manifest-key.txt`, into
   the manifest, so the development build has the store's id,
@@ -265,10 +278,10 @@ has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`
 1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
    `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
-   **Reload** keeps its UUID and storage, so the address and the AI app's pairing (checked
+   **Reload** keeps its UUID and storage, and with them the AI app's pairing (checked
    in Firefox 160: `storage.local` and IndexedDB). **Remove** and loading it again is a new
-   installation: a new UUID and empty storage, so a new address the AI app has to pair
-   with, unless `extensions.webextensions.keepUuidOnUninstall` and
+   installation: a new UUID and empty storage, so the AI app has to pair again, unless
+   `extensions.webextensions.keepUuidOnUninstall` and
    `extensions.webextensions.keepStorageOnUninstall` are `true` in `about:config`. A
    temporary add-on is gone when Firefox quits; the two prefs are meant to keep it the
    same when loaded again (not checked for a quit). Open pages keep their WebMCP tools across a reload or update of the
@@ -289,7 +302,8 @@ has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`
    (`http://localhost:8080`). Then **Give access to all sites** (Firefox asks): only then does
    every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
 5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
-   to your AI app (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
+   (`<relay>/s/tab-mcp-extension-firefox/mcp`) to your AI app
+   (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
    pairing code from the sidebar.
 
 **While developing**, `bun scripts/firefox-dev.ts [URL] [--headless] [--port N]` does steps 1,

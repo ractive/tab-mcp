@@ -26,6 +26,8 @@ export function hashToken(token: string): string {
 export interface GrantInput {
 	grantId: string;
 	addressId: string;
+	/** The app of the address (DEC-196). */
+	app: string;
 	clientId: string;
 	clientName: string;
 	scopes: string[];
@@ -59,6 +61,7 @@ export async function issueTokenPair(
 	const base = {
 		grantId: grant.grantId,
 		addressId: grant.addressId,
+		app: grant.app,
 		clientId: grant.clientId,
 		clientName: grant.clientName,
 		scopes: grant.scopes,

@@ -9,7 +9,7 @@ export type StoreKind = "sqlite" | "memory";
 
 /**
  * How a browser at `/authorize` proves it belongs to the tab's user (DEC-042):
- * the 6-digit code shown in the tab (DEC-028), or identity binding at an
+ * the code shown in the tab (DEC-028, DEC-196), or identity binding at an
  * OpenID Connect provider (DEC-075).
  */
 export type PairingKind = "code" | "oidc";
@@ -52,6 +52,12 @@ export interface SiteConfig {
 	name?: string;
 	/** Pairing method; default `identity` of the instance (`code`). */
 	pairing?: PairingKind;
+	/**
+	 * The apps this origin serves (the `<app>` of `/s/<app>/mcp`, DEC-197): its
+	 * pages may name only these, and no origin that does not list an app here
+	 * may serve it. Without it the origin's pages may name any app no site lists.
+	 */
+	apps?: string[];
 	/** Overrides of the instance-wide limits for this site's sessions. */
 	limits?: Partial<SiteLimits>;
 }
@@ -62,6 +68,8 @@ export interface Site {
 	origin: string;
 	name?: string;
 	pairing: PairingKind;
+	/** The only apps its pages may name, if the site lists any (DEC-197). */
+	apps?: readonly string[];
 	limits: SiteLimits;
 }
 
@@ -74,6 +82,21 @@ export const MIN_MESSAGE_BYTES = 16_384;
 
 /** Longest grace period for a page to (re)connect (DEC-074). */
 export const MAX_PAGE_WAIT_MS = 60_000;
+
+/** The longest app id: the `<app>` of an address `/s/<app>/mcp` (DEC-196). */
+export const MAX_APP_ID = 32;
+
+/**
+ * An app id (DEC-196): 1 to 32 characters of `a-z`, `0-9` and `-`, neither
+ * starting nor ending with `-`. Part of the address, so nothing that needs
+ * escaping in a URL and nothing that reads differently in upper case.
+ */
+export function isAppId(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(value)
+	);
+}
 
 /** Longest app name (configured or sent by the page). */
 export const MAX_APP_NAME = 64;
@@ -515,7 +538,7 @@ export function resolveConfig(input: Partial<RelayConfig> = {}): RelayConfig {
 	return config;
 }
 
-const SITE_KEYS = new Set(["origin", "name", "pairing", "limits"]);
+const SITE_KEYS = new Set(["origin", "name", "pairing", "apps", "limits"]);
 const LIMIT_KEYS: readonly (keyof SiteLimits)[] = [
 	"maxMessageBytes",
 	"maxConcurrentRequests",
@@ -565,6 +588,15 @@ function validateSite(input: unknown): SiteConfig {
 			throw new ConfigError(`pairing must be "code" or "oidc": ${out.origin}`);
 		}
 		out.pairing = pairing;
+	}
+	const apps = site["apps"];
+	if (apps !== undefined) {
+		if (!Array.isArray(apps) || apps.length === 0 || !apps.every(isAppId)) {
+			throw new ConfigError(
+				`site apps must be a list of app ids (1-${MAX_APP_ID} characters of a-z, 0-9 and -): ${out.origin}`,
+			);
+		}
+		out.apps = [...new Set(apps)];
 	}
 	const limits = site["limits"];
 	if (limits !== undefined) {
@@ -710,6 +742,7 @@ export function siteFor(
 			limits: { ...defaults, ...configured.limits },
 		};
 		if (configured.name !== undefined) site.name = configured.name;
+		if (configured.apps !== undefined) site.apps = configured.apps;
 		return site;
 	}
 	if (
@@ -733,6 +766,47 @@ export function siteFor(
 	)
 		return { origin, pairing: "code", limits: defaults };
 	return undefined;
+}
+
+/**
+ * Whether a page of `site` may serve `app` (DEC-197): one of the site's own
+ * apps if it lists any; otherwise any app that no site lists.
+ */
+export function appAllowed(
+	config: RelayConfig,
+	site: Site,
+	app: string,
+): boolean {
+	if (site.apps !== undefined) return site.apps.includes(app);
+	return !config.sites.some((s) => s.apps?.includes(app) === true);
+}
+
+/**
+ * The pairing methods the pages of `app` can have, `code` first: what the
+ * pairing page offers before it knows which page is meant (DEC-196). From
+ * the configuration alone, never from the pages connected right now.
+ */
+export function pairingKindsOf(
+	config: RelayConfig,
+	app: string,
+): PairingKind[] {
+	const kinds = new Set<PairingKind>();
+	const listing = config.sites.filter((s) => s.apps?.includes(app) === true);
+	if (listing.length > 0) {
+		for (const s of listing) kinds.add(s.pairing ?? config.identity);
+	} else {
+		for (const s of config.sites) {
+			if (s.apps === undefined) kinds.add(s.pairing ?? config.identity);
+		}
+		if (config.allowedOrigins === "*") kinds.add("code");
+		else {
+			for (const origin of config.allowedOrigins) {
+				// Firefox's extensions pair by code (`siteFor`).
+				kinds.add(origin === ANY_FIREFOX_EXTENSION ? "code" : config.identity);
+			}
+		}
+	}
+	return (["code", "oidc"] as const).filter((k) => kinds.has(k));
 }
 
 /** The longest page origin the relay keeps (RFC 1035 names fit with room to spare). */

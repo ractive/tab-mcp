@@ -18,7 +18,7 @@ import {
 } from "../src/jwt.ts";
 import { APP_ISSUER, signingKey, signJwt } from "./oidc-fixture.ts";
 
-const ADDRESS = "https://relay.example/a/abc/mcp";
+const ADDRESS = "https://relay.example/s/app/mcp";
 const PROVIDER = "https://login.example";
 
 function source(keys: Record<string, unknown>[]): KeySource {
@@ -212,7 +212,7 @@ describe("tab assertions (DEC-076)", () => {
 		const { verifier, make } = await setup();
 		const check = async (claims: Record<string, unknown>, header = {}) =>
 			reason(verifier.verify(await make(claims, header), ADDRESS));
-		expect(await check({ aud: "https://relay.example/a/other/mcp" })).toBe(
+		expect(await check({ aud: "https://relay.example/s/other/mcp" })).toBe(
 			"aud",
 		);
 		expect(await check({ aud: [ADDRESS, "https://elsewhere.example"] })).toBe(

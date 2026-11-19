@@ -27,6 +27,9 @@ export { issueAccessToken };
 
 export const ORIGIN = "https://page.example";
 
+/** The app the scripted tabs name unless told otherwise: their address is `/s/test/mcp`. */
+export const APP = "test";
+
 /** Collects log lines in memory. */
 export class LogCapture {
 	readonly lines: string[] = [];
@@ -88,6 +91,8 @@ export interface TabOptions {
 	onRequest?: RequestHandler;
 	/** The app name sent in hello. */
 	app?: string;
+	/** The app id sent in hello (default `APP`); `null` sends none. */
+	appId?: string | null;
 	/** `hello.revokeAll`: take the address back and revoke its grants (DEC-095). */
 	revokeAll?: boolean;
 }
@@ -131,7 +136,7 @@ export class ScriptedTab {
 	}
 
 	get addressId(): string {
-		return addressIdFromSecret(this.secret);
+		return addressIdFromSecret(this.secret, this.#options.appId ?? APP);
 	}
 
 	send(message: unknown): void {
@@ -144,10 +149,16 @@ export class ScriptedTab {
 		this.send({
 			type: "hello",
 			library: { name: "scripted-tab", version: "0.0.0" },
-			page: { title: "Test page" },
-			...(this.#options.app === undefined
+			...(this.#options.appId === null
 				? {}
-				: { app: { name: this.#options.app } }),
+				: {
+						app: {
+							id: this.#options.appId ?? APP,
+							...(this.#options.app === undefined
+								? {}
+								: { name: this.#options.app }),
+						},
+					}),
 			...(this.#options.revokeAll === undefined
 				? {}
 				: { revokeAll: this.#options.revokeAll }),
@@ -354,12 +365,13 @@ export async function connectClient(
 export async function tokenFor(
 	store: TokenStore,
 	addressId: string,
-	options: { ttlMs?: number; now?: number } = {},
+	options: { ttlMs?: number; now?: number; app?: string } = {},
 ): Promise<string> {
 	const { token } = await issueAccessToken(
 		store,
 		{
 			addressId,
+			app: options.app ?? APP,
 			clientId: "https://client.example/cimd.json",
 			clientName: "Test client",
 		},

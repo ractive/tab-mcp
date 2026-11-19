@@ -216,7 +216,7 @@ export const revoked: Promise<void> = mcp.revoke("g_1");
 const dialogs: DialogOptions = { strings: { lang: "de", allow: "Erlauben" }, setup: { guide: null, instructions: (name, address) => [{ app: name, text: address }] } };
 export const strings: Partial<DialogStrings> | undefined = dialogs.strings;
 export const session: Promise<SessionInfo> = mcp.connect({ resume: true });
-const steps: SetupInstruction[] = setupInstructions("x", "https://relay.example/a/x/mcp");
+const steps: SetupInstruction[] = setupInstructions("x", "https://relay.example/s/x/mcp");
 export const help: string[] = steps.map((s) => \`\${s.app}: \${s.text} \${s.command ?? ""}\${(s.note ?? []).map((p) => ("code" in p ? p.code : p.text)).join("")}\`);
 export const guide: string = SETUP_GUIDE;
 // @ts-expect-error: unknown tool fields are type errors

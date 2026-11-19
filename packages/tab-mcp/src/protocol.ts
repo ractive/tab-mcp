@@ -5,7 +5,13 @@
  * normative description is `docs/protocol.md`.
  */
 
-import { isAppName, MAX_APP_NAME, type PairingKind } from "./config.ts";
+import {
+	isAppId,
+	isAppName,
+	MAX_APP_ID,
+	MAX_APP_NAME,
+	type PairingKind,
+} from "./config.ts";
 import { MAX_JWT_BYTES } from "./jwt.ts";
 
 export const SUBPROTOCOL = "tab-mcp.v1";
@@ -28,8 +34,6 @@ export const CloseCode = {
 	replaced: 4005,
 	/** The tab sent more control messages than its budget (`rate_limited`). */
 	rateLimited: 4008,
-	/** The address id in the `/tab` URL is not the secret's (DEC-098). */
-	addressMismatch: 4009,
 } as const;
 
 export type ByeReason = "replaced" | "expired" | "idle" | "shutdown" | "user";
@@ -101,10 +105,9 @@ export interface PairingCodeMessage {
 	expiresAt: string;
 	/**
 	 * Why this code comes: `start` (the dialog opened), `used` (the last one
-	 * was entered), `locked` (too many wrong tries), `expired`. Older
-	 * relays leave it out; older clients ignore it.
+	 * was entered), `expired`.
 	 */
-	reason?: "start" | "used" | "locked" | "expired";
+	reason: "start" | "used" | "expired";
 }
 export interface GrantAddedMessage {
 	type: "grant.added";
@@ -162,19 +165,19 @@ export type ErrorCode =
 	| "rate_limited"
 	| "identity_refused"
 	| "store_unavailable"
-	| "address_mismatch";
+	/** The page's origin may not serve the app it named (DEC-197). */
+	| "app_not_allowed";
 
 // Tab → relay
 
 export interface HelloMessage {
 	type: "hello";
 	library: { name: string; version: string };
-	/*
-	 * `page: {title}` is no longer read (CC 6): accepted and ignored, as
-	 * libraries up to 0.15 send it and relays up to 0.9 require it.
+	/**
+	 * The app: `id` is the `<app>` of its address `/s/<app>/mcp` (DEC-196);
+	 * `name` is a self-declared name for people (DEC-045), unverified.
 	 */
-	/** Self-declared app name (DEC-045), unverified. */
-	app?: { name: string };
+	app: { id: string; name?: string };
 	secret: string;
 	/**
 	 * Revoke every grant of the address as the session claims it, before the
@@ -340,7 +343,12 @@ export function parseTabMessage(text: string): ParseResult {
 			}
 			if (typeof v["secret"] !== "string") return bad("hello.secret missing");
 			const app = v["app"];
-			if (app !== undefined && (!isObject(app) || !isAppName(app["name"]))) {
+			if (!isObject(app) || !isAppId(app["id"])) {
+				return bad(
+					`hello.app.id must be 1-${MAX_APP_ID} characters of a-z, 0-9 and - (tab-mcp-client 0.17 or later sends it)`,
+				);
+			}
+			if (app["name"] !== undefined && !isAppName(app["name"])) {
 				return bad(`hello.app.name must be 1-${MAX_APP_NAME} characters`);
 			}
 			const revokeAll = v["revokeAll"];
@@ -351,10 +359,9 @@ export function parseTabMessage(text: string): ParseResult {
 				type,
 				library: { name: library["name"], version: library["version"] },
 				secret: v["secret"],
+				app: { id: app["id"] },
 			};
-			if (isObject(app) && isAppName(app["name"])) {
-				hello.app = { name: app["name"] };
-			}
+			if (isAppName(app["name"])) hello.app.name = app["name"];
 			if (revokeAll === true) hello.revokeAll = true;
 			return { ok: true, message: hello };
 		}

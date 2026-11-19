@@ -30,6 +30,12 @@ export interface TokenRecord {
 	grantId: string;
 	/** The address the grant belongs to (DEC-027). */
 	addressId: string;
+	/**
+	 * The app of that address: the `<app>` of `/s/<app>/mcp`, where the token
+	 * is valid (DEC-196). Must be stored and returned unchanged: a store that
+	 * drops it makes every token invalid.
+	 */
+	app: string;
 	/** The OAuth client id (the CIMD URL). */
 	clientId: string;
 	/** The client's self-declared name, for display only. */

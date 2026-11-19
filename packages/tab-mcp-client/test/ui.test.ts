@@ -1,6 +1,7 @@
 /** The default dialogs in a DOM (happy-dom, passed in; no globals touched). */
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
+import { addressIdOf } from "../src/address.ts";
 import { confirmDialog } from "../src/confirm.ts";
 import {
 	CODE_USED_WAIT_MS,
@@ -722,17 +723,17 @@ describe("showConnectDialog", () => {
 		const code = nextEvent(mcp, "pairingcode");
 		relay.send({
 			type: "pairing.code",
-			code: "123456",
+			code: "BCDF-GHJK",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		await code;
 		const codeLine = dialog.querySelector(".tab-mcp-code") as HTMLElement;
 		expect(codeLine.hidden).toBe(false);
 		expect(codeLine.querySelector(".tab-mcp-code-value")?.textContent).toBe(
-			"123456",
+			"BCDF-GHJK",
 		);
 		expect(codeLine.textContent).toBe(
-			"When asked, enter the code 123456 CopyA new code appears every 2 minutes and after each use.",
+			"When asked, enter the code BCDF-GHJK CopyA new code appears every 2 minutes and after each use.",
 		);
 		// A newly connected app is announced with the others (CU 19); the setup closes again.
 		const added = nextEvent(mcp, "grantschange");
@@ -813,6 +814,8 @@ describe("showConnectDialog", () => {
 		});
 		await shown;
 	}
+	/** The letters of a pairing code (the relay's `pairing.ts`). */
+	const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
 	/** An expiry two minutes from now, as the relay sends with a fresh code. */
 	const inTwoMinutes = () => new Date(Date.now() + 120_000).toISOString();
 
@@ -844,7 +847,7 @@ describe("showConnectDialog", () => {
 	test("what Copy did is announced: copied, or selected for Ctrl+C (review of PR 34)", async () => {
 		const copied = stubClipboard();
 		const { dialog } = await open();
-		await sendCode("123456");
+		await sendCode("BCDF-GHJK");
 		const live = dialog.querySelector(".tab-mcp-announce") as HTMLElement;
 		expect(live.getAttribute("aria-live")).toBe("polite");
 		expect(live.textContent).toBe("");
@@ -910,7 +913,7 @@ describe("showConnectDialog", () => {
 	test("Copy next to the code copies the code shown, also after it changes", async () => {
 		const copied = stubClipboard();
 		const { dialog } = await open();
-		await sendCode("123456");
+		await sendCode("BCDF-GHJK");
 		const codeLine = dialog.querySelector(".tab-mcp-code") as HTMLElement;
 		const copy = codeLine.querySelector(
 			"button.tab-mcp-code-copy",
@@ -923,17 +926,17 @@ describe("showConnectDialog", () => {
 		expect(value.style.getPropertyValue("user-select")).toBe("all");
 		copy.click();
 		await Bun.sleep(0);
-		expect(copied()).toBe("123456");
+		expect(copied()).toBe("BCDF-GHJK");
 		expect(copy.textContent).toBe("Copied");
 		expect(copy.getAttribute("aria-label")).toBeNull();
 
 		// A new code: the button is back to Copy and copies the new one.
-		await sendCode("654321");
+		await sendCode("KJHG-FDCB");
 		expect(copy.textContent).toBe("Copy");
 		expect(copy.getAttribute("aria-label")).toBe("Copy code");
 		copy.click();
 		await Bun.sleep(0);
-		expect(copied()).toBe("654321");
+		expect(copied()).toBe("KJHG-FDCB");
 		expect(copy.textContent).toBe("Copied");
 		// The address's Copy is a separate button.
 		expect(
@@ -945,7 +948,7 @@ describe("showConnectDialog", () => {
 	test("before an app connects: no Done, a small Close that says what closing does", async () => {
 		relay.grants = [];
 		const { dialog, closed, session } = await open();
-		await sendCode("123456");
+		await sendCode("BCDF-GHJK");
 		const done = byText(dialog, "Done");
 		const close = byText(dialog, "Close");
 		expect(done.hidden).toBe(true);
@@ -954,7 +957,7 @@ describe("showConnectDialog", () => {
 		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
 		expect(note.hidden).toBe(false);
 		expect(note.textContent).toBe(
-			"Closing this stops the code. The address stays the same: to connect later, open this again from the page.",
+			"Closing this stops the code. To connect later, open this again from the page.",
 		);
 		// Close comes last: after the code, its Copy and the help.
 		const order = [
@@ -1014,10 +1017,10 @@ describe("showConnectDialog", () => {
 		).toBe(true);
 		expect(doc.activeElement).toBe(done);
 
-		// A new address disconnects it: pairing starts over, so Close is back.
-		byText(dialog, "New address").click();
+		// "Disconnect all apps" disconnects it: pairing starts over, so Close is back.
+		byText(dialog, "Disconnect all apps").click();
 		const connected = nextState(mcp, "connected");
-		byText(dialog, "Disconnect and get new address").click();
+		byText(dialog, "Disconnect all").click();
 		expect(done.hidden).toBe(true);
 		expect(close.hidden).toBe(false);
 		await relay.next("hello", (m) => m["revokeAll"] === true);
@@ -1035,7 +1038,7 @@ describe("showConnectDialog", () => {
 	test("when the app that connected here is disconnected again, Close and the note come back", async () => {
 		relay.grants = [];
 		const { dialog } = await open();
-		await sendCode("123456");
+		await sendCode("BCDF-GHJK");
 		const done = byText(dialog, "Done");
 		const close = byText(dialog, "Close");
 		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
@@ -1066,7 +1069,7 @@ describe("showConnectDialog", () => {
 		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
 		// Connected, but no code yet: nothing to stop.
 		expect(note.hidden).toBe(true);
-		await sendCode("123456");
+		await sendCode("BCDF-GHJK");
 		expect(note.hidden).toBe(false);
 		const code = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
 		const live = dialog.querySelector('[aria-live="polite"]') as HTMLElement;
@@ -1081,7 +1084,7 @@ describe("showConnectDialog", () => {
 	test("an app connects: the connected state in one change, no node made again, no new code in view (owner feedback)", async () => {
 		relay.grants = [];
 		const { dialog, closed } = await open();
-		await sendCode("111111", inTwoMinutes(), "start");
+		await sendCode("BBBB-CCCC", inTwoMinutes(), "start");
 		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
 		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
 		const success = dialog.querySelector(".tab-mcp-success") as HTMLElement;
@@ -1107,7 +1110,7 @@ describe("showConnectDialog", () => {
 
 		// The code is entered: the relay sends the next one at once, saying
 		// why. The AI app connects a moment later.
-		await sendCode("222222", inTwoMinutes(), "used");
+		await sendCode("DDDD-FFFF", inTwoMinutes(), "used");
 		expect(shown(value)).toBe(false);
 		expect(shown(used)).toBe(true);
 		expect(used.textContent).toBe("Code used. Waiting for your AI app…");
@@ -1141,7 +1144,7 @@ describe("showConnectDialog", () => {
 		// Opened again, the setup shows the next code, ready to use.
 		toggle.click();
 		expect(shown(value)).toBe(true);
-		expect(value.textContent).toBe("222222");
+		expect(value.textContent).toBe("DDDD-FFFF");
 		expect(used.hidden).toBe(true);
 
 		// Nothing was taken out and put back: the same nodes, only shown or hidden.
@@ -1158,24 +1161,24 @@ describe("showConnectDialog", () => {
 		const { dialog } = await open();
 		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
 		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
-		await sendCode("111111", inTwoMinutes(), "start");
+		await sendCode("BBBB-CCCC", inTwoMinutes(), "start");
 		jest.useFakeTimers();
 		try {
-			await sendCode("222222", inTwoMinutes(), "used");
+			await sendCode("DDDD-FFFF", inTwoMinutes(), "used");
 			expect(shown(used)).toBe(true);
 			jest.advanceTimersByTime(CODE_USED_WAIT_MS - 1);
 			expect(shown(used)).toBe(true);
 			jest.advanceTimersByTime(1);
 			expect(used.hidden).toBe(true);
 			expect(shown(value)).toBe(true);
-			expect(value.textContent).toBe("222222");
+			expect(value.textContent).toBe("DDDD-FFFF");
 		} finally {
 			jest.useRealTimers();
 		}
 		byText(dialog, "Close").click();
 	});
 
-	test("only a used code waits: expired, locked or no reason (an older relay) show the next code at once, whatever the clock", async () => {
+	test("only a used code waits: start, expired, no reason or one the library does not know show the next code at once, whatever the clock", async () => {
 		relay.grants = [];
 		const { dialog } = await open();
 		const value = dialog.querySelector(".tab-mcp-code-value") as HTMLElement;
@@ -1186,9 +1189,10 @@ describe("showConnectDialog", () => {
 		for (const skew of [-600_000, 0, 600_000]) {
 			const clock = jest.spyOn(Date, "now").mockReturnValue(now + skew);
 			try {
-				let n = 100_000 + (skew + 600_000) / 1000;
+				let n = (skew + 600_000) / 1000;
+				// "locked" is what relays up to 0.10 said: no reason any more (DEC-196).
 				for (const reason of [undefined, "start", "expired", "locked"]) {
-					const next = String(n++);
+					const next = `BCDF-${LETTERS[n % 20]}${LETTERS[n++ % 7]}XZ`;
 					await sendCode(next, relayExpiry, reason);
 					expect({ reason, skew, shown: value.textContent }).toEqual({
 						reason,
@@ -1202,28 +1206,28 @@ describe("showConnectDialog", () => {
 				clock.mockRestore();
 			}
 		}
-		// A lockout during the wait ends it: /authorize says to enter the new code.
-		await sendCode("200001", inTwoMinutes(), "used");
+		// A code that runs out during the wait ends it: the user needs the next one now.
+		await sendCode("GGGG-HHHH", inTwoMinutes(), "used");
 		expect(shown(used)).toBe(true);
-		await sendCode("200002", inTwoMinutes(), "locked");
+		await sendCode("JJJJ-KKKK", inTwoMinutes(), "expired");
 		expect(used.hidden).toBe(true);
 		expect(shown(value)).toBe(true);
-		expect(value.textContent).toBe("200002");
+		expect(value.textContent).toBe("JJJJ-KKKK");
 		byText(dialog, "Close").click();
 	});
 
-	test("one app paired twice is named once, in the confirmation and the New address question", async () => {
+	test("one app paired twice is named once, in the confirmation and the Disconnect all apps question", async () => {
 		relay.grants = [GRANT, { ...GRANT, grantId: "g_2" }];
 		const { dialog } = await open();
 		expect(dialog.querySelector(".tab-mcp-success")?.textContent).toBe(
 			"Claude (claude.ai) is connectedYou can close this now and ask it to use the tools of this page.",
 		);
 		byText(dialog, "Connect another app").click();
-		byText(dialog, "New address").click();
+		byText(dialog, "Disconnect all apps").click();
 		expect(
 			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
 		).toBe(
-			"A new address disconnects Claude (claude.ai). To use this page again, add the new address to it.",
+			"This disconnects Claude (claude.ai). To use this page with it again, connect it again and enter a new code.",
 		);
 		// Both grants are listed, each with its own Disconnect, named for its app (CU 14).
 		expect(dialog.querySelectorAll(".tab-mcp-apps li")).toHaveLength(2);
@@ -1241,7 +1245,7 @@ describe("showConnectDialog", () => {
 
 	test("opened while an app is connected: the connected state, focus on Done, the code behind the disclosure", async () => {
 		const { dialog } = await open();
-		await sendCode("123456", inTwoMinutes());
+		await sendCode("BCDF-GHJK", inTwoMinutes());
 		expect(shown(dialog.querySelector(".tab-mcp-success"))).toBe(true);
 		expect(shown(dialog.querySelector(".tab-mcp-code-value"))).toBe(false);
 		expect(shown(dialog.querySelector(".tab-mcp-address-input"))).toBe(false);
@@ -1476,7 +1480,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
-	test("with identity binding, New address says the address is new once it shows, at its Copy (review of PR 121)", async () => {
+	test("with identity binding, Disconnect all apps says it is done once the address shows again, at its Copy (review of PR 121)", async () => {
 		relay.pairing = "oidc";
 		relay.grants = [];
 		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
@@ -1491,7 +1495,7 @@ describe("showConnectDialog", () => {
 		const status = dialog.querySelector(".tab-mcp-status") as HTMLElement;
 		const address = dialog.querySelector(".tab-mcp-address") as HTMLElement;
 		expect(address.hidden).toBe(false);
-		byText(dialog, "New address").click();
+		byText(dialog, "Disconnect all apps").click();
 		// The new session's identity is not bound yet: no address, no claim about it.
 		await nextState(mcp, "connected");
 		await Bun.sleep(0);
@@ -1499,7 +1503,7 @@ describe("showConnectDialog", () => {
 		await bind();
 		expect(address.hidden).toBe(false);
 		expect(status.textContent).toBe(
-			"This is a new address. Add it to your AI app again.",
+			"Every AI app is disconnected. Connect yours again.",
 		);
 		expect(doc.activeElement).toBe(
 			dialog.querySelector(".tab-mcp-address-copy"),
@@ -1507,10 +1511,34 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
-	test("New address asks first while apps are connected; Cancel keeps the address", async () => {
+	// With identity binding the dialog shows no code ("No code is needed"),
+	// so the text after "Disconnect all apps" must not ask for one.
+	test("with identity binding, what Disconnect all apps says when done does not ask for a code", async () => {
+		relay.pairing = "oidc";
+		relay.grants = [];
+		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+		const { dialog } = await open();
+		const bind = async () => {
+			const m = await relay.next("identity");
+			relay.send({ type: "identity.bound", round: m["round"] });
+			await relay.settled();
+		};
+		await bind();
+		byText(dialog, "Disconnect all apps").click();
+		await nextState(mcp, "connected");
+		await bind();
+		const status = dialog.querySelector(".tab-mcp-status") as HTMLElement;
+		expect(status.textContent).toStartWith("Every AI app is disconnected.");
+		expect(shown(dialog.querySelector(".tab-mcp-code"))).toBe(false);
+		expect(shown(dialog.querySelector(".tab-mcp-sign-in"))).toBe(true);
+		expect(status.textContent).not.toContain("code");
+		byText(dialog, "Close").click();
+	});
+
+	test("Disconnect all apps asks first while apps are connected; Cancel keeps them and the secret", async () => {
 		const { dialog, session } = await open();
 		byText(dialog, "Connect another app").click();
-		const fresh = byText(dialog, "New address");
+		const fresh = byText(dialog, "Disconnect all apps");
 		expect(fresh.disabled).toBe(false);
 		const question = dialog.querySelector(
 			".tab-mcp-new-address-question",
@@ -1524,7 +1552,7 @@ describe("showConnectDialog", () => {
 			question.querySelector("p")?.id ?? "none",
 		);
 		expect(question.querySelector("p")?.textContent).toBe(
-			"A new address disconnects Claude (claude.ai). To use this page again, add the new address to it.",
+			"This disconnects Claude (claude.ai). To use this page with it again, connect it again and enter a new code.",
 		);
 		expect(doc.activeElement?.textContent).toBe("Cancel");
 
@@ -1532,17 +1560,19 @@ describe("showConnectDialog", () => {
 		expect(question.hidden).toBe(true);
 		expect(doc.activeElement).toBe(fresh);
 		expect(mcp.state).toBe("connected");
-		expect(mcp.session?.address).toBe(session.address);
-		expect(relay.received.some((m) => m.type === "grants.revokeAll")).toBe(
-			false,
-		);
+		expect(mcp.session).toBe(session);
+		expect(mcp.grants).toEqual([GRANT]);
+		// Nothing went to the relay: no second connection, no hello.revokeAll.
+		await relay.settled();
+		expect(relay.sockets).toHaveLength(1);
+		expect(relay.received.filter((m) => m.type === "hello")).toHaveLength(1);
 		byText(dialog, "Done").click();
 	});
 
-	test("the New address question follows the connected apps while it is open", async () => {
+	test("the Disconnect all apps question follows the connected apps while it is open", async () => {
 		const { dialog } = await open();
 		byText(dialog, "Connect another app").click();
-		const fresh = byText(dialog, "New address");
+		const fresh = byText(dialog, "Disconnect all apps");
 		const question = dialog.querySelector(
 			".tab-mcp-new-address-question",
 		) as HTMLElement;
@@ -1564,7 +1594,7 @@ describe("showConnectDialog", () => {
 		});
 		await added;
 		expect(question.querySelector("p")?.textContent).toBe(
-			"A new address disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page again, add the new address to them.",
+			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again and enter a new code.",
 		);
 		// The setup stays open while the question is: the user is answering it.
 		expect(shown(question)).toBe(true);
@@ -1580,7 +1610,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
-	test("New address, confirmed, revokes the apps, makes a new secret and connects again", async () => {
+	test("Disconnect all apps, confirmed, revokes the apps, makes a new secret and connects again at the same address", async () => {
 		relay.grants = [
 			GRANT,
 			{
@@ -1593,26 +1623,26 @@ describe("showConnectDialog", () => {
 				},
 			},
 		];
-		const { dialog } = await open();
+		const { dialog, session } = await open();
 		const hello = await relay.next("hello");
 		expect(dialog.querySelector(".tab-mcp-success")?.textContent).toBe(
 			"Claude (claude.ai) and ChatGPT (chatgpt.com) are connectedYou can close this now and ask them to use the tools of this page.",
 		);
 		byText(dialog, "Connect another app").click();
-		byText(dialog, "New address").click();
+		byText(dialog, "Disconnect all apps").click();
 		expect(
 			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
 		).toBe(
-			"A new address disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page again, add the new address to them.",
+			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again and enter a new code.",
 		);
 
-		relay.grants = []; // what the relay has for the new address
+		relay.grants = []; // what the relay has for the new secret
 		const connected = nextState(mcp, "connected");
-		byText(dialog, "Disconnect and get new address").click();
+		byText(dialog, "Disconnect all").click();
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
-			"Getting a new address…",
+			"Disconnecting…",
 		);
-		// The relay revokes them as it hands the old address back (DEC-136).
+		// The relay revokes them as it takes the old secret once more (DEC-136).
 		expect(await relay.next("hello")).toMatchObject({
 			secret: hello["secret"],
 			revokeAll: true,
@@ -1622,7 +1652,7 @@ describe("showConnectDialog", () => {
 		await connected;
 		await Bun.sleep(0);
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
-			"This is a new address. Add it to your AI app again.",
+			"Every AI app is disconnected. Connect yours again.",
 		);
 		expect(
 			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
@@ -1631,17 +1661,22 @@ describe("showConnectDialog", () => {
 		expect(
 			(dialog.querySelector(".tab-mcp-address") as HTMLElement).hidden,
 		).toBe(false);
+		// The address names the app: the one shown is the one from before.
+		expect(mcp.session?.address).toBe(session.address);
+		expect((dialog.querySelector("input") as HTMLInputElement).value).toBe(
+			session.address,
+		);
 		expect((dialog.querySelector(".tab-mcp-apps") as HTMLElement).hidden).toBe(
 			true,
 		);
 		byText(dialog, "Close").click();
 	});
 
-	test("New address without connected apps does not ask", async () => {
+	test("Disconnect all apps without connected apps does not ask", async () => {
 		relay.grants = [];
 		const { dialog } = await open();
 		await relay.next("hello");
-		byText(dialog, "New address").click();
+		byText(dialog, "Disconnect all apps").click();
 		expect(
 			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
 				.hidden,
@@ -1675,7 +1710,7 @@ describe("showConnectDialog", () => {
 
 	test("the look: one primary step, Disconnect marked, Copy that keeps its width (dialog design)", async () => {
 		const { dialog, session } = await open();
-		await sendCode("123456");
+		await sendCode("BCDF-GHJK");
 		const has = (selector: string, kind: string) =>
 			(dialog.querySelector(selector) as HTMLElement).classList.contains(kind);
 		const primary = () =>
@@ -1900,8 +1935,11 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		await connecting;
 		await relay.next("pairing.start");
 		if (sibling) {
-			// A sibling tab says its session started (`claimed`), on this address.
-			const address = new URL(relay.urls.at(-1) ?? "").searchParams.get("a");
+			// A sibling tab says its session started (`claimed`), with this
+			// page's secret: by its address id (DEC-095).
+			const hello = relay.received.find((m) => m.type === "hello");
+			const address = await addressIdOf(String(hello?.["secret"]));
+			expect(address).toMatch(/^[a-z2-7]{52}$/);
 			const announce = new BroadcastChannel(channelName);
 			const listener = new BroadcastChannel(channelName);
 			const delivered = new Promise((r) => {
@@ -1921,7 +1959,7 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		return (await waitFor("dialog.tab-mcp-replaced")) as HTMLDialogElement;
 	}
 
-	test("nobody announced it: a warning that another tab or program took over, with New address", async () => {
+	test("nobody announced it: a warning that another tab or program took over, with Disconnect all apps", async () => {
 		const replaced = openThenReplace(false);
 		const secret = (await relay.next("hello"))["secret"];
 		const notice = await replaced;
@@ -1929,31 +1967,36 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		expect(notice.querySelector("h2")?.textContent).toBe(
 			"Another tab or program took over this page",
 		);
-		expect(notice.textContent).toContain("someone may have copied its address");
+		expect(notice.querySelector("p")?.textContent).toBe(
+			"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
+		);
 		expect(buttons(notice).map((b) => b.textContent)).toEqual([
 			"Close",
-			"New address",
+			"Disconnect all apps",
 		]);
-		expect(doc.activeElement?.textContent).toBe("New address");
-		byText(notice, "New address").click();
-		// Back on the old address first, so the relay disconnects its apps.
+		expect(doc.activeElement?.textContent).toBe("Disconnect all apps");
+		byText(notice, "Disconnect all apps").click();
+		expect(notice.querySelector(".tab-mcp-status")?.textContent).toBe(
+			"Disconnecting…",
+		);
+		// With the old secret once more first, so the relay disconnects its apps.
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
 		});
 		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
 		expect((await relay.next("hello"))["secret"]).not.toBe(secret);
-		// Then the connect dialog, to add the new address to the AI apps.
+		// Then the connect dialog, to connect the AI apps again with a code.
 		const connect = await waitFor("dialog.tab-mcp-connect");
 		await relay.next("pairing.start");
 		expect(doc.querySelector("dialog.tab-mcp-replaced")).toBeNull();
 		(connect as HTMLDialogElement).close();
 	});
 
-	test("taken over again during New address: the notice says so and New address works again (review of PR 39)", async () => {
+	test("taken over again during Disconnect all apps: the notice says so and the button works again (review of PR 39)", async () => {
 		const notice = await openThenReplace(false);
 		relay.answerHello = false;
-		byText(notice, "New address").click();
+		byText(notice, "Disconnect all apps").click();
 		expect(
 			await relay.next("hello", (m) => m["revokeAll"] === true),
 		).toBeDefined();
@@ -1970,7 +2013,7 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 		expect(status.textContent).toBe(
 			"It was taken over again before its AI apps were disconnected. Try again.",
 		);
-		expect(byText(notice, "New address").disabled).toBe(false);
+		expect(byText(notice, "Disconnect all apps").disabled).toBe(false);
 		expect(notice.open).toBe(true);
 	});
 
@@ -1994,10 +2037,7 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 			const secret = (await relay.next("hello"))["secret"] as string;
 			await relay.settled();
 			expect(seen).toEqual([
-				{
-					type: "claimed",
-					address: new URL(relay.urls.at(-1) ?? "").searchParams.get("a"),
-				},
+				{ type: "claimed", address: await addressIdOf(secret) },
 			]);
 			expect(JSON.stringify(seen)).not.toContain(secret);
 		} finally {
@@ -2310,12 +2350,12 @@ describe("the connect dialog for people who are not developers (iteration 33)", 
 		byText(dialog, "Close").click();
 	});
 
-	test("first run: the help between the address and the code; New address apart, saying what it does (CU 23)", async () => {
+	test("first run: the help between the address and the code; Disconnect all apps apart, saying what it does (CU 23)", async () => {
 		const dialog = await open();
 		const code = nextEvent(mcp, "pairingcode");
 		relay.send({
 			type: "pairing.code",
-			code: "123456",
+			code: "BCDF-GHJK",
 			expiresAt: "2026-10-20T10:00:00.000Z",
 		});
 		await code;
@@ -2336,8 +2376,8 @@ describe("the connect dialog for people who are not developers (iteration 33)", 
 		expect(address.querySelector(".tab-mcp-new-address")).toBeNull();
 		const row = dialog.querySelector(".tab-mcp-new-address-row") as HTMLElement;
 		expect(shown(row)).toBe(true);
-		expect(row.textContent).toContain(
-			"A new address disconnects every AI app from this one.",
+		expect(row.textContent).toBe(
+			"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again with a new code. Disconnect all apps",
 		);
 		byText(dialog, "Close").click();
 	});

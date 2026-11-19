@@ -34,6 +34,8 @@ export interface CallHost {
 /** What a connection needs from the `TabMcp` that opened it. */
 export interface ConnectionHost extends CallHost {
 	readonly server: ServerInfo;
+	/** The app id: the `<app>` of the page's address `/s/<app>/mcp` (DEC-196). */
+	readonly app: string;
 	readonly appName: string | undefined;
 	/**
 	 * The `BroadcastChannel` of the tabs that share this page's secret

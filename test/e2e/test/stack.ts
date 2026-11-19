@@ -301,7 +301,7 @@ export async function pair(
 	);
 	const code = await waitFor<string>(
 		calculator,
-		`(document.querySelector('${dialog} .tab-mcp-code-value')?.textContent ?? '').match(/^\\d{6}$/)?.[0]`,
+		`(document.querySelector('${dialog} .tab-mcp-code-value')?.textContent ?? '').match(/^[A-Z]{4}-[A-Z]{4}$/)?.[0]`,
 	);
 	const buttonsBefore = await dialogButtons(calculator);
 	// From here to "connected", what changes in the dialog: nothing may be

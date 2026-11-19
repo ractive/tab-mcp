@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { SqliteTokenStore } from "../src/store/sqlite.ts";
 import {
+	APP,
 	connectClient,
 	mcpPost,
 	ORIGIN,
@@ -109,9 +110,7 @@ test("a bad configuration exits 2 with a message", () => {
 test("SDK client → relay process → scripted tab, with a SQLite-issued token", async () => {
 	const tab = new ScriptedTab(`ws://127.0.0.1:${port}/tab`);
 	const session = await tab.connect();
-	expect(session.address).toBe(
-		`http://127.0.0.1:${port}/a/${tab.addressId}/mcp`,
-	);
+	expect(session.address).toBe(`http://127.0.0.1:${port}/s/${APP}/mcp`);
 
 	const store = new SqliteTokenStore(dbPath);
 	const token = await tokenFor(store, tab.addressId);

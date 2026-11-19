@@ -11,7 +11,6 @@ import {
 	expect,
 	test,
 } from "bun:test";
-import { newSecret } from "../src/address.ts";
 import { ConfigError, resolveConfig } from "../src/config.ts";
 import * as entry from "../src/index.ts";
 import { forwardedIp, networkKey } from "../src/ip.ts";
@@ -30,6 +29,7 @@ import type {
 	TokenRecord,
 } from "../src/store/types.ts";
 import {
+	APP,
 	mcpPost,
 	type RequestHandler,
 	rpc,
@@ -102,22 +102,38 @@ async function pairingTab(r: OAuthTestRelay): Promise<ScriptedTab> {
 	return t;
 }
 
-/** Open `/authorize` for `address` from a browser on `ip` (behind the trusted proxy). */
+interface Opened {
+	browser: TestBrowser;
+	page: AuthorizePage;
+}
+
+/**
+ * Open `/authorize` from a browser on `ip` (behind the trusted proxy), for
+ * the address of `app`. No page of the app needs to be open: a request names
+ * an app, and the form is shown either way (DEC-196).
+ */
 async function openFrom(
 	r: OAuthTestRelay,
 	ip: string,
-	address: string,
-): Promise<{ browser: TestBrowser; page: AuthorizePage }> {
+	app: string = APP,
+): Promise<Opened> {
 	const browser = new TestBrowser(r.url, { "x-real-ip": ip });
 	const page = await browser.open(
 		authorizeUrl(r.url, {
 			client_id: clientId,
 			redirect_uri: REDIRECT,
 			code_challenge: pkce().challenge,
-			resource: address,
+			resource: r.relay.addressFor(app),
 		}),
 	);
 	return { browser, page };
+}
+
+/** Whether the request behind `o` is still open: its Cancel answers 303, a gone one 400. */
+async function stillOpen(o: Opened): Promise<boolean> {
+	const res = await o.browser.submit(o.page, { action: "cancel" });
+	expect([303, 400]).toContain(res.status);
+	return res.status === 303;
 }
 
 /** Pair with the tab's code and return the code's redirect and verifier. */
@@ -256,53 +272,74 @@ describe("RQ 1: a store failure during a refresh or a code exchange leaves the g
 });
 
 describe("RS 1: a full instance evicts open authorization requests instead of refusing everyone", () => {
-	test("requests of a page whose dialog closed go first", async () => {
+	test("with one request per network they go in the order they came, whatever the pages do", async () => {
 		const r = oauthRelay({ trustProxy: "x-real-ip" }, { maxPending: 3 });
-		const a = await pairingTab(r);
-		const b = await pairingTab(r);
-		const opened: { browser: TestBrowser; page: AuthorizePage }[] = [];
-		for (const ip of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) {
-			const o = await openFrom(r, ip, a.session?.address ?? "");
-			expect(o.page.status).toBe(200);
-			opened.push(o);
-		}
-		a.send({ type: "pairing.stop" });
-		await Bun.sleep(50);
-		// Full: before the fix, 429 for everyone.
-		const fourth = await openFrom(r, "198.51.100.4", b.session?.address ?? "");
+		// A request names an app, not a page (DEC-196), so none is kept or
+		// dropped for its page: before, the requests of a page whose dialog
+		// was closed went first. Here the oldest request is for an app whose
+		// page shows a code, the other two for an app without any page.
+		await pairingTab(r);
+		const first = await openFrom(r, "198.51.100.1");
+		const second = await openFrom(r, "198.51.100.2", "no-page");
+		const third = await openFrom(r, "198.51.100.3", "no-page");
+		for (const o of [first, second, third]) expect(o.page.status).toBe(200);
+		// Full: before RS 1, 429 for everyone.
+		const fourth = await openFrom(r, "198.51.100.4");
 		expect(fourth.page.status).toBe(200);
-		// The oldest request of the closed dialog was the one evicted.
-		const evicted = opened[0];
-		if (evicted === undefined) throw new Error("no request");
-		const gone = await evicted.browser.submit(evicted.page, {
-			action: "cancel",
-		});
-		expect(gone.status).toBe(400);
-		const kept = opened[1];
-		if (kept === undefined) throw new Error("no request");
-		const cancelled = await kept.browser.submit(kept.page, {
-			action: "cancel",
-		});
-		expect(cancelled.status).toBe(303);
+		expect(await stillOpen(first)).toBe(false);
+		expect(await stillOpen(second)).toBe(true);
+		expect(await stillOpen(third)).toBe(true);
+		expect(await stillOpen(fourth)).toBe(true);
 	});
 
-	test("with every dialog open, the network holding the most loses its oldest", async () => {
+	test("the network holding the most loses its oldest; a network with one request keeps it", async () => {
 		const r = oauthRelay({ trustProxy: "x-real-ip" }, { maxPending: 3 });
-		const a = await pairingTab(r);
-		const address = a.session?.address ?? "";
-		const flood1 = await openFrom(r, "2001:db8:f:100::1", address);
-		const owner = await openFrom(r, "198.51.100.9", address);
+		const flood1 = await openFrom(r, "2001:db8:f:100::1");
+		const owner = await openFrom(r, "198.51.100.9");
 		// Another /64 of the flood's /56: the same network.
-		const flood2 = await openFrom(r, "2001:db8:f:101::1", address);
+		const flood2 = await openFrom(r, "2001:db8:f:101::1");
 		for (const o of [flood1, owner, flood2]) expect(o.page.status).toBe(200);
-		const next = await openFrom(r, "198.51.100.10", address);
+		const next = await openFrom(r, "198.51.100.10");
 		expect(next.page.status).toBe(200);
-		expect(
-			(await flood1.browser.submit(flood1.page, { action: "cancel" })).status,
-		).toBe(400);
-		expect(
-			(await owner.browser.submit(owner.page, { action: "cancel" })).status,
-		).toBe(303);
+		// One request went, the flood's oldest; the owner's, older than the
+		// flood's second, stays.
+		expect(await stillOpen(flood1)).toBe(false);
+		expect(await stillOpen(owner)).toBe(true);
+		expect(await stillOpen(flood2)).toBe(true);
+	});
+
+	test("a flood from one network pushes out only its own requests", async () => {
+		const r = oauthRelay({ trustProxy: "x-real-ip" }, { maxPending: 4 });
+		const owner = await openFrom(r, "198.51.100.9");
+		const flood: Opened[] = [];
+		for (let i = 0; i < 8; i++) {
+			const o = await openFrom(r, "203.0.113.66");
+			expect(o.page.status).toBe(200);
+			flood.push(o);
+		}
+		// Four stay open: the owner's and the flood's newest three.
+		expect(await stillOpen(owner)).toBe(true);
+		const open: boolean[] = [];
+		for (const o of flood) open.push(await stillOpen(o));
+		expect(open).toEqual([false, false, false, false, false, true, true, true]);
+	});
+
+	// By the age of the request, not by how long its network has had one
+	// open without a break.
+	test("among networks with equally many, the one whose request is the oldest loses it", async () => {
+		const r = oauthRelay({ trustProxy: "x-real-ip" }, { maxPending: 3 });
+		const a1 = await openFrom(r, "198.51.100.1");
+		const b1 = await openFrom(r, "198.51.100.2");
+		const a2 = await openFrom(r, "198.51.100.1");
+		// Network A's first request ends (cancelled): its other one is newer
+		// than B's.
+		expect(await stillOpen(a1)).toBe(true);
+		const c1 = await openFrom(r, "198.51.100.3");
+		// Full, one request per network: B's is the oldest.
+		const d1 = await openFrom(r, "198.51.100.4");
+		for (const o of [c1, d1]) expect(o.page.status).toBe(200);
+		expect(await stillOpen(a2)).toBe(true);
+		expect(await stillOpen(b1)).toBe(false);
 	});
 
 	test("networkKey: an IPv6 /64 key widens to its /56, anything else stays", () => {
@@ -371,7 +408,6 @@ describe("RS 2: uncached client ids are charged to the requesting network first"
 
 	test("/authorize answers a drained network with 429", async () => {
 		const r = oauthRelay({ trustProxy: "x-real-ip" });
-		const t = await pairingTab(r);
 		const statuses: number[] = [];
 		for (let i = 1; i <= 6; i++) {
 			const id = cimd.serve(
@@ -384,7 +420,7 @@ describe("RS 2: uncached client ids are charged to the requesting network first"
 					client_id: id,
 					redirect_uri: REDIRECT,
 					code_challenge: pkce().challenge,
-					resource: t.session?.address ?? "",
+					resource: r.relay.addressFor(APP),
 				}),
 			);
 			statuses.push(page.status);
@@ -633,7 +669,7 @@ describe("RS 8: the MCP endpoint reads a large body only for a valid token", () 
 
 	test("a 20 KiB body without a valid token is not parsed: 401, not a parse error", async () => {
 		const r = relay();
-		const address = r.relay.addressFor(newSecret());
+		const address = r.relay.addressFor(APP);
 		// Not JSON: before the fix it was read and parsed (400 -32700).
 		const garbage = `{${"x".repeat(20_000)}`;
 		const res = await mcpPost(address, garbage);
@@ -647,7 +683,7 @@ describe("RS 8: the MCP endpoint reads a large body only for a valid token", () 
 
 	test("a version probe without a token still gets the version error first (DEC-040)", async () => {
 		const r = relay();
-		const address = r.relay.addressFor(newSecret());
+		const address = r.relay.addressFor(APP);
 		const res = await mcpPost(address, rpc(1, "tools/list"), {
 			headers: { "mcp-protocol-version": "2025-06-18" },
 		});
@@ -666,7 +702,7 @@ describe("RS 8: the MCP endpoint reads a large body only for a valid token", () 
 
 	test("a chunked body without a token is refused once it passes 16 KiB, not read to its end", async () => {
 		const r = relay({ bodyTimeoutMs: 5000 });
-		const address = new URL(r.relay.addressFor(newSecret()));
+		const address = new URL(r.relay.addressFor(APP));
 		const chunk = "x".repeat(20_000);
 		const received = await stalled(
 			r.relay.port,
@@ -826,12 +862,7 @@ describe("RQ 20: a handler that throws gets one JSON log line and a plain 500", 
 			check: () => ({ ok: false, reason: "wrong" }) as never,
 		};
 		const r = oauthRelay({}, { pairingMethods: { code: throwing } });
-		const t = await pairingTab(r);
-		const { page } = await openFrom(
-			r,
-			"198.51.100.1",
-			t.session?.address ?? "",
-		);
+		const { page } = await openFrom(r, "198.51.100.1");
 		expect(page.status).toBe(500);
 		expect(page.html).not.toContain("secret detail");
 		const lines = r.logs.events("http.handler_error");

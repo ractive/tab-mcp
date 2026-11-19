@@ -1,6 +1,8 @@
 /**
- * Stable addresses (DEC-027): the page keeps a random secret, the address id is
- * `base32(sha256(secret))`. The relay stores nothing to recognise an address.
+ * Stable addresses (DEC-027, DEC-196): the page keeps a random secret, and the
+ * address id of a page is `base32(sha256(app + "\n" + secret))`, of its app id
+ * and that secret. The relay stores nothing to recognise an address. The id
+ * is what sessions, grants and tokens are kept by; it is in no URL.
  */
 
 import { randomBase64url } from "./crypto.ts";
@@ -39,9 +41,16 @@ export function isAddressId(id: string): boolean {
 	return ADDRESS_ID_PATTERN.test(id);
 }
 
-/** The address id for a page secret: base32(sha256(UTF-8 secret)). */
-export function addressIdFromSecret(secret: string): string {
-	const digest = new Bun.CryptoHasher("sha256").update(secret).digest();
+/**
+ * The address id of a page: base32(sha256(UTF-8 of app, a line feed, secret)).
+ * The app is part of it, so the same secret under another app is another
+ * page: it cannot take over the first one's session, grants or tokens
+ * (DEC-197 holds against a copied secret). An app id has no line feed.
+ */
+export function addressIdFromSecret(secret: string, app: string): string {
+	const digest = new Bun.CryptoHasher("sha256")
+		.update(`${app}\n${secret}`)
+		.digest();
 	return base32(
 		new Uint8Array(digest.buffer, digest.byteOffset, digest.length),
 	);

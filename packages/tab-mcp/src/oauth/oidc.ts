@@ -1,13 +1,15 @@
 /**
  * The OIDC pairing method (DEC-075, DEC-079): at `/authorize` the user signs in
- * at the configured OpenID Connect provider, and the relay pairs the AI app if
- * that person is the page's user. The relay is an ordinary OIDC client there
- * (authorization code flow, PKCE S256, `state`, `nonce`).
+ * at the configured OpenID Connect provider, and the relay pairs the AI app
+ * with the app's page whose user is that person (DEC-196: the address names
+ * the app, so the sign-in comes first and finds the page). The relay is an
+ * ordinary OIDC client there (authorization code flow, PKCE S256, `state`,
+ * `nonce`).
  */
 
 import type { OidcConfig } from "../config.ts";
 import { randomBase64url, sha256Base64url } from "../crypto.ts";
-import { CLOCK_LEEWAY_MS, identityKey, MISMATCH_TEXT } from "../identity.ts";
+import { CLOCK_LEEWAY_MS, identityKey } from "../identity.ts";
 import {
 	audiences,
 	fetchJson,
@@ -22,9 +24,16 @@ import { escapeHtml } from "./html.ts";
 import type {
 	PairingContext,
 	PairingMethod,
+	PairingPool,
 	PairingResult,
-	PairingTarget,
 } from "./pairing.ts";
+
+/**
+ * No page of the app is open, signed in as the person who signed in here and
+ * connecting (its dialog open): the three cannot be told apart from here.
+ */
+export const NO_PAGE_TEXT =
+	"No page is connecting with the account you signed in with. In the page, sign in with that account and open “Connect your AI app”, then click Connect here to sign in again, or Cancel.";
 
 /** How long a sign-in at the provider may take (the pending request lives 10 minutes). */
 const FLOW_TTL_MS = 10 * 60_000;
@@ -51,6 +60,8 @@ interface Flow {
 	browserId: string;
 	nonce: string;
 	verifier: string;
+	/** When Connect sent the browser to the provider. */
+	startedAt: number;
 	expiresAt: number;
 }
 
@@ -261,39 +272,17 @@ export class OidcPairing implements PairingMethod {
 		return [...out];
 	}
 
-	render(target: PairingTarget): string {
+	render(): string {
 		const host = escapeHtml(this.#providerHost);
-		if (target.identity === undefined) {
-			return `<p class="help">Nobody is signed in to the page. Sign in there first, then click Connect.</p>`;
-		}
-		return `<p>When you click Connect, sign in at <strong>${host}</strong> with the account you use in the page. No code is needed.</p>`;
+		return `<p>Sign in at <strong>${host}</strong> with the account you use in the page. The page must be open, signed in, and showing “Connect your AI app”. No code is needed.</p>`;
 	}
 
 	async check(
-		target: PairingTarget,
+		_pool: PairingPool,
 		_form: URLSearchParams,
 		admit: () => boolean,
-		context?: PairingContext,
+		context: PairingContext,
 	): Promise<PairingResult> {
-		if (!target.pairingOpen) {
-			return {
-				ok: false,
-				message:
-					"The page is not connecting right now. In the page, open “Connect your AI app”, then click Connect here again.",
-				reason: "inactive",
-			};
-		}
-		if (target.identity === undefined) {
-			return {
-				ok: false,
-				message:
-					"Nobody is signed in to the page. Sign in there first, then click Connect here again.",
-				reason: "signed_out",
-			};
-		}
-		if (context === undefined) {
-			return { ok: false, message: "Something went wrong.", reason: "context" };
-		}
 		let metadata: ProviderMetadata;
 		try {
 			metadata = await this.#discovery.get();
@@ -316,14 +305,11 @@ export class OidcPairing implements PairingMethod {
 			return {
 				ok: false,
 				message:
-					"Too many attempts for this page. Wait a few minutes and try again.",
+					"Too many attempts from your network. Wait a few minutes and try again.",
 				reason: "rate_limited",
 			};
 		}
-		// The provider sends the state back to /authorize/callback, whose URL is
-		// fixed: the address id in front lets a load balancer route the callback
-		// to this instance, which holds the flow (DEC-098).
-		const state = `${context.addressId}.${randomBase64url(24)}`;
+		const state = randomBase64url(24);
 		const nonce = randomBase64url(24);
 		const verifier = randomBase64url(32);
 		this.#flowOf.set(context.requestId, state);
@@ -332,6 +318,7 @@ export class OidcPairing implements PairingMethod {
 			browserId: context.browserId,
 			nonce,
 			verifier,
+			startedAt: Date.now(),
 			expiresAt: Date.now() + FLOW_TTL_MS,
 		});
 		const url = new URL(metadata.authorizationEndpoint);
@@ -357,7 +344,7 @@ export class OidcPairing implements PairingMethod {
 	async callback(
 		params: URLSearchParams,
 		browserId: string,
-		targetFor: (requestId: string) => PairingTarget | undefined,
+		poolFor: (requestId: string) => PairingPool | undefined,
 	): Promise<{ requestId?: string; result: PairingResult }> {
 		this.#sweep();
 		const state = params.get("state") ?? "";
@@ -428,42 +415,34 @@ export class OidcPairing implements PairingMethod {
 				`The sign-in at ${this.#providerHost} could not be checked. Click Connect to try again.`,
 			);
 		}
-		// Compared now, so a page that signed out meanwhile pairs nobody.
-		const target = targetFor(requestId);
-		if (target === undefined) {
+		const pool = poolFor(requestId);
+		if (pool === undefined) {
 			return fail(
-				"page_closed",
-				"The page is not open any more. Open it and try again.",
+				"expired",
+				"This connection request has expired or was already used.",
 			);
 		}
-		// The dialog must still be open when the sign-in comes back, as a code
-		// is void once the dialog closes (RS 11).
-		if (!target.pairingOpen) {
-			return fail(
-				"inactive",
-				"The page is not connecting any more. In the page, open “Connect your AI app”, then click Connect here again.",
-			);
-		}
-		if (target.identity === undefined) {
-			return fail(
-				"signed_out",
-				"Nobody is signed in to the page any more. Sign in there first, then click Connect here again.",
-			);
-		}
+		// Looked up now, so a page that signed out or closed its dialog
+		// meanwhile pairs nobody: the dialog must still be open when the sign-in
+		// comes back, as a code is void once it closes (RS 11). The relay
+		// cannot tell a page signed in as someone else from no page at all, and
+		// says so in one text.
 		const key = identityKey(this.#config.issuer, subject);
-		if (key !== target.identity) {
+		const target = pool.signedIn(key, flow.startedAt);
+		if (target === undefined) {
+			// The next sign-in asks for the account again (`prompt=login`).
 			this.#mismatched.add(requestId);
 			if (this.#mismatched.size > MAX_FLOWS) {
 				const oldest = this.#mismatched.values().next().value;
 				if (oldest !== undefined) this.#mismatched.delete(oldest);
 			}
-			return fail(
-				"mismatch",
-				`${MISMATCH_TEXT} Click Connect to sign in with the page's account, or Cancel.`,
-			);
+			return fail("mismatch", NO_PAGE_TEXT);
 		}
 		this.#mismatched.delete(requestId);
-		return { requestId, result: { ok: true, subject: key } };
+		return {
+			requestId,
+			result: { ok: true, addressId: target.addressId, subject: key },
+		};
 	}
 
 	/** Exchange the code and validate the ID token (OIDC Core §3.1.3.7); returns the subject. */

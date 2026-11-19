@@ -49,8 +49,8 @@ from the app's own web address, to show you its name and verified host.
 
 For each AI app you pair, the relay keeps:
 
-- a random connection id, and the id of the page's address (derived from a random
-  secret the page keeps in your browser);
+- a random connection id, an id of the page (derived from a random secret the page
+  keeps in your browser) and the id of the page's app;
 - the AI app's client id (a web address such as `https://claude.ai/…`) and the name it
   declares;
 - the permissions granted and the times of pairing, issue and expiry;
@@ -63,7 +63,7 @@ How long:
 
 - Access tokens end after {{1 hour}}, refresh tokens after {{30 days}}. Each refresh
   issues a new refresh token. Expired tokens are deleted within minutes.
-- A connection ends when you click Disconnect or "New address" in the page, or at the
+- A connection ends when you click Disconnect or "Disconnect all apps" in the page, or at the
   latest {{90 days}} after pairing. Its tokens are then deleted. A note that the
   connection was ended (its id and the time) is kept for up to {{90 days}}, so that an
   old token cannot bring it back.
@@ -79,9 +79,9 @@ How long:
 ## Logs
 
 The relay writes event logs: what happened (a page connected, a request was answered,
-a sign-in succeeded), a shortened address id, a session id, the kind of MCP request
-(such as `tools/call`, not the tool's name), the HTTP status, the duration and the host
-of the AI app's client id. Logs never contain requests, answers, tool names,
+a sign-in succeeded), the app's id, a shortened id of the page, a session id, the kind
+of MCP request (such as `tools/call`, not the tool's name), the HTTP status, the
+duration and the host of the AI app's client id. Logs never contain requests, answers, tool names,
 arguments, results, tokens, codes or secrets. IP addresses appear only when a rate limit
 is hit, and then shortened (the last part of an IPv4 address, the last 80 bits of an
 IPv6 address removed). Logs are kept for {{N days}}.
@@ -96,8 +96,8 @@ The relay runs at {{hosting provider}} in {{country or region}}.
 
 ## Your choices
 
-- Disconnect an AI app at any time in the page; "New address" ends every connection of
-  that page.
+- Disconnect an AI app at any time in the page; "Disconnect all apps" ends every
+  connection of that page.
 - Closing the page stops all traffic; the AI app can call nothing until you connect the
   page again.
 - Connect only AI apps you started yourself, and only pages you trust: the page decides

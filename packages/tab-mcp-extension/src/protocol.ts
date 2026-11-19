@@ -20,6 +20,16 @@ export const SERVER_NAME = FIREFOX
 	? "tab-mcp-browser-extension-firefox"
 	: "tab-mcp-browser-extension";
 
+/**
+ * The extension's app id: its MCP address is `<relay>/s/<APP_ID>/mcp`, the
+ * same for everyone who has the extension (DEC-196); the code pairs an AI app
+ * with one installation. Its own in the Firefox build, like the server name.
+ * Set here because the Firefox server name is longer than an app id may be.
+ */
+export const APP_ID = FIREFOX
+	? "tab-mcp-extension-firefox"
+	: "tab-mcp-extension";
+
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "panel";
 

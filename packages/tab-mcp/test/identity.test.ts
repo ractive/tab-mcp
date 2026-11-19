@@ -2,6 +2,9 @@
  * Identity binding end to end in the relay (iteration 7, DEC-075 to DEC-079):
  * a scripted tab proves its user with a tab assertion, the AI app's browser
  * signs in at a local OIDC provider, and the relay pairs only the same person.
+ * Since the fixed address (iteration 45, DEC-196) the sign-in comes first and
+ * finds the page: the app's page whose user is the signed-in person and whose
+ * dialog is open.
  */
 import {
 	afterAll,
@@ -11,17 +14,21 @@ import {
 	expect,
 	test,
 } from "bun:test";
+import { shortAddress } from "../src/address.ts";
 import { resolveConfig } from "../src/config.ts";
 import { identityKey, MISMATCH_TEXT } from "../src/identity.ts";
 import { JwksCache, type KeySource } from "../src/jwt.ts";
+import { NO_PAGE_TEXT } from "../src/oauth/oidc.ts";
 import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { RevokeOptions, RevokeSelector } from "../src/store/types.ts";
 import {
+	APP,
 	issueAccessToken,
 	mcpPost,
 	rpc,
 	ScriptedTab,
+	type TabOptions,
 	waitFor,
 } from "./helpers.ts";
 import {
@@ -62,11 +69,16 @@ afterEach(async () => {
 	provider.tamper = undefined;
 });
 
-interface Ctx {
+/** A browser at `/authorize` for an app's address. */
+interface Visit {
 	r: OAuthTestRelay;
-	tab: ScriptedTab;
 	address: string;
 	browser: TestBrowser;
+}
+
+/** A visit with the one page the test connected. */
+interface Ctx extends Visit {
+	tab: ScriptedTab;
 }
 
 async function relay(
@@ -88,9 +100,9 @@ async function relay(
 
 async function newTab(
 	r: OAuthTestRelay,
-	secret?: string,
+	options: TabOptions = {},
 ): Promise<ScriptedTab> {
-	const tab = new ScriptedTab(r.wsUrl, secret === undefined ? {} : { secret });
+	const tab = new ScriptedTab(r.wsUrl, options);
 	tabs.push(tab);
 	await tab.connect();
 	return tab;
@@ -105,6 +117,20 @@ async function signInTab(tab: ScriptedTab, sub: string): Promise<void> {
 	await tab.next("identity.bound");
 }
 
+/**
+ * The relay has handled what the tab sent so far (it handles a tab's
+ * messages in order; an `error` from the tab is only logged).
+ */
+async function settled(r: OAuthTestRelay, tab: ScriptedTab): Promise<void> {
+	const before = r.logs.events("tab.error").length;
+	tab.send({ type: "error", code: "test_sync", message: "" });
+	await waitFor(
+		() => r.logs.events("tab.error").length > before,
+		"the relay to catch up with the tab",
+	);
+}
+
+/** One page of `APP`, signed in as `user` unless `null`, its dialog open. */
 async function setup(
 	options: CreateRelayOptions = {},
 	user: string | null = "alice",
@@ -114,6 +140,7 @@ async function setup(
 	const tab = await newTab(r);
 	if (user !== null) await signInTab(tab, user);
 	tab.send({ type: "pairing.start" });
+	await settled(r, tab);
 	return {
 		r,
 		tab,
@@ -127,7 +154,7 @@ interface Flow {
 	page: Awaited<ReturnType<TestBrowser["open"]>>;
 }
 
-async function openAuthorize(ctx: Ctx): Promise<Flow> {
+async function openAuthorize(ctx: Visit): Promise<Flow> {
 	const { verifier, challenge } = pkce();
 	const url = new URL(`${ctx.r.url}/authorize`);
 	for (const [k, v] of Object.entries({
@@ -146,18 +173,23 @@ async function openAuthorize(ctx: Ctx): Promise<Flow> {
 	return { verifier, page };
 }
 
-/** Connect → provider → callback; returns the callback's answer. */
-async function connectThroughProvider(ctx: Ctx, flow: Flow) {
-	const posted = await ctx.browser.submit(flow.page, { action: "connect" });
+/** Connect: the relay's redirect to the provider. */
+async function connect(ctx: Visit, page: Flow["page"]): Promise<string> {
+	const posted = await ctx.browser.submit(page, { action: "connect" });
 	expect(posted.status).toBe(303);
 	const toProvider = posted.location ?? "";
 	expect(toProvider.startsWith(provider.issuer)).toBe(true);
-	const back = await provider.signIn(toProvider);
+	return toProvider;
+}
+
+/** Connect → provider → callback; returns the callback's answer. */
+async function connectThroughProvider(ctx: Visit, flow: Flow) {
+	const back = await provider.signIn(await connect(ctx, flow.page));
 	expect(back.startsWith(`${ctx.r.url}/authorize/callback`)).toBe(true);
 	return ctx.browser.open(back);
 }
 
-async function tokenFrom(ctx: Ctx, location: string, verifier: string) {
+async function tokenFrom(ctx: Visit, location: string, verifier: string) {
 	const code = new URL(location).searchParams.get("code") ?? "";
 	const res = await postForm(`${ctx.r.url}/token`, {
 		grant_type: "authorization_code",
@@ -171,7 +203,7 @@ async function tokenFrom(ctx: Ctx, location: string, verifier: string) {
 	return (await res.json()) as { access_token: string; refresh_token: string };
 }
 
-async function pairedToken(ctx: Ctx): Promise<string> {
+async function pairedToken(ctx: Visit): Promise<string> {
 	provider.signedInAs = "alice";
 	const flow = await openAuthorize(ctx);
 	const done = await connectThroughProvider(ctx, flow);
@@ -183,10 +215,15 @@ async function pairedToken(ctx: Ctx): Promise<string> {
 const add = () =>
 	rpc(1, "tools/call", { name: "add", arguments: { a: 1, b: 2 } });
 
+/** A pairing page without what differs from one request to the next. */
+const masked = (html: string) =>
+	html.replace(/name="(request_id|csrf)" value="[^"]+"/g, 'name="$1"');
+
 describe("identity binding: the same person connects without a code", () => {
 	test("session says oidc; the page shows no code; a match pairs; the grant carries the subject; tools work", async () => {
 		const ctx = await setup();
 		expect(ctx.tab.session?.pairing).toBe("oidc");
+		expect(ctx.address).toBe(`${ctx.r.url}/s/${APP}/mcp`);
 		expect(ctx.tab.pairingCode).toBeUndefined();
 		provider.signedInAs = "alice";
 		const flow = await openAuthorize(ctx);
@@ -204,6 +241,14 @@ describe("identity binding: the same person connects without a code", () => {
 		expect(back.origin + back.pathname).toBe(REDIRECT);
 		expect(back.searchParams.get("state")).toBe("st-1");
 		expect(back.searchParams.get("iss")).toBe(ctx.r.url);
+		// The page the sign-in found, and how.
+		expect(ctx.r.logs.events("oauth.paired")).toEqual([
+			expect.objectContaining({
+				address: shortAddress(ctx.tab.addressId),
+				app: APP,
+				method: "oidc",
+			}),
+		]);
 
 		const tokens = await tokenFrom(ctx, done.location ?? "", flow.verifier);
 		const grants = await ctx.r.store.listGrants(ctx.tab.addressId, Date.now());
@@ -234,42 +279,252 @@ describe("identity binding: the same person connects without a code", () => {
 		});
 		expect(await again.text()).toContain('"text":"3"');
 	});
+
+	test("Connect asks no page: with none open, one signed out or one with its dialog closed, the form and the redirect are the same", async () => {
+		const r = await relay();
+		const visit: Visit = {
+			r,
+			address: r.relay.addressFor(APP),
+			browser: new TestBrowser(r.url),
+		};
+		const pages: string[] = [];
+		const look = async () => {
+			const flow = await openAuthorize(visit);
+			expect(flow.page.status).toBe(200);
+			pages.push(masked(flow.page.html));
+			// To the provider, with no question about the account.
+			const toProvider = new URL(await connect(visit, flow.page));
+			expect(toProvider.searchParams.has("prompt")).toBe(false);
+		};
+		// No page of the app is open.
+		await look();
+		// One is, signed out, its dialog closed.
+		const tab = await newTab(r);
+		await look();
+		// Signed in, the dialog still closed.
+		await signInTab(tab, "alice");
+		await look();
+		// Ready to be paired.
+		tab.send({ type: "pairing.start" });
+		await settled(r, tab);
+		await look();
+		// What the browser is shown says nothing about the app's pages (RS 10).
+		expect(new Set(pages).size).toBe(1);
+		expect(pages[0]).not.toContain("Nobody is signed in");
+		expect(pages[0]).not.toContain("Open the page first");
+	});
 });
 
-describe("identity binding: someone else gets the mismatch error", () => {
-	test("another person at the provider is refused at /authorize; Try again asks for the account", async () => {
-		const ctx = await setup();
-		provider.signedInAs = "bob";
+/** What makes the sign-in find no page; `meanwhile` runs between Connect and the provider's answer. */
+interface NoPage {
+	name: string;
+	/** Who is signed in to the page (`null`: nobody). */
+	pageUser: string | null;
+	/** Who signs in at the provider. */
+	providerUser: string;
+	meanwhile?: (ctx: Ctx) => Promise<void>;
+}
+
+const NO_PAGE: NoPage[] = [
+	{
+		name: "another person signs in at the provider",
+		pageUser: "alice",
+		providerUser: "bob",
+	},
+	{
+		name: "nobody is signed in to the page",
+		pageUser: null,
+		providerUser: "alice",
+	},
+	{
+		name: "the page signs out between Connect and the callback",
+		pageUser: "alice",
+		providerUser: "alice",
+		meanwhile: async (ctx) => {
+			ctx.tab.send({ type: "identity.logout" });
+			await waitFor(
+				() => ctx.r.logs.events("identity.signed_out").length > 0,
+				"the sign-out",
+			);
+		},
+	},
+	{
+		// The dialog must still be open when the sign-in comes back, as a
+		// code is void once it closes.
+		name: "RS 11: the dialog closes between Connect and the callback",
+		pageUser: "alice",
+		providerUser: "alice",
+		meanwhile: async (ctx) => {
+			ctx.tab.send({ type: "pairing.stop" });
+			await settled(ctx.r, ctx.tab);
+		},
+	},
+	{
+		name: "the page closes between Connect and the callback",
+		pageUser: "alice",
+		providerUser: "alice",
+		meanwhile: async (ctx) => {
+			ctx.tab.close();
+			await ctx.tab.closed;
+			await waitFor(() => ctx.r.relay.sessionCount === 0, "the tab to go");
+		},
+	},
+];
+
+describe("identity binding: no page of the signed-in person is connecting", () => {
+	/** Each case's page, to compare them. */
+	const answers: string[] = [];
+
+	/** Up to the provider's answer, which the caller opens. */
+	async function untilCallback(c: NoPage) {
+		const ctx = await setup({}, c.pageUser);
+		provider.signedInAs = c.providerUser;
 		const flow = await openAuthorize(ctx);
-		const done = await connectThroughProvider(ctx, flow);
-		expect(done.status).toBe(403);
-		expect(done.location).toBeUndefined();
-		expect(done.html).toContain(MISMATCH_TEXT);
+		// Connect goes to the provider whatever the page's state.
+		const back = await provider.signIn(await connect(ctx, flow.page));
+		await c.meanwhile?.(ctx);
+		return { ctx, flow, back };
+	}
+
+	for (const c of NO_PAGE) {
+		test(`${c.name}: 403 with the one text, nobody paired, and the next Connect asks for the account`, async () => {
+			const { ctx, back } = await untilCallback(c);
+			const done = await ctx.browser.open(back);
+			expect(done.status).toBe(403);
+			expect(done.location).toBeUndefined();
+			expect(done.html).toContain(NO_PAGE_TEXT);
+			answers.push(masked(done.html));
+			// The log does not tell the cases apart either, and names no page.
+			const failed = ctx.r.logs.events("oauth.pairing_failed");
+			expect(failed).toHaveLength(1);
+			expect(failed[0]).toMatchObject({ app: APP, reason: "mismatch" });
+			expect(failed[0]).not.toHaveProperty("address");
+			expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
+			expect(
+				await ctx.r.store.listGrants(ctx.tab.addressId, Date.now()),
+			).toEqual([]);
+			// The page still offers Connect; this time the provider is asked
+			// to log in again, so another account can be chosen.
+			const again = new URL(await connect(ctx, done));
+			expect(again.searchParams.get("prompt")).toBe("login");
+		});
+	}
+
+	test("the cases cannot be told apart by the page", () => {
+		// Filled by the tests above; empty when this one runs alone.
+		expect(new Set(answers).size).toBeLessThanOrEqual(1);
+	});
+
+	test("after another person's sign-in, the same request pairs once the page's user signs in", async () => {
+		const [another] = NO_PAGE;
+		if (another === undefined) throw new Error("no case");
+		const { ctx, flow, back } = await untilCallback(another);
+		const refused = await ctx.browser.open(back);
+		expect(refused.status).toBe(403);
+		const toProvider = await connect(ctx, refused);
+		provider.signedInAs = "alice";
+		const done = await ctx.browser.open(await provider.signIn(toProvider));
+		expect(done.status).toBe(303);
+		const tokens = await tokenFrom(ctx, done.location ?? "", flow.verifier);
+		const res = await mcpPost(ctx.address, add(), {
+			token: tokens.access_token,
+		});
+		expect(await res.text()).toContain('"text":"3"');
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(1);
+	});
+
+	test("RS 11: after a closed dialog, the same request pairs once the dialog is open again", async () => {
+		const closing = NO_PAGE.find((c) => c.name.startsWith("RS 11"));
+		if (closing === undefined) throw new Error("no case");
+		const { ctx, back } = await untilCallback(closing);
+		const refused = await ctx.browser.open(back);
+		expect(refused.status).toBe(403);
+		ctx.tab.send({ type: "pairing.start" });
+		await settled(ctx.r, ctx.tab);
+		const done = await ctx.browser.open(
+			await provider.signIn(await connect(ctx, refused)),
+		);
+		expect(done.status).toBe(303);
+		expect(
+			new URL(done.location ?? "").searchParams.get("code"),
+		).not.toBeNull();
+	});
+
+	/**
+	 * Connect with page A, then A closes and a page that connects only now
+	 * (`secret` its own or A's) is open and signed in as alice. The callback
+	 * must not pair it; a second Connect on the same request pairs it.
+	 */
+	async function connectedAfterTheSignIn(sameSecret: boolean) {
+		const ctx = await setup();
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const back = await provider.signIn(await connect(ctx, flow.page));
+		ctx.tab.close();
+		await ctx.tab.closed;
+		await waitFor(() => ctx.r.relay.sessionCount === 0, "the tab to go");
+		// openedAt and the sign-in's start are milliseconds apart at least.
+		await Bun.sleep(5);
+		const next = await newTab(
+			ctx.r,
+			sameSecret ? { secret: ctx.tab.secret } : {},
+		);
+		await signInTab(next, "alice");
+		next.send({ type: "pairing.start" });
+		await settled(ctx.r, next);
+		expect(next.addressId === ctx.tab.addressId).toBe(sameSecret);
+
+		const refused = await ctx.browser.open(back);
+		expect(refused.status).toBe(403);
+		expect(refused.location).toBeUndefined();
+		expect(refused.html).toContain(NO_PAGE_TEXT);
+		const failed = ctx.r.logs.events("oauth.pairing_failed");
+		expect(failed).toHaveLength(1);
+		expect(failed[0]).toMatchObject({ app: APP, reason: "mismatch" });
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
+		for (const t of [ctx.tab, next]) {
+			expect(await ctx.r.store.listGrants(t.addressId, Date.now())).toEqual([]);
+		}
+
+		// A new sign-in starts after the page connected: it pairs.
+		const done = await ctx.browser.open(
+			await provider.signIn(await connect(ctx, refused)),
+		);
+		expect(done.status).toBe(303);
+		// The grant is made when the code is redeemed.
+		await tokenFrom(ctx, done.location ?? "", flow.verifier);
+		return { ctx, next };
+	}
+
+	test("a sign-in under way does not pair with a page that connected after it started", async () => {
+		const { ctx, next } = await connectedAfterTheSignIn(false);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(1);
+		expect(
+			await ctx.r.store.listGrants(next.addressId, Date.now()),
+		).toHaveLength(1);
 		expect(await ctx.r.store.listGrants(ctx.tab.addressId, Date.now())).toEqual(
 			[],
 		);
-		expect(ctx.r.logs.events("oauth.pairing_failed").at(-1)?.["reason"]).toBe(
-			"mismatch",
-		);
-		// The page still offers Connect; this time the provider is asked to log in again.
-		const retried = await ctx.browser.submit(done, { action: "connect" });
-		expect(retried.status).toBe(303);
-		expect(new URL(retried.location ?? "").searchParams.get("prompt")).toBe(
-			"login",
-		);
-		provider.signedInAs = "alice";
-		const back = await provider.signIn(retried.location ?? "");
-		const ok = await ctx.browser.open(back);
-		expect(ok.status).toBe(303);
-		expect(new URL(ok.location ?? "").searchParams.get("code")).not.toBeNull();
 	});
 
-	test("the MCP endpoint refuses a grant of another person with the mismatch text", async () => {
+	test("a page that connects again with the same secret after the sign-in started is not paired by it either", async () => {
+		const { ctx, next } = await connectedAfterTheSignIn(true);
+		expect(next.addressId).toBe(ctx.tab.addressId);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(1);
+		expect(
+			await ctx.r.store.listGrants(next.addressId, Date.now()),
+		).toHaveLength(1);
+	});
+});
+
+describe("identity binding: someone else gets the mismatch error", () => {
+	test("the MCP endpoint refuses a grant of another person with the mismatch text, and names the app's metadata", async () => {
 		const ctx = await setup();
 		const { token } = await issueAccessToken(
 			ctx.r.store,
 			{
 				addressId: ctx.tab.addressId,
+				app: APP,
 				clientId,
 				clientName: "Test AI",
 				subject: identityKey(provider.issuer, "bob"),
@@ -278,22 +533,39 @@ describe("identity binding: someone else gets the mismatch error", () => {
 		);
 		const res = await mcpPost(ctx.address, add(), { token });
 		expect(res.status).toBe(401);
-		expect(res.headers.get("www-authenticate")).toContain(
-			'error="invalid_token"',
+		// Where an AI app starts over: the app's address, not a page's.
+		expect(res.headers.get("www-authenticate")).toBe(
+			`Bearer resource_metadata="${ctx.r.url}/.well-known/oauth-protected-resource/s/${APP}/mcp", scope="tools", error="invalid_token", error_description="${MISMATCH_TEXT}"`,
 		);
 		const body = (await res.json()) as { error_description: string };
 		expect(body.error_description).toBe(MISMATCH_TEXT);
+		expect(ctx.r.logs.events("mcp.request").at(-1)).toMatchObject({
+			app: APP,
+			address: shortAddress(ctx.tab.addressId),
+			status: 401,
+			reason: "identity_mismatch",
+		});
+		expect(ctx.tab.received.some((m) => m.type === "http.request")).toBe(false);
 	});
 
 	test("a code-made grant (no subject) does not work on an oidc site", async () => {
 		const ctx = await setup();
 		const { token } = await issueAccessToken(
 			ctx.r.store,
-			{ addressId: ctx.tab.addressId, clientId, clientName: "Test AI" },
+			{
+				addressId: ctx.tab.addressId,
+				app: APP,
+				clientId,
+				clientName: "Test AI",
+			},
 			{ ttlMs: 60_000 },
 		);
 		const res = await mcpPost(ctx.address, add(), { token });
 		expect(res.status).toBe(401);
+		// Refused for the person, not for the token: the token is the app's.
+		expect(
+			((await res.json()) as { error_description: string }).error_description,
+		).toBe(MISMATCH_TEXT);
 	});
 
 	test("a page that proves another user revokes the old user's grants at once", async () => {
@@ -336,6 +608,13 @@ describe("identity binding: someone else gets the mismatch error", () => {
 				reason,
 			);
 		}
+		// The page was there all along: none of these is "no page".
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
+		expect(
+			ctx.r.logs
+				.events("oauth.pairing_failed")
+				.some((e) => e["reason"] === "mismatch"),
+		).toBe(false);
 	});
 
 	test("a callback from another browser, a replayed state or a provider error issue nothing", async () => {
@@ -367,69 +646,12 @@ describe("identity binding: someone else gets the mismatch error", () => {
 });
 
 describe("identity binding: the page's state", () => {
-	test("Connect needs the dialog open and a signed-in page", async () => {
-		const ctx = await setup({}, null);
-		const flow = await openAuthorize(ctx);
-		expect(flow.page.html).toContain("Nobody is signed in to the page");
-		const refused = await ctx.browser.submit(flow.page, { action: "connect" });
-		expect(refused.status).toBe(400);
-		expect(refused.location).toBeUndefined();
-		await signInTab(ctx.tab, "alice");
-		ctx.tab.send({ type: "pairing.stop" });
-		await Bun.sleep(20);
-		const closed = await ctx.browser.submit(refused, { action: "connect" });
-		expect(closed.status).toBe(400);
-		expect(closed.html).toContain("Connect your AI app");
-	});
-
-	test("a page that signs out between Connect and the callback pairs nobody", async () => {
-		const ctx = await setup();
-		provider.signedInAs = "alice";
-		const flow = await openAuthorize(ctx);
-		const posted = await ctx.browser.submit(flow.page, { action: "connect" });
-		const back = await provider.signIn(posted.location ?? "");
-		ctx.tab.send({ type: "identity.logout" });
-		await waitFor(
-			() => ctx.r.logs.events("identity.signed_out").length > 0,
-			"the sign-out",
-		);
-		const done = await ctx.browser.open(back);
-		expect(done.status).toBe(400);
-		expect(done.html).toContain("Nobody is signed in to the page any more");
-	});
-
-	test("RS 11: a dialog closed between Connect and the callback pairs nobody", async () => {
-		const ctx = await setup();
-		provider.signedInAs = "alice";
-		const flow = await openAuthorize(ctx);
-		const posted = await ctx.browser.submit(flow.page, { action: "connect" });
-		const back = await provider.signIn(posted.location ?? "");
-		ctx.tab.send({ type: "pairing.stop" });
-		// The relay has handled the stop once a new request sees no dialog.
-		for (let i = 0; i < 50; i++) {
-			const probe = await openAuthorize({
-				...ctx,
-				browser: new TestBrowser(ctx.r.url),
-			});
-			if (probe.page.html.includes("Open the page first")) break;
-			await Bun.sleep(20);
-		}
-		const done = await ctx.browser.open(back);
-		expect(done.status).toBe(400);
-		expect(done.location).toBeUndefined();
-		expect(done.html).toContain("The page is not connecting any more");
-		expect(ctx.r.logs.events("oauth.pairing_failed").at(-1)?.["reason"]).toBe(
-			"inactive",
-		);
-		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
-	});
-
 	test("an open page without a signed-in user: requests wait for it, then get the signed-out answer", async () => {
 		const ctx = await setup({ pageWaitMs: 300 });
 		const token = await pairedToken(ctx);
 		ctx.tab.close();
 		await ctx.tab.closed;
-		const tab = await newTab(ctx.r, ctx.tab.secret);
+		const tab = await newTab(ctx.r, { secret: ctx.tab.secret });
 		const res = await mcpPost(ctx.address, add(), { token });
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as {
@@ -446,7 +668,7 @@ describe("identity binding: the page's state", () => {
 		expect(await later.text()).toContain('"text":"3"');
 	});
 
-	test("refused assertions: expired, replayed, wrong audience; the session stays and binds nobody", async () => {
+	test("refused assertions: expired, wrong audience, wrong type, replayed; the session stays and binds nobody", async () => {
 		const ctx = await setup({}, null);
 		const now = Math.floor(Date.now() / 1000);
 		const address = ctx.address;
@@ -457,10 +679,7 @@ describe("identity binding: the page's state", () => {
 			],
 			[
 				"aud",
-				await provider.assertion(
-					"alice",
-					`${ctx.r.url}/a/${"b".repeat(52)}/mcp`,
-				),
+				await provider.assertion("alice", `${ctx.r.url}/s/another-app/mcp`),
 			],
 			["typ", await provider.assertion("alice", address, {}, { typ: "JWT" })],
 		];
@@ -487,9 +706,12 @@ describe("identity binding: the page's state", () => {
 		expect(ctx.r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
 			"replayed",
 		);
-		// Fail closed: the refused (replayed) assertion ended the binding.
-		const flow = await openAuthorize(ctx);
-		expect(flow.page.html).toContain("Nobody is signed in to the page");
+		// Fail closed: the refused (replayed) assertion ended the binding, so
+		// Alice's sign-in finds no page of hers, though its dialog is open.
+		provider.signedInAs = "alice";
+		const done = await connectThroughProvider(ctx, await openAuthorize(ctx));
+		expect(done.status).toBe(403);
+		expect(done.html).toContain(NO_PAGE_TEXT);
 		expect(ctx.tab.ws.readyState).toBe(WebSocket.OPEN);
 	});
 });
@@ -656,8 +878,12 @@ describe("identity binding: review of PR #13", () => {
 			() => ctx.r.logs.events("identity.signed_out").length > 0,
 			"the sign-out",
 		);
-		const flow = await openAuthorize(ctx);
-		expect(flow.page.html).toContain("Nobody is signed in to the page");
+		// Nobody is bound: Alice's sign-in finds no page of hers.
+		provider.signedInAs = "alice";
+		const done = await connectThroughProvider(ctx, await openAuthorize(ctx));
+		expect(done.status).toBe(403);
+		expect(done.html).toContain(NO_PAGE_TEXT);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
 	});
 
 	test("an authorization code issued before a sign-out is refused at the token endpoint", async () => {
@@ -988,38 +1214,245 @@ describe("identity binding: audit of 2026-10-24, finding 3", () => {
 	});
 });
 
-describe("several instances: the address id on every pairing request (DEC-098)", () => {
-	test("the form posts to /authorize?a=<id>, the provider's state and the code start with the id", async () => {
+describe("identity binding at the fixed address (DEC-196): the sign-in finds the page", () => {
+	/** A page of `app`, signed in as `sub`, its dialog open. */
+	async function page(
+		r: OAuthTestRelay,
+		sub: string,
+		options: TabOptions = {},
+	): Promise<ScriptedTab> {
+		const tab = await newTab(r, options);
+		await signInTab(tab, sub);
+		tab.send({ type: "pairing.start" });
+		await settled(r, tab);
+		// Sessions are told apart by when they connected, to the millisecond.
+		await Bun.sleep(3);
+		return tab;
+	}
+
+	/** `sub` signs in at `address` in a browser of their own; the callback's answer and the verifier. */
+	async function signInAt(r: OAuthTestRelay, address: string, sub: string) {
+		const ctx = { r, address, browser: new TestBrowser(r.url) };
+		provider.signedInAs = sub;
+		const flow = await openAuthorize(ctx);
+		const done = await connectThroughProvider(ctx, flow);
+		return { ctx, flow, done };
+	}
+
+	/** The address ids the relay paired, oldest first (as the log shortens them). */
+	const paired = (r: OAuthTestRelay) =>
+		r.logs.events("oauth.paired").map((e) => e["address"]);
+
+	async function subjects(r: OAuthTestRelay, tab: ScriptedTab) {
+		const grants = await r.store.listGrants(tab.addressId, Date.now());
+		return grants.map((g) => g.subject);
+	}
+
+	test("two pages of one app, two people: each sign-in pairs that person's page, never the other's", async () => {
+		const r = await relay();
+		const alices = await page(r, "alice");
+		const bobs = await page(r, "bob");
+		// Alice's page is not the one that connected last ...
+		const a = await signInAt(r, alices.session?.address ?? "", "alice");
+		expect(a.done.status).toBe(303);
+		expect(paired(r)).toEqual([shortAddress(alices.addressId)]);
+		// ... and Bob's is neither the first nor the last.
+		const carols = await page(r, "carol");
+		const b = await signInAt(r, bobs.session?.address ?? "", "bob");
+		expect(b.done.status).toBe(303);
+		expect(paired(r)).toEqual([
+			shortAddress(alices.addressId),
+			shortAddress(bobs.addressId),
+		]);
+
+		// Each grant is its page's, for its person; each token reaches its
+		// own page only, at the address all three share.
+		const alicesToken = await tokenFrom(
+			a.ctx,
+			a.done.location ?? "",
+			a.flow.verifier,
+		);
+		const bobsToken = await tokenFrom(
+			b.ctx,
+			b.done.location ?? "",
+			b.flow.verifier,
+		);
+		expect(await subjects(r, alices)).toEqual([
+			identityKey(provider.issuer, "alice"),
+		]);
+		expect(await subjects(r, bobs)).toEqual([
+			identityKey(provider.issuer, "bob"),
+		]);
+		expect(await subjects(r, carols)).toEqual([]);
+		const requests = (t: ScriptedTab) =>
+			t.received.filter((m) => m.type === "http.request").length;
+		const call = async (token: string) => {
+			const res = await mcpPost(a.ctx.address, add(), { token });
+			expect(await res.text()).toContain('"text":"3"');
+			return [alices, bobs, carols].map(requests);
+		};
+		expect(await call(alicesToken.access_token)).toEqual([1, 0, 0]);
+		expect(await call(bobsToken.access_token)).toEqual([1, 1, 0]);
+	});
+
+	test("two pages of one app, one person, both dialogs open: the one that connected last is paired", async () => {
+		const r = await relay();
+		const first = await page(r, "alice");
+		const second = await page(r, "alice");
+		const address = first.session?.address ?? "";
+		expect((await signInAt(r, address, "alice")).done.status).toBe(303);
+		expect(paired(r)).toEqual([shortAddress(second.addressId)]);
+
+		// "Last" is by when the page connected, not by its place among the
+		// relay's sessions: the first page connects again and is the last now.
+		first.close();
+		await first.closed;
+		const again = await page(r, "alice", { secret: first.secret });
+		expect((await signInAt(r, address, "alice")).done.status).toBe(303);
+		expect(paired(r).at(-1)).toBe(shortAddress(again.addressId));
+
+		// Only pages whose dialog is open count: with the last one's closed,
+		// the other is paired.
+		again.send({ type: "pairing.stop" });
+		await settled(r, again);
+		expect((await signInAt(r, address, "alice")).done.status).toBe(303);
+		expect(paired(r).at(-1)).toBe(shortAddress(second.addressId));
+	});
+
+	test("a page of another app, signed in as the same person, is not paired by a sign-in at this app's address", async () => {
+		const r = await relay();
+		const other = await page(r, "alice", { appId: "other-app" });
+		expect(other.session?.address).toBe(`${r.url}/s/other-app/mcp`);
+		const address = r.relay.addressFor(APP);
+		// No page of this app: the other app's page is not taken instead.
+		const none = await signInAt(r, address, "alice");
+		expect(none.done.status).toBe(403);
+		expect(none.done.html).toContain(NO_PAGE_TEXT);
+		expect(await subjects(r, other)).toEqual([]);
+		// With one of this app, older than the other app's page: it is paired.
+		const mine = await page(r, "alice");
+		other.close();
+		await other.closed;
+		const others = await page(r, "alice", {
+			appId: "other-app",
+			secret: other.secret,
+		});
+		const here = await signInAt(r, address, "alice");
+		expect(here.done.status).toBe(303);
+		expect(paired(r)).toEqual([shortAddress(mine.addressId)]);
+		// The other app's address pairs the other app's page; its token is
+		// refused at this app's address.
+		const there = await signInAt(r, others.session?.address ?? "", "alice");
+		expect(there.done.status).toBe(303);
+		expect(paired(r).at(-1)).toBe(shortAddress(others.addressId));
+		const tokens = await tokenFrom(
+			there.ctx,
+			there.done.location ?? "",
+			there.flow.verifier,
+		);
+		const wrongApp = await mcpPost(address, add(), {
+			token: tokens.access_token,
+		});
+		expect(wrongApp.status).toBe(401);
+		const rightApp = await mcpPost(there.ctx.address, add(), {
+			token: tokens.access_token,
+		});
+		expect(await rightApp.text()).toContain('"text":"3"');
+	});
+
+	test("a tab assertion's aud is the app's address: one made for another app's address is refused", async () => {
+		const r = await relay();
+		const mine = await newTab(r);
+		const others = await newTab(r, { appId: "other-app" });
+		const forOther = await provider.assertion(
+			"alice",
+			others.session?.address ?? "",
+		);
+		mine.send({ type: "identity", assertion: forOther });
+		expect(((await mine.next("error")) as { code: string }).code).toBe(
+			"identity_refused",
+		);
+		expect(r.logs.events("identity.refused").at(-1)?.["reason"]).toBe("aud");
+		// Nothing was wrong with it but the audience: the other app's page
+		// binds with it (the refusal above did not use up its jti).
+		others.send({ type: "identity", assertion: forOther });
+		await others.next("identity.bound");
+		// The relay's own URL, the address without `/mcp` and the address
+		// form of before DEC-196 are no audience either.
+		for (const aud of [
+			r.url,
+			`${r.url}/s/${APP}`,
+			`${r.url}/s/${APP}/mcp/`,
+			`${r.url}/a/${mine.addressId}/mcp`,
+		]) {
+			mine.send({
+				type: "identity",
+				assertion: await provider.assertion("alice", aud),
+			});
+			await mine.next("error");
+			expect(r.logs.events("identity.refused").at(-1)?.["reason"]).toBe("aud");
+		}
+	});
+
+	test("an assertion is for the app, not for one page: only its jti keeps a second page from using it", async () => {
+		const r = await relay();
+		const first = await newTab(r);
+		const second = await newTab(r);
+		// Before DEC-196 the audience named one page's address; now all pages
+		// of an app share it, so the same assertion is well-formed for both.
+		// Whichever sends it first is bound; the other is refused as a replay.
+		const assertion = await provider.assertion(
+			"alice",
+			first.session?.address ?? "",
+		);
+		second.send({ type: "identity", assertion });
+		await second.next("identity.bound");
+		first.send({ type: "identity", assertion });
+		expect(((await first.next("error")) as { code: string }).code).toBe(
+			"identity_refused",
+		);
+		expect(r.logs.events("identity.refused").at(-1)?.["reason"]).toBe(
+			"replayed",
+		);
+	});
+
+	test("neither the provider's state nor the authorization code names the page; the form posts to /authorize", async () => {
 		const ctx = await setup();
 		const id = ctx.tab.addressId;
 		provider.signedInAs = "alice";
 		const flow = await openAuthorize(ctx);
-		expect(flow.page.html).toContain(
-			`<form method="post" action="/authorize?a=${id}">`,
-		);
-		expect(flow.page.html).not.toContain('action="/authorize"');
+		expect(flow.page.html).toContain('<form method="post" action="/authorize"');
+		expect(flow.page.html).not.toContain(id);
 		const done = await connectThroughProvider(ctx, flow);
-		const state = provider.authorizeRequests.at(-1)?.get("state") ?? "";
-		expect(state.startsWith(`${id}.`)).toBe(true);
-		expect(state.length).toBeGreaterThan(id.length + 20);
 		expect(done.status).toBe(303);
+		// The provider is a third party: what it sees says nothing of the page.
+		const sent = provider.authorizeRequests.at(-1)?.toString() ?? "";
+		expect(sent).not.toContain(id);
 		const code = new URL(done.location ?? "").searchParams.get("code") ?? "";
-		expect(code.startsWith(`${id}.`)).toBe(true);
-		expect(code.length).toBeGreaterThan(id.length + 40);
+		expect(code).not.toContain(id);
+		expect(code).not.toContain(".");
 		await tokenFrom(ctx, done.location ?? "", flow.verifier);
 	});
 
-	test("the 'Open the page first' form carries the id too", async () => {
-		const ctx = await setup();
-		const id = ctx.tab.addressId;
-		const flow = await openAuthorize(ctx);
-		ctx.tab.close();
-		await ctx.tab.closed;
-		await waitFor(() => ctx.r.relay.sessionCount === 0, "the tab to go");
-		const page = await ctx.browser.submit(flow.page, { action: "retry" });
-		expect(page.html).toContain("Open the page first");
-		expect(page.html).toContain(
-			`<form method="post" action="/authorize?a=${id}">`,
-		);
+	// A Connect that goes to the provider is charged as a guess, per
+	// network, and given back when the sign-in pairs. The members of one
+	// organisation (one IPv4 address, or one IPv6 /56) each signing in to
+	// the organisation's connector is the case iteration 45 is for.
+	test("a sign-in that pairs is not charged: one network pairs more than 10 times by sign-in", async () => {
+		const r = await relay();
+		const tab = await page(r, "alice");
+		const address = tab.session?.address ?? "";
+		const statuses: number[] = [];
+		for (let i = 0; i < 12; i++) {
+			const ctx = { r, address, browser: new TestBrowser(r.url) };
+			provider.signedInAs = "alice";
+			const flow = await openAuthorize(ctx);
+			const posted = await ctx.browser.submit(flow.page, { action: "connect" });
+			statuses.push(posted.status);
+			if (posted.status !== 303) break;
+			const back = await provider.signIn(posted.location ?? "");
+			expect((await ctx.browser.open(back)).status).toBe(303);
+		}
+		expect(statuses).toEqual(Array(12).fill(303));
 	});
 });

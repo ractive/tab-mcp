@@ -9,8 +9,9 @@ compatibility: Browser library for any web page (ES modules); the relay needs Bu
 
 tab-mcp lets AI apps call tools that a web page offers while it is open in a browser tab.
 The page uses the browser library `@ractive-ch/tab-mcp-client`, which connects to a
-tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and gets an MCP address. The user
-adds that address to their AI app and pairs it with a code shown in the page. The relay
+tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and shows its app's MCP address,
+the same for every page of the app. The user adds that address to their AI app and pairs
+it with a code shown in the page, which says which page is meant. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
 Facts to keep in mind (version 0.16.2):
@@ -51,7 +52,7 @@ import { TabMcp } from "@ractive-ch/tab-mcp-client";
 const mcp = new TabMcp({
   relay: "https://relay.example.com",      // https:, or http: only on localhost
   server: { name: "notes", version: "1.0.0", instructions: "Notes shown on the page." },
-  appName: "notes",                        // 1-64 characters, shown when pairing
+  appName: "notes",                        // 1-64 characters, a name for people
 });
 
 const tools = new AbortController();
@@ -124,9 +125,11 @@ What happens:
    report user activation refuse `connect()` outside a user action, so never call it on
    page load.
 2. The "Connect your AI app" dialog shows the address
-   (`https://<relay>/a/<id>/mcp`), Copy and New address buttons, steps for Claude, ChatGPT, Claude
+   (`https://<relay>/s/<app>/mcp`, the same for every page of the app; `<app>` is the `app` option, else made from
+   `server.name`), a Copy button, steps for Claude, ChatGPT, Claude
    Code and Codex (the two commands with a Copy each, named by a shell-safe label made from `server.name`; Codex's first
-   turns on its feature `mcp_2026_07_28`), and a 6-digit code. The code is valid for 2 minutes and is replaced by itself.
+   turns on its feature `mcp_2026_07_28`), a code of 8 letters (`XXXX-XXXX`) and "Disconnect all apps". The code says
+   which page the AI app is paired with; it is valid for 2 minutes and is replaced by itself.
 3. The user adds the address to the AI app, for example
    `claude mcp add --transport http notes <address>` and then `/mcp` → Authenticate in
    Claude Code.
@@ -136,10 +139,11 @@ What happens:
 5. The dialog lists the connected app with a Disconnect button. The AI app can now call
    the tools while the page is connected.
 
-The address is stable across visits (a secret per relay and server name in `localStorage`), and paired
+The relay knows the page again across visits (by a secret per relay and server name in `localStorage`), and paired
 apps stay paired across reloads. While the page is closed, their calls wait up to 10 s
 for it (the relay's `TAB_MCP_PAGE_WAIT_S`) and then get a tool result saying the page is
-not open. Renaming `server.name` changes the address, so the apps pair again.
+not open. Renaming `server.name` changes the secret's storage key and, without the `app` option, the address, so the
+apps pair again.
 
 When the connection breaks (reason `network`, `heartbeat` or `shutdown`: a dropped
 network, a phone pausing the tab in the background, a relay restart), the library
@@ -147,18 +151,18 @@ connects again by itself: after 5, 10, 20 and 40 s, then every 60 s, and at once
 tab comes back to the front or the network returns. Do not write your own retry loop;
 show `state === "reconnecting"` and the property `reconnecting` (the next attempt, its
 number and time); `statechange` fires for each attempt, and when the relay refused one,
-`error` says why just before the `statechange` to `disconnected`. It never reconnects after `disconnect()`, a new address, another
-tab taking over the address (`replaced`), an expired or idle session or a refusal by the
+`error` says why just before the `statechange` to `disconnected`. It never reconnects after `disconnect()`, `newAddress()`, another
+tab taking the page's place (`replaced`), an expired or idle session or a refusal by the
 relay, and a first `connect()` that fails is not retried (show the error and let the
 user try again). `reconnect: false` turns it off.
 
 The library does not connect on page load by itself: if the page offers a "Keep AI
 access on" switch that the user turned on, call `connect({ resume: true })` on load.
 
-"New address" in the dialog calls `mcp.newAddress()`: it disconnects every app and makes
-a new address, and the dialog asks first when apps are connected. The relay's pages point
-users to it when someone may be guessing codes. A custom UI calls `mcp.newAddress()` from
-a click.
+"Disconnect all apps" in the dialog calls `mcp.newAddress()`: it disconnects every app
+and makes a new address secret, and the dialog asks first when apps are connected. The
+address stays the same; each AI app connects again with a new code. A custom UI calls
+`mcp.newAddress()` from a click.
 
 For a custom UI, use `connect()`, `startPairing()`/`stopPairing()` (codes come only while
 pairing is on), `revoke(grantId)` (resolves once the relay removed the grant),
@@ -172,16 +176,17 @@ be replaced (`ui: { strings }`, keys in the client's `src/strings.ts`, with `lan
 `dir`), and their help gets its own guide link and steps (`ui: { setup: { guide,
 instructions } }`).
 
-When another tab or program takes over the address, the page gets a `statechange` to
+When another tab or program takes the page's place (it connects with the same address
+secret), the page gets a `statechange` to
 `disconnected` (reason `replaced`) and then, up to a second later, `replaced`. Once the page has opened the
 default dialog, the library says so itself: "Opened in another tab" when a tab of the
 same page said on its `BroadcastChannel` that its session started, otherwise a warning
-with "New address". A custom UI does the same with `event.detail.sibling`: `true` is the
+with "Disconnect all apps". A custom UI does the same with `event.detail.sibling`: `true` is the
 usual, harmless second tab; `false` means it may be a program with a copy of the address
-secret, which the paired AI apps now talk to, so offer a "New address" button that calls
-`mcp.newAddress()`. It takes the address back with the relay revoking those apps in the
-same step, then connects with a new address; if it rejects with `reason: "replaced"`, the
-address was taken over again first: say so and let the user try again.
+secret, which the paired AI apps now talk to, so offer a "Disconnect all apps" button that calls
+`mcp.newAddress()`. It takes the page back with the relay revoking those apps in the
+same step, then connects with a new secret; if it rejects with `reason: "replaced"`, the
+page was taken over again first: say so and let the user try again.
 
 **Sign-in instead of a code** (a relay that pairs by `oidc`): see
 [references/sign-in.md](references/sign-in.md). **React** single-page apps: see
@@ -305,8 +310,9 @@ Keep these; do not work around them.
   without the user's opt-in.
 - Relays must be `https:`; `http:` works only for `localhost`, `127.0.0.1` and `[::1]`.
 - Keep XSS out of the page and do not log or expose the secret under
-  `tab-mcp:secret:<relay origin>:<server name>`: whoever has it can take over the address,
-  and the AI apps paired with it then talk to them until the page gets a new address.
+  `tab-mcp:secret:<relay origin>:<server name>`: whoever has it can take the page's place,
+  and the AI apps paired with it then talk to them until the page makes a new secret
+  (`newAddress()`).
   Run the page on its own origin (not a shared one such as `*.github.io`) and keep
   third-party scripts off it.
 - For a page with user accounts, use identity binding
@@ -314,8 +320,8 @@ Keep these; do not work around them.
   On a page that pairs by code, grants follow the browser profile, not the person, so the
   next user of a shared browser gets the AI apps the previous one paired: call
   `mcp.newAddress()` when the user logs out.
-- The page origin on the relay's pairing page is what the browser reported; a program
-  can claim any origin. Do not tell users it proves which page they pair with.
+- The relay's pairing page names the AI app and the app id of the address, not the page:
+  the code alone says which page is paired. Tell users never to pass their code on.
 - Tools act with the user's rights in the page. Expose only what the user may do anyway,
   and nothing that leaks other users' data.
 - Connecting an AI app means trusting the page. Describe tools honestly; tool text and
@@ -350,7 +356,7 @@ limits.
 
 Without Docker: `bun add --global @ractive-ch/tab-mcp`, then `tab-mcp` with the same
 variables (Bun 1.4.4+). Run one relay process per public address. The reverse proxy must
-forward WebSockets on `/tab`, must not buffer event streams on `/a/…/mcp`, and must allow
+forward WebSockets on `/tab`, must not buffer event streams on `/s/…/mcp`, and must allow
 requests of up to 300 s. The relay starts event streams after 20 s, which keeps 60 s
 first-byte limits of CDNs happy. Health check: `GET /healthz`.
 

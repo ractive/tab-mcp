@@ -21,7 +21,9 @@ only), DEC-076 (tab assertion), DEC-077 (binding and grants), DEC-078 (logout), 
 (the OIDC method and its settings). The sketch below is the plan as written before the
 research; where it differs, the decisions win: the assertion travels in an `identity`
 message after `session` with `typ: tab-mcp-identity+jwt`, logout is an `identity.logout`
-message from the page, and variant 2 is not built.
+message from the page, and variant 2 is not built. Since DEC-196 the address names the
+app, not a tab: the assertion's `aud` is the app's address, the sign-in at `/authorize`
+comes first, and the relay then finds the page among the app's pages.
 
 ## Idea
 
@@ -35,14 +37,18 @@ without rebuilding the OAuth server (DEC-042).
 
 - The web app's own backend issues a short-lived signed assertion for the relay: a JWT with
   `iss` (the app's issuer), `sub` (the user at the identity provider, or the app's mapping
-  of it), `aud` = this relay and address, `exp` about 60 s, `iat`, `jti`.
+  of it), `aud` = the app's address on this relay (`https://<relay>/s/<app>/mcp`,
+  DEC-196), `exp` about 60 s, `iat`, `jti`.
 - The tab sends it to the relay (e.g. in `hello` or a new `identity` message). The relay
   verifies it with the app's JWKS URL (configured), checks `aud`, `exp` and single use of
-  `jti`, and binds the address to (`iss`, `sub`).
+  `jti`, and binds the session to (`iss`, `sub`). The audience names the app, so the
+  assertion is not bound to one page: whoever holds a person's unused assertion could
+  bind any session of the app as that person, which before DEC-196 took the page's
+  address too.
 - The app's ID token is **not** forwarded: its audience is the app, not the relay, and
   accepting it would let any party that received it impersonate the user.
 - Logout in the app tells the relay (a signed logout assertion or a back-channel call); the
-  relay revokes every grant of that address.
+  relay revokes every grant of that page (its address id).
 
 ## AI side: who is the AI app's user?
 
@@ -50,9 +56,14 @@ without rebuilding the OAuth server (DEC-042).
 
 - The relay is a registered OIDC client at the provider (client id and secret configured).
 - `/authorize` (still the relay's MCP authorization server) redirects the user's browser to
-  the provider, gets the ID token back, and compares its `iss` + `sub` with the tab's.
-- On a match the relay issues the MCP authorization code and tokens as today; the code step
-  is replaced by the identity check.
+  the provider, gets the ID token back, and looks among the app's pages for the one whose
+  user is that `iss` + `sub` and whose "Connect your AI app" dialog is open; of several,
+  the one that connected last; only a page connected when the sign-in started counts
+  (DEC-196).
+- With such a page the relay issues the MCP authorization code and tokens as today, for
+  that page's address id; the code step is replaced by the identity check. An app whose
+  pages can pair both ways gets both on one pairing page: the code field, and "Sign in
+  instead".
 - Works with any OIDC provider; the AI app sees no difference (still CIMD, PKCE, the
   relay's tokens).
 
@@ -70,7 +81,11 @@ without rebuilding the OAuth server (DEC-042).
 
 When the identities differ, `/authorize` (variant 1) or the MCP endpoint (variant 2) answers
 with a clear error: "This AI tool is logged in as someone else than the page." Nothing is
-issued or forwarded.
+issued or forwarded. Since DEC-196 `/authorize` cannot tell another person's page from no
+page: no page of the app, a closed dialog, a signed-out page and another person get one
+answer ("No page is connecting with the account you signed in with. …"). The MCP endpoint
+still answers a grant made for another person than the page's with "This AI tool is
+logged in as someone other than the page."
 
 ## Threat model addition
 
