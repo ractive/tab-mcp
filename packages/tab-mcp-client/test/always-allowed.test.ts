@@ -92,7 +92,7 @@ describe("the allowances, with a stub relay", () => {
 		for (const t of tabs.splice(0)) t.disconnect();
 	});
 
-	test("per grant and tool, as the user saw it: a changed tool is asked again and leaves the list (CU 11)", async () => {
+	test("per grant and tool, as the user saw it: a call that shows another description is asked again (CU 11)", async () => {
 		relay.grants = [grant("g_1"), grant("g_2")];
 		const storage = new MemoryStorage();
 		const t = tab({ storage });
@@ -128,8 +128,123 @@ describe("the allowances, with a stub relay", () => {
 				description: "Clears all, and more",
 			}),
 		).toBe(false);
+	});
+
+	test("the queries only read; one rule for drawing and deciding; clean-up when another tab's change arrives (review of PR 167)", async () => {
+		relay.grants = [grant("g_1")];
+		const storage = new MemoryStorage();
+		const t = tab({ storage });
+		await t.registerTool(asking("x", "D2"));
+		await t.connect();
+		const allowed = allowedTools(t);
+		allowed.allow("g_1", "x");
+		const key = [...storage.items.keys()].find((k) =>
+			k.endsWith("#allowed"),
+		) as string;
+		// Another tab, with another build, allowed x as it shows it there (D1).
+		const theirs = (storage.items.get(key) as string).replace('"D2"', '"D1"');
+		storage.setItem(key, theirs);
+		let changes = 0;
+		const stop = allowed.onChange(() => changes++);
+		// Drawn and decided alike: x asks here, and nothing is written meanwhile.
 		expect(allowed.list("g_1")).toEqual([]);
+		expect(allowed.has("g_1", "x")).toBe(false);
+		expect(allowedFor(t).allows("g_1", { name: "x", description: "D2" })).toBe(
+			false,
+		);
+		expect(storage.items.get(key)).toBe(theirs);
+		expect(changes).toBe(0);
+		// The storage event cleans up against this page's tools.
+		globalThis.dispatchEvent(Object.assign(new Event("storage"), { key }));
+		expect(changes).toBe(1);
 		expect(kept(storage)).toMatchObject({ grants: [] });
+		stop();
+	});
+
+	test("the methods are bound: they work taken off the object (review of PR 167)", async () => {
+		relay.grants = [grant("g_1")];
+		const t = tab({ storage: new MemoryStorage() });
+		await t.registerTool(asking("a"));
+		await t.connect();
+		const {
+			allow,
+			ask,
+			has,
+			list,
+			tools,
+			everything,
+			setEverything,
+			forget,
+			onChange,
+		} = allowedTools(t);
+		let changes = 0;
+		const stop = onChange(() => changes++);
+		expect(tools().map((x) => x.name)).toEqual(["a"]);
+		allow("g_1", "a");
+		expect(has("g_1", "a")).toBe(true);
+		expect(list("g_1")).toEqual(["a"]);
+		ask("g_1", "a");
+		expect(has("g_1", "a")).toBe(false);
+		setEverything("g_1", true);
+		expect(everything("g_1")).toBe(true);
+		forget("g_1");
+		expect(everything("g_1")).toBe(false);
+		expect(changes).toBe(4);
+		stop();
+	});
+
+	test("ask while everything is on turns everything off and keeps the other tools (review of PR 167)", async () => {
+		relay.grants = [grant("g_1")];
+		const t = tab({ storage: new MemoryStorage() });
+		for (const name of ["a", "b", "wipe"]) await t.registerTool(asking(name));
+		await t.connect();
+		const allowed = allowedTools(t);
+		allowed.allow("g_1", "a");
+		allowed.allow("g_1", "wipe");
+		allowed.setEverything("g_1", true);
+		expect(allowed.has("g_1", "b")).toBe(true);
+		allowed.ask("g_1", "wipe");
+		expect(allowed.everything("g_1")).toBe(false);
+		expect(allowed.has("g_1", "wipe")).toBe(false);
+		expect(allowed.has("g_1", "b")).toBe(false);
+		expect(allowed.list("g_1")).toEqual(["a"]);
+		// Asking for one that was never listed, under everything: everything goes too.
+		allowed.setEverything("g_1", true);
+		allowed.ask("g_1", "b");
+		expect(allowed.everything("g_1")).toBe(false);
+		expect(allowed.list("g_1")).toEqual(["a"]);
+	});
+
+	test("a failed write keeps the allowance for the page's lifetime; the next read does not drop it (review of PR 167)", async () => {
+		relay.grants = [grant("g_1")];
+		class Full extends MemoryStorage {
+			full = false;
+			override setItem(key: string, value: string): void {
+				if (this.full && key.endsWith("#allowed"))
+					throw new DOMException("full", "QuotaExceededError");
+				super.setItem(key, value);
+			}
+		}
+		const storage = new Full();
+		const t = tab({ storage });
+		for (const name of ["a", "b"]) await t.registerTool(asking(name));
+		await t.connect();
+		const allowed = allowedTools(t);
+		allowed.allow("g_1", "a");
+		storage.full = true;
+		allowed.allow("g_1", "b");
+		expect(allowed.list("g_1")).toEqual(["a", "b"]);
+		expect(allowed.has("g_1", "b")).toBe(true);
+		expect(kept(storage)).toMatchObject({
+			grants: [{ tools: [{ name: "a" }] }],
+		});
+		// Room again: the next write saves what memory holds.
+		storage.full = false;
+		allowed.ask("g_1", "a");
+		expect(kept(storage)).toMatchObject({
+			grants: [{ tools: [{ name: "b" }] }],
+		});
+		expect(allowed.list("g_1")).toEqual(["b"]);
 	});
 
 	test("a tool registered again with another description leaves every list; one registered again unchanged keeps it (useTool)", async () => {

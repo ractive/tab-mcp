@@ -973,10 +973,14 @@ export class TabMcp extends EventTarget {
 	 * A call the user allowed runs without asking, else `onConfirm` or the
 	 * dialog: decided out of the core, in the confirmation's chunk (a chunk
 	 * of its own for the allowances would cost the core more bytes, DEC-200).
+	 * If that chunk does not load, the page's own `onConfirm` asks (only its
+	 * `true` runs the call); without one the call is refused, never allowed.
 	 */
 	#confirm(request: ConfirmRequest): Promise<ConfirmAnswer> {
-		return import("./confirm.ts").then((m) =>
-			m.confirmCall(this, request, this.#onConfirm),
+		const ask = this.#onConfirm;
+		return import("./confirm.ts").then(
+			(m) => m.confirmCall(this, request, ask),
+			() => ask?.(request) ?? false,
 		);
 	}
 

@@ -570,9 +570,13 @@ deliberate act in the connect dialog, not an answer to one question. In the conn
 dialog, each connected app gets a switch per tool that asks (its title or name;
 destructive ones marked) and "Allow everything, no questions asked", with a sentence on
 what it means. The switches are checkboxes with `role="switch"` whose accessible names
-name the app. When the page does not offer it (`alwaysAllow` unset) but something is
-allowed for an app (by your own switches), the connect dialog shows its switches too, so
-the user can see and end what runs without asking where they disconnect apps.
+name the app. A tool that is allowed but not registered right now (a page may offer some
+tools only on some views) is listed by its name, as a switch that can only be turned
+off. When the page does not offer allowing (`alwaysAllow` unset) but something is
+allowed for an app (by your own switches), the connect dialog shows only that, as
+switches that can only be turned off ("everything" only while it is on): the user can
+see and end what runs without asking where they disconnect apps, and is never offered
+more than the page chose to offer.
 
 **What counts.** An allowed tool runs without asking as long as its title and
 description are the ones the user allowed: a tool registered with another one is asked
@@ -603,7 +607,7 @@ function drawSwitches() {
       ...allowed.tools().map((tool) =>
         mySwitch(`${tool.title ?? tool.name}${tool.destructive ? " (destructive)" : ""}`,
           allowed.has(grant.grantId, tool.name),
-          (on) => (on ? allowed.allow : allowed.ask)(grant.grantId, tool.name)),
+          (on) => on ? allowed.allow(grant.grantId, tool.name) : allowed.ask(grant.grantId, tool.name)),
       ),
       mySwitch("Allow everything, no questions asked",
         allowed.everything(grant.grantId),
@@ -618,11 +622,15 @@ mcp.addEventListener("grantschange", drawSwitches);
 - `tools()`: the tools that ask (`consequentialHint`, callable through the relay), each
   `{ name, title?, description, destructive }`.
 - `has(grantId, name)`: whether a call runs without asking now. `list(grantId)`: the
-  names allowed one by one. `everything(grantId)`.
+  names allowed one by one (one registered now with another title or description is
+  not in it). `everything(grantId)`. These only read, so they are safe while drawing.
 - `allow(grantId, name)` (as the tool is registered now), `ask(grantId, name)`,
   `setEverything(grantId, on)`, `forget(grantId)` (everything of that app asks again).
-  Allowing does nothing for an app that is not in `mcp.grants`.
+  Allowing does nothing for an app that is not in `mcp.grants`. `ask` while
+  "everything" is on turns "everything" off for that app too, and leaves the other
+  tools allowed one by one as they are: asking again errs towards asking.
 - `onChange(listener)` returns what stops it. `kept` says whether they outlive a reload.
+  The methods are bound: `const { allow, ask } = allowedTools(mcp)` works.
 - In React, `useAllowedTools(grantId)` of `@ractive-ch/tab-mcp-client/react` returns
   `{ tools (each with allowed), everything, allowedTools }` and renders again on a change.
 - Without a bundler, `cdn/allowed.min.js` sits beside the CDN build's

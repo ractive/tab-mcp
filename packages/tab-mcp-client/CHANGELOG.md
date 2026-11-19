@@ -24,8 +24,10 @@ the Git tag `client-v<version>`. The format follows
 - **Switches in the connect dialog**: under each connected app, a switch per tool that
   asks (destructive ones marked) and "Allow everything, no questions asked" with a
   sentence on what it means; checkboxes with `role="switch"` whose accessible names name
-  the app. Shown with `alwaysAllow`, and without it while something is allowed for that
-  app.
+  the app. Tools allowed but not registered right now are listed by name, to turn off.
+  Without `alwaysAllow`, only what is allowed for that app is shown, as switches that can
+  only be turned off. The methods of `allowedTools(mcp)` are bound; `ask` while
+  "everything" is on turns "everything" off for that app.
 - `useAllowedTools(grantId)` in `@ractive-ch/tab-mcp-client/react`: the tools that ask,
   each with `allowed`, `everything` and the `allowedTools` object to change them.
 - `alwaysAllow: "until-reload"`.

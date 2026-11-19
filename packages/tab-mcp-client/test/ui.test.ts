@@ -2756,17 +2756,86 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		const box = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
 		expect(shown(box)).toBe(false);
 		expect(switchesOf(dialog)).toEqual([]);
-		// The page's own switch (`./allowed`): the user sees it here too and can end it.
-		allowedFor(tab).allow("g_1", "delete_all");
+		// The page's own switch (`./allowed`): the user sees only it here, and
+		// can only end it (review of PR 167).
+		const allowed = allowedFor(tab);
+		allowed.allow("g_1", "delete_all");
 		expect(shown(box)).toBe(true);
-		const [, deleteAll] = switchesOf(box) as [
+		const visibleSwitches = () => switchesOf(box).filter((i) => shown(i));
+		expect(
+			visibleSwitches().map((i) => [i.getAttribute("aria-label"), i.checked]),
+		).toEqual([
+			[
+				"delete_all (destructive) runs without asking for Claude (claude.ai)",
+				true,
+			],
+		]);
+		const [deleteAll] = visibleSwitches() as [HTMLInputElement];
+		toggle(deleteAll);
+		expect(allowed.list("g_1")).toEqual([]);
+		expect(shown(box)).toBe(false);
+		// "Everything" turned on by the page: shown while on, and only to turn off.
+		allowed.setEverything("g_1", true);
+		const [everything] = visibleSwitches() as [HTMLInputElement];
+		expect(everything.getAttribute("aria-label")).toBe(
+			"Allow everything, no questions asked, for Claude (claude.ai)",
+		);
+		expect(everything.checked).toBe(true);
+		toggle(everything);
+		expect(allowed.everything("g_1")).toBe(false);
+		expect(shown(box)).toBe(false);
+		// Nothing to turn on here: a switch the page never offered stays off.
+		allowed.allow("g_1", "clear_memory");
+		const [clear, all] = switchesOf(box) as [
 			HTMLInputElement,
 			HTMLInputElement,
 		];
-		expect(deleteAll.checked).toBe(true);
-		toggle(deleteAll);
+		expect(shown(all)).toBe(false);
+		all.checked = true;
+		all.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(allowed.everything("g_1")).toBe(false);
+		expect(all.checked).toBe(false);
+		toggle(clear); // off
+		expect(allowed.list("g_1")).toEqual([]);
+		byText(dialog, "Done").click();
+		await closed;
+	});
+
+	test("a tool allowed but not registered right now is listed by name, to turn off (review of PR 167)", async () => {
+		mcp = newTab(relay.url, { alwaysAllow: true });
+		const tab = mcp;
+		const view = new AbortController();
+		await registerAsking(tab);
+		await tab.registerTool(
+			{
+				name: "export_report",
+				title: "Export report",
+				description: "Exports",
+				annotations: { consequentialHint: true },
+				execute: () => "ok",
+			},
+			{ signal: view.signal },
+		);
+		const { dialog, closed } = await open(tab);
+		const box = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
+		allowedFor(tab).allow("g_1", "export_report");
+		view.abort(); // another view: the tool is gone for now, still allowed
+		expect(allowedFor(tab).list("g_1")).toEqual(["export_report"]);
+		expect(switchState(box).map((s) => [s.name, s.checked])).toEqual([
+			["Clear memory runs without asking for Claude (claude.ai)", false],
+			[
+				"delete_all (destructive) runs without asking for Claude (claude.ai)",
+				false,
+			],
+			["export_report runs without asking for Claude (claude.ai)", true],
+			["Allow everything, no questions asked, for Claude (claude.ai)", false],
+		]);
+		const exported = switchesOf(box)[2] as HTMLInputElement;
+		toggle(exported);
 		expect(allowedFor(tab).list("g_1")).toEqual([]);
-		expect(shown(box)).toBe(false);
+		expect(switchState(box).map((s) => s.name)).not.toContain(
+			"export_report runs without asking for Claude (claude.ai)",
+		);
 		byText(dialog, "Done").click();
 		await closed;
 	});

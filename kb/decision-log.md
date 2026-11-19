@@ -4219,8 +4219,17 @@ owner's.
   allow", or "Allow until reload" when nothing is kept) and never offers "everything":
   that is a deliberate act, not an answer to one question. The connect dialog shows,
   under each connected app, a switch per tool that asks and "Allow everything" with one
-  sentence on what it means; with `alwaysAllow` unset, only while something is allowed
-  for that app, so the user can see and end it where apps are disconnected.
+  sentence on what it means. With `alwaysAllow` unset it shows only what is allowed for
+  that app, as switches that can only be turned off ("everything" only while it is on):
+  the user can see and end it where apps are disconnected, and is never offered more
+  than the page chose (review of PR 167). Tools allowed but not registered right now are
+  listed by name, to turn off.
+- **Reads do not write.** `list` and `has` follow one rule (allowed, and registered
+  unchanged or not registered); the clean-up of changed tools runs when the registry
+  changes or another tab's write arrives, not in a query. `ask` under "everything"
+  turns "everything" off. A failed write keeps the allowance in memory for the page's
+  lifetime. If the confirmation's chunk does not load, the page's own `onConfirm` asks;
+  without one the call is refused.
 - **An API.** `@ractive-ch/tab-mcp-client/allowed` (`allowedTools(mcp)`), an entry of its
   own like `./setup`; `useAllowedTools(grantId)` in `./react`. With `alwaysAllow` unset
   the API still works and keeps in `storage`: a page with its own switches has decided.

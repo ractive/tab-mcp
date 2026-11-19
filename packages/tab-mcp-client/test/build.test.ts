@@ -235,7 +235,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type TunnelCancelMessage } from "@ractive-ch/tab-mcp-client/tunnel";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 import { allowedTools, type AllowedTool, type AllowedTools } from "@ractive-ch/tab-mcp-client/allowed";
-const mcp =new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
+const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
 void mcp.registerTool(tool, { signal: new AbortController().signal, callers: ["relay", "webmcp"] });
 mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind === "local" ? c.id : c.kind); });

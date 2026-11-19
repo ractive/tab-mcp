@@ -49,6 +49,9 @@ export interface AllowedTool {
  * The tools that run without asking, per connected AI app (`Grant.grantId`),
  * for a page that draws its own switches: `allowedTools(mcp)` of
  * `@ractive-ch/tab-mcp-client/allowed`. The library's dialogs use the same.
+ * The methods are bound: `const { allow } = allowedTools(mcp)` works. The
+ * queries (`tools`, `list`, `has`, `everything`) only read: safe while
+ * drawing.
  */
 export interface AllowedTools {
 	/**
@@ -65,7 +68,8 @@ export interface AllowedTools {
 	/**
 	 * The names of the tools allowed one by one for this app, in the order
 	 * allowed; also one that is not registered right now (it runs without
-	 * asking again once it is back unchanged).
+	 * asking again once it is back unchanged). One registered now with another
+	 * title or description than the user allowed is not in it (it asks).
 	 */
 	list(grantId: string): string[];
 	/**
@@ -79,7 +83,11 @@ export interface AllowedTools {
 	 * `mcp.grants` or a tool that is not in `tools()`.
 	 */
 	allow(grantId: string, name: string): void;
-	/** Ask again before this app runs this tool. */
+	/**
+	 * Ask again before this app runs this tool. While "everything" is on for
+	 * the app, that goes off too (asking again errs towards asking); the
+	 * other tools allowed one by one stay allowed.
+	 */
 	ask(grantId: string, name: string): void;
 	/** Whether "Allow everything, no questions asked" is on for this app. */
 	everything(grantId: string): boolean;
@@ -188,7 +196,18 @@ function seenOf(tool: ToolSeen): ToolSeen {
 const sameSeen = (a: ToolSeen, b: ToolNow) =>
 	a.title === b.title && a.description === b.description;
 
-/** The allowances of one `TabMcp`. */
+/**
+ * Whether a tool allowed as `kept` still counts against what is registered
+ * now (`now`, `undefined` when it is not): unchanged, or not registered. The
+ * one rule for drawing (`list`) and for deciding (`has`).
+ */
+const counts = (kept: ToolSeen, now: ToolNow | undefined) =>
+	now === undefined || sameSeen(kept, now);
+
+/**
+ * The allowances of one `TabMcp`. The public methods are arrow fields, so
+ * that they work taken off the object; the queries never write.
+ */
 export class Allowances implements AllowedTools {
 	readonly kept: boolean;
 	/** The library's dialogs offer allowing (`alwaysAllow` on). */
@@ -200,6 +219,12 @@ export class Allowances implements AllowedTools {
 	readonly #storage: SecretStorage | null;
 	readonly #key: string;
 	#memory: State = { secret: "", grants: new Map() };
+	/**
+	 * The last write to storage failed (quota, blocked): memory holds what the
+	 * user chose, for the page's lifetime, and storage is not read over it
+	 * until a write succeeds again.
+	 */
+	#unsaved = false;
 	readonly #listeners = new Set<() => void>();
 	#unwatch: (() => void) | undefined;
 
@@ -215,8 +240,8 @@ export class Allowances implements AllowedTools {
 		this.offered = alwaysAllow === true || alwaysAllow === "until-reload";
 	}
 
-	tools(): AllowedTool[] {
-		return this.#registry
+	readonly tools = (): AllowedTool[] =>
+		this.#registry
 			.list()
 			.filter(
 				(t) =>
@@ -232,40 +257,38 @@ export class Allowances implements AllowedTools {
 				if (t.title !== undefined) tool.title = t.title;
 				return tool;
 			});
-	}
 
-	list(grantId: string): string[] {
-		return (this.#read().get(grantId)?.tools ?? []).map((t) => t.name);
-	}
+	readonly list = (grantId: string): string[] =>
+		(this.#read().get(grantId)?.tools ?? [])
+			.filter((t) => counts(t, this.#registry.get(t.name)))
+			.map((t) => t.name);
 
-	has(grantId: string, name: string): boolean {
+	readonly has = (grantId: string, name: string): boolean => {
 		const tool = this.#registry.get(name);
 		return (
 			this.everything(grantId) ||
 			(tool !== undefined && this.allows(grantId, tool))
 		);
-	}
+	};
 
 	/**
 	 * Whether this call runs without asking: "everything", or this tool as
-	 * the user saw it. A tool that changed since leaves the list.
+	 * the user saw it. Only reads: a tool that changed since asks, and leaves
+	 * the list when the registry or another tab's change is seen
+	 * (`toolsChanged`).
 	 */
 	allows(grantId: string, tool: ToolNow): boolean {
-		const grants = this.#read();
-		const entry = grants.get(grantId);
+		const entry = this.#read().get(grantId);
 		if (entry === undefined) return false;
 		if (entry.everything) return true;
 		const kept = entry.tools.find((t) => t.name === tool.name);
-		if (kept === undefined) return false;
-		if (sameSeen(kept, tool)) return true;
-		this.#drop(grants, grantId, (t) => t.name === tool.name);
-		return false;
+		return kept !== undefined && sameSeen(kept, tool);
 	}
 
-	allow(grantId: string, name: string): void {
+	readonly allow = (grantId: string, name: string): void => {
 		const tool = this.tools().find((t) => t.name === name);
 		if (tool !== undefined) this.keep(grantId, tool);
-	}
+	};
 
 	/** Allow `tool` as the user saw it, for an app the relay still lists. */
 	keep(grantId: string, tool: ToolSeen): void {
@@ -280,15 +303,24 @@ export class Allowances implements AllowedTools {
 		this.#write(grants);
 	}
 
-	ask(grantId: string, name: string): void {
-		this.#drop(this.#read(), grantId, (t) => t.name === name);
-	}
+	readonly ask = (grantId: string, name: string): void => {
+		const grants = this.#read();
+		const entry = grants.get(grantId);
+		if (entry === undefined) return;
+		const tools = entry.tools.filter((t) => t.name !== name);
+		// Under "everything" this tool ran without asking too: asking again
+		// for it turns that off; the tools allowed one by one stay.
+		if (!entry.everything && tools.length === entry.tools.length) return;
+		entry.everything = false;
+		entry.tools = tools;
+		if (tools.length === 0) grants.delete(grantId);
+		this.#write(grants);
+	};
 
-	everything(grantId: string): boolean {
-		return this.#read().get(grantId)?.everything === true;
-	}
+	readonly everything = (grantId: string): boolean =>
+		this.#read().get(grantId)?.everything === true;
 
-	setEverything(grantId: string, on: boolean): void {
+	readonly setEverything = (grantId: string, on: boolean): void => {
 		if (on && !this.#granted(grantId)) return;
 		const grants = this.#read();
 		const entry = grants.get(grantId) ?? { everything: false, tools: [] };
@@ -297,12 +329,12 @@ export class Allowances implements AllowedTools {
 		if (on || entry.tools.length > 0) grants.set(grantId, entry);
 		else grants.delete(grantId);
 		this.#write(grants);
-	}
+	};
 
-	forget(grantId: string): void {
+	readonly forget = (grantId: string): void => {
 		const grants = this.#read();
 		if (grants.delete(grantId)) this.#write(grants);
-	}
+	};
 
 	/**
 	 * Only the grants the relay lists now: the others ended. What was kept
@@ -321,29 +353,29 @@ export class Allowances implements AllowedTools {
 	}
 
 	/**
-	 * The registry changed: a tool registered with another title or
-	 * description than the user saw leaves every list. One that is not
-	 * registered stays (a reload registers them all again, a page may offer
-	 * some only on some views).
+	 * The registry changed, or another tab changed the allowances: a tool
+	 * registered with another title or description than the user saw leaves
+	 * every list. One that is not registered stays (a reload registers them
+	 * all again, a page may offer some only on some views). Tells the
+	 * listeners in any case.
 	 */
 	toolsChanged(): void {
 		const grants = this.#read();
 		let changed = false;
 		for (const [grantId, entry] of [...grants]) {
-			const tools = entry.tools.filter((t) => {
-				const now = this.#registry.get(t.name);
-				return now === undefined || sameSeen(t, now);
-			});
+			const tools = entry.tools.filter((t) =>
+				counts(t, this.#registry.get(t.name)),
+			);
 			if (tools.length === entry.tools.length) continue;
 			changed = true;
 			entry.tools = tools;
 			if (!entry.everything && tools.length === 0) grants.delete(grantId);
 		}
 		if (changed) this.#write(grants);
-		else this.#changed(); // `tools()` changed
+		else this.#changed();
 	}
 
-	onChange(listener: () => void): () => void {
+	readonly onChange = (listener: () => void): (() => void) => {
 		this.#listeners.add(listener);
 		this.#watch();
 		return () => {
@@ -353,14 +385,17 @@ export class Allowances implements AllowedTools {
 				this.#unwatch = undefined;
 			}
 		};
-	}
+	};
 
-	/** Another tab changed them: tell the listeners (only while there are some). */
+	/**
+	 * Another tab changed them: clean up against this page's tools and tell
+	 * the listeners (only while there are some).
+	 */
 	#watch(): void {
 		if (this.#unwatch !== undefined || this.#storage === null) return;
 		const g = globalThis as Partial<EventTarget>;
 		const changed = (event: Event) => {
-			if ((event as StorageEvent).key === this.#key) this.#changed();
+			if ((event as StorageEvent).key === this.#key) this.toolsChanged();
 		};
 		g.addEventListener?.("storage", changed);
 		this.#unwatch = () => g.removeEventListener?.("storage", changed);
@@ -370,25 +405,13 @@ export class Allowances implements AllowedTools {
 		return this.#mcp.grants.some((g) => g.grantId === grantId);
 	}
 
-	/** Drop the tools of a grant that match; the grant goes once nothing is left. */
-	#drop(
-		grants: Map<string, Entry>,
-		grantId: string,
-		match: (tool: ToolSeen) => boolean,
-	): void {
-		const entry = grants.get(grantId);
-		if (entry === undefined || !entry.tools.some(match)) return;
-		entry.tools = entry.tools.filter((t) => !match(t));
-		if (!entry.everything && entry.tools.length === 0) grants.delete(grantId);
-		this.#write(grants);
-	}
-
 	/**
 	 * The allowances now: storage first, so that another tab's change counts;
-	 * memory where storage cannot be read. None once the secret changed.
+	 * memory where storage cannot be read or the last write to it failed.
+	 * None once the secret changed.
 	 */
 	#read(): Map<string, Entry> {
-		if (this.#storage !== null) {
+		if (this.#storage !== null && !this.#unsaved) {
 			try {
 				const text = this.#storage.getItem(this.#key);
 				if (text !== null) this.#memory = parse(text);
@@ -405,8 +428,10 @@ export class Allowances implements AllowedTools {
 		this.#memory = { secret: this.#secret(), grants };
 		try {
 			this.#storage?.setItem(this.#key, serialize(this.#memory));
+			this.#unsaved = false;
 		} catch {
-			// quota or blocked: kept for the page's lifetime
+			// quota or blocked: kept in memory for the page's lifetime
+			this.#unsaved = true;
 		}
 		this.#changed();
 	}

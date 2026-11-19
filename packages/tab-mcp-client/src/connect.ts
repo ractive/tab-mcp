@@ -44,13 +44,16 @@ function switchOf(
 }
 
 /**
- * Under a connected app: a switch per tool that asks (its title or name,
- * destructive ones marked) and "Allow everything, no questions asked" with
- * what it means. Each switch's accessible name names the app: the list has
- * one set per app. Shown while the page offers allowing and has tools that
- * ask, and always while the app has an allowance, so that the user sees
- * what runs without asking and can end it. `render` updates it in place, so
- * a focused switch keeps its focus.
+ * Under a connected app, the switches for what runs without asking. With
+ * `alwaysAllow` (`offered`): a switch per tool that asks (its title or
+ * name, destructive ones marked) and "Allow everything, no questions asked"
+ * with what it means. Without it, only what is allowed now, as switches that
+ * can only be turned off ("everything" only while it is on): the user sees
+ * what runs without asking and can end it, and is never offered more than
+ * the page chose to offer. Tools allowed but not registered right now are
+ * listed by name, also only to turn off. Each switch's accessible name names
+ * the app: the list has one set per app. `render` updates it in place, so a
+ * focused switch keeps its focus.
  */
 function allowedSwitches(
 	doc: Document,
@@ -65,10 +68,14 @@ function allowedSwitches(
 		text: s.runsWithoutAsking,
 	});
 	const list = el(doc, "div", { className: "tab-mcp-switches" });
+	// Turning on only where the page offers it; the store decides the rest.
 	const all = switchOf(
 		doc,
 		el(doc, "span", { text: s.allowEverything }),
-		(on) => allowed.setEverything(grantId, on),
+		(on) => {
+			if (!on || allowed.offered) allowed.setEverything(grantId, on);
+			render();
+		},
 	);
 	all.label.classList.add("tab-mcp-everything");
 	all.input.setAttribute("aria-label", format(s.allowEverythingApp, { app }));
@@ -85,27 +92,53 @@ function allowedSwitches(
 	box.setAttribute("aria-labelledby", title.id);
 	const switches = new Map<
 		string,
-		ReturnType<typeof switchOf> & { name: HTMLElement; mark: HTMLElement }
+		ReturnType<typeof switchOf> & {
+			name: HTMLElement;
+			mark: HTMLElement;
+			offOnly: boolean;
+		}
 	>();
 	const render = () => {
-		const tools = allowed.tools();
 		const everything = allowed.everything(grantId);
-		box.hidden =
-			!(allowed.offered && tools.length > 0) &&
-			!everything &&
-			allowed.list(grantId).length === 0;
+		const listed = allowed.list(grantId);
+		const on = new Set(listed);
+		const asking = new Map(allowed.tools().map((t) => [t.name, t]));
+		const rows: {
+			name: string;
+			shown: string;
+			destructive: boolean;
+			offOnly: boolean;
+		}[] = [];
+		if (allowed.offered)
+			for (const t of asking.values())
+				rows.push({
+					name: t.name,
+					shown: t.title ?? t.name,
+					destructive: t.destructive,
+					offOnly: false,
+				});
+		for (const name of listed) {
+			if (allowed.offered && asking.has(name)) continue;
+			const t = asking.get(name);
+			rows.push({
+				name,
+				shown: t?.title ?? name,
+				destructive: t?.destructive === true,
+				offOnly: true,
+			});
+		}
+		const showAll = allowed.offered || everything;
+		box.hidden = rows.length === 0 && !everything;
 		if (box.hidden) return;
 		if (!box.hasChildNodes()) box.append(title, list, all.label, note);
-		const names = new Set(tools.map((t) => t.name));
-		// Changed tools left the list already (`toolsChanged`).
-		const listed = new Set(allowed.list(grantId));
+		const names = new Set(rows.map((r) => r.name));
 		for (const [name, { label }] of switches) {
 			if (names.has(name)) continue;
 			label.remove();
 			switches.delete(name);
 		}
-		tools.forEach((tool, i) => {
-			let entry = switches.get(tool.name);
+		rows.forEach((row, i) => {
+			let entry = switches.get(row.name);
 			if (entry === undefined) {
 				const name = el(doc, "span");
 				const mark = el(doc, "small", {
@@ -115,30 +148,34 @@ function allowedSwitches(
 				const made = switchOf(
 					doc,
 					el(doc, "span", {}, name, " ", mark),
-					(on) =>
-						on
-							? allowed.allow(grantId, tool.name)
-							: allowed.ask(grantId, tool.name),
+					(turnedOn) => {
+						if (!turnedOn) allowed.ask(grantId, row.name);
+						else if (switches.get(row.name)?.offOnly === false)
+							allowed.allow(grantId, row.name);
+						render(); // also when nothing changed: the switch says the truth
+					},
 				);
-				entry = { ...made, name, mark };
-				switches.set(tool.name, entry);
+				entry = { ...made, name, mark, offOnly: row.offOnly };
+				switches.set(row.name, entry);
 			}
-			const shown = visible(tool.title ?? tool.name);
+			entry.offOnly = row.offOnly;
+			const shown = visible(row.shown);
 			entry.name.textContent = shown;
-			entry.mark.hidden = !tool.destructive;
+			entry.mark.hidden = !row.destructive;
 			entry.input.setAttribute(
 				"aria-label",
-				format(tool.destructive ? s.allowDestructiveToolApp : s.allowToolApp, {
+				format(row.destructive ? s.allowDestructiveToolApp : s.allowToolApp, {
 					tool: shown,
 					app,
 				}),
 			);
 			// What runs without asking now: also every tool under "everything".
-			entry.input.checked = everything || listed.has(tool.name);
+			entry.input.checked = everything || on.has(row.name);
 			entry.input.disabled = everything;
 			if (list.children[i] !== entry.label)
 				list.insertBefore(entry.label, list.children[i] ?? null);
 		});
+		all.label.hidden = note.hidden = !showAll;
 		all.input.checked = everything;
 	};
 	return { box, render };
