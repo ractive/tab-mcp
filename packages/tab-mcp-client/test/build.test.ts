@@ -139,6 +139,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
+		"./cdn/allowed": "./cdn/allowed.min.js",
 	});
 	expect(pkg["peerDependencies"]).toEqual({ react: ">=18.3.0 <20" });
 	expect(pkg["peerDependenciesMeta"]).toEqual({ react: { optional: true } });
@@ -159,6 +160,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"visible.js",
 		"visible.d.ts",
 		"cdn/tab-mcp-client.min.js",
+		"cdn/allowed.min.js",
 		"LICENSE",
 		"AI_NOTICE",
 		"README.md",
@@ -203,6 +205,25 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(
 		await Bun.file(join(dist, "cdn/tab-mcp-client.min.js")).text(),
 	).not.toContain("useSyncExternalStore");
+	// `allowed.min.js` beside the CDN core (DEC-200): the core loads nothing
+	// of it, and it shares the allowances' chunk with the confirmation, so the
+	// page's switches and the dialogs see one store.
+	const cdn = new Map<string, string>();
+	for (const file of cdnFiles)
+		cdn.set(
+			file.replace(/^cdn\//, ""),
+			await Bun.file(join(dist, file)).text(),
+		);
+	const cdnCore = staticClosure(cdn, "tab-mcp-client.min.js");
+	expect([...cdnCore]).toEqual(["tab-mcp-client.min.js"]);
+	expect(cdn.get("tab-mcp-client.min.js")).not.toContain("#allowed");
+	const cdnAllowed = staticClosure(cdn, "allowed.min.js");
+	expect(cdnAllowed.has("tab-mcp-client.min.js")).toBe(false);
+	const store = [...cdnAllowed].find((n) => cdn.get(n)?.includes("#allowed"));
+	expect(store).toBeDefined();
+	const cdnConfirm = [...cdn.keys()].find((n) => n.startsWith("confirm-"));
+	expect(staticClosure(cdn, cdnConfirm ?? "").has(store ?? "")).toBe(true);
+	expect(cdn.get("allowed.min.js")).toContain("allowedTools");
 	const reactGz = Bun.gzipSync(new TextEncoder().encode(reactEntry)).length;
 	console.log(`react entry ${(reactGz / 1024).toFixed(1)} KB gzipped`);
 	expect(reactGz).toBeLessThanOrEqual(3 * 1024);

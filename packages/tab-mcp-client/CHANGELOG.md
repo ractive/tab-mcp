@@ -15,7 +15,10 @@ the Git tag `client-v<version>`. The format follows
   for a page that draws its own switches: `tools()` (the tools that ask, each with
   `destructive`), `has`, `list`, `allow`, `ask`, `everything`, `setEverything`,
   `forget`, `onChange` and `kept`. Types `AllowedTools`, `AllowedTool` (DEC-200). It
-  works with `alwaysAllow` unset too, kept in `storage`.
+  works with `alwaysAllow` unset too, kept in `storage`. Without a bundler:
+  `cdn/allowed.min.js` beside `cdn/tab-mcp-client.min.js` (package export
+  `./cdn/allowed`), sharing its chunks; a page that does not import it loads nothing
+  more.
 - **"Allow everything, no questions asked"** per AI app: every tool runs without asking,
   also ones registered later, changed and destructive ones.
 - **Switches in the connect dialog**: under each connected app, a switch per tool that

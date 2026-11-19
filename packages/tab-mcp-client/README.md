@@ -625,6 +625,14 @@ mcp.addEventListener("grantschange", drawSwitches);
 - `onChange(listener)` returns what stops it. `kept` says whether they outlive a reload.
 - In React, `useAllowedTools(grantId)` of `@ractive-ch/tab-mcp-client/react` returns
   `{ tools (each with allowed), everything, allowedTools }` and renders again on a change.
+- Without a bundler, `cdn/allowed.min.js` sits beside the CDN build's
+  `tab-mcp-client.min.js` and shares its chunks (one store with the dialogs); a page
+  that does not import it loads nothing of it. Take both from the same version:
+
+  ```js
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.17.0/cdn/tab-mcp-client.min.js";
+  import { allowedTools } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.17.0/cdn/allowed.min.js";
+  ```
 
 **The risk.** An allowance outlives the user's attention: for up to the grant's 90 days,
 calls run that nobody looks at. An AI app can be steered by text it reads (a web page, a

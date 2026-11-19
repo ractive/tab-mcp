@@ -5,7 +5,8 @@
  * - `dist/*.js`: ESM for bundlers (`--packages=external`), split so that the
  *   connection and the UI stay separate chunks loaded by `connect()`;
  * - `dist/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
- * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`;
+ * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`
+ *   (`tab-mcp-client.min.js`, and `allowed.min.js` beside it);
  * - `dist/package.json`, README, CHANGELOG, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
  *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
  *
@@ -52,12 +53,20 @@ const npm = await Bun.build({
 	// its pages (client 0.12.0). The CDN build, served as is, keeps it.
 	modulePreload: false,
 });
+// Two entries of one build, so that they share chunks (one store of allowed
+// tools for the dialogs and the page's switches): `tab-mcp-client.min.js`
+// (`scripts/cdn/tab-mcp-client.ts`, the core) and `allowed.min.js` (DEC-200),
+// which a page that never imports it never loads.
 const cdn = await Bun.build({
 	...common,
+	entrypoints: [
+		join(root, "scripts/cdn/tab-mcp-client.ts"),
+		join(root, "src/allowed.ts"),
+	],
 	outdir: join(dist, "cdn"),
 	minify: true,
 	sourcemap: "linked",
-	naming: { entry: "tab-mcp-client.min.js", chunk: "[name]-[hash].min.js" },
+	naming: { entry: "[name].min.js", chunk: "[name]-[hash].min.js" },
 });
 // The React entry (iteration 9): its own file that imports the core entry
 // (`./index.js`, one `TabMcp` class for both), `./allowed.js` and `react`;
@@ -119,6 +128,7 @@ const published = {
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
+		"./cdn/allowed": "./cdn/allowed.min.js",
 	},
 	types: "./index.d.ts",
 	sideEffects: false,
