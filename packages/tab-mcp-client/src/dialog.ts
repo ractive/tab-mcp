@@ -164,7 +164,7 @@ html dialog.tab-mcp-dialog:where(:focus) { outline: none; }
 .tab-mcp-dialog :where(h2) { font-size: var(--tab-mcp-title-size, 1.25em); line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
 .tab-mcp-dialog :where(h3) { font-size: 0.875em; font-weight: 600; color: var(--_tab-mcp-muted); margin-bottom: 0.5rem; }
 .tab-mcp-dialog :where(small) { font-size: 0.875em; }
-.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note, .tab-mcp-success-next, .tab-mcp-waiting, .tab-mcp-scroll-note, .tab-mcp-allowed) { color: var(--_tab-mcp-muted); }
+.tab-mcp-dialog :where(small, .tab-mcp-status, .tab-mcp-description, .tab-mcp-always-note, .tab-mcp-apps-note, .tab-mcp-success-next, .tab-mcp-waiting, .tab-mcp-scroll-note) { color: var(--_tab-mcp-muted); }
 html dialog.tab-mcp-dialog :where(:focus-visible) { outline: 2px solid var(--tab-mcp-focus, var(--_tab-mcp-fg)); outline-offset: 2px; }
 .tab-mcp-dialog :where(button) { font: inherit; font-size: 0.9375em; line-height: 1.25; text-transform: none; letter-spacing: normal; width: auto; min-height: 2.5rem; padding: 0.5rem 1rem; margin: 0; border: 1px solid color-mix(in srgb, currentColor 35%, transparent); border-radius: var(--_tab-mcp-small-radius); background: transparent; color: inherit; cursor: pointer; }
 html dialog.tab-mcp-dialog :where(button:hover:not(:disabled)) { color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); }
@@ -199,7 +199,18 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-help :where(code) { font: 0.875em var(--_tab-mcp-mono); padding: 0.125em 0.375em; background: var(--_tab-mcp-surface); border-radius: 0.25rem; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .tab-mcp-apps :where(li) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 0.75rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-app { flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
-.tab-mcp-allowed { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.875em; overflow-wrap: anywhere; }
+.tab-mcp-allowed { display: grid; flex-basis: 100%; gap: 0.25rem; padding-top: 0.5rem; border-top: 1px solid var(--_tab-mcp-line); font-size: 0.875em; overflow-wrap: anywhere; }
+.tab-mcp-allowed-title { font-weight: 600; color: var(--_tab-mcp-muted); }
+.tab-mcp-switches { display: grid; gap: 0.125rem; }
+.tab-mcp-switch { display: flex; align-items: center; gap: 0.625rem; min-height: 2rem; cursor: pointer; }
+.tab-mcp-switch > :where(input) { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 2.25rem; height: 1.25rem; margin: 0; padding: 0; border: 1px solid var(--_tab-mcp-line); border-radius: 0.625rem; background: var(--_tab-mcp-surface); cursor: pointer; }
+.tab-mcp-switch > :where(input)::before { content: ""; position: absolute; top: 2px; left: 2px; width: calc(1.25rem - 6px); height: calc(1.25rem - 6px); border-radius: 50%; background: var(--_tab-mcp-muted); }
+.tab-mcp-switch > :where(input:checked) { background: var(--tab-mcp-accent, var(--_tab-mcp-fg)); border-color: transparent; }
+.tab-mcp-switch > :where(input:checked)::before { left: calc(100% - 1.25rem + 4px); background: var(--tab-mcp-accent-text, var(--_tab-mcp-bg)); }
+html dialog.tab-mcp-dialog :where(.tab-mcp-switch > input:disabled) { opacity: 0.45; cursor: not-allowed; }
+.tab-mcp-destructive { color: var(--_tab-mcp-danger); }
+.tab-mcp-everything { font-weight: 600; }
+.tab-mcp-everything-note { color: var(--_tab-mcp-muted); }
 .tab-mcp-apps-note { margin-top: 0.5rem; }
 .tab-mcp-success { display: flex; align-items: center; gap: 0.875rem; padding: 1rem; background: color-mix(in srgb, var(--_tab-mcp-success) 10%, transparent); border: 1px solid color-mix(in srgb, var(--_tab-mcp-success) 45%, transparent); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-success-icon { flex: none; display: grid; place-items: center; width: 2.75rem; height: 2.75rem; border-radius: 50%; font-size: 1.5em; font-weight: 700; line-height: 1; color: var(--_tab-mcp-success); background: color-mix(in srgb, var(--_tab-mcp-success) 16%, transparent); }
@@ -220,8 +231,8 @@ html button.tab-mcp-danger { color: var(--_tab-mcp-danger); border-color: color-
 .tab-mcp-arguments { box-sizing: content-box; font: 0.875em / 1.45 var(--_tab-mcp-mono); padding: 0.75rem; background: var(--_tab-mcp-surface); border: 1px solid var(--_tab-mcp-line); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-always-note, .tab-mcp-waiting, .tab-mcp-scroll-note { font-size: 0.875em; }
 @media (max-width: 30rem) { .tab-mcp-actions > :where(button) { flex: 1 1 auto; } .tab-mcp-connect > :where(.tab-mcp-actions) > :where(button) { flex: 0 0 auto; } .tab-mcp-code { grid-template-columns: minmax(0, 1fr); } .tab-mcp-code > :where(button) { justify-self: start; } }
-@media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } .tab-mcp-success-icon { animation: tab-mcp-pop 0.4s cubic-bezier(0.3, 1.4, 0.6, 1); } }
-@media (forced-colors: active) { html button.tab-mcp-primary { border-color: ButtonText; } }
+@media (prefers-reduced-motion: no-preference) { .tab-mcp-dialog:where([open]) { animation: tab-mcp-in 0.15s ease-out; } .tab-mcp-success-icon { animation: tab-mcp-pop 0.4s cubic-bezier(0.3, 1.4, 0.6, 1); } .tab-mcp-switch > :where(input)::before { transition: left 0.15s ease-out; } }
+@media (forced-colors: active) { html button.tab-mcp-primary { border-color: ButtonText; } .tab-mcp-switch > :where(input) { forced-color-adjust: none; background: Canvas; border-color: ButtonText; } .tab-mcp-switch > :where(input)::before { forced-color-adjust: none; background: ButtonText; } .tab-mcp-switch > :where(input:checked) { background: Highlight; } .tab-mcp-switch > :where(input:checked)::before { background: HighlightText; } }
 @keyframes tab-mcp-in { from { opacity: 0; transform: translateY(0.5rem); } }
 @keyframes tab-mcp-pop { from { opacity: 0; transform: scale(0.4); } }
 `;

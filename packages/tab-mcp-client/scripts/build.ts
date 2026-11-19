@@ -32,11 +32,13 @@ const common = {
 const npm = await Bun.build({
 	...common,
 	// `./visible` (the escaping the confirmation dialog uses), `./setup` (the
-	// connect dialog's steps per AI app) and `./tunnel` (the caller's end of
-	// `serve`, for a backend) are entries of their own, out of the core
-	// (DEC-103, DEC-118, DEC-125).
+	// connect dialog's steps per AI app), `./tunnel` (the caller's end of
+	// `serve`, for a backend) and `./allowed` (the tools that run without
+	// asking) are entries of their own, out of the core (DEC-103, DEC-118,
+	// DEC-125, DEC-200).
 	entrypoints: [
 		entry,
+		join(root, "src/allowed.ts"),
 		join(root, "src/setup.ts"),
 		join(root, "src/tunnel.ts"),
 		join(root, "src/visible.ts"),
@@ -58,7 +60,8 @@ const cdn = await Bun.build({
 	naming: { entry: "tab-mcp-client.min.js", chunk: "[name]-[hash].min.js" },
 });
 // The React entry (iteration 9): its own file that imports the core entry
-// (`./index.js`, one `TabMcp` class for both) and `react`; not in the CDN build.
+// (`./index.js`, one `TabMcp` class for both), `./allowed.js` and `react`;
+// not in the CDN build.
 const react = await Bun.build({
 	entrypoints: [join(root, "src/react.ts")],
 	target: "browser",
@@ -69,12 +72,14 @@ const react = await Bun.build({
 	naming: { entry: "[name].js" },
 	// The directive must open the module (React Server Components frameworks).
 	banner: '"use client";',
+	// `./allowed.js` too: one store of allowances per `TabMcp`, the one the
+	// dialogs use, not a second copy in this file.
 	plugins: [
 		{
 			name: "core-entry-external",
 			setup(build) {
-				build.onResolve({ filter: /^\.\/index\.ts$/ }, () => ({
-					path: "./index.js",
+				build.onResolve({ filter: /^\.\/(index|allowed)\.ts$/ }, (args) => ({
+					path: args.path.replace(/\.ts$/, ".js"),
 					external: true,
 				}));
 			},
@@ -108,6 +113,7 @@ const published = {
 	type: "module",
 	exports: {
 		".": { types: "./index.d.ts", default: "./index.js" },
+		"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },

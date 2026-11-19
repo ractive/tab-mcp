@@ -3,7 +3,7 @@
  * lost its address, loaded on demand when a page opens the dialog.
  */
 
-import { allowedFor } from "./always-allowed.ts";
+import { type Allowances, allowedFor } from "./always-allowed.ts";
 import {
 	button,
 	clientLabel,
@@ -28,6 +28,121 @@ import type {
 	SessionInfo,
 	StateChangeDetail,
 } from "./types.ts";
+
+/** A switch: a checkbox with `role="switch"` in its label, which a click on the text turns too. */
+function switchOf(
+	doc: Document,
+	text: HTMLElement,
+	onToggle: (on: boolean) => void,
+): { label: HTMLLabelElement; input: HTMLInputElement } {
+	const input = el(doc, "input");
+	input.type = "checkbox";
+	input.setAttribute("role", "switch");
+	input.addEventListener("change", () => onToggle(input.checked));
+	const label = el(doc, "label", { className: "tab-mcp-switch" }, input, text);
+	return { label, input };
+}
+
+/**
+ * Under a connected app: a switch per tool that asks (its title or name,
+ * destructive ones marked) and "Allow everything, no questions asked" with
+ * what it means. Each switch's accessible name names the app: the list has
+ * one set per app. Shown while the page offers allowing and has tools that
+ * ask, and always while the app has an allowance, so that the user sees
+ * what runs without asking and can end it. `render` updates it in place, so
+ * a focused switch keeps its focus.
+ */
+function allowedSwitches(
+	doc: Document,
+	s: DialogStrings,
+	allowed: Allowances,
+	grantId: string,
+	app: string,
+): { box: HTMLElement; render: () => void } {
+	const title = el(doc, "p", {
+		className: "tab-mcp-allowed-title",
+		id: `${nextId()}-allowed`,
+		text: s.runsWithoutAsking,
+	});
+	const list = el(doc, "div", { className: "tab-mcp-switches" });
+	const all = switchOf(
+		doc,
+		el(doc, "span", { text: s.allowEverything }),
+		(on) => allowed.setEverything(grantId, on),
+	);
+	all.label.classList.add("tab-mcp-everything");
+	all.input.setAttribute("aria-label", format(s.allowEverythingApp, { app }));
+	const note = el(
+		doc,
+		"small",
+		{ className: "tab-mcp-everything-note", id: `${title.id}-note` },
+		...fill(doc, s.allowEverythingNote, { app }),
+	);
+	all.input.setAttribute("aria-describedby", note.id);
+	// Filled when first shown: a page without it has no switches in its DOM.
+	const box = el(doc, "div", { className: "tab-mcp-allowed" });
+	box.setAttribute("role", "group");
+	box.setAttribute("aria-labelledby", title.id);
+	const switches = new Map<
+		string,
+		ReturnType<typeof switchOf> & { name: HTMLElement; mark: HTMLElement }
+	>();
+	const render = () => {
+		const tools = allowed.tools();
+		const everything = allowed.everything(grantId);
+		box.hidden =
+			!(allowed.offered && tools.length > 0) &&
+			!everything &&
+			allowed.list(grantId).length === 0;
+		if (box.hidden) return;
+		if (!box.hasChildNodes()) box.append(title, list, all.label, note);
+		const names = new Set(tools.map((t) => t.name));
+		// Changed tools left the list already (`toolsChanged`).
+		const listed = new Set(allowed.list(grantId));
+		for (const [name, { label }] of switches) {
+			if (names.has(name)) continue;
+			label.remove();
+			switches.delete(name);
+		}
+		tools.forEach((tool, i) => {
+			let entry = switches.get(tool.name);
+			if (entry === undefined) {
+				const name = el(doc, "span");
+				const mark = el(doc, "small", {
+					className: "tab-mcp-destructive",
+					text: s.destructive,
+				});
+				const made = switchOf(
+					doc,
+					el(doc, "span", {}, name, " ", mark),
+					(on) =>
+						on
+							? allowed.allow(grantId, tool.name)
+							: allowed.ask(grantId, tool.name),
+				);
+				entry = { ...made, name, mark };
+				switches.set(tool.name, entry);
+			}
+			const shown = visible(tool.title ?? tool.name);
+			entry.name.textContent = shown;
+			entry.mark.hidden = !tool.destructive;
+			entry.input.setAttribute(
+				"aria-label",
+				format(tool.destructive ? s.allowDestructiveToolApp : s.allowToolApp, {
+					tool: shown,
+					app,
+				}),
+			);
+			// What runs without asking now: also every tool under "everything".
+			entry.input.checked = everything || listed.has(tool.name);
+			entry.input.disabled = everything;
+			if (list.children[i] !== entry.label)
+				list.insertBefore(entry.label, list.children[i] ?? null);
+		});
+		all.input.checked = everything;
+	};
+	return { box, render };
+}
 
 /**
  * The labels of the apps behind these grants, each once: an app can hold
@@ -199,8 +314,8 @@ export const CODE_USED_WAIT_MS = 10_000;
 /**
  * The "Connect your AI app" dialog: the address with Copy, how to add it,
  * the pairing code (with Copy) while the relay sends one, New address, and
- * the connected apps with Disconnect (and the tools allowed until reload
- * for each, with Ask again). Pairing is on while it is open, so closing it
+ * the connected apps with Disconnect (and, for each, switches for the tools
+ * that run without asking). Pairing is on while it is open, so closing it
  * ends the code; the connection and the address stay. Until an app is
  * connected, only a small Close (and Escape) close it. Once one is, a
  * confirmation leads, the setup moves behind "Connect another app" and
@@ -526,14 +641,13 @@ export function showConnectDialog(
 	const start = () => (connectedView ? done : copy);
 
 	// One item per grant, kept while the grant is: a focused Disconnect keeps
-	// its focus. Under it, the tools allowed until reload, with Ask again.
+	// its focus. Under it, the switches for what runs without asking.
 	const items = new Map<
 		string,
 		{
 			item: HTMLLIElement;
 			disconnect: HTMLButtonElement;
-			allowedText: HTMLElement;
-			allowedBox: HTMLElement;
+			renderAllowed: () => void;
 		}
 	>();
 	const appItem = (grant: Grant) => {
@@ -559,22 +673,7 @@ export function showConnectDialog(
 		);
 		// One name per button: each list item has its own Disconnect.
 		disconnect.setAttribute("aria-label", format(s.disconnectApp, { app }));
-		const askAgain = button(
-			doc,
-			s.askAgain,
-			() => allowed.forget(grant.grantId),
-			"tab-mcp-ask-again",
-		);
-		askAgain.setAttribute("aria-label", format(s.askAgainApp, { app }));
-		const allowedText = el(doc, "span");
-		const allowedBox = el(
-			doc,
-			"div",
-			{ className: "tab-mcp-allowed" },
-			allowedText,
-			" ",
-			askAgain,
-		);
+		const switches = allowedSwitches(doc, s, allowed, grant.grantId, app);
 		const item = el(
 			doc,
 			"li",
@@ -587,9 +686,9 @@ export function showConnectDialog(
 			),
 			" ",
 			disconnect,
-			allowedBox,
+			switches.box,
 		);
-		return { item, disconnect, allowedText, allowedBox };
+		return { item, disconnect, renderAllowed: switches.render };
 	};
 
 	/** The steps for `address` in the help, made again when it changes. */
@@ -778,11 +877,7 @@ export function showConnectDialog(
 				items.set(grant.grantId, entry);
 			}
 			entry.disconnect.disabled = !connected;
-			const tools = allowed.list(grant.grantId);
-			entry.allowedBox.hidden = tools.length === 0;
-			entry.allowedText.textContent = format(s.runsWithoutAsking, {
-				tools: tools.map(visible).join(", "),
-			});
+			entry.renderAllowed();
 			if (appList.children[i] !== entry.item)
 				appList.insertBefore(entry.item, appList.children[i] ?? null);
 		});

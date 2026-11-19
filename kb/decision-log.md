@@ -2027,6 +2027,11 @@ every tool of the page, so consent per tool is the page's.
 - A visible change for pages that relied on it; the changelog says so. The test page of
   `test/e2e` turns it on, so its end-to-end test still covers it.
 
+**Amended by DEC-200:** still opt-in, but `alwaysAllow: true` keeps an allowance until
+the app is disconnected (in `storage`), `"until-reload"` is the old scope, the connect
+dialog adds "Allow everything, no questions asked", and pages get the allowances as an
+API (`./allowed`).
+
 ## DEC-107: No development pairing endpoint; tests pair in-process (owner)
 
 Owner, 2026-10-31, on item 5 of the comparis game feedback
@@ -4182,3 +4187,48 @@ another browser".
 - Typing the code stays the way that always works: another browser, another profile,
   another device, or a user who ignores the question.
 - Built in Sitegloss, after this release; the tab-mcp browser extension may follow.
+
+## DEC-200: Allowed tools last until the app is disconnected; pages get them as an API (owner)
+
+Iteration 46; amends DEC-096. The owner, 2026-11-19: "The goal is that we have in every
+demo app (page) a way to select which tools to allow always plus a switch to 'allow
+everything always, no questions asked'." The shape below is the library's, not the
+owner's.
+
+- **Per grant, as the user saw it.** An allowance is per AI app (grant) and tool, with
+  the title and description the user saw; a tool registered with another one asks again
+  and leaves the list. "Allow everything, no questions asked" is a switch of its own per
+  grant: it covers every tool, also later, changed and destructive ones, so a change
+  does not end it. A tool that is not registered keeps its allowance (DEC-096's
+  "unregistered is forgotten" cannot survive a reload, which registers every tool
+  again).
+- **Kept until the grant ends.** `alwaysAllow: true` keeps them in `storage` under the
+  secret's key with `#allowed` (grant ids, tool names, what the user saw, a 32-bit
+  fingerprint of the secret; no arguments or results); `"until-reload"` keeps them in
+  memory, DEC-096's scope; `storage: null` is memory too. They are pruned only on what
+  the relay says (a session's grants, `grant.removed`, `newAddress()`), never on a
+  dropped connection or before the first session, or a reload would wipe them. The
+  fingerprint ends them when the secret changes, also in a tab that was not listening.
+  Storage is read on every question, so a change in another tab of the address counts
+  at once.
+- **Honoured wherever a call is confirmed.** The check runs before the page's own
+  `onConfirm` too: a page with its own UI otherwise could not use the switches, and
+  React's provider always installs one. Only relay AI apps: WebMCP agents and served
+  ports have no grant.
+- **The dialogs.** The confirmation's third button says how long it lasts ("Always
+  allow", or "Allow until reload" when nothing is kept) and never offers "everything":
+  that is a deliberate act, not an answer to one question. The connect dialog shows,
+  under each connected app, a switch per tool that asks and "Allow everything" with one
+  sentence on what it means; with `alwaysAllow` unset, only while something is allowed
+  for that app, so the user can see and end it where apps are disconnected.
+- **An API.** `@ractive-ch/tab-mcp-client/allowed` (`allowedTools(mcp)`), an entry of its
+  own like `./setup`; `useAllowedTools(grantId)` in `./react`. With `alwaysAllow` unset
+  the API still works and keeps in `storage`: a page with its own switches has decided.
+- **Out of the core.** The core asks the confirmation's chunk for every consequential
+  call (`confirmCall`), which loads the allowances with it; a chunk of their own cost the
+  core more than it had left. The core exposes `_allowed` (registry, secret store,
+  option) for the library's own entries, stripped from the declarations.
+- **The risk is the page's to offer.** An allowance outlives the user's attention for up
+  to the grant's 90 days, and an AI app can be steered by what it reads. The README says
+  to offer it for tools one would not check each time, and that "everything" covers
+  tools the user has not seen.

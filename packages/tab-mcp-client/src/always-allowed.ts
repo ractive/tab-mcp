@@ -1,82 +1,414 @@
 /**
- * The tools a user chose "Allow until reload" for, per AI app (grant), kept
- * in memory for the page's lifetime. An entry goes when its grant goes, when
- * the user resets it in the connect dialog, or when its tool is gone. A tool
- * registered again as it was (React's `useTool` does that on a remount) keeps
- * it; one whose title or description changed, what the user saw when
- * allowing it, is asked again.
+ * The tools that run without asking, per AI app (grant), DEC-096 and
+ * DEC-200: the ones the user allowed one by one, each with what the user
+ * saw of it (title and description; a tool that changed since is asked
+ * again and leaves the list), and "everything", which covers every tool of
+ * the page, also ones the user has not seen.
+ *
+ * Kept in the page's `storage` under the secret's key with `#allowed`, so
+ * that they outlive a reload; in memory with `alwaysAllow: "until-reload"`,
+ * with `storage: null` and without a relay. Storage is read first on every
+ * question, so that a change in another tab of the same address counts at
+ * once (only one tab at a time holds the connection, DEC-095).
+ *
+ * An allowance ends with its grant, and only on what the relay says: the
+ * grants of a new session, a removed grant, `newAddress()` (the relay
+ * revoked them all). A dropped connection, or a page that has not connected
+ * yet, keeps them: `grantschange` does not fire then. They also belong to
+ * the address secret they were made under, so a new secret (`newAddress()`
+ * here or in another tab) ends them even where nothing listened.
+ *
+ * Out of the core: the confirmation (`confirm.ts`, which the core loads for
+ * every consequential call), the connect dialog and
+ * `@ractive-ch/tab-mcp-client/allowed` import it.
  */
 
+import type { ToolRegistry } from "./registry.ts";
 import type { TabMcp } from "./tab-mcp.ts";
-import type { ConfirmRequest } from "./types.ts";
+import type { ConfirmRequest, SecretStorage } from "./types.ts";
 
+/** What the user saw of a tool: its name, title and description. */
 type ToolSeen = ConfirmRequest["tool"];
+/** A tool as the registry or a call names it. */
+type ToolNow = {
+	name: string;
+	title?: string | undefined;
+	description: string;
+};
 
-/** What the user saw of a tool when allowing it. */
-const seen = (tool: ToolSeen) => JSON.stringify([tool.title, tool.description]);
+/** A tool that asks before it runs, for a page's switch. */
+export interface AllowedTool {
+	name: string;
+	title?: string;
+	description: string;
+	/** Marked `destructiveHint`: it may delete or overwrite. */
+	destructive: boolean;
+}
 
-export class AlwaysAllowed {
-	/** Per grant: the tools by name, with what the user saw of each. */
-	readonly #tools = new Map<
-		string,
-		Map<string, { seen: string; label: string }>
-	>();
-	readonly #listeners = new Set<() => void>();
+/**
+ * The tools that run without asking, per connected AI app (`Grant.grantId`),
+ * for a page that draws its own switches: `allowedTools(mcp)` of
+ * `@ractive-ch/tab-mcp-client/allowed`. The library's dialogs use the same.
+ */
+export interface AllowedTools {
+	/**
+	 * `true`: kept in the page's `storage` until the app is disconnected;
+	 * `false`: in memory, until the page is reloaded or the app is
+	 * disconnected (`alwaysAllow: "until-reload"`, `storage: null`).
+	 */
+	readonly kept: boolean;
+	/**
+	 * The page's tools that ask before they run (`consequentialHint`, callable
+	 * by AI apps through the relay), in the order registered.
+	 */
+	tools(): AllowedTool[];
+	/**
+	 * The names of the tools allowed one by one for this app, in the order
+	 * allowed; also one that is not registered right now (it runs without
+	 * asking again once it is back unchanged).
+	 */
+	list(grantId: string): string[];
+	/**
+	 * Whether a call of this tool by this app runs without asking now:
+	 * "everything" is on, or the tool is allowed and registered unchanged.
+	 */
+	has(grantId: string, name: string): boolean;
+	/**
+	 * Allow one tool for this app from now on, as it is registered now (its
+	 * title and description). Nothing happens for an app that is not in
+	 * `mcp.grants` or a tool that is not in `tools()`.
+	 */
+	allow(grantId: string, name: string): void;
+	/** Ask again before this app runs this tool. */
+	ask(grantId: string, name: string): void;
+	/** Whether "Allow everything, no questions asked" is on for this app. */
+	everything(grantId: string): boolean;
+	/**
+	 * "Allow everything, no questions asked" for this app: every tool runs
+	 * without asking, with any arguments, also tools registered later, changed
+	 * ones and destructive ones. Turning it on does nothing for an app that
+	 * is not in `mcp.grants`.
+	 */
+	setEverything(grantId: string, on: boolean): void;
+	/** Ask again for everything of this app: its tools and "everything". */
+	forget(grantId: string): void;
+	/**
+	 * Calls `listener` on every change of the allowances (also one in
+	 * another tab of the same address) and of `tools()`; returns what stops it.
+	 */
+	onChange(listener: () => void): () => void;
+}
 
-	has(grantId: string, tool: ToolSeen): boolean {
-		const tools = this.#tools.get(grantId);
-		const allowed = tools?.get(tool.name)?.seen;
-		if (allowed === undefined || allowed === seen(tool)) {
-			return allowed !== undefined;
+/** One app's allowances. */
+interface Entry {
+	everything: boolean;
+	/** In the order allowed; `title` and `description` as the user saw them. */
+	tools: ToolSeen[];
+}
+
+/** What is kept: the grants' entries and the secret they belong to. */
+interface State {
+	/** {@link fingerprint} of the address secret. */
+	secret: string;
+	grants: Map<string, Entry>;
+}
+
+/**
+ * A short fingerprint of the address secret (FNV-1a, 32 bits): enough to
+ * tell that the secret changed, too short to say anything about it.
+ */
+function fingerprint(secret: string | undefined): string {
+	if (secret === undefined) return "";
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < secret.length; i++)
+		hash = Math.imul(hash ^ secret.charCodeAt(i), 0x01000193) >>> 0;
+	return hash.toString(16);
+}
+
+const isString = (v: unknown): v is string => typeof v === "string";
+
+/**
+ * The kept text as a state; anything that is not exactly what
+ * {@link serialize} writes allows nothing.
+ */
+function parse(text: string): State {
+	const none: State = { secret: "", grants: new Map() };
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return none;
+	}
+	const v = value as { secret?: unknown; grants?: unknown } | null;
+	if (!isString(v?.secret) || !Array.isArray(v.grants)) return none;
+	const grants = new Map<string, Entry>();
+	for (const g of v.grants as unknown[]) {
+		const e = g as {
+			grantId?: unknown;
+			everything?: unknown;
+			tools?: unknown;
+		} | null;
+		if (
+			!isString(e?.grantId) ||
+			typeof e.everything !== "boolean" ||
+			!Array.isArray(e.tools)
+		)
+			return none;
+		const tools: ToolSeen[] = [];
+		for (const t of e.tools as unknown[]) {
+			const tool = t as Partial<Record<keyof ToolSeen, unknown>> | null;
+			if (
+				!isString(tool?.name) ||
+				!isString(tool.description) ||
+				(tool.title !== undefined && !isString(tool.title))
+			)
+				return none;
+			tools.push(seenOf(tool as ToolSeen));
 		}
-		// The tool changed since: asked again, and no longer listed.
-		tools?.delete(tool.name);
-		this.#changed();
+		grants.set(e.grantId, { everything: e.everything, tools });
+	}
+	return { secret: v.secret, grants };
+}
+
+/** Grant ids, tool names and what the user saw of each: no arguments, no results. */
+function serialize(state: State): string {
+	return JSON.stringify({
+		secret: state.secret,
+		grants: [...state.grants].map(([grantId, e]) => ({ grantId, ...e })),
+	});
+}
+
+/** Only what the user saw, as plain strings. */
+function seenOf(tool: ToolSeen): ToolSeen {
+	const seen: ToolSeen = { name: tool.name, description: tool.description };
+	if (tool.title !== undefined) seen.title = tool.title;
+	return seen;
+}
+
+const sameSeen = (a: ToolSeen, b: ToolNow) =>
+	a.title === b.title && a.description === b.description;
+
+/** The allowances of one `TabMcp`. */
+export class Allowances implements AllowedTools {
+	readonly kept: boolean;
+	/** The library's dialogs offer allowing (`alwaysAllow` on). */
+	readonly offered: boolean;
+	readonly #mcp: TabMcp;
+	readonly #registry: ToolRegistry;
+	readonly #secret: () => string;
+	/** `null`: in memory only. */
+	readonly #storage: SecretStorage | null;
+	readonly #key: string;
+	#memory: State = { secret: "", grants: new Map() };
+	readonly #listeners = new Set<() => void>();
+	#unwatch: (() => void) | undefined;
+
+	constructor(mcp: TabMcp) {
+		const [registry, secrets, alwaysAllow] = mcp._allowed;
+		this.#mcp = mcp;
+		this.#registry = registry;
+		this.#secret = () => fingerprint(secrets?.current());
+		this.#storage =
+			alwaysAllow === "until-reload" ? null : (secrets?.storage ?? null);
+		this.#key = `${secrets?.key}#allowed`;
+		this.kept = this.#storage !== null;
+		this.offered = alwaysAllow === true || alwaysAllow === "until-reload";
+	}
+
+	tools(): AllowedTool[] {
+		return this.#registry
+			.list()
+			.filter(
+				(t) =>
+					t.annotations.consequentialHint === true &&
+					(t.callers?.includes("relay") ?? true),
+			)
+			.map((t) => {
+				const tool: AllowedTool = {
+					name: t.name,
+					description: t.description,
+					destructive: t.annotations.destructiveHint === true,
+				};
+				if (t.title !== undefined) tool.title = t.title;
+				return tool;
+			});
+	}
+
+	list(grantId: string): string[] {
+		return (this.#read().get(grantId)?.tools ?? []).map((t) => t.name);
+	}
+
+	has(grantId: string, name: string): boolean {
+		const tool = this.#registry.get(name);
+		return (
+			this.everything(grantId) ||
+			(tool !== undefined && this.allows(grantId, tool))
+		);
+	}
+
+	/**
+	 * Whether this call runs without asking: "everything", or this tool as
+	 * the user saw it. A tool that changed since leaves the list.
+	 */
+	allows(grantId: string, tool: ToolNow): boolean {
+		const grants = this.#read();
+		const entry = grants.get(grantId);
+		if (entry === undefined) return false;
+		if (entry.everything) return true;
+		const kept = entry.tools.find((t) => t.name === tool.name);
+		if (kept === undefined) return false;
+		if (sameSeen(kept, tool)) return true;
+		this.#drop(grants, grantId, (t) => t.name === tool.name);
 		return false;
 	}
 
-	add(grantId: string, tool: ToolSeen): void {
-		const tools = this.#tools.get(grantId) ?? new Map();
-		tools.set(tool.name, { seen: seen(tool), label: tool.title ?? tool.name });
-		this.#tools.set(grantId, tools);
-		this.#changed();
+	allow(grantId: string, name: string): void {
+		const tool = this.tools().find((t) => t.name === name);
+		if (tool !== undefined) this.keep(grantId, tool);
 	}
 
-	/** The tools allowed for a grant (title, else name), in the order allowed. */
-	list(grantId: string): string[] {
-		return [...(this.#tools.get(grantId)?.values() ?? [])].map((t) => t.label);
+	/** Allow `tool` as the user saw it, for an app the relay still lists. */
+	keep(grantId: string, tool: ToolSeen): void {
+		if (!this.#granted(grantId)) return;
+		const grants = this.#read();
+		const entry = grants.get(grantId) ?? { everything: false, tools: [] };
+		entry.tools = [
+			...entry.tools.filter((t) => t.name !== tool.name),
+			seenOf(tool),
+		];
+		grants.set(grantId, entry);
+		this.#write(grants);
 	}
 
-	/** Ask again for every tool of a grant. */
+	ask(grantId: string, name: string): void {
+		this.#drop(this.#read(), grantId, (t) => t.name === name);
+	}
+
+	everything(grantId: string): boolean {
+		return this.#read().get(grantId)?.everything === true;
+	}
+
+	setEverything(grantId: string, on: boolean): void {
+		if (on && !this.#granted(grantId)) return;
+		const grants = this.#read();
+		const entry = grants.get(grantId) ?? { everything: false, tools: [] };
+		if (entry.everything === on) return;
+		entry.everything = on;
+		if (on || entry.tools.length > 0) grants.set(grantId, entry);
+		else grants.delete(grantId);
+		this.#write(grants);
+	}
+
 	forget(grantId: string): void {
-		if (this.#tools.delete(grantId)) this.#changed();
+		const grants = this.#read();
+		if (grants.delete(grantId)) this.#write(grants);
 	}
 
-	/** Forget every grant not in `grantIds`. */
+	/**
+	 * Only the grants the relay lists now: the others ended. What was kept
+	 * under another secret is dropped from storage too (it allowed nothing
+	 * already).
+	 */
 	keepGrants(grantIds: Iterable<string>): void {
 		const keep = new Set(grantIds);
-		for (const grantId of this.#tools.keys())
-			if (!keep.has(grantId)) this.forget(grantId);
+		const grants = this.#read();
+		// Kept under another secret: nothing to write unless something was kept.
+		let changed =
+			this.#memory.grants !== grants && this.#memory.grants.size > 0;
+		for (const grantId of [...grants.keys()])
+			if (!keep.has(grantId)) changed = grants.delete(grantId) || changed;
+		if (changed) this.#write(grants);
 	}
 
-	/** Forget every tool not in `names`. */
-	keepTools(names: Iterable<string>): void {
-		const keep = new Set(names);
+	/**
+	 * The registry changed: a tool registered with another title or
+	 * description than the user saw leaves every list. One that is not
+	 * registered stays (a reload registers them all again, a page may offer
+	 * some only on some views).
+	 */
+	toolsChanged(): void {
+		const grants = this.#read();
 		let changed = false;
-		for (const tools of this.#tools.values()) {
-			for (const tool of tools.keys()) {
-				if (keep.has(tool)) continue;
-				tools.delete(tool);
-				changed = true;
-			}
+		for (const [grantId, entry] of [...grants]) {
+			const tools = entry.tools.filter((t) => {
+				const now = this.#registry.get(t.name);
+				return now === undefined || sameSeen(t, now);
+			});
+			if (tools.length === entry.tools.length) continue;
+			changed = true;
+			entry.tools = tools;
+			if (!entry.everything && tools.length === 0) grants.delete(grantId);
 		}
-		if (changed) this.#changed();
+		if (changed) this.#write(grants);
+		else this.#changed(); // `tools()` changed
 	}
 
-	/** Calls `listener` on every change; returns what stops it. */
 	onChange(listener: () => void): () => void {
 		this.#listeners.add(listener);
-		return () => this.#listeners.delete(listener);
+		this.#watch();
+		return () => {
+			this.#listeners.delete(listener);
+			if (this.#listeners.size === 0) {
+				this.#unwatch?.();
+				this.#unwatch = undefined;
+			}
+		};
+	}
+
+	/** Another tab changed them: tell the listeners (only while there are some). */
+	#watch(): void {
+		if (this.#unwatch !== undefined || this.#storage === null) return;
+		const g = globalThis as Partial<EventTarget>;
+		const changed = (event: Event) => {
+			if ((event as StorageEvent).key === this.#key) this.#changed();
+		};
+		g.addEventListener?.("storage", changed);
+		this.#unwatch = () => g.removeEventListener?.("storage", changed);
+	}
+
+	#granted(grantId: string): boolean {
+		return this.#mcp.grants.some((g) => g.grantId === grantId);
+	}
+
+	/** Drop the tools of a grant that match; the grant goes once nothing is left. */
+	#drop(
+		grants: Map<string, Entry>,
+		grantId: string,
+		match: (tool: ToolSeen) => boolean,
+	): void {
+		const entry = grants.get(grantId);
+		if (entry === undefined || !entry.tools.some(match)) return;
+		entry.tools = entry.tools.filter((t) => !match(t));
+		if (!entry.everything && entry.tools.length === 0) grants.delete(grantId);
+		this.#write(grants);
+	}
+
+	/**
+	 * The allowances now: storage first, so that another tab's change counts;
+	 * memory where storage cannot be read. None once the secret changed.
+	 */
+	#read(): Map<string, Entry> {
+		if (this.#storage !== null) {
+			try {
+				const text = this.#storage.getItem(this.#key);
+				if (text !== null) this.#memory = parse(text);
+			} catch {
+				// unreadable: what this page kept in memory
+			}
+		}
+		return this.#memory.secret === this.#secret()
+			? this.#memory.grants
+			: new Map();
+	}
+
+	#write(grants: Map<string, Entry>): void {
+		this.#memory = { secret: this.#secret(), grants };
+		try {
+			this.#storage?.setItem(this.#key, serialize(this.#memory));
+		} catch {
+			// quota or blocked: kept for the page's lifetime
+		}
+		this.#changed();
 	}
 
 	#changed(): void {
@@ -84,31 +416,25 @@ export class AlwaysAllowed {
 	}
 }
 
-/** The tools allowed until reload, per `TabMcp`. */
-const allowed = new WeakMap<TabMcp, AlwaysAllowed>();
+/** The allowances per `TabMcp`. */
+const allowances = new WeakMap<TabMcp, Allowances>();
 
 /**
- * The tools allowed until reload of `mcp`, made on first use. Its grants
- * and tools are followed: a tool's absence counts only after the current
- * task, so that one unregistered and registered again at once (React) keeps
- * its entries.
+ * The allowances of `mcp`, made on first use. They follow its grants (only
+ * when the relay names them, see above) and its tools.
  */
-export function allowedFor(mcp: TabMcp): AlwaysAllowed {
-	const kept = allowed.get(mcp);
+export function allowedFor(mcp: TabMcp): Allowances {
+	const kept = allowances.get(mcp);
 	if (kept !== undefined) return kept;
-	const made = new AlwaysAllowed();
+	const made = new Allowances(mcp);
+	allowances.set(mcp, made);
 	mcp.addEventListener("grantschange", (e) =>
 		made.keepGrants(e.detail.grants.map((g) => g.grantId)),
 	);
-	let tools: readonly string[] | undefined;
-	mcp.addEventListener("toolschange", (e) => {
-		if (tools === undefined)
-			queueMicrotask(() => {
-				if (tools !== undefined) made.keepTools(tools);
-				tools = undefined;
-			});
-		tools = e.detail.tools;
-	});
-	allowed.set(mcp, made);
+	mcp._allowed[0].onChange(() => made.toolsChanged());
+	made.toolsChanged(); // tools may have changed since the last page kept them
+	// Made while connected: the grants are the relay's, the others ended.
+	if (mcp.session !== undefined)
+		made.keepGrants(mcp.grants.map((g) => g.grantId));
 	return made;
 }

@@ -206,7 +206,7 @@ trial token that a script adds later counts for a `TabMcp` made after it.
 - A WebMCP call takes the same path as an AI app's: the arguments are checked against
   `inputSchema` (Chrome does not check them), a consequential tool asks (`onConfirm`, or
   the library's dialog, which names the caller "An agent in this browser"), and
-  `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Allow until reload" is
+  `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Always allow" is
   never offered or applied for these calls: there is no identity to remember it for.
 - The call resolves with what `execute` returned, which the browser hands the agent as
   JSON text. An MCP result goes out as its `structuredContent` if it has one, else as
@@ -450,7 +450,7 @@ instructions, as the recipe does with a delimited block.
   in a message is ignored, so the other end cannot pass for an AI app of the relay.
 - Without `serve`'s `onConfirm`, a consequential call through the port asks the page's
   `onConfirm` or the library's dialog, which names the caller "Example assistant (this
-  site's assistant)" and never offers "Allow until reload".
+  site's assistant)" and never offers "Always allow".
 - `requestTimeoutMs` (300 s by default, as `createTunnelFetch`; below 2^31 ms) limits each
   request on the page's side: on expiry the call is aborted (`execute`'s signal and the
   question's), `toolcallend` says `cancelled`, a later answer of the tool is dropped, and
@@ -484,18 +484,12 @@ asks the user before every call ("Don't allow" or "Allow"), showing the AI app a
 arguments. A refusal reaches the AI app as an error result, and so does a call whose tool
 was removed while the user was asked.
 
-`alwaysAllow: true` adds "Allow until reload", which lets that tool run without asking for
-that AI app, with any arguments, until the page is reloaded or the app is disconnected.
-The connect dialog lists such tools under the app ("Runs without asking: …") with "Ask
-again", and a tool registered again unchanged (React's `useTool` on a remount) keeps its
-entry; one whose title or description changed is asked again. It is off by default: it
-lifts the only brake at run time, which is what a prompt injection needs, and the relay
-cannot help, since its one OAuth scope (`tools`) covers every tool of the page. Consent
-per tool is the page's. Turn it on only for tools whose calls the user need not check one
-by one.
+`alwaysAllow: true` adds "Always allow", which lets that tool run without asking for that
+AI app from then on; see [Tools that run without asking](#tools-that-run-without-asking).
+It is off by default.
 
 Tools are called while the user is in the AI app, so the dialog often opens in a tab in
-the background. "Allow" and "Allow until reload" can be clicked only once the page has
+the background. "Allow" and "Always allow" can be clicked only once the page has
 been visible and focused for 750 ms with the dialog open; leaving the page
 disables them and coming back starts the wait again, so the click that brings the page
 forward cannot approve. One confirmation is shown at a time; the others wait, the shown
@@ -520,8 +514,8 @@ Not when an `onConfirm` answers (the page's, or for a served port its own): it m
 anywhere, such as a side panel or the site's chat. Say where in the tool's own
 description if the AI app should know.
 
-Pass `onConfirm` to ask in your own UI (it is asked every time; remember answers there if
-you want to). Show the verified `client.host` next to the name the AI app declares, as the
+Pass `onConfirm` to ask in your own UI (it is asked for every call the user has not
+allowed, see [Tools that run without asking](#tools-that-run-without-asking)). Show the verified `client.host` next to the name the AI app declares, as the
 library's dialog does, since anyone can declare any name. Escape the arguments and the
 name as the dialog does with `escapeInvisible` from `@ractive-ch/tab-mcp-client/visible`
 (an entry of its own, not in the core):
@@ -552,6 +546,93 @@ outcome `unanswered`. Any other value, and a throw, is a refusal.
 
 `mcp.confirmInPage(request, { document })` is the library's own dialog, for an
 `onConfirm` that handles only some calls itself (`document` defaults to the global one).
+
+### Tools that run without asking
+
+The user can let a consequential tool run without asking, for one connected AI app: one
+tool at a time ("Always allow" this tool), or everything ("Allow everything, no questions
+asked"). An allowed call runs at once, with the library's dialog and with your own
+`onConfirm` alike: neither is asked. Only AI apps through the relay can be allowed; an
+agent in the browser (WebMCP) and a served port have no grant to remember it for and are
+always asked.
+
+The option `alwaysAllow` decides what the library's dialogs offer:
+
+| `alwaysAllow`    | The confirmation offers    | The connect dialog shows              | Kept                                         |
+| ---------------- | -------------------------- | ------------------------------------- | -------------------------------------------- |
+| unset or `false` | Don't allow, Allow         | nothing (unless something is allowed) | in `storage`, for your own switches          |
+| `true`           | … and "Always allow"       | the switches under each app           | in `storage`, until the app is disconnected  |
+| `"until-reload"` | … and "Allow until reload" | the switches under each app           | in memory, until the page is reloaded        |
+
+With `true` and `storage: null`, nothing outlives the page either, and the button says
+"Allow until reload". The confirmation never offers "allow everything": that is a
+deliberate act in the connect dialog, not an answer to one question. In the connect
+dialog, each connected app gets a switch per tool that asks (its title or name;
+destructive ones marked) and "Allow everything, no questions asked", with a sentence on
+what it means. The switches are checkboxes with `role="switch"` whose accessible names
+name the app. When the page does not offer it (`alwaysAllow` unset) but something is
+allowed for an app (by your own switches), the connect dialog shows its switches too, so
+the user can see and end what runs without asking where they disconnect apps.
+
+**What counts.** An allowed tool runs without asking as long as its title and
+description are the ones the user allowed: a tool registered with another one is asked
+again and leaves the list. A tool that is not registered for a while keeps its allowance
+(a reload registers every tool again; a page may offer some only on some views).
+"Everything" covers every tool, also ones registered later, changed ones and destructive
+ones: that is why it is a switch of its own.
+
+**Where it is kept, and when it ends.** In the page's `storage` (by default
+`localStorage`), under the address secret's key with `#allowed` appended: the grant ids,
+the tool names and the title and description the user saw, and a fingerprint of the
+secret; no arguments, no results. An allowance ends with its grant, as the relay reports
+it: the app is disconnected (in the page or elsewhere), "Disconnect all apps"
+(`newAddress()`), the grant expired, the user signed out (identity binding). A dropped
+connection, a reload or a page that has not connected yet keeps them. Tabs that share the
+address share them, and a change in one counts in the others at once.
+
+**Your own switches.** `@ractive-ch/tab-mcp-client/allowed` (an entry of its own, not in
+the core) has the same allowances for a UI of your own, also with `alwaysAllow` unset:
+
+```ts
+import { allowedTools } from "@ractive-ch/tab-mcp-client/allowed";
+
+const allowed = allowedTools(mcp); // one object per TabMcp
+function drawSwitches() {
+  list.replaceChildren(
+    ...mcp.grants.flatMap((grant) => [
+      ...allowed.tools().map((tool) =>
+        mySwitch(`${tool.title ?? tool.name}${tool.destructive ? " (destructive)" : ""}`,
+          allowed.has(grant.grantId, tool.name),
+          (on) => (on ? allowed.allow : allowed.ask)(grant.grantId, tool.name)),
+      ),
+      mySwitch("Allow everything, no questions asked",
+        allowed.everything(grant.grantId),
+        (on) => allowed.setEverything(grant.grantId, on)),
+    ]),
+  );
+}
+allowed.onChange(drawSwitches); // allowances and tools
+mcp.addEventListener("grantschange", drawSwitches);
+```
+
+- `tools()`: the tools that ask (`consequentialHint`, callable through the relay), each
+  `{ name, title?, description, destructive }`.
+- `has(grantId, name)`: whether a call runs without asking now. `list(grantId)`: the
+  names allowed one by one. `everything(grantId)`.
+- `allow(grantId, name)` (as the tool is registered now), `ask(grantId, name)`,
+  `setEverything(grantId, on)`, `forget(grantId)` (everything of that app asks again).
+  Allowing does nothing for an app that is not in `mcp.grants`.
+- `onChange(listener)` returns what stops it. `kept` says whether they outlive a reload.
+- In React, `useAllowedTools(grantId)` of `@ractive-ch/tab-mcp-client/react` returns
+  `{ tools (each with allowed), everything, allowedTools }` and renders again on a change.
+
+**The risk.** An allowance outlives the user's attention: for up to the grant's 90 days,
+calls run that nobody looks at. An AI app can be steered by text it reads (a web page, a
+mail, a document), and an allowed tool is then the one that runs on its say. Offer it
+for tools one would not want to check each time, whose worst call is cheap to undo; not
+for tools that pay, send, delete or publish. "Everything" also covers tools the user has
+not seen, and ones the page adds later. The relay cannot help: its one OAuth scope
+(`tools`) covers every tool of the page, so consent per tool is the page's.
 
 ### Connecting and pairing
 
@@ -593,8 +674,8 @@ outcome `unanswered`. Any other value, and a throw, is a refusal.
    (claude.ai) is connected" (every connected app is named) and what to do next (close it and ask the app to use the
    page's tools); screen readers hear the same. The setup (address, code, help) moves
    behind "Connect another app", closed, so the next code does not appear in view; the
-   connected app is listed with a Disconnect button (and the tools it may run without
-   asking, with "Ask again"), and "Done" closes the dialog. A Disconnect the relay could
+   connected app is listed with a Disconnect button (and, with `alwaysAllow`, the
+   switches for what it may run without asking), and "Done" closes the dialog. A Disconnect the relay could
    not save says so in the list ("The relay could not save this. Try again.").
    Opened again while an app is connected, the dialog starts like this, with the focus
    on Done.
@@ -1046,7 +1127,7 @@ function TodoList() {
   again only when its name, title, description, input or output schema or annotations
   change, or `options.callers` or `options.exposedTo` (by value: a new array with the same
   entries is no change; [which callers see a tool](#which-callers-see-a-tool),
-  [WebMCP](#webmcp), whose `webmcp` on the provider turns it on). Registered again unchanged, a tool allowed until reload stays
+  [WebMCP](#webmcp), whose `webmcp` on the provider turns it on). Registered again unchanged, an allowed tool stays
   allowed. StrictMode's double mount registers it once at a time. A duplicate name or an
   invalid tool is thrown from the component's render, for an error boundary. Tools that
   read state right after another tool changed it should read it from a store (as the

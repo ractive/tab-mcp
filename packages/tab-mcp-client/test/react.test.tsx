@@ -16,10 +16,12 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import type { TabMcp } from "../src/index.ts";
 import {
+	type AllowedToolsSnapshot,
 	ConnectButton,
 	TabMcpProvider,
 	type TabMcpSnapshot,
 	type ToolCallRecord,
+	useAllowedTools,
 	useTabMcp,
 	useTabMcpState,
 	useTool,
@@ -337,6 +339,64 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 		await changed;
 	});
 	expect(snapshots.at(-1)?.grants.map((g) => g.grantId)).toEqual(["g_1"]);
+});
+
+test("useAllowedTools: the page's own switches as state, one object per change (DEC-200)", async () => {
+	stub.grants = [
+		{
+			grantId: "g_1",
+			client: { id: "https://c.example/c.json", name: "C", host: "c.example" },
+			createdAt: new Date().toISOString(),
+		},
+	];
+	const t = tab();
+	await t.registerTool({
+		name: "wipe",
+		description: "Wipes",
+		annotations: { consequentialHint: true, destructiveHint: true },
+		execute: () => "ok",
+	});
+	const snapshots: AllowedToolsSnapshot[] = [];
+	function Switches() {
+		snapshots.push(useAllowedTools("g_1"));
+		return null;
+	}
+	render(
+		<TabMcpProvider client={t}>
+			<Switches />
+		</TabMcpProvider>,
+	);
+	expect(snapshots.at(-1)).toMatchObject({
+		everything: false,
+		tools: [
+			{ name: "wipe", description: "Wipes", destructive: true, allowed: false },
+		],
+	});
+	await act(async () => {
+		await t.connect({ resume: true });
+	});
+	const renders = snapshots.length;
+	act(() => snapshots.at(-1)?.allowedTools.allow("g_1", "wipe"));
+	expect(snapshots.at(-1)?.tools[0]?.allowed).toBe(true);
+	act(() => snapshots.at(-1)?.allowedTools.setEverything("g_1", true));
+	expect(snapshots.at(-1)?.everything).toBe(true);
+	expect(snapshots).toHaveLength(renders + 2);
+	// No change, no render: the same object.
+	act(() => snapshots.at(-1)?.allowedTools.setEverything("g_1", true));
+	expect(snapshots).toHaveLength(renders + 2);
+	// A tool registered later gets its switch.
+	await act(async () => {
+		await t.registerTool({
+			name: "send",
+			description: "Sends",
+			annotations: { consequentialHint: true },
+			execute: () => "ok",
+		});
+	});
+	expect(snapshots.at(-1)?.tools.map((x) => [x.name, x.allowed])).toEqual([
+		["wipe", true],
+		["send", true],
+	]);
 });
 
 test("useTabMcpState shows identity binding and reconnecting", async () => {

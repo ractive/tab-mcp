@@ -18,6 +18,11 @@ export const STRINGS = {
 	confirmWho: "{client} wants to run {tool}.",
 	deny: "Don't allow",
 	allow: "Allow",
+	/** `alwaysAllow: true`: kept until the app is disconnected. */
+	alwaysAllow: "Always allow",
+	alwaysAllowNote:
+		"Always allow: {tool} will run for {client} without asking, with any arguments, until you disconnect {client} from this page.",
+	/** `alwaysAllow: "until-reload"`, or kept in memory only (`storage: null`). */
 	allowUntilReload: "Allow until reload",
 	allowUntilReloadNote:
 		"Allow until reload: {tool} will run for {client} without asking, with any arguments, until you reload this page or disconnect {client}.",
@@ -102,10 +107,17 @@ export const STRINGS = {
 	storeUnavailable: "The relay could not save this. Try again.",
 	/** Disconnect failed for another reason. */
 	disconnectFailed: "Could not disconnect the app. Try again.",
-	/** Under a connected app: the tools allowed until reload for it. */
-	runsWithoutAsking: "Runs without asking: {tools}",
-	askAgain: "Ask again",
-	askAgainApp: "Ask again before {app} runs a tool",
+	// Under a connected app: a switch per tool that asks, and one for all.
+	runsWithoutAsking: "Runs without asking",
+	/** After a tool's name: it may delete or overwrite (`destructiveHint`). */
+	destructive: "destructive",
+	/** A tool's switch, as read out: starts with what it shows (WCAG 2.5.3). */
+	allowToolApp: "{tool} runs without asking for {app}",
+	allowDestructiveToolApp: "{tool} (destructive) runs without asking for {app}",
+	allowEverything: "Allow everything, no questions asked",
+	allowEverythingApp: "Allow everything, no questions asked, for {app}",
+	allowEverythingNote:
+		"Every tool of this page runs for {app} without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite.",
 	closeNote:
 		"Closing this stops the code. To connect later, open this again from the page.",
 	close: "Close",
