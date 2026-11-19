@@ -575,7 +575,7 @@ describe("pairing with the code shown in the tab (DEC-028, DEC-196)", () => {
 		expect(page.html).toContain(
 			`<p>You're connecting <strong>Test AI</strong> (${host}) to <strong>${APP}</strong>: to the page or app that is open in your browser and shows the code.</p>`,
 		);
-		expect(page.html).toContain('autocomplete="one-time-code"');
+		expect(page.html).toContain('autocomplete="off"');
 		// The relay does not know which page is meant before the code: neither
 		// the page's name for itself nor its origin is shown.
 		expect(page.html).not.toContain("saturnus");
@@ -1505,7 +1505,7 @@ describe("the pairing method is replaceable (DEC-042)", () => {
 			}),
 		);
 		expect(page.html).toContain("It is me");
-		expect(page.html).not.toContain("one-time-code");
+		expect(page.html).not.toContain('name="code"');
 		const refused = await ctx.browser.submit(page, { action: "connect" });
 		expect(refused.html).toContain("Tick the box.");
 		const ok = await ctx.browser.submit(refused, {

@@ -229,7 +229,7 @@ describe("identity binding: the same person connects without a code", () => {
 		const flow = await openAuthorize(ctx);
 		expect(flow.page.status).toBe(200);
 		expect(flow.page.html).toContain("No code is needed");
-		expect(flow.page.html).not.toContain("one-time-code");
+		expect(flow.page.html).not.toContain('name="code"');
 		// The redirect after the post goes to the provider: CSP allows it.
 		expect(flow.page.headers.get("content-security-policy")).toContain(
 			provider.issuer,
