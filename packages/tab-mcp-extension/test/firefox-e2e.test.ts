@@ -63,7 +63,7 @@ interface Stack {
 	stop(): Promise<void>;
 }
 
-/** `pages/library.ts` bundled, the client library in it (DEC-205), once. */
+/** `pages/library.ts` bundled, the client library in it (DEC-207), once. */
 let libraryScript: Promise<string> | undefined;
 function libraryBundle(): Promise<string> {
 	libraryScript ??= Bun.build({
@@ -590,7 +590,7 @@ describe.skipIf(!firefoxOk)("an extension reload or update", () => {
 });
 
 describe.skipIf(!firefoxOk)(
-	"a page with the client library, the Firefox build's WebMCP (DEC-205)",
+	"a page with the client library, the Firefox build's WebMCP (DEC-207)",
 	() => {
 		let stack: Stack;
 

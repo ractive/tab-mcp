@@ -14,7 +14,7 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 ### Added
 
 - **Pages with the tab-mcp client library and the extension know of each other**
-  (DEC-205, with the library from 0.19.0 and `webmcp: true`). A call the user allowed
+  (DEC-207, with the library from 0.19.0 and `webmcp: true`). A call the user allowed
   in the extension (asked, or its "Always allow" switch) is not asked again by the page:
   right before the tool runs, the extension tells the page the tool, the exact
   arguments and the AI app, and the page runs that one call without its own question.
@@ -51,6 +51,13 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   over this extension's connection … Disconnect all apps to end that.").
 - The privacy policy says what the stored secret is now: it identifies this
   installation to the relay; the address is the same for every installation.
+- The rules of filling in the code, the pairing page's content script and the messages
+  between them are the client library's (`@ractive-ch/tab-mcp-client/extension`,
+  DEC-206), shared with Sitegloss; the extension keeps its question, setting, permission
+  prompt and the script's registration. Filling in now also stops while the code is on
+  its way: turning it or AI access off, another relay or the AI app connecting by a
+  typed code in that moment fills in nothing, and two loads of the same sign-in page at
+  once get the one more fill only once.
 
 ## [0.2.1][extension-0.2.1] - 2026-11-17
 

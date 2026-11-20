@@ -9,7 +9,7 @@ tags:
   - design
   - extension
   - webmcp
-timestamp: 2026-11-20T23:00:00+01:00
+timestamp: 2026-11-21T09:00:00+01:00
 ---
 
 # The tab-mcp browser extension
@@ -75,7 +75,7 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   tool (DEC-140): it cannot know whether the AI app is paired with the page itself. An AI
   app connected to both gets such a tool twice. (Until iteration 35 it left out the names
   listed in `<html data-tab-mcp-webmcp>`, which hid them from an AI app connected only
-  to the extension.) Such a page and the extension know of each other since DEC-205:
+  to the extension.) Such a page and the extension know of each other since DEC-207:
   see below.
 - Tools that ask first ask in the side panel when it is open in the focused window of the
   tab the call acts on, else in a Chrome notification; the extension asks, not the
@@ -93,7 +93,7 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   question's "Site (verified)") is checked against the origin of the address Chrome
   reports for the tab; a page that says otherwise gets no tools (iteration 35).
 
-## Pages with the client library (DEC-205)
+## Pages with the client library (DEC-207)
 
 A page that uses the client library with `webmcp: true` and the extension shake hands,
 so that a call the user allowed in the extension is not asked again by the page, and the
@@ -146,14 +146,14 @@ built in DEC-203). Typing the code stays the way that always works.
 - **Access.** The page is opened by the AI app, so no click grants `activeTab` for it.
   Turning it on asks for the relay's site when the extension does not have it, one
   origin of the optional host permissions (`<scheme>://<host>/*`). Then a content script
-  (`src/pairing-page.ts`) is registered for `<scheme>://<host>/authorize*` only, again
+  (`src/pairing-page.ts`, the library's `runPairingPage`) is registered for `<scheme>://<host>/authorize*` only, again
   whenever the relay, the setting or the permissions change. Off, nothing changes.
 - **What it reads.** Only the form's hooks: `data-tab-mcp-pairing="1"`, `data-app`
   (its own `APP_ID` or nothing happens), `data-client-name`, `data-client-host`, the
   hidden `request_id`, and that there is a code field and a Connect button. It sends
   these with a nonce of the page load over a port; it never sees a code before the
   user's Allow.
-- **The origin is the check.** The worker (`src/worker/fill.ts`) takes the port only
+- **The origin is the check.** The worker (the library's `CodeFiller`) takes the port only
   from this extension's content script in a tab's top frame at exactly the configured
   relay's origin, port included, and path `/authorize`: any site can copy the markup.
 - **The question.** Only while AI access is on; turning it off withdraws a question. "Connect <name> (<host>) to the tab-mcp
@@ -171,6 +171,17 @@ built in DEC-203). Typing the code stays the way that always works.
   code was not taken: filled once more without asking, then nothing until the window
   has passed. Any other request asks. Don't allow, a timeout, the page going, AI access
   going off or the AI app connecting by a typed code fill nothing.
+- **Where the logic lives** (DEC-206). The rules above that are the same for any
+  extension that is a tab-mcp page (the content script's reading and filling in, the
+  sender check, the state machine of asking and filling in, which code, the relay's
+  patterns, the messages) are the client library's entry
+  `@ractive-ch/tab-mcp-client/extension` (`src/extension.ts` there, tested in
+  `test/extension.test.ts`), which Sitegloss uses too. The extension keeps its own
+  parts: the question (`src/worker/questions.ts`), the setting, the permission prompt
+  and the panel's line (`src/sidepanel/fill.ts`), the script's registration and the
+  panel's texts (`src/worker/fill.ts`), holding pairing on and the host the library
+  calls (`src/worker/connection.ts`). `src/pairing-page.ts` is one call of the
+  library's `runPairingPage`.
 
 A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
 With the window only, Chrome resolved the call and showed nothing when another

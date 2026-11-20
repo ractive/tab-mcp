@@ -131,7 +131,7 @@ const listOf = (names: string[]) =>
 		: `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 /**
- * The tab card's lines about a page with the client library (DEC-205): that
+ * The tab card's lines about a page with the client library (DEC-207): that
  * it has tab-mcp built in (`builtIn`), and which AI apps paired with the
  * extension are connected to the page directly too (`both`), by name and
  * host as the page announced them. Such an app sees the page's tools twice.

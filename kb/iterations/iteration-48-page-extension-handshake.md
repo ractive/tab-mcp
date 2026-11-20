@@ -4,7 +4,7 @@ title: "Iteration 48: the page and the tab-mcp browser extension know of each ot
 status: completed
 description: >-
   A plain handshake over DOM events between a page that uses the client library with
-  webmcp: true and the tab-mcp browser extension (DEC-205): the extension vouches for
+  webmcp: true and the tab-mcp browser extension (DEC-207): the extension vouches for
   each call the user allowed there, right before it runs, so the page does not ask
   again; the page shows which AI apps reach it through the extension; the panel says
   the page has tab-mcp built in and when an AI app is connected both ways. No proof of
@@ -19,7 +19,7 @@ call that the user had just allowed in the extension ("When the tab-mcp-extensio
 'Allow always all' or allows single tools the website must not ask again"), and said
 "Off" and "Connect your AI app" while an AI app was connected through the extension.
 Branch `handshake/page-extension`. `main` held client 0.18.1 with unreleased changes
-(DEC-201 to DEC-203); this joins them in client 0.19.0. The decision is DEC-205.
+(DEC-201 to DEC-203, DEC-206); this joins them in client 0.19.0. The decision is DEC-207.
 
 ## What changed
 
@@ -83,7 +83,7 @@ Branch `handshake/page-extension`. `main` held client 0.18.1 with unreleased cha
 
 ### Records
 
-- [x] DEC-205; this file; both threat models; `kb/design/extension.md`; READMEs;
+- [x] DEC-207; this file; both threat models; `kb/design/extension.md`; READMEs;
   `PRIVACY.md`; `kb/operations/chrome-web-store.md`; changelogs
 
 ## Results
@@ -134,6 +134,6 @@ asked as before, as no vouch comes).
 
 # Citations
 
-- [Decision log](/decision-log.md), DEC-119, DEC-140, DEC-141, DEC-191, DEC-200, DEC-205
+- [Decision log](/decision-log.md), DEC-119, DEC-140, DEC-141, DEC-191, DEC-200, DEC-207
 - [The tab-mcp browser extension](/design/extension.md)
 - [Threat model](/design/threat-model.md)

@@ -1,6 +1,6 @@
 /**
  * The extension's side of the handshake with a page that uses the client
- * library (DEC-205): the content script's `PageHandshake`, the vouch in
+ * library (DEC-207): the content script's `PageHandshake`, the vouch in
  * `callTool` and the bridge, the worker's check of who asks, the panel's
  * lines; and both sides together, the real library in a happy-dom page
  * with a fake native WebMCP. End to end in `handshake-e2e.test.ts`.

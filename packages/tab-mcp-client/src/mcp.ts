@@ -469,7 +469,7 @@ async function decideAndRun(
  * neither why nor what to change (DEC-120). Only a call the browser
  * cancelled rejects (`AbortError`): its caller has gone already. `client`:
  * an agent in the browser, or the AI app the tab-mcp browser extension
- * vouched for (DEC-205).
+ * vouched for (DEC-207).
  */
 export async function webMcpCall(
 	context: CallContext,

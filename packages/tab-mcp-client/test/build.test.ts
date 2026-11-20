@@ -78,7 +78,7 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	const mirrorChunk = lazy.find((n) => n.startsWith("webmcp-")) ?? "";
 	expect(files.get(mirrorChunk)).toContain("is not offered through WebMCP");
 	// The handshake with the tab-mcp browser extension is in the mirror's
-	// chunk, not the core (DEC-205): 2 KB since, 1 KB before.
+	// chunk, not the core (DEC-207): 2 KB since, 1 KB before.
 	expect(files.get(mirrorChunk)).toContain("tab-mcp-extension");
 	expect(coreCode).not.toContain("tab-mcp-extension");
 	const mirrorGz = gz(files.get(mirrorChunk) ?? "");
@@ -124,6 +124,51 @@ test("the tunnel entry stands alone: no DOM, nothing of the page's library", asy
 	expect(gz(code)).toBeLessThanOrEqual(2 * 1024);
 });
 
+test("the extension entry stands alone; a content script keeps only the page side", async () => {
+	// Imported where there is no DOM (a service worker): nothing runs at load.
+	const entry = await import("../src/extension.ts");
+	expect(typeof entry.CodeFiller).toBe("function");
+	const result = await Bun.build({
+		entrypoints: [join(root, "src/extension.ts")],
+		target: "browser",
+		format: "esm",
+		minify: true,
+	});
+	expect(result.success).toBe(true);
+	expect(result.outputs).toHaveLength(1);
+	const code = (await result.outputs[0]?.text()) ?? "";
+	// Nothing of the rest of the library, and nothing of a page's.
+	expect(code).not.toMatch(/\bfrom\s*"|\bimport\s*\(/);
+	expect(code).not.toMatch(/\b(localStorage|Bun)\b/);
+	// What a content script bundles: `runPairingPage` and what it uses.
+	const content = join(consumer, "content-script.ts");
+	await Bun.write(
+		content,
+		`import { type ContentPort, PAIRING_PORT, runPairingPage } from ${JSON.stringify(join(root, "src/extension.ts"))};
+declare const chrome: { runtime: { connect(info: { name: string }): ContentPort } };
+runPairingPage({ app: "my-app", connect: () => chrome.runtime.connect({ name: PAIRING_PORT }) });
+`,
+	);
+	const script = await Bun.build({
+		entrypoints: [content],
+		target: "browser",
+		format: "iife",
+		minify: true,
+	});
+	expect(script.success).toBe(true);
+	const scriptCode = (await script.outputs[0]?.text()) ?? "";
+	expect(scriptCode).toContain("data-tab-mcp-pairing");
+	// The worker's part stays out: the question, the codes, the patterns.
+	expect(scriptCode).not.toContain("pairingcode");
+	expect(scriptCode).not.toContain("wss:");
+	expect(scriptCode).not.toContain("AbortSignal");
+	console.log(
+		`extension entry ${(gz(code) / 1024).toFixed(1)} KB gzipped, a content script of it ${gz(scriptCode)} B gzipped`,
+	);
+	expect(gz(code)).toBeLessThanOrEqual(3 * 1024);
+	expect(gz(scriptCode)).toBeLessThanOrEqual(1024);
+});
+
 const consumer = mkdtempSync(join(tmpdir(), "tab-mcp-client-consumer-"));
 afterAll(() => rmSync(consumer, { recursive: true, force: true }));
 
@@ -140,6 +185,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(pkg["exports"]).toEqual({
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
+		"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
@@ -157,6 +203,8 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"index.d.ts",
 		"allowed.js",
 		"allowed.d.ts",
+		"extension.js",
+		"extension.d.ts",
 		"react.js",
 		"react.d.ts",
 		"setup.js",
@@ -284,6 +332,38 @@ void mcp._allowed;
 `,
 	);
 	await Bun.write(
+		join(consumer, "extension.ts"),
+		`import { TabMcp } from "@ractive-ch/tab-mcp-client";
+import { CodeFiller, type ContentPort, type FillAnswer, type FillHost, PAIRING_PORT, pagePort, pairingCodes, pairingPagePattern, relayPageOrigin, relaySitePattern, runPairingPage, takeCode, type WorkerPort } from "@ractive-ch/tab-mcp-client/extension";
+// A browser extension's worker, without the browser's types.
+declare const runtime: { id: string; connect(info: { name: string }): ContentPort; onConnect: { addListener(listener: (port: WorkerPort & { name: string }) => void): void } };
+const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "my-app" });
+const host: FillHost = {
+	extensionId: runtime.id,
+	app: "my-app",
+	relayOrigin: () => relayPageOrigin("https://relay.example"),
+	aiOn: () => mcp.state !== "disconnected",
+	enabled: () => true,
+	ask: async (_tabId, client, signal): Promise<FillAnswer> => (signal.aborted ? "deny" : client.host === "claude.ai" ? "allow" : "timeout"),
+	code: (signal) => { mcp.startPairing(); return takeCode(pairingCodes(mcp), signal, { now: Date.now() }); },
+	release: () => mcp.stopPairing(),
+	failed: (why) => console.log(why === "busy" ? "busy" : "no code"),
+	now: () => Date.now(),
+};
+const filler = new CodeFiller(host, { grants: mcp.grants.map((g) => g.grantId) });
+runtime.onConnect.addListener((port) => { if (port.name === PAIRING_PORT) void filler.page(pagePort(port)); });
+mcp.addEventListener("grantschange", () => filler.grantsChanged(mcp.grants.map((g) => ({ grantId: g.grantId, host: g.client.host }))));
+filler.withdrawAll();
+filler.reset();
+export const patterns: (string | undefined)[] = [relaySitePattern("https://relay.example"), pairingPagePattern("https://relay.example")];
+// The content script.
+export const found: boolean = runPairingPage({ app: "my-app", connect: () => runtime.connect({ name: PAIRING_PORT }) });
+// @ts-expect-error: the app's answer is one of four
+const wrong: FillHost["ask"] = async () => "yes";
+void wrong;
+`,
+	);
+	await Bun.write(
 		join(consumer, "app.ts"),
 		`import { createElement, type ReactElement } from "react";
 import { ConnectButton, TabMcpProvider, useAllowedTools, useTabMcp, useTabMcpState, useTool, useToolCalls, type AllowedToolsSnapshot, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
@@ -326,11 +406,14 @@ export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x"
 					"@ractive-ch/tab-mcp-client/react": [join(dist, "react.d.ts")],
 					"@ractive-ch/tab-mcp-client/setup": [join(dist, "setup.d.ts")],
 					"@ractive-ch/tab-mcp-client/allowed": [join(dist, "allowed.d.ts")],
+					"@ractive-ch/tab-mcp-client/extension": [
+						join(dist, "extension.d.ts"),
+					],
 					"@ractive-ch/tab-mcp-client/tunnel": [join(dist, "tunnel.d.ts")],
 					react: [join(root, "node_modules/@types/react")],
 				},
 			},
-			files: ["page.ts", "app.ts"],
+			files: ["page.ts", "app.ts", "extension.ts"],
 		}),
 	);
 	const tsc = Bun.spawnSync(

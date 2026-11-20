@@ -56,7 +56,7 @@ export const STRINGS = {
 	connectTitle: "Connect your AI app",
 	/**
 	 * At the top, while AI apps reach the page through the tab-mcp browser
-	 * extension (`TabMcp.extension`, DEC-205); `…InFront` when the extension
+	 * extension (`TabMcp.extension`, DEC-207); `…InFront` when the extension
 	 * serves only the tab in front, as it does.
 	 */
 	viaExtensionOne: "{apps} is connected through the tab-mcp browser extension.",

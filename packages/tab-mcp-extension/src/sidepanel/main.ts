@@ -591,7 +591,7 @@ function showTab(s: PanelState): void {
 			? noAccessText(tab.noAccess, s.allSites)
 			: (tab?.access ?? ""),
 	);
-	// A page with the client library (DEC-205): one quiet line, and one
+	// A page with the client library (DEC-207): one quiet line, and one
 	// that says so when an app is connected to it both ways.
 	const library = libraryNotes(tab, s.grants);
 	$("tab-library").hidden = !library.builtIn;

@@ -398,7 +398,7 @@ export function showConnectDialog(
 	};
 
 	// AI apps that reach the page through the tab-mcp browser extension
-	// (DEC-205): said first, as the user may not need to connect at all.
+	// (DEC-207): said first, as the user may not need to connect at all.
 	// Everything else stays: a phone or another browser still connects here.
 	const viaExtension = el(doc, "p", { className: "tab-mcp-via-extension" });
 

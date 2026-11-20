@@ -1,6 +1,6 @@
 /**
  * The page's side of the handshake with the tab-mcp browser extension
- * (DEC-205), against a fake native `ModelContext` as in `webmcp.test.ts`;
+ * (DEC-207), against a fake native `ModelContext` as in `webmcp.test.ts`;
  * the test plays the extension with the DOM events it would send. The
  * real extension is in `packages/tab-mcp-extension/test/handshake-e2e.test.ts`.
  */

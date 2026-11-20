@@ -1,5 +1,5 @@
 /**
- * A page that uses the client library with `webmcp: true` (DEC-205), for the
+ * A page that uses the client library with `webmcp: true` (DEC-207), for the
  * extension's end-to-end test of the handshake: one tool that asks, the
  * library's own confirmation, no relay of its own. Bundled by the test and
  * served as `/library.js` next to `library.html`.

@@ -93,7 +93,7 @@ The page's tools are the page's word:
 - Tools a tab-mcp page mirrors into WebMCP (the client library's `webmcp: true`) are
   offered like any other: the extension cannot know whether your AI app is also paired
   with the page itself. An AI app connected to both sees such a tool twice, once from
-  each connector. Such a page and the extension know of each other (DEC-205, client
+  each connector. Such a page and the extension know of each other (DEC-207, client
   library 0.19.0 and later): a call you allowed here is not asked again in the page
   (the extension vouches for that one call, right before it runs), the page can show
   which AI apps reach it through the extension, and the panel says "This page has

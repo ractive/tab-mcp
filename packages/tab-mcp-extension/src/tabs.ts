@@ -295,7 +295,7 @@ export function callFailed(error: unknown): CallResult {
  * call does not inject it). The content script runs it only on the page it
  * was listed from (`target.documentId`), with the claim it was offered with.
  * Aborting `signal` cancels the call in the page. `vouch`: the user allowed
- * this call (the bridge's word, DEC-205).
+ * this call (the bridge's word, DEC-207).
  */
 export async function callInTab(
 	tabId: number,

@@ -6,7 +6,7 @@
  * its own (DEC-171), loaded by a `TabMcp` whose constructor found native
  * WebMCP (`nativeContext` in the core); a call loads the connection chunk,
  * which checks, confirms and runs it. The handshake with the tab-mcp browser
- * extension (`handshake.ts`, DEC-205) is here too: only a page that mirrors
+ * extension (`handshake.ts`, DEC-207) is here too: only a page that mirrors
  * takes part.
  */
 

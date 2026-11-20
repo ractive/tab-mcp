@@ -34,12 +34,15 @@ const npm = await Bun.build({
 	...common,
 	// `./visible` (the escaping the confirmation dialog uses), `./setup` (the
 	// connect dialog's steps per AI app), `./tunnel` (the caller's end of
-	// `serve`, for a backend) and `./allowed` (the tools that run without
-	// asking) are entries of their own, out of the core (DEC-103, DEC-118,
-	// DEC-125, DEC-200).
+	// `serve`, for a backend), `./allowed` (the tools that run without
+	// asking) and `./extension` (the code fill-in for browser extensions,
+	// which imports nothing of the rest, so it shares no chunk) are entries
+	// of their own, out of the core (DEC-103, DEC-118, DEC-125, DEC-200,
+	// DEC-206).
 	entrypoints: [
 		entry,
 		join(root, "src/allowed.ts"),
+		join(root, "src/extension.ts"),
 		join(root, "src/setup.ts"),
 		join(root, "src/tunnel.ts"),
 		join(root, "src/visible.ts"),
@@ -123,6 +126,7 @@ const published = {
 	exports: {
 		".": { types: "./index.d.ts", default: "./index.js" },
 		"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
+		"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },

@@ -9,8 +9,9 @@
  * nothing changes: the code is typed by hand, as always.
  */
 
+import { relayPageOrigin } from "@ractive-ch/tab-mcp-client/extension";
 import { BROWSER } from "../browser.ts";
-import { fillAccess, relayPageOrigin } from "../fill.ts";
+import { fillAccess } from "../fill.ts";
 import type { PanelState } from "../protocol.ts";
 
 export interface FillView {

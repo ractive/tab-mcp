@@ -6,7 +6,7 @@
  * whatever the page put on its own `document` (iteration 18). Firefox has
  * none: there this script defines one for the page and keeps its tools
  * (`firefox/webmcp.ts`, iteration 44). With a page that uses the client
- * library with `webmcp: true` it shakes hands (`page-handshake.ts`, DEC-205).
+ * library with `webmcp: true` it shakes hands (`page-handshake.ts`, DEC-207).
  */
 
 import { connectPolyfill } from "./chrome/webmcp-port.ts";
@@ -79,7 +79,7 @@ declare const TAB_MCP_FIREFOX: boolean | undefined;
  */
 let ownContext: ModelContext | undefined;
 
-/** The handshake with a page that has the client library (DEC-205). */
+/** The handshake with a page that has the client library (DEC-207). */
 let handshake: PageHandshake | undefined;
 
 const contextOf = (doc: Document) =>
@@ -308,7 +308,7 @@ const running = new Map<string, AbortController>();
  * for, nor without the confirmation its first claim would have needed.
  * `vouch`, for a call the user allowed: runs right before the tool, once
  * every check passed, so that a page with the client library does not ask
- * again (DEC-205).
+ * again (DEC-207).
  */
 export async function callTool(
 	call: { documentId: string; name: string; readOnly: boolean },
@@ -452,7 +452,7 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
-	// The page with the client library (DEC-205): what it announces goes to
+	// The page with the client library (DEC-207): what it announces goes to
 	// the panel as a change of the page's tools does.
 	handshake = new PageHandshake(document, {
 		state: async () => {

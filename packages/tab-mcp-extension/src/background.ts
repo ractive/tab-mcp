@@ -11,8 +11,8 @@
  * user left AI access on (after a browser start, an update, a reload).
  */
 
+import { PAIRING_PORT, pagePort } from "@ractive-ch/tab-mcp-client/extension";
 import { FIREFOX, openPanel } from "./browser.ts";
-import { PAIRING_PORT } from "./fill.ts";
 import {
 	CONTENT_SCRIPT,
 	CONTENT_SCRIPT_ID,
@@ -28,7 +28,6 @@ import {
 } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
-import { pagePort } from "./worker/fill.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
 declare const TAB_MCP_TEST: boolean;
@@ -176,7 +175,7 @@ chrome.windows.onFocusChanged.addListener(tabChanged);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
 // in an active tab, or the page announced the client library and asks what
-// the extension tells such a page (DEC-205). Commands come only over the
+// the extension tells such a page (DEC-207). Commands come only over the
 // side panel's port.
 chrome.runtime.onMessage.addListener(
 	(message: unknown, sender, sendResponse: (state: unknown) => void) => {

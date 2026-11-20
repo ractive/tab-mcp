@@ -16,7 +16,7 @@
  *
  * A call the user allowed (asked, or allowed for its site) goes to the page
  * with a vouch, so that a page with the client library does not ask again
- * (DEC-205). Only `#allowedThenRun` makes one, after the user's "allow" and
+ * (DEC-207). Only `#allowedThenRun` makes one, after the user's "allow" and
  * the check that the tool is still the one asked about; a read-only tool,
  * which nobody asks about, gets none.
  */
@@ -366,7 +366,7 @@ export interface BridgeState {
 	more?: number;
 	/** Why there are no tools: no access, an error. */
 	error?: string;
-	/** The page announced the client library (DEC-205). */
+	/** The page announced the client library (DEC-207). */
 	library?: PageLibrary;
 }
 
@@ -601,7 +601,7 @@ export class PageToolBridge {
 	/**
 	 * Ask first for a tool that is not read-only (both ways of calling it),
 	 * then run it if it is still the tool the user was asked about, with a
-	 * vouch: the one place one is made (DEC-205).
+	 * vouch: the one place one is made (DEC-207).
 	 */
 	async #allowedThenRun(
 		callable: Callable,

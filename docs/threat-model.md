@@ -416,7 +416,8 @@ stops script on another origin of the relay; a program can send any `Origin`.
   a code written by an extension like one that was typed. An extension must act only on
   a top-level page of its relay's origin, only for its own app id and only after its
   user agreed, showing the verified host: any site can be a client under a name of its
-  choice. The tab-mcp browser extension does this (DEC-203, A13).
+  choice. The tab-mcp browser extension does this (DEC-203, A13), with the client
+  library's `./extension` entry, which other extensions can use (DEC-206).
 - The metadata, token, revoke and MCP endpoints answer CORS requests from any origin
   without credentials (`Access-Control-Allow-Origin: *`, never `Allow-Credentials`).
   They use no cookies, and tokens travel only in the `Authorization` header, so another
@@ -690,7 +691,7 @@ like any other, `chrome-extension://<id>` (A11).
   read at most every 250 ms, and the number and size of what a page sends are capped.
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
-- **A page with the client library** (DEC-205). A page that announces the library
+- **A page with the client library** (DEC-207). A page that announces the library
   (DOM events, or `<html data-tab-mcp-handshake>`) is told the extension's name and
   version, whether AI access is on and the names and verified hosts of the AI apps
   connected now, again when that changes; a page that does not announce it is told
@@ -799,6 +800,11 @@ like any other, `chrome-extension://<id>` (A11).
   - What remains: a user who allows a client they did not start pairs it, as one who
     types the code into its page would; the host on the question is the defence, as on
     the relay's page. A program on the computer that can click the panel can click Allow.
+  - Where it lives (DEC-206): the content script's part, the sender check and the rules
+    of asking and filling in are the client library's entry
+    `@ractive-ch/tab-mcp-client/extension`, one reviewed copy that Sitegloss uses too;
+    each extension supplies its question, its setting and the permission prompt, and
+    the library fills in nothing without the extension's `ask` answering Allow.
 - **A takeover is kept.** After another tab or program takes the extension's place, the
   extension does not take it back by itself, also after a restart, so it does not trade
   places back and forth with whoever has the secret; the side panel says so and offers
@@ -853,7 +859,7 @@ from them.
   native registration of it fails. The tab-mcp browser extension (A13) offers mirrored tools like
   any other page tool, since it cannot know whether the AI app is also paired with the
   page: an AI app connected to both sees such a tool twice.
-- **The tab-mcp browser extension vouches; the page believes it** (DEC-205). Right
+- **The tab-mcp browser extension vouches; the page believes it** (DEC-207). Right
   before the extension runs a tool the user allowed there, it tells the page (DOM
   events on `document`) the tool, the exact arguments and the AI app; the next WebMCP
   call of that tool with equal arguments within 2 seconds runs without the page's

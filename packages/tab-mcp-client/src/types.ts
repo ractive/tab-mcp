@@ -47,7 +47,7 @@ export interface RelayClient {
 /**
  * An agent in this browser that calls a mirrored tool through WebMCP
  * (`webmcp: true`). Not paired and not identified: nothing more is known,
- * unless the tab-mcp browser extension vouched for the call (DEC-205).
+ * unless the tab-mcp browser extension vouched for the call (DEC-207).
  */
 export interface WebMcpClient {
 	kind: "webmcp";
@@ -66,7 +66,7 @@ export interface WebMcpClient {
 
 /**
  * The tab-mcp browser extension, as it tells a page that offers its tools
- * through WebMCP (`TabMcp.extension`, DEC-205): it is serving this page, and
+ * through WebMCP (`TabMcp.extension`, DEC-207): it is serving this page, and
  * these AI apps can call the page's tools through it.
  */
 export interface BrowserExtension {
@@ -405,7 +405,7 @@ export interface TabMcpOptions {
 	 * registration only warns in the console.
 	 *
 	 * With it, the page and the tab-mcp browser extension know of each other
-	 * (DEC-205): `extension` says which AI apps reach the page through it,
+	 * (DEC-207): `extension` says which AI apps reach the page through it,
 	 * and a call the user allowed in the extension is not asked again here
 	 * (see `trustExtension`).
 	 */
@@ -647,7 +647,7 @@ export interface TabMcpEventMap {
 		identityMessage: string | undefined;
 	}>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
-	/** `extension` changed: the tab-mcp browser extension, its AI apps (DEC-205). */
+	/** `extension` changed: the tab-mcp browser extension, its AI apps (DEC-207). */
 	extensionchange: CustomEvent<{ extension: BrowserExtension | undefined }>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;

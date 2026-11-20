@@ -330,7 +330,7 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 		await open;
 	});
 	expect(snapshots.at(-1)?.pairingUntil).toBe(until);
-	// The tab-mcp browser extension (DEC-205), as the mirror's chunk sets it.
+	// The tab-mcp browser extension (DEC-207), as the mirror's chunk sets it.
 	const extension = Object.freeze({
 		name: "tab-mcp browser extension",
 		version: "0.3.0",

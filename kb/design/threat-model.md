@@ -317,7 +317,7 @@ did, by connecting the extension.
 - **A forged `document.modelContext`** in the page's world does not reach the content
   script, which sees only the browser's own object (iteration 18). Only the extension's
   own pages talk to the content script.
-- **A page with the client library (DEC-205).** The content script speaks only to a page
+- **A page with the client library (DEC-207).** The content script speaks only to a page
   that announced the library (its `hello` on `document`, or
   `<html data-tab-mcp-handshake>`): the extension's name and version, whether AI access
   is on and connected, and the names and verified hosts of the AI apps connected now
@@ -500,7 +500,7 @@ in the browser call them without pairing and without an identity (`client.kind`
 consequential tools are mirrored only when their `callers` list `"webmcp"`; calls get
 the same schema check and confirmation, never "Always allow". Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
-connected to both the page and the extension sees such a tool twice. Since DEC-205 a call
+connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a
 proof: the next WebMCP call of that tool with equal arguments within 2 s runs without the
 page's question and `onConfirm`, once, for the tool registered under that name when the
@@ -511,7 +511,7 @@ by the relay, and page script could still answer for the library). An agent in t
 browser that calls the same tool with equal arguments between the vouch and the
 extension's call uses it: exactly the call the user allowed. `trustExtension: false`
 asks every call. The full analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119,
-DEC-205).
+DEC-207).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 

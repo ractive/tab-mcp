@@ -129,7 +129,7 @@ export interface ToolView {
 /** The tab in front, as the panel shows it. */
 export interface TabView {
 	/**
-	 * The page announced the client library (DEC-205), with the AI apps
+	 * The page announced the client library (DEC-207), with the AI apps
 	 * connected to it directly (the page's word).
 	 */
 	library?: { apps: { name: string; host: string }[] };
@@ -263,7 +263,7 @@ export function isContentEvent(
 
 /**
  * A content script asks what the extension tells a page that announced the
- * client library (DEC-205): from this extension's content script in a tab's
+ * client library (DEC-207): from this extension's content script in a tab's
  * top frame only, as only that one speaks to pages.
  */
 export function isHandshakeAsk(

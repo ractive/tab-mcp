@@ -1,6 +1,6 @@
 /**
  * The extension's side of the handshake with a page that uses the client
- * library with `webmcp: true` (DEC-205), in the content script of the top
+ * library with `webmcp: true` (DEC-207), in the content script of the top
  * frame. The page's side is `packages/tab-mcp-client/src/handshake.ts`.
  *
  * Plain DOM events on `document`, a JSON string as `detail` (objects do not

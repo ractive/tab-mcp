@@ -29,7 +29,7 @@ export type ContentRequest =
 			readOnly: boolean;
 			input: unknown;
 			/**
-			 * The user allowed this call (DEC-205): told to a page with the
+			 * The user allowed this call (DEC-207): told to a page with the
 			 * client library right before the tool runs. Only the bridge's
 			 * path after the user's "allow" sets it.
 			 */
@@ -46,7 +46,7 @@ export interface AppView {
 	host: string;
 }
 
-/** What a vouch says besides the tool and its arguments (DEC-205). */
+/** What a vouch says besides the tool and its arguments (DEC-207). */
 export interface Vouch {
 	/** One per call. */
 	nonce: string;
@@ -56,7 +56,7 @@ export interface Vouch {
 
 /**
  * What the extension tells a page that announced the client library
- * (DEC-205), and nothing else: not the relay, the address or other tabs.
+ * (DEC-207), and nothing else: not the relay, the address or other tabs.
  */
 export interface ExtensionState {
 	/** The extension's name and version. */
@@ -71,7 +71,7 @@ export interface ExtensionState {
 }
 
 /**
- * What a page with the client library announced (DEC-205): the library's
+ * What a page with the client library announced (DEC-207): the library's
  * version, and the AI apps connected to the page directly, of all its apps
  * together.
  */
@@ -162,7 +162,7 @@ export interface PageTools {
 	tools: PageTool[];
 	/** Why the tools could not be listed, if they could not. */
 	error?: string;
-	/** The page announced the client library (DEC-205). */
+	/** The page announced the client library (DEC-207). */
 	library?: PageLibrary;
 }
 

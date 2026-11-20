@@ -61,7 +61,7 @@ if (chrome === undefined && process.env["CI"])
 		"Chrome for Testing 156 or newer is needed for the extension's end-to-end tests in CI",
 	);
 
-/** `pages/library.ts` bundled, the client library in it (DEC-205), once. */
+/** `pages/library.ts` bundled, the client library in it (DEC-207), once. */
 let libraryScript: Promise<Uint8Array> | undefined;
 function libraryBundle(): Promise<Uint8Array> {
 	libraryScript ??= Bun.build({
@@ -2648,7 +2648,7 @@ describe.skipIf(chrome === undefined)(
 );
 
 /**
- * A page that uses the client library with `webmcp: true` (DEC-205): the page
+ * A page that uses the client library with `webmcp: true` (DEC-207): the page
  * and the extension know of each other. The page asks with the library's own
  * confirmation; the AI app is the test's MCP client ("Test client" at
  * client.example).
@@ -2676,7 +2676,7 @@ async function listTestApp(stack: Stack): Promise<void> {
 }
 
 describe.skipIf(chrome === undefined)(
-	"a page with the client library, Chrome's own WebMCP (DEC-205)",
+	"a page with the client library, Chrome's own WebMCP (DEC-207)",
 	() => {
 		let stack: Stack;
 		let tab: Page;
@@ -2787,7 +2787,7 @@ describe.skipIf(chrome === undefined)(
 );
 
 describe.skipIf(chrome === undefined)(
-	"a page with the client library, the extension's own WebMCP (DEC-205)",
+	"a page with the client library, the extension's own WebMCP (DEC-207)",
 	() => {
 		let stack: Stack;
 		let tab: Page;
