@@ -246,6 +246,9 @@ test("reconnecting asks for the identity again and resumes pairing", async () =>
 	relay.close(4003);
 	await nextState(t, "connected");
 	expect(t.identity).toBe("pending");
+	// The sign-in's time is not started again (DEC-202): the user continues.
+	expect(Date.parse(t.pairingUntil ?? "")).toBeLessThanOrEqual(Date.now());
+	t.startPairing();
 	await relay.next("pairing.start");
 	const again = await relay.next("identity");
 	expect(again["assertion"]).toBe("a.b.2");
@@ -254,7 +257,134 @@ test("reconnecting asks for the identity again and resumes pairing", async () =>
 	expect(t.identity).toBe("bound");
 });
 
-test("newAddress() while waiting connects with the new secret", async () => {
+test("DEC-202: a reconnect does not start a sign-in's time again; pairingUntil is the reconnect's time until the user continues", async () => {
+	relay.pairing = "oidc";
+	const t = await connected([10]);
+	t.startPairing();
+	await relay.next("pairing.start");
+	const later = new Date(Date.now() + 600_000).toISOString();
+	relay.send({ type: "pairing.open", expiresAt: later });
+	await relay.settled();
+	expect(t.pairingUntil).toBe(later);
+
+	const before = Date.now();
+	relay.close(4003);
+	await nextState(t, "connected");
+	await relay.next("hello");
+	await relay.settled();
+	// The new session was not asked to pair.
+	expect(relay.received.map((m) => m.type)).not.toContain("pairing.start");
+	const until = Date.parse(t.pairingUntil ?? "");
+	expect(until).toBeGreaterThanOrEqual(before);
+	expect(until).toBeLessThanOrEqual(Date.now());
+	// The user continues: asked again.
+	t.startPairing();
+	await relay.next("pairing.start");
+});
+
+test("DEC-202: a reconnect before the relay answered the user's start does not ask again either", async () => {
+	relay.pairing = "oidc";
+	const t = await connected([10]);
+	t.startPairing();
+	await relay.next("pairing.start");
+	// No pairing.open: the connection breaks first (or a relay up to 0.12.1).
+	const before = Date.now();
+	relay.close(4003);
+	await nextState(t, "connected");
+	await relay.next("hello");
+	await relay.settled();
+	expect(relay.received.map((m) => m.type)).not.toContain("pairing.start");
+	expect(Date.parse(t.pairingUntil ?? "")).toBeGreaterThanOrEqual(before);
+	// Continue clears it until the relay answers.
+	t.startPairing();
+	expect(t.pairingUntil).toBeUndefined();
+	await relay.next("pairing.start");
+});
+
+test("DEC-202: a reconnect asks again for codes, also after an oidc session gave a time", async () => {
+	relay.pairing = "oidc";
+	const t = await connected([10]);
+	t.startPairing();
+	await relay.next("pairing.start");
+	relay.send({
+		type: "pairing.open",
+		expiresAt: new Date(Date.now() + 600_000).toISOString(),
+		expiresInMs: 600_000,
+	});
+	await nextEvent(t, "pairinguntil");
+	// The site pairs by code after the relay's restart.
+	relay.pairing = "code";
+	relay.close(4003);
+	await nextState(t, "connected");
+	await relay.next("pairing.start");
+	expect(t.pairingUntil).toBeUndefined();
+});
+
+test("DEC-202: Connect again clicked while reconnecting asks again: it is the user's", async () => {
+	relay.pairing = "oidc";
+	const t = await connected([600_000]);
+	t.startPairing();
+	await relay.next("pairing.start");
+	relay.send({
+		type: "pairing.open",
+		expiresAt: new Date(Date.now() + 600_000).toISOString(),
+		expiresInMs: 600_000,
+	});
+	await nextEvent(t, "pairinguntil");
+	relay.close(4003);
+	await nextState(t, "reconnecting");
+	await t.connect();
+	await relay.next("pairing.start");
+	expect(t.pairingUntil).toBeUndefined();
+	// A later reconnect by the library itself does not.
+	relay.send({
+		type: "pairing.open",
+		expiresAt: new Date(Date.now() + 600_000).toISOString(),
+		expiresInMs: 600_000,
+	});
+	await nextEvent(t, "pairinguntil");
+	waits([10]);
+	relay.close(4003);
+	await nextState(t, "connected");
+	await relay.settled();
+	expect(relay.received.map((m) => m.type)).not.toContain("pairing.start");
+});
+
+test("DEC-202: pairingUntil is cleared, with its event, when the session ends", async () => {
+	relay.pairing = "oidc";
+	const t = await connected([10]);
+	t.startPairing();
+	await relay.next("pairing.start");
+	const open = () => {
+		relay.send({
+			type: "pairing.open",
+			expiresAt: new Date(Date.now() + 600_000).toISOString(),
+			expiresInMs: 600_000,
+		});
+		return nextEvent(t, "pairinguntil");
+	};
+	await open();
+	expect(t.pairingUntil).toBeDefined();
+	// disconnect()
+	let cleared = nextEvent<{ pairingUntil: string | undefined }>(
+		t,
+		"pairinguntil",
+	);
+	t.disconnect();
+	expect((await cleared).detail.pairingUntil).toBeUndefined();
+	// A refusal: the relay closes for good.
+	await t.connect({ resume: true });
+	await relay.next("pairing.start");
+	await open();
+	cleared = nextEvent(t, "pairinguntil");
+	const off = nextState(t, "disconnected");
+	relay.close(1008);
+	expect((await cleared).detail.pairingUntil).toBeUndefined();
+	await off;
+	expect(t.pairingUntil).toBeUndefined();
+});
+
+test("disconnectAll() while waiting connects with the new secret", async () => {
 	waits([600_000]);
 	const t = newTab(relay.url);
 	tab = t;
@@ -262,7 +392,7 @@ test("newAddress() while waiting connects with the new secret", async () => {
 	const before = await relay.next("hello");
 	relay.close(4004);
 	await nextState(t, "reconnecting");
-	await t.newAddress();
+	await t.disconnectAll();
 	expect(t.state).toBe("connected");
 	expect(t.reconnecting).toBeUndefined();
 	// The old secret's grants are revoked first (DEC-136).

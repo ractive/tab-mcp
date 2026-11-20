@@ -24,6 +24,8 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   and makes a new secret, and the address stays. Each AI app connects again with a new
   code. Its note and the notice after a takeover say so ("Another tab or program took
   over this extension's connection … Disconnect all apps to end that.").
+- The privacy policy says what the stored secret is now: it identifies this
+  installation to the relay; the address is the same for every installation.
 
 ## [0.2.1][extension-0.2.1] - 2026-11-17
 

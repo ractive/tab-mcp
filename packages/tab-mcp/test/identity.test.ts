@@ -433,6 +433,50 @@ describe("identity binding: no page of the signed-in person is connecting", () =
 		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(1);
 	});
 
+	test("DEC-202: a sign-in that comes back after the dialog's time is up finds no page; after Continue the same request pairs", async () => {
+		const ctx = await setup({}, "alice", { pairingWindowMs: 2000 });
+		const open = (await ctx.tab.next("pairing.open")) as unknown as {
+			expiresAt: string;
+			expiresInMs: number;
+		};
+		expect(open.expiresInMs).toBe(2000);
+		const until = Date.parse(open.expiresAt);
+		expect(until).toBeGreaterThan(Date.now());
+		expect(until).toBeLessThanOrEqual(Date.now() + 2000);
+		provider.signedInAs = "alice";
+		const flow = await openAuthorize(ctx);
+		const back = await provider.signIn(await connect(ctx, flow.page));
+		// It started while the dialog counted, and comes back after.
+		expect(Date.now()).toBeLessThan(until);
+		await Bun.sleep(until - Date.now() + 10);
+		const refused = await ctx.browser.open(back);
+		expect(refused.status).toBe(403);
+		expect(refused.location).toBeUndefined();
+		expect(refused.html).toContain(NO_PAGE_TEXT);
+		expect(ctx.r.logs.events("oauth.pairing_failed")).toEqual([
+			expect.objectContaining({ app: APP, reason: "mismatch" }),
+		]);
+		expect(await ctx.r.store.listGrants(ctx.tab.addressId, Date.now())).toEqual(
+			[],
+		);
+
+		// Continue in the page: ten (here two) minutes from now.
+		ctx.tab.send({ type: "pairing.start" });
+		const renewed = (await ctx.tab.next("pairing.open")) as unknown as {
+			expiresAt: string;
+		};
+		expect(Date.parse(renewed.expiresAt)).toBeGreaterThan(until);
+		const done = await ctx.browser.open(
+			await provider.signIn(await connect(ctx, refused)),
+		);
+		expect(done.status).toBe(303);
+		const tokens = await tokenFrom(ctx, done.location ?? "", flow.verifier);
+		const res = await mcpPost(ctx.address, add(), {
+			token: tokens.access_token,
+		});
+		expect(await res.text()).toContain('"text":"3"');
+	});
+
 	test("RS 11: after a closed dialog, the same request pairs once the dialog is open again", async () => {
 		const closing = NO_PAGE.find((c) => c.name.startsWith("RS 11"));
 		if (closing === undefined) throw new Error("no case");

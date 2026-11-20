@@ -179,10 +179,12 @@ interface WsData {
 /**
  * Test-only relaxations, never reachable from configuration or the package's
  * public API (`createTestRelay` is not exported from the package): CIMD
- * fetches from loopback test servers, shorter code lifetimes.
+ * fetches from loopback test servers, shorter code lifetimes and windows.
  */
 export interface RelayTestHooks extends AuthorizationTestMode {
 	pairingCodeTtlMs?: number;
+	/** How long an open `oidc` dialog counts (`PAIRING_WINDOW_MS`). */
+	pairingWindowMs?: number;
 	/** Keys for tab assertions instead of fetching the JWKS URL. */
 	assertionKeys?: KeySource;
 	/** A smaller relay-wide replay cache for tab assertions. */
@@ -407,8 +409,8 @@ function startRelay(
 	}
 
 	/**
-	 * Every grant of an address was revoked at `at` (New address, revoke all,
-	 * sign-out): remember it. With `dropRequests` (New address, revoke all)
+	 * Every grant of an address was revoked at `at` (Disconnect all apps, revoke all,
+	 * sign-out): remember it. With `dropRequests` (Disconnect all apps, revoke all)
 	 * the authorization codes made for the address go too, so none of them
 	 * makes a grant afterwards; after a sign-out they stay, to tell the
 	 * browser that nobody is signed in (a code is refused by the store's
@@ -500,6 +502,9 @@ function startRelay(
 		...(hooks?.pairingCodeTtlMs === undefined
 			? {}
 			: { pairingCodeTtlMs: hooks.pairingCodeTtlMs }),
+		...(hooks?.pairingWindowMs === undefined
+			? {}
+			: { pairingWindowMs: hooks.pairingWindowMs }),
 		publicUrl: () => publicUrl,
 		async revokeGrant(session: TabSession, grantId: string): Promise<boolean> {
 			const addressId = session.addressId;
@@ -1297,7 +1302,7 @@ function startRelay(
 			if (waited) {
 				// The token was checked before the wait (up to pageWaitMs): its
 				// grant may have been revoked meanwhile, also on another
-				// instance, or by the page that just connected (New address).
+				// instance, or by the page that just connected (Disconnect all apps).
 				const again = await authenticate(req, app);
 				if (typeof again === "string") return refused(again, "revoked");
 				if (req.signal.aborted) return closed();

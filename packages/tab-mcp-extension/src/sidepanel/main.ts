@@ -87,7 +87,7 @@ let switchIntent: SwitchIntent | undefined;
 const CODE_PLACEHOLDER = "––––-––––";
 
 /** "Disconnect all apps" with apps connected asks first: a second click does it. */
-let newAddressArmed = false;
+let disconnectAllArmed = false;
 /** The address the setup steps were made for. */
 let stepsFor = "";
 
@@ -265,9 +265,9 @@ function showConnection(s: PanelState): void {
 	// As the relay sends it (`XXXX-XXXX`, DEC-196): grouped already.
 	setText($("code"), code ?? CODE_PLACEHOLDER);
 	($("copy-code") as HTMLButtonElement).disabled = code === undefined;
-	if (s.grants.length === 0) newAddressArmed = false;
-	$("new-address-note").hidden = !newAddressArmed;
-	$("new-address").toggleAttribute("data-armed", newAddressArmed);
+	if (s.grants.length === 0) disconnectAllArmed = false;
+	$("disconnect-all-note").hidden = !disconnectAllArmed;
+	$("disconnect-all").toggleAttribute("data-armed", disconnectAllArmed);
 }
 
 // --- Questions ---
@@ -728,19 +728,19 @@ $("ai-switch").addEventListener("change", () => {
 $("add-app").addEventListener("click", () => addApp(true));
 $("pair-done").addEventListener("click", () => addApp(false));
 
-$("new-address").addEventListener("click", () => {
-	if ((state?.grants.length ?? 0) > 0 && !newAddressArmed) {
-		newAddressArmed = true;
-		$("new-address-note").hidden = false;
-		$("new-address").toggleAttribute("data-armed", true);
+$("disconnect-all").addEventListener("click", () => {
+	if ((state?.grants.length ?? 0) > 0 && !disconnectAllArmed) {
+		disconnectAllArmed = true;
+		$("disconnect-all-note").hidden = false;
+		$("disconnect-all").toggleAttribute("data-armed", true);
 		return;
 	}
-	newAddressArmed = false;
-	$("new-address").toggleAttribute("data-armed", false);
-	send({ type: "new-address" });
+	disconnectAllArmed = false;
+	$("disconnect-all").toggleAttribute("data-armed", false);
+	send({ type: "disconnect-all" });
 });
-$("replaced-new-address").addEventListener("click", () =>
-	send({ type: "new-address" }),
+$("replaced-disconnect-all").addEventListener("click", () =>
+	send({ type: "disconnect-all" }),
 );
 
 $("copy").addEventListener("click", () =>

@@ -12,10 +12,10 @@
  * once (only one tab at a time holds the connection, DEC-095).
  *
  * An allowance ends with its grant, and only on what the relay says: the
- * grants of a new session, a removed grant, `newAddress()` (the relay
+ * grants of a new session, a removed grant, `disconnectAll()` (the relay
  * revoked them all). A dropped connection, or a page that has not connected
  * yet, keeps them: `grantschange` does not fire then. They also belong to
- * the address secret they were made under, so a new secret (`newAddress()`
+ * the address secret they were made under, so a new secret (`disconnectAll()`
  * here or in another tab) ends them even where nothing listened.
  *
  * Out of the core: the confirmation (`confirm.ts`, which the core loads for

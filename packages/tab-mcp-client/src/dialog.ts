@@ -222,9 +222,9 @@ html dialog.tab-mcp-dialog :where(.tab-mcp-switch > input:disabled) { opacity: 0
 .tab-mcp-setup-toggle::before { content: ""; flex: none; width: 0.45em; height: 0.45em; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateX(-0.1em) rotate(-45deg); }
 .tab-mcp-setup-toggle:where([aria-expanded="true"])::before { transform: translateY(-0.15em) rotate(45deg); }
 .tab-mcp-code-used { display: flex; align-items: center; min-height: calc(var(--tab-mcp-code-size, 2em) * 1.2); }
-.tab-mcp-new-address-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
-.tab-mcp-new-address-row > :where(small) { flex: 1 1 14rem; color: var(--_tab-mcp-muted); }
-.tab-mcp-new-address-question { display: grid; gap: 0.75rem; padding: 1rem; border: 1px solid color-mix(in srgb, var(--_tab-mcp-danger) 50%, transparent); border-radius: var(--_tab-mcp-small-radius); }
+.tab-mcp-disconnect-all-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
+.tab-mcp-disconnect-all-row > :where(small) { flex: 1 1 14rem; color: var(--_tab-mcp-muted); }
+.tab-mcp-disconnect-all-question { display: grid; gap: 0.75rem; padding: 1rem; border: 1px solid color-mix(in srgb, var(--_tab-mcp-danger) 50%, transparent); border-radius: var(--_tab-mcp-small-radius); }
 .tab-mcp-connect > :where(.tab-mcp-actions) { gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--_tab-mcp-line); }
 .tab-mcp-close-note { flex: 1 1 12rem; }
 .tab-mcp-confirm :where(p bdi) { font-weight: 600; }

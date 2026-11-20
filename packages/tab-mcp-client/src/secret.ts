@@ -66,7 +66,7 @@ export class SecretStore {
 		return this.#memory;
 	}
 
-	/** Make and keep a new secret (a new address). */
+	/** Make and keep a new secret (`disconnectAll()`). */
 	rotate(): string {
 		const secret = newSecret();
 		this.#memory = secret;

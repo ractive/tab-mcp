@@ -49,6 +49,8 @@ export interface ConnectionHost extends CallHost {
 	/** The relay accepted the session; returns what `connect()` resolves with. */
 	sessionStarted(session: SessionMessage): SessionInfo;
 	pairingCode(code: PairingCode): void;
+	/** `pairing.open`: a sign-in pairs the page until `until` (DEC-202). */
+	pairingOpen(until: string): void;
 	grantAdded(grant: Grant): void;
 	grantRemoved(grantId: string): void;
 	/** Another tab or program took over the address (reported once, before `closed`). */

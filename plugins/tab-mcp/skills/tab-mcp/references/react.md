@@ -35,7 +35,7 @@ function TodoList() {
 ```
 
 - `TabMcpProvider` takes the `TabMcp` options; a changed `relay` or `server.name` makes a
-  new instance. `useTabMcp()` returns it for `newAddress()`, `revoke()`, `signOut()`.
+  new instance. `useTabMcp()` returns it for `disconnectAll()`, `revoke()`, `signOut()`.
 - `useTabMcpState()` returns `{ state, session, grants, pairingCode, identity,
   identityMessage, reconnecting, tools }` (the address is `session?.address`) and renders
   again only on change.

@@ -62,7 +62,7 @@ const COMMANDS: PanelCommand[] = [
 	{ type: "stop" },
 	{ type: "pair", on: true },
 	{ type: "revoke", grantId: "g" },
-	{ type: "new-address" },
+	{ type: "disconnect-all" },
 	{ type: "set-relay", relay: "https://relay.example" },
 	{ type: "set-allowed", origin: "https://site.test", name: "t", on: true },
 	{

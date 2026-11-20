@@ -308,8 +308,8 @@ Every pair passes in both schemes.
 | Group heading (`h3`, "Tools") | 12 / 16 / 600, `--ink-2`. |
 | Default button | `--sheet`, text `--ink` 600, 1 px `--edge`, radius 6, 30 px high (26 small). Hover `--wash`. |
 | Strong button | `--strong`, text `--on-strong`. Turn on AI access, Done, Save (Allow once until iteration 43, DEC-180). |
-| Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, New address, + Add another AI app, Stop. |
-| Armed button | `--danger`, text `--on-danger`. Disconnect and New address after the first click. |
+| Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, Disconnect all apps, + Add another AI app, Stop. |
+| Armed button | `--danger`, text `--on-danger`. Disconnect and Disconnect all apps after the first click. |
 | Disabled, `aria-disabled` | `--wash`, text `--ink-2`, 1 px `--rule`, default cursor. |
 | Focus | 2 px `--focus`, offset 2 px, every control, the scrollable arguments included. |
 | Switch | Track off `--edge`, on `--strong`, knob `--on-strong`; this extension's geometry; forced colours as today. |

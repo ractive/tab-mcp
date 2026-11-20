@@ -121,7 +121,7 @@ open the relay's pairing page for it with any AI app.
   address secret is in the profile's `localStorage`, and the relay knows nobody else. On
   a shared profile, or in a web app with accounts that pairs by code, the next user of the
   page gets the AI apps the previous one paired. Use identity binding (A12) for such
-  pages, or call `newAddress()` when the user logs out.
+  pages, or call `disconnectAll()` when the user logs out.
 
 ### A2: A malicious or impersonating AI app (OAuth client)
 
@@ -311,7 +311,7 @@ stops script on another origin of the relay; a program can send any `Origin`.
 - **How long it lasts:** after the XSS is fixed, the page is closed or the script is
   removed, until the page gets a new secret, and an AI app the holder paired lasts until
   it is disconnected or the page gets a new secret (a grant ends 90 days after pairing at
-  the latest). "Disconnect all apps" (`newAddress()`) always first takes the address id
+  the latest). "Disconnect all apps" (`disconnectAll()`) always first takes the address id
   back with the old secret and `hello.revokeAll`, connected or not, taken over or not
   (DEC-136), so the relay revokes the grants of the old secret in the same step as it
   gives the address id back; whoever claims it again right after gets no grant back. It
@@ -340,7 +340,7 @@ stops script on another origin of the relay; a program can send any `Origin`.
   that claimed while this tab was still connecting, does not count. A claim without a
   hash, from a tab on a library up to 0.15, still counts while both versions run.
 - **What helps:** identity binding for pages with user accounts; the page on its own
-  origin, without third-party scripts; `newAddress()` on logout on a shared device.
+  origin, without third-party scripts; `disconnectAll()` on logout on a shared device.
   A backend-signed claim of the address was considered and not built (DEC-094): without a
   signed-in user it proves nothing, and with one, identity binding already gives most of
   it.
@@ -580,7 +580,8 @@ page (a tab assertion), the provider says who signed in at `/authorize` (an ID t
 
 - **Someone else signs in.** The sign-in comes first. When the provider sends the
   browser back, the relay looks among the app's pages for one whose user is the
-  signed-in person and whose "Connect your AI app" dialog is open; of several, it takes
+  signed-in person and whose "Connect your AI app" dialog is open (and was opened less
+  than 10 minutes ago); of several, it takes
   the one that connected last. Only a page that was connected when the sign-in started
   counts, so a sign-in under way does not pair with the page that "Disconnect all apps"
   has just made new. Anyone without such a page gets "No page is connecting
@@ -616,10 +617,19 @@ page (a tab assertion), the provider says who signed in at `/authorize` (an ID t
   it names the app, not a page, and is the same for every user of the app; when every
   page had an address of its own, it took that address. The page's "Connect your AI
   app" dialog must be open when the provider sends the browser back, so a sign-in that
-  comes back after the user closed the dialog pairs nobody; but with identity binding
-  an open dialog has no time limit, where a code lasts 2 minutes. The pairing page
-  names the AI app and its verified host. The same click-through risk exists
-  for every OAuth consent page.
+  comes back after the user closed the dialog pairs nobody. An open dialog counts for
+  10 minutes after the user opened it (a code lasts 2): a sign-in that comes back later
+  pairs nobody either. With a client library after 0.18.1 only the user starts the 10
+  minutes again, with Continue in the dialog or a click on Connect again; neither a
+  timer nor a reconnect the library makes by itself does (DEC-202). So the window is
+  the 10 minutes after the user last opened the dialog or continued, not the whole time
+  a forgotten dialog stays open. Pages with a library up to 0.18.1 send `pairing.start`
+  again after every reconnect (a relay restart, a network drop, a laptop waking up),
+  and the relay cannot tell that from the user opening the dialog: for them each
+  reconnect starts another 10 minutes, so a forgotten dialog stays pairable in windows
+  that a reconnect renews. The limit is complete only once a page runs the newer
+  library, one reason to update. The pairing page names the AI app and its
+  verified host. The same click-through risk exists for every OAuth consent page.
 - **A different person later uses the same browser.** Grants remember a hash of the
   person they were made for. MCP requests reach the page only while it is bound to that
   person; a page that proves another person revokes the previous person's grants and ends
@@ -903,10 +913,12 @@ each default.
   on the same network can keep the others out of pairing (A1). A party with very many
   networks can push other users' connection requests out (A1, A8).
 - With identity binding, anyone can open `/authorize` for an app with an AI app of their
-  own. A user who follows such a link and clicks Connect while their page's dialog is
-  open pairs that AI app with their page, if the provider's single sign-on asks
-  nothing. The pairing page names the AI app's verified host; the dialog must be open,
-  but with identity binding it has no time limit (A12).
+  own. A user who follows such a link and clicks Connect within 10 minutes after they
+  opened their page's dialog (or chose Continue in it), while it is still open, pairs
+  that AI app with their page, if the provider's single sign-on asks nothing. The
+  pairing page names the AI app's verified host (A12). With a client library up to
+  0.18.1 every reconnect of the page starts another 10 minutes, so a forgotten dialog
+  stays pairable; the limit is complete only with a newer library (DEC-202).
 - On a page that pairs by code, the next user of the same browser profile gets the AI
   apps the previous one paired (A1).
 - A model can be steered by content (prompt injection) into calling tools the user did

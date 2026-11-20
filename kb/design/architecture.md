@@ -188,7 +188,7 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 ### 4. Disconnect and offline
 
 - "Disconnect" next to an app in the page: `grant.revoke`; its tokens stop working at once.
-- "Disconnect all apps" (`newAddress()`): the page connects with the old secret and
+- "Disconnect all apps" (`disconnectAll()`): the page connects with the old secret and
   `hello.revokeAll`, so the relay revokes all grants of the old address id (DEC-095),
   then makes a new secret and connects again. The address stays: it is the app's. Each
   AI app pairs again with a new code.

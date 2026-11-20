@@ -275,6 +275,72 @@ describe("user activation", () => {
 });
 
 describe("pairing (DEC-028)", () => {
+	test("DEC-202: pairing.open becomes pairingUntil; each startPairing() asks again; stopPairing() clears it; a malformed one is ignored", async () => {
+		relay.pairing = "oidc";
+		t.startPairing();
+		await t.connect();
+		await relay.next("pairing.start");
+		expect(t.pairingUntil).toBeUndefined();
+		const until = nextEvent<{ pairingUntil: string | undefined }>(
+			t,
+			"pairinguntil",
+		);
+		relay.send({ type: "pairing.open", expiresAt: "2026-11-20T10:10:00.000Z" });
+		expect((await until).detail.pairingUntil).toBe("2026-11-20T10:10:00.000Z");
+		expect(t.pairingUntil).toBe("2026-11-20T10:10:00.000Z");
+		// Not a time, or none: ignored.
+		relay.send({ type: "pairing.open", expiresAt: "soon" });
+		relay.send({ type: "pairing.open" });
+		await relay.settled();
+		expect(t.pairingUntil).toBe("2026-11-20T10:10:00.000Z");
+		// Continue: asked again although pairing is on.
+		t.startPairing();
+		await relay.next("pairing.start");
+		relay.send({ type: "pairing.open", expiresAt: "2026-11-20T10:20:00.000Z" });
+		await nextEvent(t, "pairinguntil");
+		expect(t.pairingUntil).toBe("2026-11-20T10:20:00.000Z");
+		const cleared = nextEvent<{ pairingUntil: string | undefined }>(
+			t,
+			"pairinguntil",
+		);
+		t.stopPairing();
+		await relay.next("pairing.stop");
+		expect((await cleared).detail.pairingUntil).toBeUndefined();
+		expect(t.pairingUntil).toBeUndefined();
+		// While pairing is off, one that comes late is not taken.
+		relay.send({ type: "pairing.open", expiresAt: "2026-11-20T10:30:00.000Z" });
+		await relay.settled();
+		expect(t.pairingUntil).toBeUndefined();
+	});
+
+	test("DEC-202: pairing.open's expiresInMs is counted on the page's clock from its arrival; a duration that cannot be waited for falls back to expiresAt", async () => {
+		relay.pairing = "oidc";
+		t.startPairing();
+		await t.connect();
+		await relay.next("pairing.start");
+		// The relay's clock is an hour behind the page's: its expiresAt is
+		// long past here, the duration is not.
+		const relayTime = new Date(Date.now() - 3_600_000 + 600_000).toISOString();
+		const before = Date.now();
+		relay.send({
+			type: "pairing.open",
+			expiresAt: relayTime,
+			expiresInMs: 600_000,
+		});
+		await nextEvent(t, "pairinguntil");
+		const until = Date.parse(t.pairingUntil ?? "");
+		expect(until).toBeGreaterThanOrEqual(before + 600_000);
+		expect(until).toBeLessThanOrEqual(Date.now() + 600_000);
+		// Too long for setTimeout, negative, or not a number: the relay's time.
+		for (const expiresInMs of [2 ** 31, -1, "600000", Number.NaN]) {
+			t.startPairing();
+			await relay.next("pairing.start");
+			relay.send({ type: "pairing.open", expiresAt: relayTime, expiresInMs });
+			await relay.settled();
+			expect(t.pairingUntil).toBe(relayTime);
+		}
+	});
+
 	test("startPairing before connect sends pairing.start after the session; codes become events", async () => {
 		t.startPairing();
 		await t.connect();
@@ -510,7 +576,7 @@ describe("grants", () => {
 		expect(relay.received.filter((m) => m["id"] === "r2")).toEqual([]);
 	});
 
-	test("newAddress revokes the old secret's grants (hello.revokeAll), then connects with a new secret at the same address (DEC-136, DEC-196)", async () => {
+	test("disconnectAll revokes the old secret's grants (hello.revokeAll), then connects with a new secret at the same address (DEC-136, DEC-196)", async () => {
 		relay.grants = [GRANT];
 		const before = (await t.connect()).address;
 		expect(t.grants.map((g) => g.grantId)).toEqual(["g_1"]);
@@ -518,7 +584,7 @@ describe("grants", () => {
 		const firstSecret = (await relay.next("hello"))["secret"];
 		const states: string[] = [];
 		t.addEventListener("statechange", (e) => states.push(e.detail.state));
-		const again = t.newAddress();
+		const again = t.disconnectAll();
 		expect(await relay.next("bye")).toEqual({ type: "bye", reason: "user" });
 		expect(await relay.next("hello")).toMatchObject({
 			secret: firstSecret,
@@ -720,13 +786,13 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		expect(order).toEqual(["replaced"]);
 	});
 
-	test("newAddress() during the wait for the detail takes the address back first", async () => {
+	test("disconnectAll() during the wait for the detail takes the address back first", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		const gone = nextEnd(t);
 		replace();
 		await gone;
-		const renewed = t.newAddress();
+		const renewed = t.disconnectAll();
 		const back = await relay.next("hello");
 		expect(back["secret"]).toBe(secret);
 		expect(back["revokeAll"]).toBe(true);
@@ -736,11 +802,11 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		expect(t.state).toBe("connected");
 	});
 
-	test("newAddress() from a replaced listener takes the address back first", async () => {
+	test("disconnectAll() from a replaced listener takes the address back first", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		const renewed = new Promise<unknown>((resolve) =>
-			t.addEventListener("replaced", () => resolve(t.newAddress()), {
+			t.addEventListener("replaced", () => resolve(t.disconnectAll()), {
 				once: true,
 			}),
 		);
@@ -760,7 +826,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		replace();
 		await nextEnd(t);
 		relay.answerHello = false;
-		const renewing = t.newAddress();
+		const renewing = t.disconnectAll();
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
@@ -769,7 +835,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await expect(renewing).rejects.toMatchObject({ reason: "replaced" });
 		expect(t.state).toBe("disconnected");
 		relay.answerHello = true;
-		const retry = t.newAddress();
+		const retry = t.disconnectAll();
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
@@ -785,7 +851,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		const secret = (await relay.next("hello"))["secret"];
 		replace();
 		await nextEnd(t);
-		const renewing = t.newAddress();
+		const renewing = t.disconnectAll();
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
@@ -793,7 +859,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await expect(renewing).rejects.toMatchObject({ reason: "policy" });
 		expect(t.state).toBe("disconnected");
 		relay.ignoreRevokeAll = false;
-		const retry = t.newAddress();
+		const retry = t.disconnectAll();
 		expect(await relay.next("hello")).toMatchObject({
 			secret,
 			revokeAll: true,
@@ -809,7 +875,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await relay.next("bye");
 		expect(t.grants).toHaveLength(1); // grants stay across disconnect()
 		const changes = nextEvent<{ grants: unknown[] }>(t, "grantschange");
-		await t.newAddress();
+		await t.disconnectAll();
 		const back = await relay.next("hello");
 		expect(back).toMatchObject({ secret, revokeAll: true });
 		expect((await changes).detail.grants).toEqual([]);
@@ -822,7 +888,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 	});
 
 	test("a page that never had a secret makes one without connecting", async () => {
-		await t.newAddress();
+		await t.disconnectAll();
 		expect(relay.urls).toEqual([]);
 		expect(t.state).toBe("disconnected");
 	});
@@ -833,20 +899,20 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		t.disconnect();
 		relay.refuse = true;
 		// The address did not change (DEC-170).
-		await expect(t.newAddress()).rejects.toMatchObject({
+		await expect(t.disconnectAll()).rejects.toMatchObject({
 			reason: "network",
-			addressChanged: false,
+			secretChanged: false,
 		});
 		relay.refuse = false;
 		await t.connect();
 		expect((await relay.next("hello"))["secret"]).toBe(secret);
 	});
 
-	test("taken back, but connecting with the new secret fails: rejects with addressChanged (DEC-170)", async () => {
+	test("taken back, but connecting with the new secret fails: rejects with secretChanged (DEC-170)", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		relay.answerHello = false;
-		const renewing = t.newAddress();
+		const renewing = t.disconnectAll();
 		const back = await relay.next("hello");
 		expect(back).toMatchObject({ secret, revokeAll: true });
 		relay.refuse = true;
@@ -861,7 +927,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		});
 		await expect(renewing).rejects.toMatchObject({
 			reason: "network",
-			addressChanged: true,
+			secretChanged: true,
 		});
 		// The new secret stays: the next connect() uses it.
 		relay.refuse = false;
@@ -877,13 +943,13 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		try {
 			await a.connect();
 			const first = (await relay.next("hello"))["secret"];
-			await b.newAddress();
+			await b.disconnectAll();
 			expect(await relay.next("hello")).toMatchObject({
 				secret: first,
 				revokeAll: true,
 			});
 			// The stored secret is new now; the next take-back is of that one.
-			await a.newAddress();
+			await a.disconnectAll();
 			const second = await relay.next("hello");
 			expect(second).toMatchObject({ revokeAll: true });
 			expect(second["secret"]).not.toBe(first);
@@ -893,12 +959,12 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		}
 	});
 
-	test("connect() while newAddress() runs waits for it and connects with the new secret", async () => {
+	test("connect() while disconnectAll() runs waits for it and connects with the new secret", async () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		t.disconnect();
-		const renewing = t.newAddress();
-		expect(t.newAddress()).toBe(renewing); // one run at a time
+		const renewing = t.disconnectAll();
+		expect(t.disconnectAll()).toBe(renewing); // one run at a time
 		const connecting = t.connect();
 		await renewing;
 		const session = await connecting;
@@ -912,7 +978,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		expect(relay.sockets).toHaveLength(3); // first, take-back, new: no fourth
 	});
 
-	test("after a takeover and a later session of its own that ended, newAddress() stays off", async () => {
+	test("after a takeover and a later session of its own that ended, disconnectAll() stays off", async () => {
 		await t.connect();
 		replace();
 		await nextEvent(t, "replaced");
@@ -920,7 +986,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		const gone = nextEnd(t);
 		relay.close(4002); // idle: not reconnected
 		await gone;
-		await t.newAddress();
+		await t.disconnectAll();
 		expect(t.state).toBe("disconnected");
 	});
 
@@ -928,7 +994,7 @@ describe("taking a taken-over address back (review of PR 39, DEC-095)", () => {
 		await t.connect();
 		const secret = (await relay.next("hello"))["secret"];
 		relay.answerHello = false;
-		const renewing = t.newAddress();
+		const renewing = t.disconnectAll();
 		await relay.next("hello", (m) => m["revokeAll"] === true);
 		t.disconnect();
 		await expect(renewing).rejects.toMatchObject({ name: "AbortError" });
@@ -1007,7 +1073,7 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 
 	test("a claim of another address does not count (CC 5)", async () => {
 		await t.connect();
-		// Same channel (same storage key), another secret: after newAddress() there.
+		// Same channel (same storage key), another secret: after disconnectAll() there.
 		const other = newTab(relay.url, { storage: new MemoryStorage() });
 		await other.connect();
 		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");

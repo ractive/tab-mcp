@@ -235,14 +235,14 @@ test.skipIf(chrome === undefined)(
 		// An app is connected: "Disconnect all apps" is behind "Connect another app".
 		expect(
 			await page.eval(
-				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-new-address').checkVisibility()",
+				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-disconnect-all').checkVisibility()",
 			),
 		).toBe(false);
 		await page.click("dialog.tab-mcp-connect .tab-mcp-setup-toggle");
-		await page.click("dialog.tab-mcp-connect .tab-mcp-new-address");
+		await page.click("dialog.tab-mcp-connect .tab-mcp-disconnect-all");
 		expect(
 			await page.eval<string>(
-				"document.querySelector('.tab-mcp-new-address-question p').textContent",
+				"document.querySelector('.tab-mcp-disconnect-all-question p').textContent",
 			),
 		).toBe(
 			"This disconnects Test client (client.example). To use this page with it again, connect it again and enter a new code.",
@@ -251,7 +251,7 @@ test.skipIf(chrome === undefined)(
 			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
 		);
 		// A real click: the reconnect needs the user action.
-		await page.click("dialog.tab-mcp-connect .tab-mcp-new-address-confirm");
+		await page.click("dialog.tab-mcp-connect .tab-mcp-disconnect-all-confirm");
 		// The address names the app and stays; the page's secret is new.
 		expect(await renewed).toBe(address);
 		expect(

@@ -168,7 +168,7 @@ test("the /tab URL has no query: no URL the library opens has the secret, its ad
 		await t.connect();
 		const first = String((await relay.next("hello"))["secret"]);
 		// "Disconnect all apps": one connection with the old secret, one with the new.
-		await t.newAddress();
+		await t.disconnectAll();
 		expect(await relay.next("hello")).toMatchObject({
 			secret: first,
 			revokeAll: true,
@@ -203,7 +203,7 @@ test("the /tab URL has no query: no URL the library opens has the secret, its ad
 	}
 });
 
-test("a tab tells its sibling tabs of its claim by the address id of its secret, never the secret; after newAddress() by the new one's", async () => {
+test("a tab tells its sibling tabs of its claim by the address id of its secret, never the secret; after disconnectAll() by the new one's", async () => {
 	const relay = new StubRelay();
 	const origin = new URL(relay.url).origin;
 	const channel = new BroadcastChannel(
@@ -230,7 +230,7 @@ test("a tab tells its sibling tabs of its claim by the address id of its secret,
 		const firstId = (await addressIdOf(first)) as string;
 		expect(firstId).toMatch(/^[a-z2-7]{52}$/);
 		expect(heard).toEqual([{ type: "claimed", address: firstId }]);
-		await t.newAddress();
+		await t.disconnectAll();
 		await relay.next("hello");
 		const second = String((await relay.next("hello"))["secret"]);
 		// The address the AI apps have is the same; what the tabs go by is new.
