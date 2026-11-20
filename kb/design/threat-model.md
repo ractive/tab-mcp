@@ -77,7 +77,7 @@ The address names an app, not a page, and is the same for every user of the app
   oldest among those of the networks that hold the most; amends DEC-088). It does
   not look whether a page is open, and the MCP endpoint answers every well-formed address
   alike without a token (DEC-040): neither tells which pages are open.
-- "Disconnect all apps" (`newAddress()`) in the page revokes the page's grants and
+- "Disconnect all apps" (`disconnectAll()`) in the page revokes the page's grants and
   replaces the secret; the address stays.
 - Residual: a user who reads the code out to someone else (social engineering), or types it
   into a pairing started by an attacker's AI app. The code is all it takes; when the
@@ -526,9 +526,13 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
 - A tab assertion's audience is the app's address, so it no longer names one page
   (DEC-196).
 - With identity binding, a link with someone else's client, one click on Connect and a
-  silent single sign-on pair that client with the user's page while its dialog is open,
-  which for `oidc` has no time limit. Before, it took the page's address. Open: a time
-  limit on the open dialog, or a confirmation in the page (DEC-196).
+  silent single sign-on pair that client with the user's page within 10 minutes after
+  the user opened its dialog (or chose Continue in it), while it is still open
+  (DEC-202). That holds with a client library after 0.18.1; one up to 0.18.1 sends
+  `pairing.start` again after every reconnect, which starts another 10 minutes, so its
+  forgotten dialogs stay pairable until the page updates. Before DEC-196 it took the
+  page's address too. A confirmation in the page
+  was not chosen.
 - Everyone behind one address shares its guess limit and its ten open requests.
 - A page that misleads the AI app (A10).
 - Whoever copies the address secret out of `localStorage` (e.g. a script injected into the

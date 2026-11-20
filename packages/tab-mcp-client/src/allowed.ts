@@ -29,7 +29,7 @@ export type { AllowedTool, AllowedTools };
  * call. Kept in its `storage` next to the address secret until the app is
  * disconnected (in memory with `storage: null` or `alwaysAllow:
  * "until-reload"`); they end with the app's grant, as the relay reports it,
- * and with `newAddress()`. A call they allow runs without asking, with the
+ * and with `disconnectAll()`. A call they allow runs without asking, with the
  * library's dialog and with the page's own `onConfirm` alike.
  */
 export function allowedTools(mcp: TabMcp): AllowedTools {

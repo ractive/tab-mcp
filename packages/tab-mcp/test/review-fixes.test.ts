@@ -134,7 +134,7 @@ function exchange(
 }
 
 describe("1: a revoked grant's requests do not reach the page", () => {
-	test("a request waiting for its page is refused when the page takes its address back (New address)", async () => {
+	test("a request waiting for its page is refused when the page takes its address back (Disconnect all apps)", async () => {
 		const r = relay();
 		const secret = newSecret();
 		const owner = tab(r, {
@@ -288,7 +288,7 @@ describe("1: a revoked grant's requests do not reach the page", () => {
 });
 
 describe("2: a code issued before an address-wide revocation makes no grant", () => {
-	test("New address (hello.revokeAll) after the code was issued", async () => {
+	test("Disconnect all apps (hello.revokeAll) after the code was issued", async () => {
 		const r = oauthRelay();
 		const attacker = tab(r);
 		const s = await attacker.connect();

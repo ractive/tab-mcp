@@ -6,6 +6,73 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Breaking
+
+**`newAddress()` is `disconnectAll()`** (DEC-201): since 0.17 the address names the app
+and never changes; the method disconnects every AI app and makes a new secret, as the
+dialogs' "Disconnect all apps" says. Every name that went with it is renamed, with no
+alias. Search your code for the old names:
+
+| Old | New |
+|---|---|
+| `TabMcp.newAddress()` | `TabMcp.disconnectAll()` |
+| `addressChanged` (on a rejection of it) | `secretChanged` |
+| `DisconnectReason` `"new_address"` (`statechange` `reason`) | `"disconnect_all"` |
+| `ui.strings.newAddress` | `ui.strings.disconnectAll` |
+| `ui.strings.newAddressNote` | `ui.strings.disconnectAllNote` |
+| `ui.strings.newAddressQuestionOne` | `ui.strings.disconnectAllQuestionOne` |
+| `ui.strings.newAddressQuestionMany` | `ui.strings.disconnectAllQuestionMany` |
+| `ui.strings.newAddressConfirm` | `ui.strings.disconnectAllConfirm` |
+| `ui.strings.gettingNewAddress` | `ui.strings.disconnectingAll` |
+| `ui.strings.newAddressDone` | `ui.strings.disconnectAllDone` |
+| CSS class `tab-mcp-new-address` (the dialog's and the takeover notice's button) | `tab-mcp-disconnect-all` |
+| CSS class `tab-mcp-new-address-row` | `tab-mcp-disconnect-all-row` |
+| CSS class `tab-mcp-new-address-question` | `tab-mcp-disconnect-all-question` |
+| CSS class `tab-mcp-new-address-confirm` | `tab-mcp-disconnect-all-confirm` |
+
+What the method does is unchanged, and so is the protocol (`hello.revokeAll`,
+`grants.revokeAll`). A page's own texts under an old key are no longer used, as any
+unknown key.
+
+### Added
+
+- **`pairingUntil` and the event `pairinguntil`** (identity binding, DEC-202): until when
+  a sign-in pairs the page (an ISO time on the page's clock: the `expiresInMs` of the
+  relay's new `pairing.open`, counted from its arrival, so a page clock that differs
+  from the relay's does not matter). Also in the React bindings' snapshot. `undefined`
+  while pairing is off, from each `startPairing()` until the relay answers, after the
+  session ended (`disconnect()`, `disconnectAll()`, a refusal), and with relays up to
+  0.12.1, which do not send it.
+- Dialog texts `signInUntil`, `signInTimeUp` and `continuePairing`.
+
+### Changed
+
+- **With identity binding the connect dialog counts for 10 minutes** (DEC-202): the
+  relay pairs a sign-in with the page only until 10 minutes after the dialog opened. The
+  dialog says until when ("Your AI app can connect until 14:32.") and, once the time is
+  up (checked again when the tab comes back to the front), "The time to connect your AI
+  app is up. To connect it now, continue." with a Continue button that starts the 10
+  minutes again; with an app connected, "Connect another app" shows that sentence next
+  to Continue. Nothing starts them again by itself: on an `oidc` session a reconnect
+  the library makes by itself does not send `pairing.start` again once the user's start
+  was sent, answered or not (`pairingUntil` is then the time of the reconnect, so the
+  dialog shows Continue). `connect()` from a click while reconnecting ("Connect again")
+  does send it, and a session that pairs by code gets it after every reconnect, as
+  before. `startPairing()` now sends `pairing.start` on each call while connected, also
+  when pairing is on already; call it only when the user acts. With a relay up to
+  0.12.1 the dialog counts as long as it is open, as before, but after a reconnect it
+  shows Continue. Libraries up to 0.18.1 send `pairing.start` after every reconnect, so
+  for their pages each reconnect starts another 10 minutes: this release is needed for
+  the limit to be complete.
+- The takeover notice says "If you did not open this page in another tab or window of
+  this browser" (was "in another tab or browser"): a page in another browser has a
+  secret of its own and cannot take this one's place.
+- The listeners that make a reconnect try at once when the tab comes back to the front
+  or the browser is online again, and the wait for the relay's answer to `revoke()` and
+  `signOut()`, are in the lazy chunk, which keeps the core within its size limit.
+
 ## [0.18.1][client-0.18.1] - 2026-11-20
 
 ### Fixed

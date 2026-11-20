@@ -458,7 +458,7 @@ describe("the allowances, with a stub relay", () => {
 		expect(allowedTools(second).list("g_1")).toEqual([]);
 	});
 
-	test("newAddress(): all gone, here and for a page that kept them under the old secret", async () => {
+	test("disconnectAll(): all gone, here and for a page that kept them under the old secret", async () => {
 		relay.grants = [grant("g_1")];
 		const storage = new MemoryStorage();
 		const t = tab({ storage, alwaysAllow: true });
@@ -468,7 +468,7 @@ describe("the allowances, with a stub relay", () => {
 		allowedTools(t).setEverything("g_1", true);
 		// Another tab on the same storage that has not asked for them yet.
 		const other = tab({ storage, alwaysAllow: true });
-		await t.newAddress();
+		await t.disconnectAll();
 		expect(allowedTools(t).list("g_1")).toEqual([]);
 		expect(allowedTools(t).everything("g_1")).toBe(false);
 		expect(allowedTools(other).everything("g_1")).toBe(false);

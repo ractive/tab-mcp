@@ -192,6 +192,11 @@ async function start(
 			`document.getElementById("address").textContent`,
 			15_000,
 		);
+		// The code as the relay sends it: no space of the panel's own in it.
+		await panel.waitFor(
+			`/^[A-Z]{4}-[A-Z]{4}$/.test(document.getElementById("code").textContent)`,
+			15_000,
+		);
 		const worker = await browser.serviceWorker(browser.extensionId as string);
 		const client = await mcpClient(relay, address);
 		return {
@@ -892,7 +897,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 						css("local-problem").color === token("--ink"),
 						css("replaced").backgroundColor === token("--warn-bg"),
 						css("replaced").borderTopColor === token("--warn-edge"),
-						css("replaced-new-address").borderTopColor === token("--edge"),
+						css("replaced-disconnect-all").borderTopColor === token("--edge"),
 					].map(String);
 				})()`),
 			).toEqual(["true", "true", "true", "true", "true", "true"]);
@@ -966,7 +971,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 						body: getComputedStyle(document.body).backgroundColor,
 						text: getComputedStyle(document.body).color,
 						section: getComputedStyle(document.querySelector("main > .card")).backgroundColor,
-						edge: getComputedStyle(document.getElementById("replaced-new-address")).borderTopColor,
+						edge: getComputedStyle(document.getElementById("replaced-disconnect-all")).borderTopColor,
 						field: getComputedStyle(document.getElementById("relay")).borderTopColor,
 						strong: getComputedStyle(document.querySelector("#relay-form button")).backgroundColor,
 						onStrong: getComputedStyle(document.querySelector("#relay-form button")).color,
@@ -1885,7 +1890,7 @@ describe.skipIf(chrome === undefined)(
 				// Disconnect all apps: the connection is taken back with a new
 				// secret behind it. The address names the app and stays
 				// (DEC-196); the notice going away says it is done.
-				await stack.panel.click("#replaced-new-address");
+				await stack.panel.click("#replaced-disconnect-all");
 				// Timed out once in CI (2026-11-13), never in 27 local runs: the
 				// error says what the panel showed then.
 				await stack.panel

@@ -194,7 +194,7 @@ button.strong:hover:not(:disabled, [aria-disabled="true"]) {
 	background: color-mix(in srgb, var(--strong) 84%, var(--paper));
 }
 
-/* A quiet one is its words: Copy, New address, Remove access to all sites. */
+/* A quiet one is its words: Copy, Disconnect all apps, Remove access to all sites. */
 button.quiet,
 button.link {
 	min-height: 24px;
@@ -214,7 +214,7 @@ button.link:hover:not(:disabled, [aria-disabled="true"]) {
 }
 
 /*
- * The first click was taken and the next one acts (Disconnect, New address
+ * The first click was taken and the next one acts (Disconnect, Disconnect all apps
  * with apps paired): the one filled in red, so the second click is meant.
  */
 button[data-armed],

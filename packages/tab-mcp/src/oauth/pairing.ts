@@ -95,6 +95,13 @@ export interface PairingMethod {
 export const PAIRING_CODE_TTL_MS = 120_000;
 
 /**
+ * How long an open dialog counts with identity binding (`oidc`) after its
+ * last `pairing.start`: a sign-in that comes back later finds no page
+ * (DEC-202). Only another `pairing.start` opens it again.
+ */
+export const PAIRING_WINDOW_MS = 600_000;
+
+/**
  * The letters of a code (RFC 8628 §6.1): 20 consonants, so no code spells a
  * word and none has a letter that reads like a digit.
  */

@@ -254,7 +254,7 @@ function watchReplaced(mcp: TabMcp, doc: Document, ui?: DialogOptions): void {
 	if (known) return;
 	mcp.addEventListener("replaced", (event) => {
 		const current = watched.get(mcp);
-		// Not when the page already went on (a New address or connect since).
+		// Not when the page already went on (`disconnectAll()` or `connect()` since).
 		if (current !== undefined && mcp.state === "disconnected")
 			replacedNotice(mcp, current.doc, event.detail.sibling, current.ui);
 	});
@@ -263,9 +263,10 @@ function watchReplaced(mcp: TabMcp, doc: Document, ui?: DialogOptions): void {
 /**
  * Says that the page lost its address (`replaced`, DEC-095). A sibling tab
  * that announced it: "Opened in another tab", nothing to do. Otherwise a
- * warning that another tab or program took over, with "New address", which
- * takes the address back, disconnects its apps, connects with a new one and
- * opens the connect dialog to add it to the AI apps again.
+ * warning that another tab or program took over, with "Disconnect all apps"
+ * (`disconnectAll()`), which takes the page back, disconnects its apps,
+ * connects with a new secret and opens the connect dialog to connect the AI
+ * apps again.
  */
 export function replacedNotice(
 	mcp: TabMcp,
@@ -298,12 +299,12 @@ export function replacedNotice(
 	if (!sibling) {
 		const fresh = button(
 			doc,
-			s.newAddress,
+			s.disconnectAll,
 			() => {
 				fresh.disabled = true;
 				status.hidden = false;
-				status.textContent = s.gettingNewAddress;
-				mcp.newAddress().then(
+				status.textContent = s.disconnectingAll;
+				mcp.disconnectAll().then(
 					() => {
 						dialog.close();
 						mcp.showConnectDialog({ document: doc }).catch(() => {});
@@ -319,7 +320,7 @@ export function replacedNotice(
 					},
 				);
 			},
-			"tab-mcp-new-address",
+			"tab-mcp-disconnect-all",
 			"primary",
 		);
 		actions.append(" ", fresh);
@@ -350,13 +351,13 @@ export const CODE_USED_WAIT_MS = 10_000;
 
 /**
  * The "Connect your AI app" dialog: the address with Copy, how to add it,
- * the pairing code (with Copy) while the relay sends one, New address, and
+ * the pairing code (with Copy) while the relay sends one, Disconnect all apps, and
  * the connected apps with Disconnect (and, for each, switches for the tools
  * that run without asking). Pairing is on while it is open, so closing it
  * ends the code; the connection and the address stay. Until an app is
  * connected, only a small Close (and Escape) close it. Once one is, a
  * confirmation leads, the setup moves behind "Connect another app" and
- * Done is the primary button. New address asks first when it would
+ * Done is the primary button. Disconnect all apps asks first when it would
  * disconnect connected apps. When the page loses its address (`replaced`),
  * this dialog closes and `replacedNotice` says why, from then on also while
  * it is closed.
@@ -451,20 +452,20 @@ export function showConnectDialog(
 	// it changes the address at once, also one just pasted into an AI app.
 	const fresh = button(
 		doc,
-		s.newAddress,
-		() => askNewAddress(),
-		"tab-mcp-new-address",
+		s.disconnectAll,
+		() => askDisconnectAll(),
+		"tab-mcp-disconnect-all",
 	);
 	const freshBox = el(
 		doc,
 		"div",
-		{ className: "tab-mcp-new-address-row" },
-		el(doc, "small", { text: s.newAddressNote }),
+		{ className: "tab-mcp-disconnect-all-row" },
+		el(doc, "small", { text: s.disconnectAllNote }),
 		" ",
 		fresh,
 	);
-	// Asked in the dialog before New address disconnects connected apps.
-	const questionId = `${nextId()}-new-address`;
+	// Asked in the dialog before Disconnect all apps disconnects connected apps.
+	const questionId = `${nextId()}-disconnect-all`;
 	const questionText = el(doc, "p", { id: questionId });
 	const cancelNew = button(doc, s.cancel, () => {
 		asking = false;
@@ -473,15 +474,15 @@ export function showConnectDialog(
 	});
 	const confirmNew = button(
 		doc,
-		s.newAddressConfirm,
-		() => getNewAddress(),
-		"tab-mcp-new-address-confirm",
+		s.disconnectAllConfirm,
+		() => runDisconnectAll(),
+		"tab-mcp-disconnect-all-confirm",
 		"danger",
 	);
 	const question = el(
 		doc,
 		"div",
-		{ className: "tab-mcp-new-address-question" },
+		{ className: "tab-mcp-disconnect-all-question" },
 		questionText,
 		el(
 			doc,
@@ -532,11 +533,47 @@ export function showConnectDialog(
 		el(doc, "br"),
 		el(doc, "small", { className: "tab-mcp-code-note", text: s.codeNote }),
 	);
-	// Identity binding: no code, the same account at the AI app's sign-in.
-	const signInLine = el(doc, "p", {
-		className: "tab-mcp-sign-in",
-		text: s.signIn,
+	// Identity binding: no code, the same account at the AI app's sign-in,
+	// until the time the relay gave (DEC-202); then Continue.
+	const signInUntil = el(doc, "small", {
+		className: "tab-mcp-sign-in-until",
 	});
+	/** The time of `iso` in hours and minutes, as the dialog's language writes it. */
+	const timeOf = (iso: string) => {
+		const time = new Date(iso);
+		try {
+			return time.toLocaleTimeString(s.lang, {
+				hour: "numeric",
+				minute: "2-digit",
+			});
+		} catch {
+			return time.toLocaleTimeString(); // a `lang` the browser does not know
+		}
+	};
+	const signInLine = el(
+		doc,
+		"p",
+		{ className: "tab-mcp-sign-in" },
+		s.signIn,
+		el(doc, "br"),
+		signInUntil,
+	);
+	const more = button(
+		doc,
+		s.continuePairing,
+		() => mcp.startPairing(),
+		"tab-mcp-continue",
+		"primary",
+	);
+	const timeUpText = el(doc, "span", { text: s.signInTimeUp });
+	const timeUp = el(
+		doc,
+		"p",
+		{ className: "tab-mcp-time-up" },
+		timeUpText,
+		" ",
+		more,
+	);
 
 	const steps = el(doc, "ul");
 	const help = el(
@@ -560,7 +597,7 @@ export function showConnectDialog(
 	// Everything for adding the page to an AI app. Once one is connected, it
 	// is behind "Connect another app", closed: the next code is not news.
 	// Where to paste the address comes right after it, the code after that
-	// (CU 23); New address last. The help stays closed (DEC-147).
+	// (CU 23); Disconnect all apps last. The help stays closed (DEC-147).
 	const setupId = `${nextId()}-setup`;
 	const setup = el(
 		doc,
@@ -570,6 +607,7 @@ export function showConnectDialog(
 		help,
 		codeLine,
 		signInLine,
+		timeUp,
 		freshBox,
 		question,
 	);
@@ -651,11 +689,11 @@ export function showConnectDialog(
 	// The dialog's own state; the rest is read from `mcp` in `render()`.
 	/** The setup is open while an app is connected. */
 	let expanded = false;
-	/** The New address question is open. */
+	/** The Disconnect all apps question is open. */
 	let asking = false;
-	/** New address waits for the new session. */
+	/** Disconnect all apps waits for the new session. */
 	let renewing = false;
-	/** New address got its session; until an app pairs or it disconnects. */
+	/** Disconnect all apps got its session; until an app pairs or it disconnects. */
 	let renewed = false;
 	/** Why it is not connected, in the user's words, while it is not. */
 	let message: string | undefined;
@@ -668,6 +706,8 @@ export function showConnectDialog(
 	/** The code shown, and the wait after it was used (until the app connects). */
 	let shownCode: PairingCode | undefined;
 	let usedTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Renders again when the time for a sign-in is up. */
+	let untilTimer: ReturnType<typeof setTimeout> | undefined;
 	/** Shown in the connected state. */
 	let connectedView = false;
 
@@ -834,9 +874,23 @@ export function showConnectDialog(
 		// knows who is signed in to the page: the status says what is missing.
 		const signIn = oidc ? signInText(mcp, s) : undefined;
 		const shown = session !== undefined && signIn === undefined;
+		// A sign-in pairs the page only until the relay's time (DEC-202): then
+		// the dialog says so and offers Continue. Without one (a relay up to
+		// 0.12.1, or no answer yet) it shows what it showed before.
+		const until = oidc ? mcp.pairingUntil : undefined;
+		const left = until === undefined ? 1 : Date.parse(until) - Date.now();
+		const over = connected && shown && left <= 0;
+		clearTimeout(untilTimer);
+		// At most a minute ahead, so that a throttled timer is not the only
+		// chance to see the end.
+		untilTimer =
+			left > 0 && until !== undefined
+				? setTimeout(render, Math.min(left, 60_000))
+				: undefined;
 
-		// An app that paired just now: the setup closes again (unless the New
-		// address question is open in it), and the confirmation is announced.
+		// An app that paired just now: the setup closes again (unless the
+		// Disconnect all apps question is open in it), and the confirmation is
+		// announced.
 		const ids = new Set(grants.map((g) => g.grantId));
 		const paired = connected && grants.some((g) => !grantsSeen.has(g.grantId));
 		grantsSeen = ids;
@@ -862,7 +916,7 @@ export function showConnectDialog(
 		if (connected) message = undefined;
 		const appName = session?.appName;
 		status.textContent = renewing
-			? s.gettingNewAddress
+			? s.disconnectingAll
 			: state === "connecting"
 				? s.connecting
 				: state === "reconnecting"
@@ -870,14 +924,16 @@ export function showConnectDialog(
 					: !connected
 						? (message ?? s.notConnected)
 						: (signIn ??
-							(renewed
-								? s.newAddressDone
-								: appName !== undefined
-									? format(s.readyApp, { app: appName })
-									: s.readyPage));
+							(over
+								? s.signInTimeUp
+								: renewed
+									? s.disconnectAllDone
+									: appName !== undefined
+										? format(s.readyApp, { app: appName })
+										: s.readyPage));
 		status.hidden = connectedView;
 
-		// The address, its help and New address.
+		// The address, its help and Disconnect all apps.
 		const addressShownBefore = !addressBox.hidden;
 		if (shown && address.value !== session.address) {
 			address.value = session.address;
@@ -889,12 +945,18 @@ export function showConnectDialog(
 		question.hidden = !asking;
 		if (asking)
 			questionText.textContent = format(
-				one ? s.newAddressQuestionOne : s.newAddressQuestionMany,
+				one ? s.disconnectAllQuestionOne : s.disconnectAllQuestionMany,
 				{ apps: listOf(names, s) },
 			);
 		const hasCode = renderCode(paired);
 		codeLine.hidden = oidc || !hasCode || !connected;
-		signInLine.hidden = !oidc || mcp.identity !== "bound";
+		signInLine.hidden = !oidc || mcp.identity !== "bound" || over;
+		signInUntil.textContent =
+			until === undefined ? "" : format(s.signInUntil, { time: timeOf(until) });
+		signInUntil.hidden = until === undefined;
+		timeUp.hidden = !over;
+		// With an app connected the status is hidden: the reason goes here.
+		timeUpText.hidden = !connectedView;
 
 		setupToggle.hidden = !connectedView;
 		setupToggle.setAttribute("aria-expanded", String(expanded));
@@ -930,7 +992,8 @@ export function showConnectDialog(
 			renewing || (state !== "disconnected" && state !== "reconnecting");
 
 		// Focus never stays on a control that was hidden or removed; from the
-		// New address question that closed, back to New address.
+		// Disconnect all apps question that closed, back to its button; from
+		// Continue, once the relay took it, to the start.
 		if (
 			focused !== null &&
 			focused !== dialog &&
@@ -940,10 +1003,12 @@ export function showConnectDialog(
 		)
 			(question.contains(focused) && !freshBox.hidden
 				? fresh
-				: closer()
+				: focused === more && !setup.hidden
+					? start()
+					: closer()
 			).focus();
 		// The address showed only now: start there (or at Done), or, after a
-		// New address, at its Copy.
+		// Disconnect all apps, at its Copy.
 		else if (doc.activeElement === dialog && (connectedView || shown))
 			start().focus();
 		else if (
@@ -957,17 +1022,17 @@ export function showConnectDialog(
 			announce(`${successTitle.textContent}. ${successNext.textContent}`);
 	};
 
-	const askNewAddress = () => {
+	const askDisconnectAll = () => {
 		if (mcp.state !== "connected") return;
 		if (mcp.grants.length === 0) {
-			getNewAddress();
+			runDisconnectAll();
 			return;
 		}
 		asking = true;
 		render();
 		cancelNew.focus(); // the safe choice is the default
 	};
-	const getNewAddress = () => {
+	const runDisconnectAll = () => {
 		renewing = true;
 		renewed = false;
 		// Focus moves before the focused control is hidden.
@@ -975,12 +1040,12 @@ export function showConnectDialog(
 		asking = false;
 		render();
 		// Called from the click, so the reconnect has the user action it needs.
-		mcp.newAddress().then(
+		mcp.disconnectAll().then(
 			() => {
 				renewing = false;
 				renewed = true;
 				render();
-				// At its Copy once the new address shows (with identity binding
+				// At its Copy once the address shows again (with identity binding
 				// maybe only later: `render()` moves it then).
 				if (!addressBox.hidden) copy.focus();
 			},
@@ -1004,7 +1069,7 @@ export function showConnectDialog(
 	};
 	const onState = (event: CustomEvent<StateChangeDetail>) => {
 		const { state, reason } = event.detail;
-		if (reason !== undefined && reason !== "new_address") {
+		if (reason !== undefined && reason !== "disconnect_all") {
 			message = disconnectedText(reason, s);
 			renewed = false;
 		}
@@ -1023,6 +1088,9 @@ export function showConnectDialog(
 	const stopAllowed = allowed.onChange(render);
 	mcp.addEventListener("statechange", onState);
 	mcp.addEventListener("pairingcode", render);
+	mcp.addEventListener("pairinguntil", render);
+	// A tab in the background may not have run the timer: look again.
+	doc.addEventListener("visibilitychange", render);
 	mcp.addEventListener("grantschange", render);
 	mcp.addEventListener("identitychange", render);
 	mcp.addEventListener("error", onError);
@@ -1040,10 +1108,13 @@ export function showConnectDialog(
 			"close",
 			() => {
 				clearTimeout(usedTimer);
+				clearTimeout(untilTimer);
 				mcp.stopPairing();
 				stopAllowed();
 				mcp.removeEventListener("statechange", onState);
 				mcp.removeEventListener("pairingcode", render);
+				mcp.removeEventListener("pairinguntil", render);
+				doc.removeEventListener("visibilitychange", render);
 				mcp.removeEventListener("grantschange", render);
 				mcp.removeEventListener("identitychange", render);
 				mcp.removeEventListener("error", onError);

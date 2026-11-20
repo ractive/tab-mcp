@@ -372,7 +372,7 @@ export class Connection {
 		// call `#changed` too.
 		mcp.addEventListener("pairingcode", changed, { signal });
 		// The library sets its list only from the relay (connected) or empties
-		// it with a new address: either way the list to keep (EQ 8).
+		// it on Disconnect all apps: either way the list to keep (EQ 8).
 		mcp.addEventListener(
 			"grantschange",
 			() => {
@@ -665,8 +665,8 @@ export class Connection {
 					this.#changed();
 				});
 				return;
-			case "new-address":
-				await this.#newAddress();
+			case "disconnect-all":
+				await this.#disconnectAll();
 				return;
 			case "set-relay":
 				if (
@@ -757,20 +757,20 @@ export class Connection {
 	}
 
 	/**
-	 * A new address. After a takeover the library first takes the old address
-	 * back, so the relay disconnects the AI apps that now talk to whoever took
-	 * it (DEC-095), but only if the takeover happened in this worker's life:
-	 * a new worker's library knows nothing of it. Then the extension connects
-	 * with the old address itself, and the new address is made while
-	 * connected, which revokes every grant of the old one.
+	 * Disconnect all apps (`disconnectAll()`). After a takeover the library
+	 * first takes the page back, so the relay disconnects the AI apps that
+	 * now talk to whoever took it (DEC-095), but only if the takeover happened
+	 * in this worker's life: a new worker's library knows nothing of it. Then
+	 * the extension connects with the old secret itself, and the new secret
+	 * is made while connected, which revokes every grant of the old one.
 	 */
-	async #newAddress(): Promise<void> {
+	async #disconnectAll(): Promise<void> {
 		const takeBack = this.#replaced !== undefined && !this.#replacedHere;
 		this.#problem = undefined;
 		this.#changed();
 		try {
 			if (takeBack) await this.#mcp.connect({ resume: true });
-			await this.#mcp.newAddress();
+			await this.#mcp.disconnectAll();
 			await this.#setReplaced(undefined);
 		} catch (error) {
 			this.#problem = message(error);

@@ -297,7 +297,8 @@ sends.
 - Not collected: personally identifiable information, health, financial, authentication
   information, personal communications, location, user activity (clicks, keystrokes).
 - Stored locally only (IndexedDB): the relay address, whether AI access is on, a random
-  secret for the connection's address, the tools allowed per site. Transmitted only to the
+  secret that identifies this installation to the relay, the tools allowed per site.
+  Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
   app the user paired, only while AI access is on.
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to

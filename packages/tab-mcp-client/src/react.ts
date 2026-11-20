@@ -54,6 +54,8 @@ export interface TabMcpSnapshot {
 	grants: readonly Grant[];
 	/** The pairing code to show, while the connect dialog is open. */
 	pairingCode: PairingCode | undefined;
+	/** Identity binding: until when a sign-in pairs the page (`TabMcp.pairingUntil`). */
+	pairingUntil: string | undefined;
 	/** Who the relay knows as the page's user (identity binding). */
 	identity: IdentityState;
 	/** Why the relay refused the identity (`identity: "refused"`). */
@@ -72,6 +74,7 @@ const SERVER_SNAPSHOT: TabMcpSnapshot = Object.freeze({
 	session: undefined,
 	grants: EMPTY,
 	pairingCode: undefined,
+	pairingUntil: undefined,
 	identity: "none",
 	identityMessage: undefined,
 	reconnecting: undefined,
@@ -82,6 +85,7 @@ const STATE_EVENTS = [
 	"statechange",
 	"grantschange",
 	"pairingcode",
+	"pairinguntil",
 	"identitychange",
 	"toolschange",
 ] as const satisfies readonly (keyof TabMcpEventMap)[];
@@ -120,6 +124,7 @@ class Store {
 			session: mcp.session,
 			grants: mcp.grants,
 			pairingCode: mcp.pairingCode,
+			pairingUntil: mcp.pairingUntil,
 			identity: mcp.identity,
 			identityMessage: mcp.identityMessage,
 			reconnecting: mcp.reconnecting,

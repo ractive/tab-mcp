@@ -322,6 +322,14 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 		await code;
 	});
 	expect(snapshots.at(-1)?.pairingCode?.code).toBe("ABCD-EFGH");
+	// Identity binding's time for a sign-in (DEC-202).
+	const until = new Date(Date.now() + 600_000).toISOString();
+	await act(async () => {
+		const open = nextEvent(t, "pairinguntil");
+		stub.send({ type: "pairing.open", expiresAt: until });
+		await open;
+	});
+	expect(snapshots.at(-1)?.pairingUntil).toBe(until);
 	await act(async () => {
 		const changed = nextEvent(t, "grantschange");
 		stub.send({

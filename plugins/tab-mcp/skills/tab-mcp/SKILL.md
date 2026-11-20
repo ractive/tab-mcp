@@ -151,7 +151,7 @@ connects again by itself: after 5, 10, 20 and 40 s, then every 60 s, and at once
 tab comes back to the front or the network returns. Do not write your own retry loop;
 show `state === "reconnecting"` and the property `reconnecting` (the next attempt, its
 number and time); `statechange` fires for each attempt, and when the relay refused one,
-`error` says why just before the `statechange` to `disconnected`. It never reconnects after `disconnect()`, `newAddress()`, another
+`error` says why just before the `statechange` to `disconnected`. It never reconnects after `disconnect()`, `disconnectAll()`, another
 tab taking the page's place (`replaced`), an expired or idle session or a refusal by the
 relay, and a first `connect()` that fails is not retried (show the error and let the
 user try again). `reconnect: false` turns it off.
@@ -159,17 +159,18 @@ user try again). `reconnect: false` turns it off.
 The library does not connect on page load by itself: if the page offers a "Keep AI
 access on" switch that the user turned on, call `connect({ resume: true })` on load.
 
-"Disconnect all apps" in the dialog calls `mcp.newAddress()`: it disconnects every app
+"Disconnect all apps" in the dialog calls `mcp.disconnectAll()`: it disconnects every app
 and makes a new address secret, and the dialog asks first when apps are connected. The
 address stays the same; each AI app connects again with a new code. A custom UI calls
-`mcp.newAddress()` from a click.
+`mcp.disconnectAll()` from a click.
 
 For a custom UI, use `connect()`, `startPairing()`/`stopPairing()` (codes come only while
 pairing is on), `revoke(grantId)` (resolves once the relay removed the grant),
 `disconnect()`, the properties `state` (`disconnected`, `connecting`, `connected`,
-`reconnecting`), `session` (its `address` is the MCP address), `pairingCode` and
-`grants`, and the events `statechange` (`{ state, reason? }`, `reason` when a session
-ended), `pairingcode` (`{ pairingCode }`), `grantschange` (`{ grants }`), `replaced` and
+`reconnecting`), `session` (its `address` is the MCP address), `pairingCode`,
+`pairingUntil` (identity binding) and `grants`, and the events `statechange` (`{ state,
+reason? }`, `reason` when a session ended), `pairingcode` (`{ pairingCode }`),
+`pairinguntil` (`{ pairingUntil }`), `grantschange` (`{ grants }`), `replaced` and
 `error`. Every detail is an object; a value that is gone is `undefined`. Methods that ask
 the relay reject with an `InvalidStateError` while not connected. The dialogs' texts can
 be replaced (`ui: { strings }`, keys in the client's `src/strings.ts`, with `lang` and
@@ -184,7 +185,7 @@ same page said on its `BroadcastChannel` that its session started, otherwise a w
 with "Disconnect all apps". A custom UI does the same with `event.detail.sibling`: `true` is the
 usual, harmless second tab; `false` means it may be a program with a copy of the address
 secret, which the paired AI apps now talk to, so offer a "Disconnect all apps" button that calls
-`mcp.newAddress()`. It takes the page back with the relay revoking those apps in the
+`mcp.disconnectAll()`. It takes the page back with the relay revoking those apps in the
 same step, then connects with a new secret; if it rejects with `reason: "replaced"`, the
 page was taken over again first: say so and let the user try again.
 
@@ -227,7 +228,7 @@ const served = await mcp.serve(port, {
 - `requestTimeoutMs` (300 s) limits each request on the page's side (`-31002`, the call
   ends as `cancelled`); a port has none of the relay's other limits.
 - `served.close()` (or `options.signal`) ends it; close it when the channel is gone.
-  Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
+  Without `relay`, `connect()`, `showConnectDialog()` and `disconnectAll()` reject with a
   `TypeError` and React's `ConnectButton` renders nothing. `serve`, the relay and
   `webmcp: true` can be used together: one registration reaches all three.
 
@@ -314,14 +315,14 @@ Keep these; do not work around them.
 - Keep XSS out of the page and do not log or expose the secret under
   `tab-mcp:secret:<relay origin>:<server name>`: whoever has it can take the page's place,
   and the AI apps paired with it then talk to them until the page makes a new secret
-  (`newAddress()`).
+  (`disconnectAll()`).
   Run the page on its own origin (not a shared one such as `*.github.io`) and keep
   third-party scripts off it.
 - For a page with user accounts, use identity binding
   ([references/sign-in.md](references/sign-in.md)): a copied secret then gets nothing.
   On a page that pairs by code, grants follow the browser profile, not the person, so the
   next user of a shared browser gets the AI apps the previous one paired: call
-  `mcp.newAddress()` when the user logs out.
+  `mcp.disconnectAll()` when the user logs out.
 - The relay's pairing page names the AI app and the app id of the address, not the page:
   the code alone says which page is paired. Tell users never to pass their code on.
 - Tools act with the user's rights in the page. Expose only what the user may do anyway,

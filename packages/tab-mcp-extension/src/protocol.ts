@@ -61,7 +61,7 @@ export type PanelCommand =
 	/** The pairing view opened (`on`) or closed: codes only while it is open. */
 	| { type: "pair"; on: boolean }
 	| { type: "revoke"; grantId: string }
-	| { type: "new-address" }
+	| { type: "disconnect-all" }
 	| { type: "set-relay"; relay: string }
 	| { type: "set-allowed"; origin: string; name: string; on: boolean }
 	/**
@@ -275,7 +275,7 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 				: undefined;
 		case "connect":
 		case "stop":
-		case "new-address":
+		case "disconnect-all":
 			return { type: m["type"] };
 		case "pair":
 			return typeof m["on"] === "boolean"

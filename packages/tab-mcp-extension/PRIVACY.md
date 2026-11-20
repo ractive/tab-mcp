@@ -49,9 +49,10 @@ which relay.
 In the extension's own IndexedDB in the browser, used by its service worker only:
 
 - the address of the relay the user chose (by default `https://tab-mcp.ractive.ch`);
-- whether AI access is on, and whether another tab or program took the connection's
-  address over;
-- a random secret from which the connection's address is derived;
+- whether AI access is on, and whether another tab or program took its place at the
+  relay;
+- a random secret that identifies this installation to the relay (the address the AI
+  app is given is the same for every installation; the secret is what tells them apart);
 - the tools the user allowed to run without asking, per site: the site's origin and the
   tool names.
 

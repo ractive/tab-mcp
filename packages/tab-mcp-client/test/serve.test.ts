@@ -122,7 +122,7 @@ async function received(
 }
 
 describe("without a relay", () => {
-	test("connect(), showConnectDialog() and newAddress() reject; nothing is stored", async () => {
+	test("connect(), showConnectDialog() and disconnectAll() reject; nothing is stored", async () => {
 		const storage = new MemoryStorage();
 		const reads: string[] = [];
 		const mcp = newPage({
@@ -138,7 +138,7 @@ describe("without a relay", () => {
 		for (const attempt of [
 			mcp.connect({ resume: true }),
 			mcp.showConnectDialog(),
-			mcp.newAddress(),
+			mcp.disconnectAll(),
 		]) {
 			const error = await attempt.catch((e: unknown) => e);
 			expect(error).toBeInstanceOf(TypeError);
