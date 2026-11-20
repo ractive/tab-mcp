@@ -15,13 +15,21 @@ import {
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
 import {
+	CodeFiller,
+	type FillHost,
+	type PagePort,
+	pairingCodes,
+	relayPageOrigin,
+	takeCode,
+} from "@ractive-ch/tab-mcp-client/extension";
+import {
 	FIREFOX,
 	notificationOptions,
 	openPanel,
 	PANEL,
 	PRODUCT,
 } from "../browser.ts";
-import { fillAccess, relayPageOrigin } from "../fill.ts";
+import { fillAccess } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	APP_ID,
@@ -55,14 +63,7 @@ import {
 } from "./allowed.ts";
 import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
-import {
-	CodeFiller,
-	type FillHost,
-	HOLD_MS,
-	type PagePort,
-	syncPairingScript,
-	takeCode,
-} from "./fill.ts";
+import { failureText, HOLD_MS, syncPairingScript } from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
@@ -220,10 +221,9 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
-		this.#filler = new CodeFiller(
-			this.#fillHost(),
-			grants.map((g) => g.grantId),
-		);
+		this.#filler = new CodeFiller(this.#fillHost(), {
+			grants: grants.map((g) => g.grantId),
+		});
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -792,12 +792,12 @@ export class Connection {
 
 	// --- The relay's pairing page in this browser (DEC-203) ---
 
-	/** A port from a pairing page's content script; its sender is checked there. */
+	/**
+	 * A port from a pairing page's content script; its sender is checked
+	 * there. The filler never rejects: it closes the port and logs a failure.
+	 */
 	pairingPage(port: PagePort): void {
-		void this.#filler.page(port).catch((error: unknown) => {
-			console.warn("tab-mcp: pairing page", error);
-			port.close();
-		});
+		void this.#filler.page(port);
 	}
 
 	/**
@@ -840,32 +840,26 @@ export class Connection {
 	/** The code to fill in (`takeCode`), with pairing held on for it. */
 	#fillCode(signal: AbortSignal): Promise<string | undefined> {
 		this.#holdPairing();
-		const mcp = this.#mcp;
-		return takeCode(
-			{
-				current: () => mcp.pairingCode,
-				onChange: (listener) => {
-					mcp.addEventListener("pairingcode", listener);
-					return () => mcp.removeEventListener("pairingcode", listener);
-				},
-			},
-			signal,
-			{ now: Date.now() },
-		);
+		return takeCode(pairingCodes(this.#mcp), signal, { now: Date.now() });
 	}
 
+	/** The extension's parts of the library's fill-in (DEC-206). */
 	#fillHost(): FillHost {
 		return {
 			extensionId: chrome.runtime.id,
+			app: APP_ID,
 			relayOrigin: () => relayPageOrigin(this.#relay),
 			aiOn: () => this.#status() !== "off",
 			enabled: () => this.#fillOn(),
 			ask: (tabId, client, signal) =>
-				this.#questions.askPairing({ tabId }, client, signal),
+				this.#questions
+					.askPairing({ tabId }, client, signal)
+					// "On <site>" is never offered for a pairing page.
+					.then((answer) => (answer === "site" ? "deny" : answer)),
 			code: (signal) => this.#fillCode(signal),
 			release: () => this.#releasePairing(),
 			failed: (why) => {
-				this.#problem = why;
+				this.#problem = failureText(why);
 				this.#changed();
 			},
 			now: () => Date.now(),

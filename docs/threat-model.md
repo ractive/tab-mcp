@@ -416,7 +416,8 @@ stops script on another origin of the relay; a program can send any `Origin`.
   a code written by an extension like one that was typed. An extension must act only on
   a top-level page of its relay's origin, only for its own app id and only after its
   user agreed, showing the verified host: any site can be a client under a name of its
-  choice. The tab-mcp browser extension does this (DEC-203, A13).
+  choice. The tab-mcp browser extension does this (DEC-203, A13), with the client
+  library's `./extension` entry, which other extensions can use (DEC-206).
 - The metadata, token, revoke and MCP endpoints answer CORS requests from any origin
   without credentials (`Access-Control-Allow-Origin: *`, never `Allow-Credentials`).
   They use no cookies, and tokens travel only in the `Authorization` header, so another
@@ -785,6 +786,11 @@ like any other, `chrome-extension://<id>` (A11).
   - What remains: a user who allows a client they did not start pairs it, as one who
     types the code into its page would; the host on the question is the defence, as on
     the relay's page. A program on the computer that can click the panel can click Allow.
+  - Where it lives (DEC-206): the content script's part, the sender check and the rules
+    of asking and filling in are the client library's entry
+    `@ractive-ch/tab-mcp-client/extension`, one reviewed copy that Sitegloss uses too;
+    each extension supplies its question, its setting and the permission prompt, and
+    the library fills in nothing without the extension's `ask` answering Allow.
 - **A takeover is kept.** After another tab or program takes the extension's place, the
   extension does not take it back by itself, also after a restart, so it does not trade
   places back and forth with whoever has the secret; the side panel says so and offers

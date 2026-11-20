@@ -11,8 +11,8 @@
  * user left AI access on (after a browser start, an update, a reload).
  */
 
+import { PAIRING_PORT, pagePort } from "@ractive-ch/tab-mcp-client/extension";
 import { FIREFOX, openPanel } from "./browser.ts";
-import { PAIRING_PORT } from "./fill.ts";
 import {
 	CONTENT_SCRIPT,
 	CONTENT_SCRIPT_ID,
@@ -23,7 +23,6 @@ import { attachPanel } from "./panel-port.ts";
 import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
-import { pagePort } from "./worker/fill.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
 declare const TAB_MCP_TEST: boolean;

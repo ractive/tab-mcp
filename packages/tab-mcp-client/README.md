@@ -9,7 +9,9 @@ which page is meant; the AI app then calls the page's tools while the tab stays 
 is installed on the user's computer. With `webmcp: true` the library also registers the
 tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A site's own
 assistant can call the same tools over a port, without a relay:
-[Your own assistant on the page](#your-own-assistant-on-the-page).
+[Your own assistant on the page](#your-own-assistant-on-the-page). A browser extension
+that is a tab-mcp page itself can fill in its pairing code on the relay's page for its
+user: [For browser extensions](#for-browser-extensions).
 
 How the library, the relay and the tab-mcp browser extension fit together, with a
 picture:
@@ -1237,6 +1239,132 @@ is a complete todo app.
 For end-to-end tests of a page's tools, `@ractive-ch/tab-mcp/testing` (the relay's
 package) starts a relay in the test process and issues a token for the page connected
 at the app's address without pairing; see the relay's [README](https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp#testing-a-pages-tools).
+
+## For browser extensions
+
+A browser extension can be a tab-mcp page itself: its service worker holds the `TabMcp`
+and offers the extension's tools (the
+[tab-mcp browser extension](https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp-extension)
+and Sitegloss do). When the user adds it to an AI app, the relay's pairing page
+(`/authorize`) often opens in the same browser. `@ractive-ch/tab-mcp-client/extension`
+lets the extension fill in its own code there: it asks its user "Connect Claude
+(claude.ai)?", and on Allow writes the code into the page's form and submits it. The
+relay checks the code as it checks a typed one, and typing it by hand keeps working
+(another browser, a user who ignores the question).
+
+It is an entry of its own, which a web page never loads. It imports nothing of the rest
+of the library at run time, touches no `window` or `document` until called, and needs no
+`chrome` types: it takes the browser's ports as small structural types, which
+`chrome.runtime.Port` fits. A content script that imports `runPairingPage` bundles less
+than 1 KB gzipped of it.
+
+**What the entry gives:**
+
+- The content script's part, `runPairingPage({ app, connect })`: on the relay's
+  `/authorize` page in a tab's top frame, with exactly one form for `app` that has a code
+  field, a Connect button and the relay's request id (the hooks of DEC-199), it opens a
+  port to the worker (`PAIRING_PORT`), says who asks (the AI app's name and verified
+  host, the request id, a nonce of this page load) and waits. It fills in only the code
+  the worker sends back with that nonce, once (`requestSubmit` with Connect, the page's
+  own post). Its pieces are exported too: `findPairingForm`, `fillIn`, `helloFor`,
+  `parseFill`.
+- The worker's part, `CodeFiller`, the rules as one state machine. A port is taken only
+  from this extension's own content script, in a tab's top frame, at exactly the relay's
+  origin (port included) and path (`isPairingSender`). One question per page load; on
+  Allow the code goes to that one page. The same request's page back in the same tab
+  within 30 s is the relay's answer that the code was not taken: filled once more
+  without asking, never a third time; any other request asks. A question that waits is
+  withdrawn when the page goes, AI access or the setting goes off, the relay changes,
+  or the AI app connects meanwhile. A page that could not be asked about is reported,
+  not dropped. `pagePort(port)` takes the browser's port over in `onConnect`.
+- Which code to fill in: `takeCode(pairingCodes(mcp), signal, { now })` gives the current
+  code unless it is about to change, else the next one, and never fails while a code
+  exists (on a computer whose clock is ahead every code would look expired).
+- The relay's addresses: `relayPageOrigin(relay)`, `relaySitePattern(relay)` (the host
+  permission to ask for, `<scheme>://<host>/*`) and `pairingPagePattern(relay)` (a
+  content script's `matches`); `undefined` where an address has none (an IPv6 literal).
+- The messages between the two (`PairingHello`, `FillMessage`, `parseHello`).
+
+**What the extension supplies** (`FillHost`): its id and app id; the relay origin it fills
+in for (`undefined` for none); whether AI access is on, and whether the user turned
+filling in on; how the user is asked (`ask`, in its own panel or notification, the name
+and host shown with invisible characters escaped, `@ractive-ch/tab-mcp-client/visible`);
+the code with pairing held on (`startPairing()` before `takeCode`, kept on long enough
+after the fill for the relay to check the code); `release()` when that AI app connected;
+and `failed("busy" | "no-code")` to tell its user. Besides, the extension keeps the
+on/off setting, asks for the relay's site with a click
+(`permissions.request({ origins: [relaySitePattern(relay)] })`, an optional host
+permission), registers the content script for `pairingPagePattern(relay)` or puts it in
+with `scripting.executeScript`, and tells the filler what changed (`grantsChanged`,
+`withdrawAll`, `reset`).
+
+The content script:
+
+```ts
+import { PAIRING_PORT, runPairingPage } from "@ractive-ch/tab-mcp-client/extension";
+
+runPairingPage({
+  app: "my-app", // the extension's appName
+  connect: () => chrome.runtime.connect({ name: PAIRING_PORT }),
+});
+```
+
+The worker:
+
+```ts
+import {
+  CodeFiller, PAIRING_PORT, pagePort, pairingCodes, relayPageOrigin, takeCode,
+} from "@ractive-ch/tab-mcp-client/extension";
+
+const filler = new CodeFiller({
+  extensionId: chrome.runtime.id,
+  app: "my-app",
+  relayOrigin: () => relayPageOrigin(relay),
+  aiOn: () => mcp.state !== "disconnected",
+  enabled: () => settings.fillCode, // off until the user turns it on
+  ask: (tabId, client, signal) => askConnect(tabId, client, signal), // "allow" | "deny" | "timeout" | "busy"
+  code: (signal) => {
+    holdPairing(); // mcp.startPairing(), and stopPairing() a while after
+    return takeCode(pairingCodes(mcp), signal, { now: Date.now() });
+  },
+  release: () => releasePairing(),
+  failed: (why) => showProblem(why), // "busy" | "no-code"
+  now: () => Date.now(),
+});
+
+// At the top level, so that a page's port wakes the worker; taken over at once.
+// `page()` never rejects: a callback that throws closes the port and is logged.
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === PAIRING_PORT) void filler.page(pagePort(port));
+});
+// The first list is taken as the grants there are; a grant in a later one is
+// an AI app that just connected, which withdraws its question.
+mcp.addEventListener("grantschange", () =>
+  filler.grantsChanged(mcp.grants.map((g) => ({ grantId: g.grantId, host: g.client.host }))),
+);
+// AI access or the setting turned off: filler.withdrawAll(); another relay: filler.reset().
+```
+
+A service worker usually starts before its connection is up, when `mcp.grants` is still
+empty: build the filler without `grants`, as above, and the relay's first list is the
+baseline. An extension that keeps the grants between worker starts can pass them
+(`new CodeFiller(host, { grants: kept })`), so that a grant made while the worker slept
+counts as new.
+
+**Rules the extension must not weaken:**
+
+- **The origin check.** Any site can copy the relay's markup, and any AI app can name
+  itself as it likes. The worker decides by the port's sender, which the browser sets,
+  never by what the page says: give `relayOrigin()` the configured relay's origin,
+  exactly, and show the verified host in the question.
+- **The user's Allow.** No code leaves the worker without a yes to a question that names
+  the AI app's verified host, and never "always allow": each pairing page asks. A
+  withdrawn, timed-out or unanswered question fills in nothing.
+- **No loops.** One question per page load; the one fill without a question is bound to
+  the same tab and the same relay request. Do not retry around the filler.
+- **Opt-in.** Off by default, also for an extension with access to all sites (that grant
+  was for something else): `enabled()` is false until the user turns it on, and the
+  content script is not registered while it is off.
 
 ## Security
 

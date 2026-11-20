@@ -4439,3 +4439,55 @@ offer the switches", the React todo included.
   for another where the user allows it.
 - **Tested end to end**: the confirmation offers "Always allow"; after the page connects
   again it lists the app, and with the switch on `delete_todos` runs without the question.
+
+## DEC-206: The code fill-in is a client library entry for browser extensions (owner)
+
+2026-11-20. The owner: "Let's build the precondition for the library here." Two
+extensions that are a tab-mcp page fill in their code on the relay's page (DEC-199):
+the tab-mcp browser extension (DEC-203, reviewed and fixed in nine points in PR 177) and
+Sitegloss, which wrote its own. Two copies of security logic drift, so what is the same
+for every such extension moves into the client library, and the tab-mcp browser
+extension is its first user. The shape below is the library's, not the owner's.
+
+- **`@ractive-ch/tab-mcp-client/extension`**, an entry of its own that a web page never
+  loads (not in the core, no CDN file: extensions bundle from npm). It imports nothing
+  of the rest of the library at run time and touches no `window` or `document` until
+  called, so a service worker and a content script can import it; a content script that
+  takes `runPairingPage` bundles less than 1 KB gzipped. No `chrome` types: the
+  browser's ports and senders are structural types (`ContentPort`, `WorkerPort`,
+  `PageSender`) that `chrome.runtime.Port` fits.
+- **Shared:** the content script's part (`runPairingPage`, with `findPairingForm`,
+  `fillIn`, `helloFor`): DEC-199's hooks, version 1, the request id, a nonce per page
+  load, one fill, `requestSubmit` with Connect. The sender check (`isPairingSender`).
+  The rules as one state machine (`CodeFiller`, with `pagePort`): one question per page
+  load; the one unasked fill for the same tab and request id within 30 s, never a third;
+  a waiting question withdrawn by the page going, AI access or the setting going off
+  (`withdrawAll`), another relay (`reset`) or the AI app connecting (`grantsChanged`);
+  a page that cannot be asked about reported, not dropped; the filled page's port closed
+  5 s after. Which code (`takeCode`, `pairingCodes`). The relay's origin and patterns
+  (`relayPageOrigin`, `relaySitePattern`, `pairingPagePattern`). The messages.
+- **Each extension's own**, given as callbacks of `FillHost` or kept outside: how the
+  user is asked (`ask`, answering `allow`, `deny`, `timeout` or `busy`) and every text;
+  where the setting lives (`enabled`); which relay it fills in for (`relayOrigin`,
+  Sitegloss only the hosted one); the permission prompt; registering or injecting the
+  content script; holding pairing on (`code`, `release`); what it says when nothing was
+  filled in (`failed("busy" | "no-code")`, no texts in the library).
+- **Sitegloss's shape fits without bending:** its single question in its own panel or a
+  notification is an `ask` that resolves when answered (a newer page's question can
+  answer the older one `deny`); its executeScript on a tab's load can put the library's
+  content script in with `scripting.executeScript({ files })` instead of reading and
+  filling the form with functions of its own, so the code goes over the port with the
+  nonce like the tab-mcp browser extension's.
+- **The review of PR 179 tightened the contract**, with four gaps that were already in
+  the extension's own code. A fill that waits for its code is withdrawn like a question
+  (turned off, AI access off, another relay, the AI app connected), and once the code is
+  there the filler checks again that filling in is on, AI access is on and the page is
+  still the configured relay's; if not, nothing is sent and no one more fill is left.
+  A fill is marked before the wait, so two overlapping pages of the same request cannot
+  both get the one more fill. `page()` never rejects: a host callback that throws closes
+  the port, fills nothing and is logged. Without `grants` to start with, the first list
+  of grants is the baseline (also after `reset()`), so a worker that starts before its
+  connection does not take the existing grants as AI apps that just connected.
+- **Otherwise no change in behaviour** for the tab-mcp browser extension: its unit tests
+  of the moved logic are the library's now (`test/extension.test.ts`), its tests of its
+  wiring and its end-to-end tests of the fill-in in Chrome and Firefox pass unchanged.
