@@ -89,8 +89,8 @@ Branch `handshake/page-extension`. `main` held client 0.18.1 with unreleased cha
 ## Results
 
 - `bun run verify` exits 0: 1742 tests pass before the merge of main (see the pull request for the merged tree).
-- The client's core is 6261 B gzipped of its 6400 B limit (6252 B before); the mirror's
-  chunk 1.6 KB gzipped (0.5 KB before), its limit in `test/build.test.ts` raised from
+- The client's core is 6262 B gzipped of its 6400 B limit after merging main (6252 B before, 6261 B on the branch); the mirror's
+  chunk 1.7 KB gzipped (0.5 KB before), its limit in `test/build.test.ts` raised from
   1 KB to 2 KB; the connection chunk 16.4 KB.
 
 ## Choices this iteration made

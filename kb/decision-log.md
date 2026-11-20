@@ -4560,8 +4560,8 @@ directly. The shapes below are this iteration's.
   is still reported). The connect dialog says first "Claude (claude.ai) is connected
   through the tab-mcp browser extension, while this tab is in front." and keeps
   everything else (a phone or another browser still connects directly).
-- **Size.** In the mirror's chunk (1.6 KB gzipped, its test limit raised from 1 KB to
-  2 KB); the core grows by 9 bytes (6261 B of 6400 B). `extension` is only declared in
+- **Size.** In the mirror's chunk (1.7 KB gzipped, its test limit raised from 1 KB to
+  2 KB); the core grows by 9 bytes (6262 B of 6400 B after the merge of main). `extension` is only declared in
   the core and defined on the instance by the chunk, and the version is passed to it: an
   import of `version.ts` there made a chunk shared with the core that cost it 88 B.
 - **The panel**, for the tab in front with the library: "This page has tab-mcp built
