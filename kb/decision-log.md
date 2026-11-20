@@ -4418,3 +4418,24 @@ the feature a setting of its own.
   without the script. Not tested end to end: the browsers' prompt for the relay's site
   (the test builds have access to all sites at install), giving the site back (the same
   reason), and a code that rotates between the fill and the check (unit tests).
+
+## DEC-204: `examples/react-todo` turns on `alwaysAllow` and shows the switches
+
+2026-11-20; amends DEC-157's last paragraph ("`examples/react-todo`, the copy readers
+take over, leaves `alwaysAllow` off (DEC-096)"). Owner decision: "Bump all examples to
+offer the switches", the React todo included.
+
+- **On, with switches of the page's own.** The provider sets `alwaysAllow`, so the
+  confirmation offers "Always allow" and the connect dialog has the switches; the page
+  also lists each connected AI app with a switch per tool that asks (`delete_todos`) and
+  "Allow everything, no questions asked", drawn with `useAllowedTools`, which no example
+  used before.
+- **The library's default stays off** (DEC-096, DEC-200): the example's comment and README
+  send readers to "The risk" in the client's README before they copy it, and say that the
+  one switchable tool, `delete_todos`, is the kind "The risk" advises against: a switch
+  is offered for every tool that asks; acceptable for a list in memory only.
+- **Each app is labelled as the library's dialogs do**: its name with the verified host,
+  invisible and direction characters escaped (`escapeInvisible`), so an app cannot pass
+  for another where the user allows it.
+- **Tested end to end**: the confirmation offers "Always allow"; after the page connects
+  again it lists the app, and with the switch on `delete_todos` runs without the question.

@@ -4,6 +4,7 @@
 	--muted: #6b6b66;
 	--line: #d9d9d4;
 	--accent: #2f5bd3;
+	--danger: #b42318;
 	font-family: system-ui, sans-serif;
 	background: var(--bg);
 	color: var(--fg);
@@ -16,6 +17,7 @@
 		--muted: #9b9b95;
 		--line: #3a3a37;
 		--accent: #8aa8ff;
+		--danger: #ff8a80;
 	}
 }
 
@@ -48,7 +50,7 @@ h1 {
 }
 
 .problem {
-	color: #b42318;
+	color: var(--danger);
 }
 
 button {
@@ -82,6 +84,55 @@ form input {
 	border-radius: 0.4rem;
 	background: transparent;
 	color: inherit;
+}
+
+.apps fieldset {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	margin: 0 0 1rem;
+	padding: 0.6rem 0.8rem;
+	border: 1px solid var(--line);
+	border-radius: 0.4rem;
+}
+
+.apps h2 {
+	font-size: 1rem;
+}
+
+.apps legend {
+	font-weight: 600;
+}
+
+.apps .hint {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.9rem;
+}
+
+.switch {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.switch input {
+	accent-color: var(--accent);
+}
+
+.switch.everything {
+	margin-top: 0.3rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--line);
+	font-weight: 600;
+}
+
+.destructive {
+	padding: 0 0.4rem;
+	border: 1px solid var(--danger);
+	border-radius: 999px;
+	color: var(--danger);
+	font-size: 0.75rem;
 }
 
 .todos {
