@@ -12,11 +12,17 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
   in the page, so those do not ask),
 - `ConnectButton` for the "Connect your AI app" dialog, `useTabMcpState` for the status
   line and `useToolCalls` for "The AI's calls", which names the caller of each call: an AI
-  app, the site's own assistant (`serve`) or an agent in the browser.
+  app, the site's own assistant (`serve`) or an agent in the browser,
+- `alwaysAllow` on the provider and `useAllowedTools` for "Runs without asking": under
+  each connected AI app a switch per tool that asks (`delete_todos`) and "Allow
+  everything, no questions asked". Switched on, the tool runs for that app without the
+  question until the app is disconnected; the confirmation also offers "Always allow".
+  The library leaves `alwaysAllow` off by default: read "The risk" in the
+  [client's README](../../packages/tab-mcp-client/README.md) before turning it on.
 
 The live version at <https://ractive.ch/tab-mcp/examples/todo/> is based on this one; it
-also keeps the list in the browser, keeps AI access on after a reload, registers the
-tools with WebMCP and offers "Allow until reload". All live examples:
+also keeps the list in the browser, keeps AI access on after a reload and registers the
+tools with WebMCP. All live examples:
 <https://ractive.ch/tab-mcp/>.
 
 The list is a small external store (`src/todos.ts`) read with `useSyncExternalStore`, so
@@ -44,4 +50,5 @@ relay).
 `test/e2e.test.ts` (part of `bun test`) drives the page in headless Chrome with a real
 relay and the MCP SDK client: it lists the tools, adds, completes and deletes todos
 (clicking Allow in the page's confirmation), restarts the relay and checks that the page
-reconnects to the same address by itself.
+reconnects to the same address by itself, then turns on the switch for `delete_todos` and
+checks that deleting runs without the question.

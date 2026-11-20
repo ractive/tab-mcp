@@ -3,7 +3,8 @@
  * relay, and the MCP SDK client as the AI app (with a token put in the
  * relay's store; pairing itself is test/e2e's subject). The AI app
  * lists the tools, adds, completes and deletes a todo (with the page's
- * confirmation), and keeps working after the relay restarted. Needs Chrome:
+ * confirmation), keeps working after the relay restarted, and deletes
+ * without the question once the page's switch allows it. Needs Chrome:
  * required in CI, skipped elsewhere without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -130,8 +131,8 @@ test.skipIf(chrome === undefined)(
 			`document.querySelector('.todos li[data-id="${added.id}"]').classList.contains('done')`,
 		);
 
-		// Deleting asks the user in the page first, without Always allow (the
-		// example leaves alwaysAllow off, as the docs advise).
+		// Deleting asks the user in the page first; the example turns on
+		// alwaysAllow, so the question also offers Always allow.
 		const deleting = client.callTool({
 			name: "delete_todos",
 			arguments: { ids: [added.id] },
@@ -144,7 +145,7 @@ test.skipIf(chrome === undefined)(
 			await page.eval(
 				"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].map((b) => b.textContent)",
 			),
-		).not.toContain("Always allow");
+		).toContain("Always allow");
 		await page.eval(
 			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow').id = 'allow'",
 		);
@@ -176,6 +177,52 @@ test.skipIf(chrome === undefined)(
 			await client.callTool({ name: "list_todos", arguments: {} }),
 		) as { todos: { text: string }[] };
 		expect(listed.todos.map((t) => t.text)).toEqual(["Water plants"]);
+
+		// The page learns of an app when it connects: a token put in the store
+		// (tokenFor) shows after the page connects again, at the same address.
+		await page.goto(`${pageOrigin}/`);
+		await waitFor(page, "document.querySelector('button.connect')");
+		await page.click("button.connect");
+		await waitFor(
+			page,
+			"document.querySelector('dialog.tab-mcp-connect[open]')",
+		);
+		await page.press("Escape");
+		await waitFor(page, "!document.querySelector('dialog[open]')");
+		await waitFor(page, "document.querySelector('.apps fieldset')");
+		// A switch per tool that asks (delete_todos), then "everything".
+		expect(
+			await page.eval(
+				"[...document.querySelectorAll('.apps [role=switch]')].map((s) => [s.parentElement.textContent, s.checked])",
+			),
+		).toEqual([
+			["Delete todosdestructive", false],
+			["Allow everything, no questions asked", false],
+		]);
+		await page.click(".apps .switch:not(.everything) input");
+		await waitFor(
+			page,
+			"document.querySelector('.apps .switch:not(.everything) input').checked",
+		);
+
+		// Switched on, deleting runs without the question.
+		const milk = json(
+			await client.callTool({
+				name: "add_todo",
+				arguments: { text: "Buy milk" },
+			}),
+		) as { id: string };
+		const result = await client.callTool({
+			name: "delete_todos",
+			arguments: { ids: [milk.id] },
+		});
+		expect(result.isError ?? false).toBe(false);
+		expect(
+			await page.eval(
+				"!!document.querySelector('dialog.tab-mcp-confirm[open]')",
+			),
+		).toBe(false);
+		await waitFor(page, "document.querySelectorAll('.todos li').length === 0");
 		await client.close();
 		await page.close();
 	},
