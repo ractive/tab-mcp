@@ -9,7 +9,7 @@ tags:
   - design
   - extension
   - webmcp
-timestamp: 2026-11-12T16:30:00+01:00
+timestamp: 2026-11-20T23:00:00+01:00
 ---
 
 # The tab-mcp browser extension
@@ -92,6 +92,40 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   question's "Site (verified)") is checked against the origin of the address Chrome
   reports for the tab; a page that says otherwise gets no tools (iteration 35).
 
+## Filling in the code on the relay's page
+
+When an AI app opens the relay's pairing page (`/authorize`) in the browser that has the
+extension, the extension can fill in its own code there, after asking (DEC-199's hooks,
+built in DEC-203). Typing the code stays the way that always works.
+
+- **Access.** The page is opened by the AI app, so no click grants `activeTab` for it.
+  "Fill in the code for me" under the code in the pairing view asks for the relay's
+  site, one origin of the optional host permissions (`<scheme>://<host>/*`); "access to
+  all sites" covers it too. Then a content script (`src/pairing-page.ts`) is registered
+  for `<scheme>://<host>/authorize*` only, again whenever the relay or the permissions
+  change. Without the grant nothing changes.
+- **What it reads.** Only the form's hooks: `data-tab-mcp-pairing="1"`, `data-app`
+  (its own `APP_ID` or nothing happens), `data-client-name`, `data-client-host`, and
+  that there is a code field and a Connect button. It sends these with a nonce of the
+  page load over a port; it never sees a code before the user's Allow.
+- **The origin is the check.** The worker (`src/worker/fill.ts`) takes the port only
+  from this extension's content script in a tab's top frame at exactly the configured
+  relay's origin, port included, and path `/authorize`: any site can copy the markup.
+- **The question.** Only while AI access is on. "Connect <name> (<host>) to the tab-mcp
+  browser extension?", with the verified host on a line of its own and the AI app's own
+  name for itself labelled as its own: any site can be a client called "Claude". One
+  click is less than opening the panel and typing a code, so the host is what the user
+  decides on. Allow or Don't allow, in the panel or a notification like a tool's
+  question, 60 s; no "Always allow".
+- **On Allow** the worker holds pairing on (30 s), takes the current code (or the next
+  one if it is about to change) and sends it on that page's port; the content script
+  writes it into the field and submits the form with Connect. The relay checks it as
+  any code.
+- **No loops.** One question per page load. The same request's page in the same tab
+  within 30 s of a fill is the relay's answer that the code was not taken: filled once
+  more without asking, then nothing until the window has passed. Don't allow, a timeout,
+  the page going or the AI app connecting by a typed code fill nothing.
+
 A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
 With the window only, Chrome resolved the call and showed nothing when another
 extension had a panel of its own open for the tab (Claude in Chrome's);
@@ -110,7 +144,8 @@ with a second extension).
   it the extension runs on a tab only after a click on its icon, as Overmark does, and
   only for that origin in that tab (Chrome keeps the grant across navigations on the same
   origin, not to another subdomain). "Give access to all sites" asks for it; the content script
-  is then registered for every http(s) page. `"incognito": "not_allowed"`: no Incognito
+  is then registered for every http(s) page. "Fill in the code for me" asks for the
+  relay's site alone, for its pairing page (DEC-203). `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).
 - No remote code.
 

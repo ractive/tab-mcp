@@ -32,7 +32,9 @@ import {
 	switchShown,
 	webmcpNote,
 } from "./card.ts";
+import { fillPanel } from "./fill.ts";
 import {
+	expiredText,
 	isUnavailable,
 	questionAnnouncement,
 	questionCard,
@@ -415,7 +417,7 @@ function expiredNotice(q: QuestionSummary): HTMLElement {
 	const notice = document.createElement("div");
 	notice.className = "question-notice";
 	const text = document.createElement("p");
-	text.textContent = `Not answered in time: ${q.tool} did not run.`;
+	text.textContent = expiredText(q);
 	const dismiss = document.createElement("button");
 	dismiss.type = "button";
 	dismiss.className = "quiet small";
@@ -632,11 +634,23 @@ function showTab(s: PanelState): void {
 			?.focus();
 }
 
+/** "Fill in the code for me" under "Pair an AI app" (DEC-203). */
+const fill = fillPanel(
+	{
+		box: $("fill"),
+		text: $("fill-text"),
+		on: $("fill-on") as HTMLButtonElement,
+		off: $("fill-off") as HTMLButtonElement,
+	},
+	(text) => problem(text),
+);
+
 function show(s: PanelState): void {
 	const relayChanged = state?.relay !== s.relay;
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
+	fill.show(s);
 	showQuestions(s.questions, s.expired);
 	showTab(s);
 }

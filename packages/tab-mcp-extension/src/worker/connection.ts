@@ -21,6 +21,7 @@ import {
 	PANEL,
 	PRODUCT,
 } from "../browser.ts";
+import { relayPageOrigin } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	APP_ID,
@@ -54,6 +55,15 @@ import {
 } from "./allowed.ts";
 import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
+import {
+	CODE_WAIT_MS,
+	CodeFiller,
+	type FillHost,
+	HOLD_MS,
+	MIN_CODE_LEFT_MS,
+	type PagePort,
+	syncPairingScript,
+} from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
@@ -154,6 +164,12 @@ export class Connection {
 	readonly #storage: CachedSecretStorage;
 	readonly #icons: Icon[];
 	readonly #questions: Questions;
+	/** The relay's pairing pages in this browser (DEC-203). */
+	readonly #filler: CodeFiller;
+	/** Pairing is held on for a code just filled in, until this fires. */
+	#fillHold: ReturnType<typeof setTimeout> | undefined;
+	/** The pairing page's script registrations, one after the other. */
+	#scriptSync: Promise<void> = Promise.resolve();
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -199,6 +215,10 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		this.#filler = new CodeFiller(
+			this.#fillHost(),
+			grants.map((g) => g.grantId),
+		);
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -235,6 +255,7 @@ export class Connection {
 			grants,
 		);
 		connection.#showBadge();
+		connection.syncFill();
 		// The alarm too, not only once connected: after an update (which
 		// clears alarms) with the relay out of reach, the first connect fails
 		// and the library does not retry it; the alarm does (EQ 14).
@@ -350,13 +371,14 @@ export class Connection {
 			() => {
 				// The list in memory is set at once; a failed write to storage
 				// is shown as the problem, not left as an unhandled rejection.
-				this.#setGrants(
-					mcp.grants.map((g) => ({
-						grantId: g.grantId,
-						name: g.client.name,
-						host: g.client.host,
-					})),
-				).catch((error: unknown) => {
+				const grants = mcp.grants.map((g) => ({
+					grantId: g.grantId,
+					name: g.client.name,
+					host: g.client.host,
+				}));
+				// An AI app that just connected withdraws its pairing question.
+				this.#filler.grantsChanged(grants);
+				this.#setGrants(grants).catch((error: unknown) => {
 					this.#problem = message(error);
 					this.#changed();
 				});
@@ -445,6 +467,9 @@ export class Connection {
 		// writes below must not come back as the new relay's list.
 		this.#listening.abort();
 		this.#bridge.stop();
+		// The pages of the relay before are not this one's.
+		this.#filler.reset();
+		this.#releasePairing();
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
 		// Apps paired through the relay before are not paired with this one.
@@ -453,6 +478,7 @@ export class Connection {
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 		await before.disconnect();
+		this.syncFill();
 		this.#changed();
 	}
 
@@ -701,9 +727,106 @@ export class Connection {
 		this.#changed();
 	}
 
-	/** Pairing stops once no panel's pairing view is open. */
+	/**
+	 * Pairing stops once no panel's pairing view is open and no code just
+	 * filled in waits for the relay's check.
+	 */
 	#pairingOff(): void {
-		if (![...this.#panels].some((p) => p.pairing)) this.#mcp.stopPairing();
+		if (
+			![...this.#panels].some((p) => p.pairing) &&
+			this.#fillHold === undefined
+		)
+			this.#mcp.stopPairing();
+	}
+
+	// --- The relay's pairing page in this browser (DEC-203) ---
+
+	/** A port from a pairing page's content script; its sender is checked there. */
+	pairingPage(port: PagePort): void {
+		void this.#filler.page(port).catch((error: unknown) => {
+			console.warn("tab-mcp: pairing page", error);
+			port.close();
+		});
+	}
+
+	/**
+	 * Register the pairing page's content script for the relay in use, if
+	 * the user gave access to its site: at each start, after a change of
+	 * the relay or of the extension's permissions.
+	 */
+	syncFill(): void {
+		const relay = this.#relay;
+		this.#scriptSync = this.#scriptSync
+			.then(() => syncPairingScript(relay))
+			.catch((error: unknown) =>
+				console.warn("tab-mcp: pairing page registration", error),
+			);
+	}
+
+	/** Pairing on for a code being filled in, for HOLD_MS from now. */
+	#holdPairing(): void {
+		clearTimeout(this.#fillHold);
+		this.#fillHold = setTimeout(() => {
+			this.#fillHold = undefined;
+			this.#pairingOff();
+		}, HOLD_MS);
+		this.#mcp.startPairing();
+	}
+
+	#releasePairing(): void {
+		if (this.#fillHold === undefined) return;
+		clearTimeout(this.#fillHold);
+		this.#fillHold = undefined;
+		this.#pairingOff();
+	}
+
+	/**
+	 * The code to fill in: the current one if it has MIN_CODE_LEFT_MS left
+	 * by this clock, else the next the relay sends (a new one is fresh,
+	 * whatever the clocks say).
+	 */
+	#fillCode(signal: AbortSignal): Promise<string | undefined> {
+		this.#holdPairing();
+		const mcp = this.#mcp;
+		const current = mcp.pairingCode;
+		if (
+			current !== undefined &&
+			!(Date.parse(current.expiresAt) - Date.now() < MIN_CODE_LEFT_MS)
+		)
+			return Promise.resolve(current.code);
+		return new Promise((resolve) => {
+			const done = (code: string | undefined) => {
+				clearTimeout(timer);
+				mcp.removeEventListener("pairingcode", next);
+				signal.removeEventListener("abort", stop);
+				resolve(code);
+			};
+			const next = () => {
+				const code = mcp.pairingCode?.code;
+				if (code !== undefined) done(code);
+			};
+			const stop = () => done(undefined);
+			const timer = setTimeout(stop, CODE_WAIT_MS);
+			mcp.addEventListener("pairingcode", next);
+			signal.addEventListener("abort", stop, { once: true });
+		});
+	}
+
+	#fillHost(): FillHost {
+		return {
+			extensionId: chrome.runtime.id,
+			relayOrigin: () => relayPageOrigin(this.#relay),
+			aiOn: () => this.#status() !== "off",
+			ask: (tabId, client, signal) =>
+				this.#questions.askPairing({ tabId }, client, signal),
+			code: (signal) => this.#fillCode(signal),
+			release: () => this.#releasePairing(),
+			failed: (why) => {
+				this.#problem = why;
+				this.#changed();
+			},
+			now: () => Date.now(),
+		};
 	}
 
 	#questionsHost(): QuestionsHost {
@@ -916,7 +1039,7 @@ export class Connection {
 				? [
 						"?",
 						BADGE_LOOK.question,
-						`${PRODUCT}: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the ${PANEL} to answer.`,
+						`${PRODUCT}: ${questions === 1 ? "a question waits" : `${questions} questions wait`} for your answer. Open the ${PANEL} to answer.`,
 					]
 				: status === "on" || status === "waiting"
 					? ["on", BADGE_LOOK.on, `${PRODUCT}: AI access is on`]

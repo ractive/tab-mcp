@@ -96,6 +96,12 @@ export interface QuestionView {
 	 * go to, or what is known of it (back or forward).
 	 */
 	navigation?: { to: string };
+	/**
+	 * Not a tool: whether to fill in the extension's code on the relay's
+	 * pairing page for this AI app (DEC-203). `name` is its own name for
+	 * itself ("" if none); `host` above is the one the relay verified.
+	 */
+	pairing?: { name: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
 	/** "Always allow on <host>" is offered (a page tool of an http(s) site). */

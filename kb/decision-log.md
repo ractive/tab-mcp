@@ -4241,3 +4241,76 @@ owner's.
   to the grant's 90 days, and an AI app can be steered by what it reads. The README says
   to offer it for tools one would not check each time, and that "everything" covers
   tools the user has not seen.
+
+## DEC-203: The tab-mcp browser extension fills in its own code on the relay's page
+
+2026-11-20; amends DEC-199 ("built in Sitegloss first; the tab-mcp browser extension may
+follow"). The owner: "Didn't we say the extension could fill the code if the page is
+opened in the same browser?" The extension's side of DEC-199's hooks, with no change to
+the relay.
+
+- **Access to the page.** The relay's `/authorize` page is opened by the AI app, not by
+  a click on the icon, so `activeTab` never covers it, and the extension may not depend
+  on "access to all sites". It asks for one origin of its existing optional host
+  permissions, the relay's (`<scheme>://<host>/*`, no port: Firefox's patterns take
+  none), with a button under the pairing code: "Fill in the code for me", with one line
+  on what it does and that the browser asks first. Not when AI access is turned on: that
+  click is about the connection, and a prompt to "read and change your data on
+  tab-mcp.ractive.ch" there would be a surprise. No new install-time permission, so
+  installed copies are not disabled by an update. Once granted (or with access to all
+  sites), a content script is registered for `<scheme>://<host>/authorize*` only
+  (`scripting.registerContentScripts`), again for the relay set in the panel, and put
+  into such a page that is open already. Without the grant nothing changes: the code is
+  typed. "Stop filling in the code" removes the grant where it is the relay's own.
+- **What the page tells the worker.** The content script reads the form's
+  `data-tab-mcp-*` hooks and nothing else of the page: it acts only in the top frame,
+  at `/authorize`, on exactly one form for its own `APP_ID` with a code field and a
+  Connect button (a page that pairs by sign-in only has no code field). It opens a port
+  and says the app, the AI app's name and host, and a nonce of that page load. The
+  worker takes the port only from this extension's content script, in a tab, frame 0,
+  at exactly the configured relay's origin (port included; Chrome's `sender.origin`
+  where given, the address otherwise) and path: any site can copy the markup. The code
+  goes back only on that port, after Allow, with the nonce; the content script writes
+  it into the field and clicks Connect with `requestSubmit`, the page's own post. The
+  relay checks it like a typed code.
+- **Only while AI access is on** (connected, connecting or retrying). Off, the port is
+  closed and nothing is asked: the user has not turned the feature on.
+- **The question** uses the tools' questions (the side panel when it is open and in
+  front in the tab's window, else a notification; the same 60 s, guard and dialog):
+  "Connect <name> (<host>) to the tab-mcp browser extension?", the verified host on a
+  line of its own ("AI app at (verified)"), the AI app's own name for itself apart and
+  labelled as its own, Don't allow and Allow. No "Always allow": each pairing page asks.
+  The notification is titled "Connect an AI app?", with "AI app at <host>" whole in its
+  context line. All pairing questions together count as one AI app for the cap of 5.
+- **On Allow** the worker holds pairing on (codes come only while it is) for 30 s after
+  the fill, so the relay can still check the code when no panel shows it; it takes the
+  current code if it has 5 s left by the extension's clock, else the next one the relay
+  sends, and gives up after 10 s (the panel then says to type the code). Pairing stops
+  when the hold ends or the AI app connects, unless a panel's pairing view is open.
+- **Nothing is filled** on Don't allow, a timeout, the tab closing or navigating (the
+  port ends with its document, which withdraws the question), another relay being set,
+  AI access going off before the answer, or the AI app connecting meanwhile (a new grant
+  for its host, typed by hand, withdraws its question).
+- **No loops.** One question per page load: one port per document, one hello per port.
+  A wrong code comes back as the same form in the same tab, a new document. The rule
+  chosen: the same request's page (same tab, same app, name and host) within 30 s of a
+  fill, with no grant for that host since, is the relay's answer to the fill: it is
+  filled once more with the code of then, without asking (the code had just rotated);
+  the next time within the window, nothing (no question, no fill), so the user types.
+  After the window a page load asks again, as it is a new action of the user's. The
+  content script does not read the page's error to decide this: it reads nothing but the
+  hooks.
+- **Firefox.** The same code: `scripting.registerContentScripts` and optional host
+  permissions work there; its port senders carry no `origin`, so the address decides.
+  Its notifications have no buttons (as for tools): a click opens the sidebar, where
+  Allow is. The Firefox build answers only forms for `tab-mcp-extension-firefox`.
+- **What stays as it was.** Typing the code works everywhere, also with the question
+  open. The relay, its page and DEC-199's hooks do not change. The panel's hint to use
+  the AI app outside this browser profile stays, for the tools.
+- **Tested** with unit tests and end to end in Chrome for Testing and Firefox, against
+  a relay with an OAuth client: a look-alike on another port of the relay's host gets
+  the script (its pattern has no port) and no question, Don't allow fills nothing and
+  typing still pairs, the page closing withdraws the question, Allow pairs the AI app
+  with the pairing view closed, AI access off asks nothing. Not tested end to end:
+  Chrome's and Firefox's prompt for the relay's site (the test builds have access to all
+  sites at install), and a code that rotates between the fill and the check (unit tests).
