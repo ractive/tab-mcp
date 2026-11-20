@@ -745,17 +745,20 @@ like any other, `chrome-extension://<id>` (A11).
   into the form and submit it, after its user's Allow. One click is less than opening
   the panel and typing a code, and the page would pair whatever client opened it, under
   the name it chose for itself (A7). So:
-  - It sees the page only if the user gave it the relay's site ("Fill in the code for
-    me", one origin of the optional host access) or all sites; the content script is
-    registered for `<relay>/authorize*` alone. It reads the form's `data-tab-mcp-*`
-    attributes and that the form has a code field, nothing else of the page, and gets
+  - It is a setting of its own, off by default, also with access to all sites: "Fill in
+    the code for me" turns it on for the relay in use and asks for the relay's site
+    (one origin of the optional host access) where the extension does not have it. Only
+    then is the content script registered, for `<relay>/authorize*` alone. "Stop filling
+    in the code" and a change of relay turn it off and give the relay's site back (not
+    access to all sites). It reads the form's `data-tab-mcp-*` attributes, its hidden
+    `request_id` and that the form has a code field, nothing else of the page, and gets
     no code before the Allow.
   - The origin is the check, not the markup, which any site can copy: the service
     worker takes the page's port only from the extension's own content script, in a
     tab's top frame, at exactly the configured relay's origin (port included) and path,
     and only for the extension's own app id. A look-alike on another origin, also on
     another port of the relay's host, is ignored.
-  - Only while AI access is on. The question shows the AI app's verified host on a line
+  - Only while AI access is on; turning it off withdraws a question. The question shows the AI app's verified host on a line
     of its own, labelled as verified, and its own name apart, labelled as the AI app's;
     Allow and Don't allow only, the same 60 s, focus wait and notification guard as a
     tool's question. A page that goes, another relay, AI access going off or the AI app
@@ -763,9 +766,12 @@ like any other, `chrome-extension://<id>` (A11).
   - The code goes back only on that page's port, with that page load's nonce, so it
     reaches no other document. The relay checks it like a typed one; nothing about the
     relay changes. Pairing is held on 30 s for the check.
-  - No loops: one question per page load; the same request's page in the same tab
+  - No loops: one question per page load. The page of the same relay request (the same
+    `request_id`, which the relay keeps on its page after a wrong code) in the same tab
     within 30 s of a fill (a code that had just changed) is filled once more without a
-    question, then not again in that window.
+    question, then not again in that window. Any other request asks, so a client that
+    sends the tab back to `/authorize` with a new request right after a fill gets no
+    second code without a question.
   - What remains: a user who allows a client they did not start pairs it, as one who
     types the code into its page would; the host on the question is the defence, as on
     the relay's page. A program on the computer that can click the panel can click Allow.

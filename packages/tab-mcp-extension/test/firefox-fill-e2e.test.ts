@@ -97,6 +97,14 @@ describe.skipIf(!firefoxOk)(
 			rmSync(dir, { recursive: true, force: true });
 		});
 
+		test("off by default; a real click on Fill in the code for me turns it on", async () => {
+			await panel.waitFor(`!document.getElementById("fill-on").hidden`);
+			await panel.click("#fill-on");
+			await panel.waitFor(
+				`!document.getElementById("fill-off").hidden && document.getElementById("fill-on").hidden`,
+			);
+		});
+
 		test("a look-alike on another origin gets no question; the relay's page, Allow fills in the code and pairs", async () => {
 			const fake = await firefox.newTab(oauth.lookAlike, "window");
 			await Bun.sleep(1_500);

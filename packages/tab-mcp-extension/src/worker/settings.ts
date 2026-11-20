@@ -12,6 +12,7 @@ const RELAY = "relay";
 const AI_ON = "aiOn";
 const REPLACED = "replaced";
 const GRANTS = "grants";
+const FILL_FOR = "fillCodeFor";
 
 export async function loadRelay(kv: Kv): Promise<string> {
 	const stored = await kv.get(RELAY);
@@ -82,4 +83,22 @@ export async function saveReplaced(
 ): Promise<void> {
 	if (replaced === undefined) await kv.remove(REPLACED);
 	else await kv.set({ [REPLACED]: { sibling: replaced.sibling } });
+}
+
+/**
+ * The relay for which the user turned on filling in the code on its pairing
+ * page (DEC-203), or `undefined`: off by default, and off for any other
+ * relay until turned on there.
+ */
+export async function loadFillFor(kv: Kv): Promise<string | undefined> {
+	const stored = await kv.get(FILL_FOR);
+	return typeof stored === "string" ? stored : undefined;
+}
+
+export async function saveFillFor(
+	kv: Kv,
+	relay: string | undefined,
+): Promise<void> {
+	if (relay === undefined) await kv.remove(FILL_FOR);
+	else await kv.set({ [FILL_FOR]: relay });
 }

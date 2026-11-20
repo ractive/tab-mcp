@@ -642,6 +642,7 @@ const fill = fillPanel(
 		on: $("fill-on") as HTMLButtonElement,
 		off: $("fill-off") as HTMLButtonElement,
 	},
+	(on) => send({ type: "set-fill", on }),
 	(text) => problem(text),
 );
 

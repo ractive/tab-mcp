@@ -14,14 +14,15 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 ### Added
 
 - **Fills in its own pairing code** on the relay's sign-in page when an AI app opens it
-  in the same browser (DEC-203): "Fill in the code for me" under the code asks for
-  access to the relay's site (the browser asks first). Then, while AI access is on, the
-  panel or a notification asks "Connect <AI app> (<host>) to the tab-mcp browser
-  extension?" with the AI app's verified host; Allow writes the code into the page and
-  clicks Connect. Only on the relay's exact origin and for this extension's own app;
-  one question per page load, one more fill if the code had just changed, never a
-  third. Typing the code works as before. "Stop filling in the code" takes the access
-  away. In Firefox too.
+  in the same browser (DEC-203), once turned on: "Fill in the code for me" under the
+  code (off by default, also with access to all sites) asks for access to the relay's
+  site if needed (the browser asks first). Then, while AI access is on, the panel or a
+  notification asks "Connect <AI app> (<host>) to the tab-mcp browser extension?" with
+  the AI app's verified host; Allow writes the code into the page and clicks Connect.
+  Only on the relay's exact origin and for this extension's own app; one question per
+  page load, one more fill for the same request if the code had just changed, never a
+  third. Typing the code works as before. "Stop filling in the code" turns it off and
+  gives the relay's site back; another relay starts off. In Firefox too.
 - The icon's tooltip says "a question waits" (a tool's, or now a pairing page's).
 
 ### Changed

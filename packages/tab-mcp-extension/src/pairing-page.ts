@@ -1,10 +1,11 @@
 /**
  * The content script of the relay's pairing page (`/authorize`), registered
  * for that page only, once the user gave the extension access to the relay's
- * site (DEC-203). It reads the form's `data-tab-mcp-*` hooks (DEC-199) and
- * nothing else of the page, tells the worker who asks, and waits: only after
- * the user's Allow does the worker send the code, which it writes into the
- * code field before clicking Connect, a real submit of the page's own form.
+ * site and turned it on (DEC-203). It reads the form's `data-tab-mcp-*` hooks
+ * (DEC-199) and its hidden `request_id`, nothing else of the page, tells the
+ * worker who asks, and waits: only after the user's Allow does the worker
+ * send the code, which it writes into the code field before clicking
+ * Connect, a real submit of the page's own form.
  * The relay checks the code as it checks a typed one.
  */
 
@@ -24,6 +25,8 @@ export interface PairingForm {
 	app: string;
 	clientName: string;
 	clientHost: string;
+	/** The relay's id of this request (the form's hidden `request_id`). */
+	requestId: string;
 }
 
 /**
@@ -52,15 +55,19 @@ export function findPairingForm(
 	);
 	const clientName = form.dataset["clientName"];
 	const clientHost = form.dataset["clientHost"];
+	const requestId = form.querySelector<HTMLInputElement>(
+		'input[type="hidden"][name="request_id"]',
+	)?.value;
 	if (
 		field === null ||
 		button === null ||
 		clientName === undefined ||
 		clientHost === undefined ||
-		clientHost === ""
+		clientHost === "" ||
+		!requestId
 	)
 		return undefined;
-	return { form, field, button, app, clientName, clientHost };
+	return { form, field, button, app, clientName, clientHost, requestId };
 }
 
 /**
@@ -83,6 +90,7 @@ export function helloFor(found: PairingForm, nonce: string): PairingHello {
 		app: found.app,
 		clientName: found.clientName,
 		clientHost: found.clientHost,
+		requestId: found.requestId,
 	};
 }
 

@@ -98,33 +98,38 @@ When an AI app opens the relay's pairing page (`/authorize`) in the browser that
 extension, the extension can fill in its own code there, after asking (DEC-199's hooks,
 built in DEC-203). Typing the code stays the way that always works.
 
+- **A setting, off by default.** "Fill in the code for me" under the code in the
+  pairing view turns it on for the relay in use, also with access to all sites; "Stop
+  filling in the code" turns it off and gives the relay's site back. Another relay
+  starts off, and the old relay's site is given back (never access to all sites).
 - **Access.** The page is opened by the AI app, so no click grants `activeTab` for it.
-  "Fill in the code for me" under the code in the pairing view asks for the relay's
-  site, one origin of the optional host permissions (`<scheme>://<host>/*`); "access to
-  all sites" covers it too. Then a content script (`src/pairing-page.ts`) is registered
-  for `<scheme>://<host>/authorize*` only, again whenever the relay or the permissions
-  change. Without the grant nothing changes.
+  Turning it on asks for the relay's site when the extension does not have it, one
+  origin of the optional host permissions (`<scheme>://<host>/*`). Then a content script
+  (`src/pairing-page.ts`) is registered for `<scheme>://<host>/authorize*` only, again
+  whenever the relay, the setting or the permissions change. Off, nothing changes.
 - **What it reads.** Only the form's hooks: `data-tab-mcp-pairing="1"`, `data-app`
-  (its own `APP_ID` or nothing happens), `data-client-name`, `data-client-host`, and
-  that there is a code field and a Connect button. It sends these with a nonce of the
-  page load over a port; it never sees a code before the user's Allow.
+  (its own `APP_ID` or nothing happens), `data-client-name`, `data-client-host`, the
+  hidden `request_id`, and that there is a code field and a Connect button. It sends
+  these with a nonce of the page load over a port; it never sees a code before the
+  user's Allow.
 - **The origin is the check.** The worker (`src/worker/fill.ts`) takes the port only
   from this extension's content script in a tab's top frame at exactly the configured
   relay's origin, port included, and path `/authorize`: any site can copy the markup.
-- **The question.** Only while AI access is on. "Connect <name> (<host>) to the tab-mcp
+- **The question.** Only while AI access is on; turning it off withdraws a question. "Connect <name> (<host>) to the tab-mcp
   browser extension?", with the verified host on a line of its own and the AI app's own
   name for itself labelled as its own: any site can be a client called "Claude". One
   click is less than opening the panel and typing a code, so the host is what the user
   decides on. Allow or Don't allow, in the panel or a notification like a tool's
   question, 60 s; no "Always allow".
 - **On Allow** the worker holds pairing on (30 s), takes the current code (or the next
-  one if it is about to change) and sends it on that page's port; the content script
-  writes it into the field and submits the form with Connect. The relay checks it as
-  any code.
-- **No loops.** One question per page load. The same request's page in the same tab
-  within 30 s of a fill is the relay's answer that the code was not taken: filled once
-  more without asking, then nothing until the window has passed. Don't allow, a timeout,
-  the page going or the AI app connecting by a typed code fill nothing.
+  one if it is about to change, and the current one if no next comes in 10 s) and sends
+  it on that page's port; the content script writes it into the field and submits the
+  form with Connect. The relay checks it as any code. The port is closed 5 s later.
+- **No loops.** One question per page load. The page of the same request
+  (`request_id`) in the same tab within 30 s of a fill is the relay's answer that the
+  code was not taken: filled once more without asking, then nothing until the window
+  has passed. Any other request asks. Don't allow, a timeout, the page going, AI access
+  going off or the AI app connecting by a typed code fill nothing.
 
 A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
 With the window only, Chrome resolved the call and showed nothing when another

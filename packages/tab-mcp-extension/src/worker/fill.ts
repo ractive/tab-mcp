@@ -7,13 +7,16 @@
  * current code and sends it to that one page, which fills it in and submits.
  *
  * No loops: one question per page load (one port per document, one hello
- * per port). When the same tab shows the same request's page again soon
- * after a fill, it is the relay's answer that the code was not taken (it had
- * just changed): filled once more with the code of then, without asking; the
- * time after, nothing. Don't allow, a timeout, the page going or the AI app
- * connecting meanwhile fill nothing, and typing by hand works as before.
+ * per port). When the same tab shows the page of the same request (the
+ * relay's `request_id`) again soon after a fill, it is the relay's answer
+ * that the code was not taken (it had just changed): filled once more with
+ * the code of then, without asking; the time after, nothing. Any other
+ * request asks. Don't allow, a timeout, the page going, AI access going off
+ * or the AI app connecting meanwhile fill nothing, and typing by hand works
+ * as before. Nothing at all unless the user turned filling in on (DEC-203).
  */
 
+import type { PairingCode } from "@ractive-ch/tab-mcp-client";
 import {
 	type FillMessage,
 	fillAccess,
@@ -40,10 +43,20 @@ export const CODE_WAIT_MS = 10_000;
 export const MIN_CODE_LEFT_MS = 5_000;
 /** Pairing stays on this long after a fill, for the relay to check the code. */
 export const HOLD_MS = 30_000;
+/**
+ * A filled-in page's port is closed this long after the fill: the page has
+ * posted by then, and its answer, if any, is a new document with a port of
+ * its own.
+ */
+export const FILLED_CLOSE_MS = 5_000;
 
 /** What the panel says when Allow could fill in nothing. */
 export const NO_CODE =
 	"The code was not filled in: none came from the relay. Type the code shown under “Pair an AI app” instead.";
+
+/** What the panel says when a pairing page could not be asked about. */
+export const BUSY =
+	"Another AI app's connection request waits for your answer. Type the code into the newer sign-in page, or reload it once you have answered.";
 
 /**
  * A pairing page's port in the worker. Its first message and its end are
@@ -108,6 +121,8 @@ export interface FillHost {
 	relayOrigin(): string | undefined;
 	/** AI access is on: connected, or on its way. */
 	aiOn(): boolean;
+	/** The user turned filling in on, for this relay. */
+	enabled(): boolean;
 	/** The question (`Questions.askPairing`). */
 	ask(
 		tabId: number,
@@ -121,7 +136,7 @@ export interface FillHost {
 	code(signal: AbortSignal): Promise<string | undefined>;
 	/** A filled-in code paired its AI app: pairing need not be held for it. */
 	release(): void;
-	/** Allow filled in nothing: the panel says why. */
+	/** A page filled in nothing, or was not asked about: the panel says why. */
 	failed(why: string): void;
 	now(): number;
 }
@@ -134,8 +149,8 @@ interface Waiting {
 
 /** The last fill in a tab. */
 interface Filled {
-	/** The request as its page described it: app, name and host. */
-	key: string;
+	/** The relay's id of the request filled in. */
+	requestId: string;
 	host: string;
 	/** Fills for it so far: 1 after Allow, 2 after the one more. */
 	count: number;
@@ -164,11 +179,20 @@ export class CodeFiller {
 	readonly #filled = new Map<number, Filled>();
 	/** The grants seen so far: a new one is an AI app that just connected. */
 	readonly #grants: Set<string>;
+	readonly #closeAfterMs: number;
 
-	/** `grantIds`: the grants there are already (not new when listed again). */
-	constructor(host: FillHost, grantIds: Iterable<string> = []) {
+	/**
+	 * `grantIds`: the grants there are already (not new when listed again).
+	 * `closeAfterMs`: FILLED_CLOSE_MS (the tests' is shorter).
+	 */
+	constructor(
+		host: FillHost,
+		grantIds: Iterable<string> = [],
+		closeAfterMs = FILLED_CLOSE_MS,
+	) {
 		this.#host = host;
 		this.#grants = new Set(grantIds);
+		this.#closeAfterMs = closeAfterMs;
 	}
 
 	/** A pairing page's port: checked, then asked about and maybe filled in. */
@@ -183,23 +207,24 @@ export class CodeFiller {
 			return;
 		}
 		const hello = parseHello(await within(port.hello, HELLO_WAIT_MS));
-		// Only this extension's own app, and only while the user has AI
-		// access on: off, they have not turned the feature on.
+		// Only this extension's own app, only if the user turned filling in
+		// on, and only while AI access is on: otherwise they have not asked
+		// for it.
 		if (
 			hello === undefined ||
 			hello.app !== APP_ID ||
 			port.signal.aborted ||
+			!host.enabled() ||
 			!host.aiOn()
 		) {
 			port.close();
 			return;
 		}
-		const key = JSON.stringify([hello.app, hello.clientName, hello.clientHost]);
 		const before = this.#lastFill(tabId);
-		if (before?.key === key) {
-			// The page came back after a fill: the code was not taken. Once
-			// more with the code of now, then never again for it.
-			if (before.count === 1) await this.#fill(port, tabId, hello, key, 2);
+		if (before?.requestId === hello.requestId) {
+			// The same request's page again after a fill: the code was not
+			// taken. Once more with the code of now, then never again for it.
+			if (before.count === 1) await this.#fill(port, tabId, hello, 2);
 			else port.close();
 			return;
 		}
@@ -219,11 +244,18 @@ export class CodeFiller {
 		} finally {
 			this.#waiting.delete(waiting);
 		}
-		if (answer !== "allow" || signal.aborted || !host.aiOn()) {
+		// Too many questions wait: not dropped unseen.
+		if (answer === "busy") host.failed(BUSY);
+		if (
+			answer !== "allow" ||
+			signal.aborted ||
+			!host.enabled() ||
+			!host.aiOn()
+		) {
 			port.close();
 			return;
 		}
-		await this.#fill(port, tabId, hello, key, 1);
+		await this.#fill(port, tabId, hello, 1);
 	}
 
 	/** The last fill in `tabId`, if it is recent enough to be answered by this page. */
@@ -238,7 +270,6 @@ export class CodeFiller {
 		port: PagePort,
 		tabId: number,
 		hello: PairingHello,
-		key: string,
 		count: number,
 	): Promise<void> {
 		const code = await this.#host.code(port.signal);
@@ -249,12 +280,13 @@ export class CodeFiller {
 			return;
 		}
 		this.#filled.set(tabId, {
-			key,
+			requestId: hello.requestId,
 			host: hello.clientHost,
 			count,
 			at: this.#host.now(),
 		});
 		port.send({ type: "fill", nonce: hello.nonce, code });
+		setTimeout(() => port.close(), this.#closeAfterMs);
 	}
 
 	/**
@@ -281,12 +313,66 @@ export class CodeFiller {
 		if (done) this.#host.release();
 	}
 
-	/** Another relay: no page of the one before is asked about or filled in. */
-	reset(): void {
+	/**
+	 * AI access off, or filling in turned off: the questions waiting are
+	 * withdrawn and no page gets the one more fill.
+	 */
+	withdrawAll(): void {
 		for (const waiting of this.#waiting) waiting.withdraw.abort();
 		this.#filled.clear();
+	}
+
+	/** Another relay: no page of the one before is asked about or filled in. */
+	reset(): void {
+		this.withdrawAll();
 		this.#grants.clear();
 	}
+}
+
+/** Where the pairing codes come from: the library's connection. */
+export interface CodeSource {
+	current(): PairingCode | undefined;
+	/** Call `listener` on every new code (or none); returns how to stop. */
+	onChange(listener: () => void): () => void;
+}
+
+/**
+ * The code to fill in. The current one if it has `minLeftMs` left by this
+ * clock (or an expiry that cannot be read); else the next one the relay
+ * sends, which is fresh whatever the clocks say. If none comes within
+ * `waitMs`, the current one after all: with this clock ahead every code
+ * would look expired, and the relay refuses one that is, which the one
+ * more fill for the same request covers. `undefined` only without any code,
+ * or when `signal` aborts.
+ */
+export function takeCode(
+	source: CodeSource,
+	signal: AbortSignal,
+	options: { now: number; waitMs?: number; minLeftMs?: number },
+): Promise<string | undefined> {
+	const { waitMs = CODE_WAIT_MS, minLeftMs = MIN_CODE_LEFT_MS } = options;
+	const current = source.current();
+	if (
+		current !== undefined &&
+		!(Date.parse(current.expiresAt) - options.now < minLeftMs)
+	)
+		return Promise.resolve(current.code);
+	if (signal.aborted) return Promise.resolve(undefined);
+	return new Promise((resolve) => {
+		const done = (code: string | undefined) => {
+			clearTimeout(timer);
+			stop();
+			signal.removeEventListener("abort", aborted);
+			resolve(code);
+		};
+		const stop = source.onChange(() => {
+			const code = source.current()?.code;
+			if (code !== undefined) done(code);
+		});
+		const aborted = () => done(undefined);
+		const timer = setTimeout(() => done(source.current()?.code), waitMs);
+		signal.addEventListener("abort", aborted, { once: true });
+	});
 }
 
 /** The browser APIs the registration uses (the unit tests give their own). */
@@ -304,18 +390,19 @@ export interface ScriptApi {
 
 /**
  * Register the pairing page's content script for the relay `relay` while the
- * user has given access to its site (or to all sites), and only then; for
- * another relay, again. Just registered, it is put into a pairing page that
- * is open already.
+ * user has turned filling in on there (`enabled`) and given access to its
+ * site (or to all sites), and only then; for another relay, again. Just
+ * registered, it is put into a pairing page that is open already.
  */
 export async function syncPairingScript(
 	relay: string,
+	enabled: boolean,
 	api: ScriptApi = chrome,
 ): Promise<void> {
 	const access = fillAccess(relay);
 	const matches = pairingMatches(relay);
 	const granted =
-		access !== undefined && (await api.permissions.contains(access));
+		enabled && access !== undefined && (await api.permissions.contains(access));
 	const [registered] = await api.scripting.getRegisteredContentScripts({
 		ids: [PAIRING_SCRIPT_ID],
 	});

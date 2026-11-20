@@ -131,6 +131,12 @@ async function answer(stack: Stack, value: "allow" | "deny"): Promise<void> {
 	);
 }
 
+/** Whether "Fill in the code for me" and "Stop filling in the code" are hidden. */
+const fillButtons = (stack: Stack) =>
+	stack.panel.eval<boolean[]>(
+		`[document.getElementById("fill-on").hidden, document.getElementById("fill-off").hidden]`,
+	);
+
 /** The pairing page's script ran in `page` (its flag in the extension's world). */
 async function scriptRan(page: Page): Promise<boolean> {
 	const world = await page.isolatedWorld("tab-mcp browser extension");
@@ -148,22 +154,29 @@ describe.skipIf(chrome === undefined)(
 			await stack?.stop();
 		});
 
-		test("the panel offers it under the code, and says what it does", async () => {
+		test("off by default, also with access to all sites: no question; Fill in the code for me turns it on", async () => {
 			const host = new URL(stack.oauth.relay.url).host;
-			// The test build has access to all sites: the relay's is in it,
-			// and cannot be taken away alone.
+			const then = `when an AI app opens the sign-in page of ${host} in this Chrome profile, tab-mcp asks you and fills in the code.`;
+			// The test build has access to all sites: Chrome asks nothing.
 			expect(
 				await stack.panel.waitFor<string>(
 					`!document.getElementById("fill").hidden && document.getElementById("fill-text").textContent`,
 				),
-			).toBe(
-				`When an AI app opens the sign-in page of ${host} in this Chrome profile, tab-mcp asks you and fills in the code.`,
+			).toBe(`Then, ${then}`);
+			expect(await fillButtons(stack)).toEqual([false, true]);
+			// Off: the relay's page has no script of it, and asks nothing.
+			const { url } = await authorizeUrl(stack.oauth, stack.address);
+			const page = await stack.browser.newPage(url);
+			expect(await scriptRan(page)).toBe(false);
+			await Bun.sleep(1_000);
+			expect(await questions(stack)).toEqual([]);
+			await page.close();
+			// A real click: `permissions.request` needs the user's gesture.
+			await stack.panel.click("#fill-on");
+			await stack.panel.waitFor(
+				`document.getElementById("fill-text").textContent === ${JSON.stringify(`W${then.slice(1)}`)}`,
 			);
-			expect(
-				await stack.panel.eval(
-					`[document.getElementById("fill-on").hidden, document.getElementById("fill-off").hidden]`,
-				),
-			).toEqual([true, true]);
+			expect(await fillButtons(stack)).toEqual([true, false]);
 		});
 
 		test("a look-alike of the page on another origin is ignored: no question", async () => {
@@ -254,6 +267,52 @@ describe.skipIf(chrome === undefined)(
 			await Bun.sleep(1_500);
 			expect(await questions(stack)).toEqual([]);
 			await page.close();
+		});
+
+		test("turning AI access off withdraws a question that waits", async () => {
+			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "on"`,
+				15_000,
+			);
+			const { url } = await authorizeUrl(stack.oauth, stack.address);
+			const page = await stack.browser.newPage(url);
+			await stack.panel.waitFor(questionCount(1));
+			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
+			await stack.panel.waitFor(questionCount(0));
+			await page.close();
+		});
+
+		test("Stop filling in the code: off again, the page has no script and asks nothing", async () => {
+			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === "on"`,
+				15_000,
+			);
+			await stack.panel.eval(`document.getElementById("add-app").click()`);
+			await stack.panel.waitFor(
+				`document.getElementById("pairing").hidden === false`,
+			);
+			await stack.panel.click("#fill-off");
+			await stack.panel.waitFor(
+				`document.getElementById("fill-off").hidden && !document.getElementById("fill-on").hidden`,
+			);
+			const { url } = await authorizeUrl(stack.oauth, stack.address);
+			// The unregistration may still be on its way: a page after it.
+			const end = Date.now() + 5_000;
+			for (;;) {
+				const page = await stack.browser.newPage(url);
+				const ran = await scriptRan(page);
+				if (!ran) {
+					await Bun.sleep(1_000);
+					expect(await questions(stack)).toEqual([]);
+					await page.close();
+					break;
+				}
+				await page.close();
+				if (Date.now() > end) throw new Error("the script stayed registered");
+				await Bun.sleep(200);
+			}
 		});
 	},
 );

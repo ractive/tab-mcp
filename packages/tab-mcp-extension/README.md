@@ -165,15 +165,16 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   back). "Disconnect all apps", also under the pairing code, disconnects every AI app
   and makes a new secret; the address stays, and each AI app connects again with a new
   code. With apps paired, the button under the code asks for a second click first.
-- "Fill in the code for me", under the code, lets the extension fill in its code on the
+- "Fill in the code for me", under the code, turns on filling in its code on the
   relay's sign-in page when an AI app opens it in this browser (an AI app on the desktop
-  opens it in the default browser): Chrome first asks for access to the relay's site
-  ("Read and change your data on tab-mcp.ractive.ch"). From then on, while AI access is
-  on, the panel (or a notification) asks "Connect <AI app> (<host>) to the tab-mcp
-  browser extension?"; Allow writes the code into the page's field and clicks Connect.
-  Typing the code by hand works as before, also while the question waits. "Stop filling
-  in the code" takes the access away again (with access to all sites, the relay's site
-  is part of that). See [Filling in the code](#filling-in-the-code).
+  opens it in the default browser). It is off by default, also with access to all
+  sites. Unless the extension has the relay's site already, Chrome first asks ("Read and
+  change your data on tab-mcp.ractive.ch"). From then on, while AI access is on, the
+  panel (or a notification) asks "Connect <AI app> (<host>) to the tab-mcp browser
+  extension?"; Allow writes the code into the page's field and clicks Connect. Typing
+  the code by hand works as before, also while the question waits. "Stop filling in the
+  code" turns it off and gives the relay's site back (not access to all sites); another
+  relay under "Settings" starts off. See [Filling in the code](#filling-in-the-code).
 
 ## Questions
 
@@ -222,9 +223,9 @@ switch it off again there.
 ## Filling in the code
 
 When an AI app opens the relay's pairing page (`<relay>/authorize`) in the browser
-that has the extension, and the extension may see the relay's site (above), its content
-script for that page reads the form's `data-tab-mcp-*` attributes: the app the AI app
-asks for, its name and its verified host. It reads nothing else of the page. Only for
+that has the extension, and filling in is on (above), its content script for that page
+reads the form's `data-tab-mcp-*` attributes (the app the AI app asks for, its name and
+its verified host) and the form's hidden request id. It reads nothing else of the page. Only for
 the extension's own app (`tab-mcp-extension`; `tab-mcp-extension-firefox` in Firefox),
 only in the tab's top frame, only on a form with a code field (a relay that pairs by
 sign-in alone has none) and only while AI access is on, the service worker asks:
@@ -235,9 +236,11 @@ The worker takes the page's word only from the relay's exact origin, port includ
 same form on another site is ignored. On Allow it writes the code into the field and
 submits the form with Connect, and the relay checks the code as a typed one. Nothing is
 filled on Don't allow, after 60 s without an answer, when the tab closes or leaves the
-page, or when the AI app connects meanwhile. One question per page load; if the page
-comes back with "That code is not right" within 30 s (the code had just changed), it is
-filled once more without asking, and not a third time. Needs a relay with the hooks
+page, when AI access goes off, or when the AI app connects meanwhile. One question per
+page load; if the page of the same request comes back with "That code is not right"
+within 30 s (the code had just changed), it is filled once more without asking, and not
+a third time; any other request asks. If another connection request's question is
+waiting already, the panel says so: type the code, or reload the page once answered. Needs a relay with the hooks
 (relay 0.12.0 and later).
 
 ## Permissions
@@ -424,12 +427,14 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   frame, `/authorize`, its own app, a code field), who may speak for it (the relay's
   exact origin; a look-alike, a frame, another extension), the question and its
   notification, Allow, Don't allow, a timeout, the page going, the AI app connecting
-  meanwhile, AI access off, one more fill and no third, the content script's
-  registration and the panel's line. `test/fill-e2e.test.ts` and
+  meanwhile, AI access off, the setting off, too many questions, one more fill for the
+  same request only and no third, the code taken despite a clock ahead, the content
+  script's registration and the panel's line. `test/fill-e2e.test.ts` and
   `test/firefox-fill-e2e.test.ts` do it end to end in Chrome for Testing and Firefox
-  with a relay and an OAuth client (`test/oauth.ts`): a look-alike on another port gets
-  no question, Don't allow then typing by hand, the tab closing, Allow pairs the AI app,
-  AI access off. Chrome's prompt for the relay's site is not tested: the test builds
+  with a relay and an OAuth client (`test/oauth.ts`): off by default, turned on with a
+  real click, a look-alike on another port gets no question, Don't allow then typing by
+  hand, the tab closing, Allow pairs the AI app, AI access off (also while a question
+  waits), Stop. Chrome's prompt for the relay's site is not tested: the test builds
   have access to all sites at install.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.

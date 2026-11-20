@@ -31,15 +31,18 @@ script can see that the API is there and, from how it behaves, that it is this
 extension's. It learns nothing else from it: not who the user is, not the relay, not the
 AI app.
 
-After the user clicks "Fill in the code for me" (or "Give access to all sites"), the
-extension may see the pairing page of the relay the user chose, and only that page of it
-(`<relay>/authorize`). There it reads three attributes of the pairing form: the app the
-AI app asks to connect to, the AI app's name and its host, which the relay put there for
-this. It reads nothing else of the page. While AI access is on, it asks the user whether
-to connect that AI app, and only after the user's Allow it writes its own pairing code
-into the form's code field and submits the form, as the user would by typing it. The
-code goes to the relay, which already knows it; nothing else leaves the browser, and
-nothing of it is stored.
+After the user clicks "Fill in the code for me" (off by default, also with access to all
+sites), the extension sees the pairing page of the relay the user chose, and only that
+page of it (`<relay>/authorize`). There it reads three attributes of the pairing form
+(the app the AI app asks to connect to, the AI app's name and its host, which the relay
+put there for this) and the form's hidden request id (the relay's id of that sign-in,
+so that it can tell a page shown again after a wrong code from a new one). It reads
+nothing else of the page. While AI access is on, it asks the user whether to connect
+that AI app, and only after the user's Allow it writes its own pairing code into the
+form's code field and submits the form, as the user would by typing it. The code goes
+to the relay, which already knows it; nothing else leaves the browser, and nothing of
+the page is stored. The extension stores only that the user turned this on, and for
+which relay.
 
 ## What it stores
 

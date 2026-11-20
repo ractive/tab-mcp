@@ -16,15 +16,21 @@ import {
 	relayPageOrigin,
 } from "../src/fill.ts";
 import { fillIn, findPairingForm, helloFor } from "../src/pairing-page.ts";
-import type { Answer, QuestionView } from "../src/protocol.ts";
-import { fillView } from "../src/sidepanel/fill.ts";
+import {
+	type Answer,
+	parseCommand,
+	type QuestionView,
+} from "../src/protocol.ts";
+import { fillView, NO_PATTERN } from "../src/sidepanel/fill.ts";
 import {
 	expiredText,
 	questionAnnouncement,
 	questionCard,
 } from "../src/sidepanel/question.ts";
 import {
+	BUSY,
 	CodeFiller,
+	type CodeSource,
 	type FillHost,
 	HOLD_MS,
 	NO_CODE,
@@ -32,6 +38,7 @@ import {
 	RETRY_WINDOW_MS,
 	type ScriptApi,
 	syncPairingScript,
+	takeCode,
 } from "../src/worker/fill.ts";
 import {
 	NOTIFICATION_GUARD_MS,
@@ -44,15 +51,22 @@ const ID = "abcdefghijklmnopabcdefghijklmnop";
 const RELAY = "https://relay.example";
 const PAGE = `${RELAY}/authorize?response_type=code&client_id=x`;
 const NONCE = "0123456789abcdef0123";
+/** The relay's id of the request (`randomBase64url(24)` there). */
+const REQUEST = "Zm9vYmFyYmF6cXV4cXV1eHh5enp6";
 
 const settle = () => Bun.sleep(5);
 
 /** The relay's form, as `#pairingPage` writes it (DEC-199's hooks). */
 function relayForm(
-	options: { app?: string; field?: boolean; forms?: number } = {},
+	options: {
+		app?: string;
+		field?: boolean;
+		forms?: number;
+		request?: boolean;
+	} = {},
 ): string {
 	const form = `<form method="post" action="/authorize" data-tab-mcp-pairing="1" data-app="${options.app ?? "tab-mcp-extension"}" data-client-name="Claude" data-client-host="claude.ai">
-<input type="hidden" name="request_id" value="r1">
+${options.request === false ? "" : `<input type="hidden" name="request_id" value="${REQUEST}">`}
 ${options.field === false ? "" : '<input id="code" name="code" type="text" data-tab-mcp-field="code" required>'}
 <button type="submit" name="action" value="connect" data-tab-mcp-action="connect">Connect</button>
 <button type="submit" name="action" value="cancel" formnovalidate>Cancel</button>
@@ -100,6 +114,16 @@ describe("where the relay's pairing page is", () => {
 		expect(fillAccess("nope")).toBeUndefined();
 		expect(pairingMatches("nope")).toEqual([]);
 	});
+
+	test("the pattern's host is normalised; one that gives no pattern gives none", () => {
+		// Lower case already from the URL parser; the trailing dot goes.
+		expect(fillAccess("https://Relay.Example.:8443/")).toEqual({
+			origins: ["https://relay.example/*"],
+		});
+		// An IPv6 literal: the browsers do not agree on a pattern for it.
+		expect(fillAccess("http://[::1]:8787")).toBeUndefined();
+		expect(pairingMatches("http://[::1]:8787")).toEqual([]);
+	});
 });
 
 describe("who may speak for the pairing page", () => {
@@ -141,13 +165,14 @@ describe("who may speak for the pairing page", () => {
 		).toBe(false);
 	});
 
-	test("the hello carries the form's three attributes and a nonce, nothing else", () => {
+	test("the hello carries the form's three attributes, its request id and a nonce, nothing else", () => {
 		const hello = {
 			type: "pairing-page",
 			nonce: NONCE,
 			app: "tab-mcp-extension",
 			clientName: "Claude",
 			clientHost: "claude.ai",
+			requestId: REQUEST,
 		};
 		expect(parseHello({ ...hello, extra: "x" })).toEqual(
 			hello as ReturnType<typeof parseHello>,
@@ -160,6 +185,9 @@ describe("who may speak for the pairing page", () => {
 			{ ...hello, clientName: 1 },
 			{ ...hello, clientName: "x".repeat(201) },
 			{ ...hello, app: undefined },
+			{ ...hello, requestId: undefined },
+			{ ...hello, requestId: "" },
+			{ ...hello, requestId: "a b" },
 		])
 			expect(parseHello(bad)).toBeUndefined();
 		expect(
@@ -187,14 +215,19 @@ describe("the content script on the page", () => {
 			app: "tab-mcp-extension",
 			clientName: "Claude",
 			clientHost: "claude.ai",
+			requestId: REQUEST,
 		});
 		// Another app's form, a page that pairs by sign-in only (no code
-		// field), a frame, another path, two forms: nothing.
+		// field), one without the relay's request id, a frame, another path,
+		// two forms: nothing.
 		expect(
 			findPairingForm(page(relayForm({ app: "sitegloss" })), top),
 		).toBeUndefined();
 		expect(
 			findPairingForm(page(relayForm({ field: false })), top),
+		).toBeUndefined();
+		expect(
+			findPairingForm(page(relayForm({ request: false })), top),
 		).toBeUndefined();
 		expect(
 			findPairingForm(page(relayForm()), { ...top, topLevel: false }),
@@ -226,16 +259,29 @@ describe("the content script on the page", () => {
 	});
 });
 
+/** A hello of the relay's page; `request`: its request id. */
+function helloOf(
+	options: {
+		request?: string;
+		name?: string;
+		host?: string;
+		app?: string;
+	} = {},
+) {
+	return {
+		type: "pairing-page",
+		nonce: NONCE,
+		app: options.app ?? "tab-mcp-extension",
+		clientName: options.name ?? "Claude",
+		clientHost: options.host ?? "claude.ai",
+		requestId: options.request ?? REQUEST,
+	};
+}
+
 /** A page's port that the test drives. */
 function fakePort(
 	sender: Partial<PageSender> = {},
-	hello: unknown = {
-		type: "pairing-page",
-		nonce: NONCE,
-		app: "tab-mcp-extension",
-		clientName: "Claude",
-		clientHost: "claude.ai",
-	},
+	hello: unknown = helloOf(),
 ) {
 	const gone = new AbortController();
 	const sent: unknown[] = [];
@@ -265,8 +311,16 @@ function fakePort(
 }
 
 /** A filler's host whose answers, code and clock the test sets. */
-function fillHost(options: { aiOn?: boolean; code?: string | undefined } = {}) {
+function fillHost(
+	options: {
+		aiOn?: boolean;
+		enabled?: boolean;
+		code?: string | undefined;
+	} = {},
+) {
 	let now = 1_000_000;
+	/** After this many questions, the next are "busy" (Questions' cap). */
+	const busyAfter = 5;
 	const asked: {
 		tabId: number;
 		name: string;
@@ -281,9 +335,12 @@ function fillHost(options: { aiOn?: boolean; code?: string | undefined } = {}) {
 		released: number;
 		failures: string[];
 		on: boolean;
+		fill: boolean;
 	} = {
 		extensionId: ID,
 		on: options.aiOn ?? true,
+		fill: options.enabled ?? true,
+		enabled: () => host.fill,
 		asked,
 		released: 0,
 		failures: [],
@@ -291,6 +348,7 @@ function fillHost(options: { aiOn?: boolean; code?: string | undefined } = {}) {
 		aiOn: () => host.on,
 		ask: (tabId, client, signal) => {
 			asked.push({ tabId, ...client, signal });
+			if (asked.length > busyAfter) return Promise.resolve("busy");
 			return new Promise((resolve) => {
 				answers.push(resolve);
 				signal.addEventListener("abort", () => resolve("deny"));
@@ -314,10 +372,15 @@ function fillHost(options: { aiOn?: boolean; code?: string | undefined } = {}) {
 
 const fillMessage = { type: "fill", nonce: NONCE, code: "BCDF-GHJK" };
 
+/** The port of a filled page is closed this soon after (FILLED_CLOSE_MS). */
+const CLOSE_MS = 20;
+const fillerFor = (host: FillHost, grants: string[] = []) =>
+	new CodeFiller(host, grants, CLOSE_MS);
+
 describe("asking and filling in", () => {
-	test("Allow: the code goes to that page, with its nonce", async () => {
+	test("Allow: the code goes to that page, with its nonce; its port is closed shortly after", async () => {
 		const host = fillHost();
-		const filler = new CodeFiller(host);
+		const filler = fillerFor(host);
 		const port = fakePort();
 		const done = filler.page(port);
 		await settle();
@@ -328,13 +391,48 @@ describe("asking and filling in", () => {
 		await done;
 		expect(port.sent).toEqual([fillMessage]);
 		expect(port.closed).toBe(false);
+		await Bun.sleep(CLOSE_MS * 3);
+		expect(port.closed).toBe(true);
+	});
+
+	test("not turned on (also with access to all sites): nothing, no question", async () => {
+		const host = fillHost({ enabled: false });
+		const port = fakePort();
+		await fillerFor(host).page(port);
+		expect(host.asked).toEqual([]);
+		expect(port.closed).toBe(true);
+	});
+
+	test("turned off or AI access off while the question waits: it is withdrawn at once", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host);
+		const port = fakePort();
+		const done = filler.page(port);
+		await settle();
+		filler.withdrawAll();
+		await done;
+		expect(host.asked[0]?.signal.aborted).toBe(true);
+		expect(port.sent).toEqual([]);
+		expect(port.closed).toBe(true);
+	});
+
+	test("a page that cannot be asked about (too many questions wait) is not dropped unseen: the panel says so", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host);
+		const ports = Array.from({ length: 6 }, (_, i) =>
+			fakePort({ tab: { id: 10 + i } }),
+		);
+		for (const port of ports) void filler.page(port);
+		await settle();
+		expect(host.failures).toEqual([BUSY]);
+		expect(ports[5]?.closed).toBe(true);
 	});
 
 	test("Don't allow, a timeout or a busy answer fill nothing", async () => {
 		for (const answer of ["deny", "timeout"] as const) {
 			const host = fillHost();
 			const port = fakePort();
-			const done = new CodeFiller(host).page(port);
+			const done = fillerFor(host).page(port);
 			await settle();
 			host.answer(answer);
 			await done;
@@ -346,7 +444,7 @@ describe("asking and filling in", () => {
 	test("with AI access off, nothing: no question, no fill", async () => {
 		const host = fillHost({ aiOn: false });
 		const port = fakePort();
-		await new CodeFiller(host).page(port);
+		await fillerFor(host).page(port);
 		expect(host.asked).toEqual([]);
 		expect(port.closed).toBe(true);
 	});
@@ -354,7 +452,7 @@ describe("asking and filling in", () => {
 	test("AI access turned off before the answer: Allow fills nothing", async () => {
 		const host = fillHost();
 		const port = fakePort();
-		const done = new CodeFiller(host).page(port);
+		const done = fillerFor(host).page(port);
 		await settle();
 		host.on = false;
 		host.answer("allow");
@@ -369,20 +467,11 @@ describe("asking and filling in", () => {
 				origin: "https://evil.example",
 			}),
 			fakePort({ frameId: 2 }),
-			fakePort(
-				{},
-				{
-					type: "pairing-page",
-					nonce: NONCE,
-					app: "sitegloss",
-					clientName: "C",
-					clientHost: "c.example",
-				},
-			),
+			fakePort({}, helloOf({ app: "sitegloss" })),
 			fakePort({}, { type: "webmcp-changed" }),
 		]) {
 			const host = fillHost();
-			await new CodeFiller(host).page(port);
+			await fillerFor(host).page(port);
 			expect(host.asked).toEqual([]);
 			expect(port.closed).toBe(true);
 		}
@@ -391,7 +480,7 @@ describe("asking and filling in", () => {
 	test("the page going (closed, navigated) withdraws the question; nothing is filled", async () => {
 		const host = fillHost();
 		const port = fakePort();
-		const done = new CodeFiller(host).page(port);
+		const done = fillerFor(host).page(port);
 		await settle();
 		port.leave();
 		await done;
@@ -401,7 +490,7 @@ describe("asking and filling in", () => {
 
 	test("the AI app connecting meanwhile (typed by hand) withdraws its question; an app listed already does not", async () => {
 		const host = fillHost();
-		const filler = new CodeFiller(host, ["old"]);
+		const filler = fillerFor(host, ["old"]);
 		const port = fakePort();
 		const done = filler.page(port);
 		await settle();
@@ -421,9 +510,9 @@ describe("asking and filling in", () => {
 		expect(port.sent).toEqual([]);
 	});
 
-	test("no loops: the page back after a fill gets one more fill without asking, then nothing", async () => {
+	test("no loops: the same request's page back after a fill gets one more fill without asking, then nothing", async () => {
 		const host = fillHost();
-		const filler = new CodeFiller(host);
+		const filler = fillerFor(host);
 		const first = fakePort();
 		const done = filler.page(first);
 		await settle();
@@ -445,26 +534,41 @@ describe("asking and filling in", () => {
 		expect(third.closed).toBe(true);
 	});
 
-	test("one question per page load; later, or in another tab, or for another app, it asks again", async () => {
+	test("a new request in the same tab right after a fill asks: the one more fill is for the same request only", async () => {
 		const host = fillHost();
-		const filler = new CodeFiller(host);
+		const filler = fillerFor(host);
 		const first = fakePort();
 		const done = filler.page(first);
 		await settle();
 		host.answer("allow");
 		await done;
-		// Another tab, another AI app: their own question.
+		first.leave();
+		// The client sends the tab to /authorize again, with a new request.
+		host.advance(1_000);
+		const again = fakePort({}, helloOf({ request: "another-request-id" }));
+		const asked = filler.page(again);
+		await settle();
+		expect(host.asked).toHaveLength(2);
+		expect(again.sent).toEqual([]);
+		host.answer("deny");
+		await asked;
+		expect(again.sent).toEqual([]);
+	});
+
+	test("one question per page load; later, or in another tab, or for another app, it asks again", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host);
+		const first = fakePort();
+		const done = filler.page(first);
+		await settle();
+		host.answer("allow");
+		await done;
+		// Another tab, another request: their own question.
 		void filler.page(fakePort({ tab: { id: 5 } }));
 		void filler.page(
 			fakePort(
 				{},
-				{
-					type: "pairing-page",
-					nonce: NONCE,
-					app: "tab-mcp-extension",
-					clientName: "ChatGPT",
-					clientHost: "chatgpt.com",
-				},
+				helloOf({ name: "ChatGPT", host: "chatgpt.com", request: "r-chatgpt" }),
 			),
 		);
 		await settle();
@@ -482,7 +586,7 @@ describe("asking and filling in", () => {
 
 	test("the app connected after a fill: the fill is done with, pairing need not be held", async () => {
 		const host = fillHost();
-		const filler = new CodeFiller(host);
+		const filler = fillerFor(host);
 		const done = filler.page(fakePort());
 		await settle();
 		host.answer("allow");
@@ -498,7 +602,7 @@ describe("asking and filling in", () => {
 	test("no code from the relay after Allow: the panel says so, nothing is filled", async () => {
 		const host = fillHost({ code: undefined });
 		const port = fakePort();
-		const done = new CodeFiller(host).page(port);
+		const done = fillerFor(host).page(port);
 		await settle();
 		host.answer("allow");
 		await done;
@@ -508,14 +612,13 @@ describe("asking and filling in", () => {
 
 	test("another relay: the questions of the one before are withdrawn", async () => {
 		const host = fillHost();
-		const filler = new CodeFiller(host);
+		const filler = fillerFor(host);
 		const port = fakePort();
 		const done = filler.page(port);
 		await settle();
 		filler.reset();
 		await done;
 		expect(port.sent).toEqual([]);
-		expect(HOLD_MS).toBeGreaterThan(0);
 	});
 });
 
@@ -645,19 +748,40 @@ describe("the panel", () => {
 		);
 	});
 
-	test("Fill in the code for me: what it does in one line; Stop only where the relay's access is its own", () => {
-		expect(fillView("https://tab-mcp.ractive.ch", false, false)).toEqual({
-			text: "Then, when an AI app opens the sign-in page of tab-mcp.ractive.ch in this Chrome profile, tab-mcp asks you and fills in the code. Chrome asks you first.",
+	test("Fill in the code for me: a setting of its own, what it does in one line, Stop while it is on", () => {
+		const relay = "https://tab-mcp.ractive.ch";
+		const then =
+			"Then, when an AI app opens the sign-in page of tab-mcp.ractive.ch in this Chrome profile, tab-mcp asks you and fills in the code.";
+		expect(fillView(relay, false, false)).toEqual({
+			text: `${then} Chrome asks you first.`,
 			on: true,
 			off: false,
 		});
-		expect(fillView("https://tab-mcp.ractive.ch", true, false)).toEqual({
+		// The site granted already (access to all sites): still off until
+		// turned on, and Chrome asks nothing.
+		expect(fillView(relay, false, true)).toEqual({
+			text: then,
+			on: true,
+			off: false,
+		});
+		expect(fillView(relay, true, true)).toEqual({
 			text: "When an AI app opens the sign-in page of tab-mcp.ractive.ch in this Chrome profile, tab-mcp asks you and fills in the code.",
 			on: false,
 			off: true,
 		});
-		expect(fillView("https://tab-mcp.ractive.ch", true, true)?.off).toBe(false);
-		expect(fillView("nope", false, false)).toBeUndefined();
+		// On, but the site was taken away in the browser's settings.
+		expect(fillView(relay, true, false)).toMatchObject({ on: true, off: true });
+		// No pattern for the address: one plain sentence, no button.
+		expect(fillView("http://[::1]:8787", false, false)).toEqual({
+			text: NO_PATTERN,
+			on: false,
+			off: false,
+		});
+		expect(parseCommand({ type: "set-fill", on: true })).toEqual({
+			type: "set-fill",
+			on: true,
+		});
+		expect(parseCommand({ type: "set-fill", on: "yes" })).toBeUndefined();
 	});
 });
 
@@ -701,13 +825,25 @@ function scriptApi(granted: Set<string>, openTabs: number[] = []) {
 }
 
 describe("the pairing page's script", () => {
+	test("not turned on: never registered, also with the relay's site granted", async () => {
+		const api = scriptApi(new Set(["https://relay.example/*"]), [9]);
+		await syncPairingScript(RELAY, false, api);
+		expect(api.registered.size).toBe(0);
+		expect(api.injected).toEqual([]);
+		await syncPairingScript(RELAY, true, api);
+		expect(api.registered.size).toBe(1);
+		// Turned off: unregistered.
+		await syncPairingScript(RELAY, false, api);
+		expect(api.registered.size).toBe(0);
+	});
+
 	test("registered only with access to the relay's site, for its /authorize; put into a page open already", async () => {
 		const granted = new Set<string>();
 		const api = scriptApi(granted, [9]);
-		await syncPairingScript(RELAY, api);
+		await syncPairingScript(RELAY, true, api);
 		expect(api.registered.size).toBe(0);
 		granted.add("https://relay.example/*");
-		await syncPairingScript(RELAY, api);
+		await syncPairingScript(RELAY, true, api);
 		expect([...api.registered.values()]).toEqual([
 			{
 				id: "tab-mcp-pairing-page",
@@ -718,18 +854,95 @@ describe("the pairing page's script", () => {
 		]);
 		expect(api.injected).toEqual([9]);
 		// Once registered, not again.
-		await syncPairingScript(RELAY, api);
+		await syncPairingScript(RELAY, true, api);
 		expect(api.injected).toEqual([9]);
 		// Another relay: its own registration, or none without its access.
-		await syncPairingScript("https://other.example", api);
+		await syncPairingScript("https://other.example", true, api);
 		expect(api.registered.size).toBe(0);
 		granted.add("https://other.example/*");
-		await syncPairingScript("https://other.example", api);
+		await syncPairingScript("https://other.example", true, api);
 		expect(api.registered.get("tab-mcp-pairing-page")?.matches).toEqual([
 			"https://other.example/authorize*",
 		]);
 		granted.clear();
-		await syncPairingScript("https://other.example", api);
+		await syncPairingScript("https://other.example", true, api);
 		expect(api.registered.size).toBe(0);
+	});
+});
+
+/** A code source the test drives; `expiresAt` relative to NOW. */
+function codes(first?: { code: string; leftMs: number | "bad" }) {
+	let current =
+		first === undefined
+			? undefined
+			: {
+					code: first.code,
+					expiresAt:
+						first.leftMs === "bad"
+							? "not a date"
+							: new Date(NOW + first.leftMs).toISOString(),
+				};
+	const listeners = new Set<() => void>();
+	const source: CodeSource & { next(code: string): void } = {
+		current: () => current,
+		onChange: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		next: (code) => {
+			current = {
+				code,
+				expiresAt: new Date(NOW + 120_000).toISOString(),
+			};
+			for (const listener of listeners) listener();
+		},
+	};
+	return source;
+}
+
+const NOW = Date.UTC(2026, 10, 20, 12);
+
+describe("the code to fill in", () => {
+	const signal = () => new AbortController().signal;
+
+	test("the current code while it has time left, or when its expiry cannot be read", async () => {
+		expect(
+			await takeCode(codes({ code: "AAAA-AAAA", leftMs: 60_000 }), signal(), {
+				now: NOW,
+			}),
+		).toBe("AAAA-AAAA");
+		expect(
+			await takeCode(codes({ code: "BBBB-BBBB", leftMs: "bad" }), signal(), {
+				now: NOW,
+			}),
+		).toBe("BBBB-BBBB");
+	});
+
+	test("about to change: the next one the relay sends", async () => {
+		const source = codes({ code: "AAAA-AAAA", leftMs: 2_000 });
+		const taken = takeCode(source, signal(), { now: NOW, waitMs: 1_000 });
+		source.next("CCCC-CCCC");
+		expect(await taken).toBe("CCCC-CCCC");
+	});
+
+	test("with this clock ahead every code looks expired: none comes, so the current one after all", async () => {
+		const source = codes({ code: "AAAA-AAAA", leftMs: -180_000 });
+		expect(await takeCode(source, signal(), { now: NOW, waitMs: 20 })).toBe(
+			"AAAA-AAAA",
+		);
+	});
+
+	test("no code at all, or the page gone: none", async () => {
+		expect(await takeCode(codes(), signal(), { now: NOW, waitMs: 20 })).toBe(
+			undefined,
+		);
+		const gone = new AbortController();
+		const taken = takeCode(codes(), gone.signal, { now: NOW, waitMs: 1_000 });
+		gone.abort();
+		expect(await taken).toBeUndefined();
+	});
+
+	test("pairing is held for the check", () => {
+		expect(HOLD_MS).toBe(30_000);
 	});
 });

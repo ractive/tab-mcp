@@ -34,6 +34,12 @@ export interface PairingHello {
 	clientName: string;
 	/** `data-client-host`: the host the relay verified for the AI app. */
 	clientHost: string;
+	/**
+	 * The form's hidden `request_id`: the relay's id of this authorization
+	 * request, the same on its page again after a wrong code. The one fill
+	 * without a question is for this request only.
+	 */
+	requestId: string;
 }
 
 /** What the worker sends after the user's Allow: the code to fill in and submit. */
@@ -73,12 +79,17 @@ export function relayPageOrigin(relay: string): string | undefined {
  * The match pattern for the relay's host, without its port: Firefox's
  * patterns take none, and Chrome's without one match every port. The exact
  * origin, port and all, is checked in the content script and in the worker.
+ * The host in lower case without a trailing dot; one that is no plain name
+ * or IPv4 address (an IPv6 literal, say) gives no pattern, as the browsers
+ * do not agree on one for it.
  */
 function hostPattern(relay: string, path: string): string | undefined {
 	const origin = relayPageOrigin(relay);
 	if (origin === undefined) return undefined;
-	const { protocol, hostname } = new URL(origin);
-	return `${protocol}//${hostname}${path}`;
+	const { protocol } = new URL(origin);
+	const host = new URL(origin).hostname.toLowerCase().replace(/\.$/, "");
+	if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(host)) return undefined;
+	return `${protocol}//${host}${path}`;
 }
 
 /**
@@ -154,6 +165,8 @@ export function parseHello(message: unknown): PairingHello | undefined {
 		!isString(m["clientName"]) ||
 		!isString(m["clientHost"]) ||
 		m["clientHost"] === "" ||
+		!isString(m["requestId"]) ||
+		!/^[\w-]{1,128}$/.test(m["requestId"]) ||
 		m["clientName"].length > MAX_CLIENT_NAME ||
 		m["clientHost"].length > MAX_CLIENT_HOST
 	)
@@ -164,6 +177,7 @@ export function parseHello(message: unknown): PairingHello | undefined {
 		app: m["app"],
 		clientName: m["clientName"],
 		clientHost: m["clientHost"],
+		requestId: m["requestId"],
 	};
 }
 
