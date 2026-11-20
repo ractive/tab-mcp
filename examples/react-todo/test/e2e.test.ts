@@ -212,16 +212,24 @@ test.skipIf(chrome === undefined)(
 				arguments: { text: "Buy milk" },
 			}),
 		) as { id: string };
-		const result = await client.callTool({
+		// A confirmation would wait for a click that never comes: the call races
+		// the dialog, so a switch that did not take fails here instead of hanging.
+		const unasked = client.callTool({
 			name: "delete_todos",
 			arguments: { ids: [milk.id] },
 		});
-		expect(result.isError ?? false).toBe(false);
-		expect(
-			await page.eval(
-				"!!document.querySelector('dialog.tab-mcp-confirm[open]')",
-			),
-		).toBe(false);
+		const asked = waitFor(
+			page,
+			"document.querySelector('dialog.tab-mcp-confirm[open]')",
+			5_000,
+		).then(
+			() => "asked",
+			() => "not asked",
+		);
+		expect(await Promise.race([unasked.then(() => "done"), asked])).toBe(
+			"done",
+		);
+		expect((await unasked).isError ?? false).toBe(false);
 		await waitFor(page, "document.querySelectorAll('.todos li').length === 0");
 		await client.close();
 		await page.close();

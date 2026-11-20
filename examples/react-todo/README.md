@@ -18,7 +18,10 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
   everything, no questions asked". Switched on, the tool runs for that app without the
   question until the app is disconnected; the confirmation also offers "Always allow".
   The library leaves `alwaysAllow` off by default: read "The risk" in the
-  [client's README](../../packages/tab-mcp-client/README.md) before turning it on.
+  [client's README](../../packages/tab-mcp-client/README.md) before turning it on. It
+  advises against allowances for tools that delete, yet a switch is offered for every
+  tool that asks: here that is `delete_todos`, acceptable for a list that lives in
+  memory, not for a page whose data matters.
 
 The live version at <https://ractive.ch/tab-mcp/examples/todo/> is based on this one; it
 also keeps the list in the browser, keeps AI access on after a reload and registers the

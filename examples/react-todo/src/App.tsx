@@ -13,6 +13,7 @@ import {
 	useTool,
 	useToolCalls,
 } from "@ractive-ch/tab-mcp-client/react";
+import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import { type FormEvent, useState, useSyncExternalStore } from "react";
 import { MAX_TEXT, MAX_TODOS, type TodoList } from "./todos.ts";
 
@@ -32,7 +33,10 @@ export function App(props: { relay: string; todos: TodoList }) {
 			appName="Todo"
 			// "Always allow" in the confirmation, and switches under each connected
 			// app (in the connect dialog and in <Apps />), kept until the app is
-			// disconnected. Off by default: see "The risk" in the client's README.
+			// disconnected. Off by default: see "The risk" in the client's README,
+			// which advises against allowances for tools that delete. They are offered
+			// for every tool that asks, so here also for delete_todos: acceptable for
+			// a demo list that lives in memory, not for a page whose data matters.
 			alwaysAllow
 		>
 			<main>
@@ -87,7 +91,13 @@ function Apps() {
 function AppSwitches({ grant }: { grant: Grant }) {
 	const { tools, everything, allowedTools } = useAllowedTools(grant.grantId);
 	const { allow, ask, setEverything } = allowedTools;
-	const name = grant.client.name || grant.client.host;
+	// The name is the AI app's own choice: shown with the host the relay
+	// verified, and with invisible or direction characters escaped, as the
+	// library's dialogs do, so it cannot pass for another app.
+	const host = escapeInvisible(grant.client.host);
+	const name = grant.client.name
+		? `${escapeInvisible(grant.client.name)} (${host})`
+		: host;
 	const until = allowedTools.kept
 		? `until you disconnect ${name}`
 		: "until you reload this page";

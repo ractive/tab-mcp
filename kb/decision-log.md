@@ -4431,6 +4431,11 @@ offer the switches", the React todo included.
   "Allow everything, no questions asked", drawn with `useAllowedTools`, which no example
   used before.
 - **The library's default stays off** (DEC-096, DEC-200): the example's comment and README
-  send readers to "The risk" in the client's README before they copy it.
+  send readers to "The risk" in the client's README before they copy it, and say that the
+  one switchable tool, `delete_todos`, is the kind "The risk" advises against: a switch
+  is offered for every tool that asks; acceptable for a list in memory only.
+- **Each app is labelled as the library's dialogs do**: its name with the verified host,
+  invisible and direction characters escaped (`escapeInvisible`), so an app cannot pass
+  for another where the user allows it.
 - **Tested end to end**: the confirmation offers "Always allow"; after the page connects
   again it lists the app, and with the switch on `delete_todos` runs without the question.
