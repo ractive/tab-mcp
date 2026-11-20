@@ -14,7 +14,7 @@ the same for every page of the app. The user adds that address to their AI app a
 it with a code shown in the page, which says which page is meant. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.17.0):
+Facts to keep in mind (version 0.18.1):
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code, claude.ai, Claude Desktop, ChatGPT and Codex work
@@ -40,7 +40,7 @@ Without a bundler, import the self-contained build from a CDN:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.17.0/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.18.1/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -220,7 +220,7 @@ const served = await mcp.serve(port, {
   assistant's backend: the library does not send the question over the port for that
   reason. Do not answer `true` for `kind === "local"` to skip the question: tool results
   bring third-party text into the model. Without it the dialog names "Shop assistant
-  (this site's assistant)", no "Allow until reload".
+  (this site's assistant)", no "Always allow".
 - Page state that changes (the product shown, the cart) belongs in a read-only tool such
   as `get_page_context`, not in `instructions`: MCP has no notification for changed
   instructions.
@@ -254,12 +254,14 @@ The page then asks before every call: a dialog names the AI app and shows the ar
 "Don't allow" has the focus, and "Allow" turns on only after the page has been visible and
 focused for 750 ms with the dialog open (leaving the page starts the wait again).
 Invisible and direction-changing characters in the arguments are shown as `\uXXXX`. The
-dialog offers "Don't allow" and "Allow"; "Allow until reload" (that tool runs without asking for
-that AI app, with any arguments, until a reload or a disconnect; the connect dialog lists
-it with "Ask again") appears only with `alwaysAllow: true` on
-`TabMcp`. Leave it off unless the user really need not check each call: it lifts the only
-brake on a prompt injection, and the relay's one `tools` scope covers every tool, so
-consent per tool is the page's. A refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
+dialog offers "Don't allow" and "Allow"; "Always allow" (that tool runs without asking for
+that AI app, with any arguments, until the app is disconnected, kept in `storage`; the
+connect dialog shows a switch per tool and "Allow everything, no questions asked" under
+each app) appears only with `alwaysAllow: true` on `TabMcp` (`"until-reload"`: memory
+only, "Allow until reload"). A page can draw its own switches with `allowedTools(mcp)` of
+`@ractive-ch/tab-mcp-client/allowed`. Leave it off unless the user really need not check
+each call: it lifts the only brake on a prompt injection for up to the grant's 90 days,
+and the relay's one `tools` scope covers every tool, so consent per tool is the page's. A refusal becomes an error result. The AI app also sees `destructiveHint: true`. To ask in the page's own UI,
 pass `onConfirm: (request) => ConfirmAnswer | Promise<ConfirmAnswer>` to `TabMcp`, where
 `ConfirmAnswer` is `true` (run), `false` (the user refused) or `"unanswered"` (the user
 was asked and did not answer, e.g. the page's own question timed out: the AI app reads
@@ -287,7 +289,7 @@ await mcp.registerTool(deleteNoteTool, { callers: ["relay", "webmcp"] }); // con
   (React: `useTool(tool, { callers: ["relay", "webmcp"] })`): such an agent often drives
   the tab and can click Allow itself. `callers` without `"webmcp"` keeps any tool out.
 - A WebMCP call gets the same argument check and confirmation (the dialog names the caller
-  "An agent in this browser", never offers "Allow until reload"), and fires `toolcall` and
+  "An agent in this browser", never offers "Always allow"), and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`.
 - The agent gets what `execute` returned. A failure (invalid arguments, "Don't allow", a
   tool that is gone, a thrown error, an `isError` result) comes back as

@@ -262,7 +262,7 @@ worker, pass `storage` and `onConfirm`: it has no `localStorage` and no document
 Mark tools whose effect the user cannot undo in the page, or that act outside it (delete
 for good, send, buy, change data on the server), with
 `annotations: { consequentialHint: true }`: the page then asks the user before each call
-("Allow until reload" only if the page turns on `alwaysAllow`). A change the user sees and can
+("Always allow" only if the page turns on `alwaysAllow`). A change the user sees and can
 take back in the page, such as `add_note` above, needs no question.
 
 A site with its own AI assistant on the page can serve the tools to it over a
@@ -358,11 +358,11 @@ so a relay is exactly one process.
 
 ## Status
 
-**0.17.0**. Until 1.0, a new minor version can still change
+**0.18.1**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what changed.
 
 - Released: relay `@ractive-ch/tab-mcp` 0.12.0 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.17.0, on the npm tag `latest`.
+  `@ractive-ch/tab-mcp-client` 0.18.1, on the npm tag `latest`.
 - The tab-mcp browser extension 0.2.1 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16). A development build loaded unpacked has the store's id, which the hosted
   relay allows ([README](packages/tab-mcp-extension/README.md)).

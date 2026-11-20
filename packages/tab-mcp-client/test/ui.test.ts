@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import { addressIdOf } from "../src/address.ts";
-import { confirmDialog } from "../src/confirm.ts";
+import { allowedFor } from "../src/always-allowed.ts";
+import { confirmDialog, confirmInPage } from "../src/confirm.ts";
 import {
 	CODE_USED_WAIT_MS,
 	replacedNotice,
@@ -125,7 +126,7 @@ describe("confirmDialog", () => {
 		const deny = byText(dialog, "Don't allow");
 		expect([...deny.classList]).toEqual(["tab-mcp-deny", "tab-mcp-primary"]);
 		expect([...byText(dialog, "Allow").classList]).toEqual(["tab-mcp-allow"]);
-		expect([...byText(dialog, "Allow until reload").classList]).toEqual([
+		expect([...byText(dialog, "Always allow").classList]).toEqual([
 			"tab-mcp-always",
 		]);
 		const args = dialog.querySelector("pre") as HTMLElement;
@@ -160,9 +161,9 @@ describe("confirmDialog: Always allow", () => {
 			"dialog.tab-mcp-confirm",
 		) as HTMLDialogElement;
 		expect(dialog.querySelector(".tab-mcp-always-note")?.textContent).toBe(
-			"Allow until reload: Clear memory will run for Claude (claude.ai) without asking, with any arguments, until you reload this page or disconnect Claude (claude.ai).",
+			"Always allow: Clear memory will run for Claude (claude.ai) without asking, with any arguments, until you disconnect Claude (claude.ai) from this page.",
 		);
-		const always = byText(dialog, "Allow until reload");
+		const always = byText(dialog, "Always allow");
 		expect(always.disabled).toBe(true);
 		always.click();
 		expect(dialog.open).toBe(true);
@@ -186,7 +187,7 @@ describe("confirmDialog: Always allow", () => {
 		expect(await answer).toBe("deny");
 	});
 
-	test("TabMcp remembers it per grant and tool; a removed grant or tool asks again", async () => {
+	test("TabMcp remembers it per grant and tool; a removed grant asks again", async () => {
 		const g = globalThis as { document?: Document | undefined };
 		const saved = g.document;
 		g.document = doc;
@@ -220,7 +221,7 @@ describe("confirmDialog: Always allow", () => {
 		try {
 			await mcp.connect();
 			const first = mcp.confirmInPage(question());
-			const always = byText(await dialog(), "Allow until reload");
+			const always = byText(await dialog(), "Always allow");
 			await enabled(always);
 			always.click();
 			expect(await first).toBe(true);
@@ -242,15 +243,18 @@ describe("confirmDialog: Always allow", () => {
 		}
 	});
 
-	test("TabMcp offers it only with alwaysAllow: true (DEC-096)", async () => {
+	test("TabMcp offers it only with alwaysAllow, named for how long it lasts (DEC-096, DEC-200)", async () => {
 		const g = globalThis as { document?: Document | undefined };
 		const saved = g.document;
 		g.document = doc;
 		try {
 			for (const [options, offered] of [
-				[{}, false],
-				[{ alwaysAllow: false }, false],
-				[{ alwaysAllow: true }, true],
+				[{}, undefined],
+				[{ alwaysAllow: false }, undefined],
+				[{ alwaysAllow: true }, "Always allow"],
+				[{ alwaysAllow: "until-reload" }, "Allow until reload"],
+				// Nothing kept across a reload: no "Always" to promise.
+				[{ alwaysAllow: true, storage: null }, "Allow until reload"],
 			] as const) {
 				const mcp = newTab("http://127.0.0.1:9", options);
 				const answer = mcp.confirmInPage(question());
@@ -264,9 +268,9 @@ describe("confirmDialog: Always allow", () => {
 				});
 				expect({
 					options,
-					offered: buttons(dialog).some(
-						(b) => b.textContent === "Allow until reload",
-					),
+					offered: buttons(dialog)
+						.map((b) => b.textContent)
+						.find((t) => t !== "Don't allow" && t !== "Allow"),
 				}).toEqual({ options, offered });
 				byText(dialog, "Don't allow").click();
 				expect(await answer).toBe(false);
@@ -380,7 +384,7 @@ describe("confirmDialog safety (review of PR #2)", () => {
 			alwaysAllow: true,
 		});
 		expect(byText(doc, "Allow").hidden).toBe(true);
-		expect(byText(doc, "Allow until reload").hidden).toBe(true);
+		expect(byText(doc, "Always allow").hidden).toBe(true);
 		byText(doc, "Don't allow").click();
 		expect(await answer).toBe("deny");
 	});
@@ -452,7 +456,7 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 			alwaysAllow: true,
 		});
 		const allow = byText(doc, "Allow");
-		const always = byText(doc, "Allow until reload");
+		const always = byText(doc, "Always allow");
 		jest.advanceTimersByTime(60_000);
 		expect(allow.disabled).toBe(true);
 		expect(always.disabled).toBe(true);
@@ -516,7 +520,7 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 			alwaysAllow: true,
 		});
 		const allow = byText(doc, "Allow");
-		const always = byText(doc, "Allow until reload");
+		const always = byText(doc, "Always allow");
 		jest.advanceTimersByTime(600);
 		expect(allow.disabled).toBe(false);
 		blur();
@@ -2155,7 +2159,7 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 			allowedNow: () => false,
 		});
 		jest.advanceTimersByTime(600);
-		always = true; // what "Allow until reload" on the first one does
+		always = true; // what "Always allow" on the first one does
 		byText(doc, "Allow").click();
 		expect(await first).toBe("allow");
 		expect(await second).toBe("allow");
@@ -2219,7 +2223,7 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 		const args = dialog.querySelector(".tab-mcp-arguments") as HTMLElement;
 		const note = dialog.querySelector(".tab-mcp-scroll-note") as HTMLElement;
 		const allow = byText(dialog, "Allow");
-		const always = byText(dialog, "Allow until reload");
+		const always = byText(dialog, "Always allow");
 		expect(shown(note)).toBe(true);
 		expect(note.textContent).toBe(
 			"Scroll to the end of the arguments to allow this call.",
@@ -2566,44 +2570,272 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 			buttons(dialog.querySelector(".tab-mcp-actions") as HTMLElement).map(
 				(b) => b.textContent,
 			),
-		).toEqual(["Don't allow", "Allow until reload", "Allow"]);
+		).toEqual(["Don't allow", "Always allow", "Allow"]);
 		byText(dialog, "Don't allow").click();
 		expect(await answer).toBe("deny");
 	});
 
-	test("the Connected list says what runs without asking, and Ask again takes it back (CU 11)", async () => {
-		mcp = newTab(relay.url, { alwaysAllow: true });
-		const tab = mcp;
-		await tab.registerTool({
+	/** The tools of `question()` and one that deletes, both asking. */
+	async function registerAsking(m: TabMcp) {
+		await m.registerTool({
 			name: "clear_memory",
 			title: "Clear memory",
 			description: "Clears the calculator memory",
+			annotations: { consequentialHint: true },
 			execute: () => "ok",
 		});
+		await m.registerTool({
+			name: "delete_all",
+			description: "Deletes everything",
+			annotations: { consequentialHint: true, destructiveHint: true },
+			execute: () => "ok",
+		});
+		// Runs without asking anyway: no switch.
+		await m.registerTool({
+			name: "read",
+			description: "Reads",
+			execute: () => "ok",
+		});
+	}
+	const switchesOf = (root: ParentNode) =>
+		[...root.querySelectorAll(".tab-mcp-allowed input")] as HTMLInputElement[];
+	const switchState = (root: ParentNode) =>
+		switchesOf(root).map((i) => ({
+			name: i.getAttribute("aria-label"),
+			role: i.getAttribute("role"),
+			type: i.type,
+			checked: i.checked,
+			disabled: i.disabled,
+		}));
+	const toggle = (input: HTMLInputElement) => {
+		input.click(); // a click on a checkbox turns it and fires `change`
+	};
+
+	test("under a connected app: a switch per tool that asks, and Allow everything (DEC-200)", async () => {
+		mcp = newTab(relay.url, { alwaysAllow: true });
+		const tab = mcp;
+		await registerAsking(tab);
 		const { dialog, closed } = await open(tab);
-		const allowed = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
-		expect(shown(allowed)).toBe(false);
-		// Allowed until reload in a confirmation over the open dialog.
+		const box = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
+		expect(shown(box)).toBe(true);
+		expect(box.getAttribute("role")).toBe("group");
+		expect(
+			doc.getElementById(box.getAttribute("aria-labelledby") ?? "")
+				?.textContent,
+		).toBe("Runs without asking");
+		// Visible: the title or name, destructive ones marked.
+		expect(
+			[...box.querySelectorAll("label")].map((l) => l.textContent),
+		).toEqual([
+			"Clear memory destructive",
+			"delete_all destructive",
+			"Allow everything, no questions asked",
+		]);
+		expect(
+			[...box.querySelectorAll(".tab-mcp-destructive")].map((m) => shown(m)),
+		).toEqual([false, true]);
+		// Read out: what it shows, then for whom.
+		expect(switchState(box)).toEqual([
+			{
+				name: "Clear memory runs without asking for Claude (claude.ai)",
+				role: "switch",
+				type: "checkbox",
+				checked: false,
+				disabled: false,
+			},
+			{
+				name: "delete_all (destructive) runs without asking for Claude (claude.ai)",
+				role: "switch",
+				type: "checkbox",
+				checked: false,
+				disabled: false,
+			},
+			{
+				name: "Allow everything, no questions asked, for Claude (claude.ai)",
+				role: "switch",
+				type: "checkbox",
+				checked: false,
+				disabled: false,
+			},
+		]);
+		const [clear, , everything] = switchesOf(box) as [
+			HTMLInputElement,
+			HTMLInputElement,
+			HTMLInputElement,
+		];
+		const note = doc.getElementById(
+			everything.getAttribute("aria-describedby") ?? "",
+		);
+		expect(note?.textContent).toBe(
+			"Every tool of this page runs for Claude (claude.ai) without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite.",
+		);
+
+		// Always allow in a confirmation over the open dialog turns its switch on.
 		const first = tab.confirmInPage(question(), { document: doc });
-		const confirm = await waitFor("dialog.tab-mcp-confirm");
-		const always = byText(confirm, "Allow until reload");
+		const always = byText(
+			await waitFor("dialog.tab-mcp-confirm"),
+			"Always allow",
+		);
 		await enabled(always);
 		always.click();
 		expect(await first).toBe(true);
-		expect(shown(allowed)).toBe(true);
-		expect(allowed.textContent).toBe(
-			"Runs without asking: Clear memory Ask again",
-		);
-		const askAgain = byText(allowed, "Ask again");
-		expect(askAgain.getAttribute("aria-label")).toBe(
-			"Ask again before Claude (claude.ai) runs a tool",
-		);
-		askAgain.click();
-		expect(shown(allowed)).toBe(false);
-		// Asked again.
+		expect(clear.checked).toBe(true);
+		expect(await tab.confirmInPage(question(), { document: doc })).toBe(true);
+		// Turned off: asked again.
+		clear.focus();
+		toggle(clear);
+		expect(clear.checked).toBe(false);
+		expect(doc.activeElement).toBe(clear); // updated in place
 		const again = tab.confirmInPage(question(), { document: doc });
 		byText(await waitFor("dialog.tab-mcp-confirm"), "Don't allow").click();
 		expect(await again).toBe(false);
+
+		// Everything: every tool, the switches say so and wait.
+		toggle(everything);
+		expect(switchState(box).map((s) => [s.checked, s.disabled])).toEqual([
+			[true, true],
+			[true, true],
+			[true, false],
+		]);
+		expect(await tab.confirmInPage(question(), { document: doc })).toBe(true);
+		expect(
+			await tab.confirmInPage(
+				{
+					...question(),
+					tool: { name: "added_later", description: "Not seen yet" },
+				},
+				{ document: doc },
+			),
+		).toBe(true);
+		// Off again: each tool as before (clear_memory was turned off).
+		toggle(everything);
+		expect(switchState(box).map((s) => [s.checked, s.disabled])).toEqual([
+			[false, false],
+			[false, false],
+			[false, false],
+		]);
+		const asked = tab.confirmInPage(question(), { document: doc });
+		byText(await waitFor("dialog.tab-mcp-confirm"), "Don't allow").click();
+		expect(await asked).toBe(false);
+		byText(dialog, "Done").click();
+		await closed;
+	});
+
+	test("a switch turned on lets the call run without the dialog; a tool registered later gets its switch", async () => {
+		mcp = newTab(relay.url, { alwaysAllow: "until-reload" });
+		const tab = mcp;
+		await registerAsking(tab);
+		const { dialog, closed } = await open(tab);
+		const box = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
+		const [clear] = switchesOf(box) as [HTMLInputElement];
+		toggle(clear);
+		expect(await tab.confirmInPage(question(), { document: doc })).toBe(true);
+		expect(doc.querySelector("dialog.tab-mcp-confirm")).toBeNull();
+		await tab.registerTool({
+			name: "send_mail",
+			title: "Send mail",
+			description: "Sends",
+			annotations: { consequentialHint: true },
+			execute: () => "ok",
+		});
+		expect(switchState(box).map((s) => s.name)).toEqual([
+			"Clear memory runs without asking for Claude (claude.ai)",
+			"delete_all (destructive) runs without asking for Claude (claude.ai)",
+			"Send mail runs without asking for Claude (claude.ai)",
+			"Allow everything, no questions asked, for Claude (claude.ai)",
+		]);
+		byText(dialog, "Done").click();
+		await closed;
+	});
+
+	test("without alwaysAllow: no switches, unless the page allowed something for that app", async () => {
+		mcp = newTab(relay.url);
+		const tab = mcp;
+		await registerAsking(tab);
+		const { dialog, closed } = await open(tab);
+		const box = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
+		expect(shown(box)).toBe(false);
+		expect(switchesOf(dialog)).toEqual([]);
+		// The page's own switch (`./allowed`): the user sees only it here, and
+		// can only end it (review of PR 167).
+		const allowed = allowedFor(tab);
+		allowed.allow("g_1", "delete_all");
+		expect(shown(box)).toBe(true);
+		const visibleSwitches = () => switchesOf(box).filter((i) => shown(i));
+		expect(
+			visibleSwitches().map((i) => [i.getAttribute("aria-label"), i.checked]),
+		).toEqual([
+			[
+				"delete_all (destructive) runs without asking for Claude (claude.ai)",
+				true,
+			],
+		]);
+		const [deleteAll] = visibleSwitches() as [HTMLInputElement];
+		toggle(deleteAll);
+		expect(allowed.list("g_1")).toEqual([]);
+		expect(shown(box)).toBe(false);
+		// "Everything" turned on by the page: shown while on, and only to turn off.
+		allowed.setEverything("g_1", true);
+		const [everything] = visibleSwitches() as [HTMLInputElement];
+		expect(everything.getAttribute("aria-label")).toBe(
+			"Allow everything, no questions asked, for Claude (claude.ai)",
+		);
+		expect(everything.checked).toBe(true);
+		toggle(everything);
+		expect(allowed.everything("g_1")).toBe(false);
+		expect(shown(box)).toBe(false);
+		// Nothing to turn on here: a switch the page never offered stays off.
+		allowed.allow("g_1", "clear_memory");
+		const [clear, all] = switchesOf(box) as [
+			HTMLInputElement,
+			HTMLInputElement,
+		];
+		expect(shown(all)).toBe(false);
+		all.checked = true;
+		all.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(allowed.everything("g_1")).toBe(false);
+		expect(all.checked).toBe(false);
+		toggle(clear); // off
+		expect(allowed.list("g_1")).toEqual([]);
+		byText(dialog, "Done").click();
+		await closed;
+	});
+
+	test("a tool allowed but not registered right now is listed by name, to turn off (review of PR 167)", async () => {
+		mcp = newTab(relay.url, { alwaysAllow: true });
+		const tab = mcp;
+		const view = new AbortController();
+		await registerAsking(tab);
+		await tab.registerTool(
+			{
+				name: "export_report",
+				title: "Export report",
+				description: "Exports",
+				annotations: { consequentialHint: true },
+				execute: () => "ok",
+			},
+			{ signal: view.signal },
+		);
+		const { dialog, closed } = await open(tab);
+		const box = dialog.querySelector(".tab-mcp-allowed") as HTMLElement;
+		allowedFor(tab).allow("g_1", "export_report");
+		view.abort(); // another view: the tool is gone for now, still allowed
+		expect(allowedFor(tab).list("g_1")).toEqual(["export_report"]);
+		expect(switchState(box).map((s) => [s.name, s.checked])).toEqual([
+			["Clear memory runs without asking for Claude (claude.ai)", false],
+			[
+				"delete_all (destructive) runs without asking for Claude (claude.ai)",
+				false,
+			],
+			["export_report runs without asking for Claude (claude.ai)", true],
+			["Allow everything, no questions asked, for Claude (claude.ai)", false],
+		]);
+		const exported = switchesOf(box)[2] as HTMLInputElement;
+		toggle(exported);
+		expect(allowedFor(tab).list("g_1")).toEqual([]);
+		expect(switchState(box).map((s) => s.name)).not.toContain(
+			"export_report runs without asking for Claude (claude.ai)",
+		);
 		byText(dialog, "Done").click();
 		await closed;
 	});
@@ -2634,5 +2866,154 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		expect(shown(dialog.querySelector(".tab-mcp-apps"))).toBe(false);
 		byText(dialog, "Close").click();
 		await closed;
+	});
+});
+
+describe("the confirmation chunk's confirmInPage with a host of the caller's own", () => {
+	/** A desktop app's stand-in for a `TabMcp`: grants, and grantschange. */
+	class Host extends EventTarget {
+		grants: { grantId: string }[] = [{ grantId: "g_1" }];
+		drop(): void {
+			this.grants = [];
+			this.dispatchEvent(
+				new CustomEvent("grantschange", { detail: { grants: this.grants } }),
+			);
+		}
+	}
+	const dialog = () =>
+		doc.querySelector("dialog.tab-mcp-confirm") as HTMLDialogElement;
+	const offered = () =>
+		buttons(dialog())
+			.map((b) => b.textContent)
+			.filter((t) => t !== "Don't allow" && t !== "Allow");
+
+	test("without _allowed and without alwaysAllow: asked every time, nothing kept", async () => {
+		const host = new Host();
+		const first = confirmInPage(host, question(), doc);
+		expect(offered()).toEqual([]);
+		const allow = byText(dialog(), "Allow");
+		await enabled(allow);
+		allow.click();
+		expect(await first).toBe(true);
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+		// A plain object, without events, does too.
+		const plain = { grants: [{ grantId: "g_1" }] };
+		const third = confirmInPage(plain, question(), doc);
+		byText(dialog(), "Don't allow").click();
+		expect(await third).toBe(false);
+	});
+
+	test("the 0.17 option alwaysAllow offers Allow until reload, kept in memory for the host's grants", async () => {
+		const host = new Host();
+		const first = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		// Nothing of a stand-in outlives a reload: no "Always" to promise.
+		expect(offered()).toEqual(["Allow until reload"]);
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true);
+		// Allowed now, also for a call that does not offer it.
+		expect(await confirmInPage(host, question(), doc)).toBe(true);
+		expect(dialog()).toBeNull();
+		// The host's grant goes: asked again.
+		host.drop();
+		const again = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("an app the host does not list gets nothing kept; alwaysAllow false offers nothing", async () => {
+		const host = new Host();
+		host.grants = [];
+		const first = confirmInPage(host, question(), doc, {
+			alwaysAllow: "until-reload",
+		});
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true); // this call runs
+		const again = confirmInPage(host, question(), doc, { alwaysAllow: false });
+		expect(offered()).toEqual([]);
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	/** Keep an allowance for g_1 through the dialog's Allow until reload. */
+	async function keepOne(host: Host | { grants: { grantId: string }[] }) {
+		const first = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true);
+		expect(await confirmInPage(host, question(), doc)).toBe(true);
+	}
+
+	test("an app removed from the host's grants without an event is asked again (review of PR 169)", async () => {
+		const host = { grants: [{ grantId: "g_1" }] };
+		await keepOne(host);
+		host.grants = [];
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("a grantschange of any shape prunes against the host's grants now (review of PR 169)", async () => {
+		const host = new Host();
+		await keepOne(host);
+		host.grants = [];
+		// A plain Event, no detail: no throw, and the allowance is gone.
+		host.dispatchEvent(new Event("grantschange"));
+		host.grants = [{ grantId: "g_1" }]; // the same app back: asked again
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("a host with an _allowed of another shape is a stand-in (review of PR 169)", async () => {
+		// What a 0.18.0 workaround put there, and other wrong shapes.
+		for (const _allowed of [
+			[
+				{ list: () => [], get: () => undefined, onChange: () => () => {} },
+				undefined,
+				"until-reload",
+			],
+			"yes",
+			[],
+			[{}, {}, true],
+		]) {
+			const host = Object.assign(new Host(), { _allowed });
+			// Treated as a stand-in: no third button without the option…
+			const first = confirmInPage(host, question(), doc);
+			expect({ _allowed, offered: offered() }).toEqual({
+				_allowed,
+				offered: [],
+			});
+			byText(dialog(), "Don't allow").click();
+			expect(await first).toBe(false);
+			// …and with it, kept in memory as for any stand-in.
+			await keepOne(host);
+		}
+	});
+
+	test("the options ui and allowDelayMs reach the dialog again", async () => {
+		const host = new Host();
+		const started = Date.now();
+		const answer = confirmInPage(host, question(), doc, {
+			ui: { strings: { allow: "Erlauben" } },
+			allowDelayMs: 1_200,
+		});
+		const allow = byText(dialog(), "Erlauben");
+		await Bun.sleep(900); // past the default 750 ms
+		expect(allow.disabled).toBe(true);
+		await enabled(allow);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(1_190);
+		allow.click();
+		expect(await answer).toBe(true);
 	});
 });

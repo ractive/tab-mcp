@@ -313,14 +313,23 @@ export interface TabMcpOptions {
 	/** Approves consequential tool calls; default: a dialog in the page. */
 	onConfirm?: ConfirmHandler;
 	/**
-	 * Offer "Allow until reload" in the default confirmation: it lets a tool
-	 * run without asking for one AI app, with any arguments, until the page
-	 * is reloaded or the app is disconnected; the connect dialog lists it
-	 * with a reset. Off by default (DEC-096): the confirmation then shows
-	 * only "Don't allow" and "Allow", and every call asks. Turn it on only
-	 * for tools whose calls the user does not need to check one by one.
+	 * Let the user allow tools in the library's dialogs, so that their calls
+	 * run without asking for one AI app, with any arguments (DEC-200):
+	 *
+	 * - `true`: the confirmation offers "Always allow", and the connect
+	 *   dialog a switch per tool and "Allow everything, no questions asked"
+	 *   under each connected app. Kept in `storage` next to the secret until
+	 *   the app is disconnected (in memory with `storage: null`).
+	 * - `"until-reload"`: the same, offered as "Allow until reload": kept in
+	 *   memory only, until the page is reloaded or the app is disconnected.
+	 * - unset or `false` (DEC-096): the confirmation shows only "Don't allow"
+	 *   and "Allow", and every call asks. A page can still offer its own
+	 *   switches with `@ractive-ch/tab-mcp-client/allowed`, kept as with `true`.
+	 *
+	 * Turn it on only for tools whose calls the user does not need to check
+	 * one by one: an AI app can be steered by what it reads.
 	 */
-	alwaysAllow?: boolean;
+	alwaysAllow?: boolean | "until-reload";
 	/** Texts and help of the library's dialogs. */
 	ui?: DialogOptions;
 	/**

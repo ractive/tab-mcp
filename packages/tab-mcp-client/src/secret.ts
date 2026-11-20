@@ -35,13 +35,17 @@ function defaultStorage(): SecretStorage | null {
 
 /** Reads, creates and rotates the secret; falls back to memory without storage. */
 export class SecretStore {
-	readonly #storage: SecretStorage | null;
-	readonly #key: string;
+	/**
+	 * Where the secret is kept (`null`: memory) and under which key; the
+	 * allowed tools (`always-allowed.ts`) are kept next to it.
+	 */
+	readonly storage: SecretStorage | null;
+	readonly key: string;
 	#memory: string | undefined;
 
 	constructor(storage: SecretStorage | null | undefined, key: string) {
-		this.#storage = storage === undefined ? defaultStorage() : storage;
-		this.#key = key;
+		this.storage = storage === undefined ? defaultStorage() : storage;
+		this.key = key;
 	}
 
 	/**
@@ -51,7 +55,7 @@ export class SecretStore {
 	current(): string | undefined {
 		let stored: string | null = null;
 		try {
-			stored = this.#storage?.getItem(this.#key) ?? null;
+			stored = this.storage?.getItem(this.key) ?? null;
 		} catch {
 			// unreadable: use a page-lifetime secret
 		}
@@ -67,7 +71,7 @@ export class SecretStore {
 		const secret = newSecret();
 		this.#memory = secret;
 		try {
-			this.#storage?.setItem(this.#key, secret);
+			this.storage?.setItem(this.key, secret);
 		} catch {
 			// quota or blocked: the secret lives as long as the page
 		}

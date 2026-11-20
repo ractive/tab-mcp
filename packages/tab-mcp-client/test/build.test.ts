@@ -62,6 +62,8 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 		.join("");
 	expect(confirmCode).toContain("Allow until reload");
 	expect(confirmCode).not.toContain("codex mcp add");
+	// The allowances (DEC-200) are out of the core, with the confirmation.
+	expect(confirmCode).toContain("#allowed");
 	const entry = files.get("index.js") ?? "";
 	expect(entry).toMatch(/import\("\.\/connection-[^"]+\.js"\)/);
 	const coreCode = [...core].map((n) => files.get(n) ?? "").join("");
@@ -79,6 +81,7 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	// No mark on <html> since iteration 37 (the attribute was for the extension).
 	expect(coreCode).not.toContain("data-tab-mcp-webmcp");
 	expect(coreCode).not.toContain("The user declined");
+	expect(coreCode).not.toContain("#allowed");
 
 	const coreGz = [...core].reduce((sum, n) => sum + gz(files.get(n) ?? ""), 0);
 	const connection = lazy
@@ -130,11 +133,13 @@ test("the build produces a package whose declarations type-check for a consumer"
 	>;
 	expect(pkg["exports"]).toEqual({
 		".": { types: "./index.d.ts", default: "./index.js" },
+		"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
+		"./cdn/allowed": "./cdn/allowed.min.js",
 	});
 	expect(pkg["peerDependencies"]).toEqual({ react: ">=18.3.0 <20" });
 	expect(pkg["peerDependenciesMeta"]).toEqual({ react: { optional: true } });
@@ -144,6 +149,8 @@ test("the build produces a package whose declarations type-check for a consumer"
 	for (const file of [
 		"index.js",
 		"index.d.ts",
+		"allowed.js",
+		"allowed.d.ts",
 		"react.js",
 		"react.d.ts",
 		"setup.js",
@@ -153,6 +160,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"visible.js",
 		"visible.d.ts",
 		"cdn/tab-mcp-client.min.js",
+		"cdn/allowed.min.js",
 		"LICENSE",
 		"AI_NOTICE",
 		"README.md",
@@ -182,18 +190,40 @@ test("the build produces a package whose declarations type-check for a consumer"
 		expect(await Bun.file(join(dist, file)).text()).not.toContain(
 			"modulepreload",
 		);
-	// The React entry: "use client" first, the core entry and react as imports.
+	// The React entry: "use client" first, the core entry, the allowances
+	// (one store with the dialogs') and react as imports.
 	const reactEntry = await Bun.file(join(dist, "react.js")).text();
 	expect(reactEntry.startsWith('"use client";')).toBe(true);
 	const imports = [
 		...reactEntry.matchAll(/\bfrom\s*"([^"]+)"|\bimport\s*\(\s*"([^"]+)"/g),
 	].map((m) => m[1] ?? m[2]);
-	expect(new Set(imports)).toEqual(new Set(["react", "./index.js"]));
+	expect(new Set(imports)).toEqual(
+		new Set(["react", "./index.js", "./allowed.js"]),
+	);
 	const cdnFiles = [...new Bun.Glob("cdn/*.js").scanSync(dist)];
 	expect(cdnFiles.some((f) => f.includes("react"))).toBe(false);
 	expect(
 		await Bun.file(join(dist, "cdn/tab-mcp-client.min.js")).text(),
 	).not.toContain("useSyncExternalStore");
+	// `allowed.min.js` beside the CDN core (DEC-200): the core loads nothing
+	// of it, and it shares the allowances' chunk with the confirmation, so the
+	// page's switches and the dialogs see one store.
+	const cdn = new Map<string, string>();
+	for (const file of cdnFiles)
+		cdn.set(
+			file.replace(/^cdn\//, ""),
+			await Bun.file(join(dist, file)).text(),
+		);
+	const cdnCore = staticClosure(cdn, "tab-mcp-client.min.js");
+	expect([...cdnCore]).toEqual(["tab-mcp-client.min.js"]);
+	expect(cdn.get("tab-mcp-client.min.js")).not.toContain("#allowed");
+	const cdnAllowed = staticClosure(cdn, "allowed.min.js");
+	expect(cdnAllowed.has("tab-mcp-client.min.js")).toBe(false);
+	const store = [...cdnAllowed].find((n) => cdn.get(n)?.includes("#allowed"));
+	expect(store).toBeDefined();
+	const cdnConfirm = [...cdn.keys()].find((n) => n.startsWith("confirm-"));
+	expect(staticClosure(cdn, cdnConfirm ?? "").has(store ?? "")).toBe(true);
+	expect(cdn.get("allowed.min.js")).toContain("allowedTools");
 	const reactGz = Bun.gzipSync(new TextEncoder().encode(reactEntry)).length;
 	console.log(`react entry ${(reactGz / 1024).toFixed(1)} KB gzipped`);
 	expect(reactGz).toBeLessThanOrEqual(3 * 1024);
@@ -204,6 +234,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 		`import { TabMcp, type Tool, type SessionInfo, type ServeHandle, type TunnelPort, type DialogOptions, type DialogStrings } from "@ractive-ch/tab-mcp-client";
 import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type TunnelCancelMessage } from "@ractive-ch/tab-mcp-client/tunnel";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
+import { allowedTools, type AllowedTool, type AllowedTools } from "@ractive-ch/tab-mcp-client/allowed";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
 void mcp.registerTool(tool, { signal: new AbortController().signal, callers: ["relay", "webmcp"] });
@@ -233,19 +264,32 @@ export const listed: Promise<Response> = tunnel.fetch("https://tab.invalid/mcp",
 export const relay: boolean = own.hasRelay;
 // @ts-expect-error: serve needs to know who is on the other end
 void own.serve(channel.port1, {});
+// The tools that run without asking, for the page's own switches.
+const allowed: AllowedTools = allowedTools(mcp);
+export const switches: AllowedTool[] = allowed.tools().filter((t) => t.destructive || t.title !== undefined);
+allowed.allow("g_1", "add");
+allowed.ask("g_1", "add");
+allowed.setEverything("g_1", !allowed.everything("g_1"));
+allowed.forget("g_1");
+export const stop: () => void = allowed.onChange(() => console.log(allowed.kept, allowed.list("g_1"), allowed.has("g_1", "add")));
+export const memory: TabMcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, alwaysAllow: "until-reload" });
+// @ts-expect-error: what the library's own entries share is not part of the API
+void mcp._allowed;
 `,
 	);
 	await Bun.write(
 		join(consumer, "app.ts"),
 		`import { createElement, type ReactElement } from "react";
-import { ConnectButton, TabMcpProvider, useTabMcp, useTabMcpState, useTool, useToolCalls, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
+import { ConnectButton, TabMcpProvider, useAllowedTools, useTabMcp, useTabMcpState, useTool, useToolCalls, type AllowedToolsSnapshot, type TabMcpSnapshot } from "@ractive-ch/tab-mcp-client/react";
 import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 function Tools(): ReactElement {
 	useTool({ name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b) }, { callers: ["webmcp"] });
 	const state: TabMcpSnapshot = useTabMcpState();
 	const mcp: TabMcp = useTabMcp();
 	const calls = useToolCalls({ limit: 5 });
-	return createElement("p", null, state.state, state.identity, state.reconnecting?.attempt, mcp.tools.length, calls[0]?.end?.outcome);
+	const allowed: AllowedToolsSnapshot = useAllowedTools("g_1");
+	allowed.allowedTools.setEverything("g_1", !allowed.everything);
+	return createElement("p", null, state.state, state.identity, state.reconnecting?.attempt, mcp.tools.length, calls[0]?.end?.outcome, allowed.tools[0]?.allowed);
 }
 export const app: ReactElement = createElement(
 	TabMcpProvider,
@@ -275,6 +319,7 @@ export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x"
 					"@ractive-ch/tab-mcp-client": [join(dist, "index.d.ts")],
 					"@ractive-ch/tab-mcp-client/react": [join(dist, "react.d.ts")],
 					"@ractive-ch/tab-mcp-client/setup": [join(dist, "setup.d.ts")],
+					"@ractive-ch/tab-mcp-client/allowed": [join(dist, "allowed.d.ts")],
 					"@ractive-ch/tab-mcp-client/tunnel": [join(dist, "tunnel.d.ts")],
 					react: [join(root, "node_modules/@types/react")],
 				},
@@ -323,7 +368,9 @@ test("docs and plugin manifests name only the current package versions", async (
 			].map((m) => m.index + m[0].length - (m[1] ?? "").length),
 		);
 		for (const m of text.matchAll(
-			/(?<![\d.])(0\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?![.\d])/g,
+			// A pre-release ends with an identifier, not with a dot: "0.2.0-rc.1." at
+			// the end of a sentence is 0.2.0-rc.1.
+			/(?<![\d.])(0\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)(?!\.?\d)/g,
 		)) {
 			const v = m[1] ?? "";
 			const ok = current.has(v) || (named.has(m.index) && v === extension);

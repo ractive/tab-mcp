@@ -6,6 +6,91 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## [0.18.1][client-0.18.1] - 2026-11-20
+
+### Fixed
+
+- **The confirmation chunk's `confirmInPage` works with a host of the caller's own
+  again.** Code that loads the built confirmation chunk (`confirm-<hash>.js`) and calls
+  its `confirmInPage(mcp, request, document, options)` with a stand-in for the `TabMcp`
+  (a desktop app's own MCP endpoint, say) broke in 0.18.0, which the 0.18.0 entry did
+  not say:
+  - it read the internal `_allowed` of the host, so a host without it threw;
+  - its fourth argument became the dialog texts (`ui`) alone, so the 0.17 options
+    `{ alwaysAllow, ui, allowDelayMs }` were silently ignored: no third button per
+    call, no translated texts, no other delay.
+
+  Now the fourth argument is again `{ alwaysAllow?, ui?, allowDelayMs? }`, as in 0.17.
+  A host needs only `grants`; it may send `grantschange` (any event: the allowances
+  are then pruned against `grants` as they are, whatever the event carries). It needs
+  no `_allowed` and no `session`. For a host that is not a `TabMcp`, nothing is
+  allowed or kept unless the call offers it with `alwaysAllow`; then the button says
+  "Allow until reload" (`true` and `"until-reload"` alike: nothing of a stand-in
+  outlives a reload), and an allowance is kept in memory for the host's grants only,
+  until a reload or until its grant leaves `grants`, and applies to that app's later
+  calls of the tool. A call counts as allowed only while its grant is in the host's
+  `grants` at that moment, also without an event. For a `TabMcp`, `alwaysAllow`
+  overrides the page's option for that call. As since 0.13, only a client with
+  `kind: "relay"` can be allowed. Hosts that added `_allowed` or `session` for 0.18.0
+  can drop them; an `_allowed` that is not a `TabMcp`'s (such as that workaround's)
+  now makes the host a stand-in, so pass `alwaysAllow` to keep offering the button.
+  `TabMcp.confirmInPage(request, { document })` is unchanged.
+
+### Changed
+
+- `allowedTools(mcp).has(grantId, name)`, and a call, count an allowance only while
+  the app is in `mcp.grants`: before the first connect after a reload, `has` is
+  `false` (the allowance is still kept, `list` shows it). Calls only come while
+  connected, so for them nothing changes.
+
+## [0.18.0][client-0.18.0] - 2026-11-20
+
+### Added
+
+- **`@ractive-ch/tab-mcp-client/allowed`**, an entry of its own (not in the core):
+  `allowedTools(mcp)` returns the tools that run without asking, per connected AI app,
+  for a page that draws its own switches: `tools()` (the tools that ask, each with
+  `destructive`), `has`, `list`, `allow`, `ask`, `everything`, `setEverything`,
+  `forget`, `onChange` and `kept`. Types `AllowedTools`, `AllowedTool` (DEC-200). It
+  works with `alwaysAllow` unset too, kept in `storage`. Without a bundler:
+  `cdn/allowed.min.js` beside `cdn/tab-mcp-client.min.js` (package export
+  `./cdn/allowed`), sharing its chunks; a page that does not import it loads nothing
+  more.
+- **"Allow everything, no questions asked"** per AI app: every tool runs without asking,
+  also ones registered later, changed and destructive ones.
+- **Switches in the connect dialog**: under each connected app, a switch per tool that
+  asks (destructive ones marked) and "Allow everything, no questions asked" with a
+  sentence on what it means; checkboxes with `role="switch"` whose accessible names name
+  the app. Tools allowed but not registered right now are listed by name, to turn off.
+  Without `alwaysAllow`, only what is allowed for that app is shown, as switches that can
+  only be turned off. The methods of `allowedTools(mcp)` are bound; `ask` while
+  "everything" is on turns "everything" off for that app.
+- `useAllowedTools(grantId)` in `@ractive-ch/tab-mcp-client/react`: the tools that ask,
+  each with `allowed`, `everything` and the `allowedTools` object to change them.
+- `alwaysAllow: "until-reload"`.
+- `ui.strings`: `alwaysAllow`, `alwaysAllowNote`, `destructive`, `allowToolApp`,
+  `allowDestructiveToolApp`, `allowEverything`, `allowEverythingApp`,
+  `allowEverythingNote`.
+
+### Changed
+
+- **`alwaysAllow: true` keeps allowances until the app is disconnected**, in `storage`
+  under the secret's key with `#allowed` appended (grant ids, tool names, the title and
+  description the user saw, a fingerprint of the secret; no arguments). They end when
+  the relay reports the grant gone (disconnected, "Disconnect all apps", expired, signed
+  out), not on a dropped connection or a reload. With `storage: null` they are kept in
+  memory. `alwaysAllow: "until-reload"` is the old behaviour.
+- **The confirmation's third button** says "Always allow" with `alwaysAllow: true`, and
+  "Allow until reload" with `"until-reload"` or `storage: null`, each with its own note.
+- **An allowed call no longer reaches the page's own `onConfirm`**: it runs without
+  asking. React's provider always installs an `onConfirm`, so this holds there too.
+- **A tool that is unregistered keeps its allowance** (a reload registers every tool
+  again); one registered again with another title or description is asked again, as
+  before.
+- `ui.strings`: `runsWithoutAsking` is the heading over the switches ("Runs without
+  asking", without `{tools}`); `askAgain` and `askAgainApp` are gone ("Ask again" is
+  replaced by the switches).
+
 ## [0.17.0][client-0.17.0] - 2026-11-19
 
 ### Breaking
@@ -822,6 +907,8 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   `<script type="module">` under `@ractive-ch/tab-mcp-client/cdn`.
 - The connect dialog shows the pairing code from the relay.
 
+[client-0.18.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.18.1
+[client-0.18.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.18.0
 [client-0.17.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.17.0
 [client-0.16.2]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.2
 [client-0.16.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.1

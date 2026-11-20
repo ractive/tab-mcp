@@ -208,7 +208,7 @@ export class TabMcp extends EventTarget {
 	readonly #app: string;
 	readonly #appName: string | undefined;
 	readonly #onConfirm: ConfirmHandler | undefined;
-	readonly #alwaysAllow: boolean;
+	readonly #alwaysAllow: TabMcpOptions["alwaysAllow"];
 	readonly #ui: DialogOptions | undefined;
 	/** `undefined` without a relay: tools only through `serve` and WebMCP. */
 	readonly #relayUrl: string | undefined;
@@ -290,7 +290,7 @@ export class TabMcp extends EventTarget {
 		this.#server = { ...server };
 		this.#appName = appName;
 		this.#onConfirm = options.onConfirm;
-		this.#alwaysAllow = options.alwaysAllow === true;
+		this.#alwaysAllow = options.alwaysAllow;
 		this.#ui = options.ui;
 		this.#identityAssertion = options.identityAssertion;
 		this.#reconnect = options.reconnect !== false;
@@ -969,23 +969,41 @@ export class TabMcp extends EventTarget {
 		this.#emit("grantschange", { grants: this.#grants });
 	}
 
+	/**
+	 * A call the user allowed runs without asking, else `onConfirm` or the
+	 * dialog: decided out of the core, in the confirmation's chunk (a chunk
+	 * of its own for the allowances would cost the core more bytes, DEC-200).
+	 * If that chunk does not load, the page's own `onConfirm` asks (only its
+	 * `true` runs the call); without one the call is refused, never allowed.
+	 */
 	#confirm(request: ConfirmRequest): Promise<ConfirmAnswer> {
-		if (this.#onConfirm !== undefined) {
-			const ask = this.#onConfirm;
-			// Anything but true or "unanswered" is a refusal.
-			return Promise.resolve()
-				.then(() => ask(request))
-				.then((answer) => (answer === "unanswered" ? answer : answer === true));
-		}
-		return this.confirmInPage(request);
+		const ask = this.#onConfirm;
+		return import("./confirm.ts").then(
+			(m) => m.confirmCall(this, request, ask),
+			() => ask?.(request) ?? false,
+		);
+	}
+
+	/**
+	 * For `./allowed` and the dialogs, not for pages: the tools, where the
+	 * secret is kept, and `alwaysAllow`.
+	 * @internal
+	 */
+	get _allowed(): [
+		ToolRegistry,
+		SecretStore | undefined,
+		TabMcpOptions["alwaysAllow"],
+	] {
+		return [this.#registry, this.#secrets, this.#alwaysAllow];
 	}
 
 	/**
 	 * The library's own confirmation: the dialog in the page with Don't allow
-	 * and Allow, and Allow until reload with `alwaysAllow: true` (what runs
-	 * without `onConfirm`), in `options.document` (default: the global one).
-	 * An `onConfirm` may hand some calls to it. Resolves `false` where there
-	 * is no document.
+	 * and Allow, and Always allow with `alwaysAllow` (what runs without
+	 * `onConfirm`), in `options.document` (default: the global one). An
+	 * `onConfirm` may hand some calls to it. A call the user allowed for its
+	 * AI app resolves `true` unasked. Resolves `false` where there is no
+	 * document.
 	 */
 	confirmInPage(
 		request: ConfirmRequest,
@@ -993,12 +1011,8 @@ export class TabMcp extends EventTarget {
 	): Promise<boolean> {
 		const doc = options.document ?? globalThis.document;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
-		// The tools allowed until reload live in the dialogs' chunks too: only they add them.
 		return import("./confirm.ts").then((ui) =>
-			ui.confirmInPage(this, request, doc, {
-				alwaysAllow: this.#alwaysAllow,
-				ui: this.#ui,
-			}),
+			ui.confirmInPage(this, request, doc, { ui: this.#ui }),
 		);
 	}
 
