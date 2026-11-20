@@ -4,7 +4,7 @@
  * until reload) for the tools a user allows (`always-allowed.ts`).
  */
 
-import { allowedFor } from "./always-allowed.ts";
+import { allowedFor, type ConfirmHost } from "./always-allowed.ts";
 import {
 	button,
 	clientLabel,
@@ -403,33 +403,61 @@ function showConfirm(
 	});
 }
 
+/** Options of this chunk's `confirmInPage`. */
+export interface ConfirmInPageOptions {
+	/**
+	 * The third button, for an AI app through the relay (`kind: "relay"`):
+	 * `true` "Always allow" (kept in the `TabMcp`'s `storage`; "Allow until
+	 * reload" where it is kept in memory, as for a stand-in), `"until-reload"`
+	 * "Allow until reload", `false` none. Default: the `TabMcp`'s
+	 * `alwaysAllow`; none for a stand-in.
+	 */
+	alwaysAllow?: boolean | "until-reload" | undefined;
+	/** Texts of the dialog, as `TabMcpOptions.ui`. */
+	ui?: DialogOptions | undefined;
+	/** Tests only: another delay than {@link ALLOW_DELAY_MS}. */
+	allowDelayMs?: number | undefined;
+}
+
 /**
  * `TabMcp.confirmInPage`: the confirmation, and the tools the user allowed
  * (`always-allowed.ts`), which run unasked. Only for an AI app through the
  * relay: an agent in the browser and a served port have no identity to
  * remember an answer for (DEC-115, DEC-124).
+ *
+ * Code that loads this chunk itself may pass a stand-in of its own for
+ * `mcp` (`ConfirmHost`: `grants`, optionally `grantschange` events). Its
+ * allowances live in memory, for its grants only, until the page is
+ * reloaded, and exist only where the caller offers them with
+ * `options.alwaysAllow`; without it nothing is allowed and nothing is kept.
  */
 export function confirmInPage(
-	mcp: TabMcp,
+	mcp: TabMcp | ConfirmHost,
 	request: ConfirmRequest,
 	doc: Document,
-	ui?: DialogOptions,
+	options: ConfirmInPageOptions = {},
 ): Promise<boolean> {
 	const { client } = request;
-	const strings = stringsOf(ui);
+	const strings = stringsOf(options.ui);
+	const { allowDelayMs } = options;
 	if (client.kind !== "relay")
-		return confirmDialog(request, doc, { strings }).then(
+		return confirmDialog(request, doc, { strings, allowDelayMs }).then(
 			(answer) => answer === "allow",
 		);
 	const { grantId } = client;
 	const allowed = allowedFor(mcp);
 	const allowedNow = () => allowed.allows(grantId, request.tool);
 	if (allowedNow()) return Promise.resolve(true);
+	const offer = options.alwaysAllow ?? allowed.offered;
 	// Asked again when its turn comes: the call before it in the queue may
 	// have been allowed meanwhile.
 	return confirmDialog(request, doc, {
 		strings,
-		alwaysAllow: allowed.offered && (allowed.kept || "until-reload"),
+		allowDelayMs,
+		// "Always" only where it outlives a reload.
+		alwaysAllow:
+			offer !== false &&
+			(offer === true && allowed.kept ? true : "until-reload"),
 		allowedNow,
 	}).then((answer) => {
 		// Only while the grant is still there: a revoked app gets nothing

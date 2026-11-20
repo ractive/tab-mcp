@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { Window } from "happy-dom";
 import { addressIdOf } from "../src/address.ts";
 import { allowedFor } from "../src/always-allowed.ts";
-import { confirmDialog } from "../src/confirm.ts";
+import { confirmDialog, confirmInPage } from "../src/confirm.ts";
 import {
 	CODE_USED_WAIT_MS,
 	replacedNotice,
@@ -2866,5 +2866,154 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		expect(shown(dialog.querySelector(".tab-mcp-apps"))).toBe(false);
 		byText(dialog, "Close").click();
 		await closed;
+	});
+});
+
+describe("the confirmation chunk's confirmInPage with a host of the caller's own", () => {
+	/** A desktop app's stand-in for a `TabMcp`: grants, and grantschange. */
+	class Host extends EventTarget {
+		grants: { grantId: string }[] = [{ grantId: "g_1" }];
+		drop(): void {
+			this.grants = [];
+			this.dispatchEvent(
+				new CustomEvent("grantschange", { detail: { grants: this.grants } }),
+			);
+		}
+	}
+	const dialog = () =>
+		doc.querySelector("dialog.tab-mcp-confirm") as HTMLDialogElement;
+	const offered = () =>
+		buttons(dialog())
+			.map((b) => b.textContent)
+			.filter((t) => t !== "Don't allow" && t !== "Allow");
+
+	test("without _allowed and without alwaysAllow: asked every time, nothing kept", async () => {
+		const host = new Host();
+		const first = confirmInPage(host, question(), doc);
+		expect(offered()).toEqual([]);
+		const allow = byText(dialog(), "Allow");
+		await enabled(allow);
+		allow.click();
+		expect(await first).toBe(true);
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+		// A plain object, without events, does too.
+		const plain = { grants: [{ grantId: "g_1" }] };
+		const third = confirmInPage(plain, question(), doc);
+		byText(dialog(), "Don't allow").click();
+		expect(await third).toBe(false);
+	});
+
+	test("the 0.17 option alwaysAllow offers Allow until reload, kept in memory for the host's grants", async () => {
+		const host = new Host();
+		const first = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		// Nothing of a stand-in outlives a reload: no "Always" to promise.
+		expect(offered()).toEqual(["Allow until reload"]);
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true);
+		// Allowed now, also for a call that does not offer it.
+		expect(await confirmInPage(host, question(), doc)).toBe(true);
+		expect(dialog()).toBeNull();
+		// The host's grant goes: asked again.
+		host.drop();
+		const again = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("an app the host does not list gets nothing kept; alwaysAllow false offers nothing", async () => {
+		const host = new Host();
+		host.grants = [];
+		const first = confirmInPage(host, question(), doc, {
+			alwaysAllow: "until-reload",
+		});
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true); // this call runs
+		const again = confirmInPage(host, question(), doc, { alwaysAllow: false });
+		expect(offered()).toEqual([]);
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	/** Keep an allowance for g_1 through the dialog's Allow until reload. */
+	async function keepOne(host: Host | { grants: { grantId: string }[] }) {
+		const first = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true);
+		expect(await confirmInPage(host, question(), doc)).toBe(true);
+	}
+
+	test("an app removed from the host's grants without an event is asked again (review of PR 169)", async () => {
+		const host = { grants: [{ grantId: "g_1" }] };
+		await keepOne(host);
+		host.grants = [];
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("a grantschange of any shape prunes against the host's grants now (review of PR 169)", async () => {
+		const host = new Host();
+		await keepOne(host);
+		host.grants = [];
+		// A plain Event, no detail: no throw, and the allowance is gone.
+		host.dispatchEvent(new Event("grantschange"));
+		host.grants = [{ grantId: "g_1" }]; // the same app back: asked again
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("a host with an _allowed of another shape is a stand-in (review of PR 169)", async () => {
+		// What a 0.18.0 workaround put there, and other wrong shapes.
+		for (const _allowed of [
+			[
+				{ list: () => [], get: () => undefined, onChange: () => () => {} },
+				undefined,
+				"until-reload",
+			],
+			"yes",
+			[],
+			[{}, {}, true],
+		]) {
+			const host = Object.assign(new Host(), { _allowed });
+			// Treated as a stand-in: no third button without the option…
+			const first = confirmInPage(host, question(), doc);
+			expect({ _allowed, offered: offered() }).toEqual({
+				_allowed,
+				offered: [],
+			});
+			byText(dialog(), "Don't allow").click();
+			expect(await first).toBe(false);
+			// …and with it, kept in memory as for any stand-in.
+			await keepOne(host);
+		}
+	});
+
+	test("the options ui and allowDelayMs reach the dialog again", async () => {
+		const host = new Host();
+		const started = Date.now();
+		const answer = confirmInPage(host, question(), doc, {
+			ui: { strings: { allow: "Erlauben" } },
+			allowDelayMs: 1_200,
+		});
+		const allow = byText(dialog(), "Erlauben");
+		await Bun.sleep(900); // past the default 750 ms
+		expect(allow.disabled).toBe(true);
+		await enabled(allow);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(1_190);
+		allow.click();
+		expect(await answer).toBe(true);
 	});
 });

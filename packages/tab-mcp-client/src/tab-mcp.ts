@@ -1012,7 +1012,7 @@ export class TabMcp extends EventTarget {
 		const doc = options.document ?? globalThis.document;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
 		return import("./confirm.ts").then((ui) =>
-			ui.confirmInPage(this, request, doc, this.#ui),
+			ui.confirmInPage(this, request, doc, { ui: this.#ui }),
 		);
 	}
 
