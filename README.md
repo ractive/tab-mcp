@@ -214,7 +214,7 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
      -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
      -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
      -e TAB_MCP_STORE=memory \
-     ractive/tab-mcp:0.12.0
+     ractive/tab-mcp:0.12.1
    ```
 
 2. Install the browser library:
@@ -313,7 +313,7 @@ The relay is one process with a SQLite file. Run it with Docker:
 docker run -d --name tab-mcp -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.12.0
+  ractive/tab-mcp:0.12.1
 ```
 
 Put it behind a reverse proxy or CDN with TLS, and run exactly one instance.
@@ -361,7 +361,7 @@ so a relay is exactly one process.
 **0.18.1**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what changed.
 
-- Released: relay `@ractive-ch/tab-mcp` 0.12.0 (npm and Docker) and browser library
+- Released: relay `@ractive-ch/tab-mcp` 0.12.1 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.18.1, on the npm tag `latest`.
 - The tab-mcp browser extension 0.2.1 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16). A development build loaded unpacked has the store's id, which the hosted
