@@ -59,6 +59,11 @@ export interface PairingCodeMessage {
 }
 
 const CODE_REASONS = new Set(["start", "used", "expired"]);
+/** Identity binding: a sign-in pairs the page until `expiresAt` (DEC-202). */
+export interface PairingOpenMessage {
+	type: "pairing.open";
+	expiresAt: string;
+}
 export interface GrantAddedMessage {
 	type: "grant.added";
 	grant: Grant;
@@ -96,6 +101,7 @@ export type RelayMessage =
 	| HttpRequestMessage
 	| HttpCancelMessage
 	| PairingCodeMessage
+	| PairingOpenMessage
 	| GrantAddedMessage
 	| GrantRemovedMessage
 	| IdentityBoundMessage
@@ -226,6 +232,10 @@ export function parseRelayMessage(text: string): RelayMessage | undefined {
 				message.reason = reason as NonNullable<PairingCodeMessage["reason"]>;
 			return message;
 		}
+		case "pairing.open":
+			return str(v["expiresAt"]) && !Number.isNaN(Date.parse(v["expiresAt"]))
+				? { type: "pairing.open", expiresAt: v["expiresAt"] }
+				: undefined;
 		case "grant.added":
 			return isGrant(v["grant"])
 				? (v as unknown as GrantAddedMessage)

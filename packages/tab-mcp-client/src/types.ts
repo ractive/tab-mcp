@@ -288,7 +288,7 @@ export interface TabMcpOptions {
 	/**
 	 * The relay, e.g. `https://relay.example` or `wss://relay.example`.
 	 * Without one the page offers its tools only through `serve` and WebMCP:
-	 * `connect()`, `showConnectDialog()` and `newAddress()` reject, and no
+	 * `connect()`, `showConnectDialog()` and `disconnectAll()` reject, and no
 	 * address secret is read or written.
 	 */
 	relay?: string;
@@ -334,16 +334,16 @@ export interface TabMcpOptions {
 	ui?: DialogOptions;
 	/**
 	 * Where the address secret lives; default `localStorage`. `null` keeps it
-	 * only for the page's lifetime (a new address on every visit).
+	 * only for the page's lifetime (a new secret, so no paired AI app, on every visit).
 	 */
 	storage?: SecretStorage | null;
 	/**
 	 * Storage key of the secret; default `tab-mcp:secret:<relay origin>:<server.name>`
 	 * (the name URI-encoded), so pages of one site with different server names get
-	 * different addresses. Changing `server.name` therefore changes the address: set
+	 * different secrets. Changing `server.name` therefore changes the secret: set
 	 * `storageKey` to keep it. Without it, a secret kept under 0.4's default
 	 * `tab-mcp:secret:<relay origin>` is copied to the new key by the first page that
-	 * connects, so that page keeps its address.
+	 * connects, so that page keeps its AI apps.
 	 */
 	storageKey?: string;
 	/**
@@ -479,8 +479,8 @@ export type ConnectionState =
 export type DisconnectReason =
 	/** `disconnect()` was called. */
 	| "user"
-	/** `newAddress()` ended the old session. */
-	| "new_address"
+	/** `disconnectAll()` ended the old session. */
+	| "disconnect_all"
 	/** Another tab connected with the same address. */
 	| "replaced"
 	/** The session lifetime is over. */
@@ -509,7 +509,7 @@ export interface StateChangeDetail {
 	/**
 	 * Why it ended: on the change from `connected` (to `disconnected`, or to
 	 * `reconnecting` when the connection broke), and when `disconnect()` or
-	 * `newAddress()` ends connecting or reconnecting (`user`, `new_address`).
+	 * `disconnectAll()` ends connecting or reconnecting (`user`, `disconnect_all`).
 	 */
 	reason?: DisconnectReason;
 }
@@ -522,7 +522,7 @@ export interface ReplacedDetail {
 	 * tab"). `false`: no such tab was heard (or the browser has no
 	 * `BroadcastChannel`), so it may be a program with a copy of the address
 	 * secret, and the AI apps paired with the address now talk to it. Offer
-	 * `newAddress()`, which takes the address back and disconnects them
+	 * `disconnectAll()`, which takes the address back and disconnects them
 	 * (DEC-095). Script on the page's origin can make a takeover look like a
 	 * sibling, so `true` is a hint, not a proof.
 	 */
@@ -591,6 +591,8 @@ export interface TabMcpEventMap {
 	error: CustomEvent<{ error: Error }>;
 	/** A new pairing code, or `undefined` when there is none (any more). */
 	pairingcode: CustomEvent<{ pairingCode: PairingCode | undefined }>;
+	/** `pairingUntil` changed (identity binding, DEC-202). */
+	pairinguntil: CustomEvent<{ pairingUntil: string | undefined }>;
 	grantschange: CustomEvent<{ grants: readonly Grant[] }>;
 	/** The relay accepted or refused the page's identity, or it was cleared. */
 	identitychange: CustomEvent<{

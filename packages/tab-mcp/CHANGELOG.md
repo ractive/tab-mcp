@@ -9,6 +9,26 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Added
+
+- **`pairing.open`** (relay → tab, `expiresAt`): on a site with identity binding
+  (`oidc`), the answer to each `pairing.start`, saying until when a sign-in pairs the
+  page. Libraries up to 0.18.1 ignore it, as any unknown message, and work as before.
+
+### Changed
+
+- **With identity binding an open "Connect your AI app" dialog counts for 10 minutes**
+  (DEC-202, closing DEC-196's open point): a sign-in pairs the page only until 10
+  minutes after its last `pairing.start`; one that comes back later gets the answer for
+  no page ("No page is connecting with the account you signed in with. …"). Each
+  `pairing.start` counts 10 minutes from then (the page's Continue); `pairing.stop` and
+  the end of the session end it at once. Before, the dialog counted as long as it was
+  open. Pages with a library up to 0.18.1 send `pairing.start` only when the dialog
+  opens (and on a reconnect): after 10 minutes their users close and open the dialog
+  again. Code pairing is unchanged.
+
 ## [0.12.1][relay-0.12.1] - 2026-11-20
 
 ### Changed

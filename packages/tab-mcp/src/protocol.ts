@@ -109,6 +109,16 @@ export interface PairingCodeMessage {
 	 */
 	reason: "start" | "used" | "expired";
 }
+/**
+ * With identity binding (`oidc`), the answer to each `pairing.start`: a
+ * sign-in pairs this page until `expiresAt`, and after it only once the page
+ * sends `pairing.start` again (DEC-202). From relays after 0.12.1; older libraries
+ * ignore it.
+ */
+export interface PairingOpenMessage {
+	type: "pairing.open";
+	expiresAt: string;
+}
 export interface GrantAddedMessage {
 	type: "grant.added";
 	grant: GrantInfo;
@@ -152,6 +162,7 @@ export type RelayMessage =
 	| HttpRequestMessage
 	| HttpCancelMessage
 	| PairingCodeMessage
+	| PairingOpenMessage
 	| GrantAddedMessage
 	| GrantRemovedMessage
 	| IdentityBoundMessage

@@ -254,7 +254,46 @@ test("reconnecting asks for the identity again and resumes pairing", async () =>
 	expect(t.identity).toBe("bound");
 });
 
-test("newAddress() while waiting connects with the new secret", async () => {
+test("DEC-202: a reconnect does not start a sign-in's time again; pairingUntil is the reconnect's time until the user continues", async () => {
+	relay.pairing = "oidc";
+	const t = await connected([10]);
+	t.startPairing();
+	await relay.next("pairing.start");
+	const later = new Date(Date.now() + 600_000).toISOString();
+	relay.send({ type: "pairing.open", expiresAt: later });
+	await relay.settled();
+	expect(t.pairingUntil).toBe(later);
+
+	const before = Date.now();
+	relay.close(4003);
+	await nextState(t, "connected");
+	await relay.next("hello");
+	await relay.settled();
+	// The new session was not asked to pair.
+	expect(relay.received.map((m) => m.type)).not.toContain("pairing.start");
+	const until = Date.parse(t.pairingUntil ?? "");
+	expect(until).toBeGreaterThanOrEqual(before);
+	expect(until).toBeLessThanOrEqual(Date.now());
+	// The user continues: asked again.
+	t.startPairing();
+	await relay.next("pairing.start");
+});
+
+test("DEC-202: a reconnect still asks again for codes, and with an oidc relay that gave no time", async () => {
+	for (const pairing of ["code", "oidc"] as const) {
+		relay.pairing = pairing;
+		const t = await connected([10]);
+		t.startPairing();
+		await relay.next("pairing.start");
+		relay.close(4003);
+		await nextState(t, "connected");
+		await relay.next("pairing.start");
+		expect(t.pairingUntil).toBeUndefined();
+		t.disconnect();
+	}
+});
+
+test("disconnectAll() while waiting connects with the new secret", async () => {
 	waits([600_000]);
 	const t = newTab(relay.url);
 	tab = t;
@@ -262,7 +301,7 @@ test("newAddress() while waiting connects with the new secret", async () => {
 	const before = await relay.next("hello");
 	relay.close(4004);
 	await nextState(t, "reconnecting");
-	await t.newAddress();
+	await t.disconnectAll();
 	expect(t.state).toBe("connected");
 	expect(t.reconnecting).toBeUndefined();
 	// The old secret's grants are revoked first (DEC-136).

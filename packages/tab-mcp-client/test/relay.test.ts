@@ -594,7 +594,7 @@ describe("disconnect", () => {
 		try {
 			await replaced;
 			for (let attempt = 0; attempt < 3; attempt++) {
-				const outcome = await t.newAddress().then(
+				const outcome = await t.disconnectAll().then(
 					() => "renewed",
 					(error: { reason?: string }) => error.reason,
 				);
@@ -624,7 +624,7 @@ describe("disconnect", () => {
 		}
 	});
 
-	test("newAddress() after a takeover takes the address back and disconnects its apps (iteration 10)", async () => {
+	test("disconnectAll() after a takeover takes the address back and disconnects its apps (iteration 10)", async () => {
 		const storage = new MemoryStorage();
 		const t = tab({ storage });
 		const { address } = await t.connect();
@@ -636,7 +636,7 @@ describe("disconnect", () => {
 		try {
 			await replaced;
 			expect(t.state).toBe("disconnected");
-			await t.newAddress();
+			await t.disconnectAll();
 			// The address names the app and stays; the secret behind it is new.
 			expect(t.session?.address).toBe(address);
 			expect(t.state).toBe("connected");
@@ -651,7 +651,7 @@ describe("disconnect", () => {
 		}
 	});
 
-	test("newAddress() connects again at the same address with a new secret; the old token is refused", async () => {
+	test("disconnectAll() connects again at the same address with a new secret; the old token is refused", async () => {
 		const storage = new MemoryStorage();
 		const t = tab({ storage });
 		const before = (await t.connect()).address;
@@ -662,8 +662,8 @@ describe("disconnect", () => {
 			(await mcpPost(before, rpc(1, "tools/list"), { token })).status,
 		).toBe(200);
 		const gone = nextEnd(t);
-		await t.newAddress();
-		expect((await gone).reason).toBe("new_address");
+		await t.disconnectAll();
+		expect((await gone).reason).toBe("disconnect_all");
 		expect(t.session?.address).toBe(before);
 		expect(t.state).toBe("connected");
 		const renewed = [...storage.items.values()];

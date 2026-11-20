@@ -1229,7 +1229,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Connect another app").click();
 		byText(dialog, "Disconnect all apps").click();
 		expect(
-			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
+			dialog.querySelector(".tab-mcp-disconnect-all-question p")?.textContent,
 		).toBe(
 			"This disconnects Claude (claude.ai). To use this page with it again, connect it again and enter a new code.",
 		);
@@ -1484,6 +1484,66 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
+	test("DEC-202: with identity binding the dialog says until when a sign-in connects, then offers Continue, which asks the relay again", async () => {
+		relay.pairing = "oidc";
+		relay.grants = [];
+		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+		const { dialog } = await open();
+		const m = await relay.next("identity");
+		relay.send({ type: "identity.bound", round: m["round"] });
+		await relay.settled();
+		const status = dialog.querySelector(".tab-mcp-status") as HTMLElement;
+		const signIn = dialog.querySelector(".tab-mcp-sign-in") as HTMLElement;
+		const until = dialog.querySelector(".tab-mcp-sign-in-until") as HTMLElement;
+		const timeUp = dialog.querySelector(".tab-mcp-time-up") as HTMLElement;
+		const more = byText(dialog, "Continue");
+		// No time yet (or from a relay before 0.13): as before.
+		expect(shown(signIn)).toBe(true);
+		expect(shown(until)).toBe(false);
+		expect(shown(timeUp)).toBe(false);
+		expect(status.textContent).toBe("This page is ready for your AI app.");
+
+		const soon = new Date(Date.now() + 300);
+		relay.send({ type: "pairing.open", expiresAt: soon.toISOString() });
+		await relay.settled();
+		expect(shown(until)).toBe(true);
+		expect(until.textContent).toBe(
+			`Your AI app can connect until ${soon.toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}.`,
+		);
+		expect(status.textContent).toBe("This page is ready for your AI app.");
+		expect(shown(timeUp)).toBe(false);
+
+		// The time is up: Continue instead of the sign-in line, and nothing
+		// asks the relay by itself.
+		await Bun.sleep(soon.getTime() - Date.now() + 50);
+		expect(status.textContent).toBe(
+			"The time to connect your AI app is up. To connect it now, continue.",
+		);
+		expect(shown(signIn)).toBe(false);
+		expect(shown(timeUp)).toBe(true);
+		expect(more.classList.contains("tab-mcp-primary")).toBe(true);
+		await relay.settled();
+		expect(relay.received.map((r) => r.type)).not.toContain("pairing.start");
+
+		more.focus();
+		more.click();
+		await relay.next("pairing.start");
+		relay.send({
+			type: "pairing.open",
+			expiresAt: new Date(Date.now() + 600_000).toISOString(),
+		});
+		await relay.settled();
+		expect(shown(timeUp)).toBe(false);
+		expect(shown(signIn)).toBe(true);
+		expect(status.textContent).toBe("This page is ready for your AI app.");
+		// From the hidden Continue to the address's Copy.
+		expect(doc.activeElement).toBe(
+			dialog.querySelector(".tab-mcp-address-copy"),
+		);
+		byText(dialog, "Close").click();
+		await relay.next("pairing.stop");
+	});
+
 	test("with identity binding, Disconnect all apps says it is done once the address shows again, at its Copy (review of PR 121)", async () => {
 		relay.pairing = "oidc";
 		relay.grants = [];
@@ -1545,7 +1605,7 @@ describe("showConnectDialog", () => {
 		const fresh = byText(dialog, "Disconnect all apps");
 		expect(fresh.disabled).toBe(false);
 		const question = dialog.querySelector(
-			".tab-mcp-new-address-question",
+			".tab-mcp-disconnect-all-question",
 		) as HTMLElement;
 		expect(question.hidden).toBe(true);
 
@@ -1578,7 +1638,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Connect another app").click();
 		const fresh = byText(dialog, "Disconnect all apps");
 		const question = dialog.querySelector(
-			".tab-mcp-new-address-question",
+			".tab-mcp-disconnect-all-question",
 		) as HTMLElement;
 		fresh.click();
 		expect(question.hidden).toBe(false);
@@ -1635,7 +1695,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Connect another app").click();
 		byText(dialog, "Disconnect all apps").click();
 		expect(
-			dialog.querySelector(".tab-mcp-new-address-question p")?.textContent,
+			dialog.querySelector(".tab-mcp-disconnect-all-question p")?.textContent,
 		).toBe(
 			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again and enter a new code.",
 		);
@@ -1659,7 +1719,7 @@ describe("showConnectDialog", () => {
 			"Every AI app is disconnected. Connect yours again.",
 		);
 		expect(
-			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
+			(dialog.querySelector(".tab-mcp-disconnect-all-question") as HTMLElement)
 				.hidden,
 		).toBe(true);
 		expect(
@@ -1682,7 +1742,7 @@ describe("showConnectDialog", () => {
 		await relay.next("hello");
 		byText(dialog, "Disconnect all apps").click();
 		expect(
-			(dialog.querySelector(".tab-mcp-new-address-question") as HTMLElement)
+			(dialog.querySelector(".tab-mcp-disconnect-all-question") as HTMLElement)
 				.hidden,
 		).toBe(true);
 		expect(await relay.next("hello")).toMatchObject({ revokeAll: true });
@@ -1726,7 +1786,7 @@ describe("showConnectDialog", () => {
 		expect(has(".tab-mcp-address-copy", "tab-mcp-primary")).toBe(false);
 		for (const plain of [
 			".tab-mcp-code-copy",
-			".tab-mcp-new-address",
+			".tab-mcp-disconnect-all",
 			".tab-mcp-close",
 			".tab-mcp-setup-toggle",
 		])
@@ -1735,7 +1795,7 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelectorAll("button.tab-mcp-copy").length).toBe(4);
 		// What disconnects apps is marked.
 		expect(has(".tab-mcp-disconnect", "tab-mcp-danger")).toBe(true);
-		expect(has(".tab-mcp-new-address-confirm", "tab-mcp-danger")).toBe(true);
+		expect(has(".tab-mcp-disconnect-all-confirm", "tab-mcp-danger")).toBe(true);
 		const app = dialog.querySelector(".tab-mcp-apps li .tab-mcp-app");
 		expect(app?.textContent).toBe("Claude (claude.ai) connected");
 		// Each command is a block with its own Copy; the server name defaults to "tools".
@@ -1972,7 +2032,7 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 			"Another tab or program took over this page",
 		);
 		expect(notice.querySelector("p")?.textContent).toBe(
-			"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
+			"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or window of this browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
 		);
 		expect(buttons(notice).map((b) => b.textContent)).toEqual([
 			"Close",
@@ -2369,16 +2429,19 @@ describe("the connect dialog for people who are not developers (iteration 33)", 
 			"tab-mcp-help",
 			"tab-mcp-code",
 			"tab-mcp-sign-in",
-			"tab-mcp-new-address-row",
-			"tab-mcp-new-address-question",
+			"tab-mcp-time-up",
+			"tab-mcp-disconnect-all-row",
+			"tab-mcp-disconnect-all-question",
 		]);
 		// Closed: open, its steps would push the code out of view.
 		const help = dialog.querySelector(".tab-mcp-help") as HTMLDetailsElement;
 		expect(shown(help)).toBe(true);
 		expect(help.open).toBe(false);
 		const address = dialog.querySelector(".tab-mcp-address") as HTMLElement;
-		expect(address.querySelector(".tab-mcp-new-address")).toBeNull();
-		const row = dialog.querySelector(".tab-mcp-new-address-row") as HTMLElement;
+		expect(address.querySelector(".tab-mcp-disconnect-all")).toBeNull();
+		const row = dialog.querySelector(
+			".tab-mcp-disconnect-all-row",
+		) as HTMLElement;
 		expect(shown(row)).toBe(true);
 		expect(row.textContent).toBe(
 			"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again with a new code. Disconnect all apps",

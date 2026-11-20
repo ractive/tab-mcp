@@ -121,7 +121,7 @@ export const SIBLING_GRACE_MS = 1_000;
  * secret), and
  * only a claim of this tab's own address, heard after this tab's own
  * `session`, counts: one heard while this tab was still connecting, or from
- * a tab on another address (after `newAddress()` there), cannot have caused
+ * a tab on another address (after `disconnectAll()` there), cannot have caused
  * the replacement (CC 5). A claim without an address counts for any. Without
  * `BroadcastChannel` nothing is heard, and every `replaced` counts as unknown.
  */
@@ -181,6 +181,24 @@ function siblingTabs(
 		close() {
 			channel?.close();
 		},
+	};
+}
+
+/**
+ * Call `now` when the page comes back to the front or the browser is online
+ * again (a reconnect then tries at once); returns what stops it.
+ */
+export function onWake(now: () => void): () => void {
+	const g = globalThis as Partial<EventTarget>;
+	const doc = (globalThis as { document?: Document }).document;
+	const visible = () => {
+		if (doc?.visibilityState !== "hidden") now();
+	};
+	doc?.addEventListener("visibilitychange", visible);
+	g.addEventListener?.("online", now);
+	return () => {
+		doc?.removeEventListener("visibilitychange", visible);
+		g.removeEventListener?.("online", now);
 	};
 }
 
@@ -372,6 +390,9 @@ export function openConnection(
 								reason: message.reason,
 							},
 				);
+				return;
+			case "pairing.open":
+				host.pairingOpen(message.expiresAt);
 				return;
 			case "grant.added":
 				host.grantAdded(message.grant);

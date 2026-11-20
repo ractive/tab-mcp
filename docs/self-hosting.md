@@ -692,7 +692,7 @@ Magic Containers with a pull zone):
   ([threat model](threat-model.md), A4). Sites with user accounts pair by
   [identity binding](configuration.md#identity-binding), so a copied secret gets nothing.
   Each page runs on its own origin (not a shared one such as `*.github.io`), without
-  third-party scripts, and calls `newAddress()` when its user logs out on a shared
+  third-party scripts, and calls `disconnectAll()` when its user logs out on a shared
   device.
 - The pairing page names the AI app and the app of the address, not the page: the relay
   does not know the page before the code is typed. A program can claim any origin,

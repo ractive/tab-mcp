@@ -4241,3 +4241,69 @@ owner's.
   to the grant's 90 days, and an AI app can be steered by what it reads. The README says
   to offer it for tools one would not check each time, and that "everything" covers
   tools the user has not seen.
+
+## DEC-201: `newAddress()` is `disconnectAll()`
+
+2026-11-20, [iteration 47](/iterations/iteration-47-follow-ups.md); amends DEC-095 and
+DEC-136, which named it "New address" / `newAddress()`, and closes the rename DEC-196
+left open. Since DEC-196 the address names the app and never changes; the method
+disconnects every AI app and makes a new secret, which the dialogs and the extension's
+panel already called "Disconnect all apps". The owner's rule: no backwards
+compatibility, so a rename is a rename, with no alias.
+
+- `TabMcp.newAddress()` is `disconnectAll()`.
+- Its rejection's `addressChanged` is `secretChanged`: `true` when the apps were
+  disconnected and the secret is new (only connecting with it failed), `false` when the
+  old secret could not be taken back.
+- `DisconnectReason` `new_address` is `disconnect_all`.
+- The `ui.strings` keys `newAddress…` and `gettingNewAddress` are `disconnectAll…` and
+  `disconnectingAll`; the CSS classes `tab-mcp-new-address…` are
+  `tab-mcp-disconnect-all…`.
+- The extension's panel command `new-address` and its element ids are `disconnect-all`.
+- The wire protocol does not change (`hello.revokeAll`, `grants.revokeAll`), and the
+  relay's code keeps the address id, which is still what grants are keyed by.
+- History keeps the old words: released changelog sections, this log, iteration files.
+
+## DEC-202: An open sign-in dialog counts for ten minutes
+
+2026-11-20, [iteration 47](/iterations/iteration-47-follow-ups.md); closes DEC-196's open
+point. With identity binding anyone can open `/authorize` for an app with a client of
+their own; a user who follows such a link and clicks Connect while their page's dialog
+is open is paired with that client if the provider's single sign-on asks nothing. A code
+limits that to its 2 minutes; the open `oidc` dialog had no limit, so a dialog left open
+for hours kept the page pairable. Of the two options DEC-196 named, a time limit and a
+confirmation in the page, the time limit: it needs no second step from the user who
+meant to connect.
+
+- **The relay counts 10 minutes** (`PAIRING_WINDOW_MS`, next to the code's lifetime;
+  `pairingWindowMs` shortens it in tests) after each `pairing.start` on an `oidc` site.
+  `pairingOpen` is true while `now < start + 10 minutes`, so not at the end's
+  millisecond. `pairing.stop` and the end of the session end it at once. A sign-in that
+  comes back after it gets the one no-page answer (`NO_PAGE_TEXT`), as for a closed
+  dialog. Each `pairing.start` counts 10 minutes from then; it never adds to what is
+  left.
+- **No automatic renewal.** The library sends `pairing.start` when its user opens the
+  dialog or clicks Continue, never by a timer. A reconnect does not send it again on an
+  `oidc` site once the relay gave a time: a relay restart would otherwise start the
+  10 minutes again for every open dialog, which is the case the limit is for. Codes still
+  come again after a reconnect, as before. Connecting from a click (the dialog opening,
+  Connect again, Disconnect all apps) sends it, as that is the user acting.
+- **The protocol addition** is one relay → tab message, `pairing.open { expiresAt }`,
+  the answer to each `pairing.start` on an `oidc` site, shaped like `pairing.code`'s
+  `expiresAt`. Nothing comes when the time is up: the page knows the end. Libraries up
+  to 0.18.1 ignore unknown messages, so they work with the new relay; their dialogs
+  just stop pairing after 10 minutes without saying so. A new library with an old relay
+  gets no `pairing.open` and behaves as before.
+- **The library** keeps the time in `pairingUntil` (event `pairinguntil`, also in the
+  React snapshot): the relay's time, the time of a reconnect after which it did not ask
+  again, or `undefined` (pairing off, no answer yet, an old relay). `startPairing()`
+  sends `pairing.start` on every call while connected, so Continue is `startPairing()`.
+  The dialog shows "Your AI app can connect until {time}." under the sign-in line and,
+  once the page's clock passes the time, "The time to connect your AI app is up. To
+  connect it now, continue." with a Continue button. The page's clock can be off from
+  the relay's by seconds; the relay's time decides.
+- **Size.** The core had 31 bytes left; the getter, the event and the reconnect rule
+  cost about 75. The visibility and `online` listeners of reconnecting moved to the lazy
+  chunk (the connection that broke has loaded it), so the limit stays where it is.
+- **The residual risk** in the threat model: the window is the 10 minutes after the user
+  opened the dialog or continued, while it is open.

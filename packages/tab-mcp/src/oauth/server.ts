@@ -1558,7 +1558,7 @@ ${alternatives}
 		}
 
 		const now = Date.now();
-		// The grant dates from the code, not from its exchange: a "New address"
+		// The grant dates from the code, not from its exchange: a "Disconnect all apps"
 		// or "revoke all" in between leaves a tombstone that refuses it.
 		const createdAt = issued.issuedAt;
 		// A retry after a store failure keeps the grant id, so tokens the failed
@@ -1598,7 +1598,7 @@ ${alternatives}
 			throw error;
 		}
 		if (tokens === undefined) {
-			// Revoked after the code was issued (code reuse, New address).
+			// Revoked after the code was issued (code reuse, Disconnect all apps).
 			throw invalid("the connection was revoked");
 		}
 		this.#host.logger.info("oauth.grant_created", {
@@ -1864,7 +1864,7 @@ ${alternatives}
 	// Housekeeping
 
 	/**
-	 * Every grant of `addressId` was revoked (New address, revoke all): the
+	 * Every grant of `addressId` was revoked (Disconnect all apps, revoke all): the
 	 * authorization codes made for it go too, so none of them makes a grant
 	 * afterwards. An open request names no page yet (DEC-196): it can only
 	 * become a grant through a pairing code typed after this, which is a new

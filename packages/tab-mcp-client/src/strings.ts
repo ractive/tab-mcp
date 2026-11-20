@@ -80,17 +80,23 @@ export const STRINGS = {
 	codeUsed: "Code used. Waiting for your AI app…",
 	signIn:
 		"When your AI app asks, sign in with the account you use on this page. No code is needed.",
-	newAddress: "Disconnect all apps",
-	newAddressNote:
+	/** Under `signIn`: until when the relay pairs a sign-in (`{time}`: hours and minutes). */
+	signInUntil: "Your AI app can connect until {time}.",
+	/** The status once that time is up; Continue starts it again. */
+	signInTimeUp:
+		"The time to connect your AI app is up. To connect it now, continue.",
+	continuePairing: "Continue",
+	disconnectAll: "Disconnect all apps",
+	disconnectAllNote:
 		"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again with a new code.",
-	newAddressQuestionOne:
+	disconnectAllQuestionOne:
 		"This disconnects {apps}. To use this page with it again, connect it again and enter a new code.",
-	newAddressQuestionMany:
+	disconnectAllQuestionMany:
 		"This disconnects {apps}. To use this page with them again, connect them again and enter a new code.",
-	newAddressConfirm: "Disconnect all",
+	disconnectAllConfirm: "Disconnect all",
 	cancel: "Cancel",
-	gettingNewAddress: "Disconnecting…",
-	newAddressDone: "Every AI app is disconnected. Connect yours again.",
+	disconnectingAll: "Disconnecting…",
+	disconnectAllDone: "Every AI app is disconnected. Connect yours again.",
 	connectedOne: "{apps} is connected",
 	connectedMany: "{apps} are connected",
 	connectedNextOne:
@@ -129,7 +135,7 @@ export const STRINGS = {
 		"This page is open in another tab, and your AI apps now use that one. To use them here, connect this page again.",
 	replacedTitle: "Another tab or program took over this page",
 	replaced:
-		"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
+		"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or window of this browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
 	takenOverAgain:
 		"It was taken over again before its AI apps were disconnected. Try again.",
 	/** `{reason}`: why disconnecting all apps failed, one of the texts above. */

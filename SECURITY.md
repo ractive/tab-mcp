@@ -43,8 +43,8 @@ honest.
   page you opened yourself, and check the AI app before you type it.
 - Type a pairing code only for an AI app you started yourself, and never read the code
   out to anyone: whoever has a valid code can connect their own AI app to your page.
-- If a page says that another tab or program took it over and you did not open
-  it elsewhere, choose "Disconnect all apps": someone may have copied what the page
+- If a page says that another tab or program took it over and you did not open it
+  in another tab or window of the same browser, choose "Disconnect all apps": someone may have copied what the page
   keeps to connect, and your AI apps would talk to them.
 - Disconnect AI apps you no longer use, in the page's "Connect your AI app" dialog.
 

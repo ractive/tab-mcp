@@ -473,7 +473,7 @@ instructions, as the recipe does with a delimited block.
   relay: the MCP client reads an error, not a network failure. Only an aborted `signal`
   rejects. Call `close()` when the channel to the page is gone; a closed tunnel stays
   closed, so a new channel (or a new `serve`) gets a new `createTunnelFetch`.
-- Without `relay`, `connect()`, `showConnectDialog()` and `newAddress()` reject with a
+- Without `relay`, `connect()`, `showConnectDialog()` and `disconnectAll()` reject with a
   `TypeError`, nothing is read from or written to `localStorage`, `mcp.hasRelay` is
   `false`, and React's `ConnectButton` renders nothing.
 
@@ -603,7 +603,7 @@ ones: that is why it is a switch of its own.
 the tool names and the title and description the user saw, and a fingerprint of the
 secret; no arguments, no results. An allowance ends with its grant, as the relay reports
 it: the app is disconnected (in the page or elsewhere), "Disconnect all apps"
-(`newAddress()`), the grant expired, the user signed out (identity binding). A dropped
+(`disconnectAll()`), the grant expired, the user signed out (identity binding). A dropped
 connection, a reload or a page that has not connected yet keeps them. Tabs that share the
 address share them, and a change in one counts in the others at once.
 
@@ -738,10 +738,9 @@ their app ids do. The key of 0.4 and older, `tab-mcp:secret:<relay origin>`, is 
 read: a visitor whose last visit predates 0.5 pairs their AI apps again.
 
 "Disconnect all apps" in the dialog (at the end of the setup, below the code, with a
-line on what it does) calls `newAddress()`, which disconnects every app and makes a new
-secret; when apps are connected, the dialog asks first. The method has its name from
-when every page had an address of its own: the address the user sees does not change,
-and each AI app connects again at the same address with a new code. It first takes the
+line on what it does) calls `disconnectAll()`, which disconnects every app and makes a new
+secret; when apps are connected, the dialog asks first. The address the user sees does
+not change, and each AI app connects again at the same address with a new code. It first takes the
 page back: it connects with the stored secret, and the relay revokes every grant made
 for it in the same step (`hello.revokeAll`), whether the page was connected or not.
 Then it makes the new secret, clears `grants`, and connects with it if the page was
@@ -750,7 +749,7 @@ makes one without connecting. If the page cannot be taken back (the relay is
 unreachable, or someone takes it over again first), it rejects and keeps the old secret,
 so calling it again tries again. A second call while it runs returns the same promise;
 `connect()` meanwhile waits for it and then connects with the new secret. A page with
-its own UI calls `newAddress()` from a click. Connected apps keep working after a reload once the page connects
+its own UI calls `disconnectAll()` from a click. Connected apps keep working after a reload once the page connects
 again; while the page is closed, they get "the page is not open".
 
 When another tab or program connects with the same secret, it takes the page's place:
@@ -773,12 +772,12 @@ accepted their session, so `replaced` says which it probably was:
   The library shows "Another tab or program took over this page" with "Disconnect all
   apps".
 
-After a takeover, `newAddress()` (from the `replaced` listener, before it, or later, also
+After a takeover, `disconnectAll()` (from the `replaced` listener, before it, or later, also
 after a reload) takes the page back as above and makes the new secret only once the
 relay confirmed that no grant is left. If the page is taken over again before that,
 it rejects with an error whose `reason` is `"replaced"` and keeps the old secret, so
 calling it again takes it back again. A relay of 0.4 or older cannot take a page
-back: `newAddress()` rejects there with `reason` `"policy"`. When the takeover ended a
+back: `disconnectAll()` rejects there with `reason` `"policy"`. When the takeover ended a
 session of this page, it then connects with the new secret; the default notice opens
 the connect dialog, where the user pairs the AI apps again.
 
@@ -792,7 +791,7 @@ mcp.addEventListener("replaced", (e) => {
   if (e.detail.sibling) showNote("Opened in another tab.");
   else showWarning("Another tab or program took over this page.", {
     action: "Disconnect all apps",
-    onClick: () => mcp.newAddress(), // from the click
+    onClick: () => mcp.disconnectAll(), // from the click
   });
 });
 ```
@@ -804,7 +803,7 @@ sibling; such script can read the secret anyway, so `sibling` is a hint, not a p
 
 Whoever has the address secret can take the page's place from anywhere, and the AI apps
 paired with the page then send their arguments to them and get their tool descriptions
-and results, until the page makes a new secret (`newAddress()`). They get no token and
+and results, until the page makes a new secret (`disconnectAll()`). They get no token and
 cannot pair a new app without a code. Script on your origin (cross-site scripting, a compromised
 third-party script, another page on the same origin) or access to the device can copy it
 ([threat model](https://github.com/ractive/tab-mcp/blob/main/docs/threat-model.md), A4).
@@ -816,7 +815,7 @@ third-party script, another page on the same origin) or access to the device can
   third-party scripts off it.
 - On a page that pairs by code, grants follow the browser profile, not the person: on a
   shared profile, or in a web app with accounts that pairs by code, the next user of the
-  page gets the AI apps the previous one paired. Call `newAddress()` when the user logs
+  page gets the AI apps the previous one paired. Call `disconnectAll()` when the user logs
   out, or use identity binding.
 - The relay's sign-in page names the AI app and the app id of the address, not the page
   or its origin: the code alone says which page is paired. Whoever types a user's code
@@ -832,7 +831,7 @@ come back at once), and at once when the tab comes back to the front or the netw
 returns. Meanwhile `state` is `reconnecting` (while it waits and while it makes an
 attempt), `reconnecting` says which attempt is next and when, and `statechange` fires
 for each attempt it schedules; only the `statechange` that leaves `connected` carries the
-`reason` ([Your own UI](#your-own-ui)). Calling `connect()` meanwhile tries at once. It never reconnects after `disconnect()`, `newAddress()`,
+`reason` ([Your own UI](#your-own-ui)). Calling `connect()` meanwhile tries at once. It never reconnects after `disconnect()`, `disconnectAll()`,
 another tab taking the page's place (`replaced`), an expired or idle session, or a
 refusal by the relay, and an attempt the relay refuses stops it (an unreachable relay is
 tried again); the event `error` then says why, with `state` already `disconnected`, just
@@ -909,6 +908,19 @@ sign in with the account you use on this page" only once it is `bound`. Until th
 says what is missing: "Checking your sign-in…" (`pending`), "Sign in to this page first."
 (`none`), or that the sign-in was not accepted, with `identityMessage` (`refused`).
 
+An open dialog counts for 10 minutes (relays after 0.12.1): a sign-in pairs the page
+only until 10 minutes after the last `startPairing()`, which the dialog calls when it
+opens. The relay says until when (`pairing.open`); the library keeps it in `pairingUntil`
+(an ISO time, event `pairinguntil`). The dialog shows "Your AI app can connect until
+14:32." under the sign-in line and, once that time is up, "The time to connect your AI
+app is up" with Continue, which calls `startPairing()` again. Nothing starts the 10
+minutes again by itself: not a timer, and not a reconnect (after one, `pairingUntil` is
+the time of the reconnect, so the dialog shows Continue). A custom UI does the same: call
+`startPairing()` only from the user's click. With an older relay `pairingUntil` stays
+`undefined` and an open dialog counts as long as it is open. A sign-in that comes back
+after the time is up gets the relay's answer that no page is connecting with that account; Continue, then
+Connect again on the relay's page, pairs it.
+
 ### Your own UI
 
 Instead of `showConnectDialog()`, use the methods, properties and events below.
@@ -917,8 +929,8 @@ Instead of `showConnectDialog()`, use the methods, properties and events below.
 |---|---|
 | `connect(options?)` | resolves with the session (`SessionInfo`) |
 | `disconnect()` | ends the session at once |
-| `newAddress()` | disconnects every app ("Disconnect all apps"); resolves once the new secret is in use (connected again if it was on) |
-| `startPairing()`, `stopPairing()` | codes come only while pairing is on |
+| `disconnectAll()` | disconnects every app ("Disconnect all apps"); resolves once the new secret is in use (connected again if it was on) |
+| `startPairing()`, `stopPairing()` | codes come only while pairing is on; with identity binding each `startPairing()` starts the 10 minutes anew |
 | `revoke(grantId)` | resolves once the relay removed the grant |
 | `signOut()` | resolves once the relay removed the grants (identity binding) |
 | `refreshIdentity()` | resolves with the new `identity`; a `TypeError` without `identityAssertion` |
@@ -936,15 +948,16 @@ older relay's refusal rejects every pending `revoke()` and `signOut()`. When the
 does not know a grant the page lists (it expired), the grant leaves `grants` (with
 `grantschange`) and its `revoke()` resolves.
 
-With a relay, `newAddress()` rejects with an error whose `addressChanged` says what happened: `false`
+With a relay, `disconnectAll()` rejects with an error whose `secretChanged` says what happened: `false`
 when the page could not be taken back (the old secret is kept with its grants; call
-`newAddress()` again), `true` when the secret changed, so every app is disconnected, and
+`disconnectAll()` again), `true` when the secret changed, so every app is disconnected, and
 only connecting with the new one failed (call `connect()`).
 
 The properties are `state` (`disconnected`, `connecting`, `connected`, `reconnecting`),
 `session` (while connected; `session.address` is the MCP address, `session.appName` the
 name the relay shows), `reconnecting` (the next attempt, while `state` is
-`reconnecting`), `pairingCode`, `grants`, `identity`, `identityMessage`, `tools` and
+`reconnecting`), `pairingCode`, `pairingUntil` (identity binding, see there), `grants`,
+`identity`, `identityMessage`, `tools` and
 `hasRelay`.
 
 Every event's `detail` is an object. A change event names the new values like the
@@ -955,6 +968,7 @@ properties (`grantschange` has `grants`), and a value that is gone is `undefined
 | `statechange` | `{ state, reason? }`, see below |
 | `grantschange` | `{ grants }` |
 | `pairingcode` | `{ pairingCode }` |
+| `pairinguntil` | `{ pairingUntil }` |
 | `identitychange` | `{ identity, identityMessage }` |
 | `toolschange` | `{ tools }` |
 | `replaced` | `{ sibling }` (see above) |
@@ -963,7 +977,7 @@ properties (`grantschange` has `grants`), and a value that is gone is `undefined
 
 `statechange`'s `reason` (a `DisconnectReason`) says why a session or an attempt to
 open one ended, once: on the change from `connected` (to `disconnected`, or to
-`reconnecting` when the connection broke), and when `disconnect()` or `newAddress()`
+`reconnecting` when the connection broke), and when `disconnect()` or `disconnectAll()`
 ends connecting or reconnecting. It is absent on every other change: `connecting`,
 `connected`, each later reconnect attempt (`statechange` fires for each, and
 `reconnecting.reason` keeps the reason of the break), a failed `connect()`, and the
@@ -1146,7 +1160,7 @@ function TodoList() {
   simulated unmount does not cancel a `connect()` a child started). `<TabMcpProvider
   client={mcp}>` uses an instance of your own instead (and leaves it connected).
 - `useTabMcp()` returns the instance, for everything the hooks do not cover
-  (`newAddress()`, `signOut()`, `refreshIdentity()`, `revoke()`, …).
+  (`disconnectAll()`, `signOut()`, `refreshIdentity()`, `revoke()`, …).
 - `useTabMcpState()` returns `{ state, session, grants, pairingCode, identity,
   identityMessage, reconnecting, tools }` (the address is `session?.address`) through `useSyncExternalStore`: the component
   renders again only when one of them changed. On the server and during hydration it is
