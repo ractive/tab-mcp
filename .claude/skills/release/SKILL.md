@@ -40,6 +40,13 @@ saturnus found it after the fact).
 5. The apps' branches move from the candidate to `x.y.z` (a one-line bump, CI again), and
    are merged and deployed (section 3).
 
+A candidate goes through `main` like any release: the `Release` workflow refuses a commit
+that is not on `main`. So for its lifetime the pinned docs on `main` name the candidate,
+and `bump-version.ts` turns the changelog's `## Unreleased` into `## [x.y.z-rc.1]`. For
+the next candidate or the stable release, rename that heading back to `## Unreleased`
+(dropping its link line) in the version PR before running `bump-version.ts`: one section
+per stable version, none per candidate.
+
 Straight to stable, without a candidate: a release that changes no behaviour or API of the
 published package (docs, a comment, a test). When in doubt, a candidate.
 

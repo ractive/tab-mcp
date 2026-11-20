@@ -368,7 +368,9 @@ test("docs and plugin manifests name only the current package versions", async (
 			].map((m) => m.index + m[0].length - (m[1] ?? "").length),
 		);
 		for (const m of text.matchAll(
-			/(?<![\d.])(0\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?![.\d])/g,
+			// A pre-release ends with an identifier, not with a dot: "0.2.0-rc.1." at
+			// the end of a sentence is 0.2.0-rc.1.
+			/(?<![\d.])(0\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)(?!\.?\d)/g,
 		)) {
 			const v = m[1] ?? "";
 			const ok = current.has(v) || (named.has(m.index) && v === extension);
