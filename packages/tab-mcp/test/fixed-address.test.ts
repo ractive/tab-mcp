@@ -407,8 +407,9 @@ describe("the pairing page is shown before any page is known (DEC-196)", () => {
 		expect(stable(closed)).toBe(stable(none));
 		expect(stable(pairing)).toBe(stable(none));
 		// And the same for an app nobody serves.
-		const other = await open(r, r.relay.addressFor("other"), browser);
-		expect(stable(other).replaceAll("other", APP)).toBe(stable(none));
+		// An app id that occurs nowhere else in the page.
+		const other = await open(r, r.relay.addressFor("nobodys-app"), browser);
+		expect(stable(other).replaceAll("nobodys-app", APP)).toBe(stable(none));
 	});
 
 	test("the form's hooks for an extension (DEC-199): the form, the code field and the Connect button, also after a wrong code", async () => {
@@ -448,7 +449,12 @@ describe("the pairing page is shown before any page is known (DEC-196)", () => {
 				"data-tab-mcp-field": "code",
 				name: "code",
 				type: "text",
-				autocomplete: "one-time-code",
+				// Nothing for a password manager to fill or to offer.
+				autocomplete: "off",
+				"data-1p-ignore": "",
+				"data-lpignore": "true",
+				"data-bwignore": "",
+				"data-form-type": "other",
 				// `XXXX-XXXX` fits, also with spaces around the dash.
 				maxlength: "12",
 			});

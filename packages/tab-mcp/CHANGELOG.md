@@ -9,6 +9,15 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Changed
+
+- The pairing page's code field is `autocomplete="off"` (it was `one-time-code`) and
+  carries the opt-outs of 1Password, LastPass, Bitwarden and Dashlane: the code is on
+  the user's screen and nothing can fill it, and with the old hint password managers put
+  their button into the field.
+
 ## [0.12.0][relay-0.12.0] - 2026-11-19
 
 One fixed MCP address per app, `https://<relay>/s/<app>/mcp`, instead of one per tab
