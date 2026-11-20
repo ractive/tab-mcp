@@ -2942,6 +2942,65 @@ describe("the confirmation chunk's confirmInPage with a host of the caller's own
 		expect(await again).toBe(false);
 	});
 
+	/** Keep an allowance for g_1 through the dialog's Allow until reload. */
+	async function keepOne(host: Host | { grants: { grantId: string }[] }) {
+		const first = confirmInPage(host, question(), doc, { alwaysAllow: true });
+		const always = byText(dialog(), "Allow until reload");
+		await enabled(always);
+		always.click();
+		expect(await first).toBe(true);
+		expect(await confirmInPage(host, question(), doc)).toBe(true);
+	}
+
+	test("an app removed from the host's grants without an event is asked again (review of PR 169)", async () => {
+		const host = { grants: [{ grantId: "g_1" }] };
+		await keepOne(host);
+		host.grants = [];
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("a grantschange of any shape prunes against the host's grants now (review of PR 169)", async () => {
+		const host = new Host();
+		await keepOne(host);
+		host.grants = [];
+		// A plain Event, no detail: no throw, and the allowance is gone.
+		host.dispatchEvent(new Event("grantschange"));
+		host.grants = [{ grantId: "g_1" }]; // the same app back: asked again
+		const again = confirmInPage(host, question(), doc);
+		expect(dialog()).not.toBeNull();
+		byText(dialog(), "Don't allow").click();
+		expect(await again).toBe(false);
+	});
+
+	test("a host with an _allowed of another shape is a stand-in (review of PR 169)", async () => {
+		// What a 0.18.0 workaround put there, and other wrong shapes.
+		for (const _allowed of [
+			[
+				{ list: () => [], get: () => undefined, onChange: () => () => {} },
+				undefined,
+				"until-reload",
+			],
+			"yes",
+			[],
+			[{}, {}, true],
+		]) {
+			const host = Object.assign(new Host(), { _allowed });
+			// Treated as a stand-in: no third button without the option…
+			const first = confirmInPage(host, question(), doc);
+			expect({ _allowed, offered: offered() }).toEqual({
+				_allowed,
+				offered: [],
+			});
+			byText(dialog(), "Don't allow").click();
+			expect(await first).toBe(false);
+			// …and with it, kept in memory as for any stand-in.
+			await keepOne(host);
+		}
+	});
+
 	test("the options ui and allowDelayMs reach the dialog again", async () => {
 		const host = new Host();
 		const started = Date.now();

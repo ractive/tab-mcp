@@ -552,7 +552,9 @@ An app that shows the dialog for an MCP endpoint of its own, without a `TabMcp` 
 desktop app, say), can load the built confirmation chunk (`confirm-<hash>.js`; its name
 changes with each build) and call its `confirmInPage(host, request, document, options)`.
 `host` is a stand-in with `grants` (the AI apps it allows for, `{ grantId }`), optionally
-an `EventTarget` that sends `grantschange` with `detail.grants`. `options` are
+an `EventTarget` that sends `grantschange` when they change (any event: the allowances
+are pruned against `grants` as they are then). A call counts as allowed only while its
+grant is in `grants`, also without an event. `options` are
 `alwaysAllow` (`true` or `"until-reload"` offers "Allow until reload" for that call;
 without it nothing is allowed or kept), `ui` (the dialog's texts) and `allowDelayMs`
 (tests only). Such allowances live in memory, for the host's grants, until a reload; only
@@ -632,7 +634,8 @@ mcp.addEventListener("grantschange", drawSwitches);
 
 - `tools()`: the tools that ask (`consequentialHint`, callable through the relay), each
   `{ name, title?, description, destructive }`.
-- `has(grantId, name)`: whether a call runs without asking now. `list(grantId)`: the
+- `has(grantId, name)`: whether a call runs without asking now (only for an app in
+  `mcp.grants`). `list(grantId)`: the
   names allowed one by one (one registered now with another title or description is
   not in it). `everything(grantId)`. These only read, so they are safe while drawing.
 - `allow(grantId, name)` (as the tool is registered now), `ask(grantId, name)`,

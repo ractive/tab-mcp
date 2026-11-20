@@ -73,8 +73,9 @@ export interface AllowedTools {
 	 */
 	list(grantId: string): string[];
 	/**
-	 * Whether a call of this tool by this app runs without asking now:
-	 * "everything" is on, or the tool is allowed and registered unchanged.
+	 * Whether a call of this tool by this app runs without asking now: the
+	 * app is in `mcp.grants`, and "everything" is on or the tool is allowed
+	 * and registered unchanged.
 	 */
 	has(grantId: string, name: string): boolean;
 	/**
@@ -226,11 +227,31 @@ const NO_TOOLS: ToolsOf = {
 	onChange: () => () => {},
 };
 
+const isFunction = (v: unknown) => typeof v === "function";
+
+/**
+ * Whether `value` is what a `TabMcp`'s `_allowed` is: its registry (with
+ * `register`), its secret store or none, its `alwaysAllow`. Anything else
+ * (a stand-in that copied part of it, as some did for 0.18.0) is a stand-in.
+ */
+function isInternals(value: unknown): value is TabMcp["_allowed"] {
+	if (!Array.isArray(value) || value.length !== 3) return false;
+	const [registry, secrets, alwaysAllow] = value as unknown[];
+	const r = registry as Partial<Record<string, unknown>> | null;
+	const s = secrets as { current?: unknown } | null | undefined;
+	return (
+		["register", "list", "get", "onChange"].every((k) => isFunction(r?.[k])) &&
+		(s === undefined || isFunction(s?.current)) &&
+		[undefined, true, false, "until-reload"].includes(alwaysAllow as never)
+	);
+}
+
 /** The host's tools, secret store and `alwaysAllow`: a `TabMcp`'s, or none for a stand-in. */
 function internalsOf(
 	host: TabMcp | ConfirmHost,
 ): TabMcp["_allowed"] | [ToolsOf, undefined, undefined] {
-	return "_allowed" in host ? host._allowed : [NO_TOOLS, undefined, undefined];
+	const internals = (host as { _allowed?: unknown })._allowed;
+	return isInternals(internals) ? internals : [NO_TOOLS, undefined, undefined];
 }
 
 /**
@@ -296,8 +317,9 @@ export class Allowances implements AllowedTools {
 	readonly has = (grantId: string, name: string): boolean => {
 		const tool = this.#registry.get(name);
 		return (
-			this.everything(grantId) ||
-			(tool !== undefined && this.allows(grantId, tool))
+			this.#granted(grantId) &&
+			(this.everything(grantId) ||
+				(tool !== undefined && this.allows(grantId, tool)))
 		);
 	};
 
@@ -308,6 +330,10 @@ export class Allowances implements AllowedTools {
 	 * (`toolsChanged`).
 	 */
 	allows(grantId: string, tool: ToolNow): boolean {
+		// Only for an app the host lists at this moment: a stand-in may drop
+		// one from `grants` without an event, and for a `TabMcp` a call comes
+		// only while the relay's list is current, so it costs nothing there.
+		if (!this.#granted(grantId)) return false;
 		const entry = this.#read().get(grantId);
 		if (entry === undefined) return false;
 		if (entry.everything) return true;
@@ -484,12 +510,10 @@ export function allowedFor(mcp: TabMcp | ConfirmHost): Allowances {
 	if (kept !== undefined) return kept;
 	const made = new Allowances(mcp);
 	allowances.set(mcp, made);
-	mcp.addEventListener?.("grantschange", (e) =>
-		made.keepGrants(
-			(e as CustomEvent<{ grants: ConfirmHost["grants"] }>).detail.grants.map(
-				(g) => g.grantId,
-			),
-		),
+	// Against the host's grants as they are now, whatever the event carries
+	// (a stand-in may send a plain Event; a TabMcp's detail is its grants).
+	mcp.addEventListener?.("grantschange", () =>
+		made.keepGrants(mcp.grants.map((g) => g.grantId)),
 	);
 	internalsOf(mcp)[0].onChange(() => made.toolsChanged());
 	made.toolsChanged(); // tools may have changed since the last page kept them

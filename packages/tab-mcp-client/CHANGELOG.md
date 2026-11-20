@@ -21,16 +21,27 @@ the Git tag `client-v<version>`. The format follows
     call, no translated texts, no other delay.
 
   Now the fourth argument is again `{ alwaysAllow?, ui?, allowDelayMs? }`, as in 0.17.
-  A host needs only `grants` (and may send `grantschange` with `detail.grants`); it
-  needs no `_allowed` and no `session`. For a host that is not a `TabMcp`, nothing is
+  A host needs only `grants`; it may send `grantschange` (any event: the allowances
+  are then pruned against `grants` as they are, whatever the event carries). It needs
+  no `_allowed` and no `session`. For a host that is not a `TabMcp`, nothing is
   allowed or kept unless the call offers it with `alwaysAllow`; then the button says
   "Allow until reload" (`true` and `"until-reload"` alike: nothing of a stand-in
   outlives a reload), and an allowance is kept in memory for the host's grants only,
   until a reload or until its grant leaves `grants`, and applies to that app's later
-  calls of the tool. For a `TabMcp`, `alwaysAllow` overrides the page's option for
-  that call. As since 0.13, only a client with `kind: "relay"` can be allowed. Hosts
-  that added `_allowed` or `session` for 0.18.0 can drop them.
+  calls of the tool. A call counts as allowed only while its grant is in the host's
+  `grants` at that moment, also without an event. For a `TabMcp`, `alwaysAllow`
+  overrides the page's option for that call. As since 0.13, only a client with
+  `kind: "relay"` can be allowed. Hosts that added `_allowed` or `session` for 0.18.0
+  can drop them; an `_allowed` that is not a `TabMcp`'s (such as that workaround's)
+  now makes the host a stand-in, so pass `alwaysAllow` to keep offering the button.
   `TabMcp.confirmInPage(request, { document })` is unchanged.
+
+### Changed
+
+- `allowedTools(mcp).has(grantId, name)`, and a call, count an allowance only while
+  the app is in `mcp.grants`: before the first connect after a reload, `has` is
+  `false` (the allowance is still kept, `list` shows it). Calls only come while
+  connected, so for them nothing changes.
 
 ## [0.18.0][client-0.18.0] - 2026-11-20
 

@@ -394,7 +394,9 @@ describe("the allowances, with a stub relay", () => {
 		const second = tab({ storage, alwaysAllow: true });
 		await second.registerTool(asking("a"));
 		const allowed = allowedTools(second);
-		expect(allowed.has("g_1", "a")).toBe(true);
+		// Kept, but nothing runs for an app the page does not list yet.
+		expect(allowed.list("g_1")).toEqual(["a"]);
+		expect(allowed.has("g_1", "a")).toBe(false);
 		await second.connect();
 		expect(allowed.has("g_1", "a")).toBe(true);
 		expect(kept(storage)).toMatchObject({ grants: [{ grantId: "g_1" }] });
