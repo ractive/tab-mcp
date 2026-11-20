@@ -31,6 +31,19 @@ script can see that the API is there and, from how it behaves, that it is this
 extension's. It learns nothing else from it: not who the user is, not the relay, not the
 AI app.
 
+A page that uses the tab-mcp client library and offers its tools to agents in the
+browser announces that to the extension (any page script could pretend to). Such a page,
+and only such a page among those the extension may read, learns from the extension its
+name and version, whether AI access is on, and the names and verified hosts of the AI
+apps connected to the extension now, while it is open; and, right before one of its own
+tools runs because the user allowed the call in the extension, that tool's name, the
+arguments the page gets anyway, and which of those AI apps made the call. So the page
+does not ask the user a second time. It learns nothing else: not who the user is, not
+the relay, not the extension's address, not other tabs. From the page the extension
+reads only what it announced: the library's version, its app id and the names and hosts
+of the AI apps connected to the page directly, which the panel shows and which stay in
+the browser.
+
 After the user clicks "Fill in the code for me" (off by default, also with access to all
 sites), the extension sees the pairing page of the relay the user chose, and only that
 page of it (`<relay>/authorize`). There it reads three attributes of the pairing form

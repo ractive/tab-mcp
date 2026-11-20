@@ -259,8 +259,15 @@ code and message.
 > WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
 > you turn on chrome://flags/#enable-webmcp-testing.
 >
+> A page built with the tab-mcp client library and the extension know of each other: a
+> call you allowed in the extension is not asked again in the page, and the page can show
+> which AI apps reach it through the extension. Such a page learns the extension's name
+> and version, whether AI access is on and the names of the AI apps connected to it,
+> nothing else.
+>
 > The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
-> tabs, and only the page's address, title, language and its WebMCP tools. It sends data
+> tabs, and only the page's address, title, language and its WebMCP tools (and what a
+> page with the tab-mcp client library tells it about itself). It sends data
 > only while AI access is on, only to the relay you chose, and only what your AI app asks
 > for. No analytics.
 

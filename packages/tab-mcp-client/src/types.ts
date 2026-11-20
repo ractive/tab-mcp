@@ -46,10 +46,44 @@ export interface RelayClient {
 
 /**
  * An agent in this browser that calls a mirrored tool through WebMCP
- * (`webmcp: true`). Not paired and not identified: nothing more is known.
+ * (`webmcp: true`). Not paired and not identified: nothing more is known,
+ * unless the tab-mcp browser extension vouched for the call (DEC-205).
  */
 export interface WebMcpClient {
 	kind: "webmcp";
+	/**
+	 * Set when the tab-mcp browser extension ran this call for an AI app
+	 * connected to it, after the user allowed the call there: the page did
+	 * not ask (no question, no `onConfirm`). Absent for every other agent in
+	 * the browser, and with `trustExtension: false`.
+	 */
+	via?: "tab-mcp-extension";
+	/** With `via`: the AI app's own name for itself, as the extension knows it. */
+	name?: string;
+	/** With `via`: the host of the AI app's client id, as the relay verified it for the extension. */
+	host?: string;
+}
+
+/**
+ * The tab-mcp browser extension, as it tells a page that offers its tools
+ * through WebMCP (`TabMcp.extension`, DEC-205): it is serving this page, and
+ * these AI apps can call the page's tools through it.
+ */
+export interface BrowserExtension {
+	/** As the extension names itself ("tab-mcp browser extension"). */
+	name: string;
+	version: string;
+	/**
+	 * The AI apps connected to the extension now (each one's own name and
+	 * the host the relay verified); empty while none is.
+	 */
+	apps: readonly { name: string; host: string }[];
+	/**
+	 * The extension serves only the tab in front of its window: say "while
+	 * this tab is in front" when telling the user that an app is connected
+	 * through it.
+	 */
+	whileInFront: boolean;
 }
 
 /**
@@ -369,8 +403,21 @@ export interface TabMcpOptions {
 	 * their `callers` list `"webmcp"`: an agent that drives this tab can
 	 * click Allow in the page's confirmation itself. A failed native
 	 * registration only warns in the console.
+	 *
+	 * With it, the page and the tab-mcp browser extension know of each other
+	 * (DEC-205): `extension` says which AI apps reach the page through it,
+	 * and a call the user allowed in the extension is not asked again here
+	 * (see `trustExtension`).
 	 */
 	webmcp?: boolean;
+	/**
+	 * With `webmcp: true`: a WebMCP call the tab-mcp browser extension vouches
+	 * for runs without the page's question and without `onConfirm` (the user
+	 * allowed exactly that call there, a moment before). On by default;
+	 * `false` asks every WebMCP call as without the extension. `extension`
+	 * is reported either way.
+	 */
+	trustExtension?: boolean;
 }
 
 /** The library is reconnecting by itself (`state` is `reconnecting`). */
@@ -600,6 +647,8 @@ export interface TabMcpEventMap {
 		identityMessage: string | undefined;
 	}>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
+	/** `extension` changed: the tab-mcp browser extension, its AI apps (DEC-205). */
+	extensionchange: CustomEvent<{ extension: BrowserExtension | undefined }>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;
 	/** That call ended; also when the user declined it, did not answer, or the AI app cancelled it. */

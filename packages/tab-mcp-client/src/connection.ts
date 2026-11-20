@@ -3,6 +3,7 @@
  * HTTP tunnel and the MCP handler. Loaded by `TabMcp.connect()`.
  */
 
+import type { VouchedBy } from "./handshake.ts";
 import { pageIcons } from "./icons.ts";
 import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
 import { createMcpHandler, webMcpCall } from "./mcp.ts";
@@ -25,15 +26,34 @@ export { pieces, servePort } from "./serve.ts";
 
 /**
  * For the core: a WebMCP call of a mirrored tool (iteration 25), on the
- * same path as an AI app's (`webMcpCall` in `mcp.ts`).
+ * same path as an AI app's (`webMcpCall` in `mcp.ts`). `by`: the tab-mcp
+ * browser extension vouched for this very call, for that AI app (DEC-205):
+ * the user allowed it there, so the page neither asks nor calls `onConfirm`;
+ * everything else (the arguments' check, the events, the tool still being
+ * the one registered) is as for any call.
  */
 export function callFromWebMcp(
 	host: CallHost,
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
+	by?: VouchedBy,
 ): Promise<unknown> {
-	return webMcpCall(callContext(host, "webmcp"), tool, input, signal);
+	const context = callContext(host, "webmcp");
+	return by === undefined
+		? webMcpCall(context, tool, input, signal, { kind: "webmcp" })
+		: webMcpCall(
+				{ ...context, confirm: () => Promise.resolve(true) },
+				tool,
+				input,
+				signal,
+				{
+					kind: "webmcp",
+					via: "tab-mcp-extension",
+					name: by.name,
+					host: by.host,
+				},
+			);
 }
 
 /** How long `connect()` waits for the relay's `session`. */

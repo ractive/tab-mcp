@@ -13,6 +13,12 @@
  * user every time (both ways of calling it ask here, through `confirm`); a
  * call runs only on the page its tool was listed from, with the read-only
  * claim it was offered with.
+ *
+ * A call the user allowed (asked, or allowed for its site) goes to the page
+ * with a vouch, so that a page with the client library does not ask again
+ * (DEC-205). Only `#allowedThenRun` makes one, after the user's "allow" and
+ * the check that the tool is still the one asked about; a read-only tool,
+ * which nobody asks about, gets none.
  */
 
 import {
@@ -26,7 +32,13 @@ import type {
 	Tool,
 	ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
-import type { CallResult, PageTool, PageTools } from "../messages.ts";
+import type {
+	CallResult,
+	PageLibrary,
+	PageTool,
+	PageTools,
+	Vouch,
+} from "../messages.ts";
 import type { TargetTab } from "../tabs.ts";
 import { OWN_TOOL_NAMES } from "./tools.ts";
 
@@ -354,6 +366,8 @@ export interface BridgeState {
 	more?: number;
 	/** Why there are no tools: no access, an error. */
 	error?: string;
+	/** The page announced the client library (DEC-205). */
+	library?: PageLibrary;
 }
 
 /** Which page tool a call is for: the page it was listed from, its claim. */
@@ -367,11 +381,13 @@ export interface CallTarget {
 export interface BridgeChrome {
 	current(): Promise<TargetTab>;
 	list(tab: TargetTab): Promise<PageTools>;
+	/** `vouch`: the user allowed this call; the page is told before it runs. */
 	call(
 		tabId: number,
 		target: CallTarget,
 		input: unknown,
 		signal: AbortSignal,
+		vouch?: Vouch,
 	): Promise<CallResult>;
 	/**
 	 * Tab `tabId` after its page went away during a call: wait until it has
@@ -584,7 +600,8 @@ export class PageToolBridge {
 
 	/**
 	 * Ask first for a tool that is not read-only (both ways of calling it),
-	 * then run it if it is still the tool the user was asked about.
+	 * then run it if it is still the tool the user was asked about, with a
+	 * vouch: the one place one is made (DEC-205).
 	 */
 	async #allowedThenRun(
 		callable: Callable,
@@ -620,6 +637,14 @@ export class PageToolBridge {
 				throw new Error(
 					`The page's tool ${cut(target.name, MAX_NAME)} changed while the user was asked; it did not run. webmcp_tools lists the tools of the page in front.`,
 				);
+			// Allowed, and still the same tool: the page may skip its own
+			// question. Only an AI app through the relay gets here (`decide`).
+			const { client } = options;
+			if (client.kind === "relay")
+				return this.#run(callable, input, options, {
+					nonce: crypto.randomUUID(),
+					app: { name: client.name ?? "", host: client.host },
+				});
 		}
 		return this.#run(callable, input, options);
 	}
@@ -629,6 +654,7 @@ export class PageToolBridge {
 		callable: Callable,
 		input: unknown,
 		options: ToolExecuteOptions,
+		vouch?: Vouch,
 	): Promise<unknown> {
 		const { target } = callable;
 		const timeout = AbortSignal.timeout(this.#timeoutMs);
@@ -636,7 +662,7 @@ export class PageToolBridge {
 		// Ends when the signal aborts, even if the page never answers (a blocked
 		// page cannot even take the cancel message).
 		const result = await Promise.race([
-			this.#chrome.call(callable.tabId, target, input, signal),
+			this.#chrome.call(callable.tabId, target, input, signal, vouch),
 			abortedWith(signal).catch(() => "aborted" as const),
 		]);
 		if (result === "aborted" || timeout.aborted) {
@@ -802,6 +828,7 @@ export class PageToolBridge {
 			tools: offered,
 			...(more ? { more } : {}),
 			...(tools.error ? { error: cut(tools.error, MAX_ERROR) } : {}),
+			...(tools.library ? { library: tools.library } : {}),
 		};
 		this.#changed();
 	}

@@ -133,7 +133,9 @@ WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-call
   `{ kind: "local", id, name? }` for the site's own assistant on a served port, with the
   `id` and `name` the page gave `serve` ([Your own assistant](#your-own-assistant-on-the-page)),
   or `{ kind: "webmcp" }` for an agent in the browser ([WebMCP](#webmcp)), of which nothing
-  more is known. Check `client.kind` before you read `host`. Return a
+  more is known (unless the tab-mcp browser extension vouched for the call: then
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, [with the
+  extension](#with-the-tab-mcp-browser-extension)). Check `client.kind` before you read `host`. Return a
   string (one text block), an MCP result (passed through with its `_meta`: an object
   whose `content` is an array of MCP content blocks, each with `type` `text`, `image`,
   `audio`, `resource_link` or `resource` and the fields that type needs), or any other JSON value (sent as JSON text,
@@ -246,7 +248,59 @@ trial token that a script adds later counts for a `TabMcp` made after it.
   names.
 - The tab-mcp browser extension offers mirrored tools like any page tool, since it cannot know
   whether the AI app is also paired with the page, so an AI app connected to the page and
-  to the extension sees such a tool twice.
+  to the extension sees such a tool twice. The page and the extension know of each
+  other, though: see the next section.
+
+#### With the tab-mcp browser extension
+
+The [tab-mcp browser extension](https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp-extension)
+calls a page's tools through WebMCP for AI apps connected to it, and asks the user
+first about every tool that is not read-only. With `webmcp: true` the page and the
+extension shake hands (DEC-205), so that a call is not asked twice and the page can say
+that an AI app reaches it through the extension:
+
+- **`extension`** (and the event `extensionchange`, `{ extension }`; in React the
+  snapshot's `extension`): while the extension serves the page,
+  `{ name, version, apps, whileInFront }`. `apps` are the AI apps connected to the
+  extension now, each `{ name, host }` (the AI app's own name and the host the relay
+  verified), empty while none is. `whileInFront` is `true`: the extension serves only the
+  tab in front of its window, so say "while this tab is in front". `undefined` without
+  the extension, while its AI access is off, and without WebMCP. The connect dialog says
+  it first ("Claude (claude.ai) is connected through the tab-mcp browser extension,
+  while this tab is in front.", `ui.strings.viaExtension…`) and keeps everything else:
+  a phone or another browser still connects to the page directly.
+- **A vouched call.** Right before the extension runs a tool the user allowed there
+  (asked and allowed, or covered by its "Always allow" switch), it tells the page the
+  tool, the exact arguments and the AI app. The next WebMCP call of that tool with equal
+  arguments (key order aside) within 2 seconds runs without the page's question and
+  without `onConfirm`: the user just allowed exactly that call. Its caller in
+  `execute`, `toolcall` and `toolcallend` is
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, so an activity view can say
+  "Claude (claude.ai) through the tab-mcp browser extension". A vouch is used once and
+  only for the tool registered under its name when it came (a tool registered anew
+  since asks). Everything else is as for any call: the arguments are checked, the
+  events fire, a tool that is gone does not run. Any call that matches no vouch (an
+  agent in the browser, a call after the 2 seconds) is asked as before.
+- **`trustExtension: false`** keeps asking every WebMCP call, vouched or not, for a site
+  that insists on its own question; `extension` is still reported.
+- **What the page tells the extension:** the library's version, the app id and the AI
+  apps connected to the page directly (`name`, `host`, as `grants` has them), again on
+  each `grantschange`. The extension's panel uses it to say that the page has tab-mcp
+  built in and when one AI app is connected both ways (it then sees the page's tools
+  twice). The page also marks `<html data-tab-mcp-handshake>`, so that an extension
+  that comes after the page loaded knows it may speak.
+- **No proof.** Plain DOM events on `document` (`tab-mcp-page` from the page,
+  `tab-mcp-extension` from the extension, a JSON string as `detail`; the protocol is in
+  `src/handshake.ts`). Script in the page could fake the extension, but script in the
+  page can already skip any question of the page: this is a convenience between two
+  parts the user trusts, not a security boundary. Only the top frame takes part.
+- Old and new mix: an extension that does not know the handshake says nothing, and the
+  page asks as before; the extension says nothing to a page that did not announce the
+  library.
+
+A page that registers its WebMCP tools itself, without the library's mirror, can take
+part the same way: answer the events as `src/handshake.ts` does and skip its own
+question for a call that matches a vouch.
 
 ### Your own assistant on the page
 
@@ -964,7 +1018,8 @@ The properties are `state` (`disconnected`, `connecting`, `connected`, `reconnec
 `session` (while connected; `session.address` is the MCP address, `session.appName` the
 name the relay shows), `reconnecting` (the next attempt, while `state` is
 `reconnecting`), `pairingCode`, `pairingUntil` (identity binding, see there), `grants`,
-`identity`, `identityMessage`, `tools` and
+`identity`, `identityMessage`, `tools`, `extension` ([with the tab-mcp browser
+extension](#with-the-tab-mcp-browser-extension)) and
 `hasRelay`.
 
 Every event's `detail` is an object. A change event names the new values like the
@@ -978,6 +1033,7 @@ properties (`grantschange` has `grants`), and a value that is gone is `undefined
 | `pairinguntil` | `{ pairingUntil }` |
 | `identitychange` | `{ identity, identityMessage }` |
 | `toolschange` | `{ tools }` |
+| `extensionchange` | `{ extension }` |
 | `replaced` | `{ sibling }` (see above) |
 | `error` | `{ error }` |
 | `toolcall`, `toolcallend` | the call, see below |
@@ -1168,8 +1224,8 @@ function TodoList() {
   client={mcp}>` uses an instance of your own instead (and leaves it connected).
 - `useTabMcp()` returns the instance, for everything the hooks do not cover
   (`disconnectAll()`, `signOut()`, `refreshIdentity()`, `revoke()`, …).
-- `useTabMcpState()` returns `{ state, session, grants, pairingCode, identity,
-  identityMessage, reconnecting, tools }` (the address is `session?.address`) through `useSyncExternalStore`: the component
+- `useTabMcpState()` returns `{ state, session, grants, pairingCode, pairingUntil,
+  identity, identityMessage, reconnecting, tools, extension }` (the address is `session?.address`) through `useSyncExternalStore`: the component
   renders again only when one of them changed. On the server and during hydration it is
   `disconnected`.
 - `useTool(tool, options?)` registers the tool while the component is mounted and

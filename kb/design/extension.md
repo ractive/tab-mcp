@@ -75,7 +75,8 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   tool (DEC-140): it cannot know whether the AI app is paired with the page itself. An AI
   app connected to both gets such a tool twice. (Until iteration 35 it left out the names
   listed in `<html data-tab-mcp-webmcp>`, which hid them from an AI app connected only
-  to the extension.)
+  to the extension.) Such a page and the extension know of each other since DEC-205:
+  see below.
 - Tools that ask first ask in the side panel when it is open in the focused window of the
   tab the call acts on, else in a Chrome notification; the extension asks, not the
   library (iteration 26). A click on a notification's body opens the whole question in
@@ -91,6 +92,46 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
 - The origin a page's tools carry (the description's prefix, the "allowed" key, the
   question's "Site (verified)") is checked against the origin of the address Chrome
   reports for the tab; a page that says otherwise gets no tools (iteration 35).
+
+## Pages with the client library (DEC-205)
+
+A page that uses the client library with `webmcp: true` and the extension shake hands,
+so that a call the user allowed in the extension is not asked again by the page, and the
+page can say that an AI app is connected through the extension
+([iteration 48](/iterations/iteration-48-page-extension-handshake.md)).
+
+- **The channel.** `CustomEvent`s on `document` with a JSON string as `detail`:
+  `tab-mcp-page` from the page, `tab-mcp-extension` from the content script (top frame
+  only). `v: 1`, a `type`; anything else is ignored. The page's side is
+  `packages/tab-mcp-client/src/handshake.ts` (in the mirror's chunk), the extension's
+  `src/page-handshake.ts` in the content script.
+- **Either may start first.** The page says `hello` when its mirror starts and marks
+  `<html data-tab-mcp-handshake>`; the content script (at `document_idle` in Chrome,
+  after a click, at `document_start` in Firefox) listens from its start, and speaks
+  first (`hello`) only when the mark is there. Each answers the other's `hello` with an
+  `update`; changes go as `update`.
+- **The extension speaks only to pages that announced the library**: its name and
+  version, `on` (AI access on and connected), the AI apps connected now (`name`,
+  verified `host`) and `whileInFront: true`. The worker sends the state to every
+  content script of a site it may read whenever it changes (`extension-state`); each
+  passes it on only to a page that announced. A content script asks the worker for it
+  with `handshake`, accepted only from a tab's top frame.
+- **The vouch.** `PageToolBridge` makes one in `#allowedThenRun` only, after the
+  user's answer (or the site's "allowed") and the same-tool check, for a tool that is not
+  read-only and an AI app through the relay; it goes with the `webmcp-call` message,
+  and the content script dispatches it (`tool`, `arguments`, `nonce`, `app`)
+  synchronously right before `executeTool`, after its own checks. The library keeps it
+  2 s, for the tool registered under that name then, and uses it once for the next
+  WebMCP call of that tool with equal arguments (canonical JSON, keys sorted): no
+  question, no `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension",
+  name, host }`. `trustExtension: false` in the page asks anyway.
+- **The panel.** For the tab in front, when the page announced the library: "This page
+  has tab-mcp built in.", and when an AI app paired with the extension is also connected
+  to the page directly (same name and host, as the page announced its grants), that it
+  sees the page's tools twice and to disconnect it in one of the two.
+- **No proof** of either side: a convenience between two parts the user trusts, not a
+  security boundary (threat model A13, A14). Old and new mix: a page without the
+  handshake hears nothing, an old extension says nothing, and the page asks as before.
 
 ## Filling in the code on the relay's page
 

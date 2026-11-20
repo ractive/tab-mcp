@@ -28,6 +28,7 @@ import {
 	allowedTools,
 } from "./allowed.ts";
 import {
+	type BrowserExtension,
 	type ConfirmRequest,
 	type ConnectionState,
 	type Grant,
@@ -64,6 +65,11 @@ export interface TabMcpSnapshot {
 	reconnecting: ReconnectingInfo | undefined;
 	/** Names of the registered tools. */
 	tools: readonly string[];
+	/**
+	 * The tab-mcp browser extension while it serves the page, with the AI
+	 * apps connected through it (`TabMcp.extension`, `webmcp: true`).
+	 */
+	extension: BrowserExtension | undefined;
 }
 
 const EMPTY: readonly never[] = Object.freeze([]);
@@ -79,6 +85,7 @@ const SERVER_SNAPSHOT: TabMcpSnapshot = Object.freeze({
 	identityMessage: undefined,
 	reconnecting: undefined,
 	tools: EMPTY,
+	extension: undefined,
 });
 
 const STATE_EVENTS = [
@@ -88,6 +95,7 @@ const STATE_EVENTS = [
 	"pairinguntil",
 	"identitychange",
 	"toolschange",
+	"extensionchange",
 ] as const satisfies readonly (keyof TabMcpEventMap)[];
 
 /** The external store of one `TabMcp`: a snapshot that changes only with the instance. */
@@ -133,6 +141,7 @@ class Store {
 				tools.every((t, i) => t === previous.tools[i])
 					? previous.tools
 					: tools,
+			extension: mcp.extension,
 		};
 		const same = (Object.keys(next) as (keyof TabMcpSnapshot)[]).every(
 			(key) => next[key] === previous[key],
@@ -260,8 +269,8 @@ export function useTabMcp(): TabMcp {
 }
 
 /**
- * The connection state, address, grants, pairing code, identity and
- * reconnecting of the provider's `TabMcp`. Re-renders only when one of them
+ * The connection state, address, grants, pairing code, identity,
+ * reconnecting and the tab-mcp browser extension of the provider's `TabMcp`. Re-renders only when one of them
  * changes; the server and hydration see `disconnected`.
  */
 export function useTabMcpState(): TabMcpSnapshot {

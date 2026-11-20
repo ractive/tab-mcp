@@ -5,6 +5,7 @@
 
 export { TabMcp } from "./tab-mcp.ts";
 export type {
+	BrowserExtension,
 	ConfirmAnswer,
 	ConfirmHandler,
 	ConfirmRequest,

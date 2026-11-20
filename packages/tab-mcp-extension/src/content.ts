@@ -5,7 +5,8 @@
  * DEC-116) about the page and its WebMCP tools and calls them. In this world `document.modelContext` is the browser's own,
  * whatever the page put on its own `document` (iteration 18). Firefox has
  * none: there this script defines one for the page and keeps its tools
- * (`firefox/webmcp.ts`, iteration 44).
+ * (`firefox/webmcp.ts`, iteration 44). With a page that uses the client
+ * library with `webmcp: true` it shakes hands (`page-handshake.ts`, DEC-205).
  */
 
 import { connectPolyfill } from "./chrome/webmcp-port.ts";
@@ -15,11 +16,14 @@ import type {
 	ContentEvent,
 	ContentRequest,
 	ContentResponse,
+	ExtensionState,
 	PageHistory,
 	PageInfo,
+	PageLibrary,
 	PageTool,
 	PageTools,
 } from "./messages.ts";
+import { PageHandshake } from "./page-handshake.ts";
 
 /** The part of WebMCP the content script uses. */
 interface ModelContext extends EventTarget {
@@ -74,6 +78,9 @@ declare const TAB_MCP_FIREFOX: boolean | undefined;
  * page-world polyfill (`chrome/webmcp-port.ts`). The browser's own wins.
  */
 let ownContext: ModelContext | undefined;
+
+/** The handshake with a page that has the client library (DEC-205). */
+let handshake: PageHandshake | undefined;
 
 const contextOf = (doc: Document) =>
 	(doc as Document & { modelContext?: ModelContext }).modelContext ??
@@ -237,6 +244,7 @@ const hint = (annotations: Record<string, unknown> | undefined, key: string) =>
 export async function pageTools(
 	doc: Document = document,
 	documentId: string = DOCUMENT_ID,
+	library: PageLibrary | undefined = handshake?.library,
 ): Promise<PageTools> {
 	const context = contextOf(doc);
 	const base = {
@@ -245,6 +253,7 @@ export async function pageTools(
 		documentId,
 		available: context !== undefined,
 		more: 0,
+		...(library !== undefined ? { library } : {}),
 	};
 	if (context === undefined) return { ...base, tools: [] };
 	let listed: RegisteredTool[];
@@ -297,6 +306,9 @@ const running = new Map<string, AbortController>();
  * this very page (`documentId`) with the same read-only claim. Otherwise
  * "gone": a tool must never run on another page than the one it was offered
  * for, nor without the confirmation its first claim would have needed.
+ * `vouch`, for a call the user allowed: runs right before the tool, once
+ * every check passed, so that a page with the client library does not ask
+ * again (DEC-205).
  */
 export async function callTool(
 	call: { documentId: string; name: string; readOnly: boolean },
@@ -304,6 +316,7 @@ export async function callTool(
 	signal: AbortSignal,
 	doc: Document = document,
 	documentId: string = DOCUMENT_ID,
+	vouch?: (input: unknown) => void,
 ): Promise<CallResult> {
 	const { name } = call;
 	if (call.documentId !== documentId)
@@ -332,8 +345,10 @@ export async function callTool(
 			gone: true,
 		};
 	let value: string | null;
+	const args = input ?? {};
 	try {
-		value = await context.executeTool(tool, input ?? {}, { signal });
+		vouch?.(args);
+		value = await context.executeTool(tool, args, { signal });
 	} catch (error) {
 		return { ok: false, error: message(error) };
 	}
@@ -354,8 +369,18 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 		case "webmcp-call": {
 			const controller = new AbortController();
 			running.set(request.callId, controller);
+			const { vouch } = request;
 			try {
-				return await callTool(request, request.input, controller.signal);
+				return await callTool(
+					request,
+					request.input,
+					controller.signal,
+					document,
+					DOCUMENT_ID,
+					vouch === undefined
+						? undefined
+						: (args) => handshake?.vouch(request.name, args, vouch),
+				);
 			} finally {
 				running.delete(request.callId);
 			}
@@ -365,6 +390,9 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 			return { ok: true, value: null };
 		case "history":
 			return { ok: true, ...pageHistory() };
+		case "extension-state":
+			handshake?.stateChanged(request.state);
+			return { ok: true, value: null };
 	}
 }
 
@@ -374,6 +402,7 @@ const REQUESTS = new Set([
 	"webmcp-call",
 	"webmcp-cancel",
 	"history",
+	"extension-state",
 ]);
 
 declare global {
@@ -423,6 +452,18 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
+	// The page with the client library (DEC-205): what it announces goes to
+	// the panel as a change of the page's tools does.
+	handshake = new PageHandshake(document, {
+		state: async () => {
+			const ask: ContentEvent = { type: "handshake" };
+			return (await chrome.runtime.sendMessage(ask)) as
+				| ExtensionState
+				| undefined;
+		},
+		changed,
+	});
+	handshake.start();
 	// Chrome without WebMCP of its own: the page-world polyfill, if it is
 	// there (registered with host access), answers on a port.
 	if (

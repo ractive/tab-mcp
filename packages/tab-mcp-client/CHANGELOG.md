@@ -38,6 +38,28 @@ unknown key.
 
 ### Added
 
+- **The page and the tab-mcp browser extension know of each other** (`webmcp: true`,
+  DEC-205): a plain handshake over DOM events (`tab-mcp-page`, `tab-mcp-extension`) with
+  the extension from its next release.
+  - **No second question.** Right before the extension runs a tool that the user
+    allowed there (asked, or its "Always allow"), it vouches for that call: the tool,
+    the exact arguments and the AI app. The next WebMCP call of that tool with equal
+    arguments within 2 seconds runs without the page's question and without
+    `onConfirm`; a vouch is used once, and any other call is asked as before.
+  - **`trustExtension: false`** keeps asking every WebMCP call (a site that insists on
+    its own question).
+  - **`extension` and the event `extensionchange`** (also in the React snapshot): while
+    the extension serves the page, `{ name, version, apps, whileInFront }`, with the AI
+    apps connected through it (`name`, `host`); `undefined` otherwise.
+  - **A vouched call's caller** is `{ kind: "webmcp", via: "tab-mcp-extension", name,
+    host }` in `execute`, `toolcall` and `toolcallend` (`WebMcpClient` has the new
+    optional fields).
+  - The connect dialog says first which AI apps are connected through the extension
+    ("… while this tab is in front."), texts `viaExtensionOne`, `viaExtensionMany`,
+    `viaExtensionInFrontOne`, `viaExtensionInFrontMany`; the rest stays.
+  - The page tells the extension the library's version, the app id and the AI apps
+    connected to it directly, and marks `<html data-tab-mcp-handshake>`.
+  - In the WebMCP mirror's chunk: the core grows by 9 bytes gzipped.
 - **`pairingUntil` and the event `pairinguntil`** (identity binding, DEC-202): until when
   a sign-in pairs the page (an ISO time on the page's clock: the `expiresInMs` of the
   relay's new `pairing.open`, counted from its arrival, so a page clock that differs

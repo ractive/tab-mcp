@@ -13,6 +13,17 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Added
 
+- **Pages with the tab-mcp client library and the extension know of each other**
+  (DEC-205, with the library from 0.19.0 and `webmcp: true`). A call the user allowed
+  in the extension (asked, or its "Always allow" switch) is not asked again by the page:
+  right before the tool runs, the extension tells the page the tool, the exact
+  arguments and the AI app, and the page runs that one call without its own question.
+  The page shows which AI apps are connected through the extension. The extension tells
+  such a page only its name and version, whether AI access is on and the AI apps
+  connected (name and verified host), and nothing to a page without the library. The
+  panel says "This page has tab-mcp built in." and, when an AI app is connected to the
+  page directly too, that it sees the page's tools twice and to disconnect it in one of
+  the two. In Firefox too.
 - **Fills in its own pairing code** on the relay's sign-in page when an AI app opens it
   in the same browser (DEC-203), once turned on: "Fill in the code for me" under the
   code (off by default, also with access to all sites) asks for access to the relay's
