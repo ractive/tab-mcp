@@ -31,7 +31,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.12.0
+  ractive/tab-mcp:0.12.1
 ```
 
 For production, see
@@ -930,7 +930,7 @@ the session ends after the message was sent and before the relay answered, and w
 or may not have done it, and `grants` says so once the page is connected again. They
 also reject with the relay's refusal of that message, an `Error` whose `code` is
 `store_unavailable` (the relay could not save the change: try again) or `unknown_id`.
-A relay after 0.12.0 names the message it answers (`for`, and `grantId` for a
+A relay after 0.12.1 names the message it answers (`for`, and `grantId` for a
 revocation), so with several revocations pending only the one it answers rejects; an
 older relay's refusal rejects every pending `revoke()` and `signOut()`. When the relay
 does not know a grant the page lists (it expired), the grant leaves `grants` (with
