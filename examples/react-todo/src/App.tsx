@@ -1,16 +1,19 @@
 /**
  * The todo app: a provider for the tree, one `useTool` per tool where the
- * list lives, a `ConnectButton`, and the AI app's recent calls.
+ * list lives, a `ConnectButton`, the switches of what runs without asking
+ * for each connected AI app, and the AI app's recent calls.
  */
 
-import type { ToolCallClient } from "@ractive-ch/tab-mcp-client";
+import type { Grant, ToolCallClient } from "@ractive-ch/tab-mcp-client";
 import {
 	ConnectButton,
 	TabMcpProvider,
+	useAllowedTools,
 	useTabMcpState,
 	useTool,
 	useToolCalls,
 } from "@ractive-ch/tab-mcp-client/react";
+import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import { type FormEvent, useState, useSyncExternalStore } from "react";
 import { MAX_TEXT, MAX_TODOS, type TodoList } from "./todos.ts";
 
@@ -24,7 +27,18 @@ const SERVER = {
 
 export function App(props: { relay: string; todos: TodoList }) {
 	return (
-		<TabMcpProvider relay={props.relay} server={SERVER} appName="Todo">
+		<TabMcpProvider
+			relay={props.relay}
+			server={SERVER}
+			appName="Todo"
+			// "Always allow" in the confirmation, and switches under each connected
+			// app (in the connect dialog and in <Apps />), kept until the app is
+			// disconnected. Off by default: see "The risk" in the client's README,
+			// which advises against allowances for tools that delete. They are offered
+			// for every tool that asks, so here also for delete_todos: acceptable for
+			// a demo list that lives in memory, not for a page whose data matters.
+			alwaysAllow
+		>
 			<main>
 				<header>
 					<h1>Todo</h1>
@@ -35,6 +49,7 @@ export function App(props: { relay: string; todos: TodoList }) {
 					change this list while the tab is open.
 				</p>
 				<Status />
+				<Apps />
 				<Todos todos={props.todos} />
 				<Activity />
 			</main>
@@ -56,6 +71,72 @@ function Status() {
 		<p className="status" role="status" data-state={state}>
 			{text}
 		</p>
+	);
+}
+
+/** Each connected AI app, with switches for the tools that ask: on, a tool runs for that app without asking. */
+function Apps() {
+	const { grants } = useTabMcpState();
+	if (grants.length === 0) return null;
+	return (
+		<section aria-labelledby="apps-title" className="apps">
+			<h2 id="apps-title">Runs without asking</h2>
+			{grants.map((grant) => (
+				<AppSwitches key={grant.grantId} grant={grant} />
+			))}
+		</section>
+	);
+}
+
+function AppSwitches({ grant }: { grant: Grant }) {
+	const { tools, everything, allowedTools } = useAllowedTools(grant.grantId);
+	const { allow, ask, setEverything } = allowedTools;
+	// The name is the AI app's own choice: shown with the host the relay
+	// verified, and with invisible or direction characters escaped, as the
+	// library's dialogs do, so it cannot pass for another app.
+	const host = escapeInvisible(grant.client.host);
+	const name = grant.client.name
+		? `${escapeInvisible(grant.client.name)} (${host})`
+		: host;
+	const until = allowedTools.kept
+		? `until you disconnect ${name}`
+		: "until you reload this page";
+	return (
+		<fieldset>
+			<legend>{name}</legend>
+			<p className="hint">
+				Switched on, a tool runs for {name} without asking you first, {until}.
+			</p>
+			{tools.map((tool) => (
+				<label key={tool.name} className="switch">
+					<input
+						type="checkbox"
+						role="switch"
+						aria-checked={tool.allowed}
+						checked={tool.allowed}
+						// "Everything" covers each tool: turn it off to choose one by one.
+						disabled={everything}
+						onChange={(e) =>
+							e.target.checked
+								? allow(grant.grantId, tool.name)
+								: ask(grant.grantId, tool.name)
+						}
+					/>
+					{tool.title ?? tool.name}
+					{tool.destructive && <span className="destructive">destructive</span>}
+				</label>
+			))}
+			<label className="switch everything">
+				<input
+					type="checkbox"
+					role="switch"
+					aria-checked={everything}
+					checked={everything}
+					onChange={(e) => setEverything(grant.grantId, e.target.checked)}
+				/>
+				Allow everything, no questions asked
+			</label>
+		</fieldset>
 	);
 }
 
