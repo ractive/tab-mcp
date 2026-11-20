@@ -94,7 +94,15 @@ fresh." Branch `relay/fixed-address`.
 
 ### After the release (other repositories)
 
-- [ ] ractive.ch: relay deploy with `apps` for the sites, examples on the new client
+- [x] ractive.ch: relay deploy with `apps` for the sites, examples on the new client
+  (2026-11-19 and 20: relay 0.12.1; examples, sign-in and saturnus on client 0.18.1;
+  only `sign-in` is reserved so far)
+- [ ] Reserve the other apps on the hosted relay: `todo`, `diagram` and `saturnus` for
+  ractive.ch, `comparis-the-game` for the game's origin, the extension's ids
+  (`TAB_MCP_SITES` in ractive.ch `infra/tab-mcp/container.tf`)
+- [ ] tab-mcp browser extension: a store release; the published copies have the old
+  client and cannot connect
+- [ ] The comparis game: client 0.18.1 (its own session, in the owner's other account)
 - [ ] Sitegloss: new client; the extension fills in the code on the relay's pairing
   page after "Connect <app>?" in the side panel (optional access to the relay's
   origin, asked on "Turn on AI access")
