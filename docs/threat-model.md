@@ -619,10 +619,16 @@ page (a tab assertion), the provider says who signed in at `/authorize` (an ID t
   app" dialog must be open when the provider sends the browser back, so a sign-in that
   comes back after the user closed the dialog pairs nobody. An open dialog counts for
   10 minutes after the user opened it (a code lasts 2): a sign-in that comes back later
-  pairs nobody either, and only the user starts the 10 minutes again, with Continue in
-  the dialog; neither a timer nor a reconnect of the page does (DEC-202). So the window
-  is the 10 minutes after the user last opened the dialog or continued, not the whole
-  time a forgotten dialog stays open. The pairing page names the AI app and its
+  pairs nobody either. With a client library after 0.18.1 only the user starts the 10
+  minutes again, with Continue in the dialog or a click on Connect again; neither a
+  timer nor a reconnect the library makes by itself does (DEC-202). So the window is
+  the 10 minutes after the user last opened the dialog or continued, not the whole time
+  a forgotten dialog stays open. Pages with a library up to 0.18.1 send `pairing.start`
+  again after every reconnect (a relay restart, a network drop, a laptop waking up),
+  and the relay cannot tell that from the user opening the dialog: for them each
+  reconnect starts another 10 minutes, so a forgotten dialog stays pairable in windows
+  that a reconnect renews. The limit is complete only once a page runs the newer
+  library, one reason to update. The pairing page names the AI app and its
   verified host. The same click-through risk exists for every OAuth consent page.
 - **A different person later uses the same browser.** Grants remember a hash of the
   person they were made for. MCP requests reach the page only while it is bound to that
@@ -910,7 +916,9 @@ each default.
   own. A user who follows such a link and clicks Connect within 10 minutes after they
   opened their page's dialog (or chose Continue in it), while it is still open, pairs
   that AI app with their page, if the provider's single sign-on asks nothing. The
-  pairing page names the AI app's verified host (A12).
+  pairing page names the AI app's verified host (A12). With a client library up to
+  0.18.1 every reconnect of the page starts another 10 minutes, so a forgotten dialog
+  stays pairable; the limit is complete only with a newer library (DEC-202).
 - On a page that pairs by code, the next user of the same browser profile gets the AI
   apps the previous one paired (A1).
 - A model can be steered by content (prompt injection) into calling tools the user did

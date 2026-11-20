@@ -565,7 +565,15 @@ export function showConnectDialog(
 		"tab-mcp-continue",
 		"primary",
 	);
-	const timeUp = el(doc, "p", { className: "tab-mcp-time-up" }, more);
+	const timeUpText = el(doc, "span", { text: s.signInTimeUp });
+	const timeUp = el(
+		doc,
+		"p",
+		{ className: "tab-mcp-time-up" },
+		timeUpText,
+		" ",
+		more,
+	);
 
 	const steps = el(doc, "ul");
 	const help = el(
@@ -873,8 +881,12 @@ export function showConnectDialog(
 		const left = until === undefined ? 1 : Date.parse(until) - Date.now();
 		const over = connected && shown && left <= 0;
 		clearTimeout(untilTimer);
+		// At most a minute ahead, so that a throttled timer is not the only
+		// chance to see the end.
 		untilTimer =
-			left > 0 && until !== undefined ? setTimeout(render, left) : undefined;
+			left > 0 && until !== undefined
+				? setTimeout(render, Math.min(left, 60_000))
+				: undefined;
 
 		// An app that paired just now: the setup closes again (unless the
 		// Disconnect all apps question is open in it), and the confirmation is
@@ -943,6 +955,8 @@ export function showConnectDialog(
 			until === undefined ? "" : format(s.signInUntil, { time: timeOf(until) });
 		signInUntil.hidden = until === undefined;
 		timeUp.hidden = !over;
+		// With an app connected the status is hidden: the reason goes here.
+		timeUpText.hidden = !connectedView;
 
 		setupToggle.hidden = !connectedView;
 		setupToggle.setAttribute("aria-expanded", String(expanded));
@@ -1075,6 +1089,8 @@ export function showConnectDialog(
 	mcp.addEventListener("statechange", onState);
 	mcp.addEventListener("pairingcode", render);
 	mcp.addEventListener("pairinguntil", render);
+	// A tab in the background may not have run the timer: look again.
+	doc.addEventListener("visibilitychange", render);
 	mcp.addEventListener("grantschange", render);
 	mcp.addEventListener("identitychange", render);
 	mcp.addEventListener("error", onError);
@@ -1098,6 +1114,7 @@ export function showConnectDialog(
 				mcp.removeEventListener("statechange", onState);
 				mcp.removeEventListener("pairingcode", render);
 				mcp.removeEventListener("pairinguntil", render);
+				doc.removeEventListener("visibilitychange", render);
 				mcp.removeEventListener("grantschange", render);
 				mcp.removeEventListener("identitychange", render);
 				mcp.removeEventListener("error", onError);

@@ -910,16 +910,23 @@ says what is missing: "Checking your sign-in…" (`pending`), "Sign in to this p
 
 An open dialog counts for 10 minutes (relays after 0.12.1): a sign-in pairs the page
 only until 10 minutes after the last `startPairing()`, which the dialog calls when it
-opens. The relay says until when (`pairing.open`); the library keeps it in `pairingUntil`
-(an ISO time, event `pairinguntil`). The dialog shows "Your AI app can connect until
-14:32." under the sign-in line and, once that time is up, "The time to connect your AI
-app is up" with Continue, which calls `startPairing()` again. Nothing starts the 10
-minutes again by itself: not a timer, and not a reconnect (after one, `pairingUntil` is
-the time of the reconnect, so the dialog shows Continue). A custom UI does the same: call
-`startPairing()` only from the user's click. With an older relay `pairingUntil` stays
-`undefined` and an open dialog counts as long as it is open. A sign-in that comes back
-after the time is up gets the relay's answer that no page is connecting with that account; Continue, then
-Connect again on the relay's page, pairs it.
+opens. The relay says for how long (`pairing.open`); the library counts that on the
+page's own clock from the message's arrival and keeps the end in `pairingUntil` (an ISO
+time, event `pairinguntil`), so a page whose clock differs from the relay's still shows
+the right moment. `pairingUntil` is `undefined` while pairing is off, from each
+`startPairing()` until the relay answers, after the session ended (`disconnect()`,
+`disconnectAll()`, a refusal), and with a relay up to 0.12.1. The dialog shows "Your AI
+app can connect until 14:32." under the sign-in line and, once that time is up (also
+checked when the tab comes back to the front), "The time to connect your AI app is up"
+with Continue, which calls `startPairing()` again. Nothing starts the 10 minutes again
+by itself: not a timer, and not a reconnect the library makes by itself once the start
+was sent, answered or not (after one, `pairingUntil` is the time of the reconnect, so
+the dialog shows Continue). `connect()` from a click while reconnecting ("Connect again")
+does ask again; codes always come again after a reconnect. A custom UI does the same:
+call `startPairing()` only from the user's click. With a relay up to 0.12.1 an open dialog
+counts as long as it is open, and after a reconnect the dialog shows Continue too. A
+sign-in that comes back after the time is up gets the relay's answer that no page is
+connecting with that account; Continue, then Connect again on the relay's page, pairs it.
 
 ### Your own UI
 

@@ -313,6 +313,34 @@ describe("pairing (DEC-028)", () => {
 		expect(t.pairingUntil).toBeUndefined();
 	});
 
+	test("DEC-202: pairing.open's expiresInMs is counted on the page's clock from its arrival; a duration that cannot be waited for falls back to expiresAt", async () => {
+		relay.pairing = "oidc";
+		t.startPairing();
+		await t.connect();
+		await relay.next("pairing.start");
+		// The relay's clock is an hour behind the page's: its expiresAt is
+		// long past here, the duration is not.
+		const relayTime = new Date(Date.now() - 3_600_000 + 600_000).toISOString();
+		const before = Date.now();
+		relay.send({
+			type: "pairing.open",
+			expiresAt: relayTime,
+			expiresInMs: 600_000,
+		});
+		await nextEvent(t, "pairinguntil");
+		const until = Date.parse(t.pairingUntil ?? "");
+		expect(until).toBeGreaterThanOrEqual(before + 600_000);
+		expect(until).toBeLessThanOrEqual(Date.now() + 600_000);
+		// Too long for setTimeout, negative, or not a number: the relay's time.
+		for (const expiresInMs of [2 ** 31, -1, "600000", Number.NaN]) {
+			t.startPairing();
+			await relay.next("pairing.start");
+			relay.send({ type: "pairing.open", expiresAt: relayTime, expiresInMs });
+			await relay.settled();
+			expect(t.pairingUntil).toBe(relayTime);
+		}
+	});
+
 	test("startPairing before connect sends pairing.start after the session; codes become events", async () => {
 		t.startPairing();
 		await t.connect();

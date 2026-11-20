@@ -262,7 +262,9 @@ The page's "Connect your AI app" dialog must be open when the sign-in comes back
 relay, as it must be for a code, and it counts for 10 minutes after the user opened it
 (DEC-202): a sign-in that comes back later gets the same answer as for a closed dialog.
 The dialog shows until when, and then a Continue button that counts 10 minutes from
-then; nothing starts them again by itself, a reconnect of the page included. The 10
+then; with a client library after 0.18.1 nothing starts them again by itself, a
+reconnect of the page included. Pages with a library up to 0.18.1 start them again on
+every reconnect: the limit is complete once your pages run a newer one. The 10
 minutes are fixed, not a setting. Grants made this way remember (a hash of) the person:
 they work only while the page they were made for is open and signed in as that person,
 and a page that signs in as someone else ends them.

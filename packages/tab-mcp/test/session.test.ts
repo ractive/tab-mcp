@@ -139,6 +139,7 @@ test("DEC-202: an oidc page can be paired for ten minutes after each pairing.sta
 			{
 				type: "pairing.open",
 				expiresAt: new Date(t0 + PAIRING_WINDOW_MS).toISOString(),
+				expiresInMs: PAIRING_WINDOW_MS,
 			},
 		]);
 		expect(PAIRING_WINDOW_MS).toBe(600_000);
@@ -158,6 +159,7 @@ test("DEC-202: an oidc page can be paired for ten minutes after each pairing.sta
 			{
 				type: "pairing.open",
 				expiresAt: new Date(t1 + PAIRING_WINDOW_MS).toISOString(),
+				expiresInMs: PAIRING_WINDOW_MS,
 			},
 		]);
 		expect(session.pairingOpen).toBe(true);

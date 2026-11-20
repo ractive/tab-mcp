@@ -437,7 +437,9 @@ describe("identity binding: no page of the signed-in person is connecting", () =
 		const ctx = await setup({}, "alice", { pairingWindowMs: 2000 });
 		const open = (await ctx.tab.next("pairing.open")) as unknown as {
 			expiresAt: string;
+			expiresInMs: number;
 		};
+		expect(open.expiresInMs).toBe(2000);
 		const until = Date.parse(open.expiresAt);
 		expect(until).toBeGreaterThan(Date.now());
 		expect(until).toBeLessThanOrEqual(Date.now() + 2000);

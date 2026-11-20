@@ -4283,27 +4283,45 @@ meant to connect.
   dialog. Each `pairing.start` counts 10 minutes from then; it never adds to what is
   left.
 - **No automatic renewal.** The library sends `pairing.start` when its user opens the
-  dialog or clicks Continue, never by a timer. A reconnect does not send it again on an
-  `oidc` site once the relay gave a time: a relay restart would otherwise start the
-  10 minutes again for every open dialog, which is the case the limit is for. Codes still
-  come again after a reconnect, as before. Connecting from a click (the dialog opening,
-  Connect again, Disconnect all apps) sends it, as that is the user acting.
-- **The protocol addition** is one relay → tab message, `pairing.open { expiresAt }`,
-  the answer to each `pairing.start` on an `oidc` site, shaped like `pairing.code`'s
-  `expiresAt`. Nothing comes when the time is up: the page knows the end. Libraries up
-  to 0.18.1 ignore unknown messages, so they work with the new relay; their dialogs
-  just stop pairing after 10 minutes without saying so. A new library with an old relay
-  gets no `pairing.open` and behaves as before.
-- **The library** keeps the time in `pairingUntil` (event `pairinguntil`, also in the
-  React snapshot): the relay's time, the time of a reconnect after which it did not ask
-  again, or `undefined` (pairing off, no answer yet, an old relay). `startPairing()`
-  sends `pairing.start` on every call while connected, so Continue is `startPairing()`.
-  The dialog shows "Your AI app can connect until {time}." under the sign-in line and,
-  once the page's clock passes the time, "The time to connect your AI app is up. To
-  connect it now, continue." with a Continue button. The page's clock can be off from
-  the relay's by seconds; the relay's time decides.
-- **Size.** The core had 31 bytes left; the getter, the event and the reconnect rule
-  cost about 75. The visibility and `online` listeners of reconnecting moved to the lazy
-  chunk (the connection that broke has loaded it), so the limit stays where it is.
-- **The residual risk** in the threat model: the window is the 10 minutes after the user
-  opened the dialog or continued, while it is open.
+  dialog, clicks Continue or connects with a click (the dialog opening, Connect again,
+  also while it reconnects, Disconnect all apps), never by a timer. On an `oidc`
+  session a reconnect the library makes by itself does not send it again once the
+  user's start was sent, whether or not `pairing.open` arrived: a relay restart would
+  otherwise start the 10 minutes again for every open dialog, which is the case the
+  limit is for. A session that pairs by code gets it after every reconnect, as before,
+  so that codes come back.
+- **Old libraries renew it on every reconnect.** Libraries up to 0.18.1 send
+  `pairing.start` after every reconnect, and the relay cannot tell that from the user
+  opening the dialog. For their pages each reconnect (a relay restart, a network drop, a
+  laptop waking up) starts another 10 minutes, so a forgotten dialog stays pairable in
+  windows that reconnects renew. The relay is not changed for this (review of PR 175):
+  the limit is complete only with a library after 0.18.1, one reason to move the pages
+  to it. The docs and the threat model say so.
+- **The protocol addition** is one relay → tab message, `pairing.open { expiresAt,
+  expiresInMs }`, the answer to each `pairing.start` on an `oidc` site.
+  `expiresAt` is on the relay's clock, as in `pairing.code`; `expiresInMs` is the
+  duration, which the library counts on the page's clock from the message's arrival, so
+  a page clock that is off by minutes does not show the wrong state (review of PR 175).
+  The library takes `expiresAt` only when `expiresInMs` is missing or not a number
+  from 0 to 2 147 483 647. Nothing comes when the time is up: the page knows the end.
+  Libraries up to 0.18.1 ignore unknown messages; a new library with an old relay gets
+  no `pairing.open`, and its dialog counts as long as it is open, as before, except
+  that after a reconnect it shows Continue.
+- **The library** keeps the end in `pairingUntil` (event `pairinguntil`, also in the
+  React snapshot), on the page's clock: the relay's duration counted from its answer,
+  the time of a reconnect after which it did not ask again, or `undefined` (pairing
+  off, from each `startPairing()` until the answer, after the session ended, an old
+  relay). `startPairing()` sends `pairing.start` on every call while connected, so
+  Continue is `startPairing()`. The dialog shows "Your AI app can connect until
+  {time}." under the sign-in line and, once the time is up, "The time to connect your
+  AI app is up. To connect it now, continue." with a Continue button; with an app
+  connected, "Connect another app" shows that sentence next to Continue. It looks again
+  at least once a minute and when the tab comes back to the front, as a background
+  tab's timers are throttled.
+- **Size.** The core had 31 bytes left; the getter, the event and the reconnect rules
+  cost about 120. The visibility and `online` listeners of reconnecting and the wait
+  for the relay's answer to `revoke()` and `signOut()` moved to the lazy chunk
+  (loaded by any session), so the limit stays where it is.
+- **The residual risk** in the threat model: with a library after 0.18.1 the window is
+  the 10 minutes after the user opened the dialog or continued, while it is open; with
+  an older one, each reconnect of the page starts another 10 minutes.

@@ -39,9 +39,12 @@ unknown key.
 ### Added
 
 - **`pairingUntil` and the event `pairinguntil`** (identity binding, DEC-202): until when
-  a sign-in pairs the page (an ISO time), from the relay's new `pairing.open`. Also in
-  the React bindings' snapshot. `undefined` while pairing is off, until the relay
-  answers, and with relays up to 0.12.1, which do not send it.
+  a sign-in pairs the page (an ISO time on the page's clock: the `expiresInMs` of the
+  relay's new `pairing.open`, counted from its arrival, so a page clock that differs
+  from the relay's does not matter). Also in the React bindings' snapshot. `undefined`
+  while pairing is off, from each `startPairing()` until the relay answers, after the
+  session ended (`disconnect()`, `disconnectAll()`, a refusal), and with relays up to
+  0.12.1, which do not send it.
 - Dialog texts `signInUntil`, `signInTimeUp` and `continuePairing`.
 
 ### Changed
@@ -49,19 +52,26 @@ unknown key.
 - **With identity binding the connect dialog counts for 10 minutes** (DEC-202): the
   relay pairs a sign-in with the page only until 10 minutes after the dialog opened. The
   dialog says until when ("Your AI app can connect until 14:32.") and, once the time is
-  up, "The time to connect your AI app is up. To connect it now, continue." with a
-  Continue button that starts the 10 minutes again. Nothing starts them again by itself:
-  a reconnect does not send `pairing.start` again when the relay gave a time
-  (`pairingUntil` is then the time of the reconnect, so the dialog shows Continue).
-  `startPairing()` now sends `pairing.start` on each call while connected, also when
-  pairing is on already; call it only when the user acts. With relays up to 0.12.1
-  nothing changes.
+  up (checked again when the tab comes back to the front), "The time to connect your AI
+  app is up. To connect it now, continue." with a Continue button that starts the 10
+  minutes again; with an app connected, "Connect another app" shows that sentence next
+  to Continue. Nothing starts them again by itself: on an `oidc` session a reconnect
+  the library makes by itself does not send `pairing.start` again once the user's start
+  was sent, answered or not (`pairingUntil` is then the time of the reconnect, so the
+  dialog shows Continue). `connect()` from a click while reconnecting ("Connect again")
+  does send it, and a session that pairs by code gets it after every reconnect, as
+  before. `startPairing()` now sends `pairing.start` on each call while connected, also
+  when pairing is on already; call it only when the user acts. With a relay up to
+  0.12.1 the dialog counts as long as it is open, as before, but after a reconnect it
+  shows Continue. Libraries up to 0.18.1 send `pairing.start` after every reconnect, so
+  for their pages each reconnect starts another 10 minutes: this release is needed for
+  the limit to be complete.
 - The takeover notice says "If you did not open this page in another tab or window of
   this browser" (was "in another tab or browser"): a page in another browser has a
   secret of its own and cannot take this one's place.
 - The listeners that make a reconnect try at once when the tab comes back to the front
-  or the browser is online again are in the lazy chunk, which keeps the core within
-  its size limit.
+  or the browser is online again, and the wait for the relay's answer to `revoke()` and
+  `signOut()`, are in the lazy chunk, which keeps the core within its size limit.
 
 ## [0.18.1][client-0.18.1] - 2026-11-20
 

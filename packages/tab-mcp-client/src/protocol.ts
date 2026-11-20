@@ -59,11 +59,19 @@ export interface PairingCodeMessage {
 }
 
 const CODE_REASONS = new Set(["start", "used", "expired"]);
-/** Identity binding: a sign-in pairs the page until `expiresAt` (DEC-202). */
+/**
+ * Identity binding: a sign-in pairs the page for `expiresInMs` from now
+ * (DEC-202), until `expiresAt` on the relay's clock. As parsed, `expiresAt`
+ * is on the page's clock: now plus `expiresInMs`, or the relay's
+ * `expiresAt` when it sent no usable `expiresInMs`.
+ */
 export interface PairingOpenMessage {
 	type: "pairing.open";
 	expiresAt: string;
 }
+
+/** The longest `expiresInMs` taken: what `setTimeout` can wait (24.8 days). */
+const MAX_DELAY_MS = 2_147_483_647;
 export interface GrantAddedMessage {
 	type: "grant.added";
 	grant: Grant;
@@ -232,10 +240,24 @@ export function parseRelayMessage(text: string): RelayMessage | undefined {
 				message.reason = reason as NonNullable<PairingCodeMessage["reason"]>;
 			return message;
 		}
-		case "pairing.open":
+		case "pairing.open": {
+			// Counted on the page's clock from now, which may differ from the
+			// relay's; the relay's absolute time only without a duration.
+			const ms = v["expiresInMs"];
+			if (
+				typeof ms === "number" &&
+				Number.isFinite(ms) &&
+				ms >= 0 &&
+				ms <= MAX_DELAY_MS
+			)
+				return {
+					type: "pairing.open",
+					expiresAt: new Date(Date.now() + ms).toISOString(),
+				};
 			return str(v["expiresAt"]) && !Number.isNaN(Date.parse(v["expiresAt"]))
 				? { type: "pairing.open", expiresAt: v["expiresAt"] }
 				: undefined;
+		}
 		case "grant.added":
 			return isGrant(v["grant"])
 				? (v as unknown as GrantAddedMessage)

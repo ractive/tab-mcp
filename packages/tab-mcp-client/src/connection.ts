@@ -185,6 +185,64 @@ function siblingTabs(
 }
 
 /**
+ * Wait for the relay's answer to `message`, which `target` (the `TabMcp`)
+ * sent: resolves once `done()`, rejects with the relay's refusal of it
+ * (`store_unavailable`, `unknown_id`), a `NetworkError` once not
+ * `connected()` and a `TimeoutError` after `timeoutMs`. In the lazy chunk:
+ * a message is sent only with a session, which loaded it.
+ */
+export function answer(
+	target: EventTarget,
+	message: TabMessage & { grantId?: string },
+	done: () => boolean,
+	connected: () => boolean,
+	timeoutMs: number,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const types = ["grantschange", "statechange", "error"];
+		const settle = (error?: unknown) => {
+			clearTimeout(timer);
+			for (const type of types) target.removeEventListener(type, check);
+			if (error) reject(error);
+			else resolve();
+		};
+		const check = (event?: Event) => {
+			const error = (event as CustomEvent<{ error?: unknown }> | undefined)
+				?.detail?.error as
+				| { code?: string; for?: string; grantId?: string }
+				| undefined;
+			if (done()) settle();
+			else if (
+				(error?.code === "store_unavailable" || error?.code === "unknown_id") &&
+				// It names the message it answers (relay 0.10.2); an older
+				// relay's answers every pending one (DEC-168).
+				(error.for === undefined ||
+					(error.for === message.type && error.grantId === message.grantId))
+			)
+				settle(error);
+			else if (!connected())
+				// Sent, but the answer cannot come: it may or may not have
+				// happened.
+				settle(
+					new DOMException(
+						"TabMcp: the session ended before the relay answered",
+						"NetworkError",
+					),
+				);
+		};
+		const timer = setTimeout(
+			() =>
+				settle(
+					new DOMException("TabMcp: the relay did not answer", "TimeoutError"),
+				),
+			timeoutMs,
+		);
+		for (const type of types) target.addEventListener(type, check);
+		check();
+	});
+}
+
+/**
  * Call `now` when the page comes back to the front or the browser is online
  * again (a reconnect then tries at once); returns what stops it.
  */

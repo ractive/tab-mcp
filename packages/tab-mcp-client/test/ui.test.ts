@@ -1,5 +1,13 @@
 /** The default dialogs in a DOM (happy-dom, passed in; no globals touched). */
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	jest,
+	setSystemTime,
+	test,
+} from "bun:test";
 import { Window } from "happy-dom";
 import { addressIdOf } from "../src/address.ts";
 import { allowedFor } from "../src/always-allowed.ts";
@@ -1542,6 +1550,84 @@ describe("showConnectDialog", () => {
 		);
 		byText(dialog, "Close").click();
 		await relay.next("pairing.stop");
+	});
+
+	test("DEC-202: a tab back in front shows that the time is up, also when its timer has not run", async () => {
+		relay.pairing = "oidc";
+		relay.grants = [];
+		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+		const { dialog } = await open();
+		const m = await relay.next("identity");
+		relay.send({ type: "identity.bound", round: m["round"] });
+		await relay.settled();
+		relay.send({
+			type: "pairing.open",
+			expiresAt: new Date(Date.now() + 600_000).toISOString(),
+			expiresInMs: 600_000,
+		});
+		await nextEvent(mcp, "pairinguntil");
+		const status = dialog.querySelector(".tab-mcp-status") as HTMLElement;
+		expect(status.textContent).toBe("This page is ready for your AI app.");
+		try {
+			// Eleven minutes later, with no timer run in between.
+			setSystemTime(Date.now() + 660_000);
+			doc.dispatchEvent(
+				new window.Event("visibilitychange") as unknown as Event,
+			);
+			expect(status.textContent).toBe(
+				"The time to connect your AI app is up. To connect it now, continue.",
+			);
+			expect(shown(dialog.querySelector(".tab-mcp-time-up"))).toBe(true);
+		} finally {
+			setSystemTime();
+		}
+		byText(dialog, "Close").click();
+	});
+
+	test("DEC-202: with an app connected, Connect another app says why it offers Continue", async () => {
+		relay.pairing = "oidc";
+		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+		const { dialog } = await open();
+		const m = await relay.next("identity");
+		relay.send({ type: "identity.bound", round: m["round"] });
+		await relay.settled();
+		relay.send({
+			type: "pairing.open",
+			expiresAt: new Date().toISOString(),
+			expiresInMs: 0,
+		});
+		await nextEvent(mcp, "pairinguntil");
+		expect(mcp.grants.length).toBeGreaterThan(0);
+		byText(dialog, "Connect another app").click();
+		const timeUp = dialog.querySelector(".tab-mcp-time-up") as HTMLElement;
+		expect(shown(timeUp)).toBe(true);
+		const why = timeUp.querySelector("span");
+		expect(shown(why)).toBe(true);
+		expect(why?.textContent).toBe(
+			"The time to connect your AI app is up. To connect it now, continue.",
+		);
+		expect(shown(byText(dialog, "Continue"))).toBe(true);
+		byText(dialog, "Close").click();
+	});
+
+	test("DEC-202: without an app connected, the time-up sentence is in the status only", async () => {
+		relay.pairing = "oidc";
+		relay.grants = [];
+		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
+		const { dialog } = await open();
+		const m = await relay.next("identity");
+		relay.send({ type: "identity.bound", round: m["round"] });
+		await relay.settled();
+		relay.send({
+			type: "pairing.open",
+			expiresAt: new Date().toISOString(),
+			expiresInMs: 0,
+		});
+		await nextEvent(mcp, "pairinguntil");
+		const timeUp = dialog.querySelector(".tab-mcp-time-up") as HTMLElement;
+		expect(shown(timeUp)).toBe(true);
+		expect(shown(timeUp.querySelector("span"))).toBe(false);
+		byText(dialog, "Close").click();
 	});
 
 	test("with identity binding, Disconnect all apps says it is done once the address shows again, at its Copy (review of PR 121)", async () => {

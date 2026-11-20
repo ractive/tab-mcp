@@ -13,9 +13,11 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 ### Added
 
-- **`pairing.open`** (relay → tab, `expiresAt`): on a site with identity binding
-  (`oidc`), the answer to each `pairing.start`, saying until when a sign-in pairs the
-  page. Libraries up to 0.18.1 ignore it, as any unknown message, and work as before.
+- **`pairing.open`** (relay → tab, `expiresAt`, `expiresInMs`): on a site with identity
+  binding (`oidc`), the answer to each `pairing.start`, saying until when a sign-in
+  pairs the page: `expiresInMs` (600 000) from now, which the page counts on its own
+  clock, and `expiresAt` on the relay's. Libraries up to 0.18.1 ignore it, as any
+  unknown message.
 
 ### Changed
 
@@ -25,9 +27,11 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   no page ("No page is connecting with the account you signed in with. …"). Each
   `pairing.start` counts 10 minutes from then (the page's Continue); `pairing.stop` and
   the end of the session end it at once. Before, the dialog counted as long as it was
-  open. Pages with a library up to 0.18.1 send `pairing.start` only when the dialog
-  opens (and on a reconnect): after 10 minutes their users close and open the dialog
-  again. Code pairing is unchanged.
+  open. Pages with a library up to 0.18.1 send `pairing.start` when the dialog opens
+  and again after every reconnect, which the relay cannot tell apart: for them each
+  reconnect starts another 10 minutes, and the limit holds only between reconnects. It
+  is complete once pages run a library after 0.18.1. Without a reconnect their users
+  close and open the dialog again after 10 minutes. Code pairing is unchanged.
 
 ## [0.12.1][relay-0.12.1] - 2026-11-20
 

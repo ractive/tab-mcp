@@ -188,6 +188,9 @@ function notConnected(): Promise<never> {
 	);
 }
 
+/** The lazy chunk (`connection.ts`). */
+type Lazy = typeof import("./connection.ts");
+
 type Listener<K extends keyof TabMcpEventMap> = (
 	event: TabMcpEventMap[K],
 ) => void;
@@ -235,6 +238,10 @@ export class TabMcp extends EventTarget {
 	#pairing = false;
 	#pairingCode: PairingCode | undefined;
 	#pairingUntil: string | undefined;
+	/** The last `pairing.start` went to an `oidc` session (DEC-202). */
+	#asked = false;
+	/** `connect()` from a click while reconnecting: that session asks again. */
+	#clicked = false;
 	#connection: ConnectionHandle | undefined;
 	#connecting: Promise<SessionInfo> | undefined;
 	/** Incremented when a connection ends or is cancelled. */
@@ -244,7 +251,7 @@ export class TabMcp extends EventTarget {
 	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	#unwatch: (() => void) | undefined;
 	/** The lazy chunk, once `#load()` loaded it. */
-	#lazy: typeof import("./connection.ts") | undefined;
+	#lazy: Lazy | undefined;
 	/** The open "Connect your AI app" dialog: one at a time. */
 	#connectDialog: { doc: Document; shown: Promise<void> } | undefined;
 	/**
@@ -474,11 +481,12 @@ export class TabMcp extends EventTarget {
 	}
 
 	/**
-	 * Identity binding: until when a sign-in pairs this page (ISO time), as
-	 * the relay said for the last `startPairing()` (DEC-202). A reconnect
-	 * does not start it anew: it is the time of the reconnect then.
-	 * `undefined` while pairing is off, until the relay answers, and from
-	 * relays up to 0.12.1, which do not say.
+	 * Identity binding: until when a sign-in pairs this page (ISO time, on
+	 * the page's clock: the relay's duration counted from its answer to the
+	 * last `startPairing()`, DEC-202). A reconnect the library makes by
+	 * itself does not start it anew: it is the time of the reconnect then.
+	 * `undefined` while pairing is off, until the relay answers, after the
+	 * session ended, and from relays up to 0.12.1, which do not say.
 	 */
 	get pairingUntil(): string | undefined {
 		return this.#pairingUntil;
@@ -496,8 +504,11 @@ export class TabMcp extends EventTarget {
 		if (this.#state === "connected" && this.#session !== undefined) {
 			return Promise.resolve(this.#session);
 		}
+		if (this.#reconnecting !== undefined) {
+			this.#clicked ||= options.resume !== true;
+			return this.#attemptReconnect();
+		}
 		if (this.#connecting !== undefined) return this.#connecting;
-		if (this.#reconnecting !== undefined) return this.#attemptReconnect();
 		const activation = (
 			globalThis.navigator as
 				| { userActivation?: { isActive: boolean } }
@@ -545,7 +556,7 @@ export class TabMcp extends EventTarget {
 	 * The lazy chunk (on `connect()` or the first WebMCP call). The validator
 	 * is loaded with it: it checks the schemas from now on (DEC-086).
 	 */
-	async #load(): Promise<typeof import("./connection.ts")> {
+	async #load(): Promise<Lazy> {
 		const lazy = await import("./connection.ts");
 		for (const error of lazy.compileRegistry(this.#registry))
 			this.#emit("error", { error });
@@ -690,7 +701,7 @@ export class TabMcp extends EventTarget {
 		connection?.close(reason); // its callbacks are stale from here on
 		if (this.#state === "disconnected") return;
 		this.#session = undefined;
-		this.#setPairingCode(undefined);
+		this.#clearPairing();
 		this.#identityRound++;
 		this.#setIdentity("none");
 		// With the reason also when it ended connecting or reconnecting: the
@@ -781,8 +792,16 @@ export class TabMcp extends EventTarget {
 	 */
 	startPairing(): void {
 		this.#pairing = true;
-		if (this.#state === "connected")
-			this.#connection?.send({ type: "pairing.start" });
+		// Owed to the relay until sent: also a reconnect sends it then.
+		this.#asked = false;
+		if (this.#state === "connected") this.#askPairing();
+	}
+
+	/** Send `pairing.start`; `pairingUntil` waits for the relay's answer. */
+	#askPairing(): void {
+		this.#setPairingUntil(undefined);
+		this.#asked = this.#session?.pairing === "oidc";
+		this.#connection?.send({ type: "pairing.start" });
 	}
 
 	/** The pairing dialog closed: the code becomes invalid. */
@@ -791,6 +810,11 @@ export class TabMcp extends EventTarget {
 		this.#pairing = false;
 		if (this.#state === "connected")
 			this.#connection?.send({ type: "pairing.stop" });
+		this.#clearPairing();
+	}
+
+	/** No code, no time for a sign-in: pairing is off or the session ended. */
+	#clearPairing(): void {
 		this.#setPairingCode(undefined);
 		this.#setPairingUntil(undefined);
 	}
@@ -824,54 +848,16 @@ export class TabMcp extends EventTarget {
 		message: TabMessage & { grantId?: string },
 		done: () => boolean,
 	): Promise<void> {
-		if (!this.#session || this.#connection?.send(message) !== true)
-			return notConnected();
-		return new Promise((resolve, reject) => {
-			const types = ["grantschange", "statechange", "error"];
-			const settle = (error?: unknown) => {
-				clearTimeout(timer);
-				for (const type of types) this.removeEventListener(type, check);
-				if (error) reject(error);
-				else resolve();
-			};
-			const check = (event?: Event) => {
-				const error = (event as Partial<TabMcpEventMap["error"]>)?.detail
-					?.error as
-					| { code?: string; for?: string; grantId?: string }
-					| undefined;
-				if (done()) settle();
-				else if (
-					(error?.code === "store_unavailable" ||
-						error?.code === "unknown_id") &&
-					// It names the message it answers (relay 0.10.2); an older
-					// relay's answers every pending one (DEC-168).
-					(error.for === undefined ||
-						(error.for === message.type && error.grantId === message.grantId))
-				)
-					settle(error);
-				else if (this.#state !== "connected")
-					// Sent, but the answer cannot come: it may or may not have
-					// happened.
-					settle(
-						new DOMException(
-							"TabMcp: the session ended before the relay answered",
-							"NetworkError",
-						),
-					);
-			};
-			const timer = setTimeout(
-				() =>
-					settle(
-						new DOMException(
-							"TabMcp: the relay did not answer",
-							"TimeoutError",
-						),
-					),
-				timing.answerTimeoutMs,
-			);
-			for (const type of types) this.addEventListener(type, check);
-			check();
-		});
+		// With a session, the lazy chunk is loaded: the waiting is there.
+		return !this.#session || this.#connection?.send(message) !== true
+			? notConnected()
+			: (this.#lazy as Lazy).answer(
+					this,
+					message,
+					done,
+					() => this.#state === "connected",
+					timing.answerTimeoutMs,
+				);
 	}
 
 	/**
@@ -1062,15 +1048,20 @@ export class TabMcp extends EventTarget {
 				if (!current()) return session;
 				this.#session = session;
 				this.#stayOn = false;
-				// A reconnect does not start a sign-in's time anew, only the user
-				// does (DEC-202); only that time sets `pairingUntil`. Codes come
-				// again, as before.
-				const ended = this.#reconnecting && this.#pairingUntil;
+				// A reconnect the library made by itself does not start a
+				// sign-in's time anew once the user's start was sent, answered
+				// or not: only the user does (DEC-202). Codes come again.
+				const ended =
+					this.#pairing &&
+					this.#reconnecting &&
+					!this.#clicked &&
+					this.#asked &&
+					session.pairing === "oidc";
+				this.#clicked = false;
 				this.#stopReconnecting();
 				this.#setGrants([...m.grants]);
 				if (ended) this.#setPairingUntil(new Date().toISOString());
-				else if (this.#pairing)
-					this.#connection?.send({ type: "pairing.start" });
+				else if (this.#pairing) this.#askPairing();
 				this.#setState("connected");
 				if (session.pairing === "oidc" && this.#identityAssertion)
 					void this.refreshIdentity();
@@ -1117,7 +1108,7 @@ export class TabMcp extends EventTarget {
 				// Any listener of these may end it all (`disconnect()`,
 				// `disconnectAll()`): that bumps the generation.
 				const generation = this.#generation;
-				this.#setPairingCode(undefined);
+				this.#clearPairing();
 				this.#identityRound++;
 				this.#setIdentity("none");
 				if (generation !== this.#generation) return;

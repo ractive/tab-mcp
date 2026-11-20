@@ -528,7 +528,10 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
 - With identity binding, a link with someone else's client, one click on Connect and a
   silent single sign-on pair that client with the user's page within 10 minutes after
   the user opened its dialog (or chose Continue in it), while it is still open
-  (DEC-202). Before DEC-196 it took the page's address too. A confirmation in the page
+  (DEC-202). That holds with a client library after 0.18.1; one up to 0.18.1 sends
+  `pairing.start` again after every reconnect, which starts another 10 minutes, so its
+  forgotten dialogs stay pairable until the page updates. Before DEC-196 it took the
+  page's address too. A confirmation in the page
   was not chosen.
 - Everyone behind one address shares its guess limit and its ten open requests.
 - A page that misleads the AI app (A10).

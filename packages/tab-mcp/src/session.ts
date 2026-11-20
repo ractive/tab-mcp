@@ -442,11 +442,12 @@ export class TabSession {
 				if (this.site.pairing === "code") this.codes.start();
 				else {
 					// Each start counts anew, never longer (DEC-202).
-					this.#dialogOpenUntil =
-						Date.now() + (this.#host.pairingWindowMs ?? PAIRING_WINDOW_MS);
+					const window = this.#host.pairingWindowMs ?? PAIRING_WINDOW_MS;
+					this.#dialogOpenUntil = Date.now() + window;
 					this.send({
 						type: "pairing.open",
 						expiresAt: new Date(this.#dialogOpenUntil).toISOString(),
+						expiresInMs: window,
 					});
 				}
 				return;

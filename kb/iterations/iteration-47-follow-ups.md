@@ -34,9 +34,10 @@ Client 0.18.1 and relay 0.12.1 were the released versions when it started.
   secret".
 - **An open sign-in dialog counts for ten minutes** (DEC-202): the relay pairs a sign-in
   with an `oidc` page only until 10 minutes after its last `pairing.start` and answers
-  each with `pairing.open { expiresAt }`. The library keeps it in `pairingUntil` (event
-  `pairinguntil`); the dialog shows until when, then Continue. A reconnect does not ask
-  again once the relay gave a time.
+  each with `pairing.open { expiresAt, expiresInMs }`. The library keeps the end, on the
+  page's clock, in `pairingUntil` (event `pairinguntil`); the dialog shows until when,
+  then Continue. A reconnect the library makes by itself does not ask again once the
+  user's start was sent.
 
 ## Tasks
 
@@ -81,22 +82,46 @@ Client 0.18.1 and relay 0.12.1 were the released versions when it started.
 
 ## Results
 
-- `bun run verify` exits 0: 1642 tests pass, 1 skipped, across 75 files.
-- The client's core is 6388 B gzipped of its 6400 B limit (6369 B before); the
-  connection chunk 16.1 KB. The pairing window cost the core about 75 B, the move of the
-  reconnect listeners saved about 50 B, and the rename itself saved 3 B.
+- `bun run verify` exits 0: 1649 tests pass, 1 skipped, across 75 files (after the
+  review's fixes).
+- The client's core is 6257 B gzipped of its 6400 B limit (6369 B before); the
+  connection chunk 16.4 KB. The pairing window and its reconnect rules cost the core
+  about 120 B; moving the reconnect's wake listeners and the wait for the relay's answer
+  (`revoke()`, `signOut()`) to the lazy chunk saved about 240 B; the rename saved 3 B.
+
+## Review of PR 175
+
+Two reviewers, eight findings, all fixed on the branch:
+
+- The docs claimed that libraries up to 0.18.1 stop pairing after 10 minutes; they
+  re-send `pairing.start` after every reconnect, so each reconnect renews their window.
+  The relay stays as it is; `docs/protocol.md`, `docs/configuration.md`, both threat
+  models, DEC-202 and the changelogs now say that the limit is complete only with a
+  newer library.
+- A reconnect before the relay answered the user's start asked again; now an `oidc`
+  session does not ask again once the start was sent, answered or not.
+- The reconnect rule now looks at the new session's method: a `code` session asks again.
+- Clock skew: `pairing.open` carries `expiresInMs` next to `expiresAt`; the page counts it
+  on its own clock from the arrival.
+- A background tab could show a stale "can connect until": the dialog looks again when
+  the tab comes back to the front, and at least once a minute.
+- Connect again while reconnecting is a click: it asks again.
+- `pairingUntil` is cleared, with its event, when a session ends.
+- With an app connected, "Connect another app" shows the time-up sentence next to
+  Continue.
 
 ## Choices this iteration made
 
 - The protocol addition is a new message rather than a field: nothing answered
-  `pairing.start` on an `oidc` site before. It carries `expiresAt` like `pairing.code`;
-  nothing comes when the time is up, the page knows the end. The page's clock can be off
-  from the relay's by seconds.
-- A reconnect does not start the ten minutes again (a relay restart would otherwise
-  renew every open dialog); `pairingUntil` is then the reconnect's time, so the dialog
-  shows Continue. Connecting from a click (the dialog opening, Connect again, Disconnect
-  all apps) asks again. Without a known time (an old relay) a reconnect asks again as
-  before, or the old relay would never count the dialog open again.
+  `pairing.start` on an `oidc` site before. It carries `expiresInMs`, counted on the
+  page's clock, and `expiresAt` on the relay's, like `pairing.code`; nothing comes when
+  the time is up, the page knows the end.
+- A reconnect the library makes by itself does not start the ten minutes again on an
+  `oidc` session once the user's start was sent (a relay restart would otherwise renew
+  every open dialog); `pairingUntil` is then the reconnect's time, so the dialog shows
+  Continue. Connecting from a click (the dialog opening, Connect again, also while
+  reconnecting, Disconnect all apps) asks again. With an old relay that never answers,
+  the dialog shows Continue after a reconnect too.
 - `startPairing()` lost its "already pairing" guard, so Continue is `startPairing()`; on
   a code site a second call gets the same code again.
 - The dialog does not say "10 minutes": the client does not know the relay's constant,
@@ -108,7 +133,9 @@ Client 0.18.1 and relay 0.12.1 were the released versions when it started.
 
 With identity binding a link with someone else's client, one click on Connect and a
 silent single sign-on pair that client with the user's page within 10 minutes after the
-user opened its dialog or chose Continue, while it is open.
+user opened its dialog or chose Continue, while it is open. That holds with a client
+library after 0.18.1; with an older one each reconnect of the page starts another 10
+minutes.
 
 # Citations
 
