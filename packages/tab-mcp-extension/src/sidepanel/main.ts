@@ -83,6 +83,9 @@ const disconnectArmed = new Map<
 >();
 /** The user's flip of the AI access switch, while the worker acts on it. */
 let switchIntent: SwitchIntent | undefined;
+/** In the code's place until the relay sends one: as wide as a code. */
+const CODE_PLACEHOLDER = "––––-––––";
+
 /** "Disconnect all apps" with apps connected asks first: a second click does it. */
 let newAddressArmed = false;
 /** The address the setup steps were made for. */
@@ -259,10 +262,8 @@ function showConnection(s: PanelState): void {
 	}
 	$("setup").hidden = view.address === "";
 	const code = s.code;
-	setText(
-		$("code"),
-		code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`,
-	);
+	// As the relay sends it (`XXXX-XXXX`, DEC-196): grouped already.
+	setText($("code"), code ?? CODE_PLACEHOLDER);
 	($("copy-code") as HTMLButtonElement).disabled = code === undefined;
 	if (s.grants.length === 0) newAddressArmed = false;
 	$("new-address-note").hidden = !newAddressArmed;
