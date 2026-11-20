@@ -69,7 +69,12 @@ export type PanelCommand =
 	 * worker takes only the names it offers there itself.
 	 */
 	| { type: "set-allowed-all"; origin: string; names: string[]; on: boolean }
-	| { type: "answer"; id: string; answer: Answer };
+	| { type: "answer"; id: string; answer: Answer }
+	/**
+	 * Filling in the code on the relay's pairing page on or off (DEC-203):
+	 * on only after the panel got the relay's site from the user.
+	 */
+	| { type: "set-fill"; on: boolean };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -96,6 +101,12 @@ export interface QuestionView {
 	 * go to, or what is known of it (back or forward).
 	 */
 	navigation?: { to: string };
+	/**
+	 * Not a tool: whether to fill in the extension's code on the relay's
+	 * pairing page for this AI app (DEC-203). `name` is its own name for
+	 * itself ("" if none); `host` above is the one the relay verified.
+	 */
+	pairing?: { name: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
 	/** "Always allow on <host>" is offered (a page tool of an http(s) site). */
@@ -149,6 +160,8 @@ export interface PanelState {
 	replaced?: { sibling: boolean };
 	/** Host access on all sites ("Give access to all sites") is granted. */
 	allSites: boolean;
+	/** Filling in the code on the relay's pairing page is on (DEC-203). */
+	fillCode?: boolean;
 	tab?: TabView;
 	/**
 	 * Without their arguments, which can be large: each question's come once
@@ -306,6 +319,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 					m["answer"] === "site" ||
 					m["answer"] === "deny")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
+				: undefined;
+		case "set-fill":
+			return typeof m["on"] === "boolean"
+				? { type: "set-fill", on: m["on"] }
 				: undefined;
 		default:
 			return undefined;

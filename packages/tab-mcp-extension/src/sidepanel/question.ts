@@ -10,6 +10,7 @@
  * enough (`setReady`).
  */
 
+import { PRODUCT } from "../browser.ts";
 import {
 	type Answer,
 	QUESTION_TIMEOUT_MS,
@@ -79,11 +80,51 @@ export function setReady(root: ParentNode, ready: boolean): void {
 
 /** What a screen reader is told when a question comes (EQ 11). */
 export function questionAnnouncement(
-	q: Pick<QuestionView, "app" | "tool" | "navigation">,
+	q: Pick<QuestionView, "app" | "tool" | "navigation" | "pairing">,
 ): string {
+	if (q.pairing) return `${q.app} asks to connect.`;
 	return q.navigation
 		? `${q.app} asks to take the tab to another site.`
 		: `${q.app} asks to run ${q.tool}.`;
+}
+
+/** What a question nobody answered in time leaves behind (EQ 13). */
+export function expiredText(q: Pick<QuestionView, "tool" | "pairing">): string {
+	return q.pairing
+		? "Not answered in time: the code was not filled in."
+		: `Not answered in time: ${q.tool} did not run.`;
+}
+
+/** A sentence of the card's own, in a paragraph. */
+function paragraph(text: string, className: string): HTMLElement {
+	const p = document.createElement("p");
+	p.className = className;
+	p.textContent = text;
+	return p;
+}
+
+/**
+ * A pairing question's text (DEC-203): which AI app, by the host the relay
+ * verified on a line of its own above its own name for itself, and what
+ * Allow does. Its name is the AI app's word: any site can call itself
+ * "Claude".
+ */
+function pairingLines(q: QuestionView): HTMLElement[] {
+	const lines = [
+		paragraph(`Connect ${q.app} to the ${PRODUCT}?`, "ask"),
+		line("AI app at (verified)", q.host, "app-host"),
+	];
+	if (q.pairing?.name)
+		lines.push(
+			line("Its name (from the AI app)", q.pairing.name, "muted small"),
+		);
+	lines.push(
+		paragraph(
+			"Allow fills in this extension's code on the relay's page in this browser and connects it. The AI app can then use the tab in front. Only allow an AI app you are connecting right now.",
+			"muted small",
+		),
+	);
+	return lines;
 }
 
 export function questionCard(
@@ -96,7 +137,9 @@ export function questionCard(
 	card.dataset["question"] = q.id;
 	const ask = document.createElement("p");
 	ask.className = "ask";
-	if (q.navigation) {
+	if (q.pairing) {
+		card.append(...pairingLines(q));
+	} else if (q.navigation) {
 		// A navigation to another site (iteration 27): from where, to where.
 		// The title is the extension's, not the page's: not shown.
 		ask.textContent = `${q.app} wants to take the tab to another site (${q.tool}).`;
@@ -112,14 +155,19 @@ export function questionCard(
 		if (q.title)
 			card.append(line("Title (from the page)", q.title, "title muted small"));
 	}
-	const tool = document.createElement("p");
-	tool.className = "muted small";
-	tool.textContent = "With these arguments from the AI app:";
-	const args = document.createElement("pre");
-	args.textContent = q.args;
-	// Scrollable, and reachable by keyboard to scroll it.
-	args.tabIndex = 0;
-	args.setAttribute("aria-label", "Arguments");
+	// A pairing question has no arguments to show.
+	const details: HTMLElement[] = [];
+	if (!q.pairing) {
+		const tool = document.createElement("p");
+		tool.className = "muted small";
+		tool.textContent = "With these arguments from the AI app:";
+		const args = document.createElement("pre");
+		args.textContent = q.args;
+		// Scrollable, and reachable by keyboard to scroll it.
+		args.tabIndex = 0;
+		args.setAttribute("aria-label", "Arguments");
+		details.push(tool, args);
+	}
 	const left = document.createElement("p");
 	// The time left stands out: a line of normal size, in bold, and a bar at
 	// the card's top that drains (only seen: the line says it).
@@ -151,8 +199,12 @@ export function questionCard(
 	};
 	// "Allow once": this call only, beside the one that keeps (EQ 9). The
 	// same default kind as "Don't allow": neither answer is pushed (DEC-180).
-	buttons.append(button("Don't allow", "deny"), button("Allow once", "allow"));
-	card.append(tool, args, left, buttons);
+	// A pairing question's Allow: there is nothing to allow for longer.
+	buttons.append(
+		button("Don't allow", "deny"),
+		button(q.pairing ? "Allow" : "Allow once", "allow"),
+	);
+	card.append(...details, left, buttons);
 	// Not for a page without a site of its own (an opaque origin).
 	// Nor for a navigation: each one to another site asks (DEC-121).
 	if (q.site && q.origin && !q.navigation) {

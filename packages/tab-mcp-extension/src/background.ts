@@ -12,6 +12,7 @@
  */
 
 import { FIREFOX, openPanel } from "./browser.ts";
+import { PAIRING_PORT } from "./fill.ts";
 import {
 	CONTENT_SCRIPT,
 	CONTENT_SCRIPT_ID,
@@ -22,6 +23,7 @@ import { attachPanel } from "./panel-port.ts";
 import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
+import { pagePort } from "./worker/fill.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
 declare const TAB_MCP_TEST: boolean;
@@ -153,6 +155,8 @@ if (FIREFOX)
 const tabChanged = () => withConnection((c) => c.tabChanged());
 const permissionsChanged = () => {
 	sync();
+	// Access to the relay's site, or to all sites: the pairing page's script.
+	withConnection((c) => c.syncFill());
 	tabChanged();
 };
 chrome.permissions.onAdded.addListener(permissionsChanged);
@@ -174,6 +178,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
 });
 
 chrome.runtime.onConnect.addListener((port) => {
+	// The relay's pairing page (DEC-203): taken at once, its sender checked
+	// once the connection has started (it knows the relay).
+	if (port.name === PAIRING_PORT) {
+		const page = pagePort(port);
+		void ready().then(
+			(connection) => connection.pairingPage(page),
+			() => page.close(),
+		);
+		return;
+	}
 	if (
 		port.name !== PANEL_PORT ||
 		!isPanelSender(port.sender ?? {}, chrome.runtime.id, {

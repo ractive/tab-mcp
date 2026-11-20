@@ -15,6 +15,7 @@
 
 import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
+import { PRODUCT } from "../browser.ts";
 import {
 	type Answer,
 	QUESTION_TIMEOUT_MS,
@@ -51,6 +52,15 @@ export const NOTIFICATION_BUTTONS = ["Allow once"] as const;
 
 /** A notification's context line says what closing it does. */
 export const CLOSE_NOTE = "Closing this is Don't allow";
+
+/**
+ * The button of a pairing question's notification (DEC-203): Allow, not
+ * "Allow once", as there is nothing to allow for longer.
+ */
+export const PAIRING_BUTTONS = ["Allow"] as const;
+
+/** All pairing questions share one cap, as one AI app's do. */
+const PAIRING_KEY = "pairing";
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -116,6 +126,22 @@ function hostOf(origin: string | undefined): string | undefined {
 }
 
 /**
+ * A pairing question's notification (DEC-203): the AI app's verified host
+ * whole in the context line, its own name for itself cut in the message.
+ */
+function pairingText(view: QuestionView): NotificationText {
+	return {
+		title: "Connect an AI app?",
+		message: cut(
+			`Connect ${view.app} to the ${PRODUCT}? Allow fills in the code on the relay's page.`,
+			300,
+		),
+		contextMessage: `AI app at ${view.host} · ${CLOSE_NOTE}`,
+		buttons: [...PAIRING_BUTTONS],
+	};
+}
+
+/**
  * A notification's text for a question. The page's title is cut on its own,
  * so that however long it is, the site (the part that is verified) stays
  * whole, in the context line.
@@ -125,6 +151,7 @@ export function notificationText(
 	summary: string,
 	argsCut = false,
 ): NotificationText {
+	if (view.pairing) return pairingText(view);
 	const what = cut(view.title ?? view.tool, MAX_NOTIFICATION_TITLE);
 	const site = hostOf(view.origin);
 	// The note stays whole, however long the rest.
@@ -167,8 +194,8 @@ export function argsToSend(
 
 interface Pending {
 	view: QuestionView;
-	/** The AI app's grant that asks. */
-	grantId: string;
+	/** Whose cap it counts against: the AI app's grant that asks, or pairing. */
+	key: string;
 	summary: string;
 	/** The summary is cut: the notification says so. */
 	argsCut: boolean;
@@ -223,10 +250,6 @@ export class Questions {
 		request: AppRequest,
 		where: { tabId?: number; origin?: string; navigation?: { to: string } },
 	): Promise<Answer | "timeout" | "busy"> {
-		const { grantId } = request.client;
-		let open = 0;
-		for (const p of this.#pending.values()) if (p.grantId === grantId) open++;
-		if (open >= MAX_QUESTIONS_PER_APP) return Promise.resolve("busy");
 		const id = crypto.randomUUID();
 		const json = visible(JSON.stringify(request.arguments, null, 2) ?? "{}");
 		const view: QuestionView = {
@@ -250,15 +273,76 @@ export class Questions {
 		};
 		const compact = visible(JSON.stringify(request.arguments) ?? "{}");
 		const summary = cut(compact, MAX_ARGS_NOTIFICATION);
+		return this.#open(view, {
+			key: request.client.grantId,
+			summary,
+			argsCut: summary !== compact,
+			tabId: where.tabId,
+			signal: request.signal,
+		});
+	}
+
+	/**
+	 * Ask whether to fill in the extension's code on the relay's pairing page
+	 * in tab `tabId`, for the AI app `client` (DEC-203): its own name for
+	 * itself, and the host the relay verified. Allow or Don't allow, never
+	 * for good; `signal` withdraws it (the page went, or the app connected).
+	 */
+	askPairing(
+		where: { tabId: number },
+		client: { name: string; host: string },
+		signal: AbortSignal,
+	): Promise<Answer | "timeout" | "busy"> {
+		const name = visible(client.name);
+		const host = visible(client.host);
+		const view: QuestionView = {
+			id: crypto.randomUUID(),
+			app: name ? `${name} (${host})` : host,
+			host,
+			tool: "",
+			pairing: { name },
+			args: "",
+			site: false,
+			expiresAt: this.#host.now() + this.#timeoutMs,
+		};
+		return this.#open(view, {
+			key: PAIRING_KEY,
+			summary: "",
+			argsCut: false,
+			tabId: where.tabId,
+			signal,
+		});
+	}
+
+	/**
+	 * Show `view` until its first answer, `"timeout"` when nobody answered in
+	 * time, `"deny"` when `signal` aborts, `"busy"` (without asking) when
+	 * MAX_QUESTIONS_PER_APP of `key` wait already.
+	 */
+	#open(
+		view: QuestionView,
+		options: {
+			key: string;
+			summary: string;
+			argsCut: boolean;
+			tabId: number | undefined;
+			signal: AbortSignal;
+		},
+	): Promise<Answer | "timeout" | "busy"> {
+		const { key, signal } = options;
+		let open = 0;
+		for (const p of this.#pending.values()) if (p.key === key) open++;
+		if (open >= MAX_QUESTIONS_PER_APP) return Promise.resolve("busy");
+		const { id } = view;
 		return new Promise((resolve) => {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const cancelled = () => pending.settle("deny");
 			const pending: Pending = {
 				view,
-				grantId,
-				summary,
-				argsCut: summary !== compact,
-				tabId: where.tabId,
+				key,
+				summary: options.summary,
+				argsCut: options.argsCut,
+				tabId: options.tabId,
 				windowId: undefined,
 				shownAt: 0,
 				settle: (answer) => {
@@ -266,20 +350,20 @@ export class Questions {
 					this.#pending.delete(id);
 					if (answer === "timeout") this.#expired.set(id, this.#host.now());
 					clearTimeout(timer);
-					request.signal.removeEventListener("abort", cancelled);
+					signal.removeEventListener("abort", cancelled);
 					if (pending.notification !== undefined)
 						this.#clear(pending.notification);
 					this.#host.changed();
 					resolve(answer);
 				},
 			};
-			if (request.signal.aborted) {
+			if (signal.aborted) {
 				resolve("deny");
 				return;
 			}
 			this.#pending.set(id, pending);
 			timer = setTimeout(() => pending.settle("timeout"), this.#timeoutMs);
-			request.signal.addEventListener("abort", cancelled, { once: true });
+			signal.addEventListener("abort", cancelled, { once: true });
 			this.#host.changed();
 			void this.#route(pending);
 		});

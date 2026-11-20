@@ -560,6 +560,14 @@ main > .card ~ .settings {
 	overflow-wrap: anywhere;
 }
 
+/*
+ * A pairing question: the AI app's verified host stands out over its own
+ * name for itself (DEC-203).
+ */
+.question .app-host bdi {
+	font-weight: 600;
+}
+
 /* The seconds left: figures of one width, so the line does not move. */
 .countdown {
 	font-variant-numeric: tabular-nums;
@@ -859,6 +867,14 @@ button.copy {
 	display: block;
 	font-size: 12px;
 	line-height: 17px;
+}
+
+/* Filling in the code on the relay's page: what it does, then its button. */
+.fill {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--s2);
 }
 
 /* Host access: what it is, then its button. */

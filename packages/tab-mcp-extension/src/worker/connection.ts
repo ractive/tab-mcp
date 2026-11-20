@@ -21,6 +21,7 @@ import {
 	PANEL,
 	PRODUCT,
 } from "../browser.ts";
+import { fillAccess, relayPageOrigin } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
 import {
 	APP_ID,
@@ -54,17 +55,27 @@ import {
 } from "./allowed.ts";
 import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
+import {
+	CodeFiller,
+	type FillHost,
+	HOLD_MS,
+	type PagePort,
+	syncPairingScript,
+	takeCode,
+} from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
+	loadFillFor,
 	loadGrants,
 	loadRelay,
 	loadReplaced,
 	type Replaced,
 	saveAiOn,
+	saveFillFor,
 	saveGrants,
 	saveRelay,
 	saveReplaced,
@@ -154,6 +165,14 @@ export class Connection {
 	readonly #storage: CachedSecretStorage;
 	readonly #icons: Icon[];
 	readonly #questions: Questions;
+	/** The relay's pairing pages in this browser (DEC-203). */
+	readonly #filler: CodeFiller;
+	/** Pairing is held on for a code just filled in, until this fires. */
+	#fillHold: ReturnType<typeof setTimeout> | undefined;
+	/** The pairing page's script registrations, one after the other. */
+	#scriptSync: Promise<void> = Promise.resolve();
+	/** The relay for which the user turned filling in on (DEC-203). */
+	#fillFor: string | undefined;
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -189,8 +208,10 @@ export class Connection {
 		kv: Kv,
 		aiOn: boolean,
 		grants: GrantView[],
+		fillFor: string | undefined,
 	) {
 		this.#kv = kv;
+		this.#fillFor = fillFor;
 		this.#aiOn = aiOn;
 		this.#grants = grants;
 		this.#storage = storage;
@@ -199,6 +220,10 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		this.#filler = new CodeFiller(
+			this.#fillHost(),
+			grants.map((g) => g.grantId),
+		);
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -214,7 +239,7 @@ export class Connection {
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
-		const [storage, icons, allowed, relay, on, replaced, grants] =
+		const [storage, icons, allowed, relay, on, replaced, grants, fillFor] =
 			await Promise.all([
 				CachedSecretStorage.load(kv),
 				iconsFor(),
@@ -223,6 +248,7 @@ export class Connection {
 				loadAiOn(kv),
 				loadReplaced(kv),
 				loadGrants(kv),
+				loadFillFor(kv),
 			]);
 		const connection = new Connection(
 			storage,
@@ -233,8 +259,10 @@ export class Connection {
 			kv,
 			on,
 			grants,
+			fillFor,
 		);
 		connection.#showBadge();
+		connection.syncFill();
 		// The alarm too, not only once connected: after an update (which
 		// clears alarms) with the relay out of reach, the first connect fails
 		// and the library does not retry it; the alarm does (EQ 14).
@@ -350,13 +378,14 @@ export class Connection {
 			() => {
 				// The list in memory is set at once; a failed write to storage
 				// is shown as the problem, not left as an unhandled rejection.
-				this.#setGrants(
-					mcp.grants.map((g) => ({
-						grantId: g.grantId,
-						name: g.client.name,
-						host: g.client.host,
-					})),
-				).catch((error: unknown) => {
+				const grants = mcp.grants.map((g) => ({
+					grantId: g.grantId,
+					name: g.client.name,
+					host: g.client.host,
+				}));
+				// An AI app that just connected withdraws its pairing question.
+				this.#filler.grantsChanged(grants);
+				this.#setGrants(grants).catch((error: unknown) => {
 					this.#problem = message(error);
 					this.#changed();
 				});
@@ -430,6 +459,8 @@ export class Connection {
 
 	async #setAiOn(on: boolean): Promise<void> {
 		this.#aiOn = on;
+		// Off: a pairing page's question is withdrawn at once (DEC-203).
+		if (!on) this.#filler.withdrawAll();
 		await saveAiOn(this.#kv, on);
 		if (on) await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 		else await chrome.alarms.clear(ALARM);
@@ -445,6 +476,17 @@ export class Connection {
 		// writes below must not come back as the new relay's list.
 		this.#listening.abort();
 		this.#bridge.stop();
+		// The pages of the relay before are not this one's, and filling in is
+		// off for the new one until turned on there; the old relay's site is
+		// given back (DEC-203).
+		this.#filler.reset();
+		this.#releasePairing();
+		if (this.#fillFor !== undefined) {
+			const old = this.#fillFor;
+			this.#fillFor = undefined;
+			await saveFillFor(this.#kv, undefined);
+			await this.#giveBackAccess(old);
+		}
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
 		// Apps paired through the relay before are not paired with this one.
@@ -453,6 +495,7 @@ export class Connection {
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 		await before.disconnect();
+		this.syncFill();
 		this.#changed();
 	}
 
@@ -676,7 +719,41 @@ export class Connection {
 			case "answer":
 				this.#questions.answer(command.id, command.answer);
 				return;
+			case "set-fill":
+				await this.#setFill(command.on);
+				return;
 		}
+	}
+
+	/**
+	 * Filling in the code on the relay's page on or off (DEC-203). On, for
+	 * the relay in use: the panel has asked for its site first. Off: the
+	 * questions waiting go, and the relay's site is given back unless the
+	 * user gave access to all sites, which is not this feature's.
+	 */
+	async #setFill(on: boolean): Promise<void> {
+		const relay = this.#relay;
+		this.#fillFor = on ? relay : undefined;
+		await saveFillFor(this.#kv, this.#fillFor);
+		if (!on) {
+			this.#filler.withdrawAll();
+			this.#releasePairing();
+			await this.#giveBackAccess(relay);
+		}
+		this.syncFill();
+		this.#changed();
+	}
+
+	/** Give back the host access asked for `relay`'s pairing page. */
+	async #giveBackAccess(relay: string): Promise<void> {
+		const access = fillAccess(relay);
+		if (access === undefined || (await chrome.permissions.contains(ALL_SITES)))
+			return;
+		await chrome.permissions
+			.remove(access)
+			.catch((error: unknown) =>
+				console.warn("tab-mcp: giving back the relay's site", error),
+			);
 	}
 
 	/**
@@ -701,9 +778,98 @@ export class Connection {
 		this.#changed();
 	}
 
-	/** Pairing stops once no panel's pairing view is open. */
+	/**
+	 * Pairing stops once no panel's pairing view is open and no code just
+	 * filled in waits for the relay's check.
+	 */
 	#pairingOff(): void {
-		if (![...this.#panels].some((p) => p.pairing)) this.#mcp.stopPairing();
+		if (
+			![...this.#panels].some((p) => p.pairing) &&
+			this.#fillHold === undefined
+		)
+			this.#mcp.stopPairing();
+	}
+
+	// --- The relay's pairing page in this browser (DEC-203) ---
+
+	/** A port from a pairing page's content script; its sender is checked there. */
+	pairingPage(port: PagePort): void {
+		void this.#filler.page(port).catch((error: unknown) => {
+			console.warn("tab-mcp: pairing page", error);
+			port.close();
+		});
+	}
+
+	/**
+	 * Register the pairing page's content script for the relay in use, if
+	 * the user gave access to its site: at each start, after a change of
+	 * the relay or of the extension's permissions.
+	 */
+	syncFill(): void {
+		const relay = this.#relay;
+		const on = this.#fillOn();
+		this.#scriptSync = this.#scriptSync
+			.then(() => syncPairingScript(relay, on))
+			.catch((error: unknown) =>
+				console.warn("tab-mcp: pairing page registration", error),
+			);
+	}
+
+	/** Pairing on for a code being filled in, for HOLD_MS from now. */
+	#holdPairing(): void {
+		clearTimeout(this.#fillHold);
+		this.#fillHold = setTimeout(() => {
+			this.#fillHold = undefined;
+			this.#pairingOff();
+		}, HOLD_MS);
+		this.#mcp.startPairing();
+	}
+
+	#releasePairing(): void {
+		if (this.#fillHold === undefined) return;
+		clearTimeout(this.#fillHold);
+		this.#fillHold = undefined;
+		this.#pairingOff();
+	}
+
+	/** Filling in is on for the relay in use. */
+	#fillOn(): boolean {
+		return this.#fillFor !== undefined && this.#fillFor === this.#relay;
+	}
+
+	/** The code to fill in (`takeCode`), with pairing held on for it. */
+	#fillCode(signal: AbortSignal): Promise<string | undefined> {
+		this.#holdPairing();
+		const mcp = this.#mcp;
+		return takeCode(
+			{
+				current: () => mcp.pairingCode,
+				onChange: (listener) => {
+					mcp.addEventListener("pairingcode", listener);
+					return () => mcp.removeEventListener("pairingcode", listener);
+				},
+			},
+			signal,
+			{ now: Date.now() },
+		);
+	}
+
+	#fillHost(): FillHost {
+		return {
+			extensionId: chrome.runtime.id,
+			relayOrigin: () => relayPageOrigin(this.#relay),
+			aiOn: () => this.#status() !== "off",
+			enabled: () => this.#fillOn(),
+			ask: (tabId, client, signal) =>
+				this.#questions.askPairing({ tabId }, client, signal),
+			code: (signal) => this.#fillCode(signal),
+			release: () => this.#releasePairing(),
+			failed: (why) => {
+				this.#problem = why;
+				this.#changed();
+			},
+			now: () => Date.now(),
+		};
 	}
 
 	#questionsHost(): QuestionsHost {
@@ -860,6 +1026,7 @@ export class Connection {
 				? { replaced: { sibling: this.#replaced.sibling } }
 				: {}),
 			allSites: this.#allSites,
+			fillCode: this.#fillOn(),
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 			expired: this.#questions.expired,
@@ -916,7 +1083,7 @@ export class Connection {
 				? [
 						"?",
 						BADGE_LOOK.question,
-						`${PRODUCT}: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the ${PANEL} to answer.`,
+						`${PRODUCT}: ${questions === 1 ? "a question waits" : `${questions} questions wait`} for your answer. Open the ${PANEL} to answer.`,
 					]
 				: status === "on" || status === "waiting"
 					? ["on", BADGE_LOOK.on, `${PRODUCT}: AI access is on`]

@@ -310,6 +310,30 @@ export class Tab {
 		}
 	}
 
+	/**
+	 * A real click (with the user activation an extension's
+	 * `permissions.request` needs) in the middle of element `selector`.
+	 */
+	async click(selector: string): Promise<void> {
+		const box = await this.eval<{ x: number; y: number }>(
+			`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error("no element " + ${JSON.stringify(selector)}); e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`,
+		);
+		await this.#firefox.send("input.performActions", {
+			context: this.context,
+			actions: [
+				{
+					type: "pointer",
+					id: "mouse",
+					actions: [
+						{ type: "pointerMove", x: box.x, y: box.y },
+						{ type: "pointerDown", button: 0 },
+						{ type: "pointerUp", button: 0 },
+					],
+				},
+			],
+		});
+	}
+
 	async close(): Promise<void> {
 		await this.#firefox.send("browsingContext.close", {
 			context: this.context,

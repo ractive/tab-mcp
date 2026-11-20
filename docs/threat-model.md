@@ -416,7 +416,7 @@ stops script on another origin of the relay; a program can send any `Origin`.
   a code written by an extension like one that was typed. An extension must act only on
   a top-level page of its relay's origin, only for its own app id and only after its
   user agreed, showing the verified host: any site can be a client under a name of its
-  choice.
+  choice. The tab-mcp browser extension does this (DEC-203, A13).
 - The metadata, token, revoke and MCP endpoints answer CORS requests from any origin
   without credentials (`Access-Control-Allow-Origin: *`, never `Allow-Credentials`).
   They use no cookies, and tokens travel only in the `Authorization` header, so another
@@ -691,7 +691,8 @@ like any other, `chrome-extension://<id>` (A11).
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
 - **Which pages.** The extension asks for no host access at install. Without it, it
-  reads a tab only after a click on its icon there, and only on that origin. With "Read all
+  reads a tab only after a click on its icon there, and only on that origin (the relay's
+  pairing page, with the relay's site granted, is the exception below). With "Read all
   sites without a click" it reads every page in front: the AI app then gets the tools of whatever
   site the user looks at, each call to a tool not marked read-only still asked. Only
   http(s) pages, no `file:` pages and no Incognito tabs. The page's address goes to the
@@ -749,6 +750,41 @@ like any other, `chrome-extension://<id>` (A11).
   whose renderer is compromised can neither read the secret (and take the extension's place
   from anywhere, A4) nor allow its own tools. The extension asks for no `storage`
   permission, so there is no `chrome.storage` area those scripts could read or write.
+- **Filling in its code on the relay's page** (DEC-203). When an AI app opens the
+  relay's `/authorize` page in the same browser, the extension can write its own code
+  into the form and submit it, after its user's Allow. One click is less than opening
+  the panel and typing a code, and the page would pair whatever client opened it, under
+  the name it chose for itself (A7). So:
+  - It is a setting of its own, off by default, also with access to all sites: "Fill in
+    the code for me" turns it on for the relay in use and asks for the relay's site
+    (one origin of the optional host access) where the extension does not have it. Only
+    then is the content script registered, for `<relay>/authorize*` alone. "Stop filling
+    in the code" and a change of relay turn it off and give the relay's site back (not
+    access to all sites). It reads the form's `data-tab-mcp-*` attributes, its hidden
+    `request_id` and that the form has a code field, nothing else of the page, and gets
+    no code before the Allow.
+  - The origin is the check, not the markup, which any site can copy: the service
+    worker takes the page's port only from the extension's own content script, in a
+    tab's top frame, at exactly the configured relay's origin (port included) and path,
+    and only for the extension's own app id. A look-alike on another origin, also on
+    another port of the relay's host, is ignored.
+  - Only while AI access is on; turning it off withdraws a question. The question shows the AI app's verified host on a line
+    of its own, labelled as verified, and its own name apart, labelled as the AI app's;
+    Allow and Don't allow only, the same 60 s, focus wait and notification guard as a
+    tool's question. A page that goes, another relay, AI access going off or the AI app
+    connecting by a typed code withdraw it.
+  - The code goes back only on that page's port, with that page load's nonce, so it
+    reaches no other document. The relay checks it like a typed one; nothing about the
+    relay changes. Pairing is held on 30 s for the check.
+  - No loops: one question per page load. The page of the same relay request (the same
+    `request_id`, which the relay keeps on its page after a wrong code) in the same tab
+    within 30 s of a fill (a code that had just changed) is filled once more without a
+    question, then not again in that window. Any other request asks, so a client that
+    sends the tab back to `/authorize` with a new request right after a fill gets no
+    second code without a question.
+  - What remains: a user who allows a client they did not start pairs it, as one who
+    types the code into its page would; the host on the question is the defence, as on
+    the relay's page. A program on the computer that can click the panel can click Allow.
 - **A takeover is kept.** After another tab or program takes the extension's place, the
   extension does not take it back by itself, also after a restart, so it does not trade
   places back and forth with whoever has the secret; the side panel says so and offers
