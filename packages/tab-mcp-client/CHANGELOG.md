@@ -46,6 +46,17 @@ unknown key.
   session ended (`disconnect()`, `disconnectAll()`, a refusal), and with relays up to
   0.12.1, which do not send it.
 - Dialog texts `signInUntil`, `signInTimeUp` and `continuePairing`.
+- **`@ractive-ch/tab-mcp-client/extension`** (DEC-206): for a browser extension that is a
+  tab-mcp page itself, filling in its own pairing code on the relay's pairing page after
+  asking its user, as the tab-mcp browser extension does (DEC-203). The content script's
+  part (`runPairingPage`), the worker's rules as one state machine (`CodeFiller`: the
+  origin check, one question per page load, the one more fill for the same tab and
+  request, what withdraws a question), which code to fill in (`takeCode`,
+  `pairingCodes`), the relay's patterns and the messages. The extension supplies how its
+  user is asked, its setting, the permission prompt and the content script's
+  registration. An entry of its own, out of the core, with no `chrome` types; a content
+  script bundles less than 1 KB gzipped of it. See
+  [For browser extensions](README.md#for-browser-extensions).
 
 ### Changed
 

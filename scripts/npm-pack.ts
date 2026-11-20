@@ -57,6 +57,7 @@ export const PACKAGES: Record<string, PackageSpec> = {
 		exports: {
 			".": { types: "./index.d.ts", default: "./index.js" },
 			"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
+			"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 			"./react": { types: "./react.d.ts", default: "./react.js" },
 			"./setup": { types: "./setup.d.ts", default: "./setup.js" },
 			"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
@@ -86,6 +87,9 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			// The tools that run without asking (DEC-200).
 			"allowed.js",
 			"allowed.js.map",
+			// For browser extensions that are a tab-mcp page (DEC-206).
+			"extension.js",
+			"extension.js.map",
 			// Chunks of this name: the escaping, shared by the dialogs and
 			// `./visible`, the setup steps, shared by the connect dialog and
 			// `./setup`, what the two dialogs share (iteration 38), and the
