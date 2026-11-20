@@ -484,7 +484,9 @@ export interface FillHost {
 	): Promise<FillAnswer>;
 	/**
 	 * The code to fill in now, with pairing held on for the relay to check it
-	 * (`takeCode`); `undefined` if none came or `signal` aborted.
+	 * (`takeCode`); `undefined` if none came or `signal` aborted (the page
+	 * went, or the fill was withdrawn as a question is). Even with a code,
+	 * nothing is sent if what holds for asking no longer does.
 	 */
 	code(signal: AbortSignal): Promise<string | undefined>;
 	/** A filled-in code paired its AI app: pairing need not be held for it. */
@@ -546,27 +548,51 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
 export class CodeFiller {
 	readonly #host: FillHost;
 	readonly #waiting = new Set<Waiting>();
-	/** By tab: what was filled in there last. */
+	/**
+	 * By tab: what was filled in there last, or is being filled in (marked
+	 * before the wait for the code, so that a page of the same request
+	 * meanwhile counts it).
+	 */
 	readonly #filled = new Map<number, Filled>();
-	/** The grants seen so far: a new one is an AI app that just connected. */
-	readonly #grants: Set<string>;
+	/**
+	 * The grants seen so far: a new one is an AI app that just connected.
+	 * `undefined` until the first list, which is taken as it is: a worker
+	 * that starts before its connection is up has none to compare with.
+	 */
+	#grants: Set<string> | undefined;
 	readonly #closeAfterMs: number;
 
 	/**
-	 * `grants`: the ids of the grants there are already (not new when listed
-	 * again). `closeAfterMs`: FILLED_CLOSE_MS unless a test's is shorter.
+	 * `grants`: the ids of the grants there are already, if the extension kept
+	 * them between worker starts (not new when listed again); without them,
+	 * the first `grantsChanged` is taken as the list there is, nothing in it
+	 * new. `closeAfterMs`: FILLED_CLOSE_MS unless a test's is shorter.
 	 */
 	constructor(
 		host: FillHost,
 		options: { grants?: Iterable<string>; closeAfterMs?: number } = {},
 	) {
 		this.#host = host;
-		this.#grants = new Set(options.grants ?? []);
+		this.#grants =
+			options.grants === undefined ? undefined : new Set(options.grants);
 		this.#closeAfterMs = options.closeAfterMs ?? FILLED_CLOSE_MS;
 	}
 
-	/** A pairing page's port: checked, then asked about and maybe filled in. */
+	/**
+	 * A pairing page's port: checked, then asked about and maybe filled in.
+	 * Never rejects: a host callback that throws fills nothing, closes the
+	 * port and is logged.
+	 */
 	async page(port: PagePort): Promise<void> {
+		try {
+			await this.#page(port);
+		} catch (error) {
+			console.warn("tab-mcp: pairing page", error);
+			port.close();
+		}
+	}
+
+	async #page(port: PagePort): Promise<void> {
 		const host = this.#host;
 		const tabId = tabIdOf(port.sender);
 		if (
@@ -636,27 +662,66 @@ export class CodeFiller {
 		return this.#filled.get(tabId);
 	}
 
+	/**
+	 * Fill `count` (1 after Allow, 2 the one more) of `hello`'s request in
+	 * `tabId`. The wait for the code is withdrawn like a question, and what
+	 * holds for asking is checked again once the code is there.
+	 */
 	async #fill(
 		port: PagePort,
 		tabId: number,
 		hello: PairingHello,
 		count: number,
 	): Promise<void> {
-		const code = await this.#host.code(port.signal);
-		if (port.signal.aborted) return;
-		if (code === undefined) {
-			this.#host.failed("no-code");
-			port.close();
-			return;
-		}
-		this.#filled.set(tabId, {
+		const host = this.#host;
+		const before = this.#filled.get(tabId);
+		// Marked before the wait: a page of the same request that comes
+		// meanwhile sees this count, so there is never a third fill.
+		const mark: Filled = {
 			requestId: hello.requestId,
 			host: hello.clientHost,
 			count,
-			at: this.#host.now(),
-		});
-		port.send({ type: "fill", nonce: hello.nonce, code });
-		setTimeout(() => port.close(), this.#closeAfterMs);
+			at: host.now(),
+		};
+		this.#filled.set(tabId, mark);
+		const waiting: Waiting = {
+			host: hello.clientHost,
+			withdraw: new AbortController(),
+		};
+		this.#waiting.add(waiting);
+		const signal = AbortSignal.any([port.signal, waiting.withdraw.signal]);
+		let sent = false;
+		// A page that went or a code that did not come leaves the tab's last
+		// fill as it was; a withdrawal leaves nothing to fill once more.
+		let keepBefore = true;
+		try {
+			const code = await host.code(signal);
+			const off =
+				waiting.withdraw.signal.aborted ||
+				!host.enabled() ||
+				!host.aiOn() ||
+				!isPairingSender(port.sender, host.extensionId, host.relayOrigin());
+			if (off) keepBefore = false;
+			if (off || port.signal.aborted) return;
+			if (code === undefined) {
+				host.failed("no-code");
+				return;
+			}
+			mark.at = host.now();
+			port.send({ type: "fill", nonce: hello.nonce, code });
+			sent = true;
+			setTimeout(() => port.close(), this.#closeAfterMs);
+		} finally {
+			this.#waiting.delete(waiting);
+			if (!sent) {
+				port.close();
+				if (this.#filled.get(tabId) === mark) {
+					if (keepBefore && before !== undefined)
+						this.#filled.set(tabId, before);
+					else this.#filled.delete(tabId);
+				}
+			}
+		}
 	}
 
 	/**
@@ -665,6 +730,11 @@ export class CodeFiller {
 	 * host, and its fills are done with.
 	 */
 	grantsChanged(grants: readonly { grantId: string; host: string }[]): void {
+		if (this.#grants === undefined) {
+			// The first list without a seed: the grants there are, none new.
+			this.#grants = new Set(grants.map((grant) => grant.grantId));
+			return;
+		}
 		const connected = new Set<string>();
 		for (const grant of grants)
 			if (!this.#grants.has(grant.grantId)) {
@@ -692,10 +762,13 @@ export class CodeFiller {
 		this.#filled.clear();
 	}
 
-	/** Another relay: no page of the one before is asked about or filled in. */
+	/**
+	 * Another relay: no page of the one before is asked about or filled in,
+	 * and the new relay's first list of grants is taken as it is.
+	 */
 	reset(): void {
 		this.withdrawAll();
-		this.#grants.clear();
+		this.#grants = undefined;
 	}
 }
 

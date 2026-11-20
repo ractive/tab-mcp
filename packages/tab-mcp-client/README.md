@@ -1330,17 +1330,26 @@ const filler = new CodeFiller({
   release: () => releasePairing(),
   failed: (why) => showProblem(why), // "busy" | "no-code"
   now: () => Date.now(),
-}, { grants: mcp.grants.map((g) => g.grantId) });
+});
 
 // At the top level, so that a page's port wakes the worker; taken over at once.
+// `page()` never rejects: a callback that throws closes the port and is logged.
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === PAIRING_PORT) void filler.page(pagePort(port));
 });
+// The first list is taken as the grants there are; a grant in a later one is
+// an AI app that just connected, which withdraws its question.
 mcp.addEventListener("grantschange", () =>
   filler.grantsChanged(mcp.grants.map((g) => ({ grantId: g.grantId, host: g.client.host }))),
 );
 // AI access or the setting turned off: filler.withdrawAll(); another relay: filler.reset().
 ```
+
+A service worker usually starts before its connection is up, when `mcp.grants` is still
+empty: build the filler without `grants`, as above, and the relay's first list is the
+baseline. An extension that keeps the grants between worker starts can pass them
+(`new CodeFiller(host, { grants: kept })`), so that a grant made while the worker slept
+counts as new.
 
 **Rules the extension must not weaken:**
 

@@ -465,9 +465,14 @@ function fillHost(
 		signal: AbortSignal;
 	}[] = [];
 	const answers: ((answer: FillAnswer) => void)[] = [];
+	const codes: ((code: string | undefined) => void)[] = [];
 	const host: FillHost & {
 		asked: typeof asked;
 		answer(answer: FillAnswer): void;
+		/** `code()` waits until `giveCode`. */
+		holdCode: boolean;
+		giveCode(code: string | undefined): void;
+		codeSignals: AbortSignal[];
 		advance(ms: number): void;
 		released: number;
 		failures: FillFailure[];
@@ -493,7 +498,19 @@ function fillHost(
 			});
 		},
 		answer: (answer) => answers.shift()?.(answer),
-		code: async () => ("code" in options ? options.code : "BCDF-GHJK"),
+		codeSignals: [],
+		code: (signal) => {
+			host.codeSignals.push(signal);
+			if (!host.holdCode)
+				return Promise.resolve("code" in options ? options.code : "BCDF-GHJK");
+			// Held until the test gives one; it pays no heed to `signal`, as a
+			// careless host might not.
+			return new Promise((resolve) => codes.push(resolve));
+		},
+		holdCode: false,
+		giveCode: (code) => {
+			for (const resolve of codes.splice(0)) resolve(code);
+		},
 		release: () => {
 			host.released++;
 		},
@@ -788,13 +805,253 @@ describe("asking and filling in", () => {
 		filler.reset();
 		await done;
 		expect(port.sent).toEqual([]);
-		// The same grant id listed by the new relay is new to it.
+		// The new relay's first list is the grants there are; a grant after it
+		// is an AI app that just connected.
 		const next = fakePort();
 		const asked = filler.page(next);
 		await settle();
 		filler.grantsChanged([{ grantId: "old", host: "claude.ai" }]);
+		expect(host.asked[1]?.signal.aborted).toBe(false);
+		filler.grantsChanged([
+			{ grantId: "old", host: "claude.ai" },
+			{ grantId: "new", host: "claude.ai" },
+		]);
 		await asked;
 		expect(host.asked[1]?.signal.aborted).toBe(true);
+	});
+
+	test("without grants to start with, the first list is the baseline: a worker that starts before its connection keeps its questions", async () => {
+		const host = fillHost();
+		const filler = new CodeFiller(host, { closeAfterMs: CLOSE_MS });
+		const port = fakePort();
+		const done = filler.page(port);
+		await settle();
+		// The relay's list once connected: claude.ai had a grant already.
+		filler.grantsChanged([{ grantId: "earlier", host: "claude.ai" }]);
+		expect(host.asked[0]?.signal.aborted).toBe(false);
+		host.answer("allow");
+		await done;
+		expect(port.sent).toEqual([fillMessage]);
+		expect(host.released).toBe(0);
+		// The grant this fill made: done with, pairing released.
+		filler.grantsChanged([
+			{ grantId: "earlier", host: "claude.ai" },
+			{ grantId: "now", host: "claude.ai" },
+		]);
+		expect(host.released).toBe(1);
+	});
+
+	test("seeded with an empty list, the first list's grants are new", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host, []);
+		const done = filler.page(fakePort());
+		await settle();
+		filler.grantsChanged([{ grantId: "g", host: "claude.ai" }]);
+		await done;
+		expect(host.asked[0]?.signal.aborted).toBe(true);
+	});
+});
+
+/** Allow on a fresh page of `filler`, its code held: the page, and its fill under way. */
+async function allowedAndWaiting(
+	host: ReturnType<typeof fillHost>,
+	filler: CodeFiller,
+) {
+	host.holdCode = true;
+	const port = fakePort();
+	const done = filler.page(port);
+	await settle();
+	host.answer("allow");
+	await settle();
+	expect(host.codeSignals).toHaveLength(1);
+	return { port, done };
+}
+
+describe("a fill that waits for its code", () => {
+	const withdrawals: [
+		string,
+		(host: ReturnType<typeof fillHost>, filler: CodeFiller) => void,
+	][] = [
+		[
+			"filling in turned off",
+			(host, filler) => {
+				host.fill = false;
+				filler.withdrawAll();
+			},
+		],
+		[
+			"AI access turned off",
+			(host, filler) => {
+				host.on = false;
+				filler.withdrawAll();
+			},
+		],
+		[
+			"another relay",
+			(host, filler) => {
+				host.relayOrigin = () => "https://other.example";
+				filler.reset();
+			},
+		],
+		[
+			"the AI app connected (typed by hand)",
+			(_host, filler) =>
+				filler.grantsChanged([{ grantId: "typed", host: "claude.ai" }]),
+		],
+	];
+
+	for (const [what, withdraw] of withdrawals)
+		test(`is withdrawn by ${what}: no code is sent, no one more fill is left`, async () => {
+			const host = fillHost();
+			const filler = fillerFor(host);
+			const { port, done } = await allowedAndWaiting(host, filler);
+			withdraw(host, filler);
+			expect(host.codeSignals[0]?.aborted).toBe(true);
+			// A host whose code comes anyway.
+			host.giveCode("BCDF-GHJK");
+			await done;
+			expect(port.sent).toEqual([]);
+			expect(port.closed).toBe(true);
+			// Back as it was: the same request's page asks, it is not filled.
+			host.fill = true;
+			host.on = true;
+			host.relayOrigin = () => RELAY;
+			host.holdCode = false;
+			const again = fakePort();
+			void filler.page(again);
+			await settle();
+			expect(host.asked).toHaveLength(2);
+			expect(again.sent).toEqual([]);
+		});
+
+	test("checked again once the code is there, also when the host withdrew nothing", async () => {
+		for (const off of [
+			(host: ReturnType<typeof fillHost>) => {
+				host.fill = false;
+			},
+			(host: ReturnType<typeof fillHost>) => {
+				host.on = false;
+			},
+			(host: ReturnType<typeof fillHost>) => {
+				host.relayOrigin = () => "https://other.example";
+			},
+		]) {
+			const host = fillHost();
+			const filler = fillerFor(host);
+			const { port, done } = await allowedAndWaiting(host, filler);
+			off(host);
+			host.giveCode("BCDF-GHJK");
+			await done;
+			expect(port.sent).toEqual([]);
+			expect(port.closed).toBe(true);
+		}
+	});
+
+	test("two pages of the same request while the one more fill waits: only one is filled, never a third", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host);
+		const first = fakePort();
+		const done = filler.page(first);
+		await settle();
+		host.answer("allow");
+		await done;
+		first.leave();
+		host.advance(1_000);
+		host.holdCode = true;
+		// The relay's answer (the one more fill, waiting for the next code)…
+		const second = fakePort();
+		const filling = filler.page(second);
+		await settle();
+		// …and a reload of the same request meanwhile.
+		const third = fakePort();
+		await filler.page(third);
+		expect(third.closed).toBe(true);
+		host.giveCode("BCDF-GHJK");
+		await filling;
+		expect(second.sent).toEqual([fillMessage]);
+		expect(third.sent).toEqual([]);
+		expect(host.asked).toHaveLength(1);
+	});
+
+	test("the one more fill without a code leaves the count as it was", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host);
+		const done = filler.page(fakePort());
+		await settle();
+		host.answer("allow");
+		await done;
+		host.advance(1_000);
+		host.holdCode = true;
+		const second = fakePort();
+		const filling = filler.page(second);
+		await settle();
+		host.giveCode(undefined);
+		await filling;
+		expect(second.sent).toEqual([]);
+		expect(host.failures).toEqual(["no-code"]);
+		// The page again: the one more fill is still its due.
+		host.holdCode = false;
+		const third = fakePort();
+		await filler.page(third);
+		expect(third.sent).toEqual([fillMessage]);
+		expect(host.asked).toHaveLength(1);
+	});
+});
+
+describe("a host callback that fails", () => {
+	test("fills nothing, closes the port, is logged, and never rejects", async () => {
+		const warn = console.warn;
+		const warned: unknown[][] = [];
+		console.warn = (...args: unknown[]) => {
+			warned.push(args);
+		};
+		try {
+			const broken: [string, (host: ReturnType<typeof fillHost>) => void][] = [
+				[
+					"ask",
+					(host) => {
+						host.ask = () => Promise.reject(new Error("no panel"));
+					},
+				],
+				[
+					"enabled",
+					(host) => {
+						host.enabled = () => {
+							throw new Error("no settings");
+						};
+					},
+				],
+				[
+					"code",
+					(host) => {
+						host.code = () => Promise.reject(new Error("no code"));
+					},
+				],
+			];
+			for (const [name, breakIt] of broken) {
+				const host = fillHost();
+				breakIt(host);
+				const filler = fillerFor(host);
+				const port = fakePort();
+				const done = filler.page(port);
+				await settle();
+				host.answer("allow");
+				await done;
+				expect(port.sent).toEqual([]);
+				expect(port.closed).toBe(true);
+				expect(warned.length).toBeGreaterThan(0);
+				warned.length = 0;
+				// Nothing left behind: the same request's page asks again.
+				if (name === "code") {
+					host.code = async () => "BCDF-GHJK";
+					void filler.page(fakePort());
+					await settle();
+					expect(host.asked).toHaveLength(2);
+				}
+			}
+		} finally {
+			console.warn = warn;
+		}
 	});
 });
 

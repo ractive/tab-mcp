@@ -4478,6 +4478,16 @@ extension is its first user. The shape below is the library's, not the owner's.
   content script in with `scripting.executeScript({ files })` instead of reading and
   filling the form with functions of its own, so the code goes over the port with the
   nonce like the tab-mcp browser extension's.
-- **No change in behaviour** for the tab-mcp browser extension: its unit tests of the
-  moved logic are the library's now (`test/extension.test.ts`), its tests of its wiring
-  and its end-to-end tests of the fill-in in Chrome and Firefox pass unchanged.
+- **The review of PR 179 tightened the contract**, with four gaps that were already in
+  the extension's own code. A fill that waits for its code is withdrawn like a question
+  (turned off, AI access off, another relay, the AI app connected), and once the code is
+  there the filler checks again that filling in is on, AI access is on and the page is
+  still the configured relay's; if not, nothing is sent and no one more fill is left.
+  A fill is marked before the wait, so two overlapping pages of the same request cannot
+  both get the one more fill. `page()` never rejects: a host callback that throws closes
+  the port, fills nothing and is logged. Without `grants` to start with, the first list
+  of grants is the baseline (also after `reset()`), so a worker that starts before its
+  connection does not take the existing grants as AI apps that just connected.
+- **Otherwise no change in behaviour** for the tab-mcp browser extension: its unit tests
+  of the moved logic are the library's now (`test/extension.test.ts`), its tests of its
+  wiring and its end-to-end tests of the fill-in in Chrome and Firefox pass unchanged.

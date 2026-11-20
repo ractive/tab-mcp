@@ -792,12 +792,12 @@ export class Connection {
 
 	// --- The relay's pairing page in this browser (DEC-203) ---
 
-	/** A port from a pairing page's content script; its sender is checked there. */
+	/**
+	 * A port from a pairing page's content script; its sender is checked
+	 * there. The filler never rejects: it closes the port and logs a failure.
+	 */
 	pairingPage(port: PagePort): void {
-		void this.#filler.page(port).catch((error: unknown) => {
-			console.warn("tab-mcp: pairing page", error);
-			port.close();
-		});
+		void this.#filler.page(port);
 	}
 
 	/**
