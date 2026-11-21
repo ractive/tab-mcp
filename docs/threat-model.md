@@ -28,7 +28,7 @@ See the [protocol](protocol.md) for the details.
    relay: grants belong to the address id derived from it and the page's app id, which
    is part of no URL.
    Whoever has the secret can take the page's place from anywhere: the AI apps already
-   paired with the page then talk to them instead, until the page gets a new secret
+   paired with the page then use them instead, until the page gets a new secret
    ("Disconnect all apps", A4). They get no token of those apps, but the relay sends them
    the pairing codes, so they can pair an AI app of their own, which later reaches the
    real page once that is connected again (A4).

@@ -828,7 +828,7 @@ accepted their session, so `replaced` says which it probably was:
   the `statechange`. The usual cause, and harmless. Once the page has opened the default
   dialog, the library shows "Opened in another tab".
 - `false`: none did (or the browser has no `BroadcastChannel`). It may be a program with
-  a copy of the address secret, and the AI apps paired with the page now talk to it.
+  a copy of the address secret, and the AI apps paired with the page now use it.
   The library shows "Another tab or program took over this page" with "Disconnect all
   apps".
 

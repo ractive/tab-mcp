@@ -184,7 +184,7 @@ default dialog, the library says so itself: "Opened in another tab" when a tab o
 same page said on its `BroadcastChannel` that its session started, otherwise a warning
 with "Disconnect all apps". A custom UI does the same with `event.detail.sibling`: `true` is the
 usual, harmless second tab; `false` means it may be a program with a copy of the address
-secret, which the paired AI apps now talk to, so offer a "Disconnect all apps" button that calls
+secret, which the paired AI apps now use, so offer a "Disconnect all apps" button that calls
 `mcp.disconnectAll()`. It takes the page back with the relay revoking those apps in the
 same step, then connects with a new secret; if it rejects with `reason: "replaced"`, the
 page was taken over again first: say so and let the user try again.
@@ -314,7 +314,7 @@ Keep these; do not work around them.
 - Relays must be `https:`; `http:` works only for `localhost`, `127.0.0.1` and `[::1]`.
 - Keep XSS out of the page and do not log or expose the secret under
   `tab-mcp:secret:<relay origin>:<server name>`: whoever has it can take the page's place,
-  and the AI apps paired with it then talk to them until the page makes a new secret
+  and the AI apps paired with it then use them until the page makes a new secret
   (`disconnectAll()`).
   Run the page on its own origin (not a shared one such as `*.github.io`) and keep
   third-party scripts off it.

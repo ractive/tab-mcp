@@ -688,7 +688,7 @@ Magic Containers with a pull zone):
   `TAB_MCP_SITES`, above all an address that an organisation allows by its URL.
 - The pages you list keep their address secret safe: whoever copies it out of
   `localStorage` (script on the page's origin, an extension, a shared computer) can take
-  the page's place, and the AI apps paired with it then talk to them
+  the page's place, and the AI apps paired with it then use them
   ([threat model](threat-model.md), A4). Sites with user accounts pair by
   [identity binding](configuration.md#identity-binding), so a copied secret gets nothing.
   Each page runs on its own origin (not a shared one such as `*.github.io`), without
