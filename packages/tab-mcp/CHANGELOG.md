@@ -38,6 +38,10 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   `/healthz`, the OAuth metadata, the 404 answer, redirects, 405s and the MCP
   address's answers. It is now set in one place that every answer passes through,
   error answers and the answers passed on from a tab included.
+- **The home page has the sign-in page's protection** (DEC-212): its policy adds
+  `base-uri 'none'` and `form-action 'none'`, and it sends `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. Every HTML page of the relay now takes these headers
+  from one function, so they cannot drift apart. Its cache time of one hour stays.
 
 ## [0.13.0][relay-0.13.0] - 2026-11-21
 

@@ -1,6 +1,7 @@
 /**
- * The headers every response of the relay carries (owner, 2026-11-22):
- * `nosniff` on each kind of answer, set in one place (`src/headers.ts`).
+ * The headers every response of the relay carries, and those of every HTML
+ * page (owner, 2026-11-22): `nosniff` on each kind of answer, set in one
+ * place (`src/headers.ts`); every page with the sign-in page's protection.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { withCommonHeaders } from "../src/headers.ts";
@@ -135,6 +136,34 @@ describe("every response", () => {
 		expect(status["MCP POST passed to the tab and back"]).toBe(200);
 		expect(status["MCP POST without a token (401)"]).toBe(401);
 		expect(status["an unknown path"]).toBe(404);
+	});
+
+	test("every HTML page has the sign-in page's protection", async () => {
+		const pages = (await answers()).filter(([, res]) =>
+			(res.headers.get("content-type") ?? "").startsWith("text/html"),
+		);
+		expect(pages.map(([name]) => name)).toEqual([
+			"home page",
+			"/authorize without a request (error page)",
+			"/authorize with a valid request (the sign-in page)",
+			"/authorize posted without a form",
+		]);
+		for (const [name, res] of pages) {
+			const policy = res.headers.get("content-security-policy") ?? "";
+			const directives = policy.split(";").map((d) => d.trim());
+			expect({ name, directives }).toMatchObject({
+				name,
+				directives: expect.arrayContaining([
+					"default-src 'none'",
+					"base-uri 'none'",
+					"frame-ancestors 'none'",
+				]),
+			});
+			expect(directives.some((d) => d.startsWith("form-action "))).toBe(true);
+			expect(policy).not.toContain("unsafe");
+			expect(res.headers.get("x-frame-options")).toBe("DENY");
+			expect(res.headers.get("referrer-policy")).toBe("same-origin");
+		}
 	});
 
 	test("the WebSocket upgrade still works", async () => {

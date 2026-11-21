@@ -32,7 +32,7 @@ import {
 	notOpenAnswer,
 	type RelayInfo,
 } from "./notopen.ts";
-import { STYLESHEET } from "./oauth/html.ts";
+import { pageHeaders, STYLESHEET } from "./oauth/html.ts";
 import { CodeIndex, type PairingPool } from "./oauth/pairing.ts";
 import {
 	AuthorizationServer,
@@ -1630,13 +1630,9 @@ function startRelay(
 			},
 			"/": {
 				GET: () =>
+					// The sign-in page's headers: no script, no form.
 					new Response(INDEX_HTML, {
-						headers: {
-							"content-type": "text/html; charset=utf-8",
-							"content-security-policy":
-								"default-src 'none'; style-src 'self'; img-src 'self'; frame-ancestors 'none'",
-							"cache-control": "public, max-age=3600",
-						},
+						headers: pageHeaders({ cacheControl: "public, max-age=3600" }),
 					}),
 			},
 			// The relay's icon, for the AI apps' connector lists and browser tabs.

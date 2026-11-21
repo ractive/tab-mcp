@@ -4815,9 +4815,10 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   version 1. An extension that writes the code and fires `input` gets it tidied; one that
   submits right away is submitted as before.
 
-## DEC-212: nosniff on every response, set in one place (owner)
+## DEC-212: nosniff on every response; every page with the sign-in page's headers (owner)
 
-2026-11-22. The owner: "Send nosniff, yes". `X-Content-Type-Options: nosniff` was on
+2026-11-22. The owner: "Send nosniff, yes", and "Also protect the homepage".
+`X-Content-Type-Options: nosniff` was on
 the pages, the stylesheet and the icons only; `/healthz`, the OAuth metadata, the 404
 answer and the MCP address's answers went without it (checked on the hosted relay).
 
@@ -4830,3 +4831,14 @@ answer and the MCP address's answers went without it (checked on the hosted rela
   `/authorize` with and without a request, a redirect, `/token`, `/revoke`, an MCP
   address with GET and POST, a tab's answer, unknown paths) and names every answer
   without the header.
+- **The home page** sent only `default-src 'none'; style-src 'self'; img-src 'self';
+  frame-ancestors 'none'`. Every HTML page of the relay (the home page and every
+  `/authorize` answer, error pages included; there are no others) now takes its headers
+  from one function, `pageHeaders` in `src/oauth/html.ts`, so they cannot drift:
+  `default-src 'none'`, `style-src 'self'`, `img-src 'self'`, `base-uri 'none'`,
+  `frame-ancestors 'none'`, a `form-action`, `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. What differs is passed in: the home page has no form
+  (`form-action 'none'`), no script and keeps `Cache-Control: public, max-age=3600`;
+  the sign-in page keeps `form-action 'self' <redirect origin>`, its one script
+  (DEC-211) and `no-store`. A test checks every HTML answer for these.
+- HSTS stays the job of whatever terminates TLS (bunny's edge for the hosted relay).

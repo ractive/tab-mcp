@@ -96,29 +96,44 @@ footer { margin-top: 2.5rem; font-size: 0.85rem; color: GrayText; }
 }
 `;
 
+/** What differs between the relay's HTML pages. */
+export interface PageHeaderOptions {
+	/** Where the page's form may post (`form-action`); none given: `'none'`. */
+	formAction?: readonly string[];
+	/**
+	 * Hash sources (`'sha256-…'`) of the page's inline scripts: a page with
+	 * none gets no `script-src`, so `default-src 'none'` forbids every script.
+	 */
+	scripts?: readonly string[];
+	/** Default `no-store`. */
+	cacheControl?: string;
+}
+
 /**
- * Security headers of every `/authorize` response. `scripts` are the hash
- * sources (`'sha256-…'`) of the page's inline scripts: a page with none
- * gets no `script-src`, so `default-src 'none'` forbids every script.
+ * Security headers of every HTML page of the relay: the home page and every
+ * `/authorize` response (threat model A7). `nosniff` is added to every
+ * response in one place (`headers.ts`).
  */
-export function pageHeaders(
-	formTargets: readonly string[] = [],
-	scripts: readonly string[] = [],
-): Headers {
-	// Chrome applies form-action to the redirect after a POST, so the client's
-	// redirect origin must be allowed explicitly.
-	const formAction = ["'self'", ...formTargets].join(" ");
-	const scriptSrc =
-		scripts.length === 0 ? "" : `script-src ${scripts.join(" ")}; `;
+export function pageHeaders(options: PageHeaderOptions = {}): Headers {
+	const { formAction = [], scripts = [], cacheControl = "no-store" } = options;
+	const policy = [
+		"default-src 'none'",
+		...(scripts.length === 0 ? [] : [`script-src ${scripts.join(" ")}`]),
+		"style-src 'self'",
+		"img-src 'self'",
+		"base-uri 'none'",
+		"frame-ancestors 'none'",
+		`form-action ${formAction.length === 0 ? "'none'" : formAction.join(" ")}`,
+	].join("; ");
 	return new Headers({
 		"content-type": "text/html; charset=utf-8",
-		"content-security-policy": `default-src 'none'; ${scriptSrc}style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action ${formAction}`,
+		"content-security-policy": policy,
 		"x-frame-options": "DENY",
-		// Not no-referrer: browsers then send `Origin: null` on the form post,
-		// which the origin check must refuse. same-origin still sends nothing
-		// to the client's redirect.
+		// Not no-referrer: browsers then send `Origin: null` on the sign-in
+		// page's form post, which the origin check must refuse. same-origin
+		// still sends nothing to the client's redirect or to another site.
 		"referrer-policy": "same-origin",
-		"cache-control": "no-store",
+		"cache-control": cacheControl,
 	});
 }
 

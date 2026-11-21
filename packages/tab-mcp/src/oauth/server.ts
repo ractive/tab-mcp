@@ -521,7 +521,12 @@ export class AuthorizationServer {
 		extraHeaders: Record<string, string> = {},
 		scripts: readonly string[] = [],
 	): Response {
-		const headers = pageHeaders(formTargets, scripts);
+		// Chrome applies form-action to the redirect after a POST, so the
+		// client's redirect origin must be allowed explicitly.
+		const headers = pageHeaders({
+			formAction: ["'self'", ...formTargets],
+			scripts,
+		});
 		for (const [k, v] of Object.entries(extraHeaders)) headers.append(k, v);
 		return new Response(renderPage(title, body), { status, headers });
 	}

@@ -406,6 +406,10 @@ stops script on another origin of the relay; a program can send any `Origin`.
   has no script at all. Framing is refused, so the code field cannot be overlaid.
 - Every response of the relay, not only its pages, carries `X-Content-Type-Options:
   nosniff`, so a browser never takes an answer as a script or style sheet it guessed.
+- The relay's home page has the same protection as the sign-in page: the same policy
+  with no script and no form (`form-action 'none'`), `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. Both pages take these headers from one function, so
+  they cannot drift apart.
 - The form posts only the id of a pending request. Its CSRF token is bound to that
   request and to a first-party `HttpOnly`, `SameSite=Lax` cookie. Posts with a foreign
   `Origin` or `Sec-Fetch-Site` are refused. The page sets no `Cross-Origin-Opener-Policy`,
