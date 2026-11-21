@@ -306,9 +306,11 @@ const running = new Map<string, AbortController>();
  * this very page (`documentId`) with the same read-only claim. Otherwise
  * "gone": a tool must never run on another page than the one it was offered
  * for, nor without the confirmation its first claim would have needed.
- * `vouch`, for a call the user allowed: runs right before the tool, once
- * every check passed, so that a page with the client library does not ask
- * again (DEC-207).
+ * `vouch`, for a call the user allowed: `send` runs right before the tool,
+ * once every check passed, so that a page with the client library does not
+ * ask again (DEC-207); `withdraw` once the call settled, whatever the
+ * outcome, so that a vouch the call did not use (it failed or was cancelled
+ * before it reached the page) is not left for another caller.
  */
 export async function callTool(
 	call: { documentId: string; name: string; readOnly: boolean },
@@ -316,7 +318,7 @@ export async function callTool(
 	signal: AbortSignal,
 	doc: Document = document,
 	documentId: string = DOCUMENT_ID,
-	vouch?: (input: unknown) => void,
+	vouch?: { send(input: unknown): void; withdraw(): void },
 ): Promise<CallResult> {
 	const { name } = call;
 	if (call.documentId !== documentId)
@@ -347,10 +349,12 @@ export async function callTool(
 	let value: string | null;
 	const args = input ?? {};
 	try {
-		vouch?.(args);
+		vouch?.send(args);
 		value = await context.executeTool(tool, args, { signal });
 	} catch (error) {
 		return { ok: false, error: message(error) };
+	} finally {
+		vouch?.withdraw();
 	}
 	if (typeof value === "string" && value.length > MAX_SEND_RESULT)
 		return {
@@ -379,7 +383,10 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 					DOCUMENT_ID,
 					vouch === undefined
 						? undefined
-						: (args) => handshake?.vouch(request.name, args, vouch),
+						: {
+								send: (args) => handshake?.vouch(request.name, args, vouch),
+								withdraw: () => handshake?.withdraw(vouch.nonce),
+							},
 				);
 			} finally {
 				running.delete(request.callId);

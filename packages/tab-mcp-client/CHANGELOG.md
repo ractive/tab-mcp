@@ -58,7 +58,8 @@ unknown key.
     allowed there (asked, or its "Always allow"), it vouches for that call: the tool,
     the exact arguments and the AI app. The next WebMCP call of that tool with equal
     arguments within 2 seconds runs without the page's question and without
-    `onConfirm`; a vouch is used once, and any other call is asked as before.
+    `onConfirm`; a vouch is used once, and any other call is asked as before. A vouch
+    the extension withdraws (its call ended, or never reached the page) is dropped.
   - **`trustExtension: false`** keeps asking every WebMCP call (a site that insists on
     its own question).
   - **`extension` and the event `extensionchange`** (also in the React snapshot): while
@@ -71,7 +72,7 @@ unknown key.
     ("… while this tab is in front."), texts `viaExtension` and `viaExtensionInFront`
     (plural forms); the rest stays.
   - The page tells the extension the library's version, the app id and the AI apps
-    connected to it directly, and marks `<html data-tab-mcp-handshake>`.
+    connected to it directly (at most 64), and marks `<html data-tab-mcp-handshake>`.
   - In the WebMCP mirror's chunk: the core grows by 9 bytes gzipped.
 - **`pairingUntil` and the event `pairinguntil`** (identity binding, DEC-202): until when
   a sign-in pairs the page (an ISO time on the page's clock: the `expiresInMs` of the

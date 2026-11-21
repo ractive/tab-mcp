@@ -281,12 +281,15 @@ that an AI app reaches it through the extension:
   "Claude (claude.ai) through the tab-mcp browser extension". A vouch is used once and
   only for the tool registered under its name when it came (a tool registered anew
   since asks). Everything else is as for any call: the arguments are checked, the
-  events fire, a tool that is gone does not run. Any call that matches no vouch (an
-  agent in the browser, a call after the 2 seconds) is asked as before.
+  events fire, a tool that is gone does not run. Once the extension's call ended or
+  failed, the extension withdraws the vouch, and one still unused (the call never
+  reached the page) is dropped. Any call that matches no vouch (an agent in the
+  browser, a call after the 2 seconds) is asked as before.
 - **`trustExtension: false`** keeps asking every WebMCP call, vouched or not, for a site
   that insists on its own question; `extension` is still reported.
 - **What the page tells the extension:** the library's version, the app id and the AI
-  apps connected to the page directly (`name`, `host`, as `grants` has them), again on
+  apps connected to the page directly (`name`, `host`, as `grants` has them; at most
+  64), again on
   each `grantschange`. The extension's panel uses it to say that the page has tab-mcp
   built in and when one AI app is connected both ways (it then sees the page's tools
   twice). The page also marks `<html data-tab-mcp-handshake>`, so that an extension
@@ -301,8 +304,8 @@ that an AI app reaches it through the extension:
   library.
 
 A page that registers its WebMCP tools itself, without the library's mirror, can take
-part the same way: answer the events as `src/handshake.ts` does and skip its own
-question for a call that matches a vouch.
+part the same way: answer the events as `src/handshake.ts` does, skip its own
+question for a call that matches a vouch, and drop a vouch the extension withdraws.
 
 ### Your own assistant on the page
 

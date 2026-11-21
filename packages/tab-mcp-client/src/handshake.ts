@@ -20,7 +20,9 @@
  * - The extension says what it is, whether it serves the page now and
  *   which AI apps are connected to it (`hello`, `update`), and, right before
  *   it runs a page tool the user allowed there, `vouch`: the tool, the exact
- *   arguments, a nonce and the AI app.
+ *   arguments, a nonce and the AI app; once that call ended or failed,
+ *   `withdraw` with the nonce, and a vouch still unused is dropped.
+ * - Each side cuts the other's list of AI apps to 64 and sends no more.
  *
  * No proof of who sent what: anything that could fake the extension runs in
  * the page already, where it could skip any check. A convenience between
@@ -40,7 +42,7 @@ export const MARK = "data-tab-mcp-handshake";
 export const VOUCH_MS = 2_000;
 /** At most this many vouches wait; beyond, the oldest goes. */
 const MAX_VOUCHES = 16;
-/** Texts from the extension are cut to these lengths, its apps to this count. */
+/** Texts from the extension are taken up to these lengths, apps up to this count either way. */
 const MAX_TEXT = 256;
 const MAX_APPS = 64;
 
@@ -137,7 +139,9 @@ class Handshake {
 					type,
 					library: page.version,
 					app: page.app,
-					apps: page.mcp.grants.map((g) => ({
+					// Capped as the extension cuts what it hears: more would
+					// not be heard anyway.
+					apps: page.mcp.grants.slice(0, MAX_APPS).map((g) => ({
 						name: g.client.name,
 						host: g.client.host,
 					})),
@@ -155,6 +159,10 @@ class Handshake {
 		}
 		if (!isObject(m) || m["v"] !== 1) return;
 		if (m["type"] === "vouch") this.#vouch(m);
+		// The call it was for ended or never reached the page: an unused vouch
+		// must not wait its 2 s for another caller.
+		else if (m["type"] === "withdraw")
+			this.#vouches = this.#vouches.filter((v) => v.nonce !== m["nonce"]);
 		else if (m["type"] === "hello" || m["type"] === "update") {
 			const extension = extensionOf(m);
 			if (extension === null) return;

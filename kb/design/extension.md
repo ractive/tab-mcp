@@ -115,12 +115,19 @@ page can say that an AI app is connected through the extension
   verified `host`) and `whileInFront: true`. The worker sends the state to every
   content script of a site it may read whenever it changes (`extension-state`); each
   passes it on only to a page that announced. A content script asks the worker for it
-  with `handshake`, accepted only from a tab's top frame.
+  with `handshake`, accepted only from a tab's top frame, at the page's first `hello`
+  only: later ones are answered from the last state the worker sent. A worker that does
+  not answer is asked again after 1 s and 5 s (`RETRY_MS`), one ask at a time; a change
+  from the worker or `pagehide` ends that. Each side cuts the other's list of AI apps
+  to 64 and sends at most 64; the panel shows the library version of the app id
+  announced first.
 - **The vouch.** `PageToolBridge` makes one in `#allowedThenRun` only, after the
   user's answer (or the site's "allowed") and the same-tool check, for a tool that is not
   read-only and an AI app through the relay; it goes with the `webmcp-call` message,
   and the content script dispatches it (`tool`, `arguments`, `nonce`, `app`)
-  synchronously right before `executeTool`, after its own checks. The library keeps it
+  synchronously right before `executeTool`, after its own checks, and `withdraw`
+  (`nonce`) once `executeTool` settled, whatever the outcome, so that a call that failed
+  or was cancelled before it reached the page leaves no vouch. The library keeps it
   2 s, for the tool registered under that name then, and uses it once for the next
   WebMCP call of that tool with equal arguments (canonical JSON, keys sorted): no
   question, no `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension",
