@@ -4518,6 +4518,8 @@ extension is its first user. The shape below is the library's, not the owner's.
   - *A test's page carries its own run mark* (`runPairingPage` with `page` marks that
     document, not the global); a real content script still marks its isolated world's
     global, once per document.
+- **Sitegloss uses this entry** in place of its own filler (owner, 2026-11-21), after
+  its trial of 0.19.0-rc.2 passed: both extensions now run the same rules.
 
 ## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
 
