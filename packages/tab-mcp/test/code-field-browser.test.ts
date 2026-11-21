@@ -114,7 +114,7 @@ async function openPairingPage(
 	}
 	await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 	await page.send("Page.addScriptToEvaluateOnNewDocument", {
-		source: `window.__violations = []; document.addEventListener("securitypolicyviolation", (e) => window.__violations.push(e.violatedDirective + " " + e.blockedURI));`,
+		source: `window.__violations = []; document.addEventListener("securitypolicyviolation", (e) => window.__violations.push(e.violatedDirective + " " + e.blockedURI)); window.__errors = []; window.addEventListener("error", (e) => window.__errors.push(String(e.message)));`,
 	});
 	await page.goto(
 		authorizeUrl(relay.url, {
@@ -196,6 +196,23 @@ async function paste(page: Page, text: string): Promise<void> {
 		type: "keyUp",
 		key: "v",
 		code: "KeyV",
+	});
+}
+
+/** Cmd/Ctrl-Z with the undo command. */
+async function undo(page: Page): Promise<void> {
+	await page.send("Input.dispatchKeyEvent", {
+		type: "rawKeyDown",
+		key: "z",
+		code: "KeyZ",
+		windowsVirtualKeyCode: 90,
+		modifiers: process.platform === "darwin" ? 4 : 2,
+		commands: ["undo"],
+	});
+	await page.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "z",
+		code: "KeyZ",
 	});
 }
 
@@ -308,6 +325,29 @@ describe.skipIf(chrome === undefined)("the code field in Chrome", () => {
 		await caretAt(page, 2);
 		await paste(page, "cd-ef");
 		expect((await field(page)).caret).toBe("ABCD-EF|GH");
+		await page.close();
+	});
+
+	test("undo after typing and after a paste: nothing throws, the text keeps its shape, typing goes on", async () => {
+		// The script's rewrites drop the field's undo history (DEC-211), so
+		// undo may do nothing; it must not break the field.
+		const page = await openPairingPage();
+		await page.send("Browser.grantPermissions", {
+			origin: relay.url,
+			permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+		});
+		const shape = /^([A-Z]{0,4}|[A-Z]{4}-[A-Z]{1,4})$/;
+		await typeKeys(page, "abcde");
+		for (let i = 0; i < 3; i++) await undo(page);
+		expect((await field(page)).value).toMatch(shape);
+		await clear(page);
+		await paste(page, "  abcd efgh \n");
+		for (let i = 0; i < 3; i++) await undo(page);
+		expect((await field(page)).value).toMatch(shape);
+		await clear(page);
+		await typeKeys(page, "bcdfg");
+		expect(await field(page)).toEqual({ value: "BCDF-G", caret: "BCDF-G|" });
+		expect(await page.eval<string[]>("window.__errors")).toEqual([]);
 		await page.close();
 	});
 

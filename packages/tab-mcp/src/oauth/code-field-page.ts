@@ -2,10 +2,16 @@
  * The pairing page's one script (DEC-211), bundled by
  * `scripts/code-field.ts` into `code-field-script.ts`, which the page ships
  * inline and the policy allows by its hash. It only touches the code field:
- * the browser makes every edit itself (typing, paste, drop, undo, an input
+ * the browser makes every edit itself (typing, paste, drop, an input
  * method), and after each one the script tidies the text and puts the caret
  * back after the same letters (`tidy`). Then it marks the field as enhanced,
  * which draws it as boxes. Without the script the field is a plain input.
+ *
+ * Undo is not kept: when the script rewrites the text (upper case, the dash,
+ * dropped characters), the browser forgets the field's undo history, so undo
+ * then does nothing or stops at that point. It never throws or loops: setting
+ * `value` fires no `input` event. Keeping it would take the deprecated
+ * `document.execCommand`, not worth it for eight letters (review of PR 194).
  *
  * Type-checked with `tsconfig.browser.json` (the DOM), not with the relay.
  */
@@ -41,6 +47,7 @@ if (
 			field.selectionStart ?? field.value.length,
 			done,
 		);
+		// Only when the text changes: setting it drops the undo history.
 		if (next.value !== field.value) field.value = next.value;
 		if (document.activeElement === field)
 			field.setSelectionRange(next.caret, next.caret);

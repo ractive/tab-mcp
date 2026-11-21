@@ -4783,10 +4783,10 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   as four boxes, a dash and four boxes: a monospace font with a letter spacing of 1ch
   puts each character in a cell of 2ch, and decorative boxes behind the input (hidden
   from assistive technology) mark the cells. The pages where such fields are hard to use
-  are mostly the ones with one input per letter: paste, selection, undo, deleting, input
+  are mostly the ones with one input per letter: paste, selection, deleting, input
   methods, screen readers, mobile keyboards and autofill all have to be rebuilt there.
-  With one input the browser keeps doing all of it, and the label, `aria-describedby`
-  and DEC-199's hooks stay on the one field.
+  With one input the browser keeps doing these, and the label, `aria-describedby` and
+  DEC-199's hooks stay on the one field. Undo is the exception (below).
 - **The script.** After each edit the browser made, a small script tidies the text to
   `XXXX-XXXX` (upper case, nothing but letters, at most eight; the dash with the fifth
   letter, so Backspace never stops at it) and puts the caret back after the same letters.
@@ -4797,6 +4797,12 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   boxes and highlights the box the caret is in. The rules are pure functions in
   `src/oauth/code-field.ts` with unit tests; `src/oauth/code-field-page.ts` (type-checked
   with the DOM in `tsconfig.browser.json`) wires them to the field.
+- **Undo is not kept** (review of PR 194). Setting the field's `value` clears the
+  browser's undo history for it, so once the script rewrote the text (upper case, the
+  dash, dropped characters) undo does nothing or stops at that point. It never throws
+  or loops: setting `value` fires no `input` event, and a browser test presses undo after
+  typing and after a paste and types on. Keeping undo would take the deprecated
+  `document.execCommand`; for a field of eight letters that is not worth it.
 - **How the policy allows it.** The script is inline, and `script-src` names its SHA-256
   hash, which the relay computes from the script's text when it starts; no `'self'`, no
   nonce, no other script. A hash fits because the text never changes between pages, and an

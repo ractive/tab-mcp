@@ -17,7 +17,9 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   boxes, a dash and four boxes, each letter in its own box and the box the caret is in
   highlighted. It is still one input: a small inline script keeps the text as
   `XXXX-XXXX` while you type, delete or paste (`abcd-efgh`, `ABCD EFGH` and `ABCDEFGH`
-  all give the code), and keeps the caret where you are. The page's policy allows that
+  all give the code), and keeps the caret where you are. When it rewrites the text, the
+  browser's undo history for the field is lost: undo then does nothing or stops there
+  (it never throws or loops). The page's policy allows that
   one script by its hash (`script-src 'sha256-…'`) and no other; a page that pairs by
   sign-in only has none. Without the script the field is a plain input, now wide
   enough for the whole code: it was cut off before. The field's hooks for browser

@@ -288,9 +288,10 @@ export const codePairing: PairingMethod = {
 		// put their button into the field. `off` and the managers' own opt-outs
 		// (1Password, LastPass, Bitwarden, Dashlane) say there is nothing to fill.
 		// One input drawn as boxes, not one input per letter (DEC-211): paste,
-		// undo, selection, screen readers and the extensions' hooks stay as
-		// they are. The script after it draws the boxes and keeps the text as
-		// `XXXX-XXXX`; without it the field is a plain input.
+		// selection, screen readers and the extensions' hooks stay as they
+		// are. The script after it draws the boxes and keeps the text as
+		// `XXXX-XXXX` (which costs the field's undo history); without it the
+		// field is a plain input.
 		return `<p><label for="code">Code</label>
 <span class="code-field">${BOXES}<input id="code" name="code" type="text" data-tab-mcp-field="code" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocapitalize="characters" spellcheck="false" pattern="[A-Za-z \\-]{${CODE_LENGTH},${CODE_LENGTH + 4}}" maxlength="${CODE_LENGTH + 4}" required autofocus aria-describedby="code-help"></span></p>
 <script>${CODE_FIELD_SCRIPT}</script>
