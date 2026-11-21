@@ -1,10 +1,21 @@
 import { expect, test } from "bun:test";
+import { PUBLISHED_EXPORTS } from "../packages/tab-mcp-client/scripts/published-exports.ts";
 import {
 	checkManifest,
 	distTag,
 	normalizeChunk,
 	PACKAGES,
 } from "./npm-pack.ts";
+
+test("the tarball check expects the client's exports its build publishes (review of PR 181)", () => {
+	expect(PACKAGES["client"]?.exports).toEqual(PUBLISHED_EXPORTS);
+	// Every entry's file and its source map are expected in the tarball too.
+	const files = new Set(PACKAGES["client"]?.files);
+	for (const target of Object.values(PUBLISHED_EXPORTS)) {
+		const js = (typeof target === "string" ? target : target.default).slice(2);
+		expect([files.has(js), files.has(`${js}.map`)]).toEqual([true, true]);
+	}
+});
 
 test("pre-releases never go to latest", () => {
 	expect(distTag("0.1.0-alpha.0")).toBe("alpha");

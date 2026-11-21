@@ -767,6 +767,12 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-success-title")?.textContent).toBe(
 			"Claude (claude.ai) and ChatGPT (chatgpt.com) are connected",
 		);
+		// Each name isolated, as every name in a dialog (review of PR 181).
+		expect(
+			[...dialog.querySelectorAll(".tab-mcp-success-title bdi")].map(
+				(b) => b.textContent,
+			),
+		).toEqual(["Claude (claude.ai)", "ChatGPT (chatgpt.com)"]);
 		expect(dialog.querySelector(".tab-mcp-announce")?.textContent).toBe(
 			"Claude (claude.ai) and ChatGPT (chatgpt.com) are connected. You can close this now and ask them to use the tools of this page.",
 		);

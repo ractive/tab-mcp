@@ -354,12 +354,12 @@ export interface TabMcpOptions {
 	 *
 	 * - `true`: the confirmation offers "Always allow", and the connect
 	 *   dialog a switch per tool and "Always allow everything"
-	 *   under each connected app. Kept in `storage` next to the secret until
-	 *   the app is disconnected (in memory with `storage: null`).
+	 *   under each connected AI app. Kept in `storage` next to the secret until
+	 *   the AI app is disconnected (in memory with `storage: null`).
 	 * - `"until-reload"`: the same, offered as "Allow until reload": kept in
-	 *   memory only, until the page is reloaded or the app is disconnected.
+	 *   memory only, until the page is reloaded or the AI app is disconnected.
 	 * - unset or `false` (DEC-096): the confirmation shows only "Don't allow"
-	 *   and "Allow", and every call asks. A page can still offer its own
+	 *   and "Allow once", and every call asks. A page can still offer its own
 	 *   switches with `@ractive-ch/tab-mcp-client/allowed`, kept as with `true`.
 	 *
 	 * Turn it on only for tools whose calls the user does not need to check

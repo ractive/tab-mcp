@@ -93,9 +93,11 @@ is DEC-208; the glossary is [`kb/design/wording.md`](/design/wording.md).
 
 ## Results
 
-- `bun run verify` exits 0: 1773 tests pass, 1 skipped, on the handshake branch; 1786 pass, 1 skipped, after merging main (with the review of pull request 180).
-- The client's core is 6268 B gzipped of its 6400 B limit (6260 B before); the React entry
-  2.9 KB of 3 KB.
+- `bun run verify` exits 0: 1792 tests pass, 1 skipped (on main with the review of pull request 180 merged, and the review of this one).
+- The client's core is 6270 B gzipped of its 6400 B limit (6260 B before). What a React
+  page loads first (`react.js` and its static imports) is 13.2 KB gzipped (13.0 KB before;
+  about 16 KB while `./react` imported the whole table, until the review); the entry
+  itself 3.1 KB of its 3.25 KB limit (3 KB before).
 
 ## Choices this iteration made
 
@@ -112,9 +114,29 @@ is DEC-208; the glossary is [`kb/design/wording.md`](/design/wording.md).
   that translating the dialog translates its help.
 - **`ConnectButton`'s labels** reuse `connectTitle`, `connecting` and `reconnecting`; only
   the short "Reconnecting…" and the count of connected AI apps are keys of their own.
-- **The English table is one chunk**, shared by the confirmation, the connect dialog,
-  `./setup` and `./react`: a confirmation alone now loads the setup steps' texts too
-  (a few hundred bytes), which beats a second table.
+- **The English table is one chunk**, shared by the confirmation, the connect dialog
+  and `./setup`: a confirmation alone now loads the setup steps' texts too (a few hundred
+  bytes), which beats a second table. `ConnectButton` keeps its five English texts
+  inline (a test keeps them equal to the table's), so a React page does not load the
+  table at all (review).
+
+## Review of pull request 181
+
+- `scripts/npm-pack.ts` did not know the `./strings` entry (CI's `client-pack` failed);
+  the published exports are now one list (`packages/tab-mcp-client/scripts/published-exports.ts`)
+  that `scripts/npm-pack.test.ts` compares with the tarball check.
+- `pickStrings` never rejects: a table that does not load or is not an object gives
+  English, with a warning. Its match of one language is deterministic: the same script,
+  then the same region, then the language alone, then by name (`Intl.Locale.maximize`).
+- `./react` loaded the whole table for five labels: now inline; `test/build.test.ts`
+  measures what a React page loads first (limit 13.5 KB) and that the table is not in it.
+- A table with texts but no `lang` counts as English and the console says so once
+  (the type does not require `lang`: a page that changes one English text would need it).
+- Names in plural texts (`connected`, `viaExtension…`, `disconnectAllQuestion`) are
+  isolated one by one (`Intl.ListFormat.formatToParts`, a `<bdi>` per name), made again
+  only when the words change.
+- JSDoc said "Allow" and "app" for the AI app in `alwaysAllow` and `AllowedTools`; the
+  relay's help said "In the page": now "on the page" (also in `NO_PAGE_TEXT`).
 - **Wording not settled by the audit**: the library's list heading "Connected" became
   "Connected AI apps" (glossary 24); the takeover notice lost "with a new code" (the same
   reason as L3 and L4: with identity binding there is no code); the panel's line about an

@@ -17,6 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { TabMcp } from "../src/index.ts";
 import {
 	type AllowedToolsSnapshot,
+	BUTTON_TEXTS,
 	ConnectButton,
 	TabMcpProvider,
 	type TabMcpSnapshot,
@@ -27,6 +28,7 @@ import {
 	useTool,
 	useToolCalls,
 } from "../src/react.ts";
+import { STRINGS } from "../src/strings.ts";
 import type { Tool, ToolCaller } from "../src/types.ts";
 import {
 	connectClient,
@@ -891,6 +893,13 @@ test("game feedback 3: the default label says the connection is lost after three
 		"Connection lost. Reconnecting…",
 	]);
 	expect(button.dataset["state"]).toBe("reconnecting");
+});
+
+test("ConnectButton's inline English texts are those of the table (review of PR 181)", () => {
+	const keys = Object.keys(BUTTON_TEXTS) as (keyof typeof BUTTON_TEXTS)[];
+	expect(Object.fromEntries(keys.map((k) => [k, STRINGS[k]]))).toEqual(
+		BUTTON_TEXTS,
+	);
 });
 
 test("ConnectButton says what the TabMcp's ui.strings say, plural forms by its language (DEC-208)", () => {

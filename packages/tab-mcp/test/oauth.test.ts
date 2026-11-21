@@ -1333,7 +1333,11 @@ describe("threat model A7: the /authorize page", () => {
 		expect(page.headers.get("cache-control")).toBe("no-store");
 		expect(page.html).not.toContain("<script");
 		expect(page.html).toContain('<html lang="en">');
-		expect(page.html).toContain('<label for="code">');
+		expect(page.html).toContain('<label for="code">Code</label>');
+		// The page's own UI is "on the page" (kb/design/wording.md, review of PR 181).
+		expect(page.html).toContain(
+			"“Connect your AI app” on the page or in the browser extension you want to connect shows a code of 8 letters. It changes every 2 minutes and after each use.",
+		);
 		const css = await fetch(`${ctx.r.url}/authorize.css`);
 		expect(css.headers.get("content-type")).toStartWith("text/css");
 	});

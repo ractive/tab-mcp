@@ -4644,10 +4644,15 @@ unchanged; the audit's recommendation for the rest.
   `TabMcp` or `<TabMcpProvider>`), partial allowed, English for every missing key; every
   part reads it: the dialogs, the setup steps (their texts moved into the table;
   `setupInstructions` takes it as a third argument) and `ConnectButton` (through an
-  internal `_ui` getter: 8 bytes of core). `./strings` also has `pickStrings(tables,
+  internal `_ui` getter: about 10 bytes of core). `./strings` also has `pickStrings(tables,
   languages?)`, which loads the page's own table for `navigator.languages` (exact tag,
-  then the language alone; English built in, so a user who prefers it keeps it) and
-  `withEnglish(strings)`; `cdn/strings.min.js` is the same for pages without a bundler.
+  then the same script, the same region, the language alone, by name; English built in,
+  so a user who prefers it keeps it; it never rejects: a table that fails to load gives
+  English) and `withEnglish(strings)`; `cdn/strings.min.js` is the same for pages
+  without a bundler. `ConnectButton` keeps its five English texts inline, so a React
+  page does not load the table. A table with texts but no `lang` counts as English and
+  the console says so once (`lang` is not required by the type: a page that changes one
+  English text would need it). Names in plural texts are isolated one by one.
   A translation typed as `DialogStrings` makes the type check name every missing or
   misspelt key, also after an upgrade. Texts an AI app reads stay English on purpose.
 - **Kept as it was:** `ui.strings` as the place (one place already), `ui.setup` for the

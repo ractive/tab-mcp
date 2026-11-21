@@ -195,6 +195,13 @@ test("English only: the core carries none of the texts, no built file another la
 /** A text of `STRINGS` that is in no other place of the library. */
 const STRING_PROBE = "Step by step, and what to do when it fails";
 
+/**
+ * What a React page loads first, gzipped: 13.0 KB before DEC-208, about 16 KB
+ * while `./react` imported the whole table, 13.2 KB with the button's few
+ * texts inline (review of PR 181).
+ */
+const REACT_CLOSURE_LIMIT = 13.5 * 1024;
+
 test("the tunnel entry stands alone: no DOM, nothing of the page's library", async () => {
 	const result = await Bun.build({
 		entrypoints: [join(root, "src/tunnel.ts")],
@@ -337,15 +344,15 @@ test("the build produces a package whose declarations type-check for a consumer"
 			"modulepreload",
 		);
 	// The React entry: "use client" first, the core entry, the allowances
-	// (one store with the dialogs'), the texts (one table with the
-	// dialogs') and react as imports.
+	// (one store with the dialogs') and react as imports; not the table of
+	// texts (`ConnectButton` has its few inline, DEC-208).
 	const reactEntry = await Bun.file(join(dist, "react.js")).text();
 	expect(reactEntry.startsWith('"use client";')).toBe(true);
 	const imports = [
 		...reactEntry.matchAll(/\bfrom\s*"([^"]+)"|\bimport\s*\(\s*"([^"]+)"/g),
 	].map((m) => m[1] ?? m[2]);
 	expect(new Set(imports)).toEqual(
-		new Set(["react", "./index.js", "./allowed.js", "./strings.js"]),
+		new Set(["react", "./index.js", "./allowed.js"]),
 	);
 	const cdnFiles = [...new Bun.Glob("cdn/*.js").scanSync(dist)];
 	expect(cdnFiles.some((f) => f.includes("react"))).toBe(false);
@@ -383,7 +390,24 @@ test("the build produces a package whose declarations type-check for a consumer"
 	expect(cdn.get("strings.min.js")).toContain("pickStrings");
 	const reactGz = Bun.gzipSync(new TextEncoder().encode(reactEntry)).length;
 	console.log(`react entry ${(reactGz / 1024).toFixed(1)} KB gzipped`);
-	expect(reactGz).toBeLessThanOrEqual(3 * 1024);
+	// 3.25 KB since `ConnectButton`'s texts are inline and translatable
+	// (DEC-208); 3 KB before.
+	expect(reactGz).toBeLessThanOrEqual(3.25 * 1024);
+	// What a React page loads with the entry (its static imports, with the
+	// core and the allowances): not the table of texts (review of PR 181).
+	const npmFiles = new Map<string, string>();
+	for (const file of new Bun.Glob("*.js").scanSync(dist))
+		npmFiles.set(file, await Bun.file(join(dist, file)).text());
+	const reactClosure = [...staticClosure(npmFiles, "react.js")];
+	const reactCode = reactClosure.map((n) => npmFiles.get(n) ?? "").join("\n");
+	expect(reactCode).not.toContain(STRING_PROBE);
+	expect(reactClosure).not.toContain("strings.js");
+	const reactClosureGz = reactClosure.reduce(
+		(sum, n) => sum + gz(npmFiles.get(n) ?? ""),
+		0,
+	);
+	console.log(`react closure ${reactClosureGz} B gzipped`);
+	expect(reactClosureGz).toBeLessThanOrEqual(REACT_CLOSURE_LIMIT);
 	expect(await Bun.file(join(dist, "react.d.ts")).text()).not.toContain('.ts"');
 
 	await Bun.write(

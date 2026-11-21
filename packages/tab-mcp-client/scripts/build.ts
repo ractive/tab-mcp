@@ -17,6 +17,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
+import { PUBLISHED_EXPORTS } from "./published-exports.ts";
 
 const root = join(import.meta.dir, "..");
 const dist = join(root, "dist");
@@ -38,7 +39,7 @@ const npm = await Bun.build({
 	// `serve`, for a backend), `./allowed` (the tools that run without
 	// asking), `./extension` (the code fill-in for browser extensions,
 	// which imports nothing of the rest, so it shares no chunk) and
-	// `./strings` (the English texts, for translators and `./react`) are
+	// `./strings` (the English texts, for translators) are
 	// entries of their own, out of the core (DEC-103, DEC-118, DEC-125,
 	// DEC-200, DEC-206, DEC-208).
 	entrypoints: [
@@ -77,9 +78,9 @@ const cdn = await Bun.build({
 	naming: { entry: "[name].min.js", chunk: "[name]-[hash].min.js" },
 });
 // The React entry (iteration 9): its own file that imports the core entry
-// (`./index.js`, one `TabMcp` class for both), `./allowed.js`,
-// `./strings.js` (the texts of `ConnectButton`, one table with the
-// dialogs') and `react`; not in the CDN build.
+// (`./index.js`, one `TabMcp` class for both), `./allowed.js` and `react`;
+// not in the CDN build. `ConnectButton` has its few English texts inline, so
+// a page does not load the table of `./strings` with it (DEC-208).
 const react = await Bun.build({
 	entrypoints: [join(root, "src/react.ts")],
 	target: "browser",
@@ -96,13 +97,10 @@ const react = await Bun.build({
 		{
 			name: "core-entry-external",
 			setup(build) {
-				build.onResolve(
-					{ filter: /^\.\/(index|allowed|strings)\.ts$/ },
-					(args) => ({
-						path: args.path.replace(/\.ts$/, ".js"),
-						external: true,
-					}),
-				);
+				build.onResolve({ filter: /^\.\/(index|allowed)\.ts$/ }, (args) => ({
+					path: args.path.replace(/\.ts$/, ".js"),
+					external: true,
+				}));
 			},
 		},
 	],
@@ -132,19 +130,7 @@ const published = {
 	version: pkg["version"],
 	description: pkg["description"],
 	type: "module",
-	exports: {
-		".": { types: "./index.d.ts", default: "./index.js" },
-		"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
-		"./extension": { types: "./extension.d.ts", default: "./extension.js" },
-		"./react": { types: "./react.d.ts", default: "./react.js" },
-		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
-		"./strings": { types: "./strings.d.ts", default: "./strings.js" },
-		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
-		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
-		"./cdn": "./cdn/tab-mcp-client.min.js",
-		"./cdn/allowed": "./cdn/allowed.min.js",
-		"./cdn/strings": "./cdn/strings.min.js",
-	},
+	exports: PUBLISHED_EXPORTS,
 	types: "./index.d.ts",
 	sideEffects: false,
 	license: pkg["license"],

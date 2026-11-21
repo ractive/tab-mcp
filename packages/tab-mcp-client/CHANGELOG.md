@@ -44,13 +44,18 @@ unknown key.
   (and `cdn/strings.min.js`): `STRINGS`, the English table, typed, so a translation
   typed as `DialogStrings` names every key it lacks or misspells in the type check;
   `pickStrings(tables, languages?)`, which loads the page's own table for the user's
-  languages (`navigator.languages`), English when they prefer it or nothing matches;
+  languages (`navigator.languages`: the same tag, else the same script, region or the
+  language alone), English when they prefer it or nothing matches, and never rejects (a
+  table that does not load gives English, with a warning);
   `withEnglish(strings)`, the full table for a page's own UI; the type `PluralText`.
   `setupInstructions(serverName, address, strings?)` takes the table too. New keys:
   `allowEverythingUntilReloadNote`, `setupClaudeApp`, `setupClaude`, `setupChatGpt`,
   `setupRun`, `setupClaudeCode`, `setupClaudeCodeNote`, `setupCodex`, `setupCodexNote`,
-  `buttonReconnecting`, `buttonConnected`. See
-  [Translating](README.md#translating). The core grows by 8 bytes gzipped.
+  `buttonReconnecting`, `buttonConnected`. A table with texts but no `lang` counts as
+  English and the console says so once. See [Translating](README.md#translating). The
+  core grows by 10 bytes gzipped (6270 B). The React entry keeps `ConnectButton`'s few
+  English texts inline and does not load the table: what a React page loads first grows
+  by about 0.5 KB gzipped (13.2 KB, 13.0 KB before), the entry itself to 3.1 KB.
 - **The page and the tab-mcp browser extension know of each other** (`webmcp: true`,
   DEC-207): a plain handshake over DOM events (`tab-mcp-page`, `tab-mcp-extension`) with
   the extension from its next release.

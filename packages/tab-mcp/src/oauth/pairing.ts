@@ -278,7 +278,7 @@ export const codePairing: PairingMethod = {
 		// (1Password, LastPass, Bitwarden, Dashlane) say there is nothing to fill.
 		return `<p><label for="code">Code</label>
 <input id="code" name="code" type="text" data-tab-mcp-field="code" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocapitalize="characters" spellcheck="false" pattern="[A-Za-z \\-]{${CODE_LENGTH},${CODE_LENGTH + 4}}" maxlength="${CODE_LENGTH + 4}" required autofocus aria-describedby="code-help"></p>
-<p id="code-help" class="help">In the page or browser extension you want to connect, “Connect your AI app” shows a code of ${CODE_LENGTH} letters. It changes every 2 minutes and after each use.</p>`;
+<p id="code-help" class="help">“Connect your AI app” on the page or in the browser extension you want to connect shows a code of ${CODE_LENGTH} letters. It changes every 2 minutes and after each use.</p>`;
 	},
 	check(pool, form, admit): PairingResult {
 		const code = normalizeCode(form.get("code") ?? "");

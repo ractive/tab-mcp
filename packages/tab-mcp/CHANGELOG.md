@@ -34,7 +34,9 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   close and open the dialog again after 10 minutes. Code pairing is unchanged.
 - **One wording with the library and the browser extension**: the pairing page speaks of
   "the page or browser extension" (not "the page or app") and "types" the code. Its
-  label is "Code"; its help says the code "changes every 2 minutes and after each use";
+  label is "Code"; its help reads "“Connect your AI app” on the page or in the browser
+  extension you want to connect shows a code of 8 letters. It changes every 2 minutes and
+  after each use.", and with identity binding "On the page, sign in with that account …";
   a wrong code reads "That code is not right, or it has expired. Type the code that
   “Connect your AI app” shows now."; a malformed one "Type the 8 letters of the code.".
   "You're connecting … to the page or browser extension in this browser that shows the

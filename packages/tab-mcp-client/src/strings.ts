@@ -17,6 +17,8 @@
  * English on purpose, as the AI app quotes them back in its own words.
  */
 
+import { isPlural, warnWithoutLang } from "./text.ts";
+
 /**
  * A text that depends on a count `{n}` (or on the number of names in a
  * list): one form per plural category the language has, as
@@ -234,21 +236,17 @@ export type DialogStrings = {
 /** The English texts, the defaults for every key. */
 export const STRINGS: DialogStrings = english;
 
-const isPlural = (value: unknown): value is PluralText =>
-	typeof value === "object" &&
-	value !== null &&
-	typeof (value as { other?: unknown }).other === "string" &&
-	Object.values(value).every((form) => typeof form === "string");
-
 /**
  * Every text: `strings` where it has one of the right kind, English for
  * the rest. A missing translation (`undefined`), an unknown key or a plain
  * string where the English text has plural forms keeps the English text:
- * a table from an older version still works, only less translated.
+ * a table from an older version still works, only less translated. A table
+ * with texts but no `lang` counts as English, and the console says so once.
  */
 export function withEnglish(
 	strings: Partial<DialogStrings> | undefined,
 ): DialogStrings {
+	warnWithoutLang(strings);
 	const s: Record<string, unknown> = { ...STRINGS };
 	for (const [key, value] of Object.entries(strings ?? {})) {
 		const english = s[key];
@@ -267,16 +265,65 @@ export function withEnglish(
 /** A table of texts, or a module whose default export is one. */
 type Loaded = Partial<DialogStrings> | { default: Partial<DialogStrings> };
 
+/** A tag's language, script and region, as the browser fills them in. */
+function subtags(tag: string): {
+	language: string;
+	script?: string;
+	region?: string;
+} {
+	const language = tag.toLowerCase().split("-")[0] ?? "";
+	try {
+		const { script, region } = new Intl.Locale(tag).maximize();
+		return {
+			language,
+			...(script === undefined ? {} : { script }),
+			...(region === undefined ? {} : { region }),
+		};
+	} catch {
+		return { language };
+	}
+}
+
+/**
+ * Of the tags in `tags`, the one for the user's language `wanted`: the same
+ * tag; else, among those of the same language, the one with the same script
+ * (`zh-TW` is written `Hant`, so it takes `zh-Hant` over `zh-Hans` or `zh`),
+ * then the same region, then the language alone (`de-CH` takes `de` over
+ * `de-AT`), then the first in alphabetical order. The browser's likely
+ * subtags (`Intl.Locale.maximize`) fill in what a tag leaves out.
+ */
+function matchTag(tags: string[], wanted: string): string | undefined {
+	const exact = tags.find((t) => t.toLowerCase() === wanted.toLowerCase());
+	if (exact !== undefined) return exact;
+	const want = subtags(wanted);
+	const score = (tag: string) => {
+		const has = subtags(tag);
+		return (
+			(has.script !== undefined && has.script === want.script ? 4 : 0) +
+			(has.region !== undefined && has.region === want.region ? 2 : 0) +
+			(tag.toLowerCase() === want.language ? 1 : 0)
+		);
+	};
+	return tags
+		.filter((t) => subtags(t).language === want.language)
+		.sort((a, b) => score(b) - score(a) || (a < b ? -1 : a > b ? 1 : 0))[0];
+}
+
 /**
  * The page's own table for the user's language, loaded only once chosen:
- * `tables` maps language tags (`"de"`, `"pt-BR"`) to functions that load
- * one, such as `() => import("./tab-mcp.de.ts")`. The user's languages
- * (`navigator.languages`, most preferred first) are matched in order, each
- * exactly and then by its language alone (`de-CH` takes `de`, and `de`
- * takes `de-DE`). English is built in: a user who prefers English before
- * any of the tables, or none of them, gets `undefined`, which keeps the
- * English texts. The table comes with `lang` set to the matched tag unless
- * it has its own.
+ * `tables` maps language tags (`"de"`, `"pt-BR"`, `"zh-Hant"`) to functions
+ * that load one, such as `() => import("./tab-mcp.de.ts")`. The user's
+ * languages (`navigator.languages`, most preferred first) are tried in
+ * order; each takes the same tag, else a table of the same language: the
+ * same script first, then the same region, then the language alone, then
+ * the first in alphabetical order. English is built in: a user who prefers
+ * English before any of the tables, or none of them, gets `undefined`,
+ * which keeps the English texts. The table comes with `lang` set to the
+ * matched tag unless it has its own.
+ *
+ * It never rejects: a table that fails to load (a chunk gone after a
+ * deploy, offline) or is not an object is said in the console and gives
+ * `undefined`, so the page still starts, in English.
  *
  * ```ts
  * const strings = await pickStrings({ de: () => import("./tab-mcp.de.ts") });
@@ -288,20 +335,29 @@ export async function pickStrings(
 	languages: readonly string[] = globalThis.navigator?.languages ?? [],
 ): Promise<Partial<DialogStrings> | undefined> {
 	const tags = Object.keys(tables);
-	const base = (tag: string) => tag.toLowerCase().split("-")[0];
 	for (const wanted of languages) {
-		const want = wanted.toLowerCase();
-		const tag =
-			tags.find((t) => t.toLowerCase() === want) ??
-			tags.find((t) => base(t) === base(want));
+		const tag = matchTag(tags, wanted);
 		if (tag !== undefined) {
-			const loaded = await (tables[tag] as () => Promise<Loaded>)();
-			const table: Partial<DialogStrings> =
-				"default" in loaded ? loaded.default : loaded;
-			return { ...table, lang: table.lang ?? tag };
+			try {
+				const loaded: unknown = await (tables[tag] as () => Promise<Loaded>)();
+				const table: unknown =
+					typeof loaded === "object" && loaded !== null && "default" in loaded
+						? loaded.default
+						: loaded;
+				if (typeof table !== "object" || table === null)
+					throw new TypeError(`not a table of texts: ${String(table)}`);
+				const texts = table as Partial<DialogStrings>;
+				return { ...texts, lang: texts.lang ?? tag };
+			} catch (error) {
+				console.warn(
+					`tab-mcp: could not load the texts for ${tag}; English instead.`,
+					error,
+				);
+				return undefined;
+			}
 		}
 		// English is built in: the user reads it before any later language.
-		if (base(want) === "en") return undefined;
+		if (subtags(wanted).language === "en") return undefined;
 	}
 	return undefined;
 }

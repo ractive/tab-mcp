@@ -11,10 +11,10 @@ import {
 	el,
 	fill,
 	format,
-	listOf,
 	newDialog,
 	nextId,
 	plural,
+	showNames,
 	stringsOf,
 	visible,
 } from "./dialog.ts";
@@ -927,10 +927,7 @@ export function showConnectDialog(
 		if (names.length === 0 || !shown) asking = false;
 
 		connectedView = !renewing && connected && grants.length > 0;
-		const named = listOf(names, s);
-		successTitle.textContent = plural(s.connected, names.length, s, {
-			apps: named,
-		});
+		showNames(doc, successTitle, s.connected, names, s);
 		successNext.textContent = plural(s.connectedNext, names.length, s);
 		if (connectedView) dialog.setAttribute("aria-describedby", successId);
 		else dialog.removeAttribute("aria-describedby");
@@ -946,15 +943,13 @@ export function showConnectDialog(
 			),
 		];
 		viaExtension.hidden = via.length === 0;
-		viaExtension.textContent =
-			via.length === 0
-				? ""
-				: plural(
-						extension?.whileInFront ? s.viaExtensionInFront : s.viaExtension,
-						via.length,
-						s,
-						{ apps: listOf(via, s) },
-					);
+		showNames(
+			doc,
+			viaExtension,
+			extension?.whileInFront ? s.viaExtensionInFront : s.viaExtension,
+			via,
+			s,
+		);
 
 		// The status line is for the setup; the confirmation says it otherwise.
 		if (connected) message = undefined;
@@ -987,13 +982,7 @@ export function showConnectDialog(
 		addressBox.hidden = help.hidden = freshBox.hidden = !shown;
 		fresh.disabled = !connected;
 		question.hidden = !asking;
-		if (asking)
-			questionText.textContent = plural(
-				s.disconnectAllQuestion,
-				names.length,
-				s,
-				{ apps: named },
-			);
+		if (asking) showNames(doc, questionText, s.disconnectAllQuestion, names, s);
 		const hasCode = renderCode(paired);
 		codeLine.hidden = oidc || !hasCode || !connected;
 		signInLine.hidden = !oidc || mcp.identity !== "bound" || over;

@@ -3,9 +3,10 @@
  * package, plural forms and lists by `Intl` in the texts' language, and a
  * page's own table given once (DEC-208).
  */
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";
 import { confirmDialog } from "../src/confirm.ts";
+import { pluralNames } from "../src/dialog.ts";
 import { setupInstructions } from "../src/setup.ts";
 import {
 	type DialogStrings,
@@ -237,6 +238,101 @@ describe("pickStrings: the page's table for the user's languages, loaded once ch
 		expect(await pickStrings(tables, [])).toBeUndefined();
 		expect(loads).toEqual([]);
 	});
+
+	test("never rejects: a table that fails to load, or is not one, gives English (review of PR 181)", async () => {
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(
+				await pickStrings(
+					{ de: () => Promise.reject(new Error("chunk gone")) },
+					["de"],
+				),
+			).toBeUndefined();
+			expect(
+				await pickStrings({ de: async () => null as never }, ["de"]),
+			).toBeUndefined();
+			expect(
+				await pickStrings({ de: async () => ({ default: "x" }) as never }, [
+					"de",
+				]),
+			).toBeUndefined();
+			// Only its own warnings: another test's may land meanwhile.
+			const mine = warn.mock.calls.filter((c) =>
+				String(c[0]).includes("could not load the texts for de"),
+			);
+			expect(mine).toHaveLength(3);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("of one language: the same script, then the same region, then the language alone, then by name (review of PR 181)", async () => {
+		const pick = async (keys: string[], wanted: string) =>
+			(
+				await pickStrings(
+					Object.fromEntries(keys.map((k) => [k, async () => ({})])),
+					[wanted],
+				)
+			)?.lang;
+		expect(await pick(["zh-Hans", "zh-Hant"], "zh-TW")).toBe("zh-Hant");
+		expect(await pick(["zh-Hant", "zh-Hans"], "zh-CN")).toBe("zh-Hans");
+		expect(await pick(["zh", "zh-Hant"], "zh-TW")).toBe("zh-Hant");
+		expect(await pick(["zh-Hant", "zh"], "zh-CN")).toBe("zh");
+		expect(await pick(["de-AT", "de"], "de-CH")).toBe("de");
+		expect(await pick(["pt-BR", "pt"], "pt-PT")).toBe("pt");
+		expect(await pick(["pt-BR"], "pt-PT")).toBe("pt-BR");
+		expect(await pick(["de-AT", "de-DE"], "de")).toBe("de-DE");
+		expect(await pick(["de-CH", "de-AT"], "de-LI")).toBe("de-AT");
+	});
+});
+
+describe("a table without lang (review of PR 181)", () => {
+	test("counts as English, and the console says so once per table", () => {
+		const noLang = () =>
+			warn.mock.calls.filter((c) =>
+				String(c[0]).includes("has texts but no lang"),
+			).length;
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const polish = { waiting: { one: "o", few: "f", other: "x" } };
+			const s = withEnglish(polish);
+			withEnglish(polish);
+			expect(s.lang).toBe("en");
+			expect(plural(s.waiting, 3, s)).toBe("x");
+			expect(noLang()).toBe(1);
+			withEnglish({ lang: "pl", deny: "Nie" });
+			withEnglish({ lang: undefined } as never);
+			withEnglish(undefined);
+			expect(noLang()).toBe(1);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+});
+
+test("names in a plural text are isolated one by one, joined as the language lists them (review of PR 181)", async () => {
+	const window = new Window({ url: "https://page.example/" });
+	const doc = window.document as unknown as Document;
+	try {
+		const p = doc.createElement("p");
+		p.append(
+			...pluralNames(
+				doc,
+				{ one: "{apps} ist verbunden", other: "{apps} sind verbunden" },
+				["Claude (claude.ai)", "ChatGPT (chatgpt.com)"],
+				de(),
+			),
+		);
+		expect(p.textContent).toBe(
+			"Claude (claude.ai) und ChatGPT (chatgpt.com) sind verbunden",
+		);
+		expect([...p.querySelectorAll("bdi")].map((b) => b.textContent)).toEqual([
+			"Claude (claude.ai)",
+			"ChatGPT (chatgpt.com)",
+		]);
+	} finally {
+		await window.happyDOM.close();
+	}
 });
 
 test("the package ships English only: no translation in the table", () => {

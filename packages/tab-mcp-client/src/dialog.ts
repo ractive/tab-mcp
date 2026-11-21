@@ -6,8 +6,8 @@
  * of `TabMcp` instead.
  */
 
-import { type DialogStrings, withEnglish } from "./strings.ts";
-import { directionOf, format } from "./text.ts";
+import { type DialogStrings, type PluralText, withEnglish } from "./strings.ts";
+import { directionOf, format, listFormat, pluralForm } from "./text.ts";
 import type { DialogOptions, Grant, ToolCallClient } from "./types.ts";
 import { escapeInvisible } from "./visible.ts";
 
@@ -82,6 +82,56 @@ export function name(doc: Document, text: string): HTMLElement {
 	const node = el(doc, "bdi", { text });
 	node.dir = "ltr";
 	return node;
+}
+
+/**
+ * The form of `text` for the number of `names`, with `{apps}` the names as
+ * the texts' language lists them ("A, B and C"), each name isolated like
+ * every other name in a dialog, as nodes.
+ */
+export function pluralNames(
+	doc: Document,
+	text: PluralText,
+	names: string[],
+	s: DialogStrings,
+): (Node | string)[] {
+	const list = el(
+		doc,
+		"span",
+		{},
+		...listFormat(s)
+			.formatToParts(names)
+			.map((part) =>
+				part.type === "element" ? name(doc, part.value) : part.value,
+			),
+	);
+	return fill(doc, pluralForm(text, names.length, s), { apps: list });
+}
+
+/** What each element shows through `showNames`, so that it is made only on a change. */
+const shownNames = new WeakMap<Element, string>();
+
+/**
+ * `node` says `text` for `names` (`pluralNames`), or nothing when there are
+ * none. Its nodes are made again only when the words change: a render that
+ * changes nothing removes nothing (a screen reader keeps its place).
+ */
+export function showNames(
+	doc: Document,
+	node: Element,
+	text: PluralText,
+	names: string[],
+	s: DialogStrings,
+): void {
+	const key =
+		names.length === 0
+			? ""
+			: [pluralForm(text, names.length, s), ...names].join("\n");
+	if ((shownNames.get(node) ?? "") === key) return;
+	shownNames.set(node, key);
+	node.replaceChildren(
+		...(names.length === 0 ? [] : pluralNames(doc, text, names, s)),
+	);
 }
 
 /** Invisible, blank and direction characters as `\uXXXX` (`visible.ts`). */

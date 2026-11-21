@@ -1117,11 +1117,15 @@ const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "notize
 ```
 
 `pickStrings(tables, languages = navigator.languages)` goes through the user's languages
-in order and loads the first table that matches, exactly or by the language alone
-(`de-CH` takes `de`, `pt-PT` takes `pt-BR`). English is built in: a user who prefers
-English before any of your languages, or none of them, gets `undefined`, which keeps the
-English texts. The table comes with `lang` set to the tag it was found by unless it has
-its own. A table with a few keys:
+in order and loads the first table that matches: the same tag, else a table of the same
+language, preferring the same script (`zh-TW` takes `zh-Hant` over `zh-Hans` or `zh`),
+then the same region, then the language alone (`de-CH` takes `de` over `de-AT`; `pt-PT`
+takes `pt` over `pt-BR`, or `pt-BR` if it is the only one), then the first by name.
+English is built in: a user who prefers English before any of your languages, or none of
+them, gets `undefined`, which keeps the English texts. The table comes with `lang` set to
+the tag it was found by unless it has its own. It never rejects: a table that does not
+load (a chunk gone after a deploy, offline) or is not an object is said in the console
+and gives `undefined`, so the page starts in English. A table with a few keys:
 
 ```ts
 // tab-mcp.de.ts
@@ -1156,7 +1160,10 @@ export default {
 - **Lists.** Names are joined by `Intl.ListFormat` in your language ("A, B und C"):
   there is nothing to translate.
 - **Language and direction.** `lang` (a BCP 47 tag) is what plural forms and lists follow,
-  and every dialog carries it, so a screen reader reads it with the right voice. The
+  and every dialog carries it, so a screen reader reads it with the right voice. Always
+  give it: a table with texts but no `lang` counts as English (English plural rules,
+  `lang="en"`), and the console says so once; a page that only changes a few English
+  texts sets `lang: "en"`. The
   dialogs take the direction from `lang` where the browser knows it; set `dir: "rtl"` in a
   right-to-left table to be sure (Firefox does not tell).
 - **Complete across upgrades.** Type a full translation as `DialogStrings` instead of

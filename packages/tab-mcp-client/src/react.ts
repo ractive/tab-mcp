@@ -45,8 +45,8 @@ import {
 	type ToolCallEnd,
 	type ToolCallStart,
 } from "./index.ts";
-import { type DialogStrings, withEnglish } from "./strings.ts";
-import { plural } from "./text.ts";
+import type { DialogStrings } from "./strings.ts";
+import { isPlural, plural } from "./text.ts";
 
 /** What `useTabMcpState()` returns: one object per change, the same object otherwise. */
 export interface TabMcpSnapshot {
@@ -446,8 +446,37 @@ export interface ConnectButtonProps
 /** Failed reconnect attempts after which the default label says the connection is lost. */
 const LOST_AFTER_ATTEMPTS = 3;
 
+/**
+ * `ConnectButton`'s texts in English: the same as these keys of `STRINGS`
+ * (a test keeps them equal), here so that a page loads not the whole table
+ * of `./strings` with the button, only these few texts (review of PR 181).
+ * @internal
+ */
+export const BUTTON_TEXTS = {
+	lang: "en",
+	connectTitle: "Connect your AI app",
+	connecting: "Connecting…",
+	reconnecting: "Connection lost. Reconnecting…",
+	buttonReconnecting: "Reconnecting…",
+	buttonConnected: { one: "AI app connected", other: "{n} AI apps connected" },
+};
+type ButtonTexts = Pick<DialogStrings, keyof typeof BUTTON_TEXTS>;
+
+/** The button's texts: the `TabMcp`'s `ui.strings` where they are of the right kind. */
+function buttonTexts(strings: Partial<DialogStrings> | undefined): ButtonTexts {
+	const s: Record<string, unknown> = { ...BUTTON_TEXTS };
+	for (const [key, english] of Object.entries(BUTTON_TEXTS)) {
+		const value: unknown = strings?.[key as keyof ButtonTexts];
+		if (
+			typeof english === "string" ? typeof value === "string" : isPlural(value)
+		)
+			s[key] = value;
+	}
+	return s as ButtonTexts;
+}
+
 /** The default label of `ConnectButton`, in the texts of the `TabMcp`'s `ui.strings`. */
-function connectLabel(state: TabMcpSnapshot, s: DialogStrings): string {
+function connectLabel(state: TabMcpSnapshot, s: ButtonTexts): string {
 	if (state.state === "connected" && state.grants.length > 0)
 		return plural(s.buttonConnected, state.grants.length, s);
 	if (state.state === "reconnecting")
@@ -476,7 +505,7 @@ export function ConnectButton({
 	if (!mcp.hasRelay) return null;
 	const label =
 		children === undefined
-			? connectLabel(state, withEnglish(mcp._ui?.strings))
+			? connectLabel(state, buttonTexts(mcp._ui?.strings))
 			: typeof children === "function"
 				? children(state)
 				: children;
