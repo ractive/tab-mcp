@@ -252,12 +252,12 @@ await mcp.registerTool<{ id: string }>({
 ```
 
 The page then asks before every call: a dialog names the AI app and shows the arguments,
-"Don't allow" has the focus, and "Allow" turns on only after the page has been visible and
+"Don't allow" has the focus, and "Allow once" turns on only after the page has been visible and
 focused for 750 ms with the dialog open (leaving the page starts the wait again).
 Invisible and direction-changing characters in the arguments are shown as `\uXXXX`. The
-dialog offers "Don't allow" and "Allow"; "Always allow" (that tool runs without asking for
+dialog offers "Don't allow" and "Allow once"; "Always allow" (that tool runs without asking for
 that AI app, with any arguments, until the app is disconnected, kept in `storage`; the
-connect dialog shows a switch per tool and "Allow everything, no questions asked" under
+connect dialog shows a switch per tool and "Always allow everything" under
 each app) appears only with `alwaysAllow: true` on `TabMcp` (`"until-reload"`: memory
 only, "Allow until reload"). A page can draw its own switches with `allowedTools(mcp)` of
 `@ractive-ch/tab-mcp-client/allowed`. Leave it off unless the user really need not check

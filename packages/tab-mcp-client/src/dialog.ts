@@ -6,9 +6,12 @@
  * of `TabMcp` instead.
  */
 
-import { type DialogStrings, STRINGS } from "./strings.ts";
+import { type DialogStrings, withEnglish } from "./strings.ts";
+import { directionOf, format } from "./text.ts";
 import type { DialogOptions, Grant, ToolCallClient } from "./types.ts";
 import { escapeInvisible } from "./visible.ts";
+
+export { format, listOf, plural } from "./text.ts";
 
 let counter = 0;
 
@@ -17,25 +20,9 @@ export function nextId(): string {
 	return `tab-mcp-${++counter}`;
 }
 
-/** The texts: the page's own where it gave them, else the English ones. */
+/** The texts: the page's own (`ui.strings`) where it gave them, else English. */
 export function stringsOf(options: DialogOptions | undefined): DialogStrings {
-	const s: DialogStrings = { ...STRINGS };
-	// Only strings: a missing translation (`undefined`) keeps the English text.
-	for (const [key, value] of Object.entries(options?.strings ?? {}))
-		if (typeof value === "string" && key in s)
-			s[key as keyof DialogStrings] = value;
-	return s;
-}
-
-/** `template` with its `{name}` placeholders filled in, as text. */
-export function format(
-	template: string,
-	values: Record<string, string>,
-): string {
-	return template.replace(
-		/\{(\w+)\}/g,
-		(all, key: string) => values[key] ?? all,
-	);
+	return withEnglish(options?.strings);
 }
 
 /**
@@ -115,13 +102,6 @@ export function clientLabel(
 	return client.name !== undefined && client.name !== ""
 		? format(s.clientRelay, { name: visible(client.name), host })
 		: host;
-}
-
-/** "A and B", "A, B and C". */
-export function listOf(items: string[], s: DialogStrings): string {
-	return items.length < 2
-		? (items[0] ?? "")
-		: `${items.slice(0, -1).join(", ")} ${s.and} ${items.at(-1)}`;
 }
 
 /**
@@ -266,8 +246,9 @@ function adoptStyles(doc: Document): void {
 
 /**
  * A dialog with its heading (`title`, or filled in by the caller). It
- * carries the texts' language and direction (`lang`, `dir` of the
- * strings), whatever the page's: read out with that voice, laid out that way.
+ * carries the texts' language and direction (`lang` of the strings, and
+ * `dir` or the direction of that language), whatever the page's: read out
+ * with that voice, laid out that way.
  */
 export function newDialog(
 	doc: Document,
@@ -281,7 +262,7 @@ export function newDialog(
 	});
 	dialog.setAttribute("aria-labelledby", `${id}-title`);
 	dialog.lang = s.lang;
-	dialog.dir = s.dir;
+	dialog.dir = directionOf(s);
 	adoptStyles(doc);
 	const heading = el(doc, "h2", { id: `${id}-title` }, ...title);
 	dialog.append(heading);

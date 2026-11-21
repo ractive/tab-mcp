@@ -201,7 +201,7 @@ const wrongFor = (code: string) =>
 
 /** The one text for a wrong and for an expired code. */
 const WRONG_TEXT = "That code is not right, or it has expired.";
-const MALFORMED_TEXT = "Enter the 8 letters shown in the page.";
+const MALFORMED_TEXT = "Type the 8 letters of the code.";
 const LIMITED_TEXT = "Too many wrong codes from your network.";
 
 /** The elements of a page with their attributes as written (not decoded). */
@@ -573,7 +573,7 @@ describe("pairing with the code shown in the tab (DEC-028, DEC-196)", () => {
 		const page = await open(ctx);
 		const host = new URL(clientId).host;
 		expect(page.html).toContain(
-			`<p>You're connecting <strong>Test AI</strong> (${host}) to <strong>${APP}</strong>: to the page or app that is open in your browser and shows the code.</p>`,
+			`<p>You're connecting <strong>Test AI</strong> (${host}) to <strong>${APP}</strong>: to the page or browser extension in this browser that shows the code.</p>`,
 		);
 		expect(page.html).toContain('autocomplete="off"');
 		// The relay does not know which page is meant before the code: neither
@@ -594,7 +594,8 @@ describe("pairing with the code shown in the tab (DEC-028, DEC-196)", () => {
 		expect(page.html).toContain(`to <strong>${APP}</strong>:`);
 		expect(page.html).not.toContain("Overmark");
 		expect(page.html).not.toContain("abcdefghijklmnop");
-		expect(page.html).not.toContain("extension");
+		// The page names "the page or browser extension" in general, never its origin.
+		expect(page.html).not.toContain("chrome-extension");
 	});
 
 	test("the code is typed as shown, in lower case, without the dash or with spaces", async () => {
@@ -630,7 +631,7 @@ describe("pairing with the code shown in the tab (DEC-028, DEC-196)", () => {
 		});
 		expect(res.status).toBe(400);
 		expect(res.html).toContain(
-			`<p class="error" role="alert" id="error">${WRONG_TEXT} Enter the code the page shows now: “Connect your AI app” in the page shows it.</p>`,
+			`<p class="error" role="alert" id="error">${WRONG_TEXT} Type the code that “Connect your AI app” shows now.</p>`,
 		);
 		expect(res.html).not.toMatch(/tr(y|ies) (is|are) left/);
 		expect(ctx.r.logs.events("oauth.pairing_failed").at(-1)).toMatchObject({

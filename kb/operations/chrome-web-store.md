@@ -241,8 +241,9 @@ code and message.
 > or Codex, through a tab-mcp relay.
 >
 > Click the extension's icon on a tab to let it read that tab, then turn on AI access in
-> the side panel. It shows an address and a pairing code to add in your AI app. The AI app
-> then sees the page's tools, follows the tab in front and can call them.
+> the side panel. Under "Connect your AI app" it shows an address to add to your AI app
+> and a code to type when your AI app asks for it. The AI app then sees the page's tools,
+> follows the tab in front and can call them.
 >
 > A tool the page marks read-only runs at once. Every other tool asks you first, in the
 > side panel or in a notification, with the AI app's name, the site and the arguments.
@@ -307,7 +308,7 @@ sends.
   secret that identifies this installation to the relay, the tools allowed per site.
   Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
-  app the user paired, only while AI access is on.
+  app the user connected, only while AI access is on.
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to
   the single purpose; not used to determine creditworthiness or for lending.
 - **Privacy policy URL:** the ractive.ch page with PRIVACY.md (setup step 2).
@@ -319,9 +320,9 @@ sends.
 > chrome://flags/#enable-webmcp-testing and restart. Open
 > https://ractive.ch/tab-mcp/examples/diagram/, a diagram editor that registers its tools
 > with WebMCP (by the extension's developer). Click the extension's icon: the side panel shows the page's tools. Turn on "AI access":
-> the panel shows an address and a pairing code. Add the address in an MCP client, for
-> example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension <address>`,
-> then `/mcp` → authenticate, and enter the pairing code in the browser page that opens.
+> under "Connect your AI app" the panel shows an address and a code. Add the address in an
+> MCP client, for example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension <address>`,
+> then `/mcp` → authenticate, and type the code on the sign-in page that opens.
 > Ask Claude to draw a small flowchart in the page; a tool that is not read-only (such as
 > `page_add_shapes`) asks in the side panel first. Ask it to open https://ractive.ch/tab-mcp/
 > (`navigate`): on the same site it opens at once; ask it to open another site: the side

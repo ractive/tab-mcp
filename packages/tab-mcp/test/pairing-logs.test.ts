@@ -252,7 +252,7 @@ describe("RS 6: on an open relay the page origin is a serialised origin or nothi
 		expect(page.html).not.toContain("Your Bank");
 		expect(page.html).not.toContain('class="origin"');
 		expect(page.html).toContain(
-			"to <strong>test</strong>: to the page or app that is open in your browser and shows the code.",
+			"to <strong>test</strong>: to the page or browser extension in this browser that shows the code.",
 		);
 	});
 });

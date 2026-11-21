@@ -271,9 +271,11 @@ export interface SetupStep {
 /** Options of the library's dialogs (`TabMcpOptions.ui`). */
 export interface DialogOptions {
 	/**
-	 * Texts of the dialogs, key by key; the rest stay English. The keys and
-	 * the English texts are in `src/strings.ts`; `{name}` placeholders are
-	 * filled in. Set `lang` and `dir` with the texts' language.
+	 * Every text the library shows a person, key by key, in one table given
+	 * once: the dialogs, their setup steps and `ConnectButton` of `./react`
+	 * read it. Missing keys stay English (`STRINGS` of `./strings`). `lang`
+	 * is the language of the texts: the dialogs carry it, and plural forms
+	 * (`Intl.PluralRules`) and lists (`Intl.ListFormat`) follow it.
 	 */
 	strings?: Partial<DialogStrings>;
 	/** The help in the connect dialog ("How do I add it?"). */
@@ -351,7 +353,7 @@ export interface TabMcpOptions {
 	 * run without asking for one AI app, with any arguments (DEC-200):
 	 *
 	 * - `true`: the confirmation offers "Always allow", and the connect
-	 *   dialog a switch per tool and "Allow everything, no questions asked"
+	 *   dialog a switch per tool and "Always allow everything"
 	 *   under each connected app. Kept in `storage` next to the secret until
 	 *   the app is disconnected (in memory with `storage: null`).
 	 * - `"until-reload"`: the same, offered as "Allow until reload": kept in

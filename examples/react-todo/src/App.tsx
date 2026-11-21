@@ -80,7 +80,7 @@ function Apps() {
 	if (grants.length === 0) return null;
 	return (
 		<section aria-labelledby="apps-title" className="apps">
-			<h2 id="apps-title">Runs without asking</h2>
+			<h2 id="apps-title">Always allow</h2>
 			{grants.map((grant) => (
 				<AppSwitches key={grant.grantId} grant={grant} />
 			))}
@@ -134,7 +134,7 @@ function AppSwitches({ grant }: { grant: Grant }) {
 					checked={everything}
 					onChange={(e) => setEverything(grant.grantId, e.target.checked)}
 				/>
-				Allow everything, no questions asked
+				Always allow everything
 			</label>
 		</fieldset>
 	);

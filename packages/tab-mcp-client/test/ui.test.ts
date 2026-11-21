@@ -119,7 +119,7 @@ describe("confirmDialog", () => {
 			dialog.querySelector("h2")?.id ?? "none",
 		);
 		expect(doc.activeElement?.textContent).toBe("Don't allow");
-		const allow = byText(dialog, "Allow");
+		const allow = byText(dialog, "Allow once");
 		await enabled(allow);
 		allow.click();
 		expect(await answer).toBe("allow");
@@ -133,7 +133,9 @@ describe("confirmDialog", () => {
 		) as HTMLDialogElement;
 		const deny = byText(dialog, "Don't allow");
 		expect([...deny.classList]).toEqual(["tab-mcp-deny", "tab-mcp-primary"]);
-		expect([...byText(dialog, "Allow").classList]).toEqual(["tab-mcp-allow"]);
+		expect([...byText(dialog, "Allow once").classList]).toEqual([
+			"tab-mcp-allow",
+		]);
 		expect([...byText(dialog, "Always allow").classList]).toEqual([
 			"tab-mcp-always",
 		]);
@@ -187,7 +189,7 @@ describe("confirmDialog: Always allow", () => {
 		) as HTMLDialogElement;
 		expect(buttons(dialog).map((b) => b.textContent)).toEqual([
 			"Don't allow",
-			"Allow",
+			"Allow once",
 		]);
 		expect(dialog.querySelector(".tab-mcp-always-note")).toBeNull();
 		expect(dialog.textContent).not.toContain("Always");
@@ -278,7 +280,7 @@ describe("confirmDialog: Always allow", () => {
 					options,
 					offered: buttons(dialog)
 						.map((b) => b.textContent)
-						.find((t) => t !== "Don't allow" && t !== "Allow"),
+						.find((t) => t !== "Don't allow" && t !== "Allow once"),
 				}).toEqual({ options, offered });
 				byText(dialog, "Don't allow").click();
 				expect(await answer).toBe(false);
@@ -314,10 +316,10 @@ describe("a WebMCP caller (iteration 25)", () => {
 			);
 			expect(buttons(shown).map((b) => b.textContent)).toEqual([
 				"Don't allow",
-				"Allow",
+				"Allow once",
 			]);
 			expect(shown.querySelector(".tab-mcp-always-note")).toBeNull();
-			const allow = byText(shown, "Allow");
+			const allow = byText(shown, "Allow once");
 			await enabled(allow);
 			allow.click();
 			expect(await first).toBe(true);
@@ -357,7 +359,7 @@ describe("a caller served over a port (iteration 28)", () => {
 			expect(await shownFor({ id: "chat", name: "Example assistant" })).toEqual(
 				{
 					text: "Example assistant (this site's assistant) wants to run Clear memory.",
-					offered: ["Don't allow", "Allow"],
+					offered: ["Don't allow", "Allow once"],
 				},
 			);
 			// Without a name, the id; invisible characters are shown as escapes.
@@ -391,7 +393,7 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		const answer = confirmDialog({ ...question(), arguments: loop }, doc, {
 			alwaysAllow: true,
 		});
-		expect(byText(doc, "Allow").hidden).toBe(true);
+		expect(byText(doc, "Allow once").hidden).toBe(true);
 		expect(byText(doc, "Always allow").hidden).toBe(true);
 		byText(doc, "Don't allow").click();
 		expect(await answer).toBe("deny");
@@ -403,7 +405,7 @@ describe("confirmDialog safety (review of PR #2)", () => {
 		const dialog = doc.querySelector(
 			"dialog.tab-mcp-confirm",
 		) as HTMLDialogElement;
-		const allow = byText(dialog, "Allow");
+		const allow = byText(dialog, "Allow once");
 		expect(allow.disabled).toBe(true);
 		allow.click();
 		expect(dialog.open).toBe(true);
@@ -463,7 +465,7 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 			allowDelayMs: 600,
 			alwaysAllow: true,
 		});
-		const allow = byText(doc, "Allow");
+		const allow = byText(doc, "Allow once");
 		const always = byText(doc, "Always allow");
 		jest.advanceTimersByTime(60_000);
 		expect(allow.disabled).toBe(true);
@@ -510,7 +512,7 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 	test("opened while another window has the focus: the delay starts on focus", async () => {
 		focused = false;
 		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
-		const allow = byText(doc, "Allow");
+		const allow = byText(doc, "Allow once");
 		jest.advanceTimersByTime(60_000);
 		expect(allow.disabled).toBe(true);
 		focus();
@@ -527,7 +529,7 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 			allowDelayMs: 600,
 			alwaysAllow: true,
 		});
-		const allow = byText(doc, "Allow");
+		const allow = byText(doc, "Allow once");
 		const always = byText(doc, "Always allow");
 		jest.advanceTimersByTime(600);
 		expect(allow.disabled).toBe(false);
@@ -556,7 +558,7 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 
 	test("once closed, it no longer follows the page", async () => {
 		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
-		const allow = byText(doc, "Allow");
+		const allow = byText(doc, "Allow once");
 		byText(doc, "Don't allow").click();
 		expect(await answer).toBe("deny");
 		blur();
@@ -638,7 +640,7 @@ describe("confirmDialog: the delay (iteration 13, CU 17)", () => {
 		{
 			const started = Date.now();
 			const answer = confirmDialog(question(), doc);
-			const allow = byText(doc, "Allow");
+			const allow = byText(doc, "Allow once");
 			await Bun.sleep(20);
 			expect(allow.disabled).toBe(true);
 			await enabled(allow);
@@ -709,14 +711,14 @@ describe("showConnectDialog", () => {
 			true,
 		);
 		// An app was connected when it opened: the connected state, the setup
-		// behind "Connect another app", Done.
+		// behind "Connect another AI app", Done.
 		const success = dialog.querySelector(".tab-mcp-success") as HTMLElement;
 		expect(shown(success)).toBe(true);
 		expect(success.textContent).toBe(
 			"Claude (claude.ai) is connectedYou can close this now and ask it to use the tools of this page.",
 		);
 		expect(dialog.getAttribute("aria-describedby")).toBe(success.id);
-		const toggle = byText(dialog, "Connect another app");
+		const toggle = byText(dialog, "Connect another AI app");
 		expect(shown(toggle)).toBe(true);
 		expect(toggle.getAttribute("aria-expanded")).toBe("false");
 		const setup = dialog.querySelector(".tab-mcp-setup") as HTMLElement;
@@ -745,7 +747,7 @@ describe("showConnectDialog", () => {
 			"BCDF-GHJK",
 		);
 		expect(codeLine.textContent).toBe(
-			"When asked, enter the code BCDF-GHJK CopyA new code appears every 2 minutes and after each use.",
+			"When asked, type the code BCDF-GHJK CopyThe code changes every 2 minutes and after each use.",
 		);
 		// A newly connected app is announced with the others (CU 19); the setup closes again.
 		const added = nextEvent(mcp, "grantschange");
@@ -969,7 +971,7 @@ describe("showConnectDialog", () => {
 		const note = dialog.querySelector(".tab-mcp-close-note") as HTMLElement;
 		expect(note.hidden).toBe(false);
 		expect(note.textContent).toBe(
-			"Closing this stops the code. To connect later, open this again from the page.",
+			"Closing this ends the code. To connect an AI app later, open this again from the page.",
 		);
 		// Close comes last: after the code, its Copy and the help.
 		const order = [
@@ -1032,7 +1034,11 @@ describe("showConnectDialog", () => {
 		// "Disconnect all apps" disconnects it: pairing starts over, so Close is back.
 		byText(dialog, "Disconnect all apps").click();
 		const connected = nextState(mcp, "connected");
-		byText(dialog, "Disconnect all").click();
+		(
+			dialog.querySelector(
+				".tab-mcp-disconnect-all-confirm",
+			) as HTMLButtonElement
+		).click();
 		expect(done.hidden).toBe(true);
 		expect(close.hidden).toBe(false);
 		await relay.next("hello", (m) => m["revokeAll"] === true);
@@ -1101,7 +1107,7 @@ describe("showConnectDialog", () => {
 		const used = dialog.querySelector(".tab-mcp-code-used") as HTMLElement;
 		const success = dialog.querySelector(".tab-mcp-success") as HTMLElement;
 		const setup = dialog.querySelector(".tab-mcp-setup") as HTMLElement;
-		const toggle = byText(dialog, "Connect another app");
+		const toggle = byText(dialog, "Connect another AI app");
 		const done = byText(dialog, "Done");
 		expect(shown(value)).toBe(true);
 		expect(used.hidden).toBe(true);
@@ -1234,12 +1240,12 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-success")?.textContent).toBe(
 			"Claude (claude.ai) is connectedYou can close this now and ask it to use the tools of this page.",
 		);
-		byText(dialog, "Connect another app").click();
+		byText(dialog, "Connect another AI app").click();
 		byText(dialog, "Disconnect all apps").click();
 		expect(
 			dialog.querySelector(".tab-mcp-disconnect-all-question p")?.textContent,
 		).toBe(
-			"This disconnects Claude (claude.ai). To use this page with it again, connect it again and enter a new code.",
+			"This disconnects Claude (claude.ai). To use this page with it again, connect it again.",
 		);
 		// Both grants are listed, each with its own Disconnect, named for its app (CU 14).
 		expect(dialog.querySelectorAll(".tab-mcp-apps li")).toHaveLength(2);
@@ -1584,7 +1590,7 @@ describe("showConnectDialog", () => {
 		byText(dialog, "Close").click();
 	});
 
-	test("DEC-202: with an app connected, Connect another app says why it offers Continue", async () => {
+	test("DEC-202: with an app connected, Connect another AI app says why it offers Continue", async () => {
 		relay.pairing = "oidc";
 		mcp = newTab(relay.url, { identityAssertion: () => "a.b.c" });
 		const { dialog } = await open();
@@ -1598,7 +1604,7 @@ describe("showConnectDialog", () => {
 		});
 		await nextEvent(mcp, "pairinguntil");
 		expect(mcp.grants.length).toBeGreaterThan(0);
-		byText(dialog, "Connect another app").click();
+		byText(dialog, "Connect another AI app").click();
 		const timeUp = dialog.querySelector(".tab-mcp-time-up") as HTMLElement;
 		expect(shown(timeUp)).toBe(true);
 		const why = timeUp.querySelector("span");
@@ -1687,7 +1693,7 @@ describe("showConnectDialog", () => {
 
 	test("Disconnect all apps asks first while apps are connected; Cancel keeps them and the secret", async () => {
 		const { dialog, session } = await open();
-		byText(dialog, "Connect another app").click();
+		byText(dialog, "Connect another AI app").click();
 		const fresh = byText(dialog, "Disconnect all apps");
 		expect(fresh.disabled).toBe(false);
 		const question = dialog.querySelector(
@@ -1702,7 +1708,7 @@ describe("showConnectDialog", () => {
 			question.querySelector("p")?.id ?? "none",
 		);
 		expect(question.querySelector("p")?.textContent).toBe(
-			"This disconnects Claude (claude.ai). To use this page with it again, connect it again and enter a new code.",
+			"This disconnects Claude (claude.ai). To use this page with it again, connect it again.",
 		);
 		expect(doc.activeElement?.textContent).toBe("Cancel");
 
@@ -1721,7 +1727,7 @@ describe("showConnectDialog", () => {
 
 	test("the Disconnect all apps question follows the connected apps while it is open", async () => {
 		const { dialog } = await open();
-		byText(dialog, "Connect another app").click();
+		byText(dialog, "Connect another AI app").click();
 		const fresh = byText(dialog, "Disconnect all apps");
 		const question = dialog.querySelector(
 			".tab-mcp-disconnect-all-question",
@@ -1744,7 +1750,7 @@ describe("showConnectDialog", () => {
 		});
 		await added;
 		expect(question.querySelector("p")?.textContent).toBe(
-			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again and enter a new code.",
+			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again.",
 		);
 		// The setup stays open while the question is: the user is answering it.
 		expect(shown(question)).toBe(true);
@@ -1778,17 +1784,21 @@ describe("showConnectDialog", () => {
 		expect(dialog.querySelector(".tab-mcp-success")?.textContent).toBe(
 			"Claude (claude.ai) and ChatGPT (chatgpt.com) are connectedYou can close this now and ask them to use the tools of this page.",
 		);
-		byText(dialog, "Connect another app").click();
+		byText(dialog, "Connect another AI app").click();
 		byText(dialog, "Disconnect all apps").click();
 		expect(
 			dialog.querySelector(".tab-mcp-disconnect-all-question p")?.textContent,
 		).toBe(
-			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again and enter a new code.",
+			"This disconnects Claude (claude.ai) and ChatGPT (chatgpt.com). To use this page with them again, connect them again.",
 		);
 
 		relay.grants = []; // what the relay has for the new secret
 		const connected = nextState(mcp, "connected");
-		byText(dialog, "Disconnect all").click();
+		(
+			dialog.querySelector(
+				".tab-mcp-disconnect-all-confirm",
+			) as HTMLButtonElement
+		).click();
 		expect(dialog.querySelector(".tab-mcp-status")?.textContent).toBe(
 			"Disconnecting…",
 		);
@@ -1867,7 +1877,7 @@ describe("showConnectDialog", () => {
 			[...dialog.querySelectorAll(".tab-mcp-primary")].filter(shown);
 		// An app is connected: Done is the next step, also with the setup open.
 		expect(primary()).toEqual([byText(dialog, "Done")]);
-		byText(dialog, "Connect another app").click();
+		byText(dialog, "Connect another AI app").click();
 		expect(primary()).toEqual([byText(dialog, "Done")]);
 		expect(has(".tab-mcp-address-copy", "tab-mcp-primary")).toBe(false);
 		for (const plain of [
@@ -2118,7 +2128,7 @@ describe("replaced: the page's address taken over (iteration 10, DEC-095)", () =
 			"Another tab or program took over this page",
 		);
 		expect(notice.querySelector("p")?.textContent).toBe(
-			"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or window of this browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
+			"Your AI apps now use that tab or program instead of this page. If you did not open this page in another tab or window of this browser, someone may have copied this page's saved connection. “Disconnect all apps” ends that; then connect your AI apps again.",
 		);
 		expect(buttons(notice).map((b) => b.textContent)).toEqual([
 			"Close",
@@ -2231,13 +2241,13 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 		expect(shown(waiting)).toBe(true);
 		expect(waiting.textContent).toBe("1 more call is waiting after this one.");
 		jest.advanceTimersByTime(600);
-		byText(doc, "Allow").click();
+		byText(doc, "Allow once").click();
 		expect(await first).toBe("allow");
 		// The second shows now, with Allow disabled again for the full delay.
 		expect(confirms()).toHaveLength(1);
 		expect(confirms()[0]?.querySelector("h2")?.textContent).toBe("Allow two?");
 		expect(shown(doc.querySelector(".tab-mcp-waiting"))).toBe(false);
-		const allow = byText(doc, "Allow");
+		const allow = byText(doc, "Allow once");
 		expect(allow.disabled).toBe(true);
 		allow.click(); // the second click of a double click
 		expect(confirms()[0]?.open).toBe(true);
@@ -2306,7 +2316,7 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 		});
 		jest.advanceTimersByTime(600);
 		always = true; // what "Always allow" on the first one does
-		byText(doc, "Allow").click();
+		byText(doc, "Allow once").click();
 		expect(await first).toBe("allow");
 		expect(await second).toBe("allow");
 		// The next waiting call is shown, and asked.
@@ -2318,7 +2328,7 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 
 	test("another dialog closing over the confirmation starts the delay again (CU 1)", async () => {
 		const answer = confirmDialog(question(), doc, { allowDelayMs: 600 });
-		const allow = byText(doc, "Allow");
+		const allow = byText(doc, "Allow once");
 		jest.advanceTimersByTime(600);
 		expect(allow.disabled).toBe(false);
 		const other = doc.createElement("dialog");
@@ -2368,7 +2378,7 @@ describe("confirmDialog: one at a time, arguments seen, no stray keys (iteration
 		const dialog = confirms()[0] as HTMLDialogElement;
 		const args = dialog.querySelector(".tab-mcp-arguments") as HTMLElement;
 		const note = dialog.querySelector(".tab-mcp-scroll-note") as HTMLElement;
-		const allow = byText(dialog, "Allow");
+		const allow = byText(dialog, "Allow once");
 		const always = byText(dialog, "Always allow");
 		expect(shown(note)).toBe(true);
 		expect(note.textContent).toBe(
@@ -2530,7 +2540,7 @@ describe("the connect dialog for people who are not developers (iteration 33)", 
 		) as HTMLElement;
 		expect(shown(row)).toBe(true);
 		expect(row.textContent).toBe(
-			"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again with a new code. Disconnect all apps",
+			"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again. Disconnect all apps",
 		);
 		byText(dialog, "Close").click();
 	});
@@ -2670,7 +2680,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 				nope: "x",
 			} as never,
 		});
-		expect(s.allow).toBe("Allow");
+		expect(s.allow).toBe("Allow once");
 		expect(s.deny).toBe("Nein");
 		expect("nope" in s).toBe(false);
 	});
@@ -2719,7 +2729,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 			buttons(dialog.querySelector(".tab-mcp-actions") as HTMLElement).map(
 				(b) => b.textContent,
 			),
-		).toEqual(["Don't allow", "Always allow", "Allow"]);
+		).toEqual(["Don't allow", "Always allow", "Allow once"]);
 		byText(dialog, "Don't allow").click();
 		expect(await answer).toBe("deny");
 	});
@@ -2760,7 +2770,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		input.click(); // a click on a checkbox turns it and fires `change`
 	};
 
-	test("under a connected app: a switch per tool that asks, and Allow everything (DEC-200)", async () => {
+	test("under a connected app: a switch per tool that asks, and Always allow everything (DEC-200)", async () => {
 		mcp = newTab(relay.url, { alwaysAllow: true });
 		const tab = mcp;
 		await registerAsking(tab);
@@ -2771,14 +2781,14 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		expect(
 			doc.getElementById(box.getAttribute("aria-labelledby") ?? "")
 				?.textContent,
-		).toBe("Runs without asking");
+		).toBe("Always allow");
 		// Visible: the title or name, destructive ones marked.
 		expect(
 			[...box.querySelectorAll("label")].map((l) => l.textContent),
 		).toEqual([
 			"Clear memory destructive",
 			"delete_all destructive",
-			"Allow everything, no questions asked",
+			"Always allow everything",
 		]);
 		expect(
 			[...box.querySelectorAll(".tab-mcp-destructive")].map((m) => shown(m)),
@@ -2800,7 +2810,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 				disabled: false,
 			},
 			{
-				name: "Allow everything, no questions asked, for Claude (claude.ai)",
+				name: "Always allow everything for Claude (claude.ai)",
 				role: "switch",
 				type: "checkbox",
 				checked: false,
@@ -2816,7 +2826,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 			everything.getAttribute("aria-describedby") ?? "",
 		);
 		expect(note?.textContent).toBe(
-			"Every tool of this page runs for Claude (claude.ai) without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite.",
+			"Every tool of this page runs for Claude (claude.ai) without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite, until you disconnect Claude (claude.ai).",
 		);
 
 		// Always allow in a confirmation over the open dialog turns its switch on.
@@ -2891,7 +2901,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 			"Clear memory runs without asking for Claude (claude.ai)",
 			"delete_all (destructive) runs without asking for Claude (claude.ai)",
 			"Send mail runs without asking for Claude (claude.ai)",
-			"Allow everything, no questions asked, for Claude (claude.ai)",
+			"Always allow everything for Claude (claude.ai)",
 		]);
 		byText(dialog, "Done").click();
 		await closed;
@@ -2927,7 +2937,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		allowed.setEverything("g_1", true);
 		const [everything] = visibleSwitches() as [HTMLInputElement];
 		expect(everything.getAttribute("aria-label")).toBe(
-			"Allow everything, no questions asked, for Claude (claude.ai)",
+			"Always allow everything for Claude (claude.ai)",
 		);
 		expect(everything.checked).toBe(true);
 		toggle(everything);
@@ -2977,7 +2987,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 				false,
 			],
 			["export_report runs without asking for Claude (claude.ai)", true],
-			["Allow everything, no questions asked, for Claude (claude.ai)", false],
+			["Always allow everything for Claude (claude.ai)", false],
 		]);
 		const exported = switchesOf(box)[2] as HTMLInputElement;
 		toggle(exported);
@@ -3034,13 +3044,13 @@ describe("the confirmation chunk's confirmInPage with a host of the caller's own
 	const offered = () =>
 		buttons(dialog())
 			.map((b) => b.textContent)
-			.filter((t) => t !== "Don't allow" && t !== "Allow");
+			.filter((t) => t !== "Don't allow" && t !== "Allow once");
 
 	test("without _allowed and without alwaysAllow: asked every time, nothing kept", async () => {
 		const host = new Host();
 		const first = confirmInPage(host, question(), doc);
 		expect(offered()).toEqual([]);
-		const allow = byText(dialog(), "Allow");
+		const allow = byText(dialog(), "Allow once");
 		await enabled(allow);
 		allow.click();
 		expect(await first).toBe(true);

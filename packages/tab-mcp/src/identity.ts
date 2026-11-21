@@ -32,7 +32,7 @@ const MAX_JTI_PER_PERSON = 120;
 
 /** The text for a person other than the page's user (DEC-077, DEC-079). */
 export const MISMATCH_TEXT =
-	"This AI tool is logged in as someone other than the page.";
+	"This AI app is signed in as someone other than the page's user.";
 
 /**
  * The binding key: SHA-256 over the provider's issuer and the subject, so the

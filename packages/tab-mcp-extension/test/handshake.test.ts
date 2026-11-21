@@ -414,7 +414,7 @@ describe("the worker and the panel", () => {
 		expect(
 			libraryNotes(tab([{ name: "Claude", host: "claude.ai" }]), grants).both,
 		).toBe(
-			"Claude (claude.ai) is also connected to this page directly, so it sees the page's tools twice, once through each. Disconnect it in one of the two: above in this panel, or in the page.",
+			"Claude (claude.ai) is also connected to this page directly, so it sees the page's tools twice, once through each. Disconnect it in one of the two: above in this panel, or on the page.",
 		);
 		expect(
 			libraryNotes(

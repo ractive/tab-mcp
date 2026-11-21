@@ -523,7 +523,7 @@ describe("6, since the fixed address (DEC-196): wrong codes are limited per netw
 		for (const malformed of ["", "BCDF", "1234-5678"]) {
 			const res = await connect(malformed);
 			expect(res.status).toBe(400);
-			expect(res.html).toContain("Enter the 8 letters");
+			expect(res.html).toContain("Type the 8 letters");
 		}
 		for (let i = 0; i < 10; i++) {
 			const res = await connect(wrong);

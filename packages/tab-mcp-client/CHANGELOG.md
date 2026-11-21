@@ -22,8 +22,7 @@ alias. Search your code for the old names:
 | `DisconnectReason` `"new_address"` (`statechange` `reason`) | `"disconnect_all"` |
 | `ui.strings.newAddress` | `ui.strings.disconnectAll` |
 | `ui.strings.newAddressNote` | `ui.strings.disconnectAllNote` |
-| `ui.strings.newAddressQuestionOne` | `ui.strings.disconnectAllQuestionOne` |
-| `ui.strings.newAddressQuestionMany` | `ui.strings.disconnectAllQuestionMany` |
+| `ui.strings.newAddressQuestionOne`, `ui.strings.newAddressQuestionMany` | `ui.strings.disconnectAllQuestion` (plural forms, see "Changed") |
 | `ui.strings.newAddressConfirm` | `ui.strings.disconnectAllConfirm` |
 | `ui.strings.gettingNewAddress` | `ui.strings.disconnectingAll` |
 | `ui.strings.newAddressDone` | `ui.strings.disconnectAllDone` |
@@ -38,6 +37,20 @@ unknown key.
 
 ### Added
 
+- **Translated texts in one step** (DEC-208): `ui.strings` is the one table for every
+  text the library shows a person, given once on `TabMcp` (or `<TabMcpProvider>`): the
+  dialogs, their setup steps and now also `ConnectButton` of `./react`. Partial tables
+  keep English for every missing key. New entry **`@ractive-ch/tab-mcp-client/strings`**
+  (and `cdn/strings.min.js`): `STRINGS`, the English table, typed, so a translation
+  typed as `DialogStrings` names every key it lacks or misspells in the type check;
+  `pickStrings(tables, languages?)`, which loads the page's own table for the user's
+  languages (`navigator.languages`), English when they prefer it or nothing matches;
+  `withEnglish(strings)`, the full table for a page's own UI; the type `PluralText`.
+  `setupInstructions(serverName, address, strings?)` takes the table too. New keys:
+  `allowEverythingUntilReloadNote`, `setupClaudeApp`, `setupClaude`, `setupChatGpt`,
+  `setupRun`, `setupClaudeCode`, `setupClaudeCodeNote`, `setupCodex`, `setupCodexNote`,
+  `buttonReconnecting`, `buttonConnected`. See
+  [Translating](README.md#translating). The core grows by 8 bytes gzipped.
 - **The page and the tab-mcp browser extension know of each other** (`webmcp: true`,
   DEC-207): a plain handshake over DOM events (`tab-mcp-page`, `tab-mcp-extension`) with
   the extension from its next release.
@@ -55,8 +68,8 @@ unknown key.
     host }` in `execute`, `toolcall` and `toolcallend` (`WebMcpClient` has the new
     optional fields).
   - The connect dialog says first which AI apps are connected through the extension
-    ("… while this tab is in front."), texts `viaExtensionOne`, `viaExtensionMany`,
-    `viaExtensionInFrontOne`, `viaExtensionInFrontMany`; the rest stays.
+    ("… while this tab is in front."), texts `viaExtension` and `viaExtensionInFront`
+    (plural forms); the rest stays.
   - The page tells the extension the library's version, the app id and the AI apps
     connected to it directly, and marks `<html data-tab-mcp-handshake>`.
   - In the WebMCP mirror's chunk: the core grows by 9 bytes gzipped.
@@ -82,12 +95,52 @@ unknown key.
 
 ### Changed
 
+- **Texts: English only, plural forms and lists by `Intl`** (DEC-208). The package
+  ships English only. The keys that made grammar by hand are gone, with no alias: a
+  page's own text under an old key is no longer used, as any unknown key.
+
+  | Old | New |
+  |---|---|
+  | `ui.strings.and` | none: lists are joined by `Intl.ListFormat` in the texts' `lang` |
+  | `ui.strings.waitingOne`, `waitingMany` | `waiting` |
+  | `ui.strings.connectedOne`, `connectedMany` | `connected` |
+  | `ui.strings.connectedNextOne`, `connectedNextMany` | `connectedNext` |
+  | `ui.strings.disconnectAllQuestionOne`, `disconnectAllQuestionMany` | `disconnectAllQuestion` |
+  | `ui.strings.runsWithoutAsking` | none: the switches are headed by `alwaysAllow` ("Always allow"), or `allowUntilReload` when nothing is kept |
+  | `ui.strings.dir` (default `"ltr"`) | optional, no default: the direction of `lang` where the browser knows it, else `"ltr"` |
+
+  The new keys hold one form per plural category of the language
+  (`{ one: "…", other: "…" }` in English, chosen by `Intl.PluralRules`), with `{n}` for
+  the count.
+- **One wording for one thing** (DEC-208; the glossary is `kb/design/wording.md`), also
+  in the texts of the tab-mcp browser extension and the relay:
+
+  | Key | Was | Now |
+  |---|---|---|
+  | `allow` | Allow | Allow once |
+  | `codeSentence` | When asked, enter the code {code} | When asked, type the code {code} |
+  | `codeNote` | A new code appears every 2 minutes and after each use. | The code changes every 2 minutes and after each use. |
+  | `connectAnother` | Connect another app | Connect another AI app |
+  | `connectedHeading` | Connected | Connected AI apps |
+  | `disconnectAllConfirm` | Disconnect all | Disconnect all apps (the button that asked) |
+  | `disconnectAllNote`, `disconnectAllQuestion` | … connect again with a new code / and enter a new code | … connect again (with identity binding there is no code) |
+  | `disconnectNote` | To disconnect an app, … | To disconnect an AI app, … |
+  | `disconnectFailed` | Could not disconnect the app. … | Could not disconnect the AI app. … |
+  | `allowEverything`, `allowEverythingApp` | Allow everything, no questions asked (, for {app}) | Always allow everything (for {app}) |
+  | `allowEverythingNote` | … and ones that delete or overwrite. | … and ones that delete or overwrite, until you disconnect {app}. |
+  | `closeNote` | Closing this stops the code. To connect later, … | Closing this ends the code. To connect an AI app later, … |
+  | `replaced` | … now reach that tab … copied what this page keeps to connect … again with a new code. | … now use that tab … copied this page's saved connection … again. |
+  | `ConnectButton` | Connection lost, retrying… | Connection lost. Reconnecting… |
+
+  What an AI app reads: a refused call is "The user did not allow this call." (was "The
+  user declined"), and a call cancelled while the user was asked "The call was
+  cancelled." (was "The user declined", though the user did nothing).
 - **With identity binding the connect dialog counts for 10 minutes** (DEC-202): the
   relay pairs a sign-in with the page only until 10 minutes after the dialog opened. The
   dialog says until when ("Your AI app can connect until 14:32.") and, once the time is
   up (checked again when the tab comes back to the front), "The time to connect your AI
   app is up. To connect it now, continue." with a Continue button that starts the 10
-  minutes again; with an app connected, "Connect another app" shows that sentence next
+  minutes again; with an app connected, "Connect another AI app" shows that sentence next
   to Continue. Nothing starts them again by itself: on an `oidc` session a reconnect
   the library makes by itself does not send `pairing.start` again once the user's start
   was sent, answered or not (`pairingUntil` is then the time of the reconnect, so the

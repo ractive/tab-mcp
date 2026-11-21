@@ -198,12 +198,8 @@ function showConnection(s: PanelState): void {
 	setText(
 		$("replaced-text"),
 		s.replaced?.sibling
-			? "Opened elsewhere in this browser: the AI apps talk to that one now."
-			: "Another tab or program took over this extension's connection, and the AI apps paired with it may now talk to it. Disconnect all apps to end that.",
-	);
-	$("grants").setAttribute(
-		"aria-label",
-		s.status === "on" ? "Connected AI apps" : "Paired AI apps",
+			? "Opened elsewhere in this browser: your AI apps use that one now."
+			: "Another tab or program took over tab-mcp's connection: your AI apps may now use it instead. “Disconnect all apps” ends that.",
 	);
 	// A keyboard user's focus stays on the app's Disconnect, which is made
 	// anew: the second Enter of the two-step Disconnect must find it.
@@ -220,7 +216,7 @@ function showConnection(s: PanelState): void {
 			app.className = "app";
 			const dot = document.createElement("span");
 			// Green only while connected: off, connecting or retrying the
-			// apps stay paired, not connected.
+			// apps keep their access but cannot reach the tab now.
 			dot.className = s.status === "on" ? "dot on" : "dot";
 			dot.setAttribute("aria-hidden", "true");
 			const name = document.createElement("span");
@@ -497,7 +493,7 @@ function badge(text: string, kind = ""): HTMLElement {
 
 /**
  * The tool's "Always allow" switch, for this site: on, it runs without
- * asking, for every paired AI app; off (the default), it asks before each
+ * asking, for every connected AI app; off (the default), it asks before each
  * call. A switch with a label that stays, not a badge that changes its text
  * (EQ 9, EQ 11). On grants, as a permission switch does (DEC-184).
  */
@@ -621,7 +617,7 @@ function showTab(s: PanelState): void {
 	$("always-allow-note").hidden = !allowAll.shown;
 	setText($("always-allow-note"), allowAll.shown ? alwaysAllowNote(scope) : "");
 	// No tooltip (DEC-160): the line under the switch names the site and
-	// "every paired AI app"; the count is the list below.
+	// "every connected AI app"; the count is the list below.
 	button.setAttribute("aria-label", allowAllLabel(allowAll, scope));
 	setAvailable(button, Date.now() >= movedUntil);
 	// The list is made anew: a keyboard user's focus goes back to the same
@@ -642,7 +638,7 @@ function showTab(s: PanelState): void {
 			?.focus();
 }
 
-/** "Fill in the code for me" under "Pair an AI app" (DEC-203). */
+/** "Fill in the code for me" under "Connect your AI app" (DEC-203). */
 const fill = fillPanel(
 	{
 		box: $("fill"),

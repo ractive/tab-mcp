@@ -39,7 +39,7 @@ export class CachedSecretStorage implements SecretStorage {
 	setItem(key: string, value: string): void {
 		this.#cache.set(key, value);
 		// Writes go out in order; one that fails leaves the secret in memory
-		// for this worker's life (the address changes after a restart).
+		// for this worker's life (the secret changes after a restart; the address stays).
 		this.written = this.written
 			.then(() => this.#kv.set({ [key]: value }))
 			.catch((error: unknown) =>

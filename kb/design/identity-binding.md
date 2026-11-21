@@ -81,12 +81,12 @@ without rebuilding the OAuth server (DEC-042).
 ## Mismatch
 
 When the identities differ, `/authorize` (variant 1) or the MCP endpoint (variant 2) answers
-with a clear error: "This AI tool is logged in as someone else than the page." Nothing is
+with a clear error: "This AI app is signed in as someone other than the page's user." Nothing is
 issued or forwarded. Since DEC-196 `/authorize` cannot tell another person's page from no
 page: no page of the app, a closed dialog, a signed-out page and another person get one
 answer ("No page is connecting with the account you signed in with. …"). The MCP endpoint
-still answers a grant made for another person than the page's with "This AI tool is
-logged in as someone other than the page."
+still answers a grant made for another person than the page's with "This AI app is
+signed in as someone other than the page's user."
 
 ## Threat model addition
 

@@ -13,9 +13,9 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
 - `ConnectButton` for the "Connect your AI app" dialog, `useTabMcpState` for the status
   line and `useToolCalls` for "The AI's calls", which names the caller of each call: an AI
   app, the site's own assistant (`serve`) or an agent in the browser,
-- `alwaysAllow` on the provider and `useAllowedTools` for "Runs without asking": under
-  each connected AI app a switch per tool that asks (`delete_todos`) and "Allow
-  everything, no questions asked". Switched on, the tool runs for that app without the
+- `alwaysAllow` on the provider and `useAllowedTools` for "Always allow": under
+  each connected AI app a switch per tool that asks (`delete_todos`) and "Always allow
+  everything". Switched on, the tool runs for that app without the
   question until the app is disconnected; the confirmation also offers "Always allow".
   The library leaves `alwaysAllow` off by default: read "The risk" in the
   [client's README](../../packages/tab-mcp-client/README.md) before turning it on. It

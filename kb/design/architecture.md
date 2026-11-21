@@ -137,10 +137,10 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
 8. The relay always shows the pairing form; it does not look whether a page of the app
    is connected, so the page tells nothing about that. Its heading is "Connect Claude
    from claude.ai" and it says "You're connecting Claude (claude.ai) to saturnus: to the
-   page or app that is open in your browser and shows the code." (declared name,
+   page or browser extension in this browser that shows the code." (declared name,
    verified client host, the app id from the address; nothing a page sent), with a field
-   for the code. For an app that pairs by sign-in only, it says "… and signed in with
-   your account." and has no code field. Which pairing methods the form offers comes
+   for the code. For an app that pairs by sign-in only, it says "… to saturnus: to the
+   page in this browser that is signed in with your account." and has no code field. Which pairing methods the form offers comes
    from the configuration alone (`pairingKindsOf`). The form carries `data-tab-mcp-*` hooks for an extension in
    the same browser (DEC-199).
 9. The user types the code shown in the tab, in any case, with or without the dash. The

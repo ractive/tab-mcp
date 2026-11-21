@@ -1,7 +1,7 @@
 /**
  * `@ractive-ch/tab-mcp-client/allowed`: the tools that run without asking,
  * per connected AI app, for a page that draws its own switches ("always
- * allow this tool", "allow everything, no questions asked"). The library's
+ * allow this tool", "always allow everything"). The library's
  * dialogs use the same allowances. An entry of its own, out of the core
  * (DEC-200).
  *

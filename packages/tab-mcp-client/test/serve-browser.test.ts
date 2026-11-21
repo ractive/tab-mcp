@@ -214,7 +214,7 @@ test.skipIf(chrome === undefined)(
 					`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].map((b) => b.textContent)`,
 				);
 			}
-			expect(buttons).toEqual(["Don't allow", "Allow"]);
+			expect(buttons).toEqual(["Don't allow", "Allow once"]);
 			expect(
 				await page.eval(
 					`document.querySelector("dialog.tab-mcp-confirm p").textContent`,
@@ -237,7 +237,7 @@ test.skipIf(chrome === undefined)(
 				{
 					origin: CHAT,
 					step: "wipe",
-					text: "The user declined",
+					text: "The user did not allow this call.",
 					isError: true,
 				},
 			]);

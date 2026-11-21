@@ -46,7 +46,7 @@ The page's tools are the page's word:
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Always allow on <host>" in a question, or switching on
   the tool's "Always allow" in the panel's list, allows the tool on that site (exact origin)
-  for every paired AI app, kept until you switch it off again. The switch
+  for every connected AI app, kept until you switch it off again. The switch
   "Always allow all" over the list does that for every tool listed at that moment that
   asks first, in one step. It is on once none asks; turned off, every one asks again. A
   tool the page registers later asks first, and the switch is off again. When the page
@@ -138,9 +138,10 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   (the page changed meanwhile, or says it is another site), the notice says that.
   On a page without tools it says so, that `page_info` and the navigation tools still
   work, and, where WebMCP is off, how Chrome turns it on.
-- "Turn on AI access" (or the "AI access" switch) connects to the relay. While no AI app
-  is paired, a line under the heading says what the extension does and names the relay.
-  With no AI app paired yet, the panel shows the address for your AI app and a pairing
+- "Turn on AI access" (or the switch beside the card's heading "AI access") connects to
+  the relay. While no AI app is connected, a line under the heading says what the
+  extension does and names the relay. With no AI app connected yet ("On · no AI app
+  connected yet"), the panel shows "Connect your AI app": the address for your AI app and a pairing
   code at once, with a note to use the AI app outside this Chrome profile (a chat in a
   tab of the same profile becomes the tab in front while you type in it). The address
   is `<relay>/s/tab-mcp-extension/mcp`, the same for everyone who has the extension;
@@ -148,14 +149,14 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   "How do I add it?" under the address says how to add it in Claude, ChatGPT, Claude Code
   and Codex (the client library's steps, the commands each with a Copy), and links to the
   [connect page](https://ractive.ch/tab-mcp/connect/). A Copy the clipboard refuses
-  selects the text in place to copy by hand. Paired apps are listed, each with a dot
+  selects the text in place to copy by hand. Connected AI apps are listed, each with a dot
   (green while connected, grey while off or connecting); while connected each has a
   Disconnect button (which asks first, and takes no double click). Only the relay can
-  disconnect an app, so while off or connecting the list has no Disconnect and says why;
+  disconnect an AI app, so while off or connecting the list has no Disconnect and says why;
   the list is kept from the relay's last one, also across a restart of the extension.
-  "+ Add another AI app" shows the address and a code again. The address shows only
-  while pairing. Off with apps paired, the panel says "AI access is off · paired apps stay
-  paired". The relay address is under "Settings". Where you name the connector
+  "+ Connect another AI app" shows the address and a code again. The address shows only
+  while pairing. Off with apps paired, the panel says "AI access is off · your AI apps
+  stay connected for next time". The relay address is under "Settings". Where you name the connector
   yourself (Claude, ChatGPT), a name such as "Browser" helps: "in my browser" then leads
   the AI to it (the Claude Code and Codex commands name it `tab-mcp-browser-extension`). The
   extension's instructions and `page_info` tell the AI to call `page_info` first when you
@@ -163,7 +164,7 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 - The connection lives in the extension's service worker, not in the side panel: close
   the panel and AI access stays on, until the switch turns it off. It comes back by itself after a
   browser start, an update or a reload of the extension when you left it on. While the
-  relay cannot be reached, the panel says "Connection lost · retrying" and the extension
+  relay cannot be reached, the panel says "Connection lost · reconnecting…" and the extension
   tries again every minute. The icon
   shows "on" while it is connected, "…" while it connects or retries, "?" while a tool asks. If
   another tab or program takes the extension's connection over (it connects with the
@@ -223,7 +224,7 @@ own call. Questions also show in every open side panel, so with notifications of
 not answer. At most 5 questions of one AI app wait at once; a further call of that app is
 declined without asking, and the app is told why.
 
-"Always allow on <host>" allows the tool on that site (exact origin) for every paired
+"Always allow on <host>" allows the tool on that site (exact origin) for every connected
 AI app, as switching on its "Always allow" in the panel's tool list does, until you
 switch it off again there.
 

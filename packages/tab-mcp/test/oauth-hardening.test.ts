@@ -102,7 +102,7 @@ describe("1: only real guesses count, per network; one network cannot lock out t
 					code: ["junk", "", "123456", "BCDF-GHJ"][i % 4] ?? "",
 				});
 				expect(page.status).toBe(400);
-				expect(page.html).toContain("Enter the 8 letters shown in the page.");
+				expect(page.html).toContain("Type the 8 letters of the code.");
 			}
 		};
 		for (let n = 0; n < 4; n++) await junk(`203.0.113.${n + 1}`);

@@ -261,8 +261,8 @@ export class PairingCodes<T> {
 }
 
 const WRONG =
-	"That code is not right, or it has expired. Enter the code the page shows now: “Connect your AI app” in the page shows it.";
-const MALFORMED = `Enter the ${CODE_LENGTH} letters shown in the page.`;
+	"That code is not right, or it has expired. Type the code that “Connect your AI app” shows now.";
+const MALFORMED = `Type the ${CODE_LENGTH} letters of the code.`;
 const LIMITED =
 	"Too many wrong codes from your network. Wait a few minutes and try again.";
 
@@ -276,9 +276,9 @@ export const codePairing: PairingMethod = {
 		// manager or text message has it, and with that hint password managers
 		// put their button into the field. `off` and the managers' own opt-outs
 		// (1Password, LastPass, Bitwarden, Dashlane) say there is nothing to fill.
-		return `<p><label for="code">Code shown in the page</label>
+		return `<p><label for="code">Code</label>
 <input id="code" name="code" type="text" data-tab-mcp-field="code" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocapitalize="characters" spellcheck="false" pattern="[A-Za-z \\-]{${CODE_LENGTH},${CODE_LENGTH + 4}}" maxlength="${CODE_LENGTH + 4}" required autofocus aria-describedby="code-help"></p>
-<p id="code-help" class="help">In the page or app you want to connect, “Connect your AI app” shows a code of ${CODE_LENGTH} letters. It changes every 2 minutes.</p>`;
+<p id="code-help" class="help">In the page or browser extension you want to connect, “Connect your AI app” shows a code of ${CODE_LENGTH} letters. It changes every 2 minutes and after each use.</p>`;
 	},
 	check(pool, form, admit): PairingResult {
 		const code = normalizeCode(form.get("code") ?? "");

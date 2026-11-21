@@ -90,10 +90,10 @@ export interface AllowedTools {
 	 * other tools allowed one by one stay allowed.
 	 */
 	ask(grantId: string, name: string): void;
-	/** Whether "Allow everything, no questions asked" is on for this app. */
+	/** Whether "Always allow everything" is on for this app. */
 	everything(grantId: string): boolean;
 	/**
-	 * "Allow everything, no questions asked" for this app: every tool runs
+	 * "Always allow everything" for this app: every tool runs
 	 * without asking, with any arguments, also tools registered later, changed
 	 * ones and destructive ones. Turning it on does nothing for an app that
 	 * is not in `mcp.grants`.

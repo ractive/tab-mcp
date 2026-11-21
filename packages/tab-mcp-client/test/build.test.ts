@@ -61,7 +61,8 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 		.map((n) => files.get(n) ?? "")
 		.join("");
 	expect(confirmCode).toContain("Allow until reload");
-	expect(confirmCode).not.toContain("codex mcp add");
+	// (The texts are one table, also the setup steps': the chunk of texts is shared.)
+	expect(confirmCode).not.toContain("ractive.ch/tab-mcp/connect");
 	// The allowances (DEC-200) are out of the core, with the confirmation.
 	expect(confirmCode).toContain("#allowed");
 	const entry = files.get("index.js") ?? "";
@@ -86,7 +87,7 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	expect(mirrorGz).toBeLessThanOrEqual(2 * 1024);
 	// No mark on <html> since iteration 37 (the attribute was for the extension).
 	expect(coreCode).not.toContain("data-tab-mcp-webmcp");
-	expect(coreCode).not.toContain("The user declined");
+	expect(coreCode).not.toContain("The user did not allow this call.");
 	expect(coreCode).not.toContain("#allowed");
 
 	const coreGz = [...core].reduce((sum, n) => sum + gz(files.get(n) ?? ""), 0);
@@ -107,6 +108,92 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 		expect(code).not.toMatch(/\bfrom\s*"node:|\bBun\./);
 	}
 });
+
+/** Every text of `STRINGS` that a person reads, plural forms one by one. */
+async function userTexts(): Promise<string[]> {
+	const { STRINGS } = await import("../src/strings.ts");
+	return Object.entries(STRINGS)
+		.filter(([key]) => key !== "lang" && key !== "dir")
+		.flatMap(([, value]) =>
+			typeof value === "string" ? [value] : Object.values(value),
+		);
+}
+
+/** `code` with its `\uXXXX`, `\u{…}` and `\xXX` escapes decoded. */
+const unescaped = (code: string) =>
+	code
+		.replace(/\\u\{([0-9a-fA-F]+)\}/g, (_, h: string) =>
+			String.fromCodePoint(Number.parseInt(h, 16)),
+		)
+		.replace(/\\u([0-9a-fA-F]{4})/g, (_, h: string) =>
+			String.fromCharCode(Number.parseInt(h, 16)),
+		)
+		.replace(/\\x([0-9a-fA-F]{2})/g, (_, h: string) =>
+			String.fromCharCode(Number.parseInt(h, 16)),
+		);
+
+test("English only: the core carries none of the texts, no built file another language's (DEC-208)", async () => {
+	const result = await Bun.build({
+		entrypoints: [
+			join(root, "src/index.ts"),
+			join(root, "src/allowed.ts"),
+			join(root, "src/setup.ts"),
+			join(root, "src/strings.ts"),
+		],
+		target: "browser",
+		format: "esm",
+		splitting: true,
+		minify: true,
+		naming: { entry: "[name].js", chunk: "[name]-[hash].js" },
+	});
+	expect(result.success).toBe(true);
+	const files = new Map<string, string>();
+	for (const output of result.outputs)
+		files.set(output.path.replace(/^.*\//, ""), unescaped(await output.text()));
+	const texts = await userTexts();
+	expect(texts.length).toBeGreaterThan(100);
+	// The core a page loads first: not one of the texts, whatever its length.
+	const core = [...staticClosure(files, "index.js")]
+		.map((n) => files.get(n) ?? "")
+		.join("\n");
+	expect(texts.filter((t) => core.includes(JSON.stringify(t)))).toEqual([]);
+	expect(
+		texts
+			.flatMap((t) => t.split(/\{\w+\}/))
+			.filter((part) => part.length >= 12 && core.includes(part)),
+	).toEqual([]);
+	// The lazily loaded dialogs carry them, once: in the strings chunk.
+	const all = [...files.values()].join("\n");
+	expect(texts.filter((t) => !all.includes(t))).toEqual([]);
+	const holders = [...files].filter(([, code]) =>
+		code.includes(JSON.stringify(STRING_PROBE)),
+	);
+	expect(holders.map(([name]) => name)).toHaveLength(1);
+	expect(staticClosure(files, "index.js").has(holders[0]?.[0] ?? "")).toBe(
+		false,
+	);
+	// No other language: the only text table's `lang` is "en", and nothing
+	// but English typography (and a few regular expressions' ranges) is
+	// outside ASCII. A table in another language, even one without its own
+	// letters, comes with its `lang`.
+	for (const code of files.values()) {
+		for (const m of code.matchAll(/\blang:\s*"([^"]*)"/g))
+			expect(m[1]).toBe("en");
+		// English typography, then the ranges of `@cfworker/json-schema`'s
+		// host pattern (U+00A1 to U+FFFF) and `visible.ts`'s blank U+2800.
+		const foreign = [...code.matchAll(/\P{ASCII}/gu)]
+			.map((m) => m[0])
+			.filter(
+				(c) =>
+					!"–⌘…→“”’".includes(c) &&
+					![0xa1, 0xffff, 0x2800].includes(c.codePointAt(0) ?? 0),
+			);
+		expect(foreign).toEqual([]);
+	}
+});
+
+/** A text of `STRINGS` that is in no other place of the library. */
+const STRING_PROBE = "Step by step, and what to do when it fails";
 
 test("the tunnel entry stands alone: no DOM, nothing of the page's library", async () => {
 	const result = await Bun.build({
@@ -188,10 +275,12 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+		"./strings": { types: "./strings.d.ts", default: "./strings.js" },
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 		"./cdn/allowed": "./cdn/allowed.min.js",
+		"./cdn/strings": "./cdn/strings.min.js",
 	});
 	expect(pkg["peerDependencies"]).toEqual({ react: ">=18.3.0 <20" });
 	expect(pkg["peerDependenciesMeta"]).toEqual({ react: { optional: true } });
@@ -209,12 +298,15 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"react.d.ts",
 		"setup.js",
 		"setup.d.ts",
+		"strings.js",
+		"strings.d.ts",
 		"tunnel.js",
 		"tunnel.d.ts",
 		"visible.js",
 		"visible.d.ts",
 		"cdn/tab-mcp-client.min.js",
 		"cdn/allowed.min.js",
+		"cdn/strings.min.js",
 		"LICENSE",
 		"AI_NOTICE",
 		"README.md",
@@ -245,14 +337,15 @@ test("the build produces a package whose declarations type-check for a consumer"
 			"modulepreload",
 		);
 	// The React entry: "use client" first, the core entry, the allowances
-	// (one store with the dialogs') and react as imports.
+	// (one store with the dialogs'), the texts (one table with the
+	// dialogs') and react as imports.
 	const reactEntry = await Bun.file(join(dist, "react.js")).text();
 	expect(reactEntry.startsWith('"use client";')).toBe(true);
 	const imports = [
 		...reactEntry.matchAll(/\bfrom\s*"([^"]+)"|\bimport\s*\(\s*"([^"]+)"/g),
 	].map((m) => m[1] ?? m[2]);
 	expect(new Set(imports)).toEqual(
-		new Set(["react", "./index.js", "./allowed.js"]),
+		new Set(["react", "./index.js", "./allowed.js", "./strings.js"]),
 	);
 	const cdnFiles = [...new Bun.Glob("cdn/*.js").scanSync(dist)];
 	expect(cdnFiles.some((f) => f.includes("react"))).toBe(false);
@@ -278,6 +371,16 @@ test("the build produces a package whose declarations type-check for a consumer"
 	const cdnConfirm = [...cdn.keys()].find((n) => n.startsWith("confirm-"));
 	expect(staticClosure(cdn, cdnConfirm ?? "").has(store ?? "")).toBe(true);
 	expect(cdn.get("allowed.min.js")).toContain("allowedTools");
+	// `strings.min.js` (DEC-208): the core loads nothing of it, and it shares
+	// the one table with the dialogs.
+	const cdnStrings = staticClosure(cdn, "strings.min.js");
+	expect(cdnStrings.has("tab-mcp-client.min.js")).toBe(false);
+	const table = [...cdnStrings].find((n) =>
+		cdn.get(n)?.includes("Step by step, and what to do when it fails"),
+	);
+	expect(table).toBeDefined();
+	expect(staticClosure(cdn, cdnConfirm ?? "").has(table ?? "")).toBe(true);
+	expect(cdn.get("strings.min.js")).toContain("pickStrings");
 	const reactGz = Bun.gzipSync(new TextEncoder().encode(reactEntry)).length;
 	console.log(`react entry ${(reactGz / 1024).toFixed(1)} KB gzipped`);
 	expect(reactGz).toBeLessThanOrEqual(3 * 1024);
@@ -289,6 +392,7 @@ test("the build produces a package whose declarations type-check for a consumer"
 import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type TunnelCancelMessage } from "@ractive-ch/tab-mcp-client/tunnel";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 import { allowedTools, type AllowedTool, type AllowedTools } from "@ractive-ch/tab-mcp-client/allowed";
+import { pickStrings, type PluralText, STRINGS, withEnglish } from "@ractive-ch/tab-mcp-client/strings";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
 const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
 void mcp.registerTool(tool, { signal: new AbortController().signal, callers: ["relay", "webmcp"] });
@@ -304,6 +408,20 @@ export const session: Promise<SessionInfo> = mcp.connect({ resume: true });
 const steps: SetupInstruction[] = setupInstructions("x", "https://relay.example/s/x/mcp");
 export const help: string[] = steps.map((s) => \`\${s.app}: \${s.text} \${s.command ?? ""}\${(s.note ?? []).map((p) => ("code" in p ? p.code : p.text)).join("")}\`);
 export const guide: string = SETUP_GUIDE;
+// Translations (DEC-208): a partial table, checked key by key; a complete
+// one names every key it lacks; plural forms by category.
+const partial: Partial<DialogStrings> = { lang: "de", deny: "Nicht erlauben", waiting: { one: "{n} weiterer", other: "{n} weitere" } };
+// @ts-expect-error: a misspelt key is a type error
+const misspelt: Partial<DialogStrings> = { lang: "de", denny: "Nicht erlauben" };
+// @ts-expect-error: a complete table lacks no key
+const incomplete: DialogStrings = { ...STRINGS, deny: undefined };
+// @ts-expect-error: a text with plural forms needs its other form
+const formless: Partial<DialogStrings> = { waiting: { one: "{n} weiterer" } };
+const plain: PluralText = STRINGS.waiting;
+export const tables: unknown[] = [partial, misspelt, incomplete, formless, plain, withEnglish(partial).deny];
+export const picked: Promise<Partial<DialogStrings> | undefined> = pickStrings({ de: async () => ({ default: partial }), fr: async () => ({ lang: "fr" }) });
+export const translated: SetupInstruction[] = setupInstructions("x", "https://relay.example/s/x/mcp", partial);
+export const german: TabMcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, ui: { strings: partial } });
 // @ts-expect-error: unknown tool fields are type errors
 mcp.registerTool({ name: "x", description: "y", execute: () => 1, nope: true });
 // Without a relay: the tools over a port, a MessagePort or one of the page's own.
@@ -405,6 +523,7 @@ export const broken: ReactElement = createElement(TabMcpProvider, { appName: "x"
 					"@ractive-ch/tab-mcp-client": [join(dist, "index.d.ts")],
 					"@ractive-ch/tab-mcp-client/react": [join(dist, "react.d.ts")],
 					"@ractive-ch/tab-mcp-client/setup": [join(dist, "setup.d.ts")],
+					"@ractive-ch/tab-mcp-client/strings": [join(dist, "strings.d.ts")],
 					"@ractive-ch/tab-mcp-client/allowed": [join(dist, "allowed.d.ts")],
 					"@ractive-ch/tab-mcp-client/extension": [
 						join(dist, "extension.d.ts"),

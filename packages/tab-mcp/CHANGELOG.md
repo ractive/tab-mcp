@@ -32,6 +32,18 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   reconnect starts another 10 minutes, and the limit holds only between reconnects. It
   is complete once pages run a library after 0.18.1. Without a reconnect their users
   close and open the dialog again after 10 minutes. Code pairing is unchanged.
+- **One wording with the library and the browser extension**: the pairing page speaks of
+  "the page or browser extension" (not "the page or app") and "types" the code. Its
+  label is "Code"; its help says the code "changes every 2 minutes and after each use";
+  a wrong code reads "That code is not right, or it has expired. Type the code that
+  “Connect your AI app” shows now."; a malformed one "Type the 8 letters of the code.".
+  "You're connecting … to the page or browser extension in this browser that shows the
+  code." (with identity binding: "… to the page in this browser that is signed in with
+  your account."), and "the account you use on the page". The AI app reads "This AI app
+  is signed in as someone other than the page's user." and, for a grant disconnected
+  while its request was in flight, "This AI app was disconnected from the page.". The
+  relay's start page says an AI app "connects to one page with the code that page
+  shows" under the web app's one address.
 
 ## [0.12.1][relay-0.12.1] - 2026-11-20
 

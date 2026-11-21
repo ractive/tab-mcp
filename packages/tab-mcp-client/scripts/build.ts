@@ -6,7 +6,8 @@
  *   connection and the UI stay separate chunks loaded by `connect()`;
  * - `dist/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
  * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`
- *   (`tab-mcp-client.min.js`, and `allowed.min.js` beside it);
+ *   (`tab-mcp-client.min.js`, and `allowed.min.js` and `strings.min.js`
+ *   beside it);
  * - `dist/package.json`, README, CHANGELOG, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
  *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
  *
@@ -35,15 +36,17 @@ const npm = await Bun.build({
 	// `./visible` (the escaping the confirmation dialog uses), `./setup` (the
 	// connect dialog's steps per AI app), `./tunnel` (the caller's end of
 	// `serve`, for a backend), `./allowed` (the tools that run without
-	// asking) and `./extension` (the code fill-in for browser extensions,
-	// which imports nothing of the rest, so it shares no chunk) are entries
-	// of their own, out of the core (DEC-103, DEC-118, DEC-125, DEC-200,
-	// DEC-206).
+	// asking), `./extension` (the code fill-in for browser extensions,
+	// which imports nothing of the rest, so it shares no chunk) and
+	// `./strings` (the English texts, for translators and `./react`) are
+	// entries of their own, out of the core (DEC-103, DEC-118, DEC-125,
+	// DEC-200, DEC-206, DEC-208).
 	entrypoints: [
 		entry,
 		join(root, "src/allowed.ts"),
 		join(root, "src/extension.ts"),
 		join(root, "src/setup.ts"),
+		join(root, "src/strings.ts"),
 		join(root, "src/tunnel.ts"),
 		join(root, "src/visible.ts"),
 	],
@@ -56,15 +59,17 @@ const npm = await Bun.build({
 	// its pages (client 0.12.0). The CDN build, served as is, keeps it.
 	modulePreload: false,
 });
-// Two entries of one build, so that they share chunks (one store of allowed
-// tools for the dialogs and the page's switches): `tab-mcp-client.min.js`
-// (`scripts/cdn/tab-mcp-client.ts`, the core) and `allowed.min.js` (DEC-200),
-// which a page that never imports it never loads.
+// Entries of one build, so that they share chunks (one store of allowed
+// tools for the dialogs and the page's switches, one table of texts):
+// `tab-mcp-client.min.js` (`scripts/cdn/tab-mcp-client.ts`, the core),
+// `allowed.min.js` (DEC-200) and `strings.min.js` (DEC-208), which a page
+// that never imports them never loads.
 const cdn = await Bun.build({
 	...common,
 	entrypoints: [
 		join(root, "scripts/cdn/tab-mcp-client.ts"),
 		join(root, "src/allowed.ts"),
+		join(root, "src/strings.ts"),
 	],
 	outdir: join(dist, "cdn"),
 	minify: true,
@@ -72,8 +77,9 @@ const cdn = await Bun.build({
 	naming: { entry: "[name].min.js", chunk: "[name]-[hash].min.js" },
 });
 // The React entry (iteration 9): its own file that imports the core entry
-// (`./index.js`, one `TabMcp` class for both), `./allowed.js` and `react`;
-// not in the CDN build.
+// (`./index.js`, one `TabMcp` class for both), `./allowed.js`,
+// `./strings.js` (the texts of `ConnectButton`, one table with the
+// dialogs') and `react`; not in the CDN build.
 const react = await Bun.build({
 	entrypoints: [join(root, "src/react.ts")],
 	target: "browser",
@@ -90,10 +96,13 @@ const react = await Bun.build({
 		{
 			name: "core-entry-external",
 			setup(build) {
-				build.onResolve({ filter: /^\.\/(index|allowed)\.ts$/ }, (args) => ({
-					path: args.path.replace(/\.ts$/, ".js"),
-					external: true,
-				}));
+				build.onResolve(
+					{ filter: /^\.\/(index|allowed|strings)\.ts$/ },
+					(args) => ({
+						path: args.path.replace(/\.ts$/, ".js"),
+						external: true,
+					}),
+				);
 			},
 		},
 	],
@@ -129,10 +138,12 @@ const published = {
 		"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 		"./react": { types: "./react.d.ts", default: "./react.js" },
 		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+		"./strings": { types: "./strings.d.ts", default: "./strings.js" },
 		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 		"./cdn": "./cdn/tab-mcp-client.min.js",
 		"./cdn/allowed": "./cdn/allowed.min.js",
+		"./cdn/strings": "./cdn/strings.min.js",
 	},
 	types: "./index.d.ts",
 	sideEffects: false,

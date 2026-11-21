@@ -321,7 +321,7 @@ on(
 					`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].map((b) => b.textContent)`,
 				);
 			}
-			expect(buttons).toEqual(["Don't allow", "Allow"]);
+			expect(buttons).toEqual(["Don't allow", "Allow once"]);
 			expect(
 				await page.eval(
 					`document.querySelector("dialog.tab-mcp-confirm").textContent.includes("An agent in this browser wants to run")`,

@@ -645,7 +645,7 @@ describe("the allowances, with a stub relay", () => {
 			);
 			return String(chunk["data"]);
 		};
-		expect(await call("r1")).toContain("The user declined");
+		expect(await call("r1")).toContain("The user did not allow this call.");
 		expect(asked).toBe(1);
 		allowedTools(t).allow("g_1", "a");
 		expect(await call("r2")).toContain('"text":"ok"');
@@ -691,7 +691,9 @@ describe("the allowances, end to end with the relay", () => {
 		await first.connect();
 		const [only] = first.grants;
 		if (only === undefined) throw new Error("no grant");
-		expect(await call(address, token)).toContain("The user declined");
+		expect(await call(address, token)).toContain(
+			"The user did not allow this call.",
+		);
 		expect(asked).toBe(1);
 		allowedTools(first).allow(only.grantId, "clear_memory");
 		expect(await call(address, token)).toContain('"text":"ok"');
@@ -711,7 +713,9 @@ describe("the allowances, end to end with the relay", () => {
 		const again = await tokenFor(r, address);
 		second.disconnect();
 		await second.connect();
-		expect(await call(address, again)).toContain("The user declined");
+		expect(await call(address, again)).toContain(
+			"The user did not allow this call.",
+		);
 		expect(asked).toBe(2);
 		second.disconnect();
 	});

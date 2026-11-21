@@ -756,7 +756,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("How do I add it? under the address: the commands fit, light and dark, Copy keeps its width", async () => {
-		// With an app paired, the address is behind "+ Add another AI app".
+		// With an app paired, the address is behind "+ Connect another AI app".
 		const adding = !(await stack.panel.eval<boolean>(
 			`document.getElementById("pairing").hidden === false`,
 		));
@@ -1071,7 +1071,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				true,
 				"",
 				"always-allow-note",
-				`Always allow, on: the tool runs without asking on ${SITE}, for every paired AI app. Off: it asks you before each call.`,
+				`Always allow, on: the tool runs without asking on ${SITE}, for every connected AI app. Off: it asks you before each call.`,
 				[],
 			]);
 		} finally {
@@ -1113,7 +1113,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The switch changed under the pointer (off again, one more tool): a
 		// click right then allows nothing.
 		await stack.panel.waitFor(
-			`!${head}.checked && ${head}.getAttribute("aria-label") === "Always allow all: the 2 tools listed on ${SITE}, for every paired AI app"`,
+			`!${head}.checked && ${head}.getAttribute("aria-label") === "Always allow all: the 2 tools listed on ${SITE}, for every connected AI app"`,
 		);
 		expect(await stack.panel.eval(takesClicks("#allow-tools"))).toBe(false);
 		// Not `disabled`: it stays in the tab order (EQ 11).
@@ -1647,7 +1647,7 @@ describe.skipIf(chrome === undefined)(
 			);
 			expect(grants).toEqual(status === "on" ? ["Test client"] : []);
 			// The same address: shown with the code (at once with no app paired,
-			// else after "+ Add another AI app").
+			// else after "+ Connect another AI app").
 			if (status === "on") await stack.panel.click("#add-app");
 			await stack.panel.waitFor(
 				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
@@ -1733,7 +1733,7 @@ describe.skipIf(chrome === undefined)(
 		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
 			await stack.panel.click("#connect");
 			// The AI app (the test's client) is paired by now: the card lists it
-			// and keeps the address out of sight until "+ Add another AI app".
+			// and keeps the address out of sight until "+ Connect another AI app".
 			await stack.panel.waitFor(
 				`document.getElementById("state").dataset.state === "on"`,
 				15_000,
@@ -1774,20 +1774,20 @@ describe.skipIf(chrome === undefined)(
 				`document.getElementById("state").dataset.state === "off"`,
 			);
 			const off = await appRow();
-			expect(off.slice(0, 3)).toEqual([1, false, "Paired AI apps"]);
+			expect(off.slice(0, 3)).toEqual([1, false, "Connected AI apps"]);
 			expect(off[3]).not.toBe(green);
-			// No Disconnect while off: only the relay can disconnect an app,
+			// No Disconnect while off: only the relay can disconnect an AI app,
 			// and the panel says so (EQ 8).
 			const offView = () =>
 				stack.panel.eval(
 					`[document.getElementById("state-text").textContent, document.querySelectorAll("#grants li").length, document.querySelectorAll("#grants button").length, document.getElementById("grants-note").hidden, document.getElementById("grants-note").textContent]`,
 				);
 			const expectedOff = [
-				"AI access is off · paired apps stay paired",
+				"AI access is off · your AI apps stay connected for next time",
 				1,
 				0,
 				false,
-				"Turn on AI access to disconnect an app.",
+				"Turn on AI access to disconnect an AI app.",
 			];
 			expect(await offView()).toEqual(expectedOff);
 			// A new worker (an update, or the old one stopped while idle) still

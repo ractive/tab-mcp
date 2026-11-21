@@ -151,8 +151,8 @@ came, and answers every `identity` exactly once. A refused assertion gets `error
 binding it had ends (fail closed), with its requests in flight. Grants made by identity
 binding remember the person (as a hash of issuer and subject). An MCP request on such a
 grant, or any request on an `oidc` site, reaches the page only while it is bound to the
-same person; another person gets HTTP 401 `invalid_token` with "This AI tool is logged
-in as someone other than the page.", and a page that is open but not signed in is waited
+same person; another person gets HTTP 401 `invalid_token` with "This AI app is signed
+in as someone other than the page's user.", and a page that is open but not signed in is waited
 for like a closed page (below), then answered with "The page is open, but nobody is
 signed in to it. …". When the page proves another person than before, the relay revokes
 the grants of the previous one and ends their requests in flight.

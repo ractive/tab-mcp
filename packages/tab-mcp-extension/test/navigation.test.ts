@@ -767,7 +767,9 @@ describe("the navigation question", () => {
 			]);
 			// One kind of button for every answer: none is pushed (DEC-180).
 			expect(buttons.map((b) => b.className)).toEqual(["", "", ""]);
-			expect(card.textContent).toContain("for every paired AI app");
+			expect(card.textContent).toContain(
+				"for every connected AI app, until you turn off its “Always allow” in the tool list.",
+			);
 			// The time left (EQ 13).
 			expect(card.querySelector(".countdown")?.textContent).toBe(
 				"48 s left to answer; no answer is Don't allow.",

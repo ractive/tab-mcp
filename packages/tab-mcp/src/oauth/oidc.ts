@@ -274,7 +274,7 @@ export class OidcPairing implements PairingMethod {
 
 	render(): string {
 		const host = escapeHtml(this.#providerHost);
-		return `<p>Sign in at <strong>${host}</strong> with the account you use in the page. The page must be open, signed in, and showing “Connect your AI app”. No code is needed.</p>`;
+		return `<p>Sign in at <strong>${host}</strong> with the account you use on the page. The page must be open, signed in, and showing “Connect your AI app”. No code is needed.</p>`;
 	}
 
 	async check(

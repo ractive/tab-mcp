@@ -120,7 +120,7 @@ function pairingLines(q: QuestionView): HTMLElement[] {
 		);
 	lines.push(
 		paragraph(
-			"Allow fills in this extension's code on the relay's page in this browser and connects it. The AI app can then use the tab in front. Only allow an AI app you are connecting right now.",
+			"Allow fills in tab-mcp's code on the sign-in page in this browser and connects the AI app. It can then use the tab in front. Only allow an AI app you are connecting right now.",
 			"muted small",
 		),
 	);
@@ -212,7 +212,7 @@ export function questionCard(
 		buttons.append(button(`Always allow on ${host}`, "site"));
 		const note = document.createElement("p");
 		note.className = "muted small";
-		note.textContent = `Always allow on ${host}: this tool runs without asking there, for every paired AI app, until you turn off its "Always allow" in the tool list.`;
+		note.textContent = `Always allow on ${host}: this tool runs without asking there, for every connected AI app, until you turn off its “Always allow” in the tool list.`;
 		card.append(note);
 	}
 	return card;

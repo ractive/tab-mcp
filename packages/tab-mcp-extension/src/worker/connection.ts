@@ -88,7 +88,7 @@ import { createTools, INSTRUCTIONS } from "./tools.ts";
 
 /** What a Disconnect while not connected says (it did nothing). */
 export const DISCONNECT_WHILE_DOWN =
-	"The app was not disconnected: AI access has to be on and connected to disconnect an app.";
+	"The AI app was not disconnected: AI access has to be on and connected first.";
 
 /** Wakes the worker while AI access is on, should the connection be down. */
 export const ALARM = "tab-mcp-keepup";
@@ -1138,7 +1138,7 @@ export class Connection {
 				: status === "on" || status === "waiting"
 					? ["on", BADGE_LOOK.on, `${PRODUCT}: AI access is on`]
 					: status === "connecting" || status === "retrying"
-						? ["…", BADGE_LOOK.idle, `${PRODUCT}: connecting`]
+						? ["…", BADGE_LOOK.idle, `${PRODUCT}: connecting…`]
 						: ["", BADGE_LOOK.idle, PRODUCT];
 		void chrome.action.setBadgeText({ text }).catch(() => {});
 		// Said, not left to Chrome's choice between black and white.

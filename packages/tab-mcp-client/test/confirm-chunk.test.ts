@@ -97,5 +97,5 @@ test("the confirmation's chunk does not load: the page's own onConfirm asks", as
 test("the confirmation's chunk does not load and there is no onConfirm: refused, never allowed", async () => {
 	const call = await callWipe({});
 	expect(call.ran).toBe(false);
-	expect(call.text).toContain("The user declined");
+	expect(call.text).toContain("The user did not allow this call.");
 });

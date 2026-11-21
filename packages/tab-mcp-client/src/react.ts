@@ -45,6 +45,8 @@ import {
 	type ToolCallEnd,
 	type ToolCallStart,
 } from "./index.ts";
+import { type DialogStrings, withEnglish } from "./strings.ts";
+import { plural } from "./text.ts";
 
 /** What `useTabMcpState()` returns: one object per change, the same object otherwise. */
 export interface TabMcpSnapshot {
@@ -286,7 +288,7 @@ export function useTabMcpState(): TabMcpSnapshot {
 export interface AllowedToolsSnapshot {
 	/** The page's tools that ask, each with whether it runs without asking for this app. */
 	tools: (AllowedTool & { allowed: boolean })[];
-	/** "Allow everything, no questions asked" is on for this app. */
+	/** "Always allow everything" is on for this app. */
 	everything: boolean;
 	/** To change them: `allow`, `ask`, `setEverything`, `forget`. */
 	allowedTools: AllowedTools;
@@ -444,18 +446,16 @@ export interface ConnectButtonProps
 /** Failed reconnect attempts after which the default label says the connection is lost. */
 const LOST_AFTER_ATTEMPTS = 3;
 
-/** The default label of `ConnectButton`. */
-function connectLabel(state: TabMcpSnapshot): string {
+/** The default label of `ConnectButton`, in the texts of the `TabMcp`'s `ui.strings`. */
+function connectLabel(state: TabMcpSnapshot, s: DialogStrings): string {
 	if (state.state === "connected" && state.grants.length > 0)
-		return state.grants.length === 1
-			? "AI app connected"
-			: `${state.grants.length} AI apps connected`;
+		return plural(s.buttonConnected, state.grants.length, s);
 	if (state.state === "reconnecting")
 		return (state.reconnecting?.attempt ?? 0) > LOST_AFTER_ATTEMPTS
-			? "Connection lost, retrying…"
-			: "Reconnecting…";
-	if (state.state === "connecting") return "Connecting…";
-	return "Connect your AI app";
+			? s.reconnecting
+			: s.buttonReconnecting;
+	if (state.state === "connecting") return s.connecting;
+	return s.connectTitle;
 }
 
 /**
@@ -476,7 +476,7 @@ export function ConnectButton({
 	if (!mcp.hasRelay) return null;
 	const label =
 		children === undefined
-			? connectLabel(state)
+			? connectLabel(state, withEnglish(mcp._ui?.strings))
 			: typeof children === "function"
 				? children(state)
 				: children;

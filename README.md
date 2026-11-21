@@ -192,7 +192,7 @@ You need a page that offers tab-mcp, such as the [live diagram editor](https://r
    Step by step for each app, and what to do when it fails:
    [connecting an AI app](https://ractive.ch/tab-mcp/connect/).
 3. Your browser opens the relay's page "Connect … from …". Check the AI app it names,
-   then type the code shown in the page.
+   then type the code that “Connect your AI app” shows on the page.
 4. Ask your AI app to use the page. To stop, click Disconnect in the page, or close the
    tab.
 

@@ -14,10 +14,9 @@
 
 	<section class="card" aria-labelledby="ai-heading">
 		<div class="card-head">
-			<h2 id="ai-heading">AI app</h2>
+			<h2 id="ai-heading">AI access</h2>
 			<label class="switch">
-				<input id="ai-switch" type="checkbox" role="switch" aria-checked="false">
-				<span>AI access</span>
+				<input id="ai-switch" type="checkbox" role="switch" aria-checked="false" aria-labelledby="ai-heading">
 			</label>
 		</div>
 		<p id="intro" class="muted small" hidden></p>
@@ -37,11 +36,11 @@
 		<div class="buttons">
 			<button id="connect" type="button" class="strong">Turn on AI access</button>
 		</div>
-		<p><button id="add-app" type="button" class="link" hidden>+ Add another AI app</button></p>
+		<p><button id="add-app" type="button" class="link" hidden>+ Connect another AI app</button></p>
 
 		<div id="pairing" class="pairing" hidden>
-			<h3>Pair an AI app</h3>
-			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
+			<h3>Connect your AI app</h3>
+			<p>Add this address to your AI app:</p>
 			<p id="pairing-profile" class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
 			<div class="address">
 				<code id="address"></code>
@@ -53,7 +52,7 @@
 				<p><a id="setup-guide" href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">Step by step, and what to do when it fails</a></p>
 			</details>
 			<p id="copy-status" class="muted small" role="status"></p>
-			<p>When the AI app opens the sign-in page, type this code there:</p>
+			<p>When your AI app opens the sign-in page, type this code there:</p>
 			<p class="code-line"><code id="code" class="code">––––-––––</code>
 				<button id="copy-code" type="button" class="quiet small copy" aria-label="Copy code" disabled>Copy</button></p>
 			<p class="muted small">The code changes every 2 minutes and after each use.</p>

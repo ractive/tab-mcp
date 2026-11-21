@@ -63,7 +63,7 @@ than 0.
 | `TAB_MCP_REFRESH_TOKEN_TTL_S` | `2592000` | Refresh token lifetime (30 days). Every refresh issues a new refresh token. |
 | `TAB_MCP_GRANT_LIFETIME_S` | `7776000` | Absolute end of a connection, counted from pairing (90 days). Refreshes never go beyond it; then the user pairs again. |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. Logs are JSON lines on stdout and never contain request or response bodies. |
-| `TAB_MCP_IDENTITY` | `code` | How AI apps pair with pages of sites that do not set their own `pairing`: `code` (the code shown in the page) or `oidc` (the same sign-in, see [Identity binding](#identity-binding)). |
+| `TAB_MCP_IDENTITY` | `code` | How AI apps pair with pages of sites that do not set their own `pairing`: `code` (the code shown on the page) or `oidc` (the same sign-in, see [Identity binding](#identity-binding)). |
 | `TAB_MCP_OIDC_ISSUER` | none | The OpenID Connect provider's issuer, e.g. `https://login.example.com`. Required when any site uses `oidc`. |
 | `TAB_MCP_OIDC_CLIENT_ID` | none | The relay's client at that provider. Required for `oidc`. |
 | `TAB_MCP_OIDC_CLIENT_SECRET` | none | Its client secret. Without it the relay is a public client (PKCE only). Keep it in your platform's secret store. |
@@ -99,7 +99,7 @@ Each site is an object with these keys:
 | `origin` | The page origin: `https://…`, `http://…`, or `chrome-extension://<id>` for an extension. Required. |
 | `name` | The app name the relay uses for the site's pages (1-64 characters), in its "the page is not open" answers to AI apps. Without it the relay uses the page's own `appName`, which the page declares itself. |
 | `apps` | The apps this origin serves: a list of app ids, at least one. Without it the origin's pages may name any app that no site lists. See below. |
-| `pairing` | `code` (the code shown in the page) or `oidc` (identity binding). Without it the site uses `TAB_MCP_IDENTITY`. |
+| `pairing` | `code` (the code shown on the page) or `oidc` (identity binding). Without it the site uses `TAB_MCP_IDENTITY`. |
 | `limits` | Overrides of the instance limits, in milliseconds and bytes: `maxMessageBytes`, `maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`, `idleTimeoutMs`, `sessionLifetimeMs`, `heartbeatMs`. |
 
 Unknown keys stop the relay at start. With `TAB_MCP_ALLOWED_ORIGINS=*`, configured sites

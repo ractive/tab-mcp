@@ -536,7 +536,7 @@ instructions, as the recipe does with a delimited block.
 ### Consequential tools
 
 Mark tools that change or delete something with `consequentialHint: true`. The page then
-asks the user before every call ("Don't allow" or "Allow"), showing the AI app and the
+asks the user before every call ("Don't allow" or "Allow once"), showing the AI app and the
 arguments. A refusal reaches the AI app as an error result, and so does a call whose tool
 was removed while the user was asked.
 
@@ -545,7 +545,7 @@ AI app from then on; see [Tools that run without asking](#tools-that-run-without
 It is off by default.
 
 Tools are called while the user is in the AI app, so the dialog often opens in a tab in
-the background. "Allow" and "Always allow" can be clicked only once the page has
+the background. "Allow once" and "Always allow" can be clicked only once the page has
 been visible and focused for 750 ms with the dialog open; leaving the page
 disables them and coming back starts the wait again, so the click that brings the page
 forward cannot approve. One confirmation is shown at a time; the others wait, the shown
@@ -597,7 +597,7 @@ const mcp = new TabMcp({
 
 `onConfirm` returns `true` (run), `false` (the user refused) or `"unanswered"`: the user was
 asked and did not answer, e.g. your question timed out. The AI app then reads "The user was
-asked and did not answer." instead of "The user declined", and `toolcallend` has the
+asked and did not answer." instead of "The user did not allow this call.", and `toolcallend` has the
 outcome `unanswered`. Any other value, and a throw, is a refusal.
 
 `mcp.confirmInPage(request, { document })` is the library's own dialog, for an
@@ -619,8 +619,7 @@ a client with `kind: "relay"` can be allowed.
 ### Tools that run without asking
 
 The user can let a consequential tool run without asking, for one connected AI app: one
-tool at a time ("Always allow" this tool), or everything ("Allow everything, no questions
-asked"). An allowed call runs at once, with the library's dialog and with your own
+tool at a time ("Always allow" this tool), or everything ("Always allow everything"). An allowed call runs at once, with the library's dialog and with your own
 `onConfirm` alike: neither is asked. Only AI apps through the relay can be allowed; an
 agent in the browser (WebMCP) and a served port have no grant to remember it for and are
 always asked.
@@ -629,16 +628,18 @@ The option `alwaysAllow` decides what the library's dialogs offer:
 
 | `alwaysAllow`    | The confirmation offers    | The connect dialog shows              | Kept                                         |
 | ---------------- | -------------------------- | ------------------------------------- | -------------------------------------------- |
-| unset or `false` | Don't allow, Allow         | nothing (unless something is allowed) | in `storage`, for your own switches          |
+| unset or `false` | Don't allow, Allow once    | nothing (unless something is allowed) | in `storage`, for your own switches          |
 | `true`           | … and "Always allow"       | the switches under each app           | in `storage`, until the app is disconnected  |
 | `"until-reload"` | … and "Allow until reload" | the switches under each app           | in memory, until the page is reloaded        |
 
 With `true` and `storage: null`, nothing outlives the page either, and the button says
 "Allow until reload". The confirmation never offers "allow everything": that is a
 deliberate act in the connect dialog, not an answer to one question. In the connect
-dialog, each connected app gets a switch per tool that asks (its title or name;
-destructive ones marked) and "Allow everything, no questions asked", with a sentence on
-what it means. The switches are checkboxes with `role="switch"` whose accessible names
+dialog, each connected AI app gets a switch per tool that asks (its title or name;
+destructive ones marked) and "Always allow everything", with a sentence on what it means
+and how long it lasts, under the confirmation's own label ("Always allow", or "Allow until
+reload" when nothing outlives the page), so the button and the switches it turns on read
+alike. The switches are checkboxes with `role="switch"` whose accessible names
 name the app. A tool that is allowed but not registered right now (a page may offer some
 tools only on some views) is listed by its name, as a switch that can only be turned
 off. When the page does not offer allowing (`alwaysAllow` unset) but something is
@@ -678,7 +679,7 @@ function drawSwitches() {
           allowed.has(grant.grantId, tool.name),
           (on) => on ? allowed.allow(grant.grantId, tool.name) : allowed.ask(grant.grantId, tool.name)),
       ),
-      mySwitch("Allow everything, no questions asked",
+      mySwitch("Always allow everything",
         allowed.everything(grant.grantId),
         (on) => allowed.setEverything(grant.grantId, on)),
     ]),
@@ -749,7 +750,7 @@ not seen, and ones the page adds later. The relay cannot help: its one OAuth sco
    revision, so its command turns that on first. The steps are the minimum; the link at
    the end of the help leads to the guide with the rest (ChatGPT's Mac app, turning the
    Codex feature off, what to do when it fails). A page can link its own guide and give
-   its own steps (`ui.setup`, see [Texts and help of the dialogs](#texts-and-help-of-the-dialogs)).
+   its own steps (`ui.setup`, see [Help in the connect dialog](#help-in-the-connect-dialog)).
    The user adds the address to their AI app. It is the app's address
    (`https://<relay>/s/<app>/mcp`), the same in every user's dialog.
 3. The AI app opens the relay's sign-in page in the browser. The dialog shows a code of
@@ -759,7 +760,7 @@ not seen, and ones the page adds later. The relay cannot help: its one OAuth sco
 4. Once the AI app connects, the dialog says so at the top: a check mark, "Claude
    (claude.ai) is connected" (every connected app is named) and what to do next (close it and ask the app to use the
    page's tools); screen readers hear the same. The setup (address, code, help) moves
-   behind "Connect another app", closed, so the next code does not appear in view; the
+   behind "Connect another AI app", closed, so the next code does not appear in view; the
    connected app is listed with a Disconnect button (and, with `alwaysAllow`, the
    switches for what it may run without asking), and "Done" closes the dialog. A Disconnect the relay could
    not save says so in the list ("The relay could not save this. Try again.").
@@ -773,7 +774,7 @@ code, for up to 10 seconds; if no app connects by then, the new code appears. A 
 replaces an expired one, or one that comes without a reason, shows at once.
 
 Until an app is connected, the dialog offers no prominent button under the code: only a small
-"Close" at the bottom (and Escape). Closing it stops the code (`stopPairing()`); the page
+"Close" at the bottom (and Escape). Closing it ends the code (`stopPairing()`); the page
 stays connected and the address stays the same, so calling `showConnectDialog()` again
 shows the same address with a new code. While the dialog is open, calling it again (a
 double click) opens no second one; the call resolves when that one closes. A call for another
@@ -956,8 +957,8 @@ const identity = await mcp.refreshIdentity();
 
 The library asks the function after every connect. `identity` (`none`, `pending`,
 `bound`, `refused`, with the reason in `identityMessage`) and the event
-`identitychange` tell you whether the relay accepted it; when the function or the relay does not answer within 15 s (counted from when the function is asked), it goes back to `none`. `signOut()` and `refreshIdentity()` reject with an `InvalidStateError` while the page is not connected (`signOut()` also on a relay that pairs by code); `identity` is cleared either way. An AI app signed in as someone else gets "This AI tool is logged in as someone other
-than the page."
+`identitychange` tell you whether the relay accepted it; when the function or the relay does not answer within 15 s (counted from when the function is asked), it goes back to `none`. `signOut()` and `refreshIdentity()` reject with an `InvalidStateError` while the page is not connected (`signOut()` also on a relay that pairs by code); `identity` is cleared either way. An AI app signed in as someone else gets "This AI app is signed in as someone other
+than the page's user."
 
 The connect dialog follows `identity`: it shows the address and "When your AI app asks,
 sign in with the account you use on this page" only once it is `bound`. Until then it
@@ -1070,15 +1071,16 @@ mcp.addEventListener("toolcallend", (e) => {
 
 `@ractive-ch/tab-mcp-client/setup` has the steps the connect dialog shows under "How do I
 add it?", as data for your own UI. An entry of its own, out of the core, and not in the CDN
-build. `setupInstructions(serverName, address)` returns one entry per AI app (Claude,
+build. `setupInstructions(serverName, address, strings?)` returns one entry per AI app (Claude,
 ChatGPT, Claude Code, Codex, in that order): `id` (`claude`, `chatgpt`, `claude-code`,
 `codex`), `app` (its name as shown), `text` (what to do), `command` (lines to run, for
 Claude Code and Codex) and `note` (text and code parts, for Claude Code and Codex). Every string is plain
 text: set it with `textContent`. The commands name the server by a label made from
 `serverName` and contain the address only when every shell reads both as plain words (see
 step 2 above), so they are safe to show with a Copy button; for an address that is not
-plain, `command` is left out and `text` names the command instead. `SETUP_GUIDE` is the
-guide with every step and what to do when it fails.
+plain, `command` is left out and `text` names the command instead. `strings` is your
+table of texts ([Translating](#translating)); the steps are English without it.
+`SETUP_GUIDE` is the guide with every step and what to do when it fails.
 
 ```ts
 import { SETUP_GUIDE, setupInstructions } from "@ractive-ch/tab-mcp-client/setup";
@@ -1095,21 +1097,89 @@ for (const { app, text, command, note } of setupInstructions("notes", session.ad
 guide.href = SETUP_GUIDE;
 ```
 
-### Texts and help of the dialogs
+### Translating
 
-Every text of the dialogs is in one table, [`src/strings.ts`](src/strings.ts) (the type
-`DialogStrings`). Pass your own for some or all keys as `ui.strings`; the rest stay
-English. `{name}` placeholders are filled in: names of tools and AI apps (isolated, so
-they cannot reorder your sentence), the code, counts. Where English needs two forms there
-are two keys (`waitingOne`, `waitingMany`). `lang` and `dir` are the language and direction
-set on every dialog: set them with your texts.
+The package ships English only. Every text the library shows a person is in one table,
+[`src/strings.ts`](src/strings.ts): the connect dialog and its setup steps, the question
+before a tool runs, the switches of the tools that run without asking, the line about AI
+apps connected through the tab-mcp browser extension, the replaced notice and the label of
+the React `ConnectButton`. Give your own table once, as `ui.strings` of `TabMcp` (or of
+`<TabMcpProvider>`), and every part reads it; a key you leave out stays English. With
+your tables loaded only for the users who need them, it takes three lines:
+
+```ts
+import { pickStrings } from "@ractive-ch/tab-mcp-client/strings";
+const strings = await pickStrings({ de: () => import("./tab-mcp.de.ts"), fr: () => import("./tab-mcp.fr.ts") });
+const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "notizen", version: "1.0.0" }, ui: { strings } });
+```
+
+`pickStrings(tables, languages = navigator.languages)` goes through the user's languages
+in order and loads the first table that matches, exactly or by the language alone
+(`de-CH` takes `de`, `pt-PT` takes `pt-BR`). English is built in: a user who prefers
+English before any of your languages, or none of them, gets `undefined`, which keeps the
+English texts. The table comes with `lang` set to the tag it was found by unless it has
+its own. A table with a few keys:
+
+```ts
+// tab-mcp.de.ts
+import type { DialogStrings } from "@ractive-ch/tab-mcp-client";
+
+export default {
+  lang: "de",
+  connectTitle: "KI-App verbinden",
+  confirmTitle: "{tool} erlauben?",
+  confirmWho: "{client} möchte {tool} ausführen.",
+  deny: "Nicht erlauben",
+  allow: "Einmal erlauben",
+  alwaysAllow: "Immer erlauben",
+  waiting: {
+    one: "{n} weiterer Aufruf wartet nach diesem.",
+    other: "{n} weitere Aufrufe warten nach diesem.",
+  },
+  connected: { one: "{apps} ist verbunden", other: "{apps} sind verbunden" },
+  buttonConnected: { one: "KI-App verbunden", other: "{n} KI-Apps verbunden" },
+} satisfies Partial<DialogStrings>;
+```
+
+- **Placeholders.** `{name}` is filled in: names of tools and AI apps (isolated, so that
+  they cannot reorder your sentence), the code, a time, a count. Put them where your
+  language needs them.
+- **Plural forms.** A text that depends on a count is an object with one form per plural
+  category of your language, as `Intl.PluralRules` names them (`zero`, `one`, `two`,
+  `few`, `many`, `other`): English needs `one` and `other`, Polish `one`, `few`, `many`
+  and `other`, Japanese only `other`. `other` is required and stands in for a category
+  you leave out. `{n}` is the count; in a text with `{apps}` the count is the number of
+  AI apps named.
+- **Lists.** Names are joined by `Intl.ListFormat` in your language ("A, B und C"):
+  there is nothing to translate.
+- **Language and direction.** `lang` (a BCP 47 tag) is what plural forms and lists follow,
+  and every dialog carries it, so a screen reader reads it with the right voice. The
+  dialogs take the direction from `lang` where the browser knows it; set `dir: "rtl"` in a
+  right-to-left table to be sure (Firefox does not tell).
+- **Complete across upgrades.** Type a full translation as `DialogStrings` instead of
+  `Partial<DialogStrings>` (start from a copy of `STRINGS`, the English table of
+  `@ractive-ch/tab-mcp-client/strings`): the type check then names every key you lack,
+  also one a new version added, and a misspelt key is a type error either way. Keys that
+  change name are listed in the changelog under "Changed". At run time a missing or wrong
+  value keeps the English text.
+- **Texts an AI app reads stay English** on purpose: tool results, refusals ("The user did
+  not allow this call.") and errors go to the AI app, which answers the user in their
+  language anyway.
+
+`Intl.PluralRules` and `Intl.ListFormat` are in every browser the library runs in (the
+later of the two since Chrome 72, Firefox 78 and Safari 14.1, 2019 to 2021). Without a
+bundler, the same entry is `cdn/strings.min.js` next to `cdn/tab-mcp-client.min.js`. A
+page that shows these texts in its own UI gets the whole table, its own texts where it
+has them and English for the rest, from `withEnglish(strings)`.
+
+### Help in the connect dialog
 
 `ui.setup` changes the help in the connect dialog: `guide` is the link at its end
 (default the guide on ractive.ch; `null` for none, for example on your own relay, and
 then your own `instructions` too, since the default steps refer to the guide), and
 `instructions(serverName, address)` returns the steps per AI app, each `{ app, text,
 command?, note? }` (default `setupInstructions` of `@ractive-ch/tab-mcp-client/setup`,
-which you can filter or extend).
+which you can filter or extend; pass it your `strings` to keep them translated).
 
 ```ts
 import { setupInstructions } from "@ractive-ch/tab-mcp-client/setup";
@@ -1118,17 +1188,11 @@ const mcp = new TabMcp({
   relay: "https://relay.example",
   server: { name: "notizen", version: "1.0.0" },
   ui: {
-    strings: {
-      lang: "de",
-      connectTitle: "KI-App verbinden",
-      confirmTitle: "{tool} erlauben?",
-      allow: "Erlauben",
-      deny: "Nicht erlauben",
-    },
+    strings,
     setup: {
       guide: "https://example.com/hilfe/ki",
       instructions: (name, address) =>
-        setupInstructions(name, address).filter((step) => step.id !== "codex"),
+        setupInstructions(name, address, strings).filter((step) => step.id !== "codex"),
     },
   },
 });
@@ -1246,8 +1310,9 @@ function TodoList() {
   newest first (default 20), each with its `end` (outcome, result, duration) once over.
 - `<ConnectButton>` calls `showConnectDialog()`, so it needs a real click (see
   [Connecting and pairing](#connecting-and-pairing)). Its label follows the state
-  ("Connect your AI app", "Connecting…", "Reconnecting…", "AI app connected"), and
-  "Connection lost, retrying…" once three reconnect attempts have failed; a click then
+  ("Connect your AI app", "Connecting…", "Reconnecting…", "AI app connected", "2 AI apps
+  connected"), and "Connection lost. Reconnecting…" once three reconnect attempts have
+  failed; a click then
   tries again at once. `children` replaces the label: a node, or a function of the state
   from `useTabMcpState()`, such as
   `{(s) => (s.grants.length > 0 ? "Claude is playing" : "Let Claude play")}`. The usual

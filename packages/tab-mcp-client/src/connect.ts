@@ -14,6 +14,7 @@ import {
 	listOf,
 	newDialog,
 	nextId,
+	plural,
 	stringsOf,
 	visible,
 } from "./dialog.ts";
@@ -46,8 +47,10 @@ function switchOf(
 /**
  * Under a connected app, the switches for what runs without asking. With
  * `alwaysAllow` (`offered`): a switch per tool that asks (its title or
- * name, destructive ones marked) and "Allow everything, no questions asked"
- * with what it means. Without it, only what is allowed now, as switches that
+ * name, destructive ones marked) and "Always allow everything" with what it
+ * means, under the confirmation's own label ("Always allow", or "Allow
+ * until reload" when nothing is kept), so the button and the switches it
+ * turns on read alike. Without it, only what is allowed now, as switches that
  * can only be turned off ("everything" only while it is on): the user sees
  * what runs without asking and can end it, and is never offered more than
  * the page chose to offer. Tools allowed but not registered right now are
@@ -65,7 +68,7 @@ function allowedSwitches(
 	const title = el(doc, "p", {
 		className: "tab-mcp-allowed-title",
 		id: `${nextId()}-allowed`,
-		text: s.runsWithoutAsking,
+		text: allowed.kept ? s.alwaysAllow : s.allowUntilReload,
 	});
 	const list = el(doc, "div", { className: "tab-mcp-switches" });
 	// Turning on only where the page offers it; the store decides the rest.
@@ -83,7 +86,11 @@ function allowedSwitches(
 		doc,
 		"small",
 		{ className: "tab-mcp-everything-note", id: `${title.id}-note` },
-		...fill(doc, s.allowEverythingNote, { app }),
+		...fill(
+			doc,
+			allowed.kept ? s.allowEverythingNote : s.allowEverythingUntilReloadNote,
+			{ app },
+		),
 	);
 	all.input.setAttribute("aria-describedby", note.id);
 	// Filled when first shown: a page without it has no switches in its DOM.
@@ -356,7 +363,7 @@ export const CODE_USED_WAIT_MS = 10_000;
  * that run without asking). Pairing is on while it is open, so closing it
  * ends the code; the connection and the address stay. Until an app is
  * connected, only a small Close (and Escape) close it. Once one is, a
- * confirmation leads, the setup moves behind "Connect another app" and
+ * confirmation leads, the setup moves behind "Connect another AI app" and
  * Done is the primary button. Disconnect all apps asks first when it would
  * disconnect connected apps. When the page loses its address (`replaced`),
  * this dialog closes and `replacedNotice` says why, from then on also while
@@ -453,8 +460,9 @@ export function showConnectDialog(
 		copy,
 	);
 
-	// Not next to Copy, and saying what it does (CU 23): with no app connected
-	// it changes the address at once, also one just pasted into an AI app.
+	// Not next to Copy, and saying what it does (CU 23): with no AI app
+	// connected it makes a new secret at once (the address stays), which
+	// also ends what a pasted address could reach.
 	const fresh = button(
 		doc,
 		s.disconnectAll,
@@ -597,10 +605,12 @@ export function showConnectDialog(
 		guide.rel = "noopener noreferrer";
 		help.append(el(doc, "p", { className: "tab-mcp-guide" }, guide));
 	}
-	const instructions = ui?.setup?.instructions ?? setupInstructions;
+	const instructions =
+		ui?.setup?.instructions ??
+		((name: string, address: string) => setupInstructions(name, address, s));
 
 	// Everything for adding the page to an AI app. Once one is connected, it
-	// is behind "Connect another app", closed: the next code is not news.
+	// is behind "Connect another AI app", closed: the next code is not news.
 	// Where to paste the address comes right after it, the code after that
 	// (CU 23); Disconnect all apps last. The help stays closed (DEC-147).
 	const setupId = `${nextId()}-setup`;
@@ -917,11 +927,11 @@ export function showConnectDialog(
 		if (names.length === 0 || !shown) asking = false;
 
 		connectedView = !renewing && connected && grants.length > 0;
-		const one = names.length === 1;
-		successTitle.textContent = format(one ? s.connectedOne : s.connectedMany, {
-			apps: listOf(names, s),
+		const named = listOf(names, s);
+		successTitle.textContent = plural(s.connected, names.length, s, {
+			apps: named,
 		});
-		successNext.textContent = one ? s.connectedNextOne : s.connectedNextMany;
+		successNext.textContent = plural(s.connectedNext, names.length, s);
 		if (connectedView) dialog.setAttribute("aria-describedby", successId);
 		else dialog.removeAttribute("aria-describedby");
 		success.hidden = !connectedView;
@@ -939,14 +949,10 @@ export function showConnectDialog(
 		viaExtension.textContent =
 			via.length === 0
 				? ""
-				: format(
-						extension?.whileInFront
-							? via.length === 1
-								? s.viaExtensionInFrontOne
-								: s.viaExtensionInFrontMany
-							: via.length === 1
-								? s.viaExtensionOne
-								: s.viaExtensionMany,
+				: plural(
+						extension?.whileInFront ? s.viaExtensionInFront : s.viaExtension,
+						via.length,
+						s,
 						{ apps: listOf(via, s) },
 					);
 
@@ -982,9 +988,11 @@ export function showConnectDialog(
 		fresh.disabled = !connected;
 		question.hidden = !asking;
 		if (asking)
-			questionText.textContent = format(
-				one ? s.disconnectAllQuestionOne : s.disconnectAllQuestionMany,
-				{ apps: listOf(names, s) },
+			questionText.textContent = plural(
+				s.disconnectAllQuestion,
+				names.length,
+				s,
+				{ apps: named },
 			);
 		const hasCode = renderCode(paired);
 		codeLine.hidden = oidc || !hasCode || !connected;
