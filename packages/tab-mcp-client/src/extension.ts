@@ -803,7 +803,9 @@ export class CodeFiller {
 				this.#filled.delete(tabId);
 				done = true;
 			}
-		if (done) this.#host.release();
+		// Another AI app's fill may still be under way or wait for the relay's
+		// check: stopping pairing now would void its code.
+		if (done && !this.#anyFill()) this.#host.release();
 	}
 
 	/**
@@ -853,10 +855,12 @@ export function pairingCodes(
  * it shows, so `startPairing()` with pairing on already brings back the
  * code that is about to change; it counts only if its expiry now leaves
  * `minLeftMs`. If no next one comes within `waitMs`, the current one after
- * all: with this clock ahead every code would look expired, and the relay
- * refuses one that is, which the one more fill for the same request covers.
- * `undefined` only without any code, or when `signal` aborts. Pairing must
- * be on (`startPairing()`) for codes to come.
+ * all: with this clock ahead every code would look expired, so the fill
+ * then waits the whole `waitMs` before it gets that code. The relay
+ * refuses a code that has expired; the one more fill for the same request
+ * covers that, or with `retry: false` a new question. `undefined` only
+ * without any code, or when `signal` aborts. Pairing must be on
+ * (`startPairing()`) for codes to come.
  */
 export function takeCode(
 	source: CodeSource,

@@ -1413,9 +1413,10 @@ than 1 KB gzipped of it.
   the browser's port over in `onConnect`.
 - Which code to fill in: `takeCode(pairingCodes(mcp), signal, { now })` gives the current
   code unless it is about to change, else the next one, and never fails while a code
-  exists (on a computer whose clock is ahead every code would look expired). The same
-  code sent again, as the relay answers `startPairing()` while pairing is on, is not the
-  next one.
+  exists: on a computer whose clock is ahead every code would look expired, so after
+  waiting 10 s for a next one it gives the current code. If the relay refuses that one,
+  the one more fill covers it, or with `retry: false` a new question. The same code sent
+  again, as the relay answers `startPairing()` while pairing is on, is not the next one.
 - The relay's addresses: `relayPageOrigin(relay)`, `relaySitePattern(relay)` (the host
   permission to ask for, `<scheme>://<host>/*`) and `pairingPagePattern(relay)` (a
   content script's `matches`); `undefined` where an address has none (an IPv6 literal).

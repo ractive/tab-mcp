@@ -336,6 +336,41 @@ describe("the content script on the page", () => {
 		expect(scope["__tabMcpPairingPage"]).toBeUndefined();
 	});
 
+	test("a real content script (no page given): once per document, by its global's mark", () => {
+		const scope = globalThis as Record<string, unknown>;
+		const win = new Window({ url: PAGE });
+		windows.push(win);
+		win.document.body.innerHTML = relayForm();
+		const saved = {
+			document: scope["document"],
+			window: scope["window"],
+			location: scope["location"],
+		};
+		Object.assign(scope, {
+			document: win.document,
+			window: win,
+			location: win.location,
+		});
+		try {
+			let ports = 0;
+			const run = () =>
+				runPairingPage({
+					app: APP,
+					connect: () => {
+						ports++;
+						return contentPort();
+					},
+				});
+			expect(run()).toBe(true);
+			// Put in again (access given with the page open): nothing more.
+			expect(run()).toBe(false);
+			expect(ports).toBe(1);
+		} finally {
+			Object.assign(scope, saved);
+			delete scope["__tabMcpPairingPage"];
+		}
+	});
+
 	test("no form of its app: no port", () => {
 		let connected = false;
 		expect(
@@ -859,6 +894,38 @@ describe("asking and filling in", () => {
 		await failing;
 		expect(other.sent).toEqual([]);
 		expect(two.released).toBe(0);
+	});
+
+	test("an AI app that connected releases pairing only once no other AI app's fill needs it", async () => {
+		const host = fillHost();
+		const filler = fillerFor(host);
+		// Claude's fill in tab 4, sent.
+		const claude = filler.page(fakePort());
+		await settle();
+		host.answer("allow");
+		await claude;
+		// ChatGPT's fill in tab 5, waiting for its code.
+		host.holdCode = true;
+		const chatgpt = fakePort(
+			{ tab: { id: 5 } },
+			helloOf({ name: "ChatGPT", host: "chatgpt.com", request: "r-chatgpt" }),
+		);
+		const filling = filler.page(chatgpt);
+		await settle();
+		host.answer("allow");
+		await settle();
+		filler.grantsChanged([{ grantId: "g-claude", host: "claude.ai" }]);
+		expect(host.released).toBe(0);
+		host.giveCode("BCDF-GHJK");
+		await filling;
+		expect(chatgpt.sent).toEqual([fillMessage]);
+		expect(host.released).toBe(0);
+		// ChatGPT connected too: no fill left, pairing released.
+		filler.grantsChanged([
+			{ grantId: "g-claude", host: "claude.ai" },
+			{ grantId: "g-chatgpt", host: "chatgpt.com" },
+		]);
+		expect(host.released).toBe(1);
 	});
 
 	test("the one more fill is for the same tab only: another tab with the same request asks", async () => {

@@ -17,9 +17,10 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   after another fill): the extension filled in the code shown even with under 5 seconds
   left, as the relay answers starting pairing again with that same code; it now waits
   for the next one (library `takeCode`, client 0.19.0).
-- Pairing held on for a fill whose code was not sent (the question or the fill
-  withdrawn, the page gone, no code) ends at once instead of after 30 seconds, unless
-  another fill still needs it.
+- Pairing held on for a fill whose code was not sent (the fill withdrawn while its code
+  was on its way, the page gone, no code) ends at once instead of after 30 seconds,
+  unless another fill still needs it. An AI app that connected releases pairing only
+  once no other AI app's fill needs it.
 - A pairing page of the relay used before is no longer asked about when the relay was
   changed while the page loaded.
 
