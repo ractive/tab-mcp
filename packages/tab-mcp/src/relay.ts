@@ -253,6 +253,7 @@ const INDEX_HTML = `<!doctype html>
 <header class="brand"><img src="/favicon.svg" alt="" width="56" height="56">
 <div><h1>tab-mcp relay</h1><p class="help">Version ${VERSION}</p></div></header>
 <p class="lead">This server passes MCP requests from AI apps to the tools a web page offers in a browser tab.</p>
+<p>A page offers its tools with the tab-mcp client library, which connects it to this relay. A page that offers its tools with the browser's WebMCP reaches it through the tab-mcp browser extension, which passes those tools on.</p>
 <div class="flow" role="img" aria-label="An AI app sends MCP requests to the relay, which passes them over a WebSocket to the browser tab.">
 <span class="node">AI app</span><span class="link">MCP</span><span class="node relay">relay</span><span class="link">WebSocket</span><span class="node">browser tab</span>
 </div>

@@ -22,6 +22,9 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   sign-in only has none. Without the script the field is a plain input, now wide
   enough for the whole code: it was cut off before. The field's hooks for browser
   extensions (DEC-199) are unchanged.
+- **The home page names both ways a page offers its tools**: with the tab-mcp client
+  library, which connects it to the relay, or with the browser's WebMCP, whose tools the
+  tab-mcp browser extension passes on.
 
 ### Fixed
 

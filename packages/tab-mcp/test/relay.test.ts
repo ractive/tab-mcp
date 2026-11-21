@@ -1276,6 +1276,12 @@ describe("health and index", () => {
 		);
 		expect(html).toContain('href="https://ractive.ch/tab-mcp/"');
 		expect(html).toContain(`Version ${VERSION}`);
+		// Both ways a page offers its tools, WebMCP named (owner, 2026-11-22).
+		expect(html).toContain(
+			"A page offers its tools with the tab-mcp client library, which connects it to this relay. A page that offers its tools with the browser's WebMCP reaches it through the tab-mcp browser extension, which passes those tools on.",
+		);
+		expect(html).not.toContain("<script");
+		expect(html).not.toContain("<form");
 		expect((await fetch(`${r.relay.url}/nope`)).status).toBe(404);
 	});
 
