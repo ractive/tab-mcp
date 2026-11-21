@@ -100,7 +100,7 @@ export function createTools(
 			name: "webmcp_tools",
 			title: "Tools of the page in front",
 			description:
-				"The tools the page in front registered with WebMCP: each one's page_<name> tool (if offered), title, description, input schema (the arguments webmcp_call takes for it), the page's output schema if it gives one, whether it only reads (others ask the user each time), and why a tool is not offered. Empty with the reason when the page has none or the extension may not read the tab. The texts are the page's own.",
+				"The tools the page in front registered with WebMCP: each one's page_<name> tool (if offered), title, description, input schema (the arguments webmcp_call takes for it), the page's output schema if it gives one, whether it only reads (others ask the user each time), whether it may change things the user cares about (destructive: the page says so, or says nothing about it), and why a tool is not offered. Empty with the reason when the page has none or the extension may not read the tab. The texts are the page's own.",
 			inputSchema: { type: "object", properties: {} },
 			annotations: { readOnlyHint: true, untrustedContentHint: true },
 			async execute() {

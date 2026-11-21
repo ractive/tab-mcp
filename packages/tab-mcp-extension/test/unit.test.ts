@@ -28,7 +28,7 @@ import {
 import { SERVER_NAME } from "../src/protocol.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
-import { ToolRegistry } from "../src/webmcp/registry.ts";
+import { PageError, readTool, ToolRegistry } from "../src/webmcp/registry.ts";
 import { createTools } from "../src/worker/tools.ts";
 
 describe("manifest", () => {
@@ -367,7 +367,7 @@ describe("calls in the content script", () => {
 		});
 	});
 
-	test("a tool is sent with what the bridge uses: readOnlyHint, debugging, outputSchema (WM 3, WM 8)", async () => {
+	test("a tool is sent with what the bridge uses: readOnlyHint, debugging, consequentialHint, outputSchema (WM 3, WM 8)", async () => {
 		const outputSchema = { type: "object", properties: { n: {} } };
 		const doc = {
 			location: {
@@ -394,6 +394,21 @@ describe("calls in the content script", () => {
 						description: "d",
 						outputSchema: { type: "object", description: "z".repeat(17000) },
 					},
+					{
+						name: "add",
+						description: "d",
+						annotations: {
+							consequentialHint: false,
+							debugging: false,
+							readOnlyHint: false,
+							untrustedContentHint: false,
+						},
+					},
+					{
+						name: "odd",
+						description: "d",
+						annotations: { consequentialHint: "yes" },
+					},
 				],
 				executeTool: async () => "ran",
 			},
@@ -404,11 +419,31 @@ describe("calls in the content script", () => {
 				name: "typed",
 				description: "d",
 				outputSchema,
-				annotations: { readOnlyHint: true, debugging: true },
+				annotations: {
+					readOnlyHint: true,
+					debugging: true,
+					consequentialHint: true,
+				},
 			},
-			// An output schema over 16 KB is left out; the tool is not.
+			// An output schema over 16 KB is left out; the tool is not. No
+			// annotations: no consequentialHint, nothing is known (DEC-213).
 			{
 				name: "huge",
+				description: "d",
+				annotations: { readOnlyHint: false, debugging: false },
+			},
+			{
+				name: "add",
+				description: "d",
+				annotations: {
+					readOnlyHint: false,
+					debugging: false,
+					consequentialHint: false,
+				},
+			},
+			// A hint that is no boolean (not from Chrome) is as none.
+			{
+				name: "odd",
 				description: "d",
 				annotations: { readOnlyHint: false, debugging: false },
 			},
@@ -801,5 +836,28 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 		expect(next.list().map((t) => t.name)).toEqual(["ok", "given"]);
 		next.provide([]);
 		expect(next.list().map((t) => t.name)).toEqual(["ok"]);
+	});
+
+	test("annotations are listed as Chrome lists them (DEC-213)", () => {
+		const annotations = (value?: unknown) =>
+			readTool({
+				...tool("t"),
+				...(value === undefined ? {} : { annotations: value }),
+			}).info.annotations;
+		const none = {
+			consequentialHint: false,
+			debugging: false,
+			readOnlyHint: false,
+			untrustedContentHint: false,
+		};
+		expect(annotations()).toBeUndefined();
+		expect(annotations({})).toEqual(none);
+		expect(annotations(null)).toEqual(none);
+		expect(annotations({ readOnlyHint: false })).toEqual(none);
+		expect(annotations({ consequentialHint: "yes", other: true })).toEqual({
+			...none,
+			consequentialHint: true,
+		});
+		expect(() => annotations("consequential")).toThrow(PageError);
 	});
 });

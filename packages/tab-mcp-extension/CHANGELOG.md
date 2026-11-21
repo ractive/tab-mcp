@@ -13,6 +13,16 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Changed
 
+- **A page tool is destructive for the AI app only when the page says so** (DEC-213).
+  `page_<name>` carried `destructiveHint: true` for every tool that is not read-only,
+  which made Claude ask with "Allow once" only. Now `destructiveHint` is the page's
+  `consequentialHint` (false when the page says false), and true only when the page gave
+  the tool no annotations at all. `webmcp_tools` lists it as `destructive`. A page that
+  registers a tool again with another hint gets it offered anew. The extension still
+  asks before every call of a tool that is not read-only. In Firefox, a tool's
+  annotations are read as Chrome reads them: all four hints as booleans, an annotations
+  value that is no object refused.
+
 - **"Fill in the code for me" is a switch** (DEC-210), in place of the buttons "Fill in
   the code for me" and "Stop filling in the code": it is a setting that stays on, and
   each connection is still asked about. The line under it says what it does. Turning it

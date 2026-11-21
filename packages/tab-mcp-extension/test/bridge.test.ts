@@ -18,6 +18,7 @@ import {
 	cutBytes,
 	describe as describeTool,
 	descriptionCap,
+	destructiveOf,
 	type LookedUp,
 	MAX_BLOCKS,
 	MAX_DESCRIPTION,
@@ -42,6 +43,23 @@ import {
 } from "../src/worker/tools.ts";
 
 describe("names, descriptions, schemas", () => {
+	test("destructiveOf: read-only no, consequential yes, said not, nothing said yes (DEC-213)", () => {
+		const of = (annotations?: PageTool["annotations"]) =>
+			destructiveOf({
+				name: "t",
+				description: "",
+				...(annotations ? { annotations } : {}),
+			});
+		expect(of({ readOnlyHint: true })).toBe(false);
+		expect(of({ readOnlyHint: true, consequentialHint: true })).toBe(false);
+		expect(of({ readOnlyHint: false, consequentialHint: true })).toBe(true);
+		expect(of({ readOnlyHint: false, consequentialHint: false })).toBe(false);
+		// The content script leaves the hint out when the page gave no
+		// annotations or no boolean: nothing known, the worst case.
+		expect(of({ readOnlyHint: false, debugging: false })).toBe(true);
+		expect(of()).toBe(true);
+	});
+
 	test("page tools are page_<name>, in names every AI app takes (Claude: no dots, 64)", () => {
 		expect(bridgedName("search")).toBe("page_search");
 		expect(bridgedName("dotted.name")).toBe("page_dotted_name");
@@ -412,7 +430,7 @@ describe("PageToolBridge", () => {
 			destructiveHint: false,
 			untrustedContentHint: true,
 		});
-		// Not read-only: asks every time (the bridge itself, not the library);
+		// Not read-only and nothing said about it: destructive (the worst case);
 		// untrusted whatever the page said.
 		expect(reg.tools.get("page_buy")?.annotations).toEqual({
 			readOnlyHint: false,
@@ -426,6 +444,55 @@ describe("PageToolBridge", () => {
 		expect(bridge.state.tools[0]?.description).toStartWith(
 			"From https://shop.example: ",
 		);
+	});
+
+	test("destructiveHint is the page's consequentialHint, true when it said nothing (DEC-213)", async () => {
+		const reg = registrar();
+		const { state, chrome } = fakeChrome(
+			page([
+				pageTool("search"),
+				pageTool("add_todo", { annotations: { consequentialHint: false } }),
+				pageTool("delete_todos", {
+					annotations: { consequentialHint: true },
+				}),
+				pageTool("place_order", { annotations: {} }),
+			]),
+		);
+		const { asked, confirm } = confirmer();
+		const bridge = new PageToolBridge(reg, chrome, { confirm });
+		await bridge.refresh();
+		const hint = (name: string) =>
+			reg.tools.get(`page_${name}`)?.annotations?.destructiveHint;
+		expect(hint("search")).toBe(false);
+		// Given as false, not left out: MCP's default for a missing one is true.
+		expect(hint("add_todo")).toBe(false);
+		expect(hint("delete_todos")).toBe(true);
+		expect(hint("place_order")).toBe(true);
+		// webmcp_tools says the same.
+		expect(
+			Object.fromEntries(
+				bridge.state.tools.map((t) => [t.name, [t.readOnly, t.destructive]]),
+			),
+		).toEqual({
+			search: [true, false],
+			add_todo: [false, false],
+			delete_todos: [false, true],
+			place_order: [false, true],
+		});
+		// The hint only describes the tool: the bridge asks all the same (DEC-141).
+		await reg.tools.get("page_add_todo")?.execute({}, options());
+		expect(asked.map((a) => a.tool.name)).toEqual(["add_todo"]);
+		expect(state.calls.map((c) => c.target.name)).toEqual(["add_todo"]);
+		// A page that registers the tool again with another hint: a new tool,
+		// so the AI app hears that the tools changed.
+		const before = reg.tools.get("page_add_todo");
+		state.page = page([
+			pageTool("search"),
+			pageTool("add_todo", { annotations: { consequentialHint: true } }),
+		]);
+		await bridge.refresh();
+		expect(reg.tools.get("page_add_todo")).not.toBe(before);
+		expect(hint("add_todo")).toBe(true);
 	});
 
 	test("webmcp_tools gives each offered tool's input schema, as offered (EQ 1)", async () => {
@@ -612,6 +679,7 @@ describe("PageToolBridge", () => {
 			tool: `page_${name}`,
 			description: "d",
 			readOnly: true,
+			destructive: false,
 			inputSchema: schema(input),
 			outputSchema: schema(output),
 		});
@@ -746,6 +814,7 @@ describe("PageToolBridge", () => {
 						name: "x",
 						description: "d",
 						readOnly: true,
+						destructive: false,
 						problem: "p",
 						outputSchema: { type: "object" },
 					},

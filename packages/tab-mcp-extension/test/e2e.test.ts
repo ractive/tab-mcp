@@ -1376,6 +1376,26 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		]);
 	});
 
+	test("destructiveHint is the page's consequentialHint; true without annotations (DEC-213)", async () => {
+		await tab.eval(`for (const [name, annotations] of [
+			["delete_all", { consequentialHint: true }],
+			["add_note", { readOnlyHint: false }],
+		]) document.modelContext.registerTool({
+			name,
+			description: name,
+			inputSchema: { type: "object" },
+			annotations,
+			async execute() { return name; },
+		})`);
+		await waitForTools(stack, (n) => n.includes("page_add_note"));
+		const { tools } = await stack.client.listTools();
+		const hint = (name: string) =>
+			tools.find((t) => t.name === name)?.annotations?.destructiveHint;
+		expect(hint("page_delete_all")).toBe(true);
+		expect(hint("page_add_note")).toBe(false);
+		expect(hint("page_place_order")).toBe(true);
+	});
+
 	test("a page that replaces document.modelContext fools only itself", async () => {
 		await tab.goto(`${SITE}/forged.html`);
 		const names = await waitForTools(stack, (n) =>

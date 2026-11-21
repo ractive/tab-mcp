@@ -337,6 +337,11 @@ export interface Offered {
 	description: string;
 	readOnly: boolean;
 	/**
+	 * It may change things the user cares about, as its `page_<name>` tool's
+	 * `destructiveHint` says (`destructiveOf`, DEC-213).
+	 */
+	destructive: boolean;
+	/**
 	 * The arguments it takes, as offered (`webmcp_call` checks them against
 	 * it): only for a tool that is offered.
 	 */
@@ -446,6 +451,20 @@ interface Callable {
 	title: string;
 	description: string;
 	validator: Validator;
+	/** Its `page_<name>` tool's `destructiveHint` (`destructiveOf`). */
+	destructive: boolean;
+}
+
+/**
+ * The `destructiveHint` the AI app gets for a page tool (DEC-213): false for
+ * a read-only one, else what the page says with `consequentialHint`, and
+ * true when the page said nothing (no annotations: the worst case, MCP's
+ * own default). It only describes the tool: the bridge asks before every
+ * call of a tool that is not read-only all the same (DEC-141).
+ */
+export function destructiveOf(tool: PageTool): boolean {
+	if (tool.annotations?.readOnlyHint === true) return false;
+	return tool.annotations?.consequentialHint !== false;
 }
 
 /** Whether `a` and `b` are the same tool of the same page in the same tab. */
@@ -759,6 +778,7 @@ export class PageToolBridge {
 				continue;
 			}
 			const readOnly = pageTool.annotations?.readOnlyHint === true;
+			const destructive = destructiveOf(pageTool);
 			const title = cut(pageTool.title ?? pageTool.name, MAX_TITLE);
 			const description = describe(tools.origin, pageTool.description, cap);
 			const entry: Offered = {
@@ -766,6 +786,7 @@ export class PageToolBridge {
 				...(pageTool.title ? { title: cut(pageTool.title, MAX_TITLE) } : {}),
 				description,
 				readOnly,
+				destructive,
 			};
 			offered.push(entry);
 			// WebMCP's hint for tools meant for the page's developers (WM 8).
@@ -813,6 +834,7 @@ export class PageToolBridge {
 				title,
 				description,
 				validator,
+				destructive,
 			};
 			callable.set(pageTool.name, item);
 			wanted.push({ name, key, tool: this.#tool(item, name, schema) });
@@ -879,7 +901,8 @@ export class PageToolBridge {
 	 * The `page_<name>` tool for a page tool. Not `consequentialHint`: the
 	 * bridge asks itself (`confirm`), as `webmcp_call` does, so that the AI
 	 * app hears why a call did not run (not answered in time, too many
-	 * questions waiting) and not only "declined".
+	 * questions waiting) and not only "declined". `destructiveHint` passes
+	 * on what the page says about the tool, not that the bridge asks.
 	 */
 	#tool(
 		callable: Callable,
@@ -893,8 +916,8 @@ export class PageToolBridge {
 			inputSchema: schema,
 			annotations: {
 				readOnlyHint: callable.target.readOnly,
-				// Not read-only: the user confirms every call (MCP's hint for it).
-				destructiveHint: !callable.target.readOnly,
+				// Always given: MCP's default for a missing one is true.
+				destructiveHint: callable.destructive,
 				// Whatever it answers is the page's.
 				untrustedContentHint: true,
 			},

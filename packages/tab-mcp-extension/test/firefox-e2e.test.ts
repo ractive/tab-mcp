@@ -417,6 +417,30 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		await waitForTools(stack, (n) => !n.includes("page_registered_later"));
 	});
 
+	test("destructiveHint as in Chrome: the page's consequentialHint, true without annotations (DEC-213)", async () => {
+		await stack.tab.eval(`(() => {
+			window.hinted = new AbortController();
+			for (const [name, annotations] of [
+				["delete_all", { consequentialHint: true }],
+				["add_note", { readOnlyHint: false }],
+			]) document.modelContext.registerTool({
+				name,
+				description: name,
+				annotations,
+				execute: () => name,
+			}, { signal: window.hinted.signal });
+		})()`);
+		await waitForTools(stack, (n) => n.includes("page_add_note"));
+		const { tools } = await stack.client.listTools();
+		const hint = (name: string) =>
+			tools.find((t) => t.name === name)?.annotations?.destructiveHint;
+		expect(hint("page_delete_all")).toBe(true);
+		expect(hint("page_add_note")).toBe(false);
+		expect(hint("page_place_order")).toBe(true);
+		await stack.tab.eval("window.hinted.abort()");
+		await waitForTools(stack, (n) => !n.includes("page_add_note"));
+	});
+
 	test("the page can break only its own object: a replaced getter leaves the extension's tools", async () => {
 		await stack.tab.eval(`(() => {
 			Object.defineProperty(Document.prototype, "modelContext", { get: () => ({ getTools: async () => [] }), configurable: true });

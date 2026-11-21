@@ -183,6 +183,10 @@ a send is dropped.
 
 ## DEC-022: Annotation mapping
 
+**Amended by DEC-213:** in the tab-mcp browser extension, a page tool's
+`consequentialHint` becomes its `page_<name>` tool's `destructiveHint` (false when the
+page says false), and the extension's own question does not depend on it.
+
 WebMCP → MCP: `readOnlyHint` → `readOnlyHint: true`, `destructiveHint: false`;
 `consequentialHint` → `destructiveHint: true` and page confirmation; `untrustedContentHint`
 → `openWorldHint: true`. All original WebMCP hints are also kept in the tool's `_meta`
@@ -2733,6 +2737,10 @@ mirroring is on); whether it stays is for iteration F and EX 11.
 
 ## DEC-141: Page tools ask in the bridge, not through the library's confirmation
 
+**Amended by DEC-213:** `destructiveHint` is no longer "not read-only" but what the page
+says with `consequentialHint`; the bridge still asks before every call of a tool that is
+not read-only.
+
 2026-11-13, iteration 35 (review finding EQ 4). `page_<name>` tools were
 `consequentialHint` when not read-only, so the library asked through `onConfirm`, and a
 throwing `onConfirm` became "The user declined", also for a question that timed out and
@@ -4767,3 +4775,44 @@ button it read like an action that fills in the code now.
   not turn it on; the panel sends another "off", so the site granted late goes back.
 - **No pattern for the relay's address:** the sentence alone, no switch; the switch only
   while the setting is somehow on there, to turn it off.
+
+## DEC-213: A page tool's `destructiveHint` is what the page says with `consequentialHint`
+
+2026-11-22; amends DEC-141 and DEC-022 for page tools. The owner: Claude, connected
+through the tab-mcp browser extension, offered only "Allow once" before `page_add_todo`,
+and then the extension asked again. The extension told the AI app that every page tool
+that is not read-only is destructive (`destructiveHint: !readOnly`, "the user confirms
+every call"), and Anthropic's connector documentation says that `readOnlyHint` and
+`destructiveHint` decide Claude's own permissions and that destructive tools always ask.
+That used MCP's hint for "the extension asks", which is not what it means. WebMCP has a
+hint for it: `consequentialHint`, which ractive.ch's todo page sets on `delete_todos`
+and not on `add_todo` (DEC-143, DEC-209).
+
+- **The mapping** for `page_<name>`, always given (MCP's default for a missing
+  `destructiveHint` is true):
+  - read-only: `readOnlyHint: true`, `destructiveHint: false`, as before;
+  - not read-only and `consequentialHint: true`: `destructiveHint: true`;
+  - not read-only and `consequentialHint: false`: `destructiveHint: false`;
+  - not read-only and no annotations at all: `destructiveHint: true`, the worst case,
+    as nothing is known.
+- **What Chrome tells apart** (checked in the WebMCP canary,
+  `test/webmcp-spike/webmcp.test.ts`): a tool registered without annotations has none in
+  `getTools()`; a tool with any annotations, `{}`, `null` or only `readOnlyHint: false`
+  included, has all four hints as booleans, missing ones false (`"yes"` becomes true,
+  a string in place of the object is refused). So `{}` reads as `consequentialHint:
+  false`; only a tool without annotations is "nothing known". The content script sends
+  `consequentialHint` only when it is a boolean; the bridge takes a missing one as true.
+- **Firefox and Chrome without WebMCP** (the polyfill, DEC-188) list annotations the same
+  way: none without, otherwise all four as booleans, a non-object refused with a
+  `TypeError`. Before, the polyfill passed on what the page gave as it was.
+- **`webmcp_tools`** lists `destructive` next to `readOnly` for each tool, the same
+  value as the `page_<name>` tool's hint. Its own annotations and those of `webmcp_call`
+  stay as they are.
+- **When the extension asks does not change:** before every call of a page tool that is
+  not read-only (DEC-141), "Always allow" on a host as before. The hint only describes
+  the tool; `consequentialHint` never skips the extension's question.
+- **A change of the hint is a new tool:** the bridge re-registers a tool when anything
+  the content script sends for it changes, the hint included, so the AI app gets a
+  tools-changed notice when a page registers a tool again with another hint.
+- **Not confirmed against Claude** that this brings back Claude's "Always allow" for a
+  tool that is not consequential; the owner tests it.

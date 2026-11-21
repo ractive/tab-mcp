@@ -144,6 +144,61 @@ test.skipIf(chrome === undefined)(
 );
 
 test.skipIf(chrome === undefined)(
+	"annotations: none listed without, all four as booleans with (DEC-213)",
+	async () => {
+		const other = await openPage(browser as Browser, `${pageUrl}?annotations`);
+		try {
+			const refused = await other.page.eval<
+				Record<string, string>
+			>(`(async () => {
+				const register = (name, annotations) => document.modelContext.registerTool({
+					name,
+					description: name,
+					inputSchema: { type: "object" },
+					...(annotations === undefined ? {} : { annotations }),
+					execute() { return "ran"; },
+				});
+				await register("a_none");
+				await register("a_empty", {});
+				await register("a_null", null);
+				await register("a_read_only_false", { readOnlyHint: false });
+				await register("a_string", { consequentialHint: "yes" });
+				const refused = {};
+				try { await register("a_text", "consequential"); } catch (e) { refused.a_text = e.name; }
+				return refused;
+			})()`);
+			expect(refused).toEqual({ a_text: "TypeError" });
+			const report = await other.page.eval<Report>(
+				`spike.probe("report")`,
+				other.isolated,
+			);
+			const annotations = Object.fromEntries(
+				report.tools
+					.filter((t) => t.name.startsWith("a_"))
+					.map((t) => [t.name, t.annotations ?? "none"]),
+			);
+			const none = {
+				consequentialHint: false,
+				debugging: false,
+				readOnlyHint: false,
+				untrustedContentHint: false,
+			};
+			// `{}` and only `readOnlyHint: false` cannot be told apart from an
+			// explicit `consequentialHint: false`; a tool without annotations can.
+			expect(annotations).toEqual({
+				a_none: "none",
+				a_empty: none,
+				a_null: none,
+				a_read_only_false: none,
+				a_string: { ...none, consequentialHint: true },
+			});
+		} finally {
+			await other.page.close();
+		}
+	},
+);
+
+test.skipIf(chrome === undefined)(
 	"a tool the content script registers is the page's to list and call",
 	async () => {
 		expect(
