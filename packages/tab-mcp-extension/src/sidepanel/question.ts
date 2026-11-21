@@ -120,11 +120,16 @@ function pairingLines(q: QuestionView): HTMLElement[] {
 		);
 	lines.push(
 		paragraph(
-			"Allow fills in tab-mcp's code on the sign-in page in this browser and connects the AI app. It can then use the tab in front. Only allow an AI app you are connecting right now.",
+			`${q.site ? "Allow once" : "Allow"} fills in tab-mcp's code on the sign-in page in this browser and connects the AI app. It can then use the tab in front. Only allow an AI app you are connecting right now.`,
 			"muted small",
 		),
 	);
 	return lines;
+}
+
+/** What "Always allow" on a pairing question does (DEC-213): one sentence. */
+export function pairingAlwaysNote(host: string): string {
+	return `Always allow: from now on tab-mcp fills in the code for ${host} without asking, until you remove it under “Fill in the code for me”.`;
 }
 
 export function questionCard(
@@ -199,12 +204,21 @@ export function questionCard(
 	};
 	// "Allow once": this call only, beside the one that keeps (EQ 9). The
 	// same default kind as "Don't allow": neither answer is pushed (DEC-180).
-	// A pairing question's Allow: there is nothing to allow for longer.
+	// A pairing question's Allow: nothing to allow for longer, unless its
+	// host may get "Always allow" (DEC-213).
 	buttons.append(
 		button("Don't allow", "deny"),
-		button(q.pairing ? "Allow" : "Allow once", "allow"),
+		button(q.pairing && !q.site ? "Allow" : "Allow once", "allow"),
 	);
 	card.append(...details, left, buttons);
+	if (q.pairing && q.site) {
+		buttons.append(button("Always allow", "site"));
+		const note = document.createElement("p");
+		note.className = "muted small";
+		note.textContent = pairingAlwaysNote(q.host);
+		card.append(note);
+		return card;
+	}
 	// Not for a page without a site of its own (an opaque origin).
 	// Nor for a navigation: each one to another site asks (DEC-121).
 	if (q.site && q.origin && !q.navigation) {

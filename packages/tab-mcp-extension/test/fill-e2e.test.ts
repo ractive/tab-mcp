@@ -33,6 +33,7 @@ import {
 	type Page,
 } from "./browser.ts";
 import {
+	ALWAYS_CLIENT_NAME,
 	authorizeUrl,
 	CLIENT_NAME,
 	type OAuthStack,
@@ -116,8 +117,23 @@ const questions = (stack: Stack) =>
 const questionCount = (n: number) =>
 	`document.querySelectorAll("[data-question]").length === ${n}`;
 
+/** The buttons of the newest question card. */
+const questionButtons = (stack: Stack) =>
+	stack.panel.eval<string[]>(
+		`[...([...document.querySelectorAll("[data-question]")].at(-1)?.querySelectorAll("button") ?? [])].map((b) => b.textContent)`,
+	);
+
+/** The hosts under "Filled in without asking for:". */
+const alwaysHosts = (stack: Stack) =>
+	stack.panel.eval<string[]>(
+		`[...document.querySelectorAll("#fill-always-list .always-host")].map((e) => e.textContent)`,
+	);
+
 /** Answer the newest question in the side panel. */
-async function answer(stack: Stack, value: "allow" | "deny"): Promise<void> {
+async function answer(
+	stack: Stack,
+	value: "allow" | "deny" | "site",
+): Promise<void> {
 	// Allow counts only once the panel has been focused a while.
 	await stack.panel.send("Emulation.setFocusEmulationEnabled", {
 		enabled: true,
@@ -226,6 +242,8 @@ describe.skipIf(chrome === undefined)(
 				`Connect ${CLIENT_NAME} (${host}) to the tab-mcp browser extension?`,
 			);
 			expect(card).toContain(`AI app at (verified) ${host}`);
+			// localhost does not qualify for "Always allow" (DEC-213).
+			expect(await questionButtons(stack)).toEqual(["Don't allow", "Allow"]);
 			await answer(stack, "deny");
 			await stack.panel.waitFor(questionCount(0));
 			await Bun.sleep(500);
@@ -267,6 +285,88 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(
 				`document.querySelectorAll("#grants li").length === 2`,
 			);
+		});
+
+		test("Always allow (DEC-213): the same host's next pages are filled in without a question, with a notice; the fourth in ten minutes asks", async () => {
+			const host = stack.oauth.alwaysHost;
+			const always = () =>
+				authorizeUrl(stack.oauth, stack.address, stack.oauth.alwaysClientId);
+			const first = await always();
+			let callback = stack.oauth.nextCallback();
+			let page = await stack.browser.newPage(first.url);
+			await stack.panel.waitFor(questionCount(1));
+			expect(await questionButtons(stack)).toEqual([
+				"Don't allow",
+				"Allow once",
+				"Always allow",
+			]);
+			const [card] = await questions(stack);
+			expect(card).toContain(
+				`Always allow: from now on tab-mcp fills in the code for ${host} without asking`,
+			);
+			await answer(stack, "site");
+			expect((await callback).get("code")).toBeString();
+			await page.close().catch(() => {});
+			await stack.panel.waitFor(questionCount(0));
+			expect(await alwaysHosts(stack)).toEqual([host]);
+			const notice = `Filled in the code for ${ALWAYS_CLIENT_NAME} (${host}).`;
+			const filledNotifications = () =>
+				stack.panel.eval<number>(
+					`chrome.notifications.getAll().then((all) => Object.keys(all).filter((id) => id.startsWith("filled:")).length)`,
+				);
+			const before = await filledNotifications();
+			for (let i = 1; i <= 3; i++) {
+				const { url } = await always();
+				callback = stack.oauth.nextCallback();
+				page = await stack.browser.newPage(url);
+				// Filled in and sent: no question on the way.
+				expect((await callback).get("code")).toBeString();
+				expect(await questions(stack)).toEqual([]);
+				await page.close().catch(() => {});
+				expect(
+					await stack.panel.waitFor<string>(
+						`!document.getElementById("fill-notice").hidden && document.getElementById("fill-notice").textContent`,
+					),
+				).toBe(notice);
+				await stack.panel.waitFor(
+					`chrome.notifications.getAll().then((all) => Object.keys(all).filter((id) => id.startsWith("filled:")).length >= ${before + i})`,
+				);
+			}
+			// The brake: the fourth without a question in ten minutes asks,
+			// with all three answers.
+			const fourth = await always();
+			page = await stack.browser.newPage(fourth.url);
+			await stack.panel.waitFor(questionCount(1));
+			expect(await questionButtons(stack)).toEqual([
+				"Don't allow",
+				"Allow once",
+				"Always allow",
+			]);
+			await answer(stack, "deny");
+			await stack.panel.waitFor(questionCount(0));
+			await page.close();
+		});
+
+		test("removing the host under the switch: its next page asks again", async () => {
+			const host = stack.oauth.alwaysHost;
+			await stack.panel.eval(`document.getElementById("add-app").click()`);
+			await stack.panel.waitFor(
+				`document.getElementById("pairing").hidden === false`,
+			);
+			await stack.panel.click(`#fill-always-list button[data-host="${host}"]`);
+			await stack.panel.waitFor(
+				`document.getElementById("fill-always").hidden && document.querySelectorAll("#fill-always-list li").length === 0`,
+			);
+			await stack.panel.eval(`document.getElementById("pair-done").click()`);
+			const { url } = await authorizeUrl(
+				stack.oauth,
+				stack.address,
+				stack.oauth.alwaysClientId,
+			);
+			const page = await stack.browser.newPage(url);
+			await stack.panel.waitFor(questionCount(1));
+			await page.close();
+			await stack.panel.waitFor(questionCount(0));
 		});
 
 		test("with AI access off, the page gets no question", async () => {
