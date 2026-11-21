@@ -196,11 +196,16 @@ Chrome has WebMCP for sites in its
 `webmcp: true` does nothing. Each `new TabMcp` looks for WebMCP when it is made, so a
 trial token that a script adds later counts for a `TabMcp` made after it.
 
-- Tools marked `consequentialHint`, or MCP's `destructiveHint`, are left out unless
-  their registration lists `"webmcp"` in `callers` (`{ callers: ["relay", "webmcp"] }`):
-  an agent in the browser often drives the very tab it calls into, so it can click Allow
-  in the page's confirmation itself. `callers` without `"webmcp"` keeps any tool out of
-  WebMCP ([which callers see a tool](#which-callers-see-a-tool)). A tool marked only
+- Every tool goes there, tools marked `consequentialHint` or MCP's `destructiveHint`
+  included, and they ask every WebMCP call (below). A WebMCP call asks by
+  `consequentialHint ?? destructiveHint`, so a tool marked only `destructiveHint` asks
+  there too, though it does not ask an AI app (its own client sees the hint). `callers` without
+  `"webmcp"` keeps a tool out of WebMCP
+  ([which callers see a tool](#which-callers-see-a-tool)). Until 0.20 such tools were
+  left out unless `callers` listed `"webmcp"`; an agent that found no tool to delete with
+  then clicked the page's own Delete buttons, with no question at all (DEC-209). An agent
+  that drives the tab can click Allow in the page's dialog too, so a tool the page wants
+  kept from agents in the browser leaves `"webmcp"` out of `callers`. A tool marked only
   `destructiveHint: true` is registered natively with `consequentialHint: true`, since
   WebMCP has no `destructiveHint` (DEC-022 maps the other way).
 - The native registration gets the WebMCP fields: `name`, `title`, `description`,
@@ -481,13 +486,21 @@ between that text and the tool.
 #### Which callers see a tool
 
 `registerTool(tool, { callers })` lists the callers that see a tool: `"relay"` (AI apps
-through the relay), `"local"` (a served port) and `"webmcp"` (agents in the browser). By
-default all of them, except that a consequential tool goes to WebMCP only when `"webmcp"`
-is listed ([WebMCP](#webmcp)). For a caller that is not listed the tool does not exist:
-`tools/list` leaves it out, `notifications/tools/list_changed` does not fire for it, and a
-call gets the same error as a call of an unknown tool. `{ callers: ["local"] }` keeps a
-tool for the site's own assistant, `{ callers: ["relay", "webmcp"] }` keeps it from the
-port.
+through the relay), `"local"` (a served port) and `"webmcp"` (agents in the browser),
+by default all of them. A tool that asks asks each of them; whether a tool deletes
+something is no reason to hide it from a caller. `callers` is for who may see it at all.
+For a caller that is not listed the tool does not exist: `tools/list` leaves it out,
+`notifications/tools/list_changed` does not fire for it, and a call gets the same error
+as a call of an unknown tool. For example:
+
+- `{ callers: ["local"] }`: data the site's own assistant may read under the site's
+  terms, but that should not pass through the relay to an AI app the site has no
+  contract with (a bank's `list_transactions`).
+- `{ callers: ["relay"] }`: a tool that needs to know which AI app calls (a paired,
+  named app; an audit line, "Always allow" remembered per app), which an anonymous
+  WebMCP caller is not.
+- `{ callers: ["relay", "webmcp"] }`: kept from the port, when the page serves it to a
+  chat frame of another origin.
 
 #### Untrusted results
 

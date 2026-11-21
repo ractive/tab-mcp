@@ -47,9 +47,9 @@ const HINTS = [
 
 /**
  * Mirror `registry`'s tools into `context`, now and whenever the registry
- * changes: those whose `callers` list `"webmcp"`, and without `callers` those
- * not marked consequential, where MCP's `destructiveHint` counts as
- * `consequentialHint` (DEC-143, DEC-165). Every failure of the native `registerTool()`
+ * changes: every tool, unless its `callers` leave `"webmcp"` out (DEC-165,
+ * DEC-209). A tool that asks asks a WebMCP caller as it asks an AI app; MCP's
+ * `destructiveHint` counts as `consequentialHint` (DEC-143). Every failure of the native `registerTool()`
  * stays here: warned once per name, the tool still offered through the relay.
  * The page joins the handshake with the tab-mcp browser extension: `mcp`
  * is its `TabMcp`, `app` its app id, `options` its options
@@ -103,8 +103,7 @@ export function mirror(
 			const consequential =
 				annotations.consequentialHint ?? annotations.destructiveHint;
 			// The one place of the rule for WebMCP (the relay and a port: `toolsFor`).
-			if (mirrors.has(tool) || !(callers?.includes("webmcp") ?? !consequential))
-				continue;
+			if (mirrors.has(tool) || !(callers?.includes("webmcp") ?? true)) continue;
 			const controller = new AbortController();
 			mirrors.set(tool, controller);
 			const hints: Record<string, boolean | undefined> = {
