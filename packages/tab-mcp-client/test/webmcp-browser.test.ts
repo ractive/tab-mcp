@@ -201,13 +201,14 @@ async function open(query = ""): Promise<Page> {
 const on = test.skipIf(chrome === undefined);
 
 on(
-	"getTools() lists the mirrored tools, not the consequential ones unless named",
+	"getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
 	async () => {
 		const page = await open();
 		try {
 			expect(await page.eval("nativeNames()")).toEqual([
 				"add",
 				"refused",
+				"wipe",
 				"wipe_named",
 			]);
 			expect(
@@ -261,7 +262,11 @@ on(
 				{ start: "add", client: { kind: "webmcp" } },
 				{ end: "add", outcome: "ok", client: { kind: "webmcp" } },
 			]);
-			expect(await page.eval("nativeNames()")).toEqual(["add", "wipe_named"]);
+			expect(await page.eval("nativeNames()")).toEqual([
+				"add",
+				"wipe",
+				"wipe_named",
+			]);
 			expect(await page.eval("mcp.tools")).not.toContain("refused");
 		} finally {
 			await page.close();
@@ -409,14 +414,16 @@ on(
 				ok: true,
 				value: '{"n":2}',
 			});
+			// Destructive: mirrored with or without callers, as consequential (DEC-209).
 			const names = await page.eval<string[]>("nativeNames()");
-			expect(names).not.toContain("remove");
+			expect(names).toContain("remove");
 			expect(names).toContain("remove_named");
-			expect(
-				await page.eval(
-					`native.getTools().then((ts) => ts.find((t) => t.name === "remove_named").annotations.consequentialHint)`,
-				),
-			).toBe(true);
+			for (const name of ["remove", "remove_named"])
+				expect(
+					await page.eval(
+						`native.getTools().then((ts) => ts.find((t) => t.name === ${JSON.stringify(name)}).annotations.consequentialHint)`,
+					),
+				).toBe(true);
 		} finally {
 			await page.close();
 		}
@@ -427,7 +434,11 @@ on("aborting unmirrors; registering again mirrors again", async () => {
 	const page = await open();
 	try {
 		await page.eval("addControl.abort()");
-		expect(await page.eval("nativeNames()")).toEqual(["refused", "wipe_named"]);
+		expect(await page.eval("nativeNames()")).toEqual([
+			"refused",
+			"wipe",
+			"wipe_named",
+		]);
 		// As React's useTool does: abort and register again at once.
 		await page.eval(`(async () => {
 			const c = new AbortController();
@@ -518,6 +529,7 @@ on(
 			expect(await page.eval("nativeNames()")).toEqual([
 				"add",
 				"refused",
+				"wipe",
 				"wipe_named",
 			]);
 			expect(await page.eval(`agent("add", { a: 2, b: 2 })`)).toEqual({

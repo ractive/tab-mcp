@@ -4687,6 +4687,42 @@ unchanged; the audit's recommendation for the rest.
 - **Kept as it was:** `ui.strings` as the place (one place already), `ui.setup` for the
   help's link and steps, the extension's and relay's texts in their own files.
 
+## DEC-209: Tools that ask go to WebMCP too; `callers` is for privacy and identity (owner)
+
+2026-11-21. Replaces the rule "consequential tools only when named" of DEC-115 (kept in
+DEC-143 and DEC-165): with `webmcp: true` every tool is mirrored, those marked
+`consequentialHint` or `destructiveHint` included, unless its `callers` leave
+`"webmcp"` out.
+
+- **What happened.** ractive.ch's todo example registered `delete_todos`
+  (`destructiveHint`) without `callers`; since client 0.16 that kept it from WebMCP.
+  Claude desktop, connected through the tab-mcp browser extension, found only add,
+  complete and list, opened the page in another tab, clicked each todo's Delete button
+  there and closed the tab. No question, no entry in the page's calls, no undo.
+- **Why the old rule did not protect.** It held tools back from an agent that drives the
+  tab because it can click Allow in the page's dialog. That agent can click the page's
+  own controls too, which ask nothing. Hiding the tool removed only the path with the
+  argument check, the question and the record. And it hid the tool from the caller the
+  reason does not fit: an AI app through the extension does not drive the tab, and the
+  extension asks the user in its own side panel before it vouches for a call (DEC-207).
+  It also failed silently: the page's own upgrade dropped the tool without a word.
+- **What asks now.** A WebMCP call asks by `consequentialHint ?? destructiveHint`, the
+  rule that already set the native `consequentialHint`: a tool marked only
+  `destructiveHint` asks there too (review of PR 191), while for an AI app it still asks
+  only with `consequentialHint` (DEC-022; its own client sees `destructiveHint`). A
+  mirrored tool that asks asks every WebMCP call: a call the
+  extension vouched for was asked in the extension (or allowed by its switch), any other
+  gets the page's question (`onConfirm` or the library's dialog). "Always allow" is still
+  never offered or applied for WebMCP calls.
+- **`callers`** stays as it is, a list of the callers that see a tool, default all. Its
+  uses are privacy and identity, not whether a tool deletes: `["local"]` for data the
+  site's own assistant may read but an AI app through the relay may not, `["relay"]` for
+  a tool that needs to know which AI app calls, `["relay", "webmcp"]` to keep a tool from
+  a port served to another origin's frame. A page that wants the old behaviour for a tool
+  sets `callers: ["relay", "local"]` on it.
+- A breaking change in behaviour (a type check does not see it): client 0.20.0, in the
+  changelog under Breaking.
+
 ## DEC-210: The code fill-in setting is a switch (owner)
 
 2026-11-21; amends DEC-203's "A setting of its own, off by default". The owner: "'Fill in

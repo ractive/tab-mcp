@@ -208,10 +208,10 @@ export interface RegisterToolOptions {
 	 * Which callers see the tool: `"relay"` (AI apps through the relay),
 	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (agents
 	 * in the browser, with `TabMcpOptions.webmcp` on). Others neither list nor
-	 * call it: for them it does not exist. By default all of them, except
-	 * that a consequential tool (`consequentialHint` or `destructiveHint`)
-	 * goes to WebMCP only when `"webmcp"` is listed: an agent that drives
-	 * this tab can click Allow in the page's confirmation itself.
+	 * call it: for them it does not exist. By default all of them, tools that
+	 * ask included (DEC-209): each caller gets the same question. Leave a
+	 * caller out for privacy or identity, e.g. `["local"]` for data the site's
+	 * own assistant may read but an AI app through the relay may not.
 	 */
 	callers?: readonly ToolCaller[];
 	/**
@@ -400,10 +400,10 @@ export interface TabMcpOptions {
 	/**
 	 * Also register the tools with the browser's own WebMCP
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
-	 * in the browser can call them, without pairing. Off by default. Tools
-	 * marked `consequentialHint` or `destructiveHint` are left out unless
-	 * their `callers` list `"webmcp"`: an agent that drives this tab can
-	 * click Allow in the page's confirmation itself. A failed native
+	 * in the browser can call them, without pairing. Off by default. Every
+	 * tool goes there unless its `callers` leave `"webmcp"` out, tools that ask
+	 * included: they ask every WebMCP call, a tool marked only `destructiveHint`
+	 * too (WebMCP has no `destructiveHint`; DEC-209). A failed native
 	 * registration only warns in the console.
 	 *
 	 * With it, the page and the tab-mcp browser extension know of each other

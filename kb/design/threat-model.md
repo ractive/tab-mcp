@@ -500,9 +500,12 @@ and DEC-076 to DEC-079.
 With `webmcp: true` the library also registers the page's tools with the browser's own
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`). Agents
 in the browser call them without pairing and without an identity (`client.kind`
-`"webmcp"`). Such an agent often drives the tab and can click Allow itself, so
-consequential tools are mirrored only when their `callers` list `"webmcp"`; calls get
-the same schema check and confirmation, never "Always allow". Only the native object is
+`"webmcp"`). Such an agent often drives the tab and can click Allow itself; until client
+0.20 consequential tools were therefore mirrored only when their `callers` listed
+`"webmcp"`. That did not stop such an agent, which clicked the page's own controls
+instead, with no question (DEC-209): now every tool is mirrored unless its `callers`
+leave `"webmcp"` out, and calls get the same schema check and confirmation, never
+"Always allow". Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a

@@ -841,12 +841,14 @@ from them.
 - **It can operate the page's dialog.** Such an agent often drives the very tab it calls
   into: input it sends through the DevTools Protocol or an extension is trusted input,
   and the delay before Allow only needs the tab visible and focused. So the page's
-  confirmation is weaker against it than against a remote AI app. Hence consequential
-  tools (`consequentialHint`, or MCP's `destructiveHint`) are not mirrored unless the
-  page lists `"webmcp"` in their `callers`, which says that its own dialog, or the
-  agent's own confirmation, is enough for that tool; a mirrored `destructiveHint` tool
-  carries `consequentialHint: true` in WebMCP. "Always allow" is never offered or
-  applied for these calls.
+  confirmation is weaker against it than against a remote AI app. Hiding a tool does not
+  help against that: the agent clicks the page's own controls instead, with no question
+  at all (seen 2026-11-21, DEC-209). So every tool is mirrored, those that ask included,
+  and they ask the WebMCP call (by `consequentialHint ?? destructiveHint`, so a tool
+  marked only `destructiveHint` asks too); a page that wants a tool kept from agents in the browser
+  leaves `"webmcp"` out of its `callers`. A mirrored `destructiveHint` tool carries
+  `consequentialHint: true` in WebMCP. "Always allow" is never offered or applied for
+  these calls (a call the tab-mcp browser extension vouches for was asked there).
 - **The same check.** Arguments are checked against the tool's schema before `execute`
   (Chrome does not), a consequential tool asks the page's `onConfirm` or the library's
   dialog ("An agent in this browser wants to run …"), and the calls appear in the
@@ -952,8 +954,8 @@ sits beside the AI apps of A2 and A6 and the agents of A14.
   accidental connects; it is not a security boundary, since a page can always open a
   WebSocket itself.
 - The browser library registers tools with the browser's WebMCP only with
-  `webmcp: true`, and consequential (or destructive) ones only when the page names them
-  (A14).
+  `webmcp: true`, every tool whose `callers` do not leave `"webmcp"` out; tools that ask
+  ask there too (A14, DEC-209).
 
 See [configuration](configuration.md#why-the-defaults-are-safe) for the reasons behind
 each default.
