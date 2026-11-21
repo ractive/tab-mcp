@@ -645,16 +645,27 @@ const fill = fillPanel(
 		text: $("fill-text"),
 		label: $("fill-label"),
 		toggle: $("fill-switch") as HTMLInputElement,
+		always: $("fill-always"),
+		alwaysList: $("fill-always-list"),
 	},
 	(on, id) => send({ type: "set-fill", on, id }),
 	(text) => problem(text),
+	(host) => send({ type: "forget-fill-host", host }),
 );
+
+/** The last fill without a question (DEC-213): never silent. */
+function showFillNotice(s: PanelState): void {
+	const notice = $("fill-notice");
+	notice.hidden = s.fillNotice === undefined;
+	setText(notice, s.fillNotice?.text ?? "");
+}
 
 function show(s: PanelState): void {
 	const relayChanged = state?.relay !== s.relay;
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
+	showFillNotice(s);
 	fill.show(s);
 	showQuestions(s.questions, s.expired);
 	showTab(s);

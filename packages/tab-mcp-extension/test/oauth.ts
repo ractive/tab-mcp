@@ -7,6 +7,9 @@
  * step the test does in the browser.
  */
 
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	Client,
 	type OAuthClientInformationMixed,
@@ -27,6 +30,54 @@ import {
 } from "../../tab-mcp/test/oauth-helpers.ts";
 
 export const CLIENT_NAME = "Fill test AI";
+
+/**
+ * A second AI app under a public DNS name (DEC-213: "Always allow" is
+ * offered only for one): its metadata document on loopback over http, which
+ * the test relay alone accepts, the name resolved by the relay's test hook.
+ */
+export const ALWAYS_HOST_NAME = "ai.fill-test.dev";
+export const ALWAYS_CLIENT_NAME = "Always test AI";
+
+/** A self-signed certificate for ALWAYS_HOST_NAME, made once per process. */
+let alwaysCert: { cert: string; key: string } | undefined;
+function alwaysCertificate(): { cert: string; key: string } {
+	if (alwaysCert !== undefined) return alwaysCert;
+	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-always-cert-"));
+	try {
+		const key = join(dir, "key.pem");
+		const cert = join(dir, "cert.pem");
+		const result = Bun.spawnSync([
+			"openssl",
+			"req",
+			"-x509",
+			"-newkey",
+			"ec",
+			"-pkeyopt",
+			"ec_paramgen_curve:prime256v1",
+			"-nodes",
+			"-keyout",
+			key,
+			"-out",
+			cert,
+			"-days",
+			"2",
+			"-subj",
+			`/CN=${ALWAYS_HOST_NAME}`,
+			"-addext",
+			`subjectAltName=DNS:${ALWAYS_HOST_NAME}`,
+		]);
+		if (result.exitCode !== 0)
+			throw new Error(`openssl failed: ${result.stderr.toString()}`);
+		alwaysCert = {
+			cert: readFileSync(cert, "utf8"),
+			key: readFileSync(key, "utf8"),
+		};
+		return alwaysCert;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
 
 /** An AI app's OAuth state, its browser step left to the test. */
 export class Provider implements OAuthClientProvider {
@@ -104,6 +155,9 @@ export interface OAuthStack {
 	lookAlike: string;
 	/** The AI app's client id (its metadata document's address). */
 	clientId: string;
+	/** The second AI app's, on ALWAYS_HOST_NAME, and its verified host. */
+	alwaysClientId: string;
+	alwaysHost: string;
 	redirectUri: string;
 	/** The next callback's query parameters. */
 	nextCallback(): Promise<URLSearchParams>;
@@ -113,6 +167,21 @@ export interface OAuthStack {
 /** The relay and the AI app's side; the look-alike names `app`. */
 export async function startOAuth(app: string): Promise<OAuthStack> {
 	const cimd = await startCimdServer();
+	const alwaysTls = alwaysCertificate();
+	const always = Bun.serve({
+		port: 0,
+		hostname: "127.0.0.1",
+		tls: alwaysTls,
+		fetch: (): Response =>
+			Response.json(
+				cimd.document(alwaysClientId, {
+					client_name: ALWAYS_CLIENT_NAME,
+					redirect_uris: ["http://127.0.0.1/callback"],
+				}),
+			),
+	});
+	const alwaysHost = `${ALWAYS_HOST_NAME}:${always.port}`;
+	const alwaysClientId = `https://${alwaysHost}/always-client.json`;
 	const relay = createTestRelay(
 		{
 			development: true,
@@ -122,7 +191,14 @@ export async function startOAuth(app: string): Promise<OAuthStack> {
 			store: new MemoryTokenStore(),
 			logger: quietLogger,
 		},
-		{ cimdUrls: testUrls(cimd.ca) },
+		{
+			// Both throwaway certificates (a PEM bundle).
+			cimdUrls: testUrls(`${cimd.ca}\n${alwaysTls.cert}`),
+			cimdLookup: async (hostname) =>
+				hostname === ALWAYS_HOST_NAME
+					? ["127.0.0.1"]
+					: (await Bun.dns.lookup(hostname, {})).map((r) => r.address),
+		},
 	);
 	const waiting: ((params: URLSearchParams) => void)[] = [];
 	// The AI app's callback and the look-alike, on 127.0.0.1 with another
@@ -158,6 +234,8 @@ export async function startOAuth(app: string): Promise<OAuthStack> {
 		blank: `${origin}/`,
 		lookAlike: `${origin}/authorize?client_id=x`,
 		clientId,
+		alwaysClientId,
+		alwaysHost,
 		redirectUri: `${origin}/callback`,
 		nextCallback: () =>
 			new Promise((resolve) => {
@@ -166,21 +244,26 @@ export async function startOAuth(app: string): Promise<OAuthStack> {
 		stop: async () => {
 			await relay.stop();
 			await pages.stop(true);
+			await always.stop(true);
 			await cimd.stop();
 		},
 	};
 }
 
-/** The AI app runs into 401 at `address` and gets its `/authorize` address. */
+/**
+ * The AI app (`clientId`, the first by default) runs into 401 at `address`
+ * and gets its `/authorize` address.
+ */
 export async function authorizeUrl(
 	stack: OAuthStack,
 	address: string,
+	clientId: string = stack.clientId,
 ): Promise<{
 	url: string;
 	provider: Provider;
 	transport: StreamableHTTPClientTransport;
 }> {
-	const provider = new Provider(stack.clientId, stack.redirectUri);
+	const provider = new Provider(clientId, stack.redirectUri);
 	const transport = new StreamableHTTPClientTransport(new URL(address), {
 		authProvider: provider,
 	});

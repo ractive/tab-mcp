@@ -17,6 +17,8 @@ import {
 } from "@ractive-ch/tab-mcp-client";
 import {
 	CodeFiller,
+	type FillAnswer,
+	type FillContext,
 	type FillHost,
 	type PagePort,
 	relayPageOrigin,
@@ -28,7 +30,7 @@ import {
 	PANEL,
 	PRODUCT,
 } from "../browser.ts";
-import { fillAccess } from "../fill.ts";
+import { alwaysAllowable, fillAccess } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
 import type { ContentRequest, ExtensionState } from "../messages.ts";
 import {
@@ -66,10 +68,16 @@ import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import {
 	codeWithPairingOn,
+	FILLED_PREFIX,
 	FillSetting,
 	failureText,
+	filledNotification,
+	filledText,
 	HOLD_MS,
+	NOTICE_MS,
+	pairingAnswer,
 	syncPairingScript,
+	UnaskedFills,
 } from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
@@ -181,6 +189,12 @@ export class Connection {
 	readonly #fill: FillSetting;
 	/** The panel's last "set-fill" the worker has handled, by its id. */
 	#fillAnswered: string | undefined;
+	/** Pages let through without a question, until their code comes (DEC-213). */
+	readonly #unasked = new UnaskedFills();
+	/** Tabs whose fill Remove withdrew: its "no code" is no problem. */
+	readonly #quietFails = new Set<number>();
+	/** The last fill without a question (DEC-213), for the panel's line. */
+	#fillNotice: { text: string; at: number } | undefined;
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -727,6 +741,13 @@ export class Connection {
 			case "set-fill":
 				await this.#setFill(command.on, command.id);
 				return;
+			case "forget-fill-host":
+				// Its next sign-in page asks again (DEC-213), and a fill of it
+				// that still waits for its code goes, as with the switch off.
+				this.#unasked.withdraw(command.host);
+				await this.#fill.forget(this.#relay, command.host);
+				this.#changed();
+				return;
 		}
 	}
 
@@ -858,9 +879,94 @@ export class Connection {
 	 * The code to fill in, with pairing held on for it; the library releases
 	 * the hold (`release`) once its code paired, or once no fill needs it.
 	 */
-	#fillCode(signal: AbortSignal): Promise<string | undefined> {
+	async #fillCode(
+		signal: AbortSignal,
+		context: FillContext,
+	): Promise<string | undefined> {
 		this.#holdPairing();
-		return codeWithPairingOn(this.#mcp, signal);
+		const { tabId, client } = context;
+		// A page let through without a question: Remove withdraws the wait.
+		const withdraw = this.#unasked.signal(tabId, client.host);
+		const code = await codeWithPairingOn(
+			this.#mcp,
+			withdraw === undefined ? signal : AbortSignal.any([signal, withdraw]),
+		);
+		const how = this.#unasked.finish(tabId, client.host, code !== undefined);
+		if (how === "withdrawn") {
+			// Removed meanwhile: nothing is filled in, and that is no problem.
+			this.#quietFails.add(tabId);
+			return undefined;
+		}
+		// Never silent (DEC-213). Said once the code is there: the library
+		// sends it right after this, unless its last checks (the page went,
+		// AI access or the setting off) stop it. So the notice errs on the
+		// side of saying too much; it is no proof that the code was sent.
+		if (how === "notice") this.#filledWithoutAsking(client);
+		return code;
+	}
+
+	/**
+	 * Ask about the pairing page in tab `tabId` (DEC-203), unless the user
+	 * chose "Always allow" for the AI app's host and the brake lets it
+	 * through (DEC-213). "Always allow" is offered only for a host that
+	 * qualifies (`alwaysAllowable`).
+	 */
+	async #askPairing(
+		tabId: number,
+		client: { name: string; host: string },
+		signal: AbortSignal,
+	): Promise<FillAnswer> {
+		const relay = this.#relay;
+		// A mark of an earlier page in the tab whose code never came.
+		this.#unasked.clear(tabId);
+		if (await this.#fill.takeUnasked(relay, client.host, Date.now())) {
+			this.#unasked.start(tabId, client.host, signal);
+			return "allow";
+		}
+		const offered = alwaysAllowable(client.host);
+		const { answer, always } = pairingAnswer(
+			await this.#questions.askPairing({ tabId }, client, signal, offered),
+			offered,
+		);
+		// "Always allow": this page now, and the host from now on.
+		if (
+			always &&
+			this.#relay === relay &&
+			(await this.#fill.allowAlways(relay, client.host))
+		)
+			this.#changed();
+		return answer;
+	}
+
+	/** The panel's line and a notification for a fill without a question. */
+	#filledWithoutAsking(client: { name: string; host: string }): void {
+		this.#fillNotice = { text: filledText(client), at: Date.now() };
+		this.#changed();
+		const text = filledNotification(client);
+		chrome.notifications
+			.create(
+				`${FILLED_PREFIX}${crypto.randomUUID()}`,
+				notificationOptions({
+					type: "basic",
+					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+					title: text.title,
+					message: text.message,
+					contextMessage: text.contextMessage,
+					priority: 0,
+				}),
+			)
+			.catch((error: unknown) =>
+				// Not made (an error; notifications turned off in the system
+				// are not one, and cannot be seen from here). The panel's line
+				// is there for 10 minutes in any case.
+				console.warn("tab-mcp: notification", error),
+			);
+	}
+
+	/** A tab closed: what was kept for its pairing page goes. */
+	tabClosed(tabId: number): void {
+		this.#unasked.tabClosed(tabId);
+		this.#quietFails.delete(tabId);
 	}
 
 	/** The extension's parts of the library's fill-in (DEC-206). */
@@ -871,14 +977,12 @@ export class Connection {
 			relayOrigin: () => relayPageOrigin(this.#relay),
 			aiOn: () => this.#status() !== "off",
 			enabled: () => this.#fillOn(),
-			ask: (tabId, client, signal) =>
-				this.#questions
-					.askPairing({ tabId }, client, signal)
-					// "On <site>" is never offered for a pairing page.
-					.then((answer) => (answer === "site" ? "deny" : answer)),
-			code: (signal) => this.#fillCode(signal),
+			ask: (tabId, client, signal) => this.#askPairing(tabId, client, signal),
+			code: (signal, context) => this.#fillCode(signal, context),
 			release: () => this.#releasePairing(),
-			failed: (why) => {
+			failed: (why, context) => {
+				// A fill withdrawn by Remove ends with no code: not a problem.
+				if (why === "no-code" && this.#quietFails.delete(context.tabId)) return;
 				this.#problem = failureText(why);
 				this.#changed();
 			},
@@ -1046,6 +1150,11 @@ export class Connection {
 			allSites: this.#allSites,
 			fillCode: this.#fillOn(),
 			fillLost: this.#fill.lost(this.#relay),
+			fillAlways: this.#fill.alwaysHosts(this.#relay),
+			...(this.#fillNotice !== undefined &&
+			Date.now() - this.#fillNotice.at < NOTICE_MS
+				? { fillNotice: this.#fillNotice }
+				: {}),
 			...(this.#fillAnswered !== undefined
 				? { fillAnswered: this.#fillAnswered }
 				: {}),

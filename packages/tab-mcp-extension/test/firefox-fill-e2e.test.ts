@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
 import {
+	ALWAYS_CLIENT_NAME,
 	authorizeUrl,
 	type OAuthStack,
 	startOAuth,
@@ -135,6 +136,57 @@ describe.skipIf(!firefoxOk)(
 			expect(await toolsAfter(address, provider, params)).toContain(
 				"page_info",
 			);
+		});
+
+		test("Always allow (DEC-213): the same host's next page is filled in without a question, with the panel's line; removed, it asks again", async () => {
+			const host = oauth.alwaysHost;
+			const first = await authorizeUrl(oauth, address, oauth.alwaysClientId);
+			let callback = oauth.nextCallback();
+			const firstTab = await firefox.newTab(first.url, "window");
+			await panel.waitFor(questionCount(1), 15_000);
+			const buttons = `[...[...document.querySelectorAll("[data-question]")].at(-1).querySelectorAll("button")].map((b) => b.textContent)`;
+			expect(await panel.eval<string[]>(buttons)).toEqual([
+				"Don't allow",
+				"Allow once",
+				"Always allow",
+			]);
+			const always = `[...document.querySelectorAll('[data-question] button[data-answer="site"]')].at(-1)`;
+			await panel.waitFor(
+				`(void chrome.windows.getCurrent().then((w) => chrome.windows.update(w.id, { focused: true })), ${always} && ${always}.getAttribute("aria-disabled") !== "true")`,
+				10_000,
+			);
+			await panel.eval(`${always}.click()`);
+			expect((await callback).get("code")).toBeString();
+			await firstTab.close().catch(() => {});
+			await panel.waitFor(questionCount(0));
+			expect(
+				await panel.eval<string[]>(
+					`[...document.querySelectorAll("#fill-always-list .always-host")].map((e) => e.textContent)`,
+				),
+			).toEqual([host]);
+
+			const second = await authorizeUrl(oauth, address, oauth.alwaysClientId);
+			callback = oauth.nextCallback();
+			const secondTab = await firefox.newTab(second.url, "window");
+			expect((await callback).get("code")).toBeString();
+			expect(await panel.eval(questionCount(0))).toBe(true);
+			expect(
+				await panel.waitFor<string>(
+					`!document.getElementById("fill-notice").hidden && document.getElementById("fill-notice").textContent`,
+				),
+			).toBe(`Filled in the code for ${ALWAYS_CLIENT_NAME} (${host}).`);
+			await secondTab.close().catch(() => {});
+
+			// Removed under the switch: the next page asks.
+			await panel.eval(
+				`document.querySelector('#fill-always-list button[data-host="${host}"]').click()`,
+			);
+			await panel.waitFor(`document.getElementById("fill-always").hidden`);
+			const third = await authorizeUrl(oauth, address, oauth.alwaysClientId);
+			const thirdTab = await firefox.newTab(third.url, "window");
+			await panel.waitFor(questionCount(1), 15_000);
+			await thirdTab.close();
+			await panel.waitFor(questionCount(0), 15_000);
 		});
 	},
 );
