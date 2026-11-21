@@ -133,7 +133,7 @@ async function openPanel(browser: Browser, tab: Page): Promise<Page> {
 	await browser.clickIcon(tab);
 	const target = await browser
 		.waitForTarget((t) => t.url === panelUrl(browser))
-		.catch(async () => {
+		.catch(async (error: unknown) => {
 			// What the worker logged (a failed `sidePanel.open` logs there),
 			// which tab it sees in front and the panel's options there.
 			const worker = await within(
@@ -149,7 +149,7 @@ async function openPanel(browser: Browser, tab: Page): Promise<Page> {
 			const said =
 				browser.extensionWorker?.console.slice(-10).join(" | ") || "nothing";
 			throw new Error(
-				`no side panel 10 s after a click on the icon; the worker said: ${said}; it sees ${seen}`,
+				`no side panel after a click on the icon (${error}; Chrome ${browser.running ? "running" : `exited: ${browser.ended}`}); the worker said: ${said}; it sees ${seen}`,
 			);
 		});
 	const panel = await browser.attach(target.targetId);
@@ -1982,7 +1982,6 @@ describe.skipIf(chrome === undefined)(
 			stack.worker = await stack.browser.readyWorker(
 				stack.browser.extensionId as string,
 			);
-			stack.browser.extensionWorker = stack.worker;
 		}
 
 		test("the database deleted under the worker: the next write opens it again, and it holds across a start", async () => {

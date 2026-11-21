@@ -320,7 +320,7 @@ export class Browser {
 				browser.extensionId = id;
 				// A click before the service worker has run its script (and added
 				// its listeners) would be lost.
-				browser.extensionWorker = await browser.readyWorker(id);
+				await browser.readyWorker(id);
 			}
 			return browser;
 		} catch (error) {
@@ -516,7 +516,9 @@ export class Browser {
 	 * evaluation before that (`chrome` not even defined yet), so "it answers"
 	 * is not "it is ready": a click then found no listener and was lost, and
 	 * the side panel never opened (a few starts in a thousand, CI and local).
-	 * An extension without an action is ready once `chrome` is there.
+	 * An extension without an action is ready once `chrome` is there. For
+	 * the extension loaded at launch it becomes `extensionWorker` too (a
+	 * reload replaces the worker).
 	 */
 	async readyWorker(id: string, timeoutMs = 10_000): Promise<Worker> {
 		const worker = await this.serviceWorker(id);
@@ -527,7 +529,10 @@ export class Browser {
 					`typeof chrome === "object" && (chrome.action === undefined || chrome.action.onClicked.hasListeners())`,
 				)
 				.catch(() => false);
-			if (ready) return worker;
+			if (ready) {
+				if (id === this.extensionId) this.extensionWorker = worker;
+				return worker;
+			}
 			if (Date.now() > end)
 				throw new Error(
 					`the service worker of ${id} added no listener for the icon in ${timeoutMs} ms`,
