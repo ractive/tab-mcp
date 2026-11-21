@@ -4814,3 +4814,19 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   `data-tab-mcp-field="code"`, the form and the Connect button keep theirs, the hooks stay
   version 1. An extension that writes the code and fires `input` gets it tidied; one that
   submits right away is submitted as before.
+
+## DEC-212: nosniff on every response, set in one place (owner)
+
+2026-11-22. The owner: "Send nosniff, yes". `X-Content-Type-Options: nosniff` was on
+the pages, the stylesheet and the icons only; `/healthz`, the OAuth metadata, the 404
+answer and the MCP address's answers went without it (checked on the hosted relay).
+
+- Every answer gets it from `src/headers.ts`: `commonHeaderRoutes` wraps each route's
+  handler and fixed response, and the fallback and the error handler pass their answer
+  through `withCommonHeaders` too. Error answers, redirects, 405s and the answers built
+  from a tab's response are covered without each naming the header; the per-response
+  copies are gone. A WebSocket upgrade (no response) passes through unchanged.
+- A test asks one path of each kind (pages, stylesheet, icons, `/healthz`, the metadata,
+  `/authorize` with and without a request, a redirect, `/token`, `/revoke`, an MCP
+  address with GET and POST, a tab's answer, unknown paths) and names every answer
+  without the header.

@@ -114,7 +114,6 @@ export function pageHeaders(
 		"content-type": "text/html; charset=utf-8",
 		"content-security-policy": `default-src 'none'; ${scriptSrc}style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action ${formAction}`,
 		"x-frame-options": "DENY",
-		"x-content-type-options": "nosniff",
 		// Not no-referrer: browsers then send `Origin: null` on the form post,
 		// which the origin check must refuse. same-origin still sends nothing
 		// to the client's redirect.

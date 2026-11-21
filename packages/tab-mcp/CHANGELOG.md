@@ -32,6 +32,13 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   Whether they were is now told by the order of fetches and calls, not by comparing
   millisecond times. Which keys verify a signature is unchanged.
 
+### Security
+
+- **`X-Content-Type-Options: nosniff` on every response** (DEC-212): it was missing on
+  `/healthz`, the OAuth metadata, the 404 answer, redirects, 405s and the MCP
+  address's answers. It is now set in one place that every answer passes through,
+  error answers and the answers passed on from a tab included.
+
 ## [0.13.0][relay-0.13.0] - 2026-11-21
 
 ### Added

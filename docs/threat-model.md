@@ -404,6 +404,8 @@ stops script on another origin of the relay; a program can send any `Origin`.
   starts; no other script, inline event handler or `eval` can run. Without the script the
   field is a plain input and the page works as before. A page that pairs by sign-in only
   has no script at all. Framing is refused, so the code field cannot be overlaid.
+- Every response of the relay, not only its pages, carries `X-Content-Type-Options:
+  nosniff`, so a browser never takes an answer as a script or style sheet it guessed.
 - The form posts only the id of a pending request. Its CSRF token is bound to that
   request and to a first-party `HttpOnly`, `SameSite=Lax` cookie. Posts with a foreign
   `Origin` or `Sec-Fetch-Site` are refused. The page sets no `Cross-Origin-Opener-Policy`,

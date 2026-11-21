@@ -507,7 +507,6 @@ export class AuthorizationServer {
 			headers: {
 				"content-type": "text/css; charset=utf-8",
 				"cache-control": "public, max-age=3600",
-				"x-content-type-options": "nosniff",
 			},
 		});
 	}

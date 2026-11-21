@@ -191,6 +191,9 @@ does not export and which refuses to run outside development (DEC-059).
   computes at start-up; no other script, inline handler or `eval` runs. A page that
   pairs by sign-in only has no script and no `script-src`. Framing is refused so the
   code field cannot be overlaid.
+- Every response of the relay, not only its pages, carries `X-Content-Type-Options:
+  nosniff`, set in one place every answer passes through (DEC-212): no answer is taken
+  as a script or style sheet by a browser that guesses types.
 - The form posts only a pending-request id; its `Bun.CSRF` token is bound to that request
   and to a first-party `HttpOnly`, `SameSite=Lax` cookie, and posts with a foreign `Origin`
   or `Sec-Fetch-Site` are refused (DEC-057). No `Cross-Origin-Opener-Policy`, because
