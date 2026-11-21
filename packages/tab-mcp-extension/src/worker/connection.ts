@@ -19,9 +19,7 @@ import {
 	CodeFiller,
 	type FillHost,
 	type PagePort,
-	pairingCodes,
 	relayPageOrigin,
-	takeCode,
 } from "@ractive-ch/tab-mcp-client/extension";
 import {
 	FIREFOX,
@@ -66,7 +64,12 @@ import {
 } from "./allowed.ts";
 import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
-import { failureText, HOLD_MS, syncPairingScript } from "./fill.ts";
+import {
+	codeWithPairingOn,
+	failureText,
+	HOLD_MS,
+	syncPairingScript,
+} from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
@@ -820,14 +823,13 @@ export class Connection {
 			);
 	}
 
-	/** Pairing on for a code being filled in, for HOLD_MS from now. */
+	/** Pairing held on for a code being filled in, for HOLD_MS from now. */
 	#holdPairing(): void {
 		clearTimeout(this.#fillHold);
 		this.#fillHold = setTimeout(() => {
 			this.#fillHold = undefined;
 			this.#pairingOff();
 		}, HOLD_MS);
-		this.#mcp.startPairing();
 	}
 
 	#releasePairing(): void {
@@ -842,10 +844,13 @@ export class Connection {
 		return this.#fillFor !== undefined && this.#fillFor === this.#relay;
 	}
 
-	/** The code to fill in (`takeCode`), with pairing held on for it. */
+	/**
+	 * The code to fill in, with pairing held on for it; the library releases
+	 * the hold (`release`) once its code paired, or once no fill needs it.
+	 */
 	#fillCode(signal: AbortSignal): Promise<string | undefined> {
 		this.#holdPairing();
-		return takeCode(pairingCodes(this.#mcp), signal, { now: Date.now() });
+		return codeWithPairingOn(this.#mcp, signal);
 	}
 
 	/** The extension's parts of the library's fill-in (DEC-206). */

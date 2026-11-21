@@ -9,6 +9,20 @@ The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store. E
 attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
 `tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`.
 
+## Unreleased
+
+### Fixed
+
+- **Filling in the code while pairing is on already** (the pairing view open, or right
+  after another fill): the extension filled in the code shown even with under 5 seconds
+  left, as the relay answers starting pairing again with that same code; it now waits
+  for the next one (library `takeCode`, client 0.19.0).
+- Pairing held on for a fill whose code was not sent (the question or the fill
+  withdrawn, the page gone, no code) ends at once instead of after 30 seconds, unless
+  another fill still needs it.
+- A pairing page of the relay used before is no longer asked about when the relay was
+  changed while the page loaded.
+
 ## [0.3.0][extension-0.3.0] - 2026-11-21
 
 ### Added

@@ -1404,13 +1404,18 @@ than 1 KB gzipped of it.
   origin (port included) and path (`isPairingSender`). One question per page load; on
   Allow the code goes to that one page. The same request's page back in the same tab
   within 30 s is the relay's answer that the code was not taken: filled once more
-  without asking, never a third time; any other request asks. A question that waits is
-  withdrawn when the page goes, AI access or the setting goes off, the relay changes,
-  or the AI app connects meanwhile. A page that could not be asked about is reported,
-  not dropped. `pagePort(port)` takes the browser's port over in `onConnect`.
+  without asking, never a third time; any other request asks. With
+  `new CodeFiller(host, { retry: false })` that page is asked about like any other (one
+  question per page load), so no code is ever filled in without a yes of its own. A
+  question that waits is withdrawn when the page goes, AI access or the setting goes off,
+  the relay changes (also during the page's hello), or the AI app connects meanwhile. A
+  page that could not be asked about is reported, not dropped. `pagePort(port)` takes
+  the browser's port over in `onConnect`.
 - Which code to fill in: `takeCode(pairingCodes(mcp), signal, { now })` gives the current
   code unless it is about to change, else the next one, and never fails while a code
-  exists (on a computer whose clock is ahead every code would look expired).
+  exists (on a computer whose clock is ahead every code would look expired). The same
+  code sent again, as the relay answers `startPairing()` while pairing is on, is not the
+  next one.
 - The relay's addresses: `relayPageOrigin(relay)`, `relaySitePattern(relay)` (the host
   permission to ask for, `<scheme>://<host>/*`) and `pairingPagePattern(relay)` (a
   content script's `matches`); `undefined` where an address has none (an IPv6 literal).
@@ -1421,8 +1426,12 @@ in for (`undefined` for none); whether AI access is on, and whether the user tur
 filling in on; how the user is asked (`ask`, in its own panel or notification, the name
 and host shown with invisible characters escaped, `@ractive-ch/tab-mcp-client/visible`);
 the code with pairing held on (`startPairing()` before `takeCode`, kept on long enough
-after the fill for the relay to check the code); `release()` when that AI app connected;
-and `failed("busy" | "no-code")` to tell its user. Besides, the extension keeps the
+after the fill for the relay to check the code); `release()`, called when no fill needs
+pairing held any more (the AI app connected, or a fill ended without sending its code
+and no other fill is under way or waits for the relay's check); and
+`failed("busy" | "no-code", context)` to tell its user. `code(signal, context)` and
+`failed(why, context)` get the page's `context` (`FillContext`): `{ tabId, client }`,
+the same `client` (`{ name, host }`) that `ask` got. Besides, the extension keeps the
 on/off setting, asks for the relay's site with a click
 (`permissions.request({ origins: [relaySitePattern(relay)] })`, an optional host
 permission), registers the content script for `pairingPagePattern(relay)` or puts it in
@@ -1458,10 +1467,12 @@ const filler = new CodeFiller({
     holdPairing(); // mcp.startPairing(), and stopPairing() a while after
     return takeCode(pairingCodes(mcp), signal, { now: Date.now() });
   },
-  release: () => releasePairing(),
-  failed: (why) => showProblem(why), // "busy" | "no-code"
+  release: () => releasePairing(), // no fill needs pairing held now
+  failed: (why, { client }) => showProblem(why, client.host), // "busy" | "no-code"
   now: () => Date.now(),
 });
+// new CodeFiller(host, { retry: false }): never fill in without a yes, also not
+// the relay's answer to a fill.
 
 // At the top level, so that a page's port wakes the worker; taken over at once.
 // `page()` never rejects: a callback that throws closes the port and is logged.

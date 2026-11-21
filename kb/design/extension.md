@@ -170,9 +170,12 @@ built in DEC-203). Typing the code stays the way that always works.
   decides on. Allow or Don't allow, in the panel or a notification like a tool's
   question, 60 s; no "Always allow".
 - **On Allow** the worker holds pairing on (30 s), takes the current code (or the next
-  one if it is about to change, and the current one if no next comes in 10 s) and sends
-  it on that page's port; the content script writes it into the field and submits the
-  form with Connect. The relay checks it as any code. The port is closed 5 s later.
+  one if it is about to change, and the current one if no next comes in 10 s; the same
+  code sent again, the relay's answer to starting pairing while it is on, is not the
+  next one) and sends it on that page's port; the content script writes it into the
+  field and submits the form with Connect. The relay checks it as any code. The port is
+  closed 5 s later. A fill that sends no code (withdrawn, the page gone, no code) ends
+  the hold at once, unless another fill still needs it.
 - **No loops.** One question per page load. The page of the same request
   (`request_id`) in the same tab within 30 s of a fill is the relay's answer that the
   code was not taken: filled once more without asking, then nothing until the window

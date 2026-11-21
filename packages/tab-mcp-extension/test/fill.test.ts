@@ -7,6 +7,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import type { PairingCode } from "@ractive-ch/tab-mcp-client";
 import { Window } from "happy-dom";
 import { fillAccess, pairingMatches } from "../src/fill.ts";
 import {
@@ -22,6 +23,7 @@ import {
 } from "../src/sidepanel/question.ts";
 import {
 	BUSY,
+	codeWithPairingOn,
 	failureText,
 	HOLD_MS,
 	NO_CODE,
@@ -65,6 +67,46 @@ describe("what the extension asks for", () => {
 		expect(failureText("busy")).toBe(BUSY);
 		expect(failureText("no-code")).toBe(NO_CODE);
 		expect(HOLD_MS).toBe(30_000);
+	});
+
+	test("the code with pairing on already: the relay's answer to starting it again is the code about to change, so the next one is filled in", async () => {
+		const now = Date.UTC(2026, 10, 21, 12);
+		let code: PairingCode | undefined = {
+			code: "AAAA-AAAA",
+			expiresAt: new Date(now + 2_000).toISOString(),
+		};
+		const target = new EventTarget();
+		let starts = 0;
+		const mcp = {
+			get pairingCode() {
+				return code;
+			},
+			addEventListener: target.addEventListener.bind(target),
+			removeEventListener: target.removeEventListener.bind(target),
+			// As the relay answers `pairing.start` with pairing on: the code
+			// it shows, sent again, after the call returns.
+			startPairing: () => {
+				starts++;
+				setTimeout(() => target.dispatchEvent(new Event("pairingcode")), 1);
+			},
+		} as unknown as Parameters<typeof codeWithPairingOn>[0];
+		let settled = false;
+		const taken = codeWithPairingOn(
+			mcp,
+			new AbortController().signal,
+			now,
+		).finally(() => {
+			settled = true;
+		});
+		await settle();
+		expect(starts).toBe(1);
+		expect(settled).toBe(false);
+		code = {
+			code: "CCCC-CCCC",
+			expiresAt: new Date(now + 120_000).toISOString(),
+		};
+		target.dispatchEvent(new Event("pairingcode"));
+		expect(await taken).toBe("CCCC-CCCC");
 	});
 });
 
