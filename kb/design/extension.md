@@ -155,8 +155,13 @@ built in DEC-203). Typing the code stays the way that always works.
   away in the browser's settings, the worker turns the setting off and remembers it
   (`fillCodeLost`), so filling in never comes back by itself (with access to all sites,
   say); the line says "tab-mcp no longer has access to <host>, so this went off." until
-  the user turns the switch on or off or picks another relay. A relay address without a
-  pattern shows the sentence alone, and the switch only while the setting is on there.
+  the user turns the switch on or off or picks another relay. "On" without the site
+  when the worker handles it (given back for an "off" just before) stays off, without
+  the note (`FillSetting` in `src/worker/fill.ts`). Each "set-fill" carries an id that
+  comes back in the state (`fillAnswered`): until then the switch shows the click, its
+  line has no "no longer has access", and an Allow that comes after the user turned it
+  off again sends another "off" instead of "on". A relay address without a pattern
+  shows the sentence alone, and the switch only while the setting is on there.
 - **Access.** The page is opened by the AI app, so no click grants `activeTab` for it.
   Turning it on asks for the relay's site when the extension does not have it, one
   origin of the optional host permissions (`<scheme>://<host>/*`). Then a content script

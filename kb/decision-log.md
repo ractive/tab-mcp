@@ -4753,5 +4753,17 @@ button it read like an action that fills in the code now.
   site again. The note goes when the user turns the switch on or off or picks another
   relay. Rejected: keeping the setting on and showing the switch off, which resumes
   filling in unseen once the site comes back.
+- **The worker's own permission changes are not a loss.** "On" turns the setting on
+  only if the site is granted when the worker handles it; otherwise (the worker gave the
+  site back for an "off" just before, the user having clicked off and straight back on)
+  it stays off, without the note. The setting and its note are one small class,
+  `FillSetting` (`src/worker/fill.ts`), with storage and `permissions.contains` passed
+  in, unit-tested.
+- **A click is the switch's state until the worker answers it.** Each "set-fill" carries
+  an id that comes back in the state (`fillAnswered`); until then the switch shows the
+  click and its line has no "no longer has access" (the site given back for an "off"
+  reaches the panel before the worker's state). A browser's Allow that comes after the
+  user turned the switch off again (Firefox's prompt does not block the sidebar) does
+  not turn it on; the panel sends another "off", so the site granted late goes back.
 - **No pattern for the relay's address:** the sentence alone, no switch; the switch only
   while the setting is somehow on there, to turn it off.

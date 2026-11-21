@@ -20,6 +20,13 @@ import {
 	PAIRING_SCRIPT_ID,
 	pairingMatches,
 } from "../fill.ts";
+import type { Kv } from "./kv.ts";
+import {
+	loadFillFor,
+	loadFillLost,
+	saveFillFor,
+	saveFillLost,
+} from "./settings.ts";
 
 /** Pairing stays on this long after a fill, for the relay to check the code. */
 export const HOLD_MS = 30_000;
@@ -117,4 +124,108 @@ export async function syncPairingScript(
 						}),
 		),
 	);
+}
+
+/** Whether the extension holds a permission (`chrome.permissions.contains`). */
+export type Contains = (
+	permissions: chrome.permissions.Permissions,
+) => Promise<boolean>;
+
+/**
+ * The "Fill in the code for me" setting (DEC-203, DEC-210), kept in storage:
+ * the relay it is on for, and the relay for which it went off by itself
+ * because its site was taken away (the panel says so). On only with the
+ * relay's site: a switch that shows off never fills in later by itself.
+ */
+export class FillSetting {
+	readonly #kv: Kv;
+	readonly #contains: Contains;
+	#for: string | undefined;
+	#lost: string | undefined;
+
+	private constructor(
+		kv: Kv,
+		contains: Contains,
+		fillFor: string | undefined,
+		lost: string | undefined,
+	) {
+		this.#kv = kv;
+		this.#contains = contains;
+		this.#for = fillFor;
+		this.#lost = lost;
+	}
+
+	static async load(
+		kv: Kv,
+		contains: Contains = (p) => chrome.permissions.contains(p),
+	): Promise<FillSetting> {
+		const [fillFor, lost] = await Promise.all([
+			loadFillFor(kv),
+			loadFillLost(kv),
+		]);
+		return new FillSetting(kv, contains, fillFor, lost);
+	}
+
+	/** On for `relay`. */
+	on(relay: string): boolean {
+		return this.#for !== undefined && this.#for === relay;
+	}
+
+	/** Went off by itself for `relay`: its site was taken away. */
+	lost(relay: string): boolean {
+		return this.#lost !== undefined && this.#lost === relay;
+	}
+
+	/**
+	 * On for `relay`, if its site is granted (the panel asked for it first).
+	 * Not granted any more (the worker gave it back for an "off" that came
+	 * just before): it stays off, without the note, as nobody took it away.
+	 */
+	async turnOn(relay: string): Promise<boolean> {
+		const access = fillAccess(relay);
+		const granted =
+			access !== undefined && (await this.#contains(access).catch(() => false));
+		await this.#set(granted ? relay : undefined, undefined);
+		return granted;
+	}
+
+	/** Off, and the note gone. */
+	async turnOff(): Promise<void> {
+		await this.#set(undefined, undefined);
+	}
+
+	/**
+	 * Another relay is used: off, the note gone. Returns the relay it was on
+	 * for, whose site is to be given back.
+	 */
+	async reset(): Promise<string | undefined> {
+		const old = this.#for;
+		await this.#set(undefined, undefined);
+		return old;
+	}
+
+	/**
+	 * On for `relay` but its site gone (taken away in the browser's
+	 * settings): off, with the note. Returns whether it went off.
+	 */
+	async check(relay: string): Promise<boolean> {
+		if (!this.on(relay)) return false;
+		const access = fillAccess(relay);
+		if (access !== undefined && (await this.#contains(access))) return false;
+		// Turned off or on for another relay meanwhile.
+		if (!this.on(relay)) return false;
+		await this.#set(undefined, relay);
+		return true;
+	}
+
+	async #set(fillFor: string | undefined, lost: string | undefined) {
+		if (this.#for !== fillFor) {
+			this.#for = fillFor;
+			await saveFillFor(this.#kv, fillFor);
+		}
+		if (this.#lost !== lost) {
+			this.#lost = lost;
+			await saveFillLost(this.#kv, lost);
+		}
+	}
 }

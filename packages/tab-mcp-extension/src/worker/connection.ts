@@ -66,6 +66,7 @@ import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import {
 	codeWithPairingOn,
+	FillSetting,
 	failureText,
 	HOLD_MS,
 	syncPairingScript,
@@ -76,15 +77,11 @@ import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
-	loadFillFor,
-	loadFillLost,
 	loadGrants,
 	loadRelay,
 	loadReplaced,
 	type Replaced,
 	saveAiOn,
-	saveFillFor,
-	saveFillLost,
 	saveGrants,
 	saveRelay,
 	saveReplaced,
@@ -180,10 +177,10 @@ export class Connection {
 	#fillHold: ReturnType<typeof setTimeout> | undefined;
 	/** The pairing page's script registrations, one after the other. */
 	#scriptSync: Promise<void> = Promise.resolve();
-	/** The relay for which the user turned filling in on (DEC-203). */
-	#fillFor: string | undefined;
-	/** The relay for which filling in went off when its site was taken away. */
-	#fillLost: string | undefined;
+	/** "Fill in the code for me" (DEC-203, DEC-210). */
+	readonly #fill: FillSetting;
+	/** The panel's last "set-fill" the worker has handled, by its id. */
+	#fillAnswered: string | undefined;
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -221,12 +218,10 @@ export class Connection {
 		kv: Kv,
 		aiOn: boolean,
 		grants: GrantView[],
-		fillFor: string | undefined,
-		fillLost: string | undefined,
+		fill: FillSetting,
 	) {
 		this.#kv = kv;
-		this.#fillFor = fillFor;
-		this.#fillLost = fillLost;
+		this.#fill = fill;
 		this.#aiOn = aiOn;
 		this.#grants = grants;
 		this.#storage = storage;
@@ -253,27 +248,17 @@ export class Connection {
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
-		const [
-			storage,
-			icons,
-			allowed,
-			relay,
-			on,
-			replaced,
-			grants,
-			fillFor,
-			fillLost,
-		] = await Promise.all([
-			CachedSecretStorage.load(kv),
-			iconsFor(),
-			loadAllowed(kv),
-			loadRelay(kv),
-			loadAiOn(kv),
-			loadReplaced(kv),
-			loadGrants(kv),
-			loadFillFor(kv),
-			loadFillLost(kv),
-		]);
+		const [storage, icons, allowed, relay, on, replaced, grants, fill] =
+			await Promise.all([
+				CachedSecretStorage.load(kv),
+				iconsFor(),
+				loadAllowed(kv),
+				loadRelay(kv),
+				loadAiOn(kv),
+				loadReplaced(kv),
+				loadGrants(kv),
+				FillSetting.load(kv),
+			]);
 		const connection = new Connection(
 			storage,
 			icons,
@@ -283,8 +268,7 @@ export class Connection {
 			kv,
 			on,
 			grants,
-			fillFor,
-			fillLost,
+			fill,
 		);
 		connection.#showBadge();
 		connection.syncFill();
@@ -506,13 +490,8 @@ export class Connection {
 		// given back (DEC-203).
 		this.#filler.reset();
 		this.#releasePairing();
-		if (this.#fillFor !== undefined) {
-			const old = this.#fillFor;
-			this.#fillFor = undefined;
-			await saveFillFor(this.#kv, undefined);
-			await this.#giveBackAccess(old);
-		}
-		await this.#setFillLost(undefined);
+		const old = await this.#fill.reset();
+		if (old !== undefined) await this.#giveBackAccess(old);
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
 		// Apps paired through the relay before are not paired with this one.
@@ -746,27 +725,30 @@ export class Connection {
 				this.#questions.answer(command.id, command.answer);
 				return;
 			case "set-fill":
-				await this.#setFill(command.on);
+				await this.#setFill(command.on, command.id);
 				return;
 		}
 	}
 
 	/**
-	 * Filling in the code on the relay's page on or off (DEC-203). On, for
-	 * the relay in use: the panel has asked for its site first. Off: the
-	 * questions waiting go, and the relay's site is given back unless the
-	 * user gave access to all sites, which is not this feature's.
+	 * Filling in the code on the relay's page on or off (DEC-203, DEC-210).
+	 * On, for the relay in use: the panel has asked for its site first; if
+	 * the site is gone by now (given back for an "off" just before), it
+	 * stays off. Off: the questions waiting go, and the relay's site is
+	 * given back unless the user gave access to all sites, which is not this
+	 * feature's. The panel's command `id` comes back in the state, so the
+	 * panel knows its switch shows the worker's answer.
 	 */
-	async #setFill(on: boolean): Promise<void> {
+	async #setFill(on: boolean, id: string): Promise<void> {
 		const relay = this.#relay;
-		this.#fillFor = on ? relay : undefined;
-		await saveFillFor(this.#kv, this.#fillFor);
-		await this.#setFillLost(undefined);
-		if (!on) {
+		if (on) await this.#fill.turnOn(relay);
+		else {
+			await this.#fill.turnOff();
 			this.#filler.withdrawAll();
 			this.#releasePairing();
 			await this.#giveBackAccess(relay);
 		}
+		this.#fillAnswered = id;
 		this.syncFill();
 		this.#changed();
 	}
@@ -839,36 +821,16 @@ export class Connection {
 		const relay = this.#relay;
 		this.#scriptSync = this.#scriptSync
 			.then(async () => {
-				if (this.#fillOn() && this.#relay === relay) {
-					const access = fillAccess(relay);
-					if (
-						access === undefined ||
-						!(await chrome.permissions.contains(access))
-					)
-						await this.#loseFill(relay);
+				if (this.#relay === relay && (await this.#fill.check(relay))) {
+					this.#filler.withdrawAll();
+					this.#releasePairing();
+					this.#changed();
 				}
 				await syncPairingScript(relay, this.#fillOn());
 			})
 			.catch((error: unknown) =>
 				console.warn("tab-mcp: pairing page registration", error),
 			);
-	}
-
-	/** Filling in off for `relay`, its site gone (see `syncFill`). */
-	async #loseFill(relay: string): Promise<void> {
-		if (this.#fillFor !== relay) return;
-		this.#fillFor = undefined;
-		await saveFillFor(this.#kv, undefined);
-		await this.#setFillLost(relay);
-		this.#filler.withdrawAll();
-		this.#releasePairing();
-		this.#changed();
-	}
-
-	async #setFillLost(relay: string | undefined): Promise<void> {
-		if (this.#fillLost === relay) return;
-		this.#fillLost = relay;
-		await saveFillLost(this.#kv, relay);
 	}
 
 	/** Pairing held on for a code being filled in, for HOLD_MS from now. */
@@ -889,7 +851,7 @@ export class Connection {
 
 	/** Filling in is on for the relay in use. */
 	#fillOn(): boolean {
-		return this.#fillFor !== undefined && this.#fillFor === this.#relay;
+		return this.#fill.on(this.#relay);
 	}
 
 	/**
@@ -1083,7 +1045,10 @@ export class Connection {
 				: {}),
 			allSites: this.#allSites,
 			fillCode: this.#fillOn(),
-			fillLost: this.#fillLost !== undefined && this.#fillLost === this.#relay,
+			fillLost: this.#fill.lost(this.#relay),
+			...(this.#fillAnswered !== undefined
+				? { fillAnswered: this.#fillAnswered }
+				: {}),
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 			expired: this.#questions.expired,

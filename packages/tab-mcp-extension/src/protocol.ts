@@ -72,9 +72,10 @@ export type PanelCommand =
 	| { type: "answer"; id: string; answer: Answer }
 	/**
 	 * Filling in the code on the relay's pairing page on or off (DEC-203):
-	 * on only after the panel got the relay's site from the user.
+	 * on only after the panel got the relay's site from the user. `id` comes
+	 * back in the state once handled (`fillAnswered`, DEC-210).
 	 */
-	| { type: "set-fill"; on: boolean };
+	| { type: "set-fill"; on: boolean; id: string };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -169,6 +170,8 @@ export interface PanelState {
 	fillCode?: boolean;
 	/** Filling in went off by itself: the relay's site was taken away. */
 	fillLost?: boolean;
+	/** The id of the last "set-fill" the worker handled. */
+	fillAnswered?: string;
 	tab?: TabView;
 	/**
 	 * Without their arguments, which can be large: each question's come once
@@ -349,8 +352,8 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 				? { type: "answer", id: m["id"], answer: m["answer"] }
 				: undefined;
 		case "set-fill":
-			return typeof m["on"] === "boolean"
-				? { type: "set-fill", on: m["on"] }
+			return typeof m["on"] === "boolean" && isString(m["id"])
+				? { type: "set-fill", on: m["on"], id: m["id"] }
 				: undefined;
 		default:
 			return undefined;

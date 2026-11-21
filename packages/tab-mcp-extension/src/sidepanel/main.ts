@@ -646,7 +646,7 @@ const fill = fillPanel(
 		label: $("fill-label"),
 		toggle: $("fill-switch") as HTMLInputElement,
 	},
-	(on) => send({ type: "set-fill", on }),
+	(on, id) => send({ type: "set-fill", on, id }),
 	(text) => problem(text),
 );
 

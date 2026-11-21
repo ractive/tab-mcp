@@ -71,15 +71,27 @@ export interface FillElements {
 	toggle: HTMLInputElement;
 }
 
+/** The browser's permissions, as the panel uses them (the tests give their own). */
+export type FillPermissions = Pick<
+	typeof chrome.permissions,
+	"contains" | "request" | "onAdded" | "onRemoved"
+>;
+
 /**
  * Wire the switch; returns what takes each state. `setFill` tells the
- * worker. Whether the relay's site is granted is the browser's to say, asked
+ * worker, with an id that comes back in the state once the worker handled
+ * it. Whether the relay's site is granted is the browser's to say, asked
  * again when the relay, the setting or the permissions change.
+ *
+ * A click is the switch's state until the worker answers it (or the browser
+ * declines): the worker's own permission changes meanwhile (giving the site
+ * back for an "off") show neither a flicker nor "no longer has access".
  */
 export function fillPanel(
 	elements: FillElements,
-	setFill: (on: boolean) => void,
+	setFill: (on: boolean, id: string) => void,
 	problem: (text: string) => void,
+	permissions: FillPermissions = chrome.permissions,
 ): { show(state: PanelState): void } {
 	let relay: string | undefined;
 	let on = false;
@@ -87,15 +99,21 @@ export function fillPanel(
 	let allSites = false;
 	let granted = false;
 	let checks = 0;
-	// What the user's click turned the switch to, until the worker's state
-	// says the same (or the browser declined): no flicker back meanwhile.
+	// What the user's last click turned the switch to, and the id of the
+	// command sent for it, until the worker's state answers that id.
 	let wanted: boolean | undefined;
+	let asked: string | undefined;
+	let clicks = 0;
 	const render = () => {
 		const view =
 			relay === undefined ? undefined : fillView(relay, on, granted, lost);
 		elements.box.hidden = view === undefined;
-		if (elements.text.textContent !== (view?.text ?? ""))
-			elements.text.textContent = view?.text ?? "";
+		// While a click waits, no "why": the worker has not answered yet.
+		const text =
+			relay !== undefined && wanted !== undefined
+				? fillView(relay, false, granted, false).text
+				: (view?.text ?? "");
+		if (elements.text.textContent !== text) elements.text.textContent = text;
 		elements.label.hidden = view?.shown !== true;
 		const checked = wanted ?? view?.checked === true;
 		elements.toggle.checked = checked;
@@ -106,20 +124,27 @@ export function fillPanel(
 		const access = relay === undefined ? undefined : fillAccess(relay);
 		const has =
 			access !== undefined &&
-			(await chrome.permissions.contains(access).catch(() => false));
+			(await permissions.contains(access).catch(() => false));
 		if (check !== checks) return;
 		granted = has;
 		render();
 	};
+	const send = (value: boolean) => {
+		asked = crypto.randomUUID();
+		setFill(value, asked);
+	};
 	const notTurnedOn = () => {
 		wanted = undefined;
+		asked = undefined;
 		render();
 	};
 	elements.toggle.addEventListener("click", () => {
+		const click = ++clicks;
 		wanted = elements.toggle.checked;
+		asked = undefined;
 		elements.toggle.setAttribute("aria-checked", String(wanted));
 		if (!wanted) {
-			setFill(false);
+			send(false);
 			return;
 		}
 		const access = relay === undefined ? undefined : fillAccess(relay);
@@ -131,28 +156,40 @@ export function fillPanel(
 		// From the click, before any await: the browser asks the user, or
 		// answers at once when the extension has the site already. Declined
 		// or not asked, the switch goes back to off.
-		chrome.permissions.request(access).then(
+		permissions.request(access).then(
 			(given) => {
-				if (given) setFill(true);
+				if (click !== clicks) {
+					// Clicked again while the browser asked. Turned off since:
+					// the site granted now goes back, filling in stays off.
+					if (given && wanted !== true && !on)
+						setFill(false, crypto.randomUUID());
+					return;
+				}
+				if (given) send(true);
 				else notTurnedOn();
 			},
 			() => {
+				if (click !== clicks) return;
 				problem(NOT_ASKED);
 				notTurnedOn();
 			},
 		);
 	});
-	chrome.permissions.onAdded.addListener(() => void check());
-	chrome.permissions.onRemoved.addListener(() => void check());
+	permissions.onAdded.addListener(() => void check());
+	permissions.onRemoved.addListener(() => void check());
 	return {
 		show(state) {
 			const fill = state.fillCode === true;
 			const gone = state.fillLost === true;
-			// The worker agrees, turned it off as the site went, or another relay.
+			// The worker answered the click, or another relay is used.
 			const settled =
 				wanted !== undefined &&
-				(fill === wanted || (gone && !lost) || state.relay !== relay);
-			if (settled) wanted = undefined;
+				((asked !== undefined && state.fillAnswered === asked) ||
+					state.relay !== relay);
+			if (settled) {
+				wanted = undefined;
+				asked = undefined;
+			}
 			if (
 				!settled &&
 				state.relay === relay &&
