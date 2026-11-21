@@ -173,16 +173,19 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   back). "Disconnect all apps", also under the pairing code, disconnects every AI app
   and makes a new secret; the address stays, and each AI app connects again with a new
   code. With apps paired, the button under the code asks for a second click first.
-- "Fill in the code for me", under the code, turns on filling in its code on the
-  relay's sign-in page when an AI app opens it in this browser (an AI app on the desktop
-  opens it in the default browser). It is off by default, also with access to all
-  sites. Unless the extension has the relay's site already, Chrome first asks ("Read and
-  change your data on tab-mcp.ractive.ch"). From then on, while AI access is on, the
-  panel (or a notification) asks "Connect <AI app> (<host>) to the tab-mcp browser
-  extension?"; Allow writes the code into the page's field and clicks Connect. Typing
-  the code by hand works as before, also while the question waits. "Stop filling in the
-  code" turns it off and gives the relay's site back (not access to all sites); another
-  relay under "Settings" starts off. See [Filling in the code](#filling-in-the-code).
+- The "Fill in the code for me" switch, under the code, turns on filling in its code on
+  the relay's sign-in page when an AI app opens it in this browser (an AI app on the
+  desktop opens it in the default browser). It is off by default, also with access to
+  all sites. Unless the extension has the relay's site already, Chrome first asks ("Read
+  and change your data on tab-mcp.ractive.ch"); declined, the switch goes back to off.
+  From then on, while AI access is on, the panel (or a notification) asks "Connect <AI
+  app> (<host>) to the tab-mcp browser extension?"; Allow writes the code into the
+  page's field and clicks Connect. Typing the code by hand works as before, also while
+  the question waits. Turned off, it gives the relay's site back (not access to all
+  sites); another relay under "Settings" starts off. The switch is on only while the
+  relay's site is granted: taken away in Chrome's settings, filling in goes off (the
+  line under the switch says so) and stays off until turned on again. See [Filling in
+  the code](#filling-in-the-code).
 
 ## Questions
 
@@ -260,7 +263,7 @@ waiting already, the panel says so: type the code, or reload the page once answe
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. Or, after "Fill in the code for me", the relay's site alone: its pairing page. |
+| `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. Or, after turning on "Fill in the code for me", the relay's site alone: its pairing page. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
 app.
@@ -346,7 +349,7 @@ has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`
    (`<relay>/s/tab-mcp-extension-firefox/mcp`) to your AI app
    (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
    pairing code from the sidebar.
-   "Fill in the code for me" works as in Chrome (Firefox asks for the relay's site);
+   The "Fill in the code for me" switch works as in Chrome (Firefox asks for the relay's site);
    its notification has no buttons, so a click on it opens the sidebar, where Allow is.
 
 **While developing**, `bun scripts/firefox-dev.ts [URL] [--headless] [--port N]` does steps 1,

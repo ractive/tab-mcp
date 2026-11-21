@@ -236,34 +236,57 @@ describe("the panel", () => {
 		);
 	});
 
-	test("Fill in the code for me: a setting of its own, what it does in one line, Stop while it is on", () => {
+	test("Fill in the code for me: a switch that shows what is in effect, what it does in one line", () => {
 		const relay = "https://tab-mcp.ractive.ch";
-		const then =
-			"Then, when an AI app opens the sign-in page of tab-mcp.ractive.ch in this Chrome profile, tab-mcp asks you and fills in the code.";
-		expect(fillView(relay, false, false)).toEqual({
-			text: `${then} Chrome asks you first.`,
-			on: true,
-			off: false,
+		const does =
+			"While this is on, tab-mcp asks you and fills in the code when an AI app opens the sign-in page of tab-mcp.ractive.ch in this Chrome profile.";
+		const asks = "Chrome asks you for access to that site when you turn it on.";
+		const gone =
+			"tab-mcp no longer has access to tab-mcp.ractive.ch, so this went off.";
+		// Off, the site not granted: Chrome asks when it is turned on.
+		expect(fillView(relay, false, false, false)).toEqual({
+			text: `${does} ${asks}`,
+			shown: true,
+			checked: false,
 		});
 		// The site granted already (access to all sites): still off until
 		// turned on, and Chrome asks nothing.
-		expect(fillView(relay, false, true)).toEqual({
-			text: then,
-			on: true,
-			off: false,
+		expect(fillView(relay, false, true, false)).toEqual({
+			text: does,
+			shown: true,
+			checked: false,
 		});
-		expect(fillView(relay, true, true)).toEqual({
-			text: "When an AI app opens the sign-in page of tab-mcp.ractive.ch in this Chrome profile, tab-mcp asks you and fills in the code.",
-			on: false,
-			off: true,
+		expect(fillView(relay, true, true, false)).toEqual({
+			text: does,
+			shown: true,
+			checked: true,
 		});
-		// On, but the site was taken away in the browser's settings.
-		expect(fillView(relay, true, false)).toMatchObject({ on: true, off: true });
-		// No pattern for the address: one plain sentence, no button.
-		expect(fillView("http://[::1]:8787", false, false)).toEqual({
+		// The site taken away in the browser's settings: off, and why. The
+		// worker turns the setting off (lost); until it has, the same.
+		const lost = {
+			text: `${gone} ${does} ${asks}`,
+			shown: true,
+			checked: false,
+		};
+		expect(fillView(relay, false, false, true)).toEqual(lost);
+		expect(fillView(relay, true, false, false)).toEqual(lost);
+		// It went off, and the site came back (access to all sites): just off.
+		expect(fillView(relay, false, true, true)).toEqual({
+			text: does,
+			shown: true,
+			checked: false,
+		});
+		// No pattern for the address: one plain sentence, no switch, unless
+		// the setting is on there, to turn it off.
+		expect(fillView("http://[::1]:8787", false, false, false)).toEqual({
 			text: NO_PATTERN,
-			on: false,
-			off: false,
+			shown: false,
+			checked: false,
+		});
+		expect(fillView("http://[::1]:8787", true, false, false)).toEqual({
+			text: NO_PATTERN,
+			shown: true,
+			checked: true,
 		});
 		expect(parseCommand({ type: "set-fill", on: true })).toEqual({
 			type: "set-fill",

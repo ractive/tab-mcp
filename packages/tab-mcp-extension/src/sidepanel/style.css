@@ -869,7 +869,7 @@ button.copy {
 	line-height: 17px;
 }
 
-/* Filling in the code on the relay's page: what it does, then its button. */
+/* Filling in the code on the relay's page: its switch, then what it does. */
 .fill {
 	display: flex;
 	flex-direction: column;

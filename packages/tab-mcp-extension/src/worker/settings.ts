@@ -13,6 +13,7 @@ const AI_ON = "aiOn";
 const REPLACED = "replaced";
 const GRANTS = "grants";
 const FILL_FOR = "fillCodeFor";
+const FILL_LOST = "fillCodeLost";
 
 export async function loadRelay(kv: Kv): Promise<string> {
 	const stored = await kv.get(RELAY);
@@ -101,4 +102,22 @@ export async function saveFillFor(
 ): Promise<void> {
 	if (relay === undefined) await kv.remove(FILL_FOR);
 	else await kv.set({ [FILL_FOR]: relay });
+}
+
+/**
+ * The relay for which filling in went off by itself because its site was
+ * taken away (in the browser's settings), or `undefined`: the panel says so
+ * until the user turns it on or off, or uses another relay.
+ */
+export async function loadFillLost(kv: Kv): Promise<string | undefined> {
+	const stored = await kv.get(FILL_LOST);
+	return typeof stored === "string" ? stored : undefined;
+}
+
+export async function saveFillLost(
+	kv: Kv,
+	relay: string | undefined,
+): Promise<void> {
+	if (relay === undefined) await kv.remove(FILL_LOST);
+	else await kv.set({ [FILL_LOST]: relay });
 }

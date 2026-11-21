@@ -638,13 +638,13 @@ function showTab(s: PanelState): void {
 			?.focus();
 }
 
-/** "Fill in the code for me" under "Connect your AI app" (DEC-203). */
+/** The "Fill in the code for me" switch under "Connect your AI app" (DEC-203, DEC-210). */
 const fill = fillPanel(
 	{
 		box: $("fill"),
 		text: $("fill-text"),
-		on: $("fill-on") as HTMLButtonElement,
-		off: $("fill-off") as HTMLButtonElement,
+		label: $("fill-label"),
+		toggle: $("fill-switch") as HTMLInputElement,
 	},
 	(on) => send({ type: "set-fill", on }),
 	(text) => problem(text),

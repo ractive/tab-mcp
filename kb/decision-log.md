@@ -4686,3 +4686,36 @@ unchanged; the audit's recommendation for the rest.
   misspelt key, also after an upgrade. Texts an AI app reads stay English on purpose.
 - **Kept as it was:** `ui.strings` as the place (one place already), `ui.setup` for the
   help's link and steps, the extension's and relay's texts in their own files.
+
+## DEC-210: The code fill-in setting is a switch (owner)
+
+2026-11-21; amends DEC-203's "A setting of its own, off by default". The owner: "'Fill in
+the code for me' should then be a toggle and not a button." It is a setting that stays
+on, and each connection is still asked about ("Connect <AI app>?" with Allow); as a
+button it read like an action that fills in the code now.
+
+- **One switch** in the panel's existing pattern (`allow-switch`, `role="switch"`,
+  `aria-checked` kept in step), labelled "Fill in the code for me", in place of the
+  buttons "Fill in the code for me" and "Stop filling in the code". The line under it
+  (`aria-describedby`) reads right in both states: "While this is on, tab-mcp asks you
+  and fills in the code when an AI app opens the sign-in page of <host> in this <browser>
+  profile.", and, while the browser would ask for the relay's site, "<browser> asks you
+  for access to that site when you turn it on."
+- **On** still asks for the relay's site from the click, before any await; declined or
+  not asked, the switch goes back to off (the panel's problem text when it could not
+  ask). **Off** is what "Stop filling in the code" did: the worker gives the relay's site
+  back, never access to all sites.
+- **It shows what is in effect:** on only while the setting is on and the relay's site
+  is granted.
+- **On, but the site was taken away** (in the browser's settings): the worker turns the
+  setting off when it finds the site gone (at each start and after each permission
+  change, where it registers the pairing page's script) and keeps the relay it went off
+  for (`fillCodeLost` in IndexedDB). So no state shows off while filling in could come
+  back by itself, for example when the site returns with access to all sites: the
+  setting itself is off. While the site is still missing, the line starts with "tab-mcp
+  no longer has access to <host>, so this went off."; turning the switch on asks for the
+  site again. The note goes when the user turns the switch on or off or picks another
+  relay. Rejected: keeping the setting on and showing the switch off, which resumes
+  filling in unseen once the site comes back.
+- **No pattern for the relay's address:** the sentence alone, no switch; the switch only
+  while the setting is somehow on there, to turn it off.

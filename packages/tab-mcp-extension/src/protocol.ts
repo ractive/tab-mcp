@@ -167,6 +167,8 @@ export interface PanelState {
 	allSites: boolean;
 	/** Filling in the code on the relay's pairing page is on (DEC-203). */
 	fillCode?: boolean;
+	/** Filling in went off by itself: the relay's site was taken away. */
+	fillLost?: boolean;
 	tab?: TabView;
 	/**
 	 * Without their arguments, which can be large: each question's come once

@@ -44,8 +44,8 @@ reads only what it announced: the library's version, its app id and the names an
 of the AI apps connected to the page directly, which the panel shows and which stay in
 the browser.
 
-After the user clicks "Fill in the code for me" (off by default, also with access to all
-sites), the extension sees the pairing page of the relay the user chose, and only that
+After the user turns on the "Fill in the code for me" switch (off by default, also with
+access to all sites), the extension sees the pairing page of the relay the user chose, and only that
 page of it (`<relay>/authorize`). There it reads three attributes of the pairing form
 (the app the AI app asks to connect to, the AI app's name and its host, which the relay
 put there for this) and the form's hidden request id (the relay's id of that sign-in,
@@ -55,7 +55,8 @@ that AI app, and only after the user's Allow it writes its own pairing code into
 form's code field and submits the form, as the user would by typing it. The code goes
 to the relay, which already knows it; nothing else leaves the browser, and nothing of
 the page is stored. The extension stores only that the user turned this on, and for
-which relay.
+which relay; or, when it went off because the user took the relay's site away in the
+browser's settings, for which relay, so that the panel can say why it is off.
 
 ## What it stores
 
