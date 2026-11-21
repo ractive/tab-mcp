@@ -323,7 +323,7 @@ describe("serve and createTunnelFetch over a MessageChannel", () => {
 		expect(declined).toMatchObject({
 			result: {
 				isError: true,
-				content: [{ type: "text", text: "The user declined" }],
+				content: [{ type: "text", text: "The user did not allow this call." }],
 			},
 		});
 		expect(runs).toBe(0);
@@ -1276,7 +1276,7 @@ describe("a site's own assistant (iteration 40)", () => {
 		// The same answers as the page's onConfirm.
 		reply = false;
 		expect((await result(own, 2)).content).toEqual([
-			{ type: "text", text: "The user declined" },
+			{ type: "text", text: "The user did not allow this call." },
 		]);
 		reply = "unanswered";
 		expect((await result(own, 3)).content).toEqual([
@@ -1286,7 +1286,7 @@ describe("a site's own assistant (iteration 40)", () => {
 		expect((await result(own, 4)).isError).toBe(true);
 		reply = new Error("the chat is gone");
 		expect((await result(own, 5)).content).toEqual([
-			{ type: "text", text: "The user declined" },
+			{ type: "text", text: "The user did not allow this call." },
 		]);
 		expect(port).toHaveLength(5);
 

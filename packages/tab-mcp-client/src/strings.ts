@@ -1,24 +1,48 @@
 /**
- * Every text of the library's dialogs, in one table (CU 5). A page passes
- * its own for some or all keys (`ui: { strings }`); the dialogs use these for
- * the rest. `{name}` is a placeholder the dialog fills in: names of tools
- * and AI apps (isolated, so that they cannot reorder the sentence), the
- * code, counts. Where English needs two forms, there are two keys
- * (`…One` for one, `…Many` for more). `lang` and `dir` are the language and
- * direction of the texts, set on every dialog.
+ * `@ractive-ch/tab-mcp-client/strings`: every text the library can show to
+ * a person, in English, in one table (`STRINGS`), `pickStrings` to choose
+ * a page's own translation by the user's languages, and `withEnglish` for
+ * a page that shows these texts in its own UI. The package ships English only;
+ * a page passes its own table once, as `ui.strings` of `TabMcp` (or of
+ * `<TabMcpProvider>`), and every missing key stays English.
+ *
+ * `{name}` is a placeholder the library fills in: names of tools and AI
+ * apps (isolated, so that they cannot reorder the sentence), the code,
+ * counts. A text that depends on a count is a {@link PluralText}, one form
+ * per plural category of the language (`Intl.PluralRules`). Lists of names
+ * are joined by `Intl.ListFormat`. Both follow `lang`, the language of the
+ * texts, which the dialogs also set on themselves with its direction.
+ *
+ * Texts an AI app reads (tool results, refusals) are not here: they stay
+ * English on purpose, as the AI app quotes them back in its own words.
  */
-export const STRINGS = {
+
+import { isPlural, warnWithoutLang } from "./text.ts";
+
+/**
+ * A text that depends on a count `{n}` (or on the number of names in a
+ * list): one form per plural category the language has, as
+ * `Intl.PluralRules` names them. `other` is required; English needs `one`
+ * and `other`, Polish `one`, `few`, `many` and `other`, Japanese only
+ * `other`. A category the table lacks uses `other`.
+ */
+export type PluralText = { other: string } & {
+	[category in Intl.LDMLPluralRule]?: string;
+};
+
+const english = {
+	/**
+	 * The language of the texts (a BCP 47 tag): set on every dialog, and the
+	 * language `Intl.PluralRules` and `Intl.ListFormat` follow.
+	 */
 	lang: "en",
-	dir: "ltr",
-	/** Between the last two items of a list ("A, B and C"). */
-	and: "and",
 
 	// The confirmation of a consequential tool call.
 	confirmTitle: "Allow {tool}?",
 	confirmWho: "{client} wants to run {tool}.",
 	deny: "Don't allow",
-	allow: "Allow",
-	/** `alwaysAllow: true`: kept until the app is disconnected. */
+	allow: "Allow once",
+	/** `alwaysAllow: true`: kept until the AI app is disconnected. */
 	alwaysAllow: "Always allow",
 	alwaysAllowNote:
 		"Always allow: {tool} will run for {client} without asking, with any arguments, until you disconnect {client} from this page.",
@@ -29,8 +53,10 @@ export const STRINGS = {
 	argumentsHidden:
 		"The arguments cannot be shown, so this call cannot be allowed.",
 	scrollToAllow: "Scroll to the end of the arguments to allow this call.",
-	waitingOne: "1 more call is waiting after this one.",
-	waitingMany: "{n} more calls are waiting after this one.",
+	waiting: {
+		one: "{n} more call is waiting after this one.",
+		other: "{n} more calls are waiting after this one.",
+	},
 	/** Before the page's title while a confirmation waits in a hidden tab. */
 	titlePrefix: "Allow? – ",
 
@@ -52,20 +78,23 @@ export const STRINGS = {
 	copyCode: "Copy code",
 	copyCommand: "Copy {app} command",
 
-	// The connect dialog.
+	// The connect dialog; its title is also `ConnectButton`'s label.
 	connectTitle: "Connect your AI app",
 	/**
 	 * At the top, while AI apps reach the page through the tab-mcp browser
 	 * extension (`TabMcp.extension`, DEC-207); `…InFront` when the extension
-	 * serves only the tab in front, as it does.
+	 * serves only the tab in front, as it does. `{apps}`: their names, as a
+	 * list.
 	 */
-	viaExtensionOne: "{apps} is connected through the tab-mcp browser extension.",
-	viaExtensionMany:
-		"{apps} are connected through the tab-mcp browser extension.",
-	viaExtensionInFrontOne:
-		"{apps} is connected through the tab-mcp browser extension, while this tab is in front.",
-	viaExtensionInFrontMany:
-		"{apps} are connected through the tab-mcp browser extension, while this tab is in front.",
+	viaExtension: {
+		one: "{apps} is connected through the tab-mcp browser extension.",
+		other: "{apps} are connected through the tab-mcp browser extension.",
+	},
+	viaExtensionInFront: {
+		one: "{apps} is connected through the tab-mcp browser extension, while this tab is in front.",
+		other:
+			"{apps} are connected through the tab-mcp browser extension, while this tab is in front.",
+	},
 	connecting: "Connecting…",
 	connectAgain: "Connect again",
 	reconnecting: "Connection lost. Reconnecting…",
@@ -87,8 +116,8 @@ export const STRINGS = {
 	addressLabel: "Add this address to your AI app:",
 	help: "How do I add it?",
 	guide: "Step by step, and what to do when it fails",
-	codeSentence: "When asked, enter the code {code}",
-	codeNote: "A new code appears every 2 minutes and after each use.",
+	codeSentence: "When asked, type the code {code}",
+	codeNote: "The code changes every 2 minutes and after each use.",
 	codeUsed: "Code used. Waiting for your AI app…",
 	signIn:
 		"When your AI app asks, sign in with the account you use on this page. No code is needed.",
@@ -100,46 +129,79 @@ export const STRINGS = {
 	continuePairing: "Continue",
 	disconnectAll: "Disconnect all apps",
 	disconnectAllNote:
-		"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again with a new code.",
-	disconnectAllQuestionOne:
-		"This disconnects {apps}. To use this page with it again, connect it again and enter a new code.",
-	disconnectAllQuestionMany:
-		"This disconnects {apps}. To use this page with them again, connect them again and enter a new code.",
-	disconnectAllConfirm: "Disconnect all",
+		"An AI app is connected that should not be? This disconnects every AI app from this page; each one has to connect again.",
+	/** `{apps}`: the AI apps it disconnects, as a list. */
+	disconnectAllQuestion: {
+		one: "This disconnects {apps}. To use this page with it again, connect it again.",
+		other:
+			"This disconnects {apps}. To use this page with them again, connect them again.",
+	},
+	/** Repeats the button that asked. */
+	disconnectAllConfirm: "Disconnect all apps",
 	cancel: "Cancel",
 	disconnectingAll: "Disconnecting…",
 	disconnectAllDone: "Every AI app is disconnected. Connect yours again.",
-	connectedOne: "{apps} is connected",
-	connectedMany: "{apps} are connected",
-	connectedNextOne:
-		"You can close this now and ask it to use the tools of this page.",
-	connectedNextMany:
-		"You can close this now and ask them to use the tools of this page.",
-	connectAnother: "Connect another app",
-	connectedHeading: "Connected",
+	/** `{apps}`: the connected AI apps, as a list. */
+	connected: { one: "{apps} is connected", other: "{apps} are connected" },
+	connectedNext: {
+		one: "You can close this now and ask it to use the tools of this page.",
+		other: "You can close this now and ask them to use the tools of this page.",
+	},
+	connectAnother: "Connect another AI app",
+	connectedHeading: "Connected AI apps",
 	appConnected: "{app} connected",
 	disconnect: "Disconnect",
 	disconnectApp: "Disconnect {app}",
-	disconnectNote: "To disconnect an app, connect this page again first.",
+	disconnectNote: "To disconnect an AI app, connect this page again first.",
 	/** Disconnect failed: the relay could not save it (`store_unavailable`). */
 	storeUnavailable: "The relay could not save this. Try again.",
 	/** Disconnect failed for another reason. */
-	disconnectFailed: "Could not disconnect the app. Try again.",
-	// Under a connected app: a switch per tool that asks, and one for all.
-	runsWithoutAsking: "Runs without asking",
+	disconnectFailed: "Could not disconnect the AI app. Try again.",
+	// Under a connected AI app: a switch per tool that asks, and one for all,
+	// headed by the confirmation's own label (`alwaysAllow` or
+	// `allowUntilReload`), so that the button and its switches read alike.
 	/** After a tool's name: it may delete or overwrite (`destructiveHint`). */
 	destructive: "destructive",
 	/** A tool's switch, as read out: starts with what it shows (WCAG 2.5.3). */
 	allowToolApp: "{tool} runs without asking for {app}",
 	allowDestructiveToolApp: "{tool} (destructive) runs without asking for {app}",
-	allowEverything: "Allow everything, no questions asked",
-	allowEverythingApp: "Allow everything, no questions asked, for {app}",
+	allowEverything: "Always allow everything",
+	allowEverythingApp: "Always allow everything for {app}",
+	/** Kept until the AI app is disconnected (`alwaysAllow: true`). */
 	allowEverythingNote:
-		"Every tool of this page runs for {app} without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite.",
+		"Every tool of this page runs for {app} without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite, until you disconnect {app}.",
+	/** Kept in memory only (`alwaysAllow: "until-reload"`, `storage: null`). */
+	allowEverythingUntilReloadNote:
+		"Every tool of this page runs for {app} without asking, with any arguments: also tools you have not seen yet and ones that delete or overwrite, until you reload this page or disconnect {app}.",
 	closeNote:
-		"Closing this stops the code. To connect later, open this again from the page.",
+		"Closing this ends the code. To connect an AI app later, open this again from the page.",
 	close: "Close",
 	done: "Done",
+
+	// The steps under "How do I add it?" (`setupInstructions`).
+	setupClaudeApp: "Claude (claude.ai and the desktop app)",
+	setupClaude:
+		"Settings → Connectors → Add custom connector, then paste the address.",
+	setupChatGpt:
+		"On chatgpt.com: Plugins, add an MCP server with the address, then Connect. The Mac app needs more steps: see the guide.",
+	/** Before a command to run in a terminal. */
+	setupRun: "Run:",
+	/** Without a command (an address a shell would not read as plain). */
+	setupClaudeCode: "Add the address with claude mcp add --transport http.",
+	/** `{command}`: `/mcp`, shown as code. */
+	setupClaudeCodeNote:
+		"Then type {command} in Claude Code and choose Authenticate.",
+	/** Without a command; `{feature}`: the Codex feature to turn on. */
+	setupCodex:
+		"Run codex features enable {feature}, then add the address with codex mcp add --url and sign in with codex mcp login.",
+	setupCodexNote:
+		"The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects.",
+
+	// `ConnectButton` of `./react`; otherwise it says `connectTitle`,
+	// `connecting` or, after a few failed attempts, `reconnecting`.
+	/** While reconnecting, before it says the connection is lost. */
+	buttonReconnecting: "Reconnecting…",
+	buttonConnected: { one: "AI app connected", other: "{n} AI apps connected" },
 
 	// The notice when another tab or program took over the address.
 	replacedSiblingTitle: "Opened in another tab",
@@ -147,12 +209,155 @@ export const STRINGS = {
 		"This page is open in another tab, and your AI apps now use that one. To use them here, connect this page again.",
 	replacedTitle: "Another tab or program took over this page",
 	replaced:
-		"Your AI apps now reach that tab or program instead of this page. If you did not open this page in another tab or window of this browser, someone may have copied what this page keeps to connect. “Disconnect all apps” ends that; then connect your AI apps again with a new code.",
+		"Your AI apps now use that tab or program instead of this page. If you did not open this page in another tab or window of this browser, someone may have copied this page's saved connection. “Disconnect all apps” ends that; then connect your AI apps again.",
 	takenOverAgain:
 		"It was taken over again before its AI apps were disconnected. Try again.",
 	/** `{reason}`: why disconnecting all apps failed, one of the texts above. */
 	tryAgainOrClose: "{reason} Try again, or close this.",
 };
 
-/** The texts of the dialogs: the keys of {@link STRINGS}, each a string. */
-export type DialogStrings = { [K in keyof typeof STRINGS]: string };
+/**
+ * The texts of the library, key by key: each a string, or a
+ * {@link PluralText} where it depends on a count. `dir` is the direction of
+ * the texts; without it, the dialogs take it from `lang` where the browser
+ * knows it (`Intl.Locale`), else left to right: set `dir: "rtl"` for a
+ * right-to-left language to be sure.
+ *
+ * Type a translation as `DialogStrings` and the type check names every key
+ * it lacks or misspells, also after an upgrade added one; as
+ * `Partial<DialogStrings>` it may leave keys out (they stay English).
+ */
+export type DialogStrings = {
+	[K in keyof typeof english]: (typeof english)[K] extends string
+		? string
+		: PluralText;
+} & { dir?: "ltr" | "rtl" };
+
+/** The English texts, the defaults for every key. */
+export const STRINGS: DialogStrings = english;
+
+/**
+ * Every text: `strings` where it has one of the right kind, English for
+ * the rest. A missing translation (`undefined`), an unknown key or a plain
+ * string where the English text has plural forms keeps the English text:
+ * a table from an older version still works, only less translated. A table
+ * with texts but no `lang` counts as English, and the console says so once.
+ */
+export function withEnglish(
+	strings: Partial<DialogStrings> | undefined,
+): DialogStrings {
+	warnWithoutLang(strings);
+	const s: Record<string, unknown> = { ...STRINGS };
+	for (const [key, value] of Object.entries(strings ?? {})) {
+		const english = s[key];
+		if (
+			key === "dir"
+				? value === "ltr" || value === "rtl"
+				: typeof english === "string"
+					? typeof value === "string"
+					: english !== undefined && isPlural(value)
+		)
+			s[key] = value;
+	}
+	return s as DialogStrings;
+}
+
+/** A table of texts, or a module whose default export is one. */
+type Loaded = Partial<DialogStrings> | { default: Partial<DialogStrings> };
+
+/** A tag's language, script and region, as the browser fills them in. */
+function subtags(tag: string): {
+	language: string;
+	script?: string;
+	region?: string;
+} {
+	const language = tag.toLowerCase().split("-")[0] ?? "";
+	try {
+		const { script, region } = new Intl.Locale(tag).maximize();
+		return {
+			language,
+			...(script === undefined ? {} : { script }),
+			...(region === undefined ? {} : { region }),
+		};
+	} catch {
+		return { language };
+	}
+}
+
+/**
+ * Of the tags in `tags`, the one for the user's language `wanted`: the same
+ * tag; else, among those of the same language, the one with the same script
+ * (`zh-TW` is written `Hant`, so it takes `zh-Hant` over `zh-Hans` or `zh`),
+ * then the same region, then the language alone (`de-CH` takes `de` over
+ * `de-AT`), then the first in alphabetical order. The browser's likely
+ * subtags (`Intl.Locale.maximize`) fill in what a tag leaves out.
+ */
+function matchTag(tags: string[], wanted: string): string | undefined {
+	const exact = tags.find((t) => t.toLowerCase() === wanted.toLowerCase());
+	if (exact !== undefined) return exact;
+	const want = subtags(wanted);
+	const score = (tag: string) => {
+		const has = subtags(tag);
+		return (
+			(has.script !== undefined && has.script === want.script ? 4 : 0) +
+			(has.region !== undefined && has.region === want.region ? 2 : 0) +
+			(tag.toLowerCase() === want.language ? 1 : 0)
+		);
+	};
+	return tags
+		.filter((t) => subtags(t).language === want.language)
+		.sort((a, b) => score(b) - score(a) || (a < b ? -1 : a > b ? 1 : 0))[0];
+}
+
+/**
+ * The page's own table for the user's language, loaded only once chosen:
+ * `tables` maps language tags (`"de"`, `"pt-BR"`, `"zh-Hant"`) to functions
+ * that load one, such as `() => import("./tab-mcp.de.ts")`. The user's
+ * languages (`navigator.languages`, most preferred first) are tried in
+ * order; each takes the same tag, else a table of the same language: the
+ * same script first, then the same region, then the language alone, then
+ * the first in alphabetical order. English is built in: a user who prefers
+ * English before any of the tables, or none of them, gets `undefined`,
+ * which keeps the English texts. The table comes with `lang` set to the
+ * matched tag unless it has its own.
+ *
+ * It never rejects: a table that fails to load (a chunk gone after a
+ * deploy, offline) or is not an object is said in the console and gives
+ * `undefined`, so the page still starts, in English.
+ *
+ * ```ts
+ * const strings = await pickStrings({ de: () => import("./tab-mcp.de.ts") });
+ * const mcp = new TabMcp({ relay, server, ui: { strings } });
+ * ```
+ */
+export async function pickStrings(
+	tables: Record<string, () => Promise<Loaded>>,
+	languages: readonly string[] = globalThis.navigator?.languages ?? [],
+): Promise<Partial<DialogStrings> | undefined> {
+	const tags = Object.keys(tables);
+	for (const wanted of languages) {
+		const tag = matchTag(tags, wanted);
+		if (tag !== undefined) {
+			try {
+				const loaded: unknown = await (tables[tag] as () => Promise<Loaded>)();
+				const table: unknown =
+					typeof loaded === "object" && loaded !== null && "default" in loaded
+						? loaded.default
+						: loaded;
+				if (typeof table !== "object" || table === null)
+					throw new TypeError(`not a table of texts: ${String(table)}`);
+				const texts = table as Partial<DialogStrings>;
+				return { ...texts, lang: texts.lang ?? tag };
+			} catch (error) {
+				console.warn(
+					`tab-mcp: could not load the texts for ${tag}; English instead.`,
+					error,
+				);
+				return undefined;
+			}
+		}
+		// English is built in: the user reads it before any later language.
+		if (subtags(wanted).language === "en") return undefined;
+	}
+	return undefined;
+}

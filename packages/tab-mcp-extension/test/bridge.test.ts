@@ -878,7 +878,7 @@ describe("PageToolBridge", () => {
 		});
 		await bridge.refresh();
 		const tool = reg.tools.get("page_buy");
-		// Not the library's "The user declined": the bridge's own reason.
+		// Not the library's "The user did not allow this call.": the bridge's own reason.
 		await expect(Promise.resolve(tool?.execute({}, options()))).rejects.toThrow(
 			"did not answer within 60 s",
 		);

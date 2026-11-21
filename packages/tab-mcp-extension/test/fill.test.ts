@@ -116,7 +116,7 @@ describe("the question", () => {
 		expect(text).toEqual({
 			title: "Connect an AI app?",
 			message:
-				"Connect Claude (claude.ai) to the tab-mcp browser extension? Allow fills in the code on the relay's page.",
+				"Connect Claude (claude.ai) to the tab-mcp browser extension? Allow fills in the code on the sign-in page.",
 			contextMessage: "AI app at claude.ai · Closing this is Don't allow",
 			buttons: ["Allow"],
 		});

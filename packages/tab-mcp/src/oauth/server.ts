@@ -1161,7 +1161,7 @@ ${method.render()}
 		// in its own code after asking its user (DEC-199). Version 1; the
 		// attributes say what the page above says and never hold a code.
 		const body = `<h1>${escapeHtml(heading)}</h1>
-<p>You're connecting ${clientLabel} to ${app}: to the page or app that is open in your browser and ${first?.kind === "oidc" ? "signed in with your account" : "shows the code"}.</p>
+<p>You're connecting ${clientLabel} to ${app}: ${first?.kind === "oidc" ? "to the page in this browser that is signed in with your account" : "to the page or browser extension in this browser that shows the code"}.</p>
 <p>${escapeHtml(client.name)} can then use that page's tools while it is open. You can disconnect it there at any time.</p>
 ${errorHtml}
 <form method="post" action="/authorize" data-tab-mcp-pairing="1" data-app="${escapeHtml(pending.app)}" data-client-name="${escapeHtml(client.name)}" data-client-host="${escapeHtml(client.host)}">

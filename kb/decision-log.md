@@ -4607,3 +4607,53 @@ directly. The shapes below are this iteration's.
   asked by a page with the library; the extension's own `onConfirm` still declines.
 - **Old and new mix**: an old extension says nothing, an old library announces nothing;
   either way every call is asked as before and nothing is told.
+
+## DEC-208: One wording for one thing; English only in the library, Intl for plurals and lists, translated texts in one step (owner)
+
+2026-11-21, [iteration 49](/iterations/iteration-49-texts.md). The owner: "Make it
+coherent", and for translations "make it very simple". An audit of every text a person
+or an AI app reads in the client library, the tab-mcp browser extension and the relay
+found 23 of 29 concepts written more than one way. Decided with the owner: "Always allow
+everything", "Allow once", "type the code", the extension card's heading "AI access",
+"The user did not allow this call." for the AI app, the relay's "page not open" text
+unchanged; the audit's recommendation for the rest.
+
+- **The glossary** is [`kb/design/wording.md`](/design/wording.md): one term per concept
+  on every surface, checked by new texts. In short: "AI app" in full (only "Disconnect all
+  apps" keeps "apps"); "connect", not "pair", in user texts (the extension's card is
+  “Connect your AI app” like the library's dialog and the relay's help that points to it);
+  "address", "code", "sign-in page"; "type the code"; "Allow once" beside "Always allow";
+  the switches under "Always allow" (or "Allow until reload") like the button that turns
+  them on, "Always allow everything" in the library and "Always allow all" in the
+  extension, because they cover different things; "Connection lost. Reconnecting…";
+  "Connected AI apps"; a confirmation repeats its button; a refused call reads "The user
+  did not allow this call." and a cancelled one "The call was cancelled.".
+- **English only in the package.** The client library ships one table, English
+  (`STRINGS`, entry `./strings`, outside the core; `test/build.test.ts` proves the core
+  carries none of its texts and no built file another language's). The extension and the
+  relay are not translated and keep their texts in their files; only their wording
+  changed.
+- **No grammar by hand.** The `and` key and the `…One`/`…Many` pairs are gone, without
+  aliases (no backwards compatibility): a text that depends on a count is one form per
+  plural category of the language (`Intl.PluralRules`, `{ one, other }` in English, `{n}`
+  the count), lists are joined by `Intl.ListFormat`, both in the table's `lang`. `dir`
+  has no default any more: the direction of `lang` where the browser tells it
+  (`Intl.Locale` text info), else left to right. Every browser the library runs in has
+  both (`Intl.ListFormat` since Chrome 72, Firefox 78, Safari 14.1).
+- **The translation hook.** One table plus its `lang`, given once as `ui.strings` (on
+  `TabMcp` or `<TabMcpProvider>`), partial allowed, English for every missing key; every
+  part reads it: the dialogs, the setup steps (their texts moved into the table;
+  `setupInstructions` takes it as a third argument) and `ConnectButton` (through an
+  internal `_ui` getter: about 10 bytes of core). `./strings` also has `pickStrings(tables,
+  languages?)`, which loads the page's own table for `navigator.languages` (exact tag,
+  then the same script, the same region, the language alone, by name; English built in,
+  so a user who prefers it keeps it; it never rejects: a table that fails to load gives
+  English) and `withEnglish(strings)`; `cdn/strings.min.js` is the same for pages
+  without a bundler. `ConnectButton` keeps its five English texts inline, so a React
+  page does not load the table. A table with texts but no `lang` counts as English and
+  the console says so once (`lang` is not required by the type: a page that changes one
+  English text would need it). Names in plural texts are isolated one by one.
+  A translation typed as `DialogStrings` makes the type check name every missing or
+  misspelt key, also after an upgrade. Texts an AI app reads stay English on purpose.
+- **Kept as it was:** `ui.strings` as the place (one place already), `ui.setup` for the
+  help's link and steps, the extension's and relay's texts in their own files.

@@ -425,10 +425,10 @@ async function decideAndRun(
 		}
 		if (answer !== true) {
 			if (signal.aborted)
-				return stopped("cancelled", "The user declined", "cancelled");
+				return stopped("cancelled", "The call was cancelled.", "cancelled");
 			return answer === "unanswered"
 				? stopped("unanswered", UNANSWERED, "unanswered")
-				: stopped("declined", "The user declined", "declined");
+				: stopped("declined", "The user did not allow this call.", "declined");
 		}
 	}
 	if (signal.aborted) return stopped("cancelled", "Cancelled", "cancelled");

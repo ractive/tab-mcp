@@ -321,7 +321,7 @@ export class TabMcp extends EventTarget {
 				`tab-mcp:secret:${relay.origin}:${encodeURIComponent(server.name)}`;
 			this.#secrets = new SecretStore(options.storage, key);
 			// Tabs that share the secret share this channel; with `storage: null`
-			// every tab has an address of its own (DEC-095).
+			// every tab has a secret of its own (DEC-095).
 			this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
 		}
 		this.#registry.onChange(() =>
@@ -1019,6 +1019,15 @@ export class TabMcp extends EventTarget {
 		TabMcpOptions["alwaysAllow"],
 	] {
 		return [this.#registry, this.#secrets, this.#alwaysAllow];
+	}
+
+	/**
+	 * For `./react`, not for pages: the dialogs' options, whose `strings`
+	 * `ConnectButton` reads too (one table for every text, given once).
+	 * @internal
+	 */
+	get _ui(): DialogOptions | undefined {
+		return this.#ui;
 	}
 
 	/**

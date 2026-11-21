@@ -199,7 +199,7 @@ export function createFirefoxManifest(
 		action: { default_title: "tab-mcp browser extension", default_icon: icons },
 		background: { scripts: ["background.js"], type: "module" },
 		sidebar_action: {
-			default_title: "tab-mcp",
+			default_title: "tab-mcp browser extension",
 			default_panel: "sidepanel/index.html",
 			default_icon: icons,
 			open_at_install: false,

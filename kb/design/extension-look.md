@@ -139,7 +139,7 @@ icon are three more hex values in `worker/connection.ts`.
 ### Adapted
 
 - **Layout: sections on paper, not cards.** Overmark's Home and Settings are sections
-  with a `--rule` between them. Here: questions (sheets, on top), "AI app", "Tab in
+  with a `--rule` between them. Here: questions (sheets, on top), "AI access", "Tab in
   front", "Settings", each `padding: 16px 16px 20px` with a rule above. The `.card`
   box, its 12 px radius and the `--bg`/`--card` pair go. The class names and ids stay:
   the tests select by them.
@@ -217,7 +217,7 @@ icon are three more hex values in `worker/connection.ts`.
   without a use is not copied; the contrast test fails on a colour token that no rule
   reads.
 - **The banner from edge to edge above the views.** It is there because a problem must
-  show on every view. With one view, the notice in the "AI app" section is in view
+  show on every view. With one view, the notice in the "AI access" section is in view
   already.
 - **The warning sign as a CSS mask.** The notices here are short, start with what
   happened, and have a coloured edge and fill; a sign adds a second mask rule for
@@ -308,7 +308,7 @@ Every pair passes in both schemes.
 | Group heading (`h3`, "Tools") | 12 / 16 / 600, `--ink-2`. |
 | Default button | `--sheet`, text `--ink` 600, 1 px `--edge`, radius 6, 30 px high (26 small). Hover `--wash`. |
 | Strong button | `--strong`, text `--on-strong`. Turn on AI access, Done, Save (Allow once until iteration 43, DEC-180). |
-| Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, Disconnect all apps, + Add another AI app, Stop. |
+| Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, Disconnect all apps, + Connect another AI app, Stop. |
 | Armed button | `--danger`, text `--on-danger`. Disconnect and Disconnect all apps after the first click. |
 | Disabled, `aria-disabled` | `--wash`, text `--ink-2`, 1 px `--rule`, default cursor. |
 | Focus | 2 px `--focus`, offset 2 px, every control, the scrollable arguments included. |

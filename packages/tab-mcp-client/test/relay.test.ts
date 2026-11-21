@@ -375,7 +375,7 @@ describe("tools through the relay", () => {
 		(await question).allow(false);
 		expect(await declined).toMatchObject({
 			isError: true,
-			content: [{ type: "text", text: "The user declined" }],
+			content: [{ type: "text", text: "The user did not allow this call." }],
 		});
 		expect(runs).toBe(1);
 		const ids = events.map((line) => Number(line.split(" ")[1]));
@@ -386,7 +386,7 @@ describe("tools through the relay", () => {
 			"start clear_memory {} client.example",
 			'end ok [{"type":"text","text":"cleared"}]',
 			"start clear_memory {} client.example",
-			'end declined [{"type":"text","text":"The user declined"}]',
+			'end declined [{"type":"text","text":"The user did not allow this call."}]',
 		]);
 		await client.close();
 	});

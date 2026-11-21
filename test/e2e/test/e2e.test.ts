@@ -177,12 +177,12 @@ test.skipIf(chrome === undefined)(
 			await clickButton(page, "dialog.tab-mcp-confirm", "Don't allow");
 			const no = await declined;
 			expect(no.isError).toBe(true);
-			expect(text(no)).toBe("The user declined");
+			expect(text(no)).toBe("The user did not allow this call.");
 			expect(
 				(await client.callTool({ name: "read_display" })).structuredContent,
 			).toEqual({ display: "42", memory: 42 });
 
-			// The call waits for the user; "Allow" (enabled after a delay) runs it.
+			// The call waits for the user; "Allow once" (enabled after a delay) runs it.
 			const allowed = client.callTool({ name: "clear_memory" });
 			await waitFor(
 				page,
@@ -194,13 +194,13 @@ test.skipIf(chrome === undefined)(
 			});
 			await waitFor(
 				page,
-				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow' && !b.disabled)",
+				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow once' && !b.disabled)",
 			);
 			expect(settled).toBe(false);
 			expect(
 				await page.eval("!document.querySelector('#memory-flag').hidden"),
 			).toBe(true);
-			await clickButton(page, "dialog.tab-mcp-confirm", "Allow");
+			await clickButton(page, "dialog.tab-mcp-confirm", "Allow once");
 			expect(text(await allowed)).toBe("Memory cleared.");
 			await waitFor(page, "document.querySelector('#memory-flag').hidden");
 

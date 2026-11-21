@@ -1,9 +1,9 @@
 /**
- * What the side panel's "AI app" card shows for a state: the next step is the
- * one that stands out. Off: "Turn on AI access". On with no app paired: the
- * address and the code at once. Apps paired: the apps, and "+ Add another AI
- * app" as a link, which shows the address and code again. Also the tab
- * card's texts, in the user's words.
+ * What the side panel's "AI access" card shows for a state: the next step is
+ * the one that stands out. Off: "Turn on AI access". On with no app paired:
+ * the address and the code at once. Apps paired: the apps, and "+ Connect
+ * another AI app" as a link, which shows the address and code again. Also the
+ * tab card's texts, in the user's words.
  */
 
 import { BROWSER, STORE_TEXT } from "../browser.ts";
@@ -13,8 +13,8 @@ import type { NoAccessReason } from "../tabs.ts";
 const STATUS_TEXT: Record<PanelState["status"], string> = {
 	off: "AI access is off",
 	connecting: "Connecting…",
-	retrying: "Connection lost · retrying",
-	waiting: "On · no AI app paired yet",
+	retrying: "Connection lost · reconnecting…",
+	waiting: "On · no AI app connected yet",
 	on: "Connected",
 };
 
@@ -32,7 +32,7 @@ export interface CardView {
 	turnOn: boolean;
 	/** The address and the code (pairing on in the worker). */
 	pairing: boolean;
-	/** "+ Add another AI app". */
+	/** "+ Connect another AI app". */
 	addApp: boolean;
 	/** "Done" under the code: only when adding another app. */
 	done: boolean;
@@ -57,7 +57,7 @@ export function cardView(state: PanelState, adding: boolean): CardView {
 			state.status === "on"
 				? `Connected · ${names.join(", ")}`
 				: state.status === "off" && paired
-					? "AI access is off · paired apps stay paired"
+					? "AI access is off · your AI apps stay connected for next time"
 					: STATUS_TEXT[state.status],
 		stateShown: !(state.status === "on" && paired),
 		switchOn: state.status !== "off",
@@ -72,8 +72,8 @@ export function cardView(state: PanelState, adding: boolean): CardView {
 			!paired || connected
 				? ""
 				: state.status === "off"
-					? "Turn on AI access to disconnect an app."
-					: "An app can be disconnected once connected again.",
+					? "Turn on AI access to disconnect an AI app."
+					: "An AI app can be disconnected once the connection is back.",
 	};
 }
 
@@ -132,7 +132,7 @@ const listOf = (names: string[]) =>
 
 /**
  * The tab card's lines about a page with the client library (DEC-207): that
- * it has tab-mcp built in (`builtIn`), and which AI apps paired with the
+ * it has tab-mcp built in (`builtIn`), and which AI apps connected to the
  * extension are connected to the page directly too (`both`), by name and
  * host as the page announced them. Such an app sees the page's tools twice.
  */
@@ -155,7 +155,7 @@ export function libraryNotes(
 	const one = names.length === 1;
 	return {
 		builtIn: true,
-		both: `${listOf(names)} ${one ? "is" : "are"} also connected to this page directly, so ${one ? "it sees" : "they see"} the page's tools twice, once through each. Disconnect ${one ? "it" : "them"} in one of the two: above in this panel, or in the page.`,
+		both: `${listOf(names)} ${one ? "is" : "are"} also connected to this page directly, so ${one ? "it sees" : "they see"} the page's tools twice, once through each. Disconnect ${one ? "it" : "them"} in one of the two: above in this panel, or on the page.`,
 	};
 }
 
@@ -223,8 +223,8 @@ export interface AllowAllView {
 
 /**
  * A switch for all the tools' "Always allow" switches (DEC-184), as a
- * "select all": the line over the list names the site and every paired AI
- * app (EQ 9).
+ * "select all": the line over the list names the site and every connected
+ * AI app (EQ 9).
  */
 export const ALWAYS_ALLOW_ALL = "Always allow all";
 
@@ -233,7 +233,7 @@ export const ALWAYS_ALLOW_ALL = "Always allow all";
  * list, for everyone, not a tooltip on each switch (DEC-160).
  */
 export const alwaysAllowNote = (site: string): string =>
-	`Always allow, on: the tool runs without asking on ${site}, for every paired AI app. Off: it asks you before each call.`;
+	`Always allow, on: the tool runs without asking on ${site}, for every connected AI app. Off: it asks you before each call.`;
 
 /**
  * "Always allow all" for the tools listed now on a site whose tools can be
@@ -266,5 +266,5 @@ export function allowAllView(tab: TabView | undefined): AllowAllView {
 export function allowAllLabel(view: AllowAllView, site: string): string {
 	const n = view.names.length;
 	// Starts with the visible label, so speech input finds it (WCAG 2.5.3).
-	return `${ALWAYS_ALLOW_ALL}: the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every paired AI app`;
+	return `${ALWAYS_ALLOW_ALL}: the ${n} ${n === 1 ? "tool" : "tools"} listed on ${site}, for every connected AI app`;
 }

@@ -17,6 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { TabMcp } from "../src/index.ts";
 import {
 	type AllowedToolsSnapshot,
+	BUTTON_TEXTS,
 	ConnectButton,
 	TabMcpProvider,
 	type TabMcpSnapshot,
@@ -27,6 +28,7 @@ import {
 	useTool,
 	useToolCalls,
 } from "../src/react.ts";
+import { STRINGS } from "../src/strings.ts";
 import type { Tool, ToolCaller } from "../src/types.ts";
 import {
 	connectClient,
@@ -888,9 +890,50 @@ test("game feedback 3: the default label says the connection is lost after three
 	expect(labels).toEqual([
 		"Reconnecting…",
 		"Reconnecting…",
-		"Connection lost, retrying…",
+		"Connection lost. Reconnecting…",
 	]);
 	expect(button.dataset["state"]).toBe("reconnecting");
+});
+
+test("ConnectButton's inline English texts are those of the table (review of PR 181)", () => {
+	const keys = Object.keys(BUTTON_TEXTS) as (keyof typeof BUTTON_TEXTS)[];
+	expect(Object.fromEntries(keys.map((k) => [k, STRINGS[k]]))).toEqual(
+		BUTTON_TEXTS,
+	);
+});
+
+test("ConnectButton says what the TabMcp's ui.strings say, plural forms by its language (DEC-208)", () => {
+	const t = tab({
+		ui: {
+			strings: {
+				lang: "de",
+				connectTitle: "KI-App verbinden",
+				buttonConnected: {
+					one: "KI-App verbunden",
+					other: "{n} KI-Apps verbunden",
+				},
+			},
+		},
+	});
+	let grants: { grantId: string }[] = [];
+	Object.defineProperty(t, "grants", { get: () => grants });
+	render(
+		<TabMcpProvider client={t}>
+			<ConnectButton />
+		</TabMcpProvider>,
+	);
+	const button = container.querySelector("button") as HTMLButtonElement;
+	expect(button.textContent).toBe("KI-App verbinden");
+	Object.defineProperty(t, "state", { get: () => "connected" });
+	const labels: (string | null)[] = [];
+	for (const n of [1, 3]) {
+		grants = Array.from({ length: n }, (_, i) => ({ grantId: `g_${i}` }));
+		act(() => {
+			t.dispatchEvent(new CustomEvent("grantschange", { detail: {} }));
+		});
+		labels.push(button.textContent);
+	}
+	expect(labels).toEqual(["KI-App verbunden", "3 KI-Apps verbunden"]);
 });
 
 test("game feedback 8: useTool and registerTool take the input's type", () => {

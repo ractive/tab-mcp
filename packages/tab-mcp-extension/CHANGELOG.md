@@ -49,7 +49,7 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 - "New address" in the side panel is "Disconnect all apps": it disconnects every AI app
   and makes a new secret, and the address stays. Each AI app connects again with a new
   code. Its note and the notice after a takeover say so ("Another tab or program took
-  over this extension's connection … Disconnect all apps to end that.").
+  over tab-mcp's connection … “Disconnect all apps” ends that.").
 - The privacy policy says what the stored secret is now: it identifies this
   installation to the relay; the address is the same for every installation.
 - The rules of filling in the code, the pairing page's content script and the messages
@@ -59,6 +59,21 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   its way: turning it or AI access off, another relay or the AI app connecting by a
   typed code in that moment fills in nothing, and two loads of the same sign-in page at
   once get the one more fill only once.
+- **One wording with the library and the relay**: an AI app is connected, not paired,
+  and "app" alone says "AI app". The side panel's card is "AI access" (its switch is
+  named by the heading); the box with the address and the code is "Connect your AI app",
+  as the relay's sign-in page calls it, with "Add this address to your AI app:" and
+  "When your AI app opens the sign-in page, type this code there:"; "+ Add another AI app"
+  is "+ Connect another AI app". The states read "On · no AI app connected yet",
+  "Connection lost · reconnecting…" and "AI access is off · your AI apps stay connected
+  for next time"; the list is "Connected AI apps" in every state; "Turn on AI access to
+  disconnect an AI app." and "An AI app can be disconnected once the connection is
+  back." The "Always allow" notes say "for every connected AI app". The connect question
+  and its notification say "the sign-in page" (not "the relay's page") and name the
+  extension "tab-mcp" in its panel; the takeover notices say "your AI apps use that one
+  now" / "may now use it instead". The page notes say "on the page". The icon's tooltip
+  while connecting is "tab-mcp browser extension: connecting…", and Firefox's sidebar is
+  titled "tab-mcp browser extension".
 
 ## [0.2.1][extension-0.2.1] - 2026-11-17
 

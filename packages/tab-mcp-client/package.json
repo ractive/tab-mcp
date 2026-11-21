@@ -10,6 +10,7 @@
 		"./extension": "./src/extension.ts",
 		"./react": "./src/react.ts",
 		"./setup": "./src/setup.ts",
+		"./strings": "./src/strings.ts",
 		"./tunnel": "./src/tunnel.ts",
 		"./visible": "./src/visible.ts"
 	},

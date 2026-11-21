@@ -70,16 +70,16 @@ In the extension's own IndexedDB in the browser, used by its service worker only
   tool names.
 
 None of this is synced to a Google account or kept outside the browser, and removing the
-extension deletes it. The grants the relay holds for paired AI apps end when the user
-disconnects an app, and 90 days after pairing at the latest.
+extension deletes it. The grants the relay holds for connected AI apps end when the user
+disconnects an AI app, and 90 days after it connected at the latest.
 
 ## What leaves the browser
 
 Only while AI access is on, and only to the relay the user chose:
 
-- the connection to the relay and the pairing of an AI app (the relay stores a grant for
-  each paired app; see the relay's own policy below);
-- what the paired AI app asks for: the address, title and language of the tab in front
+- the connection to the relay and the connecting of an AI app (the relay stores a grant for
+  each connected AI app; see the relay's own policy below);
+- what the connected AI app asks for: the address, title and language of the tab in front
   (`page_info`; the address with its query and fragment, so a link that carries a token
   in it is sent as it is), the list of its WebMCP tools (`webmcp_tools`), for each tool
   call the tool's name, the arguments the AI app sent and the page's result, and after

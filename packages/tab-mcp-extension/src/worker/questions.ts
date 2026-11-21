@@ -133,7 +133,7 @@ function pairingText(view: QuestionView): NotificationText {
 	return {
 		title: "Connect an AI app?",
 		message: cut(
-			`Connect ${view.app} to the ${PRODUCT}? Allow fills in the code on the relay's page.`,
+			`Connect ${view.app} to the ${PRODUCT}? Allow fills in the code on the sign-in page.`,
 			300,
 		),
 		contextMessage: `AI app at ${view.host} · ${CLOSE_NOTE}`,

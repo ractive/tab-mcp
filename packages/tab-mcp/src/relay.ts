@@ -80,7 +80,7 @@ const REVOKE_ALL_REPEAT_MS = 1000;
 const MAX_REMEMBERED_REVOCATIONS = 10_000;
 
 /** The answer to a request whose grant was revoked while it was in flight. */
-const REVOKED_TEXT = "The connection to this page was revoked.";
+const REVOKED_TEXT = "This AI app was disconnected from the page.";
 /** The same, when the grant reached its end (90 days after pairing). */
 const EXPIRED_TEXT = "The connection to this page has expired.";
 
@@ -255,7 +255,7 @@ const INDEX_HTML = `<!doctype html>
 <div class="flow" role="img" aria-label="An AI app sends MCP requests to the relay, which passes them over a WebSocket to the browser tab.">
 <span class="node">AI app</span><span class="link">MCP</span><span class="node relay">relay</span><span class="link">WebSocket</span><span class="node">browser tab</span>
 </div>
-<p>A page connects to the relay under its app's address. An AI app added with that address is paired with one page by a code that page shows; it can then call that page's tools while the tab is open. The relay does not log request contents.</p>
+<p>Every page of a web app connects to the relay under one address. An AI app added with that address connects to one page with the code that page shows; it can then call that page's tools while the tab is open. The relay does not log request contents.</p>
 <p class="actions"><a class="button primary" href="${DOCS_URL}">Documentation</a><a class="button" href="${DOCS_URL}connect/">Connect an AI app</a></p>
 <footer>Source code: <a href="https://github.com/ractive/tab-mcp">github.com/ractive/tab-mcp</a>. Status: <a href="/healthz">/healthz</a>.</footer>
 </main></body></html>`;

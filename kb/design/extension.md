@@ -133,7 +133,7 @@ page can say that an AI app is connected through the extension
   question, no `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension",
   name, host }`. `trustExtension: false` in the page asks anyway.
 - **The panel.** For the tab in front, when the page announced the library: "This page
-  has tab-mcp built in.", and when an AI app paired with the extension is also connected
+  has tab-mcp built in.", and when an AI app connected to the extension is also connected
   to the page directly (same name and host, as the page announced its grants), that it
   sees the page's tools twice and to disconnect it in one of the two.
 - **No proof** of either side: a convenience between two parts the user trusts, not a

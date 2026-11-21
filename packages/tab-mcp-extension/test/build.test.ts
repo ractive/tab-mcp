@@ -56,6 +56,8 @@ test("the Firefox build: an event page, a sidebar, the add-on id", async () => {
 		type: "module",
 	});
 	expect(manifest["sidebar_action"]).toMatchObject({
+		// One name wherever the browser shows it (DEC-193).
+		default_title: "tab-mcp browser extension",
 		default_panel: "sidepanel/index.html",
 	});
 	expect(manifest["side_panel"]).toBeUndefined();

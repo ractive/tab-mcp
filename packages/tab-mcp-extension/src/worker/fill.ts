@@ -21,7 +21,7 @@ export const HOLD_MS = 30_000;
 
 /** What the panel says when Allow could fill in nothing. */
 export const NO_CODE =
-	"The code was not filled in: none came from the relay. Type the code shown under “Pair an AI app” instead.";
+	"The code was not filled in: none came from the relay. Type the code shown under “Connect your AI app” instead.";
 
 /** What the panel says when a pairing page could not be asked about. */
 export const BUSY =

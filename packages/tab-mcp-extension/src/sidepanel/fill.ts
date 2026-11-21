@@ -1,5 +1,5 @@
 /**
- * "Fill in the code for me" under "Pair an AI app" (DEC-203): a setting of
+ * "Fill in the code for me" under "Connect your AI app" (DEC-203): a setting of
  * its own, off by default, also for a user who gave access to all sites.
  * Turned on, the extension asks and fills in its code when an AI app opens
  * the relay's pairing page in this browser; it needs the relay's site, one

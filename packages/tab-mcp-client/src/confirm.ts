@@ -10,8 +10,8 @@ import {
 	clientLabel,
 	el,
 	fill,
-	format,
 	newDialog,
+	plural,
 	stringsOf,
 	visible,
 } from "./dialog.ts";
@@ -29,7 +29,7 @@ import type {
  * (The relay caps a request at 1 MiB, so this stays bounded.) Invisible and
  * direction characters are shown as escapes, so the text is still JSON for
  * the same arguments; the tool gets them unchanged. `undefined` when they
- * cannot be shown, and then "Allow" is not offered.
+ * cannot be shown, and then "Allow once" is not offered.
  */
 function showArguments(args: Record<string, unknown>): string | undefined {
 	try {
@@ -40,7 +40,7 @@ function showArguments(args: Record<string, unknown>): string | undefined {
 }
 
 /**
- * How long "Allow" stays disabled after the confirmation is shown, while the
+ * How long "Allow once" stays disabled after the confirmation is shown, while the
  * page is visible and focused (CU 17: a constant; tests pass `allowDelayMs`).
  */
 export const ALLOW_DELAY_MS = 750;
@@ -85,7 +85,7 @@ const queues = new WeakMap<Document, ConfirmQueue>();
  * "allow everything": that is a deliberate act in the connect dialog, not
  * an answer to one question. One confirmation is shown at a time per
  * document; the others wait their turn, and a call cancelled while it waits
- * is never shown. "Allow" and "Always allow" stay disabled until the
+ * is never shown. "Allow once" and "Always allow" stay disabled until the
  * page has been visible and focused for 750 ms while the dialog is open and
  * is the top one, so a click meant for the page, the click that brings the
  * tab or window back, or the one that closed another dialog, cannot
@@ -172,8 +172,7 @@ function showConfirm(
 	const showWaiting = () => {
 		const n = queue.waiting.length;
 		waiting.hidden = n === 0;
-		waiting.textContent =
-			n === 1 ? s.waitingOne : format(s.waitingMany, { n: String(n) });
+		waiting.textContent = plural(s.waiting, n, s);
 	};
 	queue.changed = showWaiting;
 	showWaiting();

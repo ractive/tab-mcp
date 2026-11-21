@@ -55,8 +55,8 @@ export interface AllowedTool {
  */
 export interface AllowedTools {
 	/**
-	 * `true`: kept in the page's `storage` until the app is disconnected;
-	 * `false`: in memory, until the page is reloaded or the app is
+	 * `true`: kept in the page's `storage` until the AI app is disconnected;
+	 * `false`: in memory, until the page is reloaded or the AI app is
 	 * disconnected (`alwaysAllow: "until-reload"`, `storage: null`).
 	 */
 	readonly kept: boolean;
@@ -66,40 +66,40 @@ export interface AllowedTools {
 	 */
 	tools(): AllowedTool[];
 	/**
-	 * The names of the tools allowed one by one for this app, in the order
+	 * The names of the tools allowed one by one for this AI app, in the order
 	 * allowed; also one that is not registered right now (it runs without
 	 * asking again once it is back unchanged). One registered now with another
 	 * title or description than the user allowed is not in it (it asks).
 	 */
 	list(grantId: string): string[];
 	/**
-	 * Whether a call of this tool by this app runs without asking now: the
-	 * app is in `mcp.grants`, and "everything" is on or the tool is allowed
+	 * Whether a call of this tool by this AI app runs without asking now: the
+	 * AI app is in `mcp.grants`, and "everything" is on or the tool is allowed
 	 * and registered unchanged.
 	 */
 	has(grantId: string, name: string): boolean;
 	/**
-	 * Allow one tool for this app from now on, as it is registered now (its
-	 * title and description). Nothing happens for an app that is not in
+	 * Allow one tool for this AI app from now on, as it is registered now (its
+	 * title and description). Nothing happens for an AI app that is not in
 	 * `mcp.grants` or a tool that is not in `tools()`.
 	 */
 	allow(grantId: string, name: string): void;
 	/**
-	 * Ask again before this app runs this tool. While "everything" is on for
-	 * the app, that goes off too (asking again errs towards asking); the
+	 * Ask again before this AI app runs this tool. While "everything" is on for
+	 * the AI app, that goes off too (asking again errs towards asking); the
 	 * other tools allowed one by one stay allowed.
 	 */
 	ask(grantId: string, name: string): void;
-	/** Whether "Allow everything, no questions asked" is on for this app. */
+	/** Whether "Always allow everything" is on for this AI app. */
 	everything(grantId: string): boolean;
 	/**
-	 * "Allow everything, no questions asked" for this app: every tool runs
+	 * "Always allow everything" for this AI app: every tool runs
 	 * without asking, with any arguments, also tools registered later, changed
-	 * ones and destructive ones. Turning it on does nothing for an app that
+	 * ones and destructive ones. Turning it on does nothing for an AI app that
 	 * is not in `mcp.grants`.
 	 */
 	setEverything(grantId: string, on: boolean): void;
-	/** Ask again for everything of this app: its tools and "everything". */
+	/** Ask again for everything of this AI app: its tools and "everything". */
 	forget(grantId: string): void;
 	/**
 	 * Calls `listener` on every change of the allowances (also one in

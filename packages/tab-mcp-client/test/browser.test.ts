@@ -196,7 +196,7 @@ test.skipIf(chrome === undefined)(
 					.content,
 			).toEqual([{ type: "text", text: "42" }]);
 
-			// A consequential tool waits for "Allow" in the page's dialog.
+			// A consequential tool waits for "Allow once" in the page's dialog.
 			const call = client.callTool({ name: "clear_memory", arguments: {} });
 			const question = await page.eval<string>(
 				"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-confirm'); d ? r(d.textContent) : setTimeout(w, 10); }; w(); })",
@@ -204,11 +204,11 @@ test.skipIf(chrome === undefined)(
 			expect(question).toContain("Allow Clear memory?");
 			expect(question).toContain("client.example wants to run Clear memory.");
 			expect(await page.eval("memory()")).toBe(7);
-			// "Allow" starts disabled (a click meant for the page cannot approve).
+			// "Allow once" starts disabled (a click meant for the page cannot approve).
 			expect(
 				await page.eval(
 					`new Promise((resolve) => {
-					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow');
+					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow once');
 					const wasDisabled = allow.disabled;
 					const click = () => { allow.click(); resolve(wasDisabled); };
 					if (!allow.disabled) return click();
@@ -232,7 +232,7 @@ test.skipIf(chrome === undefined)(
 		await page.eval(
 			"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps li') ? r(true) : setTimeout(w, 10)); w(); })",
 		);
-		// An app is connected: "Disconnect all apps" is behind "Connect another app".
+		// An app is connected: "Disconnect all apps" is behind "Connect another AI app".
 		expect(
 			await page.eval(
 				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-disconnect-all').checkVisibility()",
@@ -245,7 +245,7 @@ test.skipIf(chrome === undefined)(
 				"document.querySelector('.tab-mcp-disconnect-all-question p').textContent",
 			),
 		).toBe(
-			"This disconnects Test client (client.example). To use this page with it again, connect it again and enter a new code.",
+			"This disconnects Test client (client.example). To use this page with it again, connect it again.",
 		);
 		const renewed = page.eval<string>(
 			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
@@ -373,7 +373,7 @@ test.skipIf(chrome === undefined)(
 			// Back in front: the full delay from then on.
 			const timing = page.eval<{ visible: boolean; waited: number }>(
 				`new Promise((resolve) => {
-					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow');
+					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow once');
 					let shownAt;
 					document.addEventListener('visibilitychange', () => { shownAt ??= performance.now(); });
 					new MutationObserver((_, o) => {

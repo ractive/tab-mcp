@@ -31,9 +31,10 @@ import type {
 /**
  * No page of the app is open, signed in as the person who signed in here and
  * connecting (its dialog open): the three cannot be told apart from here.
+ * "On the page": the page's own UI (kb/design/wording.md).
  */
 export const NO_PAGE_TEXT =
-	"No page is connecting with the account you signed in with. In the page, sign in with that account and open “Connect your AI app”, then click Connect here to sign in again, or Cancel.";
+	"No page is connecting with the account you signed in with. On the page, sign in with that account and open “Connect your AI app”, then click Connect here to sign in again, or Cancel.";
 
 /** How long a sign-in at the provider may take (the pending request lives 10 minutes). */
 const FLOW_TTL_MS = 10 * 60_000;
@@ -274,7 +275,7 @@ export class OidcPairing implements PairingMethod {
 
 	render(): string {
 		const host = escapeHtml(this.#providerHost);
-		return `<p>Sign in at <strong>${host}</strong> with the account you use in the page. The page must be open, signed in, and showing “Connect your AI app”. No code is needed.</p>`;
+		return `<p>Sign in at <strong>${host}</strong> with the account you use on the page. The page must be open, signed in, and showing “Connect your AI app”. No code is needed.</p>`;
 	}
 
 	async check(

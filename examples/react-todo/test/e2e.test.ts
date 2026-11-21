@@ -139,7 +139,7 @@ test.skipIf(chrome === undefined)(
 		});
 		await waitFor(
 			page,
-			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow' && !b.disabled)",
+			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow once' && !b.disabled)",
 		);
 		expect(
 			await page.eval(
@@ -147,7 +147,7 @@ test.skipIf(chrome === undefined)(
 			),
 		).toContain("Always allow");
 		await page.eval(
-			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow').id = 'allow'",
+			"[...document.querySelectorAll('dialog.tab-mcp-confirm[open] button')].find((b) => b.textContent === 'Allow once').id = 'allow'",
 		);
 		await page.click("#allow");
 		await deleting;
@@ -197,7 +197,7 @@ test.skipIf(chrome === undefined)(
 			),
 		).toEqual([
 			["Delete todosdestructive", false],
-			["Allow everything, no questions asked", false],
+			["Always allow everything", false],
 		]);
 		await page.click(".apps .switch:not(.everything) input");
 		await waitFor(

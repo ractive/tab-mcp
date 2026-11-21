@@ -173,8 +173,8 @@ does not export and which refuses to run outside development (DEC-059).
   data (mapping in the decision log).
 - The user sees connected apps in the page and can revoke them or disconnect at any time.
 - Tools that run without asking (DEC-096, DEC-200) are off unless the page turns them on
-  (`alwaysAllow`): "Always allow" in the confirmation, a switch per tool and "Allow
-  everything, no questions asked" in the connect dialog, or the page's own switches
+  (`alwaysAllow`): "Always allow" in the confirmation, a switch per tool and "Always
+  allow everything" in the connect dialog, or the page's own switches
   (`./allowed`). Kept per grant in the page's `storage` until the relay reports the grant
   gone, so an allowance outlives the user's attention for up to the grant's 90 days;
   "everything" also covers tools the user has not seen. A tool whose title or
@@ -291,7 +291,7 @@ did, by connecting the extension.
   borrow another site's origin, and with it the tools the user allowed there.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
   asks the user every time (see "Questions" below), naming the page's origin. The user
-  can stop the questions for a tool of one exact http(s) origin, for every paired AI app
+  can stop the questions for a tool of one exact http(s) origin, for every connected AI app
   and kept until taken back: "Always allow on <host>" in a question, or the "Always allow" switch in
   the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always
   allow" is gone, DEC-139). A tool that changed while the question was open (a
@@ -447,7 +447,7 @@ did, by connecting the extension.
   closes, "Always allow all" and the "Always allow" switches under it ignore a click for
   750 ms, and when a notice at the panel's top moves it, they wait the same time, so a
   click lands on nothing that allows (iteration 35). While AI access is on and the
-  relay cannot be reached, the panel says "retrying" (the alarm, also set at every
+  relay cannot be reached, the panel says "reconnecting…" (the alarm, also set at every
   start, connects again each minute), not "off" (iteration 35).
 - **The extension's settings are out of web pages' reach.** The address secret, the tools
   allowed per site, the relay, whether AI access is on and the takeover flag are in
@@ -489,8 +489,8 @@ The web app's assertion signing key and the relay's OIDC client secret become op
 secrets. At pairing the sign-in comes first, and the relay looks for the app's page whose
 user is that person and whose dialog is open; none found is one answer ("No page is
 connecting with the account you signed in with. …", DEC-196). A request whose grant is
-for another person than the page's is refused with "This AI tool is logged in as someone
-other than the page." A tab assertion's audience is the app's address, so it names no
+for another person than the page's is refused with "This AI app is signed in as someone
+other than the page's user." A tab assertion's audience is the app's address, so it names no
 single page: whoever holds a person's unused assertion can bind a session of their own as
 that person (DEC-196). The threats and mitigations are in `docs/threat-model.md` (A12)
 and DEC-076 to DEC-079.

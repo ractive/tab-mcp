@@ -28,7 +28,7 @@ See the [protocol](protocol.md) for the details.
    relay: grants belong to the address id derived from it and the page's app id, which
    is part of no URL.
    Whoever has the secret can take the page's place from anywhere: the AI apps already
-   paired with the page then talk to them instead, until the page gets a new secret
+   paired with the page then use them instead, until the page gets a new secret
    ("Disconnect all apps", A4). They get no token of those apps, but the relay sends them
    the pairing codes, so they can pair an AI app of their own, which later reaches the
    real page once that is connected again (A4).
@@ -365,7 +365,7 @@ stops script on another origin of the relay; a program can send any `Origin`.
   page before each run, showing the AI app and the arguments. The page's question does
   not depend on the AI app. A `consequentialHint` that is not a boolean is refused at
   registration, not dropped, so a typo cannot turn the question off.
-- The library's dialog shows one question at a time, and Allow is enabled only after
+- The library's dialog shows one question at a time, and "Allow once" is enabled only after
   the page was seen for the delay with that dialog on top and the arguments were
   scrolled to their end: the AI app chooses the order of the keys, so it could put the
   one that matters below the fold.
@@ -374,7 +374,7 @@ stops script on another origin of the relay; a program can send any `Origin`.
   unless the page turns it on (`alwaysAllow`, DEC-096, DEC-200), since it lifts the only
   brake at run time for that tool and AI app, which is what a prompt injection needs.
   With `alwaysAllow: true` the confirmation offers "Always allow", and the connect
-  dialog a switch per tool and "Allow everything, no questions asked" under each app,
+  dialog a switch per tool and "Always allow everything" under each app,
   which also covers tools the user has not seen and ones the page adds later. Such an
   allowance is kept in the page's `storage` until the relay reports the grant gone
   (disconnected, "Disconnect all apps", expired, signed out): it outlives the user's
@@ -635,8 +635,8 @@ page (a tab assertion), the provider says who signed in at `/authorize` (an ID t
   person they were made for. MCP requests reach the page only while it is bound to that
   person; a page that proves another person revokes the previous person's grants and ends
   their requests in flight. A page that is open but not signed in gets nothing forwarded.
-  A request whose grant was made for another person than the page's gets "This AI tool
-  is logged in as someone other than the page."
+  A request whose grant was made for another person than the page's gets "This AI app
+  is signed in as someone other than the page's user."
 - **Logout.** `signOut()` in the page revokes every grant of the page at once and ends
   requests in flight. A logout while no page is open needs nothing: a grant works only
   while its page is open and signed in as the same person. The web app must call
@@ -673,7 +673,7 @@ like any other, `chrome-extension://<id>` (A11).
 - **Hints can lie.** A tool the page marks read-only runs without asking; every other
   tool asks the user each time, naming the page's origin. "Always allow on <host>" in
   a question, or the tool's "Always allow" switched on in the side panel, stops the questions for a tool of one
-  exact http(s) origin, for every paired AI app, until the user takes it back. A tool
+  exact http(s) origin, for every connected AI app, until the user takes it back. A tool
   that changed while the question was open does not run. An allowed tool runs whatever
   the AI app, or a prompt injection steering it, asks of it. A page can mark only its
   own tools read-only, so a lie harms that page's own user session, which its scripts
@@ -1020,5 +1020,5 @@ each default.
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
 - With `webmcp: true`: any agent in the browser calls the mirrored tools without
-  pairing, and one that drives the tab can click Allow in the page's dialog for a
+  pairing, and one that drives the tab can click "Allow once" in the page's dialog for a
   consequential tool the page chose to mirror (A14).
