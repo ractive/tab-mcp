@@ -9,6 +9,17 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Fixed
+
+- A JWT with an unknown `kid` that came in the same millisecond as the last fetch of
+  its JWKS was answered "no such key" (for a `private_key_jwt` client assertion
+  `invalid_client`, 401) instead of "the keys could not be loaded, try again"
+  (`temporarily_unavailable`, 503), though the keys had not been fetched again for it.
+  Whether they were is now told by the order of fetches and calls, not by comparing
+  millisecond times. Which keys verify a signature is unchanged.
+
 ## [0.13.0][relay-0.13.0] - 2026-11-21
 
 ### Added
