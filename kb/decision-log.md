@@ -4787,7 +4787,9 @@ and not on `add_todo` (DEC-143, DEC-209). Claude sorts a connector's tools by th
 hints in its settings: "Read-only tools", "Write/delete tools" (destructive) and "Other
 tools" (neither). With the old hint `page_add_todo` was among "Write/delete tools"
 through the extension; now it is among "Other tools", as on a direct connection to the
-page.
+page. There the library sends no `destructiveHint` for `add_todo`, and Claude lists it
+under "Other tools" all the same (seen by the owner on 2026-11-22): Claude does not take
+a missing hint as destructive, so the library's `mapAnnotations` stays as it is.
 
 What it does not change: Claude's "Allow once" without "Always allow" for a page tool.
 The owner's test showed the cause: Claude keeps a saved list of a connector's tools, and
@@ -4801,7 +4803,18 @@ tools. The hint has nothing to do with it.
   - not read-only and `consequentialHint: true`: `destructiveHint: true`;
   - not read-only and `consequentialHint: false`: `destructiveHint: false`;
   - not read-only and no annotations at all: `destructiveHint: true`, the worst case,
-    as nothing is known.
+    as nothing is known. That is a page that registered the tool with WebMCP itself and
+    gave no annotations.
+- **A page built with the client library always says something.** Its WebMCP mirror
+  registers every tool with annotations, `consequentialHint` set from
+  `consequentialHint ?? destructiveHint` (DEC-143, DEC-209). A tool without hints is
+  registered as not consequential, which is what the library means by it: it does not
+  ask before such a tool on a direct connection either. Through the extension it gets
+  `destructiveHint: false`; the worst case never applies to such a page.
+- **A known difference between the two paths:** a library tool with `destructiveHint:
+  true` and an explicit `consequentialHint: false` is destructive on a direct
+  connection (MCP's hint wins there, DEC-022) and not destructive through the extension.
+  WebMCP has only the one hint, and the page set it to false itself. Not changed.
 - **What Chrome tells apart** (checked in the WebMCP canary,
   `test/webmcp-spike/webmcp.test.ts`): a tool registered without annotations has none in
   `getTools()`; a tool with any annotations, `{}`, `null` or only `readOnlyHint: false`

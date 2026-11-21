@@ -17,8 +17,10 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   `page_<name>` carried `destructiveHint: true` for every tool that is not read-only,
   because the extension asks before it runs; the hint should say what the page says
   about the tool. Now `destructiveHint` is the page's `consequentialHint` (false when the
-  page says false), and true only when the page gave the tool no annotations at all.
-  Claude sorts tools by it: a page tool that is not consequential is now among "Other
+  page says false), and true only when a page that registers its tools with WebMCP
+  itself gave the tool no annotations at all. A page built with the tab-mcp client
+  library always gives them: a tool without hints is not consequential there, so not
+  destructive. Claude sorts tools by it: a page tool that is not consequential is now among "Other
   tools" in its settings, not "Write/delete tools", as on a direct connection to the
   page. `webmcp_tools` lists it as `destructive`. A page that
   registers a tool again with another hint gets it offered anew. The extension still

@@ -2795,6 +2795,28 @@ describe.skipIf(chrome === undefined)(
 			).toBe(true);
 		});
 
+		test("the library's mirror: no hints is not destructive, consequentialHint or destructiveHint is (DEC-214)", async () => {
+			await tab.eval(`(() => {
+				window.hinted = new AbortController();
+				for (const [name, annotations] of [
+					["add_note", undefined],
+					["wipe_notes", { destructiveHint: true }],
+				]) window.tabMcpPage.mcp.registerTool(
+					{ name, description: name, annotations, execute: () => name },
+					{ signal: window.hinted.signal },
+				);
+			})()`);
+			await waitForTools(stack, (n) => n.includes("page_wipe_notes"));
+			const { tools } = await stack.client.listTools();
+			const hint = (name: string) =>
+				tools.find((t) => t.name === name)?.annotations?.destructiveHint;
+			expect(hint("page_add_note")).toBe(false);
+			expect(hint("page_complete_todo")).toBe(true);
+			expect(hint("page_wipe_notes")).toBe(true);
+			await tab.eval("window.hinted.abort()");
+			await waitForTools(stack, (n) => !n.includes("page_add_note"));
+		});
+
 		test("with the extension's Always allow on, the AI app's call runs with no question in the page", async () => {
 			const toggle = alwaysAllow("complete_todo");
 			await stack.panel.waitFor(takesClicks(toggle));
