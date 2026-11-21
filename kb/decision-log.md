@@ -4768,7 +4768,7 @@ button it read like an action that fills in the code now.
 - **No pattern for the relay's address:** the sentence alone, no switch; the switch only
   while the setting is somehow on there, to turn it off.
 
-## DEC-212: "Always allow" for the sign-in question of the code fill-in, per verified host (owner)
+## DEC-213: "Always allow" for the sign-in question of the code fill-in, per verified host (owner)
 
 2026-11-21; amends DEC-203's "No 'Always allow': each pairing page asks". The owner:
 with "Fill in the code for me" on, every sign-in page still needs a click on Allow; that
@@ -4801,25 +4801,38 @@ click should go where it is safe, and the address stays the one fixed address pe
 - **Only for a public DNS name.** The pairing form's hooks (version 1) carry the host but
   not how the relay verified it, so the extension decides by its shape and the hooks
   stay unchanged: not an IP address, not `localhost`, not a single label, not a
-  special-use or test name (`.localhost`, `.local`, `.internal`, `.test`, `.example`,
-  `.invalid`, `.home.arpa`, `.onion`, `.alt`). The relay's host is the client id's,
+  special-use, test or private name (`.localhost`, `.local`, `.internal`, `.test`,
+  `.example`, `.invalid`, all of `.arpa`, `.onion`, `.alt`, and the private suffixes in
+  common use: `.corp`, `.lan`, `.home`, `.localdomain`, `.intranet`, `.private`). An
+  answer "Always allow" to a question that did not offer it counts as Don't allow
+  (`pairingAnswer`). The relay's host is the client id's,
   fetched over https from a public address (`PUBLIC_HTTPS`); a port appears only with a
   test relay and does not change the name. `alwaysAllowable` in `src/fill.ts`.
 - **Remembered per host and relay**, with the setting (`fillCodeAlways` in the worker's
   IndexedDB, never synced), and forgotten when the switch goes off (by the user, or
   because the relay's site was taken away) and when the relay changes. Under the switch
   the panel lists them ("Filled in without asking for:"), each with Remove; removed, its
-  next sign-in page asks again.
+  next sign-in page asks again, and a fill of it that still waits for its code is
+  withdrawn, as with the switch off. Forgetting is durable: the setting, its note and its
+  hosts are written in one transaction; a stored list that is not the current setting's
+  is deleted at load; a forget whose write fails forgets every host in memory and tries
+  again to store none (the next write of the list is the list in memory in any case).
 - **Everything else the filler checks stays** (AI access on, the setting on, the site
   granted, the sender, one question per page load, the one more fill of the same
   request, the checks again before sending): the extension's `ask` answers `allow` at
   once for a remembered host, so the library (`CodeFiller`) is unchanged.
 - **Never silent.** Each fill without a question shows a notification ("Code filled in",
-  "Filled in the code for <name> (<host>).") and the same line in the panel for 10
-  minutes; nothing to answer. If the notification cannot be shown, the fill still
-  happens and the line stays.
+  "Filled in the code for <name> (<host>).") and the same line in the panel; nothing to
+  answer. The line holds the last such fill and is shown for 10 minutes in any case;
+  the extension cannot tell whether the system showed the notification (notifications
+  turned off in the system are no error to it). The notice is raised when the code is
+  there, right before the library sends it; the library's last checks (the page went,
+  AI access or the setting off) can still stop the fill, so the notice errs on the side
+  of saying too much and is no proof that the code was sent. The library has no "sent"
+  callback; adding one was left for a later client release.
 - **The brake.** At most 3 fills without a question per host in 10 minutes (kept in
-  storage, so a worker restart does not reset it); beyond that the question is asked
+  storage, so a worker restart does not reset it; a time after now, from a clock moved
+  back, counts as now, so it does not reset either); beyond that the question is asked
   again with all three answers, where "Always allow" changes nothing. A page that loops
   through sign-in requests cannot burn codes unseen.
 - **Unchanged:** the client library, which leaves how to ask to the extension (its

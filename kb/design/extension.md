@@ -181,20 +181,28 @@ built in DEC-203). Typing the code stays the way that always works.
   click is less than opening the panel and typing a code, so the host is what the user
   decides on. Allow or Don't allow, in the panel or a notification like a tool's
   question, 60 s. For a host that is a public DNS name (`alwaysAllowable`: not an IP
-  address, `localhost`, a single label or a special-use or test name) the answers are
-  "Don't allow", "Allow once" and "Always allow" (DEC-212), with one sentence on what
+  address, `localhost`, a single label, all of `.arpa`, or a special-use, test or
+  private name such as `.local`, `.test`, `.corp` or `.lan`) the answers are
+  "Don't allow", "Allow once" and "Always allow" (DEC-213), with one sentence on what
   "Always allow" does and where to undo it; the notification offers "Allow once" only,
   as a tool's does.
-- **Always allow (DEC-212).** Remembers the AI app's verified host for the relay in
+- **Always allow (DEC-213).** Remembers the AI app's verified host for the relay in
   use (`fillCodeAlways`, with the setting in IndexedDB). The next sign-in page of that
   host is filled in without a question: the extension's `ask` answers `allow` at once,
   so every other check of `CodeFiller` stays. Each such fill shows a notification ("Code
   filled in", "Filled in the code for <name> (<host>).") and the same line in the panel
-  for 10 minutes. At most 3 per host in 10 minutes (kept in storage); beyond that the
-  question comes back. Under the switch, "Filled in without asking for:" lists the hosts,
-  each with Remove. Forgotten when the switch goes off, when the relay's site was taken
-  away, and when the relay changes. It rests on the AI app's own check that a sign-in
-  belongs to the browser's account (Claude makes it; the threat model's residual risk).
+  (the last such fill, for 10 minutes in any case; the extension cannot tell whether the
+  system showed the notification). The notice comes when the code is there, before the
+  library's last checks, so it can name a fill those checks then stopped: it errs on the
+  side of saying too much. At most 3 per host in 10 minutes (kept in storage; a clock
+  moved back does not reset it); beyond that the question comes back. Under the switch,
+  "Filled in without asking for:" lists the hosts, each with Remove, which also
+  withdraws a fill of that host still waiting for its code. Forgotten when the switch
+  goes off, when the relay's site was taken away, and when the relay changes, in the
+  same write as the setting; a stored list that is not the setting's is deleted at load.
+  An "Always allow" answer to a question that did not offer it is Don't allow. It rests
+  on the AI app's own check that a sign-in belongs to the browser's account (Claude makes
+  it; the threat model's residual risk).
 - **On Allow** the worker holds pairing on (30 s), takes the current code (or the next
   one if it is about to change, and the current one if no next comes in 10 s; the same
   code sent again, the relay's answer to starting pairing while it is on, is not the

@@ -653,7 +653,7 @@ const fill = fillPanel(
 	(host) => send({ type: "forget-fill-host", host }),
 );
 
-/** The last fill without a question (DEC-212): never silent. */
+/** The last fill without a question (DEC-213): never silent. */
 function showFillNotice(s: PanelState): void {
 	const notice = $("fill-notice");
 	notice.hidden = s.fillNotice === undefined;

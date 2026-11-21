@@ -36,7 +36,9 @@ export function pairingMatches(relay: string): string[] {
 
 /**
  * Names that never belong to one public owner: special-use and test names
- * (RFC 6761, RFC 6762, RFC 8375, RFC 9476, ICANN's `.internal`).
+ * (RFC 6761, RFC 6762, RFC 8375, RFC 9476, ICANN's `.internal`), all of
+ * `.arpa`, and the private suffixes in common use on home and company
+ * networks (RFC 6762 appendix G).
  */
 const SPECIAL_USE = [
 	"localhost",
@@ -45,14 +47,20 @@ const SPECIAL_USE = [
 	"test",
 	"example",
 	"invalid",
-	"home.arpa",
+	"arpa",
 	"onion",
 	"alt",
+	"corp",
+	"lan",
+	"home",
+	"localdomain",
+	"intranet",
+	"private",
 ];
 
 /**
  * Whether "Always allow" may be offered for the AI app's verified host
- * `host` (the pairing form's `data-client-host`, `host[:port]`) (DEC-212):
+ * `host` (the pairing form's `data-client-host`, `host[:port]`) (DEC-213):
  * only a public DNS name, which the relay got the AI app's details from over
  * https. Not an IP address, not `localhost`, not a single label, not a
  * special-use or test name. The form does not say how the relay verified

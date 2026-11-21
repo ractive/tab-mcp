@@ -32,7 +32,7 @@ import {
 export const CLIENT_NAME = "Fill test AI";
 
 /**
- * A second AI app under a public DNS name (DEC-212: "Always allow" is
+ * A second AI app under a public DNS name (DEC-213: "Always allow" is
  * offered only for one): its metadata document on loopback over http, which
  * the test relay alone accepts, the name resolved by the relay's test hook.
  */

@@ -242,7 +242,7 @@ describe.skipIf(chrome === undefined)(
 				`Connect ${CLIENT_NAME} (${host}) to the tab-mcp browser extension?`,
 			);
 			expect(card).toContain(`AI app at (verified) ${host}`);
-			// localhost does not qualify for "Always allow" (DEC-212).
+			// localhost does not qualify for "Always allow" (DEC-213).
 			expect(await questionButtons(stack)).toEqual(["Don't allow", "Allow"]);
 			await answer(stack, "deny");
 			await stack.panel.waitFor(questionCount(0));
@@ -287,7 +287,7 @@ describe.skipIf(chrome === undefined)(
 			);
 		});
 
-		test("Always allow (DEC-212): the same host's next pages are filled in without a question, with a notice; the fourth in ten minutes asks", async () => {
+		test("Always allow (DEC-213): the same host's next pages are filled in without a question, with a notice; the fourth in ten minutes asks", async () => {
 			const host = stack.oauth.alwaysHost;
 			const always = () =>
 				authorizeUrl(stack.oauth, stack.address, stack.oauth.alwaysClientId);

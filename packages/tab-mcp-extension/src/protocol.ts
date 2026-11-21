@@ -76,7 +76,7 @@ export type PanelCommand =
 	 * back in the state once handled (`fillAnswered`, DEC-210).
 	 */
 	| { type: "set-fill"; on: boolean; id: string }
-	/** Remove an AI app's host from "Filled in without asking for:" (DEC-212). */
+	/** Remove an AI app's host from "Filled in without asking for:" (DEC-213). */
 	| { type: "forget-fill-host"; host: string };
 
 /** A connected AI app. */
@@ -114,7 +114,7 @@ export interface QuestionView {
 	args: string;
 	/**
 	 * "Always allow on <host>" is offered (a page tool of an http(s) site);
-	 * for a pairing question, "Always allow" for the AI app's host (DEC-212).
+	 * for a pairing question, "Always allow" for the AI app's host (DEC-213).
 	 */
 	site: boolean;
 	/** When it ends unanswered as Don't allow (epoch ms, the worker's clock). */
@@ -177,7 +177,7 @@ export interface PanelState {
 	fillLost?: boolean;
 	/** The id of the last "set-fill" the worker handled. */
 	fillAnswered?: string;
-	/** The AI apps' hosts filled in for without a question, at this relay (DEC-212). */
+	/** The AI apps' hosts filled in for without a question, at this relay (DEC-213). */
 	fillAlways?: string[];
 	/** The last fill without a question, while it is recent: what the panel says. */
 	fillNotice?: { text: string; at: number };

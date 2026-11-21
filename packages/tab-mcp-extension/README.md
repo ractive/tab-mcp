@@ -182,7 +182,7 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   app> (<host>) to the tab-mcp browser extension?"; Allow writes the code into the
   page's field and clicks Connect. Typing the code by hand works as before, also while
   the question waits. For an AI app whose verified host is a public name (not
-  `localhost`, an IP address or a test name), the question offers "Don't allow", "Allow
+  `localhost`, an IP address or a private or test name such as `.lan` or `.test`), the question offers "Don't allow", "Allow
   once" and "Always allow": "Always allow" fills in the code for that host from then on
   without asking, each time with a notification and a line in the panel ("Filled in the
   code for <AI app> (<host>)."), at most 3 times per host in 10 minutes before it asks

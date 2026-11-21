@@ -97,14 +97,6 @@ export async function loadFillFor(kv: Kv): Promise<string | undefined> {
 	return typeof stored === "string" ? stored : undefined;
 }
 
-export async function saveFillFor(
-	kv: Kv,
-	relay: string | undefined,
-): Promise<void> {
-	if (relay === undefined) await kv.remove(FILL_FOR);
-	else await kv.set({ [FILL_FOR]: relay });
-}
-
 /**
  * The relay for which filling in went off by itself because its site was
  * taken away (in the browser's settings), or `undefined`: the panel says so
@@ -115,17 +107,9 @@ export async function loadFillLost(kv: Kv): Promise<string | undefined> {
 	return typeof stored === "string" ? stored : undefined;
 }
 
-export async function saveFillLost(
-	kv: Kv,
-	relay: string | undefined,
-): Promise<void> {
-	if (relay === undefined) await kv.remove(FILL_LOST);
-	else await kv.set({ [FILL_LOST]: relay });
-}
-
 /**
  * The AI apps' verified hosts whose sign-in pages get the code without a
- * question (DEC-212), for one relay, and when each was last filled in that
+ * question (DEC-213), for one relay, and when each was last filled in that
  * way (for the brake). Kept with the setting, forgotten with it.
  */
 export interface FillAlways {
@@ -155,10 +139,30 @@ export async function loadFillAlways(kv: Kv): Promise<FillAlways | undefined> {
 	return { relay, hosts, unasked: times };
 }
 
+/** `null` stands for none: `set` writes it, and the loads read it as none. */
 export async function saveFillAlways(
 	kv: Kv,
 	always: FillAlways | undefined,
 ): Promise<void> {
-	if (always === undefined) await kv.remove(FILL_ALWAYS);
-	else await kv.set({ [FILL_ALWAYS]: always });
+	await kv.set({ [FILL_ALWAYS]: always ?? null });
+}
+
+/**
+ * The setting, its note and its hosts in one transaction (DEC-213): a worker
+ * that dies halfway, or a write that fails, never leaves the hosts of a
+ * setting that went off for a later "on" to bring back.
+ */
+export async function saveFillState(
+	kv: Kv,
+	state: {
+		fillFor: string | undefined;
+		lost: string | undefined;
+		always: FillAlways | undefined;
+	},
+): Promise<void> {
+	await kv.set({
+		[FILL_FOR]: state.fillFor ?? null,
+		[FILL_LOST]: state.lost ?? null,
+		[FILL_ALWAYS]: state.always ?? null,
+	});
 }

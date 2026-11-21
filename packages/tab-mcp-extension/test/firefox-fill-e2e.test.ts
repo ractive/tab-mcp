@@ -138,7 +138,7 @@ describe.skipIf(!firefoxOk)(
 			);
 		});
 
-		test("Always allow (DEC-212): the same host's next page is filled in without a question, with the panel's line; removed, it asks again", async () => {
+		test("Always allow (DEC-213): the same host's next page is filled in without a question, with the panel's line; removed, it asks again", async () => {
 			const host = oauth.alwaysHost;
 			const first = await authorizeUrl(oauth, address, oauth.alwaysClientId);
 			let callback = oauth.nextCallback();

@@ -13,8 +13,8 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Added
 
-- **"Always allow" for the sign-in question** (DEC-212), for an AI app whose verified
-  host is a public name (not `localhost`, an IP address or a test name): "Don't allow",
+- **"Always allow" for the sign-in question** (DEC-213), for an AI app whose verified
+  host is a public name (not `localhost`, an IP address or a private or test name such as `.lan` or `.test`): "Don't allow",
   "Allow once", "Always allow". After "Always allow", that host's next sign-in pages are
   filled in without a question, each with a notification and a line in the panel
   ("Filled in the code for <AI app> (<host>)."), at most 3 per host in 10 minutes before

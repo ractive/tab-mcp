@@ -69,12 +69,12 @@ export interface FillElements {
 	/** The switch's label, and the switch in it. */
 	label: HTMLElement;
 	toggle: HTMLInputElement;
-	/** "Filled in without asking for:" and its list (DEC-212). */
+	/** "Filled in without asking for:" and its list (DEC-213). */
 	always: HTMLElement;
 	alwaysList: HTMLElement;
 }
 
-/** The line over the hosts filled in for without a question (DEC-212). */
+/** The line over the hosts filled in for without a question (DEC-213). */
 export const ALWAYS_HEADING = "Filled in without asking for:";
 
 /**

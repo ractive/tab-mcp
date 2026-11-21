@@ -56,7 +56,7 @@ export const CLOSE_NOTE = "Closing this is Don't allow";
 /**
  * The button of a pairing question's notification (DEC-203): Allow, not
  * "Allow once", where there is nothing to allow for longer. Where "Always
- * allow" is offered (DEC-212), "Allow once", as for a tool: "Always allow"
+ * allow" is offered (DEC-213), "Allow once", as for a tool: "Always allow"
  * is in the panel, which a click on the notification's body opens.
  */
 export const PAIRING_BUTTONS = ["Allow"] as const;
@@ -289,7 +289,7 @@ export class Questions {
 	 * Ask whether to fill in the extension's code on the relay's pairing page
 	 * in tab `tabId`, for the AI app `client` (DEC-203): its own name for
 	 * itself, and the host the relay verified. Allow or Don't allow, and
-	 * "Always allow" (answer `site`) where `always` (DEC-212); `signal`
+	 * "Always allow" (answer `site`) where `always` (DEC-213); `signal`
 	 * withdraws it (the page went, or the app connected).
 	 */
 	askPairing(

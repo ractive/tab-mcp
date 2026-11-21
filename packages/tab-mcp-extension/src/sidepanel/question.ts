@@ -127,7 +127,7 @@ function pairingLines(q: QuestionView): HTMLElement[] {
 	return lines;
 }
 
-/** What "Always allow" on a pairing question does (DEC-212): one sentence. */
+/** What "Always allow" on a pairing question does (DEC-213): one sentence. */
 export function pairingAlwaysNote(host: string): string {
 	return `Always allow: from now on tab-mcp fills in the code for ${host} without asking, until you remove it under “Fill in the code for me”.`;
 }
@@ -205,7 +205,7 @@ export function questionCard(
 	// "Allow once": this call only, beside the one that keeps (EQ 9). The
 	// same default kind as "Don't allow": neither answer is pushed (DEC-180).
 	// A pairing question's Allow: nothing to allow for longer, unless its
-	// host may get "Always allow" (DEC-212).
+	// host may get "Always allow" (DEC-213).
 	buttons.append(
 		button("Don't allow", "deny"),
 		button(q.pairing && !q.site ? "Allow" : "Allow once", "allow"),
