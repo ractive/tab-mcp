@@ -25,6 +25,7 @@ import {
 	cardView,
 	confirms,
 	introText,
+	libraryNotes,
 	noAccessText,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
@@ -590,6 +591,12 @@ function showTab(s: PanelState): void {
 			? noAccessText(tab.noAccess, s.allSites)
 			: (tab?.access ?? ""),
 	);
+	// A page with the client library (DEC-207): one quiet line, and one
+	// that says so when an app is connected to it both ways.
+	const library = libraryNotes(tab, s.grants);
+	$("tab-library").hidden = !library.builtIn;
+	setText($("tab-both"), library.both ?? "");
+	$("tab-both").hidden = library.both === undefined;
 	// No tools: what still works, and where WebMCP comes from (EQ 7).
 	const note = webmcpNote(tab);
 	$("no-tools").hidden = note !== "no-tools";

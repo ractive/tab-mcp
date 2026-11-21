@@ -397,6 +397,11 @@ export function showConnectDialog(
 		live.textContent = live.textContent === text ? `${text} ` : text;
 	};
 
+	// AI apps that reach the page through the tab-mcp browser extension
+	// (DEC-207): said first, as the user may not need to connect at all.
+	// Everything else stays: a phone or another browser still connects here.
+	const viaExtension = el(doc, "p", { className: "tab-mcp-via-extension" });
+
 	// The confirmation once an app is connected: what happened, what next.
 	const successId = `${nextId()}-success`;
 	const successTitle = el(doc, "p", { className: "tab-mcp-success-title" });
@@ -684,7 +689,16 @@ export function showConnectDialog(
 		retry,
 		done,
 	);
-	dialog.append(success, status, apps, setupToggle, setup, actions, live);
+	dialog.append(
+		viaExtension,
+		success,
+		status,
+		apps,
+		setupToggle,
+		setup,
+		actions,
+		live,
+	);
 
 	// The dialog's own state; the rest is read from `mcp` in `render()`.
 	/** The setup is open while an app is connected. */
@@ -912,6 +926,30 @@ export function showConnectDialog(
 		else dialog.removeAttribute("aria-describedby");
 		success.hidden = !connectedView;
 
+		// Each app once, named as the connected apps are.
+		const extension = mcp.extension;
+		const via = [
+			...new Set(
+				(extension?.apps ?? []).map((a) =>
+					clientLabel({ id: a.host, name: a.name, host: a.host }, s),
+				),
+			),
+		];
+		viaExtension.hidden = via.length === 0;
+		viaExtension.textContent =
+			via.length === 0
+				? ""
+				: format(
+						extension?.whileInFront
+							? via.length === 1
+								? s.viaExtensionInFrontOne
+								: s.viaExtensionInFrontMany
+							: via.length === 1
+								? s.viaExtensionOne
+								: s.viaExtensionMany,
+						{ apps: listOf(via, s) },
+					);
+
 		// The status line is for the setup; the confirmation says it otherwise.
 		if (connected) message = undefined;
 		const appName = session?.appName;
@@ -1093,6 +1131,7 @@ export function showConnectDialog(
 	doc.addEventListener("visibilitychange", render);
 	mcp.addEventListener("grantschange", render);
 	mcp.addEventListener("identitychange", render);
+	mcp.addEventListener("extensionchange", render);
 	mcp.addEventListener("error", onError);
 	mcp.addEventListener("replaced", onReplaced);
 	doc.body.append(dialog);
@@ -1117,6 +1156,7 @@ export function showConnectDialog(
 				doc.removeEventListener("visibilitychange", render);
 				mcp.removeEventListener("grantschange", render);
 				mcp.removeEventListener("identitychange", render);
+				mcp.removeEventListener("extensionchange", render);
 				mcp.removeEventListener("error", onError);
 				mcp.removeEventListener("replaced", onReplaced);
 				dialog.remove();

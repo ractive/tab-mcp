@@ -691,6 +691,24 @@ like any other, `chrome-extension://<id>` (A11).
   read at most every 250 ms, and the number and size of what a page sends are capped.
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
+- **A page with the client library** (DEC-207). A page that announces the library
+  (DOM events, or `<html data-tab-mcp-handshake>`) is told the extension's name and
+  version, whether AI access is on and the names and verified hosts of the AI apps
+  connected now, again when that changes; a page that does not announce it is told
+  nothing. Any page script can announce it, so any page the extension may read can learn
+  those names by pretending; nothing else (not the relay, the address, other tabs) is
+  told. Right before a tool runs that the user allowed (asked, or allowed for the site),
+  the extension vouches for that one call to such a page: the tool, the arguments and
+  the AI app, after its own checks (the page the tool was listed from, its read-only
+  claim). The vouch is made in one place, after the user's answer and the check that
+  the tool is still the one asked about, and never for a read-only tool or a call that
+  was not allowed; once the call settled, it is withdrawn. What the page announces (the
+  library's version, its app id, at most 64 AI apps connected to it directly) is the
+  page's word and only feeds two lines in the panel. A page saying `hello` in a loop
+  does not keep the extension's one service worker busy: the worker is asked at the
+  first `hello`, later ones are answered from the last state it sent (it sends every
+  change), and a worker that does not answer is asked again twice, then not until the
+  next `hello`. No proof of either side: see A14.
 - **Which pages.** The extension asks for no host access at install. Without it, it
   reads a tab only after a click on its icon there, and only on that origin (the relay's
   pairing page, with the relay's site granted, is the exception below). With "Read all
@@ -844,8 +862,32 @@ from them.
   first stays theirs (the mirror only warns), and once a name is mirrored the page's own
   native registration of it fails. The tab-mcp browser extension (A13) offers mirrored tools like
   any other page tool, since it cannot know whether the AI app is also paired with the
-  page: an AI app connected to both sees such a tool twice, and a consequential one asks
-  in the extension and again in the page.
+  page: an AI app connected to both sees such a tool twice.
+- **The tab-mcp browser extension vouches; the page believes it** (DEC-207). Right
+  before the extension runs a tool the user allowed there, it tells the page (DOM
+  events on `document`) the tool, the exact arguments and the AI app; the next WebMCP
+  call of that tool with equal arguments within 2 seconds runs without the page's
+  question and without `onConfirm`, once, and only for the tool registered under that
+  name when the vouch came. There is no proof that the extension sent it: anything that
+  could fake it already runs in the page, where it could call `execute` or skip the
+  question itself. It is a convenience between two parts the user trusts (the page and
+  the extension the user installed), not a security boundary; a proof would cost
+  Chrome's `externally_connectable` (every site that takes part listed in the
+  extension's manifest) or an attestation signed by the relay (a round trip and keys
+  for every call), and script in the page could still answer for the library before it
+  hears anything. Once the browser's `executeTool` settled, whatever the outcome, the
+  extension withdraws the vouch (`withdraw` with its nonce) and the page drops it if it
+  is still there, so a call that failed or was cancelled before it reached the page
+  does not leave its vouch for another caller. What is left: an agent in the browser
+  that calls the same tool with equal arguments in the moment between the vouch and
+  the extension's call reaching the page takes the vouch, and that call is exactly the
+  one the user allowed; the extension's call is then asked by the page. A withdrawal
+  cannot close that window, as it comes only after `executeTool` settled: until then
+  the vouch stays usable for such a call, for a moment after a failure, and for up to
+  the 2 seconds when `executeTool` neither runs the tool nor settles, or on a page that
+  takes vouches with its own code and ignores `withdraw`. A site that insists on its own question
+  sets `trustExtension: false`. The page also learns, while the extension serves it,
+  which AI apps are connected to the extension (A13).
 
 ### A15: The site's own assistant calling the page's tools over a port (`serve`)
 

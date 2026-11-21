@@ -124,6 +124,41 @@ export function webmcpNote(
 	return tab.webmcp.tools === 0 ? "no-tools" : undefined;
 }
 
+/** "A", "A and B", "A, B and C". */
+const listOf = (names: string[]) =>
+	names.length < 2
+		? (names[0] ?? "")
+		: `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/**
+ * The tab card's lines about a page with the client library (DEC-207): that
+ * it has tab-mcp built in (`builtIn`), and which AI apps paired with the
+ * extension are connected to the page directly too (`both`), by name and
+ * host as the page announced them. Such an app sees the page's tools twice.
+ */
+export function libraryNotes(
+	tab: TabView | undefined,
+	grants: PanelState["grants"],
+): { builtIn: boolean; both?: string } {
+	const library = tab?.library;
+	if (library === undefined) return { builtIn: false };
+	const names = [
+		...new Set(
+			grants
+				.filter((g) =>
+					library.apps.some((a) => a.host === g.host && a.name === g.name),
+				)
+				.map((g) => (g.name ? `${g.name} (${g.host})` : g.host)),
+		),
+	];
+	if (names.length === 0) return { builtIn: true };
+	const one = names.length === 1;
+	return {
+		builtIn: true,
+		both: `${listOf(names)} ${one ? "is" : "are"} also connected to this page directly, so ${one ? "it sees" : "they see"} the page's tools twice, once through each. Disconnect ${one ? "it" : "them"} in one of the two: above in this panel, or in the page.`,
+	};
+}
+
 /** A confirming click this soon after the first one (a double click) counts as nothing. */
 export const CONFIRM_DELAY_MS = 750;
 

@@ -61,9 +61,31 @@ if (chrome === undefined && process.env["CI"])
 		"Chrome for Testing 156 or newer is needed for the extension's end-to-end tests in CI",
 	);
 
+/** `pages/library.ts` bundled, the client library in it (DEC-207), once. */
+let libraryScript: Promise<Uint8Array> | undefined;
+function libraryBundle(): Promise<Uint8Array> {
+	libraryScript ??= Bun.build({
+		entrypoints: [join(import.meta.dir, "pages", "library.ts")],
+		target: "browser",
+		format: "esm",
+	}).then(async (result) => {
+		const [output] = result.outputs;
+		if (!result.success || output === undefined)
+			throw new Error(`the library page did not build: ${result.logs}`);
+		return new Uint8Array(await output.arrayBuffer());
+	});
+	return libraryScript;
+}
+
 async function serve(url: string): Promise<Served> {
 	const { origin, pathname } = new URL(url);
 	const name = pathname.slice(1);
+	if (origin === SITE && name === "library.js")
+		return {
+			status: 200,
+			headers: { "content-type": "text/javascript; charset=utf-8" },
+			body: await libraryBundle(),
+		};
 	const file = Bun.file(join(import.meta.dir, "pages", name));
 	if (
 		![SITE, OTHER, SUBDOMAIN].includes(origin) ||
@@ -2621,6 +2643,186 @@ describe.skipIf(chrome === undefined)(
 				execute: () => "later",
 			})`);
 			await waitForTools(stack, (n) => n.includes("page_registered_later"));
+		});
+	},
+);
+
+/**
+ * A page that uses the client library with `webmcp: true` (DEC-207): the page
+ * and the extension know of each other. The page asks with the library's own
+ * confirmation; the AI app is the test's MCP client ("Test client" at
+ * client.example).
+ */
+const TEST_APP = { name: "Test client", host: "client.example" };
+/** The page's own confirmation is open. */
+const pageAsks = `document.querySelector("dialog.tab-mcp-confirm") !== null`;
+
+/**
+ * AI access off and on again, so that the relay lists the test's AI app
+ * (a token written into its store is not announced to a session that runs).
+ */
+async function listTestApp(stack: Stack): Promise<void> {
+	await stack.panel.eval(`(async () => {
+		const port = chrome.runtime.connect({ name: "panel" });
+		port.postMessage({ type: "stop" });
+		port.postMessage({ type: "connect" });
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		port.disconnect();
+	})()`);
+	await stack.panel.waitFor(
+		`document.getElementById("state").dataset.state === "on"`,
+		15_000,
+	);
+}
+
+describe.skipIf(chrome === undefined)(
+	"a page with the client library, Chrome's own WebMCP (DEC-207)",
+	() => {
+		let stack: Stack;
+		let tab: Page;
+
+		beforeAll(async () => {
+			stack = await start({ store: false }, `${SITE}/library.html`);
+			tab = stack.tab;
+			await listTestApp(stack);
+			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("the page shows the AI app connected through the extension; the panel says the page has tab-mcp built in", async () => {
+			await tab.waitFor(
+				"window.tabMcpPage?.mcp.extension?.apps.length === 1",
+				15_000,
+			);
+			const version = await stack.worker.eval<string>(
+				"chrome.runtime.getManifest().version",
+			);
+			expect(await tab.eval("window.tabMcpPage.mcp.extension ?? null")).toEqual(
+				{
+					name: "tab-mcp browser extension",
+					version,
+					apps: [TEST_APP],
+					whileInFront: true,
+				},
+			);
+			await stack.panel.waitFor(
+				`!document.getElementById("tab-library").hidden`,
+			);
+			// The AI app is not connected to the page directly: no second line.
+			expect(
+				await stack.panel.eval(`document.getElementById("tab-both").hidden`),
+			).toBe(true);
+		});
+
+		test("with the extension's Always allow on, the AI app's call runs with no question in the page", async () => {
+			const toggle = alwaysAllow("complete_todo");
+			await stack.panel.waitFor(takesClicks(toggle));
+			await stack.panel.click(toggle);
+			await stack.panel.waitFor(alwaysAllowed("complete_todo", true));
+			const result = await call(stack, "page_complete_todo", { id: 1 });
+			expect(result.isError).toBeFalsy();
+			expect(result.content[0]?.text).toContain("Todo 1 is done.");
+			expect(await tab.eval(pageAsks)).toBe(false);
+			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				...TEST_APP,
+			});
+			await stack.panel.waitFor(takesClicks(toggle));
+			await stack.panel.click(toggle);
+			await stack.panel.waitFor(alwaysAllowed("complete_todo", false));
+		});
+
+		test("with it off, the extension asks once and the page not at all", async () => {
+			const pending = call(stack, "page_complete_todo", { id: 2 });
+			await answerInPanel(stack, "allow");
+			const result = await pending;
+			expect(result.isError).toBeFalsy();
+			expect(await tab.eval(pageAsks)).toBe(false);
+			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
+			// Declined in the extension: the page is not asked and nothing runs.
+			const declined = call(stack, "page_complete_todo", { id: 9 });
+			await answerInPanel(stack, "deny");
+			expect((await declined).isError).toBe(true);
+			expect(await tab.eval(pageAsks)).toBe(false);
+			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
+		});
+
+		test("a WebMCP call that does not come from the extension is still asked by the page", async () => {
+			await tab.eval(`(async () => {
+				const context = document.modelContext;
+				const tool = (await context.getTools()).find((t) => t.name === "complete_todo");
+				window.ownCall = context.executeTool(tool, { id: 3 }).then(String, String);
+			})()`);
+			await tab.waitFor(pageAsks);
+			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
+				kind: "webmcp",
+			});
+			await tab.eval(
+				`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].find((b) => b.textContent === "Don't allow").click()`,
+			);
+			await tab.eval("window.ownCall");
+			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
+		});
+
+		test("the page's state follows when the app is disconnected in the extension", async () => {
+			// Disconnect asks first: a click arms it, a second one after a
+			// moment disconnects.
+			await stack.panel.click("#grants button");
+			await Bun.sleep(800);
+			await stack.panel.click("#grants button");
+			await tab.waitFor(
+				"window.tabMcpPage.mcp.extension?.apps.length === 0",
+				15_000,
+			);
+			expect(
+				await tab.eval("document.getElementById('extension').textContent"),
+			).toContain('"apps":[]');
+		});
+	},
+);
+
+describe.skipIf(chrome === undefined)(
+	"a page with the client library, the extension's own WebMCP (DEC-207)",
+	() => {
+		let stack: Stack;
+		let tab: Page;
+
+		beforeAll(async () => {
+			stack = await start(
+				{ store: false, webmcp: false },
+				`${SITE}/plain.html`,
+			);
+			tab = stack.tab;
+			await listTestApp(stack);
+			// Loaded after the install registered the polyfill for every page.
+			await tab.goto(`${SITE}/library.html`);
+			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+		}, 60_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("the page knows the extension, and a call allowed there is not asked again", async () => {
+			await tab.waitFor(
+				"window.tabMcpPage?.mcp.extension?.apps.length === 1",
+				15_000,
+			);
+			const pending = call(stack, "page_complete_todo", { id: 4 });
+			await answerInPanel(stack, "allow");
+			expect((await pending).isError).toBeFalsy();
+			expect(await tab.eval(pageAsks)).toBe(false);
+			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				...TEST_APP,
+			});
 		});
 	},
 );

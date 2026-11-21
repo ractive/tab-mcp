@@ -37,6 +37,7 @@ import type {
 	ToolCallEnd,
 	ToolCallOutcome,
 	ToolCallStart,
+	WebMcpClient,
 } from "./types.ts";
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -466,13 +467,16 @@ async function decideAndRun(
  * WebMCP hands the agent a rejection without its message (the draft: an
  * `OperationError`; Chrome 156: `UnknownError`), so the agent would learn
  * neither why nor what to change (DEC-120). Only a call the browser
- * cancelled rejects (`AbortError`): its caller has gone already.
+ * cancelled rejects (`AbortError`): its caller has gone already. `client`:
+ * an agent in the browser, or the AI app the tab-mcp browser extension
+ * vouched for (DEC-207).
  */
 export async function webMcpCall(
 	context: CallContext,
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
+	client: WebMcpClient,
 ): Promise<unknown> {
 	const failed = (error: string) => ({ error });
 	const gone = `The tool ${tool.name} is no longer available.`;
@@ -484,7 +488,7 @@ export async function webMcpCall(
 		tool,
 		input,
 		signal instanceof AbortSignal ? signal : new AbortController().signal,
-		{ kind: "webmcp" },
+		client,
 	);
 	if (run.stop === "cancelled")
 		throw new DOMException("Cancelled", "AbortError");

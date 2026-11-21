@@ -63,6 +63,22 @@ interface Stack {
 	stop(): Promise<void>;
 }
 
+/** `pages/library.ts` bundled, the client library in it (DEC-207), once. */
+let libraryScript: Promise<string> | undefined;
+function libraryBundle(): Promise<string> {
+	libraryScript ??= Bun.build({
+		entrypoints: [join(import.meta.dir, "pages", "library.ts")],
+		target: "browser",
+		format: "esm",
+	}).then((result) => {
+		const [output] = result.outputs;
+		if (!result.success || output === undefined)
+			throw new Error(`the library page did not build: ${result.logs}`);
+		return output.text();
+	});
+	return libraryScript;
+}
+
 /** The test pages, on http://localhost (a secure context). */
 function serve() {
 	return Bun.serve({
@@ -70,6 +86,10 @@ function serve() {
 		hostname: "127.0.0.1",
 		async fetch(request) {
 			const name = new URL(request.url).pathname.slice(1);
+			if (name === "library.js")
+				return new Response(await libraryBundle(), {
+					headers: { "content-type": "text/javascript; charset=utf-8" },
+				});
 			const file = Bun.file(join(import.meta.dir, "pages", name));
 			if (!/^[a-z]+\.html$/.test(name) || !(await file.exists()))
 				return new Response("not found", { status: 404 });
@@ -568,3 +588,55 @@ describe.skipIf(!firefoxOk)("an extension reload or update", () => {
 		});
 	}, 60_000);
 });
+
+describe.skipIf(!firefoxOk)(
+	"a page with the client library, the Firefox build's WebMCP (DEC-207)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start("library.html");
+			// Off and on again: the relay lists the test's AI app (a token
+			// written into its store is not announced to a running session).
+			await stack.panel.eval(`(async () => {
+				const port = chrome.runtime.connect({ name: "panel" });
+				port.postMessage({ type: "stop" });
+				port.postMessage({ type: "connect" });
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				port.disconnect();
+			})()`);
+			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+		}, 90_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		test("the page knows the extension and its AI app; a call allowed there is not asked again", async () => {
+			await stack.tab.waitFor(
+				"window.tabMcpPage?.mcp.extension?.apps.length === 1",
+				15_000,
+			);
+			expect(
+				await stack.tab.eval("window.tabMcpPage.mcp.extension.apps"),
+			).toEqual([{ name: "Test client", host: "client.example" }]);
+			const pending = call(stack, "page_complete_todo", { id: 5 });
+			await answerInPanel(stack, "allow");
+			expect((await pending).isError).toBeFalsy();
+			expect(
+				await stack.tab.eval(
+					`document.querySelector("dialog.tab-mcp-confirm") === null`,
+				),
+			).toBe(true);
+			expect(
+				await stack.tab.eval("window.tabMcpPage.calls.at(-1).client"),
+			).toEqual({
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				name: "Test client",
+				host: "client.example",
+			});
+		});
+	},
+);

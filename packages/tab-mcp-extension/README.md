@@ -93,7 +93,14 @@ The page's tools are the page's word:
 - Tools a tab-mcp page mirrors into WebMCP (the client library's `webmcp: true`) are
   offered like any other: the extension cannot know whether your AI app is also paired
   with the page itself. An AI app connected to both sees such a tool twice, once from
-  each connector, and a consequential one asks in the page as well.
+  each connector. Such a page and the extension know of each other (DEC-207, client
+  library 0.19.0 and later): a call you allowed here is not asked again in the page
+  (the extension vouches for that one call, right before it runs), the page can show
+  which AI apps reach it through the extension, and the panel says "This page has
+  tab-mcp built in." and when an AI app is connected to the page directly too (it then
+  sees the page's tools twice: disconnect it in one of the two). The extension tells
+  such a page only its name and version, whether AI access is on and the AI apps
+  connected now (name and verified host); a page without the library is told nothing.
 - The top frame's WebMCP, which lists the tools of the page and of its same-origin
   frames (the draft and Chrome's documentation say so; not tested here); tools of
   frames of other origins are not listed. Only the browser's own WebMCP: a page's

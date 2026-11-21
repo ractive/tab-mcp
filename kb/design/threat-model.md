@@ -317,6 +317,26 @@ did, by connecting the extension.
 - **A forged `document.modelContext`** in the page's world does not reach the content
   script, which sees only the browser's own object (iteration 18). Only the extension's
   own pages talk to the content script.
+- **A page with the client library (DEC-207).** The content script speaks only to a page
+  that announced the library (its `hello` on `document`, or
+  `<html data-tab-mcp-handshake>`): the extension's name and version, whether AI access
+  is on and connected, and the names and verified hosts of the AI apps connected now
+  (the worker sends changes to every content script of a site it may read; each passes
+  them on only to such a page). Any page script can announce the library, so any page
+  the extension may read can learn those names by pretending; not the relay, the
+  address or other tabs. Right before a tool runs that the user allowed, a vouch goes to
+  such a page: made only in `#allowedThenRun` after the user's answer (or the site's
+  "allowed") and the same-tool check, never for a read-only tool, sent by the content
+  script only after its own checks (listed from this document, the same read-only
+  claim), synchronously before `executeTool`, and withdrawn (`withdraw`, its nonce) once
+  `executeTool` settled. A worker message with a vouch comes only
+  from the extension (the content script checks the sender). What the page announces
+  (library version, app id, at most 64 directly connected AI apps) is the page's word
+  and only feeds the panel's two lines. The worker answers the content script's request
+  for the state only from this extension's content script in a tab's top frame, and is
+  asked only at the page's first `hello` (later ones are answered from the last state
+  it sent; no answer: asked again after 1 s and 5 s, then not until the next `hello`),
+  so a page saying `hello` in a loop does not keep the one worker busy.
 - **Which page.** Without host access the extension reads a tab only after a click on its
   icon there, and only on that origin. With "Give access to all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
@@ -484,9 +504,24 @@ in the browser call them without pairing and without an identity (`client.kind`
 consequential tools are mirrored only when their `callers` list `"webmcp"`; calls get
 the same schema check and confirmation, never "Always allow". Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
-connected to both the page and the extension sees such a tool twice, and a consequential
-one asks in the extension and in the page. The full analysis is A14 in
-`docs/threat-model.md` (DEC-115, DEC-119).
+connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
+the user allowed in the extension carries a vouch, which the page believes without a
+proof: the next WebMCP call of that tool with equal arguments within 2 s runs without the
+page's question and `onConfirm`, once, for the tool registered under that name when the
+vouch came. Anything that could fake a vouch already runs in the page and could skip the
+question itself: a convenience between two parts the user trusts, not a security
+boundary (a proof would need Chrome's `externally_connectable` or an attestation signed
+by the relay, and page script could still answer for the library). Once `executeTool`
+settled, whatever the outcome, the extension withdraws the vouch by its nonce, so a
+call that failed or was cancelled before it reached the page leaves none behind. An
+agent in the browser that calls the same tool with equal arguments between the vouch
+and the extension's call reaching the page uses it: exactly the call the user allowed.
+A withdrawal cannot close that window (it comes only after `executeTool` settled), and
+the vouch stays usable until it comes: a moment after a failure, up to the 2 s when
+`executeTool` neither runs the tool nor settles, or on a page that takes vouches with
+its own code and ignores `withdraw`. `trustExtension: false`
+asks every call. The full analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119,
+DEC-207).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 

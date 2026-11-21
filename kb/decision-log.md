@@ -4491,3 +4491,119 @@ extension is its first user. The shape below is the library's, not the owner's.
 - **Otherwise no change in behaviour** for the tab-mcp browser extension: its unit tests
   of the moved logic are the library's now (`test/extension.test.ts`), its tests of its
   wiring and its end-to-end tests of the fill-in in Chrome and Firefox pass unchanged.
+
+## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
+
+2026-11-20, [iteration 48](/iterations/iteration-48-page-extension-handshake.md); amends
+DEC-141 and DEC-191.
+The owner: "When the tab-mcp-extension sets 'Allow always all' or allows single tools the
+website must not ask again." A page with the client library (`webmcp: true`) and the
+extension knew nothing of each other: the extension reaches the page's tools through
+WebMCP, so to the library its calls were "An agent in this browser", and one call was
+asked up to three times (by the AI app, by the extension, by the page); and the page said
+"Off" and offered "Connect your AI app" while an AI app was connected through the
+extension. Decided with the owner: a plain handshake over DOM events, no proof of the
+extension's identity; the extension vouches per call and the library then does not ask,
+on by default with an opt-out; the page shows the AI app's name; only pages with
+`webmcp: true` take part; the page tells the extension which AI apps are connected to it
+directly. The shapes below are this iteration's.
+
+- **The channel.** `CustomEvent`s on `document` with a JSON string as `detail` (objects
+  do not cross between a content script's world and the page's in every browser):
+  `tab-mcp-page` from the page, `tab-mcp-extension` from the extension. Each message has
+  `v: 1` and a `type`; another version, an unknown type or a malformed message is
+  ignored, unknown fields too. Top frame only, as the bridge is. The page's side is in
+  the WebMCP mirror's chunk (`handshake.ts`), the extension's in the content script
+  (`src/page-handshake.ts`). It works with Chrome's own WebMCP, with the extension's
+  stand-in `document.modelContext` in Chrome and in the Firefox build (tested end to end
+  in all three).
+- **Either may start first.** The page says `hello` (`library`: its version, `app`: the
+  app id, `apps`: the AI apps connected to it directly, `{ name, host }` from `grants`)
+  when its mirror starts, `update` on each `grantschange`, and marks
+  `<html data-tab-mcp-handshake>`. The extension speaks first only when that mark is
+  there: its content script runs at `document_idle` in Chrome or after a click, often
+  after the page's `hello`, and must not knock on every page to find out. Each side
+  answers the other's `hello` with an `update`. A page of several `TabMcp`s announces
+  each app id; the extension keeps them together.
+- **What the extension tells, and to whom.** Only to a page that announced the library:
+  `name`, `version`, `on` (AI access on and connected), `apps` (the AI apps connected now,
+  their own name and the host the relay verified; none while not `on`) and
+  `whileInFront: true` (it serves only the tab in front of a window, so the page can say
+  "while this tab is in front"). Nothing else: not the relay, the address or other tabs.
+  The worker sends it, whenever it changes, to the content script of every tab of a site
+  it may read (`extension-state`; a tab whose address is hidden from it is left out),
+  and the content script passes it on only to a page that announced; a content script
+  asks for it (`handshake`), accepted only from a tab's top frame. Also "off" goes to a
+  page that announced, so its state does not stay "on".
+- **The vouch.** Right before the bridge runs a page tool the user allowed (asked and
+  allowed, or covered by "Always allow" for that tool or "Always allow all"), it sends
+  the page `vouch`: `tool`, the exact `arguments`, a `nonce` and `app` (`name`, `host`).
+  It is made in one place, `#allowedThenRun`, after the user's answer and the existing
+  same-tool check (one rule: what the bridge runs is what it vouches for), only for a
+  tool that is not read-only and an AI app through the relay; it travels with the
+  `webmcp-call` message, and the content script dispatches it only after its own checks
+  (listed from this document, the same read-only claim), synchronously before
+  `executeTool`. Read-only tools are asked by neither side and get none. Once
+  `executeTool` settled, whatever the outcome, the content script sends `withdraw` with
+  the vouch's `nonce` (review of PR 180), and the library drops a vouch with that nonce
+  if it is still there: a call that failed or was cancelled before it reached the page
+  (`executeTool` rejected, `webmcp-cancel`, the tool unregistered) does not leave its
+  vouch for another caller. Sent after a call that ran too: its vouch is gone already,
+  but of two vouches for equal calls the page may have used the other one for it.
+- **The library takes it** for the tool registered under that name when the vouch
+  arrives (a tool registered anew since does not get it; none registered, it is
+  dropped), by a `TabMcp` that takes vouches, for at most 2 s (a monotonic clock), at
+  most 16 at once, a `nonce` heard twice once. The next WebMCP call of that tool whose
+  arguments are equal (canonical JSON, keys sorted) uses it up as it arrives: no
+  question, no `onConfirm`; the argument check, the events and the check that the tool
+  is still registered stay. Its caller is `{ kind: "webmcp", via: "tab-mcp-extension",
+  name, host }` in `execute`, `toolcall` and `toolcallend`. Any call that matches no
+  vouch is asked as before. Two calls at once each take their own; equal calls take one
+  vouch each; a page that reloads has none.
+- **The library's API.** `TabMcp.extension` (`{ name, version, apps, whileInFront }`
+  while the extension serves the page, else `undefined`), the event `extensionchange`,
+  the React snapshot's `extension`; `trustExtension: false` asks every call (the state
+  is still reported). The connect dialog says first "Claude (claude.ai) is connected
+  through the tab-mcp browser extension, while this tab is in front." and keeps
+  everything else (a phone or another browser still connects directly).
+- **Size.** In the mirror's chunk (1.7 KB gzipped, its test limit raised from 1 KB to
+  2 KB); the core grows by 9 bytes (6255 B of 6400 B after the review of PR 180). `extension` is only declared in
+  the core and defined on the instance by the chunk, and the version is passed to it: an
+  import of `version.ts` there made a chunk shared with the core that cost it 88 B.
+- **The panel**, for the tab in front with the library: "This page has tab-mcp built
+  in.", and when an AI app paired with the extension is also connected to the page
+  directly (the same name and host as the page announced), that it sees the page's tools
+  twice, once through each, and to disconnect it in one of the two.
+- **No proof, on purpose.** Anything that could fake the extension runs in the page
+  already, where it could call a tool's `execute` or skip the page's question itself.
+  The handshake is a convenience between two parts the user trusts, not a security
+  boundary. A proof would cost Chrome's `externally_connectable` (every site that takes
+  part listed in the extension's manifest) or an attestation signed by the relay (a
+  round trip and keys for every call), and script in the page could still answer for
+  the library before it hears anything. What is left: an agent in the browser that calls
+  the same tool with equal arguments between the vouch and the moment the extension's
+  call reaches the page uses the vouch (exactly the call the user allowed), and the
+  extension's call is then asked by the page. A withdrawal cannot shorten that window,
+  as it comes only once `executeTool` settled; until it comes the vouch stays usable for
+  such a call: for one turn of the content script after a failure, and up to the 2 s
+  when `executeTool` neither runs the tool nor settles, or on a page that takes vouches
+  with its own code and ignores `withdraw` (an unknown type is ignored). And any page the extension may read can
+  learn the names of the AI apps connected to it by announcing the library.
+- **Bounded on both sides** (review of PR 180). Each side cuts the other's list of AI
+  apps to 64 (a longer list is cut, not refused) and sends at most 64. The content
+  script asks the worker for the state at the page's first `hello` only and answers
+  later ones from the last state the worker sent, which sends every change: a page
+  saying `hello` in a loop costs the one worker of all tabs nothing. A worker that
+  does not answer (starting, failing) is asked again after 1 s and 5 s, one ask at a
+  time, then not until the page's next `hello`; a change from the worker ends the
+  retries, and so does the page going away (`pagehide`). The panel shows the library
+  version of the app id the page announced first.
+- **Amends DEC-191**: a page that announces the library now also learns, from the
+  extension, its name and version, whether AI access is on and the names and verified
+  hosts of the AI apps connected through it, and of each call it runs for one of them,
+  which. `PRIVACY.md` and the store listing say so; the published policy on ractive.ch
+  has to say it before the release.
+- **Amends DEC-141**: the bridge asks, as before, and a call it allowed is now also not
+  asked by a page with the library; the extension's own `onConfirm` still declines.
+- **Old and new mix**: an old extension says nothing, an old library announces nothing;
+  either way every call is asked as before and nothing is told.

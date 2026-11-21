@@ -77,7 +77,13 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	expect(coreCode).toContain('"modelContext"');
 	const mirrorChunk = lazy.find((n) => n.startsWith("webmcp-")) ?? "";
 	expect(files.get(mirrorChunk)).toContain("is not offered through WebMCP");
-	expect(gz(files.get(mirrorChunk) ?? "")).toBeLessThanOrEqual(1024);
+	// The handshake with the tab-mcp browser extension is in the mirror's
+	// chunk, not the core (DEC-207): 2 KB since, 1 KB before.
+	expect(files.get(mirrorChunk)).toContain("tab-mcp-extension");
+	expect(coreCode).not.toContain("tab-mcp-extension");
+	const mirrorGz = gz(files.get(mirrorChunk) ?? "");
+	console.log(`mirror ${mirrorGz} B gzipped`);
+	expect(mirrorGz).toBeLessThanOrEqual(2 * 1024);
 	// No mark on <html> since iteration 37 (the attribute was for the extension).
 	expect(coreCode).not.toContain("data-tab-mcp-webmcp");
 	expect(coreCode).not.toContain("The user declined");

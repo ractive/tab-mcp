@@ -330,6 +330,23 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 		await open;
 	});
 	expect(snapshots.at(-1)?.pairingUntil).toBe(until);
+	// The tab-mcp browser extension (DEC-207), as the mirror's chunk sets it.
+	const extension = Object.freeze({
+		name: "tab-mcp browser extension",
+		version: "0.3.0",
+		apps: Object.freeze([{ name: "Claude", host: "claude.ai" }]),
+		whileInFront: true,
+	});
+	act(() => {
+		Object.defineProperty(t, "extension", {
+			get: () => extension,
+			configurable: true,
+		});
+		t.dispatchEvent(
+			new CustomEvent("extensionchange", { detail: { extension } }),
+		);
+	});
+	expect(snapshots.at(-1)?.extension).toBe(extension);
 	await act(async () => {
 		const changed = nextEvent(t, "grantschange");
 		stub.send({

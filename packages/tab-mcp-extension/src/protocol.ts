@@ -128,6 +128,11 @@ export interface ToolView {
 
 /** The tab in front, as the panel shows it. */
 export interface TabView {
+	/**
+	 * The page announced the client library (DEC-207), with the AI apps
+	 * connected to it directly (the page's word).
+	 */
+	library?: { apps: { name: string; host: string }[] };
 	title: string;
 	host: string;
 	/** `undefined`: the extension may not read it, `noAccess` or `access` says why. */
@@ -207,6 +212,7 @@ export interface Sender {
 	id?: string;
 	url?: string;
 	tab?: unknown;
+	frameId?: number;
 }
 
 /**
@@ -252,6 +258,26 @@ export function isContentEvent(
 		typeof message === "object" &&
 		message !== null &&
 		(message as { type?: unknown }).type === "webmcp-changed"
+	);
+}
+
+/**
+ * A content script asks what the extension tells a page that announced the
+ * client library (DEC-207): from this extension's content script in a tab's
+ * top frame only, as only that one speaks to pages.
+ */
+export function isHandshakeAsk(
+	message: unknown,
+	sender: Sender,
+	extensionId: string,
+): boolean {
+	return (
+		sender.id === extensionId &&
+		sender.tab !== undefined &&
+		sender.frameId === 0 &&
+		typeof message === "object" &&
+		message !== null &&
+		(message as { type?: unknown }).type === "handshake"
 	);
 }
 

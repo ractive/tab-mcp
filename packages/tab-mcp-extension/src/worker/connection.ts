@@ -2,7 +2,8 @@
  * The connection to the user's AI app, in the service worker (DEC-116): the
  * library's `TabMcp` with the extension's tools and the bridge to the page in
  * front, the questions of tools that ask first, and the state the side panels
- * show. A WebSocket that carries messages keeps the worker alive (Chrome 116),
+ * show, and what pages with the client library are told (DEC-207). A
+ * WebSocket that carries messages keeps the worker alive (Chrome 116),
  * and the relay's heartbeat (a ping every 25 s, answered) carries some even
  * when nothing else happens; the worker connects again whenever it starts
  * while the user left AI access on.
@@ -31,6 +32,7 @@ import {
 } from "../browser.ts";
 import { fillAccess } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
+import type { ContentRequest, ExtensionState } from "../messages.ts";
 import {
 	APP_ID,
 	type GrantView,
@@ -49,6 +51,7 @@ import {
 	askTools,
 	callInTab,
 	getTab,
+	isSitePage,
 	NoAccessError,
 	type TargetTab,
 	tabInFront,
@@ -192,6 +195,8 @@ export class Connection {
 	#tab: TabView | undefined;
 	#tabRead = 0;
 	#sending = false;
+	/** What pages with the client library were told last, as JSON (DEC-207). */
+	#told = "";
 	/** AI access is on, as last saved. */
 	#aiOn: boolean;
 	/**
@@ -966,6 +971,10 @@ export class Connection {
 						: "",
 				...(current && origin ? { origin } : {}),
 				canAllow: current && origin !== undefined && allowable(origin),
+				// The client library, as the page announced it (DEC-207).
+				...(current && state.library !== undefined
+					? { library: { apps: state.library.apps } }
+					: {}),
 				tools: current
 					? state.tools.map((t) => ({
 							name: t.name,
@@ -1027,6 +1036,52 @@ export class Connection {
 		};
 	}
 
+	/**
+	 * What a page that announced the client library is told (DEC-207): the
+	 * extension's name and version, whether AI access is on and connected,
+	 * and the AI apps connected now. Nothing else: not the relay, the
+	 * address or other tabs.
+	 */
+	handshakeState(): ExtensionState {
+		const mcp = this.#mcp;
+		const on = mcp.state === "connected";
+		return {
+			name: PRODUCT,
+			version: chrome.runtime.getManifest().version,
+			on,
+			apps: on
+				? mcp.grants.map((g) => ({ name: g.client.name, host: g.client.host }))
+				: [],
+			whileInFront: true,
+		};
+	}
+
+	/**
+	 * Tell the pages when the state above changes: every tab's content
+	 * script of a site the extension may read hears it, and passes it on only
+	 * to a page that announced the library. Tabs the extension may not read
+	 * (no address) are left out.
+	 */
+	#tellPages(): void {
+		const state = this.handshakeState();
+		const told = JSON.stringify(state);
+		if (told === this.#told) return;
+		this.#told = told;
+		const message: ContentRequest = { type: "extension-state", state };
+		chrome.tabs.query({}).then(
+			(tabs) => {
+				for (const tab of tabs)
+					if (tab.id !== undefined && isSitePage(tab.url ?? ""))
+						chrome.tabs
+							.sendMessage(tab.id, message, { frameId: 0 })
+							.catch(() => {
+								// No content script there: nothing to tell.
+							});
+			},
+			() => {},
+		);
+	}
+
 	#status(): PanelState["status"] {
 		return panelStatus({
 			state: this.#mcp.state,
@@ -1039,6 +1094,7 @@ export class Connection {
 	/** Tell the panels (once per turn of the event loop) and set the badge. */
 	#changed(): void {
 		this.#showBadge();
+		this.#tellPages();
 		if (this.#sending) return;
 		this.#sending = true;
 		queueMicrotask(() => {

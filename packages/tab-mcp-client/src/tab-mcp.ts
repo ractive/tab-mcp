@@ -9,6 +9,7 @@ import type { GrantRef, SessionMessage, TabMessage } from "./protocol.ts";
 import { ToolRegistry } from "./registry.ts";
 import { SecretStore } from "./secret.ts";
 import type {
+	BrowserExtension,
 	ConfirmAnswer,
 	ConfirmHandler,
 	ConfirmRequest,
@@ -207,6 +208,15 @@ type Listener<K extends keyof TabMcpEventMap> = (
  */
 export class TabMcp extends EventTarget {
 	readonly #registry = new ToolRegistry();
+	/**
+	 * With `webmcp: true`: the tab-mcp browser extension while it serves this
+	 * page, with the AI apps that reach the page's tools through it (DEC-207);
+	 * `extensionchange` says when it changes. `undefined` without it, while
+	 * its AI access is off, and without WebMCP. Declared only: the mirror's
+	 * chunk defines it on the instance once it hears the extension, so that
+	 * the core carries no bytes for it (until then it is `undefined`).
+	 */
+	declare readonly extension: BrowserExtension | undefined;
 	readonly #server: ServerInfo;
 	readonly #app: string;
 	readonly #appName: string | undefined;
@@ -319,15 +329,25 @@ export class TabMcp extends EventTarget {
 		);
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
 		// consequential tools only when their registration says so. The getter
-		// is read now (WM 10); the mirror loads only then (DEC-171).
+		// is read now (WM 10); the mirror loads only then (DEC-171), with the
+		// handshake with the tab-mcp browser extension (DEC-207).
 		const context = options.webmcp === true ? nativeContext() : undefined;
 		if (context !== undefined)
 			import("./webmcp.ts").then(
 				(m) =>
-					m.mirror(this.#registry, context, (tool, input, signal) =>
-						this.#load().then((lazy) =>
-							lazy.callFromWebMcp(this.#calls, tool, input, signal),
-						),
+					m.mirror(
+						this.#registry,
+						context,
+						(tool, input, signal, by) =>
+							this.#load().then((lazy) =>
+								lazy.callFromWebMcp(this.#calls, tool, input, signal, by),
+							),
+						this,
+						app,
+						options,
+						// Passed, not imported there: a chunk shared with the core
+						// would cost the core more.
+						VERSION,
 					),
 				// Like a failed registration: warned, the relay unaffected.
 				(error: unknown) =>

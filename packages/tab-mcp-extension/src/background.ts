@@ -20,7 +20,12 @@ import {
 	WEBMCP_MAIN_SCRIPT,
 } from "./messages.ts";
 import { attachPanel } from "./panel-port.ts";
-import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
+import {
+	isContentEvent,
+	isHandshakeAsk,
+	isPanelSender,
+	PANEL_PORT,
+} from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 
@@ -169,12 +174,26 @@ chrome.tabs.onUpdated.addListener((_id, change, tab) => {
 chrome.windows.onFocusChanged.addListener(tabChanged);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
-// in an active tab. Commands come only over the side panel's port.
-chrome.runtime.onMessage.addListener((message: unknown, sender) => {
-	if (isContentEvent(message, sender, chrome.runtime.id) && sender.tab?.active)
-		tabChanged();
-	return false;
-});
+// in an active tab, or the page announced the client library and asks what
+// the extension tells such a page (DEC-207). Commands come only over the
+// side panel's port.
+chrome.runtime.onMessage.addListener(
+	(message: unknown, sender, sendResponse: (state: unknown) => void) => {
+		if (isHandshakeAsk(message, sender, chrome.runtime.id)) {
+			void ready().then(
+				(connection) => sendResponse(connection.handshakeState()),
+				() => sendResponse(undefined),
+			);
+			return true; // answers asynchronously
+		}
+		if (
+			isContentEvent(message, sender, chrome.runtime.id) &&
+			sender.tab?.active
+		)
+			tabChanged();
+		return false;
+	},
+);
 
 chrome.runtime.onConnect.addListener((port) => {
 	// The relay's pairing page (DEC-203): taken at once, its sender checked

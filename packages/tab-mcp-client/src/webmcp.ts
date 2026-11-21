@@ -5,10 +5,18 @@
  * `AbortController`, aborted when the tool leaves the registry. A chunk of
  * its own (DEC-171), loaded by a `TabMcp` whose constructor found native
  * WebMCP (`nativeContext` in the core); a call loads the connection chunk,
- * which checks, confirms and runs it.
+ * which checks, confirms and runs it. The handshake with the tab-mcp browser
+ * extension (`handshake.ts`, DEC-207) is here too: only a page that mirrors
+ * takes part.
  */
 
+import {
+	type HandshakePage,
+	joinHandshake,
+	type VouchedBy,
+} from "./handshake.ts";
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
+import type { BrowserExtension } from "./types.ts";
 
 /** What the library uses of the browser's `ModelContext`. */
 export interface ModelContext {
@@ -18,11 +26,15 @@ export interface ModelContext {
 	): unknown;
 }
 
-/** Runs a call of a mirrored tool; `signal` is the browser's, if it gives one. */
+/**
+ * Runs a call of a mirrored tool; `signal` is the browser's, if it gives
+ * one; `by`: the AI app the tab-mcp browser extension vouched for it.
+ */
 export type WebMcpCall = (
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
+	by: VouchedBy | undefined,
 ) => Promise<unknown>;
 
 /** The WebMCP hints; the MCP-only ones are left out. */
@@ -39,12 +51,45 @@ const HINTS = [
  * not marked consequential, where MCP's `destructiveHint` counts as
  * `consequentialHint` (DEC-143, DEC-165). Every failure of the native `registerTool()`
  * stays here: warned once per name, the tool still offered through the relay.
+ * The page joins the handshake with the tab-mcp browser extension: `mcp`
+ * is its `TabMcp`, `app` its app id, `options` its options
+ * (`trustExtension`), `version` the library's. The extension's state is `mcp.extension`, defined
+ * here on the instance (the core only declares it, for its bytes), and
+ * `extensionchange` is sent here.
  */
 export function mirror(
 	registry: ToolRegistry,
 	context: ModelContext,
 	call: WebMcpCall,
+	mcp: HandshakePage["mcp"],
+	app: string,
+	options: { trustExtension?: boolean },
+	version: string,
 ): void {
+	let state: BrowserExtension | undefined;
+	Object.defineProperty(mcp, "extension", {
+		get: () => state,
+		configurable: true,
+	});
+	let handshake: ReturnType<typeof joinHandshake>;
+	try {
+		handshake = joinHandshake({
+			version,
+			app,
+			registry,
+			trust: options.trustExtension !== false,
+			mcp,
+			set: (extension) => {
+				state = extension;
+				mcp.dispatchEvent(
+					new CustomEvent("extensionchange", { detail: { extension } }),
+				);
+			},
+		});
+	} catch (error) {
+		// The tools are mirrored all the same; their calls are asked.
+		console.warn("tab-mcp: no handshake with the browser extension:", error);
+	}
 	const mirrors = new Map<RegisteredTool, AbortController>();
 	const warned = new Set<string>();
 	const sync = (): void => {
@@ -82,8 +127,15 @@ export function mirror(
 								inputSchema: tool.inputSchema,
 								outputSchema: tool.outputSchema,
 								annotations: hints,
+								// The vouch is looked up as the call arrives: it was
+								// sent right before the extension made the call.
 								execute: (input: unknown, options?: { signal?: unknown }) =>
-									call(tool, input, options?.signal),
+									call(
+										tool,
+										input,
+										options?.signal,
+										handshake?.take(tool, input),
+									),
 							},
 							{ signal, exposedTo: tool.exposedTo },
 						),

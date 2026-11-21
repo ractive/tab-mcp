@@ -12,6 +12,7 @@ import {
 	type PageHistory,
 	type PageInfo,
 	type PageTools,
+	type Vouch,
 } from "./messages.ts";
 
 /**
@@ -293,13 +294,15 @@ export function callFailed(error: unknown): CallResult {
  * Call a page tool in tab `tabId` (only the content script already there: a
  * call does not inject it). The content script runs it only on the page it
  * was listed from (`target.documentId`), with the claim it was offered with.
- * Aborting `signal` cancels the call in the page.
+ * Aborting `signal` cancels the call in the page. `vouch`: the user allowed
+ * this call (the bridge's word, DEC-207).
  */
 export async function callInTab(
 	tabId: number,
 	target: { documentId: string; name: string; readOnly: boolean },
 	input: unknown,
 	signal: AbortSignal,
+	vouch?: Vouch,
 ): Promise<CallResult> {
 	const callId = crypto.randomUUID();
 	const cancel = () =>
@@ -313,6 +316,7 @@ export async function callInTab(
 			name: target.name,
 			readOnly: target.readOnly,
 			input,
+			...(vouch !== undefined ? { vouch } : {}),
 		})) as CallResult | undefined;
 		return (
 			response ?? {
