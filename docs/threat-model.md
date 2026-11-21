@@ -1,7 +1,7 @@
 # Threat model
 
 What tab-mcp protects, from whom, how, and what it cannot protect against. It describes
-relay `@ractive-ch/tab-mcp` 0.13.0-rc.1, browser library `@ractive-ch/tab-mcp-client` 0.19.0-rc.2
+relay `@ractive-ch/tab-mcp` 0.13.0, browser library `@ractive-ch/tab-mcp-client` 0.19.0
 and the tab-mcp browser extension 0.3.1 (in the Chrome Web Store, A13).
 To report a vulnerability,
 see [SECURITY.md](../SECURITY.md).
@@ -620,11 +620,11 @@ page (a tab assertion), the provider says who signed in at `/authorize` (an ID t
   app" dialog must be open when the provider sends the browser back, so a sign-in that
   comes back after the user closed the dialog pairs nobody. An open dialog counts for
   10 minutes after the user opened it (a code lasts 2): a sign-in that comes back later
-  pairs nobody either. With a client library after 0.19.0-rc.2 only the user starts the 10
+  pairs nobody either. With a client library after 0.19.0 only the user starts the 10
   minutes again, with Continue in the dialog or a click on Connect again; neither a
   timer nor a reconnect the library makes by itself does (DEC-202). So the window is
   the 10 minutes after the user last opened the dialog or continued, not the whole time
-  a forgotten dialog stays open. Pages with a library up to 0.19.0-rc.2 send `pairing.start`
+  a forgotten dialog stays open. Pages with a library up to 0.19.0 send `pairing.start`
   again after every reconnect (a relay restart, a network drop, a laptop waking up),
   and the relay cannot tell that from the user opening the dialog: for them each
   reconnect starts another 10 minutes, so a forgotten dialog stays pairable in windows
@@ -1001,7 +1001,7 @@ each default.
   opened their page's dialog (or chose Continue in it), while it is still open, pairs
   that AI app with their page, if the provider's single sign-on asks nothing. The
   pairing page names the AI app's verified host (A12). With a client library up to
-  0.19.0-rc.2 every reconnect of the page starts another 10 minutes, so a forgotten dialog
+  0.19.0 every reconnect of the page starts another 10 minutes, so a forgotten dialog
   stays pairable; the limit is complete only with a newer library (DEC-202).
 - On a page that pairs by code, the next user of the same browser profile gets the AI
   apps the previous one paired (A1).
