@@ -287,7 +287,13 @@ export function runPairingPage(options: {
 	page?: { document: Document; topLevel: boolean; pathname: string };
 }): boolean {
 	const flag = "__tabMcpPairingPage";
-	const scope = globalThis as Record<string, unknown>;
+	// A content script put in again runs in the same isolated world, so its
+	// global marks the document. The document a test gives carries the mark
+	// itself: two such pages in one test are independent.
+	const scope = (options.page?.document ?? globalThis) as unknown as Record<
+		string,
+		unknown
+	>;
 	if (scope[flag] === true) return false;
 	scope[flag] = true;
 	const page = options.page ?? {
@@ -453,6 +459,13 @@ export type FillFailure =
 	/** Allow, but no code came from the relay (`code` gave none). */
 	| "no-code";
 
+/** The page a fill is for: its tab and the AI app that asks there. */
+export interface FillContext {
+	tabId: number;
+	/** The AI app's own name (may be `""`) and the host the relay verified, as `ask` gets them. */
+	client: { name: string; host: string };
+}
+
 /** What `CodeFiller` needs from the extension: its parts of the fill-in. */
 export interface FillHost {
 	/** This extension's id (`chrome.runtime.id`): only its own content script speaks. */
@@ -483,16 +496,22 @@ export interface FillHost {
 		signal: AbortSignal,
 	): Promise<FillAnswer>;
 	/**
-	 * The code to fill in now, with pairing held on for the relay to check it
-	 * (`takeCode`); `undefined` if none came or `signal` aborted (the page
-	 * went, or the fill was withdrawn as a question is). Even with a code,
-	 * nothing is sent if what holds for asking no longer does.
+	 * The code to fill in now on the page `context`, with pairing held on for
+	 * the relay to check it (`takeCode`); `undefined` if none came or
+	 * `signal` aborted (the page went, or the fill was withdrawn as a
+	 * question is). Even with a code, nothing is sent if what holds for
+	 * asking no longer does.
 	 */
-	code(signal: AbortSignal): Promise<string | undefined>;
-	/** A filled-in code paired its AI app: pairing need not be held for it. */
+	code(signal: AbortSignal, context: FillContext): Promise<string | undefined>;
+	/**
+	 * No fill needs pairing held on any more: a filled-in code paired its AI
+	 * app, or a fill ended without sending its code (withdrawn, the page
+	 * went, no code) while no other fill is under way or waits for the
+	 * relay's check. It may come again with nothing held: ignore it then.
+	 */
 	release(): void;
-	/** A page filled in nothing for `why`, or was not asked about: say so. */
-	failed(why: FillFailure): void;
+	/** The page `context` filled in nothing for `why`, or was not asked about: say so. */
+	failed(why: FillFailure, context: FillContext): void;
 	/** The clock (`Date.now`; a test's own). */
 	now(): number;
 }
@@ -541,9 +560,10 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
  * relay's `request_id`) again soon after a fill, it is the relay's answer
  * that the code was not taken (it had just changed): filled once more with
  * the code of then, without asking; the time after, nothing. Any other
- * request asks. Don't allow, a timeout, the page going, AI access or the
- * setting going off, another relay or the AI app connecting meanwhile fill
- * nothing, and typing by hand works as before.
+ * request asks. With `retry: false` that page is asked about like any
+ * other: every fill has a yes of its own. Don't allow, a timeout, the page
+ * going, AI access or the setting going off, another relay or the AI app
+ * connecting meanwhile fill nothing, and typing by hand works as before.
  */
 export class CodeFiller {
 	readonly #host: FillHost;
@@ -561,20 +581,30 @@ export class CodeFiller {
 	 */
 	#grants: Set<string> | undefined;
 	readonly #closeAfterMs: number;
+	readonly #retry: boolean;
 
 	/**
 	 * `grants`: the ids of the grants there are already, if the extension kept
 	 * them between worker starts (not new when listed again); without them,
 	 * the first `grantsChanged` is taken as the list there is, nothing in it
-	 * new. `closeAfterMs`: FILLED_CLOSE_MS unless a test's is shorter.
+	 * new. `retry`: the one more fill without asking when the same request's
+	 * page comes back to the same tab soon after a fill (on unless `false`;
+	 * off, that page is asked about like any other, one question per page
+	 * load, and never filled without a yes). `closeAfterMs`: FILLED_CLOSE_MS
+	 * unless a test's is shorter.
 	 */
 	constructor(
 		host: FillHost,
-		options: { grants?: Iterable<string>; closeAfterMs?: number } = {},
+		options: {
+			grants?: Iterable<string>;
+			retry?: boolean;
+			closeAfterMs?: number;
+		} = {},
 	) {
 		this.#host = host;
 		this.#grants =
 			options.grants === undefined ? undefined : new Set(options.grants);
+		this.#retry = options.retry ?? true;
 		this.#closeAfterMs = options.closeAfterMs ?? FILLED_CLOSE_MS;
 	}
 
@@ -604,23 +634,29 @@ export class CodeFiller {
 		}
 		const hello = parseHello(await within(port.hello, HELLO_WAIT_MS));
 		// Only this extension's own app, only if the user turned filling in
-		// on, and only while AI access is on: otherwise they have not asked
-		// for it.
+		// on, only while AI access is on, and only while the relay is still
+		// the one the page is of (it may have changed during the wait for
+		// the hello): otherwise they have not asked for it.
 		if (
 			hello === undefined ||
 			hello.app !== host.app ||
 			port.signal.aborted ||
 			!host.enabled() ||
-			!host.aiOn()
+			!host.aiOn() ||
+			!isPairingSender(port.sender, host.extensionId, host.relayOrigin())
 		) {
 			port.close();
 			return;
 		}
+		const context: FillContext = {
+			tabId,
+			client: { name: hello.clientName, host: hello.clientHost },
+		};
 		const before = this.#lastFill(tabId);
-		if (before?.requestId === hello.requestId) {
+		if (this.#retry && before?.requestId === hello.requestId) {
 			// The same request's page again after a fill: the code was not
 			// taken. Once more with the code of now, then never again for it.
-			if (before.count === 1) await this.#fill(port, tabId, hello, 2);
+			if (before.count === 1) await this.#fill(port, context, hello, 2);
 			else port.close();
 			return;
 		}
@@ -632,34 +668,44 @@ export class CodeFiller {
 		const signal = AbortSignal.any([port.signal, waiting.withdraw.signal]);
 		let answer: FillAnswer;
 		try {
-			answer = await host.ask(
-				tabId,
-				{ name: hello.clientName, host: hello.clientHost },
-				signal,
-			);
+			answer = await host.ask(tabId, { ...context.client }, signal);
 		} finally {
 			this.#waiting.delete(waiting);
 		}
 		// Too many questions wait: not dropped unseen.
-		if (answer === "busy") host.failed("busy");
+		if (answer === "busy") host.failed("busy", context);
 		if (
 			answer !== "allow" ||
 			signal.aborted ||
 			!host.enabled() ||
-			!host.aiOn()
+			!host.aiOn() ||
+			!isPairingSender(port.sender, host.extensionId, host.relayOrigin())
 		) {
 			port.close();
 			return;
 		}
-		await this.#fill(port, tabId, hello, 1);
+		await this.#fill(port, context, hello, 1);
+	}
+
+	/**
+	 * Whether a fill is under way or was sent recently enough for the relay
+	 * to be checking its code (the tabs' last fills, the stale ones dropped).
+	 */
+	#anyFill(): boolean {
+		this.#dropStale();
+		return this.#filled.size > 0;
 	}
 
 	/** The last fill in `tabId`, if it is recent enough to be answered by this page. */
 	#lastFill(tabId: number): Filled | undefined {
+		this.#dropStale();
+		return this.#filled.get(tabId);
+	}
+
+	#dropStale(): void {
 		const now = this.#host.now();
 		for (const [id, filled] of this.#filled)
 			if (now - filled.at > RETRY_WINDOW_MS) this.#filled.delete(id);
-		return this.#filled.get(tabId);
 	}
 
 	/**
@@ -669,11 +715,12 @@ export class CodeFiller {
 	 */
 	async #fill(
 		port: PagePort,
-		tabId: number,
+		context: FillContext,
 		hello: PairingHello,
 		count: number,
 	): Promise<void> {
 		const host = this.#host;
+		const { tabId } = context;
 		const before = this.#filled.get(tabId);
 		// Marked before the wait: a page of the same request that comes
 		// meanwhile sees this count, so there is never a third fill.
@@ -695,7 +742,10 @@ export class CodeFiller {
 		// fill as it was; a withdrawal leaves nothing to fill once more.
 		let keepBefore = true;
 		try {
-			const code = await host.code(signal);
+			const code = await host.code(signal, {
+				tabId,
+				client: { ...context.client },
+			});
 			const off =
 				waiting.withdraw.signal.aborted ||
 				!host.enabled() ||
@@ -704,7 +754,7 @@ export class CodeFiller {
 			if (off) keepBefore = false;
 			if (off || port.signal.aborted) return;
 			if (code === undefined) {
-				host.failed("no-code");
+				host.failed("no-code", { tabId, client: { ...context.client } });
 				return;
 			}
 			mark.at = host.now();
@@ -720,6 +770,9 @@ export class CodeFiller {
 						this.#filled.set(tabId, before);
 					else this.#filled.delete(tabId);
 				}
+				// `code` may have held pairing on for this fill: with no other
+				// fill to hold it for, the host need not keep it on.
+				if (!this.#anyFill()) host.release();
 			}
 		}
 	}
@@ -750,7 +803,9 @@ export class CodeFiller {
 				this.#filled.delete(tabId);
 				done = true;
 			}
-		if (done) this.#host.release();
+		// Another AI app's fill may still be under way or wait for the relay's
+		// check: stopping pairing now would void its code.
+		if (done && !this.#anyFill()) this.#host.release();
 	}
 
 	/**
@@ -795,12 +850,17 @@ export function pairingCodes(
 /**
  * The code to fill in. The current one if it has `minLeftMs` left by this
  * clock (or an expiry that cannot be read); else the next one the relay
- * sends, which is fresh whatever the clocks say. If none comes within
- * `waitMs`, the current one after all: with this clock ahead every code
- * would look expired, and the relay refuses one that is, which the one
- * more fill for the same request covers. `undefined` only without any code,
- * or when `signal` aborts. Pairing must be on (`startPairing()`) for codes
- * to come.
+ * sends, which is fresh whatever the clocks say. The same code sent again
+ * is not the next one: the relay answers each `pairing.start` with the code
+ * it shows, so `startPairing()` with pairing on already brings back the
+ * code that is about to change; it counts only if its expiry now leaves
+ * `minLeftMs`. If no next one comes within `waitMs`, the current one after
+ * all: with this clock ahead every code would look expired, so the fill
+ * then waits the whole `waitMs` before it gets that code. The relay
+ * refuses a code that has expired; the one more fill for the same request
+ * covers that, or with `retry: false` a new question. `undefined` only
+ * without any code, or when `signal` aborts. Pairing must be on
+ * (`startPairing()`) for codes to come.
  */
 export function takeCode(
 	source: CodeSource,
@@ -808,11 +868,15 @@ export function takeCode(
 	options: { now: number; waitMs?: number; minLeftMs?: number },
 ): Promise<string | undefined> {
 	const { waitMs = CODE_WAIT_MS, minLeftMs = MIN_CODE_LEFT_MS } = options;
+	// `now` is the caller's clock; the time since is the real one's.
+	const started = Date.now();
+	const leaves = (code: PairingCode) =>
+		!(
+			Date.parse(code.expiresAt) - (options.now + Date.now() - started) <
+			minLeftMs
+		);
 	const current = source.current();
-	if (
-		current !== undefined &&
-		!(Date.parse(current.expiresAt) - options.now < minLeftMs)
-	)
+	if (current !== undefined && leaves(current))
 		return Promise.resolve(current.code);
 	if (signal.aborted) return Promise.resolve(undefined);
 	return new Promise((resolve) => {
@@ -823,8 +887,9 @@ export function takeCode(
 			resolve(code);
 		};
 		const stop = source.onChange(() => {
-			const code = source.current()?.code;
-			if (code !== undefined) done(code);
+			const next = source.current();
+			if (next !== undefined && (next.code !== current?.code || leaves(next)))
+				done(next.code);
 		});
 		const aborted = () => done(undefined);
 		const timer = setTimeout(() => done(source.current()?.code), waitMs);

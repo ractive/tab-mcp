@@ -4491,6 +4491,33 @@ extension is its first user. The shape below is the library's, not the owner's.
 - **Otherwise no change in behaviour** for the tab-mcp browser extension: its unit tests
   of the moved logic are the library's now (`test/extension.test.ts`), its tests of its
   wiring and its end-to-end tests of the fill-in in Chrome and Firefox pass unchanged.
+- **Found by Sitegloss on 0.19.0-rc.1** (2026-11-21), its first use outside this
+  repository; changed before 0.19.0:
+  - *`takeCode` took the same code sent again as the next one.* Since 0.19
+    `startPairing()` sends `pairing.start` at every call and the relay answers with the
+    code it shows, so "`startPairing()` before `takeCode`" (the README's pattern and the
+    tab-mcp browser extension's) filled in a code with under 5 s left whenever pairing
+    was on already. Now only a different code, or one whose expiry leaves `minLeftMs`,
+    is the next one.
+  - *The unasked second fill can be turned off* (`retry: false` on `CodeFiller`):
+    Sitegloss's audit decided that nothing is filled in without a yes. Off, the same
+    request's page back after a fill is asked about like any other page, one question
+    per page load; each Allow fills once. No loop runs without the user, as each fill
+    needs its own yes. The default stays DEC-203's (one more fill, never a third), and
+    the tab-mcp browser extension keeps it.
+  - *`code` and `failed` say which page*: a second argument `{ tabId, client }`, the
+    `client` that `ask` gets, so a host can name the AI app in "could not fill in"
+    without remembering the last yes.
+  - *The sender is checked again after the hello and after the answer*, so a relay
+    change during the wait for the hello (up to 5 s) shows no question; a code was never
+    sent then, as the check before sending caught it.
+  - *`release()` also when a fill ended without sending its code* and no other fill is
+    under way or waits for the relay's check: a host that held pairing on for the fill
+    can end the hold at once. The smallest change: the callback was there, and only the
+    filler knows whether another fill still needs pairing.
+  - *A test's page carries its own run mark* (`runPairingPage` with `page` marks that
+    document, not the global); a real content script still marks its isolated world's
+    global, once per document.
 
 ## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
 

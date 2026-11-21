@@ -33,7 +33,9 @@ alias. Search your code for the old names:
 
 What the method does is unchanged, and so is the protocol (`hello.revokeAll`,
 `grants.revokeAll`). A page's own texts under an old key are no longer used, as any
-unknown key.
+unknown key. The type check does not catch `addressChanged` where it is read behind a
+cast, as from a caught error (`(error as { addressChanged?: unknown })`): search for it
+by name.
 
 ### Added
 
@@ -91,13 +93,26 @@ unknown key.
   tab-mcp page itself, filling in its own pairing code on the relay's pairing page after
   asking its user, as the tab-mcp browser extension does (DEC-203). The content script's
   part (`runPairingPage`), the worker's rules as one state machine (`CodeFiller`: the
-  origin check, one question per page load, the one more fill for the same tab and
-  request, what withdraws a question), which code to fill in (`takeCode`,
-  `pairingCodes`), the relay's patterns and the messages. The extension supplies how its
-  user is asked, its setting, the permission prompt and the content script's
-  registration. An entry of its own, out of the core, with no `chrome` types; a content
-  script bundles less than 1 KB gzipped of it. See
-  [For browser extensions](README.md#for-browser-extensions).
+  origin check, also after the page's hello and after the answer, one question per page
+  load, the one more fill for the same tab and request, what withdraws a question),
+  which code to fill in (`takeCode`, `pairingCodes`), the relay's patterns and the
+  messages. The extension supplies how its user is asked, its setting, the permission
+  prompt and the content script's registration. An entry of its own, out of the core,
+  with no `chrome` types; a content script bundles less than 1 KB gzipped of it. See
+  [For browser extensions](README.md#for-browser-extensions). In detail:
+  - `new CodeFiller(host, { retry: false })` turns the one more fill off: the same
+    request's page back after a fill is asked about like any other page, so nothing is
+    filled in without a yes of its own. On by default.
+  - `takeCode` takes the same code sent again (the relay's answer to `startPairing()`
+    while pairing is on) as the next one only if its expiry now leaves `minLeftMs`, so
+    "`startPairing()` before `takeCode`" never fills in a code about to change.
+  - `code(signal, context)` and `failed(why, context)` get `context: FillContext`,
+    `{ tabId, client: { name, host } }`, the page's tab and AI app as `ask` gets them.
+  - `release()` is called when no fill needs pairing held any more: the AI app
+    connected, or a fill ended without sending its code (withdrawn, the page went, no
+    code) and no other fill is under way or waits for the relay's check.
+  - `runPairingPage` with a `page` (a test's) marks that page's document as run, not
+    the global: two pages in one test are independent.
 
 ### Changed
 

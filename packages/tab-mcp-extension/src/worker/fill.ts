@@ -8,7 +8,12 @@
  * here too.
  */
 
-import type { FillFailure } from "@ractive-ch/tab-mcp-client/extension";
+import type { TabMcp } from "@ractive-ch/tab-mcp-client";
+import {
+	type FillFailure,
+	pairingCodes,
+	takeCode,
+} from "@ractive-ch/tab-mcp-client/extension";
 import {
 	fillAccess,
 	PAIRING_SCRIPT,
@@ -30,6 +35,23 @@ export const BUSY =
 /** What the panel says when a pairing page filled in nothing. */
 export function failureText(why: FillFailure): string {
 	return why === "busy" ? BUSY : NO_CODE;
+}
+
+/**
+ * The code to fill in, with pairing on for it: pairing is started first (or
+ * again, which brings back the code shown), then `takeCode` picks the code,
+ * the next one if the one shown is about to change.
+ */
+export function codeWithPairingOn(
+	mcp: Pick<
+		TabMcp,
+		"startPairing" | "pairingCode" | "addEventListener" | "removeEventListener"
+	>,
+	signal: AbortSignal,
+	now: number = Date.now(),
+): Promise<string | undefined> {
+	mcp.startPairing();
+	return takeCode(pairingCodes(mcp), signal, { now });
 }
 
 /** The browser APIs the registration uses (the unit tests give their own). */
