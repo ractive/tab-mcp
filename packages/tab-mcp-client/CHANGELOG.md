@@ -6,6 +6,18 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Breaking
+
+- With `webmcp: true`, tools marked `consequentialHint` or `destructiveHint` are mirrored
+  into the browser's WebMCP too, unless their `callers` leave `"webmcp"` out (DEC-209).
+  They ask a WebMCP call as they ask an AI app's (a call the tab-mcp browser extension
+  vouched for was asked there). Until now they were left out unless `callers` listed
+  `"webmcp"`, and an agent that found no such tool used the page's own controls instead,
+  which ask nothing. To keep a tool from agents in the browser, as before, register it
+  with `callers: ["relay", "local"]`.
+
 ## [0.19.0][client-0.19.0] - 2026-11-21
 
 ### Breaking

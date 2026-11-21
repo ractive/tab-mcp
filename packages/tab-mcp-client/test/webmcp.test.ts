@@ -210,12 +210,15 @@ describe("off by default", () => {
 });
 
 describe("mirroring", () => {
-	test("tools that are not consequential, with the WebMCP fields and hints only", async () => {
+	test("every tool, a consequential one too (DEC-209), with the WebMCP fields and hints only", async () => {
 		const t = tab();
 		await t.registerTool(add);
 		await t.registerTool(wipe);
 		await settle();
-		expect([...native.tools.keys()]).toEqual(["add"]);
+		expect([...native.tools.keys()]).toEqual(["add", "wipe"]);
+		expect(native.tools.get("wipe")?.annotations).toEqual({
+			consequentialHint: true,
+		});
 		const mirrored = native.tools.get("add") as NativeTool;
 		expect({ ...mirrored, execute: typeof mirrored.execute }).toEqual({
 			name: "add",
@@ -237,10 +240,14 @@ describe("mirroring", () => {
 		expect(t.tools).toEqual(["add", "wipe"]);
 	});
 
-	test("a consequential tool whose callers list webmcp; a tool whose callers do not, never", async () => {
+	test("a tool whose callers list webmcp; one whose callers do not, never, consequential or not", async () => {
 		const t = tab();
 		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		await t.registerTool({ ...add, name: "hidden" }, { callers: ["relay"] });
+		await t.registerTool(
+			{ ...wipe, name: "kept" },
+			{ callers: ["relay", "local"] },
+		);
 		await settle();
 		expect([...native.tools.keys()]).toEqual(["wipe"]);
 	});
@@ -352,7 +359,7 @@ describe("mirroring", () => {
 		expect(native.options[1]?.exposedTo).toBeUndefined();
 	});
 
-	test("destructiveHint counts as consequentialHint: left out by default, consequential when mirrored (WM 5)", async () => {
+	test("destructiveHint counts as consequentialHint: mirrored as consequential (WM 5)", async () => {
 		const t = tab();
 		const remove = {
 			name: "remove",
@@ -372,9 +379,13 @@ describe("mirroring", () => {
 		});
 		await settle();
 		expect([...native.tools.keys()]).toEqual([
+			"remove",
 			"removeAnyway",
 			"notConsequential",
 		]);
+		expect(native.tools.get("remove")?.annotations).toEqual({
+			consequentialHint: true,
+		});
 		expect(native.tools.get("removeAnyway")?.annotations).toEqual({
 			consequentialHint: true,
 		});
@@ -615,6 +626,22 @@ describe("calls", () => {
 			error: "The input must be an object.",
 		});
 		expect(events.start).toEqual([]);
+	});
+
+	test("a consequential tool mirrored by default asks a WebMCP call (DEC-209)", async () => {
+		const asked: ConfirmRequest[] = [];
+		const t = tab({
+			onConfirm: (request) => {
+				asked.push(request);
+				return false;
+			},
+		});
+		await t.registerTool(wipe);
+		await settle();
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not allow wipe to run.",
+		});
+		expect(asked.map((r) => r.client)).toEqual([{ kind: "webmcp" }]);
 	});
 
 	test("a consequential tool asks onConfirm, which learns the caller; Don't allow resolves with an error", async () => {
