@@ -93,7 +93,7 @@ is DEC-208; the glossary is [`kb/design/wording.md`](/design/wording.md).
 
 ## Results
 
-- `bun run verify` exits 0: 1773 tests pass, 1 skipped (1774 in 82 files).
+- `bun run verify` exits 0: 1773 tests pass, 1 skipped, on the handshake branch; 1786 pass, 1 skipped, after merging main (with the review of pull request 180).
 - The client's core is 6268 B gzipped of its 6400 B limit (6260 B before); the React entry
   2.9 KB of 3 KB.
 
