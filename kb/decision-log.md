@@ -4767,3 +4767,64 @@ button it read like an action that fills in the code now.
   not turn it on; the panel sends another "off", so the site granted late goes back.
 - **No pattern for the relay's address:** the sentence alone, no switch; the switch only
   while the setting is somehow on there, to turn it off.
+
+## DEC-212: "Always allow" for the sign-in question of the code fill-in, per verified host (owner)
+
+2026-11-21; amends DEC-203's "No 'Always allow': each pairing page asks". The owner:
+with "Fill in the code for me" on, every sign-in page still needs a click on Allow; that
+click should go where it is safe, and the address stays the one fixed address per app
+(DEC-196), so nothing per person can go into it.
+
+- **Why DEC-203 said no.** (1) A drive-by site could open the sign-in page and get the
+  code filled in. (2) Someone with their own account at the same AI app could start a
+  sign-in and get the user to open its link: the verified host would be the same
+  (claude.ai), and the access would land in the other person's account.
+- **What changed.** The owner tested (2) against Claude on 2026-11-21: a sign-in started
+  in one Claude account (from Claude Desktop), whose link (Claude's own start page, then
+  the relay's sign-in page) was opened in a browser signed in to another Claude account,
+  ended at claude.ai with "Account mismatch" both times. Claude ties a sign-in to the
+  account of the browser that started it, at the start and on the return. (1) does not
+  apply to a host the user chose: a sign-in page whose verified host is claude.ai can
+  only send its result to claude.ai. Not tested: a sign-in started on claude.ai in the
+  browser (expected to end at the same check), and any other AI app.
+- **What the safety rests on:** the AI app's own check that a sign-in belongs to the
+  browser's account. The extension cannot see whether an AI app makes it; the user opts
+  in per host after a first question, and the threat model lists the rest as a residual
+  risk.
+- **The question** gets a third answer where offered: "Don't allow", "Allow once",
+  "Always allow" (the tool question's labels and order, DEC-208), with one sentence:
+  "Always allow: from now on tab-mcp fills in the code for <host> without asking, until
+  you remove it under “Fill in the code for me”." Its notification offers "Allow once"
+  only, as a tool's does; a click on it opens the panel, where "Always allow" is. Where
+  it is not offered, the question is as before ("Don't allow", "Allow"; notification
+  "Allow").
+- **Only for a public DNS name.** The pairing form's hooks (version 1) carry the host but
+  not how the relay verified it, so the extension decides by its shape and the hooks
+  stay unchanged: not an IP address, not `localhost`, not a single label, not a
+  special-use or test name (`.localhost`, `.local`, `.internal`, `.test`, `.example`,
+  `.invalid`, `.home.arpa`, `.onion`, `.alt`). The relay's host is the client id's,
+  fetched over https from a public address (`PUBLIC_HTTPS`); a port appears only with a
+  test relay and does not change the name. `alwaysAllowable` in `src/fill.ts`.
+- **Remembered per host and relay**, with the setting (`fillCodeAlways` in the worker's
+  IndexedDB, never synced), and forgotten when the switch goes off (by the user, or
+  because the relay's site was taken away) and when the relay changes. Under the switch
+  the panel lists them ("Filled in without asking for:"), each with Remove; removed, its
+  next sign-in page asks again.
+- **Everything else the filler checks stays** (AI access on, the setting on, the site
+  granted, the sender, one question per page load, the one more fill of the same
+  request, the checks again before sending): the extension's `ask` answers `allow` at
+  once for a remembered host, so the library (`CodeFiller`) is unchanged.
+- **Never silent.** Each fill without a question shows a notification ("Code filled in",
+  "Filled in the code for <name> (<host>).") and the same line in the panel for 10
+  minutes; nothing to answer. If the notification cannot be shown, the fill still
+  happens and the line stays.
+- **The brake.** At most 3 fills without a question per host in 10 minutes (kept in
+  storage, so a worker restart does not reset it); beyond that the question is asked
+  again with all three answers, where "Always allow" changes nothing. A page that loops
+  through sign-in requests cannot burn codes unseen.
+- **Unchanged:** the client library, which leaves how to ask to the extension (its
+  README now says what an `ask` that answers without the user needs), and Sitegloss,
+  which keeps "nothing is filled in without a yes".
+- **Tests:** the relay's test mode gets `cimdLookup` (a client id host resolved without
+  DNS), so the end-to-end tests have an AI app under a public-looking name; not in a
+  production relay (`createTestRelay` needs `development: true`).

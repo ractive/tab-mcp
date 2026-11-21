@@ -55,9 +55,12 @@ export const CLOSE_NOTE = "Closing this is Don't allow";
 
 /**
  * The button of a pairing question's notification (DEC-203): Allow, not
- * "Allow once", as there is nothing to allow for longer.
+ * "Allow once", where there is nothing to allow for longer. Where "Always
+ * allow" is offered (DEC-212), "Allow once", as for a tool: "Always allow"
+ * is in the panel, which a click on the notification's body opens.
  */
 export const PAIRING_BUTTONS = ["Allow"] as const;
+export const PAIRING_ALWAYS_BUTTONS = NOTIFICATION_BUTTONS;
 
 /** All pairing questions share one cap, as one AI app's do. */
 const PAIRING_KEY = "pairing";
@@ -133,11 +136,11 @@ function pairingText(view: QuestionView): NotificationText {
 	return {
 		title: "Connect an AI app?",
 		message: cut(
-			`Connect ${view.app} to the ${PRODUCT}? Allow fills in the code on the sign-in page.`,
+			`Connect ${view.app} to the ${PRODUCT}? ${view.site ? "Allow once" : "Allow"} fills in the code on the sign-in page.`,
 			300,
 		),
 		contextMessage: `AI app at ${view.host} · ${CLOSE_NOTE}`,
-		buttons: [...PAIRING_BUTTONS],
+		buttons: view.site ? [...PAIRING_ALWAYS_BUTTONS] : [...PAIRING_BUTTONS],
 	};
 }
 
@@ -285,13 +288,15 @@ export class Questions {
 	/**
 	 * Ask whether to fill in the extension's code on the relay's pairing page
 	 * in tab `tabId`, for the AI app `client` (DEC-203): its own name for
-	 * itself, and the host the relay verified. Allow or Don't allow, never
-	 * for good; `signal` withdraws it (the page went, or the app connected).
+	 * itself, and the host the relay verified. Allow or Don't allow, and
+	 * "Always allow" (answer `site`) where `always` (DEC-212); `signal`
+	 * withdraws it (the page went, or the app connected).
 	 */
 	askPairing(
 		where: { tabId: number },
 		client: { name: string; host: string },
 		signal: AbortSignal,
+		always = false,
 	): Promise<Answer | "timeout" | "busy"> {
 		const name = visible(client.name);
 		const host = visible(client.host);
@@ -302,7 +307,7 @@ export class Questions {
 			tool: "",
 			pairing: { name },
 			args: "",
-			site: false,
+			site: always,
 			expiresAt: this.#host.now() + this.#timeoutMs,
 		};
 		return this.#open(view, {

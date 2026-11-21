@@ -17,6 +17,8 @@ import {
 } from "@ractive-ch/tab-mcp-client";
 import {
 	CodeFiller,
+	type FillAnswer,
+	type FillContext,
 	type FillHost,
 	type PagePort,
 	relayPageOrigin,
@@ -28,7 +30,7 @@ import {
 	PANEL,
 	PRODUCT,
 } from "../browser.ts";
-import { fillAccess } from "../fill.ts";
+import { alwaysAllowable, fillAccess } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
 import type { ContentRequest, ExtensionState } from "../messages.ts";
 import {
@@ -66,9 +68,13 @@ import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import {
 	codeWithPairingOn,
+	FILLED_PREFIX,
 	FillSetting,
 	failureText,
+	filledNotification,
+	filledText,
 	HOLD_MS,
+	NOTICE_MS,
 	syncPairingScript,
 } from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
@@ -181,6 +187,10 @@ export class Connection {
 	readonly #fill: FillSetting;
 	/** The panel's last "set-fill" the worker has handled, by its id. */
 	#fillAnswered: string | undefined;
+	/** Tabs whose pairing page was let through without a question, by host. */
+	readonly #unasked = new Map<number, string>();
+	/** The last fill without a question (DEC-212), for the panel's line. */
+	#fillNotice: { text: string; at: number } | undefined;
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -727,6 +737,11 @@ export class Connection {
 			case "set-fill":
 				await this.#setFill(command.on, command.id);
 				return;
+			case "forget-fill-host":
+				// Its next sign-in page asks again (DEC-212).
+				await this.#fill.forget(this.#relay, command.host);
+				this.#changed();
+				return;
 		}
 	}
 
@@ -858,9 +873,79 @@ export class Connection {
 	 * The code to fill in, with pairing held on for it; the library releases
 	 * the hold (`release`) once its code paired, or once no fill needs it.
 	 */
-	#fillCode(signal: AbortSignal): Promise<string | undefined> {
+	async #fillCode(
+		signal: AbortSignal,
+		context: FillContext,
+	): Promise<string | undefined> {
 		this.#holdPairing();
-		return codeWithPairingOn(this.#mcp, signal);
+		const code = await codeWithPairingOn(this.#mcp, signal);
+		// A page let through without a question: the user is told, never
+		// silent (DEC-212). The library sends the code right after this,
+		// unless what holds for asking no longer does.
+		const unasked = this.#unasked.get(context.tabId);
+		if (code !== undefined && unasked === context.client.host) {
+			this.#unasked.delete(context.tabId);
+			this.#filledWithoutAsking(context.client);
+		}
+		return code;
+	}
+
+	/**
+	 * Ask about the pairing page in tab `tabId` (DEC-203), unless the user
+	 * chose "Always allow" for the AI app's host and the brake lets it
+	 * through (DEC-212). "Always allow" is offered only for a host that
+	 * qualifies (`alwaysAllowable`).
+	 */
+	async #askPairing(
+		tabId: number,
+		client: { name: string; host: string },
+		signal: AbortSignal,
+	): Promise<FillAnswer> {
+		const relay = this.#relay;
+		// A mark of an earlier page in the tab whose code never came.
+		this.#unasked.delete(tabId);
+		if (await this.#fill.takeUnasked(relay, client.host, Date.now())) {
+			this.#unasked.set(tabId, client.host);
+			return "allow";
+		}
+		const always = alwaysAllowable(client.host);
+		const answer = await this.#questions.askPairing(
+			{ tabId },
+			client,
+			signal,
+			always,
+		);
+		if (answer !== "site") return answer;
+		// "Always allow": this page now, and the host from now on.
+		if (
+			this.#relay === relay &&
+			(await this.#fill.allowAlways(relay, client.host))
+		)
+			this.#changed();
+		return "allow";
+	}
+
+	/** The panel's line and a notification for a fill without a question. */
+	#filledWithoutAsking(client: { name: string; host: string }): void {
+		this.#fillNotice = { text: filledText(client), at: Date.now() };
+		this.#changed();
+		const text = filledNotification(client);
+		chrome.notifications
+			.create(
+				`${FILLED_PREFIX}${crypto.randomUUID()}`,
+				notificationOptions({
+					type: "basic",
+					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+					title: text.title,
+					message: text.message,
+					contextMessage: text.contextMessage,
+					priority: 0,
+				}),
+			)
+			.catch((error: unknown) =>
+				// Notifications off: the panel's line stays.
+				console.warn("tab-mcp: notification", error),
+			);
 	}
 
 	/** The extension's parts of the library's fill-in (DEC-206). */
@@ -871,12 +956,8 @@ export class Connection {
 			relayOrigin: () => relayPageOrigin(this.#relay),
 			aiOn: () => this.#status() !== "off",
 			enabled: () => this.#fillOn(),
-			ask: (tabId, client, signal) =>
-				this.#questions
-					.askPairing({ tabId }, client, signal)
-					// "On <site>" is never offered for a pairing page.
-					.then((answer) => (answer === "site" ? "deny" : answer)),
-			code: (signal) => this.#fillCode(signal),
+			ask: (tabId, client, signal) => this.#askPairing(tabId, client, signal),
+			code: (signal, context) => this.#fillCode(signal, context),
 			release: () => this.#releasePairing(),
 			failed: (why) => {
 				this.#problem = failureText(why);
@@ -1046,6 +1127,11 @@ export class Connection {
 			allSites: this.#allSites,
 			fillCode: this.#fillOn(),
 			fillLost: this.#fill.lost(this.#relay),
+			fillAlways: this.#fill.alwaysHosts(this.#relay),
+			...(this.#fillNotice !== undefined &&
+			Date.now() - this.#fillNotice.at < NOTICE_MS
+				? { fillNotice: this.#fillNotice }
+				: {}),
 			...(this.#fillAnswered !== undefined
 				? { fillAnswered: this.#fillAnswered }
 				: {}),

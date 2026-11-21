@@ -1514,7 +1514,11 @@ counts as new.
   never by what the page says: give `relayOrigin()` the configured relay's origin,
   exactly, and show the verified host in the question.
 - **The user's Allow.** A code leaves the worker only after a yes to a question that
-  names the AI app's verified host, and never "always allow": each pairing page asks.
+  names the AI app's verified host. How to ask is the extension's (`ask`): an `ask`
+  that answers `allow` without asking the user ("always allow" for a host) is only
+  safe for a public DNS name the relay verified, at an AI app that ties each sign-in
+  to the account of the browser that started it, with a limit on such fills and a
+  notice for each; the library enforces none of this.
   The one exception is the one more fill for the same tab and the same relay request
   (next point), which follows that request's yes without a new question;
   `retry: false` turns it off, and then no code leaves without a yes of its own. A

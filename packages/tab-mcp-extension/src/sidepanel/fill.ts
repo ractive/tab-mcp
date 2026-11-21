@@ -69,6 +69,38 @@ export interface FillElements {
 	/** The switch's label, and the switch in it. */
 	label: HTMLElement;
 	toggle: HTMLInputElement;
+	/** "Filled in without asking for:" and its list (DEC-212). */
+	always: HTMLElement;
+	alwaysList: HTMLElement;
+}
+
+/** The line over the hosts filled in for without a question (DEC-212). */
+export const ALWAYS_HEADING = "Filled in without asking for:";
+
+/**
+ * The list of hosts filled in for without a question, each with a button
+ * that removes it: its next sign-in page asks again.
+ */
+export function alwaysItems(
+	document: Document,
+	hosts: readonly string[],
+	forget: (host: string) => void,
+): HTMLElement[] {
+	return hosts.map((host) => {
+		const item = document.createElement("li");
+		const name = document.createElement("span");
+		name.className = "always-host";
+		name.textContent = host;
+		const remove = document.createElement("button");
+		remove.type = "button";
+		remove.className = "quiet small";
+		remove.textContent = "Remove";
+		remove.dataset["host"] = host;
+		remove.setAttribute("aria-label", `Remove ${host}: ask again`);
+		remove.addEventListener("click", () => forget(host));
+		item.append(name, remove);
+		return item;
+	});
 }
 
 /** The browser's permissions, as the panel uses them (the tests give their own). */
@@ -91,8 +123,25 @@ export function fillPanel(
 	elements: FillElements,
 	setFill: (on: boolean, id: string) => void,
 	problem: (text: string) => void,
+	forget: (host: string) => void,
 	permissions: FillPermissions = chrome.permissions,
 ): { show(state: PanelState): void } {
+	let alwaysShown = "[]";
+	const showAlways = (hosts: readonly string[]) => {
+		const json = JSON.stringify(hosts);
+		if (json === alwaysShown) return;
+		alwaysShown = json;
+		elements.always.hidden = hosts.length === 0;
+		// A keyboard user's focus moves to the next Remove, not to the body.
+		const focused = elements.alwaysList.contains(
+			elements.alwaysList.ownerDocument.activeElement,
+		);
+		elements.alwaysList.replaceChildren(
+			...alwaysItems(elements.alwaysList.ownerDocument, hosts, forget),
+		);
+		if (focused)
+			(elements.alwaysList.querySelector("button") ?? elements.toggle).focus();
+	};
 	let relay: string | undefined;
 	let on = false;
 	let lost = false;
@@ -179,6 +228,7 @@ export function fillPanel(
 	permissions.onRemoved.addListener(() => void check());
 	return {
 		show(state) {
+			showAlways(state.fillAlways ?? []);
 			const fill = state.fillCode === true;
 			const gone = state.fillLost === true;
 			// The worker answered the click, or another relay is used.

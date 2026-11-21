@@ -877,6 +877,15 @@ button.copy {
 	gap: var(--s2);
 }
 
+/* The hosts filled in for without a question: rows as the connected AI apps. */
+.fill-always {
+	align-self: stretch;
+}
+
+.fill-always p {
+	margin: 0 0 var(--s1);
+}
+
 /* Host access: what it is, then its button. */
 .host-access {
 	display: flex;

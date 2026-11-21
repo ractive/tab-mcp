@@ -479,6 +479,20 @@ did, by connecting the extension.
   back and forth with whoever has the secret; the panel shows the notice until
   the user connects (taking its place back) or clicks "Disconnect all apps", which first
   takes the old address id back and revokes its grants while connected.
+- **Filling in the code on the sign-in page (DEC-203, DEC-210, DEC-212).** Off by
+  default; on, the extension fills in its code only on the configured relay's exact
+  origin, for its own app, and only after the user's yes to a question that names the
+  AI app's verified host (the client id's host). Two attacks kept "Always allow" out at
+  first: a drive-by site that opens the sign-in page, and someone with their own account
+  at the same AI app who starts a sign-in and gets the user to open its link (same
+  verified host, access in the other person's account). The first does not apply to a
+  host the user chose: a sign-in whose verified host is the AI app's can only send its
+  result there. The second rests on the AI app: Claude ties a sign-in to the account of
+  the browser that started it (the owner's test, 2026-11-21, "Account mismatch" both
+  times). So "Always allow" is offered only for a public DNS name, remembered per host
+  and relay, at most 3 fills without a question per host in 10 minutes, each told in a
+  notification and the panel, and forgotten when the switch goes off or the relay
+  changes.
 
 ### Identity binding
 
@@ -589,6 +603,13 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
 - The AI app's model can be steered by content (prompt injection) into calling tools the
   user did not intend; page-side confirmation covers consequential tools only.
 - Client-declared names are self-asserted; only hosts are verified.
+- "Always allow" for the code fill-in (DEC-212) is only as safe as the AI app's own check
+  that a sign-in belongs to the account of the browser that started it. A user who
+  chooses it for the host of an AI app that does not check lets anyone with an account
+  there, who gets the user to open their sign-in link, connect their account to the
+  user's tab, up to 3 times in 10 minutes, each with a notice. The extension cannot see
+  whether an AI app checks; only Claude was tested, and only a sign-in started in Claude
+  Desktop (2026-11-21).
 - With the browser extension, a page's tool metadata and results reach the AI app as the
   page wrote them (cut, prefixed, marked); a read-only claim is the page's (A13).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay

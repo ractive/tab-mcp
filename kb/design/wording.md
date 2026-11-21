@@ -4,7 +4,7 @@ title: "Wording: one term for one thing"
 description: >-
   The glossary every text a person or an AI app reads follows, in the client library's
   dialogs, the tab-mcp browser extension and the relay's pages and messages: the term for
-  each of 30 concepts, the differences that keep two terms on purpose, the texts an AI
+  each of 31 concepts, the differences that keep two terms on purpose, the texts an AI
   app reads, and how the library writes plural forms and lists (Intl, English only in the
   package). Check new texts against it.
 tags:
@@ -77,6 +77,7 @@ the decision; this file is the reference for new texts.
 | 28 | An AI app's access ended by the user (AI-facing) | **disconnected** ("This AI app was disconnected from the page.") |
 | 29 | A question that ran out | "Not answered in time" |
 | 30 | The extension's setting that fills in its code on the sign-in page | switch **Fill in the code for me** (DEC-210); the line under it: "While this is on, tab-mcp asks you and fills in the code when an AI app opens the sign-in page of <host> …" |
+| 31 | Filling in the code for an AI app's host without asking from now on | label **Always allow** beside "Don't allow" and "Allow once" (DEC-212); the hosts listed under "Filled in without asking for:", each with **Remove**; after each such fill: "Filled in the code for <name> (<host>)." |
 
 ## Differences that stay
 
@@ -120,6 +121,6 @@ asked: "The call was cancelled." Straight quotes are fine in these texts.
 
 # Citations
 
-- [Decision log](/decision-log.md), DEC-184, DEC-193, DEC-200, DEC-201, DEC-208, DEC-210
+- [Decision log](/decision-log.md), DEC-184, DEC-193, DEC-200, DEC-201, DEC-208, DEC-210, DEC-212
 - [Iteration 49](/iterations/iteration-49-texts.md)
 - [The tab-mcp browser extension: the look](/design/extension-look.md)

@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { PairingCode } from "@ractive-ch/tab-mcp-client";
 import { Window } from "happy-dom";
-import { fillAccess, pairingMatches } from "../src/fill.ts";
+import { alwaysAllowable, fillAccess, pairingMatches } from "../src/fill.ts";
 import {
 	type Answer,
 	type PanelState,
@@ -25,6 +25,7 @@ import {
 } from "../src/sidepanel/fill.ts";
 import {
 	expiredText,
+	pairingAlwaysNote,
 	questionAnnouncement,
 	questionCard,
 } from "../src/sidepanel/question.ts";
@@ -34,15 +35,20 @@ import {
 	codeWithPairingOn,
 	FillSetting,
 	failureText,
+	filledNotification,
+	filledText,
 	HOLD_MS,
+	MAX_UNASKED,
 	NO_CODE,
 	type ScriptApi,
 	syncPairingScript,
+	UNASKED_WINDOW_MS,
 } from "../src/worker/fill.ts";
 import { memoryKv } from "../src/worker/kv.ts";
 import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
+	notificationText,
 	Questions,
 	type QuestionsHost,
 } from "../src/worker/questions.ts";
@@ -347,17 +353,26 @@ function panel(granted: boolean) {
 	const window = new Window();
 	windows.push(window);
 	const document = window.document as unknown as Document;
-	document.body.innerHTML = `<div id="fill" hidden><label id="fill-label" hidden><input id="fill-switch" type="checkbox" role="switch" aria-checked="false"><span>Fill in the code for me</span></label><p id="fill-text"></p></div>`;
+	document.body.innerHTML = `<div id="fill" hidden><label id="fill-label" hidden><input id="fill-switch" type="checkbox" role="switch" aria-checked="false"><span>Fill in the code for me</span></label><p id="fill-text"></p><div id="fill-always" hidden><ul id="fill-always-list"></ul></div></div>`;
 	const $ = (id: string) => document.getElementById(id) as HTMLElement;
 	const toggle = $("fill-switch") as HTMLInputElement;
 	const permissions = panelPermissions();
 	permissions.granted = granted;
 	const sent: { on: boolean; id: string }[] = [];
 	const problems: string[] = [];
+	const forgotten: string[] = [];
 	const fill = fillPanel(
-		{ box: $("fill"), text: $("fill-text"), label: $("fill-label"), toggle },
+		{
+			box: $("fill"),
+			text: $("fill-text"),
+			label: $("fill-label"),
+			toggle,
+			always: $("fill-always"),
+			alwaysList: $("fill-always-list"),
+		},
 		(on, id) => sent.push({ on, id }),
 		(text) => problems.push(text),
+		(host) => forgotten.push(host),
 		permissions as unknown as FillPermissions,
 	);
 	const state = (
@@ -379,7 +394,22 @@ function panel(granted: boolean) {
 		permissions,
 		sent,
 		problems,
+		forgotten,
 		state,
+		/** The remembered hosts as listed, and whether the list shows. */
+		always: () => ({
+			shown: !$("fill-always").hidden,
+			hosts: [...$("fill-always-list").querySelectorAll(".always-host")].map(
+				(e) => e.textContent,
+			),
+		}),
+		/** Click the Remove of `host`. */
+		remove: (host: string) =>
+			(
+				$("fill-always-list").querySelector(
+					`button[data-host="${host}"]`,
+				) as HTMLButtonElement
+			).click(),
 		/** The worker's answer to the `n`th command sent. */
 		answer: (n: number) => ({ fillAnswered: sent[n]?.id ?? "" }),
 		/** A real click: the box toggles, then the handler runs. */
@@ -667,5 +697,260 @@ describe("the pairing page's script", () => {
 		granted.clear();
 		await syncPairingScript("https://other.example", true, api);
 		expect(api.registered.size).toBe(0);
+	});
+});
+
+describe("Always allow for the sign-in question (DEC-212)", () => {
+	test("only a public DNS name qualifies", () => {
+		for (const host of [
+			"claude.ai",
+			"chatgpt.com",
+			"Claude.AI",
+			"app.example.com",
+			"ai.fill-test.dev:8443",
+			"xn--bcher-kva.ch",
+		])
+			expect(alwaysAllowable(host), host).toBe(true);
+		for (const host of [
+			"",
+			"localhost",
+			"localhost:3000",
+			"app.localhost",
+			"printer.local",
+			"corp.internal",
+			"ai.test",
+			"example",
+			"ai.example",
+			"x.invalid",
+			"nas.home.arpa",
+			"abc.onion",
+			"a.alt",
+			"intranet",
+			"127.0.0.1",
+			"127.0.0.1:8787",
+			"8.8.8.8",
+			"[::1]",
+			"[::1]:8787",
+			"[2001:db8::1]",
+			"-bad.com",
+			"bad-.com",
+			"a..com",
+			"a b.com",
+			"claude.ai/path",
+			"user@claude.ai",
+			`${"a".repeat(64)}.com`,
+		])
+			expect(alwaysAllowable(host), host).toBe(false);
+	});
+
+	const site = fillAccess(RELAY)?.origins?.[0] ?? "";
+	const setup = async (initial: Record<string, unknown> = {}) => {
+		const kv = memoryKv(initial);
+		const sites = new Set<string>([site]);
+		const contains: Contains = async (p) =>
+			(p.origins ?? []).every((o) => sites.has(o));
+		const load = () => FillSetting.load(kv, contains);
+		const fill = await load();
+		await fill.turnOn(RELAY);
+		return { kv, sites, load, fill };
+	};
+
+	test("remembered only while on and for a host that qualifies; listed; removed", async () => {
+		const off = await FillSetting.load(memoryKv(), async () => true);
+		expect(await off.allowAlways(RELAY, "claude.ai")).toBe(false);
+		const { fill, load } = await setup();
+		expect(await fill.allowAlways(RELAY, "localhost:3000")).toBe(false);
+		expect(await fill.allowAlways("https://other.example", "claude.ai")).toBe(
+			false,
+		);
+		expect(await fill.allowAlways(RELAY, "claude.ai")).toBe(true);
+		expect(await fill.allowAlways(RELAY, "chatgpt.com")).toBe(true);
+		// Again: nothing changes.
+		expect(await fill.allowAlways(RELAY, "claude.ai")).toBe(true);
+		expect(fill.alwaysHosts(RELAY)).toEqual(["claude.ai", "chatgpt.com"]);
+		expect(fill.alwaysHosts("https://other.example")).toEqual([]);
+		// Kept for the next worker.
+		expect((await load()).alwaysHosts(RELAY)).toEqual([
+			"claude.ai",
+			"chatgpt.com",
+		]);
+		await fill.forget(RELAY, "claude.ai");
+		expect(fill.alwaysHosts(RELAY)).toEqual(["chatgpt.com"]);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", 0)).toBe(false);
+		expect((await load()).alwaysHosts(RELAY)).toEqual(["chatgpt.com"]);
+	});
+
+	test("forgotten when the switch goes off, the site is taken away, or the relay changes", async () => {
+		let s = await setup();
+		await s.fill.allowAlways(RELAY, "claude.ai");
+		await s.fill.turnOff();
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(s.kv.data.has("fillCodeAlways")).toBe(false);
+		await s.fill.turnOn(RELAY);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+
+		s = await setup();
+		await s.fill.allowAlways(RELAY, "claude.ai");
+		s.sites.delete(site);
+		expect(await s.fill.check(RELAY)).toBe(true);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(s.kv.data.has("fillCodeAlways")).toBe(false);
+		// The site back: still nothing remembered.
+		s.sites.add(site);
+		expect(await s.fill.turnOn(RELAY)).toBe(true);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+
+		s = await setup();
+		await s.fill.allowAlways(RELAY, "claude.ai");
+		expect(await s.fill.reset()).toBe(RELAY);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(s.kv.data.has("fillCodeAlways")).toBe(false);
+
+		// A stored list of another relay than the setting's is not used.
+		const stray = await FillSetting.load(
+			memoryKv({
+				fillCodeFor: RELAY,
+				fillCodeAlways: {
+					relay: "https://other.example",
+					hosts: ["claude.ai"],
+					unasked: {},
+				},
+			}),
+			async () => true,
+		);
+		expect(stray.alwaysHosts(RELAY)).toEqual([]);
+		expect(await stray.takeUnasked(RELAY, "claude.ai", 0)).toBe(false);
+	});
+
+	test("the brake: at most 3 fills without a question per host in 10 minutes", async () => {
+		const { fill, load } = await setup();
+		await fill.allowAlways(RELAY, "claude.ai");
+		await fill.allowAlways(RELAY, "chatgpt.com");
+		const t = 1_000_000;
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t)).toBe(true);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 1_000)).toBe(true);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 2_000)).toBe(true);
+		// The fourth asks; a refused one does not count.
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 3_000)).toBe(false);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 4_000)).toBe(false);
+		// Per host.
+		expect(await fill.takeUnasked(RELAY, "chatgpt.com", t + 4_000)).toBe(true);
+		// Kept across a worker restart.
+		const again = await load();
+		expect(await again.takeUnasked(RELAY, "claude.ai", t + 5_000)).toBe(false);
+		// Once the first is 10 minutes old, one more.
+		expect(
+			await again.takeUnasked(RELAY, "claude.ai", t + UNASKED_WINDOW_MS - 1),
+		).toBe(false);
+		expect(
+			await again.takeUnasked(RELAY, "claude.ai", t + UNASKED_WINDOW_MS),
+		).toBe(true);
+		expect(
+			await again.takeUnasked(RELAY, "claude.ai", t + UNASKED_WINDOW_MS + 1),
+		).toBe(false);
+		expect(MAX_UNASKED).toBe(3);
+		// Not remembered, or the setting off: never.
+		expect(await again.takeUnasked(RELAY, "other.com", t)).toBe(false);
+		await again.turnOff();
+		expect(await again.takeUnasked(RELAY, "chatgpt.com", t + 10)).toBe(false);
+	});
+
+	test("the notice after a fill without a question: the AI app as a question names it", () => {
+		expect(filledText({ name: "Claude", host: "claude.ai" })).toBe(
+			"Filled in the code for Claude (claude.ai).",
+		);
+		expect(filledText({ name: "", host: "claude.ai" })).toBe(
+			"Filled in the code for claude.ai.",
+		);
+		expect(filledText({ name: "Cl‮aude", host: "claude.ai" })).toBe(
+			"Filled in the code for Cl\\u202Eaude (claude.ai).",
+		);
+		expect(filledNotification({ name: "Claude", host: "claude.ai" })).toEqual({
+			title: "Code filled in",
+			message: "Filled in the code for Claude (claude.ai).",
+			contextMessage: "You chose Always allow for claude.ai",
+		});
+	});
+
+	const view: QuestionView = {
+		id: "q1",
+		app: "Claude (claude.ai)",
+		host: "claude.ai",
+		tool: "",
+		pairing: { name: "Claude" },
+		args: "",
+		site: true,
+		expiresAt: 2_000_000,
+	};
+
+	test("the question: Don't allow, Allow once, Always allow, and what Always allow does", () => {
+		const window = new Window();
+		windows.push(window);
+		const saved = globalThis.document;
+		globalThis.document = window.document as unknown as Document;
+		try {
+			const answers: Answer[] = [];
+			const card = questionCard(view, (a) => answers.push(a), 1_990_000);
+			const buttons = [...card.querySelectorAll("button")];
+			expect(buttons.map((b) => b.textContent)).toEqual([
+				"Don't allow",
+				"Allow once",
+				"Always allow",
+			]);
+			expect(buttons.map((b) => b.dataset["answer"])).toEqual([
+				"deny",
+				"allow",
+				"site",
+			]);
+			const lines = [...card.querySelectorAll("p")].map((p) => p.textContent);
+			expect(lines).toContain(pairingAlwaysNote("claude.ai"));
+			expect(pairingAlwaysNote("claude.ai")).toBe(
+				"Always allow: from now on tab-mcp fills in the code for claude.ai without asking, until you remove it under “Fill in the code for me”.",
+			);
+			expect(lines.some((l) => l?.startsWith("Allow once fills in"))).toBe(
+				true,
+			);
+		} finally {
+			globalThis.document = saved;
+		}
+	});
+
+	test("its notification: Allow once (Always allow is in the panel); without it, Allow", () => {
+		expect(notificationText(view, "")).toEqual({
+			title: "Connect an AI app?",
+			message:
+				"Connect Claude (claude.ai) to the tab-mcp browser extension? Allow once fills in the code on the sign-in page.",
+			contextMessage: "AI app at claude.ai · Closing this is Don't allow",
+			buttons: ["Allow once"],
+		});
+		expect(notificationText({ ...view, site: false }, "").buttons).toEqual([
+			"Allow",
+		]);
+	});
+
+	test("the panel lists the remembered hosts, each with Remove; the switch still works", async () => {
+		const p = panel(true);
+		p.fill.show(p.state(true));
+		await settle();
+		expect(p.always()).toEqual({ shown: false, hosts: [] });
+		p.fill.show(p.state(true, { fillAlways: ["claude.ai", "chatgpt.com"] }));
+		await settle();
+		expect(p.always()).toEqual({
+			shown: true,
+			hosts: ["claude.ai", "chatgpt.com"],
+		});
+		p.remove("claude.ai");
+		expect(p.forgotten).toEqual(["claude.ai"]);
+		p.fill.show(p.state(true, { fillAlways: ["chatgpt.com"] }));
+		await settle();
+		expect(p.always().hosts).toEqual(["chatgpt.com"]);
+		// Off: the pending click as before, and the worker forgets the list.
+		p.click();
+		expect(p.sent.map((s) => s.on)).toEqual([false]);
+		expect(p.shown().checked).toBe(false);
+		p.fill.show(p.state(false, { ...p.answer(0), fillAlways: [] }));
+		await settle();
+		expect(p.shown().checked).toBe(false);
+		expect(p.always()).toEqual({ shown: false, hosts: [] });
 	});
 });

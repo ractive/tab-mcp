@@ -119,6 +119,11 @@ export interface AuthorizationHost {
 export interface AuthorizationTestMode {
 	/** What the CIMD fetch accepts instead of `PUBLIC_HTTPS` (a loopback test server). */
 	cimdUrls?: UrlPolicy;
+	/**
+	 * Resolve client id host names instead of DNS (a test client under a
+	 * public-looking name on loopback).
+	 */
+	cimdLookup?: (hostname: string) => Promise<string[]>;
 	authCodeTtlMs?: number;
 	/** A smaller cap on open authorization requests on the instance. */
 	maxPending?: number;
@@ -393,6 +398,9 @@ export class AuthorizationServer {
 			allowedHosts: host.config.clientIdHosts,
 			logger: host.logger,
 			...(testMode?.cimdUrls === undefined ? {} : { urls: testMode.cimdUrls }),
+			...(testMode?.cimdLookup === undefined
+				? {}
+				: { lookup: testMode.cimdLookup }),
 		});
 		const cimd = this.#cimd;
 		this.#clientKeys = new ClientKeySets(

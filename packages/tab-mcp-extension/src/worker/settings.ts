@@ -14,6 +14,7 @@ const REPLACED = "replaced";
 const GRANTS = "grants";
 const FILL_FOR = "fillCodeFor";
 const FILL_LOST = "fillCodeLost";
+const FILL_ALWAYS = "fillCodeAlways";
 
 export async function loadRelay(kv: Kv): Promise<string> {
 	const stored = await kv.get(RELAY);
@@ -120,4 +121,44 @@ export async function saveFillLost(
 ): Promise<void> {
 	if (relay === undefined) await kv.remove(FILL_LOST);
 	else await kv.set({ [FILL_LOST]: relay });
+}
+
+/**
+ * The AI apps' verified hosts whose sign-in pages get the code without a
+ * question (DEC-212), for one relay, and when each was last filled in that
+ * way (for the brake). Kept with the setting, forgotten with it.
+ */
+export interface FillAlways {
+	relay: string;
+	hosts: string[];
+	/** Per host, the times (epoch ms) of its fills without a question. */
+	unasked: Record<string, number[]>;
+}
+
+const isNumbers = (value: unknown): value is number[] =>
+	Array.isArray(value) && value.every((n) => typeof n === "number");
+
+export async function loadFillAlways(kv: Kv): Promise<FillAlways | undefined> {
+	const stored = await kv.get(FILL_ALWAYS);
+	if (typeof stored !== "object" || stored === null) return undefined;
+	const { relay, hosts, unasked } = stored as Record<string, unknown>;
+	if (
+		typeof relay !== "string" ||
+		!Array.isArray(hosts) ||
+		!hosts.every((h) => typeof h === "string")
+	)
+		return undefined;
+	const times: Record<string, number[]> = {};
+	if (typeof unasked === "object" && unasked !== null)
+		for (const [host, list] of Object.entries(unasked))
+			if (isNumbers(list)) times[host] = list;
+	return { relay, hosts, unasked: times };
+}
+
+export async function saveFillAlways(
+	kv: Kv,
+	always: FillAlways | undefined,
+): Promise<void> {
+	if (always === undefined) await kv.remove(FILL_ALWAYS);
+	else await kv.set({ [FILL_ALWAYS]: always });
 }

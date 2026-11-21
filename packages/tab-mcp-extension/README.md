@@ -181,7 +181,15 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   From then on, while AI access is on, the panel (or a notification) asks "Connect <AI
   app> (<host>) to the tab-mcp browser extension?"; Allow writes the code into the
   page's field and clicks Connect. Typing the code by hand works as before, also while
-  the question waits. Turned off, it gives the relay's site back (not access to all
+  the question waits. For an AI app whose verified host is a public name (not
+  `localhost`, an IP address or a test name), the question offers "Don't allow", "Allow
+  once" and "Always allow": "Always allow" fills in the code for that host from then on
+  without asking, each time with a notification and a line in the panel ("Filled in the
+  code for <AI app> (<host>)."), at most 3 times per host in 10 minutes before it asks
+  again. "Filled in without asking for:", under the switch, lists those hosts, each with
+  Remove; turning the switch off or using another relay forgets them all. It relies on
+  the AI app tying each sign-in to the account of the browser that started it (Claude
+  does: a sign-in started in another account ends with "Account mismatch"). Turned off, it gives the relay's site back (not access to all
   sites); another relay under "Settings" starts off. The switch is on only while the
   relay's site is granted: taken away in Chrome's settings, filling in goes off (the
   line under the switch says so) and stays off until turned on again. See [Filling in

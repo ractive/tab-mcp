@@ -14,7 +14,9 @@ import {
 	pairingCodes,
 	takeCode,
 } from "@ractive-ch/tab-mcp-client/extension";
+import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import {
+	alwaysAllowable,
 	fillAccess,
 	PAIRING_SCRIPT,
 	PAIRING_SCRIPT_ID,
@@ -22,8 +24,11 @@ import {
 } from "../fill.ts";
 import type { Kv } from "./kv.ts";
 import {
+	type FillAlways,
+	loadFillAlways,
 	loadFillFor,
 	loadFillLost,
+	saveFillAlways,
 	saveFillFor,
 	saveFillLost,
 } from "./settings.ts";
@@ -131,39 +136,79 @@ export type Contains = (
 	permissions: chrome.permissions.Permissions,
 ) => Promise<boolean>;
 
+/** How long the panel shows the line of a fill without a question. */
+export const NOTICE_MS = 10 * 60_000;
+
+/** The id prefix of a notification that tells of a fill: no question's. */
+export const FILLED_PREFIX = "filled:";
+
+/**
+ * What the panel and a notification say after a fill without a question
+ * (DEC-212): the AI app by its own name (invisible characters escaped)
+ * beside its verified host, as a question names it.
+ */
+export function filledText(client: { name: string; host: string }): string {
+	const name = escapeInvisible(client.name);
+	const host = escapeInvisible(client.host);
+	return `Filled in the code for ${name ? `${name} (${host})` : host}.`;
+}
+
+/** A notification's text for a fill without a question: nothing to answer. */
+export function filledNotification(client: { name: string; host: string }) {
+	return {
+		title: "Code filled in",
+		message: filledText(client),
+		contextMessage: `You chose Always allow for ${escapeInvisible(client.host)}`,
+	};
+}
+
+/** At most this many fills without a question per host in UNASKED_WINDOW_MS (DEC-212). */
+export const MAX_UNASKED = 3;
+export const UNASKED_WINDOW_MS = 10 * 60_000;
+
 /**
  * The "Fill in the code for me" setting (DEC-203, DEC-210), kept in storage:
  * the relay it is on for, and the relay for which it went off by itself
  * because its site was taken away (the panel says so). On only with the
  * relay's site: a switch that shows off never fills in later by itself.
+ * With it, the AI apps' verified hosts the user chose "Always allow" for
+ * (DEC-212): forgotten whenever the setting goes off or the relay changes.
  */
 export class FillSetting {
 	readonly #kv: Kv;
 	readonly #contains: Contains;
 	#for: string | undefined;
 	#lost: string | undefined;
+	#always: FillAlways | undefined;
 
 	private constructor(
 		kv: Kv,
 		contains: Contains,
 		fillFor: string | undefined,
 		lost: string | undefined,
+		always: FillAlways | undefined,
 	) {
 		this.#kv = kv;
 		this.#contains = contains;
 		this.#for = fillFor;
 		this.#lost = lost;
+		// Only with the setting on for the same relay.
+		this.#always =
+			always !== undefined && fillFor !== undefined && always.relay === fillFor
+				? always
+				: undefined;
 	}
 
 	static async load(
 		kv: Kv,
 		contains: Contains = (p) => chrome.permissions.contains(p),
 	): Promise<FillSetting> {
-		const [fillFor, lost] = await Promise.all([
+		const [fillFor, lost, always] = await Promise.all([
 			loadFillFor(kv),
 			loadFillLost(kv),
+			loadFillAlways(kv),
 		]);
-		return new FillSetting(kv, contains, fillFor, lost);
+		return new FillSetting(kv, contains, fillFor, lost, always);
 	}
 
 	/** On for `relay`. */
@@ -174,6 +219,66 @@ export class FillSetting {
 	/** Went off by itself for `relay`: its site was taken away. */
 	lost(relay: string): boolean {
 		return this.#lost !== undefined && this.#lost === relay;
+	}
+
+	/** The hosts filled in for without a question at `relay`, in the order chosen. */
+	alwaysHosts(relay: string): string[] {
+		return this.on(relay) && this.#always?.relay === relay
+			? [...this.#always.hosts]
+			: [];
+	}
+
+	/**
+	 * "Always allow" for `host` at `relay`: only while the setting is on
+	 * there, and only for a host that qualifies (`alwaysAllowable`).
+	 * Returns whether it is remembered.
+	 */
+	async allowAlways(relay: string, host: string): Promise<boolean> {
+		if (!this.on(relay) || !alwaysAllowable(host)) return false;
+		const always = this.#always ?? { relay, hosts: [], unasked: {} };
+		if (!always.hosts.includes(host)) {
+			this.#always = { ...always, hosts: [...always.hosts, host] };
+			await saveFillAlways(this.#kv, this.#always);
+		}
+		return true;
+	}
+
+	/** Its next sign-in page asks again. */
+	async forget(relay: string, host: string): Promise<void> {
+		const always = this.#always;
+		if (always?.relay !== relay || !always.hosts.includes(host)) return;
+		const { [host]: _, ...unasked } = always.unasked;
+		this.#always = {
+			relay,
+			hosts: always.hosts.filter((h) => h !== host),
+			unasked,
+		};
+		await saveFillAlways(this.#kv, this.#always);
+	}
+
+	/**
+	 * Whether `host`'s sign-in page at `relay` is filled in without a
+	 * question now, at `now`: a remembered host, under the brake (at most
+	 * MAX_UNASKED in UNASKED_WINDOW_MS). Yes counts as one of them.
+	 */
+	async takeUnasked(
+		relay: string,
+		host: string,
+		now: number,
+	): Promise<boolean> {
+		const always = this.#always;
+		if (!this.on(relay) || always?.relay !== relay) return false;
+		if (!always.hosts.includes(host)) return false;
+		const recent = (always.unasked[host] ?? []).filter(
+			(at) => at <= now && now - at < UNASKED_WINDOW_MS,
+		);
+		if (recent.length >= MAX_UNASKED) return false;
+		this.#always = {
+			...always,
+			unasked: { ...always.unasked, [host]: [...recent, now] },
+		};
+		await saveFillAlways(this.#kv, this.#always);
+		return true;
 	}
 
 	/**
@@ -226,6 +331,11 @@ export class FillSetting {
 		if (this.#lost !== lost) {
 			this.#lost = lost;
 			await saveFillLost(this.#kv, lost);
+		}
+		// The remembered hosts go with the setting (off, or another relay).
+		if (this.#always !== undefined && this.#always.relay !== fillFor) {
+			this.#always = undefined;
+			await saveFillAlways(this.#kv, undefined);
 		}
 	}
 }
