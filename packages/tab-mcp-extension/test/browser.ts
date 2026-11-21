@@ -176,6 +176,11 @@ export class Browser {
 	readonly serve: Serve | undefined;
 	/** The extension loaded at launch, if one was. */
 	extensionId: string | undefined;
+	/**
+	 * Its service worker, attached from the start: its console (a failed
+	 * `sidePanel.open`, say) is there for a test's error.
+	 */
+	extensionWorker: Worker | undefined;
 	#nextId = 0;
 
 	private constructor(
@@ -315,7 +320,7 @@ export class Browser {
 				browser.extensionId = id;
 				// A click before the service worker has run its script (and added
 				// its listeners) would be lost.
-				await (await browser.serviceWorker(id)).eval("true");
+				browser.extensionWorker = await browser.readyWorker(id);
 			}
 			return browser;
 		} catch (error) {
@@ -505,6 +510,32 @@ export class Browser {
 		throw new Error(`the service worker of ${id} did not start`);
 	}
 
+	/**
+	 * The service worker of extension `id` once its script has run and added
+	 * its listener for a click on the icon. The worker's target answers an
+	 * evaluation before that (`chrome` not even defined yet), so "it answers"
+	 * is not "it is ready": a click then found no listener and was lost, and
+	 * the side panel never opened (a few starts in a thousand, CI and local).
+	 * An extension without an action is ready once `chrome` is there.
+	 */
+	async readyWorker(id: string, timeoutMs = 10_000): Promise<Worker> {
+		const worker = await this.serviceWorker(id);
+		const end = Date.now() + timeoutMs;
+		for (;;) {
+			const ready = await worker
+				.eval<boolean>(
+					`typeof chrome === "object" && (chrome.action === undefined || chrome.action.onClicked.hasListeners())`,
+				)
+				.catch(() => false);
+			if (ready) return worker;
+			if (Date.now() > end)
+				throw new Error(
+					`the service worker of ${id} added no listener for the icon in ${timeoutMs} ms`,
+				);
+			await Bun.sleep(50);
+		}
+	}
+
 	#closed: Promise<void> | undefined;
 
 	/** Close Chrome; once closed, calling it again does nothing. */
@@ -574,7 +605,32 @@ class Target {
 	}
 }
 
-export class Worker extends Target {}
+export class Worker extends Target {
+	/** What the worker logged (and threw) since it was attached, the last 50. */
+	readonly console: string[] = [];
+
+	constructor(browser: Browser, sessionId: string) {
+		super(browser, sessionId);
+		browser.on((method, params, s) => {
+			if (s !== sessionId) return;
+			if (method === "Runtime.consoleAPICalled") {
+				const args = params["args"] as Remote[];
+				this.console.push(
+					`${params["type"]}: ${args.map((a) => a.value ?? a.description).join(" ")}`,
+				);
+			} else if (method === "Runtime.exceptionThrown") {
+				const details = params["exceptionDetails"] as {
+					text?: string;
+					exception?: { description?: string };
+				};
+				this.console.push(
+					`uncaught: ${details.exception?.description ?? details.text}`,
+				);
+			} else return;
+			if (this.console.length > 50) this.console.shift();
+		});
+	}
+}
 
 export class Page extends Target {
 	readonly targetId: string;
@@ -649,8 +705,12 @@ export class Page extends Target {
 	 * element `selector`, scrolled into view.
 	 */
 	async click(selector: string): Promise<void> {
-		const box = await this.eval<{ x: number; y: number }>(
-			`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error("no element " + ${JSON.stringify(selector)}); e.scrollIntoView({ block: "center", inline: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+		// Not before the element has a box and the page a size: a click on a
+		// page Chrome has yet to lay out (a side panel still 0×0) lands on
+		// nothing and is lost without a word.
+		const box = await this.waitFor<{ x: number; y: number }>(
+			`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error("no element " + ${JSON.stringify(selector)}); e.scrollIntoView({ block: "center", inline: "center" }); const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && innerWidth > 0 && innerHeight > 0 && { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+			5_000,
 		);
 		for (const type of ["mousePressed", "mouseReleased"])
 			await this.send("Input.dispatchMouseEvent", {
@@ -662,14 +722,27 @@ export class Page extends Target {
 			});
 	}
 
-	/** Wait until `expression` (in the page's world) is truthy; returns its value. */
+	/**
+	 * Wait until `expression` (in the page's world) is truthy; returns its
+	 * value. An expression that throws is tried again: a page that has not
+	 * built its document yet (a side panel just opened) has no element to
+	 * read. The last error is in the timeout's.
+	 */
 	async waitFor<T>(expression: string, timeoutMs = 10_000): Promise<T> {
 		const end = Date.now() + timeoutMs;
+		let failed: unknown;
 		for (;;) {
-			const value = await this.eval<T>(expression);
-			if (value) return value;
+			try {
+				const value = await this.eval<T>(expression);
+				if (value) return value;
+				failed = undefined;
+			} catch (error) {
+				failed = error;
+			}
 			if (Date.now() > end)
-				throw new Error(`timed out waiting for ${expression}`);
+				throw new Error(
+					`timed out waiting for ${expression}${failed === undefined ? "" : ` (last: ${failed})`}`,
+				);
 			await Bun.sleep(100);
 		}
 	}
