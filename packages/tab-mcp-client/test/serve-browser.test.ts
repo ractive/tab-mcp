@@ -188,15 +188,19 @@ interface Report {
 	[key: string]: unknown;
 }
 
-/** The frames' reports, once one of the chat's has `step`. */
-async function reportsUntil(page: Page, step: string): Promise<Report[]> {
+/** The frames' reports, once one from `origin` (the chat's) has `step`. */
+async function reportsUntil(
+	page: Page,
+	step: string,
+	origin = CHAT,
+): Promise<Report[]> {
 	for (let i = 0; i < 200; i++) {
 		const reports = await page.eval<Report[]>("reports");
-		if (reports.some((r) => r.origin === CHAT && r.step === step))
+		if (reports.some((r) => r.origin === origin && r.step === step))
 			return reports;
 		await Bun.sleep(50);
 	}
-	throw new Error(`the chat never reported ${step}`);
+	throw new Error(`the frame on ${origin} never reported ${step}`);
 }
 
 test.skipIf(chrome === undefined)(
@@ -245,16 +249,14 @@ test.skipIf(chrome === undefined)(
 				{ tool: "add", outcome: "ok", client: local },
 				{ tool: "wipe", outcome: "declined", client: local },
 			]);
-			// The frame on the other origin asked too, and got no port.
+			// The frame on the other origin asked too, and got no port. Its frame
+			// loads on its own, maybe after the chat is done: its "waited" report
+			// comes after its ask, so once it is here, the ask was refused.
+			const evil = await reportsUntil(page, "waited", EVIL);
 			expect(await page.eval("refused")).toEqual([EVIL]);
-			for (let i = 0; i < 40; i++) {
-				const waited = await page.eval<Report[]>("reports");
-				if (waited.some((r) => r.origin === EVIL)) break;
-				await Bun.sleep(50);
-			}
-			expect(
-				(await page.eval<Report[]>("reports")).filter((r) => r.origin === EVIL),
-			).toEqual([{ origin: EVIL, step: "waited" }]);
+			expect(evil.filter((r) => r.origin === EVIL)).toEqual([
+				{ origin: EVIL, step: "waited" },
+			]);
 			// No relay: nothing was stored, and connecting is refused.
 			expect(await page.eval("localStorage.length")).toBe(0);
 			expect(await page.eval("mcp.connect().catch((e) => e.message)")).toBe(

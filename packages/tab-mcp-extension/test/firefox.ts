@@ -51,6 +51,9 @@ export class BidiError extends Error {}
 /** A JavaScript exception thrown by an evaluation. */
 export class EvaluationError extends Error {}
 
+/** Firefox named no BiDi address in time. */
+class StartTimeout extends Error {}
+
 /** The prefs every test profile gets, besides Firefox's own for automation. */
 const BASE_PREFS: Record<string, string | number | boolean> = {
 	"browser.shell.checkDefaultBrowser": false,
@@ -102,10 +105,30 @@ export class Firefox {
 		});
 	}
 
-	/** Start `binary` with a fresh profile and open a BiDi session. */
+	/**
+	 * Start `binary` with a fresh profile and open a BiDi session. The first
+	 * start on a fresh machine (a CI runner) is slow: 10 to 25 s in green runs,
+	 * over 30 s now and then, where a later one takes 2 s. A start that names
+	 * no BiDi address in 30 s is ended and made once more, with a new profile.
+	 */
 	static async launch(
 		binary: string,
 		options: FirefoxOptions = {},
+	): Promise<Firefox> {
+		try {
+			return await Firefox.#launch(binary, options);
+		} catch (error) {
+			if (!(error instanceof StartTimeout)) throw error;
+			console.warn(
+				`::warning::${error.message.split("\n")[0]}; starting it again`,
+			);
+			return await Firefox.#launch(binary, options);
+		}
+	}
+
+	static async #launch(
+		binary: string,
+		options: FirefoxOptions,
 	): Promise<Firefox> {
 		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-"));
 		const log = options.log ?? Boolean(process.env["FIREFOX_LOG"]);
@@ -348,7 +371,7 @@ async function bidiAddress(proc: Subprocess, log: boolean): Promise<string> {
 	const decoder = new TextDecoder();
 	let text = "";
 	const deadline = Bun.sleep(30_000).then(() => {
-		throw new Error(
+		throw new StartTimeout(
 			`Firefox named no BiDi address in 30 s:\n${text.slice(-2000)}`,
 		);
 	});

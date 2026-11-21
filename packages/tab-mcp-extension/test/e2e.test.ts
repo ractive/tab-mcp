@@ -119,14 +119,46 @@ interface Stack {
 const panelUrl = (browser: Browser) =>
 	`chrome-extension://${browser.extensionId}/sidepanel/index.html`;
 
+/** At most `ms` for a diagnostic: a worker gone since (a reload) never answers. */
+const within = <T>(promise: Promise<T>, ms = 3_000): Promise<T> =>
+	Promise.race([
+		promise,
+		Bun.sleep(ms).then(() => {
+			throw new Error(`no answer in ${ms} ms`);
+		}),
+	]);
+
 /** Click the icon on `tab` and attach to the side panel it opens. */
 async function openPanel(browser: Browser, tab: Page): Promise<Page> {
 	await browser.clickIcon(tab);
-	const panel = await browser.attach(
-		(await browser.waitForTarget((t) => t.url === panelUrl(browser))).targetId,
-	);
+	const target = await browser
+		.waitForTarget((t) => t.url === panelUrl(browser))
+		.catch(async (error: unknown) => {
+			// What the worker logged (a failed `sidePanel.open` logs there),
+			// which tab it sees in front and the panel's options there.
+			const worker = await within(
+				browser.serviceWorker(browser.extensionId as string),
+			).catch(() => undefined);
+			const seen = worker
+				? await within(
+						worker.eval<string>(
+							`Promise.all([chrome.tabs.query({}), chrome.windows.getAll()]).then(async ([t, w]) => JSON.stringify({ tabs: t.map((x) => [x.id, x.windowId, x.active, x.url]), windows: w.map((x) => [x.id, x.focused, x.type]), options: await Promise.all(t.filter((x) => x.active).map((x) => chrome.sidePanel.getOptions({ tabId: x.id }))) }))`,
+						),
+					).catch((error: unknown) => `(no answer: ${error})`)
+				: "(no worker)";
+			const said =
+				browser.extensionWorker?.console.slice(-10).join(" | ") || "nothing";
+			throw new Error(
+				`no side panel after a click on the icon (${error}; Chrome ${browser.running ? "running" : `exited: ${browser.ended}`}); the worker said: ${said}; it sees ${seen}`,
+			);
+		});
+	const panel = await browser.attach(target.targetId);
 	// The state from the worker has come once the relay is shown.
 	await panel.waitFor(`document.getElementById("relay").value !== ""`);
+	// Chrome may load the panel's page, and the worker's state reach it,
+	// before it gives the panel its size: a click while the page is 0×0
+	// lands on nothing at (0, 0) and is lost.
+	await panel.waitFor(`innerWidth > 0 && innerHeight > 0`);
 	return panel;
 }
 
@@ -378,6 +410,31 @@ const kvAll = (worker: Worker) =>
 			};
 		};
 	})`);
+
+/**
+ * Wait until the worker has stored `name` as always allowed on `origin`
+ * (`on`) or not: a switch in the panel flips on the click, before the worker's
+ * write, and the worker answers calls from what it wrote.
+ */
+async function workerAllows(
+	stack: Stack,
+	origin: string,
+	name: string,
+	on: boolean,
+): Promise<void> {
+	const end = Date.now() + 10_000;
+	for (;;) {
+		const all = (await kvAll(stack.worker))["allowedTools"] as
+			| Record<string, string[]>
+			| undefined;
+		if ((all?.[origin] ?? []).includes(name) === on) return;
+		if (Date.now() > end)
+			throw new Error(
+				`the worker never stored ${name} as ${on ? "allowed" : "asking"} on ${origin}: ${JSON.stringify(all)}`,
+			);
+		await Bun.sleep(100);
+	}
+}
 
 /** The ids of the extension's notifications on screen. */
 const notifications = (stack: Stack) =>
@@ -1665,7 +1722,7 @@ describe.skipIf(chrome === undefined)(
 			const { id: other } = (await browser.send("Extensions.loadUnpacked", {
 				path: join(import.meta.dir, "other-extension"),
 			})) as { id: string };
-			await (await browser.serviceWorker(other)).eval("true");
+			await browser.readyWorker(other);
 			// A new page, as the user would have it.
 			await stack.tab.goto(`${SITE}/webmcp.html`);
 			// webmcp_tools reads the page again: its tools are registered anew.
@@ -1888,10 +1945,9 @@ describe.skipIf(chrome === undefined)(
 					path: stack.extension,
 				});
 				await Bun.sleep(1000);
-				stack.worker = await stack.browser.serviceWorker(
+				stack.worker = await stack.browser.readyWorker(
 					stack.browser.extensionId as string,
 				);
-				await stack.worker.eval("true");
 				// The alarm comes: still nothing taken back.
 				await stack.worker.eval(
 					`chrome.alarms.create("tab-mcp-keepup", { when: Date.now() + 50 })`,
@@ -1913,8 +1969,9 @@ describe.skipIf(chrome === undefined)(
 				// secret behind it. The address names the app and stays
 				// (DEC-196); the notice going away says it is done.
 				await stack.panel.click("#replaced-disconnect-all");
-				// Timed out once in CI (2026-11-13), never in 27 local runs: the
-				// error says what the panel showed then.
+				// The error says what the panel showed then. (It timed out in CI
+				// when the click came while the panel was still 0×0: `openPanel`
+				// waits for its size now.)
 				await stack.panel
 					.waitFor(
 						`document.getElementById("replaced").hidden && ["on", "waiting"].includes(document.getElementById("state").dataset.state)`,
@@ -1946,10 +2003,10 @@ describe.skipIf(chrome === undefined)(
 				path: stack.extension,
 			});
 			await Bun.sleep(1000);
-			stack.worker = await stack.browser.serviceWorker(
+			// The new worker, once its script has run: a click before would be lost.
+			stack.worker = await stack.browser.readyWorker(
 				stack.browser.extensionId as string,
 			);
-			await stack.worker.eval("true");
 		}
 
 		test("the database deleted under the worker: the next write opens it again, and it holds across a start", async () => {
@@ -2266,7 +2323,7 @@ describe.skipIf(chrome === undefined)(
 			const { id: other } = (await browser.send("Extensions.loadUnpacked", {
 				path: join(import.meta.dir, "other-extension"),
 			})) as { id: string };
-			await (await browser.serviceWorker(other)).eval("true");
+			await browser.readyWorker(other);
 			// A new tab, so no click has granted anything there yet.
 			const page = await browser.newPage(`${SITE}/webmcp.html`);
 			/** Whether the panel at `url` is the one on screen. */
@@ -2722,6 +2779,9 @@ describe.skipIf(chrome === undefined)(
 			const toggle = alwaysAllow("complete_todo");
 			await stack.panel.waitFor(takesClicks(toggle));
 			await stack.panel.click(toggle);
+			// The click flips the switch at once; the worker's write comes after,
+			// and a call before it would still be asked (or, off, not asked).
+			await workerAllows(stack, SITE, "complete_todo", true);
 			await stack.panel.waitFor(alwaysAllowed("complete_todo", true));
 			const result = await call(stack, "page_complete_todo", { id: 1 });
 			expect(result.isError).toBeFalsy();
@@ -2734,6 +2794,7 @@ describe.skipIf(chrome === undefined)(
 			});
 			await stack.panel.waitFor(takesClicks(toggle));
 			await stack.panel.click(toggle);
+			await workerAllows(stack, SITE, "complete_todo", false);
 			await stack.panel.waitFor(alwaysAllowed("complete_todo", false));
 		});
 

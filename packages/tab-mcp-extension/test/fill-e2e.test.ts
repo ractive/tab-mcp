@@ -83,6 +83,8 @@ async function start(): Promise<Stack> {
 			).targetId,
 		);
 		await panel.waitFor(`document.getElementById("relay").value !== ""`);
+		// Not clicked while Chrome has yet to size the panel (0×0): lost.
+		await panel.waitFor(`innerWidth > 0 && innerHeight > 0`);
 		const relay = oauth.relay.url;
 		await panel.eval(`document.querySelector("details.settings").open = true`);
 		await panel.eval(`(() => {

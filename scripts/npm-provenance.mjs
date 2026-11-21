@@ -49,6 +49,10 @@ if (command === "sign" && rest.length === 1 && values.integrity) {
 	} catch (error) {
 		fail(error.message);
 	}
+	// Before npm's own code is loaded (seconds on a cold machine): off GitHub
+	// Actions there is nothing to sign with.
+	if (process.env.GITHUB_ACTIONS !== "true")
+		fail("sign runs on GitHub Actions only (it needs the OIDC token)", 2);
 } else if (command === "verify" && rest.length === 2 && !values.integrity) {
 	[tarball, bundlePath] = rest;
 } else {
@@ -87,8 +91,6 @@ console.log(`package ${manifest.name}@${manifest.version}`);
 console.log(`integrity ${integrity}`);
 
 if (command === "sign") {
-	if (process.env.GITHUB_ACTIONS !== "true")
-		fail("sign runs on GitHub Actions only (it needs the OIDC token)", 2);
 	if (integrity !== values.integrity)
 		fail(`the tarball's integrity is not the checked ${values.integrity}`);
 	const bundle = await generateProvenance([subject], {});
