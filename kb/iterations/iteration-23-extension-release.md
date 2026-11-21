@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 23: releasing tab-mcp for Chrome"
-status: planned
+status: completed
 description: "The Chrome Web Store listing, privacy policy and review notes, a release workflow on extension-v* tags that publishes the store package, and the documentation on ractive.ch/tab-mcp."
 timestamp: 2026-11-09T15:00:00+01:00
 tags: [iteration, extension, release]
@@ -39,23 +39,28 @@ tags: [iteration, extension, release]
   `host_permissions`, and leaves out source maps (the `--store` build has had no source
   maps since 2026-11-09, `docs/pre-release`; `--store --zip` and `zipStoreBuild` since
   2026-11-11, `ext/release-23`, with `test/build.test.ts`)
-- [ ] Once the store item exists, add its origin `chrome-extension://<store id>` to the
+- [x] Once the store item exists, add its origin `chrome-extension://<store id>` to the
   hosted relay's allowed origins (ractive/ractive.ch `infra/tab-mcp`, through tofu) before
   the listing goes public, and check it with a live handshake (the store build connects
-  to `https://tab-mcp.ractive.ch` and shows an address and a pairing code)
-- [ ] Once the store build works from the store, remove the old development build's id
+  to `https://tab-mcp.ractive.ch` and shows an address and a pairing code) (the store
+  ids are in `TAB_MCP_SITES`, since iteration 45 with the app `tab-mcp-extension`
+  reserved for them)
+- [x] Once the store build works from the store, remove the old development build's id
   (`chrome-extension://handeaggdjdkpniflkjlknlcfbjifkng`) from the hosted relay's allowed
-  origins, the same way: development builds have the store id since DEC-187
+  origins, the same way: development builds have the store id since DEC-187 (gone from
+  ractive.ch `infra/tab-mcp`, checked 2026-11-21)
 - [x] Publish workflow (`extension-publish.yml`, 2026-11-11, `ext/release-23`)
-- [ ] The `chrome-web-store` environment and its credentials, set up by the owner
-  ([chrome-web-store](../operations/chrome-web-store.md))
+- [x] The `chrome-web-store` environment and its credentials, set up by the owner
+  ([chrome-web-store](../operations/chrome-web-store.md)) (releases publish through it
+  since 0.2.1, DEC-190)
 - [x] Listing texts, single purpose, permission justifications, data usage, review notes
   ([chrome-web-store](../operations/chrome-web-store.md)) and the privacy policy
   (`packages/tab-mcp-extension/PRIVACY.md`) (2026-11-11, `ext/release-23`)
 - [x] Screenshots (1280×800), and the privacy policy published on ractive.ch
 - [x] `refs/tags/extension-v*` in the "release tags" tag ruleset (owner)
 - [x] CHANGELOG section for the extension (2026-11-11, `ext/release-23`)
-- [ ] Docs page content for ractive.ch (its own PR there)
+- [x] Docs page content for ractive.ch (its own PR there) (`ractive.ch/tab-mcp` describes
+  both ways, the library in a page and the tab-mcp browser extension)
 - [x] First release on the owner's word
 
 # Citations
