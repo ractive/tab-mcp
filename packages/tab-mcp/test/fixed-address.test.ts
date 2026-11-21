@@ -819,8 +819,19 @@ describe("an app that pairs both ways: code and sign-in on one page (DEC-196)", 
 		expect(noSignIn.status).toBe(200);
 		expect(noSignIn.location).toBeUndefined();
 
+		// The code field's script (DEC-211) comes with the field only.
+		expect(elements(plain.html, "script")).toHaveLength(1);
+		expect(plain.headers.get("content-security-policy")).toContain(
+			"script-src 'sha256-",
+		);
+
 		const bound = await open(r, r.relay.addressFor("bound"), browser);
 		expect(elements(bound.html, "form [data-tab-mcp-field]")).toEqual([]);
+		// Sign-in only: no script, and none allowed.
+		expect(elements(bound.html, "script")).toEqual([]);
+		expect(bound.headers.get("content-security-policy")).not.toContain(
+			"script-src",
+		);
 		expect(
 			elements(bound.html, "form button").map((e) => e.attributes["value"]),
 		).toEqual(["connect", "cancel"]);

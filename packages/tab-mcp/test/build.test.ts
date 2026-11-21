@@ -46,6 +46,9 @@ test("the build produces a runnable bin and declarations that type-check", async
 	expect(main.startsWith("#!/usr/bin/env bun\n")).toBe(true);
 	// Only the version is taken from package.json, not the whole file.
 	expect(main).not.toContain("devDependencies");
+	// The code field's script (DEC-211) is in the bundle, which the container
+	// image runs as well: the generated module, no file of its own.
+	expect(main).toContain("function boxAt(caret)");
 	// The token helper for tests is in testing.js only (RQ 18).
 	expect(main).not.toContain("issueAccessToken");
 	expect(await Bun.file(join(dist, "index.js")).text()).not.toContain(

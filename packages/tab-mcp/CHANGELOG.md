@@ -11,6 +11,18 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 ## Unreleased
 
+### Changed
+
+- **The code field on the sign-in page shows the whole code, as boxes** (DEC-211): four
+  boxes, a dash and four boxes, each letter in its own box and the box the caret is in
+  highlighted. It is still one input: a small inline script keeps the text as
+  `XXXX-XXXX` while you type, delete or paste (`abcd-efgh`, `ABCD EFGH` and `ABCDEFGH`
+  all give the code), and keeps the caret where you are. The page's policy allows that
+  one script by its hash (`script-src 'sha256-…'`) and no other; a page that pairs by
+  sign-in only has none. Without the script the field is a plain input, now wide
+  enough for the whole code: it was cut off before. The field's hooks for browser
+  extensions (DEC-199) are unchanged.
+
 ### Fixed
 
 - A JWT with an unknown `kid` that came in the same millisecond as the last fetch of

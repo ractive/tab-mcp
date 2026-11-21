@@ -520,8 +520,9 @@ export class AuthorizationServer {
 		body: string,
 		formTargets: readonly string[] = [],
 		extraHeaders: Record<string, string> = {},
+		scripts: readonly string[] = [],
 	): Response {
-		const headers = pageHeaders(formTargets);
+		const headers = pageHeaders(formTargets, scripts);
 		for (const [k, v] of Object.entries(extraHeaders)) headers.append(k, v);
 		return new Response(renderPage(title, body), { status, headers });
 	}
@@ -1134,8 +1135,10 @@ export class AuthorizationServer {
 			const method = this.#methods[kind];
 			return method === undefined ? [] : [method];
 		});
+		const scripts: string[] = [];
 		for (const method of methods) {
 			targets.push(...(method.formTargets?.() ?? []));
+			scripts.push(...(method.scripts?.() ?? []));
 		}
 		// The app is named by its id, as in the address the user added: the
 		// relay does not know which page is meant before the pairing step
@@ -1174,7 +1177,7 @@ ${cancel}
 ${alternatives}
 </form>
 <p class="help">After you connect, your browser goes back to ${escapeHtml(hostOf(pending.redirectUri))}. Only connect AI apps you started yourself.</p>`;
-		return this.#page(status, heading, body, targets, extra);
+		return this.#page(status, heading, body, targets, extra, scripts);
 	}
 
 	// /token
