@@ -60,10 +60,12 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 			"./react": { types: "./react.d.ts", default: "./react.js" },
 			"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+			"./strings": { types: "./strings.d.ts", default: "./strings.js" },
 			"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 			"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 			"./cdn": "./cdn/tab-mcp-client.min.js",
 			"./cdn/allowed": "./cdn/allowed.min.js",
+			"./cdn/strings": "./cdn/strings.min.js",
 		},
 		types: "./index.d.ts",
 		peerDependencies: { react: ">=18.3.0 <20" },
@@ -90,6 +92,9 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			// For browser extensions that are a tab-mcp page (DEC-206).
 			"extension.js",
 			"extension.js.map",
+			// The English texts, for translators and `./react` (DEC-208).
+			"strings.js",
+			"strings.js.map",
 			// Chunks of this name: the escaping, shared by the dialogs and
 			// `./visible`, the setup steps, shared by the connect dialog and
 			// `./setup`, what the two dialogs share (iteration 38), and the
@@ -118,6 +123,9 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			// `./allowed` beside the CDN core, in the same build (DEC-200).
 			"cdn/allowed.min.js",
 			"cdn/allowed.min.js.map",
+			// `./strings` beside it, in the same build (DEC-208).
+			"cdn/strings.min.js",
+			"cdn/strings.min.js.map",
 			// Chunks of this name: what the dialogs share, and the allowances,
 			// shared by the dialogs and `allowed.min.js`. Named after the CDN
 			// core's entry (`scripts/cdn/tab-mcp-client.ts`) since that build has
