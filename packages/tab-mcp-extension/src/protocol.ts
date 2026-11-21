@@ -75,7 +75,9 @@ export type PanelCommand =
 	 * on only after the panel got the relay's site from the user. `id` comes
 	 * back in the state once handled (`fillAnswered`, DEC-210).
 	 */
-	| { type: "set-fill"; on: boolean; id: string };
+	| { type: "set-fill"; on: boolean; id: string }
+	/** Remove an AI app's host from "Filled in without asking for:" (DEC-213). */
+	| { type: "forget-fill-host"; host: string };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -110,7 +112,10 @@ export interface QuestionView {
 	pairing?: { name: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
-	/** "Always allow on <host>" is offered (a page tool of an http(s) site). */
+	/**
+	 * "Always allow on <host>" is offered (a page tool of an http(s) site);
+	 * for a pairing question, "Always allow" for the AI app's host (DEC-213).
+	 */
 	site: boolean;
 	/** When it ends unanswered as Don't allow (epoch ms, the worker's clock). */
 	expiresAt: number;
@@ -172,6 +177,10 @@ export interface PanelState {
 	fillLost?: boolean;
 	/** The id of the last "set-fill" the worker handled. */
 	fillAnswered?: string;
+	/** The AI apps' hosts filled in for without a question, at this relay (DEC-213). */
+	fillAlways?: string[];
+	/** The last fill without a question, while it is recent: what the panel says. */
+	fillNotice?: { text: string; at: number };
 	tab?: TabView;
 	/**
 	 * Without their arguments, which can be large: each question's come once
@@ -354,6 +363,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "set-fill":
 			return typeof m["on"] === "boolean" && isString(m["id"])
 				? { type: "set-fill", on: m["on"], id: m["id"] }
+				: undefined;
+		case "forget-fill-host":
+			return isString(m["host"])
+				? { type: "forget-fill-host", host: m["host"] }
 				: undefined;
 		default:
 			return undefined;

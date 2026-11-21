@@ -52,10 +52,12 @@ put there for this) and the form's hidden request id (the relay's id of that sig
 so that it can tell a page shown again after a wrong code from a new one). It reads
 nothing else of the page. While AI access is on, it asks the user whether to connect
 that AI app, and only after the user's Allow it writes its own pairing code into the
-form's code field and submits the form, as the user would by typing it. The code goes
-to the relay, which already knows it; nothing else leaves the browser, and nothing of
-the page is stored. The extension stores only that the user turned this on, and for
-which relay; or, when it went off because the user took the relay's site away in the
+form's code field and submits the form, as the user would by typing it; for an AI app
+whose host the user chose "Always allow" for, it does so without asking and tells the
+user each time. The code goes to the relay, which already knows it; nothing else leaves
+the browser, and nothing of the page is stored. The extension stores only that the user
+turned this on, and for which relay, and the hosts chosen for "Always allow" (see
+below); or, when it went off because the user took the relay's site away in the
 browser's settings, for which relay, so that the panel can say why it is off.
 
 ## What it stores
@@ -68,7 +70,11 @@ In the extension's own IndexedDB in the browser, used by its service worker only
 - a random secret that identifies this installation to the relay (the address the AI
   app is given is the same for every installation; the secret is what tells them apart);
 - the tools the user allowed to run without asking, per site: the site's origin and the
-  tool names.
+  tool names;
+- with "Fill in the code for me" on, the AI apps' hosts the user chose "Always allow"
+  for (for example `claude.ai`) and the times of the last fills without a question (at
+  most the last 3 per host, for the limit of 3 in 10 minutes); forgotten when the
+  setting goes off or the relay changes.
 
 None of this is synced to a Google account or kept outside the browser, and removing the
 extension deletes it. The grants the relay holds for connected AI apps end when the user

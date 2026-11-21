@@ -166,6 +166,10 @@ const permissionsChanged = () => {
 chrome.permissions.onAdded.addListener(permissionsChanged);
 chrome.permissions.onRemoved.addListener(permissionsChanged);
 chrome.tabs.onActivated.addListener(tabChanged);
+// What the worker kept for a tab's pairing page (DEC-213) goes with the tab.
+chrome.tabs.onRemoved.addListener((tabId) =>
+	withConnection((c) => c.tabClosed(tabId)),
+);
 chrome.tabs.onUpdated.addListener((_id, change, tab) => {
 	// Only the active tabs, and only once a page has loaded: mid-navigation
 	// there is nothing to read, and the click's grant may be on its way out.

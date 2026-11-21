@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { PairingCode } from "@ractive-ch/tab-mcp-client";
 import { Window } from "happy-dom";
-import { fillAccess, pairingMatches } from "../src/fill.ts";
+import { alwaysAllowable, fillAccess, pairingMatches } from "../src/fill.ts";
 import {
 	type Answer,
 	type PanelState,
@@ -25,6 +25,7 @@ import {
 } from "../src/sidepanel/fill.ts";
 import {
 	expiredText,
+	pairingAlwaysNote,
 	questionAnnouncement,
 	questionCard,
 } from "../src/sidepanel/question.ts";
@@ -34,15 +35,22 @@ import {
 	codeWithPairingOn,
 	FillSetting,
 	failureText,
+	filledNotification,
+	filledText,
 	HOLD_MS,
+	MAX_UNASKED,
 	NO_CODE,
+	pairingAnswer,
 	type ScriptApi,
 	syncPairingScript,
+	UNASKED_WINDOW_MS,
+	UnaskedFills,
 } from "../src/worker/fill.ts";
 import { memoryKv } from "../src/worker/kv.ts";
 import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
+	notificationText,
 	Questions,
 	type QuestionsHost,
 } from "../src/worker/questions.ts";
@@ -347,17 +355,26 @@ function panel(granted: boolean) {
 	const window = new Window();
 	windows.push(window);
 	const document = window.document as unknown as Document;
-	document.body.innerHTML = `<div id="fill" hidden><label id="fill-label" hidden><input id="fill-switch" type="checkbox" role="switch" aria-checked="false"><span>Fill in the code for me</span></label><p id="fill-text"></p></div>`;
+	document.body.innerHTML = `<div id="fill" hidden><label id="fill-label" hidden><input id="fill-switch" type="checkbox" role="switch" aria-checked="false"><span>Fill in the code for me</span></label><p id="fill-text"></p><div id="fill-always" hidden><ul id="fill-always-list"></ul></div></div>`;
 	const $ = (id: string) => document.getElementById(id) as HTMLElement;
 	const toggle = $("fill-switch") as HTMLInputElement;
 	const permissions = panelPermissions();
 	permissions.granted = granted;
 	const sent: { on: boolean; id: string }[] = [];
 	const problems: string[] = [];
+	const forgotten: string[] = [];
 	const fill = fillPanel(
-		{ box: $("fill"), text: $("fill-text"), label: $("fill-label"), toggle },
+		{
+			box: $("fill"),
+			text: $("fill-text"),
+			label: $("fill-label"),
+			toggle,
+			always: $("fill-always"),
+			alwaysList: $("fill-always-list"),
+		},
 		(on, id) => sent.push({ on, id }),
 		(text) => problems.push(text),
+		(host) => forgotten.push(host),
 		permissions as unknown as FillPermissions,
 	);
 	const state = (
@@ -379,7 +396,22 @@ function panel(granted: boolean) {
 		permissions,
 		sent,
 		problems,
+		forgotten,
 		state,
+		/** The remembered hosts as listed, and whether the list shows. */
+		always: () => ({
+			shown: !$("fill-always").hidden,
+			hosts: [...$("fill-always-list").querySelectorAll(".always-host")].map(
+				(e) => e.textContent,
+			),
+		}),
+		/** Click the Remove of `host`. */
+		remove: (host: string) =>
+			(
+				$("fill-always-list").querySelector(
+					`button[data-host="${host}"]`,
+				) as HTMLButtonElement
+			).click(),
 		/** The worker's answer to the `n`th command sent. */
 		answer: (n: number) => ({ fillAnswered: sent[n]?.id ?? "" }),
 		/** A real click: the box toggles, then the handler runs. */
@@ -543,20 +575,20 @@ describe("the setting in the worker (DEC-210)", () => {
 		expect(fill.lost(RELAY)).toBe(true);
 		await fill.turnOn(RELAY);
 		expect(fill.lost(RELAY)).toBe(false);
-		expect(s.kv.data.has("fillCodeLost")).toBe(false);
+		expect(s.kv.data.get("fillCodeLost") ?? undefined).toBeUndefined();
 		await s.kv.set({ fillCodeLost: RELAY });
 		fill = await s.load();
 		await fill.turnOff();
 		expect(fill.lost(RELAY)).toBe(false);
 		expect(fill.on(RELAY)).toBe(false);
-		expect(s.kv.data.has("fillCodeFor")).toBe(false);
+		expect(s.kv.data.get("fillCodeFor") ?? undefined).toBeUndefined();
 		await s.kv.set({ fillCodeLost: RELAY, fillCodeFor: RELAY });
 		fill = await s.load();
 		expect(await fill.reset()).toBe(RELAY);
 		expect(fill.lost(RELAY)).toBe(false);
 		expect(fill.on(RELAY)).toBe(false);
-		expect(s.kv.data.has("fillCodeLost")).toBe(false);
-		expect(s.kv.data.has("fillCodeFor")).toBe(false);
+		expect(s.kv.data.get("fillCodeLost") ?? undefined).toBeUndefined();
+		expect(s.kv.data.get("fillCodeFor") ?? undefined).toBeUndefined();
 	});
 
 	test("on after the worker gave the site back for an off just before: stays off, without the note", async () => {
@@ -565,7 +597,7 @@ describe("the setting in the worker (DEC-210)", () => {
 		expect(await fill.turnOn(RELAY)).toBe(false);
 		expect(fill.on(RELAY)).toBe(false);
 		expect(fill.lost(RELAY)).toBe(false);
-		expect(s.kv.data.has("fillCodeFor")).toBe(false);
+		expect(s.kv.data.get("fillCodeFor") ?? undefined).toBeUndefined();
 	});
 
 	test("only the relay in use; another relay's setting is not checked", async () => {
@@ -667,5 +699,458 @@ describe("the pairing page's script", () => {
 		granted.clear();
 		await syncPairingScript("https://other.example", true, api);
 		expect(api.registered.size).toBe(0);
+	});
+});
+
+describe("Always allow for the sign-in question (DEC-213)", () => {
+	test("only a public DNS name qualifies", () => {
+		for (const host of [
+			"claude.ai",
+			"chatgpt.com",
+			"Claude.AI",
+			"app.example.com",
+			"ai.fill-test.dev:8443",
+			"xn--bcher-kva.ch",
+			// Those words as labels of a public name are fine.
+			"home.ch",
+			"lan.example.com",
+			"arpa.org",
+			"corp.ai",
+		])
+			expect(alwaysAllowable(host), host).toBe(true);
+		for (const host of [
+			"",
+			"localhost",
+			"localhost:3000",
+			"app.localhost",
+			"printer.local",
+			"corp.internal",
+			"ai.test",
+			"example",
+			"ai.example",
+			"x.invalid",
+			"nas.home.arpa",
+			"1.0.0.127.in-addr.arpa",
+			"ai.arpa",
+			"ai.corp",
+			"router.lan",
+			"nas.home",
+			"pc.localdomain",
+			"wiki.intranet",
+			"ai.private",
+			"abc.onion",
+			"a.alt",
+			"intranet",
+			"127.0.0.1",
+			"127.0.0.1:8787",
+			"8.8.8.8",
+			"[::1]",
+			"[::1]:8787",
+			"[2001:db8::1]",
+			"-bad.com",
+			"bad-.com",
+			"a..com",
+			"a b.com",
+			"claude.ai/path",
+			"user@claude.ai",
+			`${"a".repeat(64)}.com`,
+		])
+			expect(alwaysAllowable(host), host).toBe(false);
+	});
+
+	const site = fillAccess(RELAY)?.origins?.[0] ?? "";
+	const setup = async (initial: Record<string, unknown> = {}) => {
+		const kv = memoryKv(initial);
+		const sites = new Set<string>([site]);
+		const contains: Contains = async (p) =>
+			(p.origins ?? []).every((o) => sites.has(o));
+		const load = () => FillSetting.load(kv, contains);
+		const fill = await load();
+		await fill.turnOn(RELAY);
+		return { kv, sites, load, fill };
+	};
+
+	test("remembered only while on and for a host that qualifies; listed; removed", async () => {
+		const off = await FillSetting.load(memoryKv(), async () => true);
+		expect(await off.allowAlways(RELAY, "claude.ai")).toBe(false);
+		const { fill, load } = await setup();
+		expect(await fill.allowAlways(RELAY, "localhost:3000")).toBe(false);
+		expect(await fill.allowAlways("https://other.example", "claude.ai")).toBe(
+			false,
+		);
+		expect(await fill.allowAlways(RELAY, "claude.ai")).toBe(true);
+		expect(await fill.allowAlways(RELAY, "chatgpt.com")).toBe(true);
+		// Again: nothing changes.
+		expect(await fill.allowAlways(RELAY, "claude.ai")).toBe(true);
+		expect(fill.alwaysHosts(RELAY)).toEqual(["claude.ai", "chatgpt.com"]);
+		expect(fill.alwaysHosts("https://other.example")).toEqual([]);
+		// Kept for the next worker.
+		expect((await load()).alwaysHosts(RELAY)).toEqual([
+			"claude.ai",
+			"chatgpt.com",
+		]);
+		await fill.forget(RELAY, "claude.ai");
+		expect(fill.alwaysHosts(RELAY)).toEqual(["chatgpt.com"]);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", 0)).toBe(false);
+		expect((await load()).alwaysHosts(RELAY)).toEqual(["chatgpt.com"]);
+	});
+
+	test("forgotten when the switch goes off, the site is taken away, or the relay changes", async () => {
+		let s = await setup();
+		await s.fill.allowAlways(RELAY, "claude.ai");
+		await s.fill.turnOff();
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(s.kv.data.get("fillCodeAlways") ?? undefined).toBeUndefined();
+		await s.fill.turnOn(RELAY);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+
+		s = await setup();
+		await s.fill.allowAlways(RELAY, "claude.ai");
+		s.sites.delete(site);
+		expect(await s.fill.check(RELAY)).toBe(true);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(s.kv.data.get("fillCodeAlways") ?? undefined).toBeUndefined();
+		// The site back: still nothing remembered.
+		s.sites.add(site);
+		expect(await s.fill.turnOn(RELAY)).toBe(true);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+
+		s = await setup();
+		await s.fill.allowAlways(RELAY, "claude.ai");
+		expect(await s.fill.reset()).toBe(RELAY);
+		expect(s.fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(s.kv.data.get("fillCodeAlways") ?? undefined).toBeUndefined();
+
+		// A stored list of another relay than the setting's is not used.
+		const stray = await FillSetting.load(
+			memoryKv({
+				fillCodeFor: RELAY,
+				fillCodeAlways: {
+					relay: "https://other.example",
+					hosts: ["claude.ai"],
+					unasked: {},
+				},
+			}),
+			async () => true,
+		);
+		expect(stray.alwaysHosts(RELAY)).toEqual([]);
+		expect(await stray.takeUnasked(RELAY, "claude.ai", 0)).toBe(false);
+	});
+
+	test("the brake: at most 3 fills without a question per host in 10 minutes", async () => {
+		const { fill, load } = await setup();
+		await fill.allowAlways(RELAY, "claude.ai");
+		await fill.allowAlways(RELAY, "chatgpt.com");
+		const t = 1_000_000;
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t)).toBe(true);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 1_000)).toBe(true);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 2_000)).toBe(true);
+		// The fourth asks; a refused one does not count.
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 3_000)).toBe(false);
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t + 4_000)).toBe(false);
+		// Per host.
+		expect(await fill.takeUnasked(RELAY, "chatgpt.com", t + 4_000)).toBe(true);
+		// Kept across a worker restart.
+		const again = await load();
+		expect(await again.takeUnasked(RELAY, "claude.ai", t + 5_000)).toBe(false);
+		// Once the first is 10 minutes old, one more.
+		expect(
+			await again.takeUnasked(RELAY, "claude.ai", t + UNASKED_WINDOW_MS - 1),
+		).toBe(false);
+		expect(
+			await again.takeUnasked(RELAY, "claude.ai", t + UNASKED_WINDOW_MS),
+		).toBe(true);
+		expect(
+			await again.takeUnasked(RELAY, "claude.ai", t + UNASKED_WINDOW_MS + 1),
+		).toBe(false);
+		expect(MAX_UNASKED).toBe(3);
+		// Not remembered, or the setting off: never.
+		expect(await again.takeUnasked(RELAY, "other.com", t)).toBe(false);
+		await again.turnOff();
+		expect(await again.takeUnasked(RELAY, "chatgpt.com", t + 10)).toBe(false);
+	});
+
+	test("the notice after a fill without a question: the AI app as a question names it", () => {
+		expect(filledText({ name: "Claude", host: "claude.ai" })).toBe(
+			"Filled in the code for Claude (claude.ai).",
+		);
+		expect(filledText({ name: "", host: "claude.ai" })).toBe(
+			"Filled in the code for claude.ai.",
+		);
+		expect(filledText({ name: "Cl‮aude", host: "claude.ai" })).toBe(
+			"Filled in the code for Cl\\u202Eaude (claude.ai).",
+		);
+		expect(filledNotification({ name: "Claude", host: "claude.ai" })).toEqual({
+			title: "Code filled in",
+			message: "Filled in the code for Claude (claude.ai).",
+			contextMessage: "You chose Always allow for claude.ai",
+		});
+	});
+
+	const view: QuestionView = {
+		id: "q1",
+		app: "Claude (claude.ai)",
+		host: "claude.ai",
+		tool: "",
+		pairing: { name: "Claude" },
+		args: "",
+		site: true,
+		expiresAt: 2_000_000,
+	};
+
+	test("the question: Don't allow, Allow once, Always allow, and what Always allow does", () => {
+		const window = new Window();
+		windows.push(window);
+		const saved = globalThis.document;
+		globalThis.document = window.document as unknown as Document;
+		try {
+			const answers: Answer[] = [];
+			const card = questionCard(view, (a) => answers.push(a), 1_990_000);
+			const buttons = [...card.querySelectorAll("button")];
+			expect(buttons.map((b) => b.textContent)).toEqual([
+				"Don't allow",
+				"Allow once",
+				"Always allow",
+			]);
+			expect(buttons.map((b) => b.dataset["answer"])).toEqual([
+				"deny",
+				"allow",
+				"site",
+			]);
+			const lines = [...card.querySelectorAll("p")].map((p) => p.textContent);
+			expect(lines).toContain(pairingAlwaysNote("claude.ai"));
+			expect(pairingAlwaysNote("claude.ai")).toBe(
+				"Always allow: from now on tab-mcp fills in the code for claude.ai without asking, until you remove it under “Fill in the code for me”.",
+			);
+			expect(lines.some((l) => l?.startsWith("Allow once fills in"))).toBe(
+				true,
+			);
+		} finally {
+			globalThis.document = saved;
+		}
+	});
+
+	test("its notification: Allow once (Always allow is in the panel); without it, Allow", () => {
+		expect(notificationText(view, "")).toEqual({
+			title: "Connect an AI app?",
+			message:
+				"Connect Claude (claude.ai) to the tab-mcp browser extension? Allow once fills in the code on the sign-in page.",
+			contextMessage: "AI app at claude.ai · Closing this is Don't allow",
+			buttons: ["Allow once"],
+		});
+		expect(notificationText({ ...view, site: false }, "").buttons).toEqual([
+			"Allow",
+		]);
+	});
+
+	test("the panel lists the remembered hosts, each with Remove; the switch still works", async () => {
+		const p = panel(true);
+		p.fill.show(p.state(true));
+		await settle();
+		expect(p.always()).toEqual({ shown: false, hosts: [] });
+		p.fill.show(p.state(true, { fillAlways: ["claude.ai", "chatgpt.com"] }));
+		await settle();
+		expect(p.always()).toEqual({
+			shown: true,
+			hosts: ["claude.ai", "chatgpt.com"],
+		});
+		p.remove("claude.ai");
+		expect(p.forgotten).toEqual(["claude.ai"]);
+		p.fill.show(p.state(true, { fillAlways: ["chatgpt.com"] }));
+		await settle();
+		expect(p.always().hosts).toEqual(["chatgpt.com"]);
+		// Off: the pending click as before, and the worker forgets the list.
+		p.click();
+		expect(p.sent.map((s) => s.on)).toEqual([false]);
+		expect(p.shown().checked).toBe(false);
+		p.fill.show(p.state(false, { ...p.answer(0), fillAlways: [] }));
+		await settle();
+		expect(p.shown().checked).toBe(false);
+		expect(p.always()).toEqual({ shown: false, hosts: [] });
+	});
+});
+
+describe("Always allow, review of PR 195 (DEC-213)", () => {
+	const site = fillAccess(RELAY)?.origins?.[0] ?? "";
+	const always = (hosts: string[], relay = RELAY) => ({
+		relay,
+		hosts,
+		unasked: {},
+	});
+	/** A store whose writes can fail, and that counts them. */
+	const flakyKv = (initial: Record<string, unknown> = {}) => {
+		const kv = memoryKv(initial);
+		const writes: Record<string, unknown>[] = [];
+		let fail = 0;
+		const flaky = {
+			...kv,
+			data: kv.data,
+			writes,
+			failNext(n: number) {
+				fail = n;
+			},
+			async set(entries: Record<string, unknown>) {
+				if (fail > 0) {
+					fail--;
+					throw new Error("disk full");
+				}
+				writes.push(entries);
+				await kv.set(entries);
+			},
+		};
+		return flaky;
+	};
+	const granted: Contains = async (p) =>
+		(p.origins ?? []).every((o) => o === site);
+
+	test("off forgets the hosts in the same write as the setting", async () => {
+		const kv = flakyKv();
+		const fill = await FillSetting.load(kv, granted);
+		await fill.turnOn(RELAY);
+		await fill.allowAlways(RELAY, "claude.ai");
+		kv.writes.length = 0;
+		await fill.turnOff();
+		expect(kv.writes).toEqual([
+			{ fillCodeFor: null, fillCodeLost: null, fillCodeAlways: null },
+		]);
+		// A failed write leaves the store as it was: never off with the hosts kept.
+		const again = await FillSetting.load(kv, granted);
+		await again.turnOn(RELAY);
+		await again.allowAlways(RELAY, "claude.ai");
+		kv.failNext(1);
+		await expect(again.turnOff()).rejects.toThrow("disk full");
+		expect(kv.data.get("fillCodeFor")).toBe(RELAY);
+		expect(kv.data.get("fillCodeAlways")).toEqual(always(["claude.ai"]));
+	});
+
+	test("a stored list that is not the setting's is deleted at load, so a later on cannot bring it back", async () => {
+		// Left by a write that never happened (before this change: two writes).
+		const kv = flakyKv({ fillCodeAlways: always(["claude.ai"]) });
+		const fill = await FillSetting.load(kv, granted);
+		expect(kv.data.get("fillCodeAlways") ?? undefined).toBeUndefined();
+		await fill.turnOn(RELAY);
+		expect((await FillSetting.load(kv, granted)).alwaysHosts(RELAY)).toEqual(
+			[],
+		);
+		// Another relay's list beside the setting: deleted too.
+		const other = flakyKv({
+			fillCodeFor: RELAY,
+			fillCodeAlways: always(["claude.ai"], "https://other.example"),
+		});
+		await FillSetting.load(other, granted);
+		expect(other.data.get("fillCodeAlways") ?? undefined).toBeUndefined();
+	});
+
+	test("a forget whose write fails forgets every host: in memory, and in storage once a write gets through", async () => {
+		const kv = flakyKv();
+		const fill = await FillSetting.load(kv, granted);
+		await fill.turnOn(RELAY);
+		await fill.allowAlways(RELAY, "claude.ai");
+		await fill.allowAlways(RELAY, "chatgpt.com");
+		kv.failNext(1);
+		await fill.forget(RELAY, "claude.ai");
+		expect(fill.alwaysHosts(RELAY)).toEqual([]);
+		expect(kv.data.get("fillCodeAlways")).toBeNull();
+		expect((await FillSetting.load(kv, granted)).alwaysHosts(RELAY)).toEqual(
+			[],
+		);
+
+		const stuck = flakyKv();
+		const s = await FillSetting.load(stuck, granted);
+		await s.turnOn(RELAY);
+		await s.allowAlways(RELAY, "claude.ai");
+		stuck.failNext(2);
+		await s.forget(RELAY, "claude.ai");
+		// Unusable now, although the store could not be written.
+		expect(s.alwaysHosts(RELAY)).toEqual([]);
+		expect(await s.takeUnasked(RELAY, "claude.ai", 0)).toBe(false);
+		// The next write of the list is the list in memory.
+		await s.allowAlways(RELAY, "chatgpt.com");
+		expect(stuck.data.get("fillCodeAlways")).toEqual(always(["chatgpt.com"]));
+	});
+
+	test("the brake: a clock moved back does not reset it; at most 3 times per host are kept", async () => {
+		const fill = await FillSetting.load(memoryKv(), granted);
+		await fill.turnOn(RELAY);
+		await fill.allowAlways(RELAY, "claude.ai");
+		const t = 50_000_000;
+		for (const at of [t, t + 1, t + 2])
+			expect(await fill.takeUnasked(RELAY, "claude.ai", at)).toBe(true);
+		// An hour back: the three are "in the future", and still count.
+		expect(await fill.takeUnasked(RELAY, "claude.ai", t - 3_600_000)).toBe(
+			false,
+		);
+		// They keep counting (the safe direction: it asks more) until the
+		// clock is ten minutes past them again.
+		expect(
+			await fill.takeUnasked(
+				RELAY,
+				"claude.ai",
+				t - 3_600_000 + UNASKED_WINDOW_MS,
+			),
+		).toBe(false);
+		expect(
+			await fill.takeUnasked(RELAY, "claude.ai", t + 2 + UNASKED_WINDOW_MS),
+		).toBe(true);
+		// Old and recent times stored: the old ones go, at most 3 are kept.
+		const now = 3 * UNASKED_WINDOW_MS;
+		const kv = memoryKv({
+			fillCodeFor: RELAY,
+			fillCodeAlways: {
+				relay: RELAY,
+				hosts: ["claude.ai"],
+				unasked: { "claude.ai": [1, 2, 3, 4, now - 2, now - 1] },
+			},
+		});
+		const many = await FillSetting.load(kv, granted);
+		expect(await many.takeUnasked(RELAY, "claude.ai", now)).toBe(true);
+		const stored = (await kv.get("fillCodeAlways")) as {
+			unasked: Record<string, number[]>;
+		};
+		expect(stored.unasked["claude.ai"]?.length).toBe(MAX_UNASKED);
+	});
+
+	test("an answer the question did not offer: Always allow only where offered, else Don't allow", () => {
+		expect(pairingAnswer("site", true)).toEqual({
+			answer: "allow",
+			always: true,
+		});
+		expect(pairingAnswer("site", false)).toEqual({
+			answer: "deny",
+			always: false,
+		});
+		for (const answer of ["allow", "deny", "timeout", "busy"] as const)
+			expect(pairingAnswer(answer, true)).toEqual({ answer, always: false });
+	});
+
+	test("Remove withdraws a fill of its host that waits for its code; the page going or the tab closing drops it", () => {
+		const fills = new UnaskedFills();
+		const page = new AbortController();
+		fills.start(1, "claude.ai", page.signal);
+		fills.start(2, "chatgpt.com", new AbortController().signal);
+		const wait = fills.signal(1, "claude.ai");
+		expect(wait?.aborted).toBe(false);
+		expect(fills.signal(1, "chatgpt.com")).toBeUndefined();
+		fills.withdraw("claude.ai");
+		expect(wait?.aborted).toBe(true);
+		expect(fills.signal(2, "chatgpt.com")?.aborted).toBe(false);
+		// Its code came anyway: withdrawn, no notice.
+		expect(fills.finish(1, "claude.ai", true)).toBe("withdrawn");
+		expect(fills.finish(2, "chatgpt.com", true)).toBe("notice");
+		// A page asked about, or one whose code did not come: no notice.
+		expect(fills.finish(3, "claude.ai", true)).toBe("asked");
+		fills.start(4, "claude.ai", new AbortController().signal);
+		expect(fills.finish(4, "claude.ai", false)).toBe("asked");
+		expect(fills.size).toBe(0);
+		// Pruned when the page goes or the tab closes.
+		const going = new AbortController();
+		fills.start(5, "claude.ai", going.signal);
+		fills.start(6, "claude.ai", new AbortController().signal);
+		going.abort();
+		fills.tabClosed(6);
+		expect(fills.size).toBe(0);
+		// A page that went already is not kept.
+		fills.start(7, "claude.ai", AbortSignal.abort());
+		expect(fills.size).toBe(0);
 	});
 });

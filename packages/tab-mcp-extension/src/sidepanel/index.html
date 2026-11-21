@@ -25,6 +25,7 @@
 		</p>
 		<ul id="grants" class="grants" aria-label="Connected AI apps"></ul>
 		<p id="grants-note" class="muted small" hidden></p>
+		<p id="fill-notice" class="muted small" role="status" hidden></p>
 		<p id="problem" class="problem" role="alert" hidden></p>
 		<p id="local-problem" class="problem" role="alert" hidden></p>
 		<div id="replaced" class="replaced" hidden>
@@ -59,6 +60,10 @@
 			<div id="fill" class="fill" hidden>
 				<label id="fill-label" class="allow-switch"><input id="fill-switch" type="checkbox" role="switch" aria-checked="false" aria-describedby="fill-text"><span>Fill in the code for me</span></label>
 				<p id="fill-text" class="muted small"></p>
+				<div id="fill-always" class="fill-always" hidden>
+					<p id="fill-always-heading" class="muted small">Filled in without asking for:</p>
+					<ul id="fill-always-list" class="grants" aria-labelledby="fill-always-heading"></ul>
+				</div>
 			</div>
 			<div class="buttons">
 				<button id="pair-done" type="button" class="strong" hidden>Done</button>
