@@ -12,8 +12,10 @@ the Git tag `client-v<version>`. The format follows
 
 - With `webmcp: true`, tools marked `consequentialHint` or `destructiveHint` are mirrored
   into the browser's WebMCP too, unless their `callers` leave `"webmcp"` out (DEC-209).
-  They ask a WebMCP call as they ask an AI app's (a call the tab-mcp browser extension
-  vouched for was asked there). Until now they were left out unless `callers` listed
+  They ask every WebMCP call (a call the tab-mcp browser extension vouched for was asked
+  there), and so does a tool marked only `destructiveHint`, which the page asks no AI
+  app for (DEC-022): WebMCP has no `destructiveHint`, so a WebMCP call asks by
+  `consequentialHint ?? destructiveHint`, the rule that already set the native hint. Until now they were left out unless `callers` listed
   `"webmcp"`, and an agent that found no such tool used the page's own controls instead,
   which ask nothing. To keep a tool from agents in the browser, as before, register it
   with `callers: ["relay", "local"]`.

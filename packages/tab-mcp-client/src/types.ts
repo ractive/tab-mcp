@@ -402,7 +402,8 @@ export interface TabMcpOptions {
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
 	 * in the browser can call them, without pairing. Off by default. Every
 	 * tool goes there unless its `callers` leave `"webmcp"` out, tools that ask
-	 * included: they ask a WebMCP call as any other (DEC-209). A failed native
+	 * included: they ask every WebMCP call, a tool marked only `destructiveHint`
+	 * too (WebMCP has no `destructiveHint`; DEC-209). A failed native
 	 * registration only warns in the console.
 	 *
 	 * With it, the page and the tab-mcp browser extension know of each other

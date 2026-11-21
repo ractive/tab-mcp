@@ -644,6 +644,35 @@ describe("calls", () => {
 		expect(asked.map((r) => r.client)).toEqual([{ kind: "webmcp" }]);
 	});
 
+	test("a tool marked only destructiveHint asks a WebMCP call too, not an AI app's (DEC-022, DEC-209)", async () => {
+		const asked: ConfirmRequest[] = [];
+		const t = tab({
+			onConfirm: (request) => {
+				asked.push(request);
+				return false;
+			},
+		});
+		await t.registerTool({
+			name: "remove",
+			description: "Removes an element",
+			annotations: { destructiveHint: true },
+			execute: () => "removed",
+		});
+		await t.registerTool({
+			name: "notConsequential",
+			description: "Removes, said not to ask",
+			annotations: { destructiveHint: true, consequentialHint: false },
+			execute: () => "removed",
+		});
+		await settle();
+		await expect(native.call("remove", {})).resolves.toEqual({
+			error: "The user did not allow remove to run.",
+		});
+		expect(asked.map((r) => r.client)).toEqual([{ kind: "webmcp" }]);
+		await expect(native.call("notConsequential", {})).resolves.toBe("removed");
+		expect(asked).toHaveLength(1);
+	});
+
 	test("a consequential tool asks onConfirm, which learns the caller; Don't allow resolves with an error", async () => {
 		const asked: ConfirmRequest[] = [];
 		let answer = false;

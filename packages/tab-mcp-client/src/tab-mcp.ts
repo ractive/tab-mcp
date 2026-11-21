@@ -328,7 +328,7 @@ export class TabMcp extends EventTarget {
 			this.#emit("toolschange", { tools: this.tools }),
 		);
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
-		// consequential tools only when their registration says so. The getter
+		// every tool whose `callers` do not leave "webmcp" out (DEC-209). The getter
 		// is read now (WM 10); the mirror loads only then (DEC-171), with the
 		// handshake with the tab-mcp browser extension (DEC-207).
 		const context = options.webmcp === true ? nativeContext() : undefined;

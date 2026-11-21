@@ -844,7 +844,8 @@ from them.
   confirmation is weaker against it than against a remote AI app. Hiding a tool does not
   help against that: the agent clicks the page's own controls instead, with no question
   at all (seen 2026-11-21, DEC-209). So every tool is mirrored, those that ask included,
-  and they ask the WebMCP call; a page that wants a tool kept from agents in the browser
+  and they ask the WebMCP call (by `consequentialHint ?? destructiveHint`, so a tool
+  marked only `destructiveHint` asks too); a page that wants a tool kept from agents in the browser
   leaves `"webmcp"` out of its `callers`. A mirrored `destructiveHint` tool carries
   `consequentialHint: true` in WebMCP. "Always allow" is never offered or applied for
   these calls (a call the tab-mcp browser extension vouches for was asked there).

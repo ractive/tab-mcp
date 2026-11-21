@@ -197,7 +197,9 @@ Chrome has WebMCP for sites in its
 trial token that a script adds later counts for a `TabMcp` made after it.
 
 - Every tool goes there, tools marked `consequentialHint` or MCP's `destructiveHint`
-  included: they ask a WebMCP call as they ask an AI app's (below). `callers` without
+  included, and they ask every WebMCP call (below). A WebMCP call asks by
+  `consequentialHint ?? destructiveHint`, so a tool marked only `destructiveHint` asks
+  there too, though it does not ask an AI app (its own client sees the hint). `callers` without
   `"webmcp"` keeps a tool out of WebMCP
   ([which callers see a tool](#which-callers-see-a-tool)). Until 0.20 such tools were
   left out unless `callers` listed `"webmcp"`; an agent that found no tool to delete with

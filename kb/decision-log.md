@@ -4706,7 +4706,11 @@ DEC-143 and DEC-165): with `webmcp: true` every tool is mirrored, those marked
   reason does not fit: an AI app through the extension does not drive the tab, and the
   extension asks the user in its own side panel before it vouches for a call (DEC-207).
   It also failed silently: the page's own upgrade dropped the tool without a word.
-- **What asks now.** A mirrored tool that asks asks every WebMCP call: a call the
+- **What asks now.** A WebMCP call asks by `consequentialHint ?? destructiveHint`, the
+  rule that already set the native `consequentialHint`: a tool marked only
+  `destructiveHint` asks there too (review of PR 191), while for an AI app it still asks
+  only with `consequentialHint` (DEC-022; its own client sees `destructiveHint`). A
+  mirrored tool that asks asks every WebMCP call: a call the
   extension vouched for was asked in the extension (or allowed by its switch), any other
   gets the page's question (`onConfirm` or the library's dialog). "Always allow" is still
   never offered or applied for WebMCP calls.

@@ -409,7 +409,15 @@ async function decideAndRun(
 		signal.addEventListener("abort", () => reject(signal.reason));
 	});
 	cancelled.catch(() => {});
-	if (tool.annotations.consequentialHint === true) {
+	// A WebMCP call asks by the mirror's rule: MCP's `destructiveHint` counts as
+	// `consequentialHint` there, as WebMCP has no `destructiveHint` (DEC-143,
+	// DEC-209). For AI apps the hints are mapped as DEC-022 says.
+	const { consequentialHint, destructiveHint } = tool.annotations;
+	const asks =
+		client.kind === "webmcp"
+			? (consequentialHint ?? destructiveHint)
+			: consequentialHint;
+	if (asks === true) {
 		const question: ConfirmRequest = {
 			tool: { name: tool.name, description: tool.description },
 			arguments: raw,

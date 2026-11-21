@@ -79,9 +79,12 @@ Rules for tools:
   argument is `{ signal, callers, exposedTo }`. There is no `unregisterTool`: abort the
   registration signal. AI apps that listen get a tool-list-changed notification.
 - `callers` (default: all) lists who sees a tool: `"relay"` (AI apps), `"local"` (the
-  site's own assistant on a served port), `"webmcp"` (agents in the browser; a
-  consequential tool only when listed). For the others the tool does not exist (not
-  listed, no list-changed, a call answered as for an unknown tool).
+  site's own assistant on a served port), `"webmcp"` (agents in the browser). Tools that
+  ask go to every caller and ask each of them; leave a caller out for privacy
+  (`["local"]`: data the site's own assistant may read, not an AI app through the relay)
+  or identity (`["relay"]`: the tool needs to know which AI app calls), not because a
+  tool deletes. For the others the tool does not exist (not listed, no list-changed, a
+  call answered as for an unknown tool).
 - `registerTool` returns a promise. It rejects with a `TypeError` for an invalid tool and
   an `InvalidStateError` for a duplicate name. Do not use `x-mcp-header` in schemas.
 - Arguments are validated against `inputSchema` before `execute` runs, so `execute`
@@ -278,7 +281,7 @@ calls are declined.
 
 ```ts
 const mcp = new TabMcp({ relay, server, webmcp: true });
-await mcp.registerTool(deleteNoteTool, { callers: ["relay", "webmcp"] }); // consequential: only when named
+await mcp.registerTool(deleteNoteTool); // asks, also an agent in the browser
 ```
 
 - `webmcp: true` (off by default) also registers each tool with the browser's native
@@ -286,9 +289,10 @@ await mcp.registerTool(deleteNoteTool, { callers: ["relay", "webmcp"] }); // con
   the WebMCP origin trial, or `chrome://flags/#enable-webmcp-testing`). Agents in the
   browser (built in, or an extension) then call the tools without pairing. It is a
   change in what the page exposes: turn it on only when the user wants that.
-- Tools with `consequentialHint` are left out unless their `callers` list `"webmcp"`
-  (React: `useTool(tool, { callers: ["relay", "webmcp"] })`): such an agent often drives
-  the tab and can click Allow itself. `callers` without `"webmcp"` keeps any tool out.
+- Every tool goes there, tools with `consequentialHint` or `destructiveHint` included
+  (since client 0.20, DEC-209): hiding them did not stop an agent that drives the tab, it
+  clicked the page's own controls instead, with no question. `callers` without
+  `"webmcp"` keeps a tool out (React: `useTool(tool, { callers: ["relay", "local"] })`).
 - A WebMCP call gets the same argument check and confirmation (the dialog names the caller
   "An agent in this browser", never offers "Always allow"), and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`.
