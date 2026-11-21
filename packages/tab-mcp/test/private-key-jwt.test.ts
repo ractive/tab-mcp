@@ -745,11 +745,12 @@ describe("RFC 7523 §3: the assertion's checks at /token", () => {
 	});
 
 	test("keys come only from the client's JWKS: by kid, never from the header", async () => {
-		// The key sets' clock moves 1 ms per reading, not with the wall clock:
-		// the unknown kid below must come within the 5 s refetch floor of
-		// the first fetch however slow the machine is.
-		let tick = Date.now();
-		const r = startOAuthRelay(cimd, {}, { clientKeysNow: () => tick++ });
+		// The key sets' clock stands still: the unknown kid below comes within
+		// the 5 s refetch floor of the first fetch however slow the machine is,
+		// and in the same millisecond as that fetch, as on a fast one (CI run
+		// 42612803397 got 401 that way).
+		const frozen = Date.now();
+		const r = startOAuthRelay(cimd, {}, { clientKeysNow: () => frozen });
 		relays.push(r);
 		const stranger = await signingKey("RS256", "k1");
 		// Signed with another key under k1's kid, with that key embedded.
