@@ -17,8 +17,9 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   (DEC-207, with the library from 0.19.0 and `webmcp: true`). A call the user allowed
   in the extension (asked, or its "Always allow" switch) is not asked again by the page:
   right before the tool runs, the extension tells the page the tool, the exact
-  arguments and the AI app, and the page runs that one call without its own question.
-  The page shows which AI apps are connected through the extension. The extension tells
+  arguments and the AI app, and the page runs that one call without its own question;
+  once the call ended or failed, the extension takes that back, so a call that never
+  reached the page leaves nothing another caller could use. The page shows which AI apps are connected through the extension. The extension tells
   such a page only its name and version, whether AI access is on and the AI apps
   connected (name and verified host), and nothing to a page without the library. The
   panel says "This page has tab-mcp built in." and, when an AI app is connected to the

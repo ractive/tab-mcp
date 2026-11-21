@@ -3,7 +3,8 @@
  * library (DEC-207): the content script's `PageHandshake`, the vouch in
  * `callTool` and the bridge, the worker's check of who asks, the panel's
  * lines; and both sides together, the real library in a happy-dom page
- * with a fake native WebMCP. End to end in `handshake-e2e.test.ts`.
+ * with a fake native WebMCP. End to end in `e2e.test.ts` (Chrome) and
+ * `firefox-e2e.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -88,16 +89,31 @@ const hello = (extra: object = {}) => ({
 	...extra,
 });
 
-/** A handshake whose worker answers `state` (or does not, `null`). */
-function handshake(state: ExtensionState | null = STATE) {
+/** Retries in these tests: 10 ms, then 20 ms. */
+const RETRIES = [10, 20];
+
+/**
+ * A handshake whose worker answers `state` (or does not, `null`), or each
+ * ask with the next of `answers` (`"throw"`: `sendMessage` rejects).
+ */
+function handshake(
+	state: ExtensionState | null = STATE,
+	answers?: (ExtensionState | null | "throw")[],
+) {
 	const host = { asked: 0, changes: 0 };
-	const h = new PageHandshake(doc, {
-		state: async () => {
-			host.asked++;
-			return state ?? undefined;
+	const h = new PageHandshake(
+		doc,
+		{
+			state: async () => {
+				host.asked++;
+				const answer = answers === undefined ? state : answers.shift();
+				if (answer === "throw") throw new Error("no worker");
+				return answer ?? undefined;
+			},
+			changed: () => host.changes++,
 		},
-		changed: () => host.changes++,
-	});
+		RETRIES,
+	);
 	h.start();
 	return { h, host };
 }
@@ -107,6 +123,7 @@ describe("the content script speaks only to a page that announced the library", 
 		const { h, host } = handshake();
 		h.stateChanged(STATE);
 		h.vouch("buy", { n: 1 }, VOUCH);
+		h.withdraw("n1");
 		await Bun.sleep(0);
 		expect(told).toEqual([]);
 		expect(host.asked).toBe(0);
@@ -152,13 +169,77 @@ describe("the content script speaks only to a page that announced the library", 
 			nonce: "n1",
 			app: { name: "Claude", host: "claude.ai" },
 		});
+		h.withdraw("n1");
+		expect(told.at(-1)).toEqual({ v: 1, type: "withdraw", nonce: "n1" });
 	});
 
-	test("a worker that does not answer: nothing is told", async () => {
-		handshake(null);
+	test("a worker that never answers: asked again twice, then not; nothing is told", async () => {
+		const { host } = handshake(null);
+		pageSays(hello());
+		await Bun.sleep(80);
+		expect(told).toEqual([]);
+		expect(host.asked).toBe(1 + RETRIES.length);
+	});
+
+	test("a worker that answers only on a retry: the page learns the state then", async () => {
+		const { host } = handshake(null, ["throw", null, STATE]);
+		pageSays(hello());
+		await Bun.sleep(5);
+		expect(told).toEqual([]);
+		await Bun.sleep(60);
+		expect(host.asked).toBe(3);
+		expect(told).toEqual([{ v: 1, type: "update", ...STATE }]);
+	});
+
+	test("a page that spoke first and a worker slow to start: the hello comes on a retry", async () => {
+		doc.documentElement.setAttribute(MARK, "1");
+		handshake(null, [null, STATE]);
+		await Bun.sleep(40);
+		expect(told).toEqual([{ v: 1, type: "hello", ...STATE }]);
+	});
+
+	test("no more retries once the page went away", async () => {
+		const { host } = handshake(null);
 		pageSays(hello());
 		await Bun.sleep(0);
-		expect(told).toEqual([]);
+		window.dispatchEvent(new window.Event("pagehide"));
+		await Bun.sleep(60);
+		expect(host.asked).toBe(1);
+	});
+
+	test("a change from the worker during the retries is told, and ends them", async () => {
+		const { h, host } = handshake(null);
+		pageSays(hello());
+		await Bun.sleep(0);
+		h.stateChanged(STATE);
+		await Bun.sleep(60);
+		expect(host.asked).toBe(1);
+		expect(told).toEqual([{ v: 1, type: "update", ...STATE }]);
+	});
+
+	test("many hellos in a row cost one message to the worker; later ones are answered from the last state", async () => {
+		const { h, host } = handshake();
+		for (let i = 0; i < 100; i++) pageSays(hello());
+		await Bun.sleep(0);
+		for (let i = 0; i < 100; i++) pageSays(hello());
+		await Bun.sleep(0);
+		expect(host.asked).toBe(1);
+		expect(told).toHaveLength(100 + 1);
+		// The worker's next change is what later hellos are answered with.
+		const off = { ...STATE, on: false, apps: [] };
+		h.stateChanged(off);
+		pageSays(hello());
+		expect(told.at(-1)).toEqual({ v: 1, type: "update", ...off });
+		expect(host.asked).toBe(1);
+	});
+
+	test("many hellos while the worker cannot answer: still one ask per try", async () => {
+		const { host } = handshake(null);
+		for (let i = 0; i < 100; i++) pageSays(hello());
+		await Bun.sleep(15);
+		for (let i = 0; i < 100; i++) pageSays(hello());
+		await Bun.sleep(60);
+		expect(host.asked).toBe(1 + RETRIES.length);
 	});
 
 	test("the apps of all the page's apps together, each once; the same again is no change", async () => {
@@ -171,6 +252,30 @@ describe("the content script speaks only to a page that announced the library", 
 		expect(host.changes).toBe(1);
 	});
 
+	test("several app ids of other versions: the version is that of the first, whatever comes after", () => {
+		const { h } = handshake();
+		pageSays(hello({ type: "update", app: "a", library: "0.19.0" }));
+		pageSays(hello({ type: "update", app: "b", library: "0.20.0" }));
+		pageSays(hello({ type: "update", app: "b", library: "0.20.1" }));
+		pageSays(hello({ type: "update", app: "a", library: "0.19.0" }));
+		expect(h.library?.version).toBe("0.19.0");
+	});
+
+	test("more than 64 apps either way are cut to 64, not refused", async () => {
+		const many = Array.from({ length: 70 }, (_, i) => ({
+			name: `App ${i}`,
+			host: "apps.example",
+		}));
+		expect(parsePage(JSON.stringify(hello({ apps: many })))?.apps).toEqual(
+			many.slice(0, 64),
+		);
+		const { h } = handshake({ ...STATE, apps: many });
+		pageSays(hello({ apps: many }));
+		await Bun.sleep(0);
+		expect(h.library?.apps).toHaveLength(64);
+		expect(told.at(-1)?.["apps"]).toEqual(many.slice(0, 64));
+	});
+
 	test("what the page says is checked: other versions, types, shapes and sizes are ignored", () => {
 		for (const bad of [
 			"{not json",
@@ -180,11 +285,6 @@ describe("the content script speaks only to a page that announced the library", 
 			JSON.stringify(hello({ app: "x".repeat(300) })),
 			JSON.stringify(hello({ apps: "Claude" })),
 			JSON.stringify(hello({ apps: [{ name: "Claude" }] })),
-			JSON.stringify(
-				hello({
-					apps: Array.from({ length: 65 }, () => ({ name: "a", host: "b" })),
-				}),
-			),
 			JSON.stringify([hello()]),
 			{ v: 1 },
 		])
@@ -199,8 +299,12 @@ describe("the content script speaks only to a page that announced the library", 
 });
 
 describe("the vouch in the content script", () => {
-	/** A page with one tool `buy` (not read-only) in a fake WebMCP. */
-	function toolPage() {
+	/**
+	 * A page with one tool `buy` (not read-only) in a fake WebMCP whose
+	 * `executeTool` fails with `fails`, or (`"abort"`) as the browser does
+	 * for an aborted signal.
+	 */
+	function toolPage(fails?: Error | "abort") {
 		const order: string[] = [];
 		const page = {
 			location: {
@@ -211,29 +315,61 @@ describe("the vouch in the content script", () => {
 				getTools: async () => [
 					{ name: "buy", description: "Buys.", annotations: {} },
 				],
-				executeTool: async (_tool: unknown, input: unknown) => {
+				executeTool: async (
+					_tool: unknown,
+					input: unknown,
+					options: { signal: AbortSignal },
+				) => {
+					if (fails === "abort") {
+						options.signal.throwIfAborted();
+						throw new Error("not aborted");
+					}
+					if (fails !== undefined) throw fails;
 					order.push(`run ${JSON.stringify(input)}`);
 					return "ran";
 				},
 			},
 		} as unknown as Document;
-		const vouch = (args: unknown) =>
-			order.push(`vouch ${JSON.stringify(args)}`);
+		const vouch = {
+			send: (args: unknown) => order.push(`vouch ${JSON.stringify(args)}`),
+			withdraw: () => order.push("withdraw"),
+		};
 		return { page, order, vouch };
 	}
 	const signal = new AbortController().signal;
 	const call = { documentId: "doc-A", name: "buy", readOnly: false };
 
-	test("goes out right before the tool runs, with the arguments it runs with", async () => {
+	test("goes out right before the tool runs, with the arguments it runs with; withdrawn after", async () => {
 		const { page, order, vouch } = toolPage();
 		expect(
 			await callTool(call, { n: 1 }, signal, page, "doc-A", vouch),
 		).toEqual({ ok: true, value: "ran" });
-		expect(order).toEqual(['vouch {"n":1}', 'run {"n":1}']);
+		expect(order).toEqual(['vouch {"n":1}', 'run {"n":1}', "withdraw"]);
 		// No input: both with {}.
 		order.length = 0;
 		await callTool(call, undefined, signal, page, "doc-A", vouch);
-		expect(order).toEqual(["vouch {}", "run {}"]);
+		expect(order).toEqual(["vouch {}", "run {}", "withdraw"]);
+	});
+
+	test("withdrawn when the call fails or is cancelled before it reaches the page", async () => {
+		const failing = toolPage(new Error("The tool is not registered."));
+		expect(
+			await callTool(call, {}, signal, failing.page, "doc-A", failing.vouch),
+		).toEqual({ ok: false, error: "The tool is not registered." });
+		expect(failing.order).toEqual(["vouch {}", "withdraw"]);
+		const aborted = toolPage("abort");
+		const cancel = new AbortController();
+		cancel.abort();
+		const result = await callTool(
+			call,
+			{},
+			cancel.signal,
+			aborted.page,
+			"doc-A",
+			aborted.vouch,
+		);
+		expect(result.ok).toBe(false);
+		expect(aborted.order).toEqual(["vouch {}", "withdraw"]);
 	});
 
 	test("never for a call that does not run: another page, a tool gone, another claim", async () => {
@@ -452,7 +588,13 @@ describe("both sides together: the client library in the page", () => {
 		async getTools() {
 			return [...this.tools.values()];
 		}
-		async executeTool(tool: { name: string }, input: unknown) {
+		async executeTool(
+			tool: { name: string },
+			input: unknown,
+			options?: { signal?: AbortSignal },
+		) {
+			// As the browser: an aborted call does not reach the page.
+			options?.signal?.throwIfAborted();
 			const value = await this.tools
 				.get(tool.name)
 				?.execute(input, { signal: new AbortController().signal });
@@ -523,14 +665,10 @@ describe("both sides together: the client library in the page", () => {
 			location: doc.location,
 			modelContext: native,
 		} as unknown as Document;
-		const result = await callTool(
-			call,
-			{ id: 7 },
-			signal,
-			page,
-			"doc-A",
-			(args) => h.vouch("complete_todo", args, VOUCH),
-		);
+		const result = await callTool(call, { id: 7 }, signal, page, "doc-A", {
+			send: (args) => h.vouch("complete_todo", args, VOUCH),
+			withdraw: () => h.withdraw(VOUCH.nonce),
+		});
 		expect(result).toEqual({ ok: true, value: "completed 7" });
 		expect(asked).toEqual([]);
 		expect(calls[0]?.client).toEqual({
@@ -544,6 +682,45 @@ describe("both sides together: the client library in the page", () => {
 		expect(asked).toHaveLength(1);
 		h.stateChanged({ ...STATE, on: false, apps: [] });
 		expect(mcp.extension).toBeUndefined();
+	});
+
+	test("a call cancelled before it reached the page takes its vouch back: an agent's equal call is asked", async () => {
+		const { h } = handshake();
+		const { native, asked } = await libraryPage();
+		await Bun.sleep(0);
+		const call = {
+			documentId: "doc-A",
+			name: "complete_todo",
+			readOnly: false,
+		};
+		const page = {
+			location: doc.location,
+			modelContext: native,
+		} as unknown as Document;
+		const cancelled = new AbortController();
+		cancelled.abort();
+		const result = await callTool(
+			call,
+			{ id: 7 },
+			cancelled.signal,
+			page,
+			"doc-A",
+			{
+				send: (args) => h.vouch("complete_todo", args, VOUCH),
+				withdraw: () => h.withdraw(VOUCH.nonce),
+			},
+		);
+		expect(result.ok).toBe(false);
+		expect(asked).toEqual([]);
+		// Another agent in the browser, at once, with equal arguments.
+		await callTool(
+			call,
+			{ id: 7 },
+			new AbortController().signal,
+			page,
+			"doc-A",
+		);
+		expect(asked).toHaveLength(1);
 	});
 
 	test("the page's directly connected apps reach the panel's view", async () => {

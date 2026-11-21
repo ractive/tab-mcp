@@ -1,8 +1,9 @@
 /**
  * The page's side of the handshake with the tab-mcp browser extension
  * (DEC-207), against a fake native `ModelContext` as in `webmcp.test.ts`;
- * the test plays the extension with the DOM events it would send. The
- * real extension is in `packages/tab-mcp-extension/test/handshake-e2e.test.ts`.
+ * the test plays the extension with the DOM events it would send. With the
+ * real extension: `packages/tab-mcp-extension/test/e2e.test.ts` (Chrome) and
+ * `packages/tab-mcp-extension/test/firefox-e2e.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";
@@ -243,6 +244,21 @@ describe("the announcement", () => {
 		}
 	});
 
+	test("at most 64 AI apps go out, as the extension takes no more", async () => {
+		const t = tab();
+		await settle();
+		const grants: Grant[] = Array.from({ length: 70 }, (_, i) => ({
+			grantId: `g${i}`,
+			client: { id: `https://app${i}.example`, name: `App ${i}`, host: "x" },
+			createdAt: new Date().toISOString(),
+		}));
+		Object.defineProperty(t, "grants", { value: grants });
+		t.dispatchEvent(new CustomEvent("grantschange", { detail: { grants } }));
+		const apps = heard.at(-1)?.["apps"] as unknown[];
+		expect(apps).toHaveLength(64);
+		expect(apps[63]).toEqual({ name: "App 63", host: "x" });
+	});
+
 	test("in a frame the page takes no part (the extension speaks to the top frame only)", async () => {
 		const top = g["top"];
 		g["top"] = {};
@@ -478,6 +494,36 @@ describe("the vouch", () => {
 		await native.call("complete_todo", { id: 3 });
 		expect(asked).toHaveLength(1);
 		expect(calls[0]?.client).toEqual({ kind: "webmcp" });
+	});
+
+	test("a withdrawn vouch is dropped: the equal call that comes after is asked", async () => {
+		const { asked } = await todoPage();
+		const once = vouch({ id: 3 });
+		tell(once);
+		tell({ v: 1, type: "withdraw", nonce: once.nonce });
+		await native.call("complete_todo", { id: 3 });
+		expect(asked).toHaveLength(1);
+	});
+
+	test("a withdrawal drops only its own vouch; one for a vouch used, unknown or malformed changes nothing", async () => {
+		const { asked } = await todoPage();
+		const used = vouch({ id: 1 });
+		tell(used);
+		await native.call("complete_todo", { id: 1 });
+		const kept = vouch({ id: 1 });
+		const other = vouch({ id: 2 });
+		tell(kept);
+		tell(other);
+		tell({ v: 1, type: "withdraw", nonce: used.nonce });
+		tell({ v: 1, type: "withdraw", nonce: "unknown" });
+		tell({ v: 1, type: "withdraw", nonce: 7 });
+		tell({ v: 1, type: "withdraw" });
+		tell({ v: 2, type: "withdraw", nonce: kept.nonce });
+		tell({ v: 1, type: "withdraw", nonce: other.nonce });
+		await native.call("complete_todo", { id: 1 });
+		expect(asked).toHaveLength(0);
+		await native.call("complete_todo", { id: 2 });
+		expect(asked).toHaveLength(1);
 	});
 
 	test("a malformed vouch is ignored", async () => {

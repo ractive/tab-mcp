@@ -14,7 +14,9 @@
  * extension that comes later (this script runs at `document_idle` in
  * Chrome, or after a click). It tells the page what it is, whether AI
  * access is on and which AI apps are connected (`hello`, `update`), and,
- * right before a page tool runs that the user allowed, `vouch`. Nothing
+ * right before a page tool runs that the user allowed, `vouch`, and once
+ * that call ended or failed, `withdraw` with the vouch's nonce, so that a
+ * vouch its call did not use does not wait for another caller. Nothing
  * else: not the relay, not the address, not other tabs.
  *
  * Everything the page says is the page's word: it only feeds the panel's
@@ -72,12 +74,13 @@ export function parsePage(detail: unknown): PageMessage | undefined {
 		(type !== "hello" && type !== "update") ||
 		!text(library) ||
 		!text(app) ||
-		!Array.isArray(apps) ||
-		apps.length > MAX_APPS
+		!Array.isArray(apps)
 	)
 		return;
 	const list: AppView[] = [];
-	for (const a of apps) {
+	// Cut, not refused, as the library cuts the extension's list: a page
+	// with more apps than that still gets its handshake.
+	for (const a of apps.slice(0, MAX_APPS)) {
 		if (!isObject(a) || !text(a["name"]) || !text(a["host"])) return;
 		list.push({ name: a["name"], host: a["host"] });
 	}
@@ -92,17 +95,42 @@ export interface HandshakeHost {
 	changed(): void;
 }
 
+/**
+ * A worker that did not answer (starting, failing) is asked again after
+ * these delays (milliseconds), then not until the page says `hello` again:
+ * the page learns the state without waiting for its next change, and a
+ * worker that cannot answer is not asked in a loop.
+ */
+export const RETRY_MS: readonly number[] = [1_000, 5_000];
+
 export class PageHandshake {
 	readonly #doc: Document;
 	readonly #host: HandshakeHost;
-	/** What each of the page's apps announced, by app id. */
+	readonly #retryMs: readonly number[];
+	/** What each of the page's apps announced, by app id, in the order they first did. */
 	readonly #pages = new Map<string, { library: string; apps: AppView[] }>();
 	/** The page announced the library: the extension may speak to it. */
 	#announced = false;
+	/**
+	 * The state as the worker last sent it (an answer or a change). The
+	 * worker sends every change, so a later `hello` of the page is answered
+	 * from it: a page saying `hello` in a loop costs the one worker of all
+	 * tabs nothing.
+	 */
+	#state: ExtensionState | undefined;
+	/** What the page is owed once the state is known: `hello` (spoken first) or `update`. */
+	#owed: "hello" | "update" | undefined;
+	/** The worker is being asked (or a retry waits): one round at a time. */
+	#asking = false;
+	/** Counts the rounds: the answer of an ended round is not used. */
+	#round = 0;
+	#retry: ReturnType<typeof setTimeout> | undefined;
 
-	constructor(doc: Document, host: HandshakeHost) {
+	/** `retryMs`: `RETRY_MS`, shorter in tests. */
+	constructor(doc: Document, host: HandshakeHost, retryMs = RETRY_MS) {
 		this.#doc = doc;
 		this.#host = host;
+		this.#retryMs = retryMs;
 	}
 
 	/** Listen to the page; speak first if the page announced before this script ran. */
@@ -110,27 +138,37 @@ export class PageHandshake {
 		this.#doc.addEventListener(PAGE_EVENT, (event) =>
 			this.#heard((event as CustomEvent).detail),
 		);
+		// A page that goes away needs no answer: no more retries for it.
+		this.#doc.defaultView?.addEventListener("pagehide", () => this.#end());
 		if (this.#doc.documentElement?.hasAttribute(MARK)) {
 			this.#announced = true;
-			void this.#tell("hello");
+			this.#owe("hello");
 		}
 	}
 
-	/** What the page announced, all its apps together; `undefined` if nothing. */
+	/**
+	 * What the page announced, all its apps together; `undefined` if nothing.
+	 * The version is that of the app id the page announced first: a page
+	 * with several `TabMcp`s has one library, and should two differ, the
+	 * panel always shows the same one.
+	 */
 	get library(): PageLibrary | undefined {
-		if (this.#pages.size === 0) return undefined;
+		const first = this.#pages.values().next().value;
+		if (first === undefined) return undefined;
 		const apps = new Map<string, AppView>();
-		let version = "";
-		for (const page of this.#pages.values()) {
-			version = page.library;
+		for (const page of this.#pages.values())
 			for (const a of page.apps) apps.set(JSON.stringify([a.name, a.host]), a);
-		}
-		return { version, apps: [...apps.values()] };
+		return { version: first.library, apps: [...apps.values()] };
 	}
 
-	/** The extension's state changed: told to a page that announced the library. */
+	/**
+	 * The extension's state changed (the worker's word): kept, and told to a
+	 * page that announced the library, as what it is owed if anything.
+	 */
 	stateChanged(state: ExtensionState): void {
-		if (this.#announced) this.#send({ type: "update", ...state });
+		this.#state = state;
+		const type = this.#end() ?? "update";
+		if (this.#announced) this.#tell(type, state);
 	}
 
 	/**
@@ -149,6 +187,16 @@ export class PageHandshake {
 		});
 	}
 
+	/**
+	 * The vouch with `nonce` is no longer wanted: its call ended, or failed
+	 * or was cancelled before it reached the page. Sent after every vouched
+	 * call: a vouch its call used is gone already, and of two vouches for
+	 * equal calls the page may have used the other one for this call.
+	 */
+	withdraw(nonce: string): void {
+		if (this.#announced) this.#send({ type: "withdraw", nonce });
+	}
+
 	#heard(detail: unknown): void {
 		const m = parsePage(detail);
 		if (m === undefined) return;
@@ -157,13 +205,55 @@ export class PageHandshake {
 		if (this.#pages.has(m.app) || this.#pages.size < MAX_PAGES)
 			this.#pages.set(m.app, { library: m.library, apps: m.apps });
 		if (JSON.stringify(this.library) !== before) this.#host.changed();
-		if (m.type === "hello") void this.#tell("update");
+		if (m.type === "hello") this.#owe("update");
 	}
 
-	/** Ask the worker for the state and tell the page. */
-	async #tell(type: "hello" | "update"): Promise<void> {
+	/** Tell the page the state as `type`: at once if known, else once the worker answers. */
+	#owe(type: "hello" | "update"): void {
+		if (this.#state !== undefined) {
+			this.#tell(type, this.#state);
+			return;
+		}
+		// A `hello` owed stays one: the page answers it with its own news.
+		this.#owed ??= type;
+		if (this.#asking) return;
+		this.#asking = true;
+		void this.#ask(this.#round, 0);
+	}
+
+	/** Ask the worker for the state; after no answer, again after `#retryMs[attempt]`. */
+	async #ask(round: number, attempt: number): Promise<void> {
 		const state = await this.#host.state().catch(() => undefined);
-		if (state !== undefined) this.#send({ type, ...state });
+		// Ended meanwhile: a change came from the worker, or the page went away.
+		if (round !== this.#round) return;
+		if (state !== undefined) {
+			this.#state = state;
+			this.#tell(this.#end() ?? "update", state);
+			return;
+		}
+		const delay = this.#retryMs[attempt];
+		if (delay === undefined) {
+			// Given up: the page's next `hello` or the worker's next change heals it.
+			this.#end();
+			return;
+		}
+		this.#retry = setTimeout(() => void this.#ask(round, attempt + 1), delay);
+	}
+
+	/** End the round of asking; what the page was owed, if anything. */
+	#end(): "hello" | "update" | undefined {
+		const owed = this.#owed;
+		this.#round++;
+		clearTimeout(this.#retry);
+		this.#retry = undefined;
+		this.#owed = undefined;
+		this.#asking = false;
+		return owed;
+	}
+
+	#tell(type: "hello" | "update", state: ExtensionState): void {
+		// Capped as the page caps its own list: the library cuts it there too.
+		this.#send({ type, ...state, apps: state.apps.slice(0, MAX_APPS) });
 	}
 
 	#send(message: Record<string, unknown>): void {

@@ -702,9 +702,13 @@ like any other, `chrome-extension://<id>` (A11).
   the AI app, after its own checks (the page the tool was listed from, its read-only
   claim). The vouch is made in one place, after the user's answer and the check that
   the tool is still the one asked about, and never for a read-only tool or a call that
-  was not allowed. What the page announces (the library's version, its app id, the AI
-  apps connected to it directly) is the page's word and only feeds two lines in the
-  panel. No proof of either side: see A14.
+  was not allowed; once the call settled, it is withdrawn. What the page announces (the
+  library's version, its app id, at most 64 AI apps connected to it directly) is the
+  page's word and only feeds two lines in the panel. A page saying `hello` in a loop
+  does not keep the extension's one service worker busy: the worker is asked at the
+  first `hello`, later ones are answered from the last state it sent (it sends every
+  change), and a worker that does not answer is asked again twice, then not until the
+  next `hello`. No proof of either side: see A14.
 - **Which pages.** The extension asks for no host access at install. Without it, it
   reads a tab only after a click on its icon there, and only on that origin (the relay's
   pairing page, with the relay's site granted, is the exception below). With "Read all
@@ -871,10 +875,17 @@ from them.
   Chrome's `externally_connectable` (every site that takes part listed in the
   extension's manifest) or an attestation signed by the relay (a round trip and keys
   for every call), and script in the page could still answer for the library before it
-  hears anything. What is left: an agent in the browser that calls the
-  same tool with equal arguments in the moment between the vouch and the extension's
-  own call takes the vouch, and that call is exactly the one the user allowed; the
-  extension's call is then asked by the page. A site that insists on its own question
+  hears anything. Once the browser's `executeTool` settled, whatever the outcome, the
+  extension withdraws the vouch (`withdraw` with its nonce) and the page drops it if it
+  is still there, so a call that failed or was cancelled before it reached the page
+  does not leave its vouch for another caller. What is left: an agent in the browser
+  that calls the same tool with equal arguments in the moment between the vouch and
+  the extension's call reaching the page takes the vouch, and that call is exactly the
+  one the user allowed; the extension's call is then asked by the page. A withdrawal
+  cannot close that window, as it comes only after `executeTool` settled: until then
+  the vouch stays usable for such a call, for a moment after a failure, and for up to
+  the 2 seconds when `executeTool` neither runs the tool nor settles, or on a page that
+  takes vouches with its own code and ignores `withdraw`. A site that insists on its own question
   sets `trustExtension: false`. The page also learns, while the extension serves it,
   which AI apps are connected to the extension (A13).
 

@@ -4543,7 +4543,13 @@ directly. The shapes below are this iteration's.
   tool that is not read-only and an AI app through the relay; it travels with the
   `webmcp-call` message, and the content script dispatches it only after its own checks
   (listed from this document, the same read-only claim), synchronously before
-  `executeTool`. Read-only tools are asked by neither side and get none.
+  `executeTool`. Read-only tools are asked by neither side and get none. Once
+  `executeTool` settled, whatever the outcome, the content script sends `withdraw` with
+  the vouch's `nonce` (review of PR 180), and the library drops a vouch with that nonce
+  if it is still there: a call that failed or was cancelled before it reached the page
+  (`executeTool` rejected, `webmcp-cancel`, the tool unregistered) does not leave its
+  vouch for another caller. Sent after a call that ran too: its vouch is gone already,
+  but of two vouches for equal calls the page may have used the other one for it.
 - **The library takes it** for the tool registered under that name when the vouch
   arrives (a tool registered anew since does not get it; none registered, it is
   dropped), by a `TabMcp` that takes vouches, for at most 2 s (a monotonic clock), at
@@ -4561,7 +4567,7 @@ directly. The shapes below are this iteration's.
   through the tab-mcp browser extension, while this tab is in front." and keeps
   everything else (a phone or another browser still connects directly).
 - **Size.** In the mirror's chunk (1.7 KB gzipped, its test limit raised from 1 KB to
-  2 KB); the core grows by 9 bytes (6262 B of 6400 B after the merge of main). `extension` is only declared in
+  2 KB); the core grows by 9 bytes (6255 B of 6400 B after the review of PR 180). `extension` is only declared in
   the core and defined on the instance by the chunk, and the version is passed to it: an
   import of `version.ts` there made a chunk shared with the core that cost it 88 B.
 - **The panel**, for the tab in front with the library: "This page has tab-mcp built
@@ -4575,10 +4581,23 @@ directly. The shapes below are this iteration's.
   part listed in the extension's manifest) or an attestation signed by the relay (a
   round trip and keys for every call), and script in the page could still answer for
   the library before it hears anything. What is left: an agent in the browser that calls
-  the same tool with equal arguments between the vouch and the extension's call uses
-  the vouch (exactly the call the user allowed), and the extension's call is then asked
-  by the page; and any page the extension may read can learn the names of the AI apps
-  connected to it by announcing the library.
+  the same tool with equal arguments between the vouch and the moment the extension's
+  call reaches the page uses the vouch (exactly the call the user allowed), and the
+  extension's call is then asked by the page. A withdrawal cannot shorten that window,
+  as it comes only once `executeTool` settled; until it comes the vouch stays usable for
+  such a call: for one turn of the content script after a failure, and up to the 2 s
+  when `executeTool` neither runs the tool nor settles, or on a page that takes vouches
+  with its own code and ignores `withdraw` (an unknown type is ignored). And any page the extension may read can
+  learn the names of the AI apps connected to it by announcing the library.
+- **Bounded on both sides** (review of PR 180). Each side cuts the other's list of AI
+  apps to 64 (a longer list is cut, not refused) and sends at most 64. The content
+  script asks the worker for the state at the page's first `hello` only and answers
+  later ones from the last state the worker sent, which sends every change: a page
+  saying `hello` in a loop costs the one worker of all tabs nothing. A worker that
+  does not answer (starting, failing) is asked again after 1 s and 5 s, one ask at a
+  time, then not until the page's next `hello`; a change from the worker ends the
+  retries, and so does the page going away (`pagehide`). The panel shows the library
+  version of the app id the page announced first.
 - **Amends DEC-191**: a page that announces the library now also learns, from the
   extension, its name and version, whether AI access is on and the names and verified
   hosts of the AI apps connected through it, and of each call it runs for one of them,
