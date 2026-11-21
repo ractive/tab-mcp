@@ -9,6 +9,20 @@ The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store. E
 attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
 `tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`.
 
+## Unreleased
+
+### Changed
+
+- **"Fill in the code for me" is a switch** (DEC-210), in place of the buttons "Fill in
+  the code for me" and "Stop filling in the code": it is a setting that stays on, and
+  each connection is still asked about. The line under it says what it does. Turning it
+  on asks for the relay's site as before (the browser asks first); declined, the switch
+  goes back to off. It shows on only while the relay's site is granted: when the site
+  is taken away in the browser's settings, filling in goes off and the line says
+  "tab-mcp no longer has access to <host>, so this went off."; it does not come back by
+  itself when the site does (with access to all sites, say). Turning it on asks for the
+  site again.
+
 ## [0.3.1][extension-0.3.1] - 2026-11-21
 
 ### Fixed

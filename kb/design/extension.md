@@ -146,10 +146,22 @@ When an AI app opens the relay's pairing page (`/authorize`) in the browser that
 extension, the extension can fill in its own code there, after asking (DEC-199's hooks,
 built in DEC-203). Typing the code stays the way that always works.
 
-- **A setting, off by default.** "Fill in the code for me" under the code in the
-  pairing view turns it on for the relay in use, also with access to all sites; "Stop
-  filling in the code" turns it off and gives the relay's site back. Another relay
-  starts off, and the old relay's site is given back (never access to all sites).
+- **A switch, off by default** (DEC-210). "Fill in the code for me" under the code in
+  the pairing view, with one line under it on what it does, turns it on for the relay
+  in use, also with access to all sites; off, it gives the relay's site back. Another
+  relay starts off, and the old relay's site is given back (never access to all sites).
+  The switch shows what is in effect: on only with the setting on and the relay's site
+  granted. Declined in the browser's prompt, it goes back to off. When the site is taken
+  away in the browser's settings, the worker turns the setting off and remembers it
+  (`fillCodeLost`), so filling in never comes back by itself (with access to all sites,
+  say); the line says "tab-mcp no longer has access to <host>, so this went off." until
+  the user turns the switch on or off or picks another relay. "On" without the site
+  when the worker handles it (given back for an "off" just before) stays off, without
+  the note (`FillSetting` in `src/worker/fill.ts`). Each "set-fill" carries an id that
+  comes back in the state (`fillAnswered`): until then the switch shows the click, its
+  line has no "no longer has access", and an Allow that comes after the user turned it
+  off again sends another "off" instead of "on". A relay address without a pattern
+  shows the sentence alone, and the switch only while the setting is on there.
 - **Access.** The page is opened by the AI app, so no click grants `activeTab` for it.
   Turning it on asks for the relay's site when the extension does not have it, one
   origin of the optional host permissions (`<scheme>://<host>/*`). Then a content script
@@ -211,8 +223,8 @@ with a second extension).
   it the extension runs on a tab only after a click on its icon, as Overmark does, and
   only for that origin in that tab (Chrome keeps the grant across navigations on the same
   origin, not to another subdomain). "Give access to all sites" asks for it; the content script
-  is then registered for every http(s) page. "Fill in the code for me" asks for the
-  relay's site alone, for its pairing page (DEC-203). `"incognito": "not_allowed"`: no Incognito
+  is then registered for every http(s) page. The "Fill in the code for me" switch asks
+  for the relay's site alone, for its pairing page (DEC-203). `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).
 - No remote code.
 
