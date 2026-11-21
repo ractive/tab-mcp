@@ -89,7 +89,7 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   app is told about a tool does not depend on that: `page_<name>` carries MCP's
   `destructiveHint` as the page's `consequentialHint` says (true when the page gave no
   annotations at all), and the bridge asks before every call of a tool that is not
-  read-only either way (DEC-213). "Don't ask
+  read-only either way (DEC-214). "Don't ask
   again on <host>" in a question writes the site's "allowed" entry, as the panel's "Always allow"
   switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
   notification has "Allow once" only.
@@ -237,8 +237,8 @@ with a second extension).
 | Tool | Kind | What it does |
 |---|---|---|
 | `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
-| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, whether it is destructive (DEC-213), and why a tool is left out (iteration 20) |
-| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). `readOnlyHint` as the page's; `destructiveHint` false for a read-only tool, else the page's `consequentialHint`, true when the page gave no annotations (DEC-213). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
+| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, whether it is destructive (DEC-214), and why a tool is left out (iteration 20) |
+| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). `readOnlyHint` as the page's; `destructiveHint` false for a read-only tool, else the page's `consequentialHint`, true when the page gave no annotations (DEC-214). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
 | `webmcp_call` | as the called tool | Calls a tool of the page in front by its WebMCP name, with the same rules (schema check, confirmation, the page it was listed from); for AI apps that read their tool list once (Claude, Codex), which never see the `page_<name>` tools of a later tab (iteration 20 review, `src/worker/tools.ts`) |
 | `navigate` | navigates; another origin asks | Opens an http(s) address in the tab in front, if the extension may read it; waits for the load (30 s) and answers with the new page's `page_info`, or `readable: false` and why (iteration 27, DEC-121, `src/worker/navigation.ts`) |
 | `go_back`, `go_forward` | navigates; another or unknown origin asks | One step in the tab's history; a target on the page's origin is known from the Navigation API (same-origin entries only), any other one asks |

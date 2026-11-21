@@ -1376,7 +1376,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		]);
 	});
 
-	test("destructiveHint is the page's consequentialHint; true without annotations (DEC-213)", async () => {
+	test("destructiveHint is the page's consequentialHint; true without annotations (DEC-214)", async () => {
 		await tab.eval(`for (const [name, annotations] of [
 			["delete_all", { consequentialHint: true }],
 			["add_note", { readOnlyHint: false }],

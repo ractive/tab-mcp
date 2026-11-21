@@ -13,11 +13,14 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Changed
 
-- **A page tool is destructive for the AI app only when the page says so** (DEC-213).
+- **A page tool is destructive for the AI app only when the page says so** (DEC-214).
   `page_<name>` carried `destructiveHint: true` for every tool that is not read-only,
-  which made Claude ask with "Allow once" only. Now `destructiveHint` is the page's
-  `consequentialHint` (false when the page says false), and true only when the page gave
-  the tool no annotations at all. `webmcp_tools` lists it as `destructive`. A page that
+  because the extension asks before it runs; the hint should say what the page says
+  about the tool. Now `destructiveHint` is the page's `consequentialHint` (false when the
+  page says false), and true only when the page gave the tool no annotations at all.
+  Claude sorts tools by it: a page tool that is not consequential is now among "Other
+  tools" in its settings, not "Write/delete tools", as on a direct connection to the
+  page. `webmcp_tools` lists it as `destructive`. A page that
   registers a tool again with another hint gets it offered anew. The extension still
   asks before every call of a tool that is not read-only. In Firefox, a tool's
   annotations are read as Chrome reads them: all four hints as booleans, an annotations

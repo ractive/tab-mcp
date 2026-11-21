@@ -426,7 +426,7 @@ describe("calls in the content script", () => {
 				},
 			},
 			// An output schema over 16 KB is left out; the tool is not. No
-			// annotations: no consequentialHint, nothing is known (DEC-213).
+			// annotations: no consequentialHint, nothing is known (DEC-214).
 			{
 				name: "huge",
 				description: "d",
@@ -838,7 +838,7 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 		expect(next.list().map((t) => t.name)).toEqual(["ok"]);
 	});
 
-	test("annotations are listed as Chrome lists them (DEC-213)", () => {
+	test("annotations are listed as Chrome lists them (DEC-214)", () => {
 		const annotations = (value?: unknown) =>
 			readTool({
 				...tool("t"),

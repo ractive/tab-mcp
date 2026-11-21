@@ -144,7 +144,7 @@ test.skipIf(chrome === undefined)(
 );
 
 test.skipIf(chrome === undefined)(
-	"annotations: none listed without, all four as booleans with (DEC-213)",
+	"annotations: none listed without, all four as booleans with (DEC-214)",
 	async () => {
 		const other = await openPage(browser as Browser, `${pageUrl}?annotations`);
 		try {

@@ -136,7 +136,7 @@ const HINTS = [
 ] as const;
 
 /**
- * A tool's annotations as Chrome lists them (DEC-213): none when the page
+ * A tool's annotations as Chrome lists them (DEC-214): none when the page
  * gave none; otherwise all four hints, each a boolean (missing ones false,
  * `"yes"` true), `null` taken as no hints. Anything else is refused, as
  * Chrome's `registerTool()` refuses it.

@@ -47,7 +47,7 @@ below was observed in Chrome for Testing 156.0.8078.80 (the version CI pins) wit
   `description`, `inputSchema`, `annotations` (all four: `readOnlyHint`,
   `consequentialHint`, `untrustedContentHint`, `debugging`; missing when the page gave
   none; given as `{}`, `null` or with only some hints, the missing ones are false and a
-  non-boolean is converted, so `{}` cannot be told apart from all four false; DEC-213),
+  non-boolean is converted, so `{}` cannot be told apart from all four false; DEC-214),
   `origin` and `window`. **No `outputSchema`**: Chrome 156 drops it at
   registration (DevTools' `WebMCP.toolsAdded` has none either).
 - `executeTool(tool, input, { signal })` runs the page's `execute` (in the page's world,

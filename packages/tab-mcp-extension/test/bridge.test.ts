@@ -43,7 +43,7 @@ import {
 } from "../src/worker/tools.ts";
 
 describe("names, descriptions, schemas", () => {
-	test("destructiveOf: read-only no, consequential yes, said not, nothing said yes (DEC-213)", () => {
+	test("destructiveOf: read-only no, consequential yes, said not, nothing said yes (DEC-214)", () => {
 		const of = (annotations?: PageTool["annotations"]) =>
 			destructiveOf({
 				name: "t",
@@ -446,7 +446,7 @@ describe("PageToolBridge", () => {
 		);
 	});
 
-	test("destructiveHint is the page's consequentialHint, true when it said nothing (DEC-213)", async () => {
+	test("destructiveHint is the page's consequentialHint, true when it said nothing (DEC-214)", async () => {
 		const reg = registrar();
 		const { state, chrome } = fakeChrome(
 			page([

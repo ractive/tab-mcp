@@ -148,7 +148,7 @@ export interface PageTool {
 		debugging?: boolean;
 		/**
 		 * The page's own; missing when the page gave no annotations (Chrome
-		 * then lists none) or no boolean: nothing is known (DEC-213).
+		 * then lists none) or no boolean: nothing is known (DEC-214).
 		 */
 		consequentialHint?: boolean;
 	};

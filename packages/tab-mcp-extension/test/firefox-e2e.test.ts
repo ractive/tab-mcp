@@ -417,7 +417,7 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		await waitForTools(stack, (n) => !n.includes("page_registered_later"));
 	});
 
-	test("destructiveHint as in Chrome: the page's consequentialHint, true without annotations (DEC-213)", async () => {
+	test("destructiveHint as in Chrome: the page's consequentialHint, true without annotations (DEC-214)", async () => {
 		await stack.tab.eval(`(() => {
 			window.hinted = new AbortController();
 			for (const [name, annotations] of [

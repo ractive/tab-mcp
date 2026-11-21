@@ -338,7 +338,7 @@ export interface Offered {
 	readOnly: boolean;
 	/**
 	 * It may change things the user cares about, as its `page_<name>` tool's
-	 * `destructiveHint` says (`destructiveOf`, DEC-213).
+	 * `destructiveHint` says (`destructiveOf`, DEC-214).
 	 */
 	destructive: boolean;
 	/**
@@ -456,7 +456,7 @@ interface Callable {
 }
 
 /**
- * The `destructiveHint` the AI app gets for a page tool (DEC-213): false for
+ * The `destructiveHint` the AI app gets for a page tool (DEC-214): false for
  * a read-only one, else what the page says with `consequentialHint`, and
  * true when the page said nothing (no annotations: the worst case, MCP's
  * own default). It only describes the tool: the bridge asks before every

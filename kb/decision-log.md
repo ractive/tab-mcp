@@ -183,7 +183,7 @@ a send is dropped.
 
 ## DEC-022: Annotation mapping
 
-**Amended by DEC-213:** in the tab-mcp browser extension, a page tool's
+**Amended by DEC-214:** in the tab-mcp browser extension, a page tool's
 `consequentialHint` becomes its `page_<name>` tool's `destructiveHint` (false when the
 page says false), and the extension's own question does not depend on it.
 
@@ -2737,7 +2737,7 @@ mirroring is on); whether it stays is for iteration F and EX 11.
 
 ## DEC-141: Page tools ask in the bridge, not through the library's confirmation
 
-**Amended by DEC-213:** `destructiveHint` is no longer "not read-only" but what the page
+**Amended by DEC-214:** `destructiveHint` is no longer "not read-only" but what the page
 says with `consequentialHint`; the bridge still asks before every call of a tool that is
 not read-only.
 
@@ -4776,17 +4776,24 @@ button it read like an action that fills in the code now.
 - **No pattern for the relay's address:** the sentence alone, no switch; the switch only
   while the setting is somehow on there, to turn it off.
 
-## DEC-213: A page tool's `destructiveHint` is what the page says with `consequentialHint`
+## DEC-214: A page tool's `destructiveHint` is what the page says with `consequentialHint`
 
-2026-11-22; amends DEC-141 and DEC-022 for page tools. The owner: Claude, connected
-through the tab-mcp browser extension, offered only "Allow once" before `page_add_todo`,
-and then the extension asked again. The extension told the AI app that every page tool
-that is not read-only is destructive (`destructiveHint: !readOnly`, "the user confirms
-every call"), and Anthropic's connector documentation says that `readOnlyHint` and
-`destructiveHint` decide Claude's own permissions and that destructive tools always ask.
-That used MCP's hint for "the extension asks", which is not what it means. WebMCP has a
-hint for it: `consequentialHint`, which ractive.ch's todo page sets on `delete_todos`
-and not on `add_todo` (DEC-143, DEC-209).
+2026-11-22; amends DEC-141 and DEC-022 for page tools. The extension told the AI app
+that every page tool that is not read-only is destructive (`destructiveHint: !readOnly`,
+"the user confirms every call"). That used MCP's hint for "the extension asks", which is
+not what it means: the hint should say what the page says about the tool. WebMCP has a
+hint for that, `consequentialHint`, which ractive.ch's todo page sets on `delete_todos`
+and not on `add_todo` (DEC-143, DEC-209). Claude sorts a connector's tools by these
+hints in its settings: "Read-only tools", "Write/delete tools" (destructive) and "Other
+tools" (neither). With the old hint `page_add_todo` was among "Write/delete tools"
+through the extension; now it is among "Other tools", as on a direct connection to the
+page.
+
+What it does not change: Claude's "Allow once" without "Always allow" for a page tool.
+The owner's test showed the cause: Claude keeps a saved list of a connector's tools, and
+a tool that is not in it (page tools are there only while their page is in front) gets
+"requires your approval" with "Allow once" only, until the user reloads the connector's
+tools. The hint has nothing to do with it.
 
 - **The mapping** for `page_<name>`, always given (MCP's default for a missing
   `destructiveHint` is true):
@@ -4814,5 +4821,3 @@ and not on `add_todo` (DEC-143, DEC-209).
 - **A change of the hint is a new tool:** the bridge re-registers a tool when anything
   the content script sends for it changes, the hint included, so the AI app gets a
   tools-changed notice when a page registers a tool again with another hint.
-- **Not confirmed against Claude** that this brings back Claude's "Always allow" for a
-  tool that is not consequential; the owner tests it.
