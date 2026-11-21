@@ -133,10 +133,10 @@ async function answer(stack: Stack, value: "allow" | "deny"): Promise<void> {
 	);
 }
 
-/** Whether "Fill in the code for me" and "Stop filling in the code" are hidden. */
-const fillButtons = (stack: Stack) =>
-	stack.panel.eval<boolean[]>(
-		`[document.getElementById("fill-on").hidden, document.getElementById("fill-off").hidden]`,
+/** Whether the "Fill in the code for me" switch is there, on, and says so. */
+const fillSwitch = (stack: Stack) =>
+	stack.panel.eval<[boolean, boolean, string | null]>(
+		`[!document.getElementById("fill-label").hidden, document.getElementById("fill-switch").checked, document.getElementById("fill-switch").getAttribute("aria-checked")]`,
 	);
 
 /** The pairing page's script ran in `page` (its flag in the extension's world). */
@@ -158,14 +158,16 @@ describe.skipIf(chrome === undefined)(
 
 		test("off by default, also with access to all sites: no question; Fill in the code for me turns it on", async () => {
 			const host = new URL(stack.oauth.relay.url).host;
-			const then = `when an AI app opens the sign-in page of ${host} in this Chrome profile, tab-mcp asks you and fills in the code.`;
-			// The test build has access to all sites: Chrome asks nothing.
+			// The test build has access to all sites: Chrome asks nothing, and
+			// the line is the same with the switch off and on.
 			expect(
 				await stack.panel.waitFor<string>(
 					`!document.getElementById("fill").hidden && document.getElementById("fill-text").textContent`,
 				),
-			).toBe(`Then, ${then}`);
-			expect(await fillButtons(stack)).toEqual([false, true]);
+			).toBe(
+				`While this is on, tab-mcp asks you and fills in the code when an AI app opens the sign-in page of ${host} in this Chrome profile.`,
+			);
+			expect(await fillSwitch(stack)).toEqual([true, false, "false"]);
 			// Off: the relay's page has no script of it, and asks nothing.
 			const { url } = await authorizeUrl(stack.oauth, stack.address);
 			const page = await stack.browser.newPage(url);
@@ -174,11 +176,20 @@ describe.skipIf(chrome === undefined)(
 			expect(await questions(stack)).toEqual([]);
 			await page.close();
 			// A real click: `permissions.request` needs the user's gesture.
-			await stack.panel.click("#fill-on");
-			await stack.panel.waitFor(
-				`document.getElementById("fill-text").textContent === ${JSON.stringify(`W${then.slice(1)}`)}`,
-			);
-			expect(await fillButtons(stack)).toEqual([true, false]);
+			await stack.panel.click("#fill-switch");
+			expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
+			// The worker took it: the script is registered (on the look-alike,
+			// which it refuses, so no question).
+			const end = Date.now() + 5_000;
+			for (;;) {
+				const page = await stack.browser.newPage(stack.oauth.lookAlike);
+				const ran = await scriptRan(page);
+				await page.close();
+				if (ran) break;
+				if (Date.now() > end) throw new Error("the script was not registered");
+				await Bun.sleep(200);
+			}
+			expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
 		});
 
 		test("a look-alike of the page on another origin is ignored: no question", async () => {
@@ -285,7 +296,7 @@ describe.skipIf(chrome === undefined)(
 			await page.close();
 		});
 
-		test("Stop filling in the code: off again, the page has no script and asks nothing", async () => {
+		test("the switch turned off: off again, the page has no script and asks nothing", async () => {
 			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
 			await stack.panel.waitFor(
 				`document.getElementById("state").dataset.state === "on"`,
@@ -295,10 +306,9 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(
 				`document.getElementById("pairing").hidden === false`,
 			);
-			await stack.panel.click("#fill-off");
-			await stack.panel.waitFor(
-				`document.getElementById("fill-off").hidden && !document.getElementById("fill-on").hidden`,
-			);
+			expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
+			await stack.panel.click("#fill-switch");
+			expect(await fillSwitch(stack)).toEqual([true, false, "false"]);
 			const { url } = await authorizeUrl(stack.oauth, stack.address);
 			// The unregistration may still be on its way: a page after it.
 			const end = Date.now() + 5_000;

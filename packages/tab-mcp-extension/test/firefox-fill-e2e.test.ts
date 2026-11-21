@@ -97,12 +97,18 @@ describe.skipIf(!firefoxOk)(
 			rmSync(dir, { recursive: true, force: true });
 		});
 
-		test("off by default; a real click on Fill in the code for me turns it on", async () => {
-			await panel.waitFor(`!document.getElementById("fill-on").hidden`);
-			await panel.click("#fill-on");
+		test("off by default; a real click on the Fill in the code for me switch turns it on", async () => {
+			const fillSwitch = `document.getElementById("fill-switch")`;
 			await panel.waitFor(
-				`!document.getElementById("fill-off").hidden && document.getElementById("fill-on").hidden`,
+				`!document.getElementById("fill-label").hidden && !${fillSwitch}.checked`,
 			);
+			await panel.click("#fill-switch");
+			await panel.waitFor(
+				`${fillSwitch}.checked && ${fillSwitch}.getAttribute("aria-checked") === "true"`,
+			);
+			// It stays on: the permission was given and the worker took it.
+			await Bun.sleep(500);
+			expect(await panel.eval(`${fillSwitch}.checked`)).toBe(true);
 		});
 
 		test("a look-alike on another origin gets no question; the relay's page, Allow fills in the code and pairs", async () => {

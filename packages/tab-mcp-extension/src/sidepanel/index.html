@@ -57,13 +57,8 @@
 				<button id="copy-code" type="button" class="quiet small copy" aria-label="Copy code" disabled>Copy</button></p>
 			<p class="muted small">The code changes every 2 minutes and after each use.</p>
 			<div id="fill" class="fill" hidden>
-				<div class="buttons">
-					<button id="fill-on" type="button" hidden>Fill in the code for me</button>
-				</div>
+				<label id="fill-label" class="allow-switch"><input id="fill-switch" type="checkbox" role="switch" aria-checked="false" aria-describedby="fill-text"><span>Fill in the code for me</span></label>
 				<p id="fill-text" class="muted small"></p>
-				<div class="buttons">
-					<button id="fill-off" type="button" class="quiet small" hidden>Stop filling in the code</button>
-				</div>
 			</div>
 			<div class="buttons">
 				<button id="pair-done" type="button" class="strong" hidden>Done</button>

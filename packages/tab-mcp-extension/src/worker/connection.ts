@@ -66,6 +66,7 @@ import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
 import {
 	codeWithPairingOn,
+	FillSetting,
 	failureText,
 	HOLD_MS,
 	syncPairingScript,
@@ -76,13 +77,11 @@ import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
-	loadFillFor,
 	loadGrants,
 	loadRelay,
 	loadReplaced,
 	type Replaced,
 	saveAiOn,
-	saveFillFor,
 	saveGrants,
 	saveRelay,
 	saveReplaced,
@@ -178,8 +177,10 @@ export class Connection {
 	#fillHold: ReturnType<typeof setTimeout> | undefined;
 	/** The pairing page's script registrations, one after the other. */
 	#scriptSync: Promise<void> = Promise.resolve();
-	/** The relay for which the user turned filling in on (DEC-203). */
-	#fillFor: string | undefined;
+	/** "Fill in the code for me" (DEC-203, DEC-210). */
+	readonly #fill: FillSetting;
+	/** The panel's last "set-fill" the worker has handled, by its id. */
+	#fillAnswered: string | undefined;
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -217,10 +218,10 @@ export class Connection {
 		kv: Kv,
 		aiOn: boolean,
 		grants: GrantView[],
-		fillFor: string | undefined,
+		fill: FillSetting,
 	) {
 		this.#kv = kv;
-		this.#fillFor = fillFor;
+		this.#fill = fill;
 		this.#aiOn = aiOn;
 		this.#grants = grants;
 		this.#storage = storage;
@@ -247,7 +248,7 @@ export class Connection {
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
-		const [storage, icons, allowed, relay, on, replaced, grants, fillFor] =
+		const [storage, icons, allowed, relay, on, replaced, grants, fill] =
 			await Promise.all([
 				CachedSecretStorage.load(kv),
 				iconsFor(),
@@ -256,7 +257,7 @@ export class Connection {
 				loadAiOn(kv),
 				loadReplaced(kv),
 				loadGrants(kv),
-				loadFillFor(kv),
+				FillSetting.load(kv),
 			]);
 		const connection = new Connection(
 			storage,
@@ -267,7 +268,7 @@ export class Connection {
 			kv,
 			on,
 			grants,
-			fillFor,
+			fill,
 		);
 		connection.#showBadge();
 		connection.syncFill();
@@ -489,12 +490,8 @@ export class Connection {
 		// given back (DEC-203).
 		this.#filler.reset();
 		this.#releasePairing();
-		if (this.#fillFor !== undefined) {
-			const old = this.#fillFor;
-			this.#fillFor = undefined;
-			await saveFillFor(this.#kv, undefined);
-			await this.#giveBackAccess(old);
-		}
+		const old = await this.#fill.reset();
+		if (old !== undefined) await this.#giveBackAccess(old);
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
 		// Apps paired through the relay before are not paired with this one.
@@ -728,26 +725,30 @@ export class Connection {
 				this.#questions.answer(command.id, command.answer);
 				return;
 			case "set-fill":
-				await this.#setFill(command.on);
+				await this.#setFill(command.on, command.id);
 				return;
 		}
 	}
 
 	/**
-	 * Filling in the code on the relay's page on or off (DEC-203). On, for
-	 * the relay in use: the panel has asked for its site first. Off: the
-	 * questions waiting go, and the relay's site is given back unless the
-	 * user gave access to all sites, which is not this feature's.
+	 * Filling in the code on the relay's page on or off (DEC-203, DEC-210).
+	 * On, for the relay in use: the panel has asked for its site first; if
+	 * the site is gone by now (given back for an "off" just before), it
+	 * stays off. Off: the questions waiting go, and the relay's site is
+	 * given back unless the user gave access to all sites, which is not this
+	 * feature's. The panel's command `id` comes back in the state, so the
+	 * panel knows its switch shows the worker's answer.
 	 */
-	async #setFill(on: boolean): Promise<void> {
+	async #setFill(on: boolean, id: string): Promise<void> {
 		const relay = this.#relay;
-		this.#fillFor = on ? relay : undefined;
-		await saveFillFor(this.#kv, this.#fillFor);
-		if (!on) {
+		if (on) await this.#fill.turnOn(relay);
+		else {
+			await this.#fill.turnOff();
 			this.#filler.withdrawAll();
 			this.#releasePairing();
 			await this.#giveBackAccess(relay);
 		}
+		this.#fillAnswered = id;
 		this.syncFill();
 		this.#changed();
 	}
@@ -811,13 +812,22 @@ export class Connection {
 	/**
 	 * Register the pairing page's content script for the relay in use, if
 	 * the user gave access to its site: at each start, after a change of
-	 * the relay or of the extension's permissions.
+	 * the relay or of the extension's permissions. On, but the site was
+	 * taken away (in the browser's settings): filling in goes off, so it
+	 * cannot come back by itself when the site does (with access to all
+	 * sites, say); the panel says why, and its switch asks for the site.
 	 */
 	syncFill(): void {
 		const relay = this.#relay;
-		const on = this.#fillOn();
 		this.#scriptSync = this.#scriptSync
-			.then(() => syncPairingScript(relay, on))
+			.then(async () => {
+				if (this.#relay === relay && (await this.#fill.check(relay))) {
+					this.#filler.withdrawAll();
+					this.#releasePairing();
+					this.#changed();
+				}
+				await syncPairingScript(relay, this.#fillOn());
+			})
 			.catch((error: unknown) =>
 				console.warn("tab-mcp: pairing page registration", error),
 			);
@@ -841,7 +851,7 @@ export class Connection {
 
 	/** Filling in is on for the relay in use. */
 	#fillOn(): boolean {
-		return this.#fillFor !== undefined && this.#fillFor === this.#relay;
+		return this.#fill.on(this.#relay);
 	}
 
 	/**
@@ -1035,6 +1045,10 @@ export class Connection {
 				: {}),
 			allSites: this.#allSites,
 			fillCode: this.#fillOn(),
+			fillLost: this.#fill.lost(this.#relay),
+			...(this.#fillAnswered !== undefined
+				? { fillAnswered: this.#fillAnswered }
+				: {}),
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 			expired: this.#questions.expired,
