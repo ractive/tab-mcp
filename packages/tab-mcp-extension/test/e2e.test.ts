@@ -411,6 +411,31 @@ const kvAll = (worker: Worker) =>
 		};
 	})`);
 
+/**
+ * Wait until the worker has stored `name` as always allowed on `origin`
+ * (`on`) or not: a switch in the panel flips on the click, before the worker's
+ * write, and the worker answers calls from what it wrote.
+ */
+async function workerAllows(
+	stack: Stack,
+	origin: string,
+	name: string,
+	on: boolean,
+): Promise<void> {
+	const end = Date.now() + 10_000;
+	for (;;) {
+		const all = (await kvAll(stack.worker))["allowedTools"] as
+			| Record<string, string[]>
+			| undefined;
+		if ((all?.[origin] ?? []).includes(name) === on) return;
+		if (Date.now() > end)
+			throw new Error(
+				`the worker never stored ${name} as ${on ? "allowed" : "asking"} on ${origin}: ${JSON.stringify(all)}`,
+			);
+		await Bun.sleep(100);
+	}
+}
+
 /** The ids of the extension's notifications on screen. */
 const notifications = (stack: Stack) =>
 	stack.worker.eval<string[]>(
@@ -2754,6 +2779,9 @@ describe.skipIf(chrome === undefined)(
 			const toggle = alwaysAllow("complete_todo");
 			await stack.panel.waitFor(takesClicks(toggle));
 			await stack.panel.click(toggle);
+			// The click flips the switch at once; the worker's write comes after,
+			// and a call before it would still be asked (or, off, not asked).
+			await workerAllows(stack, SITE, "complete_todo", true);
 			await stack.panel.waitFor(alwaysAllowed("complete_todo", true));
 			const result = await call(stack, "page_complete_todo", { id: 1 });
 			expect(result.isError).toBeFalsy();
@@ -2766,6 +2794,7 @@ describe.skipIf(chrome === undefined)(
 			});
 			await stack.panel.waitFor(takesClicks(toggle));
 			await stack.panel.click(toggle);
+			await workerAllows(stack, SITE, "complete_todo", false);
 			await stack.panel.waitFor(alwaysAllowed("complete_todo", false));
 		});
 
