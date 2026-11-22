@@ -29,6 +29,7 @@ import {
 	openPanel,
 	PANEL,
 	PRODUCT,
+	questionNotification,
 } from "../browser.ts";
 import { alwaysAllowable, fillAccess } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
@@ -1012,16 +1013,10 @@ export class Connection {
 			notify: async (id, text) => {
 				await notificationApi().create(
 					id,
-					notificationOptions({
-						type: "basic",
-						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-						title: text.title,
-						message: text.message,
-						contextMessage: text.contextMessage,
-						buttons: text.buttons.map((title) => ({ title })),
-						requireInteraction: true,
-						priority: 2,
-					}),
+					questionNotification(
+						text,
+						chrome.runtime.getURL("icons/icon-128.png"),
+					),
 				);
 			},
 			clear: (id) =>

@@ -29,6 +29,9 @@ import { join } from "node:path";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
+import { questionNotification } from "../src/browser.ts";
+import type { QuestionView } from "../src/protocol.ts";
+import { notificationText } from "../src/worker/questions.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -63,21 +66,36 @@ afterAll(async () => {
 	if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-/** Create a question-like notification `id` in the worker, through the real API. */
-const create = (id: string) =>
-	worker.eval<string>(`chrome.notifications.create(${JSON.stringify(id)}, {
-		type: "basic",
-		iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-		title: "tab-mcp test",
-		message: "never on the desktop",
-		buttons: [{ title: "Allow" }, { title: "Don't allow" }],
-		requireInteraction: true,
-		priority: 2,
-	})`);
-const listed = () =>
-	worker.eval<string[]>(
-		"chrome.notifications.getAll().then((all) => Object.keys(all))",
+/** A question of an AI app, as the worker shows one (questions.ts). */
+const QUESTION: QuestionView = {
+	id: "q_1",
+	app: "Claude (claude.ai)",
+	host: "claude.ai",
+	tool: "page_place_order",
+	title: "Place an order",
+	origin: "https://shop.example",
+	args: '{"item":"real"}',
+	site: true,
+	expiresAt: 0,
+};
+
+/** The options the worker creates a question's notification with. */
+const productOptions = () =>
+	questionNotification(
+		notificationText(QUESTION, '{"item":"real"}'),
+		// What chrome.runtime.getURL("icons/icon-128.png") gives in the worker.
+		`chrome-extension://${browser?.extensionId}/icons/icon-128.png`,
 	);
+
+/** Create notification `id` in the worker, through the real API, with the product's options. */
+const create = (id: string) =>
+	worker.eval<string>(
+		`chrome.notifications.create(${JSON.stringify(id)}, ${JSON.stringify(productOptions())})`,
+	);
+/** Chrome's `getAll`: each notification's id, with `true` (no fields). */
+const all = () =>
+	worker.eval<Record<string, unknown>>("chrome.notifications.getAll()");
+const listed = async () => Object.keys(await all());
 const clear = (id: string) =>
 	worker.eval<boolean>(`chrome.notifications.clear(${JSON.stringify(id)})`);
 
@@ -85,9 +103,23 @@ test.skipIf(chrome === undefined)(
 	"with the switch, the real API creates, lists and clears a notification as before",
 	async () => {
 		const id = `api-${Date.now()}`;
+		// What this test is for: the real API takes what the product passes
+		// (the permission in the manifest, every option, the icon) and answers.
+		// A rejection of any of it fails here.
 		expect(await create(id)).toBe(id);
-		expect(await listed()).toContain(id);
-		expect(await clear(id)).toBe(true);
+		// Not what it is for: whether the system keeps the notification. With
+		// the switch, or without a notification service (a CI runner), it can
+		// be gone as soon as it is made. CI run 45002871065 (attempt 1): getAll
+		// was empty right after create. So both are accepted; when it is still
+		// there, it is there as made (Chrome's getAll gives no fields).
+		const now = await all();
+		const kept = id in now;
+		console.log(
+			`notifications: Chrome ${kept ? "kept" : "did not keep"} the notification`,
+		);
+		if (kept) expect(now[id]).toBe(true);
+		// Gone already: false. Either way it answers, and is gone after.
+		expect(typeof (await clear(id))).toBe("boolean");
 		expect(await listed()).not.toContain(id);
 	},
 	30_000,
