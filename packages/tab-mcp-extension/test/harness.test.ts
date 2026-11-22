@@ -14,6 +14,7 @@ import {
 	Browser,
 	findChromeForTesting,
 	type Page,
+	profilePattern,
 	type Served,
 } from "./browser.ts";
 
@@ -115,4 +116,36 @@ test("an attach that fails otherwise is thrown on, unhandled", async () => {
 	]);
 	expect(code).not.toBe(0);
 	expect(stderr).toContain("attach failed");
+});
+
+test("reap's pattern matches only the profile's own Chrome", async () => {
+	// Stand-ins for Chromes, as pgrep sees them: the profile's own, one whose
+	// profile only starts the same, one that names it in another argument.
+	// A dot, to check that it stands for itself.
+	const profile = `/tmp/reap-check-${process.pid}/tab-mcp-extension-a.b`;
+	const args = [
+		[`--user-data-dir=${profile}`, "--type=renderer"],
+		[`--user-data-dir=${profile}x`],
+		[`--user-data-dir=/tmp/reap-check-${process.pid}/tab-mcp-extension-aXb`],
+		["--user-data-dir=/tmp/other", `--note=${profile}`],
+	];
+	const procs = args.map((a) =>
+		Bun.spawn([process.execPath, "-e", "await Bun.sleep(30_000)", ...a], {
+			stdout: "ignore",
+			stderr: "ignore",
+		}),
+	);
+	try {
+		await Bun.sleep(300);
+		const { stdout } = Bun.spawnSync(["pgrep", "-f", profilePattern(profile)]);
+		const found = stdout
+			.toString()
+			.trim()
+			.split("\n")
+			.filter(Boolean)
+			.map(Number);
+		expect(found).toEqual(procs.slice(0, 1).map((p) => p.pid));
+	} finally {
+		for (const p of procs) p.kill("SIGKILL");
+	}
 });

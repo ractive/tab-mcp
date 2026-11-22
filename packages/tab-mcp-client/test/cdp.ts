@@ -8,6 +8,57 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
+/**
+ * The profiles of the Chromes this process started and has not closed yet.
+ * The same as in `test/webmcp-spike/browser.ts`.
+ */
+const running = new Set<string>();
+let reapOnExit = false;
+
+/**
+ * Kill every process of the Chrome that uses `profile` and remove the profile.
+ * Its helpers (renderers, GPU, network) outlive a SIGKILL of the main process
+ * and would stay behind under launchd; each carries the profile's path, as
+ * given, in its `--user-data-dir`. The pattern is that whole argument and
+ * nothing more, so no other Chrome (another run's, another tool's) matches.
+ */
+function reap(profile: string): void {
+	try {
+		Bun.spawnSync(["pkill", "-9", "-f", profilePattern(profile)]);
+	} catch {
+		// no pkill: only the main process was killed
+	}
+	rmSync(profile, { recursive: true, force: true });
+	running.delete(profile);
+}
+
+/** The `--user-data-dir` argument of `profile`, whole, as a pkill pattern. */
+export function profilePattern(profile: string): string {
+	return `user-data-dir=${profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`;
+}
+
+/**
+ * Remember `profile` until its Chrome is closed; a test process that ends
+ * first (a failed hook, a timeout, Ctrl-C, a kill with SIGTERM) still takes
+ * its Chromes with it.
+ */
+function track(profile: string): void {
+	running.add(profile);
+	if (reapOnExit) return;
+	reapOnExit = true;
+	const reapAll = () => {
+		for (const p of [...running]) reap(p);
+	};
+	process.on("exit", reapAll);
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
+		process.once(signal, () => {
+			reapAll();
+			process.exit(
+				128 + (signal === "SIGINT" ? 2 : signal === "SIGTERM" ? 15 : 1),
+			);
+		});
+}
+
 const CANDIDATES = [
 	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 	"/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -82,6 +133,7 @@ export class Browser {
 
 	static async launch(binary: string): Promise<Browser> {
 		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-chrome-"));
+		track(profile);
 		const proc = Bun.spawn(
 			[
 				binary,
@@ -101,37 +153,46 @@ export class Browser {
 			],
 			{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
 		);
-		// Chrome prints "DevTools listening on ws://…" on stderr once it is ready.
-		const endpoint = await new Promise<string>((resolve, reject) => {
-			const timer = setTimeout(
-				() => reject(new Error("Chrome did not start")),
-				20_000,
-			);
-			void (async () => {
-				const decoder = new TextDecoder();
-				let text = "";
-				for await (const chunk of proc.stderr) {
-					text += decoder.decode(chunk, { stream: true });
-					const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
-					if (m?.[1] !== undefined) {
-						clearTimeout(timer);
-						resolve(m[1]);
-						return;
+		try {
+			// Chrome prints "DevTools listening on ws://…" on stderr once it is ready.
+			const endpoint = await new Promise<string>((resolve, reject) => {
+				const timer = setTimeout(
+					() => reject(new Error("Chrome did not start")),
+					20_000,
+				);
+				void (async () => {
+					const decoder = new TextDecoder();
+					let text = "";
+					for await (const chunk of proc.stderr) {
+						text += decoder.decode(chunk, { stream: true });
+						const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
+						if (m?.[1] !== undefined) {
+							clearTimeout(timer);
+							resolve(m[1]);
+							return;
+						}
 					}
-				}
-				reject(new Error(`Chrome exited: ${text.slice(-500)}`));
-			})();
-		});
-		const ws = new WebSocket(endpoint);
-		await new Promise<void>((resolve, reject) => {
-			ws.addEventListener("open", () => resolve(), { once: true });
-			ws.addEventListener(
-				"error",
-				() => reject(new Error("CDP connection failed")),
-				{ once: true },
-			);
-		});
-		return new Browser(proc, profile, ws);
+					reject(new Error(`Chrome exited: ${text.slice(-500)}`));
+				})();
+			});
+			const ws = new WebSocket(endpoint);
+			await new Promise<void>((resolve, reject) => {
+				ws.addEventListener("open", () => resolve(), { once: true });
+				ws.addEventListener(
+					"error",
+					() => reject(new Error("CDP connection failed")),
+					{ once: true },
+				);
+			});
+			return new Browser(proc, profile, ws);
+		} catch (error) {
+			// No Browser to close (Chrome did not start, say): kill what started
+			// and remove the profile here.
+			proc.kill("SIGKILL");
+			await proc.exited;
+			reap(profile);
+			throw error;
+		}
 	}
 
 	send(
@@ -195,7 +256,7 @@ export class Browser {
 		this.#ws.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
-		rmSync(this.#profile, { recursive: true, force: true });
+		reap(this.#profile);
 	}
 }
 

@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { Subprocess } from "bun";
 
 /** The profiles of the Chromes this process started and has not closed yet. */
@@ -18,22 +18,23 @@ let reapOnExit = false;
 /**
  * Kill every process of the Chrome that uses `profile` and remove the profile.
  * Its helpers (renderers, GPU, network) outlive a SIGKILL of the main process
- * and would stay behind under launchd; each carries the profile's unique
- * name in its `--user-data-dir`.
+ * and would stay behind under launchd; each carries the profile's path, as
+ * given, in its `--user-data-dir`. The pattern is that whole argument and
+ * nothing more, so no other Chrome (another run's, another tool's) matches.
  */
 function reap(profile: string): void {
 	try {
-		Bun.spawnSync([
-			"pkill",
-			"-9",
-			"-f",
-			`user-data-dir=.*${basename(profile)}`,
-		]);
+		Bun.spawnSync(["pkill", "-9", "-f", profilePattern(profile)]);
 	} catch {
 		// no pkill: only the main process was killed
 	}
 	rmSync(profile, { recursive: true, force: true });
 	running.delete(profile);
+}
+
+/** The `--user-data-dir` argument of `profile`, whole, as a pkill pattern. */
+export function profilePattern(profile: string): string {
+	return `user-data-dir=${profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`;
 }
 
 /**

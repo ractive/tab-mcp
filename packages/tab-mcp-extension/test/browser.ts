@@ -12,6 +12,60 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
+/**
+ * The profiles of the Chromes this process started and has not closed yet,
+ * and whether each is removed with its Chrome (not one the caller keeps).
+ * The same as in `test/webmcp-spike/browser.ts`.
+ */
+const running = new Map<string, boolean>();
+let reapOnExit = false;
+
+/**
+ * Kill every process of the Chrome that uses `profile`, and remove the
+ * profile unless the caller keeps it. Its helpers (renderers, GPU, network)
+ * outlive a SIGKILL of the main process and would stay behind under launchd;
+ * each carries the profile's path, as given, in its `--user-data-dir`. The
+ * pattern is that whole argument and nothing more, so no other Chrome
+ * (another run's, another tool's) matches.
+ */
+function reap(profile: string): void {
+	try {
+		Bun.spawnSync(["pkill", "-9", "-f", profilePattern(profile)]);
+	} catch {
+		// no pkill: only the main process was killed
+	}
+	if (running.get(profile) !== false)
+		rmSync(profile, { recursive: true, force: true });
+	running.delete(profile);
+}
+
+/** The `--user-data-dir` argument of `profile`, whole, as a pkill pattern. */
+export function profilePattern(profile: string): string {
+	return `user-data-dir=${profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`;
+}
+
+/**
+ * Remember `profile` until its Chrome is closed; a test process that ends
+ * first (a failed hook, a timeout, Ctrl-C, a kill with SIGTERM) still takes
+ * its Chromes with it.
+ */
+function track(profile: string, keep: boolean): void {
+	running.set(profile, !keep);
+	if (reapOnExit) return;
+	reapOnExit = true;
+	const reapAll = () => {
+		for (const p of [...running.keys()]) reap(p);
+	};
+	process.on("exit", reapAll);
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
+		process.once(signal, () => {
+			reapAll();
+			process.exit(
+				128 + (signal === "SIGINT" ? 2 : signal === "SIGTERM" ? 15 : 1),
+			);
+		});
+}
+
 /** Chrome's major version, from `--version`; 0 if it does not say. */
 export function chromeMajor(binary: string): number {
 	const { stdout } = Bun.spawnSync([binary, "--version"]);
@@ -169,7 +223,6 @@ type ChromeProcess = Subprocess<"ignore", "ignore", "ignore">;
 export class Browser {
 	readonly #proc: ChromeProcess;
 	readonly #profile: string;
-	readonly #keepProfile: boolean;
 	readonly #transport: Transport;
 	readonly #pending = new Map<number, Pending>();
 	readonly #listeners = new Set<Listener>();
@@ -186,14 +239,12 @@ export class Browser {
 	private constructor(
 		proc: ChromeProcess,
 		profile: string,
-		keepProfile: boolean,
 		toChrome: number,
 		fromChrome: number,
 		serve: Serve | undefined,
 	) {
 		this.#proc = proc;
 		this.#profile = profile;
-		this.#keepProfile = keepProfile;
 		this.serve = serve;
 		this.#transport = pipe(
 			toChrome,
@@ -268,7 +319,7 @@ export class Browser {
 	): Promise<Browser> {
 		const profile =
 			options.profile ?? mkdtempSync(join(tmpdir(), "tab-mcp-extension-"));
-		const keepProfile = options.profile !== undefined;
+		track(profile, options.profile !== undefined);
 		let browser: Browser | undefined;
 		let proc: ChromeProcess | undefined;
 		try {
@@ -299,7 +350,6 @@ export class Browser {
 			browser = new Browser(
 				proc,
 				profile,
-				keepProfile,
 				toChrome as number,
 				fromChrome as number,
 				options.serve,
@@ -329,7 +379,7 @@ export class Browser {
 			else {
 				proc?.kill("SIGKILL");
 				await proc?.exited;
-				if (!keepProfile) rmSync(profile, { recursive: true, force: true });
+				reap(profile);
 			}
 			throw error;
 		}
@@ -565,8 +615,7 @@ export class Browser {
 		// Chrome is gone: its end of the pipe is shut, ours follow before the
 		// next launch can get the same descriptor numbers.
 		await this.#transport.close();
-		if (!this.#keepProfile)
-			rmSync(this.#profile, { recursive: true, force: true });
+		reap(this.#profile);
 	}
 }
 
