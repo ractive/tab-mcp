@@ -41,11 +41,14 @@ import {
 
 const STATE: ExtensionState = {
 	name: "tab-mcp browser extension",
-	version: "0.3.0",
 	on: true,
 	apps: [{ name: "Claude", host: "claude.ai" }],
 	whileInFront: true,
 };
+/** AI access off (or not connected), as the worker sends it. */
+const OFF: ExtensionState = { ...STATE, on: false, apps: [] };
+/** What a page told "on" hears once AI access goes off (DEC-221). */
+const TOLD_OFF = { v: 1, type: "update", on: false };
 const VOUCH: Vouch = {
 	nonce: "n1",
 	app: { name: "Claude", host: "claude.ai" },
@@ -159,14 +162,8 @@ describe("the content script speaks only to a page that announced the library", 
 		await Bun.sleep(0);
 		expect(told).toEqual([{ v: 1, type: "update", ...STATE }]);
 		expect(host.changes).toBe(2);
-		h.stateChanged({ ...STATE, on: false, apps: [] });
-		expect(told.at(-1)).toEqual({
-			v: 1,
-			type: "update",
-			...STATE,
-			on: false,
-			apps: [],
-		});
+		h.stateChanged(OFF);
+		expect(told.at(-1)).toEqual(TOLD_OFF);
 	});
 
 	test("a page that marked itself before the content script came gets the hello first", async () => {
@@ -239,11 +236,15 @@ describe("the content script speaks only to a page that announced the library", 
 		await Bun.sleep(0);
 		expect(host.asked).toBe(1);
 		expect(told).toHaveLength(100 + 1);
-		// The worker's next change is what later hellos are answered with.
-		const off = { ...STATE, on: false, apps: [] };
-		h.stateChanged(off);
+		// The worker's next change is what later hellos are answered with:
+		// off, told once, then nothing.
+		h.stateChanged(OFF);
+		expect(told.at(-1)).toEqual(TOLD_OFF);
 		pageSays(hello());
-		expect(told.at(-1)).toEqual({ v: 1, type: "update", ...off });
+		expect(told).toHaveLength(100 + 2);
+		h.stateChanged(STATE);
+		pageSays(hello());
+		expect(told.at(-1)).toEqual({ v: 1, type: "update", ...STATE });
 		expect(host.asked).toBe(1);
 	});
 
@@ -309,6 +310,135 @@ describe("the content script speaks only to a page that announced the library", 
 			app: "todo",
 			apps: [],
 		});
+	});
+});
+
+describe("while AI access is off the page learns nothing (DEC-221)", () => {
+	/** The attributes of `<html>`, to see that nothing marks the document. */
+	const marks = () =>
+		doc.documentElement
+			.getAttributeNames()
+			.map((n) => `${n}=${doc.documentElement.getAttribute(n)}`);
+
+	test("a page that announces while off hears nothing at all, and is not marked", async () => {
+		doc.documentElement.setAttribute(MARK, "1");
+		const before = marks();
+		const { h, host } = handshake(OFF);
+		await Bun.sleep(0);
+		pageSays(hello());
+		await Bun.sleep(0);
+		h.stateChanged(OFF);
+		h.vouch("buy", { n: 1 }, VOUCH);
+		h.withdraw("n1");
+		await Bun.sleep(30);
+		expect(told).toEqual([]);
+		expect(marks()).toEqual(before);
+		// The panel still learns what the page announced.
+		expect(h.library?.version).toBe("0.19.0");
+		expect(host.changes).toBe(1);
+	});
+
+	test("nothing is said in the call of the page's hello either (no reply to time)", () => {
+		const { h } = handshake(OFF);
+		h.stateChanged(OFF);
+		pageSays(hello());
+		expect(told).toEqual([]);
+	});
+
+	test("a page told on hears off once, then nothing; a later hello is not answered", async () => {
+		const { h } = handshake();
+		pageSays(hello());
+		await Bun.sleep(0);
+		expect(told).toEqual([{ v: 1, type: "update", ...STATE }]);
+		h.stateChanged(OFF);
+		h.stateChanged({ ...OFF, name: "other" });
+		pageSays(hello());
+		await Bun.sleep(0);
+		expect(told).toEqual([{ v: 1, type: "update", ...STATE }, TOLD_OFF]);
+	});
+
+	test("a page that announces after AI access went off hears nothing", async () => {
+		const { h } = handshake(null);
+		h.stateChanged(OFF);
+		pageSays(hello());
+		await Bun.sleep(30);
+		expect(told).toEqual([]);
+	});
+
+	test("turning on later reaches a page that announced earlier", async () => {
+		const { h } = handshake(OFF);
+		pageSays(hello());
+		await Bun.sleep(0);
+		h.stateChanged(STATE);
+		expect(told).toEqual([{ v: 1, type: "update", ...STATE }]);
+		h.stateChanged(OFF);
+		expect(told.at(-1)).toEqual(TOLD_OFF);
+	});
+
+	test("a page that only marked itself gets the hello once on, so that it answers", async () => {
+		doc.documentElement.setAttribute(MARK, "1");
+		const { h } = handshake(OFF);
+		await Bun.sleep(0);
+		h.stateChanged(STATE);
+		expect(told).toEqual([{ v: 1, type: "hello", ...STATE }]);
+		h.stateChanged(OFF);
+		h.stateChanged(STATE);
+		expect(told.at(-1)).toEqual({ v: 1, type: "update", ...STATE });
+	});
+
+	test("no version in any message, whatever the worker sends", async () => {
+		doc.documentElement.setAttribute(MARK, "1");
+		// A state with more in it than the page may learn.
+		const more = {
+			...STATE,
+			version: "0.3.2",
+			relay: "https://relay.example",
+		} as ExtensionState;
+		const { h } = handshake(more);
+		await Bun.sleep(0);
+		pageSays(hello());
+		h.vouch("buy", { n: 1 }, VOUCH);
+		h.stateChanged({ ...more, on: false });
+		expect(told.map((m) => m["type"])).toEqual([
+			"hello",
+			"update",
+			"vouch",
+			"update",
+		]);
+		for (const m of told) {
+			expect(m).not.toHaveProperty("version");
+			expect(m).not.toHaveProperty("relay");
+		}
+		expect(Object.keys(told[0] ?? {}).sort()).toEqual([
+			"apps",
+			"name",
+			"on",
+			"type",
+			"v",
+			"whileInFront",
+		]);
+	});
+
+	test("no vouch to a page never told on; a vouch sent while on is still withdrawn after off", async () => {
+		const { h } = handshake(OFF);
+		pageSays(hello());
+		await Bun.sleep(0);
+		h.vouch("buy", { n: 1 }, VOUCH);
+		h.withdraw("n1");
+		expect(told).toEqual([]);
+		h.stateChanged(STATE);
+		h.vouch("buy", { n: 1 }, VOUCH);
+		h.stateChanged(OFF);
+		h.withdraw("n1");
+		// Withdrawn once; a nonce never vouched for is not.
+		h.withdraw("n1");
+		h.withdraw("n2");
+		expect(told.map((m) => m["type"])).toEqual([
+			"update",
+			"vouch",
+			"update",
+			"withdraw",
+		]);
 	});
 });
 
@@ -686,7 +816,6 @@ describe("both sides together: the client library in the page", () => {
 		expect(h.library).toEqual({ version: expect.any(String), apps: [] });
 		expect(mcp.extension).toEqual({
 			name: "tab-mcp browser extension",
-			version: "0.3.0",
 			apps: [{ name: "Claude", host: "claude.ai" }],
 			whileInFront: true,
 		});
@@ -712,8 +841,46 @@ describe("both sides together: the client library in the page", () => {
 		// Without the vouch (another agent in the browser): asked as before.
 		await callTool(call, { id: 7 }, signal, page, "doc-A");
 		expect(asked).toHaveLength(1);
-		h.stateChanged({ ...STATE, on: false, apps: [] });
+		h.stateChanged(OFF);
 		expect(mcp.extension).toBeUndefined();
+	});
+
+	test("AI access off: the page's TabMcp sees exactly what it sees without the extension", async () => {
+		const { h } = handshake(OFF);
+		const { mcp, native, asked } = await libraryPage();
+		const changes: unknown[] = [];
+		mcp.addEventListener("extensionchange", (e) => changes.push(e.detail));
+		await Bun.sleep(0);
+		h.stateChanged(OFF);
+		expect(h.library).toEqual({ version: expect.any(String), apps: [] });
+		expect(told).toEqual([]);
+		expect(mcp.extension).toBeUndefined();
+		// A WebMCP call is the page's to decide, unvouched, as without the
+		// extension.
+		const page = {
+			location: doc.location,
+			modelContext: native,
+		} as unknown as Document;
+		const call = await offered(page, "complete_todo");
+		await callTool(
+			call,
+			{ id: 1 },
+			new AbortController().signal,
+			page,
+			"doc-A",
+			{
+				send: (args) => h.vouch("complete_todo", args, VOUCH),
+				withdraw: () => h.withdraw(VOUCH.nonce),
+			},
+		);
+		expect(asked).toHaveLength(1);
+		expect(told).toEqual([]);
+		// On: the page learns it now.
+		h.stateChanged(STATE);
+		expect(mcp.extension?.apps).toEqual([
+			{ name: "Claude", host: "claude.ai" },
+		]);
+		expect(changes).toHaveLength(1);
 	});
 
 	test("a call cancelled before it reached the page takes its vouch back: an agent's equal call is asked", async () => {

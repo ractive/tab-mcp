@@ -121,13 +121,19 @@ page can say that an AI app is connected through the extension
 - **Either may start first.** The page says `hello` when its mirror starts and marks
   `<html data-tab-mcp-handshake>`; the content script (at `document_idle` in Chrome,
   after a click, at `document_start` in Firefox) listens from its start, and speaks
-  first (`hello`) only when the mark is there. Each answers the other's `hello` with an
-  `update`; changes go as `update`.
-- **The extension speaks only to pages that announced the library**: its name and
-  version, `on` (AI access on and connected), the AI apps connected now (`name`,
-  verified `host`) and `whileInFront: true`. The worker sends the state to every
-  content script of a site it may read whenever it changes (`extension-state`); each
-  passes it on only to a page that announced. A content script asks the worker for it
+  first (`hello`) only when the mark is there (while AI access is off: once it goes on,
+  unless the page spoke meanwhile). Each answers the other's `hello` with an `update`;
+  changes go as `update`.
+- **The extension speaks only to pages that announced the library, and only while AI
+  access is on and connected** (DEC-221): its name, `on: true`, the AI apps connected
+  now (`name`, verified `host`) and `whileInFront: true`; not its version. While AI
+  access is off (or connecting) it says nothing, not even to a page's `hello`, and sends
+  no vouch, so that a page cannot tell it from no extension; a document the content
+  script told "on" hears `{ v: 1, type: "update", on: false }` once when it goes off.
+  The "told on" memory is the content script's, per document. The worker sends the
+  state to every content script of a site it may read whenever it changes
+  (`extension-state`); each passes it on, field by field, only to a page that announced.
+  A content script asks the worker for it
   with `handshake`, accepted only from a tab's top frame, at the page's first `hello`
   only: later ones are answered from the last state the worker sent. A worker that does
   not answer is asked again after 1 s and 5 s (`RETRY_MS`), one ask at a time; a change
@@ -155,7 +161,10 @@ page can say that an AI app is connected through the extension
 - **No proof** of either side: a convenience between two parts the user trusts, not a
   security boundary (threat model A13, A14). Old and new mix: a page without the
   handshake hears nothing, an old extension says nothing, and its calls are unvouched
-  WebMCP calls, which the library does not ask.
+  WebMCP calls, which the library does not ask. Client 0.21.0 and older takes "on" only
+  with a version, so with an extension after DEC-221 such a page shows no extension
+  (its vouches still work); a newer client ignores an older extension's version and
+  treats its "off" as no extension (DEC-221).
 
 ## Filling in the code on the relay's page
 

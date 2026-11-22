@@ -449,6 +449,18 @@ describe("the panel's commands", () => {
 	});
 });
 
+describe("the state for pages with the client library (DEC-207, DEC-221)", () => {
+	test("its name, on and the AI apps: no version, nothing of the relay", async () => {
+		const { c } = await connection();
+		expect(c.handshakeState()).toEqual({
+			name: "tab-mcp browser extension",
+			on: false,
+			apps: [],
+			whileInFront: true,
+		});
+	});
+});
+
 describe("a page tool's question", () => {
 	test("Always allow on <host>: kept for the site, shown in the panel; that tool runs unasked after, another still asks (EQ 10)", async () => {
 		const { c, kv, fake } = await connection({

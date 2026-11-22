@@ -1164,17 +1164,17 @@ export class Connection {
 	}
 
 	/**
-	 * What a page that announced the client library is told (DEC-207): the
-	 * extension's name and version, whether AI access is on and connected,
-	 * and the AI apps connected now. Nothing else: not the relay, the
-	 * address or other tabs.
+	 * What a page that announced the client library may be told (DEC-207):
+	 * the extension's name, whether AI access is on and connected, and the
+	 * AI apps connected now; the content script tells it only while on
+	 * (DEC-221). Nothing else: not the version, the relay, the address or
+	 * other tabs.
 	 */
 	handshakeState(): ExtensionState {
 		const mcp = this.#mcp;
 		const on = mcp.state === "connected";
 		return {
 			name: PRODUCT,
-			version: chrome.runtime.getManifest().version,
 			on,
 			apps: on
 				? mcp.grants.map((g) => ({ name: g.client.name, host: g.client.host }))

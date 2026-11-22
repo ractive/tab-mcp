@@ -4554,6 +4554,10 @@ extension is its first user. The shape below is the library's, not the owner's.
 
 ## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
 
+**Amended by DEC-221:** the extension says nothing to a page while AI access is off
+(a page it told "on" hears "off" once), sends no vouch to a page it did not tell
+"on", and no longer tells its version.
+
 **Amended by DEC-215:** a WebMCP call that matches no vouch is no longer "asked as
 before" by the page: the page's `onConfirm` decides it in code, and without one it
 runs. `trustExtension: false` no longer "asks every call": it hands a vouched call to
@@ -5408,3 +5412,47 @@ started his own Chrome and Firefox.
   `test:browser` prints the install line when one is missing. Playwright's cache is no
   longer looked at. CI and the release jobs install the same pinned Firefox with the same
   line.
+
+## DEC-221: The extension tells a page nothing while AI access is off, and not its version (owner)
+
+2026-11-22; amends DEC-207. The extension answered every page that announced the client
+library, also while AI access was off, and any page can send that announcement: any
+page it may read could tell that it is installed, and learned its version. The owner
+decided:
+
+- **Nothing while AI access is off.** Through the handshake a page cannot tell "the
+  extension, AI access off" from "no extension". The content script (the narrowest
+  place: it decides what reaches the page) speaks only while the worker's state is
+  `on` (AI access on and connected; connecting counts as off): no answer to the
+  page's `hello`, no `update`, no `hello` for a page that only marked itself, no
+  `vouch`, no `withdraw` of a vouch it did not send, no mark, nothing in the call of
+  the page's event. It still takes what the page announces, for the panel.
+- **"Off" once to a document told "on".** The content script remembers, per document,
+  that it told it "on"; when the state goes off it sends `{ v: 1, type: "update",
+  on: false }` once, so that the page's display does not stay on, and then nothing
+  until it is on again. A vouch it sent before is still withdrawn after that.
+- **No version.** `ExtensionState` and the message lose `version`; the content script
+  builds the message field by field (`name`, `on`, `apps`, `whileInFront`), so
+  nothing else the worker might send gets through. The client's `BrowserExtension`
+  loses `version` (breaking for the client's next version).
+- **Kept:** the AI apps' names and verified hosts while on (the page says "Claude is
+  connected through the tab-mcp browser extension"), and the vouch with the AI app's
+  name and host.
+- **A page that only marked itself** (`<html data-tab-mcp-handshake>`, it said `hello`
+  before the content script listened) while AI access is off is greeted with `hello`
+  once AI access is on, so that it answers with what it announces. Until then the panel
+  does not know that page has the library: learning it would mean speaking.
+- **Not covered:** the extension's own `document.modelContext` where the browser has
+  none (Firefox, Chrome without WebMCP, after "Give access to all sites") still shows
+  any page that it is installed, as accepted on 2026-11-16 (`PRIVACY.md`). And a page
+  could try to time its own event: the content script parses what it hears (at most
+  64 KB) whatever the state, as it runs in the page's thread.
+- **Old and new mix** (no shim). Client 0.21.0 and older with an extension after 0.3.2:
+  the library takes "on" only with a version, so the page never shows the AI apps
+  connected through the extension (`extension` stays `undefined`, the connect dialog
+  offers to connect as if there were none); the vouch does not depend on it, so a call
+  the user allowed in the extension is still not asked again. A newer client with
+  extension 0.3.2 and older: the version is an unknown field and ignored, "off" means no
+  extension as before; such an extension still answers while off. Release order: the
+  client first, then the apps on it, then the extension; pages still on 0.21.0 lose the
+  "connected through the extension" line until they update.

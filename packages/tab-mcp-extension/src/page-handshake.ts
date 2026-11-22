@@ -12,12 +12,16 @@
  * The extension speaks only to a page that announced the library: its
  * `hello`, or `<html data-tab-mcp-handshake>`, which the library sets for an
  * extension that comes later (this script runs at `document_idle` in
- * Chrome, or after a click). It tells the page what it is, whether AI
- * access is on and which AI apps are connected (`hello`, `update`), and,
- * right before a page tool runs that the user allowed, `vouch`, and once
- * that call ended or failed, `withdraw` with the vouch's nonce, so that a
- * vouch its call did not use does not wait for another caller. Nothing
- * else: not the relay, not the address, not other tabs.
+ * Chrome, or after a click). And only while AI access is on and connected
+ * (DEC-221): then it tells the page its name and which AI apps are
+ * connected (`hello`, `update`), and, right before a page tool runs that
+ * the user allowed, `vouch`, and once that call ended or failed,
+ * `withdraw` with the vouch's nonce, so that a vouch its call did not use
+ * does not wait for another caller. While off it says nothing, so that a
+ * page cannot tell the extension from none; a page it told "on" hears
+ * `update` with `on: false` once, so that its display does not stay on.
+ * Nothing else: not its version, not the relay, not the address, not
+ * other tabs.
  *
  * Everything the page says is the page's word: it only feeds the panel's
  * lines. No proof either way: a page script can fake the library, and the
@@ -118,8 +122,18 @@ export class PageHandshake {
 	 * tabs nothing.
 	 */
 	#state: ExtensionState | undefined;
-	/** What the page is owed once the state is known: `hello` (spoken first) or `update`. */
-	#owed: "hello" | "update" | undefined;
+	/** The page is owed the state once it is known (a `hello` of its own, or its mark). */
+	#owed = false;
+	/**
+	 * The page marked itself and has not spoken since this script listens:
+	 * the first message to it is `hello`, which it answers with what it
+	 * announced. Kept while AI access is off, as nothing is said then.
+	 */
+	#greet = false;
+	/** This document was told "on", and not "off" since (DEC-221). */
+	#on = false;
+	/** The nonces of the vouches it was told and not yet withdrawn. */
+	readonly #vouched = new Set<string>();
 	/** The worker is being asked (or a retry waits): one round at a time. */
 	#asking = false;
 	/** Counts the rounds: the answer of an ended round is not used. */
@@ -142,7 +156,8 @@ export class PageHandshake {
 		this.#doc.defaultView?.addEventListener("pagehide", () => this.#end());
 		if (this.#doc.documentElement?.hasAttribute(MARK)) {
 			this.#announced = true;
-			this.#owe("hello");
+			this.#greet = true;
+			this.#owe();
 		}
 	}
 
@@ -163,21 +178,22 @@ export class PageHandshake {
 
 	/**
 	 * The extension's state changed (the worker's word): kept, and told to a
-	 * page that announced the library, as what it is owed if anything.
+	 * page that announced the library.
 	 */
 	stateChanged(state: ExtensionState): void {
 		this.#state = state;
-		const type = this.#end() ?? "update";
-		if (this.#announced) this.#tell(type, state);
+		this.#end();
+		if (this.#announced) this.#tell(state);
 	}
 
 	/**
 	 * Right before the page's tool `tool` runs with `args`, which the user
-	 * allowed: tell a page that announced the library. Synchronous, so the
-	 * page has it before the call.
+	 * allowed: tell a page that was told "on". Synchronous, so the page has
+	 * it before the call.
 	 */
 	vouch(tool: string, args: unknown, vouch: Vouch): void {
-		if (!this.#announced) return;
+		if (!this.#on) return;
+		this.#vouched.add(vouch.nonce);
 		this.#send({
 			type: "vouch",
 			tool,
@@ -194,28 +210,29 @@ export class PageHandshake {
 	 * equal calls the page may have used the other one for this call.
 	 */
 	withdraw(nonce: string): void {
-		if (this.#announced) this.#send({ type: "withdraw", nonce });
+		// Also after "off": the page has the vouch, it must not wait.
+		if (this.#vouched.delete(nonce)) this.#send({ type: "withdraw", nonce });
 	}
 
 	#heard(detail: unknown): void {
 		const m = parsePage(detail);
 		if (m === undefined) return;
 		this.#announced = true;
+		this.#greet = false;
 		const before = JSON.stringify(this.library);
 		if (this.#pages.has(m.app) || this.#pages.size < MAX_PAGES)
 			this.#pages.set(m.app, { library: m.library, apps: m.apps });
 		if (JSON.stringify(this.library) !== before) this.#host.changed();
-		if (m.type === "hello") this.#owe("update");
+		if (m.type === "hello") this.#owe();
 	}
 
-	/** Tell the page the state as `type`: at once if known, else once the worker answers. */
-	#owe(type: "hello" | "update"): void {
+	/** Tell the page the state: at once if known, else once the worker answers. */
+	#owe(): void {
 		if (this.#state !== undefined) {
-			this.#tell(type, this.#state);
+			this.#tell(this.#state);
 			return;
 		}
-		// A `hello` owed stays one: the page answers it with its own news.
-		this.#owed ??= type;
+		this.#owed = true;
 		if (this.#asking) return;
 		this.#asking = true;
 		void this.#ask(this.#round, 0);
@@ -228,7 +245,7 @@ export class PageHandshake {
 		if (round !== this.#round) return;
 		if (state !== undefined) {
 			this.#state = state;
-			this.#tell(this.#end() ?? "update", state);
+			if (this.#end()) this.#tell(state);
 			return;
 		}
 		const delay = this.#retryMs[attempt];
@@ -240,20 +257,42 @@ export class PageHandshake {
 		this.#retry = setTimeout(() => void this.#ask(round, attempt + 1), delay);
 	}
 
-	/** End the round of asking; what the page was owed, if anything. */
-	#end(): "hello" | "update" | undefined {
+	/** End the round of asking; whether the page was owed the state. */
+	#end(): boolean {
 		const owed = this.#owed;
 		this.#round++;
 		clearTimeout(this.#retry);
 		this.#retry = undefined;
-		this.#owed = undefined;
+		this.#owed = false;
 		this.#asking = false;
 		return owed;
 	}
 
-	#tell(type: "hello" | "update", state: ExtensionState): void {
-		// Capped as the page caps its own list: the library cuts it there too.
-		this.#send({ type, ...state, apps: state.apps.slice(0, MAX_APPS) });
+	/**
+	 * Tell the page the state (DEC-221): while on, what it is and the AI
+	 * apps; while not, nothing, unless it was told "on": then `on: false`,
+	 * once. Field by field: nothing else the worker might send gets through.
+	 */
+	#tell(state: ExtensionState): void {
+		if (!state.on) {
+			if (!this.#on) return;
+			this.#on = false;
+			this.#send({ type: "update", on: false });
+			return;
+		}
+		const type = this.#greet ? "hello" : "update";
+		this.#greet = false;
+		this.#on = true;
+		this.#send({
+			type,
+			name: state.name,
+			on: true,
+			// Capped as the page caps its own list: the library cuts it there too.
+			apps: state.apps
+				.slice(0, MAX_APPS)
+				.map((a) => ({ name: a.name, host: a.host })),
+			whileInFront: state.whileInFront,
+		});
 	}
 
 	#send(message: Record<string, unknown>): void {

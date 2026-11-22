@@ -36,9 +36,11 @@ AI app. A page that uses the tab-mcp library learns more, as the next paragraph 
 A page that uses the tab-mcp client library and offers its tools to agents in the
 browser announces that to the extension (any page script could pretend to). Such a page,
 and only such a page among those the extension may read (in every tab, not only the one
-in front), learns from the extension while it is open: the extension's name and version
-and whether AI access is on, also while it is off; and while AI access is on, the names
-and verified hosts of the AI apps connected to the extension. Right before one of its own
+in front), learns from the extension while it is open and AI access is on: the
+extension's name, that AI access is on, and the names and verified hosts of the AI apps
+connected to the extension. While AI access is off, the extension tells it nothing, so
+it cannot tell from the extension that it is installed; a page it told that AI access
+is on is told once that it went off. Right before one of its own
 tools runs because the user allowed the call in the extension, it also learns that
 tool's name, the arguments the page gets anyway, and which of those AI apps made the
 call, so that the page does not ask the user a second time. It learns nothing else: not
@@ -121,11 +123,11 @@ stores and logs: https://ractive.ch/tab-mcp/privacy/. A relay the user runs or c
 themselves has its operator's policy.
 
 To a page that uses the tab-mcp client library, inside the browser (see "What it reads"
-above): the extension's name and version and whether AI access is on, also while it is
-off; while AI access is on, the names and verified hosts of the AI apps connected to the
-extension, and right before a call the user allowed in the extension, the tool's name,
-its arguments and which AI app made the call. The page's script can send this on to its
-site, whose own privacy policy applies.
+above), only while AI access is on: the extension's name, that AI access is on, the
+names and verified hosts of the AI apps connected to the extension, and right before a
+call the user allowed in the extension, the tool's name, its arguments and which AI app
+made the call; once AI access goes off, that it went off, and then nothing. The page's
+script can send this on to its site, whose own privacy policy applies.
 
 ## What it does not do
 

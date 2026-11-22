@@ -358,9 +358,11 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   `trustExtension: false` on `TabMcp` hands such a call to `onConfirm` like an
   unvouched one; without `onConfirm` it then runs as well, so the option only matters
   to a page with an `onConfirm`. `mcp.extension` (event `extensionchange`, React:
-  `extension` of `useTabMcpState()`) is `{ name, version, apps, whileInFront }` while
+  `extension` of `useTabMcpState()`) is `{ name, apps, whileInFront }` while
   the extension serves the page, `apps` being the AI apps connected through it
-  (`{ name, host }`), else `undefined`; the connect dialog already says so. Details:
+  (`{ name, host }`), else `undefined`: while its AI access is off the extension tells
+  the page nothing, so do not try to tell "extension off" from "no extension". The
+  connect dialog already says so. Details:
   [With the tab-mcp browser extension](https://github.com/ractive/tab-mcp/blob/client-v0.21.0/packages/tab-mcp-client/README.md#with-the-tab-mcp-browser-extension).
 - A WebMCP call gets the same argument check as an AI app's and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`, so the page's record of calls still

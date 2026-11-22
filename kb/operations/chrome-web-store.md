@@ -263,10 +263,12 @@ code and message.
 >
 > A page built with the tab-mcp client library and the extension know of each other: a
 > call you allowed in the extension is not asked again in the page, and the page can show
-> which AI apps reach it through the extension. Such a page learns the extension's name
-> and version and whether AI access is on, also while it is off; while it is on, the
-> names and verified hosts of the AI apps connected to it; and right before a call you
-> allowed, the tool, its arguments and which AI app made the call. Nothing else.
+> which AI apps reach it through the extension. Only while AI access is on, such a page
+> learns the extension's name, that AI access is on, the names and verified hosts of the
+> AI apps connected to it, and right before a call you allowed, the tool, its arguments
+> and which AI app made the call. While AI access is off, it learns nothing from the
+> extension; a page that was told AI access is on is told once that it went off.
+> Nothing else.
 >
 > The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
 > tabs, and only the page's address, title, language and its WebMCP tools (and what a
@@ -314,9 +316,10 @@ sends.
   (PRIVACY.md has the full list). Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
   app the user connected, only while AI access is on; and, inside the browser, to a page
-  that uses the tab-mcp client library: the extension's name and version, whether AI
-  access is on, the connected AI apps' names and verified hosts, and for a call the user
-  allowed, the tool, its arguments and which AI app made it.
+  that uses the tab-mcp client library, only while AI access is on: the extension's
+  name, that AI access is on, the connected AI apps' names and verified hosts, and for a
+  call the user allowed, the tool, its arguments and which AI app made it (and, once,
+  that AI access went off).
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to
   the single purpose; not used to determine creditworthiness or for lending.
 - **Privacy policy URL:** the ractive.ch page with PRIVACY.md (setup step 2).

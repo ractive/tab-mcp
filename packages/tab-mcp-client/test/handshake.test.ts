@@ -126,7 +126,6 @@ const ON = {
 	v: 1,
 	type: "update",
 	name: "tab-mcp browser extension",
-	version: "0.3.0",
 	on: true,
 	whileInFront: true,
 	apps: [CLAUDE],
@@ -284,7 +283,6 @@ describe("the extension's state", () => {
 		tell(ON);
 		const expected = {
 			name: "tab-mcp browser extension",
-			version: "0.3.0",
 			apps: [CLAUDE],
 			whileInFront: true,
 		};
@@ -298,6 +296,22 @@ describe("the extension's state", () => {
 		tell({ v: 1, type: "update", on: false });
 		expect(t.extension).toBeUndefined();
 		expect(changes).toHaveLength(3);
+	});
+
+	test("the extension tells no version (DEC-221); one an older extension sends is not kept", async () => {
+		const t = tab();
+		await settle();
+		tell(ON);
+		expect(t.extension?.apps).toEqual([CLAUDE]);
+		tell({ v: 1, type: "update", on: false });
+		// The tab-mcp browser extension 0.3.2 and older: with its version.
+		tell({ ...ON, version: "0.3.2" });
+		expect(t.extension).toEqual({
+			name: "tab-mcp browser extension",
+			apps: [CLAUDE],
+			whileInFront: true,
+		});
+		expect(t.extension).not.toHaveProperty("version");
 	});
 
 	test("a TabMcp made after the extension spoke knows it at once", async () => {
@@ -325,7 +339,6 @@ describe("the extension's state", () => {
 			{ ...ON, apps: [{ name: "Claude" }] },
 			{ ...ON, apps: [{ name: 1, host: "claude.ai" }] },
 			{ ...ON, name: 7 },
-			{ ...ON, version: "x".repeat(300) },
 			[ON],
 			null,
 		])

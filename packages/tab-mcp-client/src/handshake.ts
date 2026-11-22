@@ -17,11 +17,13 @@
  *   extension that starts later (its content script comes at
  *   `document_idle`, or with a click) knows it may speak without having
  *   heard the `hello`.
- * - The extension says what it is, whether it serves the page now and
- *   which AI apps are connected to it (`hello`, `update`), and, right before
- *   it runs a page tool the user allowed there, `vouch`: the tool, the exact
- *   arguments, a nonce and the AI app; once that call ended or failed,
- *   `withdraw` with the nonce, and a vouch still unused is dropped.
+ * - The extension says what it is and which AI apps are connected to it
+ *   (`hello`, `update`), and, right before it runs a page tool the user
+ *   allowed there, `vouch`: the tool, the exact arguments, a nonce and the
+ *   AI app; once that call ended or failed, `withdraw` with the nonce, and
+ *   a vouch still unused is dropped. It speaks only while it serves the
+ *   page (DEC-221): while its AI access is off the page hears nothing, as
+ *   without the extension, except `on: false` once if it was told "on".
  * - Each side cuts the other's list of AI apps to 64 and sends no more.
  *
  * No proof of who sent what: anything that could fake the extension runs in
@@ -236,13 +238,12 @@ function extensionOf(
 	m: Record<string, unknown>,
 ): BrowserExtension | undefined | null {
 	if (m["on"] !== true) return m["on"] === false ? undefined : null;
-	const { name, version, apps } = m;
-	if (!text(name) || !text(version) || !Array.isArray(apps)) return null;
+	const { name, apps } = m;
+	if (!text(name) || !Array.isArray(apps)) return null;
 	const list = apps.slice(0, MAX_APPS).map(appOf);
 	if (list.some((a) => a === undefined)) return null;
 	return Object.freeze({
 		name,
-		version,
 		apps: Object.freeze(list.map((a) => Object.freeze(a as VouchedBy))),
 		whileInFront: m["whileInFront"] !== false,
 	});

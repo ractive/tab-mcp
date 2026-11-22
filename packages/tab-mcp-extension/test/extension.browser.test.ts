@@ -2579,14 +2579,11 @@ describe.skipIf(chrome === undefined)(
 						"window.tabMcpPage?.mcp.extension?.apps.length === 1",
 						15_000,
 					);
-					const version = await stack.worker.eval<string>(
-						"chrome.runtime.getManifest().version",
-					);
+					// No version (DEC-221).
 					expect(
 						await tab.eval("window.tabMcpPage.mcp.extension ?? null"),
 					).toEqual({
 						name: "tab-mcp browser extension",
-						version,
 						apps: [TEST_APP],
 						whileInFront: true,
 					});
@@ -2668,6 +2665,21 @@ describe.skipIf(chrome === undefined)(
 					expect(
 						await tab.eval("document.getElementById('extension').textContent"),
 					).toContain('"apps":[]');
+				},
+			);
+			await step(
+				"AI access off: the page, told on before, hears off and shows no extension (DEC-221)",
+				async () => {
+					await stack.panel.eval(`(async () => {
+						const port = chrome.runtime.connect({ name: "panel" });
+						port.postMessage({ type: "stop" });
+						await new Promise((resolve) => setTimeout(resolve, 300));
+						port.disconnect();
+					})()`);
+					await tab.waitFor(
+						"window.tabMcpPage.mcp.extension === undefined",
+						15_000,
+					);
 				},
 			);
 		}, 130_000);

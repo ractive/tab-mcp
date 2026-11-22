@@ -77,7 +77,6 @@ export interface WebMcpClient {
 export interface BrowserExtension {
 	/** As the extension names itself ("tab-mcp browser extension"). */
 	name: string;
-	version: string;
 	/**
 	 * The AI apps connected to the extension now (each one's own name and
 	 * the host the relay verified); empty while none is.

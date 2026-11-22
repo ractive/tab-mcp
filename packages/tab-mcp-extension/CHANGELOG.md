@@ -11,6 +11,20 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ## Unreleased
 
+### Changed
+
+- **A page with the tab-mcp client library learns nothing while AI access is off**
+  (DEC-221). The extension no longer answers its announcement then, so the page cannot
+  tell from the extension that it is installed. A page it told that AI access is on is
+  told once that it went off, and then nothing until AI access is on again. No vouch
+  goes to a page that was not told "on".
+- **The extension no longer tells such a page its version.** While AI access is on, the
+  page learns its name, that AI access is on and the AI apps connected now, as before.
+- **With client 0.21.0 and older** a page no longer shows the AI apps connected through
+  the extension (the library takes "on" only with a version); calls the user allowed in
+  the extension are still not asked again in the page. Client versions after 0.21.0
+  show them.
+
 ### Fixed
 
 - **A page tool that takes the tab to another page could take 30 seconds to answer**

@@ -344,11 +344,14 @@ that an AI app reaches it through the extension:
 
 - **`extension`** (and the event `extensionchange`, `{ extension }`; in React the
   snapshot's `extension`): while the extension serves the page,
-  `{ name, version, apps, whileInFront }`. `apps` are the AI apps connected to the
+  `{ name, apps, whileInFront }`. `apps` are the AI apps connected to the
   extension now, each `{ name, host }` (the AI app's own name and the host the relay
   verified), empty while none is. `whileInFront` is `true`: the extension serves only the
   tab in front of its window, so say "while this tab is in front". `undefined` without
-  the extension, while its AI access is off, and without WebMCP. The connect dialog says
+  the extension, while its AI access is off, and without WebMCP: while its AI access is
+  off the extension tells the page nothing at all (DEC-221), so the page cannot tell it
+  from no extension, and a page it served hears once that it stopped. It does not tell
+  its version. The connect dialog says
   it first ("Claude (claude.ai) is connected through the tab-mcp browser extension,
   while this tab is in front.", `ui.strings.viaExtension…`) and keeps everything else:
   a phone or another browser still connects to the page directly.
