@@ -8,7 +8,7 @@ tags:
   - relay
   - client
   - extension
-timestamp: 2026-11-22
+timestamp: 2026-11-22T00:00:00+01:00
 ---
 
 # Code review of tab-mcp, 2026-11-22
@@ -353,3 +353,36 @@ browser access. These were test-environment permissions, not production changes.
 The passing suite does not contradict the findings: the reproductions exercise
 conditions its current tests miss. The suggested regression cases above should fail
 against this revision before their corresponding fixes are implemented.
+
+## Outcome
+
+Added 2026-11-22. CR-01 to CR-04 were reproduced against main at `9f11a91` (after
+pull request 202) with the regression tests the review asks for, which failed before
+their fixes, and fixed in [tab-mcp#206](https://github.com/ractive/tab-mcp/pull/206),
+one commit each.
+
+- **CR-01, fixed.** Reproduced as described: eight held requests all reached a page
+  whose site allows two, and eight listen streams of one grant all reached the page.
+  The two limits are now checked in `handleMcp`'s loop, after the last await, in the
+  same synchronous step as `session.forward()`, which counts the exchange; no separate
+  reservation is needed, since a refused, ended, cancelled or resent request leaves
+  `pending` when its exchange ends. Tests in `packages/tab-mcp/test/page-not-open.test.ts`
+  ("CR-01: …"): both bursts (two forwarded, six 429), and that cancelling the held
+  requests lets the next one through.
+- **CR-02, fixed.** Reproduced through `SecretStore` and `disconnectAll()` (the
+  "fresh" connection sent the old secret). `SecretStore` keeps an unsaved state, as
+  `always-allowed.ts` does: after a rotation that could not be written, `current()`
+  returns the secret in memory and does not read storage until a write succeeds. After a
+  reload the page reads the old secret again, whose grants were revoked; the README and
+  the threat model say so. Tests in `packages/tab-mcp-client/test/secret.test.ts`.
+  Core bundle 6283 to 6297 B gzipped, React closure 13486 to 13514 B.
+- **CR-03, fixed.** Reproduced; mixed line ends (`\n\r\n`, `\n\r`) failed even in one
+  chunk, which the review did not mention. `Exchange` keeps a framing state (between
+  events, line has text, last character a CR) updated by every write. Tests in
+  `packages/tab-mcp/test/hardening.test.ts`: six event ends split at every character,
+  each with keep-alives and the final error event, and streams left inside an event.
+- **CR-04, fixed.** Reproduced with the review's sequence. The registry keeps the
+  context's entries, not names; removing a tool drops its entry, and the quota counts
+  the live ones. Tests in `packages/tab-mcp-extension/test/unit.test.ts` ("CR-04: …"):
+  the sequence, a new context with a tool of that name, `records()`/`restore()`.
+- **CR-05 to CR-08:** see the pull request of the branch `review/2026-11-22`.

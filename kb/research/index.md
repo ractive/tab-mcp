@@ -4,10 +4,10 @@
 
 ## research
 
-* [Code review of tab-mcp, 2026-11-22](code-review-2026-11-22.md) - Implementation review at a6e154c, with four newly reproduced correctness bugs and four reconfirmed findings, proposed corrections and regression-test cases.
 * [AI app support for MCP 2026-07-28 and CIMD (October 2026)](ai-app-support.md) - Which AI apps speak the stateless 2026-07-28 revision and register OAuth clients via Client ID Metadata Documents, and the client bugs a strict server hits.
 * [Bun 1.4.3, TypeScript 7 and publishing for tab-mcp](bun-runtime-and-publishing.md) - Bun.serve WebSockets and long-held requests, crypto and CSRF helpers, declaration emit with TypeScript 7, browser bundles, npm trusted publishing and Docker.
 * [bunny.net Magic Containers for the relay](bunny-magic-containers.md) - Notes for the deployment iteration — WebSockets, long requests, single instance, health checks, client IP and pricing on bunny.net Magic Containers.
+* [Code review of tab-mcp, 2026-11-22](code-review-2026-11-22.md) - Implementation review at a6e154c, with four newly reproduced correctness bugs and four reconfirmed findings from the website and code review, including fixes to consider and regression-test cases.
 * [Feedback from integrating tab-mcp into comparis 2027](feedback-comparis-game.md) - Bugs, rough edges and developer-experience gaps found while adding the React client 0.9.1 to a Vite + React 19 + Tailwind v4 game and testing it against the 0.6.0 relay.
 * [Full review of tab-mcp, 2026-11-13](review-2026-11-13.md) - Eight independent read-only reviews of the relay, the client library, tab-mcp for Chrome, the WebMCP integration and the example pages (security, code quality, UX/UI, overengineering) with 144 findings, a triage and proposed iterations.
 * [Identity binding: research findings](identity-binding-research-needed.md) - The five questions for identity binding answered from primary sources — identity providers as MCP authorization servers, assertion standards, AI apps with third-party authorization servers, pairwise subjects and logout — and what they mean for the design.
