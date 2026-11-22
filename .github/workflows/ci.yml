@@ -80,6 +80,8 @@ jobs:
         run: bun run test:browser
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          # The runner image's Firefox, named: the tests never pick an installed one by themselves.
+          FIREFOX_PATH: /usr/bin/firefox
 
   # The required check. It runs even when a test job failed or was cancelled
   # (always()), and fails unless both report success; a kb-only pull request's

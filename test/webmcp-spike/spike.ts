@@ -4,7 +4,7 @@
  * each world saw as JSON (kb/research/webmcp-from-extension.md reads it).
  *
  * Run: `bun test/webmcp-spike/spike.ts` with CHROME_PATH set to Chrome for
- * Testing (or one in Puppeteer's or Playwright's cache). The pages are served
+ * Testing (or one in the pinned one in Puppeteer's cache, test/browsers.ts). The pages are served
  * through the DevTools Protocol on https://spike.test and https://other.test
  * (no server, no network: it runs in a sandbox too); only the polyfill is
  * downloaded, from unpkg.

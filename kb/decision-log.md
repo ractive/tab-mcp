@@ -5368,3 +5368,30 @@ folders in the temp folder that day).
   the sweep is for what it cannot do. `bun run test:browser --sweep --dry-run` lists
   what it would do.
 - **The rule (`CLAUDE.md`):** "never several at once" became "a second run waits".
+
+## DEC-220: The test browsers are pinned test builds, and their notifications stay off the desktop
+
+2026-11-22, iteration 50's third pull request. The extension's browser tests put about
+16 real notifications per run on the owner's macOS desktop, each with
+`requireInteraction: true`. Without `CHROME_PATH` or `FIREFOX_PATH`, the tests also
+started his own Chrome and Firefox.
+
+- **A switch, not a recorder.** Tried first
+  ([research](/research/test-browser-notifications.md)): Chrome for Testing 156 with
+  `--disable-features=NativeNotifications` and Firefox 160 with
+  `alerts.useSystemBackend: false` deliver nothing to macOS (usernoted's log), while
+  `chrome.notifications.create`, `getAll` and `clear` answer as before. Every test Chrome
+  and Firefox gets them (`test/browsers.ts`, `chromeSwitches` merges them with a caller's
+  `--disable-features`). The tests answer notifications through the worker's own handlers,
+  so no assertion changed. The recorder the audit proposed for the test build is not
+  built; the store and development builds are untouched.
+- **The guard:** `notifications.browser.test.ts`, macOS only, creates a question-like
+  notification and fails if usernoted's log names it.
+- **Pinned test browsers only:** Chrome for Testing in CI's version (`CHROME_VERSION`,
+  `156.0.8078.80`, checked against the workflows) and a test Firefox (`stable_160.0.1`),
+  from `CHROME_PATH` / `FIREFOX_PATH` or Puppeteer's cache (`~/.cache/puppeteer`, installed
+  once with `bunx @puppeteer/browsers@3.2.7 install …`, as the README's commands say).
+  Never an installed Chrome. An installed Firefox only on request (`--system-firefox`,
+  `TAB_MCP_SYSTEM_FIREFOX=1`), with a line saying so. `test:browser` prints the install
+  line when one is missing. Playwright's cache is no longer looked at. CI names the
+  runner's Firefox (`FIREFOX_PATH: /usr/bin/firefox`).

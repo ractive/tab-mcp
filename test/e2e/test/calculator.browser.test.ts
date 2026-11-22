@@ -2,7 +2,7 @@
  * End to end (iteration 4): the calculator page in headless Chrome, a real
  * relay, and the MCP SDK client as the AI app doing the whole OAuth flow with
  * the pairing code typed on `/authorize` in Chrome. Needs Chrome
- * (`CHROME_PATH` or a usual location): required in CI, skipped elsewhere
+ * (`CHROME_PATH` or the pinned Chrome for Testing, test/browsers.ts): required in CI, skipped elsewhere
  * without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";

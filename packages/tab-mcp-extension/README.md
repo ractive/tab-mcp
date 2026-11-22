@@ -494,8 +494,11 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   have access to all sites at install.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
+- `test/notifications.browser.test.ts` (macOS): a question-like notification of the test
+  build works and never reaches the desktop. Every test Chrome starts without its macOS
+  notifications, and every test Firefox without its system alerts (`test/browsers.ts`).
 - `test/firefox.browser.test.ts`: the Firefox test build in Firefox 128 or newer
-  (`FIREFOX_PATH`, else where it is installed; skipped without it) over WebDriver BiDi
+  (`FIREFOX_PATH`, else the pinned test Firefox in Puppeteer's cache; skipped without it) over WebDriver BiDi
   (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
   extension's `document.modelContext` as it loads, and a relay and an MCP client list,
   call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page replacing

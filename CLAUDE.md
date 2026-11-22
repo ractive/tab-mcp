@@ -130,8 +130,13 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
   (`extension fill firefox`), the client library's browser code (`page webmcp
   serve`), the relay's pages, server and protocol (`code-field calculator page
   react-todo`), the test pages and harnesses (the files that use them). It
-  fails when a browser it needs is missing; `--no-firefox` or `--no-chrome`
-  leaves those files out and says so. One browser run per machine: a second
+  starts only the pinned test browsers, never the owner's own Chrome or
+  Firefox: Chrome for Testing and a test Firefox in `~/.cache/puppeteer`,
+  installed once with the two `bunx @puppeteer/browsers` lines in the README's
+  commands (or `CHROME_PATH` / `FIREFOX_PATH`; an installed Firefox only with
+  `--system-firefox`), and no notification reaches the desktop. It fails when
+  a browser it needs is missing and prints the line that installs it;
+  `--no-firefox` or `--no-chrome` leaves those files out and says so. One browser run per machine: a second
   run (also `TAB_MCP_BROWSER=1 bun test <file>`) says whose run holds the lock
   and waits for it; `--no-wait` fails instead. Each run first stops the test
   browsers of killed runs and removes their folders (`bun run test:browser

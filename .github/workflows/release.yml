@@ -212,6 +212,8 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          # The runner image's Firefox, named: the tests never pick an installed one by themselves.
+          FIREFOX_PATH: /usr/bin/firefox
       - run: bun run build
         working-directory: packages/tab-mcp-client
       - id: pack
@@ -386,6 +388,8 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          # The runner image's Firefox, named: the tests never pick an installed one by themselves.
+          FIREFOX_PATH: /usr/bin/firefox
       - run: bun run build
         working-directory: packages/tab-mcp
       - id: pack

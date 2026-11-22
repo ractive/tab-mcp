@@ -7,7 +7,7 @@
  * app. Firefox has no WebMCP: the page's tools reach the AI app only through
  * the extension's own `document.modelContext` (`src/firefox/webmcp.ts`).
  *
- * Needs Firefox 128 or newer (`FIREFOX_PATH`, or where it is installed):
+ * Needs Firefox 128 or newer (`FIREFOX_PATH`, or the pinned test Firefox, test/browsers.ts):
  * required in CI, skipped elsewhere without it.
  */
 

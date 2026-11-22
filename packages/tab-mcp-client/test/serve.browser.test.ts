@@ -3,8 +3,8 @@
  * a chat in a frame on another origin, after checking the frame's origin, and
  * the chat calls the page's tools through `createTunnelFetch`. Pages are
  * served through the DevTools Protocol, as in `webmcp.browser.test.ts`. Runs
- * with any Chrome for Testing (`CHROME_PATH`, or Puppeteer's or Playwright's
- * cache); the WebMCP part needs 156 or newer. Required in CI, skipped
+ * with any Chrome for Testing (`CHROME_PATH`, or the pinned one in
+ * Puppeteer's cache, test/browsers.ts); the WebMCP part needs 156 or newer. Required in CI, skipped
  * elsewhere without a browser.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";

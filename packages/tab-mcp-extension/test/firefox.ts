@@ -11,20 +11,10 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
+import { FIREFOX_PREFS, findTestFirefox } from "../../../test/browsers.ts";
 
-/** Firefox: `FIREFOX_PATH`, else where macOS and Linux put it. */
-export function findFirefox(): string | undefined {
-	const fromEnv = process.env["FIREFOX_PATH"];
-	if (fromEnv) return fromEnv;
-	const candidates = [
-		"/Applications/Firefox.app/Contents/MacOS/firefox",
-		"/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
-		"/usr/bin/firefox",
-		"/usr/local/bin/firefox",
-		"/snap/bin/firefox",
-	];
-	return candidates.find((path) => Bun.file(path).size > 0);
-}
+/** The test Firefox in the pinned version, `FIREFOX_PATH` or Puppeteer's cache (test/browsers.ts). */
+export const findFirefox = findTestFirefox;
 
 /** Firefox's major version, from `--version`; 0 if it does not say. */
 export function firefoxMajor(binary: string): number {
@@ -60,6 +50,8 @@ const BASE_PREFS: Record<string, string | number | boolean> = {
 	"browser.startup.homepage_override.mstone": "ignore",
 	"datareporting.policy.dataSubmissionEnabled": false,
 	"toolkit.telemetry.reportingpolicy.firstRun": false,
+	// No notification of a test on the desktop.
+	...FIREFOX_PREFS,
 };
 
 export class Firefox {

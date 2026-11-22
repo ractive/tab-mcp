@@ -9,8 +9,9 @@
  * and tab switches; the store package has none and works on a tab only after
  * a click on the icon there, until the tab goes to another origin.
  *
- * Needs Chrome for Testing 156 or newer (`CHROME_PATH`, or Puppeteer's or
- * Playwright's cache): required in CI, skipped elsewhere without it. Runs
+ * Needs Chrome for Testing 156 or newer (`CHROME_PATH`, or the pinned one in
+ * Puppeteer's cache, test/browsers.ts): required in CI, skipped elsewhere
+ * without it. Runs
  * with `bun run test:browser` only (test/browser-gate.ts).
  */
 
