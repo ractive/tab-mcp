@@ -236,9 +236,11 @@ describe.skipIf(chrome === undefined)(
 		test("a question stays in place when the panel behind it scrolls or stops scrolling (classic scrollbars)", async () => {
 			// Scrollbars that take room, as on Linux and Windows (macOS lays
 			// them over the page): the panel's page behind the dialog getting
-			// taller than the panel, or shorter, adds or removes one. Its width
-			// must not change the dialog's, or a question's buttons move between
-			// a look and a click (CI, 2026-11-22).
+			// taller than the panel, or shorter, must not add or remove one
+			// while a question waits, or the dialog changes its width and the
+			// question's buttons move between a look and a click (CI,
+			// 2026-11-22). The dialog stays within the panel's edge, scrollbar
+			// left out ("the look" in e2e.test.ts).
 			await stack.panel.eval(
 				`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-scrollbars", textContent: "::-webkit-scrollbar { width: 15px; height: 15px; } ::-webkit-scrollbar-thumb { background: #888; }" }))`,
 			);
@@ -248,7 +250,7 @@ describe.skipIf(chrome === undefined)(
 				await stack.panel.waitFor(questionCount(1));
 				const place = () =>
 					stack.panel.eval<string>(
-						`(() => { const b = [...document.querySelectorAll('[data-question] button[data-answer="deny"]')].at(-1).getBoundingClientRect(); return [document.getElementById("questions").clientWidth, b.left, b.top, b.width].map(Math.round).join(); })()`,
+						`(() => { const b = [...document.querySelectorAll('[data-question] button[data-answer="deny"]')].at(-1).getBoundingClientRect(); const dialog = document.getElementById("questions"); const inside = dialog.getBoundingClientRect().right <= document.documentElement.clientWidth; return [dialog.clientWidth, b.left, b.top, b.width].map(Math.round).join() + (inside ? "" : " past the edge"); })()`,
 					);
 				const scrolls = () =>
 					stack.panel.eval<boolean>(
@@ -260,6 +262,7 @@ describe.skipIf(chrome === undefined)(
 				);
 				expect(await scrolls()).toBe(true);
 				const scrolling = await place();
+				expect(scrolling).not.toContain("past the edge");
 				// Nothing behind but the dialog: it does not.
 				await stack.panel.eval(
 					`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-short", textContent: "body *:not(:has(#questions), #questions, #questions *) { display: none !important; }" }))`,
