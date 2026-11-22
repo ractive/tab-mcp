@@ -167,6 +167,33 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - **Scope:** the Firefox UNIT rows (1.2) are for pull request 7, and the client's (1.5,
   1.6) for pull request 8.
 
+## What changed (pull request 6)
+
+- **One Chrome per build and WebMCP flag:** `extension.browser.test.ts` has 6 launches
+  in place of 14 (the test build with WebMCP, the test build without it, the store
+  package, and 3 for the restart scenario) and 2 builds in place of 12. `fill.browser.test.ts`
+  keeps its 1 launch.
+- **Each test starts from its own state:**
+  - The extension is installed anew in its file's Chrome (`Browser.reinstall`:
+    `Extensions.uninstall`, which drops its IndexedDB, then loaded again with the same
+    id, about 150 ms).
+  - Each test gets a relay of its own and a new tab, every other tab closed.
+  - The other extension a test loaded goes too.
+  - The service worker's lifetime (the opt-in idle test) and a profile that must outlive
+    the browser (the restart) keep a Chrome of their own.
+- **The audit's MERGE rows of 1.1 and 1.3 are scenarios with named steps** (`step()`;
+  a failure names its step). The bodies are unchanged:
+  - `extension.browser.test.ts`: 49 tests down to 25.
+  - `fill.browser.test.ts`: 7 down to 3.
+  - The `expect()` calls are the same, 234 and 39.
+  - Every test passes alone (`bun test -t`) and in a random order (`--randomize`).
+- **Tests made independent:**
+  - "it follows a tab switch" now goes to its page itself.
+  - The onClosed test closes the panel itself.
+  - The fill tests turn filling in on themselves (`fillOn`).
+- **Time:** locally no faster (a launch costs about 0.6 s there, and 22 starts replace 12).
+  The CI numbers are in the pull request.
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
@@ -180,7 +207,7 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - [x] 4. The fast suite's timers (`timing.allowDelayMs`, the relay's idle test)
 - [x] 5. The extension's logic tests to unit tests (the UNIT rows of the audit's 1.1 and
   1.3), each new unit test shown to fail against a mutant first
-- [ ] 6. The extension's browser tests merged, one browser per build and flag
+- [x] 6. The extension's browser tests merged, one browser per build and flag
 - [ ] 7. Firefox: a smoke block on every change, the full file when the extension
   changes and nightly
 - [ ] 8. The client's and the examples' browser files trimmed
