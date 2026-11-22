@@ -465,7 +465,8 @@ test("an unsafe TAB_MCP_BROWSER_DIR is refused", () => {
 		"/private/tmp",
 		homedir(),
 		tmpdir(),
-		"/a/b",
+		"/a",
+		"/var/tmp",
 		"/a b/c/d",
 	])
 		expect({ dir, refused: refuseBase(dir) !== undefined }).toEqual({

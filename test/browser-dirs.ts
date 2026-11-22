@@ -26,8 +26,7 @@ export function refuseBase(dir: string): string | undefined {
 		return "it has white space (ps prints command lines unquoted)";
 	const clean = resolve(dir);
 	const parts = clean.split(sep).filter(Boolean);
-	if (parts.length < 3)
-		return "it is too short (at least three levels, as /a/b/c)";
+	if (parts.length < 2) return "it is too short (at least two levels, as /a/b)";
 	const roots = new Set<string>();
 	for (const root of [
 		homedir(),

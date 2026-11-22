@@ -5344,7 +5344,7 @@ folders in the temp folder that day).
   `runs/<pid>-<start>/<kind>-XXXXXX` (`test/browser-dirs.ts`; the four harnesses, the
   browser test files, `hosted.ts`), in place of nine `tab-mcp-*-` and `webmcp-spike-`
   prefixes in the temp folder. An empty run folder goes at exit. `TAB_MCP_BROWSER_DIR`
-  must be absolute, three levels deep at least, without white space, and not a home or
+  must be absolute, two levels deep at least, without white space, and not a home or
   temp folder itself.
 - **The sweep** (`test/browser-sweep.ts`), under the lock, before and after a run. It
   touches nothing outside its own parent folder. It stops a process only when a browser
