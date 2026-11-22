@@ -39,23 +39,40 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 	});
 
 	test("an address goes into a command only when every character is plain", () => {
-		expect(commandAddress("https://relay.example/a/abc234/mcp")).toBe(
-			"https://relay.example/a/abc234/mcp",
+		expect(commandAddress("https://relay.example/s/abc234/mcp")).toBe(
+			"https://relay.example/s/abc234/mcp",
 		);
-		expect(commandAddress("http://127.0.0.1:8080/a/x/mcp")).toBe(
-			"http://127.0.0.1:8080/a/x/mcp",
+		expect(commandAddress("http://127.0.0.1:8080/s/x/mcp")).toBe(
+			"http://127.0.0.1:8080/s/x/mcp",
 		);
-		expect(commandAddress("http://[::1]:8080/a/x/mcp")).toBe(
-			"http://[::1]:8080/a/x/mcp",
+		// zsh reads [ ] and ~ as patterns: in double quotes (the review of 2026-11-22).
+		expect(commandAddress("http://[::1]:8080/s/x/mcp")).toBe(
+			'"http://[::1]:8080/s/x/mcp"',
+		);
+		expect(commandAddress("https://relay.example/~x/s/x/mcp")).toBe(
+			'"https://relay.example/~x/s/x/mcp"',
 		);
 		for (const unsafe of [
-			"https://relay.example/a/x/mcp?q=1&calc",
-			"https://relay.example/a/$(calc)/mcp",
-			"https://relay.example/a/x%0Acalc/mcp",
-			"https://relay.example/a/'x'/mcp",
-			"https://relay.example/a/x/mcp#frag",
-			"https://user:pw@relay.example/a/x/mcp",
-			"ftp://relay.example/a/x/mcp",
+			"https://relay.example/s/x/mcp?q=1&calc",
+			"https://relay.example/s/x?/mcp",
+			"https://relay.example/s/x*/mcp",
+			"https://relay.example/s/x&calc/mcp",
+			"https://relay.example/s/x;calc/mcp",
+			"https://relay.example/s/x!calc/mcp",
+			"https://relay.example/s/x calc/mcp",
+			'https://relay.example/s/x"calc/mcp',
+			"https://relay.example/s/x`calc`/mcp",
+			"https://relay.example/s/x%calc%/mcp",
+			"https://relay.example/s/x^calc/mcp",
+			"https://relay.example/s/x{a,b}/mcp",
+			"https://relay.example/s/x<calc/mcp",
+			"https://relay.example/s/x|calc/mcp",
+			"https://relay.example/s/$(calc)/mcp",
+			"https://relay.example/s/x%0Acalc/mcp",
+			"https://relay.example/s/'x'/mcp",
+			"https://relay.example/s/x/mcp#frag",
+			"https://user:pw@relay.example/s/x/mcp",
+			"ftp://relay.example/s/x/mcp",
 			"not an address",
 		])
 			expect({ unsafe, command: commandAddress(unsafe) }).toEqual({
@@ -64,27 +81,94 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 			});
 	});
 
+	/**
+	 * The shells the commands are for that are run here, where installed:
+	 * each with how it runs a line and its own builtin that prints each
+	 * argument on a line (`printf` in the POSIX shells, zsh and fish,
+	 * `Write-Output` in PowerShell). cmd.exe is not run (it is not on the
+	 * computers the tests run on); for it the rule rests on how it reads
+	 * double quotes (DEC-217).
+	 */
+	const shells: { name: string; argv: string[]; print: string }[] = [
+		{ name: "sh", argv: ["sh", "-c"], print: "printf '%s\\n'" },
+		{ name: "dash", argv: ["dash", "-c"], print: "printf '%s\\n'" },
+		{ name: "bash", argv: ["bash", "-c"], print: "printf '%s\\n'" },
+		{ name: "zsh", argv: ["zsh", "-fc"], print: "printf '%s\\n'" },
+		{
+			name: "zsh with extendedglob",
+			argv: ["zsh", "-fc"],
+			print: "setopt extendedglob; printf '%s\\n'",
+		},
+		{
+			name: "fish",
+			argv: ["fish", "--no-config", "-c"],
+			print: "printf '%s\\n'",
+		},
+		{
+			name: "PowerShell",
+			argv: ["pwsh", "-NoProfile", "-NonInteractive", "-Command"],
+			print: "Write-Output",
+		},
+	];
+
+	const addresses = [
+		"https://relay.example/s/abc234/mcp",
+		"http://[::1]:8080/s/test/mcp",
+		"http://[2001:db8::1]/s/x/mcp",
+		"https://relay.example/~x/s/x/mcp",
+		"https://relay.example/s/a.b_c-d/mcp",
+	];
+	const installed = (argv: string[]) =>
+		argv[0] !== undefined && Bun.which(argv[0]) !== null;
+
+	// One test per shell, each started once for all the addresses, with time
+	// for a cold start: PowerShell took more than Bun's 5 s on CI (run
+	// 44989682575).
+	for (const { name, argv, print } of shells)
+		test.skipIf(!installed(argv))(
+			`${name} passes the address in a command on as it is`,
+			() => {
+				const words = addresses.map((a) => commandAddress(a) ?? "");
+				const run = Bun.spawnSync([...argv, `${print} ${words.join(" ")}`], {
+					stderr: "pipe",
+				});
+				expect({
+					out: run.stdout.toString().replaceAll("\r\n", "\n"),
+					err: run.stderr.toString(),
+				}).toEqual({
+					out: addresses.map((a) => `${new URL(a).href}\n`).join(""),
+					err: "",
+				});
+			},
+			30_000,
+		);
+
+	test("sh at least runs here, on every computer the tests run on", () => {
+		expect(shells.filter((s) => installed(s.argv)).length).toBeGreaterThan(0);
+		expect(installed(["sh"])).toBe(true);
+	});
+
 	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {
 		const codex = setupInstructions(
 			"calc",
-			"https://relay.example/a/x/mcp",
+			"https://relay.example/s/x/mcp",
 		).find(({ id }) => id === "codex");
 		expect(codex?.command).toBe(
-			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/a/x/mcp\ncodex mcp login calc",
+			"codex features enable mcp_2026_07_28\ncodex mcp add calc --url https://relay.example/s/x/mcp\ncodex mcp login calc",
 		);
 		const claudeCode = setupInstructions(
 			"x' ; calc ; 'y$",
-			"https://r.example/a/x/mcp",
+			"https://r.example/s/x/mcp",
 		).find(({ id }) => id === "claude-code");
 		expect(claudeCode?.command).toBe(
-			"claude mcp add --transport http x-calc-y https://r.example/a/x/mcp",
+			"claude mcp add --transport http x-calc-y https://r.example/s/x/mcp",
 		);
 	});
 
 	test("with an address that is not plain, no commands: only the steps", () => {
 		const steps = setupInstructions(
 			"calc",
-			"https://relay.example/a/x/mcp?a=1&b",
+			"https://relay.example/s/x/mcp?a=1&b",
 		);
 		expect(steps.every((step) => !("command" in step))).toBe(true);
 		expect(steps.map(({ app }) => app)).toEqual([
@@ -101,7 +185,7 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 });
 
 describe("setupInstructions, the public API", () => {
-	const ADDRESS = "https://relay.example/a/abc234/mcp";
+	const ADDRESS = "https://relay.example/s/abc234/mcp";
 
 	test("one entry per app, in order, each a readable object", () => {
 		const steps: SetupInstruction[] = setupInstructions("My notes", ADDRESS);
@@ -162,8 +246,8 @@ describe("setupInstructions, the public API", () => {
 
 	test("an address that is not shell-plain: no command key at all, the note stays", () => {
 		for (const unsafe of [
-			"https://relay.example/a/$(calc)/mcp",
-			"https://relay.example/a/x/mcp?a=1&b",
+			"https://relay.example/s/$(calc)/mcp",
+			"https://relay.example/s/x/mcp?a=1&b",
 			"not an address",
 		]) {
 			const steps = setupInstructions("calc", unsafe);

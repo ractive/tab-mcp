@@ -139,7 +139,7 @@ icon are three more hex values in `worker/connection.ts`.
 ### Adapted
 
 - **Layout: sections on paper, not cards.** Overmark's Home and Settings are sections
-  with a `--rule` between them. Here: questions (sheets, on top), "AI app", "Tab in
+  with a `--rule` between them. Here: questions (sheets, on top), "AI access", "Tab in
   front", "Settings", each `padding: 16px 16px 20px` with a rule above. The `.card`
   box, its 12 px radius and the `--bg`/`--card` pair go. The class names and ids stay:
   the tests select by them.
@@ -217,7 +217,7 @@ icon are three more hex values in `worker/connection.ts`.
   without a use is not copied; the contrast test fails on a colour token that no rule
   reads.
 - **The banner from edge to edge above the views.** It is there because a problem must
-  show on every view. With one view, the notice in the "AI app" section is in view
+  show on every view. With one view, the notice in the "AI access" section is in view
   already.
 - **The warning sign as a CSS mask.** The notices here are short, start with what
   happened, and have a coloured edge and fill; a sign adds a second mask rule for
@@ -308,8 +308,8 @@ Every pair passes in both schemes.
 | Group heading (`h3`, "Tools") | 12 / 16 / 600, `--ink-2`. |
 | Default button | `--sheet`, text `--ink` 600, 1 px `--edge`, radius 6, 30 px high (26 small). Hover `--wash`. |
 | Strong button | `--strong`, text `--on-strong`. Turn on AI access, Done, Save (Allow once until iteration 43, DEC-180). |
-| Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, New address, + Add another AI app, Stop. |
-| Armed button | `--danger`, text `--on-danger`. Disconnect and New address after the first click. |
+| Quiet / link button | No fill or border, `--link` 600, underline on hover. Copy, Disconnect all apps, + Connect another AI app, Stop. |
+| Armed button | `--danger`, text `--on-danger`. Disconnect and Disconnect all apps after the first click. |
 | Disabled, `aria-disabled` | `--wash`, text `--ink-2`, 1 px `--rule`, default cursor. |
 | Focus | 2 px `--focus`, offset 2 px, every control, the scrollable arguments included. |
 | Switch | Track off `--edge`, on `--strong`, knob `--on-strong`; this extension's geometry; forced colours as today. |
@@ -357,7 +357,7 @@ No behaviour changes: no text, no order of controls, no message of the protocol.
     `transition`;
   - the forced-colours block gives filled buttons a border and names their hover and
     focus selectors.
-- `test/e2e.test.ts` (real Chrome, a new "the look" block in the existing harness):
+- `test/extension.browser.test.ts` (real Chrome, a new "the look" block in the existing harness):
   - no sideways scroll and nothing past the right edge at 345, 360 and 420 px: AI
     access off; on with the address, the code and "How do I add it?" open; an app
     paired on a page with tools; a question with long arguments and a long host; the
@@ -367,7 +367,7 @@ No behaviour changes: no text, no order of controls, no message of the protocol.
     body's background and colour, a default button's border colour (`--edge`), the
     strong button's fill;
   - the question window at its size: the same tokens, no sideways scroll.
-- Existing tests that pin what changes: the knob test (`e2e.test.ts`, light, dark and
+- Existing tests that pin what changes: the knob test (`extension.browser.test.ts`, light, dark and
   forced colours) keeps its geometry and gets the new colours; the "How do I add it?"
   test keeps Copy's width; unit tests in `panel.test.ts` that read `primary` follow
   the class.
@@ -413,7 +413,7 @@ Iteration 39, on the panel of iteration 36. The plan held; these points differ.
 - **The switch's contrast** (EQ 17) is measured in Chrome for both switches against the
   paper: light 16.07 (knob on track) and 14.61 (track on paper) on, 3.86 and 3.51 off;
   dark 15.89 and 15.89 on, 4.39 and 4.39 off.
-- **The e2e look test** is one test in the test build's block of `test/e2e.test.ts`
+- **The e2e look test** is one test in the test build's block of `test/extension.browser.test.ts`
   rather than a block of its own: the states it needs are there already (tools, the
   address and code, a question), and each further browser start costs seconds and has
   crashed Chrome for Testing 157 before.

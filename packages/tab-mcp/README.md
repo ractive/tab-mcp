@@ -6,15 +6,17 @@ browser tab.
 
 The page connects to the relay over a WebSocket with the browser library
 [`@ractive-ch/tab-mcp-client`](https://www.npmjs.com/package/@ractive-ch/tab-mcp-client)
-and gets an MCP address. The user adds that address to an AI app and pairs it by typing
-a code from the page on the relay's sign-in page. The relay then forwards the AI app's
-requests to the page. It knows nothing about the tools themselves.
+and names its app. The app's MCP address, `https://<relay>/s/<app>/mcp`, is the same
+for every page of the app. The user adds that address to an AI app and pairs it by
+typing a code from the page on the relay's sign-in page: the code tells the relay which
+page is meant. The relay then forwards the AI app's requests to that page. It knows
+nothing about the tools themselves.
 
 How the relay, the browser library and the tab-mcp browser extension fit together,
 with a picture:
 [How the parts fit together](https://github.com/ractive/tab-mcp#how-the-parts-fit-together).
 
-**Status: 0.11.0.** Until 1.0, a new minor version can still change settings and the API.
+**Status: 0.13.2.** Until 1.0, a new minor version can still change settings and the API.
 The relay speaks MCP revision 2026-07-28 only and accepts AI apps that register through
 OAuth Client ID Metadata Documents; see [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md)
 for which apps work.
@@ -36,7 +38,7 @@ Or with Docker (linux/amd64 and linux/arm64):
 docker run -d -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.11.0
+  ractive/tab-mcp:0.13.2
 ```
 
 The image is also on `ghcr.io/ractive/tab-mcp`. Put the relay behind a reverse proxy
@@ -61,7 +63,7 @@ The most important:
 |---|---|---|
 | `TAB_MCP_PUBLIC_URL` | required | the relay's public origin; `https:` outside development |
 | `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | comma-separated page origins, including Chrome and Edge extensions (`chrome-extension://<id>`); `*` makes an open relay (read the warning in the docs first) |
-| `TAB_MCP_SITES` | empty | JSON array of sites with their own app name or limits |
+| `TAB_MCP_SITES` | empty | JSON array of sites with their own app name, apps (`apps`: the app ids the origin serves, which no origin that does not list them may serve), pairing method or limits |
 | `TAB_MCP_STORE` | `sqlite` | `sqlite` or `memory` |
 | `TAB_MCP_SQLITE_PATH` | `tab-mcp.db` | the SQLite file for grants and token hashes |
 | `TAB_MCP_TRUST_PROXY` | `none` | `x-real-ip` or `x-forwarded-for` behind a proxy |
@@ -94,8 +96,10 @@ seconds and arrays instead of comma-separated lists (`allowedOrigins`, `sites`,
 - `store`: `"sqlite"` (default), `"memory"`, or your own `TokenStore` object;
 - `logger`: your own logger; by default JSON lines on stdout.
 
-The returned `Relay` has `url`, `port`, `config`, `sessionCount`, `addressFor(secret)`
-and `stop()`, which sends `bye` to every page (close code 4004) and stops the server.
+The returned `Relay` has `url`, `port`, `config`, `sessionCount`, `addressFor(app)` (the
+MCP address of an app id, `<url>/s/<app>/mcp`), `pagesOf(app)` (the address ids of the
+app's pages that are connected now) and `stop()`, which sends `bye` to every page (close
+code 4004) and stops the server.
 
 The package also exports `MemoryTokenStore`, `SqliteTokenStore`, the `TokenStore` types,
 `configFromEnv`, `resolveConfig`, `DEFAULT_CONFIG`, `createLogger`, `installCrashLogging`,
@@ -141,17 +145,24 @@ the interface, its guarantees and a Redis example.
 For end-to-end tests under `bun test`, `startTestRelay()` runs a relay in the test
 process (127.0.0.1, a free port, development mode, every page origin allowed, a memory
 store, no log output unless `logger` or `logLevel` is given; options override any of that), and `tokenFor()` writes a token for
-a page's MCP address into its store, as if an AI app had paired:
+the page connected at an app's MCP address into its store, as if an AI app had paired:
 
 ```ts
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
 
 const relay = startTestRelay();
 // The page connects with `relay: relay.url`; its address is `session.address`.
-const token = await tokenFor(relay.store, address);
+const token = await tokenFor(relay, address);
 // Any MCP client, with the header `Authorization: Bearer ${token}`.
 await relay.stop();
 ```
+
+The address names the app, not the page, so `tokenFor(relay, address)` needs exactly one
+page of that app connected and throws otherwise. With several connected, or none yet,
+pass the page's address secret: `tokenFor(relay, address, { secret })`. For a relay in
+another process, pass its token store in place of the relay; the secret is then
+required: `tokenFor(store, address, { secret })`. The other options are `clientId`,
+`clientName` and `ttlMs` (an hour by default).
 
 It is for tests only: it accepts every origin and skips pairing.
 

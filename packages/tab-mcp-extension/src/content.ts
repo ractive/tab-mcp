@@ -5,9 +5,11 @@
  * DEC-116) about the page and its WebMCP tools and calls them. In this world `document.modelContext` is the browser's own,
  * whatever the page put on its own `document` (iteration 18). Firefox has
  * none: there this script defines one for the page and keeps its tools
- * (`firefox/webmcp.ts`, iteration 44).
+ * (`firefox/webmcp.ts`, iteration 44). With a page that uses the client
+ * library with `webmcp: true` it shakes hands (`page-handshake.ts`, DEC-207).
  */
 
+import { canonicalJson } from "./canonical.ts";
 import { connectPolyfill } from "./chrome/webmcp-port.ts";
 import { installWebMCP } from "./firefox/webmcp.ts";
 import type {
@@ -15,11 +17,14 @@ import type {
 	ContentEvent,
 	ContentRequest,
 	ContentResponse,
+	ExtensionState,
 	PageHistory,
 	PageInfo,
+	PageLibrary,
 	PageTool,
 	PageTools,
 } from "./messages.ts";
+import { PageHandshake } from "./page-handshake.ts";
 
 /** The part of WebMCP the content script uses. */
 interface ModelContext extends EventTarget {
@@ -74,6 +79,9 @@ declare const TAB_MCP_FIREFOX: boolean | undefined;
  * page-world polyfill (`chrome/webmcp-port.ts`). The browser's own wins.
  */
 let ownContext: ModelContext | undefined;
+
+/** The handshake with a page that has the client library (DEC-207). */
+let handshake: PageHandshake | undefined;
 
 const contextOf = (doc: Document) =>
 	(doc as Document & { modelContext?: ModelContext }).modelContext ??
@@ -237,6 +245,7 @@ const hint = (annotations: Record<string, unknown> | undefined, key: string) =>
 export async function pageTools(
 	doc: Document = document,
 	documentId: string = DOCUMENT_ID,
+	library: PageLibrary | undefined = handshake?.library,
 ): Promise<PageTools> {
 	const context = contextOf(doc);
 	const base = {
@@ -245,6 +254,7 @@ export async function pageTools(
 		documentId,
 		available: context !== undefined,
 		more: 0,
+		...(library !== undefined ? { library } : {}),
 	};
 	if (context === undefined) return { ...base, tools: [] };
 	let listed: RegisteredTool[];
@@ -260,50 +270,83 @@ export async function pageTools(
 			more++;
 			continue;
 		}
-		const annotations = tool.annotations;
-		/** Whether `schema` fits in a message (as JSON). */
-		const fits = (schema: unknown) =>
-			(JSON.stringify(schema) ?? "").length <= SEND_SCHEMA_BYTES;
-		let schema: { inputSchema?: unknown; schemaTooBig?: true } = {};
-		if (tool.inputSchema !== undefined)
-			schema = fits(tool.inputSchema)
-				? { inputSchema: tool.inputSchema }
-				: { schemaTooBig: true };
-		tools.push({
-			name: cutText(String(tool.name), SEND_NAME),
-			...(typeof tool.title === "string" && tool.title !== ""
-				? { title: cutText(tool.title, SEND_TEXT) }
-				: {}),
-			description: cutText(String(tool.description ?? ""), SEND_TEXT),
-			...schema,
-			// The draft's (WM 3); left out when too big, as it is only shown.
-			...(tool.outputSchema !== undefined && fits(tool.outputSchema)
-				? { outputSchema: tool.outputSchema }
-				: {}),
-			annotations: {
-				readOnlyHint: hint(annotations, "readOnlyHint"),
-				debugging: hint(annotations, "debugging"),
-			},
-		});
+		tools.push(offeredTool(tool));
 	}
 	return { ...base, tools, more };
 }
+
+/** A page's tool as the content script sends it: capped, as plain data. */
+function offeredTool(tool: RegisteredTool): PageTool {
+	const annotations = tool.annotations;
+	/** Whether `schema` fits in a message (as JSON). */
+	const fits = (schema: unknown) =>
+		(JSON.stringify(schema) ?? "").length <= SEND_SCHEMA_BYTES;
+	let schema: { inputSchema?: unknown; schemaTooBig?: true } = {};
+	if (tool.inputSchema !== undefined)
+		schema = fits(tool.inputSchema)
+			? { inputSchema: tool.inputSchema }
+			: { schemaTooBig: true };
+	return {
+		name: cutText(String(tool.name), SEND_NAME),
+		...(typeof tool.title === "string" && tool.title !== ""
+			? { title: cutText(tool.title, SEND_TEXT) }
+			: {}),
+		description: cutText(String(tool.description ?? ""), SEND_TEXT),
+		...schema,
+		// The draft's (WM 3); left out when too big, as it is only shown.
+		...(tool.outputSchema !== undefined && fits(tool.outputSchema)
+			? { outputSchema: tool.outputSchema }
+			: {}),
+		annotations: {
+			readOnlyHint: hint(annotations, "readOnlyHint"),
+			debugging: hint(annotations, "debugging"),
+			// Only as the page gave it: Chrome fills in all four hints of a
+			// tool with annotations and lists none without, so a tool
+			// without it is one nothing is known about (DEC-214).
+			...(typeof annotations?.["consequentialHint"] === "boolean"
+				? { consequentialHint: annotations["consequentialHint"] }
+				: {}),
+		},
+	};
+}
+
+/**
+ * What identifies a tool as offered (DEC-217): its `PageTool` as
+ * `canonicalJson`, which the worker sends with each call
+ * (`CallTarget.definition`).
+ */
+export const definitionOf = (tool: PageTool): string => canonicalJson(tool);
 
 /** Calls still running, by call id, to cancel them. */
 const running = new Map<string, AbortController>();
 
 /**
  * Run the page's tool `name`, if it is still what was offered: listed from
- * this very page (`documentId`) with the same read-only claim. Otherwise
- * "gone": a tool must never run on another page than the one it was offered
- * for, nor without the confirmation its first claim would have needed.
+ * this very page (`documentId`) with the same read-only claim, and, read
+ * again now, the same definition (`definition`, DEC-217: the user's answer
+ * was about that one; a page that registered it again meanwhile, faster
+ * than the worker read its list, does not get the changed tool run).
+ * Otherwise "gone": a tool must never run on another page than the one it
+ * was offered for, nor without the confirmation its first claim would have
+ * needed.
+ * `vouch`, for a call the user allowed: `send` runs right before the tool,
+ * once every check passed, so that a page with the client library does not
+ * ask again (DEC-207); `withdraw` once the call settled, whatever the
+ * outcome, so that a vouch the call did not use (it failed or was cancelled
+ * before it reached the page) is not left for another caller.
  */
 export async function callTool(
-	call: { documentId: string; name: string; readOnly: boolean },
+	call: {
+		documentId: string;
+		name: string;
+		readOnly: boolean;
+		definition: string;
+	},
 	input: unknown,
 	signal: AbortSignal,
 	doc: Document = document,
 	documentId: string = DOCUMENT_ID,
+	vouch?: { send(input: unknown): void; withdraw(): void },
 ): Promise<CallResult> {
 	const { name } = call;
 	if (call.documentId !== documentId)
@@ -331,11 +374,21 @@ export async function callTool(
 			error: `The page changed what tool ${name} does since it was listed.`,
 			gone: true,
 		};
+	if (definitionOf(offeredTool(tool)) !== call.definition)
+		return {
+			ok: false,
+			error: `The page's tool ${name} changed since it was offered; it did not run.`,
+			gone: true,
+		};
 	let value: string | null;
+	const args = input ?? {};
 	try {
-		value = await context.executeTool(tool, input ?? {}, { signal });
+		vouch?.send(args);
+		value = await context.executeTool(tool, args, { signal });
 	} catch (error) {
 		return { ok: false, error: message(error) };
+	} finally {
+		vouch?.withdraw();
 	}
 	if (typeof value === "string" && value.length > MAX_SEND_RESULT)
 		return {
@@ -354,8 +407,22 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 		case "webmcp-call": {
 			const controller = new AbortController();
 			running.set(request.callId, controller);
+			const { vouch } = request;
 			try {
-				return await callTool(request, request.input, controller.signal);
+				return await callTool(
+					request,
+					request.input,
+					controller.signal,
+					document,
+					DOCUMENT_ID,
+					vouch === undefined
+						? undefined
+						: {
+								send: (args) =>
+									handshake?.vouch(request.name, args, vouch, request.state),
+								withdraw: () => handshake?.withdraw(vouch.nonce),
+							},
+				);
 			} finally {
 				running.delete(request.callId);
 			}
@@ -365,6 +432,9 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 			return { ok: true, value: null };
 		case "history":
 			return { ok: true, ...pageHistory() };
+		case "extension-state":
+			handshake?.stateChanged(request.state);
+			return { ok: true, value: null };
 	}
 }
 
@@ -374,6 +444,7 @@ const REQUESTS = new Set([
 	"webmcp-call",
 	"webmcp-cancel",
 	"history",
+	"extension-state",
 ]);
 
 declare global {
@@ -423,6 +494,20 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		if (waiting === undefined) waiting = setTimeout(send, 250);
 	};
 	contextOf(document)?.addEventListener("toolchange", changed);
+	// The page with the client library (DEC-207): what it announces goes to
+	// the panel as a change of the page's tools does.
+	handshake = new PageHandshake(document, {
+		state: async () => {
+			const ask: ContentEvent = { type: "handshake" };
+			return (await chrome.runtime.sendMessage(ask)) as
+				| ExtensionState
+				| undefined;
+		},
+		changed,
+		// Undefined once the extension was disabled, removed or updated.
+		alive: () => chrome.runtime?.id !== undefined,
+	});
+	handshake.start();
 	// Chrome without WebMCP of its own: the page-world polyfill, if it is
 	// there (registered with host access), answers on a port.
 	if (

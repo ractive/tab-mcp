@@ -20,8 +20,13 @@ Becomes `SECURITY.md` (reporting, supported versions) and `docs/threat-model.md`
 2. **Tool arguments and results** in transit through the relay.
 3. **Tokens**: anyone holding an access token can call the tab's tools while the tab is
    open, for up to an hour; a refresh token yields new access tokens for up to 30 days.
-4. **The address secret** in the page's `localStorage`: whoever has it can take over the
-   address (but not existing grants' tokens).
+4. **The address secret** in the page's `localStorage`: it is what a page is to the relay
+   (sessions, grants and tokens are keyed by the address id,
+   `base32(sha256(app + "\n" + secret))`, which is in no URL, DEC-196; the same secret
+   under another app is another page). Whoever has it can take the page's place under
+   the page's own app (but not existing grants' tokens).
+   A **pairing code** while it is valid: the address is the app's, so the code alone
+   selects the page.
 5. **The token store** (SQLite file): token hashes and grant metadata.
 6. **The user's attention**: pairing dialogs and confirmations must not be spammed or
    confusing.
@@ -35,7 +40,7 @@ Becomes `SECURITY.md` (reporting, supported versions) and `docs/threat-model.md`
 | Relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or altering traffic |
 | AI app | the tools it is allowed to call, their results | following the user's intent (it is driven by a model) |
 | Model provider behind the AI app | the same as the AI app | — |
-| Agent in the browser (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP, their results | — |
+| WebMCP caller: agent in the browser, another extension, an `exposedTo` origin (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP, their results | — |
 | Network | nothing (TLS everywhere; `wss:` and `https:` only outside development) | — |
 
 The relay cannot be made blind: the AI app speaks HTTPS to the relay and the MCP payload
@@ -43,25 +48,42 @@ must be readable to be forwarded. Users who do not trust a public relay self-hos
 
 ## Attackers and mitigations
 
-### A1: Someone who learns the address (shared screenshot, chat log, shoulder-surfing)
+### A1: Someone who knows the address
+
+The address names an app, not a page, and is the same for every user of the app
+(DEC-196): treat it as public.
 
 - The address alone grants nothing: every MCP request needs a token, and a token needs the
-  pairing code that only the tab shows (DEC-028).
-- **Pairing code typed at `/authorize`**: 6 digits, single-use, valid 2 minutes, at most 5
-  attempts per code, issued only while the page's dialog is open. An attacker without a
-  view of the tab has 5 guesses in a million per code. The page names the AI app and the
-  page origin, so the user sees what they are connecting.
-- Guesses are also limited per address and network (10, then 1 a minute) and per address
-  overall (30, then 1 every 30 s); only a well-formed code against an active code counts,
-  so junk cannot lock the owner out (DEC-061). Even an attacker who could keep fresh codes
-  coming gets about 2 880 guesses a day per address against a million codes, and only
-  while the user keeps the page's dialog open. An attacker on many networks can make the
-  owner wait; "New address" in the page ends that, because the attacker does not learn
-  the new address. Per-IP limits count an IPv6 /64 as one network.
-- No 404 for unknown addresses (DEC-040): without a token every address looks the same.
-- "New address" in the page revokes the old address's grants and replaces the secret.
+  pairing code that only a page shows (DEC-028), or with identity binding a sign-in as the
+  page's user.
+- **Pairing code typed at `/authorize`**: the only thing that selects a page. 8 letters of
+  `BCDFGHJKLMNPQRSTVWXZ` (RFC 8628 §6.1; 2.56 × 10¹⁰ values), single-use, valid 2 minutes,
+  unique among the relay's live codes, issued only while the page's dialog is open, and
+  counted only at the address of its page's app. No attempts per code and no `locked`: a
+  wrong guess does not belong to a code or a page, so a stranger's guesses neither end a
+  user's code nor make the user wait (amends DEC-028, DEC-060).
+- Guesses are limited per network only (an IPv4 address or an IPv6 /56): 10, then 1 a
+  minute, 1 450 a day; a right code is given back, a sign-in is charged when it starts
+  and given back when it pairs, malformed input is no guess (DEC-061 kept). With N dialogs of an app open, one network's day of guessing hits one with
+  probability N × 5.7 × 10⁻⁸. No limit per page (there is none to charge) and none across
+  networks: a limit anyone can use up locks the owners out. An attacker with M networks
+  has M times the chance. A hit pairs the attacker's AI app with the page of a user they
+  did not choose; the page lists it among its connected apps.
+- Everyone behind one address shares its guess limit and its 10 open requests, as they
+  already shared the limits on page loads and form posts: someone on the same network
+  can keep it out of pairing. Before, that took the victim's address for the guess limit.
+- `/authorize` always shows the form and keeps a request (10 per network: the eleventh
+  pushes out that network's own oldest, nobody is refused; 10 000 in all, evicting the
+  oldest among those of the networks that hold the most; amends DEC-088). It does
+  not look whether a page is open, and the MCP endpoint answers every well-formed address
+  alike without a token (DEC-040): neither tells which pages are open.
+- "Disconnect all apps" (`disconnectAll()`) in the page revokes the page's grants and
+  replaces the secret; the address stays.
 - Residual: a user who reads the code out to someone else (social engineering), or types it
-  into a pairing started by an attacker's AI app. The page shows which app is connecting.
+  into a pairing started by an attacker's AI app. The code is all it takes; when the
+  address named the tab (DEC-027), the other party needed that too. The pairing page
+  names the AI app and its verified host, not the page, which the relay does not know
+  before the code. Identity binding is the cure where a site has it.
 
 ### A2: A malicious or impersonating OAuth client
 
@@ -103,8 +125,9 @@ does not export and which refuses to run outside development (DEC-059).
 ### A4: Token theft and replay
 
 - Tokens are 256-bit random, opaque, stored only as SHA-256 hashes (a stolen store file
-  yields no usable token), accepted only in the `Authorization` header and only for their
-  own address (audience check against `resource`).
+  yields no usable token), accepted only in the `Authorization` header and only at the
+  address of their app (`TokenRecord.app`, RFC 8707; a refresh naming another `resource`
+  is `invalid_target`). The record's address id says which page a request is for.
 - Access tokens live 1 hour. Refresh tokens live 30 days (at most until 90 days after
   pairing) and rotate on every use; reusing
   an old one revokes the whole grant (RFC 9700), which cuts off a thief and the victim
@@ -115,14 +138,15 @@ does not export and which refuses to run outside development (DEC-059).
   pairing (DEC-062): a stolen refresh token cannot be kept alive forever.
 - Revocation leaves a tombstone in the store and `put` refuses tokens of a revoked grant
   atomically, so a refresh that races Disconnect cannot bring the grant back (DEC-063).
-- Disconnect in the page revokes at once; "New address" revokes all grants of the old
-  address. A revocation also ends the grant's requests in flight and listen streams
-  (401 / an error event, `http.cancel` to the page), and a request authenticated before
-  but still waiting for its page re-checks its token before it is forwarded; the
-  instance also remembers its own revocations for two minutes and refuses such a request
+- Disconnect in the page revokes at once; "Disconnect all apps" revokes all grants of
+  the old address id. A revocation also ends the grant's requests in flight and listen
+  streams (401 / an error event, `http.cancel` to the page), and a request authenticated
+  before but still waiting for its page re-checks its token before it is forwarded; the
+  relay also remembers its own revocations for two minutes and refuses such a request
   right before the forward. A grant dates from its authorization code, so a code issued
-  before "New address" or "revoke all" is refused by the address tombstone, and those two
-  also drop the address's pending requests and codes (branch relay/review-fixes).
+  before "Disconnect all apps" or "revoke all" is refused by the address tombstone, and
+  those two also drop the authorization codes issued for the page; an open request names
+  no page (DEC-196) and can only pair through a code typed afterwards.
 - Tokens are useless while the tab is closed ("the page is not open", HTTP 200 with a
   JSON-RPC error or tool error after a bounded wait; DEC-074).
 - The relay never forwards the `Authorization` header to the tab.
@@ -148,18 +172,41 @@ does not export and which refuses to run outside development (DEC-059).
 - `untrustedContentHint` tools mark their results so AI apps can treat them as untrusted
   data (mapping in the decision log).
 - The user sees connected apps in the page and can revoke them or disconnect at any time.
+- Tools that run without asking (DEC-096, DEC-200) are off unless the page turns them on
+  (`alwaysAllow`): "Always allow" in the confirmation, a switch per tool and "Always
+  allow everything" in the connect dialog, or the page's own switches
+  (`./allowed`). Kept per grant in the page's `storage` until the relay reports the grant
+  gone, so an allowance outlives the user's attention for up to the grant's 90 days;
+  "everything" also covers tools the user has not seen. A tool whose title or
+  description changed asks again; the page's own `onConfirm` is not asked for an
+  allowed call. Only relay AI apps can be allowed, never WebMCP agents or served ports
+  (an unvouched WebMCP call is not asked by the library at all; only the page's
+  `onConfirm` decides, A14).
 
 ### A7: Cross-site attacks on the relay's pages
 
-- `/authorize` sends `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
-  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store`; the
-  page has no JavaScript. Framing is refused so the code field cannot be overlaid.
+- `/authorize` sends `Content-Security-Policy: default-src 'none'; script-src 'sha256-<code field script>'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store`.
+  The only JavaScript is the code field's own small inline script (DEC-211): it tidies
+  the typed text to `XXXX-XXXX` and draws the field as boxes, touches nothing else, loads
+  nothing and posts nothing. `script-src` allows exactly its text by the hash the relay
+  computes at start-up; no other script, inline handler or `eval` runs. A page that
+  pairs by sign-in only has no script and no `script-src`. Framing is refused so the
+  code field cannot be overlaid.
+- Every response of the relay, not only its pages, carries `X-Content-Type-Options:
+  nosniff`, set in one place every answer passes through (DEC-212): no answer is taken
+  as a script or style sheet by a browser that guesses types.
+- The home page (`/`) has the same protection from the same function (`pageHeaders`,
+  DEC-212): `default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`; it has no script and no form.
 - The form posts only a pending-request id; its `Bun.CSRF` token is bound to that request
   and to a first-party `HttpOnly`, `SameSite=Lax` cookie, and posts with a foreign `Origin`
   or `Sec-Fetch-Site` are refused (DEC-057). No `Cross-Origin-Opener-Policy`, because
   claude.ai's popup flow needs its opener back.
-- All values shown on the page (client name, page origin) are HTML-escaped and
-  length-capped.
+- All values shown on the page (client name, verified client host, the app id from the
+  address) are HTML-escaped and length-capped; nothing a page sent is shown (DEC-196).
+  The form's `data-tab-mcp-*` hooks for an extension in the same browser repeat these
+  values and never hold a code (DEC-199).
 - CORS without credentials on the metadata, token, revoke and MCP endpoints (DEC-036):
   `Access-Control-Allow-Origin: *`, never `Allow-Credentials`; the relay uses no cookies
   there and tokens are only bearer headers, so a foreign origin can do nothing it could not
@@ -169,13 +216,15 @@ does not export and which refuses to run outside development (DEC-059).
 
 ### A8: Denial of service
 
-In-memory token buckets: `/authorize` page loads and posts per IP, guesses per address
-and network and per address, `/token` and `/revoke` per IP, CIMD fetches per host and in
-total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64. Only wrong guesses
-are charged (a right code is refunded). The per-address guess cap fails closed when full
-(100 000 addresses): a bucket that still counts something is never dropped, so churning
-keys cannot reset it; the per-address-and-network share evicts its oldest when full,
-since failing closed there would let a few networks refuse everyone's first guess.
+In-memory token buckets: `/authorize` page loads and posts per IP, guesses per network,
+`/token` and `/revoke` per IP, CIMD fetches per host and in
+total (DEC-059, DEC-061); IPv4 counts per address, IPv6 per /64 (guesses and open
+requests per /56). Only wrong guesses
+are charged (a right code is refunded, and a sign-in when it pairs). The guess limit keeps
+100 000 networks and drops its oldest bucket when full: failing closed would let a party
+with that many networks refuse everyone's first guess, and dropping only gives it its
+networks' first ten guesses again. There is no cap per
+address any more (DEC-196): none exists that a stranger could use up for a page's owner.
 `/token` and `/revoke`: failures per IP (30, then 1/s) turn a further failure into 429
 but never refuse a success, so one hosted AI app's users behind shared egress do not
 block each other; a ceiling on all requests per IP (600, then 20/s, not refunded) bounds
@@ -183,25 +232,35 @@ work and store writes, also grant rotation; keying by `client_id` was rejected b
 any request can name a well-known one (DEC-117).
 Session limits per IP for `/tab` count IPv6 per /64 and per /56; concurrent requests per
 session for the MCP endpoint; pending
-authorizations and codes are bounded maps with expiry; WebSocket backpressure checked on every send (a dropped send fails the
-request instead of hanging); bounded maps with expiry sweeps. A single-instance relay can
+authorizations (10 per network, the eleventh pushing out that network's own oldest; 10 000
+in all, the oldest among those of the networks that hold the most evicted) and codes are bounded maps with expiry; WebSocket backpressure checked on every send (a dropped send fails the
+request instead of hanging); bounded maps with expiry sweeps. The relay is one instance
+(DEC-198) and can
 still be flooded; the CDN in front absorbs volumetric attacks.
 
 ### A9: Logs and privacy
 
-Logs are JSON lines with event, a shortened address id, session id, MCP method, HTTP
+Logs are JSON lines with event, the app id, a shortened address id, session id, MCP method, HTTP
 status, duration, client id host and coarse error codes. Never bodies, tool names,
 arguments, results, tokens, codes or secrets. Client IPs appear only in rate-limit warnings,
 truncated (/24, /48). The hosted instance's privacy notice states this.
 
 ### A11: Several sites on one relay (DEC-045)
 
-- One relay may serve several sites, each configured by origin. The relay verifies the
-  origin (from the browser's `Origin` header); the app name a page sends is self-declared
-  and unverified. The pairing page therefore shows the name next to the verified origin:
-  "to saturnus on `https://ractive.ch`". Pages on the same origin can claim each other's
-  names; within one's own origin that is acceptable, because they share a trust domain
-  anyway (same-origin pages can read each other's `localStorage` and secrets).
+- One relay may serve several sites, each configured by origin. The relay checks the
+  origin (the browser's `Origin` header) against its list; a program can claim any.
+- The app id of an address is the page's own word (`hello.app.id`, DEC-196): the site
+  list cannot derive it, as one origin can run several apps and Firefox gives every
+  installation its own origin. Sites may reserve apps (`sites[].apps`, DEC-197): a
+  site's pages may name only its apps, and no origin that does not list an app may
+  serve it (`app_not_allowed`, close 1008, before anything is claimed). An app no site
+  lists is open to every allowed origin. No list can name one Firefox extension
+  (DEC-189), so a Firefox build needs an app id of its own, left unreserved.
+- The app name a page sends is self-declared and unverified. The pairing page no longer
+  shows it or the origin (DEC-196); the relay uses the name in "the page is not open"
+  answers. Pages on the same origin can claim each other's names and apps; within one's
+  own origin that is acceptable, because they share a trust domain anyway (same-origin
+  pages can read each other's `localStorage` and secrets).
 - A configured site `name` overrides the page's claim.
 - Sites share one operator, one store and one log; a project that needs separation gets
   its own instance.
@@ -210,10 +269,12 @@ truncated (/24, /48). The hosted instance's privacy notice states this.
 
 Connecting an AI app to a page means trusting that page like any MCP server (DEC-038): its
 tool descriptions and results reach the model, and it can describe a tool in misleading
-ways or return text that steers the model. tab-mcp cannot judge a page's honesty; the
-pairing page names the page's origin so the user knows whom they trust. The closed origin
-list (DEC-032) keeps other sites from borrowing a hosted relay's domain to look
-trustworthy. `SECURITY.md` says this plainly.
+ways or return text that steers the model. tab-mcp cannot judge a page's honesty. The
+pairing page names the AI app and the app id, not the page: the relay does not know the
+page before the code (DEC-196), so the user knows whom they trust by where they read the
+code. A user who types a code from a look-alike page connects their AI app to it, also
+with the right address. The closed origin list (DEC-032) and reserved apps (DEC-197) keep
+other sites in a browser from serving an app's address. `SECURITY.md` says this plainly.
 
 ### A13: The browser extension and the pages it bridges (iterations 19, 20 and 26)
 
@@ -242,12 +303,20 @@ did, by connecting the extension.
   offers no tools when they differ. A page with a compromised renderer can therefore not
   borrow another site's origin, and with it the tools the user allowed there.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
-  asks the user every time (see "Questions" below), naming the page's origin. The user
-  can stop the questions for a tool of one exact http(s) origin, for every paired AI app
+  asks the user every time (see "Questions" below), naming the page's origin. A page's
+  `consequentialHint` only becomes the AI app's `destructiveHint` (DEC-214): a page that
+  says false may get the AI app to ask less, never the extension. The user
+  can stop the questions for a tool of one exact http(s) origin, for every connected AI app
   and kept until taken back: "Always allow on <host>" in a question, or the "Always allow" switch in
   the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always
   allow" is gone, DEC-139). A tool that changed while the question was open (a
-  navigation, another tab in front with a tool of the same name) does not run. An
+  navigation, another tab in front with a tool of the same name, the tool registered
+  again with another title, description, schema or hint) does not run (DEC-217): the
+  bridge checks after the answer, and the content script checks the definition the call
+  carries against its own read right before the call. "Always allow on <host>" is for
+  the site's tool by name and is not tied to a definition: it covers the tool when the
+  page changes its description, as the page can change what the tool does without
+  changing a word (DEC-217). An
   allowed tool runs whatever the AI app (or a prompt injection steering it) asks of it.
   A page can only mark its own tools read-only, so a lie harms that page's own user
   session, which its scripts could reach anyway.
@@ -259,7 +328,13 @@ did, by connecting the extension.
 - **Arguments are checked by the library** against the page's schema before the call;
   Chrome does not check them. The schema's `pattern` and `patternProperties` are left
   out in keyword position only (a parameter called `pattern` stays), so a page's
-  catastrophic regular expression cannot freeze the connection. Calls end for the AI app
+  catastrophic regular expression cannot freeze the connection. What goes with them
+  keeps the check from getting stricter than the page's (DEC-217): it can only let
+  through more than the page's schema. A page with the client library checks the
+  arguments again with its full schema; for a page that registers with WebMCP itself,
+  or with the extension's own WebMCP, which checks nothing, this check is the only one,
+  and an argument its patterns would refuse reaches its tool: such a page checks its own
+  input. Calls end for the AI app
   after 60 s or on its cancellation even if the page never answers; a page that does not
   answer the list, `page_info` or history in 5 s is given up, so a stuck page cannot hold
   the bridge for every other tab (iteration 35).
@@ -269,6 +344,37 @@ did, by connecting the extension.
 - **A forged `document.modelContext`** in the page's world does not reach the content
   script, which sees only the browser's own object (iteration 18). Only the extension's
   own pages talk to the content script.
+- **A page with the client library (DEC-207).** The content script speaks only to a page
+  that announced the library (its `hello` on `document`, or
+  `<html data-tab-mcp-handshake>`), and only while AI access is on and connected
+  (DEC-221): the extension's name and the names and verified hosts of the AI apps
+  connected now (the worker sends changes to every content script of a site it may
+  read; each passes them on only to such a page, field by field). Any page script can
+  announce the library, so any page the extension may read can learn those names by
+  pretending while AI access is on; not the version, the relay, the address or other
+  tabs. While AI access is off, the extension answers no page and sends it nothing, of
+  any type, and marks nothing; until a document was told "on" the content script does
+  not read its events either (not `detail`: Chrome copies an object `detail` into the
+  reading world and runs the page's getters, which a browser test checks for the store
+  and the test build). A page can still see that the extension is installed where it
+  provides WebMCP itself (in browsers without their own), and could try to time its own
+  events, which the extension still listens to. A document the content script told
+  "on" hears `on: false` once when it goes off, also after the back/forward cache
+  (asked again), after host access was withdrawn (the worker sends "off" to the tabs it
+  can no longer read), and after the extension was disabled or updated (at the page's
+  next event or `pageshow`). Right before a tool runs that the user allowed, a vouch goes to such a page,
+  only to a document told "on": made only in `#allowedThenRun` after the user's answer (or the site's
+  "allowed") and the same-tool check, never for a read-only tool, sent by the content
+  script only after its own checks (listed from this document, the same read-only
+  claim), synchronously before `executeTool`, and withdrawn (`withdraw`, its nonce) once
+  `executeTool` settled. A worker message with a vouch comes only
+  from the extension (the content script checks the sender). What the page announces
+  (library version, app id, at most 64 directly connected AI apps) is the page's word
+  and only feeds the panel's two lines. The worker answers the content script's request
+  for the state only from this extension's content script in a tab's top frame, and is
+  asked only at the page's first `hello` (later ones are answered from the last state
+  it sent; no answer: asked again after 1 s and 5 s, then not until the next `hello`),
+  so a page saying `hello` in a loop does not keep the one worker busy.
 - **Which page.** Without host access the extension reads a tab only after a click on its
   icon there, and only on that origin. With "Give access to all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
@@ -301,7 +407,7 @@ did, by connecting the extension.
   with the id the hosted relay allows; the Chrome Web Store keeps its own key.
 - **Who may send what (iteration 26).** The connection lives in the service worker,
   which content scripts in every granted tab can message too. Commands (connect, turn
-  off, pairing, disconnect an app, new address, the relay, the "Always allow" switches,
+  off, pairing, disconnect an app, disconnect all apps, the relay, the "Always allow" switches,
   "Always allow all" over the tool list,
   answers to questions) come only over the side panel's named port, whose sender Chrome reports: an
   extension page of this extension at the panel's path, not in a tab; any other port is
@@ -379,7 +485,7 @@ did, by connecting the extension.
   closes, "Always allow all" and the "Always allow" switches under it ignore a click for
   750 ms, and when a notice at the panel's top moves it, they wait the same time, so a
   click lands on nothing that allows (iteration 35). While AI access is on and the
-  relay cannot be reached, the panel says "retrying" (the alarm, also set at every
+  relay cannot be reached, the panel says "reconnecting…" (the alarm, also set at every
   start, connects again each minute), not "off" (iteration 35).
 - **The extension's settings are out of web pages' reach.** The address secret, the tools
   allowed per site, the relay, whether AI access is on and the takeover flag are in
@@ -387,7 +493,7 @@ did, by connecting the extension.
   panel asks the worker). A content script runs in the page's origin and cannot open
   that database, in any Chrome version and from the first moment of a browser start, so
   a page's compromised renderer, running code in the content script's world, can neither
-  read the secret (and take the address over from anywhere) nor allow its own tools.
+  read the secret (and take the extension's place from anywhere) nor allow its own tools.
   The extension asks for no `storage` permission (ext/review-fixes): without it there is
   no `chrome.storage` area at all, so nothing a content script could write there (where
   the owner's development builds once kept the settings) can be picked up, and the
@@ -407,10 +513,24 @@ did, by connecting the extension.
   cancelled, shown again) only after its `create` has finished, so none stays on screen
   with buttons that answer nothing.
 - **A takeover is kept (iteration 26).** After `replaced` the worker stores the fact and
-  connects again neither at its next start nor on its alarm, so it does not take the
-  address back and forth with whoever has the secret; the panel shows the notice until
-  the user connects (taking it back) or makes a new address, which first takes the old
-  address back and revokes its grants while connected.
+  connects again neither at its next start nor on its alarm, so it does not trade places
+  back and forth with whoever has the secret; the panel shows the notice until
+  the user connects (taking its place back) or clicks "Disconnect all apps", which first
+  takes the old address id back and revokes its grants while connected.
+- **Filling in the code on the sign-in page (DEC-203, DEC-210, DEC-213).** Off by
+  default; on, the extension fills in its code only on the configured relay's exact
+  origin, for its own app, and only after the user's yes to a question that names the
+  AI app's verified host (the client id's host). Two attacks kept "Always allow" out at
+  first: a drive-by site that opens the sign-in page, and someone with their own account
+  at the same AI app who starts a sign-in and gets the user to open its link (same
+  verified host, access in the other person's account). The first does not apply to a
+  host the user chose: a sign-in whose verified host is the AI app's can only send its
+  result there. The second rests on the AI app: Claude ties a sign-in to the account of
+  the browser that started it (the owner's test, 2026-11-21, "Account mismatch" both
+  times). So "Always allow" is offered only for a public DNS name, remembered per host
+  and relay, at most 3 fills without a question per host in 10 minutes, each told in a
+  notification and the panel, and forgotten when the switch goes off or the relay
+  changes.
 
 ### Identity binding
 
@@ -418,22 +538,63 @@ With [identity binding](/design/identity-binding.md) the AI app acts with exactl
 rights of the tab's user, because both must be signed in as the same person at the same
 OpenID Connect provider. A taken-over provider account then also gives the AI connection.
 The web app's assertion signing key and the relay's OIDC client secret become operator
-secrets. A mismatch is refused with "This AI tool is logged in as someone other than the
-page." The threats and mitigations are in `docs/threat-model.md` (A12) and DEC-076 to
-DEC-079.
+secrets. At pairing the sign-in comes first, and the relay looks for the app's page whose
+user is that person and whose dialog is open; none found is one answer ("No page is
+connecting with the account you signed in with. …", DEC-196). A request whose grant is
+for another person than the page's is refused with "This AI app is signed in as someone
+other than the page's user." A tab assertion's audience is the app's address, so it names no
+single page: whoever holds a person's unused assertion can bind a session of their own as
+that person (DEC-196). The threats and mitigations are in `docs/threat-model.md` (A12)
+and DEC-076 to DEC-079.
 
-### A14: Agents in the browser calling mirrored tools (WebMCP, iteration 25)
+### A14: WebMCP callers of mirrored tools (iteration 25)
 
 With `webmcp: true` the library also registers the page's tools with the browser's own
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`). Agents
 in the browser call them without pairing and without an identity (`client.kind`
-`"webmcp"`). Such an agent often drives the tab and can click Allow itself, so
-consequential tools are mirrored only when their `callers` list `"webmcp"`; calls get
-the same schema check and confirmation, never "Always allow". Only the native object is
+`"webmcp"`). Such an agent often drives the tab and can click Allow itself; until client
+0.20 consequential tools were therefore mirrored only when their `callers` listed
+`"webmcp"`. That did not stop such an agent, which clicked the page's own controls
+instead, with no question (DEC-209): now every tool is mirrored unless its `callers`
+leave `"webmcp"` out, and calls get the same schema check, never "Always allow". In
+0.20 they got the library's dialog too; with ChatGPT's browser the call waited on it
+until the agent's own timeout (40 to 50 s), then the agent clicked "Allow once" itself
+(2026-11-22). Since DEC-215 the library shows no question for any WebMCP call the
+tab-mcp browser extension did not vouch for: a tool that asks is registered with
+`consequentialHint: true`, so that a caller that heeds it asks its user, and the page's
+`onConfirm`, if any, decides in code; without one the call runs. Such a call is not
+always an agent that drives the tab: it can come from another extension that passes on
+an AI app's calls (which cannot click in the page, unless that extension lets it), or
+from a document of an origin named in the tool's `exposedTo` (Chrome 156 lets it list
+and run the tool, [research](/research/webmcp-register-tool.md)); the page cannot tell
+them apart. For those two the dialog was a real check. Residual risk, for a page without
+an `onConfirm` that refuses them and a tool offered to WebMCP: an agent that ignores the
+hint runs a consequential tool unasked (it could already click the page's own controls
+or the dialog); an extension that asks nothing runs it on its AI app's say, a prompt
+injection included; script of an `exposedTo` origin runs it unasked. `callers` without
+`"webmcp"` and no `exposedTo` keep a tool from all three; a tool that asks with an
+`exposedTo` naming other origins, on a page without `onConfirm`, gets a console warning
+once, when the browser accepted its registration (none for mirroring alone: it would be
+noise on almost every such page; the remedy is the same, `onConfirm` or `callers`). Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
-connected to both the page and the extension sees such a tool twice, and a consequential
-one asks in the extension and in the page. The full analysis is A14 in
-`docs/threat-model.md` (DEC-115, DEC-119).
+connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
+the user allowed in the extension carries a vouch, which the page believes without a
+proof: the next WebMCP call of that tool with equal arguments within 2 s runs without
+`onConfirm`, once, for the tool registered under that name when the
+vouch came. Anything that could fake a vouch already runs in the page and could skip the
+question itself: a convenience between two parts the user trusts, not a security
+boundary (a proof would need Chrome's `externally_connectable` or an attestation signed
+by the relay, and page script could still answer for the library). Once `executeTool`
+settled, whatever the outcome, the extension withdraws the vouch by its nonce, so a
+call that failed or was cancelled before it reached the page leaves none behind. An
+agent in the browser that calls the same tool with equal arguments between the vouch
+and the extension's call reaching the page uses it: exactly the call the user allowed.
+A withdrawal cannot close that window (it comes only after `executeTool` settled), and
+the vouch stays usable until it comes: a moment after a failure, up to the 2 s when
+`executeTool` neither runs the tool nor settles, or on a page that takes vouches with
+its own code and ignores `withdraw`. `trustExtension: false`
+treats every WebMCP call as an agent in the browser's (`onConfirm` decides). The full
+analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119, DEC-207, DEC-215).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 
@@ -462,16 +623,33 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
 
 - The relay operator can read and alter all traffic. Mitigation: open source, self-hosting,
   no logs of bodies; not solvable with MCP over HTTPS.
+- The code is the only thing that selects a page (DEC-196). Guesses are limited per
+  network only: one network's 1 450 guesses a day hit one of N open dialogs with
+  probability N × 5.7 × 10⁻⁸, an attacker with M networks M times that.
 - Users who give the pairing code to someone else, or type it for an AI app they did not
-  start.
+  start. The code alone gives that person's AI app access; before DEC-196 the address was
+  needed too. Identity binding is the cure where a site has it.
+- Where an app is not reserved (`sites[].apps`), any origin the relay allows can serve it
+  (DEC-197); a program can claim any origin and so serve a reserved app too.
+- A tab assertion's audience is the app's address, so it no longer names one page
+  (DEC-196).
+- With identity binding, a link with someone else's client, one click on Connect and a
+  silent single sign-on pair that client with the user's page within 10 minutes after
+  the user opened its dialog (or chose Continue in it), while it is still open
+  (DEC-202). That holds with a client library after 0.18.1; one up to 0.18.1 sends
+  `pairing.start` again after every reconnect, which starts another 10 minutes, so its
+  forgotten dialogs stay pairable until the page updates. Before DEC-196 it took the
+  page's address too. A confirmation in the page
+  was not chosen.
+- Everyone behind one address shares its guess limit and its ten open requests.
 - A page that misleads the AI app (A10).
 - Whoever copies the address secret out of `localStorage` (e.g. a script injected into the
-  page) can take over the address, also while the page is open. To the relay that session
+  page) can take the page's place, also while the page is open. To the relay that session
   is the page, so the relay sends it the pairing codes and the holder can pair an AI app of
-  their own; that grant belongs to the address. When the owner's page later holds the
-  address again without having seen `replaced` (closed during the takeover, reloaded, the
+  their own; that grant belongs to the address id. When the owner's page later connects
+  again without having seen `replaced` (closed during the takeover, reloaded, the
   extension reconnecting), the holder's AI app calls the real page's tools until it is
-  disconnected or the page gets a new address; the page lists it among its AI apps and
+  disconnected or the page gets a new secret; the page lists it among its AI apps and
   cannot tell it from the user's own. The relay does not prevent it (pre-release review of
   2026-11-09: documented, no new relay mechanism, DEC-117); identity binding does. Pages must
   keep XSS out, as for any session secret.
@@ -481,6 +659,13 @@ is A15 in `docs/threat-model.md` (DEC-122 to DEC-126, DEC-164 to DEC-167).
 - The AI app's model can be steered by content (prompt injection) into calling tools the
   user did not intend; page-side confirmation covers consequential tools only.
 - Client-declared names are self-asserted; only hosts are verified.
+- "Always allow" for the code fill-in (DEC-213) is only as safe as the AI app's own check
+  that a sign-in belongs to the account of the browser that started it. A user who
+  chooses it for the host of an AI app that does not check lets anyone with an account
+  there, who gets the user to open their sign-in link, connect their account to the
+  user's tab, up to 3 times in 10 minutes, each with a notice. The extension cannot see
+  whether an AI app checks; only Claude was tested, and only a sign-in started in Claude
+  Desktop (2026-11-21).
 - With the browser extension, a page's tool metadata and results reach the AI app as the
   page wrote them (cut, prefixed, marked); a read-only claim is the page's (A13).
 - The known Claude header bug tolerance (decision log) slightly widens what the relay

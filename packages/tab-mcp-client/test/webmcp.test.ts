@@ -1,7 +1,8 @@
 /**
  * Mirroring the tools into WebMCP (iteration 25): against a fake native
  * `ModelContext` behind `Document.prototype`'s getter, as Chrome 156 has it
- * (`test/webmcp-browser.test.ts` checks the same in Chrome for Testing).
+ * (`test/webmcp.browser.test.ts` checks that contract in Chrome for Testing:
+ * what Chrome lists and hands an agent, its duplicates, frames, exposedTo).
  */
 import {
 	afterEach,
@@ -210,12 +211,15 @@ describe("off by default", () => {
 });
 
 describe("mirroring", () => {
-	test("tools that are not consequential, with the WebMCP fields and hints only", async () => {
+	test("every tool, a consequential one too (DEC-209), with the WebMCP fields and hints only", async () => {
 		const t = tab();
 		await t.registerTool(add);
 		await t.registerTool(wipe);
 		await settle();
-		expect([...native.tools.keys()]).toEqual(["add"]);
+		expect([...native.tools.keys()]).toEqual(["add", "wipe"]);
+		expect(native.tools.get("wipe")?.annotations).toEqual({
+			consequentialHint: true,
+		});
 		const mirrored = native.tools.get("add") as NativeTool;
 		expect({ ...mirrored, execute: typeof mirrored.execute }).toEqual({
 			name: "add",
@@ -237,10 +241,14 @@ describe("mirroring", () => {
 		expect(t.tools).toEqual(["add", "wipe"]);
 	});
 
-	test("a consequential tool whose callers list webmcp; a tool whose callers do not, never", async () => {
+	test("a tool whose callers list webmcp; one whose callers do not, never, consequential or not", async () => {
 		const t = tab();
 		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		await t.registerTool({ ...add, name: "hidden" }, { callers: ["relay"] });
+		await t.registerTool(
+			{ ...wipe, name: "kept" },
+			{ callers: ["relay", "local"] },
+		);
 		await settle();
 		expect([...native.tools.keys()]).toEqual(["wipe"]);
 	});
@@ -352,7 +360,114 @@ describe("mirroring", () => {
 		expect(native.options[1]?.exposedTo).toBeUndefined();
 	});
 
-	test("destructiveHint counts as consequentialHint: left out by default, consequential when mirrored (WM 5)", async () => {
+	describe("a tool that asks with exposedTo, without onConfirm, is warned about once (DEC-215)", () => {
+		const exposedWarnings = () =>
+			warn.mock.calls
+				.map((args) => String(args[0]))
+				.filter((text) => text.includes("(its exposedTo)"));
+
+		test("warned once per tool, also when registered again; it is still mirrored", async () => {
+			const t = tab();
+			const first = new AbortController();
+			await t.registerTool(wipe, {
+				exposedTo: ["https://embedder.example", "https://page.example"],
+				signal: first.signal,
+			});
+			await settle();
+			first.abort();
+			await t.registerTool(wipe, { exposedTo: ["https://embedder.example"] });
+			await t.registerTool(
+				{
+					name: "remove",
+					description: "d",
+					annotations: { destructiveHint: true },
+					execute: () => 1,
+				},
+				{ exposedTo: ["https://embedder.example"] },
+			);
+			await settle();
+			expect(exposedWarnings()).toEqual([
+				"tab-mcp: wipe asks before it runs, but documents of https://embedder.example (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.",
+				"tab-mcp: remove asks before it runs, but documents of https://embedder.example (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.",
+			]);
+			expect(native.tools.has("wipe")).toBe(true);
+		});
+
+		test("not with onConfirm, not without exposedTo, not for the page's own origin, not for a tool that does not ask", async () => {
+			const asking = tab({ onConfirm: () => false });
+			await asking.registerTool(wipe, {
+				exposedTo: ["https://embedder.example"],
+			});
+			await settle();
+			scope.abort();
+			scope = new AbortController();
+			const t = tab();
+			await t.registerTool(wipe);
+			await t.registerTool(
+				{ ...wipe, name: "own_origin" },
+				{
+					exposedTo: [
+						"https://page.example",
+						"HTTPS://Page.Example:443/",
+						"https://page.example/path?q#h",
+					],
+				},
+			);
+			await t.registerTool(
+				{
+					...wipe,
+					name: "not_asking",
+					annotations: { consequentialHint: false, destructiveHint: true },
+				},
+				{ exposedTo: ["https://embedder.example"] },
+			);
+			await t.registerTool(add, { exposedTo: ["https://embedder.example"] });
+			await settle();
+			expect(exposedWarnings()).toEqual([]);
+			expect(native.tools.has("own_origin")).toBe(true);
+		});
+
+		test("not when the native registration fails: only that warning", async () => {
+			native.refuse = new DOMException("insecure origin", "SecurityError");
+			const t = tab();
+			await t.registerTool(wipe, { exposedTo: ["http://embedder.example"] });
+			await settle();
+			expect(exposedWarnings()).toEqual([]);
+			expect(warn.mock.calls.map((args) => String(args[0]))).toContain(
+				"tab-mcp: wipe is not offered through WebMCP:",
+			);
+		});
+
+		test("an exposedTo of the wrong type never breaks registration or the mirror of later tools", async () => {
+			const t = tab();
+			const bad: unknown[] = [
+				"https://embedder.example",
+				5,
+				null,
+				[1, { origin: "x" }],
+				["not a url"],
+			];
+			for (const [i, exposedTo] of bad.entries())
+				await expect(
+					t.registerTool(
+						{ ...wipe, name: `bad_${i}` },
+						{ exposedTo: exposedTo as string[] },
+					),
+				).resolves.toBeUndefined();
+			await t.registerTool(add);
+			await settle();
+			for (const i of bad.keys())
+				expect(native.tools.has(`bad_${i}`)).toBe(true);
+			expect(native.tools.has("add")).toBe(true);
+			expect(native.options.map((o): unknown => o.exposedTo)).toEqual([
+				...bad,
+				undefined,
+			]);
+			expect(exposedWarnings()).toEqual([]);
+		});
+	});
+
+	test("destructiveHint counts as consequentialHint: mirrored as consequential (WM 5)", async () => {
 		const t = tab();
 		const remove = {
 			name: "remove",
@@ -372,15 +487,35 @@ describe("mirroring", () => {
 		});
 		await settle();
 		expect([...native.tools.keys()]).toEqual([
+			"remove",
 			"removeAnyway",
 			"notConsequential",
 		]);
+		expect(native.tools.get("remove")?.annotations).toEqual({
+			consequentialHint: true,
+		});
 		expect(native.tools.get("removeAnyway")?.annotations).toEqual({
 			consequentialHint: true,
 		});
 		expect(native.tools.get("notConsequential")?.annotations).toEqual({
 			consequentialHint: false,
 		});
+	});
+
+	test("a tool without hints is mirrored with annotations all the same: Chrome then lists it as not consequential, not as unknown (DEC-214)", async () => {
+		const t = tab();
+		await t.registerTool({
+			name: "note",
+			description: "Adds a note",
+			execute: () => "noted",
+		});
+		await settle();
+		// Chrome lists every hint as false for annotations given, even with no
+		// member (the spike's canary), and none for annotations left out; the
+		// extension takes none for "may be destructive" (DEC-214).
+		const annotations = native.tools.get("note")?.annotations;
+		expect(annotations).toBeObject();
+		expect(annotations?.["consequentialHint"]).toBeUndefined();
 	});
 });
 
@@ -617,6 +752,76 @@ describe("calls", () => {
 		expect(events.start).toEqual([]);
 	});
 
+	test("a tool that asks runs for an agent in the browser without onConfirm: no dialog, the events name the caller (DEC-215)", async () => {
+		const t = tab({ alwaysAllow: true });
+		await t.registerTool(wipe);
+		await t.registerTool({
+			name: "remove",
+			description: "Removes an element",
+			annotations: { destructiveHint: true },
+			execute: () => "removed",
+		});
+		const events = watched(t);
+		await settle();
+		await expect(native.call("wipe", {})).resolves.toBe("wiped");
+		await expect(native.call("remove", {})).resolves.toBe("removed");
+		expect(window.document.querySelector("dialog")).toBeNull();
+		expect(events.start.map((c) => [c.tool, c.client])).toEqual([
+			["wipe", { kind: "webmcp" }],
+			["remove", { kind: "webmcp" }],
+		]);
+		expect(events.end.map((c) => c.outcome)).toEqual(["ok", "ok"]);
+		// Still marked for the agent, so that it asks its user (WebMCP's hint).
+		expect(native.tools.get("wipe")?.annotations?.["consequentialHint"]).toBe(
+			true,
+		);
+	});
+
+	test("a consequential tool mirrored by default asks the page's onConfirm for a WebMCP call (DEC-209, DEC-215)", async () => {
+		const asked: ConfirmRequest[] = [];
+		const t = tab({
+			onConfirm: (request) => {
+				asked.push(request);
+				return false;
+			},
+		});
+		await t.registerTool(wipe);
+		await settle();
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not allow wipe to run.",
+		});
+		expect(asked.map((r) => r.client)).toEqual([{ kind: "webmcp" }]);
+	});
+
+	test("a tool marked only destructiveHint asks onConfirm for a WebMCP call too, not for an AI app's (DEC-022, DEC-209)", async () => {
+		const asked: ConfirmRequest[] = [];
+		const t = tab({
+			onConfirm: (request) => {
+				asked.push(request);
+				return false;
+			},
+		});
+		await t.registerTool({
+			name: "remove",
+			description: "Removes an element",
+			annotations: { destructiveHint: true },
+			execute: () => "removed",
+		});
+		await t.registerTool({
+			name: "notConsequential",
+			description: "Removes, said not to ask",
+			annotations: { destructiveHint: true, consequentialHint: false },
+			execute: () => "removed",
+		});
+		await settle();
+		await expect(native.call("remove", {})).resolves.toEqual({
+			error: "The user did not allow remove to run.",
+		});
+		expect(asked.map((r) => r.client)).toEqual([{ kind: "webmcp" }]);
+		await expect(native.call("notConsequential", {})).resolves.toBe("removed");
+		expect(asked).toHaveLength(1);
+	});
+
 	test("a consequential tool asks onConfirm, which learns the caller; Don't allow resolves with an error", async () => {
 		const asked: ConfirmRequest[] = [];
 		let answer = false;
@@ -640,9 +845,14 @@ describe("calls", () => {
 		expect(events.end[1]?.outcome).toBe("ok");
 	});
 
-	test('onConfirm\'s "unanswered" resolves with its own error and outcome; another value is a refusal', async () => {
+	test('onConfirm\'s "unanswered" resolves with its own error and outcome; another value or a throw is a refusal', async () => {
 		let answer: unknown = "unanswered";
-		const t = tab({ onConfirm: () => answer as boolean });
+		const t = tab({
+			onConfirm: () => {
+				if (answer === "throw") throw new Error("no");
+				return answer as boolean;
+			},
+		});
 		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		const events = watched(t);
 		await settle();
@@ -659,6 +869,11 @@ describe("calls", () => {
 			error: "The user did not allow wipe to run.",
 		});
 		expect(events.end[1]?.outcome).toBe("declined");
+		answer = "throw";
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not allow wipe to run.",
+		});
+		expect(events.end[2]?.outcome).toBe("declined");
 	});
 
 	test('a call cancelled while asked stays cancelled, even if onConfirm then says "unanswered" (review of PR 112)', async () => {

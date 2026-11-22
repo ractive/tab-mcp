@@ -9,7 +9,7 @@ tags:
   - design
   - extension
   - webmcp
-timestamp: 2026-11-12T16:30:00+01:00
+timestamp: 2026-11-21T09:00:00+01:00
 ---
 
 # The tab-mcp browser extension
@@ -61,15 +61,22 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   the last focused normal window) and returns its answer. Overmark does the same in its
   side panel.
 - Pairing, grants and the relay are tab-mcp's as they are; the side panel shows them
-  with its own pairing view (the address, the code, the connected apps, New address),
-  since the library's dialog would draw into no page. Commands reach the worker only
+  with its own pairing view (the address, the code, the connected apps, "Disconnect all
+  apps"), since the library's dialog would draw into no page. The extension sets its app
+  id itself (`APP_ID` in `src/protocol.ts`: `tab-mcp-extension`, and
+  `tab-mcp-extension-firefox` in the Firefox build, as its server name there is longer
+  than an app id may be), so its address `<relay>/s/tab-mcp-extension/mcp` is the same
+  for everyone who has it, and the code pairs an AI app with one installation (DEC-196).
+  A relay can reserve the first id for the extension's origins; the Firefox id stays
+  unreserved, as no list can name a Firefox extension (DEC-197). Commands reach the worker only
   over the panel's port (threat model A13).
 - A page with the client library and `webmcp: true` (client 0.13.0, DEC-115, DEC-119)
   registers its tools with WebMCP too. The extension offers them like any other page
   tool (DEC-140): it cannot know whether the AI app is paired with the page itself. An AI
   app connected to both gets such a tool twice. (Until iteration 35 it left out the names
   listed in `<html data-tab-mcp-webmcp>`, which hid them from an AI app connected only
-  to the extension.)
+  to the extension.) Such a page and the extension know of each other since DEC-207:
+  see below.
 - Tools that ask first ask in the side panel when it is open in the focused window of the
   tab the call acts on, else in a Chrome notification; the extension asks, not the
   library (iteration 26). A click on a notification's body opens the whole question in
@@ -78,13 +85,190 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   notification asks again (iteration 43, DEC-181; the popup window of the extension's
   that showed the question in that case is gone).
   The bridge asks itself for both ways of calling a page tool (`page_<name>` is not
-  `consequentialHint`, DEC-141), so the AI app hears why a call did not run. "Don't ask
+  `consequentialHint`, DEC-141), so the AI app hears why a call did not run. What the AI
+  app is told about a tool does not depend on that: `page_<name>` carries MCP's
+  `destructiveHint` as the page's `consequentialHint` says (true only when a page that
+  registers with WebMCP itself gave no annotations at all; a page with the client library
+  always gives them, a tool without hints as not consequential), and the bridge asks before every call of a tool that is not
+  read-only either way (DEC-214). "Don't ask
   again on <host>" in a question writes the site's "allowed" entry, as the panel's "Always allow"
   switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
-  notification has "Allow once" only.
+  notification has "Allow once" only. An answer is for the tool as it was offered
+  (`keyOf`: its tab, document and everything the content script sent for it, title,
+  description, schemas and hints included, as `canonicalJson`); a tool offered
+  differently by the time the user answers does not run (DEC-217). The bridge checks
+  that against its last read, and the content script against the page's tools read
+  right before the call: each call carries the definition it was offered with
+  (`CallTarget.definition`). The site's "allowed" entry is not tied to a definition: it
+  is the user's standing word for the site's tool by name, while a question shows one
+  definition and its answer is for that one (DEC-217).
 - The origin a page's tools carry (the description's prefix, the "allowed" key, the
   question's "Site (verified)") is checked against the origin of the address Chrome
   reports for the tab; a page that says otherwise gets no tools (iteration 35).
+
+## Pages with the client library (DEC-207)
+
+A page that uses the client library with `webmcp: true` and the extension shake hands,
+so that a call the user allowed in the extension is not asked again by the page, and the
+page can say that an AI app is connected through the extension
+([iteration 48](/iterations/iteration-48-page-extension-handshake.md)).
+
+- **The channel.** `CustomEvent`s on `document` with a JSON string as `detail`:
+  `tab-mcp-page` from the page, `tab-mcp-extension` from the content script (top frame
+  only). `v: 1`, a `type`; anything else is ignored. The page's side is
+  `packages/tab-mcp-client/src/handshake.ts` (in the mirror's chunk), the extension's
+  `src/page-handshake.ts` in the content script.
+- **Either may start first.** The page says `hello` when its mirror starts and marks
+  `<html data-tab-mcp-handshake>`; the content script (at `document_idle` in Chrome,
+  after a click, at `document_start` in Firefox) listens from its start, and speaks
+  first (`hello`) when the mark is there or the page spoke before it was told "on",
+  once AI access is on. Each answers the other's `hello` with an `update` (the page's
+  carries what its `hello` did: the library's version, the app id and its AI apps, for
+  each of its apps); changes go as `update`.
+- **The extension speaks only to pages that announced the library, and only while AI
+  access is on and connected** (DEC-221): its name, `on: true`, the AI apps connected
+  now (`name`, verified `host`) and `whileInFront: true`; not its version. While AI
+  access is off (or connecting), the extension answers no page and sends it nothing,
+  not even a vouch. Until a document was told "on", the content script does not read its
+  events: it notes that the page spoke, without touching `detail` (in Chrome, reading an
+  object `detail` from another world runs the page's getters), and greets the page with
+  `hello` once on; told "on", it reads `detail` and takes only a string. A page can still
+  see that the extension is installed where it provides WebMCP itself (in browsers
+  without their own), and could try to time its own events, which the extension still
+  listens to. A document the content script told "on" hears
+  `{ v: 1, type: "update", on: false }` once when it goes off; the "told on" memory is
+  the content script's, per document. Back from the back/forward cache it asks the
+  worker again; once the extension was disabled, removed or updated
+  (`chrome.runtime.id` gone) it says "off" at the page's next event or `pageshow` and
+  then nothing. The worker sends the state to every content script of a site it may
+  read whenever it changes (`extension-state`), and again when host access changes;
+  each passes it on, field by field, only to a page that announced. A tab it can no
+  longer read (no address) hears only "off". A call with a vouch carries the state, so
+  that a page not told "on" yet (the call came first, or the worker did not answer) is
+  told before the vouch.
+  A content script asks the worker for it
+  with `handshake`, accepted only from a tab's top frame, at the page's first `hello`
+  only: later ones are answered from the last state the worker sent. A worker that does
+  not answer is asked again after 1 s and 5 s (`RETRY_MS`), one ask at a time; a change
+  from the worker or `pagehide` ends that. Each side cuts the other's list of AI apps
+  to 64 and sends at most 64; the panel shows the library version of the app id
+  announced first.
+- **The vouch.** `PageToolBridge` makes one in `#allowedThenRun` only, after the
+  user's answer (or the site's "allowed") and the same-tool check, for a tool that is not
+  read-only and an AI app through the relay; it goes with the `webmcp-call` message,
+  and the content script dispatches it (`tool`, `arguments`, `nonce`, `app`)
+  synchronously right before `executeTool`, after its own checks, and `withdraw`
+  (`nonce`) once `executeTool` settled, whatever the outcome, so that a call that failed
+  or was cancelled before it reached the page leaves no vouch. The library keeps it
+  2 s, for the tool registered under that name then, and uses it once for the next
+  WebMCP call of that tool with equal arguments (canonical JSON, keys sorted): no
+  `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`.
+  `trustExtension: false` in the page hands it to `onConfirm` anyway. A WebMCP call
+  without a vouch (an agent in the browser, another extension, an `exposedTo`
+  origin; the page cannot tell which) gets no question from the library, only the
+  page's `onConfirm` decides (DEC-215).
+- **The panel.** For the tab in front, when the page announced the library: "This page
+  has tab-mcp built in." (also while AI access is off: the page spoke, nothing it said
+  was read), and when an AI app connected to the extension is also connected to the
+  page directly (known only once AI access is on and the page answered the extension's
+  `hello`) (same name and host, as the page announced its grants), that it
+  sees the page's tools twice and to disconnect it in one of the two.
+- **No proof** of either side: a convenience between two parts the user trusts, not a
+  security boundary (threat model A13, A14). Old and new mix: a page without the
+  handshake hears nothing, an old extension says nothing, and its calls are unvouched
+  WebMCP calls, which the library does not ask. Client 0.21.0 and older takes "on" and
+  `hello` only with a version, so with an extension after DEC-221 such a page shows no
+  extension and does not answer the extension's `hello`: the panel says "This page has
+  tab-mcp built in." but has no "sees the page's tools twice" line until the page's own
+  AI apps change; its vouches still work. A newer client ignores an older extension's
+  version and treats its "off" as no extension (DEC-221).
+
+## Filling in the code on the relay's page
+
+When an AI app opens the relay's pairing page (`/authorize`) in the browser that has the
+extension, the extension can fill in its own code there, after asking (DEC-199's hooks,
+built in DEC-203). Typing the code stays the way that always works.
+
+- **A switch, off by default** (DEC-210). "Fill in the code for me" under the code in
+  the pairing view, with one line under it on what it does, turns it on for the relay
+  in use, also with access to all sites; off, it gives the relay's site back. Another
+  relay starts off, and the old relay's site is given back (never access to all sites).
+  The switch shows what is in effect: on only with the setting on and the relay's site
+  granted. Declined in the browser's prompt, it goes back to off. When the site is taken
+  away in the browser's settings, the worker turns the setting off and remembers it
+  (`fillCodeLost`), so filling in never comes back by itself (with access to all sites,
+  say); the line says "tab-mcp no longer has access to <host>, so this went off." until
+  the user turns the switch on or off or picks another relay. "On" without the site
+  when the worker handles it (given back for an "off" just before) stays off, without
+  the note (`FillSetting` in `src/worker/fill.ts`). Each "set-fill" carries an id that
+  comes back in the state (`fillAnswered`): until then the switch shows the click, its
+  line has no "no longer has access", and an Allow that comes after the user turned it
+  off again sends another "off" instead of "on". A relay address without a pattern
+  shows the sentence alone, and the switch only while the setting is on there.
+- **Access.** The page is opened by the AI app, so no click grants `activeTab` for it.
+  Turning it on asks for the relay's site when the extension does not have it, one
+  origin of the optional host permissions (`<scheme>://<host>/*`). Then a content script
+  (`src/pairing-page.ts`, the library's `runPairingPage`) is registered for `<scheme>://<host>/authorize*` only, again
+  whenever the relay, the setting or the permissions change. Off, nothing changes.
+- **What it reads.** Only the form's hooks: `data-tab-mcp-pairing="1"`, `data-app`
+  (its own `APP_ID` or nothing happens), `data-client-name`, `data-client-host`, the
+  hidden `request_id`, and that there is a code field and a Connect button. It sends
+  these with a nonce of the page load over a port; it never sees a code before the
+  user's Allow.
+- **The origin is the check.** The worker (the library's `CodeFiller`) takes the port only
+  from this extension's content script in a tab's top frame at exactly the configured
+  relay's origin, port included, and path `/authorize`: any site can copy the markup.
+- **The question.** Only while AI access is on; turning it off withdraws a question. "Connect <name> (<host>) to the tab-mcp
+  browser extension?", with the verified host on a line of its own and the AI app's own
+  name for itself labelled as its own: any site can be a client called "Claude". One
+  click is less than opening the panel and typing a code, so the host is what the user
+  decides on. Allow or Don't allow, in the panel or a notification like a tool's
+  question, 60 s. For a host that is a public DNS name (`alwaysAllowable`: not an IP
+  address, `localhost`, a single label, all of `.arpa`, or a special-use, test or
+  private name such as `.local`, `.test`, `.corp` or `.lan`) the answers are
+  "Don't allow", "Allow once" and "Always allow" (DEC-213), with one sentence on what
+  "Always allow" does and where to undo it; the notification offers "Allow once" only,
+  as a tool's does.
+- **Always allow (DEC-213).** Remembers the AI app's verified host for the relay in
+  use (`fillCodeAlways`, with the setting in IndexedDB). The next sign-in page of that
+  host is filled in without a question: the extension's `ask` answers `allow` at once,
+  so every other check of `CodeFiller` stays. Each such fill shows a notification ("Code
+  filled in", "Filled in the code for <name> (<host>).") and the same line in the panel
+  (the last such fill, for 10 minutes in any case; the extension cannot tell whether the
+  system showed the notification). The notice comes when the code is there, before the
+  library's last checks, so it can name a fill those checks then stopped: it errs on the
+  side of saying too much. At most 3 per host in 10 minutes (kept in storage; a clock
+  moved back does not reset it); beyond that the question comes back. Under the switch,
+  "Filled in without asking for:" lists the hosts, each with Remove, which also
+  withdraws a fill of that host still waiting for its code. Forgotten when the switch
+  goes off, when the relay's site was taken away, and when the relay changes, in the
+  same write as the setting; a stored list that is not the setting's is deleted at load.
+  An "Always allow" answer to a question that did not offer it is Don't allow. It rests
+  on the AI app's own check that a sign-in belongs to the browser's account (Claude makes
+  it; the threat model's residual risk).
+- **On Allow** the worker holds pairing on (30 s), takes the current code (or the next
+  one if it is about to change, and the current one if no next comes in 10 s; the same
+  code sent again, the relay's answer to starting pairing while it is on, is not the
+  next one) and sends it on that page's port; the content script writes it into the
+  field and submits the form with Connect. The relay checks it as any code. The port is
+  closed 5 s later. A fill that sends no code (withdrawn, the page gone, no code) ends
+  the hold at once, unless another fill still needs it.
+- **No loops.** One question per page load. The page of the same request
+  (`request_id`) in the same tab within 30 s of a fill is the relay's answer that the
+  code was not taken: filled once more without asking, then nothing until the window
+  has passed. Any other request asks. Don't allow, a timeout, the page going, AI access
+  going off or the AI app connecting by a typed code fill nothing.
+- **Where the logic lives** (DEC-206). The rules above that are the same for any
+  extension that is a tab-mcp page (the content script's reading and filling in, the
+  sender check, the state machine of asking and filling in, which code, the relay's
+  patterns, the messages) are the client library's entry
+  `@ractive-ch/tab-mcp-client/extension` (`src/extension.ts` there, tested in
+  `test/extension.test.ts`), which Sitegloss uses too. The extension keeps its own
+  parts: the question (`src/worker/questions.ts`), the setting, the permission prompt
+  and the panel's line (`src/sidepanel/fill.ts`), the script's registration and the
+  panel's texts (`src/worker/fill.ts`), holding pairing on and the host the library
+  calls (`src/worker/connection.ts`). `src/pairing-page.ts` is one call of the
+  library's `runPairingPage`.
 
 A click on the icon opens the side panel with `sidePanel.open({ tabId, windowId })`.
 With the window only, Chrome resolved the call and showed nothing when another
@@ -104,7 +288,8 @@ with a second extension).
   it the extension runs on a tab only after a click on its icon, as Overmark does, and
   only for that origin in that tab (Chrome keeps the grant across navigations on the same
   origin, not to another subdomain). "Give access to all sites" asks for it; the content script
-  is then registered for every http(s) page. `"incognito": "not_allowed"`: no Incognito
+  is then registered for every http(s) page. The "Fill in the code for me" switch asks
+  for the relay's site alone, for its pairing page (DEC-203). `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).
 - No remote code.
 
@@ -113,8 +298,8 @@ with a second extension).
 | Tool | Kind | What it does |
 |---|---|---|
 | `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
-| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, and why a tool is left out (iteration 20) |
-| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
+| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, whether it is destructive (DEC-214), and why a tool is left out (iteration 20) |
+| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). `readOnlyHint` as the page's; `destructiveHint` false for a read-only tool, else the page's `consequentialHint`, true when a page registering with WebMCP itself gave no annotations (a page with the client library always gives them; a tool without hints is not consequential there) (DEC-214). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
 | `webmcp_call` | as the called tool | Calls a tool of the page in front by its WebMCP name, with the same rules (schema check, confirmation, the page it was listed from); for AI apps that read their tool list once (Claude, Codex), which never see the `page_<name>` tools of a later tab (iteration 20 review, `src/worker/tools.ts`) |
 | `navigate` | navigates; another origin asks | Opens an http(s) address in the tab in front, if the extension may read it; waits for the load (30 s) and answers with the new page's `page_info`, or `readable: false` and why (iteration 27, DEC-121, `src/worker/navigation.ts`) |
 | `go_back`, `go_forward` | navigates; another or unknown origin asks | One step in the tab's history; a target on the page's origin is known from the Navigation API (same-origin entries only), any other one asks |

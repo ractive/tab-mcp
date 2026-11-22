@@ -5,9 +5,13 @@
  * - `dist/*.js`: ESM for bundlers (`--packages=external`), split so that the
  *   connection and the UI stay separate chunks loaded by `connect()`;
  * - `dist/*.d.ts`: declarations from `tsc` with `isolatedDeclarations`;
- * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`;
+ * - `dist/cdn/`: a minified, self-contained build for `<script type="module">`
+ *   (`tab-mcp-client.min.js`, and `allowed.min.js` and `strings.min.js`
+ *   beside it);
  * - `dist/package.json`, README, CHANGELOG, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
- *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
+ *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack;
+ * - `dist/skill/`: the agent skill of `plugins/tab-mcp/skills/tab-mcp/`
+ *   (`scripts/skill.ts`, DEC-216).
  *
  * Prints the gzipped sizes of the core and the lazily loaded chunks.
  */
@@ -15,6 +19,8 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
+import { PUBLISHED_EXPORTS } from "./published-exports.ts";
+import { packagedSkill } from "./skill.ts";
 
 const root = join(import.meta.dir, "..");
 const dist = join(root, "dist");
@@ -32,12 +38,19 @@ const common = {
 const npm = await Bun.build({
 	...common,
 	// `./visible` (the escaping the confirmation dialog uses), `./setup` (the
-	// connect dialog's steps per AI app) and `./tunnel` (the caller's end of
-	// `serve`, for a backend) are entries of their own, out of the core
-	// (DEC-103, DEC-118, DEC-125).
+	// connect dialog's steps per AI app), `./tunnel` (the caller's end of
+	// `serve`, for a backend), `./allowed` (the tools that run without
+	// asking), `./extension` (the code fill-in for browser extensions,
+	// which imports nothing of the rest, so it shares no chunk) and
+	// `./strings` (the English texts, for translators) are
+	// entries of their own, out of the core (DEC-103, DEC-118, DEC-125,
+	// DEC-200, DEC-206, DEC-208).
 	entrypoints: [
 		entry,
+		join(root, "src/allowed.ts"),
+		join(root, "src/extension.ts"),
 		join(root, "src/setup.ts"),
+		join(root, "src/strings.ts"),
 		join(root, "src/tunnel.ts"),
 		join(root, "src/visible.ts"),
 	],
@@ -50,15 +63,27 @@ const npm = await Bun.build({
 	// its pages (client 0.12.0). The CDN build, served as is, keeps it.
 	modulePreload: false,
 });
+// Entries of one build, so that they share chunks (one store of allowed
+// tools for the dialogs and the page's switches, one table of texts):
+// `tab-mcp-client.min.js` (`scripts/cdn/tab-mcp-client.ts`, the core),
+// `allowed.min.js` (DEC-200) and `strings.min.js` (DEC-208), which a page
+// that never imports them never loads.
 const cdn = await Bun.build({
 	...common,
+	entrypoints: [
+		join(root, "scripts/cdn/tab-mcp-client.ts"),
+		join(root, "src/allowed.ts"),
+		join(root, "src/strings.ts"),
+	],
 	outdir: join(dist, "cdn"),
 	minify: true,
 	sourcemap: "linked",
-	naming: { entry: "tab-mcp-client.min.js", chunk: "[name]-[hash].min.js" },
+	naming: { entry: "[name].min.js", chunk: "[name]-[hash].min.js" },
 });
 // The React entry (iteration 9): its own file that imports the core entry
-// (`./index.js`, one `TabMcp` class for both) and `react`; not in the CDN build.
+// (`./index.js`, one `TabMcp` class for both), `./allowed.js` and `react`;
+// not in the CDN build. `ConnectButton` has its few English texts inline, so
+// a page does not load the table of `./strings` with it (DEC-208).
 const react = await Bun.build({
 	entrypoints: [join(root, "src/react.ts")],
 	target: "browser",
@@ -69,12 +94,14 @@ const react = await Bun.build({
 	naming: { entry: "[name].js" },
 	// The directive must open the module (React Server Components frameworks).
 	banner: '"use client";',
+	// `./allowed.js` too: one store of allowances per `TabMcp`, the one the
+	// dialogs use, not a second copy in this file.
 	plugins: [
 		{
 			name: "core-entry-external",
 			setup(build) {
-				build.onResolve({ filter: /^\.\/index\.ts$/ }, () => ({
-					path: "./index.js",
+				build.onResolve({ filter: /^\.\/(index|allowed)\.ts$/ }, (args) => ({
+					path: args.path.replace(/\.ts$/, ".js"),
 					external: true,
 				}));
 			},
@@ -106,14 +133,7 @@ const published = {
 	version: pkg["version"],
 	description: pkg["description"],
 	type: "module",
-	exports: {
-		".": { types: "./index.d.ts", default: "./index.js" },
-		"./react": { types: "./react.d.ts", default: "./react.js" },
-		"./setup": { types: "./setup.d.ts", default: "./setup.js" },
-		"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
-		"./visible": { types: "./visible.d.ts", default: "./visible.js" },
-		"./cdn": "./cdn/tab-mcp-client.min.js",
-	},
+	exports: PUBLISHED_EXPORTS,
 	types: "./index.d.ts",
 	sideEffects: false,
 	license: pkg["license"],
@@ -141,6 +161,13 @@ for (const [from, to] of [
 	const file = Bun.file(from);
 	if (await file.exists()) await Bun.write(join(dist, to), file);
 }
+// The agent skill, its links to the client's README and sources made
+// relative (DEC-216).
+for (const [path, text] of await packagedSkill(
+	join(root, "../.."),
+	String(pkg["version"]),
+))
+	await Bun.write(join(dist, path), text);
 
 // Sizes: the CDN build is what a page pays (dependencies included).
 const sizes: [string, number, number][] = [];

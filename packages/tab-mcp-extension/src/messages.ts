@@ -27,10 +27,67 @@ export type ContentRequest =
 			name: string;
 			/** The read-only claim the tool was offered with. */
 			readOnly: boolean;
+			/** The tool as it was offered (`definitionOf`, DEC-217). */
+			definition: string;
 			input: unknown;
+			/**
+			 * The user allowed this call (DEC-207): told to a page with the
+			 * client library right before the tool runs. Only the bridge's
+			 * path after the user's "allow" sets it.
+			 */
+			vouch?: Vouch;
+			/**
+			 * With a vouch: the state for the page, told before the vouch
+			 * to a page not told "on" yet (DEC-221).
+			 */
+			state?: ExtensionState;
 	  }
 	| { type: "webmcp-cancel"; callId: string }
-	| { type: "history" };
+	| { type: "history" }
+	/** The extension's state changed: for a page with the library. */
+	| { type: "extension-state"; state: ExtensionState };
+
+/** An AI app connected to the extension: its own name and verified host. */
+export interface AppView {
+	name: string;
+	host: string;
+}
+
+/** What a vouch says besides the tool and its arguments (DEC-207). */
+export interface Vouch {
+	/** One per call. */
+	nonce: string;
+	/** The AI app that made the call. */
+	app: AppView;
+}
+
+/**
+ * The state the worker sends a content script for a page that announced
+ * the client library (DEC-207). The content script tells the page only
+ * while `on` (DEC-221), and nothing else: not the relay, the address or
+ * other tabs.
+ */
+export interface ExtensionState {
+	/** The extension's name. */
+	name: string;
+	/** AI access is on and connected: the page's tools can be called now. */
+	on: boolean;
+	/** The AI apps connected now (none while not `on`). */
+	apps: AppView[];
+	/** It serves the tab in front of a window only. */
+	whileInFront: true;
+}
+
+/**
+ * What a page with the client library announced (DEC-207): the library's
+ * version, and the AI apps connected to the page directly, of all its apps
+ * together. Until the page was told "on" nothing it said is read (DEC-221):
+ * no version, no apps.
+ */
+export interface PageLibrary {
+	version?: string;
+	apps: AppView[];
+}
 
 /**
  * The tab's history as the page can see it: the Navigation API lists only
@@ -47,8 +104,12 @@ export interface PageHistory {
 	forward?: { url: string | null };
 }
 
-/** From the content script: the page's tools changed (`toolchange`). */
-export type ContentEvent = { type: "webmcp-changed" };
+/**
+ * From the content script: the page's tools changed (`toolchange`), or
+ * what the page with the client library announced; `handshake`: the page
+ * announced the library, the worker answers with the `ExtensionState`.
+ */
+export type ContentEvent = { type: "webmcp-changed" } | { type: "handshake" };
 
 /** The page in a tab, as the content script sees it. */
 export interface PageInfo {
@@ -94,6 +155,11 @@ export interface PageTool {
 		readOnlyHint?: boolean;
 		/** WebMCP's hint for tools meant for developers: not offered (WM 8). */
 		debugging?: boolean;
+		/**
+		 * The page's own; missing when the page gave no annotations (Chrome
+		 * then lists none) or no boolean: nothing is known (DEC-214).
+		 */
+		consequentialHint?: boolean;
 	};
 }
 
@@ -110,6 +176,8 @@ export interface PageTools {
 	tools: PageTool[];
 	/** Why the tools could not be listed, if they could not. */
 	error?: string;
+	/** The page announced the client library (DEC-207). */
+	library?: PageLibrary;
 }
 
 /**

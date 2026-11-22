@@ -20,6 +20,16 @@ export const SERVER_NAME = FIREFOX
 	? "tab-mcp-browser-extension-firefox"
 	: "tab-mcp-browser-extension";
 
+/**
+ * The extension's app id: its MCP address is `<relay>/s/<APP_ID>/mcp`, the
+ * same for everyone who has the extension (DEC-196); the code pairs an AI app
+ * with one installation. Its own in the Firefox build, like the server name.
+ * Set here because the Firefox server name is longer than an app id may be.
+ */
+export const APP_ID = FIREFOX
+	? "tab-mcp-extension-firefox"
+	: "tab-mcp-extension";
+
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "panel";
 
@@ -51,7 +61,7 @@ export type PanelCommand =
 	/** The pairing view opened (`on`) or closed: codes only while it is open. */
 	| { type: "pair"; on: boolean }
 	| { type: "revoke"; grantId: string }
-	| { type: "new-address" }
+	| { type: "disconnect-all" }
 	| { type: "set-relay"; relay: string }
 	| { type: "set-allowed"; origin: string; name: string; on: boolean }
 	/**
@@ -59,7 +69,15 @@ export type PanelCommand =
 	 * worker takes only the names it offers there itself.
 	 */
 	| { type: "set-allowed-all"; origin: string; names: string[]; on: boolean }
-	| { type: "answer"; id: string; answer: Answer };
+	| { type: "answer"; id: string; answer: Answer }
+	/**
+	 * Filling in the code on the relay's pairing page on or off (DEC-203):
+	 * on only after the panel got the relay's site from the user. `id` comes
+	 * back in the state once handled (`fillAnswered`, DEC-210).
+	 */
+	| { type: "set-fill"; on: boolean; id: string }
+	/** Remove an AI app's host from "Filled in without asking for:" (DEC-213). */
+	| { type: "forget-fill-host"; host: string };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -86,9 +104,18 @@ export interface QuestionView {
 	 * go to, or what is known of it (back or forward).
 	 */
 	navigation?: { to: string };
+	/**
+	 * Not a tool: whether to fill in the extension's code on the relay's
+	 * pairing page for this AI app (DEC-203). `name` is its own name for
+	 * itself ("" if none); `host` above is the one the relay verified.
+	 */
+	pairing?: { name: string };
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
-	/** "Always allow on <host>" is offered (a page tool of an http(s) site). */
+	/**
+	 * "Always allow on <host>" is offered (a page tool of an http(s) site);
+	 * for a pairing question, "Always allow" for the AI app's host (DEC-213).
+	 */
 	site: boolean;
 	/** When it ends unanswered as Don't allow (epoch ms, the worker's clock). */
 	expiresAt: number;
@@ -107,6 +134,11 @@ export interface ToolView {
 
 /** The tab in front, as the panel shows it. */
 export interface TabView {
+	/**
+	 * The page announced the client library (DEC-207), with the AI apps
+	 * connected to it directly (the page's word).
+	 */
+	library?: { apps: { name: string; host: string }[] };
 	title: string;
 	host: string;
 	/** `undefined`: the extension may not read it, `noAccess` or `access` says why. */
@@ -139,6 +171,16 @@ export interface PanelState {
 	replaced?: { sibling: boolean };
 	/** Host access on all sites ("Give access to all sites") is granted. */
 	allSites: boolean;
+	/** Filling in the code on the relay's pairing page is on (DEC-203). */
+	fillCode?: boolean;
+	/** Filling in went off by itself: the relay's site was taken away. */
+	fillLost?: boolean;
+	/** The id of the last "set-fill" the worker handled. */
+	fillAnswered?: string;
+	/** The AI apps' hosts filled in for without a question, at this relay (DEC-213). */
+	fillAlways?: string[];
+	/** The last fill without a question, while it is recent: what the panel says. */
+	fillNotice?: { text: string; at: number };
 	tab?: TabView;
 	/**
 	 * Without their arguments, which can be large: each question's come once
@@ -184,6 +226,7 @@ export interface Sender {
 	id?: string;
 	url?: string;
 	tab?: unknown;
+	frameId?: number;
 }
 
 /**
@@ -232,6 +275,26 @@ export function isContentEvent(
 	);
 }
 
+/**
+ * A content script asks what the extension tells a page that announced the
+ * client library (DEC-207): from this extension's content script in a tab's
+ * top frame only, as only that one speaks to pages.
+ */
+export function isHandshakeAsk(
+	message: unknown,
+	sender: Sender,
+	extensionId: string,
+): boolean {
+	return (
+		sender.id === extensionId &&
+		sender.tab !== undefined &&
+		sender.frameId === 0 &&
+		typeof message === "object" &&
+		message !== null &&
+		(message as { type?: unknown }).type === "handshake"
+	);
+}
+
 const isString = (value: unknown): value is string => typeof value === "string";
 
 /** At most this many names in "Allow all" (the bridge lists at most 64 tools). */
@@ -252,7 +315,7 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 				: undefined;
 		case "connect":
 		case "stop":
-		case "new-address":
+		case "disconnect-all":
 			return { type: m["type"] };
 		case "pair":
 			return typeof m["on"] === "boolean"
@@ -296,6 +359,14 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 					m["answer"] === "site" ||
 					m["answer"] === "deny")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
+				: undefined;
+		case "set-fill":
+			return typeof m["on"] === "boolean" && isString(m["id"])
+				? { type: "set-fill", on: m["on"], id: m["id"] }
+				: undefined;
+		case "forget-fill-host":
+			return isString(m["host"])
+				? { type: "forget-fill-host", host: m["host"] }
 				: undefined;
 		default:
 			return undefined;

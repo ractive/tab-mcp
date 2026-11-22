@@ -2,15 +2,18 @@
  * Integration: the relay as its own process (`bun packages/tab-mcp/src/main.ts`)
  * with a SQLite store, this library in Bun as the tab, and the MCP SDK client
  * as the AI app. The token is written into the same SQLite file (the binary
- * has no test switch for a loopback CIMD fixture; OAuth: oauth-e2e.test.ts).
+ * has no test switch for a loopback CIMD fixture; OAuth: oauth-e2e.test.ts),
+ * for the page's secret: `tokenFor` asks a relay in this process which page
+ * is connected, and this one is not.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SqliteTokenStore } from "@ractive-ch/tab-mcp";
+import { addressIdFromSecret, SqliteTokenStore } from "@ractive-ch/tab-mcp";
 import type { Subprocess } from "bun";
-import { connectClient, newTab, nextEnd, tokenFor } from "./helpers.ts";
+import { issueAccessToken } from "../../tab-mcp/src/test-token.ts";
+import { connectClient, MemoryStorage, newTab, nextEnd } from "./helpers.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "tab-mcp-client-int-"));
 const dbPath = join(dir, "tab-mcp.db");
@@ -72,7 +75,11 @@ afterAll(async () => {
 });
 
 test("SDK client → relay process → TabMcp in Bun", async () => {
-	const tab = newTab(`http://127.0.0.1:${port}`, { appName: "integration" });
+	const storage = new MemoryStorage();
+	const tab = newTab(`http://127.0.0.1:${port}`, {
+		appName: "integration",
+		storage,
+	});
 	await tab.registerTool({
 		name: "multiply",
 		title: "Multiply",
@@ -85,12 +92,21 @@ test("SDK client → relay process → TabMcp in Bun", async () => {
 		execute: ({ a, b }) => `${Number(a) * Number(b)} SECRET-RESULT-4711`,
 	});
 	const session = await tab.connect();
-	expect(session.address).toMatch(
-		new RegExp(`^http://127\\.0\\.0\\.1:${port}/a/[a-z2-7]{52}/mcp$`),
-	);
+	expect(session.address).toBe(`http://127.0.0.1:${port}/s/test-page/mcp`);
+	const secret = [...storage.items.values()][0] as string;
+	const addressId = addressIdFromSecret(secret, "test-page");
 
 	const store = new SqliteTokenStore(dbPath);
-	const token = await tokenFor(store, session.address);
+	const { token } = await issueAccessToken(
+		store,
+		{
+			addressId,
+			app: "test-page",
+			clientId: "https://client.example/cimd.json",
+			clientName: "Test client",
+		},
+		{ ttlMs: 3_600_000 },
+	);
 	await store.close();
 
 	const client = await connectClient(session.address, token);
@@ -106,12 +122,20 @@ test("SDK client → relay process → TabMcp in Bun", async () => {
 	]);
 	await client.close();
 
-	// The relay logs no results, tokens or secrets.
+	// The relay logs no results, tokens or secrets: not the page's secret
+	// either, and its address id only shortened (the URL no longer has it).
 	const log = lines.join("\n");
 	expect(log).toContain('"event":"mcp.request"');
+	expect(log).toContain('"app":"test-page"');
 	expect(log).toContain("@ractive-ch/tab-mcp-client@");
-	for (const secret of ["SECRET-RESULT-4711", token, '"multiply"'])
-		expect(log).not.toContain(secret);
+	for (const hidden of [
+		"SECRET-RESULT-4711",
+		token,
+		'"multiply"',
+		secret,
+		addressId,
+	])
+		expect(log).not.toContain(hidden);
 
 	// SIGTERM: the tab hears "shutdown".
 	const gone = nextEnd(tab);

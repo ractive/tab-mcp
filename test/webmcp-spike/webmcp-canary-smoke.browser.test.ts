@@ -2,11 +2,16 @@
  * Iteration 18's canary: what kb/research/webmcp-from-extension.md found
  * about Chrome's WebMCP, checked against the pinned Chrome for Testing, so a
  * Chrome change shows. The pages are served through the DevTools Protocol on
- * https://spike.test (no server, no network). Needs Chrome for Testing 156 or newer
- * (`CHROME_PATH`, or Puppeteer's or Playwright's cache): required in CI,
+ * https://spike.test (no server, no network). Its answers change only with
+ * the pin, but it runs on every pull request (`-smoke`): about 4 s, and so a
+ * pull request that bumps the Chrome pin meets it in the required check, not
+ * only in the advisory full run (iteration 50, review of PR 220). Needs
+ * Chrome for Testing 156 or newer
+ * (`CHROME_PATH`, or the pinned one in Puppeteer's cache, test/browsers.ts): required in CI,
  * skipped elsewhere without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { browserTests } from "../browser-gate.ts";
 import type { Browser, Page, World } from "./browser.ts";
 import { chromeMajor, findChromeForTesting } from "./browser.ts";
 import { launch, openPage, pageUrl, WEBMCP_ON } from "./spike.ts";
@@ -14,10 +19,10 @@ import { launch, openPage, pageUrl, WEBMCP_ON } from "./spike.ts";
 /** The Chrome the findings are for (the `debugging` annotation is new in 156). */
 const MIN_MAJOR = 156;
 
-const found = findChromeForTesting();
+const found = browserTests ? findChromeForTesting() : undefined;
 const chrome =
 	found !== undefined && chromeMajor(found) >= MIN_MAJOR ? found : undefined;
-if (chrome === undefined && process.env["CI"])
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error(
 		`Chrome for Testing ${MIN_MAJOR} or newer is needed for the WebMCP canary in CI`,
 	);
@@ -144,36 +149,56 @@ test.skipIf(chrome === undefined)(
 );
 
 test.skipIf(chrome === undefined)(
-	"a tool the content script registers is the page's to list and call",
+	"annotations: none listed without, all four as booleans with (DEC-214)",
 	async () => {
-		expect(
-			await page.eval(
-				`spike.probe("register", { name: "canary_tool" })`,
-				isolated,
-			),
-		).toMatchObject({ ok: true });
-		const listed = await page.eval<string[]>(
-			"document.modelContext.getTools().then((tools) => tools.map((t) => t.name))",
-		);
-		expect(listed).toContain("canary_tool");
-		// The page calls it, and it runs in the content script.
-		const result = await page.eval<string>(
-			`document.modelContext.getTools().then((tools) => document.modelContext.executeTool(tools.find((t) => t.name === "canary_tool"), { from: "page" }))`,
-		);
-		expect(JSON.parse(result)).toEqual({
-			registeredIn: "isolated",
-			ranIn: "isolated",
-			input: { from: "page" },
-		});
-		// A name already taken, either way round, is refused.
-		expect(
-			await page.eval(
-				`spike.probe("register", { name: "get_greeting" })`,
-				isolated,
-			),
-		).toMatchObject({
-			ok: false,
-			error: "InvalidStateError: Duplicate tool name",
-		});
+		const other = await openPage(browser as Browser, `${pageUrl}?annotations`);
+		try {
+			const refused = await other.page.eval<
+				Record<string, string>
+			>(`(async () => {
+				const register = (name, annotations) => document.modelContext.registerTool({
+					name,
+					description: name,
+					inputSchema: { type: "object" },
+					...(annotations === undefined ? {} : { annotations }),
+					execute() { return "ran"; },
+				});
+				await register("a_none");
+				await register("a_empty", {});
+				await register("a_null", null);
+				await register("a_read_only_false", { readOnlyHint: false });
+				await register("a_string", { consequentialHint: "yes" });
+				const refused = {};
+				try { await register("a_text", "consequential"); } catch (e) { refused.a_text = e.name; }
+				return refused;
+			})()`);
+			expect(refused).toEqual({ a_text: "TypeError" });
+			const report = await other.page.eval<Report>(
+				`spike.probe("report")`,
+				other.isolated,
+			);
+			const annotations = Object.fromEntries(
+				report.tools
+					.filter((t) => t.name.startsWith("a_"))
+					.map((t) => [t.name, t.annotations ?? "none"]),
+			);
+			const none = {
+				consequentialHint: false,
+				debugging: false,
+				readOnlyHint: false,
+				untrustedContentHint: false,
+			};
+			// `{}` and only `readOnlyHint: false` cannot be told apart from an
+			// explicit `consequentialHint: false`; a tool without annotations can.
+			expect(annotations).toEqual({
+				a_none: "none",
+				a_empty: none,
+				a_null: none,
+				a_read_only_false: none,
+				a_string: { ...none, consequentialHint: true },
+			});
+		} finally {
+			await other.page.close();
+		}
 	},
 );

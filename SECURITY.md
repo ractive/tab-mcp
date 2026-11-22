@@ -25,9 +25,9 @@ comes as a new version, not as a patch to an older one.
 
 | Package | Supported | Not supported |
 |---|---|---|
-| `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.11.0 | older versions |
-| `@ractive-ch/tab-mcp-client` (npm) | 0.16.2 | older versions |
-| tab-mcp browser extension (Chrome Web Store) | 0.2.1 | older versions |
+| `@ractive-ch/tab-mcp` (npm), `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` (Docker) | 0.13.2 | older versions |
+| `@ractive-ch/tab-mcp-client` (npm) | 0.21.0 | older versions |
+| tab-mcp browser extension (Chrome Web Store) | 0.3.2 | older versions |
 
 ## Connecting an AI app to a page means trusting the page
 
@@ -37,23 +37,26 @@ return. A page can describe a tool in misleading ways, or return text that steer
 AI app into doing something you did not ask for. tab-mcp cannot judge whether a page is
 honest.
 
-- Connect only pages you trust. The relay's pairing page names the page's origin (for
-  example `https://ractive.ch`) and the AI app that is connecting. Check both before you
-  type the code. The origin is what the page's browser reported when it connected; a
-  program that is not a browser can claim any origin. It tells you which page you connect
-  only when the code comes from a page you opened yourself.
+- Connect only pages you trust. The relay's pairing page names the AI app that is
+  connecting and the app of the address, not the page: an address is the same for every
+  page of an app. The code decides which page you connect, so type only a code from a
+  page you opened yourself, and check the AI app before you type it.
 - Type a pairing code only for an AI app you started yourself, and never read the code
-  out to anyone.
-- If a page says that another tab or program took over its address and you did not open
-  it elsewhere, choose "New address": someone may have copied the page's address, and
-  your AI apps would talk to them.
+  out to anyone: whoever has a valid code can connect their own AI app to your page.
+- If a page says that another tab or program took it over and you did not open it
+  in another tab or window of the same browser, choose "Disconnect all apps": someone may have copied what the page
+  keeps to connect, and your AI apps would use them.
 - Disconnect AI apps you no longer use, in the page's "Connect your AI app" dialog.
 
 A page that also registers its tools with the browser's
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (the client library's
 `webmcp: true`) offers them to agents in your browser without pairing; which agents may
-call them is the browser's decision. Tools that change something go there only if the
-page names them, and then ask in the page as well
+call them is the browser's decision. Every tool the page registers goes there, tools
+that change something included, unless the page keeps it from WebMCP (`callers`). The
+page does not ask you before such a call: a tool it marks as consequential or
+destructive goes there marked consequential, for an agent that heeds the hint to ask you
+in its own chat, and only the page's own code (`onConfirm`) can refuse a call; a call
+the tab-mcp browser extension asked you about runs as you allowed it there
 ([threat model](docs/threat-model.md), A14).
 
 A relay accepts pages only from the origins its operator lists. This keeps other

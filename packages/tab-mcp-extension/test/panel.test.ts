@@ -1,5 +1,5 @@
 /**
- * The side panel's "AI app" card: the next step stands out, the address
+ * The side panel's "AI access" card: the next step stands out, the address
  * shows only while pairing, with "How do I add it?" under it.
  */
 
@@ -44,10 +44,10 @@ const base: PanelState = {
 	questions: [],
 	expired: [],
 };
-const ADDRESS = "https://relay.example/a/x/mcp";
+const ADDRESS = "https://relay.example/s/tab-mcp/mcp";
 const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
 
-describe("the AI app card", () => {
+describe("the AI access card", () => {
 	test("off: the switch is off, Turn on AI access is the step, no address", () => {
 		expect(cardView(base, false)).toEqual({
 			// Nothing paired: no promise about paired apps (EQ 7).
@@ -68,18 +68,19 @@ describe("the AI app card", () => {
 	test("off with apps paired: they stay listed, without Disconnect, and the panel says why (EQ 8)", () => {
 		const view = cardView({ ...base, grants: [claude] }, false);
 		expect(view).toMatchObject({
-			stateText: "AI access is off · paired apps stay paired",
+			stateText: "AI access is off · your AI apps stay connected for next time",
 			stateShown: true,
 			intro: false,
 			disconnect: false,
-			grantsNote: "Turn on AI access to disconnect an app.",
+			grantsNote: "Turn on AI access to disconnect an AI app.",
 		});
 		for (const status of ["connecting", "retrying"] as const)
 			expect(
 				cardView({ ...base, status, grants: [claude] }, false),
 			).toMatchObject({
 				disconnect: false,
-				grantsNote: "An app can be disconnected once connected again.",
+				grantsNote:
+					"An AI app can be disconnected once the connection is back.",
 			});
 		expect(
 			cardView({ ...base, status: "on", grants: [claude] }, false),
@@ -109,7 +110,7 @@ describe("the AI app card", () => {
 			false,
 		);
 		expect(view).toEqual({
-			stateText: "On · no AI app paired yet",
+			stateText: "On · no AI app connected yet",
 			stateShown: true,
 			switchOn: true,
 			turnOn: false,
@@ -123,7 +124,7 @@ describe("the AI app card", () => {
 		});
 	});
 
-	test("apps paired: their names, + Add another AI app, the address hidden until asked", () => {
+	test("apps paired: their names, + Connect another AI app, the address hidden until asked", () => {
 		const state: PanelState = {
 			...base,
 			status: "on",
@@ -324,7 +325,13 @@ describe("the tab card's texts", () => {
 			expect(doc.getElementById("always-allow-note")?.hidden).toBe(true);
 			expect(
 				[...doc.querySelectorAll("h2, h3")].map((h) => h.textContent),
-			).toEqual(["AI app", "Pair an AI app", "Tab in front", "Tools"]);
+			).toEqual(["AI access", "Connect your AI app", "Tab in front", "Tools"]);
+			// The AI access switch is named by the card's heading: no second
+			// "AI access" beside it.
+			expect(
+				doc.getElementById("ai-switch")?.getAttribute("aria-labelledby"),
+			).toBe("ai-heading");
+			expect(doc.querySelector("label.switch")?.textContent?.trim()).toBe("");
 		} finally {
 			await window.happyDOM.close();
 		}
@@ -332,7 +339,7 @@ describe("the tab card's texts", () => {
 
 	test("what Always allow does is a line for everyone, with the site (DEC-160)", () => {
 		expect(alwaysAllowNote("https://shop.example")).toBe(
-			"Always allow, on: the tool runs without asking on https://shop.example, for every paired AI app. Off: it asks you before each call.",
+			"Always allow, on: the tool runs without asking on https://shop.example, for every connected AI app. Off: it asks you before each call.",
 		);
 	});
 
@@ -408,15 +415,15 @@ describe("Always allow all, over the tool list", () => {
 		});
 	});
 
-	test("its accessible name: the count, the site and every paired AI app", () => {
+	test("its accessible name: the count, the site and every connected AI app", () => {
 		const site = "https://shop.example";
 		expect(allowAllLabel(allowAllView(tab([order, pay, read])), site)).toBe(
-			"Always allow all: the 2 tools listed on https://shop.example, for every paired AI app",
+			"Always allow all: the 2 tools listed on https://shop.example, for every connected AI app",
 		);
 		expect(
 			allowAllLabel(allowAllView(tab([{ ...order, allowed: true }])), site),
 		).toBe(
-			"Always allow all: the 1 tool listed on https://shop.example, for every paired AI app",
+			"Always allow all: the 1 tool listed on https://shop.example, for every connected AI app",
 		);
 	});
 

@@ -45,11 +45,49 @@ export interface RelayClient {
 }
 
 /**
- * An agent in this browser that calls a mirrored tool through WebMCP
- * (`webmcp: true`). Not paired and not identified: nothing more is known.
+ * Whatever calls a mirrored tool through the browser's WebMCP
+ * (`webmcp: true`): an agent in the browser, which may drive the tab,
+ * another extension that passes on an AI app's calls, or a document of an
+ * origin in the tool's `exposedTo`. Not paired and not identified: nothing
+ * more is known, and the page cannot tell these apart, unless the tab-mcp
+ * browser extension vouched for the call (DEC-207). The library never shows
+ * an unvouched call its confirmation (DEC-215): only the page's own
+ * `onConfirm` decides, in code.
  */
 export interface WebMcpClient {
 	kind: "webmcp";
+	/**
+	 * Set when the tab-mcp browser extension ran this call for an AI app
+	 * connected to it, after the user allowed the call there: the page did
+	 * not ask (no question, no `onConfirm`). Absent for every other agent in
+	 * the browser, and with `trustExtension: false`.
+	 */
+	via?: "tab-mcp-extension";
+	/** With `via`: the AI app's own name for itself, as the extension knows it. */
+	name?: string;
+	/** With `via`: the host of the AI app's client id, as the relay verified it for the extension. */
+	host?: string;
+}
+
+/**
+ * The tab-mcp browser extension, as it tells a page that offers its tools
+ * through WebMCP (`TabMcp.extension`, DEC-207): it is serving this page, and
+ * these AI apps can call the page's tools through it.
+ */
+export interface BrowserExtension {
+	/** As the extension names itself ("tab-mcp browser extension"). */
+	name: string;
+	/**
+	 * The AI apps connected to the extension now (each one's own name and
+	 * the host the relay verified); empty while none is.
+	 */
+	apps: readonly { name: string; host: string }[];
+	/**
+	 * The extension serves only the tab in front of its window: say "while
+	 * this tab is in front" when telling the user that an app is connected
+	 * through it.
+	 */
+	whileInFront: boolean;
 }
 
 /**
@@ -97,8 +135,8 @@ export interface ServeOptions {
 	 * `onConfirm`; a throw is a refusal. `request.signal` aborts when the call
 	 * is cancelled, times out or the serve closes. The answer must come from
 	 * the user: never let the other end of the port answer it, since that is
-	 * the caller that wants the tool to run. Calls through the relay and
-	 * WebMCP keep the page's `onConfirm` or dialog.
+	 * the caller that wants the tool to run. Calls through the relay keep the
+	 * page's `onConfirm` or dialog, WebMCP calls the page's `onConfirm`.
 	 */
 	onConfirm?: ConfirmHandler;
 	/**
@@ -172,18 +210,22 @@ export interface RegisterToolOptions {
 	signal?: AbortSignal;
 	/**
 	 * Which callers see the tool: `"relay"` (AI apps through the relay),
-	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (agents
-	 * in the browser, with `TabMcpOptions.webmcp` on). Others neither list nor
-	 * call it: for them it does not exist. By default all of them, except
-	 * that a consequential tool (`consequentialHint` or `destructiveHint`)
-	 * goes to WebMCP only when `"webmcp"` is listed: an agent that drives
-	 * this tab can click Allow in the page's confirmation itself.
+	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (whatever
+	 * calls through the browser's WebMCP, with `TabMcpOptions.webmcp` on). Others neither list nor
+	 * call it: for them it does not exist. By default all of them, tools that
+	 * ask included (DEC-209). Leave a caller out for privacy or identity, e.g.
+	 * `["local"]` for data the site's own assistant may read but an AI app
+	 * through the relay may not, or `["relay", "local"]` for a tool no WebMCP
+	 * caller may run unasked: the library does not ask an unvouched WebMCP
+	 * call (DEC-215).
 	 */
 	callers?: readonly ToolCaller[];
 	/**
 	 * WebMCP's origins of other documents in this tab that may see the tool:
 	 * passed on to the native `registerTool` of a mirrored tool, which checks
-	 * it (an invalid list only warns). No effect on AI apps.
+	 * it (an invalid list only warns). A document of a listed origin can run
+	 * the tool, and the library does not ask it (DEC-215): only `onConfirm`
+	 * stops it. No effect on AI apps.
 	 */
 	exposedTo?: string[];
 }
@@ -237,9 +279,11 @@ export interface SetupStep {
 /** Options of the library's dialogs (`TabMcpOptions.ui`). */
 export interface DialogOptions {
 	/**
-	 * Texts of the dialogs, key by key; the rest stay English. The keys and
-	 * the English texts are in `src/strings.ts`; `{name}` placeholders are
-	 * filled in. Set `lang` and `dir` with the texts' language.
+	 * Every text the library shows a person, key by key, in one table given
+	 * once: the dialogs, their setup steps and `ConnectButton` of `./react`
+	 * read it. Missing keys stay English (`STRINGS` of `./strings`). `lang`
+	 * is the language of the texts: the dialogs carry it, and plural forms
+	 * (`Intl.PluralRules`) and lists (`Intl.ListFormat`) follow it.
 	 */
 	strings?: Partial<DialogStrings>;
 	/** The help in the connect dialog ("How do I add it?"). */
@@ -288,39 +332,72 @@ export interface TabMcpOptions {
 	/**
 	 * The relay, e.g. `https://relay.example` or `wss://relay.example`.
 	 * Without one the page offers its tools only through `serve` and WebMCP:
-	 * `connect()`, `showConnectDialog()` and `newAddress()` reject, and no
+	 * `connect()`, `showConnectDialog()` and `disconnectAll()` reject, and no
 	 * address secret is read or written.
 	 */
 	relay?: string;
 	/** Name, version and instructions of the page's MCP server. */
 	server: ServerInfo;
-	/** The page's app name (e.g. `saturnus`), shown when an AI app pairs; at most 64 characters. */
+	/**
+	 * The app id: the `<app>` of the page's MCP address
+	 * `https://<relay>/s/<app>/mcp`, which every page of the app shares (an AI
+	 * app is paired with one page by the code that page shows). 1 to 32
+	 * characters of `a-z`, `0-9` and `-`, not starting or ending with `-`.
+	 * Default: `server.name` in lower case, letters without their marks, each
+	 * run of other characters as one `-`, cut to 32; a name that leaves
+	 * nothing (no letter a-z, no digit) needs `app`. The relay may allow a
+	 * page's origin only certain apps.
+	 */
+	app?: string;
+	/**
+	 * The page's app name for people (e.g. `saturnus`): what an AI app is told
+	 * to open when the page is not open; at most 64 characters.
+	 */
 	appName?: string;
-	/** Approves consequential tool calls; default: a dialog in the page. */
+	/**
+	 * Approves consequential tool calls; default: a dialog in the page. It
+	 * gets every such call of an AI app through the relay and every WebMCP
+	 * call, not one the tab-mcp browser extension vouched for. A WebMCP call is
+	 * never shown the library's dialog (DEC-215): it may come from an agent
+	 * that drives the tab and can click whatever the page shows, this
+	 * handler's UI too, from another extension, or from an `exposedTo`
+	 * origin. For it, decide in code (`request.client.kind` is `"webmcp"`),
+	 * or keep the tool from WebMCP with `callers`; without a handler its call
+	 * runs.
+	 */
 	onConfirm?: ConfirmHandler;
 	/**
-	 * Offer "Allow until reload" in the default confirmation: it lets a tool
-	 * run without asking for one AI app, with any arguments, until the page
-	 * is reloaded or the app is disconnected; the connect dialog lists it
-	 * with a reset. Off by default (DEC-096): the confirmation then shows
-	 * only "Don't allow" and "Allow", and every call asks. Turn it on only
-	 * for tools whose calls the user does not need to check one by one.
+	 * Let the user allow tools in the library's dialogs, so that their calls
+	 * run without asking for one AI app, with any arguments (DEC-200):
+	 *
+	 * - `true`: the confirmation offers "Always allow", and the connect
+	 *   dialog a switch per tool and "Always allow everything"
+	 *   under each connected AI app. Kept in `storage` next to the secret until
+	 *   the AI app is disconnected (in memory with `storage: null`).
+	 * - `"until-reload"`: the same, offered as "Allow until reload": kept in
+	 *   memory only, until the page is reloaded or the AI app is disconnected.
+	 * - unset or `false` (DEC-096): the confirmation shows only "Don't allow"
+	 *   and "Allow once", and every call asks. A page can still offer its own
+	 *   switches with `@ractive-ch/tab-mcp-client/allowed`, kept as with `true`.
+	 *
+	 * Turn it on only for tools whose calls the user does not need to check
+	 * one by one: an AI app can be steered by what it reads.
 	 */
-	alwaysAllow?: boolean;
+	alwaysAllow?: boolean | "until-reload";
 	/** Texts and help of the library's dialogs. */
 	ui?: DialogOptions;
 	/**
 	 * Where the address secret lives; default `localStorage`. `null` keeps it
-	 * only for the page's lifetime (a new address on every visit).
+	 * only for the page's lifetime (a new secret, so no paired AI app, on every visit).
 	 */
 	storage?: SecretStorage | null;
 	/**
 	 * Storage key of the secret; default `tab-mcp:secret:<relay origin>:<server.name>`
 	 * (the name URI-encoded), so pages of one site with different server names get
-	 * different addresses. Changing `server.name` therefore changes the address: set
+	 * different secrets. Changing `server.name` therefore changes the secret: set
 	 * `storageKey` to keep it. Without it, a secret kept under 0.4's default
 	 * `tab-mcp:secret:<relay origin>` is copied to the new key by the first page that
-	 * connects, so that page keeps its address.
+	 * connects, so that page keeps its AI apps.
 	 */
 	storageKey?: string;
 	/**
@@ -341,13 +418,29 @@ export interface TabMcpOptions {
 	/**
 	 * Also register the tools with the browser's own WebMCP
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
-	 * in the browser can call them, without pairing. Off by default. Tools
-	 * marked `consequentialHint` or `destructiveHint` are left out unless
-	 * their `callers` list `"webmcp"`: an agent that drives this tab can
-	 * click Allow in the page's confirmation itself. A failed native
-	 * registration only warns in the console.
+	 * in the browser can call them, without pairing. Off by default. Every
+	 * tool goes there unless its `callers` leave `"webmcp"` out, tools that ask
+	 * included, marked `consequentialHint` (a tool marked only
+	 * `destructiveHint` too: WebMCP has no `destructiveHint`; DEC-209), so
+	 * that a caller that heeds it asks its user. The library shows an
+	 * unvouched WebMCP call no question (DEC-215): it runs unless `onConfirm`
+	 * refuses it. A
+	 * failed native registration only warns in the console.
+	 *
+	 * With it, the page and the tab-mcp browser extension know of each other
+	 * (DEC-207): `extension` says which AI apps reach the page through it,
+	 * and a call the user allowed in the extension is not asked again here
+	 * (see `trustExtension`).
 	 */
 	webmcp?: boolean;
+	/**
+	 * With `webmcp: true`: a WebMCP call the tab-mcp browser extension vouches
+	 * for runs without `onConfirm` (the user allowed exactly that call there,
+	 * a moment before). On by default; `false` treats it as any other WebMCP
+	 * call: `onConfirm` decides, without one it runs (DEC-215). `extension`
+	 * is reported either way.
+	 */
+	trustExtension?: boolean;
 }
 
 /** The library is reconnecting by itself (`state` is `reconnecting`). */
@@ -417,7 +510,7 @@ export interface SessionInfo {
 }
 
 /** Why the relay sent a pairing code (`PairingCode.reason`). */
-export type PairingCodeReason = "start" | "used" | "locked" | "expired";
+export type PairingCodeReason = "start" | "used" | "expired";
 
 /** A pairing code to show (DEC-028). */
 export interface PairingCode {
@@ -456,8 +549,8 @@ export type ConnectionState =
 export type DisconnectReason =
 	/** `disconnect()` was called. */
 	| "user"
-	/** `newAddress()` ended the old session. */
-	| "new_address"
+	/** `disconnectAll()` ended the old session. */
+	| "disconnect_all"
 	/** Another tab connected with the same address. */
 	| "replaced"
 	/** The session lifetime is over. */
@@ -486,7 +579,7 @@ export interface StateChangeDetail {
 	/**
 	 * Why it ended: on the change from `connected` (to `disconnected`, or to
 	 * `reconnecting` when the connection broke), and when `disconnect()` or
-	 * `newAddress()` ends connecting or reconnecting (`user`, `new_address`).
+	 * `disconnectAll()` ends connecting or reconnecting (`user`, `disconnect_all`).
 	 */
 	reason?: DisconnectReason;
 }
@@ -499,7 +592,7 @@ export interface ReplacedDetail {
 	 * tab"). `false`: no such tab was heard (or the browser has no
 	 * `BroadcastChannel`), so it may be a program with a copy of the address
 	 * secret, and the AI apps paired with the address now talk to it. Offer
-	 * `newAddress()`, which takes the address back and disconnects them
+	 * `disconnectAll()`, which takes the address back and disconnects them
 	 * (DEC-095). Script on the page's origin can make a takeover look like a
 	 * sibling, so `true` is a hint, not a proof.
 	 */
@@ -568,6 +661,8 @@ export interface TabMcpEventMap {
 	error: CustomEvent<{ error: Error }>;
 	/** A new pairing code, or `undefined` when there is none (any more). */
 	pairingcode: CustomEvent<{ pairingCode: PairingCode | undefined }>;
+	/** `pairingUntil` changed (identity binding, DEC-202). */
+	pairinguntil: CustomEvent<{ pairingUntil: string | undefined }>;
 	grantschange: CustomEvent<{ grants: readonly Grant[] }>;
 	/** The relay accepted or refused the page's identity, or it was cleared. */
 	identitychange: CustomEvent<{
@@ -575,6 +670,8 @@ export interface TabMcpEventMap {
 		identityMessage: string | undefined;
 	}>;
 	toolschange: CustomEvent<{ tools: readonly string[] }>;
+	/** `extension` changed: the tab-mcp browser extension, its AI apps (DEC-207). */
+	extensionchange: CustomEvent<{ extension: BrowserExtension | undefined }>;
 	/** An AI app called a tool (before any confirmation). */
 	toolcall: CustomEvent<ToolCallStart>;
 	/** That call ended; also when the user declined it, did not answer, or the AI app cancelled it. */

@@ -16,15 +16,19 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import type { TabMcp } from "../src/index.ts";
 import {
+	type AllowedToolsSnapshot,
+	BUTTON_TEXTS,
 	ConnectButton,
 	TabMcpProvider,
 	type TabMcpSnapshot,
 	type ToolCallRecord,
+	useAllowedTools,
 	useTabMcp,
 	useTabMcpState,
 	useTool,
 	useToolCalls,
 } from "../src/react.ts";
+import { STRINGS } from "../src/strings.ts";
 import type { Tool, ToolCaller } from "../src/types.ts";
 import {
 	connectClient,
@@ -320,6 +324,30 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 		await code;
 	});
 	expect(snapshots.at(-1)?.pairingCode?.code).toBe("ABCD-EFGH");
+	// Identity binding's time for a sign-in (DEC-202).
+	const until = new Date(Date.now() + 600_000).toISOString();
+	await act(async () => {
+		const open = nextEvent(t, "pairinguntil");
+		stub.send({ type: "pairing.open", expiresAt: until });
+		await open;
+	});
+	expect(snapshots.at(-1)?.pairingUntil).toBe(until);
+	// The tab-mcp browser extension (DEC-207), as the mirror's chunk sets it.
+	const extension = Object.freeze({
+		name: "tab-mcp browser extension",
+		apps: Object.freeze([{ name: "Claude", host: "claude.ai" }]),
+		whileInFront: true,
+	});
+	act(() => {
+		Object.defineProperty(t, "extension", {
+			get: () => extension,
+			configurable: true,
+		});
+		t.dispatchEvent(
+			new CustomEvent("extensionchange", { detail: { extension } }),
+		);
+	});
+	expect(snapshots.at(-1)?.extension).toBe(extension);
 	await act(async () => {
 		const changed = nextEvent(t, "grantschange");
 		stub.send({
@@ -337,6 +365,64 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 		await changed;
 	});
 	expect(snapshots.at(-1)?.grants.map((g) => g.grantId)).toEqual(["g_1"]);
+});
+
+test("useAllowedTools: the page's own switches as state, one object per change (DEC-200)", async () => {
+	stub.grants = [
+		{
+			grantId: "g_1",
+			client: { id: "https://c.example/c.json", name: "C", host: "c.example" },
+			createdAt: new Date().toISOString(),
+		},
+	];
+	const t = tab();
+	await t.registerTool({
+		name: "wipe",
+		description: "Wipes",
+		annotations: { consequentialHint: true, destructiveHint: true },
+		execute: () => "ok",
+	});
+	const snapshots: AllowedToolsSnapshot[] = [];
+	function Switches() {
+		snapshots.push(useAllowedTools("g_1"));
+		return null;
+	}
+	render(
+		<TabMcpProvider client={t}>
+			<Switches />
+		</TabMcpProvider>,
+	);
+	expect(snapshots.at(-1)).toMatchObject({
+		everything: false,
+		tools: [
+			{ name: "wipe", description: "Wipes", destructive: true, allowed: false },
+		],
+	});
+	await act(async () => {
+		await t.connect({ resume: true });
+	});
+	const renders = snapshots.length;
+	act(() => snapshots.at(-1)?.allowedTools.allow("g_1", "wipe"));
+	expect(snapshots.at(-1)?.tools[0]?.allowed).toBe(true);
+	act(() => snapshots.at(-1)?.allowedTools.setEverything("g_1", true));
+	expect(snapshots.at(-1)?.everything).toBe(true);
+	expect(snapshots).toHaveLength(renders + 2);
+	// No change, no render: the same object.
+	act(() => snapshots.at(-1)?.allowedTools.setEverything("g_1", true));
+	expect(snapshots).toHaveLength(renders + 2);
+	// A tool registered later gets its switch.
+	await act(async () => {
+		await t.registerTool({
+			name: "send",
+			description: "Sends",
+			annotations: { consequentialHint: true },
+			execute: () => "ok",
+		});
+	});
+	expect(snapshots.at(-1)?.tools.map((x) => [x.name, x.allowed])).toEqual([
+		["wipe", true],
+		["send", true],
+	]);
 });
 
 test("useTabMcpState shows identity binding and reconnecting", async () => {
@@ -415,7 +501,7 @@ test("a tool call reaches the latest execute; useToolCalls lists it with its end
 		const session = await act(() => t.connect({ resume: true }));
 		const client = await connectClient(
 			session.address,
-			await tokenFor(relay.store, session.address),
+			await tokenFor(relay, session.address),
 		);
 		const ended = nextEvent(t, "toolcallend");
 		const result = await act(() =>
@@ -657,7 +743,7 @@ test("the provider uses the latest onConfirm", async () => {
 		const session = await act(() => t.connect({ resume: true }));
 		const client = await connectClient(
 			session.address,
-			await tokenFor(relay.store, session.address),
+			await tokenFor(relay, session.address),
 		);
 		await act(() => client.callTool({ name: "clear", arguments: {} }));
 		expect(asked).toEqual(["second"]);
@@ -754,7 +840,7 @@ test("an onConfirm added after the first render is used; without one, the page's
 		const session = await act(() => t.connect({ resume: true }));
 		const client = await connectClient(
 			session.address,
-			await tokenFor(relay.store, session.address),
+			await tokenFor(relay, session.address),
 		);
 		// No onConfirm yet: the library's dialog asks; "Don't allow" declines.
 		const first = client.callTool({ name: "clear", arguments: {} });
@@ -773,6 +859,152 @@ test("an onConfirm added after the first render is used; without one, the page's
 		await client.close();
 	} finally {
 		await relay.stop();
+	}
+});
+
+test("the provider without the page's onConfirm warns about a tool that asks with exposedTo; with one it does not (DEC-215)", async () => {
+	const g = globalThis as Record<string, unknown>;
+	const savedDocument = g["Document"];
+	const Doc = window.Document as unknown as { prototype: object };
+	const registered: string[] = [];
+	Object.defineProperty(Doc.prototype, "modelContext", {
+		configurable: true,
+		get: () => ({
+			registerTool: (tool: { name: string }) => {
+				registered.push(tool.name);
+			},
+		}),
+	});
+	g["Document"] = Doc;
+	const warned: string[] = [];
+	const quiet = console.warn;
+	console.warn = (...args: unknown[]) => warned.push(String(args[0]));
+	function Probe() {
+		useTool(
+			{
+				name: "clear",
+				description: "Clear everything",
+				annotations: { consequentialHint: true },
+				execute: () => "cleared",
+			},
+			{ exposedTo: ["https://embedder.example"] },
+		);
+		return null;
+	}
+	const exposed = () => warned.filter((w) => w.includes("(its exposedTo)"));
+	try {
+		render(
+			<TabMcpProvider
+				server={{ name: "bare", version: "1" }}
+				storage={null}
+				webmcp
+			>
+				<Probe />
+			</TabMcpProvider>,
+		);
+		await until(() => exposed().length > 0);
+		expect(exposed()).toHaveLength(1);
+		act(() => root?.unmount());
+		root = undefined;
+		warned.length = 0;
+		render(
+			<TabMcpProvider
+				server={{ name: "asks", version: "1" }}
+				storage={null}
+				webmcp
+				onConfirm={() => false}
+			>
+				<Probe />
+			</TabMcpProvider>,
+		);
+		// Mirrored by the second provider, and the step after the registration
+		// (where the warning would be) has run.
+		await until(() => registered.length === 2);
+		await act(async () => {
+			await Bun.sleep(5);
+		});
+		expect(registered).toEqual(["clear", "clear"]);
+		expect(exposed()).toEqual([]);
+	} finally {
+		console.warn = quiet;
+		delete (Doc.prototype as { modelContext?: unknown }).modelContext;
+		if (savedDocument === undefined) delete g["Document"];
+		else g["Document"] = savedDocument;
+	}
+});
+
+test("an agent in the browser: a tool that asks runs without the library's dialog; an onConfirm added later decides (DEC-215)", async () => {
+	interface Native {
+		name: string;
+		execute: (input: unknown, options: { signal: AbortSignal }) => unknown;
+	}
+	const native = new Map<string, Native>();
+	const g = globalThis as Record<string, unknown>;
+	const savedDocument = g["Document"];
+	const Doc = window.Document as unknown as { prototype: object };
+	Object.defineProperty(Doc.prototype, "modelContext", {
+		configurable: true,
+		get: () => ({
+			registerTool: (tool: Native) => {
+				native.set(tool.name, tool);
+			},
+		}),
+	});
+	g["Document"] = Doc;
+	const asked: string[] = [];
+	let setConfirm: ((on: boolean) => void) | undefined;
+	function Probe() {
+		useTool({
+			name: "clear",
+			description: "Clear everything",
+			annotations: { consequentialHint: true },
+			execute: () => "cleared",
+		});
+		return null;
+	}
+	function App() {
+		const [on, setOn] = useState(false);
+		setConfirm = setOn;
+		return (
+			<TabMcpProvider
+				server={{ name: "todo", version: "1" }}
+				storage={null}
+				webmcp
+				{...(on
+					? {
+							onConfirm: () => {
+								asked.push("page");
+								return false;
+							},
+						}
+					: {})}
+			>
+				<Probe />
+			</TabMcpProvider>
+		);
+	}
+	const call = () =>
+		act(() =>
+			native
+				.get("clear")
+				?.execute({}, { signal: new AbortController().signal }),
+		);
+	try {
+		render(<App />);
+		await until(() => native.has("clear"));
+		// No onConfirm: the provider's default is the library's, which shows
+		// an agent in the browser nothing.
+		expect(await call()).toBe("cleared");
+		expect(doc.querySelector("dialog")).toBeNull();
+		act(() => setConfirm?.(true));
+		expect(await call()).toEqual({
+			error: "The user did not allow clear to run.",
+		});
+		expect(asked).toEqual(["page"]);
+	} finally {
+		delete (Doc.prototype as { modelContext?: unknown }).modelContext;
+		if (savedDocument === undefined) delete g["Document"];
+		else g["Document"] = savedDocument;
 	}
 });
 
@@ -803,9 +1035,50 @@ test("game feedback 3: the default label says the connection is lost after three
 	expect(labels).toEqual([
 		"Reconnecting…",
 		"Reconnecting…",
-		"Connection lost, retrying…",
+		"Connection lost. Reconnecting…",
 	]);
 	expect(button.dataset["state"]).toBe("reconnecting");
+});
+
+test("ConnectButton's inline English texts are those of the table (review of PR 181)", () => {
+	const keys = Object.keys(BUTTON_TEXTS) as (keyof typeof BUTTON_TEXTS)[];
+	expect(Object.fromEntries(keys.map((k) => [k, STRINGS[k]]))).toEqual(
+		BUTTON_TEXTS,
+	);
+});
+
+test("ConnectButton says what the TabMcp's ui.strings say, plural forms by its language (DEC-208)", () => {
+	const t = tab({
+		ui: {
+			strings: {
+				lang: "de",
+				connectTitle: "KI-App verbinden",
+				buttonConnected: {
+					one: "KI-App verbunden",
+					other: "{n} KI-Apps verbunden",
+				},
+			},
+		},
+	});
+	let grants: { grantId: string }[] = [];
+	Object.defineProperty(t, "grants", { get: () => grants });
+	render(
+		<TabMcpProvider client={t}>
+			<ConnectButton />
+		</TabMcpProvider>,
+	);
+	const button = container.querySelector("button") as HTMLButtonElement;
+	expect(button.textContent).toBe("KI-App verbinden");
+	Object.defineProperty(t, "state", { get: () => "connected" });
+	const labels: (string | null)[] = [];
+	for (const n of [1, 3]) {
+		grants = Array.from({ length: n }, (_, i) => ({ grantId: `g_${i}` }));
+		act(() => {
+			t.dispatchEvent(new CustomEvent("grantschange", { detail: {} }));
+		});
+		labels.push(button.textContent);
+	}
+	expect(labels).toEqual(["KI-App verbunden", "3 KI-Apps verbunden"]);
 });
 
 test("game feedback 8: useTool and registerTool take the input's type", () => {

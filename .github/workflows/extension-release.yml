@@ -3,7 +3,7 @@ name: Extension release
 # The tab-mcp browser extension (iteration 23, kb/operations/chrome-web-store.md).
 #
 # Pushing a tag extension-v<version> (on a commit of main, with that version in
-# packages/tab-mcp-extension/package.json) runs verify, builds the store
+# packages/tab-mcp-extension/package.json) runs verify:all, builds the store
 # packages tab-mcp-browser-extension-<version>-store.zip (Chrome Web Store,
 # Edge Add-ons) and tab-mcp-browser-extension-firefox-<version>-store.zip
 # (addons.mozilla.org), and the source archive tab-mcp-<version>-source.zip
@@ -101,7 +101,10 @@ jobs:
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun install --frozen-lockfile
-      - run: bun run verify
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+      # verify and the browser tests (verify:all).
+      - run: bun run verify:all
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       # The build refuses to pack a manifest with a key or host_permissions,

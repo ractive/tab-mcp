@@ -16,6 +16,8 @@ export const PINNED_FILES: readonly string[] = [
 	"docs/token-store.md",
 	"plugins/tab-mcp/README.md",
 	"plugins/tab-mcp/skills/tab-mcp/SKILL.md",
+	"plugins/tab-mcp/skills/tab-mcp/references/react.md",
+	"plugins/tab-mcp/skills/tab-mcp/references/sign-in.md",
 	"plugins/tab-mcp/.claude-plugin/plugin.json",
 	"plugins/tab-mcp/.codex-plugin/plugin.json",
 	".claude-plugin/marketplace.json",

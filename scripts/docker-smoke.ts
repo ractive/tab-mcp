@@ -91,7 +91,7 @@ function tab(
 				JSON.stringify({
 					type: "hello",
 					library: { name: "docker-smoke", version: "0.0.0" },
-					page: { title: "Smoke test" },
+					app: { id: "smoke" },
 					secret: crypto
 						.getRandomValues(new Uint8Array(32))
 						.toBase64({ alphabet: "base64url", omitPadding: true }),

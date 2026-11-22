@@ -3,6 +3,7 @@
  * HTTP tunnel and the MCP handler. Loaded by `TabMcp.connect()`.
  */
 
+import type { VouchedBy } from "./handshake.ts";
 import { pageIcons } from "./icons.ts";
 import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
 import { createMcpHandler, webMcpCall } from "./mcp.ts";
@@ -16,8 +17,8 @@ import type { RegisteredTool } from "./registry.ts";
 import { callContext, createTunnel, watchTools } from "./serve.ts";
 import type { DisconnectReason, SessionInfo } from "./types.ts";
 
-/** For the core: the address id in the `/tab` URL (DEC-098). */
-export { addressIdOf, withAddress } from "./address.ts";
+/** For the core: the address id the page's tabs tell each other by (DEC-095). */
+export { addressIdOf } from "./address.ts";
 /** For the core: compiles the schemas once this chunk (and the validator) is loaded. */
 export { compileRegistry } from "./mcp.ts";
 /** For the core: `TabMcp.serve`, the tunnel over a port (iteration 28). */
@@ -25,15 +26,39 @@ export { pieces, servePort } from "./serve.ts";
 
 /**
  * For the core: a WebMCP call of a mirrored tool (iteration 25), on the
- * same path as an AI app's (`webMcpCall` in `mcp.ts`).
+ * same path as an AI app's (`webMcpCall` in `mcp.ts`). `by`: the tab-mcp
+ * browser extension vouched for this very call, for that AI app (DEC-207):
+ * the user allowed it there, so the page neither asks nor calls `onConfirm`.
+ * Any other WebMCP call (an agent that may drive the tab and would answer
+ * the library's dialog itself, another extension, an `exposedTo` origin;
+ * DEC-215): the page's own `onConfirm` decides a tool that asks, in code;
+ * without one the tool runs, and the
+ * confirmation's chunk is not loaded. Everything else (the arguments'
+ * check, the events, the tool still being the one registered) is as for
+ * any call.
  */
 export function callFromWebMcp(
 	host: CallHost,
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
+	by?: VouchedBy,
 ): Promise<unknown> {
-	return webMcpCall(callContext(host, "webmcp"), tool, input, signal);
+	const context = callContext(host, "webmcp");
+	return by === undefined
+		? webMcpCall(
+				{ ...context, confirm: host.onConfirm() ?? (() => true) },
+				tool,
+				input,
+				signal,
+				{ kind: "webmcp" },
+			)
+		: webMcpCall({ ...context, confirm: () => true }, tool, input, signal, {
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				name: by.name,
+				host: by.host,
+			});
 }
 
 /** How long `connect()` waits for the relay's `session`. */
@@ -58,8 +83,6 @@ const CLOSE_REASONS: Record<number, DisconnectReason> = {
 	4004: "shutdown",
 	4005: "replaced",
 	4008: "rate_limited",
-	/** The URL's address id is not the secret's (DEC-098): retrying cannot help. */
-	4009: "policy",
 };
 
 const BYE_REASONS: Record<string, DisconnectReason> = {
@@ -108,28 +131,24 @@ export function chunkSize(maxMessageBytes: number): number | undefined {
 export const SIBLING_WINDOW_MS = 10_000;
 
 /**
- * How long a replaced tab that heard no `claimed` yet waits for one before it
- * reports `replaced`: the sibling's session and this tab's `bye` leave the
- * relay at about the same time, so the message usually comes after the `bye`.
- */
-export const SIBLING_GRACE_MS = 1_000;
-
-/**
  * The tabs of one page (same relay, same storage key) tell each other on a
  * `BroadcastChannel` when the relay accepted their claim of an address
  * (`claimed`, once their `session` arrived), so that a replaced tab can tell
  * a sibling from an impostor. A sibling whose `hello` failed says nothing.
- * The message carries the address id (as in the `/tab` URL; no secret), and
+ * The message carries the address id of the secret (`addressIdOf`; never the
+ * secret), and
  * only a claim of this tab's own address, heard after this tab's own
  * `session`, counts: one heard while this tab was still connecting, or from
- * a tab on another address (after `newAddress()` there), cannot have caused
- * the replacement (CC 5). A claim without an address, from a tab still on a
- * library up to 0.15, counts as before. Without `BroadcastChannel` nothing is heard, and
- * every `replaced` counts as unknown.
+ * a tab on another address (after `disconnectAll()` there), cannot have caused
+ * the replacement (CC 5). A claim without an address counts for any. Without
+ * `BroadcastChannel` nothing is heard, and every `replaced` counts as unknown.
+ * `graceMs`: how long a replaced tab that heard no `claimed` yet waits for one
+ * (`SIBLING_GRACE_MS` in tab-mcp.ts).
  */
 function siblingTabs(
 	name: string | undefined,
 	address: string | undefined,
+	graceMs: number,
 ): {
 	/** The own session arrived: say so, and listen to the others from now on. */
 	claimed(): void;
@@ -173,7 +192,7 @@ function siblingTabs(
 			if (Date.now() - at <= SIBLING_WINDOW_MS) return Promise.resolve(true);
 			if (channel === undefined) return Promise.resolve(false);
 			return new Promise((resolve) => {
-				const timer = setTimeout(() => resolve(false), SIBLING_GRACE_MS);
+				const timer = setTimeout(() => resolve(false), graceMs);
 				onClaim = () => {
 					clearTimeout(timer);
 					resolve(true);
@@ -187,15 +206,97 @@ function siblingTabs(
 }
 
 /**
+ * Wait for the relay's answer to `message`, which `target` (the `TabMcp`)
+ * sent: resolves once `done()`, rejects with the relay's refusal of it
+ * (`store_unavailable`, `unknown_id`), a `NetworkError` once not
+ * `connected()` and a `TimeoutError` after `timeoutMs`. In the lazy chunk:
+ * a message is sent only with a session, which loaded it.
+ */
+export function answer(
+	target: EventTarget,
+	message: TabMessage & { grantId?: string },
+	done: () => boolean,
+	connected: () => boolean,
+	timeoutMs: number,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const types = ["grantschange", "statechange", "error"];
+		const settle = (error?: unknown) => {
+			clearTimeout(timer);
+			for (const type of types) target.removeEventListener(type, check);
+			if (error) reject(error);
+			else resolve();
+		};
+		const check = (event?: Event) => {
+			const error = (event as CustomEvent<{ error?: unknown }> | undefined)
+				?.detail?.error as
+				| { code?: string; for?: string; grantId?: string }
+				| undefined;
+			if (done()) settle();
+			else if (
+				(error?.code === "store_unavailable" || error?.code === "unknown_id") &&
+				// It names the message it answers (relay 0.10.2); an older
+				// relay's answers every pending one (DEC-168).
+				(error.for === undefined ||
+					(error.for === message.type && error.grantId === message.grantId))
+			)
+				settle(error);
+			else if (!connected())
+				// Sent, but the answer cannot come: it may or may not have
+				// happened.
+				settle(
+					new DOMException(
+						"TabMcp: the session ended before the relay answered",
+						"NetworkError",
+					),
+				);
+		};
+		const timer = setTimeout(
+			() =>
+				settle(
+					new DOMException("TabMcp: the relay did not answer", "TimeoutError"),
+				),
+			timeoutMs,
+		);
+		for (const type of types) target.addEventListener(type, check);
+		check();
+	});
+}
+
+/**
+ * Call `now` when the page comes back to the front or the browser is online
+ * again (a reconnect then tries at once); returns what stops it.
+ */
+export function onWake(now: () => void): () => void {
+	const g = globalThis as Partial<EventTarget>;
+	const doc = (globalThis as { document?: Document }).document;
+	const visible = () => {
+		if (doc?.visibilityState !== "hidden") now();
+	};
+	doc?.addEventListener("visibilitychange", visible);
+	g.addEventListener?.("online", now);
+	return () => {
+		doc?.removeEventListener("visibilitychange", visible);
+		g.removeEventListener?.("online", now);
+	};
+}
+
+/**
  * Open the WebSocket and run the session. `address`: the secret's address id
  * (`addressIdOf`). `revokeAll`: take the address back (DEC-095); the relay
  * revokes every grant as it claims the address, and its `session` lists none.
+ * `siblingGraceMs`: `timing.siblingGraceMs` (tab-mcp.ts), the one place it
+ * is set.
  */
 export function openConnection(
 	host: ConnectionHost,
 	url: string,
 	secret: string,
-	options: { address?: string | undefined; revokeAll?: boolean } = {},
+	options: {
+		address?: string | undefined;
+		revokeAll?: boolean;
+		siblingGraceMs: number;
+	},
 ): ConnectionHandle {
 	const revokeAll = options.revokeAll === true;
 	const ws = new WebSocket(url, SUBPROTOCOL);
@@ -206,7 +307,11 @@ export function openConnection(
 	let maxBodyBytes: number | undefined;
 	let heartbeat: ReturnType<typeof setTimeout> | undefined;
 	let heartbeatMs = 0;
-	const siblings = siblingTabs(host.tabs, options.address);
+	const siblings = siblingTabs(
+		host.tabs,
+		options.address,
+		options.siblingGraceMs,
+	);
 
 	let resolveReady!: (session: SessionInfo) => void;
 	let rejectReady!: (error: Error) => void;
@@ -375,6 +480,9 @@ export function openConnection(
 							},
 				);
 				return;
+			case "pairing.open":
+				host.pairingOpen(message.expiresAt);
+				return;
 			case "grant.added":
 				host.grantAdded(message.grant);
 				return;
@@ -435,17 +543,16 @@ export function openConnection(
 			);
 			return;
 		}
-		const hello: TabMessage = {
+		send({
 			type: "hello",
 			library: host.library,
-			// The relay never read the title (CC 6); relays up to 0.9 still
-			// require the field.
-			page: { title: "" },
+			app:
+				host.appName === undefined
+					? { id: host.app }
+					: { id: host.app, name: host.appName },
 			secret,
-		};
-		if (host.appName !== undefined) hello.app = { name: host.appName };
-		if (revokeAll) hello.revokeAll = true;
-		send(hello);
+			...(revokeAll ? { revokeAll: true } : {}),
+		});
 	});
 	ws.addEventListener("message", (event: MessageEvent) => {
 		if (typeof event.data !== "string") return;

@@ -277,8 +277,9 @@ On failure the log shows AMO's answer.
 > or Codex, through a tab-mcp relay.
 >
 > Click the extension's icon on a tab to let it read that tab, then turn on AI access in
-> the side panel. It shows an address and a pairing code to add in your AI app. The AI app
-> then sees the page's tools, follows the tab in front and can call them.
+> the side panel. Under "Connect your AI app" it shows an address to add to your AI app
+> and a code to type when your AI app asks for it. The AI app then sees the page's tools,
+> follows the tab in front and can call them.
 >
 > A tool the page marks read-only runs at once. Every other tool asks you first, in the
 > side panel or in a notification, with the AI app's name, the site and the arguments.
@@ -292,13 +293,27 @@ On failure the log shows AMO's answer.
 > The relay is https://tab-mcp.ractive.ch by default; you can run your own (the relay is
 > open source, MIT) and enter its address in the settings.
 >
-> WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
-> you turn on chrome://flags/#enable-webmcp-testing.
+> Chrome's own WebMCP is on only where a site takes part in Chrome's origin trial, or
+> after you turn on chrome://flags/#enable-webmcp-testing. Elsewhere, after "Give access
+> to all sites", the extension gives https pages a WebMCP of its own as they load.
+>
+> A page built with the tab-mcp client library and the extension know of each other: a
+> call you allowed in the extension is not asked again in the page, and the page can show
+> which AI apps reach it through the extension. Only while AI access is on, such a page
+> learns the extension's name, that AI access is on, the names and verified hosts of the
+> AI apps connected to it, and right before a call you allowed, the tool, its arguments
+> and which AI app made the call. While AI access is off, the extension answers no page
+> and sends it nothing. A page can still see that the extension is installed where it
+> provides WebMCP itself (in browsers without their own), and could try to time its own
+> events, which the extension still listens to. A page that was told AI access is on is
+> told once that it went off. Nothing else.
 >
 > The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
-> tabs, and only the page's address, title, language and its WebMCP tools. It sends data
-> only while AI access is on, only to the relay you chose, and only what your AI app asks
-> for. No analytics.
+> tabs, and only the page's address, title, language and its WebMCP tools (and what a
+> page with the tab-mcp client library tells it about itself). It sends your AI app's
+> requests and the page's answers only while AI access is on, only to the relay you
+> chose, and only what your AI app asks for; a page with the tab-mcp client library gets,
+> inside the browser, what is said above. No analytics.
 
 **Single purpose:** Letting an AI app outside the browser that the user connected work
 with the page in front, through a tab-mcp relay: passing on the WebMCP tools the page
@@ -313,7 +328,7 @@ registered, and opening pages in that tab.
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Give access to all sites": read every http(s) tab's WebMCP tools without a click on the icon. |
+| `http://*/*`, `https://*/*` (optional) | Asked for only when the user clicks "Give access to all sites": read every http(s) tab's WebMCP tools without a click on the icon. Or only the relay's site, when the user turns on the "Fill in the code for me" switch (off by default): on the relay's pairing page, read the AI app's name and host and the request's id from the form and, after the user allows it (or, for an AI app's host the user chose "Always allow" for, with a notification instead of a question), fill in the extension's pairing code and submit the form. |
 
 **Remote code:** No. All code is in the package. The extension lists and calls only the
 tools a page registered itself through the browser's WebMCP API; the relay connection
@@ -333,9 +348,16 @@ sends.
 - Not collected: personally identifiable information, health, financial, authentication
   information, personal communications, location, user activity (clicks, keystrokes).
 - Stored locally only (IndexedDB): the relay address, whether AI access is on, a random
-  secret for the connection's address, the tools allowed per site. Transmitted only to the
+  secret per relay that identifies this installation to it, the connected AI apps as the
+  relay last listed them (grant id, name, verified host), the tools allowed per site, and
+  with "Fill in the code for me" on its relay and the hosts chosen for "Always allow"
+  (PRIVACY.md has the full list). Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
-  app the user paired, only while AI access is on.
+  app the user connected, only while AI access is on; and, inside the browser, to a page
+  that uses the tab-mcp client library, only while AI access is on: the extension's
+  name, that AI access is on, the connected AI apps' names and verified hosts, and for a
+  call the user allowed, the tool, its arguments and which AI app made it (and, once,
+  that AI access went off).
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to
   the single purpose; not used to determine creditworthiness or for lending.
 - **Privacy policy URL:** the ractive.ch page with PRIVACY.md (setup step 2).
@@ -347,9 +369,9 @@ sends.
 > chrome://flags/#enable-webmcp-testing and restart. Open
 > https://ractive.ch/tab-mcp/examples/diagram/, a diagram editor that registers its tools
 > with WebMCP (by the extension's developer). Click the extension's icon: the side panel shows the page's tools. Turn on "AI access":
-> the panel shows an address and a pairing code. Add the address in an MCP client, for
-> example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension <address>`,
-> then `/mcp` → authenticate, and enter the pairing code in the browser page that opens.
+> under "Connect your AI app" the panel shows an address and a code. Add the address in an
+> MCP client, for example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension <address>`,
+> then `/mcp` → authenticate, and type the code on the sign-in page that opens.
 > Ask Claude to draw a small flowchart in the page; a tool that is not read-only (such as
 > `page_add_shapes`) asks in the side panel first. Ask it to open https://ractive.ch/tab-mcp/
 > (`navigate`): on the same site it opens at once; ask it to open another site: the side

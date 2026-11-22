@@ -2,11 +2,12 @@
  * End to end (iteration 4): the calculator page in headless Chrome, a real
  * relay, and the MCP SDK client as the AI app doing the whole OAuth flow with
  * the pairing code typed on `/authorize` in Chrome. Needs Chrome
- * (`CHROME_PATH` or a usual location): required in CI, skipped elsewhere
+ * (`CHROME_PATH` or the pinned Chrome for Testing, test/browsers.ts): required in CI, skipped elsewhere
  * without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/client";
+import { browserTests } from "../../browser-gate.ts";
 import {
 	CLIENT_NAME,
 	clickButton,
@@ -21,8 +22,8 @@ import {
 	waitFor,
 } from "./stack.ts";
 
-const chrome = findChrome();
-if (chrome === undefined && process.env["CI"])
+const chrome = browserTests ? findChrome() : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error("Chrome is needed for the calculator e2e test in CI");
 
 let stack: Stack | undefined;
@@ -84,14 +85,15 @@ test.skipIf(chrome === undefined)(
 		// Pairing: the dialog's address and code, the code typed on /authorize.
 		const pairing: Pairing = await pair(stack, page, stack.clientId());
 		expect(pairing.address).toMatch(
-			new RegExp(`^${stack.relay.url}/a/[a-z2-7]{52}/mcp$`),
+			new RegExp(`^${stack.relay.url}/s/calculator/mcp$`),
 		);
 		expect(pairing.authorizeText).toContain(
 			`Connect ${CLIENT_NAME} from localhost:`,
 		);
-		expect(pairing.authorizeText).toContain(
-			`to Calculator on ${new URL(stack.pageUrl).origin}`,
-		);
+		// The relay names the app of the address, not the page: it does not know
+		// the page before the code is typed (DEC-196).
+		expect(pairing.authorizeText).toContain("to calculator: to the page");
+		expect(pairing.authorizeText).not.toContain(new URL(stack.pageUrl).origin);
 		// While the code is shown only a small Close; once paired, Done.
 		expect(pairing.buttonsBefore).toEqual(["Close"]);
 		expect(pairing.buttonsAfter).toEqual(["Done"]);
@@ -176,12 +178,12 @@ test.skipIf(chrome === undefined)(
 			await clickButton(page, "dialog.tab-mcp-confirm", "Don't allow");
 			const no = await declined;
 			expect(no.isError).toBe(true);
-			expect(text(no)).toBe("The user declined");
+			expect(text(no)).toBe("The user did not allow this call.");
 			expect(
 				(await client.callTool({ name: "read_display" })).structuredContent,
 			).toEqual({ display: "42", memory: 42 });
 
-			// The call waits for the user; "Allow" (enabled after a delay) runs it.
+			// The call waits for the user; "Allow once" (enabled after a delay) runs it.
 			const allowed = client.callTool({ name: "clear_memory" });
 			await waitFor(
 				page,
@@ -193,26 +195,26 @@ test.skipIf(chrome === undefined)(
 			});
 			await waitFor(
 				page,
-				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow' && !b.disabled)",
+				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow once' && !b.disabled)",
 			);
 			expect(settled).toBe(false);
 			expect(
 				await page.eval("!document.querySelector('#memory-flag').hidden"),
 			).toBe(true);
-			await clickButton(page, "dialog.tab-mcp-confirm", "Allow");
+			await clickButton(page, "dialog.tab-mcp-confirm", "Allow once");
 			expect(text(await allowed)).toBe("Memory cleared.");
 			await waitFor(page, "document.querySelector('#memory-flag').hidden");
 
-			// "Allow until reload" runs it and remembers: the next call does not ask.
+			// "Always allow" runs it and remembers: the next call does not ask.
 			const always = client.callTool({ name: "clear_memory" });
 			await waitFor(
 				page,
-				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow until reload' && !b.disabled)",
+				"[...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Always allow' && !b.disabled)",
 			);
 			await clickButton(
 				page,
 				"dialog.tab-mcp-confirm",
-				"Allow until reload",
+				"Always allow",
 				"!document.querySelector('dialog.tab-mcp-confirm')",
 			);
 			expect(text(await always)).toBe("Memory cleared.");

@@ -24,8 +24,8 @@ TAB_MCP_ALLOWED_ORIGINS=https://app.example.com
 ```
 
 - `TAB_MCP_PUBLIC_URL` is the address AI apps and browsers use to reach the relay. The
-  relay builds the MCP addresses (`https://relay.example.com/a/<id>/mcp`) and its OAuth
-  issuer from it. It must be `https:` unless `NODE_ENV=development`.
+  relay builds the MCP addresses (`https://relay.example.com/s/<app>/mcp`, one per app)
+  and its OAuth issuer from it. It must be `https:` unless `NODE_ENV=development`.
 - `TAB_MCP_ALLOWED_ORIGINS` lists the web pages that may connect, and browser extensions
   (see [Browser extensions](#browser-extensions)). Without it the relay starts, logs
   `relay.no_origins` and refuses every page.
@@ -41,7 +41,7 @@ than 0.
 | `TAB_MCP_PORT` | `8080` | Port to listen on. |
 | `TAB_MCP_HOST` | `0.0.0.0` | Address to listen on. |
 | `TAB_MCP_ALLOWED_ORIGINS` | empty: no page may connect | Comma-separated page origins (`https://app.example.com`, or a Chrome or Edge extension's `chrome-extension://<id>`, or `moz-extension://*` for any Firefox extension, see [Browser extensions](#browser-extensions)) allowed to open tab sessions with the default limits. `*` admits any website and any extension (an open relay, see below). |
-| `TAB_MCP_SITES` | empty | JSON array of sites with their own app name or limits (see [Sites](#sites)). A site listed here needs no entry in `TAB_MCP_ALLOWED_ORIGINS`; an origin may appear in only one of the two. |
+| `TAB_MCP_SITES` | empty | JSON array of sites with their own app name, apps, pairing method or limits (see [Sites](#sites)). A site listed here needs no entry in `TAB_MCP_ALLOWED_ORIGINS`; an origin may appear in only one of the two. |
 | `TAB_MCP_CLIENT_ID_HOSTS` | empty: any AI app | Comma-separated hosts whose AI apps may connect, compared exactly with the host of the app's client id URL. For example `claude.ai` admits Claude Code, whose client id is `https://claude.ai/oauth/claude-code-client-metadata`. An app that authenticates with `private_key_jwt` (ChatGPT) publishes its keys on the same host, so the list covers them too (DEC-106). |
 | `TAB_MCP_TRUST_PROXY` | `none` | Where the client IP for rate limits comes from: `none` (the TCP peer), `x-real-ip`, or `x-forwarded-for` (its last entry, the one your proxy added). Set it only behind a proxy that sets the header; otherwise clients can choose their own IP. A value with a port (`203.0.113.7:51234`, `[2001:db8::1]:443`) counts as its address; a value that is not an address is ignored for the TCP peer, logged once as `relay.bad_forwarded_ip`. |
 | `TAB_MCP_CORS` | `on` | `on` answers cross-origin requests to the MCP, OAuth metadata, token and revoke endpoints without credentials, so browser-based MCP clients work. `off` drops the CORS headers. |
@@ -57,13 +57,13 @@ than 0.
 | `TAB_MCP_SESSION_LIFETIME_S` | `43200` | Longest life of one tab session (12 hours; close code 4001). |
 | `TAB_MCP_HEARTBEAT_S` | `25` | Interval of the protocol `ping` to the tab. |
 | `TAB_MCP_BODY_TIMEOUT_S` | `10` | Deadline for receiving a request body (the MCP endpoint, `/token`, `/revoke`, the pairing form); a slower client gets HTTP 408 and the connection closes. |
-| `TAB_MCP_PAGE_WAIT_S` | `10` | How long an MCP request waits for its page to open or reconnect (a phone pauses a tab in the background) before the relay answers "the page is not open". `0` answers at once; at most `60`. Waiting requests count against `TAB_MCP_MAX_CONCURRENT_REQUESTS` per address and `TAB_MCP_MAX_SESSIONS` in total; beyond that the relay answers at once. |
+| `TAB_MCP_PAGE_WAIT_S` | `10` | How long an MCP request waits for its page to open or reconnect (a phone pauses a tab in the background) before the relay answers "the page is not open". `0` answers at once; at most `60`. Waiting requests count against `TAB_MCP_MAX_CONCURRENT_REQUESTS` per page and `TAB_MCP_MAX_SESSIONS` in total; beyond that the relay answers at once. |
 | `TAB_MCP_MAX_MESSAGE_BYTES` | `1048576` | Largest MCP request body and largest WebSocket message from the tab (1 MiB). At least `16384`. |
 | `TAB_MCP_ACCESS_TOKEN_TTL_S` | `3600` | Access token lifetime (1 hour). |
 | `TAB_MCP_REFRESH_TOKEN_TTL_S` | `2592000` | Refresh token lifetime (30 days). Every refresh issues a new refresh token. |
 | `TAB_MCP_GRANT_LIFETIME_S` | `7776000` | Absolute end of a connection, counted from pairing (90 days). Refreshes never go beyond it; then the user pairs again. |
 | `TAB_MCP_LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. Logs are JSON lines on stdout and never contain request or response bodies. |
-| `TAB_MCP_IDENTITY` | `code` | How AI apps pair with pages of sites that do not set their own `pairing`: `code` (the code shown in the page) or `oidc` (the same sign-in, see [Identity binding](#identity-binding)). |
+| `TAB_MCP_IDENTITY` | `code` | How AI apps pair with pages of sites that do not set their own `pairing`: `code` (the code shown on the page) or `oidc` (the same sign-in, see [Identity binding](#identity-binding)). |
 | `TAB_MCP_OIDC_ISSUER` | none | The OpenID Connect provider's issuer, e.g. `https://login.example.com`. Required when any site uses `oidc`. |
 | `TAB_MCP_OIDC_CLIENT_ID` | none | The relay's client at that provider. Required for `oidc`. |
 | `TAB_MCP_OIDC_CLIENT_SECRET` | none | Its client secret. Without it the relay is a public client (PKCE only). Keep it in your platform's secret store. |
@@ -89,7 +89,7 @@ The browser library refuses `http:` relays except on `localhost`, `127.0.0.1` an
 One relay can serve several pages. `TAB_MCP_SITES` gives a page origin its own settings:
 
 ```sh
-TAB_MCP_SITES='[{"origin":"https://ractive.ch","name":"saturnus","limits":{"maxConcurrentRequests":4}}]'
+TAB_MCP_SITES='[{"origin":"https://ractive.ch","name":"saturnus","apps":["saturnus"],"limits":{"maxConcurrentRequests":4}}]'
 ```
 
 Each site is an object with these keys:
@@ -97,12 +97,39 @@ Each site is an object with these keys:
 | Key | Meaning |
 |---|---|
 | `origin` | The page origin: `https://…`, `http://…`, or `chrome-extension://<id>` for an extension. Required. |
-| `name` | The app name the pairing page shows (1-64 characters). Without it the page's own `appName` is shown, which the page declares itself. |
-| `pairing` | `code` (the code shown in the page) or `oidc` (identity binding). Without it the site uses `TAB_MCP_IDENTITY`. |
+| `name` | The app name the relay uses for the site's pages (1-64 characters), in its "the page is not open" answers to AI apps. Without it the relay uses the page's own `appName`, which the page declares itself. |
+| `apps` | The apps this origin serves: a list of app ids, at least one. Without it the origin's pages may name any app that no site lists. See below. |
+| `pairing` | `code` (the code shown on the page) or `oidc` (identity binding). Without it the site uses `TAB_MCP_IDENTITY`. |
 | `limits` | Overrides of the instance limits, in milliseconds and bytes: `maxMessageBytes`, `maxConcurrentRequests`, `requestTimeoutMs`, `keepAliveMs`, `idleTimeoutMs`, `sessionLifetimeMs`, `heartbeatMs`. |
 
 Unknown keys stop the relay at start. With `TAB_MCP_ALLOWED_ORIGINS=*`, configured sites
 keep their settings and every other origin gets the defaults.
+
+**Apps.** An MCP address names an app, not a page: `https://relay.example.com/s/<app>/mcp`
+is the address of every page that names `<app>` as its app id when it connects (the
+library's `app` option, by default derived from the server name). An app id is 1 to 32
+characters of `a-z`, `0-9` and `-`, not starting or ending with `-`. The id is the page's
+own word, so on a relay that serves several origins any of them can serve an app that
+nobody reserved. `apps` reserves app ids for an origin:
+
+- The pages of a site with `apps` may name only the apps on its list.
+- An app that some site lists is served only by the sites that list it: not by another
+  site, not by an origin of `TAB_MCP_ALLOWED_ORIGINS`, not by a Firefox extension, and
+  not by any other origin of an open relay.
+- An app that no site lists is open to every origin the relay allows, except to sites
+  that have a list of their own.
+- Several sites may list the same app (an extension with one id per store, for example).
+
+A page whose origin may not serve the app it names is refused when it connects
+(`app_not_allowed`, logged as `tab.refused`), and a session that is open for that app
+stays. Reserve the app of every address that an organisation allows by its URL: whoever
+allows `https://relay.example.com/s/<app>/mcp` allows that app on your relay, whichever
+origin serves it.
+
+The pairing page for an address is built from this configuration alone, before the relay
+knows which page is meant: it offers the pairing methods of the sites that list the app
+or, for an app that no site lists, of every origin that could serve it. Where that is
+both `code` and `oidc`, the page has the code field and a "Sign in instead" button.
 
 ## Browser extensions
 
@@ -114,22 +141,23 @@ service worker stays alive while it is connected: the relay's heartbeat (`ping` 
 running in Chrome 116 and later, as long as `heartbeatMs` stays under 30 s (Chrome
 stops a worker after 30 s without events). A service worker has no `localStorage` and
 no document, so pass two options there: `storage`, a synchronous `SecretStorage` kept
-somewhere persistent (otherwise the address changes each time the worker starts), and
+somewhere persistent (otherwise the extension is a new page to the relay each time the
+worker starts, and its AI apps have to pair again), and
 `onConfirm`, a question of your own (otherwise every tool marked `consequentialHint` is
 refused). The tab-mcp browser extension keeps the secret in IndexedDB behind a cache and asks in
 its side panel or a notification. List it like a
-website, best as a site with a name, so the pairing page says "Overmark on the browser
-extension `chrome-extension://…`" rather than only the id:
+website, best as a site with a name and its app, so that no other origin of the relay can
+serve the extension's address ([Sites](#sites)):
 
 ```sh
-TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Overmark"}]'
+TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Sitegloss","apps":["sitegloss"]}]'
 ```
 
 - **Use a stable id, one per store.** An extension from a store has the same id on every
   installation from that store, but each store gives its own: the Chrome Web Store one,
   Microsoft Edge Add-ons another. An extension published in both needs both origins
-  listed, one site per id with the same name (Edge users who install from the Chrome Web
-  Store get its id). An unpacked extension gets an id from its folder path, unless its
+  listed, one site per id with the same name and the same `apps` (Edge users who install
+  from the Chrome Web Store get its id). An unpacked extension gets an id from its folder path, unless its
   `manifest.json` has a `key`: set one, or every installation has another id and the
   relay refuses it.
 - **Connect from an extension page, not a content script.** A content script's requests
@@ -140,8 +168,11 @@ TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop",
   `moz-extension://*` in `TAB_MCP_ALLOWED_ORIGINS` admits the pages of any Firefox
   extension (an `Origin` of `moz-extension://` and a UUID, which websites cannot send),
   always paired by code, and is not allowed in `TAB_MCP_SITES` (its name would go to
-  every Firefox extension). `TAB_MCP_ALLOWED_ORIGINS=*` admits Safari's too (see
-  [Open relay](#open-relay)).
+  every Firefox extension). Such a page can serve only apps that no site lists: an app
+  reserved for the Chrome extension's origin cannot also be served by the extension's
+  Firefox build, which therefore needs an app id of its own that stays unreserved (the
+  tab-mcp browser extension uses `tab-mcp-extension` and `tab-mcp-extension-firefox`).
+  `TAB_MCP_ALLOWED_ORIGINS=*` admits Safari's too (see [Open relay](#open-relay)).
 - **Pairing.** Pair by code. Identity binding (`pairing: "oidc"`) works only if a backend
   signs tab assertions for the extension's user (see [Identity binding](#identity-binding)),
   which an extension usually does not have.
@@ -173,11 +204,17 @@ TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop",
 
 ## Identity binding
 
-With identity binding, an AI app connects to a page without a code if the person signing
-in to the AI app's connection is the person signed in to the page, at the same OpenID
-Connect provider (your organisation's login, Google, Keycloak, Auth0, Okta, Microsoft
-Entra ID). Anyone else gets "This AI tool is logged in as someone other than the page."
-and nothing is connected. Logging out of the page ends the AI connection at once.
+With identity binding, an AI app connects to a page without a code: the person who adds
+the app's address to the AI app signs in at an OpenID Connect provider (your
+organisation's login, Google, Keycloak, Auth0, Okta, Microsoft Entra ID), and the relay
+pairs the AI app with the app's page whose user is that person and whose "Connect your
+AI app" dialog was opened less than 10 minutes ago, and which was connected already when the sign-in started; of
+several such pages, the one that connected last. If there is
+none, the pairing page says "No page is connecting with the account you signed in with.
+…" and nothing is connected. The relay cannot tell apart a page that is not open, one
+whose dialog is closed, one that is signed out and one that is signed in as someone
+else, and gives this one answer for all four. Logging out of the page ends the AI
+connection at once.
 
 It needs three things:
 
@@ -193,7 +230,7 @@ It needs three things:
    | header `alg` | RS256/384/512, PS256/384/512, ES256/384/512 or EdDSA (Ed25519), with a `kid` from your JWKS |
    | `iss` | `TAB_MCP_TAB_ASSERTION_ISSUER` |
    | `sub` | the user's subject **at the provider**: the same value the provider puts in the claim `TAB_MCP_OIDC_SUBJECT_CLAIM` |
-   | `aud` | the page's MCP address, `https://relay.example.com/a/<id>/mcp` (the library passes it to your code) |
+   | `aud` | the page's MCP address, `https://relay.example.com/s/<app>/mcp` (the library passes it to your code). It names the app, not one page |
    | `exp` | at most 60 seconds ahead |
    | `jti` | a unique id; the relay accepts each one once |
 
@@ -218,11 +255,19 @@ The relay checks these settings at start (`https:` URLs outside development, a c
 `sub` or `oid`) and refuses `oidc` together with `TAB_MCP_ALLOWED_ORIGINS=*`. It loads the
 provider's discovery document and keys when the first pairing page opens. One relay has
 one provider and one assertion signer; a site with another needs its own relay. With
-`TAB_MCP_SITES` a single site can use `oidc` while the others keep `code`.
+`TAB_MCP_SITES` a single site can use `oidc` while the others keep `code`; an app that
+sites of both kinds can serve gets both on its pairing page ([Sites](#sites)).
 
-The page's "Connect your AI app" dialog must be open while the AI app connects, as with
-codes. Grants made this way remember (a hash of) the person: they work only while a page
-signed in as that person is open, and a page that signs in as someone else ends them.
+The page's "Connect your AI app" dialog must be open when the sign-in comes back to the
+relay, as it must be for a code, and it counts for 10 minutes after the user opened it
+(DEC-202): a sign-in that comes back later gets the same answer as for a closed dialog.
+The dialog shows until when, and then a Continue button that counts 10 minutes from
+then; with a client library after 0.18.1 nothing starts them again by itself, a
+reconnect of the page included. Pages with a library up to 0.18.1 start them again on
+every reconnect: the limit is complete once your pages run a newer one. The 10
+minutes are fixed, not a setting. Grants made this way remember (a hash of) the person:
+they work only while the page they were made for is open and signed in as that person,
+and a page that signs in as someone else ends them.
 See the [threat model](threat-model.md) for what this does and does not protect.
 
 ## Open relay
@@ -233,12 +278,13 @@ See the [threat model](threat-model.md) for what this does and does not protect.
 > Use it only on a relay that you run for yourself, for development, or when you accept
 > that any website can use it.
 
-Users still have to pair each AI app with a code, and all limits still apply. The page
-origin the pairing page shows is then whatever the page's client sent: a browser sends
-its page's true origin, a program any origin it likes. The relay keeps it only if it is
-a serialised origin (`https://host[:port]`) or a browser extension's origin of at most
-255 characters, and otherwise shows "a page that did not say where it runs". Prefer a
-list of origins or `TAB_MCP_SITES`.
+Users still have to pair each AI app with a code, and all limits still apply. Any origin
+can then serve any app that no site reserves with `apps` ([Sites](#sites)). The page
+origin the relay logs and sends to the page is whatever the page's client sent: a browser
+sends its page's true origin, a program any origin it likes. The relay keeps it only if
+it is a serialised origin (`https://host[:port]`) or a browser extension's origin of at
+most 255 characters, and otherwise keeps none. Prefer a list of origins or
+`TAB_MCP_SITES`.
 
 ## Examples
 
@@ -262,7 +308,7 @@ A local relay for an extension under development, whose `manifest.json` has a `k
 
 ```sh
 NODE_ENV=development TAB_MCP_PUBLIC_URL=http://localhost:8080 TAB_MCP_STORE=memory \
-  TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Overmark"}]' \
+  TAB_MCP_SITES='[{"origin":"chrome-extension://abcdefghijklmnopabcdefghijklmnop","name":"Sitegloss"}]' \
   tab-mcp
 ```
 

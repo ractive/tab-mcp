@@ -18,8 +18,12 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { holdBrowserLock } from "../../../test/browser-lock.ts";
 import { Browser, findChromeForTesting, type Page } from "../test/browser.ts";
 import { build } from "./build.ts";
+
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "screenshots.ts" });
 
 const ROOT = join(import.meta.dir, "..");
 const OUT = join(ROOT, "assets/store");
@@ -162,7 +166,7 @@ try {
 	);
 	await panel.click("#connect");
 	const address = await panel.waitFor<string>(
-		`document.getElementById("code").textContent.match(/\\d/) && document.getElementById("address").textContent`,
+		`document.getElementById("code").textContent.match(/[A-Z]{4}-[A-Z]{4}/) && document.getElementById("address").textContent`,
 		15_000,
 	);
 	// The line under the heading names the relay in the settings, this
@@ -184,7 +188,7 @@ try {
 			throw new Error(`the panel names another relay: ${intro}`);
 	}
 
-	const token = await tokenFor(relay.store, address, {
+	const token = await tokenFor(relay, address, {
 		clientId: "https://claude.ai/oauth/claude-code-client-metadata",
 		clientName: "Claude Code",
 	});

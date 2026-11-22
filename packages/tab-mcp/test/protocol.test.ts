@@ -4,53 +4,125 @@ import { parseTabMessage } from "../src/protocol.ts";
 const ok = (v: unknown) => parseTabMessage(JSON.stringify(v));
 
 describe("parseTabMessage", () => {
+	const hello = {
+		type: "hello" as const,
+		library: { name: "lib", version: "1" },
+		app: { id: "my-app" },
+		secret: "s",
+	};
+
 	test("hello", () => {
-		const r = ok({
-			type: "hello",
-			library: { name: "lib", version: "1" },
-			page: { title: "T" },
-			secret: "s",
-			extra: 1,
-		});
-		expect(r).toEqual({
+		expect(ok({ ...hello, page: { title: "T" }, extra: 1 })).toEqual({
 			ok: true,
-			message: {
-				type: "hello",
-				library: { name: "lib", version: "1" },
-				secret: "s",
-			},
+			message: hello,
+		});
+		// Only `id` and `name` of the app are kept.
+		expect(
+			ok({ ...hello, app: { id: "my-app", name: "My app", extra: 1 } }),
+		).toEqual({
+			ok: true,
+			message: { ...hello, app: { id: "my-app", name: "My app" } },
+		});
+		expect(ok({ ...hello, revokeAll: true })).toEqual({
+			ok: true,
+			message: { ...hello, revokeAll: true },
 		});
 	});
 
 	test("hello without library or secret is refused; page is not needed and never read (CC 6)", () => {
-		expect(ok({ type: "hello", page: { title: "" }, secret: "s" }).ok).toBe(
-			false,
-		);
-		expect(
-			ok({ type: "hello", library: { name: "l", version: "1" }, secret: "s" }),
-		).toEqual({
-			ok: true,
-			message: {
-				type: "hello",
-				library: { name: "l", version: "1" },
-				secret: "s",
-			},
-		});
-		expect(
-			ok({
-				type: "hello",
-				library: { name: "l", version: "1" },
-				page: 42,
-				secret: "s",
-			}).ok,
-		).toBe(true);
-		expect(
-			ok({
-				type: "hello",
-				library: { name: "l", version: "1" },
-				page: { title: "" },
-			}).ok,
-		).toBe(false);
+		const { library: _library, ...noLibrary } = hello;
+		const { secret: _secret, ...noSecret } = hello;
+		expect(ok(noLibrary).ok).toBe(false);
+		expect(ok(noSecret).ok).toBe(false);
+		expect(ok({ ...hello, page: 42 })).toEqual({ ok: true, message: hello });
+	});
+
+	test("hello.app.id is required: the <app> of the address, 1-32 of a-z, 0-9 and -, no - at either end (DEC-196)", () => {
+		for (const id of [
+			"a",
+			"7",
+			"ab",
+			"my-app",
+			"a--b",
+			"0-0",
+			"a".repeat(32),
+			`a${"-".repeat(30)}b`,
+		]) {
+			expect(ok({ ...hello, app: { id } })).toEqual({
+				ok: true,
+				message: { ...hello, app: { id } },
+			});
+		}
+		for (const id of [
+			"",
+			"-",
+			"-a",
+			"a-",
+			"A",
+			"My-App",
+			"a_b",
+			"a.b",
+			"a b",
+			"a/b",
+			"a%2fb",
+			"ä",
+			"a\n",
+			" a",
+			"a".repeat(33),
+			42,
+			null,
+			["a"],
+			{ id: "a" },
+		]) {
+			expect(ok({ ...hello, app: { id } })).toEqual({
+				ok: false,
+				error: expect.stringContaining("hello.app.id"),
+			});
+		}
+		// No app at all (libraries before 0.17), or only a name.
+		const { app: _app, ...noApp } = hello;
+		for (const message of [
+			noApp,
+			{ ...hello, app: {} },
+			{ ...hello, app: { name: "My app" } },
+			{ ...hello, app: "my-app" },
+			{ ...hello, app: null },
+			{ ...hello, app: ["my-app"] },
+		]) {
+			const r = ok(message);
+			expect(r).toEqual({
+				ok: false,
+				error: expect.stringContaining("hello.app.id"),
+			});
+			// The text tells an old library's developer what to do.
+			expect(r).toEqual({
+				ok: false,
+				error: expect.stringContaining("tab-mcp-client 0.17"),
+			});
+		}
+	});
+
+	test("hello.app.name is optional; when given it must be an app name (DEC-045)", () => {
+		for (const name of ["x", "My app", "Größe ✓", "n".repeat(64)]) {
+			expect(ok({ ...hello, app: { id: "my-app", name } })).toEqual({
+				ok: true,
+				message: { ...hello, app: { id: "my-app", name } },
+			});
+		}
+		for (const name of [
+			"",
+			"   ",
+			"n".repeat(65),
+			"a\nb",
+			"a\u0000",
+			7,
+			null,
+		]) {
+			expect(ok({ ...hello, app: { id: "my-app", name } })).toEqual({
+				ok: false,
+				error: expect.stringContaining("hello.app.name"),
+			});
+		}
 	});
 
 	test("not JSON, not an object, no type", () => {

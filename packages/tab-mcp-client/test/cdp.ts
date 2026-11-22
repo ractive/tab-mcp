@@ -3,34 +3,75 @@
  * open a page, evaluate, click and type. Uses Bun's WebSocket; no Playwright.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import type { Subprocess } from "bun";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
+import {
+	chromeSwitches,
+	findChromeForTesting,
+} from "../../../test/browsers.ts";
 
-const CANDIDATES = [
-	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-	"/Applications/Chromium.app/Contents/MacOS/Chromium",
-	"google-chrome",
-	"google-chrome-stable",
-	"chromium",
-	"chromium-browser",
-];
+/**
+ * The profiles of the Chromes this process started and has not closed yet.
+ * The same as in `test/webmcp-spike/browser.ts`.
+ */
+const running = new Set<string>();
+let reapOnExit = false;
 
-/** The Chrome binary: `CHROME_PATH`, else a usual location; `undefined` if none. */
-export function findChrome(): string | undefined {
-	const fromEnv = process.env["CHROME_PATH"];
-	if (fromEnv) return fromEnv;
-	for (const candidate of CANDIDATES) {
-		const found = candidate.startsWith("/")
-			? Bun.file(candidate).size > 0
-				? candidate
-				: null
-			: Bun.which(candidate);
-		if (found) return found;
+/**
+ * Kill every process of the Chrome that uses `profile` and remove the profile.
+ * Its helpers (renderers, GPU, network) outlive a SIGKILL of the main process
+ * and would stay behind under launchd; each carries the profile's path, as
+ * given, in its `--user-data-dir`. The pattern is that whole argument and
+ * nothing more, so no other Chrome (another run's, another tool's) matches.
+ */
+function reap(profile: string): void {
+	try {
+		Bun.spawnSync(["pkill", "-9", "-f", profilePattern(profile)]);
+	} catch {
+		// no pkill: only the main process was killed
 	}
-	return undefined;
+	try {
+		rmSync(profile, { recursive: true, force: true });
+	} catch {
+		// still busy right after the kill: left in the temp directory
+	}
+	running.delete(profile);
 }
+
+/** The `--user-data-dir` argument of `profile`, whole, as a pkill pattern. */
+export function profilePattern(profile: string): string {
+	return `user-data-dir=${profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`;
+}
+
+/**
+ * Remember `profile` until its Chrome is closed; a test process that ends
+ * first (a failed hook, a timeout, Ctrl-C, a kill with SIGTERM) still takes
+ * its Chromes with it.
+ */
+function track(profile: string): void {
+	running.add(profile);
+	if (reapOnExit) return;
+	reapOnExit = true;
+	// reap() does not throw: every profile is reaped, and a signal still exits.
+	const reapAll = () => {
+		for (const p of [...running]) reap(p);
+	};
+	process.on("exit", reapAll);
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
+		process.once(signal, () => {
+			reapAll();
+			process.exit(
+				128 + (signal === "SIGINT" ? 2 : signal === "SIGTERM" ? 15 : 1),
+			);
+		});
+}
+
+/**
+ * The Chrome binary: Chrome for Testing in the pinned version, `CHROME_PATH`
+ * or Puppeteer's cache (test/browsers.ts); never an installed Chrome.
+ */
+export const findChrome = findChromeForTesting;
 
 type Pending = {
 	resolve: (v: Record<string, unknown>) => void;
@@ -81,7 +122,8 @@ export class Browser {
 	}
 
 	static async launch(binary: string): Promise<Browser> {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-chrome-"));
+		const profile = browserTempDir("chrome-");
+		track(profile);
 		const proc = Bun.spawn(
 			[
 				binary,
@@ -96,42 +138,52 @@ export class Browser {
 				// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
 				"--use-mock-keychain",
 				"--password-store=basic",
+				...chromeSwitches(),
 				...(process.platform === "linux" ? ["--no-sandbox"] : []),
 				"about:blank",
 			],
 			{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
 		);
-		// Chrome prints "DevTools listening on ws://…" on stderr once it is ready.
-		const endpoint = await new Promise<string>((resolve, reject) => {
-			const timer = setTimeout(
-				() => reject(new Error("Chrome did not start")),
-				20_000,
-			);
-			void (async () => {
-				const decoder = new TextDecoder();
-				let text = "";
-				for await (const chunk of proc.stderr) {
-					text += decoder.decode(chunk, { stream: true });
-					const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
-					if (m?.[1] !== undefined) {
-						clearTimeout(timer);
-						resolve(m[1]);
-						return;
+		try {
+			// Chrome prints "DevTools listening on ws://…" on stderr once it is ready.
+			const endpoint = await new Promise<string>((resolve, reject) => {
+				const timer = setTimeout(
+					() => reject(new Error("Chrome did not start")),
+					20_000,
+				);
+				void (async () => {
+					const decoder = new TextDecoder();
+					let text = "";
+					for await (const chunk of proc.stderr) {
+						text += decoder.decode(chunk, { stream: true });
+						const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
+						if (m?.[1] !== undefined) {
+							clearTimeout(timer);
+							resolve(m[1]);
+							return;
+						}
 					}
-				}
-				reject(new Error(`Chrome exited: ${text.slice(-500)}`));
-			})();
-		});
-		const ws = new WebSocket(endpoint);
-		await new Promise<void>((resolve, reject) => {
-			ws.addEventListener("open", () => resolve(), { once: true });
-			ws.addEventListener(
-				"error",
-				() => reject(new Error("CDP connection failed")),
-				{ once: true },
-			);
-		});
-		return new Browser(proc, profile, ws);
+					reject(new Error(`Chrome exited: ${text.slice(-500)}`));
+				})();
+			});
+			const ws = new WebSocket(endpoint);
+			await new Promise<void>((resolve, reject) => {
+				ws.addEventListener("open", () => resolve(), { once: true });
+				ws.addEventListener(
+					"error",
+					() => reject(new Error("CDP connection failed")),
+					{ once: true },
+				);
+			});
+			return new Browser(proc, profile, ws);
+		} catch (error) {
+			// No Browser to close (Chrome did not start, say): kill what started
+			// and remove the profile here.
+			proc.kill("SIGKILL");
+			await proc.exited;
+			reap(profile);
+			throw error;
+		}
 	}
 
 	send(
@@ -195,7 +247,7 @@ export class Browser {
 		this.#ws.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
-		rmSync(this.#profile, { recursive: true, force: true });
+		reap(this.#profile);
 	}
 }
 

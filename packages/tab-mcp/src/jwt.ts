@@ -245,6 +245,12 @@ export class JwksCache implements KeySource {
 	readonly #load: (url: string) => Promise<unknown>;
 	#keys: Jwk[] = [];
 	#fetchedAt = 0;
+	/**
+	 * Good fetches so far. Whether the keys were fetched during a call is
+	 * told by this count, not by `#fetchedAt`: a fetch and a later call can
+	 * fall in the same millisecond.
+	 */
+	#fetches = 0;
 	#attemptedAt = Number.NEGATIVE_INFINITY;
 	#lastError: Error | undefined;
 	#inflight: Promise<void> | undefined;
@@ -266,7 +272,7 @@ export class JwksCache implements KeySource {
 	}
 
 	async keys(kid: string | undefined): Promise<Jwk[]> {
-		const entered = this.#now();
+		const fetchesBefore = this.#fetches;
 		// A fetch already running answers everyone who asks meanwhile (many tabs
 		// after a relay restart, a new kid during a rotation): without waiting,
 		// they would find the throttle set and read the old (or no) keys.
@@ -295,7 +301,7 @@ export class JwksCache implements KeySource {
 		// Unknown, and the keys were not fetched again for this call (throttled
 		// or failed): the key may exist and not be loaded yet, so this is "the
 		// keys could not be loaded", not "no such key" (review of PR 65).
-		if (!this.#has(kid) && this.#fetchedAt < entered) {
+		if (!this.#has(kid) && this.#fetches === fetchesBefore) {
 			throw (
 				this.#lastError ??
 				new Error("an unknown key id; the JWKS was fetched too recently")
@@ -321,6 +327,7 @@ export class JwksCache implements KeySource {
 					.filter((k): k is Jwk => typeof k === "object" && k !== null)
 					.slice(0, MAX_JWKS_KEYS);
 				this.#fetchedAt = this.#now();
+				this.#fetches++;
 				this.#lastError = undefined;
 			} finally {
 				this.#inflight = undefined;

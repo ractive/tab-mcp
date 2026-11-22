@@ -1,6 +1,6 @@
 # The tab-mcp browser extension
 
-A Chrome extension that offers the page in front to your AI app outside the browser,
+A browser extension that offers the page in front to your AI app outside the browser,
 through a tab-mcp relay. It is the WebMCP bridge of tab-mcp (DEC-114 in `kb/`): pages that
 register tools with [WebMCP](https://webmachinelearning.github.io/webmcp/)
 (`document.modelContext.registerTool()`) offer them only to agents in the browser; the
@@ -8,15 +8,33 @@ extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp
 this. How the extension, the relay and the client library fit together, with a picture:
 [How the parts fit together](../../README.md#how-the-parts-fit-together).
 
-Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh). Privacy policy: [PRIVACY.md](PRIVACY.md).
+- **What the browser must have:** Chrome 116 or later; Firefox 140 or later for the
+  Firefox build. It needs no WebMCP of its own.
+- **What the extension adds:** the page's WebMCP tools for the AI app. Where the browser
+  has WebMCP on (Chrome with `chrome://flags/#enable-webmcp-testing`, or a site in
+  Chrome's origin trial), they are the tools the page registered with the browser. Where
+  it has none (Firefox, Chrome without either), the extension gives each https page (and
+  localhost) its own `document.modelContext` as the page starts loading, after "Give
+  access to all sites" only: a click on the icon comes after the page has looked for it
+  (DEC-188, DEC-191).
+- **Where it can be installed today:** the Chrome build from the
+  [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh),
+  or built from this repository and loaded unpacked ([Install and use
+  it](#install-and-use-it)). The Firefox build is not on addons.mozilla.org yet (its
+  release is [pull request 163](https://github.com/ractive/tab-mcp/pull/163)): built from
+  this repository, it loads as a temporary add-on ([In Firefox](#in-firefox)). Every
+  release is also submitted to Microsoft Edge Add-ons (DEC-194), but that listing is not
+  public yet (checked on 2026-11-22).
+
+Privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `page_info` | The tab in front: address (with its query and fragment), title, language, whether WebMCP is available on the page and how many tools it registered. Read-only; its text is the page's own (untrusted). |
-| `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, input schema (what `webmcp_call` checks the arguments against; 192 KB of schemas together at most, past that a tool says where its schema is), whether it only reads, and why a tool is left out; empty with the reason when the tab has none or may not be read. |
-| `page_<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. |
+| `webmcp_tools` | The page's WebMCP tools: each one's `page_<name>`, title, description, input schema (what `webmcp_call` checks the arguments against; 192 KB of schemas together at most, past that a tool says where its schema is), whether it only reads, whether it is destructive (as its `page_<name>` tool's hint), and why a tool is left out; empty with the reason when the tab has none or may not be read. |
+| `page_<name>` | One per tool the page in front registered. The list follows the tab in front and the page's `toolchange`. Its hints for the AI app: `readOnlyHint` as the page marks it; `destructiveHint` false for a read-only tool, else as the page's `consequentialHint`, and true when a page that registers its tools with WebMCP itself gave the tool no annotations at all (nothing known). A page built with the tab-mcp client library always gives them: a tool without hints is not consequential there, so not destructive. The hint only describes the tool: every tool that is not read-only asks you all the same. |
 | `webmcp_call` | Calls a tool of the page in front by its name, with the same rules. For AI apps that read their tool list once (Claude, Codex): a `page_<name>` tool that came with a later tab is not in their list, but `webmcp_call` reaches it. |
 | `navigate` | Opens an http(s) address (or one relative to the page, `/sale`) in the tab in front, waits until it has loaded and answers with its `page_info`. |
 | `go_back`, `go_forward` | Back or forward one page in that tab, as the browser's buttons do, with the new page's `page_info`. |
@@ -46,7 +64,7 @@ The page's tools are the page's word:
 - A tool the page marks read-only runs at once; every other one asks you each time
   (see "Questions" below). "Always allow on <host>" in a question, or switching on
   the tool's "Always allow" in the panel's list, allows the tool on that site (exact origin)
-  for every paired AI app, kept until you switch it off again. The switch
+  for every connected AI app, kept until you switch it off again. The switch
   "Always allow all" over the list does that for every tool listed at that moment that
   asks first, in one step. It is on once none asks; turned off, every one asks again. A
   tool the page registers later asks first, and the switch is off again. When the page
@@ -55,15 +73,26 @@ The page's tools are the page's word:
   first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
-  changed (also while you were asked), the AI app is told to list the tools again.
+  changed (also while you were asked), the AI app is told to list the tools again. An
+  answer is for the tool as you were asked about it: a page that registers it again
+  with another title, description, schema or hint meanwhile gets nothing run.
+  "Always allow on <host>" is different: it is for the site's tool by name, whatever
+  its description says later.
 - A tool that takes the tab to another page (a checkout, a search) is not a failure: the
   answer says the page changed while the tool ran, that the tool may have completed, and
   gives the new page's `page_info` once it has loaded; its tools are offered by then.
 - Arguments are checked against the tool's schema before the call (without the schema's
-  regular expressions, which a page could make freeze the extension; the page checks those
-  itself; a parameter that is called `pattern` stays). The schema the AI app gets has no
+  regular expressions, which a page could make freeze the extension; a parameter that is
+  called `pattern` stays). A page with the client library checks the arguments again with
+  its full schema; for a page that registers with WebMCP itself this check is the only
+  one, so such a page checks its patterns itself. The schema the AI app gets has no
   `pattern` either: each one is added to its property's description instead ("Must match
-  the regular expression …", cut to 200 characters). A call that the page does not
+  the regular expression …", cut to 200 characters), and so are the names
+  `patternProperties` allows. Without them the check only ever lets through more than the
+  page's schema, never less: a restricting `additionalProperties` beside
+  `patternProperties`, an `unevaluatedProperties` or `unevaluatedItems` above them, a
+  `not` or `if` around them and a `maxContains` go too, and a `oneOf` becomes an `anyOf`.
+  A call that the page does not
   answer in 60 s ends for the AI app, also when the page is stuck; cancelling in the AI
   app cancels it in the page. A page that does not answer the extension's other questions
   (its tools, `page_info`) in 5 s is given up, so a stuck page cannot hold the other
@@ -93,11 +122,23 @@ The page's tools are the page's word:
 - Tools a tab-mcp page mirrors into WebMCP (the client library's `webmcp: true`) are
   offered like any other: the extension cannot know whether your AI app is also paired
   with the page itself. An AI app connected to both sees such a tool twice, once from
-  each connector, and a consequential one asks in the page as well.
+  each connector. Such a page and the extension know of each other (DEC-207, client
+  library 0.19.0 and later): a call you allowed here is not asked again in the page
+  (the extension vouches for that one call, right before it runs), the page can show
+  which AI apps reach it through the extension, and the panel says "This page has
+  tab-mcp built in." and when an AI app is connected to the page directly too (it then
+  sees the page's tools twice: disconnect it in one of the two). While AI access is on,
+  the extension tells such a page only its name, that AI access is on and the AI apps
+  connected now (name and verified host), not its version. While AI access is off, the
+  extension answers no page and sends it nothing (DEC-221). A page can still see that
+  the extension is installed where it provides WebMCP itself (in browsers without their
+  own, below), and could try to time its own events, which the extension still listens
+  to. A page it told "on" is told once that it went off. A page without the library is
+  told nothing.
 - The top frame's WebMCP, which lists the tools of the page and of its same-origin
   frames (the draft and Chrome's documentation say so; not tested here); tools of
-  frames of other origins are not listed. Only the browser's own WebMCP: a page's
-  replacement `document.modelContext` (or a polyfill without native WebMCP) is not used.
+  frames of other origins are not listed. The browser's own WebMCP, or where it has none
+  the extension's (above): a `document.modelContext` the page defines itself is not used.
 - Only pages of http(s) sites, not `file:` pages, and not Incognito tabs (the extension
   cannot be allowed there).
 - The extension reads a page's tools (`getTools()`) only while the side panel is open or
@@ -131,22 +172,25 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   (the page changed meanwhile, or says it is another site), the notice says that.
   On a page without tools it says so, that `page_info` and the navigation tools still
   work, and, where WebMCP is off, how Chrome turns it on.
-- "Turn on AI access" (or the "AI access" switch) connects to the relay. While no AI app
-  is paired, a line under the heading says what the extension does and names the relay.
-  With no AI app paired yet, the panel shows the address for your AI app and a pairing
+- "Turn on AI access" (or the switch beside the card's heading "AI access") connects to
+  the relay. While no AI app is connected, a line under the heading says what the
+  extension does and names the relay. With no AI app connected yet ("On · no AI app
+  connected yet"), the panel shows "Connect your AI app": the address for your AI app and a pairing
   code at once, with a note to use the AI app outside this Chrome profile (a chat in a
-  tab of the same profile becomes the tab in front while you type in it).
+  tab of the same profile becomes the tab in front while you type in it). The address
+  is `<relay>/s/tab-mcp-extension/mcp`, the same for everyone who has the extension;
+  the code (8 letters, `XXXX-XXXX`) pairs the AI app with this installation.
   "How do I add it?" under the address says how to add it in Claude, ChatGPT, Claude Code
   and Codex (the client library's steps, the commands each with a Copy), and links to the
   [connect page](https://ractive.ch/tab-mcp/connect/). A Copy the clipboard refuses
-  selects the text in place to copy by hand. Paired apps are listed, each with a dot
+  selects the text in place to copy by hand. Connected AI apps are listed, each with a dot
   (green while connected, grey while off or connecting); while connected each has a
   Disconnect button (which asks first, and takes no double click). Only the relay can
-  disconnect an app, so while off or connecting the list has no Disconnect and says why;
+  disconnect an AI app, so while off or connecting the list has no Disconnect and says why;
   the list is kept from the relay's last one, also across a restart of the extension.
-  "+ Add another AI app" shows the address and a code again. The address shows only
-  while pairing. Off with apps paired, the panel says "AI access is off · paired apps stay
-  paired". The relay address is under "Settings". Where you name the connector
+  "+ Connect another AI app" shows the address and a code again. The address shows only
+  while pairing. Off with apps paired, the panel says "AI access is off · your AI apps
+  stay connected for next time". The relay address is under "Settings". Where you name the connector
   yourself (Claude, ChatGPT), a name such as "Browser" helps: "in my browser" then leads
   the AI to it (the Claude Code and Codex commands name it `tab-mcp-browser-extension`). The
   extension's instructions and `page_info` tell the AI to call `page_info` first when you
@@ -154,12 +198,36 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 - The connection lives in the extension's service worker, not in the side panel: close
   the panel and AI access stays on, until the switch turns it off. It comes back by itself after a
   browser start, an update or a reload of the extension when you left it on. While the
-  relay cannot be reached, the panel says "Connection lost · retrying" and the extension
+  relay cannot be reached, the panel says "Connection lost · reconnecting…" and the extension
   tries again every minute. The icon
   shows "on" while it is connected, "…" while it connects or retries, "?" while a tool asks. If
-  another tab or program takes the address over, the extension does not take it back by
-  itself, also after a restart: the panel says so and offers "New address" (or Connect,
-  to take it back).
+  another tab or program takes the extension's connection over (it connects with the
+  extension's secret), the extension does not take it back by itself, also after a
+  restart: the panel says so and offers "Disconnect all apps" (or Connect, to take it
+  back). "Disconnect all apps", also under the pairing code, disconnects every AI app
+  and makes a new secret; the address stays, and each AI app connects again with a new
+  code. With apps paired, the button under the code asks for a second click first.
+- The "Fill in the code for me" switch, under the code, turns on filling in its code on
+  the relay's sign-in page when an AI app opens it in this browser (an AI app on the
+  desktop opens it in the default browser). It is off by default, also with access to
+  all sites. Unless the extension has the relay's site already, Chrome first asks ("Read
+  and change your data on tab-mcp.ractive.ch"); declined, the switch goes back to off.
+  From then on, while AI access is on, the panel (or a notification) asks "Connect <AI
+  app> (<host>) to the tab-mcp browser extension?"; Allow writes the code into the
+  page's field and clicks Connect. Typing the code by hand works as before, also while
+  the question waits. For an AI app whose verified host is a public name (not
+  `localhost`, an IP address or a private or test name such as `.lan` or `.test`), the question offers "Don't allow", "Allow
+  once" and "Always allow": "Always allow" fills in the code for that host from then on
+  without asking, each time with a notification and a line in the panel ("Filled in the
+  code for <AI app> (<host>)."), at most 3 times per host in 10 minutes before it asks
+  again. "Filled in without asking for:", under the switch, lists those hosts, each with
+  Remove; turning the switch off or using another relay forgets them all. It relies on
+  the AI app tying each sign-in to the account of the browser that started it (Claude
+  does: a sign-in started in another account ends with "Account mismatch"). Turned off, it gives the relay's site back (not access to all
+  sites); another relay under "Settings" starts off. The switch is on only while the
+  relay's site is granted: taken away in Chrome's settings, filling in goes off (the
+  line under the switch says so) and stays off until turned on again. See [Filling in
+  the code](#filling-in-the-code).
 
 ## Questions
 
@@ -201,9 +269,32 @@ own call. Questions also show in every open side panel, so with notifications of
 not answer. At most 5 questions of one AI app wait at once; a further call of that app is
 declined without asking, and the app is told why.
 
-"Always allow on <host>" allows the tool on that site (exact origin) for every paired
+"Always allow on <host>" allows the tool on that site (exact origin) for every connected
 AI app, as switching on its "Always allow" in the panel's tool list does, until you
 switch it off again there.
+
+## Filling in the code
+
+When an AI app opens the relay's pairing page (`<relay>/authorize`) in the browser
+that has the extension, and filling in is on (above), its content script for that page
+reads the form's `data-tab-mcp-*` attributes (the app the AI app asks for, its name and
+its verified host) and the form's hidden request id. It reads nothing else of the page. Only for
+the extension's own app (`tab-mcp-extension`; `tab-mcp-extension-firefox` in Firefox),
+only in the tab's top frame, only on a form with a code field (a relay that pairs by
+sign-in alone has none) and only while AI access is on, the service worker asks:
+"Connect <name> (<host>) to the tab-mcp browser extension?", with "AI app at (verified)
+<host>" on a line of its own and the AI app's name for itself apart, Don't allow and
+Allow, in the side panel or a notification ("Connect an AI app?") like a tool's question.
+The worker takes the page's word only from the relay's exact origin, port included: the
+same form on another site is ignored. On Allow it writes the code into the field and
+submits the form with Connect, and the relay checks the code as a typed one. Nothing is
+filled on Don't allow, after 60 s without an answer, when the tab closes or leaves the
+page, when AI access goes off, or when the AI app connects meanwhile. One question per
+page load; if the page of the same request comes back with "That code is not right"
+within 30 s (the code had just changed), it is filled once more without asking, and not
+a third time; any other request asks. If another connection request's question is
+waiting already, the panel says so: type the code, or reload the page once answered. Needs a relay with the hooks
+(relay 0.12.0 and later).
 
 ## Permissions
 
@@ -214,21 +305,25 @@ switch it off again there.
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
-| `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. |
+| `http://*/*`, `https://*/*` (optional) | Only after "Give access to all sites": read every tab of an http(s) site without a click. Or, after turning on "Fill in the code for me", the relay's site alone: its pairing page. |
 
 The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered to an AI
 app.
 
 No `storage` permission: the relay address, whether AI access is on, the tools allowed per
-site and the secret behind the connection's address are in IndexedDB, used by the service
-worker only, which content scripts (in the page's origin) cannot reach; there is no
-`chrome.storage` area for them to read or write.
+site, the secret by which the relay knows this installation, the connected AI apps as the
+relay last listed them and the "Fill in the code for me" setting with its hosts (the full
+list is in [PRIVACY.md](PRIVACY.md#what-it-stores)) are in IndexedDB, used by
+the service worker only, which content scripts (in the page's origin) cannot reach; there
+is no `chrome.storage` area for them to read or write.
 
-WebMCP is on in Chrome only where a site takes part in Chrome's
+Chrome's own WebMCP is on only where a site takes part in Chrome's
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
 162), or after you
 turn on `chrome://flags/#enable-webmcp-testing`
-([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)).
+([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Elsewhere, with
+access to all sites, the extension gives pages its own (`src/chrome/webmcp-main.ts`, a
+script in the page's own world at `document_start`); Chrome's wins where it has one.
 
 ## The relay and the extension's id
 
@@ -236,6 +331,14 @@ The relay accepts an extension only if its origin, `chrome-extension://<id>`, is
 (`TAB_MCP_ALLOWED_ORIGINS` or `TAB_MCP_SITES`, relay 0.7.0 or later; see "Browser
 extensions" in `docs/configuration.md`). An unpacked extension's id comes from the public
 key in its manifest, or, without one, from the folder it was loaded from.
+
+The extension names its app to the relay (`APP_ID` in `src/protocol.ts`):
+`tab-mcp-extension`, and `tab-mcp-extension-firefox` in the Firefox build. Its MCP
+address is therefore `<relay>/s/tab-mcp-extension/mcp` for every installation; the
+pairing code says which installation an AI app is paired with. A relay can reserve
+`tab-mcp-extension` for the extension's origin (`apps` of its entry in `TAB_MCP_SITES`),
+so that no other origin the relay allows can serve that address. The Firefox build's id
+cannot be reserved for it: no list can name one Firefox extension.
 
 - `bun run build` writes the Chrome Web Store item's public key, `manifest-key.txt`, into
   the manifest, so the development build has the store's id,
@@ -270,10 +373,10 @@ it from, and publishes both there (DEC-195, "Releases" below).
 1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 140 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
    `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
-   **Reload** keeps its UUID and storage, so the address and the AI app's pairing (checked
+   **Reload** keeps its UUID and storage, and with them the AI app's pairing (checked
    in Firefox 160: `storage.local` and IndexedDB). **Remove** and loading it again is a new
-   installation: a new UUID and empty storage, so a new address the AI app has to pair
-   with, unless `extensions.webextensions.keepUuidOnUninstall` and
+   installation: a new UUID and empty storage, so the AI app has to pair again, unless
+   `extensions.webextensions.keepUuidOnUninstall` and
    `extensions.webextensions.keepStorageOnUninstall` are `true` in `about:config`. A
    temporary add-on is gone when Firefox quits; the two prefs are meant to keep it the
    same when loaded again (not checked for a quit). Open pages keep their WebMCP tools across a reload or update of the
@@ -294,8 +397,11 @@ it from, and publishes both there (DEC-195, "Releases" below).
    (`http://localhost:8080`). Then **Give access to all sites** (Firefox asks): only then does
    every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
 5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
-   to your AI app (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
+   (`<relay>/s/tab-mcp-extension-firefox/mcp`) to your AI app
+   (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
    pairing code from the sidebar.
+   The "Fill in the code for me" switch works as in Chrome (Firefox asks for the relay's site);
+   its notification has no buttons, so a click on it opens the sidebar, where Allow is.
 
 **While developing**, `bun scripts/firefox-dev.ts [URL] [--headless] [--port N]` does steps 1,
 2 and the host access in one: it builds `dist-firefox-dev/` with host access granted at
@@ -367,7 +473,7 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   descriptions, schemas (a parameter called `pattern`), results (the image budget, a
   tool that navigates), the origin checked against Chrome's, why a call did not run, and
   how its tools follow the page.
-- `test/e2e.test.ts`: the test build and the store package in Chrome for Testing 156 or
+- `test/extension.browser.test.ts`: the test build and the store package in Chrome for Testing 156 or
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
@@ -381,17 +487,41 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   retries). `TAB_MCP_E2E_IDLE=1` adds a two-minute check that the service
   worker keeps running on a quiet connection and stops once AI access is off. Pages are served
   through the DevTools Protocol on made-up https origins. They take a few seconds and
-  run in CI on every change.
+  run in CI on every change. Locally: `bun run test:browser extension` (every file named
+  `*.browser.test.ts` runs only with `bun run test:browser`, never in plain `bun test`).
+- `test/fill.test.ts`: filling in the code on the relay's page: which page is one (top
+  frame, `/authorize`, its own app, a code field), who may speak for it (the relay's
+  exact origin; a look-alike, a frame, another extension), the question and its
+  notification, Allow, Don't allow, a timeout, the page going, the AI app connecting
+  meanwhile, AI access off, the setting off, too many questions, one more fill for the
+  same request only and no third, the code taken despite a clock ahead, the content
+  script's registration and the panel's line. `test/fill.browser.test.ts` and
+  `test/firefox-fill-smoke.browser.test.ts` (Firefox's gesture rule and senders without
+  `origin`; Always allow in `-full`, the full run's) do it end to end in Chrome for Testing and Firefox
+  with a relay and an OAuth client (`test/oauth.ts`): off by default, turned on with a
+  real click, a look-alike on another port gets no question, Don't allow then typing by
+  hand, the tab closing, Allow pairs the AI app, AI access off (also while a question
+  waits), Stop. Chrome's prompt for the relay's site is not tested: the test builds
+  have access to all sites at install.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
-- `test/firefox-e2e.test.ts`: the Firefox test build in Firefox 140 or newer
-  (`FIREFOX_PATH`, else where it is installed; skipped without it) over WebDriver BiDi
-  (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
-  extension's `document.modelContext` as it loads, and a relay and an MCP client list,
-  call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page replacing
-  the getter); the event page outlasts Firefox's idle timeout with the panel closed; the
-  panel says Firefox, not Chrome. Pages on http://localhost. `test/firefox-sites.ts` (by
-  hand, the network): real sites.
+- `test/notifications.browser.test.ts` (macOS): a question-like notification of the test
+  build works and never reaches the desktop. Every test Chrome starts without its macOS
+  notifications (`test/browsers.ts`); the Firefox test build records its notifications
+  instead of showing them (`src/worker/notifications.ts`, test build only).
+- `test/firefox-smoke.browser.test.ts` (every pull request) and
+  `test/firefox-full.browser.test.ts` (the full run, browser-full.yml): the Firefox test
+  build in Firefox 140 or newer (`FIREFOX_PATH`, else the pinned test Firefox in
+  Puppeteer's cache; skipped without it) over WebDriver BiDi (`test/firefox.ts`, a
+  temporary add-on; harness `test/firefox-e2e.ts`): the same test page registers its tools
+  with the extension's `document.modelContext` as it loads, and a relay and an MCP client
+  list, call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page
+  replacing the getter), notifications as Firefox has them, an extension reload, the
+  client library; in the full run, the event page outlasts Firefox's idle timeout with
+  the panel open and closed. The panel's Firefox words, the arguments check, an MCP
+  result, the hints and the polyfill's limits are unit tests (`sidepanel.test.ts`,
+  `unit.test.ts`, `bridge.test.ts`). Pages on http://localhost. `test/firefox-sites.ts`
+  (by hand, the network): real sites.
 
 ## Licence
 

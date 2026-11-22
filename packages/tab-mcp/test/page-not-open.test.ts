@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { addressIdFromSecret, newSecret } from "../src/address.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import {
+	APP,
 	mcpPost,
+	ORIGIN,
 	rpc,
 	ScriptedTab,
 	startRelay,
@@ -69,10 +71,14 @@ function toolText(message: RpcMessage): string {
 	return content?.[0]?.text ?? "";
 }
 
+/**
+ * A page that is not open: its secret and a token for it. The address is its
+ * app's, the same for every such page: only the token says which is meant.
+ */
 async function closedAddress(r: TestRelay) {
 	const secret = newSecret();
-	const token = await tokenFor(r.store, addressIdFromSecret(secret));
-	return { secret, token, address: r.relay.addressFor(secret) };
+	const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
+	return { secret, token, address: r.relay.addressFor(APP) };
 }
 
 describe("answers at HTTP 200 when the page stays away", () => {
@@ -97,6 +103,25 @@ describe("answers at HTTP 200 when the page stays away", () => {
 			status: 200,
 			reason: "page_not_open",
 		});
+	});
+
+	test("another page of the app being open changes nothing: the token's page is the one that is away", async () => {
+		const r = relay({ pageWaitMs: 0 });
+		const open = tab(r, { app: "Calculator" });
+		const { address: openAddress } = await open.connect();
+		const { token, address } = await closedAddress(r);
+		expect(address).toBe(openAddress);
+		const res = await mcpPost(address, rpc(3, "tools/call", { name: "add" }), {
+			token,
+		});
+		expect(res.status).toBe(200);
+		const message = await rpcMessage(res);
+		expect(message.result?.["isError"]).toBe(true);
+		// Not the open page's name either: the relay never saw the token's page.
+		expect(toolText(message)).toBe(
+			"The page is not open, or not in front. Ask the user to open the web page and keep it in front (on a phone, in split screen), then try again.",
+		);
+		expect(open.received.some((m) => m.type === "http.request")).toBe(false);
 	});
 
 	test("the text names the page's app once it has connected", async () => {
@@ -181,6 +206,29 @@ describe("the grace period", () => {
 		expect(tools.map((t) => t.name).sort()).toEqual(["add", "echo"]);
 	});
 
+	test("a waiting request is not woken by another page of the app, only by the token's page", async () => {
+		const r = relay({ pageWaitMs: 3_000 });
+		const { secret, token, address } = await closedAddress(r);
+		let answered = false;
+		const pending = mcpPost(address, rpc(5, "tools/list"), { token }).then(
+			(res) => {
+				answered = true;
+				return res;
+			},
+		);
+		await Bun.sleep(100);
+		const other = tab(r);
+		expect((await other.connect()).address).toBe(address);
+		await Bun.sleep(150);
+		expect(answered).toBe(false);
+		expect(other.received.some((m) => m.type === "http.request")).toBe(false);
+		await tab(r, { secret }).connect();
+		const message = await rpcMessage(await pending);
+		expect(message.id).toBe(5);
+		expect(message.result?.["tools"]).toHaveLength(2);
+		expect(other.received.some((m) => m.type === "http.request")).toBe(false);
+	});
+
 	test("server/discover does not wait: clients probe with a short timeout", async () => {
 		const r = relay({ pageWaitMs: 5_000 });
 		const { token, address } = await closedAddress(r);
@@ -241,7 +289,7 @@ describe("the grace period", () => {
 		expect(Date.now() - started).toBeLessThan(1_000);
 	});
 
-	test("waiting requests are bounded per address: beyond the limit the answer comes at once", async () => {
+	test("waiting requests are bounded per page, not per app: beyond the limit the answer comes at once", async () => {
 		const r = relay({ pageWaitMs: 5_000, maxConcurrentRequests: 1 });
 		const { token, address } = await closedAddress(r);
 		const abort = new AbortController();
@@ -254,8 +302,25 @@ describe("the grace period", () => {
 		const second = await mcpPost(address, rpc(2, "tools/list"), { token });
 		expect(Date.now() - started).toBeLessThan(1_000);
 		expect((await rpcMessage(second)).error?.code).toBe(-31001);
+		// Another page of the same app has a wait of its own: one page's AI
+		// app cannot use up the waiting of the others at the shared address.
+		const sibling = await closedAddress(r);
+		expect(sibling.address).toBe(address);
+		let siblingAnswered = false;
+		const third = mcpPost(address, rpc(3, "tools/list"), {
+			token: sibling.token,
+			signal: abort.signal,
+		}).then(
+			() => {
+				siblingAnswered = true;
+			},
+			() => "aborted",
+		);
+		await Bun.sleep(150);
+		expect(siblingAnswered).toBe(false);
 		abort.abort();
 		expect(await first).toBe("aborted");
+		expect(await third).toBe("aborted");
 	});
 
 	test("waiting requests are bounded in total by maxSessions", async () => {
@@ -276,6 +341,86 @@ describe("the grace period", () => {
 		expect((await rpcMessage(other)).error?.code).toBe(-31001);
 		abort.abort();
 		expect(await first).toBe("aborted");
+	});
+
+	/**
+	 * Code review 2026-11-22, CR-01: eight requests that waited for the page
+	 * are let go together when it connects. The page's limits are checked
+	 * and counted in one step, so no more reach it than it allows.
+	 */
+	async function burst(
+		r: TestRelay,
+		method: string,
+		options: TabOptions = {},
+	): Promise<{
+		t: ScriptedTab;
+		token: string;
+		address: string;
+		statuses: number[];
+		abort: AbortController[];
+	}> {
+		const { secret, token, address } = await closedAddress(r);
+		const statuses: number[] = [];
+		const abort: AbortController[] = [];
+		for (let i = 0; i < 8; i++) {
+			const controller = new AbortController();
+			abort.push(controller);
+			mcpPost(address, rpc(i, method), { token, signal: controller.signal })
+				.then((res) => {
+					statuses.push(res.status);
+					return res.body?.cancel();
+				})
+				.catch(() => {});
+		}
+		await Bun.sleep(150);
+		const t = tab(r, { ...options, secret, onRequest: () => {} }); // never answers
+		await t.connect();
+		await waitFor(
+			() => forwarded(t) + refusals(statuses) === 8,
+			"every request forwarded or refused",
+		);
+		await Bun.sleep(100);
+		return { t, token, address, statuses, abort };
+	}
+
+	const forwarded = (t: ScriptedTab) =>
+		t.received.filter((m) => m.type === "http.request").length;
+	const refusals = (statuses: number[]) =>
+		statuses.filter((s) => s === 429).length;
+
+	test("CR-01: a site's request limit holds for requests that waited for the page", async () => {
+		const r = relay({
+			pageWaitMs: 5_000,
+			maxConcurrentRequests: 16,
+			allowedOrigins: [],
+			sites: [{ origin: ORIGIN, limits: { maxConcurrentRequests: 2 } }],
+		});
+		const { t, token, address, statuses, abort } = await burst(r, "tools/list");
+		expect(forwarded(t)).toBe(2);
+		expect(refusals(statuses)).toBe(6);
+		// A cancelled request frees its slot: the next one reaches the page.
+		const held = t.received.filter((m) => m.type === "http.request");
+		for (const c of abort) c.abort();
+		await waitFor(
+			() => t.received.filter((m) => m.type === "http.cancel").length === 2,
+			"both cancels",
+		);
+		expect(held).toHaveLength(2);
+		const next = new AbortController();
+		mcpPost(address, rpc(9, "tools/list"), {
+			token,
+			signal: next.signal,
+		}).catch(() => {});
+		await waitFor(() => forwarded(t) === 3, "the next request");
+		next.abort();
+	});
+
+	test("CR-01: the listen-stream limit holds for listen requests that waited for the page", async () => {
+		const r = relay({ pageWaitMs: 5_000 });
+		const { t, statuses, abort } = await burst(r, "subscriptions/listen");
+		expect(forwarded(t)).toBe(2);
+		expect(refusals(statuses)).toBe(6);
+		for (const c of abort) c.abort();
 	});
 
 	test("stopping the relay ends waiting requests", async () => {

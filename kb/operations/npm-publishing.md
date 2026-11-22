@@ -175,7 +175,10 @@ commands in an up-to-date checkout of `main`.
    manifests name only the current package versions" fails on any other version), dates
    the changelog section and runs `bun install`. Merge to `main`. The whole release,
    including updating the apps that use the client, is the project skill
-   `.claude/skills/release/SKILL.md`.
+   `.claude/skills/release/SKILL.md`. The client's package also holds the agent skill
+   (`skill/`, made by its build from `plugins/tab-mcp/skills/tab-mcp/`, DEC-216); its
+   links at `client-v<version>` become links to the files beside it, so the pinned
+   versions in the skill must be the version being released.
 2. Create a GitHub release with the tag `client-v<version>` on exactly that merge commit,
    not on whatever `main` points to by then. Mark it as a pre-release exactly when the
    version is one (`0.1.0-alpha.1`, `0.2.0-beta.0`, `1.0.0-rc.1`); a stable version is a

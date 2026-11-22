@@ -4,27 +4,18 @@
  * free port, an extension installed as a temporary add-on
  * (`webExtension.install`, which needs no signature), tabs opened and pages
  * evaluated in. BiDi is built into Firefox, so this needs no driver and no
- * package; `FIREFOX_PATH` names the binary, else the usual places are tried.
+ * package. Which Firefox: test/browsers.ts (`FIREFOX_PATH`, else the pinned
+ * test Firefox in Puppeteer's cache; an installed one only when asked for).
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
+import { findTestFirefox } from "../../../test/browsers.ts";
 
-/** Firefox: `FIREFOX_PATH`, else where macOS and Linux put it. */
-export function findFirefox(): string | undefined {
-	const fromEnv = process.env["FIREFOX_PATH"];
-	if (fromEnv) return fromEnv;
-	const candidates = [
-		"/Applications/Firefox.app/Contents/MacOS/firefox",
-		"/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
-		"/usr/bin/firefox",
-		"/usr/local/bin/firefox",
-		"/snap/bin/firefox",
-	];
-	return candidates.find((path) => Bun.file(path).size > 0);
-}
+/** The test Firefox in the pinned version, `FIREFOX_PATH` or Puppeteer's cache (test/browsers.ts). */
+export const findFirefox = findTestFirefox;
 
 /** Firefox's major version, from `--version`; 0 if it does not say. */
 export function firefoxMajor(binary: string): number {
@@ -50,6 +41,9 @@ export class BidiError extends Error {}
 
 /** A JavaScript exception thrown by an evaluation. */
 export class EvaluationError extends Error {}
+
+/** Firefox named no BiDi address in time. */
+class StartTimeout extends Error {}
 
 /** The prefs every test profile gets, besides Firefox's own for automation. */
 const BASE_PREFS: Record<string, string | number | boolean> = {
@@ -102,12 +96,32 @@ export class Firefox {
 		});
 	}
 
-	/** Start `binary` with a fresh profile and open a BiDi session. */
+	/**
+	 * Start `binary` with a fresh profile and open a BiDi session. The first
+	 * start on a fresh machine (a CI runner) is slow: 10 to 25 s in green runs,
+	 * over 30 s now and then, where a later one takes 2 s. A start that names
+	 * no BiDi address in 30 s is ended and made once more, with a new profile.
+	 */
 	static async launch(
 		binary: string,
 		options: FirefoxOptions = {},
 	): Promise<Firefox> {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-"));
+		try {
+			return await Firefox.#launch(binary, options);
+		} catch (error) {
+			if (!(error instanceof StartTimeout)) throw error;
+			console.warn(
+				`::warning::${error.message.split("\n")[0]}; starting it again`,
+			);
+			return await Firefox.#launch(binary, options);
+		}
+	}
+
+	static async #launch(
+		binary: string,
+		options: FirefoxOptions,
+	): Promise<Firefox> {
+		const profile = browserTempDir("firefox-");
 		const log = options.log ?? Boolean(process.env["FIREFOX_LOG"]);
 		const prefs = {
 			...BASE_PREFS,
@@ -310,6 +324,30 @@ export class Tab {
 		}
 	}
 
+	/**
+	 * A real click (with the user activation an extension's
+	 * `permissions.request` needs) in the middle of element `selector`.
+	 */
+	async click(selector: string): Promise<void> {
+		const box = await this.eval<{ x: number; y: number }>(
+			`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error("no element " + ${JSON.stringify(selector)}); e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`,
+		);
+		await this.#firefox.send("input.performActions", {
+			context: this.context,
+			actions: [
+				{
+					type: "pointer",
+					id: "mouse",
+					actions: [
+						{ type: "pointerMove", x: box.x, y: box.y },
+						{ type: "pointerDown", button: 0 },
+						{ type: "pointerUp", button: 0 },
+					],
+				},
+			],
+		});
+	}
+
 	async close(): Promise<void> {
 		await this.#firefox.send("browsingContext.close", {
 			context: this.context,
@@ -324,7 +362,7 @@ async function bidiAddress(proc: Subprocess, log: boolean): Promise<string> {
 	const decoder = new TextDecoder();
 	let text = "";
 	const deadline = Bun.sleep(30_000).then(() => {
-		throw new Error(
+		throw new StartTimeout(
 			`Firefox named no BiDi address in 30 s:\n${text.slice(-2000)}`,
 		);
 	});

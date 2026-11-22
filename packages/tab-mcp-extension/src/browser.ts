@@ -92,3 +92,30 @@ export function notificationOptions(
 	const { buttons: _b, requireInteraction: _r, ...rest } = options;
 	return rest;
 }
+
+/**
+ * A question's notification as the worker creates it: its text
+ * (`notificationText` in worker/questions.ts) and the extension's icon
+ * (`chrome.runtime.getURL("icons/icon-128.png")`). The browser tests create
+ * one with the same options.
+ */
+export function questionNotification(
+	text: {
+		title: string;
+		message: string;
+		contextMessage: string;
+		buttons: readonly string[];
+	},
+	iconUrl: string,
+): chrome.notifications.NotificationCreateOptions {
+	return notificationOptions({
+		type: "basic",
+		iconUrl,
+		title: text.title,
+		message: text.message,
+		contextMessage: text.contextMessage,
+		buttons: text.buttons.map((title) => ({ title })),
+		requireInteraction: true,
+		priority: 2,
+	});
+}

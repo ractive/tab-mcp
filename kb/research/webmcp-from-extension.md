@@ -11,7 +11,7 @@ Iteration 18 asked whether an extension can reach a page's WebMCP tools, and fro
 world. It can, from its content script, with nothing in the page's world. Everything
 below was observed in Chrome for Testing 156.0.8078.80 (the version CI pins) with
 `test/webmcp-spike/` (`bun test/webmcp-spike/spike.ts` prints the full report as JSON);
-`test/webmcp-spike/webmcp.test.ts` keeps the main findings as a canary.
+`test/webmcp-spike/webmcp-canary.browser.test.ts` keeps the main findings as a canary.
 
 ## 1. Turning it on
 
@@ -46,7 +46,9 @@ below was observed in Chrome for Testing 156.0.8078.80 (the version CI pins) wit
 - `getTools()` returns plain objects, sorted by name, with exactly `name`, `title`,
   `description`, `inputSchema`, `annotations` (all four: `readOnlyHint`,
   `consequentialHint`, `untrustedContentHint`, `debugging`; missing when the page gave
-  none), `origin` and `window`. **No `outputSchema`**: Chrome 156 drops it at
+  none; given as `{}`, `null` or with only some hints, the missing ones are false and a
+  non-boolean is converted, so `{}` cannot be told apart from all four false; DEC-214),
+  `origin` and `window`. **No `outputSchema`**: Chrome 156 drops it at
   registration (DevTools' `WebMCP.toolsAdded` has none either).
 - `executeTool(tool, input, { signal })` runs the page's `execute` (in the page's world,
   with a signal) and resolves to a **string**: a string result as it is, anything else

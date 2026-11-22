@@ -3,13 +3,13 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { newSecret } from "../src/address.ts";
 import { Exchange } from "../src/exchange.ts";
 import { truncateIp } from "../src/log.ts";
 import { parseTabMessage } from "../src/protocol.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import {
+	APP,
 	mcpPost,
 	rpc,
 	ScriptedTab,
@@ -211,7 +211,7 @@ async function stalledRequest(
 describe("2: unauthenticated requests keep Bun's idle timeout", () => {
 	test("a stalled unauthenticated POST to the MCP endpoint is closed after the idle timeout", async () => {
 		const r = relay({ httpIdleTimeoutS: 1, bodyTimeoutMs: 500 });
-		const address = new URL(r.relay.addressFor(newSecret()));
+		const address = new URL(r.relay.addressFor(APP));
 		const { closedAfterMs, received } = await stalledRequest(
 			r.relay.port,
 			`POST ${address.pathname} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nContent-Length: 100\r\n\r\n{"jsonrpc":`,
@@ -372,6 +372,73 @@ describe("3: response size and backpressure", () => {
 	});
 });
 
+describe("code review 2026-11-22, CR-03: an event's end split across chunks", () => {
+	/** An event stream of the tab, with keep-alives every 10 ms. */
+	function streaming(): Exchange {
+		const exchange = new Exchange({
+			id: "r1",
+			rpcId: 1,
+			isListen: true,
+			requestTimeoutMs: 60_000,
+			keepAliveMs: 10,
+			maxBodyBytes: 100_000,
+			extraHeaders: {},
+			cancel: () => {},
+			onDone: () => {},
+		});
+		exchange.onStart({
+			type: "http.response.start",
+			id: "r1",
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+		return exchange;
+	}
+
+	/** What the AI app got after `chunks`, three keep-alive intervals and a failure. */
+	async function received(chunks: string[]): Promise<string> {
+		const exchange = streaming();
+		const res = await exchange.response;
+		for (const c of chunks) exchange.onChunk(c);
+		await Bun.sleep(35);
+		exchange.fail(504, -31005, "The page did not answer in time.", false);
+		return res.text();
+	}
+
+	const error =
+		'event: message\ndata: {"jsonrpc":"2.0","id":1,"error":{"code":-31005,"message":"The page did not answer in time."}}\n\n';
+
+	for (const end of ["\n\n", "\r\n\r\n", "\r\r", "\n\r\n", "\r\n\n", "\n\r"]) {
+		test(`${JSON.stringify(end)} split at every character: keep-alives and the error event`, async () => {
+			const event = `data: {}${end}`;
+			const splits: string[][] = [];
+			for (let at = 1; at < event.length; at++) {
+				splits.push([event.slice(0, at), event.slice(at)]);
+			}
+			const bodies = await Promise.all(splits.map(received));
+			for (const [i, body] of bodies.entries()) {
+				const at = i + 1;
+				expect({ at, body }).toEqual({
+					at,
+					body: expect.stringMatching(/^data: \{\}[\r\n]+(: keep-alive\n\n)+/),
+				});
+				expect(body.endsWith(error)).toBe(true);
+			}
+		});
+	}
+
+	test("inside an unfinished event: no keep-alive and no error event", async () => {
+		const cases = [
+			["data: {}\n"],
+			["data: {}\r", "\n"],
+			["data: {}\n\n", "data: 1\n"],
+			["data: {}\r\n\r\n", "data: 1", "\r\n"],
+		];
+		const bodies = await Promise.all(cases.map(received));
+		expect(bodies).toEqual(cases.map((c) => c.join("")));
+	});
+});
+
 describe("4: an open listen stream keeps the session from going idle", () => {
 	test("a session whose only request is a listen stream is not closed as idle", async () => {
 		const r = relay({ heartbeatMs: 20, idleTimeoutMs: 80, keepAliveMs: 40 });
@@ -416,11 +483,9 @@ describe("5: a failing token store is not an invalid token", () => {
 			throw new Error("database is locked");
 		};
 		const r = relay({ store });
-		const res = await mcpPost(
-			r.relay.addressFor(newSecret()),
-			rpc(4, "tools/list"),
-			{ token: "tmcp_at_whatever" },
-		);
+		const res = await mcpPost(r.relay.addressFor(APP), rpc(4, "tools/list"), {
+			token: "tmcp_at_whatever",
+		});
 		expect(res.status).toBe(503);
 		expect(res.headers.get("retry-after")).toBe("5");
 		expect(res.headers.get("www-authenticate")).toBeNull();

@@ -11,6 +11,7 @@
  * user left AI access on (after a browser start, an update, a reload).
  */
 
+import { PAIRING_PORT, pagePort } from "@ractive-ch/tab-mcp-client/extension";
 import { FIREFOX, openPanel } from "./browser.ts";
 import {
 	CONTENT_SCRIPT,
@@ -19,12 +20,36 @@ import {
 	WEBMCP_MAIN_SCRIPT,
 } from "./messages.ts";
 import { attachPanel } from "./panel-port.ts";
-import { isContentEvent, isPanelSender, PANEL_PORT } from "./protocol.ts";
+import {
+	isContentEvent,
+	isHandshakeAsk,
+	isPanelSender,
+	PANEL_PORT,
+} from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
+import {
+	notificationRecorder,
+	useNotificationApi,
+} from "./worker/notifications.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
 declare const TAB_MCP_TEST: boolean;
+
+// The Firefox test build keeps its notifications to itself (DEC-220): a
+// test Firefox's system notifications reach the owner's desktop, and its own
+// alert windows (`alerts.useSystemBackend: false`) take the focus from the
+// panel. firefox-smoke.browser.test.ts reads them with `tabMcpNotificationRecorder()`
+// (from the panel, through `runtime.getBackgroundPage()`), answers through the
+// hooks below, and calls the real API once itself. Chrome's tests keep the
+// real API and turn the desktop's off with a switch (test/browsers.ts).
+if (TAB_MCP_TEST && FIREFOX) {
+	const recorder = notificationRecorder();
+	useNotificationApi(recorder);
+	Object.assign(globalThis, {
+		tabMcpNotificationRecorder: () => Object.fromEntries(recorder.shown),
+	});
+}
 
 /** The connection, once its start has succeeded. */
 let started: Connection | undefined;
@@ -153,11 +178,19 @@ if (FIREFOX)
 const tabChanged = () => withConnection((c) => c.tabChanged());
 const permissionsChanged = () => {
 	sync();
+	// Access to the relay's site, or to all sites: the pairing page's script.
+	withConnection((c) => c.syncFill());
+	// A tab no longer readable hears "off" (DEC-221).
+	withConnection((c) => c.hostAccessChanged());
 	tabChanged();
 };
 chrome.permissions.onAdded.addListener(permissionsChanged);
 chrome.permissions.onRemoved.addListener(permissionsChanged);
 chrome.tabs.onActivated.addListener(tabChanged);
+// What the worker kept for a tab's pairing page (DEC-213) goes with the tab.
+chrome.tabs.onRemoved.addListener((tabId) =>
+	withConnection((c) => c.tabClosed(tabId)),
+);
 chrome.tabs.onUpdated.addListener((_id, change, tab) => {
 	// Only the active tabs, and only once a page has loaded: mid-navigation
 	// there is nothing to read, and the click's grant may be on its way out.
@@ -166,14 +199,38 @@ chrome.tabs.onUpdated.addListener((_id, change, tab) => {
 chrome.windows.onFocusChanged.addListener(tabChanged);
 
 // Content scripts may say only this: the page's tools changed (`toolchange`)
-// in an active tab. Commands come only over the side panel's port.
-chrome.runtime.onMessage.addListener((message: unknown, sender) => {
-	if (isContentEvent(message, sender, chrome.runtime.id) && sender.tab?.active)
-		tabChanged();
-	return false;
-});
+// in an active tab, or the page announced the client library and asks what
+// the extension tells such a page (DEC-207). Commands come only over the
+// side panel's port.
+chrome.runtime.onMessage.addListener(
+	(message: unknown, sender, sendResponse: (state: unknown) => void) => {
+		if (isHandshakeAsk(message, sender, chrome.runtime.id)) {
+			void ready().then(
+				(connection) => sendResponse(connection.handshakeState()),
+				() => sendResponse(undefined),
+			);
+			return true; // answers asynchronously
+		}
+		if (
+			isContentEvent(message, sender, chrome.runtime.id) &&
+			sender.tab?.active
+		)
+			tabChanged();
+		return false;
+	},
+);
 
 chrome.runtime.onConnect.addListener((port) => {
+	// The relay's pairing page (DEC-203): taken at once, its sender checked
+	// once the connection has started (it knows the relay).
+	if (port.name === PAIRING_PORT) {
+		const page = pagePort(port);
+		void ready().then(
+			(connection) => connection.pairingPage(page),
+			() => page.close(),
+		);
+		return;
+	}
 	if (
 		port.name !== PANEL_PORT ||
 		!isPanelSender(port.sender ?? {}, chrome.runtime.id, {
@@ -219,9 +276,10 @@ if (FIREFOX)
  * A notification's answer: its button Allow; its closing is Don't allow; a
  * click on its body opens the side panel of the tab's window, where the
  * whole question is (if Chrome refuses, the notification comes back). In
- * the test build on the worker's global object too, for the DevTools
- * Protocol, which cannot click a notification: the end-to-end tests answer
- * through the same functions a click calls. Not in the store build (ES 7).
+ * the test build the button's function is on the worker's global object
+ * too, for the DevTools Protocol, which cannot click a notification: the
+ * end-to-end tests answer through the same function a click calls. Not in
+ * the store build (ES 7).
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));
@@ -256,9 +314,8 @@ if (TAB_MCP_TEST && FIREFOX)
 				active: true,
 			}),
 	);
+// Closing and a click on the body come from Chrome's own events only: the
+// tests close one with chrome.notifications.clear (onClosed), and Chrome
+// gives no way to click one from outside.
 if (TAB_MCP_TEST)
-	Object.assign(globalThis, {
-		tabMcpNotificationButton: notificationButton,
-		tabMcpNotificationDismissed: notificationDismissed,
-		tabMcpNotificationClicked: notificationClicked,
-	});
+	Object.assign(globalThis, { tabMcpNotificationButton: notificationButton });

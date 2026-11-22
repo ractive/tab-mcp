@@ -35,23 +35,36 @@ function defaultStorage(): SecretStorage | null {
 
 /** Reads, creates and rotates the secret; falls back to memory without storage. */
 export class SecretStore {
-	readonly #storage: SecretStorage | null;
-	readonly #key: string;
+	/**
+	 * Where the secret is kept (`null`: memory) and under which key; the
+	 * allowed tools (`always-allowed.ts`) are kept next to it.
+	 */
+	readonly storage: SecretStorage | null;
+	readonly key: string;
 	#memory: string | undefined;
+	/**
+	 * The last rotation could not be written (quota, blocked, read-only):
+	 * memory holds the new secret for the page's lifetime and storage, which
+	 * may still hold the old one, is not read over it until a write succeeds
+	 * (code review 2026-11-22, CR-02).
+	 */
+	#unsaved = false;
 
 	constructor(storage: SecretStorage | null | undefined, key: string) {
-		this.#storage = storage === undefined ? defaultStorage() : storage;
-		this.#key = key;
+		this.storage = storage === undefined ? defaultStorage() : storage;
+		this.key = key;
 	}
 
 	/**
 	 * The current secret, or `undefined` while this page has none (none made
-	 * yet); storage first, so a rotation in another tab is seen.
+	 * yet); storage first, so a rotation in another tab is seen, unless the
+	 * last rotation could not be written.
 	 */
 	current(): string | undefined {
+		if (this.#unsaved) return this.#memory;
 		let stored: string | null = null;
 		try {
-			stored = this.#storage?.getItem(this.#key) ?? null;
+			stored = this.storage?.getItem(this.key) ?? null;
 		} catch {
 			// unreadable: use a page-lifetime secret
 		}
@@ -62,12 +75,14 @@ export class SecretStore {
 		return this.#memory;
 	}
 
-	/** Make and keep a new secret (a new address). */
+	/** Make and keep a new secret (`disconnectAll()`). */
 	rotate(): string {
 		const secret = newSecret();
 		this.#memory = secret;
+		this.#unsaved = true;
 		try {
-			this.#storage?.setItem(this.#key, secret);
+			this.storage?.setItem(this.key, secret);
+			this.#unsaved = false;
 		} catch {
 			// quota or blocked: the secret lives as long as the page
 		}

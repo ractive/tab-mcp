@@ -12,6 +12,7 @@ export async function issueAccessToken(
 	grant: {
 		grantId?: string;
 		addressId: string;
+		app: string;
 		clientId: string;
 		clientName: string;
 		subject?: string;
@@ -25,6 +26,7 @@ export async function issueAccessToken(
 		kind: "access",
 		grantId: grant.grantId ?? newId("g"),
 		addressId: grant.addressId,
+		app: grant.app,
 		clientId: grant.clientId,
 		clientName: grant.clientName,
 		scopes: ["tools"],

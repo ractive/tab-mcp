@@ -1,4 +1,7 @@
-/** Sites (DEC-045): per-origin configuration, app names, limits. */
+/**
+ * Sites (DEC-045): per-origin configuration, app names, limits, and the apps
+ * a site reserves (DEC-197).
+ */
 import { afterEach, describe, expect, test } from "bun:test";
 import {
 	ConfigError,
@@ -8,7 +11,18 @@ import {
 	siteFor,
 } from "../src/config.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
-import { ORIGIN, ScriptedTab, startRelay, type TestRelay } from "./helpers.ts";
+import {
+	APP,
+	mcpPost,
+	ORIGIN,
+	rpc,
+	ScriptedTab,
+	startRelay,
+	type TabOptions,
+	type TestRelay,
+	tokenFor,
+	waitFor,
+} from "./helpers.ts";
 
 let current: TestRelay | undefined;
 const tabs: ScriptedTab[] = [];
@@ -33,6 +47,7 @@ describe("configuration", () => {
 				{
 					origin: "HTTPS://Ractive.CH",
 					name: "saturnus",
+					apps: ["saturnus", "hp-48", "saturnus", "a", "0"],
 					limits: { maxConcurrentRequests: 2 },
 				},
 			],
@@ -41,9 +56,70 @@ describe("configuration", () => {
 			{
 				origin: "https://ractive.ch",
 				name: "saturnus",
+				// Each app once, in the order given.
+				apps: ["saturnus", "hp-48", "a", "0"],
 				limits: { maxConcurrentRequests: 2 },
 			},
 		]);
+	});
+
+	test("site apps must be a list of at least one app id (DEC-197)", () => {
+		const bad: unknown[] = [
+			"notes",
+			[],
+			{},
+			{ 0: "notes", length: 1 },
+			null,
+			true,
+			["Notes"],
+			["-notes"],
+			["notes-"],
+			["-"],
+			["no tes"],
+			["no_tes"],
+			["no.tes"],
+			["notes/x"],
+			["nötes"],
+			[""],
+			["a".repeat(33)],
+			[1],
+			[["notes"]],
+			["notes", ""],
+			["notes", "Other"],
+			["notes", null],
+		];
+		for (const apps of bad) {
+			expect(() =>
+				resolveConfig({
+					...base,
+					sites: [{ origin: "https://a.example", apps: apps as never }],
+				}),
+			).toThrow(
+				"site apps must be a list of app ids (1-32 characters of a-z, 0-9 and -): https://a.example",
+			);
+		}
+		// The longest id, and one site's app listed by another too.
+		const c = resolveConfig({
+			...base,
+			sites: [
+				{ origin: "https://a.example", apps: ["a".repeat(32), "shared"] },
+				{ origin: "https://b.example", apps: ["shared"] },
+			],
+		});
+		expect(c.sites.map((s) => s.apps)).toEqual([
+			["a".repeat(32), "shared"],
+			["shared"],
+		]);
+	});
+
+	test("the configuration's list is not the caller's: changing that afterwards changes nothing", () => {
+		const apps = ["notes"];
+		const c = resolveConfig({
+			...base,
+			sites: [{ origin: "https://a.example", apps }],
+		});
+		apps.push("other");
+		expect(c.sites[0]?.apps).toEqual(["notes"]);
 	});
 
 	test("bad sites are refused", () => {
@@ -92,12 +168,24 @@ describe("configuration", () => {
 
 	test("TAB_MCP_SITES (JSON) and TAB_MCP_CLIENT_ID_HOSTS", () => {
 		const env = configFromEnv({
-			TAB_MCP_SITES: '[{"origin":"https://ractive.ch","name":"saturnus"}]',
+			TAB_MCP_SITES:
+				'[{"origin":"https://ractive.ch","name":"saturnus","apps":["saturnus","hp-48"]}]',
 			TAB_MCP_CLIENT_ID_HOSTS: "claude.ai, chatgpt.com",
 		});
 		expect(env.sites).toEqual([
-			{ origin: "https://ractive.ch", name: "saturnus" },
+			{
+				origin: "https://ractive.ch",
+				name: "saturnus",
+				apps: ["saturnus", "hp-48"],
+			},
 		]);
+		// A site's fields are checked when the configuration is resolved.
+		const badApps = configFromEnv({
+			TAB_MCP_SITES: '[{"origin":"https://ractive.ch","apps":"saturnus"}]',
+		});
+		expect(() => resolveConfig({ ...base, ...badApps })).toThrow(
+			/site apps must be a list of app ids/,
+		);
 		expect(env.clientIdHosts).toEqual(["claude.ai", "chatgpt.com"]);
 		expect(() => configFromEnv({ TAB_MCP_SITES: "{nope" })).toThrow(
 			ConfigError,
@@ -141,6 +229,15 @@ describe("configuration", () => {
 		expect(siteFor(open, "https://c.example")?.origin).toBe("*");
 		expect(siteFor(open, "https://a.example")?.name).toBe("A");
 		expect(siteFor(resolveConfig(base), "https://a.example")).toBeUndefined();
+		// A site's apps come with it; an origin without a site has none.
+		const reserving = resolveConfig({
+			...base,
+			allowedOrigins: ["https://b.example"],
+			sites: [{ origin: "https://a.example", apps: ["notes"] }],
+		});
+		expect(siteFor(reserving, "https://a.example")?.apps).toEqual(["notes"]);
+		expect(siteFor(reserving, "https://b.example")).not.toHaveProperty("apps");
+		expect(siteFor(c, "https://a.example")).not.toHaveProperty("apps");
 	});
 });
 
@@ -183,10 +280,13 @@ describe("sessions", () => {
 		t.send({
 			type: "hello",
 			library: { name: "t", version: "1" },
-			page: { title: "" },
-			app: { name: "x".repeat(65) },
+			// A good id, so that the name is what is wrong.
+			app: { id: APP, name: "x".repeat(65) },
 			secret: t.secret,
 		});
+		const error = (await t.next("error")) as { code: string; message: string };
+		expect(error.code).toBe("bad_message");
+		expect(error.message).toContain("hello.app.name");
 		expect((await t.closed).code).toBe(1008);
 	});
 
@@ -199,6 +299,233 @@ describe("sessions", () => {
 			headers: { origin: ORIGIN, "sec-websocket-protocol": "tab-mcp.v1" },
 		});
 		expect(res.status).toBe(403);
+	});
+});
+
+describe("sites may reserve apps (DEC-197)", () => {
+	const LISTING = "https://listing.example";
+	const SECOND = "https://second.example";
+	const PLAIN = "https://plain.example";
+	const ALLOWED = "https://allowed.example";
+
+	/** Say hello as `options` have it; the session, or the refusal. */
+	async function hello(
+		r: TestRelay,
+		options: TabOptions,
+	): Promise<
+		| { tab: ScriptedTab; address: string }
+		| { tab: ScriptedTab; error: string; message: string; close: number }
+	> {
+		const t = new ScriptedTab(r.wsUrl, options);
+		tabs.push(t);
+		const session = t.connect();
+		const first = await Promise.race([
+			session.then((s) => ({ address: s.address })),
+			t.next("error").then((e) => e as { code: string; message: string }),
+		]);
+		if ("address" in first) return { tab: t, address: first.address };
+		return {
+			tab: t,
+			error: first.code,
+			message: first.message,
+			close: (await t.closed).code,
+		};
+	}
+
+	const refusal = (origin: string, app: string) => ({
+		error: "app_not_allowed",
+		message: `this relay does not let ${origin} serve the app "${app}"`,
+		// Policy violation: the page's library does not connect again.
+		close: 1008,
+	});
+
+	test("a site that lists apps serves those and no other; the refusal names origin and app, and is logged", async () => {
+		const r = relay({
+			allowedOrigins: [],
+			sites: [{ origin: LISTING, apps: ["notes", "calc"] }],
+		});
+		for (const appId of ["notes", "calc"]) {
+			expect(await hello(r, { origin: LISTING, appId })).toMatchObject({
+				address: `${r.relay.url}/s/${appId}/mcp`,
+			});
+		}
+		expect(r.relay.sessionCount).toBe(2);
+		for (const appId of ["other", "note", "notes2", APP]) {
+			expect(await hello(r, { origin: LISTING, appId })).toMatchObject(
+				refusal(LISTING, appId),
+			);
+		}
+		await waitFor(() => r.relay.sessionCount === 2, "the refused to close");
+		expect(r.logs.events("tab.refused").at(-1)).toMatchObject({
+			level: "warn",
+			reason: "app_not_allowed",
+			origin: LISTING,
+			app: APP,
+		});
+		expect(r.logs.events("tab.refused")).toHaveLength(4);
+		expect(r.logs.events("tab.session")).toHaveLength(2);
+		expect(r.relay.pagesOf("other")).toEqual([]);
+	});
+
+	test("an origin that does not list a reserved app may not serve it: another site, with apps of its own or without, and an allowed origin", async () => {
+		const r = relay({
+			allowedOrigins: [ALLOWED],
+			sites: [
+				{ origin: LISTING, apps: ["notes"] },
+				{ origin: SECOND, apps: ["calc"] },
+				{ origin: PLAIN, name: "Plain" },
+			],
+		});
+		for (const origin of [SECOND, PLAIN, ALLOWED]) {
+			expect(await hello(r, { origin, appId: "notes" })).toMatchObject(
+				refusal(origin, "notes"),
+			);
+		}
+		expect(r.relay.pagesOf("notes")).toEqual([]);
+		expect(await hello(r, { origin: LISTING, appId: "notes" })).toHaveProperty(
+			"address",
+		);
+	});
+
+	test("on an open relay no other origin serves a reserved app, whatever it sends as its origin", async () => {
+		const r = relay({
+			allowedOrigins: "*",
+			sites: [{ origin: LISTING, apps: ["notes"] }],
+		});
+		for (const origin of [
+			"https://anyone.example",
+			"http://localhost:5173",
+			`chrome-extension://${"a".repeat(32)}`,
+			// Not the site: another scheme, port, host or case of it.
+			"http://listing.example",
+			"https://listing.example:444",
+			"https://www.listing.example",
+		]) {
+			expect(await hello(r, { origin, appId: "notes" })).toMatchObject(
+				refusal(origin, "notes"),
+			);
+		}
+		// An origin the relay does not keep (RS 6) is "this page".
+		expect(
+			await hello(r, {
+				origin: "https://listing.example (verified)",
+				appId: "notes",
+			}),
+		).toMatchObject({
+			error: "app_not_allowed",
+			message: 'this relay does not let this page serve the app "notes"',
+		});
+		expect(await hello(r, { origin: LISTING, appId: "notes" })).toHaveProperty(
+			"address",
+		);
+		// What nobody lists is anyone's there.
+		expect(
+			await hello(r, { origin: "https://anyone.example", appId: "other" }),
+		).toHaveProperty("address");
+	});
+
+	test("an app no site lists is open to every origin the relay serves, but not to a site with a list of its own", async () => {
+		const r = relay({
+			allowedOrigins: [ALLOWED],
+			sites: [
+				{ origin: LISTING, apps: ["notes"] },
+				{ origin: PLAIN, name: "Plain" },
+			],
+		});
+		for (const origin of [ALLOWED, PLAIN]) {
+			expect(await hello(r, { origin, appId: "free" })).toMatchObject({
+				address: `${r.relay.url}/s/free/mcp`,
+			});
+		}
+		expect(await hello(r, { origin: LISTING, appId: "free" })).toMatchObject(
+			refusal(LISTING, "free"),
+		);
+		expect(r.relay.pagesOf("free")).toHaveLength(2);
+	});
+
+	test("two sites may list one app: both serve it", async () => {
+		const r = relay({
+			allowedOrigins: [ALLOWED],
+			sites: [
+				{ origin: LISTING, apps: ["shared", "notes"] },
+				{ origin: SECOND, apps: ["shared"] },
+			],
+		});
+		for (const origin of [LISTING, SECOND]) {
+			expect(await hello(r, { origin, appId: "shared" })).toHaveProperty(
+				"address",
+			);
+		}
+		expect(r.relay.pagesOf("shared")).toHaveLength(2);
+		expect(await hello(r, { origin: SECOND, appId: "notes" })).toMatchObject(
+			refusal(SECOND, "notes"),
+		);
+		expect(await hello(r, { origin: ALLOWED, appId: "shared" })).toMatchObject(
+			refusal(ALLOWED, "shared"),
+		);
+	});
+
+	test("any Firefox extension (moz-extension://*) serves what nobody lists, and no reserved app", async () => {
+		const firefox = "moz-extension://3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f";
+		const r = relay({
+			allowedOrigins: ["moz-extension://*"],
+			sites: [{ origin: LISTING, apps: ["notes"] }],
+		});
+		expect(await hello(r, { origin: firefox, appId: "notes" })).toMatchObject(
+			refusal(firefox, "notes"),
+		);
+		expect(await hello(r, { origin: firefox, appId: "free" })).toHaveProperty(
+			"address",
+		);
+	});
+
+	test("a refused page does not take the address of the page that holds it: no bye, no revocation, and its requests keep arriving", async () => {
+		const r = relay({
+			allowedOrigins: [ALLOWED],
+			sites: [{ origin: LISTING, apps: ["notes"] }],
+		});
+		const held = await hello(r, { origin: LISTING, appId: "notes" });
+		if (!("address" in held)) throw new Error("not connected");
+		const holder = held.tab;
+		const token = await tokenFor(r.store, holder.addressId, { app: "notes" });
+		// A page of an origin that may not serve the app says hello with the
+		// same secret, and asks for every grant of the address to be revoked.
+		for (const revokeAll of [false, true]) {
+			expect(
+				await hello(r, {
+					origin: ALLOWED,
+					appId: "notes",
+					secret: holder.secret,
+					revokeAll,
+				}),
+			).toMatchObject(refusal(ALLOWED, "notes"));
+		}
+		await waitFor(() => r.relay.sessionCount === 1, "the refused to close");
+		expect(holder.ws.readyState).toBe(WebSocket.OPEN);
+		expect(holder.received.filter((m) => m.type !== "ping")).toEqual([]);
+		expect(r.relay.pagesOf("notes")).toEqual([holder.addressId]);
+		expect(await r.store.listGrants(holder.addressId, Date.now())).toHaveLength(
+			1,
+		);
+		const res = await mcpPost(
+			held.address,
+			rpc(1, "tools/call", { name: "add", arguments: { a: 1, b: 2 } }),
+			{ token },
+		);
+		expect(res.status).toBe(200);
+		expect(await res.text()).toContain('"text":"3"');
+
+		// The same hello from the site itself does take the address: that the
+		// refused one did not is the check above, not a relay that never
+		// replaces.
+		const again = await hello(r, {
+			origin: LISTING,
+			appId: "notes",
+			secret: holder.secret,
+		});
+		expect(again).toHaveProperty("address");
+		expect(await holder.next("bye")).toMatchObject({ reason: "replaced" });
+		expect((await holder.closed).code).toBe(4005);
 	});
 });
 

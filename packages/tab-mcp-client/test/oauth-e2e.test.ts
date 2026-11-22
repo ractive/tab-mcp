@@ -1,11 +1,13 @@
 /**
  * The whole pairing flow end to end (iteration 3 acceptance criteria): the MCP SDK
- * client hits a page's address, gets 401 with `resource_metadata`, discovers
+ * client hits an app's address (`/s/<app>/mcp`, DEC-196), gets 401 with
+ * `resource_metadata`, discovers
  * the relay, registers through a Client ID Metadata Document served over
  * HTTPS by a local fixture, and opens `/authorize`. The page (this library,
  * with its default dialog in happy-dom) shows the code; the test types it like
- * a user. The client gets tokens, calls a tool, refreshes; reusing the old
- * refresh token revokes the grant, and the dialog follows along.
+ * a user: the code alone says which page is meant. The client gets tokens,
+ * calls a tool, refreshes; reusing the old refresh token revokes the grant,
+ * and the dialog follows along.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
@@ -102,6 +104,7 @@ beforeAll(async () => {
 			port: 0,
 			host: "127.0.0.1",
 			allowedOrigins: "*", // Bun's WebSocket sends no Origin
+			pageWaitMs: 0, // "the page is not open" at once (DEC-074)
 			store: new MemoryTokenStore(),
 			logger: quietLogger,
 		},
@@ -121,6 +124,9 @@ function sdkClient(): Client {
 		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
 	);
 }
+
+/** A pairing code as the relay sends it and the dialog shows it (DEC-196). */
+const CODE = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 
 async function until(condition: () => boolean, what: string): Promise<void> {
 	const deadline = Date.now() + 5000;
@@ -160,9 +166,12 @@ test("SDK client pairs with a tab through the code shown in its dialog, calls a 
 	const dialog = () => doc.querySelector(".tab-mcp-connect");
 	await until(() => tab.session !== undefined, "the session");
 	const address = tab.session?.address ?? "";
+	expect(address).toBe(`${relay.url}/s/test-page/mcp`);
 	const shownCode = () =>
 		dialog()?.querySelector(".tab-mcp-code-value")?.textContent ?? "";
-	await until(() => /^\d{6}$/.test(shownCode()), "a code in the dialog");
+	await until(() => CODE.test(shownCode()), "a code in the dialog");
+	// Shown as it came from the relay, dash and all.
+	expect(shownCode()).toBe(tab.pairingCode?.code ?? "none");
 	expect(
 		(
 			dialog()?.querySelector(
@@ -190,11 +199,16 @@ test("SDK client pairs with a tab through the code shown in its dialog, calls a 
 	expect(authorizationUrl.searchParams.get("resource")).toBe(address);
 	expect(authorizationUrl.searchParams.get("scope")).toBe("tools");
 
-	// The user: the page names the AI app and the page, the code is typed.
+	// The user: the relay's page names the AI app and the app of the address.
+	// Which page that is, it learns from the code: nothing of the page (its
+	// app name, its origin) is on it before.
 	const browser = new TestBrowser(relay.url);
 	const page = await browser.open(authorizationUrl.href);
 	expect(page.html).toContain("<strong>SDK test client</strong>");
-	expect(page.html).toContain("<strong>calculator</strong>");
+	expect(page.html).toContain("<strong>test-page</strong>");
+	expect(page.html).toContain('data-app="test-page"');
+	expect(page.html).not.toContain("calculator");
+	expect(page.html).not.toContain("page.example");
 	const done = await browser.submit(page, {
 		action: "connect",
 		code: shownCode(),
@@ -308,14 +322,14 @@ test("Disconnect in the dialog revokes the app's tokens at once", async () => {
 	);
 	const browser = new TestBrowser(relay.url);
 	const page = await browser.open(provider.authorizationUrl?.href ?? "");
-	// Bun's WebSocket sends no Origin; a browser always does.
-	expect(page.html).toContain(
-		"to tools from a page that did not say where it runs",
-	);
+	// Typed as people type: lower case, a space for the dash.
+	const shown = tab.pairingCode?.code ?? "";
+	expect(shown).toMatch(CODE);
 	const done = await browser.submit(page, {
 		action: "connect",
-		code: tab.pairingCode?.code ?? "",
+		code: ` ${shown.toLowerCase().replace("-", " ")} `,
 	});
+	expect(done.status).toBe(303);
 	await transport.finishAuth(new URL(done.location ?? "").searchParams);
 	const token = provider.tokens()?.access_token ?? "";
 	expect((await mcpPost(address, rpc(1, "tools/list"), { token })).status).toBe(
@@ -335,4 +349,88 @@ test("Disconnect in the dialog revokes the app's tokens at once", async () => {
 	(dialog() as HTMLDialogElement | null)?.close();
 	await dialogClosed;
 	tab.disconnect();
+}, 30_000);
+
+test("two pages of one app share the address; the code typed says which one the AI app gets (DEC-196)", async () => {
+	const clientId = cimd.serve(
+		"/sdk-client-3.json",
+		cimd.document(`${cimd.origin}/sdk-client-3.json`, {
+			client_name: "Third client",
+			redirect_uris: ["http://127.0.0.1/callback"],
+		}),
+	);
+	// Two browsers with the same app open: each has its own storage and secret.
+	const pages = await Promise.all(
+		["first", "second"].map(async (name) => {
+			const tab = newTab(`http://127.0.0.1:${relay.port}`, {
+				storage: new MemoryStorage(),
+			});
+			await tab.registerTool({
+				name: "who",
+				description: "Which page answers",
+				execute: () => name,
+			});
+			const session = await tab.connect({ resume: true });
+			tab.startPairing();
+			await until(() => tab.pairingCode !== undefined, `the code of ${name}`);
+			return { tab, session };
+		}),
+	);
+	const [first, second] = pages as [
+		(typeof pages)[number],
+		(typeof pages)[number],
+	];
+	try {
+		const address = second.session.address;
+		expect(first.session.address).toBe(address);
+		expect(first.tab.state).toBe("connected");
+		expect(first.tab.pairingCode?.code).not.toBe(second.tab.pairingCode?.code);
+
+		const provider = new TestProvider(clientId);
+		const transport = new StreamableHTTPClientTransport(new URL(address), {
+			authProvider: provider,
+		});
+		await expect(sdkClient().connect(transport)).rejects.toBeInstanceOf(
+			UnauthorizedError,
+		);
+		const browser = new TestBrowser(relay.url);
+		const page = await browser.open(provider.authorizationUrl?.href ?? "");
+		const done = await browser.submit(page, {
+			action: "connect",
+			code: second.tab.pairingCode?.code ?? "",
+		});
+		expect(done.status).toBe(303);
+		await transport.finishAuth(new URL(done.location ?? "").searchParams);
+		const token = provider.tokens()?.access_token ?? "";
+
+		// The grant is the second page's alone; the first one's code is still its own.
+		await until(() => second.tab.grants.length === 1, "grant.added");
+		expect(second.tab.grants[0]?.client.name).toBe("Third client");
+		expect(first.tab.grants).toEqual([]);
+		const call = await mcpPost(
+			address,
+			rpc(1, "tools/call", { name: "who", arguments: {} }),
+			{ token },
+		);
+		expect(call.status).toBe(200);
+		expect(await call.text()).toContain('"text":"second"');
+
+		// The second page closes: its AI app does not fall through to the first.
+		second.tab.disconnect();
+		await until(
+			() => relay.pagesOf("test-page").length === 1,
+			"the second page to leave",
+		);
+		const after = await mcpPost(
+			address,
+			rpc(2, "tools/call", { name: "who", arguments: {} }),
+			{ token },
+		);
+		const text = await after.text();
+		expect(text).not.toContain('"text":"first"');
+		expect(text).toContain("The page is not open");
+	} finally {
+		first.tab.disconnect();
+		second.tab.disconnect();
+	}
 }, 30_000);

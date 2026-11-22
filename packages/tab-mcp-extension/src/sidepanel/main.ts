@@ -25,6 +25,7 @@ import {
 	cardView,
 	confirms,
 	introText,
+	libraryNotes,
 	noAccessText,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
@@ -32,7 +33,9 @@ import {
 	switchShown,
 	webmcpNote,
 } from "./card.ts";
+import { fillPanel } from "./fill.ts";
 import {
+	expiredText,
 	isUnavailable,
 	questionAnnouncement,
 	questionCard,
@@ -83,8 +86,11 @@ const disconnectArmed = new Map<
 >();
 /** The user's flip of the AI access switch, while the worker acts on it. */
 let switchIntent: SwitchIntent | undefined;
-/** "New address" with apps connected asks first: a second click makes it. */
-let newAddressArmed = false;
+/** In the code's place until the relay sends one: as wide as a code. */
+const CODE_PLACEHOLDER = "––––-––––";
+
+/** "Disconnect all apps" with apps connected asks first: a second click does it. */
+let disconnectAllArmed = false;
 /** The address the setup steps were made for. */
 let stepsFor = "";
 
@@ -192,12 +198,8 @@ function showConnection(s: PanelState): void {
 	setText(
 		$("replaced-text"),
 		s.replaced?.sibling
-			? "Opened elsewhere in this browser: the address is in use there."
-			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.",
-	);
-	$("grants").setAttribute(
-		"aria-label",
-		s.status === "on" ? "Connected AI apps" : "Paired AI apps",
+			? "Opened elsewhere in this browser: your AI apps use that one now."
+			: "Another tab or program took over tab-mcp's connection: your AI apps may now use it instead. “Disconnect all apps” ends that.",
 	);
 	// A keyboard user's focus stays on the app's Disconnect, which is made
 	// anew: the second Enter of the two-step Disconnect must find it.
@@ -214,7 +216,7 @@ function showConnection(s: PanelState): void {
 			app.className = "app";
 			const dot = document.createElement("span");
 			// Green only while connected: off, connecting or retrying the
-			// apps stay paired, not connected.
+			// apps keep their access but cannot reach the tab now.
 			dot.className = s.status === "on" ? "dot on" : "dot";
 			dot.setAttribute("aria-hidden", "true");
 			const name = document.createElement("span");
@@ -259,14 +261,12 @@ function showConnection(s: PanelState): void {
 	}
 	$("setup").hidden = view.address === "";
 	const code = s.code;
-	setText(
-		$("code"),
-		code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`,
-	);
+	// As the relay sends it (`XXXX-XXXX`, DEC-196): grouped already.
+	setText($("code"), code ?? CODE_PLACEHOLDER);
 	($("copy-code") as HTMLButtonElement).disabled = code === undefined;
-	if (s.grants.length === 0) newAddressArmed = false;
-	$("new-address-note").hidden = !newAddressArmed;
-	$("new-address").toggleAttribute("data-armed", newAddressArmed);
+	if (s.grants.length === 0) disconnectAllArmed = false;
+	$("disconnect-all-note").hidden = !disconnectAllArmed;
+	$("disconnect-all").toggleAttribute("data-armed", disconnectAllArmed);
 }
 
 // --- Questions ---
@@ -293,8 +293,14 @@ let movedUntil = 0;
 /**
  * Until when the same controls ignore a click after the questions' dialog
  * closed: the second click of a double click on its last "Allow once" lands
- * on the panel under it. Not shown: nothing moved, and the switches would
- * flicker after every answer.
+ * on the panel under it. Not shown, as the switches would flicker after every
+ * answer. Where scrollbars take room (Linux, Windows) and the panel does not
+ * scroll, the panel can also move sideways by a scrollbar's width at the
+ * close: it keeps a scrollbar while a question waits, so the question keeps
+ * its width (style.css). That moves right-aligned controls (an AI app's
+ * Disconnect, the AI access switch, the tools' switches) by that much; under
+ * the dialog's buttons, at its left, lies text that does not move, and the
+ * tools' switches take no click until this passes.
  */
 let quietUntil = 0;
 const quiet = (): boolean => Date.now() < quietUntil;
@@ -327,7 +333,9 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 				{ ...q, args: args.get(q.id) ?? "" },
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
-			$("questions").append(card);
+			// Above the focus hint, which then comes and goes under the
+			// questions and moves none of their buttons.
+			$("focus-hint").before(card);
 			const now = Date.now();
 			cards.set(q.id, { card, shownAt: now, question: q });
 			// A short line for screen readers, not the card with its arguments
@@ -415,7 +423,7 @@ function expiredNotice(q: QuestionSummary): HTMLElement {
 	const notice = document.createElement("div");
 	notice.className = "question-notice";
 	const text = document.createElement("p");
-	text.textContent = `Not answered in time: ${q.tool} did not run.`;
+	text.textContent = expiredText(q);
 	const dismiss = document.createElement("button");
 	dismiss.type = "button";
 	dismiss.className = "quiet small";
@@ -493,7 +501,7 @@ function badge(text: string, kind = ""): HTMLElement {
 
 /**
  * The tool's "Always allow" switch, for this site: on, it runs without
- * asking, for every paired AI app; off (the default), it asks before each
+ * asking, for every connected AI app; off (the default), it asks before each
  * call. A switch with a label that stays, not a badge that changes its text
  * (EQ 9, EQ 11). On grants, as a permission switch does (DEC-184).
  */
@@ -587,6 +595,12 @@ function showTab(s: PanelState): void {
 			? noAccessText(tab.noAccess, s.allSites)
 			: (tab?.access ?? ""),
 	);
+	// A page with the client library (DEC-207): one quiet line, and one
+	// that says so when an app is connected to it both ways.
+	const library = libraryNotes(tab, s.grants);
+	$("tab-library").hidden = !library.builtIn;
+	setText($("tab-both"), library.both ?? "");
+	$("tab-both").hidden = library.both === undefined;
 	// No tools: what still works, and where WebMCP comes from (EQ 7).
 	const note = webmcpNote(tab);
 	$("no-tools").hidden = note !== "no-tools";
@@ -611,7 +625,7 @@ function showTab(s: PanelState): void {
 	$("always-allow-note").hidden = !allowAll.shown;
 	setText($("always-allow-note"), allowAll.shown ? alwaysAllowNote(scope) : "");
 	// No tooltip (DEC-160): the line under the switch names the site and
-	// "every paired AI app"; the count is the list below.
+	// "every connected AI app"; the count is the list below.
 	button.setAttribute("aria-label", allowAllLabel(allowAll, scope));
 	setAvailable(button, Date.now() >= movedUntil);
 	// The list is made anew: a keyboard user's focus goes back to the same
@@ -632,11 +646,35 @@ function showTab(s: PanelState): void {
 			?.focus();
 }
 
+/** The "Fill in the code for me" switch under "Connect your AI app" (DEC-203, DEC-210). */
+const fill = fillPanel(
+	{
+		box: $("fill"),
+		text: $("fill-text"),
+		label: $("fill-label"),
+		toggle: $("fill-switch") as HTMLInputElement,
+		always: $("fill-always"),
+		alwaysList: $("fill-always-list"),
+	},
+	(on, id) => send({ type: "set-fill", on, id }),
+	(text) => problem(text),
+	(host) => send({ type: "forget-fill-host", host }),
+);
+
+/** The last fill without a question (DEC-213): never silent. */
+function showFillNotice(s: PanelState): void {
+	const notice = $("fill-notice");
+	notice.hidden = s.fillNotice === undefined;
+	setText(notice, s.fillNotice?.text ?? "");
+}
+
 function show(s: PanelState): void {
 	const relayChanged = state?.relay !== s.relay;
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
+	showFillNotice(s);
+	fill.show(s);
 	showQuestions(s.questions, s.expired);
 	showTab(s);
 }
@@ -727,19 +765,19 @@ $("ai-switch").addEventListener("change", () => {
 $("add-app").addEventListener("click", () => addApp(true));
 $("pair-done").addEventListener("click", () => addApp(false));
 
-$("new-address").addEventListener("click", () => {
-	if ((state?.grants.length ?? 0) > 0 && !newAddressArmed) {
-		newAddressArmed = true;
-		$("new-address-note").hidden = false;
-		$("new-address").toggleAttribute("data-armed", true);
+$("disconnect-all").addEventListener("click", () => {
+	if ((state?.grants.length ?? 0) > 0 && !disconnectAllArmed) {
+		disconnectAllArmed = true;
+		$("disconnect-all-note").hidden = false;
+		$("disconnect-all").toggleAttribute("data-armed", true);
 		return;
 	}
-	newAddressArmed = false;
-	$("new-address").toggleAttribute("data-armed", false);
-	send({ type: "new-address" });
+	disconnectAllArmed = false;
+	$("disconnect-all").toggleAttribute("data-armed", false);
+	send({ type: "disconnect-all" });
 });
-$("replaced-new-address").addEventListener("click", () =>
-	send({ type: "new-address" }),
+$("replaced-disconnect-all").addEventListener("click", () =>
+	send({ type: "disconnect-all" }),
 );
 
 $("copy").addEventListener("click", () =>

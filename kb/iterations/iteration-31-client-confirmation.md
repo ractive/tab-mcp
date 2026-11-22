@@ -45,26 +45,26 @@ confirmation, the served port).
 - [x] One confirmation shown at a time per document; the others wait, a cancelled one
       leaves the queue; "N more calls are waiting after this one."
 - [x] The delay starts again when another dialog closes over the confirmation
-- [x] Tests: `ui.test.ts`, `browser.test.ts` (headless Chrome)
+- [x] Tests: `ui.test.ts`, `page.browser.test.ts` (headless Chrome)
 
 ## CU 2: Allow without the arguments seen
 
 - [x] The box grows to `min(50vh, 24rem)`; when it overflows, Allow and Always allow
       wait until it was scrolled to its end, with a note and `tabindex="0"`
-- [x] Tests: `ui.test.ts` (stubbed layout), `browser.test.ts` (real layout)
+- [x] Tests: `ui.test.ts` (stubbed layout), `page.browser.test.ts` (real layout)
 
 ## CU 3, CU 8: page rules reach into the dialogs
 
 - [x] `color: inherit` on every element of a dialog; buttons reset `width`,
       `text-transform`, `letter-spacing`; `pointer-events: auto` on the dialog
 - [x] Shadow root considered and not taken (styling contract, iteration J; DEC-135)
-- [x] Tests: `browser.test.ts` with a dark page and `body { pointer-events: none }`
+- [x] Tests: `page.browser.test.ts` with a dark page and `body { pointer-events: none }`
 
 ## CU 13: a stray key refuses
 
 - [x] Before the delay has run out, Enter and Space on a button and Escape are ignored;
       clicks still answer
-- [x] Tests: `ui.test.ts`, `browser.test.ts` (a real Enter before and after the delay)
+- [x] Tests: `ui.test.ts`, `page.browser.test.ts` (a real Enter before and after the delay)
 
 ## CU 14: screen readers
 
@@ -77,7 +77,7 @@ Not done: an announcement when Allow becomes enabled.
 
 - [x] `serve` closes on the port's `close` event where the port has it
 - [x] Tests: `serve.test.ts` (Bun's `MessagePort`, an `EventTarget` port),
-      `serve-browser.test.ts` (Chrome with `MessagePortCloseEvent`: the chat's frame is
+      `serve.browser.test.ts` (Chrome with `MessagePortCloseEvent`: the chat's frame is
       removed, the open confirmation closes, the call ends `cancelled`)
 
 Chrome 151 does not fire the event without that Blink feature, so the README keeps

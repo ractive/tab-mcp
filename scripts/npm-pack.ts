@@ -18,6 +18,7 @@
 import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseArgs } from "node:util";
+import { packagedSkill } from "../packages/tab-mcp-client/scripts/skill.ts";
 
 /** The exact repository URL npm compares with the provenance statement. */
 export const REPOSITORY_URL = "git+https://github.com/ractive/tab-mcp.git";
@@ -45,6 +46,11 @@ interface PackageSpec {
 	declarationsFrom: string;
 	/** Source files (relative to `declarationsFrom`) that ship no `.d.ts`. */
 	noDeclarations?: string[];
+	/**
+	 * Files the build makes from a source elsewhere in the repository, as
+	 * they must be in the tarball: path in the package to text.
+	 */
+	copies?: (repo: string, version: string) => Promise<Map<string, string>>;
 }
 
 /** Packages this script knows. */
@@ -56,11 +62,16 @@ export const PACKAGES: Record<string, PackageSpec> = {
 		tagPrefix: "client-v",
 		exports: {
 			".": { types: "./index.d.ts", default: "./index.js" },
+			"./allowed": { types: "./allowed.d.ts", default: "./allowed.js" },
+			"./extension": { types: "./extension.d.ts", default: "./extension.js" },
 			"./react": { types: "./react.d.ts", default: "./react.js" },
 			"./setup": { types: "./setup.d.ts", default: "./setup.js" },
+			"./strings": { types: "./strings.d.ts", default: "./strings.js" },
 			"./tunnel": { types: "./tunnel.d.ts", default: "./tunnel.js" },
 			"./visible": { types: "./visible.d.ts", default: "./visible.js" },
 			"./cdn": "./cdn/tab-mcp-client.min.js",
+			"./cdn/allowed": "./cdn/allowed.min.js",
+			"./cdn/strings": "./cdn/strings.min.js",
 		},
 		types: "./index.d.ts",
 		peerDependencies: { react: ">=18.3.0 <20" },
@@ -81,9 +92,19 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"tunnel.js.map",
 			"visible.js",
 			"visible.js.map",
+			// The tools that run without asking (DEC-200).
+			"allowed.js",
+			"allowed.js.map",
+			// For browser extensions that are a tab-mcp page (DEC-206).
+			"extension.js",
+			"extension.js.map",
+			// The English texts, for translators and `./react` (DEC-208).
+			"strings.js",
+			"strings.js.map",
 			// Chunks of this name: the escaping, shared by the dialogs and
 			// `./visible`, the setup steps, shared by the connect dialog and
-			// `./setup`, and what the two dialogs share (iteration 38).
+			// `./setup`, what the two dialogs share (iteration 38), and the
+			// allowances, shared by the dialogs, `./allowed` and `./react` (DEC-200).
 			"index-[hash].js",
 			"index-[hash].js.map",
 			"connection-[hash].js",
@@ -105,10 +126,25 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"cdn/connect-[hash].min.js.map",
 			"cdn/webmcp-[hash].min.js",
 			"cdn/webmcp-[hash].min.js.map",
-			"cdn/index-[hash].min.js",
-			"cdn/index-[hash].min.js.map",
+			// `./allowed` beside the CDN core, in the same build (DEC-200).
+			"cdn/allowed.min.js",
+			"cdn/allowed.min.js.map",
+			// `./strings` beside it, in the same build (DEC-208).
+			"cdn/strings.min.js",
+			"cdn/strings.min.js.map",
+			// Chunks of this name: what the dialogs share, and the allowances,
+			// shared by the dialogs and `allowed.min.js`. Named after the CDN
+			// core's entry (`scripts/cdn/tab-mcp-client.ts`) since that build has
+			// two entries (DEC-200).
+			"cdn/tab-mcp-client-[hash].min.js",
+			"cdn/tab-mcp-client-[hash].min.js.map",
+			// The agent skill, made from plugins/tab-mcp/skills/tab-mcp (DEC-216).
+			"skill/SKILL.md",
+			"skill/references/react.md",
+			"skill/references/sign-in.md",
 		],
 		declarationsFrom: "src",
+		copies: packagedSkill,
 	},
 	relay: {
 		name: "@ractive-ch/tab-mcp",
@@ -135,7 +171,10 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"testing.js.map",
 		],
 		declarationsFrom: "src",
-		noDeclarations: ["main.ts"],
+		// main.ts has no exports. code-field-page.ts is the pairing page's
+		// browser script (DEC-211), checked with the DOM by its own tsconfig
+		// and shipped only as the text in code-field-script.ts.
+		noDeclarations: ["main.ts", "oauth/code-field-page.ts"],
 	},
 };
 
@@ -218,6 +257,22 @@ export function checkManifest(
 		}
 	}
 	return problems;
+}
+
+/**
+ * Every file the tarball must hold, sorted: `files` and a `.d.ts` per source
+ * file under `declarationsFrom` (`repo` is the repository root).
+ */
+export function expectedFiles(repo: string, spec: PackageSpec): string[] {
+	const declarations = readdirSync(
+		join(repo, spec.workspace, spec.declarationsFrom),
+		{ recursive: true, encoding: "utf8" },
+	)
+		.map((f) => f.split(sep).join("/"))
+		.filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+		.filter((f) => !spec.noDeclarations?.includes(f))
+		.map((f) => f.replace(/\.ts$/, ".d.ts"));
+	return [...spec.files, ...declarations].sort();
 }
 
 /** One package in `npm pack --json`'s report. */
@@ -305,15 +360,7 @@ async function main() {
 		problems.push(`packed ${packed.name}@${packed.version}`);
 
 	// The file list, with chunk hashes normalised and declarations derived.
-	const declarations = readdirSync(join(workspace, spec.declarationsFrom), {
-		recursive: true,
-		encoding: "utf8",
-	})
-		.map((f) => f.split(sep).join("/"))
-		.filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-		.filter((f) => !spec.noDeclarations?.includes(f))
-		.map((f) => f.replace(/\.ts$/, ".d.ts"));
-	const expected = [...spec.files, ...declarations].sort();
+	const expected = expectedFiles(root, spec);
 	const actual = packed.files.map((f) => normalizeChunk(f.path)).sort();
 	const missing = expected.filter((f) => !actual.includes(f));
 	const extra = actual.filter((f) => !expected.includes(f));
@@ -333,6 +380,13 @@ async function main() {
 			(p) => `tarball: ${p}`,
 		),
 	);
+	// Files made from a source elsewhere: the tarball's equal it.
+	for (const [path, text] of (await spec.copies?.(root, version)) ?? []) {
+		const copy = Bun.spawnSync(["tar", "-xzOf", tarball, `package/${path}`]);
+		if (copy.exitCode !== 0) problems.push(`cannot read ${path}`);
+		else if (copy.stdout.toString() !== text)
+			problems.push(`${path} differs from its source`);
+	}
 	if (problems.length > 0) fail(problems);
 
 	const outputs = {

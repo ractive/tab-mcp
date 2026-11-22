@@ -1,0 +1,563 @@
+/**
+ * The WebMCP mirror (iteration 25) in Chrome for Testing with
+ * `--enable-features=WebMCP`: the library, built as for a page, on pages
+ * served through the DevTools Protocol on https://webmcp.test (as in
+ * `test/webmcp-spike/`: no server, no network; `@mcp-b/global` from
+ * `test/vendor/`). Only the contract the unit tests' fake native
+ * `ModelContext` stands for (webmcp.test.ts): what Chrome lists and hands an
+ * agent, its duplicate rule, a polyfill over it, a call without `onConfirm`
+ * (no confirmation chunk loaded: the built bundle), the abort of
+ * `registerTool()`'s signal, `allow="tools"` in a frame,
+ * and `exposedTo` across origins (iteration 50).
+ * An agent's calls go through the native `executeTool()`. Needs Chrome for
+ * Testing 156 or newer (`CHROME_PATH`, or the pinned one in Puppeteer's
+ * cache, test/browsers.ts): required in CI, skipped elsewhere without it.
+ */
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { join } from "node:path";
+import { browserTests } from "../../../test/browser-gate.ts";
+import { step } from "../../../test/step.ts";
+import {
+	Browser,
+	chromeMajor,
+	findChromeForTesting,
+	type Page,
+	type Served,
+} from "../../../test/webmcp-spike/browser.ts";
+
+const MIN_MAJOR = 156;
+const found = browserTests ? findChromeForTesting() : undefined;
+const chrome =
+	found !== undefined && chromeMajor(found) >= MIN_MAJOR ? found : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
+	throw new Error(
+		`Chrome for Testing ${MIN_MAJOR} or newer is needed for the WebMCP browser test in CI`,
+	);
+
+const SITE = "https://webmcp.test";
+const OTHER = "https://other.test";
+/** Served from the vendored copy (test/vendor/): no download. */
+const POLYFILL = "https://unpkg.com/@mcp-b/global@6.0.3/dist/index.iife.js";
+const VENDORED = join(
+	import.meta.dir,
+	"vendor/mcp-b-global-6.0.3/index.iife.js",
+);
+const POLYFILL_SRI =
+	"sha384-MjmUqfRCVKBDYdxv/Rlj1fc1tRkKQdtCI04fbUUMgSL8uJf1ydjQep7E4G43bnQn";
+
+/**
+ * The test page: the library with `webmcp: true`, its
+ * tools, and what the harness reads. `?native=<name>` registers a tool of
+ * that name natively before the library does; `?poly` loads `@mcp-b/global`
+ * first; `?default` has no `onConfirm` (the library's own behaviour). `agent()`
+ * calls a tool as an agent does, through the native `executeTool()`, which
+ * hands back the result as JSON text.
+ */
+const PAGE = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>WebMCP mirror</title>
+POLYFILL_TAG
+</head><body>
+<script type="module">
+const q = new URLSearchParams(location.search);
+window.warnings = [];
+const warn = console.warn;
+console.warn = (...args) => { warnings.push(args.map(String).join(" ")); warn(...args); };
+const native = Object.getOwnPropertyDescriptor(Document.prototype, "modelContext")?.get?.call(document);
+if (q.has("native")) await native.registerTool({ name: q.get("native"), description: "The page's own", execute: () => "page" });
+const { TabMcp } = await import("/lib/index.js");
+window.calls = [];
+window.asked = [];
+window.answer = false;
+const mcp = new TabMcp({
+	relay: "https://relay.test",
+	server: { name: "webmcp-test", version: "1.0.0" },
+	storage: null,
+	alwaysAllow: true,
+	webmcp: true,
+	...(q.has("default") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
+});
+mcp.addEventListener("toolcall", (e) => calls.push({ start: e.detail.tool, client: e.detail.client }));
+mcp.addEventListener("toolcallend", (e) => calls.push({ end: e.detail.tool, outcome: e.detail.outcome, client: e.detail.client }));
+const add = {
+	name: "add", title: "Add", description: "Adds two numbers",
+	inputSchema: { type: "object", properties: { a: { type: "number" }, b: { type: "number" } }, required: ["a", "b"] },
+	annotations: { readOnlyHint: true, destructiveHint: false },
+	execute: ({ a, b }, { client }) => ({ sum: a + b, caller: client.kind }),
+};
+window.addControl = new AbortController();
+await mcp.registerTool(add, { signal: addControl.signal });
+await mcp.registerTool({ name: "wipe", description: "Wipes the memory", annotations: { consequentialHint: true }, execute: () => "wiped" });
+await mcp.registerTool({ name: "wipe_named", description: "Wipes, offered in WebMCP", annotations: { consequentialHint: true }, execute: () => "wiped" }, { callers: ["relay", "webmcp"] });
+await mcp.registerTool({ name: "hidden", description: "Never in WebMCP", annotations: { readOnlyHint: true }, execute: () => 1 }, { callers: ["relay"] });
+await mcp.registerTool({
+	name: "refused", description: "A schema only the validator refuses",
+	inputSchema: { type: "object", properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } }, $defs: { s: { type: "string" } } },
+	execute: () => "ran",
+});
+if (q.has("expose")) await mcp.registerTool({ name: "exposed_wipe", description: "Wipes, exposed to other.test", annotations: { consequentialHint: true }, execute: () => "wiped" }, { exposedTo: ["https://other.test"] });
+window.mcp = mcp;
+window.native = native;
+window.nativeNames = async () => (await native.getTools()).map((t) => t.name).sort();
+window.agent = async (name, input, cancelAfterMs) => {
+	const tool = (await native.getTools()).find((t) => t.name === name);
+	if (tool === undefined) return { ok: false, error: "not listed" };
+	const controller = new AbortController();
+	if (cancelAfterMs !== undefined) setTimeout(() => controller.abort(), cancelAfterMs);
+	try {
+		return { ok: true, value: await native.executeTool(tool, input, { signal: controller.signal }) };
+	} catch (e) {
+		return { ok: false, error: e.name };
+	}
+};
+window.ready = true;
+</script>
+FRAMES
+</body></html>`;
+
+/** A cross-origin frame with the library, with or without `allow="tools"`. */
+const FRAME = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+const warnings = [];
+console.warn = (...args) => warnings.push(args.map(String).join(" "));
+const { TabMcp } = await import("${SITE}/lib/index.js");
+const mcp = new TabMcp({ relay: "https://relay.test", server: { name: "frame", version: "1.0.0" }, storage: null, webmcp: true });
+await mcp.registerTool({ name: "frame_" + location.search.slice(1), description: "d", annotations: { readOnlyHint: true }, execute: () => 1 });
+const nativeNames = async () => { try { return (await document.modelContext.getTools()).map((t) => t.name); } catch { return null; } };
+setTimeout(async () => parent.postMessage({ frame: location.search.slice(1), tools: mcp.tools, warnings, native: await nativeNames() }, "*"), 200);
+</script></body></html>`;
+
+/**
+ * A cross-origin frame (`allow="tools"`) that looks for the top page's
+ * `exposed_wipe` with `getTools({ fromOrigins })` and calls it, as script of
+ * an origin named in `exposedTo` could.
+ */
+const CALLER = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+const mc = document.modelContext;
+const report = { fromTop: null, own: null, call: null };
+try {
+	let tool;
+	for (const end = Date.now() + 5000; Date.now() < end; ) {
+		const listed = await mc.getTools({ fromOrigins: ["${SITE}"] });
+		report.fromTop = listed.map((t) => t.name);
+		tool = listed.find((t) => t.name === "exposed_wipe");
+		if (tool) break;
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	report.own = (await mc.getTools()).map((t) => t.name);
+	if (tool) {
+		try { report.call = { ok: true, value: await mc.executeTool(tool, {}) }; }
+		catch (e) { report.call = { ok: false, error: e.name + ": " + e.message }; }
+	}
+} catch (e) { report.error = e.name + ": " + e.message; }
+parent.postMessage({ caller: report }, "*");
+</script></body></html>`;
+
+let browser: Browser | undefined;
+const lib = new Map<string, string>();
+let polyfill: Uint8Array | undefined;
+
+async function serve(url: string): Promise<Served> {
+	const { origin, pathname, searchParams } = new URL(url);
+	if (url === POLYFILL) {
+		polyfill ??= await Bun.file(VENDORED).bytes();
+		return {
+			status: 200,
+			headers: {
+				"content-type": "text/javascript",
+				"access-control-allow-origin": "*",
+			},
+			body: polyfill,
+		};
+	}
+	const code = origin === SITE ? lib.get(pathname) : undefined;
+	if (code !== undefined)
+		return {
+			status: 200,
+			headers: {
+				"content-type": "text/javascript",
+				"access-control-allow-origin": "*",
+			},
+			body: code,
+		};
+	if (pathname === "/caller.html")
+		return {
+			status: 200,
+			headers: { "content-type": "text/html; charset=utf-8" },
+			body: CALLER,
+		};
+	if (pathname === "/frame.html")
+		return {
+			status: 200,
+			headers: { "content-type": "text/html; charset=utf-8" },
+			body: FRAME,
+		};
+	if (origin !== SITE || pathname !== "/")
+		return { status: 404, body: "not found" };
+	const html = PAGE.replace(
+		"POLYFILL_TAG",
+		searchParams.has("poly")
+			? `<script src="${POLYFILL}" integrity="${POLYFILL_SRI}" crossorigin="anonymous"></script>`
+			: "",
+	).replace(
+		"FRAMES",
+		searchParams.has("frames")
+			? `<script>window.frames_ = []; addEventListener("message", (e) => { if (e.data?.frame) frames_.push(e.data); });</script>
+<iframe src="${OTHER}/frame.html?plain"></iframe><iframe allow="tools" src="${OTHER}/frame.html?allowed"></iframe>`
+			: searchParams.has("expose")
+				? `<script>window.caller_ = null; addEventListener("message", (e) => { if (e.data?.caller) caller_ = e.data.caller; });</script>
+<iframe allow="tools" src="${OTHER}/caller.html"></iframe>`
+				: "",
+	);
+	return {
+		status: 200,
+		headers: { "content-type": "text/html; charset=utf-8" },
+		body: html,
+	};
+}
+
+beforeAll(async () => {
+	if (chrome === undefined) return;
+	const build = await Bun.build({
+		entrypoints: [join(import.meta.dir, "../src/index.ts")],
+		target: "browser",
+		format: "esm",
+		splitting: true,
+		naming: { entry: "[name].js", chunk: "[name]-[hash].js" },
+	});
+	if (!build.success) throw new Error(build.logs.join("\n"));
+	for (const o of build.outputs)
+		lib.set(`/lib/${o.path.replace(/^.*\//, "")}`, await o.text());
+	browser = await Browser.launch(chrome, {
+		args: ["--enable-features=WebMCP"],
+		serve,
+	});
+}, 30_000);
+
+afterAll(async () => {
+	await browser?.close();
+});
+
+async function open(query = ""): Promise<Page> {
+	const page = await (browser as Browser).newPage(`${SITE}/${query}`);
+	for (let waited = 0; !(await page.eval<boolean>("window.ready === true")); ) {
+		waited += 50;
+		if (waited > 10_000) throw new Error(`${query} was not ready`);
+		await Bun.sleep(50);
+	}
+	await Bun.sleep(20); // the registrations run a microtask later
+	return page;
+}
+
+const on = test.skipIf(chrome === undefined);
+
+on(
+	"the mirror as Chrome has it: what getTools() lists, what an agent reads, a native duplicate, @mcp-b/global over native WebMCP, a call without onConfirm, unmirroring and registering again (DEC-209, DEC-215, WM 4-6)",
+	async () => {
+		await step(
+			"getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
+			async () => {
+				const page = await open();
+				try {
+					expect(await page.eval("nativeNames()")).toEqual([
+						"add",
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					expect(
+						await page.eval(
+							`native.getTools().then((ts) => { const t = ts.find((x) => x.name === "add"); return { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }; })`,
+						),
+					).toEqual({
+						title: "Add",
+						description: "Adds two numbers",
+						inputSchema: {
+							type: "object",
+							properties: { a: { type: "number" }, b: { type: "number" } },
+							required: ["a", "b"],
+						},
+						annotations: {
+							consequentialHint: false,
+							debugging: false,
+							readOnlyHint: true,
+							untrustedContentHint: false,
+						},
+					});
+					// The page is not marked: <html data-tab-mcp-webmcp> is gone.
+					expect(
+						await page.eval(
+							`document.documentElement.hasAttribute("data-tab-mcp-webmcp")`,
+						),
+					).toBe(false);
+					expect(await page.eval("mcp.tools")).toEqual([
+						"add",
+						"wipe",
+						"wipe_named",
+						"hidden",
+						"refused",
+					]);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"results as the agent reads them: nothing, an MCP result, a destructive tool (WM 4, WM 5, WM 6)",
+			async () => {
+				const page = await open();
+				try {
+					await page.eval(`(async () => {
+					await mcp.registerTool({ name: "noop", description: "Returns nothing", annotations: { readOnlyHint: true }, execute: () => {} });
+					await mcp.registerTool({ name: "structured", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "n is 1" }], structuredContent: { n: 1 } }) });
+					await mcp.registerTool({ name: "picture", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "The diagram:" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] }) });
+					await mcp.registerTool({ name: "remove", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" });
+					await mcp.registerTool({ name: "remove_named", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" }, { callers: ["relay", "webmcp"] });
+					await mcp.registerTool({ name: "typed", description: "d", annotations: { readOnlyHint: true }, outputSchema: { type: "object", properties: { n: { type: "number" } } }, execute: () => ({ n: 2 }) });
+				})()`);
+					await Bun.sleep(50);
+					// Chrome 156 passes a string on as it is (the draft would JSON-encode
+					// it): what matters is that the call succeeds.
+					expect(await page.eval(`agent("noop", {})`)).toEqual({
+						ok: true,
+						value: "Done.",
+					});
+					expect(await page.eval(`agent("structured", {})`)).toEqual({
+						ok: true,
+						value: '{"n":1}',
+					});
+					const picture = await page.eval<{ ok: boolean; value: string }>(
+						`agent("picture", {})`,
+					);
+					expect(picture.ok).toBe(true);
+					expect(picture.value).toContain(
+						"[image content left out: WebMCP results are text.]",
+					);
+					expect(picture.value).not.toContain("iVBORw0KGgo");
+					expect(await page.eval(`agent("typed", {})`)).toEqual({
+						ok: true,
+						value: '{"n":2}',
+					});
+					// Destructive: mirrored with or without callers, as consequential (DEC-209).
+					const names = await page.eval<string[]>("nativeNames()");
+					expect(names).toContain("remove");
+					expect(names).toContain("remove_named");
+					for (const name of ["remove", "remove_named"])
+						expect(
+							await page.eval(
+								`native.getTools().then((ts) => ts.find((t) => t.name === ${JSON.stringify(name)}).annotations.consequentialHint)`,
+							),
+						).toBe(true);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"a native duplicate in either order keeps its owner",
+			async () => {
+				const page = await open("?native=add");
+				try {
+					// The page's own came first: the mirror warns, the relay still has it.
+					expect(await page.eval(`agent("add", { a: 1, b: 2 })`)).toEqual({
+						ok: true,
+						value: "page",
+					});
+					expect(await page.eval("warnings.length")).toBe(1);
+					expect(await page.eval("warnings[0]")).toContain(
+						"add is not offered through WebMCP",
+					);
+					expect(await page.eval("mcp.tools")).toContain("add");
+					// The mirror came first: the page's own registration fails.
+					expect(
+						await page.eval(
+							`native.registerTool({ name: "wipe_named", description: "d", execute: () => 1 }).then(() => "ok", (e) => e.name)`,
+						),
+					).toBe("InvalidStateError");
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"with @mcp-b/global over native WebMCP, the tools go to the native object",
+			async () => {
+				const page = await open("?poly");
+				try {
+					expect(
+						await page.eval(
+							`Object.hasOwn(document, "modelContext") && document.modelContext !== native`,
+						),
+					).toBe(true);
+					expect(await page.eval("nativeNames()")).toEqual([
+						"add",
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					expect(await page.eval(`agent("add", { a: 2, b: 2 })`)).toEqual({
+						ok: true,
+						value: '{"sum":4,"caller":"webmcp"}',
+					});
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"without onConfirm a tool that asks runs for an agent in the browser: no dialog, the confirmation's chunk not loaded (DEC-215)",
+			async () => {
+				const page = await open("?default");
+				try {
+					expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
+						ok: true,
+						value: "wiped",
+					});
+					expect(await page.eval(`agent("wipe", {})`)).toEqual({
+						ok: true,
+						value: "wiped",
+					});
+					expect(
+						await page.eval(`document.querySelector("dialog") === null`),
+					).toBe(true);
+					expect(
+						await page.eval(
+							`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.startsWith("/lib/confirm-"))`,
+						),
+					).toEqual([]);
+					// The page's record still lists the calls, with their caller.
+					expect(await page.eval("calls")).toEqual([
+						{ start: "wipe_named", client: { kind: "webmcp" } },
+						{ end: "wipe_named", outcome: "ok", client: { kind: "webmcp" } },
+						{ start: "wipe", client: { kind: "webmcp" } },
+						{ end: "wipe", outcome: "ok", client: { kind: "webmcp" } },
+					]);
+					// The agent is still told that the tool is consequential.
+					expect(
+						await page.eval(
+							`native.getTools().then((ts) => ts.find((t) => t.name === "wipe").annotations.consequentialHint)`,
+						),
+					).toBe(true);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"aborting unmirrors; registering again mirrors again",
+			async () => {
+				const page = await open();
+				try {
+					await page.eval("addControl.abort()");
+					expect(await page.eval("nativeNames()")).toEqual([
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					// As React's useTool does: abort and register again at once.
+					await page.eval(`(async () => {
+					const c = new AbortController();
+					await mcp.registerTool({ name: "again", description: "d", execute: () => "one" }, { signal: c.signal });
+					c.abort();
+					await mcp.registerTool({ name: "again", description: "d", execute: () => "two" });
+				})()`);
+					await Bun.sleep(50);
+					expect(await page.eval(`agent("again", {})`)).toEqual({
+						ok: true,
+						value: "two",
+					});
+					expect(await page.eval("warnings")).toEqual([]);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+	},
+	35_000,
+);
+
+on(
+	'a frame without allow="tools" warns and keeps its tools for the relay',
+	async () => {
+		const page = await open("?frames");
+		try {
+			interface FrameReport {
+				frame: string;
+				tools: string[];
+				warnings: string[];
+				native: string[] | null;
+			}
+			let frames: FrameReport[] = [];
+			for (let i = 0; i < 100 && frames.length < 2; i++) {
+				await Bun.sleep(50);
+				frames = await page.eval("frames_");
+			}
+			const byName = Object.fromEntries(frames.map((f) => [f.frame, f]));
+			expect(byName["plain"]).toMatchObject({ tools: ["frame_plain"] });
+			// Not registered natively: no tools there, or no access at all.
+			expect(byName["plain"]?.native ?? []).toEqual([]);
+			expect(
+				(byName["plain"] as unknown as { warnings: string[] }).warnings,
+			).toHaveLength(1);
+			expect(byName["allowed"]).toEqual({
+				frame: "allowed",
+				tools: ["frame_allowed"],
+				warnings: [],
+				native: ["frame_allowed"],
+			});
+		} finally {
+			await page.close();
+		}
+	},
+);
+
+on(
+	"exposedTo: a document of that origin lists and runs a tool that asks; the page sees an agent in the browser (DEC-215)",
+	async () => {
+		const callerReport = async (query: string) => {
+			const page = await open(query);
+			try {
+				let report: unknown = null;
+				for (let i = 0; i < 100 && report === null; i++) {
+					await Bun.sleep(100);
+					report = await page.eval("caller_");
+				}
+				return {
+					report,
+					calls: await page.eval("calls"),
+					asked: await page.eval("asked"),
+				};
+			} finally {
+				await page.close();
+			}
+		};
+		// Without onConfirm: the frame of other.test runs it, no question. Only
+		// the exposed tool is listed to it; the page cannot tell the caller
+		// from an agent that drives the tab.
+		expect(await callerReport("?expose&default")).toEqual({
+			report: {
+				fromTop: ["exposed_wipe"],
+				own: [],
+				call: { ok: true, value: "wiped" },
+			},
+			calls: [
+				{ start: "exposed_wipe", client: { kind: "webmcp" } },
+				{ end: "exposed_wipe", outcome: "ok", client: { kind: "webmcp" } },
+			],
+			asked: [],
+		});
+		// The page's onConfirm decides it in code.
+		const refused = await callerReport("?expose");
+		expect(refused.report).toMatchObject({
+			call: {
+				ok: true,
+				value: '{"error":"The user did not allow exposed_wipe to run."}',
+			},
+		});
+		expect(refused.asked).toEqual([{ kind: "webmcp" }]);
+	},
+);

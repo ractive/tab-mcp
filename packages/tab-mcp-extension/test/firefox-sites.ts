@@ -15,8 +15,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { holdBrowserLock } from "../../../test/browser-lock.ts";
+import { INSTALL } from "../../../test/browsers.ts";
 import { build } from "../scripts/build.ts";
 import { Firefox, findFirefox } from "./firefox.ts";
+
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "firefox-sites.ts" });
 
 const WAIT_MS = 10_000;
 
@@ -44,7 +49,9 @@ interface Seen {
 
 const binary = findFirefox();
 if (binary === undefined) {
-	console.error("no Firefox: set FIREFOX_PATH");
+	console.error(
+		`no test Firefox. Once: ${INSTALL.firefox}\nor set FIREFOX_PATH, or TAB_MCP_SYSTEM_FIREFOX=1 for the installed one.`,
+	);
 	process.exit(2);
 }
 const sites = process.argv.slice(2).length > 0 ? process.argv.slice(2) : SITES;

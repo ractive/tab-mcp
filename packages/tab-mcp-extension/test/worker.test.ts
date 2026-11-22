@@ -62,7 +62,7 @@ const COMMANDS: PanelCommand[] = [
 	{ type: "stop" },
 	{ type: "pair", on: true },
 	{ type: "revoke", grantId: "g" },
-	{ type: "new-address" },
+	{ type: "disconnect-all" },
 	{ type: "set-relay", relay: "https://relay.example" },
 	{ type: "set-allowed", origin: "https://site.test", name: "t", on: true },
 	{
@@ -1035,7 +1035,7 @@ describe("the worker's start", () => {
 
 describe("the service worker's bundle", () => {
 	test("has no dynamic import(), which a service worker refuses", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "tab-mcp-ext-build-"));
+		const dir = mkdtempSync(join(tmpdir(), "tab-mcp-worker-bundle-"));
 		try {
 			const { outdir } = await build({ outdir: join(dir, "dist"), test: true });
 			const code = await Bun.file(join(outdir, "background.js")).text();

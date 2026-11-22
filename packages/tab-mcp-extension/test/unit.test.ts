@@ -5,7 +5,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { join } from "node:path";
 import {
+	createFirefoxManifest,
 	createManifest,
 	extensionId,
 	mitText,
@@ -16,6 +18,7 @@ import { openSidebar, type SidebarAction } from "../src/browser.ts";
 import { connectPolyfill } from "../src/chrome/webmcp-port.ts";
 import {
 	callTool,
+	definitionOf,
 	FIREFOX_NO_WEBMCP_NOTE,
 	MAX_LANGUAGE,
 	MAX_PAGE_TITLE,
@@ -28,8 +31,24 @@ import {
 import { SERVER_NAME } from "../src/protocol.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
-import { ToolRegistry } from "../src/webmcp/registry.ts";
+import {
+	MAX_TOOLS,
+	PageError,
+	readTool,
+	resultText,
+	ToolRegistry,
+} from "../src/webmcp/registry.ts";
 import { createTools } from "../src/worker/tools.ts";
+
+const transpiler = new Bun.Transpiler({ loader: "ts" });
+
+/**
+ * Whether TypeScript `source` uses `chrome.storage` or `browser.storage` in
+ * its code: comments left out by the transpiler, strings kept whole.
+ */
+function usesStorage(source: string): boolean {
+	return /\b(chrome|browser)\.storage\b/.test(transpiler.transformSync(source));
+}
 
 describe("manifest", () => {
 	test("the development build has the key and no host access", () => {
@@ -58,6 +77,45 @@ describe("manifest", () => {
 		const store = createManifest("1.0.0", {});
 		expect(store["key"]).toBeUndefined();
 		expect(store["host_permissions"]).toBeUndefined();
+	});
+
+	test("no build has the storage permission, and no code uses chrome.storage: the settings are in IndexedDB, where a content script cannot reach", async () => {
+		// Without the permission Chrome and Firefox give no `storage` area at
+		// all, in the worker or in a content script's world (where a page's
+		// compromised renderer would run its code with the extension's APIs).
+		for (const manifest of [
+			createManifest("1.0.0", {}),
+			createManifest("1.0.0", { test: true }),
+			createManifest("1.0.0", { key: "KEY" }),
+			createFirefoxManifest("1.0.0", {}),
+			createFirefoxManifest("1.0.0", { test: true }),
+			createFirefoxManifest("1.0.0", { allSites: true }),
+		]) {
+			expect(manifest["permissions"]).not.toContain("storage");
+			expect(manifest["permissions"]).not.toContain("unlimitedStorage");
+		}
+		// The settings go through kv.ts (IndexedDB in the extension's origin).
+		// The check itself: a use is seen also on a line with a URL in a
+		// string, and a comment that names the API is not one.
+		expect(
+			usesStorage(
+				'const u = "https://shop.example/x"; chrome.storage.local.get("a");',
+			),
+		).toBe(true);
+		expect(usesStorage("const s = browser.storage;")).toBe(true);
+		expect(
+			usesStorage(
+				"// there is no chrome.storage\n/* nor browser.storage */\nconst n = 1;",
+			),
+		).toBe(false);
+		const users: string[] = [];
+		for await (const file of new Bun.Glob("**/*.ts").scan(
+			join(import.meta.dir, "../src"),
+		)) {
+			const text = await Bun.file(join(import.meta.dir, "../src", file)).text();
+			if (usesStorage(text)) users.push(file);
+		}
+		expect(users).toEqual([]);
 	});
 
 	test("the description is the store summary: at most 132 characters", () => {
@@ -252,7 +310,7 @@ function toolDocument(
 	result = "ran",
 ) {
 	const executed: string[] = [];
-	const registered = tools.map((t) => ({
+	const registered: Record<string, unknown>[] = tools.map((t) => ({
 		name: t.name,
 		description: `${t.name}.`,
 		inputSchema: { type: "object" },
@@ -274,24 +332,77 @@ function toolDocument(
 			},
 		},
 	} as unknown as Document;
-	return { doc, executed };
+	return { doc, executed, registered };
+}
+
+/**
+ * The call target of `name` as the bridge sends it for `doc`'s tool as
+ * listed now, with the read-only claim `readOnly`.
+ */
+async function target(doc: Document, name: string, readOnly: boolean) {
+	const tool = (await pageTools(doc, "doc-A")).tools.find(
+		(t) => t.name === name,
+	);
+	if (tool === undefined) throw new Error(`no tool ${name}`);
+	return {
+		documentId: "doc-A",
+		name,
+		readOnly,
+		definition: definitionOf(tool),
+	};
 }
 
 describe("calls in the content script", () => {
 	const signal = new AbortController().signal;
+
+	test("a tool registered again with another definition since it was offered never runs (DEC-217)", async () => {
+		const changes: Record<string, unknown>[] = [
+			{ description: "Publish the draft publicly." },
+			{ title: "Publish" },
+			{ inputSchema: { type: "object", properties: { to: {} } } },
+			{ outputSchema: { type: "object" } },
+			{ annotations: { readOnlyHint: false, consequentialHint: true } },
+		];
+		for (const change of changes) {
+			const { doc, executed, registered } = toolDocument([
+				{ name: "save", readOnly: false },
+			]);
+			const offered = await target(doc, "save", false);
+			registered[0] = { ...registered[0], ...change };
+			expect(await callTool(offered, {}, signal, doc, "doc-A")).toEqual({
+				ok: false,
+				error:
+					"The page's tool save changed since it was offered; it did not run.",
+				gone: true,
+			});
+			expect(executed).toEqual([]);
+		}
+	});
+
+	test("the same tool registered again with its fields in another order runs (DEC-217)", async () => {
+		const { doc, executed, registered } = toolDocument([
+			{ name: "save", readOnly: false },
+		]);
+		const offered = await target(doc, "save", false);
+		registered[0] = {
+			annotations: { readOnlyHint: false },
+			inputSchema: { type: "object" },
+			description: "save.",
+			name: "save",
+		};
+		expect(await callTool(offered, {}, signal, doc, "doc-A")).toEqual({
+			ok: true,
+			value: "ran",
+		});
+		expect(executed).toEqual(["save"]);
+	});
 
 	test("a call listed from this page, with the same claim, runs", async () => {
 		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
 		const listed = await pageTools(doc, "doc-A");
 		expect(listed.documentId).toBe("doc-A");
 		expect(
-			await callTool(
-				{ documentId: "doc-A", name: "buy", readOnly: false },
-				{},
-				signal,
-				doc,
-				"doc-A",
-			),
+			await callTool(await target(doc, "buy", false), {}, signal, doc, "doc-A"),
 		).toEqual({ ok: true, value: "ran" });
 		expect(executed).toEqual(["buy"]);
 	});
@@ -299,7 +410,7 @@ describe("calls in the content script", () => {
 	test("a call listed from another page (the tab navigated) never runs", async () => {
 		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
 		const result = await callTool(
-			{ documentId: "doc-A", name: "buy", readOnly: false },
+			await target(doc, "buy", false),
 			{},
 			signal,
 			doc,
@@ -313,7 +424,7 @@ describe("calls in the content script", () => {
 		// Offered as read-only (no confirmation), now consequential: refused.
 		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
 		const result = await callTool(
-			{ documentId: "doc-A", name: "buy", readOnly: true },
+			await target(doc, "buy", true),
 			{},
 			signal,
 			doc,
@@ -338,7 +449,7 @@ describe("calls in the content script", () => {
 		expect(listed).not.toHaveProperty("mirrored");
 		expect(
 			await callTool(
-				{ documentId: "doc-A", name: "mirror", readOnly: true },
+				await target(doc, "mirror", true),
 				{},
 				signal,
 				doc,
@@ -355,7 +466,7 @@ describe("calls in the content script", () => {
 			"r".repeat(MAX_SEND_RESULT + 1),
 		);
 		const result = await callTool(
-			{ documentId: "doc-A", name: "big", readOnly: true },
+			await target(doc, "big", true),
 			{},
 			signal,
 			doc,
@@ -367,7 +478,7 @@ describe("calls in the content script", () => {
 		});
 	});
 
-	test("a tool is sent with what the bridge uses: readOnlyHint, debugging, outputSchema (WM 3, WM 8)", async () => {
+	test("a tool is sent with what the bridge uses: readOnlyHint, debugging, consequentialHint, outputSchema (WM 3, WM 8)", async () => {
 		const outputSchema = { type: "object", properties: { n: {} } };
 		const doc = {
 			location: {
@@ -394,6 +505,21 @@ describe("calls in the content script", () => {
 						description: "d",
 						outputSchema: { type: "object", description: "z".repeat(17000) },
 					},
+					{
+						name: "add",
+						description: "d",
+						annotations: {
+							consequentialHint: false,
+							debugging: false,
+							readOnlyHint: false,
+							untrustedContentHint: false,
+						},
+					},
+					{
+						name: "odd",
+						description: "d",
+						annotations: { consequentialHint: "yes" },
+					},
 				],
 				executeTool: async () => "ran",
 			},
@@ -404,11 +530,31 @@ describe("calls in the content script", () => {
 				name: "typed",
 				description: "d",
 				outputSchema,
-				annotations: { readOnlyHint: true, debugging: true },
+				annotations: {
+					readOnlyHint: true,
+					debugging: true,
+					consequentialHint: true,
+				},
 			},
-			// An output schema over 16 KB is left out; the tool is not.
+			// An output schema over 16 KB is left out; the tool is not. No
+			// annotations: no consequentialHint, nothing is known (DEC-214).
 			{
 				name: "huge",
+				description: "d",
+				annotations: { readOnlyHint: false, debugging: false },
+			},
+			{
+				name: "add",
+				description: "d",
+				annotations: {
+					readOnlyHint: false,
+					debugging: false,
+					consequentialHint: false,
+				},
+			},
+			// A hint that is no boolean (not from Chrome) is as none.
+			{
+				name: "odd",
 				description: "d",
 				annotations: { readOnlyHint: false, debugging: false },
 			},
@@ -790,6 +936,47 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 		expect(changes).toBe(2);
 	});
 
+	describe("code review 2026-11-22, CR-04: provideContext owns its registrations, not their names", () => {
+		/** "save" given by provideContext, unregistered, then registered on its own. */
+		const independent = () => {
+			const registry = new ToolRegistry(() => {});
+			registry.provide([{ ...tool("save"), description: "old context" }]);
+			registry.unregister("save");
+			registry.register({ ...tool("save"), description: "independent tool" });
+			return registry;
+		};
+		const description = (registry: ToolRegistry) =>
+			registry.get("save")?.info.description;
+
+		test("the next provideContext() leaves the tool registered on its own", () => {
+			const registry = independent();
+			registry.provide([]);
+			expect(description(registry)).toBe("independent tool");
+		});
+
+		test("a new context with a tool of that name does not replace it", () => {
+			const registry = independent();
+			registry.provide([{ ...tool("save"), description: "new context" }]);
+			expect(description(registry)).toBe("independent tool");
+			registry.provide([]);
+			expect(description(registry)).toBe("independent tool");
+		});
+
+		test("records() and restore() keep it the page's own", () => {
+			const registry = independent();
+			registry.provide([tool("other")]);
+			const records = registry.records();
+			expect(records.map((r) => [r.tool.name, r.provided])).toEqual([
+				["save", false],
+				["other", true],
+			]);
+			const next = new ToolRegistry(() => {});
+			next.restore(records);
+			next.provide([]);
+			expect(next.list().map((t) => t.name)).toEqual(["save"]);
+		});
+	});
+
 	test("a record that no longer reads as a tool is left out", () => {
 		const next = new ToolRegistry(() => {});
 		next.restore([
@@ -801,5 +988,75 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 		expect(next.list().map((t) => t.name)).toEqual(["ok", "given"]);
 		next.provide([]);
 		expect(next.list().map((t) => t.name)).toEqual(["ok"]);
+	});
+
+	test("annotations are listed as Chrome lists them (DEC-214)", () => {
+		const annotations = (value?: unknown) =>
+			readTool({
+				...tool("t"),
+				...(value === undefined ? {} : { annotations: value }),
+			}).info.annotations;
+		const none = {
+			consequentialHint: false,
+			debugging: false,
+			readOnlyHint: false,
+			untrustedContentHint: false,
+		};
+		expect(annotations()).toBeUndefined();
+		expect(annotations({})).toEqual(none);
+		expect(annotations(null)).toEqual(none);
+		expect(annotations({ readOnlyHint: false })).toEqual(none);
+		expect(annotations({ consequentialHint: "yes", other: true })).toEqual({
+			...none,
+			consequentialHint: true,
+		});
+		expect(() => annotations("consequential")).toThrow(PageError);
+	});
+
+	/** The kind of `PageError` `run` throws, or "none". */
+	const kindOf = (run: () => void) => {
+		try {
+			run();
+			return "none";
+		} catch (error) {
+			return error instanceof PageError ? error.kind : String(error);
+		}
+	};
+
+	test("provideContext with an invalid tool changes nothing; at most MAX_TOOLS tools over registerTool and provideContext (QuotaExceededError)", () => {
+		const registry = new ToolRegistry(() => {});
+		registry.register(tool("kept"));
+		registry.provide([tool("given")]);
+		// All read and checked first: one invalid tool, and nothing changes.
+		expect(
+			kindOf(() => registry.provide([tool("ok_one"), { name: "broken" }])),
+		).toBe("TypeError");
+		expect(registry.list().map((t) => t.name)).toEqual(["kept", "given"]);
+		// The limit holds over all the page's tools, both ways of giving them.
+		for (let i = 0; registry.list().length < MAX_TOOLS - 1; i++)
+			registry.register(tool(`r${i}`));
+		expect(
+			kindOf(() =>
+				registry.provide(Array.from({ length: 3 }, (_, i) => tool(`p${i}`))),
+			),
+		).toBe("QuotaExceededError");
+		expect(registry.list()).toHaveLength(MAX_TOOLS - 1);
+		registry.register(tool("last"));
+		expect(registry.list()).toHaveLength(MAX_TOOLS);
+		expect(kindOf(() => registry.register(tool("one_more")))).toBe(
+			"QuotaExceededError",
+		);
+		expect(registry.list()).toHaveLength(MAX_TOOLS);
+	});
+
+	test("a tool's result as Chrome's executeTool gives it: a string as it is, nothing as null, anything else as its JSON, a page's object read through its wrapper (Firefox)", () => {
+		expect(resultText("Hello")).toBe("Hello");
+		expect(resultText(undefined)).toBeNull();
+		expect(resultText(null)).toBeNull();
+		const mcp = { content: [{ type: "text", text: "from an MCP result" }] };
+		expect(resultText(mcp)).toBe(JSON.stringify(mcp));
+		// A page-realm object in Firefox: its JSON is the page's own object's.
+		expect(resultText({ wrappedJSObject: mcp })).toBe(JSON.stringify(mcp));
+		expect(resultText(() => {})).toBeNull();
 	});
 });

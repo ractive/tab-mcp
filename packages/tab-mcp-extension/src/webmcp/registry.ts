@@ -116,16 +116,51 @@ export function readTool(raw: PageObject): Entry {
 		if (inputSchema !== undefined) info.inputSchema = inputSchema;
 		const outputSchema = copyJson(raw.outputSchema);
 		if (outputSchema !== undefined) info.outputSchema = outputSchema;
-		const annotations = copyJson(raw.annotations);
-		if (annotations !== null && typeof annotations === "object")
-			info.annotations = annotations as Record<string, unknown>;
 	} catch (error) {
 		throw new PageError(
 			"TypeError",
 			`the tool ${name} has a schema that is no JSON: ${messageOf(error)}`,
 		);
 	}
+	const annotations = annotationsOf(name, raw.annotations);
+	if (annotations !== undefined) info.annotations = annotations;
 	return { info, tool: raw, execute };
+}
+
+/** WebMCP's hints, in the order Chrome lists them. */
+const HINTS = [
+	"consequentialHint",
+	"debugging",
+	"readOnlyHint",
+	"untrustedContentHint",
+] as const;
+
+/**
+ * A tool's annotations as Chrome lists them (DEC-214): none when the page
+ * gave none; otherwise all four hints, each a boolean (missing ones false,
+ * `"yes"` true), `null` taken as no hints. Anything else is refused, as
+ * Chrome's `registerTool()` refuses it.
+ */
+function annotationsOf(
+	name: string,
+	raw: PageObject,
+): Record<string, boolean> | undefined {
+	if (raw === undefined) return undefined;
+	if (raw !== null && typeof raw !== "object" && typeof raw !== "function")
+		throw new PageError(
+			"TypeError",
+			`the annotations of the tool ${name} are not an object`,
+		);
+	const hints: Record<string, boolean> = {};
+	try {
+		for (const hint of HINTS) hints[hint] = Boolean(raw?.[hint]);
+	} catch (error) {
+		throw new PageError(
+			"TypeError",
+			`the annotations of the tool ${name} cannot be read: ${messageOf(error)}`,
+		);
+	}
+	return hints;
 }
 
 /**
@@ -135,8 +170,12 @@ export function readTool(raw: PageObject): Entry {
 export class ToolRegistry {
 	readonly #tools = new Map<string, Entry>();
 	readonly #changed: () => void;
-	/** The names the last `provide` gave (the older `provideContext`). */
-	#provided: string[] = [];
+	/**
+	 * The registrations the last `provide` made (the older `provideContext`)
+	 * that are still there: by entry, not name, so a tool registered later
+	 * under one of their names is the page's own (code review 2026-11-22, CR-04).
+	 */
+	#provided = new Set<Entry>();
 	/** While `restore` runs: no `changed`. */
 	#quiet = false;
 
@@ -190,17 +229,16 @@ export class ToolRegistry {
 			const entry = readTool(given[i]);
 			const name = entry.info.name;
 			// A name registered with registerTool keeps its tool.
-			if (this.#tools.has(name) && !this.#provided.includes(name)) continue;
+			const current = this.#tools.get(name);
+			if (current !== undefined && !this.#provided.has(current)) continue;
 			if (!fresh.has(name)) fresh.set(name, entry);
 		}
-		const kept =
-			this.#tools.size -
-			this.#provided.filter((n) => this.#tools.has(n)).length;
+		const kept = this.#tools.size - this.#provided.size;
 		if (kept + fresh.size > MAX_TOOLS)
 			throw new PageError("QuotaExceededError", "too many tools");
-		for (const name of this.#provided) this.#remove(name);
-		this.#provided = [...fresh.keys()];
+		for (const entry of [...this.#provided]) this.#remove(entry.info.name);
 		for (const [name, entry] of fresh) this.#tools.set(name, entry);
+		this.#provided = new Set(fresh.values());
 		this.#notify();
 	}
 
@@ -208,7 +246,6 @@ export class ToolRegistry {
 	clear(): void {
 		const any = this.#tools.size > 0;
 		for (const name of [...this.#tools.keys()]) this.#remove(name);
-		this.#provided = [];
 		if (any) this.#notify();
 	}
 
@@ -217,7 +254,7 @@ export class ToolRegistry {
 		return [...this.#tools.values()].map((entry) => ({
 			tool: entry.tool,
 			...(entry.signal ? { signal: entry.signal } : {}),
-			provided: this.#provided.includes(entry.info.name),
+			provided: this.#provided.has(entry),
 		}));
 	}
 
@@ -235,7 +272,8 @@ export class ToolRegistry {
 						record.tool,
 						record.provided ? undefined : record.signal,
 					);
-					if (record.provided && name !== undefined) this.#provided.push(name);
+					const entry = name === undefined ? undefined : this.#tools.get(name);
+					if (record.provided && entry !== undefined) this.#provided.add(entry);
 				} catch {
 					// Changed meanwhile so that it is no tool: left out.
 				}
@@ -264,6 +302,7 @@ export class ToolRegistry {
 		const entry = this.#tools.get(name);
 		if (entry === undefined) return false;
 		this.#tools.delete(name);
+		this.#provided.delete(entry);
 		entry.stop?.();
 		return true;
 	}

@@ -14,10 +14,9 @@
 
 	<section class="card" aria-labelledby="ai-heading">
 		<div class="card-head">
-			<h2 id="ai-heading">AI app</h2>
+			<h2 id="ai-heading">AI access</h2>
 			<label class="switch">
-				<input id="ai-switch" type="checkbox" role="switch" aria-checked="false">
-				<span>AI access</span>
+				<input id="ai-switch" type="checkbox" role="switch" aria-checked="false" aria-labelledby="ai-heading">
 			</label>
 		</div>
 		<p id="intro" class="muted small" hidden></p>
@@ -26,22 +25,23 @@
 		</p>
 		<ul id="grants" class="grants" aria-label="Connected AI apps"></ul>
 		<p id="grants-note" class="muted small" hidden></p>
+		<p id="fill-notice" class="muted small" role="status" hidden></p>
 		<p id="problem" class="problem" role="alert" hidden></p>
 		<p id="local-problem" class="problem" role="alert" hidden></p>
 		<div id="replaced" class="replaced" hidden>
 			<p id="replaced-text"></p>
 			<div class="buttons">
-				<button id="replaced-new-address" type="button">New address</button>
+				<button id="replaced-disconnect-all" type="button">Disconnect all apps</button>
 			</div>
 		</div>
 		<div class="buttons">
 			<button id="connect" type="button" class="strong">Turn on AI access</button>
 		</div>
-		<p><button id="add-app" type="button" class="link" hidden>+ Add another AI app</button></p>
+		<p><button id="add-app" type="button" class="link" hidden>+ Connect another AI app</button></p>
 
 		<div id="pairing" class="pairing" hidden>
-			<h3>Pair an AI app</h3>
-			<p>Add this address to your AI app as a connector (a remote MCP server).</p>
+			<h3>Connect your AI app</h3>
+			<p>Add this address to your AI app:</p>
 			<p id="pairing-profile" class="muted small">Use the AI app outside this Chrome profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.</p>
 			<div class="address">
 				<code id="address"></code>
@@ -53,15 +53,23 @@
 				<p><a id="setup-guide" href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">Step by step, and what to do when it fails</a></p>
 			</details>
 			<p id="copy-status" class="muted small" role="status"></p>
-			<p>When the AI app opens the sign-in page, type this code there:</p>
-			<p class="code-line"><code id="code" class="code">––– –––</code>
+			<p>When your AI app opens the sign-in page, type this code there:</p>
+			<p class="code-line"><code id="code" class="code">––––-––––</code>
 				<button id="copy-code" type="button" class="quiet small copy" aria-label="Copy code" disabled>Copy</button></p>
 			<p class="muted small">The code changes every 2 minutes and after each use.</p>
+			<div id="fill" class="fill" hidden>
+				<label id="fill-label" class="allow-switch"><input id="fill-switch" type="checkbox" role="switch" aria-checked="false" aria-describedby="fill-text"><span>Fill in the code for me</span></label>
+				<p id="fill-text" class="muted small"></p>
+				<div id="fill-always" class="fill-always" hidden>
+					<p id="fill-always-heading" class="muted small">Filled in without asking for:</p>
+					<ul id="fill-always-list" class="grants" aria-labelledby="fill-always-heading"></ul>
+				</div>
+			</div>
 			<div class="buttons">
 				<button id="pair-done" type="button" class="strong" hidden>Done</button>
-				<button id="new-address" type="button" class="quiet">New address</button>
+				<button id="disconnect-all" type="button" class="quiet">Disconnect all apps</button>
 			</div>
-			<p id="new-address-note" class="muted small" hidden>A new address disconnects every AI app; each has to be added again. Click again to make one.</p>
+			<p id="disconnect-all-note" class="muted small" hidden>This disconnects every AI app; each has to connect again with a new code. Click again to do it.</p>
 		</div>
 		<p class="muted small">AI access stays on with this panel closed, until you turn it off.</p>
 	</section>
@@ -72,6 +80,8 @@
 		<p id="tab-host" class="muted"></p>
 		<p id="tab-badges" class="badges"></p>
 		<p id="tab-access" class="tab-access" role="status"></p>
+		<p id="tab-library" class="muted small" hidden>This page has tab-mcp built in.</p>
+		<p id="tab-both" class="small" hidden></p>
 		<p id="no-tools" class="muted small" hidden>This page offers no WebMCP tools. page_info and the navigation tools still work.</p>
 		<p id="no-webmcp" class="muted small" hidden>This page has no WebMCP: with access to all sites, tab-mcp gives a page its WebMCP as the page starts loading, so reload a page that loaded before (a click on the icon comes too late for it). Only https pages (and localhost) get it. Chrome's own WebMCP is on for sites in its origin trial, or everywhere with <code>chrome://flags/#enable-webmcp-testing</code> (<a href="https://developer.chrome.com/docs/ai/webmcp" target="_blank" rel="noopener">WebMCP in Chrome</a>). page_info and the navigation tools still work.</p>
 		<div id="tools-head" class="tools-head" hidden>

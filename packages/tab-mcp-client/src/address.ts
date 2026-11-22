@@ -1,7 +1,9 @@
 /**
- * The address id in the `/tab` URL (DEC-098): a load balancer in front of
- * several relays routes every request of one address to one instance by it.
- * Part of the lazily loaded chunk (DEC-035), not the core.
+ * A hash of the page's secret: what the tabs of one page tell each other by
+ * when one of them takes over (DEC-095), in place of the secret. It is not the
+ * relay's address id, which is of the app and the secret (DEC-196), and never
+ * part of a URL. Part of the lazily loaded chunk
+ * (DEC-035), not the core.
  */
 
 const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
@@ -25,10 +27,10 @@ function base32(bytes: Uint8Array): string {
 }
 
 /**
- * The address id of a secret, as the relay derives it (DEC-027):
+ * The hash of a secret that the tabs of a page name it by:
  * base32(sha256(secret)). `undefined` where Web Crypto is missing (`null`: a
- * page on plain http other than localhost) or fails; the URL then has no id,
- * which one relay accepts and only a load balancer cannot route.
+ * page on plain http other than localhost) or fails; a replaced tab then
+ * cannot tell a sibling tab from an impostor.
  */
 export async function addressIdOf(
 	secret: string,
@@ -44,12 +46,4 @@ export async function addressIdOf(
 	} catch {
 		return undefined;
 	}
-}
-
-/** The `/tab` URL with `?a=<id>`. Never the secret: URLs end up in logs. */
-export function withAddress(url: string, address: string | undefined): string {
-	if (address === undefined) return url;
-	const u = new URL(url);
-	u.searchParams.set("a", address);
-	return u.href;
 }

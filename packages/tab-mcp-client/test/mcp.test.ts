@@ -648,7 +648,7 @@ describe("consequential tools", () => {
 			const t = consequential(confirm);
 			expect(await t.call()).toMatchObject({
 				isError: true,
-				content: [{ type: "text", text: "The user declined" }],
+				content: [{ type: "text", text: "The user did not allow this call." }],
 			});
 			expect(t.runs()).toBe(0);
 		}

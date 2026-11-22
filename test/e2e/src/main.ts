@@ -181,7 +181,7 @@ function showAccess(mcp: TabMcp): void {
 		status.textContent =
 			state === "connected"
 				? grants.length === 0
-					? "On. Add the address to your AI app and enter the code shown."
+					? "On. Add the address to your AI app and type the code shown."
 					: `On. ${count} connected.`
 				: state === "connecting"
 					? "Connecting…"
@@ -207,7 +207,7 @@ function showAccess(mcp: TabMcp): void {
 				disconnect.disabled = state !== "connected";
 				disconnect.addEventListener("click", () => {
 					mcp.revoke(grant.grantId).catch((error: unknown) => {
-						showError("Could not disconnect the app", error);
+						showError("Could not disconnect the AI app", error);
 					});
 				});
 				item.append(`${grantLabel(grant)} `, disconnect);
@@ -245,7 +245,7 @@ loadConfig()
 						"press_keys and take the result from its answer; the user sees every key.",
 				},
 				appName: "Calculator",
-				// The test page offers "Allow until reload" (opt-in, DEC-096).
+				// The test page offers "Always allow" (opt-in, DEC-096, DEC-200).
 				alwaysAllow: true,
 			});
 			await registerTools(mcp);

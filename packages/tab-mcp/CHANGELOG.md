@@ -9,6 +9,227 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Changed
+
+- The boxes of the connect page's code field are wider: the letters no longer nearly
+  fill them. A thin blinking line, like a text cursor, stands in the box the cursor is
+  in (it stays steady for a user who asks for less motion).
+
+## [0.13.2][relay-0.13.2] - 2026-11-22
+
+### Fixed
+
+- Requests that waited for their page and were let go together when it connected all
+  reached it, beyond its limits: the page's concurrent requests (`maxConcurrentRequests`,
+  its site's as configured) and the 2 listen streams per grant. The limits were checked
+  before the relay checked the token again and the request was counted only after that,
+  so every waiting request saw the same free slots. They are now checked in the same
+  step as the request is counted and sent; the others get 429 (`-31004`). A request that
+  ends, is cancelled or is sent again after the page came back frees its slot as before
+  (code review 2026-11-22, CR-01).
+- An event stream whose blank line ending an event was split across two of the page's
+  chunks (`data: {}\n`, then `\n`), or that ended an event with mixed line ends
+  (`\n\r\n`), was taken to be inside an event: the relay wrote no keep-alives into it,
+  so a quiet listen stream could be dropped by a proxy, and no error event at its end
+  (timeout, cancellation, the page gone). The relay now follows the line ends (LF, CRLF,
+  CR) across chunks (code review 2026-11-22, CR-03).
+
+## [0.13.1][relay-0.13.1] - 2026-11-22
+
+### Changed
+
+- **The code field on the sign-in page shows the whole code, as boxes** (DEC-211): four
+  boxes, a dash and four boxes, each letter in its own box and the box the caret is in
+  highlighted. It is still one input: a small inline script keeps the text as
+  `XXXX-XXXX` while you type, delete or paste (`abcd-efgh`, `ABCD EFGH` and `ABCDEFGH`
+  all give the code), and keeps the caret where you are. When it rewrites the text, the
+  browser's undo history for the field is lost: undo then does nothing or stops there
+  (it never throws or loops). The page's policy allows that
+  one script by its hash (`script-src 'sha256-…'`) and no other; a page that pairs by
+  sign-in only has none. Without the script the field is a plain input, now wide
+  enough for the whole code: it was cut off before. The field's hooks for browser
+  extensions (DEC-199) are unchanged.
+- **The home page names both ways a page offers its tools**: with the tab-mcp client
+  library, which connects it to the relay, or with the browser's WebMCP, whose tools the
+  tab-mcp browser extension passes on.
+
+### Fixed
+
+- A JWT with an unknown `kid` that came in the same millisecond as the last fetch of
+  its JWKS was answered "no such key" (for a `private_key_jwt` client assertion
+  `invalid_client`, 401) instead of "the keys could not be loaded, try again"
+  (`temporarily_unavailable`, 503), though the keys had not been fetched again for it.
+  Whether they were is now told by the order of fetches and calls, not by comparing
+  millisecond times. Which keys verify a signature is unchanged.
+
+### Security
+
+- **`X-Content-Type-Options: nosniff` on every response** (DEC-212): it was missing on
+  `/healthz`, the OAuth metadata, the 404 answer, redirects, 405s and the MCP
+  address's answers. It is now set in one place that every answer passes through,
+  error answers and the answers passed on from a tab included.
+- **The home page has the sign-in page's protection** (DEC-212): its policy adds
+  `base-uri 'none'` and `form-action 'none'`, and it sends `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. Every HTML page of the relay now takes these headers
+  from one function, so they cannot drift apart. Its cache time of one hour stays.
+
+## [0.13.0][relay-0.13.0] - 2026-11-21
+
+### Added
+
+- **`pairing.open`** (relay → tab, `expiresAt`, `expiresInMs`): on a site with identity
+  binding (`oidc`), the answer to each `pairing.start`, saying until when a sign-in
+  pairs the page: `expiresInMs` (600 000) from now, which the page counts on its own
+  clock, and `expiresAt` on the relay's. Libraries up to 0.18.1 ignore it, as any
+  unknown message.
+
+### Changed
+
+- **With identity binding an open "Connect your AI app" dialog counts for 10 minutes**
+  (DEC-202, closing DEC-196's open point): a sign-in pairs the page only until 10
+  minutes after its last `pairing.start`; one that comes back later gets the answer for
+  no page ("No page is connecting with the account you signed in with. …"). Each
+  `pairing.start` counts 10 minutes from then (the page's Continue); `pairing.stop` and
+  the end of the session end it at once. Before, the dialog counted as long as it was
+  open. Pages with a library up to 0.18.1 send `pairing.start` when the dialog opens
+  and again after every reconnect, which the relay cannot tell apart: for them each
+  reconnect starts another 10 minutes, and the limit holds only between reconnects. It
+  is complete once pages run a library after 0.18.1. Without a reconnect their users
+  close and open the dialog again after 10 minutes. Code pairing is unchanged.
+- **One wording with the library and the browser extension**: the pairing page speaks of
+  "the page or browser extension" (not "the page or app") and "types" the code. Its
+  label is "Code"; its help reads "“Connect your AI app” on the page or in the browser
+  extension you want to connect shows a code of 8 letters. It changes every 2 minutes and
+  after each use.", and with identity binding "On the page, sign in with that account …";
+  a wrong code reads "That code is not right, or it has expired. Type the code that
+  “Connect your AI app” shows now."; a malformed one "Type the 8 letters of the code.".
+  "You're connecting … to the page or browser extension in this browser that shows the
+  code." (with identity binding: "… to the page in this browser that is signed in with
+  your account."), and "the account you use on the page". The AI app reads "This AI app
+  is signed in as someone other than the page's user." and, for a grant disconnected
+  while its request was in flight, "This AI app was disconnected from the page.". The
+  relay's start page says an AI app "connects to one page with the code that page
+  shows" under the web app's one address.
+
+## [0.12.1][relay-0.12.1] - 2026-11-20
+
+### Changed
+
+- The pairing page's code field is `autocomplete="off"` (it was `one-time-code`) and
+  carries the opt-outs of 1Password, LastPass, Bitwarden and Dashlane: the code is on
+  the user's screen and nothing can fill it, and with the old hint password managers put
+  their button into the field.
+
+## [0.12.0][relay-0.12.0] - 2026-11-19
+
+One fixed MCP address per app, `https://<relay>/s/<app>/mcp`, instead of one per tab
+(`/a/<address id>/mcp`); the pairing code alone finds the page (DEC-196 to DEC-199). An
+organisation that allows custom connectors only by exact URL can then allow an app.
+This release is breaking, with no compatibility with what was before:
+
+- Every address changes. Users add the new address to their AI apps and pair again.
+- Pages need `@ractive-ch/tab-mcp-client` 0.17 or later.
+- Tokens from before stop working.
+- A custom `TokenStore` must store the new field `app`.
+- The relay runs as one instance only.
+
+### Changed
+
+- **The address.** MCP requests go to `/s/<app>/mcp`, the same URL for every page of an
+  app. `<app>` is the app id: 1 to 32 characters of `a-z`, `0-9` and `-`, not starting
+  or ending with `-`. The protected-resource metadata is at
+  `/.well-known/oauth-protected-resource/s/<app>/mcp`, and `WWW-Authenticate` names it
+  per app. `/a/<address id>/mcp` and its metadata answer 404.
+- **The address id is of the app and the secret together:**
+  `base32(sha256(app + "\n" + secret))`, no longer of the secret alone, and no URL
+  carries it. Sessions, grants and tokens are keyed by it as before. The same secret
+  under another app id is another page, with its own session and none of the first
+  one's grants, and cannot replace it. `addressIdFromSecret(secret, app)` takes the app
+  id as its second argument.
+- **`hello` needs `app: { id, name? }`.** The page names its app in `hello.app.id`; a
+  `hello` without a valid one gets `error` `bad_message` and close 1008
+  (tab-mcp-client 0.17 or later sends it). `session.address` is the app's address.
+- **Tool calls.** The bearer token's record says which page a request is for.
+  `TokenRecord` has a new required field `app`, and a token is valid only at the address
+  of its app (401 otherwise). A refresh that names another `resource` is
+  `invalid_target`.
+- **`TokenStore`s must store and return `app` unchanged.** A store that drops it makes
+  every token invalid. The conformance suite (`tokenStoreConformance`) writes records
+  with `app` and expects them back equal.
+- **SQLite schema 6** (a column `app`), with `min_reader_version` 6: relays from 0.6.0
+  to 0.11.0 refuse a file this release has opened. The step to schema 6 deletes every
+  token in the file: they were for addresses that no longer exist.
+- **Pairing codes** are 8 letters of `BCDFGHJKLMNPQRSTVWXZ` (2.56 × 10¹⁰ values), sent to
+  the page as `XXXX-XXXX` in `pairing.code` and typed in any case, with or without the
+  dash and spaces. A code is unique among the relay's live codes; the typed code finds
+  its page among the pages of the address's app. Still 2 minutes and single use. A code
+  has no attempts of its own any more: `pairing.code` `reason` is `start`, `used` or
+  `expired`, never `locked`. A wrong and an expired code get the same text; input that
+  is not 8 of those letters is not a guess.
+- **Guess limits** are per network only (an IPv6 /56): 10 wrong guesses, then one a
+  minute, answered with 429. A right code is given back; a sign-in (`oidc`) is charged
+  when it starts and given back when it pairs. There is no limit per address. The limit
+  keeps 100 000 networks and drops its oldest when full.
+- **`/authorize`** takes an app's address as `resource` (anything else is
+  `invalid_target`) and always shows the pairing form: it no longer looks whether a page
+  is connected or its dialog open, and the "Open the page first" page is gone. The form
+  posts to `/authorize` without `?a=`. The page names the AI app with its verified host
+  and the app id of the address; it no longer names the page's origin or the page's own
+  app name, which the relay does not know before the code is typed.
+- **Open authorization requests** are capped per network (10) and in all (10 000), and
+  neither cap refuses a request any more. A network's eleventh request pushes out that
+  network's own oldest (it got 429 before); when the relay holds 10 000, the oldest
+  request among those of the networks that hold the most is dropped. The caps per
+  address are gone.
+- **Identity binding (`oidc`).** Connect redirects to the provider at once; at the
+  callback the relay pairs with the app's page whose user is the signed-in person and
+  whose "Connect your AI app" dialog is open (of several, the one that connected last;
+  only a page that was connected when the sign-in started).
+  No such page, a closed dialog, a signed-out page and another person get one answer
+  (403, log reason `mismatch`), and the next sign-in asks for the account again
+  (`prompt=login`). The provider `state` and the authorization code no longer start
+  with the address id. A tab assertion's `aud` is the app's address, so it no longer
+  names one page.
+- **An app whose pages can pair by code and by `oidc`** gets both on one page: the code
+  field with Connect, and "Sign in instead". Which methods an app's page offers comes
+  from the configuration alone.
+- **Log fields.** `oauth.cancelled`, `oauth.pairing_failed` and `oauth.pairing_redirect`
+  carry `app` instead of `address`; `oauth.paired` and `tab.session` carry both;
+  `mcp.request` carries `app` and, once the token is known, `address`.
+- **`Relay.addressFor(app)`** takes an app id (it took the secret).
+- **`tokenFor`** in `@ractive-ch/tab-mcp/testing` has two forms, both with an address
+  `/s/<app>/mcp`. `tokenFor(relay, address, options?)` takes the `TestRelay`: the token
+  is for the one page of that app that is connected; with several connected, or none
+  yet, pass the page's secret as `options.secret`. `tokenFor(store, address, { secret })`
+  takes a token store, for a relay in another process, and needs the secret (a
+  `TypeError` without it).
+
+### Removed
+
+- **Several relay instances** behind a load balancer (DEC-198; DEC-098 is withdrawn): a
+  typed code must reach the instance whose page shows it, and a form post cannot be
+  routed by its body. Gone with it: the `a` parameter of `/tab` (ignored now), HTTP 400
+  `bad_address`, the tab error `address_mismatch`, close code 4009, and "Running several
+  instances" in the self-hosting guide. The token store may still be shared.
+
+### Added
+
+- **Sites may reserve apps** (DEC-197): `apps` in an entry of `TAB_MCP_SITES` lists the
+  app ids that origin serves. Its pages may name only these, and no origin that does not
+  list an app may serve it. An app no site lists is open to every origin the relay
+  allows. A page whose origin may not serve the app it names gets `error`
+  `app_not_allowed` and close 1008, before its session claims anything; the log has
+  `tab.refused` with reason `app_not_allowed`, the origin and the app.
+- **Hooks on the pairing form** for a browser extension in the same browser that fills
+  in its own code after asking its user (DEC-199): on the form
+  `data-tab-mcp-pairing="1"`, `data-app`, `data-client-name` and `data-client-host`; on
+  the code field `data-tab-mcp-field="code"`; on the Connect button
+  `data-tab-mcp-action="connect"`. They never hold a code, and the relay checks a typed
+  and a filled-in code alike.
+- `Relay.pagesOf(app)`: the address ids of the app's pages that are connected now.
+
 ## [0.11.0][relay-0.11.0] - 2026-11-16
 
 ### Added
@@ -552,6 +773,11 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
 
+[relay-0.13.2]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.13.2
+[relay-0.13.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.13.1
+[relay-0.13.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.13.0
+[relay-0.12.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.12.1
+[relay-0.12.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.12.0
 [relay-0.11.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.11.0
 [relay-0.10.3]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.3
 [relay-0.10.2]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.10.2

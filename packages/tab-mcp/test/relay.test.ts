@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { addressIdFromSecret, newSecret } from "../src/address.ts";
+import {
+	addressIdFromSecret,
+	newSecret,
+	shortAddress,
+} from "../src/address.ts";
+import type { HttpRequestMessage } from "../src/protocol.ts";
 import { type CreateRelayOptions, VERSION } from "../src/relay.ts";
 import {
+	APP,
 	connectClient,
 	mcpPost,
 	ORIGIN,
@@ -58,22 +64,102 @@ async function readUntil(
 }
 
 describe("tab WebSocket", () => {
-	test("hello gives the address derived from the secret", async () => {
+	test("hello gives the address of the app, which names neither the secret nor its id (DEC-196)", async () => {
 		const r = relay();
 		const t = tab(r);
 		const s = await t.connect();
-		expect(s.address).toBe(r.relay.addressFor(t.secret));
-		expect(s.address).toBe(`${r.relay.url}/a/${t.addressId}/mcp`);
+		expect(s.address).toBe(r.relay.addressFor(APP));
+		expect(s.address).toBe(`${r.relay.url}/s/${APP}/mcp`);
 		expect(s.origin).toBe(ORIGIN);
 		expect(s.grants).toEqual([]);
 		expect(s.limits.requestTimeoutMs).toBe(300_000);
 		expect(s.limits.keepAliveMs).toBe(20_000);
 	});
 
+	test("two pages of one app get the same address, a page of another app another; both stay connected", async () => {
+		const r = relay();
+		const a = tab(r);
+		const b = tab(r);
+		const other = tab(r, { appId: "other-app" });
+		const sa = await a.connect();
+		const sb = await b.connect();
+		const so = await other.connect();
+		expect(sb.address).toBe(sa.address);
+		expect(so.address).toBe(`${r.relay.url}/s/other-app/mcp`);
+		// The secret still is what a tab is: neither replaced the other.
+		expect(r.relay.sessionCount).toBe(3);
+		expect(a.received.some((m) => m.type === "bye")).toBe(false);
+		expect(r.relay.pagesOf(APP).sort()).toEqual(
+			[a.addressId, b.addressId].sort(),
+		);
+		expect(r.relay.pagesOf("other-app")).toEqual([other.addressId]);
+		expect(r.relay.pagesOf("nobody")).toEqual([]);
+		b.close();
+		await waitFor(
+			() => r.relay.pagesOf(APP).length === 1,
+			"the closed page to leave its app",
+		);
+		expect(r.relay.pagesOf(APP)).toEqual([a.addressId]);
+	});
+
+	test("hello without an app id, or with one that is no app id, closes with 1008 and claims nothing", async () => {
+		const r = relay();
+		const none = tab(r, { appId: null });
+		await none.opened;
+		void none.connect();
+		expect(await none.next("error")).toEqual({
+			type: "error",
+			code: "bad_message",
+			message: expect.stringContaining("hello.app.id"),
+		});
+		expect((await none.closed).code).toBe(1008);
+		for (const appId of ["Test", "-test", "test-", "a_b", "a".repeat(33)]) {
+			const t = tab(r, { appId });
+			void t.connect();
+			expect(await t.next("error")).toMatchObject({ code: "bad_message" });
+			expect((await t.closed).code).toBe(1008);
+		}
+		expect(r.relay.pagesOf(APP)).toEqual([]);
+		expect(r.logs.events("tab.session")).toEqual([]);
+	});
+
+	test("a page whose origin may not serve the app is refused before it claims the address (DEC-197)", async () => {
+		const elsewhere = "https://elsewhere.example";
+		const r = relay({
+			allowedOrigins: [elsewhere],
+			sites: [{ origin: ORIGIN, apps: [APP] }],
+		});
+		const secret = newSecret();
+		const owner = tab(r, { secret });
+		await owner.connect();
+		// Even with the owner's secret: the session of the page that may serve
+		// the app is not replaced.
+		const intruder = tab(r, { secret, origin: elsewhere });
+		void intruder.connect();
+		expect(await intruder.next("error")).toEqual({
+			type: "error",
+			code: "app_not_allowed",
+			message: expect.stringContaining(`"${APP}"`),
+		});
+		expect((await intruder.closed).code).toBe(1008);
+		expect(owner.ws.readyState).toBe(WebSocket.OPEN);
+		expect(owner.received.some((m) => m.type === "bye")).toBe(false);
+		expect(r.relay.pagesOf(APP)).toEqual([owner.addressId]);
+		// The reserving origin's pages may name only its apps.
+		const stray = tab(r, { appId: "other-app" });
+		void stray.connect();
+		expect(await stray.next("error")).toMatchObject({
+			code: "app_not_allowed",
+		});
+		expect((await stray.closed).code).toBe(1008);
+		// An app nobody reserved is open to the other origin.
+		await tab(r, { origin: elsewhere, appId: "other-app" }).connect();
+	});
+
 	test("the session lists the address's grants", async () => {
 		const r = relay();
 		const secret = newSecret();
-		await tokenFor(r.store, addressIdFromSecret(secret));
+		await tokenFor(r.store, addressIdFromSecret(secret, APP));
 		const t = tab(r, { secret });
 		const s = await t.connect();
 		expect(s.grants).toHaveLength(1);
@@ -144,7 +230,7 @@ describe("tab WebSocket", () => {
 		const secret = newSecret();
 		const impostor = tab(r, { secret });
 		const first = await impostor.connect();
-		const token = await tokenFor(r.store, addressIdFromSecret(secret));
+		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
 		expect(
 			(await mcpPost(first.address, rpc(1, "tools/list"), { token })).status,
 		).toBe(200);
@@ -159,7 +245,7 @@ describe("tab WebSocket", () => {
 			(await mcpPost(session.address, rpc(2, "tools/list"), { token })).status,
 		).toBe(401);
 		expect(
-			await r.store.listGrants(addressIdFromSecret(secret), Date.now()),
+			await r.store.listGrants(addressIdFromSecret(secret, APP), Date.now()),
 		).toEqual([]);
 	});
 
@@ -170,11 +256,14 @@ describe("tab WebSocket", () => {
 		t.send({
 			type: "hello",
 			library: { name: "x", version: "1" },
-			page: { title: "" },
+			app: { id: APP },
 			secret: newSecret(),
 			revokeAll: "yes",
 		});
-		expect((await t.next("error")).type).toBe("error");
+		expect(await t.next("error")).toMatchObject({
+			code: "bad_message",
+			message: expect.stringContaining("revokeAll"),
+		});
 		expect((await t.closed).code).toBe(1008);
 	});
 
@@ -210,10 +299,13 @@ describe("tab WebSocket", () => {
 		t.send({
 			type: "hello",
 			library: { name: "x", version: "1" },
-			page: { title: "" },
+			app: { id: APP },
 			secret: "short",
 		});
-		expect((await t.next("error")).type).toBe("error");
+		expect(await t.next("error")).toMatchObject({
+			code: "bad_message",
+			message: expect.stringContaining("secret"),
+		});
 		expect((await t.closed).code).toBe(1008);
 	});
 
@@ -302,14 +394,14 @@ describe("tab WebSocket", () => {
 describe("MCP endpoint checks", () => {
 	test("GET and DELETE get 405", async () => {
 		const r = relay();
-		const address = r.relay.addressFor(newSecret());
+		const address = r.relay.addressFor(APP);
 		expect((await fetch(address)).status).toBe(405);
 		expect((await fetch(address, { method: "DELETE" })).status).toBe(405);
 	});
 
 	test("a legacy initialize gets 400 / -32022 naming 2026-07-28, even without a token", async () => {
 		const r = relay();
-		const res = await fetch(r.relay.addressFor(newSecret()), {
+		const res = await fetch(r.relay.addressFor(APP), {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
@@ -353,7 +445,7 @@ describe("MCP endpoint checks", () => {
 
 	test("an older version header gets -32022, a missing one -32020", async () => {
 		const r = relay();
-		const address = r.relay.addressFor(newSecret());
+		const address = r.relay.addressFor(APP);
 		const old = await mcpPost(address, rpc(1, "tools/list"), {
 			headers: { "mcp-protocol-version": "2025-06-18" },
 		});
@@ -374,7 +466,7 @@ describe("MCP endpoint checks", () => {
 
 	test("invalid JSON, batches and oversized bodies are refused", async () => {
 		const r = relay({ maxMessageBytes: 16_384 });
-		const address = r.relay.addressFor(newSecret());
+		const address = r.relay.addressFor(APP);
 		const bad = await mcpPost(address, "{nope");
 		expect(bad.status).toBe(400);
 		expect(((await bad.json()) as { error: { code: number } }).error.code).toBe(
@@ -392,7 +484,7 @@ describe("MCP endpoint checks", () => {
 		expect(big.status).toBe(413);
 	});
 
-	test("no token, an unknown token, another address's token, an expired token: 401", async () => {
+	test("no token, an unknown token, an expired token: 401, and the challenge names the app's metadata", async () => {
 		const r = relay();
 		const t = tab(r);
 		await t.connect();
@@ -400,24 +492,19 @@ describe("MCP endpoint checks", () => {
 		const none = await mcpPost(address, rpc(1, "tools/list"));
 		expect(none.status).toBe(401);
 		const challenge = none.headers.get("www-authenticate") ?? "";
-		expect(challenge).toContain(
-			`resource_metadata="${r.relay.url}/.well-known/oauth-protected-resource/a/${t.addressId}/mcp"`,
+		expect(challenge).toBe(
+			`Bearer resource_metadata="${r.relay.url}/.well-known/oauth-protected-resource/s/${APP}/mcp", scope="tools"`,
 		);
-		expect(challenge).toContain('scope="tools"');
-		expect(challenge).not.toContain("invalid_token");
+		// Before a token says which page is meant, nothing names one.
+		expect(challenge).not.toContain(t.addressId);
 
 		const unknown = await mcpPost(address, rpc(1, "tools/list"), {
 			token: "tmcp_at_nope",
 		});
 		expect(unknown.status).toBe(401);
-		expect(unknown.headers.get("www-authenticate")).toContain(
-			'error="invalid_token"',
+		expect(unknown.headers.get("www-authenticate")).toBe(
+			`${challenge}, error="invalid_token"`,
 		);
-
-		const other = await tokenFor(r.store, "b".repeat(52));
-		expect(
-			(await mcpPost(address, rpc(1, "tools/list"), { token: other })).status,
-		).toBe(401);
 
 		const expired = await tokenFor(r.store, t.addressId, {
 			ttlMs: 1,
@@ -426,6 +513,139 @@ describe("MCP endpoint checks", () => {
 		expect(
 			(await mcpPost(address, rpc(1, "tools/list"), { token: expired })).status,
 		).toBe(401);
+	});
+
+	test("the token decides the page: one of another page of the app reaches that page, never this one", async () => {
+		const r = relay({ pageWaitMs: 0 });
+		const seen = { mine: [] as string[], theirs: [] as string[] };
+		const answer =
+			(list: string[]) => (msg: HttpRequestMessage, tab: ScriptedTab) => {
+				list.push(msg.grant.grantId);
+				tab.send({
+					type: "http.response",
+					id: msg.id,
+					status: 200,
+					headers: { "content-type": "application/json" },
+					body: "{}",
+				});
+			};
+		const mine = tab(r, { onRequest: answer(seen.mine) });
+		const theirs = tab(r, { onRequest: answer(seen.theirs) });
+		const address = (await mine.connect()).address;
+		expect((await theirs.connect()).address).toBe(address);
+		const theirToken = await tokenFor(r.store, theirs.addressId);
+		const res = await mcpPost(address, rpc(1, "tools/list"), {
+			token: theirToken,
+		});
+		expect(res.status).toBe(200);
+		expect(seen.theirs).toHaveLength(1);
+		expect(seen.mine).toEqual([]);
+
+		// Their page closed: the request is not handed to the page that is
+		// left, although it has the same address.
+		theirs.close();
+		await waitFor(() => r.relay.pagesOf(APP).length === 1, "their page to go");
+		const gone = await mcpPost(address, rpc(2, "tools/list"), {
+			token: theirToken,
+		});
+		expect(gone.status).toBe(200);
+		expect(
+			((await gone.json()) as { error: { code: number } }).error.code,
+		).toBe(-31001);
+		expect(seen.mine).toEqual([]);
+		// A token for a page that never connected: the same.
+		const nobody = await tokenFor(r.store, "b".repeat(52));
+		const never = await mcpPost(address, rpc(3, "tools/list"), {
+			token: nobody,
+		});
+		expect(
+			((await never.json()) as { error: { code: number } }).error.code,
+		).toBe(-31001);
+		expect(seen.mine).toEqual([]);
+	});
+
+	test("a token is valid only at its app's address: 401 at another app's, although its page is open", async () => {
+		const r = relay();
+		let forwarded = 0;
+		const t = tab(r, {
+			onRequest: (msg, tab) => {
+				forwarded++;
+				tab.send({
+					type: "http.response",
+					id: msg.id,
+					status: 200,
+					headers: { "content-type": "application/json" },
+					body: "{}",
+				});
+			},
+		});
+		const address = (await t.connect()).address;
+		// The record names this page, but another app (and, from a store file
+		// of before DEC-196, no app at all).
+		for (const app of ["other-app", ""]) {
+			const token = await tokenFor(r.store, t.addressId, { app });
+			const res = await mcpPost(address, rpc(1, "tools/list"), { token });
+			expect(res.status).toBe(401);
+			expect(res.headers.get("www-authenticate")).toBe(
+				`Bearer resource_metadata="${r.relay.url}/.well-known/oauth-protected-resource/s/${APP}/mcp", scope="tools", error="invalid_token"`,
+			);
+		}
+		// And this app's token is refused at the other app's address, whose
+		// challenge names that app.
+		const token = await tokenFor(r.store, t.addressId);
+		const elsewhere = await mcpPost(
+			r.relay.addressFor("other-app"),
+			rpc(2, "tools/list"),
+			{ token },
+		);
+		expect(elsewhere.status).toBe(401);
+		expect(elsewhere.headers.get("www-authenticate")).toContain(
+			"/.well-known/oauth-protected-resource/s/other-app/mcp",
+		);
+		expect(forwarded).toBe(0);
+		expect(
+			(await mcpPost(address, rpc(3, "tools/list"), { token })).status,
+		).toBe(200);
+		expect(forwarded).toBe(1);
+	});
+
+	// The address id is of the app and the secret together: a page that
+	// names another app with the same secret is another page, with its own
+	// session and no grants of the first.
+	test("a token of one app does not reach its page once that page names another app", async () => {
+		const r = relay({ pageWaitMs: 0 });
+		const secret = newSecret();
+		const first = tab(r, { secret });
+		const address = (await first.connect()).address;
+		const token = await tokenFor(r.store, first.addressId);
+		let forwarded = 0;
+		const renamed = tab(r, {
+			secret,
+			appId: "other-app",
+			onRequest: (msg, tab) => {
+				forwarded++;
+				tab.send({
+					type: "http.response",
+					id: msg.id,
+					status: 200,
+					headers: { "content-type": "application/json" },
+					body: "{}",
+				});
+			},
+		});
+		const session = await renamed.connect();
+		expect(session.address).not.toBe(address);
+		expect(session.grants).toEqual([]);
+		expect(renamed.addressId).not.toBe(first.addressId);
+		expect(
+			(await mcpPost(address, rpc(1, "tools/list"), { token })).status,
+		).toBe(200);
+		expect(forwarded).toBe(0);
+		// The first page is still there; with it gone the token reaches nobody.
+		first.close();
+		await first.closed;
+		await mcpPost(address, rpc(2, "tools/list"), { token });
+		expect(forwarded).toBe(0);
 	});
 
 	test("a revoked grant's token gets 401", async () => {
@@ -446,26 +666,86 @@ describe("MCP endpoint checks", () => {
 		).toBe(401);
 	});
 
-	test("unknown addresses are not revealed: a malformed id is 404, a well-formed one 401", async () => {
+	test("a malformed app is 404; a well-formed one is 401 whether or not a page of it is connected", async () => {
 		const r = relay();
+		for (const app of [
+			"Bad_App",
+			"TEST",
+			"-test",
+			"test-",
+			"a".repeat(33),
+			"te%22st",
+			"a%2Fb",
+		]) {
+			const res = await mcpPost(
+				`${r.relay.url}/s/${app}/mcp`,
+				rpc(1, "tools/list"),
+			);
+			expect(res.status).toBe(404);
+			expect(res.headers.get("www-authenticate")).toBeNull();
+		}
+		// The router decodes the path: an escaped spelling of an app id is that
+		// app, and the challenge names its address as the relay writes it,
+		// never as the request spelt it.
+		const escaped = await mcpPost(
+			`${r.relay.url}/s/te%73t/mcp`,
+			rpc(1, "tools/list"),
+		);
+		expect(escaped.status).toBe(401);
+		expect(escaped.headers.get("www-authenticate")).toBe(
+			`Bearer resource_metadata="${r.relay.url}/.well-known/oauth-protected-resource/s/${APP}/mcp", scope="tools"`,
+		);
+		const unknown = await mcpPost(
+			r.relay.addressFor("nobody-serves-this"),
+			rpc(1, "tools/list"),
+		);
+		expect(unknown.status).toBe(401);
+		expect(unknown.headers.get("www-authenticate")).toBe(
+			`Bearer resource_metadata="${r.relay.url}/.well-known/oauth-protected-resource/s/nobody-serves-this/mcp", scope="tools"`,
+		);
+		await tab(r).connect();
+		const known = await mcpPost(r.relay.addressFor(APP), rpc(1, "tools/list"));
+		expect(known.status).toBe(401);
+		expect(await known.text()).toBe(await unknown.text());
+	});
+
+	test("the per-tab address of before DEC-196 is gone: 404, also for its metadata", async () => {
+		const r = relay();
+		const t = tab(r);
+		await t.connect();
+		const token = await tokenFor(r.store, t.addressId);
+		const old = await mcpPost(
+			`${r.relay.url}/a/${t.addressId}/mcp`,
+			rpc(1, "tools/list"),
+			{ token },
+		);
+		expect(old.status).toBe(404);
 		expect(
-			(await mcpPost(`${r.relay.url}/a/NOPE/mcp`, rpc(1, "tools/list"))).status,
+			(
+				await fetch(
+					`${r.relay.url}/.well-known/oauth-protected-resource/a/${t.addressId}/mcp`,
+				)
+			).status,
 		).toBe(404);
+		// The id of a page is no app: it cannot be put where the app goes.
 		expect(
-			(await mcpPost(r.relay.addressFor(newSecret()), rpc(1, "tools/list")))
-				.status,
-		).toBe(401);
+			(
+				await mcpPost(
+					`${r.relay.url}/s/${t.addressId}/mcp`,
+					rpc(1, "tools/list"),
+					{ token },
+				)
+			).status,
+		).toBe(404);
 	});
 
 	test("a valid token while the page is not open: HTTP 200 with a JSON-RPC error (DEC-074)", async () => {
 		const r = relay({ pageWaitMs: 0 });
 		const secret = newSecret();
-		const token = await tokenFor(r.store, addressIdFromSecret(secret));
-		const res = await mcpPost(
-			r.relay.addressFor(secret),
-			rpc(7, "tools/list"),
-			{ token },
-		);
+		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
+		const res = await mcpPost(r.relay.addressFor(APP), rpc(7, "tools/list"), {
+			token,
+		});
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as {
 			id: number;
@@ -478,7 +758,7 @@ describe("MCP endpoint checks", () => {
 
 	test("CORS: preflight and headers without credentials; off when configured", async () => {
 		const r = relay();
-		const address = r.relay.addressFor(newSecret());
+		const address = r.relay.addressFor(APP);
 		const pre = await fetch(address, {
 			method: "OPTIONS",
 			headers: {
@@ -502,7 +782,7 @@ describe("MCP endpoint checks", () => {
 		await r.stop();
 
 		const off = relay({ cors: false });
-		const address2 = off.relay.addressFor(newSecret());
+		const address2 = off.relay.addressFor(APP);
 		expect((await fetch(address2, { method: "OPTIONS" })).status).toBe(405);
 		expect(
 			(await mcpPost(address2, rpc(1, "tools/list"))).headers.get(
@@ -859,6 +1139,27 @@ describe("tunnel", () => {
 		expect(signal?.aborted).toBe(true);
 	});
 
+	test("a request in flight when the page revokes its grant ends with 401, and the challenge names the app's metadata", async () => {
+		const r = relay();
+		const secret = newSecret();
+		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
+		const again = tab(r, {
+			secret,
+			onRequest: (msg, tab) => {
+				tab.send({ type: "grant.revoke", grantId: msg.grant.grantId });
+			},
+		});
+		const session = await again.connect();
+		expect(session.grants).toHaveLength(1);
+		const res = await mcpPost(session.address, rpc(1, "tools/list"), {
+			token,
+		});
+		expect(res.status).toBe(401);
+		expect(res.headers.get("www-authenticate")).toBe(
+			`Bearer resource_metadata="${r.relay.url}/.well-known/oauth-protected-resource/s/${APP}/mcp", scope="tools", error="invalid_token"`,
+		);
+	});
+
 	test("closing the tab fails in-flight requests; the token works again after reconnecting", async () => {
 		const r = relay({ pageWaitMs: 0 });
 		const secret = newSecret();
@@ -960,10 +1261,14 @@ describe("health and index", () => {
 		const index = await fetch(`${r.relay.url}/`);
 		expect(index.headers.get("content-type")).toContain("text/html");
 		expect(index.headers.get("cache-control")).toBe("public, max-age=3600");
-		// The page loads only the relay's own stylesheet and icon.
+		// The page loads only the relay's own stylesheet and icon, runs no
+		// script, has no form and cannot be framed: the sign-in page's headers.
 		expect(index.headers.get("content-security-policy")).toBe(
-			"default-src 'none'; style-src 'self'; img-src 'self'; frame-ancestors 'none'",
+			"default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 		);
+		expect(index.headers.get("x-frame-options")).toBe("DENY");
+		expect(index.headers.get("referrer-policy")).toBe("same-origin");
+		expect(index.headers.get("x-content-type-options")).toBe("nosniff");
 		const html = await index.text();
 		expect(html).toContain('<link rel="icon" href="/favicon.svg"');
 		expect(html).toContain(
@@ -971,6 +1276,12 @@ describe("health and index", () => {
 		);
 		expect(html).toContain('href="https://ractive.ch/tab-mcp/"');
 		expect(html).toContain(`Version ${VERSION}`);
+		// Both ways a page offers its tools, WebMCP named (owner, 2026-11-22).
+		expect(html).toContain(
+			"A page offers its tools with the tab-mcp client library, which connects it to this relay. A page that offers its tools with the browser's WebMCP reaches it through the tab-mcp browser extension, which passes those tools on.",
+		);
+		expect(html).not.toContain("<script");
+		expect(html).not.toContain("<form");
 		expect((await fetch(`${r.relay.url}/nope`)).status).toBe(404);
 	});
 
@@ -1020,12 +1331,38 @@ describe("logs", () => {
 			token,
 			t.secret,
 			t.addressId,
-			"Test page",
 		]) {
 			expect(all).not.toContain(forbidden);
 		}
 		const requests = r.logs.events("mcp.request");
 		expect(requests.length).toBeGreaterThanOrEqual(3);
 		expect(requests.map((e) => e["method"])).toContain("tools/call");
+	});
+
+	test("lines name the app, and the page (shortened) once a token or a hello says which", async () => {
+		const r = relay();
+		const t = tab(r);
+		const address = (await t.connect()).address;
+		expect(r.logs.events("tab.session")).toEqual([
+			expect.objectContaining({
+				app: APP,
+				address: shortAddress(t.addressId),
+			}),
+		]);
+		await mcpPost(address, rpc(1, "tools/list"));
+		await mcpPost(address, rpc(2, "tools/list"), { token: "tmcp_at_nope" });
+		const token = await tokenFor(r.store, t.addressId);
+		await mcpPost(address, rpc(3, "tools/list"), { token });
+		const requests = r.logs.events("mcp.request");
+		expect(requests).toHaveLength(3);
+		for (const line of requests.slice(0, 2)) {
+			expect(line).toMatchObject({ app: APP, status: 401 });
+			expect(line).not.toHaveProperty("address");
+		}
+		expect(requests[2]).toMatchObject({
+			app: APP,
+			address: shortAddress(t.addressId),
+			status: 200,
+		});
 	});
 });

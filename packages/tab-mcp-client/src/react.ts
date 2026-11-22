@@ -14,6 +14,7 @@ import {
 	type MouseEvent,
 	type ReactElement,
 	type ReactNode,
+	useCallback,
 	useContext,
 	useEffect,
 	useInsertionEffect,
@@ -22,6 +23,12 @@ import {
 	useSyncExternalStore,
 } from "react";
 import {
+	type AllowedTool,
+	type AllowedTools,
+	allowedTools,
+} from "./allowed.ts";
+import {
+	type BrowserExtension,
 	type ConfirmRequest,
 	type ConnectionState,
 	type Grant,
@@ -38,6 +45,8 @@ import {
 	type ToolCallEnd,
 	type ToolCallStart,
 } from "./index.ts";
+import type { DialogStrings } from "./strings.ts";
+import { isPlural, plural } from "./text.ts";
 
 /** What `useTabMcpState()` returns: one object per change, the same object otherwise. */
 export interface TabMcpSnapshot {
@@ -48,6 +57,8 @@ export interface TabMcpSnapshot {
 	grants: readonly Grant[];
 	/** The pairing code to show, while the connect dialog is open. */
 	pairingCode: PairingCode | undefined;
+	/** Identity binding: until when a sign-in pairs the page (`TabMcp.pairingUntil`). */
+	pairingUntil: string | undefined;
 	/** Who the relay knows as the page's user (identity binding). */
 	identity: IdentityState;
 	/** Why the relay refused the identity (`identity: "refused"`). */
@@ -56,6 +67,11 @@ export interface TabMcpSnapshot {
 	reconnecting: ReconnectingInfo | undefined;
 	/** Names of the registered tools. */
 	tools: readonly string[];
+	/**
+	 * The tab-mcp browser extension while it serves the page, with the AI
+	 * apps connected through it (`TabMcp.extension`, `webmcp: true`).
+	 */
+	extension: BrowserExtension | undefined;
 }
 
 const EMPTY: readonly never[] = Object.freeze([]);
@@ -66,18 +82,22 @@ const SERVER_SNAPSHOT: TabMcpSnapshot = Object.freeze({
 	session: undefined,
 	grants: EMPTY,
 	pairingCode: undefined,
+	pairingUntil: undefined,
 	identity: "none",
 	identityMessage: undefined,
 	reconnecting: undefined,
 	tools: EMPTY,
+	extension: undefined,
 });
 
 const STATE_EVENTS = [
 	"statechange",
 	"grantschange",
 	"pairingcode",
+	"pairinguntil",
 	"identitychange",
 	"toolschange",
+	"extensionchange",
 ] as const satisfies readonly (keyof TabMcpEventMap)[];
 
 /** The external store of one `TabMcp`: a snapshot that changes only with the instance. */
@@ -114,6 +134,7 @@ class Store {
 			session: mcp.session,
 			grants: mcp.grants,
 			pairingCode: mcp.pairingCode,
+			pairingUntil: mcp.pairingUntil,
 			identity: mcp.identity,
 			identityMessage: mcp.identityMessage,
 			reconnecting: mcp.reconnecting,
@@ -122,6 +143,7 @@ class Store {
 				tools.every((t, i) => t === previous.tools[i])
 					? previous.tools
 					: tools,
+			extension: mcp.extension,
 		};
 		const same = (Object.keys(next) as (keyof TabMcpSnapshot)[]).every(
 			(key) => next[key] === previous[key],
@@ -178,14 +200,17 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 		// Always installed, so that a handler added, changed or removed in a
 		// later render counts: without one, the library's own behaviour.
 		const handlers = () => latest.current as Partial<TabMcpOptions>;
+		const onConfirm = (request: ConfirmRequest) => {
+			const ask = handlers().onConfirm;
+			return ask === undefined ? instance.confirmInPage(request) : ask(request);
+		};
+		// Whether the page gave a handler: the WebMCP mirror warns without one.
+		Object.defineProperty(onConfirm, "own", {
+			get: () => handlers().onConfirm !== undefined,
+		});
 		const instance: TabMcp = new TabMcp({
 			...options,
-			onConfirm: (request: ConfirmRequest) => {
-				const ask = handlers().onConfirm;
-				return ask === undefined
-					? instance.confirmInPage(request)
-					: ask(request);
-			},
+			onConfirm,
 			identityAssertion: (request: IdentityAssertionRequest) =>
 				handlers().identityAssertion?.(request) ?? null,
 		});
@@ -249,8 +274,8 @@ export function useTabMcp(): TabMcp {
 }
 
 /**
- * The connection state, address, grants, pairing code, identity and
- * reconnecting of the provider's `TabMcp`. Re-renders only when one of them
+ * The connection state, address, grants, pairing code, identity,
+ * reconnecting and the tab-mcp browser extension of the provider's `TabMcp`. Re-renders only when one of them
  * changes; the server and hydration see `disconnected`.
  */
 export function useTabMcpState(): TabMcpSnapshot {
@@ -260,6 +285,58 @@ export function useTabMcpState(): TabMcpSnapshot {
 		store.getSnapshot,
 		() => SERVER_SNAPSHOT,
 	);
+}
+
+/** What `useAllowedTools(grantId)` returns: one object per change, the same object otherwise. */
+export interface AllowedToolsSnapshot {
+	/** The page's tools that ask, each with whether it runs without asking for this app. */
+	tools: (AllowedTool & { allowed: boolean })[];
+	/** "Always allow everything" is on for this app. */
+	everything: boolean;
+	/** To change them: `allow`, `ask`, `setEverything`, `forget`. */
+	allowedTools: AllowedTools;
+}
+
+/**
+ * The tools that run without asking for one connected AI app
+ * (`grant.grantId`), for switches of the page's own: `allowedTools(mcp)` of
+ * `@ractive-ch/tab-mcp-client/allowed` as state. Re-renders when they or the
+ * tools change; the server and hydration see none.
+ */
+export function useAllowedTools(grantId: string): AllowedToolsSnapshot {
+	const allowed = allowedTools(useTabMcp());
+	const subscribe = useCallback(
+		(changed: () => void) => allowed.onChange(changed),
+		[allowed],
+	);
+	const last = useRef<{ key: string; snapshot: AllowedToolsSnapshot }>(
+		undefined,
+	);
+	const server = useRef<AllowedToolsSnapshot>(undefined);
+	// Reads only: a changed tool left the list already.
+	const getSnapshot = () => {
+		const everything = allowed.everything(grantId);
+		const listed = new Set(allowed.list(grantId));
+		const tools = allowed
+			.tools()
+			.map((t) => ({ ...t, allowed: everything || listed.has(t.name) }));
+		const key = JSON.stringify([grantId, everything, tools]);
+		if (
+			last.current?.key !== key ||
+			last.current.snapshot.allowedTools !== allowed
+		)
+			last.current = {
+				key,
+				snapshot: { tools, everything, allowedTools: allowed },
+			};
+		return last.current.snapshot;
+	};
+	const getServerSnapshot = () => {
+		if (server.current?.allowedTools !== allowed)
+			server.current = { tools: [], everything: false, allowedTools: allowed };
+		return server.current;
+	};
+	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 /** Options of `useTool`: `RegisterToolOptions` without the signal (the hook has its own). */
@@ -372,18 +449,45 @@ export interface ConnectButtonProps
 /** Failed reconnect attempts after which the default label says the connection is lost. */
 const LOST_AFTER_ATTEMPTS = 3;
 
-/** The default label of `ConnectButton`. */
-function connectLabel(state: TabMcpSnapshot): string {
+/**
+ * `ConnectButton`'s texts in English: the same as these keys of `STRINGS`
+ * (a test keeps them equal), here so that a page loads not the whole table
+ * of `./strings` with the button, only these few texts (review of PR 181).
+ * @internal
+ */
+export const BUTTON_TEXTS = {
+	lang: "en",
+	connectTitle: "Connect your AI app",
+	connecting: "Connecting…",
+	reconnecting: "Connection lost. Reconnecting…",
+	buttonReconnecting: "Reconnecting…",
+	buttonConnected: { one: "AI app connected", other: "{n} AI apps connected" },
+};
+type ButtonTexts = Pick<DialogStrings, keyof typeof BUTTON_TEXTS>;
+
+/** The button's texts: the `TabMcp`'s `ui.strings` where they are of the right kind. */
+function buttonTexts(strings: Partial<DialogStrings> | undefined): ButtonTexts {
+	const s: Record<string, unknown> = { ...BUTTON_TEXTS };
+	for (const [key, english] of Object.entries(BUTTON_TEXTS)) {
+		const value: unknown = strings?.[key as keyof ButtonTexts];
+		if (
+			typeof english === "string" ? typeof value === "string" : isPlural(value)
+		)
+			s[key] = value;
+	}
+	return s as ButtonTexts;
+}
+
+/** The default label of `ConnectButton`, in the texts of the `TabMcp`'s `ui.strings`. */
+function connectLabel(state: TabMcpSnapshot, s: ButtonTexts): string {
 	if (state.state === "connected" && state.grants.length > 0)
-		return state.grants.length === 1
-			? "AI app connected"
-			: `${state.grants.length} AI apps connected`;
+		return plural(s.buttonConnected, state.grants.length, s);
 	if (state.state === "reconnecting")
 		return (state.reconnecting?.attempt ?? 0) > LOST_AFTER_ATTEMPTS
-			? "Connection lost, retrying…"
-			: "Reconnecting…";
-	if (state.state === "connecting") return "Connecting…";
-	return "Connect your AI app";
+			? s.reconnecting
+			: s.buttonReconnecting;
+	if (state.state === "connecting") return s.connecting;
+	return s.connectTitle;
 }
 
 /**
@@ -404,7 +508,7 @@ export function ConnectButton({
 	if (!mcp.hasRelay) return null;
 	const label =
 		children === undefined
-			? connectLabel(state)
+			? connectLabel(state, buttonTexts(mcp._ui?.strings))
 			: typeof children === "function"
 				? children(state)
 				: children;

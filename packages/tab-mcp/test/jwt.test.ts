@@ -18,7 +18,7 @@ import {
 } from "../src/jwt.ts";
 import { APP_ISSUER, signingKey, signJwt } from "./oidc-fixture.ts";
 
-const ADDRESS = "https://relay.example/a/abc/mcp";
+const ADDRESS = "https://relay.example/s/app/mcp";
 const PROVIDER = "https://login.example";
 
 function source(keys: Record<string, unknown>[]): KeySource {
@@ -212,7 +212,7 @@ describe("tab assertions (DEC-076)", () => {
 		const { verifier, make } = await setup();
 		const check = async (claims: Record<string, unknown>, header = {}) =>
 			reason(verifier.verify(await make(claims, header), ADDRESS));
-		expect(await check({ aud: "https://relay.example/a/other/mcp" })).toBe(
+		expect(await check({ aud: "https://relay.example/s/other/mcp" })).toBe(
 			"aud",
 		);
 		expect(await check({ aud: [ADDRESS, "https://elsewhere.example"] })).toBe(
@@ -294,6 +294,44 @@ describe("JwksCache: stale keys on errors, no hammering", () => {
 		clock += 6_000;
 		expect(await cache.keys("nope")).toHaveLength(0);
 		expect(hits).toBe(3);
+	});
+
+	test("an unknown kid in the same millisecond as the last fetch is unavailable, not 'no key' (CI run 42612803397)", async () => {
+		const k1 = await signingKey("ES256", "k1");
+		let hits = 0;
+		const cache = new JwksCache("https://keys.example/jwks", {
+			now: () => 1_000_000, // every reading in one millisecond
+			load: async () => {
+				hits++;
+				return { keys: [k1.publicJwk] };
+			},
+		});
+		expect(await cache.keys("k1")).toHaveLength(1);
+		// Not fetched for this call (the 5 s floor): the key may be new.
+		await expect(cache.keys("nope")).rejects.toThrow();
+		const jwt = await signJwt(k1, { sub: "x" }, { kid: "nope" });
+		expect(await reason(verifyJwt(jwt, cache))).toBe("jwks_unavailable");
+		expect(hits).toBe(1);
+	});
+
+	test("a fetch that ends after a call came in answers it: a kid it lacks does not exist, in the same millisecond too", async () => {
+		const k1 = await signingKey("ES256", "k1");
+		let hits = 0;
+		const { promise: served, resolve: serve } = Promise.withResolvers<void>();
+		const cache = new JwksCache("https://keys.example/jwks", {
+			now: () => 1_000_000,
+			load: async () => {
+				hits++;
+				await served;
+				return { keys: [k1.publicJwk] };
+			},
+		});
+		const first = cache.keys("k1");
+		const waiting = cache.keys("nope"); // comes in while the fetch runs
+		serve();
+		expect(await first).toHaveLength(1);
+		expect(await waiting).toHaveLength(0);
+		expect(hits).toBe(1);
 	});
 
 	test("with no keys yet a failure throws, and the next call does not fetch again at once", async () => {

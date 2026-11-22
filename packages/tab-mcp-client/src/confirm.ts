@@ -1,30 +1,42 @@
 /**
  * The confirmation of consequential tools, loaded on demand: a `<dialog>`
- * per call, one shown at a time per document, and the tools a user allowed
- * until reload (`always-allowed.ts`).
+ * per call, one shown at a time per document, and Always allow (or Allow
+ * until reload) for the tools a user allows (`always-allowed.ts`).
  */
 
-import { allowedFor } from "./always-allowed.ts";
+import { allowedFor, type ConfirmHost } from "./always-allowed.ts";
 import {
 	button,
 	clientLabel,
 	el,
 	fill,
-	format,
 	newDialog,
+	plural,
 	stringsOf,
 	visible,
 } from "./dialog.ts";
 import type { DialogStrings } from "./strings.ts";
 import type { TabMcp } from "./tab-mcp.ts";
-import type { ConfirmRequest, DialogOptions } from "./types.ts";
+import type {
+	ConfirmAnswer,
+	ConfirmHandler,
+	ConfirmRequest,
+	DialogOptions,
+	LocalClient,
+	RelayClient,
+} from "./types.ts";
+
+/** A request the dialog is shown for: never a WebMCP call's (DEC-215). */
+export type AskedRequest = ConfirmRequest & {
+	client: RelayClient | LocalClient;
+};
 
 /**
  * The arguments as text, in full: what the user approves must be visible.
  * (The relay caps a request at 1 MiB, so this stays bounded.) Invisible and
  * direction characters are shown as escapes, so the text is still JSON for
  * the same arguments; the tool gets them unchanged. `undefined` when they
- * cannot be shown, and then "Allow" is not offered.
+ * cannot be shown, and then "Allow once" is not offered.
  */
 function showArguments(args: Record<string, unknown>): string | undefined {
 	try {
@@ -35,12 +47,21 @@ function showArguments(args: Record<string, unknown>): string | undefined {
 }
 
 /**
- * How long "Allow" stays disabled after the confirmation is shown, while the
+ * How long "Allow once" stays disabled after the confirmation is shown, while the
  * page is visible and focused (CU 17: a constant; tests pass `allowDelayMs`).
  */
 export const ALLOW_DELAY_MS = 750;
 
-/** The user's answer: "always" allows this tool for this AI app until reload. */
+/**
+ * Tests only: the delay a dialog gets when its caller passes none, for tests
+ * whose subject is not the delay (the library's own `TabMcp` passes none).
+ * Pages never change it; it starts as {@link ALLOW_DELAY_MS}.
+ */
+export const confirmTiming: { allowDelayMs: number } = {
+	allowDelayMs: ALLOW_DELAY_MS,
+};
+
+/** The user's answer: "always" allows this tool for this AI app (Always allow, or until reload). */
 export type DialogAnswer = "allow" | "always" | "deny";
 
 /** Arguments up to this many characters are read out with the question. */
@@ -50,8 +71,11 @@ const DESCRIBED_ARGUMENTS = 500;
 export interface ConfirmDialogOptions {
 	/** Tests only: another delay than {@link ALLOW_DELAY_MS}. */
 	allowDelayMs?: number | undefined;
-	/** Offer "Allow until reload". */
-	alwaysAllow?: boolean | undefined;
+	/**
+	 * Offer a third button: `true` "Always allow" (kept until the app is
+	 * disconnected), `"until-reload"` "Allow until reload" (kept in memory).
+	 */
+	alwaysAllow?: boolean | "until-reload" | undefined;
 	/** Asked when a waiting call's turn comes: `true` answers "allow" unseen. */
 	allowedNow?: () => boolean;
 	strings?: DialogStrings;
@@ -72,10 +96,12 @@ interface ConfirmQueue {
 const queues = new WeakMap<Document, ConfirmQueue>();
 
 /**
- * Ask whether a consequential tool may run. "Allow until reload" is offered
- * only with `alwaysAllow` (DEC-096). One confirmation is shown at a time per
+ * Ask whether a consequential tool may run. "Always allow" (or "Allow until
+ * reload") is offered only with `alwaysAllow` (DEC-096, DEC-200); never
+ * "allow everything": that is a deliberate act in the connect dialog, not
+ * an answer to one question. One confirmation is shown at a time per
  * document; the others wait their turn, and a call cancelled while it waits
- * is never shown. "Allow" and "Allow until reload" stay disabled until the
+ * is never shown. "Allow once" and "Always allow" stay disabled until the
  * page has been visible and focused for 750 ms while the dialog is open and
  * is the top one, so a click meant for the page, the click that brings the
  * tab or window back, or the one that closed another dialog, cannot
@@ -84,11 +110,11 @@ const queues = new WeakMap<Document, ConfirmQueue>();
  * Enter or Space on a button and Escape are ignored, so typing meant for the
  * page cannot refuse either. Everything else (Don't allow, Escape, an
  * aborted call) is "deny". `allowedNow` is asked when a waiting call's turn
- * comes: `true` (the user allowed it until reload meanwhile) answers "allow"
+ * comes: `true` (the user allowed it meanwhile) answers "allow"
  * without showing it.
  */
 export function confirmDialog(
-	request: ConfirmRequest,
+	request: AskedRequest,
 	doc: Document,
 	options: ConfirmDialogOptions = {},
 ): Promise<DialogAnswer> {
@@ -141,14 +167,14 @@ export function confirmDialog(
 
 /** `confirmDialog` once it is this request's turn; calls `next` when it closes. */
 function showConfirm(
-	request: ConfirmRequest,
+	request: AskedRequest,
 	doc: Document,
 	options: ConfirmDialogOptions,
 	queue: ConfirmQueue,
 	next: () => void,
 ): Promise<DialogAnswer> {
 	const s = options.strings ?? stringsOf(undefined);
-	const delay = options.allowDelayMs ?? ALLOW_DELAY_MS;
+	const delay = options.allowDelayMs ?? confirmTiming.allowDelayMs;
 	const tool = request.tool.title ?? request.tool.name;
 	const client = clientLabel(request.client, s);
 	const names = { tool, client };
@@ -162,8 +188,7 @@ function showConfirm(
 	const showWaiting = () => {
 		const n = queue.waiting.length;
 		waiting.hidden = n === 0;
-		waiting.textContent =
-			n === 1 ? s.waitingOne : format(s.waitingMany, { n: String(n) });
+		waiting.textContent = plural(s.waiting, n, s);
 	};
 	queue.changed = showWaiting;
 	showWaiting();
@@ -186,18 +211,27 @@ function showConfirm(
 		);
 		return node;
 	};
-	// The approving buttons: Allow, and Allow until reload when the page offers it.
+	// The approving buttons: Allow, and Always allow (or Allow until reload)
+	// when the page offers it, saying how long it lasts.
 	const approve = [approving(s.allow, "allow", "tab-mcp-allow")];
 	const extra: HTMLElement[] = [];
-	if (options.alwaysAllow === true) {
+	const mode = options.alwaysAllow;
+	if (mode === true || mode === "until-reload") {
+		const kept = mode === true;
 		// Left of Allow: not where most platforms put the default (CU 11).
-		approve.unshift(approving(s.allowUntilReload, "always", "tab-mcp-always"));
+		approve.unshift(
+			approving(
+				kept ? s.alwaysAllow : s.allowUntilReload,
+				"always",
+				"tab-mcp-always",
+			),
+		);
 		extra.push(
 			el(
 				doc,
 				"p",
 				{ className: "tab-mcp-always-note" },
-				...fill(doc, s.allowUntilReloadNote, names),
+				...fill(doc, kept ? s.alwaysAllowNote : s.allowUntilReloadNote, names),
 			),
 		);
 	}
@@ -384,46 +418,93 @@ function showConfirm(
 	});
 }
 
+/** Options of this chunk's `confirmInPage`. */
+export interface ConfirmInPageOptions {
+	/**
+	 * The third button, for an AI app through the relay (`kind: "relay"`):
+	 * `true` "Always allow" (kept in the `TabMcp`'s `storage`; "Allow until
+	 * reload" where it is kept in memory, as for a stand-in), `"until-reload"`
+	 * "Allow until reload", `false` none. Default: the `TabMcp`'s
+	 * `alwaysAllow`; none for a stand-in.
+	 */
+	alwaysAllow?: boolean | "until-reload" | undefined;
+	/** Texts of the dialog, as `TabMcpOptions.ui`. */
+	ui?: DialogOptions | undefined;
+	/** Tests only: another delay than {@link ALLOW_DELAY_MS}. */
+	allowDelayMs?: number | undefined;
+}
+
 /**
- * `TabMcp.confirmInPage`: the confirmation, and the tools allowed until
- * reload (`always-allowed.ts`). Only for an AI app through the relay: an
- * agent in the browser and a served port have no identity to remember an
- * answer for (DEC-115, DEC-124).
+ * `TabMcp.confirmInPage`: the confirmation, and the tools the user allowed
+ * (`always-allowed.ts`), which run unasked. Those only for an AI app through
+ * the relay: a served port has no identity to remember an answer for
+ * (DEC-115, DEC-124). A WebMCP call is never shown it (an agent that drives
+ * the tab would answer it itself; DEC-215): it resolves `true`.
+ *
+ * Code that loads this chunk itself may pass a stand-in of its own for
+ * `mcp` (`ConfirmHost`: `grants`, optionally `grantschange` events). Its
+ * allowances live in memory, for its grants only, until the page is
+ * reloaded, and exist only where the caller offers them with
+ * `options.alwaysAllow`; without it nothing is allowed and nothing is kept.
  */
 export function confirmInPage(
-	mcp: TabMcp,
+	mcp: TabMcp | ConfirmHost,
 	request: ConfirmRequest,
 	doc: Document,
-	options: {
-		alwaysAllow?: boolean | undefined;
-		ui?: DialogOptions | undefined;
-		/** Tests only. */
-		allowDelayMs?: number | undefined;
-	} = {},
+	options: ConfirmInPageOptions = {},
 ): Promise<boolean> {
 	const { client } = request;
-	const dialogOptions = {
-		strings: stringsOf(options.ui),
-		allowDelayMs: options.allowDelayMs,
-	};
+	if (client.kind === "webmcp") return Promise.resolve(true);
+	const strings = stringsOf(options.ui);
+	const { allowDelayMs } = options;
 	if (client.kind !== "relay")
-		return confirmDialog(request, doc, dialogOptions).then(
-			(answer) => answer === "allow",
-		);
+		return confirmDialog({ ...request, client }, doc, {
+			strings,
+			allowDelayMs,
+		}).then((answer) => answer === "allow");
 	const { grantId } = client;
 	const allowed = allowedFor(mcp);
-	const allowedNow = () => allowed.has(grantId, request.tool);
+	const allowedNow = () => allowed.allows(grantId, request.tool);
 	if (allowedNow()) return Promise.resolve(true);
+	const offer = options.alwaysAllow ?? allowed.offered;
 	// Asked again when its turn comes: the call before it in the queue may
-	// have been allowed until reload.
-	return confirmDialog(request, doc, {
-		...dialogOptions,
-		alwaysAllow: options.alwaysAllow,
+	// have been allowed meanwhile.
+	return confirmDialog({ ...request, client }, doc, {
+		strings,
+		allowDelayMs,
+		// "Always" only where it outlives a reload.
+		alwaysAllow:
+			offer !== false &&
+			(offer === true && allowed.kept ? true : "until-reload"),
 		allowedNow,
 	}).then((answer) => {
-		// Only while the grant is still there: a revoked app gets nothing.
-		if (answer === "always" && mcp.grants.some((g) => g.grantId === grantId))
-			allowed.add(grantId, request.tool);
+		// Only while the grant is still there: a revoked app gets nothing
+		// (`keep` checks).
+		if (answer === "always") allowed.keep(grantId, request.tool);
 		return answer !== "deny";
 	});
+}
+
+/**
+ * The core's question about a consequential call: an AI app's call that the
+ * user allowed runs without asking, with the dialog and with the page's own
+ * `onConfirm` alike; any other goes to `onConfirm`, else to the dialog.
+ * Only AI apps through the relay have a grant to allow for.
+ */
+export function confirmCall(
+	mcp: TabMcp,
+	request: ConfirmRequest,
+	onConfirm: ConfirmHandler | undefined,
+): Promise<ConfirmAnswer> {
+	const { client } = request;
+	if (
+		client.kind === "relay" &&
+		allowedFor(mcp).allows(client.grantId, request.tool)
+	)
+		return Promise.resolve(true);
+	if (onConfirm === undefined) return mcp.confirmInPage(request);
+	// Anything but true or "unanswered" is a refusal.
+	return Promise.resolve()
+		.then(() => onConfirm(request))
+		.then((answer) => (answer === "unanswered" ? answer : answer === true));
 }

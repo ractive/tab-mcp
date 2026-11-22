@@ -31,12 +31,14 @@ import type { GrantRef } from "./protocol.ts";
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
 import type {
 	ConfirmAnswer,
+	ConfirmHandler,
 	ConfirmRequest,
 	ServerInfo,
 	ToolCallClient,
 	ToolCallEnd,
 	ToolCallOutcome,
 	ToolCallStart,
+	WebMcpClient,
 } from "./types.ts";
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -64,8 +66,12 @@ export interface ToolSource {
 /** What a tool call needs, through the relay or through WebMCP. */
 export interface CallContext {
 	tools: ToolSource;
-	/** Ask the user before a consequential tool runs. */
-	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
+	/**
+	 * Ask the user before a consequential tool runs (a throw is a refusal);
+	 * for an unvouched WebMCP call, the page's own `onConfirm` or nothing
+	 * (DEC-215).
+	 */
+	confirm: ConfirmHandler;
 	/**
 	 * `confirm` is an own `onConfirm` (the page's, or a serve's), which may
 	 * ask anywhere: `tools/list` then does not say where (DEC-169).
@@ -107,35 +113,62 @@ const compiled = new WeakMap<RegisteredTool, ArgumentValidator>();
  * (the validator resolves one only when an argument reaches it, against the
  * base of the nearest `$id`), an `$id` that is not a URL, a duplicate one.
  * `compileRegistry` makes the registry call it at registration (DEC-086).
+ * The output schema gets the same check (an AI app compiles it when it
+ * lists the tools, and one its validator cannot use costs the tool); results
+ * are not checked against it.
  */
 export function compileTool(tool: RegisteredTool): ArgumentValidator {
 	const known = compiled.get(tool);
 	if (known !== undefined) return known;
 	const schema = tool.inputSchema as Schema;
-	let lookup: Record<string, Schema | boolean>;
-	try {
-		lookup = dereference(schema);
-	} catch (error) {
-		// Only the first line: the validator appends the URIs it knows.
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(message.split("\n")[0]);
-	}
-	for (const node of Object.values(lookup)) {
-		if (typeof node !== "object" || node.$ref === undefined) continue;
-		const absolute = (node as { __absolute_ref__?: string }).__absolute_ref__;
-		if (lookup[absolute ?? node.$ref] === undefined)
-			throw new Error(`$ref ${JSON.stringify(node.$ref)} does not resolve`);
-	}
+	const lookup = lookupOf(schema, "inputSchema");
+	if (tool.outputSchema !== undefined)
+		lookupOf(tool.outputSchema as Schema, "outputSchema");
 	const validator: ArgumentValidator = (args) =>
 		validateSchema(args, schema, "2020-12", lookup, false);
 	compiled.set(tool, validator);
 	return validator;
 }
 
+/** Why `compileTool` refused a tool, and which of its schemas. */
+class SchemaError extends Error {
+	readonly what: string;
+	constructor(what: string, message: string) {
+		super(message);
+		this.what = what;
+	}
+}
+
+/** The validator's lookup of `schema`; a `SchemaError` if it cannot use it. */
+function lookupOf(
+	schema: Schema,
+	what: string,
+): Record<string, Schema | boolean> {
+	let lookup: Record<string, Schema | boolean>;
+	try {
+		lookup = dereference(schema);
+	} catch (error) {
+		// Only the first line: the validator appends the URIs it knows.
+		const message = error instanceof Error ? error.message : String(error);
+		throw new SchemaError(what, message.split("\n")[0] ?? "");
+	}
+	for (const node of Object.values(lookup)) {
+		if (typeof node !== "object" || node.$ref === undefined) continue;
+		const absolute = (node as { __absolute_ref__?: string }).__absolute_ref__;
+		if (lookup[absolute ?? node.$ref] === undefined)
+			throw new SchemaError(
+				what,
+				`$ref ${JSON.stringify(node.$ref)} does not resolve`,
+			);
+	}
+	return lookup;
+}
+
 function schemaError(name: string, error: unknown, suffix = ""): TypeError {
 	const message = error instanceof Error ? error.message : String(error);
+	const what = error instanceof SchemaError ? error.what : "inputSchema";
 	return new TypeError(
-		`registerTool: the inputSchema of ${name}: ${message}${suffix}`,
+		`registerTool: the ${what} of ${name}: ${message}${suffix}`,
 	);
 }
 
@@ -408,7 +441,17 @@ async function decideAndRun(
 		signal.addEventListener("abort", () => reject(signal.reason));
 	});
 	cancelled.catch(() => {});
-	if (tool.annotations.consequentialHint === true) {
+	// A WebMCP call asks by the mirror's rule: MCP's `destructiveHint` counts as
+	// `consequentialHint` there, as WebMCP has no `destructiveHint` (DEC-143,
+	// DEC-209); its `confirm` is the page's own `onConfirm` or none, never
+	// the library's dialog (DEC-215). For AI apps the hints are mapped as
+	// DEC-022 says.
+	const { consequentialHint, destructiveHint } = tool.annotations;
+	const asks =
+		client.kind === "webmcp"
+			? (consequentialHint ?? destructiveHint)
+			: consequentialHint;
+	if (asks === true) {
 		const question: ConfirmRequest = {
 			tool: { name: tool.name, description: tool.description },
 			arguments: raw,
@@ -424,10 +467,10 @@ async function decideAndRun(
 		}
 		if (answer !== true) {
 			if (signal.aborted)
-				return stopped("cancelled", "The user declined", "cancelled");
+				return stopped("cancelled", "The call was cancelled.", "cancelled");
 			return answer === "unanswered"
 				? stopped("unanswered", UNANSWERED, "unanswered")
-				: stopped("declined", "The user declined", "declined");
+				: stopped("declined", "The user did not allow this call.", "declined");
 		}
 	}
 	if (signal.aborted) return stopped("cancelled", "Cancelled", "cancelled");
@@ -461,18 +504,21 @@ async function decideAndRun(
  * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
  * Resolves with what `execute` returned, as `webMcpValue` maps it. Every
  * failure the agent should read resolves too, as `{ error: "<message>" }`:
- * invalid arguments, "Don't allow", a question not answered, a tool that is
- * gone, what `execute` threw, an `isError` result.
+ * invalid arguments, a refusal or `"unanswered"` of the page's `onConfirm`,
+ * a tool that is gone, what `execute` threw, an `isError` result.
  * WebMCP hands the agent a rejection without its message (the draft: an
  * `OperationError`; Chrome 156: `UnknownError`), so the agent would learn
  * neither why nor what to change (DEC-120). Only a call the browser
- * cancelled rejects (`AbortError`): its caller has gone already.
+ * cancelled rejects (`AbortError`): its caller has gone already. `client`:
+ * an agent in the browser, or the AI app the tab-mcp browser extension
+ * vouched for (DEC-207).
  */
 export async function webMcpCall(
 	context: CallContext,
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
+	client: WebMcpClient,
 ): Promise<unknown> {
 	const failed = (error: string) => ({ error });
 	const gone = `The tool ${tool.name} is no longer available.`;
@@ -484,7 +530,7 @@ export async function webMcpCall(
 		tool,
 		input,
 		signal instanceof AbortSignal ? signal : new AbortController().signal,
-		{ kind: "webmcp" },
+		client,
 	);
 	if (run.stop === "cancelled")
 		throw new DOMException("Cancelled", "AbortError");

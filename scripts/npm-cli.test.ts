@@ -2,10 +2,14 @@
  * The failure paths of the signing and publishing scripts that need neither
  * the registry nor an OIDC token (they run on Node, as in the workflow).
  */
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Each test starts Node (and `tar`) a few times; a busy CI runner takes a
+// second or more per start, past bun's 5 s.
+setDefaultTimeout(30_000);
 
 const tmp = mkdtempSync(join(tmpdir(), "npm-cli-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));

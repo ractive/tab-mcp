@@ -13,10 +13,9 @@ the `TokenStore` interface, for example one backed by Redis, PostgreSQL or Prism
 page describes the interface, the guarantees a store must give, and how to check a store
 with the conformance suite.
 
-A shared store alone does not let you run several relays for one address: tab sessions
-live in the relay's memory. With a load balancer that sends every request of one address
-to the same instance it does; see
-[Running several instances](self-hosting.md#running-several-instances).
+A shared store does not let you run several relay instances behind one public URL: tab
+sessions and the pairing codes their pages show live in one relay's memory, and a relay
+is one instance ([self-hosting](self-hosting.md#one-instance)).
 
 ## Using your own store
 
@@ -46,7 +45,8 @@ interface TokenRecord {
   hash: string;           // SHA-256 of the token, base64url without padding
   kind: TokenKind;
   grantId: string;
-  addressId: string;      // the address the grant belongs to
+  addressId: string;      // the address id of the page the grant belongs to
+  app: string;            // the app of the address the token is valid at: /s/<app>/mcp
   clientId: string;       // the AI app's client id (its metadata document URL)
   clientName: string;     // the AI app's declared name, for display only
   scopes: string[];
@@ -69,6 +69,13 @@ interface GrantSummary {
 
 type RevokeSelector = { grantId: string } | { addressId: string };
 ```
+
+`addressId` names one page: the id the relay derives from the page's app id and secret
+([protocol](protocol.md#session)). It is not part of any URL. `app` is the app id of the
+MCP address the page serves, `https://<relay>/s/<app>/mcp`, and is set on every record.
+Store it and return it unchanged. A store that drops or changes it does not break
+anything open: the relay accepts a token only at the address of its record's `app`, so
+every token of that store is then refused. The conformance suite checks the round trip.
 
 `subject` is set only on grants made by identity binding. Store it and return it
 unchanged (and leave the key out when it was not set). A store that drops it does not
@@ -108,10 +115,10 @@ epoch.
 | `put` | Insert the record, or replace the record with the same `hash`. Return `false` and store nothing if the grant was revoked (see tombstones below). |
 | `get` | Return the record for a hash, also when it is expired or used: the relay decides what that means. Return `undefined` once `revoke` or `deleteExpired` removed it. Changing the returned object must not change the store. |
 | `markUsed` | Set `usedAt` to `now` if it is not set yet, and in the same step lower `expiresAt` to `keepUntil` if that is earlier (never raise it). Return `true` only for the call that set it; `false`, changing nothing, if it was already used or does not exist. |
-| `revoke` | Delete every token of the grant or of the address, leave a tombstone until `keepUntil`, and return how many tokens were deleted. |
-| `listGrants` | The grants of an address that still have a usable token at `now` (an unexpired access token, or an unexpired and unused refresh token), oldest grant first. The page uses it to list connected apps. |
+| `revoke` | Delete every token of the grant, or of the address id (every grant of one page), leave a tombstone until `keepUntil`, and return how many tokens were deleted. |
+| `listGrants` | The grants of an address id that still have a usable token at `now` (an unexpired access token, or an unexpired and unused refresh token), oldest grant first. The page uses it to list connected apps. |
 | `deleteExpired` | Delete every record with `expiresAt <= now` and every tombstone whose `keepUntil` has passed. Return how many records were deleted. The relay calls it every 10 minutes. It should also drop `claimNonce` entries whose `expiresAt` has passed. |
-| `claimNonce` | Optional (DEC-106): remember `key` (a hash of an AI app's client id and the `jti` of its client assertion) until `expiresAt`. Return `true` for the one call that recorded it, `false` while it is remembered; an entry with `expiresAt <= now` counts as absent. Atomic like `markUsed` (Redis `SET key 1 PXAT expiresAt NX`, SQL `INSERT … ON CONFLICT DO UPDATE … WHERE expires_at <= now`). Without it the relay keeps used `jti`s in its own memory: correct for one instance, but with several a replayed assertion is not noticed on another instance. `expiresAt` is at most about six minutes ahead, and each instance writes at most 10 000 live entries per AI app host, so the table stays small. |
+| `claimNonce` | Optional (DEC-106): remember `key` (a hash of an AI app's client id and the `jti` of its client assertion) until `expiresAt`. Return `true` for the one call that recorded it, `false` while it is remembered; an entry with `expiresAt <= now` counts as absent. Atomic like `markUsed` (Redis `SET key 1 PXAT expiresAt NX`, SQL `INSERT … ON CONFLICT DO UPDATE … WHERE expires_at <= now`). Without it the relay keeps used `jti`s in its own memory, until it restarts. `expiresAt` is at most about six minutes ahead, and the relay writes at most 10 000 live entries per AI app host, so the table stays small. |
 | `close` | Optional: release connections or file handles. |
 
 ## Guarantees
@@ -137,7 +144,7 @@ Every store must give these guarantees. The relay's security depends on them.
   an older file, or let them expire.
 - **Revocation is final.** `revoke` leaves a tombstone at least until `keepUntil`. Until
   then `put` refuses a record of a revoked grant, and a record of a grant of a revoked
-  address if the grant was created at or before the revocation (`grantCreatedAt <=` the
+  address id if the grant was created at or before the revocation (`grantCreatedAt <=` the
   revocation's `now`). Checking the tombstone and inserting must be atomic, so tokens
   minted by a refresh that raced a Disconnect never outlive it. The relay sets
   `keepUntil` to the grant lifetime (90 days by default), the longest any earlier token
@@ -183,8 +190,8 @@ conformance suite with Redis 7.0 when it was written, and again with Redis 7.4 a
 `markUsed` gained `keepUntil`. It is a starting point, not
 a supported package: it assumes a single Redis node (the scripts touch keys they do not
 declare, which Redis Cluster does not allow), and `listGrants` reads tokens one by one.
-It keeps records as JSON, so `clientAuth` round-trips. It has no `claimNonce`; with
-several instances add one: `(await this.redis.send("SET", [this.prefix + "nonce:" + key,
+It keeps records as JSON, so `app`, `subject` and `clientAuth` round-trip. It has no
+`claimNonce`; to add one: `(await this.redis.send("SET", [this.prefix + "nonce:" + key,
 "1", "PXAT", String(expiresAt), "NX"])) === "OK"` (Redis expires the key by itself).
 
 ```ts
@@ -201,10 +208,10 @@ import { RedisClient } from "bun";
 // Keys, under a prefix:
 //   tok:<hash>      the record as JSON
 //   grant:<id>      set of token hashes of a grant
-//   addr:<id>       set of token hashes of an address
+//   addr:<id>       set of token hashes of an address id
 //   exp             sorted set: token hash by expiresAt
 //   rev:grant:<id>  tombstone of a grant: keepUntil
-//   rev:addr:<id>   tombstone of an address: JSON {at, until}
+//   rev:addr:<id>   tombstone of an address id: JSON {at, until}
 //   revs            sorted set: tombstone key by keepUntil
 // Each write runs as one Lua script, so it is atomic.
 
@@ -371,7 +378,7 @@ A relational store needs two tables:
 
 Map the methods like this:
 
-- `put`: in one transaction, look for a tombstone of the grant, or of the address with
+- `put`: in one transaction, look for a tombstone of the grant, or of the address id with
   `at >= grantCreatedAt`. If there is one, return `false`; else insert or replace the
   row. Use a transaction level that keeps a concurrent `revoke` from slipping in between
   (SQLite's write lock does it; in PostgreSQL use `SERIALIZABLE`, or lock the
@@ -384,12 +391,19 @@ Map the methods like this:
   `keep_until`) and delete the matching tokens.
 - `deleteExpired`: delete tokens with `expires_at <= now` and tombstones with
   `keep_until <= now` (and nonces with `expires_at <= now`).
-- `claimNonce`, if you run several instances: a third table `nonces` (`key` primary
-  key, `expires_at`) and `INSERT INTO nonces VALUES ($key, $expires_at) ON CONFLICT (key)
-  DO UPDATE SET expires_at = excluded.expires_at WHERE nonces.expires_at <= $now`;
-  return whether one row changed.
-- `client_auth`: a nullable text column on `tokens` for `clientAuth`.
+- `claimNonce`, if the store should keep the used assertion ids: a third table `nonces`
+  (`key` primary key, `expires_at`) and `INSERT INTO nonces VALUES ($key, $expires_at)
+  ON CONFLICT (key) DO UPDATE SET expires_at = excluded.expires_at WHERE
+  nonces.expires_at <= $now`; return whether one row changed.
+- `app`: a text column on `tokens`, not null, for `app`.
+- `subject` and `client_auth`: nullable text columns on `tokens` for `subject` and
+  `clientAuth`.
 
 The built-in `SqliteTokenStore` in the
 [relay's source](../packages/tab-mcp/src/store/sqlite.ts) follows exactly this plan and
-is a complete example. Run the conformance suite against your store before you use it.
+is a complete example. Its schema is at version 6, which added the `app` column. A file
+from an older relay is migrated when it is opened, and that step deletes every token in
+it: they were made for addresses that no longer exist, so every AI app pairs again. The
+file is then marked as needing a relay that knows schema 6, and an older relay refuses
+to open it (see [Upgrading](self-hosting.md#upgrading)). Run the conformance suite
+against your store before you use it.

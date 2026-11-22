@@ -1,5 +1,4 @@
-import { expect, test } from "bun:test";
-import { addressIdFromSecret } from "@ractive-ch/tab-mcp";
+import { expect, spyOn, test } from "bun:test";
 import { addressIdOf } from "../src/address.ts";
 import { base64url, isSecret, newSecret, SecretStore } from "../src/secret.ts";
 import { MemoryStorage, newTab } from "./helpers.ts";
@@ -26,10 +25,10 @@ test("base64url matches the platform encoder", () => {
 	}
 });
 
-test("a secret is 43 base64url characters and gives a 52-character address id", () => {
+test("a secret is 43 base64url characters and gives a 52-character address id", async () => {
 	const secret = newSecret();
 	expect(isSecret(secret)).toBe(true);
-	expect(addressIdFromSecret(secret)).toMatch(/^[a-z2-7]{52}$/);
+	expect(await addressIdOf(secret)).toMatch(/^[a-z2-7]{52}$/);
 });
 
 test("the secret is kept in storage and stable", () => {
@@ -75,6 +74,70 @@ test("without storage, or with storage that throws, the secret lives as long as 
 	const s = got(throwing);
 	expect(isSecret(s)).toBe(true);
 	expect(got(throwing)).toBe(s);
+});
+
+/** Storage that reads `old` and cannot be written (code review 2026-11-22, CR-02). */
+function readOnly(old: string) {
+	return {
+		getItem: () => old,
+		setItem: () => {
+			throw new Error("read-only storage");
+		},
+	};
+}
+
+test("a rotated secret that storage could not keep wins over the old stored one for the page's lifetime", () => {
+	const old = newSecret();
+	const store = new SecretStore(readOnly(old), "k");
+	expect(store.current()).toBe(old);
+	const fresh = store.rotate();
+	expect(fresh).not.toBe(old);
+	expect(store.current()).toBe(fresh);
+	expect(got(store)).toBe(fresh);
+	// Once a write works again, storage counts again.
+	const storage = new MemoryStorage();
+	storage.setItem("k", old);
+	let fail = true;
+	const flaky = new SecretStore(
+		{
+			getItem: (key) => storage.getItem(key),
+			setItem: (key, value) => {
+				if (fail) throw new Error("quota");
+				storage.setItem(key, value);
+			},
+		},
+		"k",
+	);
+	const kept = flaky.rotate();
+	expect(flaky.current()).toBe(kept);
+	fail = false;
+	const saved = flaky.rotate();
+	expect(storage.items.get("k")).toBe(saved);
+	const other = newSecret();
+	storage.setItem("k", other); // another tab rotated
+	expect(flaky.current()).toBe(other);
+});
+
+test("disconnectAll() with storage that cannot be written: the new connection has the new secret", async () => {
+	const relay = new StubRelay();
+	try {
+		const old = newSecret();
+		const t = newTab(relay.url, { storage: readOnly(old) });
+		await t.connect();
+		expect((await relay.next("hello"))["secret"]).toBe(old);
+		await t.disconnectAll();
+		expect(await relay.next("hello")).toMatchObject({
+			secret: old,
+			revokeAll: true,
+		});
+		const fresh = await relay.next("hello");
+		expect(isSecret(fresh["secret"])).toBe(true);
+		expect(fresh["secret"]).not.toBe(old);
+		expect(fresh["revokeAll"]).toBeUndefined();
+		t.disconnect();
+	} finally {
+		await relay.stop();
+	}
 });
 
 test("TabMcp keys the secret by relay origin and the URI-encoded server name; an explicit storageKey is used as given", async () => {
@@ -123,10 +186,23 @@ test("a secret under the key of client 0.4 and older is not read: that page pair
 	}
 });
 
-test("addressIdOf is the relay's derivation, computed with Web Crypto (DEC-098)", async () => {
+// What the tabs of one page tell each other by (DEC-095): the library's own
+// id of a secret. Not compared with the relay's id of a session, which no
+// part of the library needs to know.
+test("addressIdOf is base32(sha256(secret)), lower case without padding, computed with Web Crypto", async () => {
+	expect(await addressIdOf("A".repeat(43))).toBe(
+		"b4ahhbnw7hklp3vsosdall7bvgckbi57upybjue6fj4ez2pfzuna",
+	);
+	const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
 	for (let i = 0; i < 20; i++) {
 		const secret = newSecret();
-		expect(await addressIdOf(secret)).toBe(addressIdFromSecret(secret));
+		let bits = "";
+		for (const byte of new Bun.CryptoHasher("sha256").update(secret).digest())
+			bits += byte.toString(2).padStart(8, "0");
+		let id = "";
+		for (let at = 0; at < bits.length; at += 5)
+			id += alphabet[Number.parseInt(bits.slice(at, at + 5).padEnd(5, "0"), 2)];
+		expect(await addressIdOf(secret)).toBe(id);
 	}
 });
 
@@ -139,31 +215,102 @@ test("addressIdOf is undefined without Web Crypto (an insecure context) or when 
 	expect(await addressIdOf(secret, broken)).toBeUndefined();
 });
 
-test("the /tab URL carries the address id of the secret in hello, never the secret (DEC-098)", async () => {
+test("the /tab URL has no query: no URL the library opens has the secret, its address id or the app in it (DEC-196)", async () => {
 	const relay = new StubRelay();
+	// Every socket the library opens, as it asked for it.
+	const Real = globalThis.WebSocket;
+	const opened: { url: string; protocols: unknown }[] = [];
+	globalThis.WebSocket = class extends Real {
+		constructor(url: string | URL, protocols?: string | string[]) {
+			opened.push({ url: String(url), protocols });
+			super(url, protocols);
+		}
+	} as typeof WebSocket;
+	const fetched = spyOn(globalThis, "fetch");
 	try {
-		const t = newTab(relay.url, { storage: new MemoryStorage() });
+		const t = newTab(relay.url, { app: "calc-2", appName: "Calc" });
 		await t.connect();
-		const hello = await relay.next("hello");
-		const secret = String(hello["secret"]);
-		const url = new URL(relay.urls.at(-1) ?? "");
-		expect(url.pathname).toBe("/tab");
-		expect(url.searchParams.getAll("a")).toEqual([addressIdFromSecret(secret)]);
-		expect(url.href).not.toContain(secret);
-		// New address: the take-back names the old id, the next connection the new one.
-		await t.newAddress();
-		const back = await relay.next("hello");
-		expect(back).toMatchObject({ secret, revokeAll: true });
-		expect(new URL(relay.urls.at(-2) ?? "").searchParams.get("a")).toBe(
-			addressIdFromSecret(secret),
-		);
-		const second = await relay.next("hello");
-		expect(second["secret"]).not.toBe(secret);
-		expect(new URL(relay.urls.at(-1) ?? "").searchParams.get("a")).toBe(
-			addressIdFromSecret(String(second["secret"])),
-		);
+		const first = String((await relay.next("hello"))["secret"]);
+		// "Disconnect all apps": one connection with the old secret, one with the new.
+		await t.disconnectAll();
+		expect(await relay.next("hello")).toMatchObject({
+			secret: first,
+			revokeAll: true,
+		});
+		const second = String((await relay.next("hello"))["secret"]);
+		expect(second).not.toBe(first);
+		t.disconnect();
+
+		const tab = `${relay.url.replace("http", "ws")}/tab`;
+		expect(opened).toEqual([
+			{ url: tab, protocols: "tab-mcp.v1" },
+			{ url: tab, protocols: "tab-mcp.v1" },
+			{ url: tab, protocols: "tab-mcp.v1" },
+		]);
+		expect(relay.urls).toHaveLength(3);
+		for (const href of relay.urls) {
+			const url = new URL(href);
+			expect(url.pathname).toBe("/tab");
+			expect(url.search).toBe("");
+			for (const secret of [first, second]) {
+				expect(href).not.toContain(secret);
+				expect(href).not.toContain((await addressIdOf(secret)) as string);
+			}
+			expect(href).not.toContain("calc-2");
+		}
+		// Nothing but the socket: the library fetches nothing.
+		expect(fetched).not.toHaveBeenCalled();
+	} finally {
+		fetched.mockRestore();
+		globalThis.WebSocket = Real;
+		await relay.stop();
+	}
+});
+
+test("a tab tells its sibling tabs of its claim by the address id of its secret, never the secret; after disconnectAll() by the new one's", async () => {
+	const relay = new StubRelay();
+	const origin = new URL(relay.url).origin;
+	const channel = new BroadcastChannel(
+		`tab-mcp:secret:${origin}:test-page#tabs`,
+	);
+	const heard: unknown[] = [];
+	let wake = () => {};
+	channel.onmessage = (e) => {
+		heard.push(e.data);
+		wake();
+	};
+	const count = async (n: number) => {
+		while (heard.length < n) {
+			await new Promise<void>((resolve) => {
+				wake = resolve;
+			});
+		}
+	};
+	try {
+		const t = newTab(relay.url);
+		const { address } = await t.connect();
+		const first = String((await relay.next("hello"))["secret"]);
+		await count(1);
+		const firstId = (await addressIdOf(first)) as string;
+		expect(firstId).toMatch(/^[a-z2-7]{52}$/);
+		expect(heard).toEqual([{ type: "claimed", address: firstId }]);
+		await t.disconnectAll();
+		await relay.next("hello");
+		const second = String((await relay.next("hello"))["secret"]);
+		// The address the AI apps have is the same; what the tabs go by is new.
+		expect(t.session?.address).toBe(address);
+		await count(3);
+		const secondId = (await addressIdOf(second)) as string;
+		expect(heard.slice(1)).toEqual([
+			{ type: "claimed", address: firstId },
+			{ type: "claimed", address: secondId },
+		]);
+		expect(secondId).not.toBe(firstId);
+		expect(JSON.stringify(heard)).not.toContain(first);
+		expect(JSON.stringify(heard)).not.toContain(second);
 		t.disconnect();
 	} finally {
+		channel.close();
 		await relay.stop();
 	}
 });

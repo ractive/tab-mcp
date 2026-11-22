@@ -2,7 +2,9 @@
  * The authorization server against the specifications it implements, one
  * group per requirement (DEC-031). Section numbers name the rule each test
  * pins. The flow runs with a scripted tab showing pairing codes and a test
- * browser typing them on `/authorize`.
+ * browser typing them on `/authorize`. The address names the tab's app
+ * (`/s/test/mcp`, DEC-196); what is special about that is pinned in
+ * fixed-address.test.ts.
  */
 import {
 	afterAll,
@@ -12,10 +14,12 @@ import {
 	expect,
 	test,
 } from "bun:test";
-import { newSecret } from "../src/address.ts";
-import type { PairingMethod } from "../src/oauth/pairing.ts";
+import { CODE_FIELD_SCRIPT } from "../src/oauth/code-field-script.ts";
+import { scriptHash } from "../src/oauth/html.ts";
+import { normalizeCode, type PairingMethod } from "../src/oauth/pairing.ts";
 import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
 import {
+	APP,
 	mcpPost,
 	rpc,
 	ScriptedTab,
@@ -193,15 +197,44 @@ async function toolsList(address: string, token: string): Promise<number> {
 	return (await mcpPost(address, rpc(1, "tools/list"), { token })).status;
 }
 
+/** A well-formed code that is not `code`. */
+const wrongFor = (code: string) =>
+	normalizeCode(code) === "BBBBBBBB" ? "CCCC-CCCC" : "BBBB-BBBB";
+
+/** The one text for a wrong and for an expired code. */
+const WRONG_TEXT = "That code is not right, or it has expired.";
+const MALFORMED_TEXT = "Type the 8 letters of the code.";
+const LIMITED_TEXT = "Too many wrong codes from your network.";
+
+/** The elements of a page with their attributes as written (not decoded). */
+function elements(
+	html: string,
+	selector = "*",
+): { tag: string; attributes: Record<string, string> }[] {
+	const out: { tag: string; attributes: Record<string, string> }[] = [];
+	new HTMLRewriter()
+		.on(selector, {
+			element(el) {
+				out.push({
+					tag: el.tagName,
+					attributes: Object.fromEntries(el.attributes),
+				});
+			},
+		})
+		.transform(html);
+	return out;
+}
+
 describe("RFC 9728: protected resource metadata", () => {
 	test("§5.1: the 401 names the metadata URL; the metadata names the address and the relay (§3.2)", async () => {
 		const { r, address } = await setup();
+		expect(address).toBe(`${r.url}/s/${APP}/mcp`);
 		const res = await mcpPost(address, rpc(1, "tools/list"));
 		expect(res.status).toBe(401);
 		const challenge = res.headers.get("www-authenticate") ?? "";
 		const url = /resource_metadata="([^"]+)"/.exec(challenge)?.[1] ?? "";
 		expect(url).toBe(
-			`${r.url}/.well-known/oauth-protected-resource${new URL(address).pathname}`,
+			`${r.url}/.well-known/oauth-protected-resource/s/${APP}/mcp`,
 		);
 		expect(challenge).toContain('scope="tools"');
 		const meta = await fetch(url);
@@ -216,12 +249,44 @@ describe("RFC 9728: protected resource metadata", () => {
 		});
 	});
 
-	test("a malformed address id has no metadata", async () => {
+	test("an address that names no app has no metadata; nor has the address of one tab (/a/, gone)", async () => {
+		const { r, tab } = await setup();
+		for (const path of [
+			"/s/-x/mcp",
+			"/s/x-/mcp",
+			"/s/Test/mcp",
+			"/s/te_st/mcp",
+			"/s/te%20st/mcp",
+			`/s/${"a".repeat(33)}/mcp`,
+			"/s/test",
+			"/s/test/mcp/x",
+			"/a/x/mcp",
+			`/a/${tab.addressId}/mcp`,
+		]) {
+			const res = await fetch(
+				`${r.url}/.well-known/oauth-protected-resource${path}`,
+			);
+			expect(res.status).toBe(404);
+		}
+	});
+
+	test("an app's metadata is the same whether a page of it is connected or not", async () => {
 		const { r } = await setup();
-		const res = await fetch(
-			`${r.url}/.well-known/oauth-protected-resource/a/x/mcp`,
-		);
-		expect(res.status).toBe(404);
+		const of = async (app: string) => {
+			const res = await fetch(
+				`${r.url}/.well-known/oauth-protected-resource/s/${app}/mcp`,
+			);
+			expect(res.status).toBe(200);
+			return (await res.json()) as Record<string, unknown>;
+		};
+		const nobody = await of("nobody-here");
+		expect(nobody).toEqual({
+			...(await of(APP)),
+			resource: `${r.url}/s/nobody-here/mcp`,
+		});
+		// The longest app id.
+		const longest = "a".repeat(32);
+		expect((await of(longest))["resource"]).toBe(`${r.url}/s/${longest}/mcp`);
 	});
 });
 
@@ -403,12 +468,45 @@ describe("RFC 6749 §4.1.1/§4.1.2: authorization request and response", () => {
 		await redirected({ code_challenge: "short" }, "invalid_request");
 	});
 
-	test("RFC 8707 §2: a missing resource or one that is not an address here → invalid_target", async () => {
+	test("RFC 8707 §2: a missing resource or one that is not an app's address here → invalid_target", async () => {
 		await redirected({ resource: undefined }, "invalid_target");
-		await redirected(
-			{ resource: "https://other.example/a/x/mcp" },
-			"invalid_target",
-		);
+		const ctx = await setup();
+		const { challenge } = pkce();
+		for (const resource of [
+			"https://other.example/s/test/mcp",
+			ctx.r.url,
+			`${ctx.r.url}/`,
+			`${ctx.r.url}/s/test`,
+			`${ctx.r.url}/s/test/mcp/`,
+			`${ctx.r.url}/s/test/mcp?x=1`,
+			`${ctx.r.url}/s/test/mcp#x`,
+			`${ctx.r.url}/s//mcp`,
+			`${ctx.r.url}/s/Test/mcp`,
+			`${ctx.r.url}/s/-test/mcp`,
+			`${ctx.r.url}/s/test-/mcp`,
+			`${ctx.r.url}/s/te%73t/mcp`,
+			`${ctx.r.url}/s/a/b/mcp`,
+			`${ctx.r.url}/s/../s/test/mcp`,
+			`${ctx.r.url}/s/${"a".repeat(33)}/mcp`,
+			`${ctx.r.url.replace("127.0.0.1", "localhost")}/s/test/mcp`,
+			// The address of one tab, as it was before DEC-196.
+			`${ctx.r.url}/a/${ctx.tab.addressId}/mcp`,
+			`${ctx.r.url}/s/${ctx.tab.addressId}/mcp`,
+		]) {
+			const page = await ctx.browser.open(
+				authorizeUrl(ctx.r.url, {
+					client_id: clientId,
+					redirect_uri: REDIRECT,
+					code_challenge: challenge,
+					resource,
+				}),
+			);
+			expect(page.status).toBe(400);
+			expect(page.requestId).toBeUndefined();
+			expect(errorLink(page.html).searchParams.get("error")).toBe(
+				"invalid_target",
+			);
+		}
 	});
 
 	test("§3.3: an unknown scope → invalid_scope; tools alone or with extras is granted as tools", async () => {
@@ -459,7 +557,7 @@ describe("RFC 6749 §4.1.1/§4.1.2: authorization request and response", () => {
 	});
 });
 
-describe("pairing with the code shown in the tab (DEC-028)", () => {
+describe("pairing with the code shown in the tab (DEC-028, DEC-196)", () => {
 	const open = async (ctx: Ctx) => {
 		const { challenge } = pkce();
 		return ctx.browser.open(
@@ -472,25 +570,21 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		);
 	};
 
-	test("the page names the client, its verified host, the app name and the page origin", async () => {
+	test("the page names the client, its verified host and the app of the address; nothing the page says about itself", async () => {
 		const ctx = await setup({}, {}, { app: "saturnus" });
 		const page = await open(ctx);
 		const host = new URL(clientId).host;
 		expect(page.html).toContain(
-			`You're connecting <strong>Test AI</strong> (${host}) to <strong>saturnus</strong> on <span class="origin">https://page.example</span>.`,
+			`<p>You're connecting <strong>Test AI</strong> (${host}) to <strong>${APP}</strong>: to the page or browser extension in this browser that shows the code.</p>`,
 		);
-		expect(page.html).toContain('autocomplete="one-time-code"');
+		expect(page.html).toContain('autocomplete="off"');
+		// The relay does not know which page is meant before the code: neither
+		// the page's name for itself nor its origin is shown.
+		expect(page.html).not.toContain("saturnus");
+		expect(page.html).not.toContain("page.example");
 	});
 
-	test("without an app name the page says 'tools from <origin>'", async () => {
-		const ctx = await setup();
-		const page = await open(ctx);
-		expect(page.html).toContain(
-			'to tools from <span class="origin">https://page.example</span>',
-		);
-	});
-
-	test("an extension's page is named as a browser extension (DEC-108)", async () => {
+	test("a site's configured name and an extension's origin are not shown either", async () => {
 		const ext = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 		const ctx = await setup(
 			{ allowedOrigins: [], sites: [{ origin: ext, name: "Overmark" }] },
@@ -498,129 +592,118 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 			{ origin: ext },
 		);
 		const page = await open(ctx);
-		expect(page.html).toContain(
-			`to <strong>Overmark</strong> on the browser extension <span class="origin">${ext}</span>.`,
-		);
-	});
-
-	test("on an open relay, a Firefox extension is named as one too", async () => {
-		const moz = "moz-extension://0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
-		const ctx = await setup({ allowedOrigins: "*" }, {}, { origin: moz });
-		const page = await open(ctx);
-		expect(page.html).toContain(
-			`to tools from the browser extension <span class="origin">${moz}</span>`,
-		);
-	});
-
-	test("the tab offline: 'Open the page first' with Try again; it works once the tab is back", async () => {
-		const r = startOAuthRelay(cimd);
-		current = r;
-		const secret = newSecret();
-		const address = r.relay.addressFor(secret);
-		const browser = new TestBrowser(r.url);
-		const { challenge } = pkce();
-		const page = await browser.open(
-			authorizeUrl(r.url, {
-				client_id: clientId,
-				redirect_uri: REDIRECT,
-				code_challenge: challenge,
-				resource: address,
-			}),
-		);
 		expect(page.status).toBe(200);
-		expect(page.html).toContain("Open the page first");
-		// Nothing is kept for an address without a tab (review finding 3):
-		// no form, Try again reloads the same request, Cancel links back.
-		expect(page.requestId).toBeUndefined();
-		const retryHref = /href="([^"]+)">Try again/.exec(page.html)?.[1] ?? "";
-		const cancel = errorLinkNamed(page.html, "Cancel");
-		expect(cancel.searchParams.get("error")).toBe("access_denied");
-
-		const tab = new ScriptedTab(r.wsUrl, { secret });
-		tabs.push(tab);
-		await tab.connect();
-		const code = await tab.startPairing();
-		const retry = await browser.open(
-			`${r.url}${retryHref.replaceAll("&amp;", "&")}`,
-		);
-		expect(retry.html).toContain("You're connecting");
-		const done = await browser.submit(retry, { action: "connect", code });
-		expect(done.status).toBe(303);
-		expect(
-			new URL(done.location ?? "").searchParams.get("code"),
-		).not.toBeNull();
+		expect(page.html).toContain(`to <strong>${APP}</strong>:`);
+		expect(page.html).not.toContain("Overmark");
+		expect(page.html).not.toContain("abcdefghijklmnop");
+		// The page names "the page or browser extension" in general, never its origin.
+		expect(page.html).not.toContain("chrome-extension");
 	});
 
-	test("a wrong code fails and says how many tries are left; the right one still works", async () => {
+	test("the code is typed as shown, in lower case, without the dash or with spaces", async () => {
+		const ctx = await setup();
+		const typed: ((shown: string) => string)[] = [
+			(shown) => shown,
+			(shown) => shown.toLowerCase(),
+			(shown) => shown.replace("-", ""),
+			(shown) => ` ${shown.toLowerCase().replace("-", " ")} `,
+		];
+		for (const as of typed) {
+			const page = await open(ctx);
+			const code = await currentCode(ctx);
+			expect(code).toMatch(
+				/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/,
+			);
+			const done = await ctx.browser.submit(page, {
+				action: "connect",
+				code: as(code),
+			});
+			ctx.usedCodes.add(code);
+			expect(done.status).toBe(303);
+		}
+	});
+
+	test("a wrong code fails with one text and no count of tries; the right one still works", async () => {
 		const ctx = await setup();
 		const page = await open(ctx);
 		const code = await currentCode(ctx);
-		const wrong = code === "000000" ? "000001" : "000000";
 		const res = await ctx.browser.submit(page, {
 			action: "connect",
-			code: wrong,
+			code: wrongFor(code),
 		});
 		expect(res.status).toBe(400);
-		expect(res.html).toContain("That code is not right.");
-		expect(res.html).toContain("4 tries are left");
-		expect(res.html).toContain('role="alert"');
+		expect(res.html).toContain(
+			`<p class="error" role="alert" id="error">${WRONG_TEXT} Type the code that “Connect your AI app” shows now.</p>`,
+		);
+		expect(res.html).not.toMatch(/tr(y|ies) (is|are) left/);
+		expect(ctx.r.logs.events("oauth.pairing_failed").at(-1)).toMatchObject({
+			app: APP,
+			reason: "wrong",
+		});
 		const ok = await ctx.browser.submit(res, { action: "connect", code });
 		expect(ok.status).toBe(303);
 	});
 
-	test("the tab hears why each code comes: start, used after the right code, locked after 5 wrong ones", async () => {
+	test("the tab hears why each code comes: start, used after the right code; wrong codes send it nothing", async () => {
 		const ctx = await setup();
 		const reason = async () =>
 			((await ctx.tab.next("pairing.code")) as { reason?: string }).reason;
 		const code = await currentCode(ctx);
+		// A second pairing.start repeats the current code, as "start".
+		ctx.tab.send({ type: "pairing.start" });
+		expect(await reason()).toBe("start");
+		expect(ctx.tab.pairingCode).toBe(code);
 		const ok = await ctx.browser.submit(await open(ctx), {
 			action: "connect",
 			code,
 		});
 		expect(ok.status).toBe(303);
 		expect(await reason()).toBe("used");
+		const next = await ctx.tab.nextCode(code);
 		let page = await open(ctx);
-		const next = await currentCode(ctx);
-		const wrong = next === "000000" ? "000001" : "000000";
-		for (let i = 0; i < 5; i++)
-			page = await ctx.browser.submit(page, { action: "connect", code: wrong });
-		expect(await reason()).toBe("locked");
-		// A second pairing.start repeats the current code, as "start".
-		ctx.tab.send({ type: "pairing.start" });
-		expect(await reason()).toBe("start");
+		for (let i = 0; i < 5; i++) {
+			page = await ctx.browser.submit(page, {
+				action: "connect",
+				code: wrongFor(next),
+			});
+			expect(page.status).toBe(400);
+		}
+		await Bun.sleep(30);
+		expect(ctx.tab.received.some((m) => m.type === "pairing.code")).toBe(false);
+		expect(ctx.tab.pairingCode).toBe(next);
 	});
 
-	test("5 wrong codes: the code is replaced and the old one no longer works", async () => {
+	test("wrong codes never replace the code a page shows: no tries are counted against it", async () => {
 		const ctx = await setup();
 		let page = await open(ctx);
 		const code = await currentCode(ctx);
-		const wrong = code === "000000" ? "000001" : "000000";
-		for (let i = 0; i < 4; i++) {
-			page = await ctx.browser.submit(page, { action: "connect", code: wrong });
+		for (let i = 0; i < 9; i++) {
+			page = await ctx.browser.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
 			expect(page.status).toBe(400);
+			expect(page.html).toContain(WRONG_TEXT);
 		}
-		page = await ctx.browser.submit(page, { action: "connect", code: wrong });
-		expect(page.html).toContain("Too many wrong codes.");
-		const fresh = await ctx.tab.nextCode(code);
-		expect(fresh).not.toBe(code);
-		const old = await ctx.browser.submit(page, { action: "connect", code });
-		expect(old.status).toBe(400);
-		const ok = await ctx.browser.submit(old, {
-			action: "connect",
-			code: fresh,
-		});
+		expect(ctx.tab.pairingCode).toBe(code);
+		const ok = await ctx.browser.submit(page, { action: "connect", code });
 		expect(ok.status).toBe(303);
 	});
 
-	test("an expired code fails; a fresh code arrives by itself", async () => {
+	test("an expired code fails like a wrong one; a fresh code arrives by itself, as expired", async () => {
 		const ctx = await setup({}, { pairingCodeTtlMs: 150 });
 		const page = await open(ctx);
 		const code = await currentCode(ctx);
 		const fresh = await ctx.tab.nextCode(code); // after 150 ms
+		expect(
+			((await ctx.tab.next("pairing.code")) as { reason?: string }).reason,
+		).toBe("expired");
 		const res = await ctx.browser.submit(page, { action: "connect", code });
 		expect(res.status).toBe(400);
-		expect(res.html).toContain("That code has expired.");
-		await Bun.sleep(1); // the fresh code is valid
+		expect(res.html).toContain(WRONG_TEXT);
+		expect(ctx.r.logs.events("oauth.pairing_failed").at(-1)?.["reason"]).toBe(
+			"wrong",
+		);
 		const ok = await ctx.browser.submit(res, {
 			action: "connect",
 			code: ctx.tab.pairingCode ?? fresh,
@@ -638,10 +721,16 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		const second = await open(ctx);
 		const again = await ctx.browser.submit(second, { action: "connect", code });
 		expect(again.status).toBe(400);
-		expect(await ctx.tab.nextCode(code)).not.toBe(code);
+		expect(again.html).toContain(WRONG_TEXT);
+		const next = await ctx.tab.nextCode(code);
+		expect(next).not.toBe(code);
+		expect(
+			(await ctx.browser.submit(again, { action: "connect", code: next }))
+				.status,
+		).toBe(303);
 	});
 
-	test("no code while the tab's dialog is closed; pairing.stop ends the code", async () => {
+	test("pairing.stop ends the code: it is wrong from then on, and the page says nothing else", async () => {
 		const ctx = await setup();
 		const code = await currentCode(ctx);
 		const page = await open(ctx);
@@ -649,50 +738,147 @@ describe("pairing with the code shown in the tab (DEC-028)", () => {
 		await Bun.sleep(20);
 		const res = await ctx.browser.submit(page, { action: "connect", code });
 		expect(res.status).toBe(400);
-		expect(res.html).toContain("The page is not showing a code right now.");
-		// A new request is not even opened while the dialog is closed (DEC-088).
+		expect(res.html).toContain(WRONG_TEXT);
+		// A new request gets the form as ever (DEC-196): the relay does not
+		// say that the dialog is closed.
 		const closed = await open(ctx);
-		expect(closed.requestId).toBeUndefined();
-		expect(closed.html).toContain("not open or not connecting right now");
-	});
-
-	test("malformed input is not counted as a try", async () => {
-		const ctx = await setup();
-		let page = await open(ctx);
-		for (let i = 0; i < 6; i++) {
-			page = await ctx.browser.submit(page, {
-				action: "connect",
-				code: "12ab",
-			});
-			expect(page.html).toContain("Enter the 6 digits");
-		}
-		const ok = await ctx.browser.submit(page, {
+		expect(closed.status).toBe(200);
+		expect(closed.requestId).toBeDefined();
+		// The dialog opened again: a new code; the old one stays dead.
+		ctx.tab.send({ type: "pairing.start" });
+		const fresh = await ctx.tab.nextCode(code);
+		const old = await ctx.browser.submit(closed, { action: "connect", code });
+		expect(old.status).toBe(400);
+		const ok = await ctx.browser.submit(old, {
 			action: "connect",
-			code: await currentCode(ctx),
+			code: fresh,
 		});
 		expect(ok.status).toBe(303);
 	});
 
-	test("one network's guesses per address are rate-limited (threat model A1)", async () => {
+	test("a page that goes away takes its code with it", async () => {
+		const ctx = await setup();
+		const code = await currentCode(ctx);
+		const page = await open(ctx);
+		ctx.tab.close();
+		await waitFor(() => ctx.r.relay.sessionCount === 0, "the tab to close");
+		const res = await ctx.browser.submit(page, { action: "connect", code });
+		expect(res.status).toBe(400);
+		expect(res.html).toContain(WRONG_TEXT);
+	});
+
+	test("malformed input is told apart and is no guess: the network keeps its 10", async () => {
 		const ctx = await setup();
 		let page = await open(ctx);
 		const code = await currentCode(ctx);
-		const wrong = code === "000000" ? "000001" : "000000";
+		for (const typed of [
+			"",
+			"12ab",
+			"12345678",
+			code.slice(0, 8), // 7 letters
+			`${code}B`,
+			"AEIOUYAE",
+		]) {
+			page = await ctx.browser.submit(page, { action: "connect", code: typed });
+			expect(page.status).toBe(400);
+			expect(page.html).toContain(MALFORMED_TEXT);
+			expect(page.html).not.toContain(WRONG_TEXT);
+		}
+		expect(
+			ctx.r.logs.events("oauth.pairing_failed").map((e) => e["reason"]),
+		).toEqual(new Array(6).fill("malformed"));
+		// Ten real guesses are still judged; the eleventh is not.
+		for (let i = 0; i < 10; i++) {
+			page = await ctx.browser.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
+			expect(page.status).toBe(400);
+			expect(page.html).toContain(WRONG_TEXT);
+		}
+		page = await ctx.browser.submit(page, {
+			action: "connect",
+			code: wrongFor(code),
+		});
+		expect(page.status).toBe(429);
+	});
+
+	test("after 10 wrong codes a network's next one is refused without being judged, a right one too (threat model A1)", async () => {
+		const ctx = await setup();
+		let page = await open(ctx);
+		const code = await currentCode(ctx);
 		const statuses: number[] = [];
 		for (let i = 0; i < 12; i++) {
-			page = await ctx.browser.submit(page, { action: "connect", code: wrong });
+			page = await ctx.browser.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
 			statuses.push(page.status);
 		}
 		expect(statuses.slice(0, 10).every((s) => s === 400)).toBe(true);
 		expect(statuses.slice(10)).toEqual([429, 429]);
+		expect(page.html).toContain(
+			`${LIMITED_TEXT} Wait a few minutes and try again.`,
+		);
+		// The right code is not looked at: it is refused, and not used up.
+		const right = await ctx.browser.submit(page, { action: "connect", code });
+		expect(right.status).toBe(429);
+		expect(right.html).toContain(LIMITED_TEXT);
+		await Bun.sleep(20);
+		expect(ctx.tab.pairingCode).toBe(code);
+		expect(
+			ctx.r.logs.events("oauth.pairing_failed").map((e) => e["reason"]),
+		).toEqual([
+			...new Array(10).fill("wrong"),
+			"rate_limited",
+			"rate_limited",
+			"rate_limited",
+		]);
+		expect(ctx.r.logs.events("oauth.paired")).toHaveLength(0);
+		// One warning for the episode.
+		expect(ctx.r.logs.events("oauth.rate_limited")).toEqual([
+			expect.objectContaining({ limit: "code_guesses", ip: "127.0.0.0/24" }),
+		]);
 	});
 
-	test("codes are never logged", async () => {
+	test("a right code costs nothing: after 5 of them the network still has its 10 guesses", async () => {
+		const ctx = await setup();
+		for (let i = 0; i < 5; i++) await authorize(ctx);
+		let page = await open(ctx);
+		const code = await currentCode(ctx);
+		for (let i = 0; i < 10; i++) {
+			page = await ctx.browser.submit(page, {
+				action: "connect",
+				code: wrongFor(code),
+			});
+			expect(page.status).toBe(400);
+		}
+		page = await ctx.browser.submit(page, {
+			action: "connect",
+			code: wrongFor(code),
+		});
+		expect(page.status).toBe(429);
+	});
+
+	test("codes are never logged, nor what was typed", async () => {
 		const ctx = await setup();
 		await tokens(ctx);
+		const page = await open(ctx);
+		const code = await currentCode(ctx);
+		await ctx.browser.submit(page, { action: "connect", code: "XZXZ-XZXZ" });
+		await ctx.browser.submit(page, { action: "connect", code: "not-a-code" });
 		const all = ctx.r.logs.lines.join("\n");
-		for (const code of ctx.usedCodes) expect(all).not.toContain(code);
+		for (const shown of [...ctx.usedCodes, code]) {
+			expect(shown).toMatch(/^[A-Z]{4}-[A-Z]{4}$/);
+			expect(all).not.toContain(shown);
+			expect(all).not.toContain(shown.replace("-", ""));
+			expect(all.toUpperCase()).not.toContain(shown.replace("-", ""));
+		}
+		expect(all.toUpperCase()).not.toContain("XZXZ-XZXZ");
+		expect(all.toUpperCase()).not.toContain("XZXZXZXZ");
+		expect(all).not.toContain("not-a-code");
 		expect(all).toContain('"event":"oauth.paired"');
+		expect(all).toContain('"event":"oauth.pairing_failed"');
 	});
 });
 
@@ -801,7 +987,8 @@ describe("RFC 6749 §4.1.3/§5.1/§5.2: token endpoint, authorization code", () 
 
 	test("RFC 8707 §2.2: a resource other than the authorized one → invalid_target", async () => {
 		const ctx = await setup();
-		const other = ctx.r.relay.addressFor(newSecret());
+		const other = ctx.r.relay.addressFor("other");
+		expect(other).toBe(`${ctx.r.url}/s/other/mcp`);
 		expect(
 			(
 				await oauthError(
@@ -877,13 +1064,25 @@ describe("RFC 6749 §4.1.3/§5.1/§5.2: token endpoint, authorization code", () 
 		expect((await fetch(`${ctx.r.url}/token`)).status).toBe(405);
 	});
 
-	test("RFC 8707: an access token works only at its own address (audience)", async () => {
+	test("RFC 8707: an access token works only at its own app's address (audience)", async () => {
 		const ctx = await setup();
 		const body = await tokens(ctx);
-		const otherTab = new ScriptedTab(ctx.r.wsUrl);
+		const otherTab = new ScriptedTab(ctx.r.wsUrl, { appId: "other" });
 		tabs.push(otherTab);
 		const other = await otherTab.connect();
-		expect(await toolsList(other.address, body.access_token)).toBe(401);
+		expect(other.address).toBe(`${ctx.r.url}/s/other/mcp`);
+		const refused = await mcpPost(other.address, rpc(1, "tools/list"), {
+			token: body.access_token,
+		});
+		expect(refused.status).toBe(401);
+		// The challenge is the address's own, whatever the token was for.
+		expect(refused.headers.get("www-authenticate")).toBe(
+			`Bearer resource_metadata="${ctx.r.url}/.well-known/oauth-protected-resource/s/other/mcp", scope="tools", error="invalid_token"`,
+		);
+		// Nor at the address of an app nobody serves.
+		expect(
+			await toolsList(ctx.r.relay.addressFor("nobody"), body.access_token),
+		).toBe(401);
 		expect(await toolsList(ctx.address, body.access_token)).toBe(200);
 	});
 });
@@ -926,7 +1125,7 @@ describe("RFC 6749 §6 and RFC 9700 §4.14: refresh token rotation (DEC-029)", (
 		expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
 	});
 
-	test("another client, another address, a wider scope, an expired token: refused", async () => {
+	test("another client, another app's address, a wider scope, an expired token: refused", async () => {
 		const ctx = await setup({ refreshTokenTtlMs: 300 });
 		const t = await tokens(ctx);
 		expect(
@@ -942,7 +1141,17 @@ describe("RFC 6749 §6 and RFC 9700 §4.14: refresh token rotation (DEC-029)", (
 			(
 				await oauthError(
 					await refresh(ctx, t.refresh_token, {
-						resource: ctx.r.relay.addressFor(newSecret()),
+						resource: ctx.r.relay.addressFor("other"),
+					}),
+				)
+			).error,
+		).toBe("invalid_target");
+		// The address of one tab, as it was before DEC-196, is no resource.
+		expect(
+			(
+				await oauthError(
+					await refresh(ctx, t.refresh_token, {
+						resource: `${ctx.r.url}/a/${ctx.tab.addressId}/mcp`,
 					}),
 				)
 			).error,
@@ -1112,39 +1321,102 @@ describe("threat model A7: the /authorize page", () => {
 		);
 	};
 
-	test("CSP without scripts, no framing, no referrer, form-action limited to the redirect origin", async () => {
+	test("CSP with the code field's script alone (by its hash), no framing, no referrer, form-action limited to the redirect origin", async () => {
 		const ctx = await setup();
 		const page = await open(ctx, clientId, "https://app.example/cb");
 		const csp = page.headers.get("content-security-policy") ?? "";
 		expect(csp).toContain("default-src 'none'");
 		expect(csp).toContain("frame-ancestors 'none'");
 		expect(csp).toContain("form-action 'self' https://app.example");
-		expect(csp).not.toContain("script-src");
+		// One script (DEC-211): inline, without attributes, the field's own,
+		// and the policy allows exactly that text.
+		const hash = scriptHash(CODE_FIELD_SCRIPT);
+		expect(csp).toContain(`script-src ${hash};`);
+		expect(csp.match(/script-src[^;]*/)?.[0]).toBe(`script-src ${hash}`);
+		expect(csp).not.toContain("unsafe");
+		expect(elements(page.html, "script")).toEqual([
+			{ tag: "script", attributes: {} },
+		]);
+		const scripts = [...page.html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+		expect(scripts.map((m) => m[1])).toEqual([CODE_FIELD_SCRIPT]);
+		expect(page.html.split("<script").length).toBe(2);
+		expect(page.html).not.toMatch(/\son[a-z]+=/);
 		expect(page.headers.get("x-frame-options")).toBe("DENY");
 		// same-origin, not no-referrer: with no-referrer browsers post `Origin: null`.
 		expect(page.headers.get("referrer-policy")).toBe("same-origin");
 		expect(page.headers.get("cache-control")).toBe("no-store");
-		expect(page.html).not.toContain("<script");
 		expect(page.html).toContain('<html lang="en">');
-		expect(page.html).toContain('<label for="code">');
+		expect(page.html).toContain('<label for="code">Code</label>');
+		// The page's own UI is "on the page" (kb/design/wording.md, review of PR 181).
+		expect(page.html).toContain(
+			"“Connect your AI app” on the page or in the browser extension you want to connect shows a code of 8 letters. It changes every 2 minutes and after each use.",
+		);
 		const css = await fetch(`${ctx.r.url}/authorize.css`);
 		expect(css.headers.get("content-type")).toStartWith("text/css");
 	});
 
-	test("hostile client and app names are escaped", async () => {
+	test("a hostile client name is escaped, in the text and in the form's attributes; a page's name for itself is not shown at all", async () => {
 		const hostile = `<img src=x onerror=alert(1)>"'&`;
+		const escaped = "&lt;img src=x onerror=alert(1)&gt;&quot;&#39;&amp;";
 		const id = cimd.serve(
 			"/hostile.json",
 			cimd.document(`${cimd.origin}/hostile.json`, { client_name: hostile }),
 		);
-		const ctx = await setup({}, {}, { app: "<b>app</b>" });
-		const page = await open(ctx, id);
-		expect(page.html).not.toContain("<img");
-		expect(page.html).not.toContain("<b>app</b>");
-		expect(page.html).toContain(
-			"&lt;img src=x onerror=alert(1)&gt;&quot;&#39;&amp;",
+		const breakout = `x" onfocus="alert(1)" data-app="bank`;
+		const breakoutId = cimd.serve(
+			"/breakout.json",
+			cimd.document(`${cimd.origin}/breakout.json`, { client_name: breakout }),
 		);
-		expect(page.html).toContain("&lt;b&gt;app&lt;/b&gt;");
+		const ctx = await setup({}, {}, { app: "<b>app</b>" });
+		const host = new URL(clientId).host;
+		const page = await open(ctx, id);
+		expect(page.status).toBe(200);
+		expect(page.html).not.toContain("<img");
+		expect(page.html).toContain(`<strong>${escaped}</strong> (${host})`);
+		expect(page.html).toContain(`<h1>Connect ${escaped} from ${host}</h1>`);
+		expect(page.html).toContain(
+			`<title>Connect ${escaped} from ${host}</title>`,
+		);
+		// As a browser reads the tags: no element of the name's making (the one
+		// script is the code field's), and the form has its own attributes only.
+		expect(elements(page.html, "img, b")).toEqual([]);
+		expect(elements(page.html, "script")).toEqual([
+			{ tag: "script", attributes: {} },
+		]);
+		expect(elements(page.html, "form")).toEqual([
+			{
+				tag: "form",
+				attributes: {
+					method: "post",
+					action: "/authorize",
+					"data-tab-mcp-pairing": "1",
+					"data-app": APP,
+					"data-client-name": escaped,
+					"data-client-host": host,
+				},
+			},
+		]);
+		// The page's own name is nowhere, escaped or not.
+		expect(page.html).not.toContain("<b>app</b>");
+		expect(page.html).not.toContain("&lt;b&gt;app");
+
+		// A name that tries to close the attribute and add its own.
+		const second = await open(ctx, breakoutId);
+		expect(second.status).toBe(200);
+		expect(elements(second.html, "form")).toEqual([
+			{
+				tag: "form",
+				attributes: {
+					method: "post",
+					action: "/authorize",
+					"data-tab-mcp-pairing": "1",
+					"data-app": APP,
+					"data-client-name": breakout.replaceAll('"', "&quot;"),
+					"data-client-host": host,
+				},
+			},
+		]);
+		expect(elements(second.html, "[onfocus]")).toEqual([]);
 	});
 
 	test("CSRF: a post without our cookie, with a bad token, or from another site is refused", async () => {
@@ -1231,16 +1503,19 @@ describe("threat model A7: the /authorize page", () => {
 
 describe("the pairing method is replaceable (DEC-042)", () => {
 	test("the full flow with a stub method that knows no codes", async () => {
+		// The method names the page; this one knows it from outside the relay.
+		let addressId = "";
 		const stub: PairingMethod = {
 			kind: "code",
 			render: () =>
 				'<p><label><input type="checkbox" name="approve" value="yes"> It is me</label></p>',
-			check: (_target, form) =>
+			check: (_pool, form) =>
 				form.get("approve") === "yes"
-					? { ok: true }
+					? { ok: true, addressId }
 					: { ok: false, message: "Tick the box.", reason: "stub" },
 		};
 		const ctx = await setup({}, { pairingMethods: { code: stub } });
+		addressId = ctx.tab.addressId;
 		const { verifier, challenge } = pkce();
 		const page = await ctx.browser.open(
 			authorizeUrl(ctx.r.url, {
@@ -1251,7 +1526,7 @@ describe("the pairing method is replaceable (DEC-042)", () => {
 			}),
 		);
 		expect(page.html).toContain("It is me");
-		expect(page.html).not.toContain("one-time-code");
+		expect(page.html).not.toContain('name="code"');
 		const refused = await ctx.browser.submit(page, { action: "connect" });
 		expect(refused.html).toContain("Tick the box.");
 		const ok = await ctx.browser.submit(refused, {
@@ -1265,5 +1540,13 @@ describe("the pairing method is replaceable (DEC-042)", () => {
 			location: new URL(REDIRECT),
 		});
 		expect(res.status).toBe(200);
+		// The grant is for the page the method named.
+		const body = (await res.json()) as TokenBody;
+		expect(await toolsList(ctx.address, body.access_token)).toBe(200);
+		expect(
+			await ctx.r.store.listGrants(ctx.tab.addressId, Date.now()),
+		).toHaveLength(1);
+		// The method never asked for a guess: nothing was charged or logged as one.
+		expect(ctx.r.logs.events("oauth.rate_limited")).toHaveLength(0);
 	});
 });

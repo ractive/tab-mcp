@@ -15,7 +15,7 @@ timestamp: 2026-11-14T18:00:00+01:00
 ## Symptom
 
 In CI (`verify`, and `client-pack`/`relay-pack` in release.yml) the block "the store
-package (no host access)" of `packages/tab-mcp-extension/test/e2e.test.ts` failed in
+package (no host access)" of `packages/tab-mcp-extension/test/extension.browser.test.ts` failed in
 about one run in ten on 2026-11-13 (runs 43421002233, 43464281451, 43465298651, PR 121):
 "another origin of the same site needs a click too" waited 15 s for
 `https://www.site.test/plain.html` and reported "Chrome exited (exit code null, signal
@@ -88,7 +88,7 @@ close the window for a user's navigation.
 
 ## Fix in the tests
 
-`readsSettled(tab)` in `e2e.test.ts` waits, before each navigation to another origin in
+`readsSettled(tab)` in `extension.browser.test.ts` waits, before each navigation to another origin in
 the store block, until the content script has had no `getTools()` pending and started none
 for 1 s (a read that began before the first poll is not counted; `getTools()` takes milliseconds). It wraps `document.modelContext.getTools` in the content script's isolated
 world through the DevTools Protocol, so the build has no hook (ES 7). What the tests check

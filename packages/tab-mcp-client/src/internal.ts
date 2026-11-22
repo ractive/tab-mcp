@@ -7,6 +7,7 @@ import type { GrantRef, SessionMessage, TabMessage } from "./protocol.ts";
 import type { ToolRegistry } from "./registry.ts";
 import type {
 	ConfirmAnswer,
+	ConfirmHandler,
 	ConfirmRequest,
 	DisconnectReason,
 	Grant,
@@ -24,8 +25,12 @@ export interface CallHost {
 	readonly registry: ToolRegistry;
 	/** Ask the user about a consequential tool call. */
 	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
-	/** The page's own `onConfirm` asks, not the library's dialog in the tab. */
-	ownConfirm(): boolean;
+	/**
+	 * The page's own `onConfirm`, if it has one: it asks, not the library's
+	 * dialog in the tab. For an unvouched WebMCP call it is the only check
+	 * (DEC-215).
+	 */
+	onConfirm(): ConfirmHandler | undefined;
 	/** A tool call started or ended (the `toolcall` and `toolcallend` events). */
 	toolCallStarted(call: ToolCallStart): void;
 	toolCallEnded(call: ToolCallEnd): void;
@@ -34,6 +39,8 @@ export interface CallHost {
 /** What a connection needs from the `TabMcp` that opened it. */
 export interface ConnectionHost extends CallHost {
 	readonly server: ServerInfo;
+	/** The app id: the `<app>` of the page's address `/s/<app>/mcp` (DEC-196). */
+	readonly app: string;
 	readonly appName: string | undefined;
 	/**
 	 * The `BroadcastChannel` of the tabs that share this page's secret
@@ -47,6 +54,8 @@ export interface ConnectionHost extends CallHost {
 	/** The relay accepted the session; returns what `connect()` resolves with. */
 	sessionStarted(session: SessionMessage): SessionInfo;
 	pairingCode(code: PairingCode): void;
+	/** `pairing.open`: a sign-in pairs the page until `until` (DEC-202). */
+	pairingOpen(until: string): void;
 	grantAdded(grant: Grant): void;
 	grantRemoved(grantId: string): void;
 	/** Another tab or program took over the address (reported once, before `closed`). */

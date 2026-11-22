@@ -6,6 +6,7 @@
  */
 
 import { commandAddress, commandName } from "./command.ts";
+import { type DialogStrings, withEnglish } from "./strings.ts";
 import type { SetupNotePart, SetupStep } from "./types.ts";
 
 export type { SetupNotePart, SetupStep };
@@ -20,11 +21,11 @@ const CODEX_FEATURE = "mcp_2026_07_28";
  * The steps for one AI app. All strings are plain text (set them with
  * `textContent`). `command`, where present, is safe to show and to run: the
  * server's name and the address in it are words that every shell (POSIX
- * shells, PowerShell, cmd.exe) reads as plain, with nothing to quote. It is
- * absent for apps without a command, and when the address is not
- * shell-plain (only http or https, letters, digits and `. : [ ] / _ ~ -`);
- * then `text` names the command instead. The relay's addresses are
- * shell-plain.
+ * shells, zsh, PowerShell, cmd.exe) reads the same, an address with `[`, `]`
+ * or `~` (an IPv6 address) in double quotes, as zsh reads those as patterns.
+ * It is absent for apps without a command, and when the address has anything
+ * but http or https, letters, digits and `. : [ ] / _ ~ -`; then `text` names
+ * the command instead. The relay's addresses are plain words.
  */
 export interface SetupInstruction extends SetupStep {
 	/** Which app, stable across versions: `claude`, `chatgpt`, `claude-code` or `codex`. */
@@ -39,51 +40,55 @@ export interface SetupInstruction extends SetupStep {
  * characters as `-`, at most 40 characters, `tools` if nothing is left).
  * End the list with a link to {@link SETUP_GUIDE}: the steps here are the
  * minimum (CU 20), the guide has the rest and follows the apps' menus.
+ * `strings` translates the texts (the `setup…` keys of `./strings`, the
+ * same table as the dialogs' `ui.strings`); missing keys stay English.
  */
 export function setupInstructions(
 	serverName: string,
 	address: string,
+	strings?: Partial<DialogStrings>,
 ): SetupInstruction[] {
+	const s = withEnglish(strings);
 	const n = commandName(serverName);
 	const a = commandAddress(address);
 	const run = (command: string) =>
-		a === undefined ? {} : { text: "Run:", command };
+		a === undefined ? {} : { text: s.setupRun, command };
 	return [
-		{
-			id: "claude",
-			app: "Claude (claude.ai and the desktop app)",
-			text: "Settings → Connectors → Add custom connector, then paste the address.",
-		},
-		{
-			id: "chatgpt",
-			app: "ChatGPT",
-			text: "On chatgpt.com: Plugins, add an MCP server with the address, then Connect. The Mac app needs more steps: see the guide.",
-		},
+		{ id: "claude", app: s.setupClaudeApp, text: s.setupClaude },
+		{ id: "chatgpt", app: "ChatGPT", text: s.setupChatGpt },
 		{
 			id: "claude-code",
 			app: "Claude Code",
-			text: "Add the address with claude mcp add --transport http.",
+			text: s.setupClaudeCode,
 			...run(`claude mcp add --transport http ${n} ${a}`),
 			// The command only adds the server; the sign-in that asks for the
 			// code starts in Claude Code (CU 6).
-			note: [
-				{ text: "Then type " },
-				{ code: "/mcp" },
-				{ text: " in Claude Code and choose Authenticate." },
-			],
+			note: noteOf(s.setupClaudeCodeNote, { command: "/mcp" }),
 		},
 		{
 			id: "codex",
 			app: "Codex",
-			text: `Run codex features enable ${CODEX_FEATURE}, then add the address with codex mcp add --url and sign in with codex mcp login.`,
+			text: s.setupCodex.replace("{feature}", CODEX_FEATURE),
 			...run(
 				`codex features enable ${CODEX_FEATURE}\ncodex mcp add ${n} --url ${a}\ncodex mcp login ${n}`,
 			),
-			note: [
-				{
-					text: "The last line opens the sign-in that asks for the code. Start a new chat in Codex after it connects.",
-				},
-			],
+			note: noteOf(s.setupCodexNote, {}),
 		},
 	];
+}
+
+/** `template` as note parts: its text, and each `{name}` of `code` as code. */
+function noteOf(
+	template: string,
+	code: Record<string, string>,
+): SetupNotePart[] {
+	return template
+		.split(/\{(\w+)\}/)
+		.map((part, i): SetupNotePart => {
+			const value = i % 2 === 1 ? code[part] : undefined;
+			return value === undefined
+				? { text: i % 2 === 1 ? `{${part}}` : part }
+				: { code: value };
+		})
+		.filter((part) => !("text" in part) || part.text !== "");
 }

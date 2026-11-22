@@ -1,35 +1,52 @@
 /**
- * Pairing (DEC-028, DEC-042): the step at `/authorize` that proves the browser
- * belongs to the tab's user. The authorization server only knows the
- * `PairingMethod` interface; which method a session uses comes from its site
- * (DEC-045): the 6-digit code shown in the tab, or identity binding at an
- * OpenID Connect provider (`oidc.ts`, DEC-079).
+ * Pairing (DEC-028, DEC-042, DEC-196): the step at `/authorize` that finds the
+ * page the browser's user means and proves they can see it. The address
+ * names an app, not a page, so the method finds the page among the app's:
+ * by the code it shows, or by the person signed in to it (`oidc.ts`,
+ * DEC-079). The authorization server only knows the `PairingMethod` interface.
  */
 
 import type { PairingKind } from "../config.ts";
-import { constantTimeEqual } from "../crypto.ts";
+import { sha256Base64url } from "../crypto.ts";
+import { CODE_FIELD_SCRIPT } from "./code-field-script.ts";
+import { scriptHash } from "./html.ts";
 
-/** What a pairing method sees of a tab session. */
+/** A page a pairing method found: the grant is made for its address. */
 export interface PairingTarget {
-	/** The code state of the session (used by the code method). */
-	readonly codes: PairingCodes;
-	/** The binding key of the page's user, if signed in (DEC-077). */
-	readonly identity: string | undefined;
-	/** Whether the page's "Connect your AI app" dialog is open. */
-	readonly pairingOpen: boolean;
+	/** The page's address id (DEC-027). */
+	readonly addressId: string;
+}
+
+/** The pages of one app, as a pairing method finds its page among them. */
+export interface PairingPool {
+	/**
+	 * The page that shows this code (as `normalizeCode` gives it) right now;
+	 * the code is used up and the page shows a new one.
+	 */
+	redeem(code: string): PairingTarget | undefined;
+	/**
+	 * The page whose user is `identity` (DEC-077), whose "Connect your AI
+	 * app" dialog is open, and whose session was open at `since` already (when
+	 * the sign-in started); of several, the one that connected last. A page
+	 * that connected after the sign-in began is not it: "Disconnect all apps"
+	 * makes the page a new one, and a sign-in under way from before must not
+	 * pair with that.
+	 */
+	signedIn(identity: string, since: number): PairingTarget | undefined;
 }
 
 /** The pending request a check belongs to (for methods that leave the page). */
 export interface PairingContext {
 	requestId: string;
 	browserId: string;
-	/** The address being paired: the routing key of the return trip (DEC-098). */
-	addressId: string;
 }
 
 export type PairingResult =
-	/** Paired; `subject` is recorded on the grant (identity binding, DEC-077). */
-	| { ok: true; subject?: string }
+	/**
+	 * Paired with the page of `addressId`; `subject` is recorded on the grant
+	 * (identity binding, DEC-077).
+	 */
+	| { ok: true; addressId: string; subject?: string }
 	/** Continue elsewhere (the provider's sign-in); the answer comes to `callback`. */
 	| { ok: "redirect"; location: string }
 	| {
@@ -41,88 +58,156 @@ export type PairingResult =
 	  };
 
 /**
- * A way to pair a browser at `/authorize` with an address. The authorization
- * server renders `render()` inside its form (CSRF token, buttons and the
- * request id are its own) and passes the submitted form to `check()`.
+ * A way to pair a browser at `/authorize` with a page of an app. The
+ * authorization server renders `render()` inside its form (CSRF token,
+ * buttons and the request id are its own) and passes the submitted form to
+ * `check()`.
  */
 export interface PairingMethod {
 	readonly kind: PairingKind;
 	/** HTML of the method's step (escaped by the method). */
-	render(target: PairingTarget): string;
+	render(): string;
 	/**
 	 * Check the submitted form fields. Call `admit()` right before judging an
 	 * answer that could be right (a real guess); if it returns false, refuse
-	 * with reason `rate_limited` without judging. Malformed input and a state
-	 * that cannot succeed are answered without calling it (DEC-061).
+	 * with reason `rate_limited` without judging. Malformed input is answered
+	 * without calling it (DEC-061).
 	 */
 	check(
-		target: PairingTarget,
+		pool: PairingPool,
 		form: URLSearchParams,
 		admit: () => boolean,
-		context?: PairingContext,
+		context: PairingContext,
 	): PairingResult | Promise<PairingResult>;
 	/** Work before the page is shown (e.g. provider discovery); throws if unavailable. */
 	prepare?(): Promise<void>;
 	/** Extra origins the page's form may lead to (CSP `form-action`). */
 	formTargets?(): readonly string[];
+	/** Hash sources of the inline scripts in `render()` (CSP `script-src`). */
+	scripts?(): readonly string[];
 	/** The pending request ended (paired, cancelled, expired, evicted): drop its state. */
 	forget?(requestId: string): void;
 	/** The answer of a method that redirected (`/authorize/callback`). */
 	callback?(
 		params: URLSearchParams,
 		browserId: string,
-		targetFor: (requestId: string) => PairingTarget | undefined,
+		poolFor: (requestId: string) => PairingPool | undefined,
 	): Promise<{ requestId?: string; result: PairingResult }>;
 }
 
-/** Code lifetime and attempts (DEC-028). */
+/** Code lifetime (DEC-028). */
 export const PAIRING_CODE_TTL_MS = 120_000;
-export const PAIRING_MAX_ATTEMPTS = 5;
 
-export type CodeCheck =
-	| "ok"
-	| "limited"
-	| "wrong"
-	| "expired"
-	| "locked"
-	| "inactive"
-	| "malformed";
+/**
+ * How long an open dialog counts with identity binding (`oidc`) after its
+ * last `pairing.start`: a sign-in that comes back later finds no page
+ * (DEC-202). Only another `pairing.start` opens it again.
+ */
+export const PAIRING_WINDOW_MS = 600_000;
 
-/** Six uniformly distributed digits. */
+/**
+ * The letters of a code (RFC 8628 §6.1): 20 consonants, so no code spells a
+ * word and none has a letter that reads like a digit.
+ */
+export const CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+/** Letters in a code: 20^8 = 2.56 × 10^10 codes (DEC-196). */
+export const CODE_LENGTH = 8;
+
+/** Eight uniformly distributed letters of `CODE_ALPHABET`. */
 export function newPairingCode(): string {
-	// 4 294 000 000 is the largest multiple of 10^6 below 2^32: rejecting the
-	// values above it keeps every code equally likely.
-	const buffer = new Uint32Array(1);
-	for (;;) {
+	// 240 is the largest multiple of 20 a byte holds: rejecting the values
+	// from it up keeps every letter equally likely.
+	let code = "";
+	const buffer = new Uint8Array(CODE_LENGTH * 2);
+	while (code.length < CODE_LENGTH) {
 		crypto.getRandomValues(buffer);
-		const n = buffer[0] ?? 0;
-		if (n < 4_294_000_000) return String(n % 1_000_000).padStart(6, "0");
+		for (const byte of buffer) {
+			if (byte >= 240 || code.length === CODE_LENGTH) continue;
+			code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+		}
 	}
+	return code;
+}
+
+/** A code as pages show it: `XXXX-XXXX`. */
+export function shownCode(code: string): string {
+	return `${code.slice(0, CODE_LENGTH / 2)}-${code.slice(CODE_LENGTH / 2)}`;
+}
+
+const CODE_PATTERN = new RegExp(`^[${CODE_ALPHABET}]{${CODE_LENGTH}}$`);
+
+/**
+ * A typed code without spaces and dashes, in upper case; `undefined` when it
+ * is not eight letters of the alphabet (then it is no guess: DEC-061).
+ */
+export function normalizeCode(input: string): string | undefined {
+	const typed = input.replace(/[\s-]/g, "").toUpperCase();
+	return CODE_PATTERN.test(typed) ? typed : undefined;
 }
 
 /**
  * Why the relay sends a code (`pairing.code` `reason`): `start` the dialog
  * opened (a new code, or the current one again), `used` the last one was
- * entered, `locked` it had too many wrong tries, `expired` it timed out.
+ * entered, `expired` it timed out.
  */
-export type CodeReason = "start" | "used" | "locked" | "expired";
+export type CodeReason = "start" | "used" | "expired";
+
+/**
+ * The codes the relay's pages show right now, each with the page that shows
+ * it (DEC-196): a typed code finds its page here, so no two pages show the
+ * same code. Kept by the code's hash, so how long a lookup takes says
+ * nothing about a live code's letters.
+ */
+export class CodeIndex<T> {
+	readonly #owners = new Map<string, T>();
+
+	/** A new code no page shows, kept for `owner`. */
+	issue(owner: T): string {
+		for (;;) {
+			const code = newPairingCode();
+			const key = sha256Base64url(code);
+			if (this.#owners.has(key)) continue;
+			this.#owners.set(key, owner);
+			return code;
+		}
+	}
+
+	release(code: string): void {
+		this.#owners.delete(sha256Base64url(code));
+	}
+
+	/** Who shows `code` (as `normalizeCode` gives it). */
+	owner(code: string): T | undefined {
+		return this.#owners.get(sha256Base64url(code));
+	}
+
+	get size(): number {
+		return this.#owners.size;
+	}
+}
 
 /**
  * The pairing codes of one tab session: on while the tab's dialog is open
- * (`pairing.start` … `pairing.stop`); a fresh code after expiry, after use and
- * after too many wrong attempts. Codes are never logged.
+ * (`pairing.start` … `pairing.stop`); a fresh code after expiry and after
+ * use. Codes are never logged.
  */
-export class PairingCodes {
+export class PairingCodes<T> {
+	readonly #index: CodeIndex<T>;
+	readonly #owner: T;
 	readonly #send: (code: string, expiresAt: number, reason: CodeReason) => void;
 	readonly #ttlMs: number;
-	#current: { code: string; expiresAt: number; attempts: number } | undefined;
-	#previous: string | undefined;
+	#current: { code: string; expiresAt: number } | undefined;
 	#timer: Timer | undefined;
 
 	constructor(
+		index: CodeIndex<T>,
+		owner: T,
+		/** `code` as pages show it (`shownCode`). */
 		send: (code: string, expiresAt: number, reason: CodeReason) => void,
 		options: { ttlMs?: number } = {},
 	) {
+		this.#index = index;
+		this.#owner = owner;
 		this.#send = send;
 		this.#ttlMs = options.ttlMs ?? PAIRING_CODE_TTL_MS;
 	}
@@ -132,17 +217,14 @@ export class PairingCodes {
 		return this.#current !== undefined;
 	}
 
-	/** Attempts left for the current code. */
-	get attemptsLeft(): number {
-		return this.#current === undefined
-			? 0
-			: PAIRING_MAX_ATTEMPTS - this.#current.attempts;
-	}
-
 	start(): void {
 		if (this.#current !== undefined) {
 			// Already on (e.g. a second dialog): show the same code again.
-			this.#send(this.#current.code, this.#current.expiresAt, "start");
+			this.#send(
+				shownCode(this.#current.code),
+				this.#current.expiresAt,
+				"start",
+			);
 			return;
 		}
 		this.#issue("start");
@@ -151,97 +233,86 @@ export class PairingCodes {
 	stop(): void {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
+		if (this.#current !== undefined) this.#index.release(this.#current.code);
 		this.#current = undefined;
-		this.#previous = undefined;
 	}
 
 	/**
-	 * Check a typed code; a correct one is used up and replaced. `admit` is
-	 * asked only for a well-formed code while a code is active.
+	 * Use up `code` (as `normalizeCode` gives it) if it is the one shown now;
+	 * the tab then shows a new one.
 	 */
-	check(
-		input: string,
-		now: number = Date.now(),
-		admit: () => boolean = () => true,
-	): CodeCheck {
+	redeem(code: string, now: number = Date.now()): boolean {
 		const current = this.#current;
-		if (current === undefined) return "inactive";
-		const typed = input.replace(/[\s-]/g, "");
-		if (!/^\d{6}$/.test(typed)) return "malformed";
-		if (!admit()) return "limited";
+		if (current === undefined || current.code !== code) return false;
 		if (now >= current.expiresAt) {
-			this.#previous = current.code;
 			this.#issue("expired");
-			return "expired";
+			return false;
 		}
-		if (constantTimeEqual(typed, current.code)) {
-			this.#previous = undefined;
-			this.#issue("used");
-			return "ok";
-		}
-		current.attempts++;
-		const expired =
-			this.#previous !== undefined && constantTimeEqual(typed, this.#previous);
-		if (current.attempts >= PAIRING_MAX_ATTEMPTS) {
-			this.#previous = undefined;
-			this.#issue("locked");
-			return "locked";
-		}
-		return expired ? "expired" : "wrong";
+		this.#issue("used");
+		return true;
 	}
 
 	#issue(reason: CodeReason): void {
 		clearTimeout(this.#timer);
+		if (this.#current !== undefined) this.#index.release(this.#current.code);
 		const expiresAt = Date.now() + this.#ttlMs;
-		this.#current = { code: newPairingCode(), expiresAt, attempts: 0 };
+		this.#current = { code: this.#index.issue(this.#owner), expiresAt };
 		this.#timer = setTimeout(() => {
-			if (this.#current === undefined) return;
-			this.#previous = this.#current.code;
-			this.#issue("expired");
+			if (this.#current !== undefined) this.#issue("expired");
 		}, this.#ttlMs);
-		this.#send(this.#current.code, expiresAt, reason);
+		this.#send(shownCode(this.#current.code), expiresAt, reason);
 	}
 }
 
-const MESSAGES: Record<Exclude<CodeCheck, "ok">, string> = {
-	wrong:
-		"That code is not right. Check the code shown in the page and try again.",
-	expired:
-		"That code has expired. The page now shows a new code: enter that one.",
-	locked:
-		"Too many wrong codes. The page now shows a new code: enter that one.",
-	inactive:
-		"The page is not showing a code right now. In the page, open “Connect your AI app” to see one, then enter it here.",
-	malformed: "Enter the 6 digits shown in the page.",
-	limited:
-		"Too many attempts for this page. Wait a few minutes and try again. If it keeps happening, someone else may be guessing: use “New address” in the page.",
-};
+const WRONG =
+	"That code is not right, or it has expired. Type the code that “Connect your AI app” shows now.";
+const MALFORMED = `Type the ${CODE_LENGTH} letters of the code.`;
+const LIMITED =
+	"Too many wrong codes from your network. Wait a few minutes and try again.";
 
-/** The 6-digit code typed at `/authorize` (DEC-028). */
+/**
+ * The code field's boxes (DEC-211): four, the dash, four. Decoration only,
+ * hidden from assistive technology and shown once the script ran.
+ */
+const BOXES = `<span class="code-boxes" aria-hidden="true">${"<span></span>".repeat(CODE_LENGTH / 2)}<span class="code-dash"></span>${"<span></span>".repeat(CODE_LENGTH / 2)}</span>`;
+const CODE_FIELD_HASH = scriptHash(CODE_FIELD_SCRIPT);
+
+/** The code typed at `/authorize` (DEC-028, DEC-196). */
 export const codePairing: PairingMethod = {
 	kind: "code",
 	render(): string {
-		return `<p><label for="code">Code shown in the page</label>
-<input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus aria-describedby="code-help"></p>
-<p id="code-help" class="help">In the page, “Connect your AI app” shows a 6-digit code. It changes every 2 minutes.</p>`;
+		// `data-tab-mcp-field` is for a browser extension that fills in its own
+		// code after asking its user (DEC-199); the attribute never holds one.
+		// Not `one-time-code`: the code is on the user's screen, no password
+		// manager or text message has it, and with that hint password managers
+		// put their button into the field. `off` and the managers' own opt-outs
+		// (1Password, LastPass, Bitwarden, Dashlane) say there is nothing to fill.
+		// One input drawn as boxes, not one input per letter (DEC-211): paste,
+		// selection, screen readers and the extensions' hooks stay as they
+		// are. The script after it draws the boxes and keeps the text as
+		// `XXXX-XXXX` (which costs the field's undo history); without it the
+		// field is a plain input.
+		return `<p><label for="code">Code</label>
+<span class="code-field">${BOXES}<input id="code" name="code" type="text" data-tab-mcp-field="code" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocapitalize="characters" spellcheck="false" pattern="[A-Za-z \\-]{${CODE_LENGTH},${CODE_LENGTH + 4}}" maxlength="${CODE_LENGTH + 4}" required autofocus aria-describedby="code-help"></span></p>
+<script>${CODE_FIELD_SCRIPT}</script>
+<p id="code-help" class="help">“Connect your AI app” on the page or in the browser extension you want to connect shows a code of ${CODE_LENGTH} letters. It changes every 2 minutes and after each use.</p>`;
 	},
-	check(target, form, admit): PairingResult {
-		const result = target.codes.check(
-			form.get("code") ?? "",
-			Date.now(),
-			admit,
-		);
-		if (result === "ok") return { ok: true };
-		let message = MESSAGES[result];
-		if (result === "wrong") {
-			const left = target.codes.attemptsLeft;
-			message += ` ${left === 1 ? "1 try is" : `${left} tries are`} left for this code.`;
+	scripts(): readonly string[] {
+		return [CODE_FIELD_HASH];
+	},
+	check(pool, form, admit): PairingResult {
+		const code = normalizeCode(form.get("code") ?? "");
+		if (code === undefined) {
+			return { ok: false, message: MALFORMED, reason: "malformed" };
 		}
-		return {
-			ok: false,
-			message,
-			reason: result === "limited" ? "rate_limited" : result,
-		};
+		if (!admit()) {
+			return { ok: false, message: LIMITED, reason: "rate_limited" };
+		}
+		const target = pool.redeem(code);
+		if (target === undefined) {
+			return { ok: false, message: WRONG, reason: "wrong" };
+		}
+		return { ok: true, addressId: target.addressId };
 	},
 };
 

@@ -76,7 +76,7 @@ page can then call too. Chrome 156 has WebMCP behind `--enable-features=WebMCP` 
 `chrome://flags` entry, or the page's origin trial token), checks no input and drops
 `outputSchema` ([research](/research/webmcp-from-extension.md), DEC-113). The spike stays
 in `test/webmcp-spike/` (pages in `pages/`, served through the DevTools Protocol on
-made-up https origins) with `webmcp.test.ts` as the canary.
+made-up https origins) with `webmcp-canary.browser.test.ts` as the canary.
 
 # Citations
 

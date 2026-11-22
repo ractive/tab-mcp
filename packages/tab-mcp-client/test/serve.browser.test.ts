@@ -2,13 +2,14 @@
  * `serve` in a browser (iteration 28): a page without a relay hands a port to
  * a chat in a frame on another origin, after checking the frame's origin, and
  * the chat calls the page's tools through `createTunnelFetch`. Pages are
- * served through the DevTools Protocol, as in `webmcp-browser.test.ts`. Runs
- * with any Chrome for Testing (`CHROME_PATH`, or Puppeteer's or Playwright's
- * cache); the WebMCP part needs 156 or newer. Required in CI, skipped
+ * served through the DevTools Protocol, as in `webmcp.browser.test.ts`. Runs
+ * with any Chrome for Testing (`CHROME_PATH`, or the pinned one in
+ * Puppeteer's cache, test/browsers.ts); the WebMCP part needs 156 or newer. Required in CI, skipped
  * elsewhere without a browser.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
+import { browserTests } from "../../../test/browser-gate.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -18,9 +19,9 @@ import {
 } from "../../../test/webmcp-spike/browser.ts";
 
 const WEBMCP_MAJOR = 156;
-const chrome = findChromeForTesting();
+const chrome = browserTests ? findChromeForTesting() : undefined;
 const major = chrome === undefined ? 0 : chromeMajor(chrome);
-if (process.env["CI"] && major < WEBMCP_MAJOR)
+if (browserTests && process.env["CI"] && major < WEBMCP_MAJOR)
 	throw new Error(
 		`Chrome for Testing ${WEBMCP_MAJOR} or newer is needed for the serve browser test in CI`,
 	);
@@ -188,15 +189,19 @@ interface Report {
 	[key: string]: unknown;
 }
 
-/** The frames' reports, once one of the chat's has `step`. */
-async function reportsUntil(page: Page, step: string): Promise<Report[]> {
+/** The frames' reports, once one from `origin` (the chat's) has `step`. */
+async function reportsUntil(
+	page: Page,
+	step: string,
+	origin = CHAT,
+): Promise<Report[]> {
 	for (let i = 0; i < 200; i++) {
 		const reports = await page.eval<Report[]>("reports");
-		if (reports.some((r) => r.origin === CHAT && r.step === step))
+		if (reports.some((r) => r.origin === origin && r.step === step))
 			return reports;
 		await Bun.sleep(50);
 	}
-	throw new Error(`the chat never reported ${step}`);
+	throw new Error(`the frame on ${origin} never reported ${step}`);
 }
 
 test.skipIf(chrome === undefined)(
@@ -214,7 +219,7 @@ test.skipIf(chrome === undefined)(
 					`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].map((b) => b.textContent)`,
 				);
 			}
-			expect(buttons).toEqual(["Don't allow", "Allow"]);
+			expect(buttons).toEqual(["Don't allow", "Allow once"]);
 			expect(
 				await page.eval(
 					`document.querySelector("dialog.tab-mcp-confirm p").textContent`,
@@ -237,7 +242,7 @@ test.skipIf(chrome === undefined)(
 				{
 					origin: CHAT,
 					step: "wipe",
-					text: "The user declined",
+					text: "The user did not allow this call.",
 					isError: true,
 				},
 			]);
@@ -245,16 +250,14 @@ test.skipIf(chrome === undefined)(
 				{ tool: "add", outcome: "ok", client: local },
 				{ tool: "wipe", outcome: "declined", client: local },
 			]);
-			// The frame on the other origin asked too, and got no port.
+			// The frame on the other origin asked too, and got no port. Its frame
+			// loads on its own, maybe after the chat is done: its "waited" report
+			// comes after its ask, so once it is here, the ask was refused.
+			const evil = await reportsUntil(page, "waited", EVIL);
 			expect(await page.eval("refused")).toEqual([EVIL]);
-			for (let i = 0; i < 40; i++) {
-				const waited = await page.eval<Report[]>("reports");
-				if (waited.some((r) => r.origin === EVIL)) break;
-				await Bun.sleep(50);
-			}
-			expect(
-				(await page.eval<Report[]>("reports")).filter((r) => r.origin === EVIL),
-			).toEqual([{ origin: EVIL, step: "waited" }]);
+			expect(evil.filter((r) => r.origin === EVIL)).toEqual([
+				{ origin: EVIL, step: "waited" },
+			]);
 			// No relay: nothing was stored, and connecting is refused.
 			expect(await page.eval("localStorage.length")).toBe(0);
 			expect(await page.eval("mcp.connect().catch((e) => e.message)")).toBe(

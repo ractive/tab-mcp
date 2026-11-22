@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 27: navigation tools"
-status: in-progress
+status: completed
 description: >-
   tab-mcp for Chrome gets four standard tools, navigate, go_back, go_forward and
   reload, for the tab in front it has access to; each returns the new page's
@@ -109,7 +109,8 @@ in the threat model (A13).
 - [x] README tools table, PRIVACY.md (back and forward look at the page's own history
       entries; the new page's info leaves like `page_info`'s), design (tools table),
       threat model A13, CHANGELOG
-- [ ] Review and merge (owner)
+- [x] Review and merge (owner) (merged; the four tools are in the store since
+      0.1.0, see the extension's changelog)
 
 ## Findings
 

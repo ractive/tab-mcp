@@ -1,13 +1,16 @@
 {
 	"name": "@ractive-ch/tab-mcp-client",
-	"version": "0.16.2",
+	"version": "0.21.0",
 	"private": true,
 	"description": "Browser library: offer a web page's tools to AI agents through a tab-mcp relay",
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./allowed": "./src/allowed.ts",
+		"./extension": "./src/extension.ts",
 		"./react": "./src/react.ts",
 		"./setup": "./src/setup.ts",
+		"./strings": "./src/strings.ts",
 		"./tunnel": "./src/tunnel.ts",
 		"./visible": "./src/visible.ts"
 	},

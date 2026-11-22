@@ -44,7 +44,7 @@ dictionary ModelContextRegisterToolOptions {
 
 `RegisteredTool` (what `getTools()` lists) has `name`, `title`, `description`,
 `inputSchema`, `outputSchema`, `annotations`, `window` and `origin`. Chrome 156 gives no
-`outputSchema` (the canary in `test/webmcp-spike/webmcp.test.ts`).
+`outputSchema` (the canary in `test/webmcp-spike/webmcp-canary.browser.test.ts`).
 
 The steps of `registerTool`, as far as tab-mcp mirrors them:
 
@@ -81,6 +81,30 @@ Notes for tab-mcp:
   mirror treats `destructiveHint: true` as `consequentialHint: true` (DEC-143).
 - `exposedTo` has no meaning for AI apps; the library passes it on to the native
   registration of a mirrored tool (DEC-143).
+
+## `exposedTo` in Chrome: another origin calls the page's tool
+
+Checked 2026-11-22 in Chrome for Testing 156.0.8078.80 with `--enable-features=WebMCP`
+(`packages/tab-mcp-client/test/webmcp.browser.test.ts`, the `exposedTo` test, for the
+review of PR 202). The top page `https://webmcp.test` registers a consequential tool
+through the library with `exposedTo: ["https://other.test"]`; a frame of
+`https://other.test` with `allow="tools"` runs script in it:
+
+- `document.modelContext.getTools({ fromOrigins: ["https://webmcp.test"] })` in the frame
+  lists that tool and no other of the page's tools; `getTools()` without `fromOrigins`
+  lists none of them.
+- `executeTool(tool, {})` in the frame runs the page's `execute` and resolves with its
+  result. The page's events see `client: { kind: "webmcp" }`: nothing tells such a call
+  from one of an agent that drives the tab, or of an extension that passes on an AI
+  app's call.
+- The page's `onConfirm` is called for it and its refusal reaches the frame as
+  `{"error":"The user did not allow exposed_wipe to run."}`.
+
+So a document of an origin named in `exposedTo` can run a page's tool that asks, without
+being able to click in the top page. With the library's behaviour since DEC-215 it runs
+unasked unless the page's `onConfirm` refuses it. The reverse direction (a frame's tool
+exposed to the top origin) is in [WebMCP from an extension](/research/webmcp-from-extension.md),
+section 5.
 
 # Citations
 

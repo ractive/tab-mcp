@@ -2,7 +2,8 @@
  * The connection to the user's AI app, in the service worker (DEC-116): the
  * library's `TabMcp` with the extension's tools and the bridge to the page in
  * front, the questions of tools that ask first, and the state the side panels
- * show. A WebSocket that carries messages keeps the worker alive (Chrome 116),
+ * show, and what pages with the client library are told (DEC-207). A
+ * WebSocket that carries messages keeps the worker alive (Chrome 116),
  * and the relay's heartbeat (a ping every 25 s, answered) carries some even
  * when nothing else happens; the worker connects again whenever it starts
  * while the user left AI access on.
@@ -15,14 +16,26 @@ import {
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
 import {
+	CodeFiller,
+	type FillAnswer,
+	type FillContext,
+	type FillHost,
+	type PagePort,
+	relayPageOrigin,
+} from "@ractive-ch/tab-mcp-client/extension";
+import {
 	FIREFOX,
 	notificationOptions,
 	openPanel,
 	PANEL,
 	PRODUCT,
+	questionNotification,
 } from "../browser.ts";
+import { alwaysAllowable, fillAccess } from "../fill.ts";
 import { BADGE_LOOK } from "../look.ts";
+import type { ContentRequest, ExtensionState } from "../messages.ts";
 import {
+	APP_ID,
 	type GrantView,
 	type PanelCommand,
 	type PanelState,
@@ -39,6 +52,7 @@ import {
 	askTools,
 	callInTab,
 	getTab,
+	isSitePage,
 	NoAccessError,
 	type TargetTab,
 	tabInFront,
@@ -53,8 +67,22 @@ import {
 } from "./allowed.ts";
 import { type LookedUp, PageToolBridge } from "./bridge.ts";
 import { decide } from "./decide.ts";
+import {
+	codeWithPairingOn,
+	FILLED_PREFIX,
+	FillSetting,
+	failureText,
+	filledNotification,
+	filledText,
+	HOLD_MS,
+	NOTICE_MS,
+	pairingAnswer,
+	syncPairingScript,
+	UnaskedFills,
+} from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
+import { notificationApi } from "./notifications.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
@@ -72,7 +100,7 @@ import { createTools, INSTRUCTIONS } from "./tools.ts";
 
 /** What a Disconnect while not connected says (it did nothing). */
 export const DISCONNECT_WHILE_DOWN =
-	"The app was not disconnected: AI access has to be on and connected to disconnect an app.";
+	"The AI app was not disconnected: AI access has to be on and connected first.";
 
 /** Wakes the worker while AI access is on, should the connection be down. */
 export const ALARM = "tab-mcp-keepup";
@@ -114,9 +142,9 @@ async function iconsFor(): Promise<Icon[]> {
 /** Clear every notification of the extension. */
 async function clearNotifications(): Promise<void> {
 	try {
-		const all = await chrome.notifications.getAll();
+		const all = await notificationApi().getAll();
 		await Promise.all(
-			Object.keys(all).map((id) => chrome.notifications.clear(id)),
+			Object.keys(all).map((id) => notificationApi().clear(id)),
 		);
 	} catch {
 		// None to clear, or notifications not available.
@@ -153,6 +181,22 @@ export class Connection {
 	readonly #storage: CachedSecretStorage;
 	readonly #icons: Icon[];
 	readonly #questions: Questions;
+	/** The relay's pairing pages in this browser (DEC-203). */
+	readonly #filler: CodeFiller;
+	/** Pairing is held on for a code just filled in, until this fires. */
+	#fillHold: ReturnType<typeof setTimeout> | undefined;
+	/** The pairing page's script registrations, one after the other. */
+	#scriptSync: Promise<void> = Promise.resolve();
+	/** "Fill in the code for me" (DEC-203, DEC-210). */
+	readonly #fill: FillSetting;
+	/** The panel's last "set-fill" the worker has handled, by its id. */
+	#fillAnswered: string | undefined;
+	/** Pages let through without a question, until their code comes (DEC-213). */
+	readonly #unasked = new UnaskedFills();
+	/** Tabs whose fill Remove withdrew: its "no code" is no problem. */
+	readonly #quietFails = new Set<number>();
+	/** The last fill without a question (DEC-213), for the panel's line. */
+	#fillNotice: { text: string; at: number } | undefined;
 	readonly #panels = new Set<Panel>();
 	#allowed: AllowedTools;
 	#relay: string;
@@ -171,6 +215,8 @@ export class Connection {
 	#tab: TabView | undefined;
 	#tabRead = 0;
 	#sending = false;
+	/** What pages with the client library were told last, as JSON (DEC-207). */
+	#told = "";
 	/** AI access is on, as last saved. */
 	#aiOn: boolean;
 	/**
@@ -188,8 +234,10 @@ export class Connection {
 		kv: Kv,
 		aiOn: boolean,
 		grants: GrantView[],
+		fill: FillSetting,
 	) {
 		this.#kv = kv;
+		this.#fill = fill;
 		this.#aiOn = aiOn;
 		this.#grants = grants;
 		this.#storage = storage;
@@ -198,6 +246,9 @@ export class Connection {
 		this.#relay = relay;
 		this.#replaced = replaced;
 		this.#questions = new Questions(this.#questionsHost());
+		this.#filler = new CodeFiller(this.#fillHost(), {
+			grants: grants.map((g) => g.grantId),
+		});
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 	}
@@ -213,7 +264,7 @@ export class Connection {
 		// A previous worker's questions died with it: their notifications
 		// would answer nothing.
 		await clearNotifications();
-		const [storage, icons, allowed, relay, on, replaced, grants] =
+		const [storage, icons, allowed, relay, on, replaced, grants, fill] =
 			await Promise.all([
 				CachedSecretStorage.load(kv),
 				iconsFor(),
@@ -222,6 +273,7 @@ export class Connection {
 				loadAiOn(kv),
 				loadReplaced(kv),
 				loadGrants(kv),
+				FillSetting.load(kv),
 			]);
 		const connection = new Connection(
 			storage,
@@ -232,8 +284,10 @@ export class Connection {
 			kv,
 			on,
 			grants,
+			fill,
 		);
 		connection.#showBadge();
+		connection.syncFill();
 		// The alarm too, not only once connected: after an update (which
 		// clears alarms) with the relay out of reach, the first connect fails
 		// and the library does not retry it; the alarm does (EQ 14).
@@ -254,6 +308,7 @@ export class Connection {
 				instructions: INSTRUCTIONS,
 				icons: this.#icons,
 			},
+			app: APP_ID,
 			appName: PRODUCT,
 			storage: this.#storage,
 			// No tool of the extension is consequential: the page tools ask in
@@ -265,7 +320,16 @@ export class Connection {
 			{
 				current: tabInFront,
 				list: askTools,
-				call: callInTab,
+				// With a vouch, the state too: the page may not have it yet.
+				call: (tabId, target, input, signal, vouch) =>
+					callInTab(
+						tabId,
+						target,
+						input,
+						signal,
+						vouch,
+						vouch === undefined ? undefined : this.handshakeState(),
+					),
 				settled: (tabId, signal) =>
 					settledPage({ tab: getTab, page: askPage }, tabId, signal),
 			},
@@ -342,19 +406,20 @@ export class Connection {
 		// call `#changed` too.
 		mcp.addEventListener("pairingcode", changed, { signal });
 		// The library sets its list only from the relay (connected) or empties
-		// it with a new address: either way the list to keep (EQ 8).
+		// it on Disconnect all apps: either way the list to keep (EQ 8).
 		mcp.addEventListener(
 			"grantschange",
 			() => {
 				// The list in memory is set at once; a failed write to storage
 				// is shown as the problem, not left as an unhandled rejection.
-				this.#setGrants(
-					mcp.grants.map((g) => ({
-						grantId: g.grantId,
-						name: g.client.name,
-						host: g.client.host,
-					})),
-				).catch((error: unknown) => {
+				const grants = mcp.grants.map((g) => ({
+					grantId: g.grantId,
+					name: g.client.name,
+					host: g.client.host,
+				}));
+				// An AI app that just connected withdraws its pairing question.
+				this.#filler.grantsChanged(grants);
+				this.#setGrants(grants).catch((error: unknown) => {
 					this.#problem = message(error);
 					this.#changed();
 				});
@@ -428,6 +493,8 @@ export class Connection {
 
 	async #setAiOn(on: boolean): Promise<void> {
 		this.#aiOn = on;
+		// Off: a pairing page's question is withdrawn at once (DEC-203).
+		if (!on) this.#filler.withdrawAll();
 		await saveAiOn(this.#kv, on);
 		if (on) await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 		else await chrome.alarms.clear(ALARM);
@@ -443,6 +510,13 @@ export class Connection {
 		// writes below must not come back as the new relay's list.
 		this.#listening.abort();
 		this.#bridge.stop();
+		// The pages of the relay before are not this one's, and filling in is
+		// off for the new one until turned on there; the old relay's site is
+		// given back (DEC-203).
+		this.#filler.reset();
+		this.#releasePairing();
+		const old = await this.#fill.reset();
+		if (old !== undefined) await this.#giveBackAccess(old);
 		this.#relay = relay;
 		await this.#setReplaced(undefined);
 		// Apps paired through the relay before are not paired with this one.
@@ -451,6 +525,7 @@ export class Connection {
 		[this.#mcp, this.#bridge] = this.#create(relay);
 		this.#watch(this.#mcp);
 		await before.disconnect();
+		this.syncFill();
 		this.#changed();
 	}
 
@@ -620,8 +695,8 @@ export class Connection {
 					this.#changed();
 				});
 				return;
-			case "new-address":
-				await this.#newAddress();
+			case "disconnect-all":
+				await this.#disconnectAll();
 				return;
 			case "set-relay":
 				if (
@@ -674,24 +749,69 @@ export class Connection {
 			case "answer":
 				this.#questions.answer(command.id, command.answer);
 				return;
+			case "set-fill":
+				await this.#setFill(command.on, command.id);
+				return;
+			case "forget-fill-host":
+				// Its next sign-in page asks again (DEC-213), and a fill of it
+				// that still waits for its code goes, as with the switch off.
+				this.#unasked.withdraw(command.host);
+				await this.#fill.forget(this.#relay, command.host);
+				this.#changed();
+				return;
 		}
 	}
 
 	/**
-	 * A new address. After a takeover the library first takes the old address
-	 * back, so the relay disconnects the AI apps that now talk to whoever took
-	 * it (DEC-095), but only if the takeover happened in this worker's life:
-	 * a new worker's library knows nothing of it. Then the extension connects
-	 * with the old address itself, and the new address is made while
-	 * connected, which revokes every grant of the old one.
+	 * Filling in the code on the relay's page on or off (DEC-203, DEC-210).
+	 * On, for the relay in use: the panel has asked for its site first; if
+	 * the site is gone by now (given back for an "off" just before), it
+	 * stays off. Off: the questions waiting go, and the relay's site is
+	 * given back unless the user gave access to all sites, which is not this
+	 * feature's. The panel's command `id` comes back in the state, so the
+	 * panel knows its switch shows the worker's answer.
 	 */
-	async #newAddress(): Promise<void> {
+	async #setFill(on: boolean, id: string): Promise<void> {
+		const relay = this.#relay;
+		if (on) await this.#fill.turnOn(relay);
+		else {
+			await this.#fill.turnOff();
+			this.#filler.withdrawAll();
+			this.#releasePairing();
+			await this.#giveBackAccess(relay);
+		}
+		this.#fillAnswered = id;
+		this.syncFill();
+		this.#changed();
+	}
+
+	/** Give back the host access asked for `relay`'s pairing page. */
+	async #giveBackAccess(relay: string): Promise<void> {
+		const access = fillAccess(relay);
+		if (access === undefined || (await chrome.permissions.contains(ALL_SITES)))
+			return;
+		await chrome.permissions
+			.remove(access)
+			.catch((error: unknown) =>
+				console.warn("tab-mcp: giving back the relay's site", error),
+			);
+	}
+
+	/**
+	 * Disconnect all apps (`disconnectAll()`). After a takeover the library
+	 * first takes the page back, so the relay disconnects the AI apps that
+	 * now talk to whoever took it (DEC-095), but only if the takeover happened
+	 * in this worker's life: a new worker's library knows nothing of it. Then
+	 * the extension connects with the old secret itself, and the new secret
+	 * is made while connected, which revokes every grant of the old one.
+	 */
+	async #disconnectAll(): Promise<void> {
 		const takeBack = this.#replaced !== undefined && !this.#replacedHere;
 		this.#problem = undefined;
 		this.#changed();
 		try {
 			if (takeBack) await this.#mcp.connect({ resume: true });
-			await this.#mcp.newAddress();
+			await this.#mcp.disconnectAll();
 			await this.#setReplaced(undefined);
 		} catch (error) {
 			this.#problem = message(error);
@@ -699,9 +819,186 @@ export class Connection {
 		this.#changed();
 	}
 
-	/** Pairing stops once no panel's pairing view is open. */
+	/**
+	 * Pairing stops once no panel's pairing view is open and no code just
+	 * filled in waits for the relay's check.
+	 */
 	#pairingOff(): void {
-		if (![...this.#panels].some((p) => p.pairing)) this.#mcp.stopPairing();
+		if (
+			![...this.#panels].some((p) => p.pairing) &&
+			this.#fillHold === undefined
+		)
+			this.#mcp.stopPairing();
+	}
+
+	// --- The relay's pairing page in this browser (DEC-203) ---
+
+	/**
+	 * A port from a pairing page's content script; its sender is checked
+	 * there. The filler never rejects: it closes the port and logs a failure.
+	 */
+	pairingPage(port: PagePort): void {
+		void this.#filler.page(port);
+	}
+
+	/**
+	 * Register the pairing page's content script for the relay in use, if
+	 * the user gave access to its site: at each start, after a change of
+	 * the relay or of the extension's permissions. On, but the site was
+	 * taken away (in the browser's settings): filling in goes off, so it
+	 * cannot come back by itself when the site does (with access to all
+	 * sites, say); the panel says why, and its switch asks for the site.
+	 */
+	syncFill(): void {
+		const relay = this.#relay;
+		this.#scriptSync = this.#scriptSync
+			.then(async () => {
+				if (this.#relay === relay && (await this.#fill.check(relay))) {
+					this.#filler.withdrawAll();
+					this.#releasePairing();
+					this.#changed();
+				}
+				await syncPairingScript(relay, this.#fillOn());
+			})
+			.catch((error: unknown) =>
+				console.warn("tab-mcp: pairing page registration", error),
+			);
+	}
+
+	/** Pairing held on for a code being filled in, for HOLD_MS from now. */
+	#holdPairing(): void {
+		clearTimeout(this.#fillHold);
+		this.#fillHold = setTimeout(() => {
+			this.#fillHold = undefined;
+			this.#pairingOff();
+		}, HOLD_MS);
+	}
+
+	#releasePairing(): void {
+		if (this.#fillHold === undefined) return;
+		clearTimeout(this.#fillHold);
+		this.#fillHold = undefined;
+		this.#pairingOff();
+	}
+
+	/** Filling in is on for the relay in use. */
+	#fillOn(): boolean {
+		return this.#fill.on(this.#relay);
+	}
+
+	/**
+	 * The code to fill in, with pairing held on for it; the library releases
+	 * the hold (`release`) once its code paired, or once no fill needs it.
+	 */
+	async #fillCode(
+		signal: AbortSignal,
+		context: FillContext,
+	): Promise<string | undefined> {
+		this.#holdPairing();
+		const { tabId, client } = context;
+		// A page let through without a question: Remove withdraws the wait.
+		const withdraw = this.#unasked.signal(tabId, client.host);
+		const code = await codeWithPairingOn(
+			this.#mcp,
+			withdraw === undefined ? signal : AbortSignal.any([signal, withdraw]),
+		);
+		const how = this.#unasked.finish(tabId, client.host, code !== undefined);
+		if (how === "withdrawn") {
+			// Removed meanwhile: nothing is filled in, and that is no problem.
+			this.#quietFails.add(tabId);
+			return undefined;
+		}
+		// Never silent (DEC-213). Said once the code is there: the library
+		// sends it right after this, unless its last checks (the page went,
+		// AI access or the setting off) stop it. So the notice errs on the
+		// side of saying too much; it is no proof that the code was sent.
+		if (how === "notice") this.#filledWithoutAsking(client);
+		return code;
+	}
+
+	/**
+	 * Ask about the pairing page in tab `tabId` (DEC-203), unless the user
+	 * chose "Always allow" for the AI app's host and the brake lets it
+	 * through (DEC-213). "Always allow" is offered only for a host that
+	 * qualifies (`alwaysAllowable`).
+	 */
+	async #askPairing(
+		tabId: number,
+		client: { name: string; host: string },
+		signal: AbortSignal,
+	): Promise<FillAnswer> {
+		const relay = this.#relay;
+		// A mark of an earlier page in the tab whose code never came.
+		this.#unasked.clear(tabId);
+		if (await this.#fill.takeUnasked(relay, client.host, Date.now())) {
+			this.#unasked.start(tabId, client.host, signal);
+			return "allow";
+		}
+		const offered = alwaysAllowable(client.host);
+		const { answer, always } = pairingAnswer(
+			await this.#questions.askPairing({ tabId }, client, signal, offered),
+			offered,
+		);
+		// "Always allow": this page now, and the host from now on.
+		if (
+			always &&
+			this.#relay === relay &&
+			(await this.#fill.allowAlways(relay, client.host))
+		)
+			this.#changed();
+		return answer;
+	}
+
+	/** The panel's line and a notification for a fill without a question. */
+	#filledWithoutAsking(client: { name: string; host: string }): void {
+		this.#fillNotice = { text: filledText(client), at: Date.now() };
+		this.#changed();
+		const text = filledNotification(client);
+		notificationApi()
+			.create(
+				`${FILLED_PREFIX}${crypto.randomUUID()}`,
+				notificationOptions({
+					type: "basic",
+					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+					title: text.title,
+					message: text.message,
+					contextMessage: text.contextMessage,
+					priority: 0,
+				}),
+			)
+			.catch((error: unknown) =>
+				// Not made (an error; notifications turned off in the system
+				// are not one, and cannot be seen from here). The panel's line
+				// is there for 10 minutes in any case.
+				console.warn("tab-mcp: notification", error),
+			);
+	}
+
+	/** A tab closed: what was kept for its pairing page goes. */
+	tabClosed(tabId: number): void {
+		this.#unasked.tabClosed(tabId);
+		this.#quietFails.delete(tabId);
+	}
+
+	/** The extension's parts of the library's fill-in (DEC-206). */
+	#fillHost(): FillHost {
+		return {
+			extensionId: chrome.runtime.id,
+			app: APP_ID,
+			relayOrigin: () => relayPageOrigin(this.#relay),
+			aiOn: () => this.#status() !== "off",
+			enabled: () => this.#fillOn(),
+			ask: (tabId, client, signal) => this.#askPairing(tabId, client, signal),
+			code: (signal, context) => this.#fillCode(signal, context),
+			release: () => this.#releasePairing(),
+			failed: (why, context) => {
+				// A fill withdrawn by Remove ends with no code: not a problem.
+				if (why === "no-code" && this.#quietFails.delete(context.tabId)) return;
+				this.#problem = failureText(why);
+				this.#changed();
+			},
+			now: () => Date.now(),
+		};
 	}
 
 	#questionsHost(): QuestionsHost {
@@ -723,21 +1020,18 @@ export class Connection {
 				return (await chrome.windows.get(windowId)).focused;
 			},
 			notify: async (id, text) => {
-				await chrome.notifications.create(
+				await notificationApi().create(
 					id,
-					notificationOptions({
-						type: "basic",
-						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-						title: text.title,
-						message: text.message,
-						contextMessage: text.contextMessage,
-						buttons: text.buttons.map((title) => ({ title })),
-						requireInteraction: true,
-						priority: 2,
-					}),
+					questionNotification(
+						text,
+						chrome.runtime.getURL("icons/icon-128.png"),
+					),
 				);
 			},
-			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
+			clear: (id) =>
+				void notificationApi()
+					.clear(id)
+					.catch(() => {}),
 			showQuestion: ({ tabId, windowId }) =>
 				this.#showQuestion(tabId, windowId),
 			changed: () => this.#changed(),
@@ -804,6 +1098,10 @@ export class Connection {
 						: "",
 				...(current && origin ? { origin } : {}),
 				canAllow: current && origin !== undefined && allowable(origin),
+				// The client library, as the page announced it (DEC-207).
+				...(current && state.library !== undefined
+					? { library: { apps: state.library.apps } }
+					: {}),
 				tools: current
 					? state.tools.map((t) => ({
 							name: t.name,
@@ -858,10 +1156,83 @@ export class Connection {
 				? { replaced: { sibling: this.#replaced.sibling } }
 				: {}),
 			allSites: this.#allSites,
+			fillCode: this.#fillOn(),
+			fillLost: this.#fill.lost(this.#relay),
+			fillAlways: this.#fill.alwaysHosts(this.#relay),
+			...(this.#fillNotice !== undefined &&
+			Date.now() - this.#fillNotice.at < NOTICE_MS
+				? { fillNotice: this.#fillNotice }
+				: {}),
+			...(this.#fillAnswered !== undefined
+				? { fillAnswered: this.#fillAnswered }
+				: {}),
 			...(this.#tab !== undefined ? { tab: this.#tab } : {}),
 			questions: this.#questions.list.map(({ args: _, ...q }) => q),
 			expired: this.#questions.expired,
 		};
+	}
+
+	/**
+	 * What a page that announced the client library may be told (DEC-207):
+	 * the extension's name, whether AI access is on and connected, and the
+	 * AI apps connected now; the content script tells it only while on
+	 * (DEC-221). Nothing else: not the version, the relay, the address or
+	 * other tabs.
+	 */
+	handshakeState(): ExtensionState {
+		const mcp = this.#mcp;
+		const on = mcp.state === "connected";
+		return {
+			name: PRODUCT,
+			on,
+			apps: on
+				? mcp.grants.map((g) => ({ name: g.client.name, host: g.client.host }))
+				: [],
+			whileInFront: true,
+		};
+	}
+
+	/**
+	 * Tell the pages when the state above changes (or, `again`, when host
+	 * access changed): every tab's content script of a site the extension
+	 * may read hears it, and passes it on only to a page that announced the
+	 * library. A tab the extension may not read (no address: host access
+	 * withdrawn, say) hears only "off": a content script left there from
+	 * before tells a page it told "on" that it is off, and nothing more
+	 * (DEC-221).
+	 */
+	#tellPages(again = false): void {
+		const state = this.handshakeState();
+		const told = JSON.stringify(state);
+		if (told === this.#told && !again) return;
+		this.#told = told;
+		const message: ContentRequest = { type: "extension-state", state };
+		const off: ContentRequest = {
+			type: "extension-state",
+			state: { ...state, on: false, apps: [] },
+		};
+		chrome.tabs.query({}).then(
+			(tabs) => {
+				for (const tab of tabs) {
+					const to =
+						tab.url === undefined
+							? off
+							: isSitePage(tab.url)
+								? message
+								: undefined;
+					if (tab.id !== undefined && to !== undefined)
+						chrome.tabs.sendMessage(tab.id, to, { frameId: 0 }).catch(() => {
+							// No content script there: nothing to tell.
+						});
+				}
+			},
+			() => {},
+		);
+	}
+
+	/** Host access was granted or withdrawn: the pages hear the state again. */
+	hostAccessChanged(): void {
+		this.#tellPages(true);
 	}
 
 	#status(): PanelState["status"] {
@@ -876,6 +1247,7 @@ export class Connection {
 	/** Tell the panels (once per turn of the event loop) and set the badge. */
 	#changed(): void {
 		this.#showBadge();
+		this.#tellPages();
 		if (this.#sending) return;
 		this.#sending = true;
 		queueMicrotask(() => {
@@ -914,12 +1286,12 @@ export class Connection {
 				? [
 						"?",
 						BADGE_LOOK.question,
-						`${PRODUCT}: ${questions === 1 ? "a tool asks" : `${questions} tools ask`} for your answer. Open the ${PANEL} to answer.`,
+						`${PRODUCT}: ${questions === 1 ? "a question waits" : `${questions} questions wait`} for your answer. Open the ${PANEL} to answer.`,
 					]
 				: status === "on" || status === "waiting"
 					? ["on", BADGE_LOOK.on, `${PRODUCT}: AI access is on`]
 					: status === "connecting" || status === "retrying"
-						? ["…", BADGE_LOOK.idle, `${PRODUCT}: connecting`]
+						? ["…", BADGE_LOOK.idle, `${PRODUCT}: connecting…`]
 						: ["", BADGE_LOOK.idle, PRODUCT];
 		void chrome.action.setBadgeText({ text }).catch(() => {});
 		// Said, not left to Chrome's choice between black and white.

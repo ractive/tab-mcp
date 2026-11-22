@@ -6,6 +6,419 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Breaking
+
+- **`BrowserExtension` has no `version` any more** (`TabMcp.extension`,
+  `extensionchange`, the React snapshot's `extension`; DEC-221). The tab-mcp browser
+  extension no longer tells a page its version. A page that showed or checked it drops
+  that; `name`, `apps` and `whileInFront` are unchanged.
+
+### Changed
+
+- **The library takes the extension's "on" without a version** (DEC-221), as the
+  tab-mcp browser extension after 0.3.2 sends it; a version an older extension sends is
+  ignored. While AI access is off, the extension answers no page and sends it
+  nothing, so `extension` stays `undefined`, as without the extension; a page it served
+  is told once that it went off. Once on, the extension greets the page with `hello`,
+  and the library's answer tells it what the page announces.
+
+## [0.21.0][client-0.21.0] - 2026-11-22
+
+### Breaking
+
+- **The library no longer asks a WebMCP call that the tab-mcp browser extension did
+  not vouch for** (DEC-215). Its confirmation dialog is never shown for such a call: a
+  tool that asks (`consequentialHint`, or only `destructiveHint`) runs, unless the
+  page's `onConfirm` refuses it. The tool is still registered with
+  `consequentialHint: true`, so that a caller that heeds the hint asks its user. Calls of
+  AI apps through the relay or a port, and calls the extension vouched for, are
+  unchanged.
+- **Who loses the dialog.** Every unvouched WebMCP call, and the page cannot tell their
+  kinds apart: an agent in the browser that drives the tab (it clicked "Allow once"
+  itself, after waiting most of a minute for the dialog, so the dialog did not check
+  it); another extension that passes on calls of an AI app outside the browser; and a
+  document of an origin the page named in `exposedTo` (Chrome 156 lets it list and run
+  the tool). The last two cannot click in the page: for them the dialog was a real
+  check, and now only the calling extension's own question, if it has one, or the
+  page's `onConfirm` stands between them and the tool.
+- **What a page has to do:** nothing to get the new behaviour. A page with a tool that
+  must not run on an unvouched WebMCP caller's word either decides in `onConfirm`
+  (`request.client.kind === "webmcp"`; refuse, or apply a rule of your own, without
+  showing anything an agent could click), keeps the tool from WebMCP with
+  `callers: ["relay", "local"]`, or leaves `exposedTo` off it. Search your tool
+  descriptions and server instructions for "the page asks" (or similar) and remove the
+  promise of a question: an agent told that the page asks may click the page's own
+  buttons instead of calling the tool.
+- `TabMcp.confirmInPage()` and the confirmation chunk's `confirmInPage()` resolve `true`
+  for a WebMCP call without showing anything, so an `onConfirm` that hands such a call
+  to them, as React's `TabMcpProvider` does without a handler of the page, does what the
+  library does without `onConfirm`. The confirmation's chunk is not loaded for such a
+  call.
+- `trustExtension: false` now treats a vouched call as any other WebMCP call: `onConfirm`
+  decides, without one it runs.
+- **`ui.strings.clientWebMcp` is removed** ("An agent in this browser"): no dialog names
+  this caller any more. A page's own text under that key is no longer used, as any
+  unknown key (the type check flags it in an object literal); remove it.
+
+### Added
+
+- **A console warning for a tool that asks with `exposedTo`** (DEC-215): with
+  `webmcp: true`, a tool marked `consequentialHint` (or only `destructiveHint`) whose
+  `exposedTo` names other origins, on a page without `onConfirm` (in React: the
+  provider without one), is warned about once per tool, when the browser accepted its
+  registration (an `onConfirm` removed later is not caught). Documents of those origins can
+  call it through WebMCP, and the library no longer asks them. Refuse such calls in
+  `onConfirm`, or leave `exposedTo` off.
+- The agent skill ships in the package as `skill/SKILL.md` (with `skill/references/`),
+  written for this version (DEC-216). With a coding agent, install the package and tell
+  it: "Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to
+  this app." Its links point to the README, CHANGELOG and declarations beside it.
+
+### Fixed
+
+- The validator that `connect()` loads checks `outputSchema` as it checks `inputSchema`,
+  as the README said it did: an output schema it cannot use (a `$ref` next to a nested
+  `$id`, which does not resolve, or a duplicate `$id`) makes `registerTool` throw, and a
+  tool registered before with one is unregistered, with the reason in the event `error`
+  ("the outputSchema of …"). Until now such a tool was listed, and an AI app whose
+  validator compiles output schemas (the MCP SDK's client) could not use it. Results
+  are still not checked against the output schema.
+- The setup commands (`./setup`, "How do I add it?") put an address with `[`, `]` or `~`
+  in double quotes (DEC-217): zsh refused `claude mcp add --transport http test
+  http://[::1]:8080/s/test/mcp` with "no matches found" (`~` with `extendedglob`). POSIX
+  shells, zsh, fish, PowerShell and cmd.exe read the quoted address the same. An address
+  with any other character than letters, digits and `. : [ ] / _ ~ -` still gets the
+  steps without a command.
+- `disconnectAll()` with a `storage` that reads but cannot be written (full, blocked, or
+  a custom one whose writes fail) connected again with the old secret: the new one was
+  kept only in memory, and the next read of storage returned the old one over it. The
+  grants were revoked, but the secret was not changed, so whoever held the old one could
+  still take the page's place. The new secret now stays in use until the page is
+  reloaded, and storage is not read over it until a write succeeds (code review
+  2026-11-22, CR-02).
+
+## [0.20.0][client-0.20.0] - 2026-11-22
+
+### Breaking
+
+- With `webmcp: true`, tools marked `consequentialHint` or `destructiveHint` are mirrored
+  into the browser's WebMCP too, unless their `callers` leave `"webmcp"` out (DEC-209).
+  They ask every WebMCP call (a call the tab-mcp browser extension vouched for was asked
+  there), and so does a tool marked only `destructiveHint`, which the page asks no AI
+  app for (DEC-022): WebMCP has no `destructiveHint`, so a WebMCP call asks by
+  `consequentialHint ?? destructiveHint`, the rule that already set the native hint. Until now they were left out unless `callers` listed
+  `"webmcp"`, and an agent that found no such tool used the page's own controls instead,
+  which ask nothing. To keep a tool from agents in the browser, as before, register it
+  with `callers: ["relay", "local"]`.
+
+## [0.19.0][client-0.19.0] - 2026-11-21
+
+### Breaking
+
+**`newAddress()` is `disconnectAll()`** (DEC-201): since 0.17 the address names the app
+and never changes; the method disconnects every AI app and makes a new secret, as the
+dialogs' "Disconnect all apps" says. Every name that went with it is renamed, with no
+alias. Search your code for the old names:
+
+| Old | New |
+|---|---|
+| `TabMcp.newAddress()` | `TabMcp.disconnectAll()` |
+| `addressChanged` (on a rejection of it) | `secretChanged` |
+| `DisconnectReason` `"new_address"` (`statechange` `reason`) | `"disconnect_all"` |
+| `ui.strings.newAddress` | `ui.strings.disconnectAll` |
+| `ui.strings.newAddressNote` | `ui.strings.disconnectAllNote` |
+| `ui.strings.newAddressQuestionOne`, `ui.strings.newAddressQuestionMany` | `ui.strings.disconnectAllQuestion` (plural forms, see "Changed") |
+| `ui.strings.newAddressConfirm` | `ui.strings.disconnectAllConfirm` |
+| `ui.strings.gettingNewAddress` | `ui.strings.disconnectingAll` |
+| `ui.strings.newAddressDone` | `ui.strings.disconnectAllDone` |
+| CSS class `tab-mcp-new-address` (the dialog's and the takeover notice's button) | `tab-mcp-disconnect-all` |
+| CSS class `tab-mcp-new-address-row` | `tab-mcp-disconnect-all-row` |
+| CSS class `tab-mcp-new-address-question` | `tab-mcp-disconnect-all-question` |
+| CSS class `tab-mcp-new-address-confirm` | `tab-mcp-disconnect-all-confirm` |
+
+What the method does is unchanged, and so is the protocol (`hello.revokeAll`,
+`grants.revokeAll`). A page's own texts under an old key are no longer used, as any
+unknown key. The type check does not catch `addressChanged` where it is read behind a
+cast, as from a caught error (`(error as { addressChanged?: unknown })`): search for it
+by name.
+
+### Added
+
+- **Translated texts in one step** (DEC-208): `ui.strings` is the one table for every
+  text the library shows a person, given once on `TabMcp` (or `<TabMcpProvider>`): the
+  dialogs, their setup steps and now also `ConnectButton` of `./react`. Partial tables
+  keep English for every missing key. New entry **`@ractive-ch/tab-mcp-client/strings`**
+  (and `cdn/strings.min.js`): `STRINGS`, the English table, typed, so a translation
+  typed as `DialogStrings` names every key it lacks or misspells in the type check;
+  `pickStrings(tables, languages?)`, which loads the page's own table for the user's
+  languages (`navigator.languages`: the same tag, else the same script, region or the
+  language alone), English when they prefer it or nothing matches, and never rejects (a
+  table that does not load gives English, with a warning);
+  `withEnglish(strings)`, the full table for a page's own UI; the type `PluralText`.
+  `setupInstructions(serverName, address, strings?)` takes the table too. New keys:
+  `allowEverythingUntilReloadNote`, `setupClaudeApp`, `setupClaude`, `setupChatGpt`,
+  `setupRun`, `setupClaudeCode`, `setupClaudeCodeNote`, `setupCodex`, `setupCodexNote`,
+  `buttonReconnecting`, `buttonConnected`. A table with texts but no `lang` counts as
+  English and the console says so once. See [Translating](README.md#translating). The
+  core grows by 10 bytes gzipped (6270 B). The React entry keeps `ConnectButton`'s few
+  English texts inline and does not load the table: what a React page loads first grows
+  by about 0.5 KB gzipped (13.2 KB, 13.0 KB before), the entry itself to 3.1 KB.
+- **The page and the tab-mcp browser extension know of each other** (`webmcp: true`,
+  DEC-207): a plain handshake over DOM events (`tab-mcp-page`, `tab-mcp-extension`) with
+  the extension from its next release.
+  - **No second question.** Right before the extension runs a tool that the user
+    allowed there (asked, or its "Always allow"), it vouches for that call: the tool,
+    the exact arguments and the AI app. The next WebMCP call of that tool with equal
+    arguments within 2 seconds runs without the page's question and without
+    `onConfirm`; a vouch is used once, and any other call is asked as before. A vouch
+    the extension withdraws (its call ended, or never reached the page) is dropped.
+  - **`trustExtension: false`** keeps asking every WebMCP call (a site that insists on
+    its own question).
+  - **`extension` and the event `extensionchange`** (also in the React snapshot): while
+    the extension serves the page, `{ name, version, apps, whileInFront }`, with the AI
+    apps connected through it (`name`, `host`); `undefined` otherwise.
+  - **A vouched call's caller** is `{ kind: "webmcp", via: "tab-mcp-extension", name,
+    host }` in `execute`, `toolcall` and `toolcallend` (`WebMcpClient` has the new
+    optional fields).
+  - The connect dialog says first which AI apps are connected through the extension
+    ("… while this tab is in front."), texts `viaExtension` and `viaExtensionInFront`
+    (plural forms); the rest stays.
+  - The page tells the extension the library's version, the app id and the AI apps
+    connected to it directly (at most 64), and marks `<html data-tab-mcp-handshake>`.
+  - In the WebMCP mirror's chunk: the core grows by 9 bytes gzipped.
+- **`pairingUntil` and the event `pairinguntil`** (identity binding, DEC-202): until when
+  a sign-in pairs the page (an ISO time on the page's clock: the `expiresInMs` of the
+  relay's new `pairing.open`, counted from its arrival, so a page clock that differs
+  from the relay's does not matter). Also in the React bindings' snapshot. `undefined`
+  while pairing is off, from each `startPairing()` until the relay answers, after the
+  session ended (`disconnect()`, `disconnectAll()`, a refusal), and with relays up to
+  0.12.1, which do not send it.
+- Dialog texts `signInUntil`, `signInTimeUp` and `continuePairing`.
+- **`@ractive-ch/tab-mcp-client/extension`** (DEC-206): for a browser extension that is a
+  tab-mcp page itself, filling in its own pairing code on the relay's pairing page after
+  asking its user, as the tab-mcp browser extension does (DEC-203). The content script's
+  part (`runPairingPage`), the worker's rules as one state machine (`CodeFiller`: the
+  origin check, also after the page's hello and after the answer, one question per page
+  load, the one more fill for the same tab and request, what withdraws a question),
+  which code to fill in (`takeCode`, `pairingCodes`), the relay's patterns and the
+  messages. The extension supplies how its user is asked, its setting, the permission
+  prompt and the content script's registration. An entry of its own, out of the core,
+  with no `chrome` types; a content script bundles less than 1 KB gzipped of it. See
+  [For browser extensions](README.md#for-browser-extensions). In detail:
+  - `new CodeFiller(host, { retry: false })` turns the one more fill off: the same
+    request's page back after a fill is asked about like any other page, so nothing is
+    filled in without a yes of its own. On by default.
+  - `takeCode` takes the same code sent again (the relay's answer to `startPairing()`
+    while pairing is on) as the next one only if its expiry now leaves `minLeftMs`, so
+    "`startPairing()` before `takeCode`" never fills in a code about to change.
+  - `code(signal, context)` and `failed(why, context)` get `context: FillContext`,
+    `{ tabId, client: { name, host } }`, the page's tab and AI app as `ask` gets them.
+  - `release()` is called when no fill needs pairing held any more: the AI app
+    connected, or a fill ended without sending its code (withdrawn, the page went, no
+    code) and no other fill is under way or waits for the relay's check.
+  - `runPairingPage` with a `page` (a test's) marks that page's document as run, not
+    the global: two pages in one test are independent.
+
+### Changed
+
+- **Texts: English only, plural forms and lists by `Intl`** (DEC-208). The package
+  ships English only. The keys that made grammar by hand are gone, with no alias: a
+  page's own text under an old key is no longer used, as any unknown key.
+
+  | Old | New |
+  |---|---|
+  | `ui.strings.and` | none: lists are joined by `Intl.ListFormat` in the texts' `lang` |
+  | `ui.strings.waitingOne`, `waitingMany` | `waiting` |
+  | `ui.strings.connectedOne`, `connectedMany` | `connected` |
+  | `ui.strings.connectedNextOne`, `connectedNextMany` | `connectedNext` |
+  | `ui.strings.disconnectAllQuestionOne`, `disconnectAllQuestionMany` | `disconnectAllQuestion` |
+  | `ui.strings.runsWithoutAsking` | none: the switches are headed by `alwaysAllow` ("Always allow"), or `allowUntilReload` when nothing is kept |
+  | `ui.strings.dir` (default `"ltr"`) | optional, no default: the direction of `lang` where the browser knows it, else `"ltr"` |
+
+  The new keys hold one form per plural category of the language
+  (`{ one: "…", other: "…" }` in English, chosen by `Intl.PluralRules`), with `{n}` for
+  the count.
+- **One wording for one thing** (DEC-208; the glossary is `kb/design/wording.md`), also
+  in the texts of the tab-mcp browser extension and the relay:
+
+  | Key | Was | Now |
+  |---|---|---|
+  | `allow` | Allow | Allow once |
+  | `codeSentence` | When asked, enter the code {code} | When asked, type the code {code} |
+  | `codeNote` | A new code appears every 2 minutes and after each use. | The code changes every 2 minutes and after each use. |
+  | `connectAnother` | Connect another app | Connect another AI app |
+  | `connectedHeading` | Connected | Connected AI apps |
+  | `disconnectAllConfirm` | Disconnect all | Disconnect all apps (the button that asked) |
+  | `disconnectAllNote`, `disconnectAllQuestion` | … connect again with a new code / and enter a new code | … connect again (with identity binding there is no code) |
+  | `disconnectNote` | To disconnect an app, … | To disconnect an AI app, … |
+  | `disconnectFailed` | Could not disconnect the app. … | Could not disconnect the AI app. … |
+  | `allowEverything`, `allowEverythingApp` | Allow everything, no questions asked (, for {app}) | Always allow everything (for {app}) |
+  | `allowEverythingNote` | … and ones that delete or overwrite. | … and ones that delete or overwrite, until you disconnect {app}. |
+  | `closeNote` | Closing this stops the code. To connect later, … | Closing this ends the code. To connect an AI app later, … |
+  | `replaced` | … now reach that tab … copied what this page keeps to connect … again with a new code. | … now use that tab … copied this page's saved connection … again. |
+  | `ConnectButton` | Connection lost, retrying… | Connection lost. Reconnecting… |
+
+  What an AI app reads: a refused call is "The user did not allow this call." (was "The
+  user declined"), and a call cancelled while the user was asked "The call was
+  cancelled." (was "The user declined", though the user did nothing).
+- **With identity binding the connect dialog counts for 10 minutes** (DEC-202): the
+  relay pairs a sign-in with the page only until 10 minutes after the dialog opened. The
+  dialog says until when ("Your AI app can connect until 14:32.") and, once the time is
+  up (checked again when the tab comes back to the front), "The time to connect your AI
+  app is up. To connect it now, continue." with a Continue button that starts the 10
+  minutes again; with an app connected, "Connect another AI app" shows that sentence next
+  to Continue. Nothing starts them again by itself: on an `oidc` session a reconnect
+  the library makes by itself does not send `pairing.start` again once the user's start
+  was sent, answered or not (`pairingUntil` is then the time of the reconnect, so the
+  dialog shows Continue). `connect()` from a click while reconnecting ("Connect again")
+  does send it, and a session that pairs by code gets it after every reconnect, as
+  before. `startPairing()` now sends `pairing.start` on each call while connected, also
+  when pairing is on already; call it only when the user acts. With a relay up to
+  0.12.1 the dialog counts as long as it is open, as before, but after a reconnect it
+  shows Continue. Libraries up to 0.18.1 send `pairing.start` after every reconnect, so
+  for their pages each reconnect starts another 10 minutes: this release is needed for
+  the limit to be complete.
+- The takeover notice says "If you did not open this page in another tab or window of
+  this browser" (was "in another tab or browser"): a page in another browser has a
+  secret of its own and cannot take this one's place.
+- The listeners that make a reconnect try at once when the tab comes back to the front
+  or the browser is online again, and the wait for the relay's answer to `revoke()` and
+  `signOut()`, are in the lazy chunk, which keeps the core within its size limit.
+
+## [0.18.1][client-0.18.1] - 2026-11-20
+
+### Fixed
+
+- **The confirmation chunk's `confirmInPage` works with a host of the caller's own
+  again.** Code that loads the built confirmation chunk (`confirm-<hash>.js`) and calls
+  its `confirmInPage(mcp, request, document, options)` with a stand-in for the `TabMcp`
+  (a desktop app's own MCP endpoint, say) broke in 0.18.0, which the 0.18.0 entry did
+  not say:
+  - it read the internal `_allowed` of the host, so a host without it threw;
+  - its fourth argument became the dialog texts (`ui`) alone, so the 0.17 options
+    `{ alwaysAllow, ui, allowDelayMs }` were silently ignored: no third button per
+    call, no translated texts, no other delay.
+
+  Now the fourth argument is again `{ alwaysAllow?, ui?, allowDelayMs? }`, as in 0.17.
+  A host needs only `grants`; it may send `grantschange` (any event: the allowances
+  are then pruned against `grants` as they are, whatever the event carries). It needs
+  no `_allowed` and no `session`. For a host that is not a `TabMcp`, nothing is
+  allowed or kept unless the call offers it with `alwaysAllow`; then the button says
+  "Allow until reload" (`true` and `"until-reload"` alike: nothing of a stand-in
+  outlives a reload), and an allowance is kept in memory for the host's grants only,
+  until a reload or until its grant leaves `grants`, and applies to that app's later
+  calls of the tool. A call counts as allowed only while its grant is in the host's
+  `grants` at that moment, also without an event. For a `TabMcp`, `alwaysAllow`
+  overrides the page's option for that call. As since 0.13, only a client with
+  `kind: "relay"` can be allowed. Hosts that added `_allowed` or `session` for 0.18.0
+  can drop them; an `_allowed` that is not a `TabMcp`'s (such as that workaround's)
+  now makes the host a stand-in, so pass `alwaysAllow` to keep offering the button.
+  `TabMcp.confirmInPage(request, { document })` is unchanged.
+
+### Changed
+
+- `allowedTools(mcp).has(grantId, name)`, and a call, count an allowance only while
+  the app is in `mcp.grants`: before the first connect after a reload, `has` is
+  `false` (the allowance is still kept, `list` shows it). Calls only come while
+  connected, so for them nothing changes.
+
+## [0.18.0][client-0.18.0] - 2026-11-20
+
+### Added
+
+- **`@ractive-ch/tab-mcp-client/allowed`**, an entry of its own (not in the core):
+  `allowedTools(mcp)` returns the tools that run without asking, per connected AI app,
+  for a page that draws its own switches: `tools()` (the tools that ask, each with
+  `destructive`), `has`, `list`, `allow`, `ask`, `everything`, `setEverything`,
+  `forget`, `onChange` and `kept`. Types `AllowedTools`, `AllowedTool` (DEC-200). It
+  works with `alwaysAllow` unset too, kept in `storage`. Without a bundler:
+  `cdn/allowed.min.js` beside `cdn/tab-mcp-client.min.js` (package export
+  `./cdn/allowed`), sharing its chunks; a page that does not import it loads nothing
+  more.
+- **"Allow everything, no questions asked"** per AI app: every tool runs without asking,
+  also ones registered later, changed and destructive ones.
+- **Switches in the connect dialog**: under each connected app, a switch per tool that
+  asks (destructive ones marked) and "Allow everything, no questions asked" with a
+  sentence on what it means; checkboxes with `role="switch"` whose accessible names name
+  the app. Tools allowed but not registered right now are listed by name, to turn off.
+  Without `alwaysAllow`, only what is allowed for that app is shown, as switches that can
+  only be turned off. The methods of `allowedTools(mcp)` are bound; `ask` while
+  "everything" is on turns "everything" off for that app.
+- `useAllowedTools(grantId)` in `@ractive-ch/tab-mcp-client/react`: the tools that ask,
+  each with `allowed`, `everything` and the `allowedTools` object to change them.
+- `alwaysAllow: "until-reload"`.
+- `ui.strings`: `alwaysAllow`, `alwaysAllowNote`, `destructive`, `allowToolApp`,
+  `allowDestructiveToolApp`, `allowEverything`, `allowEverythingApp`,
+  `allowEverythingNote`.
+
+### Changed
+
+- **`alwaysAllow: true` keeps allowances until the app is disconnected**, in `storage`
+  under the secret's key with `#allowed` appended (grant ids, tool names, the title and
+  description the user saw, a fingerprint of the secret; no arguments). They end when
+  the relay reports the grant gone (disconnected, "Disconnect all apps", expired, signed
+  out), not on a dropped connection or a reload. With `storage: null` they are kept in
+  memory. `alwaysAllow: "until-reload"` is the old behaviour.
+- **The confirmation's third button** says "Always allow" with `alwaysAllow: true`, and
+  "Allow until reload" with `"until-reload"` or `storage: null`, each with its own note.
+- **An allowed call no longer reaches the page's own `onConfirm`**: it runs without
+  asking. React's provider always installs an `onConfirm`, so this holds there too.
+- **A tool that is unregistered keeps its allowance** (a reload registers every tool
+  again); one registered again with another title or description is asked again, as
+  before.
+- `ui.strings`: `runsWithoutAsking` is the heading over the switches ("Runs without
+  asking", without `{tools}`); `askAgain` and `askAgainApp` are gone ("Ask again" is
+  replaced by the switches).
+
+## [0.17.0][client-0.17.0] - 2026-11-19
+
+### Breaking
+
+For relays with one fixed MCP address per app, `https://<relay>/s/<app>/mcp` (the relay
+release after 0.11.0; DEC-196). Relays up to 0.11.0 are not supported, and that relay
+release refuses clients before this one.
+
+- **The address names the app, not the tab.** `session.address` is
+  `https://<relay>/s/<app>/mcp`, the same for every page of the app and every visitor;
+  the pairing code alone says which page an AI app is paired with. Every address from
+  before is gone: users add the new one to their AI apps and pair again.
+- **`hello` carries `app: { id, name? }`**, which the relay requires. The `page` field
+  is no longer sent, and the `/tab` URL has no `?a=<address id>`.
+- **`newAddress()` no longer changes the address.** It still takes the page back,
+  revokes every grant and makes a new secret, and `addressChanged` on its rejection
+  still says whether the secret changed. The dialogs call it "Disconnect all apps"
+  (was "New address"); every AI app then connects again at the same address with a new
+  code. The keys of `ui.strings` are unchanged (`newAddress`, `newAddressNote`,
+  `newAddressQuestionOne`, `newAddressQuestionMany`, `newAddressConfirm`,
+  `gettingNewAddress`, `newAddressDone`, `closeNote`, `replaced`); their English texts
+  changed. A page with its own texts for them should say the same.
+- **`PairingCodeReason` has no `"locked"`.** The relay's codes have no attempts of their
+  own any more: `reason` is `start`, `used` or `expired`.
+
+### Added
+
+- The option `app`: the app id, the `<app>` of the address. 1 to 32 characters of `a-z`,
+  `0-9` and `-`, not starting or ending with `-`; anything else is a `TypeError`.
+  Without it the id is made from `server.name`: lower case, letters without their marks,
+  each run of other characters as one `-`, at most 32 characters ("Bücher" gives
+  `bucher`). A `server.name` that leaves nothing, with `relay` set, is a `TypeError`
+  that says to set `app`. A relay may reserve an app id for certain origins; a page of
+  another origin that names it is refused (`connect()` rejects with reason `policy`).
+  The relay knows a page by its app id and its secret together, so a page that changes
+  its app id is a new page to the relay, and its AI apps pair again.
+
+### Changed
+
+- The pairing code is 8 letters, shown as the relay sends it: `XXXX-XXXX`.
+- The storage key of the secret is unchanged (`tab-mcp:secret:<relay origin>:<server.name>`
+  or `storageKey`).
+
+### Removed
+
+- Close code 4009 (`address_mismatch`) is no longer known: relays do not send it.
+
 ## [0.16.2][client-0.16.2] - 2026-11-14
 
 ### Removed
@@ -775,6 +1188,12 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   `<script type="module">` under `@ractive-ch/tab-mcp-client/cdn`.
 - The connect dialog shows the pairing code from the relay.
 
+[client-0.21.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.21.0
+[client-0.20.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.20.0
+[client-0.19.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.19.0
+[client-0.18.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.18.1
+[client-0.18.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.18.0
+[client-0.17.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.17.0
 [client-0.16.2]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.2
 [client-0.16.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.1
 [client-0.16.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.16.0

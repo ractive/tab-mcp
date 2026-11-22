@@ -35,6 +35,7 @@
 import { readdir, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
+import { PAIRING_SCRIPT } from "../src/fill.ts";
 import { CONTENT_SCRIPT, WEBMCP_MAIN_SCRIPT } from "../src/messages.ts";
 import { SITE_MATCHES } from "../src/tabs.ts";
 import { ICON_SIZES } from "./icons.ts";
@@ -200,7 +201,7 @@ export function createFirefoxManifest(
 		action: { default_title: "tab-mcp browser extension", default_icon: icons },
 		background: { scripts: ["background.js"], type: "module" },
 		sidebar_action: {
-			default_title: "tab-mcp",
+			default_title: "tab-mcp browser extension",
 			default_panel: "sidepanel/index.html",
 			default_icon: icons,
 			open_at_install: false,
@@ -318,6 +319,14 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	const packages = new Set([
 		...(await bundle("src/background.ts", outdir, "esm", how)),
 		...(await bundle("src/content.ts", outdir, "iife", how, CONTENT_SCRIPT)),
+		// The relay's pairing page, registered for it alone (DEC-203).
+		...(await bundle(
+			"src/pairing-page.ts",
+			outdir,
+			"iife",
+			how,
+			PAIRING_SCRIPT,
+		)),
 		// Chrome's page-world polyfill; Firefox's lives in the content script.
 		...(how.firefox
 			? []

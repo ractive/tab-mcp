@@ -44,6 +44,8 @@ on:
     paths:
       - "packages/tab-mcp-client/**"
       - "packages/tab-mcp/**"
+      # The agent skill ships in the client's package (DEC-216).
+      - "plugins/tab-mcp/skills/**"
       - "scripts/npm-*"
       - "scripts/docker-*"
       - "Dockerfile"
@@ -199,13 +201,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm install --global "npm@$NPM_VERSION"
       - run: bun install --frozen-lockfile
-      # The browser tests in verify need Chrome; ci.yml runs verify on pull requests.
+      # verify and the browser tests (verify:all); the browser tests need
+      # Chrome. ci.yml runs both on pull requests.
       - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
         if: github.event_name != 'pull_request'
         id: chrome
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
-      - run: bun run verify
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+        if: github.event_name != 'pull_request'
+      - run: bun run verify:all
         if: github.event_name != 'pull_request'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
@@ -256,6 +262,8 @@ jobs:
             if (typeof lib.TabMcp !== 'function' || typeof cdn.TabMcp !== 'function') throw new Error('no TabMcp');
             console.log('imported', lib.VERSION);
           "
+          # The path the READMEs give to a coding agent (DEC-216).
+          test -f node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-pack-tab-mcp-client-${{ steps.pack.outputs.version }}
@@ -370,13 +378,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: npm install --global "npm@$NPM_VERSION"
       - run: bun install --frozen-lockfile
-      # The browser tests in verify need Chrome; ci.yml runs verify on pull requests.
+      # verify and the browser tests (verify:all); the browser tests need
+      # Chrome. ci.yml runs both on pull requests.
       - uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
         if: github.event_name != 'pull_request'
         id: chrome
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
-      - run: bun run verify
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+        if: github.event_name != 'pull_request'
+      - run: bun run verify:all
         if: github.event_name != 'pull_request'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
