@@ -108,35 +108,62 @@ const compiled = new WeakMap<RegisteredTool, ArgumentValidator>();
  * (the validator resolves one only when an argument reaches it, against the
  * base of the nearest `$id`), an `$id` that is not a URL, a duplicate one.
  * `compileRegistry` makes the registry call it at registration (DEC-086).
+ * The output schema gets the same check (an AI app compiles it when it
+ * lists the tools, and one its validator cannot use costs the tool); results
+ * are not checked against it.
  */
 export function compileTool(tool: RegisteredTool): ArgumentValidator {
 	const known = compiled.get(tool);
 	if (known !== undefined) return known;
 	const schema = tool.inputSchema as Schema;
-	let lookup: Record<string, Schema | boolean>;
-	try {
-		lookup = dereference(schema);
-	} catch (error) {
-		// Only the first line: the validator appends the URIs it knows.
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(message.split("\n")[0]);
-	}
-	for (const node of Object.values(lookup)) {
-		if (typeof node !== "object" || node.$ref === undefined) continue;
-		const absolute = (node as { __absolute_ref__?: string }).__absolute_ref__;
-		if (lookup[absolute ?? node.$ref] === undefined)
-			throw new Error(`$ref ${JSON.stringify(node.$ref)} does not resolve`);
-	}
+	const lookup = lookupOf(schema, "inputSchema");
+	if (tool.outputSchema !== undefined)
+		lookupOf(tool.outputSchema as Schema, "outputSchema");
 	const validator: ArgumentValidator = (args) =>
 		validateSchema(args, schema, "2020-12", lookup, false);
 	compiled.set(tool, validator);
 	return validator;
 }
 
+/** Why `compileTool` refused a tool, and which of its schemas. */
+class SchemaError extends Error {
+	readonly what: string;
+	constructor(what: string, message: string) {
+		super(message);
+		this.what = what;
+	}
+}
+
+/** The validator's lookup of `schema`; a `SchemaError` if it cannot use it. */
+function lookupOf(
+	schema: Schema,
+	what: string,
+): Record<string, Schema | boolean> {
+	let lookup: Record<string, Schema | boolean>;
+	try {
+		lookup = dereference(schema);
+	} catch (error) {
+		// Only the first line: the validator appends the URIs it knows.
+		const message = error instanceof Error ? error.message : String(error);
+		throw new SchemaError(what, message.split("\n")[0] ?? "");
+	}
+	for (const node of Object.values(lookup)) {
+		if (typeof node !== "object" || node.$ref === undefined) continue;
+		const absolute = (node as { __absolute_ref__?: string }).__absolute_ref__;
+		if (lookup[absolute ?? node.$ref] === undefined)
+			throw new SchemaError(
+				what,
+				`$ref ${JSON.stringify(node.$ref)} does not resolve`,
+			);
+	}
+	return lookup;
+}
+
 function schemaError(name: string, error: unknown, suffix = ""): TypeError {
 	const message = error instanceof Error ? error.message : String(error);
+	const what = error instanceof SchemaError ? error.what : "inputSchema";
 	return new TypeError(
-		`registerTool: the inputSchema of ${name}: ${message}${suffix}`,
+		`registerTool: the ${what} of ${name}: ${message}${suffix}`,
 	);
 }
 

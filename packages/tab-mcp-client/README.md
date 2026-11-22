@@ -148,7 +148,7 @@ WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-call
   `$ref` next to a nested `$id`) is unregistered, with the reason in the event `error`;
 - `outputSchema` (optional): a JSON Schema with `"type": "object"` for the result, listed
   to AI apps (`tools/list`) and passed on to WebMCP. `registerTool` checks it as it checks
-  `inputSchema` (an AI app compiles it when it lists the tools, and one that does not
+  `inputSchema`, also with the validator once `connect()` has loaded it (an AI app compiles it when it lists the tools, and one that does not
   compile can cost the whole list), but results are not checked against it. An AI app
   expects every result of such a tool to carry
   `structuredContent` that matches it (the MCP SDK's client refuses one without), so
@@ -185,7 +185,7 @@ written for the native API behaves differently here:
   draft rejects the first two with an `InvalidStateError`. A duplicate name is an
   `InvalidStateError` in both.
 - `inputSchema` and `outputSchema` need `"type": "object"`, as MCP does; the draft takes
-  any object. The library also checks `inputSchema`'s patterns and `$ref`s (above).
+  any object. The library also checks the patterns and `$ref`s of both (above).
 - The library checks the arguments against `inputSchema` before `execute` runs; the
   draft leaves that to the page.
 - `execute` may return an MCP result; through WebMCP it goes out as its

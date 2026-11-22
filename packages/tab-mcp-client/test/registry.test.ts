@@ -219,6 +219,66 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		expect(compileRegistry(r)).toEqual([]);
 	});
 
+	test("the output schema gets the validator's check too, before and after it is loaded (the review of 2026-11-22)", () => {
+		const r = new ToolRegistry();
+		// The review's schema: the core's check passes it, an AI app's validator does not.
+		const nested = {
+			type: "object",
+			$defs: { s: { type: "string" } },
+			properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } },
+		};
+		const duplicate = {
+			type: "object",
+			$defs: {
+				a: { $id: "https://z.example/a" },
+				b: { $id: "https://z.example/a" },
+			},
+		};
+		r.register(tool({ name: "early_out", outputSchema: nested }));
+		r.register(tool({ name: "early_in", inputSchema: nested }));
+		r.register(tool({ name: "early_good", outputSchema: { type: "object" } }));
+		expect(compileRegistry(r).map((e) => e.message)).toEqual([
+			'registerTool: the outputSchema of early_out: $ref "#/$defs/s" does not resolve; the tool was unregistered',
+			'registerTool: the inputSchema of early_in: $ref "#/$defs/s" does not resolve; the tool was unregistered',
+		]);
+		expect(r.list().map((t) => t.name)).toEqual(["early_good"]);
+		expect(() =>
+			r.register(tool({ name: "late_out", outputSchema: nested })),
+		).toThrow(
+			new TypeError(
+				'registerTool: the outputSchema of late_out: $ref "#/$defs/s" does not resolve',
+			),
+		);
+		expect(() =>
+			r.register(tool({ name: "late_dup", outputSchema: duplicate })),
+		).toThrow(
+			new TypeError(
+				'registerTool: the outputSchema of late_dup: Duplicate schema URI "https://z.example/a".',
+			),
+		);
+		// The same schema as input and as output: the input's problem is named.
+		expect(() =>
+			r.register(
+				tool({ name: "late_both", inputSchema: nested, outputSchema: nested }),
+			),
+		).toThrow(
+			new TypeError(
+				'registerTool: the inputSchema of late_both: $ref "#/$defs/s" does not resolve',
+			),
+		);
+		r.register(
+			tool({
+				name: "late_good",
+				outputSchema: {
+					type: "object",
+					$defs: { s: { type: "string" } },
+					properties: { a: { $ref: "#/$defs/s" } },
+				},
+			}),
+		);
+		expect(r.list().map((t) => t.name)).toEqual(["early_good", "late_good"]);
+	});
+
 	test("keeps a copy of the schema", () => {
 		const r = new ToolRegistry();
 		const schema = { type: "object", properties: { a: { type: "number" } } };

@@ -15,6 +15,16 @@ the Git tag `client-v<version>`. The format follows
   it: "Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to
   this app." Its links point to the README, CHANGELOG and declarations beside it.
 
+### Fixed
+
+- The validator that `connect()` loads checks `outputSchema` as it checks `inputSchema`,
+  as the README said it did: an output schema it cannot use (a `$ref` next to a nested
+  `$id`, which does not resolve, or a duplicate `$id`) makes `registerTool` throw, and a
+  tool registered before with one is unregistered, with the reason in the event `error`
+  ("the outputSchema of …"). Until now such a tool was listed, and an AI app whose
+  validator compiles output schemas (the MCP SDK's client) could not use it. Results
+  are still not checked against the output schema.
+
 ## [0.20.0][client-0.20.0] - 2026-11-22
 
 ### Breaking
