@@ -530,7 +530,6 @@ function advances(page: Page): Promise<{ font: string; worst: number }> {
 
 interface CaretLine {
 	box: number;
-	side: "before" | "after" | "empty";
 	/** The line's left and right edge, against the box's middle, in px. */
 	from: number;
 	to: number;
@@ -563,7 +562,6 @@ function caretLines(page: Page): Promise<CaretLine[]> {
 			const mid = (r.left + r.right) / 2;
 			out.push({
 				box,
-				side: b.classList.contains("caret-after") ? "after" : b.classList.contains("caret-empty") ? "empty" : "before",
 				from: left - mid,
 				to: left + width - mid,
 				half: ch / 2,
@@ -608,16 +606,26 @@ async function nativeCaretHidden(page: Page): Promise<boolean> {
 	return (await caretColor(page)) === "rgba(0, 0, 0, 0)";
 }
 
+/** Which side of the letter's advance box the line stands on, from where it is drawn. */
+function sideOf(line: CaretLine): "before" | "after" | "empty" | "other" {
+	if (line.to <= -line.half) return "before";
+	if (line.from >= line.half) return "after";
+	return Math.abs((line.from + line.to) / 2) < 0.5 ? "empty" : "other";
+}
+
 /** The line stands in `box`, on `side`, a clear gap from the letter's advance box (or in the box's middle). */
-function expectCaret(line: CaretLine, box: number, side: CaretLine["side"]) {
+function expectCaret(
+	line: CaretLine,
+	box: number,
+	side: "before" | "after" | "empty",
+) {
 	expect(line.box).toBe(box);
-	expect(line.side).toBe(side);
-	expect(line.width).toBeGreaterThanOrEqual(2);
+	expect(sideOf(line)).toBe(side);
+	expect(line.width).toBeGreaterThanOrEqual(1);
 	expect(line.height).toBeGreaterThan(0);
-	if (side === "before") expect(line.to).toBeLessThanOrEqual(-line.half - 0.5);
-	else if (side === "after")
-		expect(line.from).toBeGreaterThanOrEqual(line.half + 0.5);
-	else expect(Math.abs((line.from + line.to) / 2)).toBeLessThan(0.5);
+	// A clear gap to the letter's advance box (the font test proves it is 1ch).
+	if (side === "before") expect(-line.half - line.to).toBeGreaterThanOrEqual(1);
+	if (side === "after") expect(line.from - line.half).toBeGreaterThanOrEqual(1);
 	// The field's text colour, as a native caret.
 	expect(line.color).toBe(line.letterColor);
 }
@@ -694,9 +702,9 @@ describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
 		await page.close();
 	});
 
-	test("the line blinks, and stands still when the user asks for less motion; moving the caret restarts the blink", async () => {
+	test("the line blinks, and stands still when the user asks for less motion; every paint starts a new blink", async () => {
 		const page = await openPairingPage();
-		await typeKeys(page, "nhnx");
+		await typeKeys(page, "nhnxmnmh");
 		await oneCaret(page);
 		expect(
 			await page.eval(
@@ -708,25 +716,82 @@ describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
 			iterations: "infinite",
 			easing: "steps(1)",
 		});
-		// Moved: the new box's blink starts at its visible phase.
-		await caretAt(page, 1);
-		await atIs(page, [1]);
+		// In one evaluation, without wall time: the caret moves within the same
+		// box (behind the last letter instead of in front of it) and the
+		// animation is a new object, so it starts again.
+		await caretAt(page, 8);
+		await atIs(page, [8]);
 		expect(
-			await page.eval<number>(
-				`document.querySelector(".code-boxes > .at").getAnimations({ subtree: true })[0].currentTime`,
-			),
-		).toBeLessThan(500);
-		expect(
-			Number(
-				await page.eval<string>(
-					`getComputedStyle(document.querySelector(".code-boxes > .at"), "::before").opacity`,
-				),
-			),
-		).toBe(1);
+			await page.eval<{ fresh: boolean; same: boolean }>(`(async () => {
+				const f = ${FIELD};
+				const first = () => document.querySelector(".code-boxes > .at").getAnimations({ subtree: true })[0];
+				const before = first();
+				const box = document.querySelector(".code-boxes > .at");
+				const moved = new Promise((r) => f.addEventListener("selectionchange", r, { once: true }));
+				f.setSelectionRange(9, 9);
+				await moved;
+				return { fresh: first() !== before, same: document.querySelector(".code-boxes > .at") === box };
+			})()`),
+		).toEqual({ fresh: true, same: true });
 		await page.send("Emulation.setEmulatedMedia", {
 			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 		});
 		expect((await caretLines(page)).map((l) => l.animation)).toEqual(["none"]);
+		await page.close();
+	});
+
+	test("typing eight letters one by one moves the line across the dash, and a paste of more than eight ends behind the last letter", async () => {
+		const page = await openPairingPage();
+		const expected = [
+			[1, "empty"],
+			[2, "empty"],
+			[3, "empty"],
+			[5, "empty"],
+			[6, "empty"],
+			[7, "empty"],
+			[8, "empty"],
+			[8, "after"],
+		] as const;
+		let i = 0;
+		for (const letter of "nhnxmnmh") {
+			await typeKeys(page, letter);
+			const [box, side] = expected[i++] as (typeof expected)[number];
+			await atIs(page, [box]);
+			expectCaret(await oneCaret(page), box, side);
+			expect(await nativeCaretHidden(page)).toBe(true);
+		}
+		await page.send("Browser.grantPermissions", {
+			origin: relay.url,
+			permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+		});
+		await clear(page);
+		await paste(page, "abcdefghijkl");
+		expect((await field(page)).value).toBe("ABCD-EFGH");
+		await atIs(page, [8]);
+		expectCaret(await oneCaret(page), 8, "after");
+		await page.close();
+	});
+
+	test("no line while the window is not in front, though the field keeps being the active element; it is back with the window", async () => {
+		const page = await openPairingPage();
+		await typeKeys(page, "nh");
+		await oneCaret(page);
+		// Another tab in front: the page keeps its active element but loses the
+		// window's focus (the harness's focus emulation would keep it).
+		await page.send("Emulation.setFocusEmulationEnabled", { enabled: false });
+		const other = await browser.newPage();
+		await other.goto("about:blank");
+		await browser.send("Target.activateTarget", { targetId: other.targetId });
+		await noCaret(page);
+		expect(
+			await page.eval<{ active: boolean; focus: boolean }>(
+				`({ active: document.activeElement === ${FIELD}, focus: document.hasFocus() })`,
+			),
+		).toEqual({ active: true, focus: false });
+		expect(await nativeCaretHidden(page)).toBe(false);
+		await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+		expectCaret(await oneCaret(page), 2, "empty");
+		await other.close();
 		await page.close();
 	});
 

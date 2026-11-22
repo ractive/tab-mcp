@@ -33,6 +33,7 @@ if (
 		const start = field.selectionStart;
 		const at =
 			!composing &&
+			document.hasFocus() &&
 			document.activeElement === field &&
 			start !== null &&
 			start === field.selectionEnd
@@ -82,6 +83,10 @@ if (
 		if (event instanceof InputEvent && event.isComposing) return;
 		apply(done);
 	});
+	// The field keeps `activeElement` when the window loses the focus, but a
+	// native caret is gone then, and so is the drawn one.
+	window.addEventListener("blur", paint);
+	window.addEventListener("focus", paint);
 	field.addEventListener("compositionstart", () => {
 		composing = true;
 		paint();

@@ -4852,7 +4852,11 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   the classes `at`, `caret-after` and `caret-empty` off and puts them back after a
   reflow on every paint, which restarts the blink visible, as a native caret does. No
   box is marked, so the native caret shows, with a selection, while an input method
-  composes and when the field is not focused. The rules are pure functions in
+  composes and when the field or its window is not focused (`document.hasFocus()`,
+  repainted on the window's `blur` and `focus`). Known limits, accepted by the owner: the
+  drawn caret ignores the operating system's caret settings (thickness, blink rate, the
+  text-cursor indicator) and never stops blinking except under reduced motion; once a
+  second is no flash hazard. The rules are pure functions in
   `src/oauth/code-field.ts` with unit tests; `src/oauth/code-field-page.ts` (type-checked
   with the DOM in `tsconfig.browser.json`) wires them to the field.
 - **Undo is not kept** (review of PR 194). Setting the field's `value` clears the
