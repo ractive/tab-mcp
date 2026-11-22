@@ -6,7 +6,7 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
-## [0.22.0-rc.1][client-0.22.0-rc.1] - 2026-11-23
+## [0.22.0][client-0.22.0] - 2026-11-23
 
 ### Breaking
 
@@ -14,6 +14,12 @@ the Git tag `client-v<version>`. The format follows
   `extensionchange`, the React snapshot's `extension`; DEC-221). The tab-mcp browser
   extension no longer tells a page its version. A page that showed or checked it drops
   that; `name`, `apps` and `whileInFront` are unchanged.
+- **A page that stays on 0.21.0 or older loses the extension's state** once its users
+  have the tab-mcp browser extension after 0.3.2: such a page takes the extension's
+  "on" only with a version, so `extension` stays `undefined` and the page no longer
+  shows the AI apps connected through the extension. Calls the user allowed in the
+  extension are still not asked again in the page. Update to this version to get it
+  back.
 
 ### Changed
 
@@ -1188,7 +1194,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   `<script type="module">` under `@ractive-ch/tab-mcp-client/cdn`.
 - The connect dialog shows the pairing code from the relay.
 
-[client-0.22.0-rc.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.22.0-rc.1
+[client-0.22.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.22.0
 [client-0.21.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.21.0
 [client-0.20.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.20.0
 [client-0.19.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.19.0
