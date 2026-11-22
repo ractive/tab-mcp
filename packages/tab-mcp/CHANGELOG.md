@@ -9,7 +9,7 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
-## Unreleased
+## [0.13.1-rc.1][relay-0.13.1-rc.1] - 2026-11-22
 
 ### Changed
 
@@ -746,6 +746,7 @@ CI-signed tarball (no GitHub release, no Docker image). It runs on Bun 1.4.3 or 
 - `/healthz` with the version, and JSON-line logs that never contain request or response
   bodies.
 
+[relay-0.13.1-rc.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.13.1-rc.1
 [relay-0.13.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.13.0
 [relay-0.12.1]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.12.1
 [relay-0.12.0]: https://github.com/ractive/tab-mcp/releases/tag/relay-v0.12.0
