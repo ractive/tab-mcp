@@ -216,6 +216,22 @@ export function write(sink: Sink, chunk: string): void {
 
 type ChromeProcess = Subprocess<"ignore", "ignore", "ignore">;
 
+/**
+ * One step of a test that is one scenario: a failure names the step, then
+ * says what failed in it.
+ */
+export async function step(
+	name: string,
+	body: () => Promise<void>,
+): Promise<void> {
+	try {
+		await body();
+	} catch (error) {
+		if (error instanceof Error) error.message = `[${name}] ${error.message}`;
+		throw error;
+	}
+}
+
 export class Browser {
 	readonly #proc: ChromeProcess;
 	readonly #profile: string;
@@ -520,6 +536,36 @@ export class Browser {
 		await page.send("Page.enable");
 		await page.goto(url);
 		return page;
+	}
+
+	/**
+	 * The extension loaded at launch anew, as just installed, for the next
+	 * test in a Chrome that tests share: the `others` (extensions a test
+	 * loaded) removed, ours removed (its IndexedDB, alarms and permissions
+	 * go with it) and loaded again from `path` (the same id), its worker
+	 * ready.
+	 */
+	async reinstall(path: string, others: Iterable<string> = []): Promise<void> {
+		const id = this.extensionId;
+		if (id === undefined) throw new Error("no extension loaded");
+		await this.detachServiceWorkers();
+		for (const other of others)
+			await this.send("Extensions.uninstall", { id: other }).catch(() => {});
+		await this.send("Extensions.uninstall", { id });
+		await this.send("Extensions.loadUnpacked", { path });
+		await this.readyWorker(id);
+	}
+
+	/** Close every tab but `keep` (the windows a test opened go with them). */
+	async closeTabsBut(keep: Page): Promise<void> {
+		const { targetInfos } = (await this.send("Target.getTargets")) as {
+			targetInfos: { targetId: string; type: string }[];
+		};
+		for (const target of targetInfos)
+			if (target.type === "page" && target.targetId !== keep.targetId)
+				await this.send("Target.closeTarget", {
+					targetId: target.targetId,
+				}).catch(() => {});
 	}
 
 	/** The sessions on service workers, for `detachServiceWorkers()`. */
