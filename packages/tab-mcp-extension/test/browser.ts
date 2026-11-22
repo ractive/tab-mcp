@@ -7,10 +7,11 @@
  * `test/webmcp-spike/browser.ts`.
  */
 
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { readdirSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 
 /**
  * The profiles of the Chromes this process started and has not closed yet,
@@ -346,8 +347,7 @@ export class Browser {
 		binary: string,
 		options: LaunchOptions = {},
 	): Promise<Browser> {
-		const profile =
-			options.profile ?? mkdtempSync(join(tmpdir(), "tab-mcp-extension-"));
+		const profile = options.profile ?? browserTempDir("chrome-");
 		track(profile, options.profile !== undefined);
 		let browser: Browser | undefined;
 		let proc: ChromeProcess | undefined;

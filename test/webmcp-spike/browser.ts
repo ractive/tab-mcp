@@ -6,10 +6,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { readdirSync, realpathSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { browserTempDir } from "../browser-dirs.ts";
 
 /** The profiles of the Chromes this process started and has not closed yet. */
 const running = new Set<string>();
@@ -262,7 +263,7 @@ export class Browser {
 		binary: string,
 		options: LaunchOptions = {},
 	): Promise<Browser> {
-		const profile = mkdtempSync(join(tmpdir(), "webmcp-spike-"));
+		const profile = browserTempDir("chrome-spike-");
 		track(profile);
 		if (options.labs?.length)
 			await Bun.write(

@@ -7,8 +7,7 @@
  * step the test does in the browser.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
 	Client,
@@ -21,6 +20,7 @@ import {
 	UnauthorizedError,
 } from "@modelcontextprotocol/client";
 import { MemoryTokenStore } from "@ractive-ch/tab-mcp";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { createTestRelay, type Relay } from "../../tab-mcp/src/relay.ts";
 import {
 	type CimdServer,
@@ -43,7 +43,7 @@ export const ALWAYS_CLIENT_NAME = "Always test AI";
 let alwaysCert: { cert: string; key: string } | undefined;
 function alwaysCertificate(): { cert: string; key: string } {
 	if (alwaysCert !== undefined) return alwaysCert;
-	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-always-cert-"));
+	const dir = browserTempDir("always-cert-");
 	try {
 		const key = join(dir, "key.pem");
 		const cert = join(dir, "cert.pem");

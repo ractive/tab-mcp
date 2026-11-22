@@ -22,8 +22,7 @@ import {
 	setDefaultTimeout,
 	test,
 } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import {
 	Client,
@@ -35,6 +34,7 @@ import {
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
 import { TabMcp } from "@ractive-ch/tab-mcp-client";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
 import {
@@ -225,7 +225,7 @@ async function start(
 	options: { store: boolean; profile?: string; webmcp?: boolean },
 	first: string,
 ): Promise<Stack> {
-	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-ext-"));
+	const dir = browserTempDir("extension-build-");
 	const relay = startTestRelay();
 	let browser: Browser | undefined;
 	const stop = async () => {
@@ -2071,7 +2071,7 @@ describe.skipIf(chrome === undefined)(
 
 describe.skipIf(chrome === undefined)("a restart", () => {
 	test("the same profile connects again by itself, with the same address", async () => {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-ext-profile-"));
+		const profile = browserTempDir("extension-profile-");
 		let stack: Stack | undefined;
 		let again: Browser | undefined;
 		try {
@@ -2109,7 +2109,7 @@ describe.skipIf(chrome === undefined)("a restart", () => {
 	}, 90_000);
 
 	test("with the relay out of reach at a start, it keeps trying: the alarm is set and the panel says so (EQ 3, EQ 14)", async () => {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-ext-profile-"));
+		const profile = browserTempDir("extension-profile-");
 		let stack: Stack | undefined;
 		let again: Browser | undefined;
 		try {

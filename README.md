@@ -405,11 +405,11 @@ so a relay is exactly one process.
 
 ## Status
 
-**0.21.0-rc.1**. Until 1.0, a new minor version can still change
+**0.21.0-rc.2**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what changed.
 
 - Released: relay `@ractive-ch/tab-mcp` 0.13.2-rc.1 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.21.0-rc.1, on the npm tag `latest`.
+  `@ractive-ch/tab-mcp-client` 0.21.0-rc.2, on the npm tag `latest`.
 - The tab-mcp browser extension 0.3.1 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16). A development build loaded unpacked has the store's id, which the hosted
   relay allows ([README](packages/tab-mcp-extension/README.md)).
@@ -426,7 +426,10 @@ Requires [Bun](https://bun.sh) 1.4.4 or newer.
 ```sh
 bun install
 bun run verify     # Biome, type check, tests, MCP conformance suite; no browser
-bun run test:browser [filter]  # the browser tests (*.browser.test.ts), Chrome and Firefox
+bun run test:browser [filter]  # the browser tests (*.browser.test.ts), Chrome and Firefox;
+                               # one run per machine, a second waits (--no-wait: fails)
+bun run test:browser --sweep --dry-run  # what a run would clean up from killed runs
+                                        # (in ~/.cache/tab-mcp/browser-tests only; takes the lock)
 bun run verify:all # both
 bun run conformance  # only the official MCP conformance suite (relay and library)
 bun run fix        # format and apply safe lint fixes

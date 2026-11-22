@@ -21,6 +21,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { holdBrowserLock } from "../../browser-lock.ts";
 import {
 	clickButton,
 	findChrome,
@@ -30,6 +31,9 @@ import {
 	startStack,
 	waitFor,
 } from "./stack.ts";
+
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "claude-code.ts" });
 
 const PROMPT = "Use the calculator to compute 12*12";
 

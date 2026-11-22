@@ -12,10 +12,20 @@
  * `--no-chrome` or `--no-firefox` leaves out the files that need that browser
  * instead, and says which were not tested. After the run, a file with no
  * passed test fails it too. SIGINT, SIGTERM and SIGHUP go on to the test run.
+ *
+ * One browser run per machine: it takes the machine-wide lock
+ * (test/browser-lock.ts) before it starts anything, and waits while another
+ * run holds it, saying whose (`--no-wait` fails at once instead). Then it
+ * sweeps the browsers and folders of runs that are gone
+ * (test/browser-sweep.ts), and again after the run. `--sweep` only sweeps,
+ * `--sweep --dry-run` only
+ * says what it would stop and remove.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { holdBrowserLock } from "../test/browser-lock.ts";
+import { sweep } from "../test/browser-sweep.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 
@@ -99,6 +109,20 @@ export function passedPerFile(junit: string): Map<string, number> {
 
 async function main(): Promise<number> {
 	const args = process.argv.slice(2);
+	if (args.includes("--sweep")) {
+		// Under the lock, without waiting: a running run's own sweep is enough.
+		try {
+			await holdBrowserLock({ wait: false, filter: "--sweep" });
+		} catch (error) {
+			console.error(`not sweeping: ${(error as Error).message}`);
+			return 1;
+		}
+		const plan = sweep({ dryRun: args.includes("--dry-run") });
+		console.error(
+			`sweep: ${plan.kill.length} process${plan.kill.length === 1 ? "" : "es"}, ${plan.remove.length} folder${plan.remove.length === 1 ? "" : "s"}${args.includes("--dry-run") ? " (dry run)" : ""}${plan.kept ? ", kept everything" : ""}`,
+		);
+		return plan.kept ? 1 : 0;
+	}
 	const without = new Set<Need>();
 	if (args.includes("--no-chrome")) {
 		without.add("chrome");
@@ -145,15 +169,33 @@ async function main(): Promise<number> {
 	}
 	if (missing) return 1;
 
-	// The next steps go here, around the run: the machine-wide lock (one
-	// browser run at a time) and the sweep of browsers a killed run left.
+	// One browser run on this machine at a time; then what killed runs left.
+	// The run's bun test inherits TAB_MCP_BROWSER_LOCK and holds it on.
+	let run: ReturnType<typeof Bun.spawn> | undefined;
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
+		process.on(signal, () => {
+			if (run === undefined) process.exit(128 + constants.signals[signal]);
+			run.kill(signal);
+		});
+	try {
+		await holdBrowserLock({
+			wait: !args.includes("--no-wait"),
+			filter: filters.join(" "),
+			signals: false,
+		});
+	} catch (error) {
+		console.error((error as Error).message);
+		return 1;
+	}
+	sweep();
+
 	console.log(
 		`browser tests: ${files.length} file${files.length === 1 ? "" : "s"}`,
 	);
 	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-test-browser-"));
 	const report = join(dir, "junit.xml");
 	try {
-		const run = Bun.spawn(
+		run = Bun.spawn(
 			[
 				process.execPath,
 				"test",
@@ -167,9 +209,10 @@ async function main(): Promise<number> {
 				stdio: ["inherit", "inherit", "inherit"],
 			},
 		);
-		for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
-			process.on(signal, () => run.kill(signal));
 		const code = await run.exited;
+		// Its run folder (a harness's reap empties it at exit, after the
+		// folder's own exit hook has run) and anything a crash left.
+		sweep();
 		const signal = run.signalCode;
 		if (signal !== null)
 			return (
