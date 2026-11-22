@@ -121,7 +121,9 @@ test.skipIf(chrome === undefined)(
 		console.log(
 			`notifications: Chrome: listed after create ${kept}, clear returned ${cleared}`,
 		);
-		if (kept) expect(now[id]).toBe(true);
+		// One assertion either way, so the count of a run does not depend on
+		// what the system did: listed, it is listed as Chrome lists one.
+		expect(kept ? now[id] : true).toBe(true);
 		expect(typeof cleared).toBe("boolean");
 		expect(await listed()).not.toContain(id);
 	},

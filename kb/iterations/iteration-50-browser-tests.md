@@ -191,8 +191,20 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   - "it follows a tab switch" now goes to its page itself.
   - The onClosed test closes the panel itself.
   - The fill tests turn filling in on themselves (`fillOn`).
-- **Time:** locally no faster (a launch costs about 0.6 s there, and 22 starts replace 12).
-  The CI numbers are in the pull request.
+- **Time:** no faster: CI 142.6 s against main's 133.6 s, locally the same. The owner chose
+  independence over the 9 s (22 starts replace 12; a launch costs about 0.6 s locally).
+- **A dead Chrome is launched again:** one that is gone (a crash, Bun killing a timed-out
+  test's processes) or whose reinstall failed is closed and launched anew at the next
+  test's start, and the log says so ("relaunched Chrome … at start N"). Before, the rest
+  of the file would have failed. Shown in a scratch run with `Browser.crash` between two
+  tests.
+- **What a reinstall guarantees** (checked, else the start fails):
+  - the other extensions a test loaded are gone;
+  - every target of the old install is gone before the new one loads;
+  - the extension's settings, alarms and notifications are empty, and its permissions
+    are its manifest's.
+- **Steps have deadlines:** a step's own (its test's timeout before) comes before the
+  scenario's, so a slow step fails named.
 
 ## Tasks
 

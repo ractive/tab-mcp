@@ -220,19 +220,86 @@ type ChromeProcess = Subprocess<"ignore", "ignore", "ignore">;
 
 /**
  * One step of a test that is one scenario: a failure names the step, then
- * says what failed in it.
+ * says what failed in it, also for a thrown value that is no `Error`. A
+ * step has its own deadline, `deadlineMs` (the timeout of the test it was
+ * before; 30 s by default): a step that takes longer fails as "[name] took
+ * longer than N s", where the test's own timeout (which no code can catch)
+ * would name nothing. A scenario's timeout is the sum of its steps'
+ * deadlines and a margin, so a step's deadline always comes first.
  */
 export async function step(
 	name: string,
 	body: () => Promise<void>,
+	deadlineMs = 30_000,
 ): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const late = new Promise<never>((_, reject) => {
+		timer = setTimeout(
+			() =>
+				reject(
+					new Error(
+						`took longer than ${deadlineMs >= 1000 ? `${Math.round(deadlineMs / 1000)} s` : `${deadlineMs} ms`}`,
+					),
+				),
+			deadlineMs,
+		);
+	});
 	try {
-		await body();
+		await Promise.race([body(), late]);
 	} catch (error) {
-		if (error instanceof Error) error.message = `[${name}] ${error.message}`;
-		throw error;
+		if (error instanceof Error) {
+			error.message = `[${name}] ${error.message}`;
+			throw error;
+		}
+		throw new Error(`[${name}] ${String(error)}`, { cause: error });
+	} finally {
+		clearTimeout(timer);
 	}
 }
+
+/**
+ * In the extension's service worker: what is not as a fresh install has it,
+ * as text, or nothing. Its settings (the `settings` store of its IndexedDB
+ * `tab-mcp`, `worker/kv.ts`), its alarms, its notifications, and the
+ * permissions it holds against its manifest's.
+ */
+const FRESH_STATE = `(async () => {
+	const left = [];
+	const keys = await new Promise((resolve) => {
+		const open = indexedDB.open("tab-mcp");
+		open.onerror = () => resolve(["(the database did not open)"]);
+		open.onsuccess = () => {
+			const db = open.result;
+			if (!db.objectStoreNames.contains("settings")) {
+				db.close();
+				resolve([]);
+				return;
+			}
+			const read = db.transaction("settings").objectStore("settings").getAllKeys();
+			read.onsuccess = () => {
+				db.close();
+				resolve(read.result.map(String));
+			};
+			read.onerror = () => {
+				db.close();
+				resolve(["(the settings could not be read)"]);
+			};
+		};
+	});
+	if (keys.length > 0) left.push("settings " + keys.join(", "));
+	const alarms = await chrome.alarms.getAll();
+	if (alarms.length > 0) left.push("alarms " + alarms.map((a) => a.name).join(", "));
+	const shown = Object.keys(await chrome.notifications.getAll());
+	if (shown.length > 0) left.push("notifications " + shown.join(", "));
+	const manifest = chrome.runtime.getManifest();
+	const held = await chrome.permissions.getAll();
+	const same = (a, b) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
+	if (!same(held.permissions, manifest.permissions))
+		left.push("permissions " + JSON.stringify(held.permissions));
+	if (!same(held.origins, manifest.host_permissions))
+		left.push("origins " + JSON.stringify(held.origins));
+	return left;
+})()`;
 
 export class Browser {
 	readonly #proc: ChromeProcess;
@@ -543,33 +610,55 @@ export class Browser {
 
 	/**
 	 * The extension loaded at launch anew, as just installed, for the next
-	 * test in a Chrome that tests share: the `others` (extensions a test
-	 * loaded) removed, ours removed (its IndexedDB, alarms and permissions
-	 * go with it) and loaded again from `path` (the same id), its worker
-	 * ready.
+	 * test in a Chrome that tests share. What it guarantees, checked here and
+	 * not assumed (it fails loudly otherwise):
+	 * - the `others` (extensions a test loaded) are gone; one that cannot be
+	 *   removed is an error, as it could cover our side panel later;
+	 * - every target of the old install (its worker, its pages) is gone
+	 *   before the extension is loaded again from `path` (the same id), so
+	 *   the worker found after it is the new one;
+	 * - the new worker is ready (its click listener there), and the
+	 *   extension's state is a fresh install's: nothing in its settings
+	 *   (IndexedDB, which Chrome deletes after an uninstall without saying
+	 *   when: polled, at most 5 s), no alarm, no notification, and the
+	 *   permissions of its manifest only.
 	 */
 	async reinstall(path: string, others: Iterable<string> = []): Promise<void> {
 		const id = this.extensionId;
 		if (id === undefined) throw new Error("no extension loaded");
 		await this.detachServiceWorkers();
 		for (const other of others)
-			await this.send("Extensions.uninstall", { id: other }).catch(() => {});
+			await this.send("Extensions.uninstall", { id: other }).catch(
+				(error: unknown) => {
+					throw new Error(
+						`the other extension ${other} could not be removed: ${error}`,
+					);
+				},
+			);
 		await this.send("Extensions.uninstall", { id });
-		// Gone before it comes back: an old worker still listed would be
-		// found, and attached to, as the new one.
 		const prefix = `chrome-extension://${id}/`;
-		const end = Date.now() + 5_000;
+		const gone = Date.now() + 5_000;
 		for (;;) {
 			const { targetInfos } = (await this.send("Target.getTargets", {
 				filter: [{}],
 			})) as { targetInfos: { url: string }[] };
 			if (!targetInfos.some((t) => t.url.startsWith(prefix))) break;
-			if (Date.now() > end)
+			if (Date.now() > gone)
 				throw new Error(`the extension ${id} stayed after its uninstall`);
 			await Bun.sleep(50);
 		}
 		await this.send("Extensions.loadUnpacked", { path });
-		await this.readyWorker(id);
+		const worker = await this.readyWorker(id);
+		const fresh = Date.now() + 5_000;
+		for (;;) {
+			const left = await worker.eval<string[]>(FRESH_STATE);
+			if (left.length === 0) return;
+			if (Date.now() > fresh)
+				throw new Error(
+					`the extension is not as just installed after its reinstall: ${left.join("; ")}`,
+				);
+			await Bun.sleep(50);
+		}
 	}
 
 	/** Close every tab but `keep` (the windows a test opened go with them). */

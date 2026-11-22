@@ -75,8 +75,56 @@ afterAll(async () => {
 	await done?.browser.close();
 	if (done) rmSync(done.dir, { recursive: true, force: true });
 	if (launches > 0)
-		console.log(`fill.browser.test.ts: ${launches} Chrome launch`);
+		console.log(
+			`fill.browser.test.ts: ${launches} Chrome launch${launches === 1 ? "" : "es"}`,
+		);
 });
+
+/** Starts so far, to say which one found its Chrome gone. */
+let starts = 0;
+
+/**
+ * The file's Chrome, ready for the next test: the extension as just
+ * installed. One that is gone (a crash, or Bun killing a timed-out test's
+ * processes) or whose reinstall failed is closed and launched again, and
+ * the log says so: one failure no longer takes the rest of the file down.
+ */
+async function ready(): Promise<{ browser: Browser; extension: string }> {
+	starts++;
+	shared ??= (async () => {
+		const dir = browserTempDir("fill-build-");
+		const extension = join(dir, "dist");
+		await build({ outdir: extension, test: true, minify: false });
+		launches++;
+		const browser = await Browser.launch(chrome as string, { extension });
+		return { browser, extension, dir };
+	})();
+	const current = await shared;
+	let why: string | undefined;
+	if (!current.browser.running || current.browser.closed)
+		why = `it was gone (${current.browser.ended})`;
+	else if (used)
+		try {
+			await current.browser.reinstall(current.extension);
+		} catch (error) {
+			why = `its reinstall failed: ${error instanceof Error ? error.message : error}`;
+		}
+	used = true;
+	if (why === undefined) return current;
+	console.log(
+		`fill.browser.test.ts: relaunched Chrome at start ${starts}: ${why}`,
+	);
+	await current.browser.close();
+	launches++;
+	const again = {
+		...current,
+		browser: await Browser.launch(chrome as string, {
+			extension: current.extension,
+		}),
+	};
+	shared = Promise.resolve(again);
+	return again;
+}
 
 /**
  * A start for one test: the extension as just installed in the file's
@@ -86,21 +134,11 @@ afterAll(async () => {
  */
 async function start(): Promise<Stack> {
 	const oauth = await startOAuth("tab-mcp-extension");
-	const stop = async () => {
-		await oauth.stop();
-	};
+	// Once however often it is called.
+	let stopped: Promise<void> | undefined;
+	const stop = () => (stopped ??= oauth.stop());
 	try {
-		shared ??= (async () => {
-			const dir = browserTempDir("fill-build-");
-			const extension = join(dir, "dist");
-			await build({ outdir: extension, test: true, minify: false });
-			launches++;
-			const browser = await Browser.launch(chrome as string, { extension });
-			return { browser, extension, dir };
-		})();
-		const { browser, extension } = await shared;
-		if (used) await browser.reinstall(extension);
-		used = true;
+		const { browser } = await ready();
 		const tab = await browser.newPage(oauth.blank);
 		await browser.closeTabsBut(tab);
 		await browser.clickIcon(tab);
@@ -222,97 +260,59 @@ describe.skipIf(chrome === undefined)(
 		});
 		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("off by default, also with access to all sites: no question; Fill in the code for me turns it on", async () => {
-			await step(
-				"off by default, also with access to all sites: no question; Fill in the code for me turns it on",
-				async () => {
-					const host = new URL(stack.oauth.relay.url).host;
-					// The test build has access to all sites: Chrome asks nothing, and
-					// the line is the same with the switch off and on.
-					expect(
-						await stack.panel.waitFor<string>(
-							`!document.getElementById("fill").hidden && document.getElementById("fill-text").textContent`,
-						),
-					).toBe(
-						`While this is on, tab-mcp asks you and fills in the code when an AI app opens the sign-in page of ${host} in this Chrome profile.`,
-					);
-					expect(await fillSwitch(stack)).toEqual([true, false, "false"]);
-					// Off: the relay's page has no script of it, and asks nothing.
-					const { url } = await authorizeUrl(stack.oauth, stack.address);
-					const page = await stack.browser.newPage(url);
-					expect(await scriptRan(page)).toBe(false);
-					await Bun.sleep(1_000);
-					expect(await questions(stack)).toEqual([]);
-					await page.close();
-					// A real click: `permissions.request` needs the user's gesture.
-					await stack.panel.click("#fill-switch");
-					expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
-					// The worker took it: the script is registered (on the look-alike,
-					// which it refuses, so no question).
-					const end = Date.now() + 5_000;
-					for (;;) {
-						const page = await stack.browser.newPage(stack.oauth.lookAlike);
-						const ran = await scriptRan(page);
-						await page.close();
-						if (ran) break;
-						if (Date.now() > end)
-							throw new Error("the script was not registered");
-						await Bun.sleep(200);
-					}
-					expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
-				},
+			const host = new URL(stack.oauth.relay.url).host;
+			// The test build has access to all sites: Chrome asks nothing, and
+			// the line is the same with the switch off and on.
+			expect(
+				await stack.panel.waitFor<string>(
+					`!document.getElementById("fill").hidden && document.getElementById("fill-text").textContent`,
+				),
+			).toBe(
+				`While this is on, tab-mcp asks you and fills in the code when an AI app opens the sign-in page of ${host} in this Chrome profile.`,
 			);
-			await step(
-				"the switch turned off: off again, the page has no script and asks nothing",
-				async () => {
-					// AI access on (no AI app paired yet: "waiting").
-					await stack.panel.eval(
-						`document.getElementById("state").dataset.state === "off" && document.getElementById("ai-switch").click()`,
-					);
-					await stack.panel.waitFor(
-						`["on", "waiting"].includes(document.getElementById("state").dataset.state)`,
-						15_000,
-					);
-					await stack.panel.eval(`document.getElementById("add-app").click()`);
-					await stack.panel.waitFor(
-						`document.getElementById("pairing").hidden === false`,
-					);
-					expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
-					await stack.panel.click("#fill-switch");
-					expect(await fillSwitch(stack)).toEqual([true, false, "false"]);
-					const { url } = await authorizeUrl(stack.oauth, stack.address);
-					// The unregistration may still be on its way: a page after it.
-					const end = Date.now() + 5_000;
-					for (;;) {
-						const page = await stack.browser.newPage(url);
-						const ran = await scriptRan(page);
-						if (!ran) {
-							await Bun.sleep(1_000);
-							expect(await questions(stack)).toEqual([]);
-							await page.close();
-							break;
-						}
-						await page.close();
-						if (Date.now() > end)
-							throw new Error("the script stayed registered");
-						await Bun.sleep(200);
-					}
-				},
-			);
-		}, 90_000);
+			expect(await fillSwitch(stack)).toEqual([true, false, "false"]);
+			// Off: the relay's page has no script of it, and asks nothing.
+			const { url } = await authorizeUrl(stack.oauth, stack.address);
+			const page = await stack.browser.newPage(url);
+			expect(await scriptRan(page)).toBe(false);
+			await Bun.sleep(1_000);
+			expect(await questions(stack)).toEqual([]);
+			await page.close();
+			// A real click: `permissions.request` needs the user's gesture.
+			await stack.panel.click("#fill-switch");
+			expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
+			// The worker took it: the script is registered (on the look-alike,
+			// which it refuses, so no question).
+			const end = Date.now() + 5_000;
+			for (;;) {
+				const page = await stack.browser.newPage(stack.oauth.lookAlike);
+				const ran = await scriptRan(page);
+				await page.close();
+				if (ran) break;
+				if (Date.now() > end) throw new Error("the script was not registered");
+				await Bun.sleep(200);
+			}
+			expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
+		}, 60_000);
 
 		test("Allow fills in the code and the AI app is paired, also with the pairing view closed", async () => {
 			// Filling in turned on, as the first test does.
 			await fillOn(stack);
-			await step("the page going withdraws the question", async () => {
-				const { url } = await authorizeUrl(stack.oauth, stack.address);
-				const page = await stack.browser.newPage(url);
-				await stack.panel.waitFor(questionCount(1));
-				await page.close();
-				await stack.panel.waitFor(questionCount(0));
-			});
+			await step(
+				"the page going withdraws the question",
+				async () => {
+					const { url } = await authorizeUrl(stack.oauth, stack.address);
+					const page = await stack.browser.newPage(url);
+					await stack.panel.waitFor(questionCount(1));
+					await page.close();
+					await stack.panel.waitFor(questionCount(0));
+				},
+				60_000,
+			);
 			await step(
 				"Don't allow fills in nothing, and typing the code by hand pairs as before",
 				async () => {
@@ -352,6 +352,7 @@ describe.skipIf(chrome === undefined)(
 					expect(provider.tokens()?.access_token).toBeString();
 					await page.close();
 				},
+				60_000,
 			);
 			await step(
 				"Allow fills in the code and the AI app is paired, also with the pairing view closed",
@@ -380,6 +381,7 @@ describe.skipIf(chrome === undefined)(
 						`document.querySelectorAll("#grants li").length === 2`,
 					);
 				},
+				60_000,
 			);
 			await step(
 				"Always allow (DEC-213): the same host's next pages are filled in without a question, with a notice; the fourth in ten minutes asks",
@@ -451,8 +453,47 @@ describe.skipIf(chrome === undefined)(
 						for (const page of opened) await page.close().catch(() => {});
 					}
 				},
+				60_000,
 			);
-		}, 180_000);
+			await step(
+				"the switch turned off: off again, the page has no script and asks nothing",
+				async () => {
+					// AI access on, with the AI apps the steps before paired.
+					await stack.panel.eval(
+						`document.getElementById("state").dataset.state === "off" && document.getElementById("ai-switch").click()`,
+					);
+					await stack.panel.waitFor(
+						`document.getElementById("state").dataset.state === "on"`,
+						15_000,
+					);
+					await stack.panel.eval(`document.getElementById("add-app").click()`);
+					await stack.panel.waitFor(
+						`document.getElementById("pairing").hidden === false`,
+					);
+					expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
+					await stack.panel.click("#fill-switch");
+					expect(await fillSwitch(stack)).toEqual([true, false, "false"]);
+					const { url } = await authorizeUrl(stack.oauth, stack.address);
+					// The unregistration may still be on its way: a page after it.
+					const end = Date.now() + 5_000;
+					for (;;) {
+						const page = await stack.browser.newPage(url);
+						const ran = await scriptRan(page);
+						if (!ran) {
+							await Bun.sleep(1_000);
+							expect(await questions(stack)).toEqual([]);
+							await page.close();
+							break;
+						}
+						await page.close();
+						if (Date.now() > end)
+							throw new Error("the script stayed registered");
+						await Bun.sleep(200);
+					}
+				},
+				60_000,
+			);
+		}, 310_000);
 
 		test("a question stays in place when the panel behind it, the dialog or the focus hint change (classic scrollbars)", async () => {
 			// Filling in turned on, as the first test does.

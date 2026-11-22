@@ -53,16 +53,14 @@ import {
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
-// A test that waits for pages to load gives each of them the extension's
-// own limit and 15 s more: 45 s for one load, 75 s for two (back and
-// forward; reload and #part; a navigation and one more), 225 s for the
-// navigation scenario's seven. So a load the extension gives up on fails
-// with the extension's answer: at the test's timeout Bun kills the block's
-// Chrome, and every test after it fails too, naming nothing.
+// A test or step that waits for pages to load gives each of them the
+// extension's own limit and 15 s more: 45 s for one load, 75 s for two
+// (back and forward; reload and #part; a navigation and one more). So a
+// load the extension gives up on fails with the extension's answer, not
+// with the test's timeout. A scenario's timeout is the sum of its steps'.
 for (const [loads, timeout] of [
 	[1, 45_000],
 	[2, 75_000],
-	[7, 225_000],
 ] as const)
 	if (loads * LOAD_TIMEOUT_MS + 15_000 > timeout)
 		throw new Error(
@@ -280,8 +278,49 @@ afterAll(async () => {
 		);
 });
 
+const sharedKey = (store: boolean, webmcp: boolean) =>
+	`${store ? "store" : "test"}-${webmcp ? "webmcp" : "polyfill"}`;
+
+/** Starts so far, to say which one found its Chrome gone. */
+let starts = 0;
+
+/**
+ * The shared Chrome of this build and flag, ready for the next test: the
+ * extension as just installed. A Chrome that is gone (a crash, or Bun
+ * killing a timed-out test's processes) or whose reinstall failed is closed
+ * and launched again, and the log says so: one failure no longer takes the
+ * rest of the file down with it.
+ */
+async function sharedReady(store: boolean, webmcp: boolean): Promise<Shared> {
+	const key = sharedKey(store, webmcp);
+	const shared = await sharedFor(store, webmcp);
+	let why: string | undefined;
+	if (!shared.browser.running || shared.browser.closed)
+		why = `it was gone (${shared.browser.ended})`;
+	else if (shared.used)
+		try {
+			await shared.browser.reinstall(shared.extension, shared.others);
+			shared.others.clear();
+			return shared;
+		} catch (error) {
+			why = `its reinstall failed: ${error instanceof Error ? error.message : error}`;
+		}
+	if (why === undefined) {
+		shared.used = true;
+		return shared;
+	}
+	console.log(
+		`extension.browser.test.ts: relaunched Chrome (${key}) at start ${starts}: ${why}`,
+	);
+	await shared.browser.close();
+	sharedBrowsers.delete(key);
+	const again = await sharedFor(store, webmcp);
+	again.used = true;
+	return again;
+}
+
 function sharedFor(store: boolean, webmcp: boolean): Promise<Shared> {
-	const key = `${store ? "store" : "test"}-${webmcp ? "webmcp" : "polyfill"}`;
+	const key = sharedKey(store, webmcp);
 	let shared = sharedBrowsers.get(key);
 	if (shared === undefined) {
 		shared = builtFor(store).then(async (extension) => ({
@@ -338,17 +377,13 @@ async function start(
 		await relay.stop();
 	};
 	try {
+		starts++;
 		const outdir = await builtFor(options.store);
 		if (own) browser = await launch(outdir, options.profile, webmcp);
 		else {
-			const shared = await sharedFor(options.store, webmcp);
+			const shared = await sharedReady(options.store, webmcp);
 			browser = shared.browser;
 			sharedOf.set(browser, shared);
-			if (shared.used) {
-				await browser.reinstall(shared.extension, shared.others);
-				shared.others.clear();
-			}
-			shared.used = true;
 		}
 		const tab = await browser.newPage(first);
 		if (!own) await browser.closeTabsBut(tab);
@@ -366,6 +401,9 @@ async function start(
 		);
 		const worker = await browser.serviceWorker(browser.extensionId as string);
 		const client = await mcpClient(relay, address);
+		// The one path that closes the client and the relay, once however
+		// often it is called.
+		let stopped: Promise<void> | undefined;
 		return {
 			browser,
 			relay,
@@ -375,10 +413,11 @@ async function start(
 			address,
 			client,
 			extension: outdir,
-			stop: async () => {
-				await client.close().catch(() => {});
-				await stop();
-			},
+			stop: () =>
+				(stopped ??= (async () => {
+					await client.close().catch(() => {});
+					await stop();
+				})()),
 		};
 	} catch (error) {
 		await stop();
@@ -593,8 +632,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	}, 60_000);
 
 	afterEach(async () => {
-		await stack?.client.close();
 		await stack?.stop();
+		stack = undefined as unknown as Stack;
 	});
 
 	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {
@@ -724,7 +763,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 				]);
 			},
 		);
-	}, 90_000);
+	}, 220_000);
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
@@ -1262,8 +1301,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 						await panel.eval(`document.getElementById("pair-done").click()`);
 				}
 			},
+			90_000,
 		);
-	}, 150_000);
+	}, 190_000);
 
 	test("a page that replaces document.modelContext fools only itself", async () => {
 		await tab.goto(`${SITE}/forged.html`);
@@ -1342,8 +1382,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		const badge = () =>
@@ -1452,7 +1492,7 @@ describe.skipIf(chrome === undefined)(
 					),
 				).toBe("Page with WebMCP tools");
 			});
-		}, 60_000);
+		}, 100_000);
 
 		test("a notification closed is Don't allow, through Chrome's onClosed: the call is refused, the tool does not run", async () => {
 			// No panel, so the question is a notification.
@@ -1513,16 +1553,16 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		const stored = async <T>(key: string) =>
 			((await kvAll(stack.worker))[key] ?? null) as T;
 
 		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
-			// AI access off first, which the test before this one left behind
-			// until it went (connection.test.ts has its commands now).
+			// From the start's connected state to off, over the panel's port: the
+			// test turns AI access on with a click on Connect below.
 			await stack.panel.eval(`(() => {
 				window.e2eStop = chrome.runtime.connect({ name: "panel" });
 				window.e2eStop.postMessage({ type: "stop" });
@@ -1759,12 +1799,6 @@ describe.skipIf(chrome === undefined)(
 		}
 
 		test("the database deleted under the worker: the next write opens it again, and it holds across a start", async () => {
-			// The worker and the panel attached anew, as a test that reloaded the
-			// extension before this one would need them.
-			stack.worker = await stack.browser.serviceWorker(
-				stack.browser.extensionId as string,
-			);
-			stack.panel = await openPanel(stack.browser, stack.tab);
 			// The site data cleared, say: the worker's connection is asked to
 			// close, and closes.
 			await stack.worker.eval(`new Promise((resolve, reject) => {
@@ -1839,6 +1873,7 @@ describe.skipIf(chrome === undefined)("a restart", () => {
 					});
 					await client.close();
 				},
+				90_000,
 			);
 			await step(
 				"with the relay out of reach at a start, it keeps trying: the alarm is set and the panel says so (EQ 3, EQ 14)",
@@ -1877,6 +1912,7 @@ describe.skipIf(chrome === undefined)("a restart", () => {
 						await panel.eval(`document.getElementById("connect").hidden`),
 					).toBe(true);
 				},
+				90_000,
 			);
 		} finally {
 			await third?.close();
@@ -1884,7 +1920,7 @@ describe.skipIf(chrome === undefined)("a restart", () => {
 			await stack?.stop().catch(() => {});
 			rmSync(profile, { recursive: true, force: true });
 		}
-	}, 150_000);
+	}, 190_000);
 });
 
 /**
@@ -2012,8 +2048,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("the tab the icon was clicked on can be read", async () => {
@@ -2036,6 +2072,10 @@ describe.skipIf(chrome === undefined)(
 			await step(
 				"on the page's origin the click's access holds: the new page is read",
 				async () => {
+					// From a page without tools, as this test began before it was a
+					// step: only the page that navigate loads has the 5 tools.
+					await tab.goto(`${SITE}/plain.html`);
+					await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
 					const result = await call(stack, "navigate", {
 						url: `${SITE}/webmcp.html`,
 					});
@@ -2045,8 +2085,9 @@ describe.skipIf(chrome === undefined)(
 					});
 					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 				},
+				45_000,
 			);
-		}, 60_000);
+		}, 85_000);
 
 		test("another origin of the same site needs a click too", async () => {
 			await step(
@@ -2106,7 +2147,7 @@ describe.skipIf(chrome === undefined)(
 					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 				},
 			);
-		}, 60_000);
+		}, 70_000);
 
 		test("a click shows the panel over another extension's panel for the tab, and gives the tab's tools", async () => {
 			const { browser } = stack;
@@ -2173,8 +2214,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("with AI access off and the panel closed the page is not read; the panel opened reads it", async () => {
@@ -2230,13 +2271,12 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
-		// Seven loads in its steps (1, 1, 1, 2, 2): each the extension's own
-		// limit (30 s) and 15 s more, so a load it gives up on fails with its
-		// answer, not with this test's timeout.
+		// Its steps wait for 1, 1, 1, 2 and 2 loads: 45 s or 75 s each (by the
+		// rule at the top), the test their sum and 10 s.
 		test("navigate on the page's origin runs at once, with the new page's page_info and tools", async () => {
 			await step(
 				"navigate on the page's origin runs at once, with the new page's page_info and tools",
@@ -2251,6 +2291,7 @@ describe.skipIf(chrome === undefined)(
 					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 					await noQuestion(stack);
 				},
+				45_000,
 			);
 			await step(
 				"to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes",
@@ -2289,6 +2330,7 @@ describe.skipIf(chrome === undefined)(
 						title: "Plain page",
 					});
 				},
+				45_000,
 			);
 			await step(
 				"back to another origin asks too, its address not known",
@@ -2306,6 +2348,7 @@ describe.skipIf(chrome === undefined)(
 						url: `${SITE}/webmcp.html`,
 					});
 				},
+				45_000,
 			);
 			await step(
 				"back and forward on the page's origin run at once",
@@ -2320,6 +2363,7 @@ describe.skipIf(chrome === undefined)(
 					});
 					await noQuestion(stack);
 				},
+				75_000,
 			);
 			await step(
 				"reload stays and never asks; within the page (#part) it answers at once",
@@ -2340,8 +2384,9 @@ describe.skipIf(chrome === undefined)(
 					expect(Date.now() - started).toBeLessThan(5_000);
 					await noQuestion(stack);
 				},
+				75_000,
 			);
-		}, 225_000);
+		}, 295_000);
 	},
 );
 
@@ -2355,8 +2400,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("to another origin, once allowed, the result says the new page needs a click; then nothing more", async () => {
@@ -2403,8 +2448,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("Chrome has no WebMCP here; the page finds the polyfill's as it loads", async () => {
@@ -2475,7 +2520,7 @@ describe.skipIf(chrome === undefined)(
 				})`);
 				await waitForTools(stack, (n) => n.includes("page_registered_later"));
 			});
-		}, 90_000);
+		}, 130_000);
 	},
 );
 
@@ -2522,8 +2567,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("the page shows the AI app connected through the extension; the panel says the page has tab-mcp built in", async () => {
@@ -2625,7 +2670,7 @@ describe.skipIf(chrome === undefined)(
 					).toContain('"apps":[]');
 				},
 			);
-		}, 90_000);
+		}, 130_000);
 	},
 );
 
@@ -2648,8 +2693,8 @@ describe.skipIf(chrome === undefined)(
 		}, 60_000);
 
 		afterEach(async () => {
-			await stack?.client.close();
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("the page knows the extension, and a call allowed there is not asked again", async () => {

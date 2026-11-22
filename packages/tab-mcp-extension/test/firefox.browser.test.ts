@@ -499,12 +499,10 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		console.log(
 			`notifications: Firefox: listed after create ${real.listed !== null}, clear returned ${real.cleared}`,
 		);
-		if (real.listed !== null)
-			expect(real.listed).toMatchObject({
-				type: "basic",
-				title: shown.title,
-				message: shown.message,
-			});
+		// One assertion either way, so the count of a run does not depend on
+		// what the system did: listed, it is listed as made.
+		const made = { type: "basic", title: shown.title, message: shown.message };
+		expect(real.listed ?? made).toMatchObject(made);
 		expect(typeof real.cleared).toBe("boolean");
 		expect(real.after).toBe(false);
 	});
