@@ -44,6 +44,13 @@ the Git tag `client-v<version>`. The format follows
   this caller any more. A page's own text under that key is no longer used, as any
   unknown key (the type check flags it in an object literal); remove it.
 
+### Added
+
+- The agent skill ships in the package as `skill/SKILL.md` (with `skill/references/`),
+  written for this version (DEC-216). With a coding agent, install the package and tell
+  it: "Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to
+  this app." Its links point to the README, CHANGELOG and declarations beside it.
+
 ## [0.20.0][client-0.20.0] - 2026-11-22
 
 ### Breaking

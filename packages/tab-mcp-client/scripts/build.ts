@@ -9,7 +9,9 @@
  *   (`tab-mcp-client.min.js`, and `allowed.min.js` and `strings.min.js`
  *   beside it);
  * - `dist/package.json`, README, CHANGELOG, LICENSE, AI_NOTICE, THIRD-PARTY-NOTICES.txt
- *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack.
+ *   (the CDN build bundles `@cfworker/json-schema`): the directory to pack;
+ * - `dist/skill/`: the agent skill of `plugins/tab-mcp/skills/tab-mcp/`
+ *   (`scripts/skill.ts`, DEC-216).
  *
  * Prints the gzipped sizes of the core and the lazily loaded chunks.
  */
@@ -18,6 +20,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { $ } from "bun";
 import { PUBLISHED_EXPORTS } from "./published-exports.ts";
+import { packagedSkill } from "./skill.ts";
 
 const root = join(import.meta.dir, "..");
 const dist = join(root, "dist");
@@ -158,6 +161,13 @@ for (const [from, to] of [
 	const file = Bun.file(from);
 	if (await file.exists()) await Bun.write(join(dist, to), file);
 }
+// The agent skill, its links to the client's README and sources made
+// relative (DEC-216).
+for (const [path, text] of await packagedSkill(
+	join(root, "../.."),
+	String(pkg["version"]),
+))
+	await Bun.write(join(dist, path), text);
 
 // Sizes: the CDN build is what a page pays (dependencies included).
 const sizes: [string, number, number][] = [];
