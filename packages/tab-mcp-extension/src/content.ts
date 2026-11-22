@@ -9,6 +9,7 @@
  * library with `webmcp: true` it shakes hands (`page-handshake.ts`, DEC-207).
  */
 
+import { canonicalJson } from "./canonical.ts";
 import { connectPolyfill } from "./chrome/webmcp-port.ts";
 import { installWebMCP } from "./firefox/webmcp.ts";
 import type {
@@ -269,49 +270,65 @@ export async function pageTools(
 			more++;
 			continue;
 		}
-		const annotations = tool.annotations;
-		/** Whether `schema` fits in a message (as JSON). */
-		const fits = (schema: unknown) =>
-			(JSON.stringify(schema) ?? "").length <= SEND_SCHEMA_BYTES;
-		let schema: { inputSchema?: unknown; schemaTooBig?: true } = {};
-		if (tool.inputSchema !== undefined)
-			schema = fits(tool.inputSchema)
-				? { inputSchema: tool.inputSchema }
-				: { schemaTooBig: true };
-		tools.push({
-			name: cutText(String(tool.name), SEND_NAME),
-			...(typeof tool.title === "string" && tool.title !== ""
-				? { title: cutText(tool.title, SEND_TEXT) }
-				: {}),
-			description: cutText(String(tool.description ?? ""), SEND_TEXT),
-			...schema,
-			// The draft's (WM 3); left out when too big, as it is only shown.
-			...(tool.outputSchema !== undefined && fits(tool.outputSchema)
-				? { outputSchema: tool.outputSchema }
-				: {}),
-			annotations: {
-				readOnlyHint: hint(annotations, "readOnlyHint"),
-				debugging: hint(annotations, "debugging"),
-				// Only as the page gave it: Chrome fills in all four hints of a
-				// tool with annotations and lists none without, so a tool
-				// without it is one nothing is known about (DEC-214).
-				...(typeof annotations?.["consequentialHint"] === "boolean"
-					? { consequentialHint: annotations["consequentialHint"] }
-					: {}),
-			},
-		});
+		tools.push(offeredTool(tool));
 	}
 	return { ...base, tools, more };
 }
+
+/** A page's tool as the content script sends it: capped, as plain data. */
+function offeredTool(tool: RegisteredTool): PageTool {
+	const annotations = tool.annotations;
+	/** Whether `schema` fits in a message (as JSON). */
+	const fits = (schema: unknown) =>
+		(JSON.stringify(schema) ?? "").length <= SEND_SCHEMA_BYTES;
+	let schema: { inputSchema?: unknown; schemaTooBig?: true } = {};
+	if (tool.inputSchema !== undefined)
+		schema = fits(tool.inputSchema)
+			? { inputSchema: tool.inputSchema }
+			: { schemaTooBig: true };
+	return {
+		name: cutText(String(tool.name), SEND_NAME),
+		...(typeof tool.title === "string" && tool.title !== ""
+			? { title: cutText(tool.title, SEND_TEXT) }
+			: {}),
+		description: cutText(String(tool.description ?? ""), SEND_TEXT),
+		...schema,
+		// The draft's (WM 3); left out when too big, as it is only shown.
+		...(tool.outputSchema !== undefined && fits(tool.outputSchema)
+			? { outputSchema: tool.outputSchema }
+			: {}),
+		annotations: {
+			readOnlyHint: hint(annotations, "readOnlyHint"),
+			debugging: hint(annotations, "debugging"),
+			// Only as the page gave it: Chrome fills in all four hints of a
+			// tool with annotations and lists none without, so a tool
+			// without it is one nothing is known about (DEC-214).
+			...(typeof annotations?.["consequentialHint"] === "boolean"
+				? { consequentialHint: annotations["consequentialHint"] }
+				: {}),
+		},
+	};
+}
+
+/**
+ * What identifies a tool as offered (DEC-217): its `PageTool` as
+ * `canonicalJson`, which the worker sends with each call
+ * (`CallTarget.definition`).
+ */
+export const definitionOf = (tool: PageTool): string => canonicalJson(tool);
 
 /** Calls still running, by call id, to cancel them. */
 const running = new Map<string, AbortController>();
 
 /**
  * Run the page's tool `name`, if it is still what was offered: listed from
- * this very page (`documentId`) with the same read-only claim. Otherwise
- * "gone": a tool must never run on another page than the one it was offered
- * for, nor without the confirmation its first claim would have needed.
+ * this very page (`documentId`) with the same read-only claim, and, read
+ * again now, the same definition (`definition`, DEC-217: the user's answer
+ * was about that one; a page that registered it again meanwhile, faster
+ * than the worker read its list, does not get the changed tool run).
+ * Otherwise "gone": a tool must never run on another page than the one it
+ * was offered for, nor without the confirmation its first claim would have
+ * needed.
  * `vouch`, for a call the user allowed: `send` runs right before the tool,
  * once every check passed, so that a page with the client library does not
  * ask again (DEC-207); `withdraw` once the call settled, whatever the
@@ -319,7 +336,12 @@ const running = new Map<string, AbortController>();
  * before it reached the page) is not left for another caller.
  */
 export async function callTool(
-	call: { documentId: string; name: string; readOnly: boolean },
+	call: {
+		documentId: string;
+		name: string;
+		readOnly: boolean;
+		definition: string;
+	},
 	input: unknown,
 	signal: AbortSignal,
 	doc: Document = document,
@@ -350,6 +372,12 @@ export async function callTool(
 		return {
 			ok: false,
 			error: `The page changed what tool ${name} does since it was listed.`,
+			gone: true,
+		};
+	if (definitionOf(offeredTool(tool)) !== call.definition)
+		return {
+			ok: false,
+			error: `The page's tool ${name} changed since it was offered; it did not run.`,
 			gone: true,
 		};
 	let value: string | null;

@@ -56,8 +56,11 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   tool again while its question waited, under the same name and read-only hint but with
   another title, description, input or output schema or `consequentialHint`, got the
   changed tool run on "Allow". Now such a call does not run, and the AI app is told that
-  the tool changed while the user was asked. A page that registers the same tool again
-  unchanged is not affected.
+  the tool changed while the user was asked; the content script checks it too, right
+  before the call, so a change the extension had not read yet does not slip through.
+  A page that registers the same tool again unchanged, also with its fields in another
+  order, is not affected. "Always allow on <host>" still covers the site's tool by name,
+  whatever its description says.
 
 - **Arguments a page's schema takes are no longer refused** (DEC-217). The extension
   leaves a schema's regular expressions out (`pattern`, `patternProperties`), and that
@@ -67,9 +70,12 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   a refusal: a restricting `additionalProperties` beside `patternProperties`,
   `unevaluatedProperties` and `unevaluatedItems` above it, a `not` or `if` around it
   (with its `then` and `else`), a `maxContains` for its `contains`; a `oneOf` around it
-  becomes an `anyOf`, and a `$ref` counts as around it. The names `patternProperties`
-  allows are noted in the schema's description. The page checks its arguments with its
-  own schema as before.
+  becomes an `anyOf`, and a `$ref` counts as around it when what it points to lost a
+  regular expression. The names `patternProperties` allows are noted in the schema's
+  description. A page built with the client library checks its arguments again with its
+  full schema; a page that registers with WebMCP itself, or with the extension's own,
+  gets no other check, and its tool gets an argument its patterns would refuse, as
+  before, since the extension never runs a page's regular expressions.
 
 - **A question no longer moves under the pointer.** Where scrollbars take room (Linux,
   Windows), the panel behind the questions' dialog growing taller or shorter than its

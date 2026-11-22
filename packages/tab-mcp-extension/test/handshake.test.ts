@@ -16,7 +16,7 @@ import {
 	type ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
 import { Window } from "happy-dom";
-import { callTool } from "../src/content.ts";
+import { callTool, definitionOf, pageTools } from "../src/content.ts";
 import type {
 	CallResult,
 	ExtensionState,
@@ -91,6 +91,20 @@ const hello = (extra: object = {}) => ({
 
 /** Retries in these tests: 10 ms, then 20 ms. */
 const RETRIES = [10, 20];
+
+/** The call target of page tool `name` of `page`, as the bridge sends it. */
+async function offered(page: Document, name: string) {
+	const tool = (await pageTools(page, "doc-A")).tools.find(
+		(t) => t.name === name,
+	);
+	if (tool === undefined) throw new Error(`no tool ${name}`);
+	return {
+		documentId: "doc-A",
+		name,
+		readOnly: tool.annotations?.readOnlyHint === true,
+		definition: definitionOf(tool),
+	};
+}
 
 /**
  * A handshake whose worker answers `state` (or does not, `null`), or each
@@ -337,7 +351,17 @@ describe("the vouch in the content script", () => {
 		return { page, order, vouch };
 	}
 	const signal = new AbortController().signal;
-	const call = { documentId: "doc-A", name: "buy", readOnly: false };
+	const call = {
+		documentId: "doc-A",
+		name: "buy",
+		readOnly: false,
+		// `buy` as the content script offers it.
+		definition: definitionOf({
+			name: "buy",
+			description: "Buys.",
+			annotations: { readOnlyHint: false, debugging: false },
+		}),
+	};
 
 	test("goes out right before the tool runs, with the arguments it runs with; withdrawn after", async () => {
 		const { page, order, vouch } = toolPage();
@@ -386,6 +410,18 @@ describe("the vouch in the content script", () => {
 			),
 			await callTool(
 				{ ...call, readOnly: true },
+				{},
+				signal,
+				page,
+				"doc-A",
+				vouch,
+			),
+			// Offered with another definition (DEC-217).
+			await callTool(
+				{
+					...call,
+					definition: definitionOf({ name: "buy", description: "x" }),
+				},
 				{},
 				signal,
 				page,
@@ -654,17 +690,13 @@ describe("both sides together: the client library in the page", () => {
 			apps: [{ name: "Claude", host: "claude.ai" }],
 			whileInFront: true,
 		});
-		const call = {
-			documentId: "doc-A",
-			name: "complete_todo",
-			readOnly: false,
-		};
 		const signal = new AbortController().signal;
 		// The page as the content script reads it: the native WebMCP.
 		const page = {
 			location: doc.location,
 			modelContext: native,
 		} as unknown as Document;
+		const call = await offered(page, "complete_todo");
 		const result = await callTool(call, { id: 7 }, signal, page, "doc-A", {
 			send: (args) => h.vouch("complete_todo", args, VOUCH),
 			withdraw: () => h.withdraw(VOUCH.nonce),
@@ -688,15 +720,11 @@ describe("both sides together: the client library in the page", () => {
 		const { h } = handshake();
 		const { native, asked } = await libraryPage();
 		await Bun.sleep(0);
-		const call = {
-			documentId: "doc-A",
-			name: "complete_todo",
-			readOnly: false,
-		};
 		const page = {
 			location: doc.location,
 			modelContext: native,
 		} as unknown as Document;
+		const call = await offered(page, "complete_todo");
 		const cancelled = new AbortController();
 		cancelled.abort();
 		const result = await callTool(

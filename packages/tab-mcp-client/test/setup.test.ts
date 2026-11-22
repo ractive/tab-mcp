@@ -81,15 +81,34 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 			});
 	});
 
-	/** The shells on this computer that the commands are for, each with how it runs a line. */
-	const shells: [string, string[]][] = [
-		["sh", ["sh", "-c"]],
-		["dash", ["dash", "-c"]],
-		["bash", ["bash", "-c"]],
-		["zsh", ["zsh", "-fc"]],
-		["zsh with extendedglob", ["zsh", "-fc", "setopt extendedglob;"]],
-		["fish", ["fish", "--no-config", "-c"]],
-		["PowerShell", ["pwsh", "-NoProfile", "-NonInteractive", "-Command"]],
+	/**
+	 * The shells the commands are for that are run here, where installed:
+	 * each with how it runs a line and its own builtin that prints each
+	 * argument on a line (`printf` in the POSIX shells, zsh and fish,
+	 * `Write-Output` in PowerShell). cmd.exe is not run (it is not on the
+	 * computers the tests run on); for it the rule rests on how it reads
+	 * double quotes (DEC-217).
+	 */
+	const shells: { name: string; argv: string[]; print: string }[] = [
+		{ name: "sh", argv: ["sh", "-c"], print: "printf '%s\\n'" },
+		{ name: "dash", argv: ["dash", "-c"], print: "printf '%s\\n'" },
+		{ name: "bash", argv: ["bash", "-c"], print: "printf '%s\\n'" },
+		{ name: "zsh", argv: ["zsh", "-fc"], print: "printf '%s\\n'" },
+		{
+			name: "zsh with extendedglob",
+			argv: ["zsh", "-fc"],
+			print: "setopt extendedglob; printf '%s\\n'",
+		},
+		{
+			name: "fish",
+			argv: ["fish", "--no-config", "-c"],
+			print: "printf '%s\\n'",
+		},
+		{
+			name: "PowerShell",
+			argv: ["pwsh", "-NoProfile", "-NonInteractive", "-Command"],
+			print: "Write-Output",
+		},
 	];
 
 	test("each shell here passes the address in a command on as it is", () => {
@@ -102,17 +121,15 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 		];
 		const words = addresses.map((a) => commandAddress(a) ?? "");
 		let ran = 0;
-		for (const [name, [program, ...args]] of shells) {
+		for (const { name, argv, print } of shells) {
+			const [program] = argv;
 			if (program === undefined || Bun.which(program) === null) continue;
-			const line = `printf '%s\\n' ${words.join(" ")}`;
-			// zsh's setopt goes before the line, in the same argument.
-			const argv = name.endsWith("extendedglob")
-				? [program, ...args.slice(0, -1), `${args.at(-1)} ${line}`]
-				: [program, ...args, line];
-			const run = Bun.spawnSync(argv, { stderr: "pipe" });
+			const run = Bun.spawnSync([...argv, `${print} ${words.join(" ")}`], {
+				stderr: "pipe",
+			});
 			expect({
 				name,
-				out: run.stdout.toString(),
+				out: run.stdout.toString().replaceAll("\r\n", "\n"),
 				err: run.stderr.toString(),
 			}).toEqual({
 				name,

@@ -32,6 +32,7 @@ import type {
 	Tool,
 	ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
+import { canonicalJson } from "../canonical.ts";
 import type {
 	CallResult,
 	PageLibrary,
@@ -178,10 +179,15 @@ const has = (keywords: Record<string, unknown>, key: string) =>
  * `MAX_PATTERN` characters), so that the AI app still knows the format the
  * page wants (WM 8); so are the names `patternProperties` allowed.
  *
- * The copy only ever accepts more than the page's schema, never less (DEC-217):
- * a check that is too loose here lets through arguments the page then refuses
- * with its own error (the page checks its input as it likes, and the bridge
- * is only a first check), while one that is too strict would refuse calls the
+ * The copy only ever accepts more than the page's schema, never less (DEC-217).
+ * For a page built with the client library this check is a first one: the
+ * library checks the arguments again with the page's full schema. For a page
+ * that registers with the browser's WebMCP itself, or with the extension's
+ * own (`webmcp/registry.ts`), it is the only one: neither the browser nor the
+ * extension's WebMCP checks arguments. There an argument the page's regular
+ * expressions would have refused reaches its `execute`, as it always did
+ * (patterns were never run here), and the page has to check its input
+ * itself. A check that is too strict, on the other hand, refuses calls the
  * page takes, with no way around it for the AI app. Taking a keyword away
  * loosens only where the schema around it does not turn it around, so:
  * - without `patternProperties`, its keys become "additional": a restricting
@@ -193,29 +199,101 @@ const has = (keywords: Record<string, unknown>, key: string) =>
  *   more often); `oneOf` becomes `anyOf` (two branches that now both match
  *   would fail it), or goes when there is an `anyOf` already; `maxContains`
  *   goes when its `contains` got looser;
- * - a `$ref` may lead anywhere, so in a schema that lost any keyword, each
- *   `$ref` counts as something below that went (the second pass of `widen`).
+ * - a `$ref` counts as something below that went when what it leads to lost
+ *   something, itself or through its own `$ref`s (`lostRefs`, the second
+ *   pass of `widen`); one that may lead anywhere (not a `#/…` pointer, an
+ *   `$id` below the root, `$dynamicRef`, `$recursiveRef`) always does.
  * `propertyNames`, `properties`, `items`, `allOf`, `anyOf`, `then`, `else`
  * and the like only get looser with what is below them, and stay.
  */
 function withoutPatterns(schema: unknown): unknown {
-	const first = widen(schema, false);
-	return first.loosened ? widen(schema, true).schema : first.schema;
+	const first = widen(schema);
+	return first.loosened
+		? widen(schema, lostRefs(schema, first)).schema
+		: first.schema;
 }
 
 const REFS = ["$ref", "$dynamicRef", "$recursiveRef"];
 
+/** What `widen` makes of a schema. */
+interface Widened {
+	schema: unknown;
+	/** Something in it went (or, with `lost`, it has a `$ref` that counts so). */
+	loosened: boolean;
+	/** The `$ref`s in it, as written. */
+	refs: string[];
+	/** It has an `$id` below the root, which moves where `#/…` resolves. */
+	ids: boolean;
+}
+
 /**
- * `withoutPatterns` for `schema`, and whether anything in it went (with
- * `refs`, a `$ref` counts as something that went).
+ * Which `$ref`s of `root` (its first pass, `first`) lead to a schema that
+ * lost something, itself or through its own `$ref`s, to any depth: a fixed
+ * point over the distinct pointers, so that cycles end and no path is
+ * walked twice. A `$ref` that is not a `#/…` pointer into `root`, or any one
+ * in a schema with an `$id` below the root, counts as lost.
+ */
+function lostRefs(root: unknown, first: Widened): (ref: string) => boolean {
+	if (first.ids) return () => true;
+	const targets = new Map<string, Widened | undefined>();
+	const queue = [...first.refs];
+	for (let ref = queue.pop(); ref !== undefined; ref = queue.pop()) {
+		if (targets.has(ref)) continue;
+		const target = pointed(root, ref);
+		const made = target === undefined ? undefined : widen(target.value);
+		targets.set(ref, made);
+		if (made !== undefined) queue.push(...made.refs);
+	}
+	const lost = new Map<string, boolean>();
+	for (const [ref, made] of targets) lost.set(ref, made?.loosened ?? true);
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (const [ref, made] of targets)
+			if (!lost.get(ref) && made?.refs.some((r) => lost.get(r) ?? true)) {
+				lost.set(ref, true);
+				changed = true;
+			}
+	}
+	return (ref) => lost.get(ref) ?? true;
+}
+
+/** What `#` or a `#/…` JSON pointer `ref` names in `root`; `undefined` if nothing. */
+function pointed(root: unknown, ref: string): { value: unknown } | undefined {
+	if (ref !== "#" && !ref.startsWith("#/")) return undefined;
+	let node = root;
+	for (const raw of ref === "#" ? [] : ref.slice(2).split("/")) {
+		let part: string;
+		try {
+			part = decodeURIComponent(raw)
+				.replaceAll("~1", "/")
+				.replaceAll("~0", "~");
+		} catch {
+			return undefined;
+		}
+		if (Array.isArray(node) && /^(0|[1-9]\d*)$/.test(part))
+			node = node[Number(part)];
+		else if (isObject(node) && Object.hasOwn(node, part)) node = node[part];
+		else return undefined;
+	}
+	return node === undefined ? undefined : { value: node };
+}
+
+/**
+ * `withoutPatterns` for `schema` (`root`: it is the whole schema), and
+ * whether anything in it went; with `lost`, a `$ref` counts as something
+ * that went where `lost` says its target lost something.
  */
 function widen(
 	schema: unknown,
-	refs: boolean,
-): { schema: unknown; loosened: boolean } {
-	if (!isObject(schema)) return { schema, loosened: false };
+	lost?: (ref: string) => boolean,
+	root = true,
+): Widened {
+	if (!isObject(schema))
+		return { schema, loosened: false, refs: [], ids: false };
 	const out: Record<string, unknown> = {};
 	const looser = new Set<string>();
+	const refs: string[] = [];
+	let ids = !root && "$id" in schema;
 	const notes: string[] = [];
 	const { pattern, patternProperties, description } = schema;
 	if (typeof pattern === "string")
@@ -231,8 +309,10 @@ function widen(
 				.join(" or ")} are allowed too.)`,
 		);
 	const sub = (key: string, value: unknown) => {
-		const made = widen(value, refs);
+		const made = widen(value, lost, false);
 		if (made.loosened) looser.add(key);
+		refs.push(...made.refs);
+		ids ||= made.ids;
 		return made.schema;
 	};
 	for (const [key, value] of Object.entries(schema)) {
@@ -240,7 +320,11 @@ function widen(
 			looser.add(key);
 			continue;
 		}
-		if (refs && REFS.includes(key)) looser.add(key);
+		if (REFS.includes(key)) {
+			const pointer = key === "$ref" && typeof value === "string";
+			if (pointer) refs.push(value);
+			if (lost !== undefined && (!pointer || lost(value))) looser.add(key);
+		}
 		if (
 			(has(schemaMapKeyword, key) || key === "dependencies") &&
 			isObject(value)
@@ -263,7 +347,7 @@ function widen(
 			...(typeof description === "string" && description ? [description] : []),
 			...notes,
 		].join(" ");
-	if (!looser.size) return { schema: out, loosened: false };
+	if (!looser.size) return { schema: out, loosened: false, refs, ids };
 	if (looser.has("patternProperties")) delete out["additionalProperties"];
 	delete out["unevaluatedProperties"];
 	delete out["unevaluatedItems"];
@@ -278,7 +362,7 @@ function widen(
 		delete out["oneOf"];
 	}
 	if (looser.has("contains")) delete out["maxContains"];
-	return { schema: out, loosened: true };
+	return { schema: out, loosened: true, refs, ids };
 }
 
 /** The input schema to offer, or why the tool is left out. */
@@ -453,6 +537,11 @@ export interface CallTarget {
 	documentId: string;
 	name: string;
 	readOnly: boolean;
+	/**
+	 * The tool as it was offered, as `canonicalJson` of its `PageTool`: the
+	 * content script runs it only if the page's tool is still that one.
+	 */
+	definition: string;
 }
 
 /** What the bridge needs from Chrome. */
@@ -569,9 +658,13 @@ function compile(tool: PageTool): Compiled {
 	}
 }
 
-/** What makes two offers the same tool: re-register only when it changes. */
+/**
+ * What makes two offers the same tool: re-register only when it changes.
+ * `canonicalJson`, so that the same tool with its fields in another order
+ * is the same (DEC-217).
+ */
 const keyOf = (tabId: number, documentId: string, tool: PageTool) =>
-	JSON.stringify([tabId, documentId, tool]);
+	canonicalJson([tabId, documentId, tool]);
 
 /** The origin of `url` as Chrome reports a tab's address; `undefined` if none. */
 function originOf(url: string): string | undefined {
@@ -909,7 +1002,14 @@ export class PageToolBridge {
 				key,
 				tabId: tab.id,
 				origin: tools.origin,
-				target: { documentId: tools.documentId, name: pageTool.name, readOnly },
+				target: {
+					documentId: tools.documentId,
+					name: pageTool.name,
+					readOnly,
+					// The content script compares it with the tool it is about
+					// to call (DEC-217): the same spelling as its `definitionOf`.
+					definition: canonicalJson(pageTool),
+				},
 				title,
 				description,
 				validator,

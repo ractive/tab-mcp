@@ -97,6 +97,8 @@ library alone, without `webmcp: true`, has none for it.
   access to all sites": a click on the icon comes after the page has looked for the API.
 - **Where it can be installed today:** the Chrome build from the
   [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh).
+  Every release is also submitted to Microsoft Edge Add-ons (DEC-194), but that listing
+  is not public yet (checked on 2026-11-22).
   The Firefox build is not on addons.mozilla.org yet (its release is
   [pull request 163](https://github.com/ractive/tab-mcp/pull/163)); it can be built from
   this repository and loaded as a temporary add-on

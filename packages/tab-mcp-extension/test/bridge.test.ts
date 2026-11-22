@@ -10,6 +10,8 @@ import type {
 	Tool,
 	ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
+import { canonicalJson } from "../src/canonical.ts";
+import { callTool, pageTools } from "../src/content.ts";
 import type { CallResult, PageTool, PageTools } from "../src/messages.ts";
 import {
 	type BridgeChrome,
@@ -427,6 +429,64 @@ describe("names, descriptions, schemas", () => {
 			anyOf: [{ required: ["a"] }, { required: ["b"] }],
 			properties: { list: { contains: { type: "number" }, maxContains: 2 } },
 		});
+	});
+
+	test("a $ref to a schema that lost nothing keeps what is around it; one that did, or may have, does not (DEC-217)", () => {
+		const defs = {
+			Card: { type: "object", properties: { number: { type: "string" } } },
+			Bank: { type: "object", properties: { iban: { type: "string" } } },
+			Code: { type: "string", pattern: "^[A-Z]+$" },
+			// Through another $ref, to a schema that lost something.
+			Wrapped: { $ref: "#/$defs/Code" },
+			// A cycle: each leads to the other; neither lost anything.
+			A: { properties: { b: { $ref: "#/$defs/B" } } },
+			B: { properties: { a: { $ref: "#/$defs/A" } } },
+		};
+		const made = offered({
+			type: "object",
+			$defs: defs,
+			properties: {
+				id: { type: "string", pattern: "^[0-9a-f-]+$" },
+				payment: {
+					oneOf: [{ $ref: "#/$defs/Card" }, { $ref: "#/$defs/Bank" }],
+				},
+				mode: { not: { $ref: "#/$defs/Card" } },
+				tree: { not: { $ref: "#/$defs/A" } },
+				code: { not: { $ref: "#/$defs/Code" } },
+				wrapped: { not: { $ref: "#/$defs/Wrapped" } },
+				elsewhere: { not: { $ref: "other.json#/x" } },
+			},
+			unevaluatedProperties: false,
+		});
+		const properties = made["properties"] as Record<string, unknown>;
+		// Clean targets: not, oneOf and the cycle stay as the page wrote them.
+		expect(properties["payment"]).toEqual({
+			oneOf: [{ $ref: "#/$defs/Card" }, { $ref: "#/$defs/Bank" }],
+		});
+		expect(properties["mode"]).toEqual({ not: { $ref: "#/$defs/Card" } });
+		expect(properties["tree"]).toEqual({ not: { $ref: "#/$defs/A" } });
+		// A target that lost its pattern, directly or through a $ref, and one
+		// that is not in this schema: the not goes.
+		expect(properties["code"]).toEqual({});
+		expect(properties["wrapped"]).toEqual({});
+		expect(properties["elsewhere"]).toEqual({});
+		// The root lost a pattern below it: unevaluatedProperties goes there.
+		expect(made).not.toHaveProperty("unevaluatedProperties");
+		// What the page's schema takes, the offered one takes.
+		const value = { mode: "x", code: "abc", wrapped: "abc", elsewhere: 1 };
+		expect(accepts(made, value)).toBe(true);
+	});
+
+	test("an $id below the root: every $ref counts as leading to a schema that lost something (DEC-217)", () => {
+		const made = offered({
+			type: "object",
+			$defs: { Card: { $id: "https://x.example/card", type: "object" } },
+			properties: {
+				id: { type: "string", pattern: "^x" },
+				mode: { not: { $ref: "#/$defs/Card" } },
+			},
+		});
+		expect((made["properties"] as Record<string, unknown>)["mode"]).toEqual({});
 	});
 
 	test("a schema without regular expressions is offered as it is, $ref, not and oneOf included", () => {
@@ -1312,6 +1372,104 @@ describe("PageToolBridge", () => {
 		expect(state.calls).toHaveLength(2);
 	});
 
+	test("the same tool with its fields in another order is the same tool: not offered anew, still runs (DEC-217)", async () => {
+		const reg = registrar();
+		let registrations = 0;
+		const counting = {
+			registerTool: (tool: Tool, opts: { signal: AbortSignal }) => {
+				registrations++;
+				return reg.registerTool(tool, opts);
+			},
+		};
+		const draft: PageTool = {
+			name: "save",
+			title: "Save draft",
+			description: "Save a draft only.",
+			inputSchema: { type: "object", properties: { a: {}, b: {} } },
+			annotations: { readOnlyHint: false, consequentialHint: false },
+		};
+		const reordered: PageTool = {
+			annotations: { consequentialHint: false, readOnlyHint: false },
+			inputSchema: { properties: { b: {}, a: {} }, type: "object" },
+			description: "Save a draft only.",
+			title: "Save draft",
+			name: "save",
+		};
+		const { state, chrome } = fakeChrome(page([draft]));
+		let bridge: PageToolBridge | undefined;
+		const confirm: Confirm = async () => {
+			state.page = page([reordered]);
+			await bridge?.refresh();
+		};
+		bridge = new PageToolBridge(counting, chrome, { confirm });
+		await bridge.refresh();
+		expect(registrations).toBe(1);
+		expect(await bridge.callByName("save", {}, options())).toBe("done");
+		expect(registrations).toBe(1);
+		expect(state.calls[0]?.target.definition).toBe(canonicalJson(reordered));
+	});
+
+	test("a tool registered again after the answer, before the bridge read it: the content script refuses the call (DEC-217)", async () => {
+		// The page as the content script reads it, with a tool the test changes.
+		const registered: Record<string, unknown>[] = [
+			{
+				name: "save",
+				description: "Save a draft only.",
+				inputSchema: { type: "object" },
+				annotations: { readOnlyHint: false, consequentialHint: false },
+			},
+		];
+		const executed: string[] = [];
+		const doc = {
+			location: {
+				href: "https://shop.example/",
+				origin: "https://shop.example",
+			},
+			modelContext: {
+				getTools: async () => registered,
+				executeTool: async (tool: { name: string }) => {
+					executed.push(tool.name);
+					return "ran";
+				},
+			},
+		} as unknown as Document;
+		// The bridge's next read is held until the test lets it go.
+		let release = () => {};
+		let held = false;
+		const chrome: BridgeChrome = {
+			current: async () => ({ id: 1, url: "https://shop.example/", title: "" }),
+			list: async () => {
+				if (held) await new Promise<void>((done) => (release = done));
+				return pageTools(doc, "doc-1");
+			},
+			call: (_tabId, target, input, signal) =>
+				callTool(target, input, signal, doc, "doc-1"),
+			settled: async () => ({ url: "https://shop.example/", title: "" }),
+		};
+		let bridge: PageToolBridge | undefined;
+		let reading: Promise<void> | undefined;
+		const confirm: Confirm = async () => {
+			// While the question is open the page registers the tool again, and
+			// the bridge starts reading the list, which does not finish before
+			// the user's answer.
+			registered[0] = {
+				...registered[0],
+				description: "Publish the draft publicly.",
+				annotations: { readOnlyHint: false, consequentialHint: true },
+			};
+			held = true;
+			reading = bridge?.refresh();
+		};
+		bridge = new PageToolBridge(registrar(), chrome, { confirm });
+		await bridge.refresh();
+		await expect(bridge.callByName("save", {}, options())).rejects.toThrow(
+			"The page's tool save changed since it was offered; it did not run.",
+		);
+		expect(executed).toEqual([]);
+		release();
+		await reading;
+	});
+
 	test("a call goes to the page the tool was listed from, with its claim", async () => {
 		const reg = registrar();
 		const { state, chrome } = fakeChrome(page([pageTool("search")]));
@@ -1328,7 +1486,12 @@ describe("PageToolBridge", () => {
 		expect(state.calls).toEqual([
 			{
 				tabId: 1,
-				target: { documentId: "doc-1", name: "search", readOnly: true },
+				target: {
+					documentId: "doc-1",
+					name: "search",
+					readOnly: true,
+					definition: canonicalJson(pageTool("search")),
+				},
 				input: { q: "tea" },
 			},
 		]);

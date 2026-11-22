@@ -311,7 +311,12 @@ did, by connecting the extension.
   the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always
   allow" is gone, DEC-139). A tool that changed while the question was open (a
   navigation, another tab in front with a tool of the same name, the tool registered
-  again with another title, description, schema or hint) does not run (DEC-217). An
+  again with another title, description, schema or hint) does not run (DEC-217): the
+  bridge checks after the answer, and the content script checks the definition the call
+  carries against its own read right before the call. "Always allow on <host>" is for
+  the site's tool by name and is not tied to a definition: it covers the tool when the
+  page changes its description, as the page can change what the tool does without
+  changing a word (DEC-217). An
   allowed tool runs whatever the AI app (or a prompt injection steering it) asks of it.
   A page can only mark its own tools read-only, so a lie harms that page's own user
   session, which its scripts could reach anyway.
@@ -324,8 +329,12 @@ did, by connecting the extension.
   Chrome does not check them. The schema's `pattern` and `patternProperties` are left
   out in keyword position only (a parameter called `pattern` stays), so a page's
   catastrophic regular expression cannot freeze the connection. What goes with them
-  keeps the check from getting stricter than the page's (DEC-217): the check can only
-  let through more than the page's schema, which the page still applies itself. Calls end for the AI app
+  keeps the check from getting stricter than the page's (DEC-217): it can only let
+  through more than the page's schema. A page with the client library checks the
+  arguments again with its full schema; for a page that registers with WebMCP itself,
+  or with the extension's own WebMCP, which checks nothing, this check is the only one,
+  and an argument its patterns would refuse reaches its tool: such a page checks its own
+  input. Calls end for the AI app
   after 60 s or on its cancellation even if the page never answers; a page that does not
   answer the list, `page_info` or history in 5 s is given up, so a stuck page cannot hold
   the bridge for every other tab (iteration 35).
