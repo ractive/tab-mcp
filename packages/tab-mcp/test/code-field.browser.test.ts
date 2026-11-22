@@ -439,3 +439,93 @@ describe.skipIf(chrome === undefined)("the code field in Chrome", () => {
 		await page.close();
 	});
 });
+
+/**
+ * Where each letter sits against its box, from the geometry of the page
+ * itself (so any cell width passes): the letter's horizontal centre, from the
+ * input's padding, the width of `1ch` and the letter spacing, against the
+ * centre of the box drawn for it; the boxes' rectangles, the `.at` boxes
+ * and whether the page scrolls sideways.
+ */
+function geometry(page: Page): Promise<{
+	offsets: number[];
+	dash: number;
+	at: number[];
+	overflow: boolean;
+	boxWidth: number;
+	letterWidth: number;
+	rowRight: number;
+	viewport: number;
+}> {
+	return page.eval(`(() => {
+		const f = ${FIELD};
+		const cs = getComputedStyle(f);
+		const probe = document.createElement("span");
+		probe.style.cssText = "position:absolute;visibility:hidden;width:1ch;font:" + cs.font;
+		document.body.append(probe);
+		const ch = probe.getBoundingClientRect().width;
+		probe.remove();
+		const cell = ch + parseFloat(cs.letterSpacing);
+		const left = f.getBoundingClientRect().left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft) - f.scrollLeft;
+		const boxes = [...document.querySelectorAll(".code-boxes > span")].map((b) => b.getBoundingClientRect());
+		const mid = (r) => (r.left + r.right) / 2;
+		const letters = f.value.replace("-", "").length;
+		const offsets = [];
+		for (let i = 0; i < letters; i++) {
+			const index = i < 4 ? i : i + 1;
+			offsets.push(left + index * cell + ch / 2 - mid(boxes[index]));
+		}
+		return {
+			offsets,
+			dash: mid(boxes[4]) - (boxes[3].right + boxes[5].left) / 2,
+			at: boxes.map((b, i) => document.querySelectorAll(".code-boxes > span")[i].classList.contains("at") ? i : -1).filter((i) => i >= 0),
+			overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+			boxWidth: boxes[0].width,
+			letterWidth: ch,
+			rowRight: document.querySelector(".code-boxes").getBoundingClientRect().right,
+			viewport: document.documentElement.clientWidth,
+		};
+	})()`);
+}
+
+describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
+	test("each letter is centred in its box, the dash between the groups, boxes roomier than the letters, at 320 px and at desktop width", async () => {
+		for (const width of [320, 1280]) {
+			const page = await openPairingPage({ width });
+			// Four letters: no dash typed, and no box of the second group used.
+			await typeKeys(page, "nhnx");
+			let g = await geometry(page);
+			expect(g.offsets).toHaveLength(4);
+			for (const o of g.offsets) expect(Math.abs(o)).toBeLessThan(1);
+			expect(g.overflow).toBe(false);
+			// Eight letters: the dash is there.
+			await typeKeys(page, "mnmh");
+			expect((await field(page)).value).toBe("NHNX-MNMH");
+			g = await geometry(page);
+			expect(g.offsets).toHaveLength(8);
+			for (const o of g.offsets) expect(Math.abs(o)).toBeLessThan(1);
+			expect(Math.abs(g.dash)).toBeLessThan(1);
+			expect(g.overflow).toBe(false);
+			expect(g.rowRight).toBeLessThanOrEqual(g.viewport);
+			// Roomier than the letters: a box is at least twice a letter wide.
+			expect(g.boxWidth).toBeGreaterThanOrEqual(g.letterWidth * 2);
+			await page.close();
+		}
+	});
+
+	test("the highlighted box follows the caret at the start, in front of the dash and at the end", async () => {
+		const page = await openPairingPage();
+		await typeKeys(page, "nhnxmnmh");
+		for (const [caret, box] of [
+			[0, 0],
+			[4, 5],
+			[8, 8],
+			[9, 8],
+		] as const) {
+			await caretAt(page, caret);
+			await Bun.sleep(100); // the page paints on `selectionchange`
+			expect((await geometry(page)).at).toEqual([box]);
+		}
+		await page.close();
+	});
+});
