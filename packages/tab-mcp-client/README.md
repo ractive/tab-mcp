@@ -20,6 +20,31 @@ picture:
 **Status: 0.20.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
+## With a coding agent
+
+You only need the install:
+
+```sh
+npm install @ractive-ch/tab-mcp-client
+```
+
+Then point your coding agent (Claude Code, Codex or another) at the guide in the package.
+That's the whole tutorial:
+
+```text
+Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to this app.
+```
+
+Then ask for what you want: which features of the page AI apps may use, and which of them
+ask first. The guide is an [Agent Skill](https://agentskills.io/specification) written for
+the version in your `node_modules`, and it links this README for the details. No such
+file means the installed version is older than this guide: update the package.
+
+The path is relative to the folder of the app that installed the package (in a
+monorepo, that app's folder, where its own `node_modules` is), the same with npm, Bun,
+pnpm and Yarn's `node_modules` linker. Yarn Plug'n'Play keeps packages in zip files: run `yarn unplug @ractive-ch/tab-mcp-client`
+and give the agent the `skill/SKILL.md` under `.yarn/unplugged/`.
+
 ## You need a relay
 
 The page talks to a tab-mcp relay, which only accepts pages from the origins its operator

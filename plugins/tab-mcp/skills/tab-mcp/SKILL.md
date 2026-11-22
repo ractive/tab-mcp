@@ -7,6 +7,15 @@ compatibility: Browser library for any web page (ES modules); the relay needs Bu
 
 # Add tab-mcp to a web app
 
+This skill describes `@ractive-ch/tab-mcp-client` 0.20.0. The package's
+[README](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md)
+is the full reference; read the section you need there when this skill is not enough. Its
+[CHANGELOG](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/CHANGELOG.md)
+says what changed between versions. The package ships this skill for its own version as
+`node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md`: when the project has another
+version installed, follow that copy; an installed version without it is older than this
+skill, so update the package first.
+
 tab-mcp lets AI apps call tools that a web page offers while it is open in a browser tab.
 The page uses the browser library `@ractive-ch/tab-mcp-client`, which connects to a
 tab-mcp relay (`@ractive-ch/tab-mcp`) over a WebSocket and shows its app's MCP address,
@@ -14,7 +23,7 @@ the same for every page of the app. The user adds that address to their AI app a
 it with a code shown in the page, which says which page is meant. The relay
 forwards the AI app's requests to the page; the tools run in the page.
 
-Facts to keep in mind (version 0.20.0):
+Facts to keep in mind:
 
 - Only MCP revision 2026-07-28, and only AI apps that register through OAuth Client ID
   Metadata Documents. Claude Code, claude.ai, Claude Desktop, ChatGPT and Codex work
@@ -50,7 +59,7 @@ Without a bundler, import the self-contained build from a CDN:
 import { TabMcp } from "@ractive-ch/tab-mcp-client";
 
 const mcp = new TabMcp({
-  relay: "https://relay.example.com",      // https:, or http: only on localhost
+  relay: "https://relay.example.com",      // your relay (section 7); http: only on localhost
   server: { name: "notes", version: "1.0.0", instructions: "Notes shown on the page." },
   appName: "notes",                        // 1-64 characters, a name for people
 });
@@ -72,6 +81,11 @@ await mcp.registerTool<{ text: string }>( // types `input`; the schema is what i
   { signal: tools.signal },                // abort to remove the tool
 );
 ```
+
+In development, `relay` is the local relay of section 7 (`http://localhost:8080`), and
+the page's exact origin (scheme and port: `http://localhost:5173` for Vite) must be in the
+relay's `TAB_MCP_ALLOWED_ORIGINS`. Take the relay address from the app's configuration
+(an environment variable of the build), not a constant.
 
 Rules for tools:
 
@@ -102,10 +116,13 @@ Rules for tools:
   going, and its late result is dropped. `client` names the caller:
   `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared
   `name`), `{ kind: "local", id, name? }` for the site's own assistant on a served port
-  (what the page passed to `serve`, section 3), or `{ kind: "webmcp" }` for an agent in
-  the browser, of which nothing more is known. Check `client.kind` before reading `host`;
-  a label for a log has three cases, e.g. `kind === "relay" ? name ?? host : kind ===
-  "local" ? name ?? id : "an agent in this browser"`.
+  (what the page passed to `serve`, section 3), or `{ kind: "webmcp", via?, name?,
+  host? }` for an agent in the browser: `via: "tab-mcp-extension"` with the AI app's
+  `name` and verified `host` when the tab-mcp browser extension ran the call for an AI
+  app connected to it (section 5), else nothing more is known. Check `client.kind`
+  before reading `host`; a label for a log, e.g. `kind === "relay" ? name ?? host :
+  kind === "local" ? name ?? id : via ? (name ?? host) + " through the tab-mcp browser
+  extension" : "an agent in this browser"`.
 - Annotations: `readOnlyHint` for tools that only read; `consequentialHint` for tools
   whose effect cannot be undone in the page or reaches outside it (section 4);
   `untrustedContentHint` for results that contain text from the user, another AI app or
@@ -176,8 +193,11 @@ reason? }`, `reason` when a session ended), `pairingcode` (`{ pairingCode }`),
 `pairinguntil` (`{ pairingUntil }`), `grantschange` (`{ grants }`), `replaced` and
 `error`. Every detail is an object; a value that is gone is `undefined`. Methods that ask
 the relay reject with an `InvalidStateError` while not connected. The dialogs' texts can
-be replaced (`ui: { strings }`, keys in the client's `src/strings.ts`, with `lang` and
-`dir`), and their help gets its own guide link and steps (`ui: { setup: { guide,
+be replaced (`ui: { strings }`, the keys of
+[`STRINGS`](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/src/strings.ts),
+with `lang` and `dir`; see
+[Translating](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md#translating)),
+and their help gets its own guide link and steps (`ui: { setup: { guide,
 instructions } }`).
 
 When another tab or program takes the page's place (it connects with the same address
@@ -211,8 +231,9 @@ const served = await mcp.serve(port, {
 - The other end uses `createTunnelFetch` from `@ractive-ch/tab-mcp-client/tunnel` as the
   `fetch` of the MCP SDK's client, pinned to `2026-07-28` (an agent framework's own MCP
   client may not speak it), and passes the messages over its own channel; it hands the
-  framework the tools as function tools. The client README's "Your own assistant on the
-  page" has the whole setup and a tested backend recipe.
+  framework the tools as function tools. The README's
+  [Your own assistant on the page](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md#your-own-assistant-on-the-page)
+  has the whole setup and a tested backend recipe.
 - A port is a key: whoever holds the other end calls the tools without pairing. Hand it
   only to a frame whose origin you checked, with that origin as the `postMessage` target,
   never `"*"`.
@@ -296,6 +317,17 @@ await mcp.registerTool(deleteNoteTool); // asks, also an agent in the browser
 - A WebMCP call gets the same argument check and confirmation (the dialog names the caller
   "An agent in this browser", never offers "Always allow"), and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`.
+- **The tab-mcp browser extension.** With `webmcp: true` the page and the extension
+  shake hands. A call the user has just allowed in the extension (the same tool, equal
+  arguments, within 2 seconds) runs without the page's question and without
+  `onConfirm`, so `onConfirm` is not a hook that sees every call; its caller is
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`. `trustExtension: false`
+  on `TabMcp` asks every WebMCP call anyway. `mcp.extension` (event
+  `extensionchange`, React: `extension` of `useTabMcpState()`) is
+  `{ name, version, apps, whileInFront }` while the extension serves the page, `apps`
+  being the AI apps connected through it (`{ name, host }`), else `undefined`; the
+  connect dialog already says so. Details:
+  [With the tab-mcp browser extension](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md#with-the-tab-mcp-browser-extension).
 - The agent gets what `execute` returned. A failure (invalid arguments, "Don't allow", a
   tool that is gone, a thrown error, an `isError` result) comes back as
   `{ error: "<message>" }`, not as a rejection, which Chrome would hand the agent as a
@@ -367,9 +399,37 @@ forward WebSockets on `/tab`, must not buffer event streams on `/s/…/mcp`, and
 requests of up to 300 s. The relay starts event streams after 20 s, which keeps 60 s
 first-byte limits of CDNs happy. Health check: `GET /healthz`.
 
+## 8. Common mistakes
+
+- `connect()` or `showConnectDialog()` on page load, in a `useEffect` or from a timer:
+  the browser refuses it. Open the dialog from a click; on load only
+  `connect({ resume: true })`, and only after the user turned AI access on.
+- The page's origin is missing from `TAB_MCP_ALLOWED_ORIGINS`, or differs in scheme or
+  port: the relay refuses the page.
+- `consequentialHint` on every tool that writes: only for effects the user cannot undo
+  in the page (section 4).
+- Casts or hand-written checks of the arguments in `execute`: the schema is checked
+  first; put the limits in it.
+- A React tool that reads state the previous call changed from the component's props or
+  `useState`: it gets the old value. Read from a store or a ref
+  ([references/react.md](references/react.md)).
+- A retry loop around `connect()`: the library reconnects by itself (section 3).
+- Renaming `server.name` after release: the page gets a new secret (and, without `app`, a
+  new address), so every AI app pairs again. Choose it once.
+- Handing `serve`'s port to a frame with `"*"` as the target: transfer it as
+  `frame.contentWindow.postMessage({ type: "tools-port" }, "https://chat.example", [port2])`,
+  with the frame's checked origin (section 3).
+
 ## Check your work
 
-Try the pairing flow by hand with Claude Code against a local relay. Live pages to try
-are at <https://ractive.ch/tab-mcp/>; the docs cover every setting and the proxy details:
-<https://github.com/ractive/tab-mcp> (`docs/configuration.md`,
-`docs/self-hosting.md`, `docs/compatibility.md`, `SECURITY.md`).
+Try the pairing flow by hand with Claude Code against a local relay. For automated
+tests of the page's tools, `@ractive-ch/tab-mcp/testing` starts a relay in the test
+process and gives a token without pairing
+([the relay's README](https://github.com/ractive/tab-mcp/tree/relay-v0.13.1/packages/tab-mcp#testing-a-pages-tools)).
+Live pages to try are at <https://ractive.ch/tab-mcp/>. The relay's docs cover every
+setting and the proxy details:
+[configuration](https://github.com/ractive/tab-mcp/blob/relay-v0.13.1/docs/configuration.md),
+[self-hosting](https://github.com/ractive/tab-mcp/blob/relay-v0.13.1/docs/self-hosting.md),
+[compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md) (which
+AI apps work, kept up to date) and the
+[security policy](https://github.com/ractive/tab-mcp/blob/main/SECURITY.md).

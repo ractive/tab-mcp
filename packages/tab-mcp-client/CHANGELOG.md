@@ -6,6 +6,15 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- The agent skill ships in the package as `skill/SKILL.md` (with `skill/references/`),
+  written for this version (DEC-216). With a coding agent, install the package and tell
+  it: "Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to
+  this app." Its links point to the README, CHANGELOG and declarations beside it.
+
 ## [0.20.0][client-0.20.0] - 2026-11-22
 
 ### Breaking

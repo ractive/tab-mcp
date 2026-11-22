@@ -284,8 +284,29 @@ There is no public relay for other sites: run your own ([Self-hosting](#self-hos
 
 ### Agent skill
 
-The repository has an [Agent Skill](plugins/tab-mcp/skills/tab-mcp/SKILL.md) that
-teaches a coding agent to add tab-mcp to a web app. In Claude Code:
+With a coding agent, you only need the install. The browser library comes with an
+[Agent Skill](plugins/tab-mcp/skills/tab-mcp/SKILL.md) that teaches the agent to add
+tab-mcp to a web app, written for the version you installed:
+
+```sh
+npm install @ractive-ch/tab-mcp-client
+```
+
+Then tell your agent:
+
+```text
+Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to this app.
+```
+
+and ask for what you want: which features of the page AI apps may use, and which of them
+ask first. No such file means the installed version is older than this guide: update the
+package. The path is relative to the folder of the app that installed the package (in a
+monorepo, that app's folder), with npm, Bun, pnpm and Yarn's `node_modules` linker alike;
+see the [client README](packages/tab-mcp-client/README.md#with-a-coding-agent) for Yarn
+Plug'n'Play.
+
+The same skill is also a plugin. It comes from this repository's `main` branch, which
+can be ahead of the last release. In Claude Code:
 
 ```text
 /plugin marketplace add ractive/tab-mcp
