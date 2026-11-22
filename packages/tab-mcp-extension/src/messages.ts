@@ -36,6 +36,11 @@ export type ContentRequest =
 			 * path after the user's "allow" sets it.
 			 */
 			vouch?: Vouch;
+			/**
+			 * With a vouch: the state for the page, told before the vouch
+			 * to a page not told "on" yet (DEC-221).
+			 */
+			state?: ExtensionState;
 	  }
 	| { type: "webmcp-cancel"; callId: string }
 	| { type: "history" }
@@ -76,10 +81,11 @@ export interface ExtensionState {
 /**
  * What a page with the client library announced (DEC-207): the library's
  * version, and the AI apps connected to the page directly, of all its apps
- * together.
+ * together. Until the page was told "on" nothing it said is read (DEC-221):
+ * no version, no apps.
  */
 export interface PageLibrary {
-	version: string;
+	version?: string;
 	apps: AppView[];
 }
 

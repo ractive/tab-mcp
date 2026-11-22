@@ -266,9 +266,11 @@ code and message.
 > which AI apps reach it through the extension. Only while AI access is on, such a page
 > learns the extension's name, that AI access is on, the names and verified hosts of the
 > AI apps connected to it, and right before a call you allowed, the tool, its arguments
-> and which AI app made the call. While AI access is off, it learns nothing from the
-> extension; a page that was told AI access is on is told once that it went off.
-> Nothing else.
+> and which AI app made the call. While AI access is off, the extension answers no page
+> and sends it nothing. A page can still see that the extension is installed where it
+> provides WebMCP itself (in browsers without their own), and could try to time its own
+> events, which the extension still listens to. A page that was told AI access is on is
+> told once that it went off. Nothing else.
 >
 > The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
 > tabs, and only the page's address, title, language and its WebMCP tools (and what a

@@ -4555,8 +4555,8 @@ extension is its first user. The shape below is the library's, not the owner's.
 ## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
 
 **Amended by DEC-221:** the extension says nothing to a page while AI access is off
-(a page it told "on" hears "off" once), sends no vouch to a page it did not tell
-"on", and no longer tells its version.
+(a page it told "on" hears "off" once), reads nothing a page sends before it told it
+"on", sends no vouch to a page it did not tell "on", and no longer tells its version.
 
 **Amended by DEC-215:** a WebMCP call that matches no vouch is no longer "asked as
 before" by the page: the page's `onConfirm` decides it in code, and without one it
@@ -5420,17 +5420,38 @@ library, also while AI access was off, and any page can send that announcement: 
 page it may read could tell that it is installed, and learned its version. The owner
 decided:
 
-- **Nothing while AI access is off.** Through the handshake a page cannot tell "the
-  extension, AI access off" from "no extension". The content script (the narrowest
-  place: it decides what reaches the page) speaks only while the worker's state is
-  `on` (AI access on and connected; connecting counts as off): no answer to the
-  page's `hello`, no `update`, no `hello` for a page that only marked itself, no
-  `vouch`, no `withdraw` of a vouch it did not send, no mark, nothing in the call of
-  the page's event. It still takes what the page announces, for the panel.
+- **Nothing while AI access is off.** The extension answers no page and sends it
+  nothing. The content script (the narrowest place: it decides what reaches the page)
+  speaks only while the worker's state is `on` (AI access on and connected; connecting
+  counts as off): no answer to the page's `hello`, no `update`, no `hello` for a page
+  that only marked itself, no `vouch`, no `withdraw` of a vouch it did not send, no
+  mark, nothing in the call of the page's event.
+- **Nothing read before "on"** (review of the pull request). In Chrome and Edge, reading
+  an object `detail` from another world copies it and runs the page's getters: a page
+  that sent `{ get x() { … } }` saw its getter run and knew that someone listened. A
+  browser test showed it for the store and the test build. Until a document was told
+  "on", the content script notes only that the page spoke (a boolean): no read of
+  `detail`, no parse, no message to the worker with the page's content. Once on, it
+  says `hello`; the page's answer, an `update` per app id with everything its `hello`
+  had (library version, app id, AI apps), is read then. Told "on", it reads `detail`
+  and takes only a string. The panel says "This page has tab-mcp built in." from the
+  boolean, also while off; its "sees the page's tools twice" line needs the page's
+  AI apps and comes once AI access is on, a moment after connecting, which is when it
+  matters.
 - **"Off" once to a document told "on".** The content script remembers, per document,
   that it told it "on"; when the state goes off it sends `{ v: 1, type: "update",
   on: false }` once, so that the page's display does not stay on, and then nothing
-  until it is on again. A vouch it sent before is still withdrawn after that.
+  until it is on again. A vouch it sent before is still withdrawn after that. Where the
+  page could stay "on": back from the back/forward cache the content script asks the
+  worker again; when host access is withdrawn (Chrome then gives the worker no address
+  for the tab) the worker sends the tabs it can no longer read only "off", also at the
+  permission change; once the extension is disabled, removed or updated
+  (`chrome.runtime.id` gone) the content script says "off" at the page's next event or
+  `pageshow`, then nothing. Left: a page left behind that neither speaks nor is shown
+  again keeps showing "on".
+- **A vouch never waits for the state.** A call with a vouch carries the worker's
+  state; a document not told "on" yet (the call came first, or the content script's ask
+  gave up) is told it first, then the vouch.
 - **No version.** `ExtensionState` and the message lose `version`; the content script
   builds the message field by field (`name`, `on`, `apps`, `whileInFront`), so
   nothing else the worker might send gets through. The client's `BrowserExtension`
@@ -5439,20 +5460,39 @@ decided:
   connected through the tab-mcp browser extension"), and the vouch with the AI app's
   name and host.
 - **A page that only marked itself** (`<html data-tab-mcp-handshake>`, it said `hello`
-  before the content script listened) while AI access is off is greeted with `hello`
-  once AI access is on, so that it answers with what it announces. Until then the panel
-  does not know that page has the library: learning it would mean speaking.
+  before the content script listened), or that spoke before it was told "on", is
+  greeted with `hello` once AI access is on, so that it answers with what it announces.
 - **Not covered:** the extension's own `document.modelContext` where the browser has
   none (Firefox, Chrome without WebMCP, after "Give access to all sites") still shows
   any page that it is installed, as accepted on 2026-11-16 (`PRIVACY.md`). And a page
-  could try to time its own event: the content script parses what it hears (at most
-  64 KB) whatever the state, as it runs in the page's thread.
-- **Old and new mix** (no shim). Client 0.21.0 and older with an extension after 0.3.2:
-  the library takes "on" only with a version, so the page never shows the AI apps
-  connected through the extension (`extension` stays `undefined`, the connect dialog
-  offers to connect as if there were none); the vouch does not depend on it, so a call
-  the user allowed in the extension is still not asked again. A newer client with
-  extension 0.3.2 and older: the version is an unknown field and ignored, "off" means no
-  extension as before; such an extension still answers while off. Release order: the
-  client first, then the apps on it, then the extension; pages still on 0.21.0 lose the
-  "connected through the extension" line until they update.
+  could try to time its own events: before "on" the content script's listener only
+  checks a few booleans and, once per round, asks the worker for the state (no page
+  content in it), but it runs in the page's thread, and the page's first event makes
+  the panel's tab view be read again while the panel is open. Told "on", the content
+  script parses what it hears (at most 64 KB) and keeps it, which takes time a page can
+  measure; it answers then anyway. One wording in the docs: "While AI access is off, the
+  extension answers no page and sends it nothing. A page can still see that the
+  extension is installed where it provides WebMCP itself (in browsers without their
+  own), and could try to time its own events, which the extension still listens to."
+- **Old and new mix** (no shim).
+  - Client 0.21.0 and older with an extension after 0.3.2: the library takes the
+    extension's `hello` and `update` only with a version, so it ignores them and does
+    not answer the `hello`. The page never shows the AI apps connected through the
+    extension (`extension` stays `undefined`; the card has no "connected through the
+    tab-mcp browser extension" line, the connect dialog offers to connect as if there
+    were none). The panel says "This page has tab-mcp built in." (the page spoke), but it
+    never learns the page's own AI apps, so the "sees the page's tools twice" warning is
+    missing until those apps change (the page's `update` is read, as the page was told
+    "on"). The vouch does not depend on any of it: the content script told the page "on"
+    whether it took it or not, and 0.21.0 takes a vouch without the state, so a call the
+    user allowed in the extension is still not asked again.
+  - A newer client with extension 0.3.2 and older: everything works; the version is an
+    unknown field and ignored, "off" is no extension as before. Such an extension still
+    answers while off and reads every page's `detail`, so the gains of this decision
+    need the new extension.
+  - Release order: the client first (release candidate, then stable), then the apps on
+    it (the ractive.ch examples, sign-in, saturnus, Sitegloss), then the extension. A
+    page still on 0.21.0 when the extension ships loses, until it updates, the
+    "connected through the extension" line and the connect dialog's sentence about it,
+    and the panel's "sees the page's tools twice" warning; it keeps the vouch and the
+    panel's "This page has tab-mcp built in."

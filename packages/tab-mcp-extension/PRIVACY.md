@@ -38,9 +38,11 @@ browser announces that to the extension (any page script could pretend to). Such
 and only such a page among those the extension may read (in every tab, not only the one
 in front), learns from the extension while it is open and AI access is on: the
 extension's name, that AI access is on, and the names and verified hosts of the AI apps
-connected to the extension. While AI access is off, the extension tells it nothing, so
-it cannot tell from the extension that it is installed; a page it told that AI access
-is on is told once that it went off. Right before one of its own
+connected to the extension. While AI access is off, the extension answers no page and
+sends it nothing. A page can still see that the extension is installed where it
+provides WebMCP itself (in browsers without their own, above), and could try to time
+its own events, which the extension still listens to. A page it told that AI access is
+on is told once that it went off. Right before one of its own
 tools runs because the user allowed the call in the extension, it also learns that
 tool's name, the arguments the page gets anyway, and which of those AI apps made the
 call, so that the page does not ask the user a second time. It learns nothing else: not

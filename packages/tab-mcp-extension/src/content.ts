@@ -418,7 +418,8 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 					vouch === undefined
 						? undefined
 						: {
-								send: (args) => handshake?.vouch(request.name, args, vouch),
+								send: (args) =>
+									handshake?.vouch(request.name, args, vouch, request.state),
 								withdraw: () => handshake?.withdraw(vouch.nonce),
 							},
 				);
@@ -503,6 +504,8 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 				| undefined;
 		},
 		changed,
+		// Undefined once the extension was disabled, removed or updated.
+		alive: () => chrome.runtime?.id !== undefined,
 	});
 	handshake.start();
 	// Chrome without WebMCP of its own: the page-world polyfill, if it is

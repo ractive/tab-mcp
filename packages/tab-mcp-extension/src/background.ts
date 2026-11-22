@@ -180,6 +180,8 @@ const permissionsChanged = () => {
 	sync();
 	// Access to the relay's site, or to all sites: the pairing page's script.
 	withConnection((c) => c.syncFill());
+	// A tab no longer readable hears "off" (DEC-221).
+	withConnection((c) => c.hostAccessChanged());
 	tabChanged();
 };
 chrome.permissions.onAdded.addListener(permissionsChanged);

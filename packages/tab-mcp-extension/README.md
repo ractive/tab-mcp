@@ -129,10 +129,12 @@ The page's tools are the page's word:
   tab-mcp built in." and when an AI app is connected to the page directly too (it then
   sees the page's tools twice: disconnect it in one of the two). While AI access is on,
   the extension tells such a page only its name, that AI access is on and the AI apps
-  connected now (name and verified host), not its version. While AI access is off it
-  tells the page nothing (DEC-221), so the handshake does not show that the extension
-  is installed; a page it told "on" is told once that it went off. A page without the
-  library is told nothing.
+  connected now (name and verified host), not its version. While AI access is off, the
+  extension answers no page and sends it nothing (DEC-221). A page can still see that
+  the extension is installed where it provides WebMCP itself (in browsers without their
+  own, below), and could try to time its own events, which the extension still listens
+  to. A page it told "on" is told once that it went off. A page without the library is
+  told nothing.
 - The top frame's WebMCP, which lists the tools of the page and of its same-origin
   frames (the draft and Chrome's documentation say so; not tested here); tools of
   frames of other origins are not listed. The browser's own WebMCP, or where it has none

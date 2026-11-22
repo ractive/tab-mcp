@@ -121,18 +121,31 @@ page can say that an AI app is connected through the extension
 - **Either may start first.** The page says `hello` when its mirror starts and marks
   `<html data-tab-mcp-handshake>`; the content script (at `document_idle` in Chrome,
   after a click, at `document_start` in Firefox) listens from its start, and speaks
-  first (`hello`) only when the mark is there (while AI access is off: once it goes on,
-  unless the page spoke meanwhile). Each answers the other's `hello` with an `update`;
-  changes go as `update`.
+  first (`hello`) when the mark is there or the page spoke before it was told "on",
+  once AI access is on. Each answers the other's `hello` with an `update` (the page's
+  carries what its `hello` did: the library's version, the app id and its AI apps, for
+  each of its apps); changes go as `update`.
 - **The extension speaks only to pages that announced the library, and only while AI
   access is on and connected** (DEC-221): its name, `on: true`, the AI apps connected
   now (`name`, verified `host`) and `whileInFront: true`; not its version. While AI
-  access is off (or connecting) it says nothing, not even to a page's `hello`, and sends
-  no vouch, so that a page cannot tell it from no extension; a document the content
-  script told "on" hears `{ v: 1, type: "update", on: false }` once when it goes off.
-  The "told on" memory is the content script's, per document. The worker sends the
-  state to every content script of a site it may read whenever it changes
-  (`extension-state`); each passes it on, field by field, only to a page that announced.
+  access is off (or connecting), the extension answers no page and sends it nothing,
+  not even a vouch. Until a document was told "on", the content script does not read its
+  events: it notes that the page spoke, without touching `detail` (in Chrome, reading an
+  object `detail` from another world runs the page's getters), and greets the page with
+  `hello` once on; told "on", it reads `detail` and takes only a string. A page can still
+  see that the extension is installed where it provides WebMCP itself (in browsers
+  without their own), and could try to time its own events, which the extension still
+  listens to. A document the content script told "on" hears
+  `{ v: 1, type: "update", on: false }` once when it goes off; the "told on" memory is
+  the content script's, per document. Back from the back/forward cache it asks the
+  worker again; once the extension was disabled, removed or updated
+  (`chrome.runtime.id` gone) it says "off" at the page's next event or `pageshow` and
+  then nothing. The worker sends the state to every content script of a site it may
+  read whenever it changes (`extension-state`), and again when host access changes;
+  each passes it on, field by field, only to a page that announced. A tab it can no
+  longer read (no address) hears only "off". A call with a vouch carries the state, so
+  that a page not told "on" yet (the call came first, or the worker did not answer) is
+  told before the vouch.
   A content script asks the worker for it
   with `handshake`, accepted only from a tab's top frame, at the page's first `hello`
   only: later ones are answered from the last state the worker sent. A worker that does
@@ -155,16 +168,20 @@ page can say that an AI app is connected through the extension
   origin; the page cannot tell which) gets no question from the library, only the
   page's `onConfirm` decides (DEC-215).
 - **The panel.** For the tab in front, when the page announced the library: "This page
-  has tab-mcp built in.", and when an AI app connected to the extension is also connected
-  to the page directly (same name and host, as the page announced its grants), that it
+  has tab-mcp built in." (also while AI access is off: the page spoke, nothing it said
+  was read), and when an AI app connected to the extension is also connected to the
+  page directly (known only once AI access is on and the page answered the extension's
+  `hello`) (same name and host, as the page announced its grants), that it
   sees the page's tools twice and to disconnect it in one of the two.
 - **No proof** of either side: a convenience between two parts the user trusts, not a
   security boundary (threat model A13, A14). Old and new mix: a page without the
   handshake hears nothing, an old extension says nothing, and its calls are unvouched
-  WebMCP calls, which the library does not ask. Client 0.21.0 and older takes "on" only
-  with a version, so with an extension after DEC-221 such a page shows no extension
-  (its vouches still work); a newer client ignores an older extension's version and
-  treats its "off" as no extension (DEC-221).
+  WebMCP calls, which the library does not ask. Client 0.21.0 and older takes "on" and
+  `hello` only with a version, so with an extension after DEC-221 such a page shows no
+  extension and does not answer the extension's `hello`: the panel says "This page has
+  tab-mcp built in." but has no "sees the page's tools twice" line until the page's own
+  AI apps change; its vouches still work. A newer client ignores an older extension's
+  version and treats its "off" as no extension (DEC-221).
 
 ## Filling in the code on the relay's page
 

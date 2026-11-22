@@ -19,9 +19,10 @@ the Git tag `client-v<version>`. The format follows
 
 - **The library takes the extension's "on" without a version** (DEC-221), as the
   tab-mcp browser extension after 0.3.2 sends it; a version an older extension sends is
-  ignored. While the extension's AI access is off it tells the page nothing, so
-  `extension` stays `undefined`, as without the extension; a page it served is told
-  once that it went off.
+  ignored. While AI access is off, the extension answers no page and sends it
+  nothing, so `extension` stays `undefined`, as without the extension; a page it served
+  is told once that it went off. Once on, the extension greets the page with `hello`,
+  and the library's answer tells it what the page announces.
 
 ## [0.21.0][client-0.21.0] - 2026-11-22
 

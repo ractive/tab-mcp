@@ -352,10 +352,17 @@ did, by connecting the extension.
   read; each passes them on only to such a page, field by field). Any page script can
   announce the library, so any page the extension may read can learn those names by
   pretending while AI access is on; not the version, the relay, the address or other
-  tabs. While AI access is off the content script says nothing to a page, of any type,
-  and marks nothing: through the handshake a page cannot tell an extension that is off
-  from none. A document the content script told "on" hears `on: false` once when it
-  goes off. Right before a tool runs that the user allowed, a vouch goes to such a page,
+  tabs. While AI access is off, the extension answers no page and sends it nothing, of
+  any type, and marks nothing; until a document was told "on" the content script does
+  not read its events either (not `detail`: Chrome copies an object `detail` into the
+  reading world and runs the page's getters, which a browser test checks for the store
+  and the test build). A page can still see that the extension is installed where it
+  provides WebMCP itself (in browsers without their own), and could try to time its own
+  events, which the extension still listens to. A document the content script told
+  "on" hears `on: false` once when it goes off, also after the back/forward cache
+  (asked again), after host access was withdrawn (the worker sends "off" to the tabs it
+  can no longer read), and after the extension was disabled or updated (at the page's
+  next event or `pageshow`). Right before a tool runs that the user allowed, a vouch goes to such a page,
   only to a document told "on": made only in `#allowedThenRun` after the user's answer (or the site's
   "allowed") and the same-tool check, never for a read-only tool, sent by the content
   script only after its own checks (listed from this document, the same read-only

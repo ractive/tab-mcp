@@ -320,7 +320,16 @@ export class Connection {
 			{
 				current: tabInFront,
 				list: askTools,
-				call: callInTab,
+				// With a vouch, the state too: the page may not have it yet.
+				call: (tabId, target, input, signal, vouch) =>
+					callInTab(
+						tabId,
+						target,
+						input,
+						signal,
+						vouch,
+						vouch === undefined ? undefined : this.handshakeState(),
+					),
 				settled: (tabId, signal) =>
 					settledPage({ tab: getTab, page: askPage }, tabId, signal),
 			},
@@ -1184,29 +1193,46 @@ export class Connection {
 	}
 
 	/**
-	 * Tell the pages when the state above changes: every tab's content
-	 * script of a site the extension may read hears it, and passes it on only
-	 * to a page that announced the library. Tabs the extension may not read
-	 * (no address) are left out.
+	 * Tell the pages when the state above changes (or, `again`, when host
+	 * access changed): every tab's content script of a site the extension
+	 * may read hears it, and passes it on only to a page that announced the
+	 * library. A tab the extension may not read (no address: host access
+	 * withdrawn, say) hears only "off": a content script left there from
+	 * before tells a page it told "on" that it is off, and nothing more
+	 * (DEC-221).
 	 */
-	#tellPages(): void {
+	#tellPages(again = false): void {
 		const state = this.handshakeState();
 		const told = JSON.stringify(state);
-		if (told === this.#told) return;
+		if (told === this.#told && !again) return;
 		this.#told = told;
 		const message: ContentRequest = { type: "extension-state", state };
+		const off: ContentRequest = {
+			type: "extension-state",
+			state: { ...state, on: false, apps: [] },
+		};
 		chrome.tabs.query({}).then(
 			(tabs) => {
-				for (const tab of tabs)
-					if (tab.id !== undefined && isSitePage(tab.url ?? ""))
-						chrome.tabs
-							.sendMessage(tab.id, message, { frameId: 0 })
-							.catch(() => {
-								// No content script there: nothing to tell.
-							});
+				for (const tab of tabs) {
+					const to =
+						tab.url === undefined
+							? off
+							: isSitePage(tab.url)
+								? message
+								: undefined;
+					if (tab.id !== undefined && to !== undefined)
+						chrome.tabs.sendMessage(tab.id, to, { frameId: 0 }).catch(() => {
+							// No content script there: nothing to tell.
+						});
+				}
 			},
 			() => {},
 		);
+	}
+
+	/** Host access was granted or withdrawn: the pages hear the state again. */
+	hostAccessChanged(): void {
+		this.#tellPages(true);
 	}
 
 	#status(): PanelState["status"] {
