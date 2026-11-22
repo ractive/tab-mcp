@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { buildCodeFieldScript } from "../scripts/code-field.ts";
 import {
 	boxAt,
+	caretSide,
 	type Edit,
 	LETTERS,
 	lettersOf,
@@ -248,6 +249,42 @@ describe("the box the caret is in", () => {
 		expect([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(boxAt)).toEqual([
 			0, 1, 2, 3, 5, 5, 6, 7, 8, 8,
 		]);
+	});
+});
+
+describe("where the drawn caret stands", () => {
+	test("in front of the box's letter, behind the last letter, in the middle of an empty box", () => {
+		const full = "ABCD-EFGH";
+		expect(
+			[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((c) => caretSide(c, full)),
+		).toEqual([
+			"before",
+			"before",
+			"before",
+			"before",
+			"before",
+			"before",
+			"before",
+			"before",
+			"before",
+			"after",
+		]);
+		expect([0, 1, 2, 3].map((c) => caretSide(c, "ABC"))).toEqual([
+			"before",
+			"before",
+			"before",
+			"empty",
+		]);
+		expect([3, 4].map((c) => caretSide(c, "ABCD"))).toEqual([
+			"before",
+			"empty",
+		]);
+		expect([4, 5, 6].map((c) => caretSide(c, "ABCD-E"))).toEqual([
+			"before",
+			"before",
+			"empty",
+		]);
+		expect(caretSide(0, "")).toBe("empty");
 	});
 });
 

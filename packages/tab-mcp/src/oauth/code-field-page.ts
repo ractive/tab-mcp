@@ -16,7 +16,7 @@
  * Type-checked with `tsconfig.browser.json` (the DOM), not with the relay.
  */
 
-import { boxAt, type Edit, tidy } from "./code-field.ts";
+import { boxAt, caretSide, type Edit, tidy } from "./code-field.ts";
 
 const field = document.getElementById("code");
 const row = field?.parentElement;
@@ -38,9 +38,17 @@ if (
 			start === field.selectionEnd
 				? boxAt(start)
 				: -1;
-		boxes.forEach((box, i) => {
-			box.classList.toggle("at", i === at);
-		});
+		// The classes go and come back after a reflow, so that the caret's blink
+		// starts again, visible, as a native caret's does.
+		for (const box of boxes)
+			box.classList.remove("at", "caret-after", "caret-empty");
+		const box = boxes[at];
+		if (box instanceof HTMLElement && start !== null) {
+			void box.offsetWidth;
+			box.classList.add("at");
+			const side = caretSide(start, field.value);
+			if (side !== "before") box.classList.add(`caret-${side}`);
+		}
 		row.classList.toggle("has-dash", field.value.includes("-"));
 	};
 

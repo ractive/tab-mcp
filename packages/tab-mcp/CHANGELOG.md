@@ -14,7 +14,8 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 ### Changed
 
 - The boxes of the connect page's code field are wider: the letters no longer nearly
-  fill them.
+  fill them. A thin blinking line, like a text cursor, stands in the box the cursor is
+  in (it stays steady for a user who asks for less motion).
 
 ## [0.13.2][relay-0.13.2] - 2026-11-22
 

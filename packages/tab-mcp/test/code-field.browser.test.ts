@@ -528,41 +528,205 @@ function advances(page: Page): Promise<{ font: string; worst: number }> {
 	})()`);
 }
 
+interface CaretLine {
+	box: number;
+	side: "before" | "after" | "empty";
+	/** The line's left and right edge, against the box's middle, in px. */
+	from: number;
+	to: number;
+	/** The letter's advance box, against the box's middle: half a `1ch`. */
+	half: number;
+	width: number;
+	height: number;
+	animation: string;
+	color: string;
+	letterColor: string;
+}
+
+/** The drawn caret lines: one per box that has one, measured from computed styles. */
+function caretLines(page: Page): Promise<CaretLine[]> {
+	return page.eval(`(() => {
+		const f = ${FIELD};
+		const probe = document.createElement("span");
+		probe.style.cssText = "position:absolute;visibility:hidden;width:1ch;font:" + getComputedStyle(f).font;
+		document.body.append(probe);
+		const ch = probe.getBoundingClientRect().width;
+		probe.remove();
+		const out = [];
+		document.querySelectorAll(".code-boxes > span").forEach((b, box) => {
+			if (b.classList.contains("code-dash")) return;
+			const cs = getComputedStyle(b, "::before");
+			if (cs.content === "none" || cs.content === "normal") return;
+			const r = b.getBoundingClientRect();
+			const left = r.left + parseFloat(getComputedStyle(b).borderLeftWidth) + parseFloat(cs.left);
+			const width = parseFloat(cs.borderLeftWidth);
+			const mid = (r.left + r.right) / 2;
+			out.push({
+				box,
+				side: b.classList.contains("caret-after") ? "after" : b.classList.contains("caret-empty") ? "empty" : "before",
+				from: left - mid,
+				to: left + width - mid,
+				half: ch / 2,
+				width,
+				height: parseFloat(cs.height),
+				animation: cs.animationName,
+				color: cs.borderLeftColor,
+				letterColor: getComputedStyle(f).color,
+			});
+		});
+		return out;
+	})()`);
+}
+
+/** Wait until exactly one caret line is drawn, then return it. */
+async function oneCaret(page: Page): Promise<CaretLine> {
+	const deadline = Date.now() + 3000;
+	let lines: CaretLine[] = [];
+	while (Date.now() < deadline) {
+		lines = await caretLines(page);
+		if (lines.length === 1) break;
+		await Bun.sleep(20);
+	}
+	expect(lines).toHaveLength(1);
+	return lines[0] as CaretLine;
+}
+
+/** Wait until no caret line is drawn. */
+async function noCaret(page: Page): Promise<void> {
+	const deadline = Date.now() + 3000;
+	let lines: CaretLine[] = [];
+	while (Date.now() < deadline) {
+		lines = await caretLines(page);
+		if (lines.length === 0) return;
+		await Bun.sleep(20);
+	}
+	expect(lines).toEqual([]);
+}
+
+/** The native caret is hidden exactly while a drawn one exists. */
+async function nativeCaretHidden(page: Page): Promise<boolean> {
+	return (await caretColor(page)) === "rgba(0, 0, 0, 0)";
+}
+
+/** The line stands in `box`, on `side`, a clear gap from the letter's advance box (or in the box's middle). */
+function expectCaret(line: CaretLine, box: number, side: CaretLine["side"]) {
+	expect(line.box).toBe(box);
+	expect(line.side).toBe(side);
+	expect(line.width).toBeGreaterThanOrEqual(2);
+	expect(line.height).toBeGreaterThan(0);
+	if (side === "before") expect(line.to).toBeLessThanOrEqual(-line.half - 0.5);
+	else if (side === "after")
+		expect(line.from).toBeGreaterThanOrEqual(line.half + 0.5);
+	else expect(Math.abs((line.from + line.to) / 2)).toBeLessThan(0.5);
+	// The field's text colour, as a native caret.
+	expect(line.color).toBe(line.letterColor);
+}
+
 describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
-	test("the box marks the caret and the input's own caret hides only then; one box when empty, full and in the middle, none with a selection", async () => {
+	test("a blinking line stands in the box at the caret, on the side of the real caret; the native caret hides exactly then", async () => {
 		const page = await openPairingPage();
-		expect(await caretColor(page)).toBe("rgba(0, 0, 0, 0)");
-		await atIs(page, [0]);
-		await typeKeys(page, "nhnxmnmh");
-		await atIs(page, [8]);
-		await caretAt(page, 3);
-		await atIs(page, [3]);
-		// A selection of several letters: the native highlight shows them, no
-		// box, and the native caret is back.
+		// Empty: the next letter goes to box 0.
+		expectCaret(await oneCaret(page), 0, "empty");
+		expect(await nativeCaretHidden(page)).toBe(true);
+		// Half typed: caret after "NHN", box 3 has no letter.
+		await typeKeys(page, "nhn");
+		expectCaret(await oneCaret(page), 3, "empty");
+		await caretAt(page, 1);
+		await atIs(page, [1]);
+		expectCaret(await oneCaret(page), 1, "before");
+		// A full code: every caret position of "NHNX-MNMH".
 		await clear(page);
-		await atIs(page, []);
-		expect(await caretColor(page)).not.toBe("rgba(0, 0, 0, 0)");
+		await typeKeys(page, "nhnxmnmh");
+		expect((await field(page)).value).toBe("NHNX-MNMH");
+		for (const [caret, box, side] of [
+			[0, 0, "before"],
+			[1, 1, "before"],
+			[2, 2, "before"],
+			[3, 3, "before"],
+			[4, 5, "before"],
+			[5, 5, "before"],
+			[6, 6, "before"],
+			[7, 7, "before"],
+			[8, 8, "before"],
+			[9, 8, "after"],
+		] as const) {
+			await caretAt(page, caret);
+			await atIs(page, [box]);
+			expectCaret(await oneCaret(page), box, side);
+			expect(await nativeCaretHidden(page)).toBe(true);
+			expect((await caretLines(page)).map((l) => l.animation)).toEqual([
+				"code-blink",
+			]);
+		}
+		// Four letters, caret at the end: the first box of the second group.
+		await clear(page);
+		await typeKeys(page, "nhnx");
+		expectCaret(await oneCaret(page), 5, "empty");
 		await page.close();
 	});
 
-	test("while an input method composes no box is marked and the native caret shows; the box is back afterwards", async () => {
+	test("no line and the native caret back: blurred, with a selection, while an input method composes", async () => {
 		const page = await openPairingPage();
-		await typeKeys(page, "nh");
-		await atIs(page, [2]);
+		await typeKeys(page, "nhnxmnmh");
+		await oneCaret(page);
+		await clear(page); // a selection of every letter
+		await noCaret(page);
+		expect(await nativeCaretHidden(page)).toBe(false);
+		await caretAt(page, 2);
+		await oneCaret(page);
 		await page.eval(
 			`${FIELD}.dispatchEvent(new CompositionEvent("compositionstart"))`,
 		);
-		await atIs(page, []);
-		expect(await caretColor(page)).not.toBe("rgba(0, 0, 0, 0)");
-		// A selection change during the composition paints no box either.
+		await noCaret(page);
+		expect(await nativeCaretHidden(page)).toBe(false);
+		// A selection change during the composition draws no line: a negative,
+		// so it is given 100 ms to show up.
 		await caretAt(page, 1);
 		await Bun.sleep(100);
-		await atIs(page, []);
+		expect(await caretLines(page)).toEqual([]);
 		await page.eval(
 			`${FIELD}.dispatchEvent(new CompositionEvent("compositionend"))`,
 		);
+		expectCaret(await oneCaret(page), 1, "before");
+		await page.eval(`${FIELD}.blur()`);
+		await noCaret(page);
+		expect(await nativeCaretHidden(page)).toBe(false);
+		await page.close();
+	});
+
+	test("the line blinks, and stands still when the user asks for less motion; moving the caret restarts the blink", async () => {
+		const page = await openPairingPage();
+		await typeKeys(page, "nhnx");
+		await oneCaret(page);
+		expect(
+			await page.eval(
+				`(() => { const b = document.querySelector(".code-boxes > .at"); const cs = getComputedStyle(b, "::before"); return { count: b.getAnimations({ subtree: true }).filter((x) => x.animationName === "code-blink").length, duration: cs.animationDuration, iterations: cs.animationIterationCount, easing: cs.animationTimingFunction }; })()`,
+			),
+		).toEqual({
+			count: 1,
+			duration: "1.1s",
+			iterations: "infinite",
+			easing: "steps(1)",
+		});
+		// Moved: the new box's blink starts at its visible phase.
+		await caretAt(page, 1);
 		await atIs(page, [1]);
-		expect(await caretColor(page)).toBe("rgba(0, 0, 0, 0)");
+		expect(
+			await page.eval<number>(
+				`document.querySelector(".code-boxes > .at").getAnimations({ subtree: true })[0].currentTime`,
+			),
+		).toBeLessThan(500);
+		expect(
+			Number(
+				await page.eval<string>(
+					`getComputedStyle(document.querySelector(".code-boxes > .at"), "::before").opacity`,
+				),
+			),
+		).toBe(1);
+		await page.send("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+		});
+		expect((await caretLines(page)).map((l) => l.animation)).toEqual(["none"]);
 		await page.close();
 	});
 

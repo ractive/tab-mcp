@@ -92,3 +92,19 @@ export function tidy(raw: string, caret: number, edit?: Edit): Field {
 export function boxAt(caret: number): number {
 	return caret === HALF ? HALF + 1 : Math.min(Math.max(caret, 0), LETTERS);
 }
+
+/** Where the drawn caret stands in its box. */
+export type CaretSide = "before" | "after" | "empty";
+
+/**
+ * Where the caret at `caret` in `value` is drawn in the box `boxAt` names:
+ * in front of the box's letter, behind it (the end of a full code), or, when
+ * the box has no letter yet, in the middle of the box.
+ */
+export function caretSide(caret: number, value: string): CaretSide {
+	const box = boxAt(caret);
+	const letter = box < HALF ? box : box - 1;
+	if (letter >= lettersOf(value).length) return "empty";
+	// The box's letter stands at index `box` of the text (the dash is at 4).
+	return caret > box ? "after" : "before";
+}

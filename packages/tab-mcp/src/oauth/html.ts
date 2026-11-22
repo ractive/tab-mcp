@@ -58,11 +58,16 @@ label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
 .code-field.enhanced:has(.at) input { caret-color: transparent; }
 .code-field.enhanced .code-boxes { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: 22.5ch; pointer-events: none; border-radius: 0.4rem; }
 .code-field.enhanced:has(input:focus-visible) .code-boxes { outline: 3px solid var(--accent); outline-offset: 2px; }
-.code-boxes > span { width: 2.1ch; margin: 0 0.2ch; border: 2px solid GrayText; border-radius: 0.3em; background: Field; }
+.code-boxes > span { position: relative; width: 2.1ch; margin: 0 0.2ch; border: 2px solid GrayText; border-radius: 0.3em; background: Field; }
 .code-boxes > .code-dash { display: flex; align-items: center; justify-content: center; border-color: transparent; background: none; }
 .code-boxes > .code-dash::before { content: ""; width: 0.8ch; border-top: 2px solid GrayText; }
 .code-field.has-dash .code-dash::before { visibility: hidden; }
-.code-boxes > .at { border-width: 3px; border-color: var(--accent); box-shadow: inset 0 -0.18em 0 var(--accent); }
+.code-boxes > .at { border-color: var(--accent); }
+.code-boxes > .at::before { content: ""; position: absolute; top: 50%; height: 1.1em; margin-top: -0.55em; left: calc((50% - 0.5ch - max(2px, 0.08em)) / 2); border-left: max(2px, 0.08em) solid FieldText; animation: code-blink 1.1s steps(1) infinite; }
+.code-boxes > .at.caret-after::before { left: calc(50% + 0.5ch + (50% - 0.5ch - max(2px, 0.08em)) / 2); }
+.code-boxes > .at.caret-empty::before { left: calc(50% - max(2px, 0.08em) / 2); }
+@keyframes code-blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .code-boxes > .at::before { animation: none; } }
 @media (forced-colors: active) {
   .code-field.enhanced input { forced-color-adjust: none; color: CanvasText; }
   .code-field.enhanced:has(input:focus-visible) .code-boxes { outline-color: Highlight; }
@@ -70,8 +75,8 @@ label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
   .code-boxes > span { border-color: CanvasText; background: Canvas; }
   .code-boxes > .code-dash { border-color: transparent; background: none; }
   .code-boxes > .code-dash::before { border-color: CanvasText; }
-  .code-boxes > .at { border-color: Highlight; box-shadow: inset 0 -0.18em 0 Highlight; }
-  .code-field.enhanced:has(.at) input { caret-color: auto; }
+  .code-boxes > .at { border-color: Highlight; }
+  .code-boxes > .at::before { border-left-color: CanvasText; }
 }
 input[type="text"]:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 1.25rem; }

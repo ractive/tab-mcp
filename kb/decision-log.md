@@ -4837,11 +4837,22 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   the letter after it. Nothing happens while an input method composes, and nothing
   submits by itself. It removes `maxlength`, which would cut a paste with spaces around
   it before the script could tidy it, and marks the field as enhanced, which draws the
-  boxes and highlights the box the caret is in. That box stands in for the input's own
-  caret, which is hidden only while a box is highlighted: it shows again with a
-  selection, during an input method's composition (the script marks no box then), and in
-  forced-colors mode (the highlighted box differs there by `Highlight` alone). The box
-  has a thicker border and a bar along its bottom edge besides its colour. The rules are pure functions in
+  boxes and marks the box the caret is in (`.at`, a 2px accent border). The input's own
+  caret is hidden only while a box is marked (`:has(.at)`); a drawn caret takes its
+  place (owner, 2026-11-22: the first stand-in, a 3px border with a bar along the box's
+  bottom edge, read as an odd double shape; "thin border and the blinking line"). The
+  caret is a pseudo-element of the marked box: a border-left of `max(2px, 0.08em)` in
+  the field's text colour (`CanvasText` in forced colours, so it shows there too), 1.1em
+  tall, blinking in 1.1 s with `steps(1)`, visible first, and steady under
+  `prefers-reduced-motion`. It stands in front of the box's letter, centred in a box
+  without a letter, and behind the last letter at the end of a full code (`caretSide`
+  in `code-field.ts`: the caret before the letter's index in the text is "before", after
+  it "after"; in front of the dash it is the box after it, "before"), midway between
+  the box's border and the letter's advance box so it touches neither. The script takes
+  the classes `at`, `caret-after` and `caret-empty` off and puts them back after a
+  reflow on every paint, which restarts the blink visible, as a native caret does. No
+  box is marked, so the native caret shows, with a selection, while an input method
+  composes and when the field is not focused. The rules are pure functions in
   `src/oauth/code-field.ts` with unit tests; `src/oauth/code-field-page.ts` (type-checked
   with the DOM in `tsconfig.browser.json`) wires them to the field.
 - **Undo is not kept** (review of PR 194). Setting the field's `value` clears the
