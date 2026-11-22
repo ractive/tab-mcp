@@ -179,7 +179,8 @@ does not export and which refuses to run outside development (DEC-059).
   gone, so an allowance outlives the user's attention for up to the grant's 90 days;
   "everything" also covers tools the user has not seen. A tool whose title or
   description changed asks again; the page's own `onConfirm` is not asked for an
-  allowed call. Only relay AI apps can be allowed, never WebMCP agents or served ports.
+  allowed call. Only relay AI apps can be allowed, never WebMCP agents or served ports
+  (agents in the browser are not asked by the library at all, A14).
 
 ### A7: Cross-site attacks on the relay's pages
 
@@ -531,13 +532,19 @@ in the browser call them without pairing and without an identity (`client.kind`
 0.20 consequential tools were therefore mirrored only when their `callers` listed
 `"webmcp"`. That did not stop such an agent, which clicked the page's own controls
 instead, with no question (DEC-209): now every tool is mirrored unless its `callers`
-leave `"webmcp"` out, and calls get the same schema check and confirmation, never
-"Always allow". Only the native object is
+leave `"webmcp"` out, and calls get the same schema check, never "Always allow". In
+0.20 they got the library's dialog too; with ChatGPT's browser the call waited on it
+until the agent's own timeout (40 to 50 s), then the agent clicked "Allow once" itself
+(2026-11-22). Since DEC-215 the library shows such an agent no question: a tool that
+asks is registered with `consequentialHint: true`, so that the agent asks its user in
+its own chat, and the page's `onConfirm`, if any, decides in code; without one the call
+runs. Residual risk: an agent that ignores the hint runs a consequential tool unasked;
+it could already click the page's own controls or the dialog. Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a
-proof: the next WebMCP call of that tool with equal arguments within 2 s runs without the
-page's question and `onConfirm`, once, for the tool registered under that name when the
+proof: the next WebMCP call of that tool with equal arguments within 2 s runs without
+`onConfirm`, once, for the tool registered under that name when the
 vouch came. Anything that could fake a vouch already runs in the page and could skip the
 question itself: a convenience between two parts the user trusts, not a security
 boundary (a proof would need Chrome's `externally_connectable` or an attestation signed
@@ -550,8 +557,8 @@ A withdrawal cannot close that window (it comes only after `executeTool` settled
 the vouch stays usable until it comes: a moment after a failure, up to the 2 s when
 `executeTool` neither runs the tool nor settles, or on a page that takes vouches with
 its own code and ignores `withdraw`. `trustExtension: false`
-asks every call. The full analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119,
-DEC-207).
+treats every WebMCP call as an agent in the browser's (`onConfirm` decides). The full
+analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119, DEC-207, DEC-215).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 

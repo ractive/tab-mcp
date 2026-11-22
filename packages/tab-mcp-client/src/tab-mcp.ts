@@ -272,7 +272,7 @@ export class TabMcp extends EventTarget {
 	readonly #calls: CallHost = {
 		registry: this.#registry,
 		confirm: (request) => this.#confirm(request),
-		ownConfirm: () => !!this.#onConfirm,
+		onConfirm: () => this.#onConfirm,
 		toolCallStarted: (call) => this.#emit("toolcall", call),
 		toolCallEnded: (call) => this.#emit("toolcallend", call),
 	};
@@ -1035,13 +1035,15 @@ export class TabMcp extends EventTarget {
 	 * and Allow, and Always allow with `alwaysAllow` (what runs without
 	 * `onConfirm`), in `options.document` (default: the global one). An
 	 * `onConfirm` may hand some calls to it. A call the user allowed for its
-	 * AI app resolves `true` unasked. Resolves `false` where there is no
-	 * document.
+	 * AI app resolves `true` unasked. A WebMCP call resolves `true` unasked
+	 * too, without loading the dialog: an agent in the browser would answer
+	 * it itself (DEC-215). Resolves `false` where there is no document.
 	 */
 	confirmInPage(
 		request: ConfirmRequest,
 		options: { document?: Document } = {},
 	): Promise<boolean> {
+		if (request.client.kind === "webmcp") return Promise.resolve(true);
 		const doc = options.document ?? globalThis.document;
 		if (doc === undefined) return Promise.resolve(false); // nobody to ask: decline
 		return import("./confirm.ts").then((ui) =>

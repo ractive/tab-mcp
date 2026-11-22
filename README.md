@@ -92,7 +92,7 @@ Try it without installing anything. These pages connect to the hosted relay
 | Page | What your AI app can do there |
 |---|---|
 | [Diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) | draw, read and rearrange a diagram of boxes and arrows with you, and get it as a picture |
-| [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (deleting asks you in the page first); based on [examples/react-todo](examples/react-todo) |
+| [Todo (React)](https://ractive.ch/tab-mcp/examples/todo/) | list, add, complete and delete todos in a React single-page app (an AI app's delete asks you in the page first); based on [examples/react-todo](examples/react-todo) |
 | [saturnus](https://ractive.ch/saturnus/) | use an HP 48 calculator emulator |
 | [Sign-in example](https://tab-mcp-login.ractive.ch/) | read, add and delete notes; the AI app connects by signing in with the same Google account as the page, without a code ([identity binding](#identity-binding)) |
 
@@ -262,7 +262,7 @@ worker, pass `storage` and `onConfirm`: it has no `localStorage` and no document
 Mark tools whose effect the user cannot undo in the page, or that act outside it (delete
 for good, send, buy, change data on the server), with
 `annotations: { consequentialHint: true }`: the page then asks the user before each call
-("Always allow" only if the page turns on `alwaysAllow`). A change the user sees and can
+of an AI app ("Always allow" only if the page turns on `alwaysAllow`). A change the user sees and can
 take back in the page, such as `add_note` above, needs no question.
 
 A site with its own AI assistant on the page can serve the tools to it over a
@@ -273,8 +273,11 @@ the site's own chat. See
 
 `new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
 where the browser has it, so that agents in the browser call them without pairing, with
-the same argument check and confirmation, tools that ask included. `callers` in a
-tool's registration says which callers see it. See [WebMCP](packages/tab-mcp-client/README.md#webmcp)
+the same argument check, tools that ask included. Such an agent drives the tab and could
+click "Allow" itself, so the library shows it no question: a tool that asks is marked
+`consequentialHint` for it, so that it asks its user in its own chat, and the page's
+`onConfirm` can still refuse it in code. `callers` in a tool's registration says which
+callers see it. See [who asks](packages/tab-mcp-client/README.md#who-asks-before-a-tool-that-asks-runs)
 in the client README.
 
 The [client README](packages/tab-mcp-client/README.md) covers the whole API; the

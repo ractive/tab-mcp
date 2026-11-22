@@ -36,7 +36,7 @@ const POLYFILL_SRI =
  * The test page: the library with `webmcp: true` (`?off`: without), its
  * tools, and what the harness reads. `?native=<name>` registers a tool of
  * that name natively before the library does; `?poly` loads `@mcp-b/global`
- * first; `?dialog` asks with the library's own confirmation. `agent()`
+ * first; `?default` has no `onConfirm` (the library's own behaviour). `agent()`
  * calls a tool as an agent does, through the native `executeTool()`, which
  * hands back the result as JSON text.
  */
@@ -61,7 +61,7 @@ const mcp = new TabMcp({
 	storage: null,
 	alwaysAllow: true,
 	webmcp: !q.has("off"),
-	...(q.has("dialog") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
+	...(q.has("default") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
 });
 mcp.addEventListener("toolcall", (e) => calls.push({ start: e.detail.tool, client: e.detail.client }));
 mcp.addEventListener("toolcallend", (e) => calls.push({ end: e.detail.tool, outcome: e.detail.outcome, client: e.detail.client }));
@@ -314,34 +314,39 @@ on(
 );
 
 on(
-	'the default confirmation offers no "Always allow" to an agent in the browser',
+	"without onConfirm a tool that asks runs for an agent in the browser: no dialog, the confirmation's chunk not loaded (DEC-215)",
 	async () => {
-		const page = await open("?dialog");
+		const page = await open("?default");
 		try {
-			const call = page.eval(`agent("wipe_named", {})`);
-			let buttons: string[] = [];
-			for (let i = 0; i < 100 && buttons.length === 0; i++) {
-				await Bun.sleep(50);
-				buttons = await page.eval<string[]>(
-					`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].map((b) => b.textContent)`,
-				);
-			}
-			expect(buttons).toEqual(["Don't allow", "Allow once"]);
+			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
+				ok: true,
+				value: "wiped",
+			});
+			expect(await page.eval(`agent("wipe", {})`)).toEqual({
+				ok: true,
+				value: "wiped",
+			});
+			expect(await page.eval(`document.querySelector("dialog") === null`)).toBe(
+				true,
+			);
 			expect(
 				await page.eval(
-					`document.querySelector("dialog.tab-mcp-confirm").textContent.includes("An agent in this browser wants to run")`,
+					`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.startsWith("/lib/confirm-"))`,
+				),
+			).toEqual([]);
+			// The page's record still lists the calls, with their caller.
+			expect(await page.eval("calls")).toEqual([
+				{ start: "wipe_named", client: { kind: "webmcp" } },
+				{ end: "wipe_named", outcome: "ok", client: { kind: "webmcp" } },
+				{ start: "wipe", client: { kind: "webmcp" } },
+				{ end: "wipe", outcome: "ok", client: { kind: "webmcp" } },
+			]);
+			// The agent is still told that the tool is consequential.
+			expect(
+				await page.eval(
+					`native.getTools().then((ts) => ts.find((t) => t.name === "wipe").annotations.consequentialHint)`,
 				),
 			).toBe(true);
-			await page.eval(
-				`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].find((b) => b.textContent === "Don't allow").click()`,
-			);
-			expect(await call).toEqual({
-				ok: true,
-				value: '{"error":"The user did not allow wipe_named to run."}',
-			});
-			expect(
-				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
-			).toEqual(["declined"]);
 		} finally {
 			await page.close();
 		}
@@ -349,26 +354,17 @@ on(
 );
 
 on(
-	"a call the agent cancels aborts execute's signal and closes the dialog (review of PR 103)",
+	"a call the agent cancels while onConfirm decides ends cancelled (review of PR 103)",
 	async () => {
-		const page = await open("?dialog");
+		const page = await open();
 		try {
-			const call = page.eval(`agent("wipe_named", {}, 300)`);
-			let open = false;
-			for (let i = 0; i < 100 && !open; i++) {
-				await Bun.sleep(20);
-				open = await page.eval<boolean>(
-					`document.querySelector("dialog.tab-mcp-confirm") !== null`,
-				);
-			}
-			expect(open).toBe(true);
-			expect(await call).toEqual({ ok: false, error: "AbortError" });
-			await Bun.sleep(50);
-			expect(
-				await page.eval(
-					`document.querySelector("dialog.tab-mcp-confirm") === null`,
-				),
-			).toBe(true);
+			// Never answers (not awaited here: the comma returns true).
+			await page.eval("(answer = new Promise(() => {})), true");
+			expect(await page.eval(`agent("wipe_named", {}, 300)`)).toEqual({
+				ok: false,
+				error: "AbortError",
+			});
+			expect(await page.eval("asked")).toEqual([{ kind: "webmcp" }]);
 			expect(
 				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
 			).toEqual(["cancelled"]);

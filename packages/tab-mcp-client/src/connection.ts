@@ -28,9 +28,13 @@ export { pieces, servePort } from "./serve.ts";
  * For the core: a WebMCP call of a mirrored tool (iteration 25), on the
  * same path as an AI app's (`webMcpCall` in `mcp.ts`). `by`: the tab-mcp
  * browser extension vouched for this very call, for that AI app (DEC-207):
- * the user allowed it there, so the page neither asks nor calls `onConfirm`;
- * everything else (the arguments' check, the events, the tool still being
- * the one registered) is as for any call.
+ * the user allowed it there, so the page neither asks nor calls `onConfirm`.
+ * Any other WebMCP call comes from an agent that drives the tab and would
+ * answer the library's dialog itself (DEC-215): the page's own `onConfirm`
+ * decides a tool that asks, in code; without one the tool runs, and the
+ * confirmation's chunk is not loaded. Everything else (the arguments'
+ * check, the events, the tool still being the one registered) is as for
+ * any call.
  */
 export function callFromWebMcp(
 	host: CallHost,
@@ -41,19 +45,19 @@ export function callFromWebMcp(
 ): Promise<unknown> {
 	const context = callContext(host, "webmcp");
 	return by === undefined
-		? webMcpCall(context, tool, input, signal, { kind: "webmcp" })
-		: webMcpCall(
-				{ ...context, confirm: () => Promise.resolve(true) },
+		? webMcpCall(
+				{ ...context, confirm: host.onConfirm() ?? (() => true) },
 				tool,
 				input,
 				signal,
-				{
-					kind: "webmcp",
-					via: "tab-mcp-extension",
-					name: by.name,
-					host: by.host,
-				},
-			);
+				{ kind: "webmcp" },
+			)
+		: webMcpCall({ ...context, confirm: () => true }, tool, input, signal, {
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				name: by.name,
+				host: by.host,
+			});
 }
 
 /** How long `connect()` waits for the relay's `session`. */

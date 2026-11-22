@@ -2206,6 +2206,10 @@ an extension.
 
 ## DEC-115: The client library can also register its tools with WebMCP (owner)
 
+**Amended by DEC-209 and DEC-215:** consequential tools are mirrored too, and the page's
+dialog that this entry calls weaker against an agent in the browser is not shown to it
+at all; the page's `onConfirm` decides such a call in code.
+
 2026-11-08. When a page asks for it (`webmcp: true`), `tab-mcp-client` registers its tools
 also with `document.modelContext.registerTool()` where the browser has native WebMCP
 (iteration 25), so agents in the browser can use them. MCP Apps' SDK does the same for
@@ -2847,6 +2851,10 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
 
 ## DEC-143: The client follows the WebMCP draft of 2026-11-12
 
+**Amended by DEC-215** (after DEC-209): `consequentialHint ?? destructiveHint` still sets
+the native `consequentialHint`, but no longer decides a question of the library for a
+WebMCP call: an agent in the browser gets none, only the page's `onConfirm`.
+
 2026-11-13, iteration 34 (review of 2026-11-13, WM 3, 4, 5, 6, 9, 10, 11). Amends
 DEC-119 and DEC-120; keeps DEC-115.
 
@@ -3424,6 +3432,10 @@ owner on 2026-11-13. Amends DEC-124's advice.
 - In the lazy chunk; no change to the core.
 
 ## DEC-165: `callers` per tool replaces the `webmcp` registration option (owner)
+
+**Amended by DEC-215** (after DEC-209): every tool is mirrored by default, and a
+mirrored tool that asks gets no question from the library for an agent in the browser;
+`callers` without `"webmcp"` is how a page keeps such a tool from it.
 
 2026-11-14, iteration 40. The owner ruled out reusing `exposedTo`: in the WebMCP draft it
 is a list of origins and is passed through to the native registration (DEC-143).
@@ -4701,6 +4713,10 @@ unchanged; the audit's recommendation for the rest.
 
 ## DEC-209: Tools that ask go to WebMCP too; `callers` is for privacy and identity (owner)
 
+**Amended by DEC-215:** a WebMCP call that the tab-mcp browser extension did not vouch
+for no longer gets the library's dialog: a tool that asks runs for it unless the page's
+own `onConfirm` refuses it. "What asks now" below is the rule of 0.20 only.
+
 2026-11-21. Replaces the rule "consequential tools only when named" of DEC-115 (kept in
 DEC-143 and DEC-165): with `webmcp: true` every tool is mirrored, those marked
 `consequentialHint` or `destructiveHint` included, unless its `callers` leave
@@ -4989,3 +5005,60 @@ tools. The hint has nothing to do with it.
 - **A change of the hint is a new tool:** the bridge re-registers a tool when anything
   the content script sends for it changes, the hint included, so the AI app gets a
   tools-changed notice when a page registers a tool again with another hint.
+
+## DEC-215: No question from the library for an agent in the browser (owner)
+
+2026-11-22. "Yes, stop asking. It makes no sense." (the owner). Amends DEC-209, and what
+DEC-115, DEC-143 and DEC-165 say about the question for WebMCP callers: for a WebMCP
+call that the tab-mcp browser extension did not vouch for, the library never shows its
+own confirmation dialog. A tool that asks runs, unless the page's own `onConfirm`
+refuses it.
+
+A page's tool has three kinds of caller:
+
+| Caller | Can it click in the tab? | Who asks |
+|---|---|---|
+| An AI app through the relay | no | the page (the library's dialog or `onConfirm`): unchanged |
+| An AI app through the tab-mcp browser extension (a WebMCP call the extension vouched for, DEC-207) | no | the extension, in its side panel: unchanged |
+| An agent in the browser (a WebMCP call nobody vouched for) | yes, it drives the tab | the agent, in its own chat; the page's `onConfirm` if it has one; no longer the library's dialog |
+
+- **What was seen.** ChatGPT's built-in browser on ractive.ch's todo example (client
+  0.20.0, `delete_todos` marked destructive), three runs. Run 1: ChatGPT asked the user
+  in its chat, then did not call the tool at all and clicked each todo's Delete button
+  instead, because the tool's description said the page asks and it expected a second
+  confirmation. Runs 2 and 3: it asked the user in its chat, called `delete_todos`, the
+  call waited on the library's dialog until ChatGPT's own timeout (about 40 to 50 s), and
+  then the agent clicked "Allow once" itself. The owner never saw the dialog; the agent's
+  own screenshot shows it, "Allow once" greyed until its 750 ms delay ran out in a page
+  the automation keeps focused and visible.
+- **Why.** For this caller the question is answered by the party it is meant to check,
+  costs most of a minute, and looks like protection without being any. What protected
+  the user was the agent asking in its own chat, which is what WebMCP's
+  `consequentialHint` is for. The native registration keeps `consequentialHint: true`
+  for such a tool (`consequentialHint ?? destructiveHint`, DEC-143), so the agent is told
+  to ask.
+- **What an author can still do.** `onConfirm` (`TabMcpOptions.onConfirm`, or the
+  provider's in React) is still called for such a call, with `client.kind` `"webmcp"` and
+  no `via`: it is the page's own code and can decide without showing anything, such as
+  refusing every WebMCP caller or applying a rule. Anything it shows the agent can click
+  too, so it decides in code. `callers` without `"webmcp"` keeps a tool from WebMCP
+  altogether. `TabMcp.confirmInPage()` (and the confirmation chunk's `confirmInPage`)
+  resolves `true` for a WebMCP call without showing anything: an `onConfirm` that hands
+  such a call to it, as React's provider does without a handler of the page, does what
+  the library does without `onConfirm`. With `trustExtension: false` a vouched call is
+  treated like any other WebMCP call.
+- **What does not change.** Calls the extension vouched for and calls of AI apps through
+  the relay or a port; "Always allow" and the switches (never offered for WebMCP calls).
+  The page's record of calls (`toolcall`, `toolcallend`) still lists the call, with
+  `client: { kind: "webmcp" }`.
+- **What went.** The confirmation's chunk is not loaded for such a call; the text
+  `ui.strings.clientWebMcp` ("An agent in this browser"), which only the dialog used for
+  this caller, is removed without an alias.
+- **Texts that promise a question.** A tool description that says "the page asks"
+  pushed ChatGPT away from the tool. Descriptions say what a tool does and that it
+  cannot be undone, not that a question follows ("Delete one or more todos by their ids
+  from list_todos, in one call. Deleted todos cannot be restored.").
+- **Residual risk.** An agent that ignores the hint runs a consequential tool unasked.
+  It could already click the page's own controls or the library's dialog.
+- A breaking change in behaviour (a type check does not see it), in the client's
+  changelog under Breaking.

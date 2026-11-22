@@ -43,7 +43,8 @@ function TodoList() {
   only when the name, title, description, schemas or annotations change, or
   `options.callers` or `options.exposedTo` (by value). A duplicate name throws from render (use an error boundary).
 - `webmcp` on the provider registers the tools with the browser's WebMCP too, tools that
-  ask included; `useTool(tool, { callers: ["relay", "local"] })` keeps one out
-  (SKILL.md, section 5).
+  ask included; the library shows an agent in the browser no question (the provider's
+  `onConfirm`, if given, still decides in code); `useTool(tool, { callers: ["relay",
+  "local"] })` keeps one out (SKILL.md, section 5).
 - `useToolCalls({ limit })` lists the AI app's recent calls; `ConnectButton` opens the
   dialog and labels itself by state.

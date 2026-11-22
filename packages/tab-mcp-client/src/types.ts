@@ -47,7 +47,10 @@ export interface RelayClient {
 /**
  * An agent in this browser that calls a mirrored tool through WebMCP
  * (`webmcp: true`). Not paired and not identified: nothing more is known,
- * unless the tab-mcp browser extension vouched for the call (DEC-207).
+ * unless the tab-mcp browser extension vouched for the call (DEC-207). Such
+ * an agent can drive the tab and click whatever the page shows, so the
+ * library never shows it its confirmation (DEC-215): only the page's own
+ * `onConfirm` decides, in code.
  */
 export interface WebMcpClient {
 	kind: "webmcp";
@@ -131,8 +134,8 @@ export interface ServeOptions {
 	 * `onConfirm`; a throw is a refusal. `request.signal` aborts when the call
 	 * is cancelled, times out or the serve closes. The answer must come from
 	 * the user: never let the other end of the port answer it, since that is
-	 * the caller that wants the tool to run. Calls through the relay and
-	 * WebMCP keep the page's `onConfirm` or dialog.
+	 * the caller that wants the tool to run. Calls through the relay keep the
+	 * page's `onConfirm` or dialog, WebMCP calls the page's `onConfirm`.
 	 */
 	onConfirm?: ConfirmHandler;
 	/**
@@ -209,9 +212,11 @@ export interface RegisterToolOptions {
 	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (agents
 	 * in the browser, with `TabMcpOptions.webmcp` on). Others neither list nor
 	 * call it: for them it does not exist. By default all of them, tools that
-	 * ask included (DEC-209): each caller gets the same question. Leave a
-	 * caller out for privacy or identity, e.g. `["local"]` for data the site's
-	 * own assistant may read but an AI app through the relay may not.
+	 * ask included (DEC-209). Leave a caller out for privacy or identity, e.g.
+	 * `["local"]` for data the site's own assistant may read but an AI app
+	 * through the relay may not, or `["relay", "local"]` for a tool an agent
+	 * in the browser must not run: the library does not ask such an agent
+	 * (DEC-215).
 	 */
 	callers?: readonly ToolCaller[];
 	/**
@@ -346,7 +351,16 @@ export interface TabMcpOptions {
 	 * to open when the page is not open; at most 64 characters.
 	 */
 	appName?: string;
-	/** Approves consequential tool calls; default: a dialog in the page. */
+	/**
+	 * Approves consequential tool calls; default: a dialog in the page. It
+	 * gets every such call of an AI app through the relay and of an agent in
+	 * the browser (WebMCP), not one the tab-mcp browser extension vouched for.
+	 * An agent in the browser is never shown the library's dialog: it drives
+	 * the tab and could answer it itself (DEC-215), and it can click whatever
+	 * this handler shows too. For it, decide in code (`request.client.kind`
+	 * is `"webmcp"`), or keep the tool from it with `callers`; without a
+	 * handler its call runs.
+	 */
 	onConfirm?: ConfirmHandler;
 	/**
 	 * Let the user allow tools in the library's dialogs, so that their calls
@@ -402,9 +416,11 @@ export interface TabMcpOptions {
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
 	 * in the browser can call them, without pairing. Off by default. Every
 	 * tool goes there unless its `callers` leave `"webmcp"` out, tools that ask
-	 * included: they ask every WebMCP call, a tool marked only `destructiveHint`
-	 * too (WebMCP has no `destructiveHint`; DEC-209). A failed native
-	 * registration only warns in the console.
+	 * included, marked `consequentialHint` (a tool marked only
+	 * `destructiveHint` too: WebMCP has no `destructiveHint`; DEC-209), so
+	 * that the agent asks its user. The library shows such an agent no
+	 * question (DEC-215): its call runs unless `onConfirm` refuses it. A
+	 * failed native registration only warns in the console.
 	 *
 	 * With it, the page and the tab-mcp browser extension know of each other
 	 * (DEC-207): `extension` says which AI apps reach the page through it,
@@ -414,9 +430,9 @@ export interface TabMcpOptions {
 	webmcp?: boolean;
 	/**
 	 * With `webmcp: true`: a WebMCP call the tab-mcp browser extension vouches
-	 * for runs without the page's question and without `onConfirm` (the user
-	 * allowed exactly that call there, a moment before). On by default;
-	 * `false` asks every WebMCP call as without the extension. `extension`
+	 * for runs without `onConfirm` (the user allowed exactly that call there,
+	 * a moment before). On by default; `false` treats it as any other WebMCP
+	 * call: `onConfirm` decides, without one it runs (DEC-215). `extension`
 	 * is reported either way.
 	 */
 	trustExtension?: boolean;
