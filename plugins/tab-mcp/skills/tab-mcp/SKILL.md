@@ -13,7 +13,8 @@ is the full reference; read the section you need there when this skill is not en
 [CHANGELOG](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/CHANGELOG.md)
 says what changed between versions. The package ships this skill for its own version as
 `node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md`: when the project has another
-version installed, follow that copy.
+version installed, follow that copy; an installed version without it is older than this
+skill, so update the package first.
 
 tab-mcp lets AI apps call tools that a web page offers while it is open in a browser tab.
 The page uses the browser library `@ractive-ch/tab-mcp-client`, which connects to a
@@ -115,10 +116,13 @@ Rules for tools:
   going, and its late result is dropped. `client` names the caller:
   `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared
   `name`), `{ kind: "local", id, name? }` for the site's own assistant on a served port
-  (what the page passed to `serve`, section 3), or `{ kind: "webmcp" }` for an agent in
-  the browser, of which nothing more is known. Check `client.kind` before reading `host`;
-  a label for a log has three cases, e.g. `kind === "relay" ? name ?? host : kind ===
-  "local" ? name ?? id : "an agent in this browser"`.
+  (what the page passed to `serve`, section 3), or `{ kind: "webmcp", via?, name?,
+  host? }` for an agent in the browser: `via: "tab-mcp-extension"` with the AI app's
+  `name` and verified `host` when the tab-mcp browser extension ran the call for an AI
+  app connected to it (section 5), else nothing more is known. Check `client.kind`
+  before reading `host`; a label for a log, e.g. `kind === "relay" ? name ?? host :
+  kind === "local" ? name ?? id : via ? (name ?? host) + " through the tab-mcp browser
+  extension" : "an agent in this browser"`.
 - Annotations: `readOnlyHint` for tools that only read; `consequentialHint` for tools
   whose effect cannot be undone in the page or reaches outside it (section 4);
   `untrustedContentHint` for results that contain text from the user, another AI app or
@@ -313,6 +317,17 @@ await mcp.registerTool(deleteNoteTool); // asks, also an agent in the browser
 - A WebMCP call gets the same argument check and confirmation (the dialog names the caller
   "An agent in this browser", never offers "Always allow"), and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`.
+- **The tab-mcp browser extension.** With `webmcp: true` the page and the extension
+  shake hands. A call the user has just allowed in the extension (the same tool, equal
+  arguments, within 2 seconds) runs without the page's question and without
+  `onConfirm`, so `onConfirm` is not a hook that sees every call; its caller is
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`. `trustExtension: false`
+  on `TabMcp` asks every WebMCP call anyway. `mcp.extension` (event
+  `extensionchange`, React: `extension` of `useTabMcpState()`) is
+  `{ name, version, apps, whileInFront }` while the extension serves the page, `apps`
+  being the AI apps connected through it (`{ name, host }`), else `undefined`; the
+  connect dialog already says so. Details:
+  [With the tab-mcp browser extension](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md#with-the-tab-mcp-browser-extension).
 - The agent gets what `execute` returned. A failure (invalid arguments, "Don't allow", a
   tool that is gone, a thrown error, an `isError` result) comes back as
   `{ error: "<message>" }`, not as a rejection, which Chrome would hand the agent as a
@@ -401,7 +416,9 @@ first-byte limits of CDNs happy. Health check: `GET /healthz`.
 - A retry loop around `connect()`: the library reconnects by itself (section 3).
 - Renaming `server.name` after release: the page gets a new secret (and, without `app`, a
   new address), so every AI app pairs again. Choose it once.
-- `postMessage(port, "*")` for `serve`: give the frame's checked origin.
+- Handing `serve`'s port to a frame with `"*"` as the target: transfer it as
+  `frame.contentWindow.postMessage({ type: "tools-port" }, "https://chat.example", [port2])`,
+  with the frame's checked origin (section 3).
 
 ## Check your work
 

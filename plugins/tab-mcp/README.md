@@ -12,12 +12,15 @@ marketplace files that point here.
 ## Without a plugin
 
 The npm package ships the same skill as `skill/SKILL.md`, written for the version it
-installs; the plugin describes the newest release. After
-`npm install @ractive-ch/tab-mcp-client`, tell the agent:
+installs; the plugin comes from the repository's `main` branch, which can be ahead of
+the last release. After `npm install @ractive-ch/tab-mcp-client`, tell the agent:
 
 ```text
 Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to this app.
 ```
+
+No such file means the installed version is older than this guide: update the package.
+The path is relative to the folder of the app that installed the package.
 
 ## Claude Code
 

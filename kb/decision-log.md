@@ -5002,7 +5002,8 @@ coding agent"), the root README's "Agent skill" first, before the plugin.
   `@ractive-ch/tab-mcp-client`, from the next client release on. The plugin's
   `agents/openai.yaml` (Codex's display name) stays out; the skill does not need it.
 - **Why in the package:** the files in `node_modules` describe the version that is
-  installed. A plugin or a web page describes the newest release, and the library still
+  installed. A web page describes the newest release, the plugin the `main` branch
+  (which can be ahead of the last release), and the library still
   has breaking changes between minor versions. The plugin stays, as the second way, for
   agents that load skills from a marketplace (Claude Code, Codex, claude.ai).
 - **One source:** `plugins/tab-mcp/skills/tab-mcp/`. No copy is checked in: the client's
@@ -5017,12 +5018,20 @@ coding agent"), the root README's "Agent skill" first, before the plugin.
   fails the release. `packages/tab-mcp-client/test/skill.test.ts` checks that every
   relative link of the copy names a file of the package (headings included), that none
   leaves the package, that the plugin's copy links by a relative path only into its own
-  folder, and that the links into the repository name files that exist at `main` or a
-  current release's tag. The references joined `scripts/pinned-files.ts`, so
+  folder, and that the links into the repository name files and headings that exist at
+  the ref they name, `main` or a current release's tag: read with `git show <tag>:<file>`,
+  from the working tree for `main` and for the tag of a version not released yet (its
+  release pull request). CI's checkout fetches the tags for it; without tags the test is
+  skipped with a warning, and fails in CI. The references joined `scripts/pinned-files.ts`, so
   `bump-version.ts` keeps their versions current. The release's install test checks the
   path the READMEs give.
 - **The skill's content:** it now says near the top which version it describes and that
   the package's README is the full reference, adds the relay address for development, a
-  section of common mistakes, and React's `useState` pitfall; old version notes left
-  the sign-in reference.
+  section of common mistakes, React's `useState` pitfall, and what a call through the
+  tab-mcp browser extension looks like (`via`, `name`, `host`; `trustExtension`;
+  `extension`); old version notes left the sign-in reference.
+- **Before the release:** the READMEs on `main` describe `main`, as for every unreleased
+  change; the client README ships in the same package as the skill, so there it always
+  holds. Each place that gives the line says that a missing file means an older version
+  to update. The plugin comes from `main` and can be ahead of the last release.
 - The website (ractive.ch, another repository) is not changed here.

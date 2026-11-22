@@ -382,9 +382,9 @@ async function main() {
 	);
 	// Files made from a source elsewhere: the tarball's equal it.
 	for (const [path, text] of (await spec.copies?.(root, version)) ?? []) {
-		const packed = Bun.spawnSync(["tar", "-xzOf", tarball, `package/${path}`]);
-		if (packed.exitCode !== 0) problems.push(`cannot read ${path}`);
-		else if (packed.stdout.toString() !== text)
+		const copy = Bun.spawnSync(["tar", "-xzOf", tarball, `package/${path}`]);
+		if (copy.exitCode !== 0) problems.push(`cannot read ${path}`);
+		else if (copy.stdout.toString() !== text)
 			problems.push(`${path} differs from its source`);
 	}
 	if (problems.length > 0) fail(problems);

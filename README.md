@@ -299,11 +299,14 @@ Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to t
 ```
 
 and ask for what you want: which features of the page AI apps may use, and which of them
-ask first. Bun, pnpm and Yarn's `node_modules` linker put it at the same path; see the
-[client README](packages/tab-mcp-client/README.md#with-a-coding-agent) for Yarn
+ask first. No such file means the installed version is older than this guide: update the
+package. The path is relative to the folder of the app that installed the package (in a
+monorepo, that app's folder), with npm, Bun, pnpm and Yarn's `node_modules` linker alike;
+see the [client README](packages/tab-mcp-client/README.md#with-a-coding-agent) for Yarn
 Plug'n'Play.
 
-The same skill is also a plugin, which describes the newest release. In Claude Code:
+The same skill is also a plugin. It comes from this repository's `main` branch, which
+can be ahead of the last release. In Claude Code:
 
 ```text
 /plugin marketplace add ractive/tab-mcp

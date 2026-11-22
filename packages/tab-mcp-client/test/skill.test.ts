@@ -4,7 +4,7 @@
  * works from `plugins/tab-mcp/skills/tab-mcp/`.
  */
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { expectedFiles, PACKAGES } from "../../../scripts/npm-pack.ts";
 import { packagedSkill, SKILL_SOURCE, skillFiles } from "../scripts/skill.ts";
@@ -121,27 +121,67 @@ test("the plugin's skill links only into its own folder by a relative path", asy
 	expect(wrong).toEqual([]);
 });
 
-test("the skill's links into the repository name files that exist, at main or a current release's tag", async () => {
-	const refs = new Set(["main", `client-v${client}`, `relay-v${relay}`]);
-	const wrong: string[] = [];
-	for (const [path, text] of skill) {
-		for (const link of links(text)) {
-			const m =
-				/^https:\/\/github\.com\/ractive\/tab-mcp\/(blob|tree)\/([^/]+)\/([^#]+)(?:#(.+))?$/.exec(
-					link,
-				);
-			if (m === null) continue;
-			const [, kind, ref = "", file = "", anchor] = m;
-			if (!refs.has(ref)) wrong.push(`${path}: ${link} (ref ${ref})`);
-			if (!existsSync(join(repo, file))) {
-				wrong.push(`${path}: ${link} (no such file)`);
-				continue;
-			}
-			if (anchor === undefined) continue;
-			const markdown = join(repo, kind === "tree" ? `${file}/README.md` : file);
-			if (!anchors(await Bun.file(markdown).text()).has(anchor))
-				wrong.push(`${path}: ${link} (no such heading)`);
-		}
+const git = (...args: string[]) =>
+	Bun.spawnSync(["git", ...args], { cwd: repo, stderr: "ignore" });
+/** Whether the release tags are in this checkout (CI fetches them, ci.yml). */
+const tagsFetched = git("tag", "--list", "client-v*").stdout.toString() !== "";
+if (!tagsFetched)
+	console.warn(
+		"skill.test.ts: no release tags in this checkout (git fetch --tags): links at a release's tag are not checked",
+	);
+
+/**
+ * A file of the repository at a ref: the working tree for `main` and for
+ * the tag of a version not released yet (a release's own pull request);
+ * `undefined` when it is not there.
+ */
+function fileAt(ref: string, file: string): string | undefined {
+	const released =
+		ref !== "main" &&
+		git("rev-parse", "--verify", "--quiet", `refs/tags/${ref}^{commit}`)
+			.exitCode === 0;
+	if (!released) {
+		const path = join(repo, file);
+		if (!existsSync(path)) return undefined;
+		return statSync(path).isDirectory() ? "" : readFileSync(path, "utf8");
 	}
-	expect(wrong).toEqual([]);
-});
+	const show = git("show", `${ref}:${file}`);
+	return show.exitCode === 0 ? show.stdout.toString() : undefined;
+}
+
+// Without the tags, a fresh shallow clone skips this with the warning above;
+// CI must have them.
+test.skipIf(!tagsFetched && !process.env["CI"])(
+	"the skill's links into the repository name files that exist at the ref they name: main or a current release's tag",
+	() => {
+		expect(tagsFetched).toBe(true);
+		const refs = new Set(["main", `client-v${client}`, `relay-v${relay}`]);
+		const wrong: string[] = [];
+		let checked = 0;
+		for (const [path, text] of skill) {
+			for (const link of links(text)) {
+				const m =
+					/^https:\/\/github\.com\/ractive\/tab-mcp\/(blob|tree)\/([^/]+)\/([^#]+)(?:#(.+))?$/.exec(
+						link,
+					);
+				if (m === null) continue;
+				checked++;
+				const [, kind, ref = "", file = "", anchor] = m;
+				if (!refs.has(ref)) wrong.push(`${path}: ${link} (ref ${ref})`);
+				if (fileAt(ref, file) === undefined) {
+					wrong.push(`${path}: ${link} (no such file at ${ref})`);
+					continue;
+				}
+				if (anchor === undefined) continue;
+				const markdown = fileAt(
+					ref,
+					kind === "tree" ? `${file}/README.md` : file,
+				);
+				if (markdown === undefined || !anchors(markdown).has(anchor))
+					wrong.push(`${path}: ${link} (no such heading at ${ref})`);
+			}
+		}
+		expect(wrong).toEqual([]);
+		expect(checked).toBeGreaterThanOrEqual(5);
+	},
+);
