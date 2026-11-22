@@ -53,6 +53,19 @@ the Git tag `client-v<version>`. The format follows
 
 ### Fixed
 
+- The validator that `connect()` loads checks `outputSchema` as it checks `inputSchema`,
+  as the README said it did: an output schema it cannot use (a `$ref` next to a nested
+  `$id`, which does not resolve, or a duplicate `$id`) makes `registerTool` throw, and a
+  tool registered before with one is unregistered, with the reason in the event `error`
+  ("the outputSchema of …"). Until now such a tool was listed, and an AI app whose
+  validator compiles output schemas (the MCP SDK's client) could not use it. Results
+  are still not checked against the output schema.
+- The setup commands (`./setup`, "How do I add it?") put an address with `[`, `]` or `~`
+  in double quotes (DEC-217): zsh refused `claude mcp add --transport http test
+  http://[::1]:8080/s/test/mcp` with "no matches found" (`~` with `extendedglob`). POSIX
+  shells, zsh, fish, PowerShell and cmd.exe read the quoted address the same. An address
+  with any other character than letters, digits and `. : [ ] / _ ~ -` still gets the
+  steps without a command.
 - `disconnectAll()` with a `storage` that reads but cannot be written (full, blocked, or
   a custom one whose writes fail) connected again with the old secret: the new one was
   kept only in memory, and the next read of storage returned the old one over it. The

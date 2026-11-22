@@ -1,6 +1,6 @@
 # The tab-mcp browser extension
 
-A Chrome extension that offers the page in front to your AI app outside the browser,
+A browser extension that offers the page in front to your AI app outside the browser,
 through a tab-mcp relay. It is the WebMCP bridge of tab-mcp (DEC-114 in `kb/`): pages that
 register tools with [WebMCP](https://webmachinelearning.github.io/webmcp/)
 (`document.modelContext.registerTool()`) offer them only to agents in the browser; the
@@ -8,7 +8,25 @@ extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp
 this. How the extension, the relay and the client library fit together, with a picture:
 [How the parts fit together](../../README.md#how-the-parts-fit-together).
 
-Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh). Privacy policy: [PRIVACY.md](PRIVACY.md).
+- **What the browser must have:** Chrome 116 or later; Firefox 128 or later for the
+  Firefox build. It needs no WebMCP of its own.
+- **What the extension adds:** the page's WebMCP tools for the AI app. Where the browser
+  has WebMCP on (Chrome with `chrome://flags/#enable-webmcp-testing`, or a site in
+  Chrome's origin trial), they are the tools the page registered with the browser. Where
+  it has none (Firefox, Chrome without either), the extension gives each https page (and
+  localhost) its own `document.modelContext` as the page starts loading, after "Give
+  access to all sites" only: a click on the icon comes after the page has looked for it
+  (DEC-188, DEC-191).
+- **Where it can be installed today:** the Chrome build from the
+  [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh),
+  or built from this repository and loaded unpacked ([Install and use
+  it](#install-and-use-it)). The Firefox build is not on addons.mozilla.org yet (its
+  release is [pull request 163](https://github.com/ractive/tab-mcp/pull/163)): built from
+  this repository, it loads as a temporary add-on ([In Firefox](#in-firefox)). Every
+  release is also submitted to Microsoft Edge Add-ons (DEC-194), but that listing is not
+  public yet (checked on 2026-11-22).
+
+Privacy policy: [PRIVACY.md](PRIVACY.md).
 
 ## Tools
 
@@ -55,15 +73,26 @@ The page's tools are the page's word:
   first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
-  changed (also while you were asked), the AI app is told to list the tools again.
+  changed (also while you were asked), the AI app is told to list the tools again. An
+  answer is for the tool as you were asked about it: a page that registers it again
+  with another title, description, schema or hint meanwhile gets nothing run.
+  "Always allow on <host>" is different: it is for the site's tool by name, whatever
+  its description says later.
 - A tool that takes the tab to another page (a checkout, a search) is not a failure: the
   answer says the page changed while the tool ran, that the tool may have completed, and
   gives the new page's `page_info` once it has loaded; its tools are offered by then.
 - Arguments are checked against the tool's schema before the call (without the schema's
-  regular expressions, which a page could make freeze the extension; the page checks those
-  itself; a parameter that is called `pattern` stays). The schema the AI app gets has no
+  regular expressions, which a page could make freeze the extension; a parameter that is
+  called `pattern` stays). A page with the client library checks the arguments again with
+  its full schema; for a page that registers with WebMCP itself this check is the only
+  one, so such a page checks its patterns itself. The schema the AI app gets has no
   `pattern` either: each one is added to its property's description instead ("Must match
-  the regular expression …", cut to 200 characters). A call that the page does not
+  the regular expression …", cut to 200 characters), and so are the names
+  `patternProperties` allows. Without them the check only ever lets through more than the
+  page's schema, never less: a restricting `additionalProperties` beside
+  `patternProperties`, an `unevaluatedProperties` or `unevaluatedItems` above them, a
+  `not` or `if` around them and a `maxContains` go too, and a `oneOf` becomes an `anyOf`.
+  A call that the page does not
   answer in 60 s ends for the AI app, also when the page is stuck; cancelling in the AI
   app cancels it in the page. A page that does not answer the extension's other questions
   (its tools, `page_info`) in 5 s is given up, so a stuck page cannot hold the other
@@ -103,8 +132,8 @@ The page's tools are the page's word:
   connected now (name and verified host); a page without the library is told nothing.
 - The top frame's WebMCP, which lists the tools of the page and of its same-origin
   frames (the draft and Chrome's documentation say so; not tested here); tools of
-  frames of other origins are not listed. Only the browser's own WebMCP: a page's
-  replacement `document.modelContext` (or a polyfill without native WebMCP) is not used.
+  frames of other origins are not listed. The browser's own WebMCP, or where it has none
+  the extension's (above): a `document.modelContext` the page defines itself is not used.
 - Only pages of http(s) sites, not `file:` pages, and not Incognito tabs (the extension
   cannot be allowed there).
 - The extension reads a page's tools (`getTools()`) only while the side panel is open or
@@ -277,15 +306,19 @@ The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered
 app.
 
 No `storage` permission: the relay address, whether AI access is on, the tools allowed per
-site and the secret by which the relay knows this installation are in IndexedDB, used by
+site, the secret by which the relay knows this installation, the connected AI apps as the
+relay last listed them and the "Fill in the code for me" setting with its hosts (the full
+list is in [PRIVACY.md](PRIVACY.md#what-it-stores)) are in IndexedDB, used by
 the service worker only, which content scripts (in the page's origin) cannot reach; there
 is no `chrome.storage` area for them to read or write.
 
-WebMCP is on in Chrome only where a site takes part in Chrome's
+Chrome's own WebMCP is on only where a site takes part in Chrome's
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
 162), or after you
 turn on `chrome://flags/#enable-webmcp-testing`
-([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)).
+([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Elsewhere, with
+access to all sites, the extension gives pages its own (`src/chrome/webmcp-main.ts`, a
+script in the page's own world at `document_start`); Chrome's wins where it has one.
 
 ## The relay and the extension's id
 
@@ -317,13 +350,16 @@ cannot be reserved for it: no list can name one Firefox extension.
   key, host access at install, and the hooks through which the tests answer
   notifications, which no other build has).
 
-## In Firefox (a spike)
+## In Firefox
 
 Firefox has no WebMCP. The Firefox build gives every page `document.modelContext` as the
 page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188), so pages
 that register their tools wherever the API exists (Shopify's storefronts, Mintlify, GitBook
 and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
-the extension offers them to the AI app as in Chrome. Iteration 44; not released.
+the extension offers them to the AI app as in Chrome. Iteration 44; not on
+addons.mozilla.org yet (its release is
+[pull request 163](https://github.com/ractive/tab-mcp/pull/163)), so it is loaded from a
+build, as below.
 A page can therefore tell that the extension is installed: the API is there where Firefox
 has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`).
 

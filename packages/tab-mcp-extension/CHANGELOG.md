@@ -52,6 +52,31 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Fixed
 
+- **An answer holds only for the tool it was about** (DEC-217). A page that registered a
+  tool again while its question waited, under the same name and read-only hint but with
+  another title, description, input or output schema or `consequentialHint`, got the
+  changed tool run on "Allow". Now such a call does not run, and the AI app is told that
+  the tool changed while the user was asked; the content script checks it too, right
+  before the call, so a change the extension had not read yet does not slip through.
+  A page that registers the same tool again unchanged, also with its fields in another
+  order, is not affected. "Always allow on <host>" still covers the site's tool by name,
+  whatever its description says.
+
+- **Arguments a page's schema takes are no longer refused** (DEC-217). The extension
+  leaves a schema's regular expressions out (`pattern`, `patternProperties`), and that
+  could make the schema stricter: with `patternProperties: { "^x-": … }` and
+  `additionalProperties: false`, `{ "x-name": "Alice" }` was refused before it reached
+  the page. Now what goes with a regular expression is what would turn its absence into
+  a refusal: a restricting `additionalProperties` beside `patternProperties`,
+  `unevaluatedProperties` and `unevaluatedItems` above it, a `not` or `if` around it
+  (with its `then` and `else`), a `maxContains` for its `contains`; a `oneOf` around it
+  becomes an `anyOf`, and a `$ref` counts as around it when what it points to lost a
+  regular expression. The names `patternProperties` allows are noted in the schema's
+  description. A page built with the client library checks its arguments again with its
+  full schema; a page that registers with WebMCP itself, or with the extension's own,
+  gets no other check, and its tool gets an argument its patterns would refuse, as
+  before, since the extension never runs a page's regular expressions.
+
 - **A question no longer moves under the pointer.** Where scrollbars take room (Linux,
   Windows), the panel behind the questions' dialog growing taller or shorter than its
   window while a question waited added or took away its scrollbar; the dialog got
