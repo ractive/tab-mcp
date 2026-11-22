@@ -301,7 +301,9 @@ did, by connecting the extension.
   offers no tools when they differ. A page with a compromised renderer can therefore not
   borrow another site's origin, and with it the tools the user allowed there.
 - **Hints can lie.** A tool the page marks read-only runs without asking; anything else
-  asks the user every time (see "Questions" below), naming the page's origin. The user
+  asks the user every time (see "Questions" below), naming the page's origin. A page's
+  `consequentialHint` only becomes the AI app's `destructiveHint` (DEC-214): a page that
+  says false may get the AI app to ask less, never the extension. The user
   can stop the questions for a tool of one exact http(s) origin, for every connected AI app
   and kept until taken back: "Always allow on <host>" in a question, or the "Always allow" switch in
   the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always

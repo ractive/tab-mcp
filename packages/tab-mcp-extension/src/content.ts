@@ -292,6 +292,12 @@ export async function pageTools(
 			annotations: {
 				readOnlyHint: hint(annotations, "readOnlyHint"),
 				debugging: hint(annotations, "debugging"),
+				// Only as the page gave it: Chrome fills in all four hints of a
+				// tool with annotations and lists none without, so a tool
+				// without it is one nothing is known about (DEC-214).
+				...(typeof annotations?.["consequentialHint"] === "boolean"
+					? { consequentialHint: annotations["consequentialHint"] }
+					: {}),
 			},
 		});
 	}

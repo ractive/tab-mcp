@@ -183,6 +183,10 @@ a send is dropped.
 
 ## DEC-022: Annotation mapping
 
+**Amended by DEC-214:** in the tab-mcp browser extension, a page tool's
+`consequentialHint` becomes its `page_<name>` tool's `destructiveHint` (false when the
+page says false), and the extension's own question does not depend on it.
+
 WebMCP → MCP: `readOnlyHint` → `readOnlyHint: true`, `destructiveHint: false`;
 `consequentialHint` → `destructiveHint: true` and page confirmation; `untrustedContentHint`
 → `openWorldHint: true`. All original WebMCP hints are also kept in the tool's `_meta`
@@ -2737,6 +2741,10 @@ mirroring is on); whether it stays is for iteration F and EX 11.
 
 ## DEC-141: Page tools ask in the bridge, not through the library's confirmation
 
+**Amended by DEC-214:** `destructiveHint` is no longer "not read-only" but what the page
+says with `consequentialHint`; the bridge still asks before every call of a tool that is
+not read-only.
+
 2026-11-13, iteration 35 (review finding EQ 4). `page_<name>` tools were
 `consequentialHint` when not read-only, so the library asked through `onConfirm`, and a
 throwing `onConfirm` became "The user declined", also for a question that timed out and
@@ -4922,3 +4930,62 @@ click should go where it is safe, and the address stays the one fixed address pe
 - **Tests:** the relay's test mode gets `cimdLookup` (a client id host resolved without
   DNS), so the end-to-end tests have an AI app under a public-looking name; not in a
   production relay (`createTestRelay` needs `development: true`).
+
+## DEC-214: A page tool's `destructiveHint` is what the page says with `consequentialHint`
+
+2026-11-22; amends DEC-141 and DEC-022 for page tools. The extension told the AI app
+that every page tool that is not read-only is destructive (`destructiveHint: !readOnly`,
+"the user confirms every call"). That used MCP's hint for "the extension asks", which is
+not what it means: the hint should say what the page says about the tool. WebMCP has a
+hint for that, `consequentialHint`, which ractive.ch's todo page sets on `delete_todos`
+and not on `add_todo` (DEC-143, DEC-209). Claude sorts a connector's tools by these
+hints in its settings: "Read-only tools", "Write/delete tools" (destructive) and "Other
+tools" (neither). With the old hint `page_add_todo` was among "Write/delete tools"
+through the extension; now it is among "Other tools", as on a direct connection to the
+page. There the library sends no `destructiveHint` for `add_todo`, and Claude lists it
+under "Other tools" all the same (seen by the owner on 2026-11-22): Claude does not take
+a missing hint as destructive, so the library's `mapAnnotations` stays as it is.
+
+What it does not change: Claude's "Allow once" without "Always allow" for a page tool.
+The owner's test showed the cause: Claude keeps a saved list of a connector's tools, and
+a tool that is not in it (page tools are there only while their page is in front) gets
+"requires your approval" with "Allow once" only, until the user reloads the connector's
+tools. The hint has nothing to do with it.
+
+- **The mapping** for `page_<name>`, always given (MCP's default for a missing
+  `destructiveHint` is true):
+  - read-only: `readOnlyHint: true`, `destructiveHint: false`, as before;
+  - not read-only and `consequentialHint: true`: `destructiveHint: true`;
+  - not read-only and `consequentialHint: false`: `destructiveHint: false`;
+  - not read-only and no annotations at all: `destructiveHint: true`, the worst case,
+    as nothing is known. That is a page that registered the tool with WebMCP itself and
+    gave no annotations.
+- **A page built with the client library always says something.** Its WebMCP mirror
+  registers every tool with annotations, `consequentialHint` set from
+  `consequentialHint ?? destructiveHint` (DEC-143, DEC-209). A tool without hints is
+  registered as not consequential, which is what the library means by it: it does not
+  ask before such a tool on a direct connection either. Through the extension it gets
+  `destructiveHint: false`; the worst case never applies to such a page.
+- **A known difference between the two paths:** a library tool with `destructiveHint:
+  true` and an explicit `consequentialHint: false` is destructive on a direct
+  connection (MCP's hint wins there, DEC-022) and not destructive through the extension.
+  WebMCP has only the one hint, and the page set it to false itself. Not changed.
+- **What Chrome tells apart** (checked in the WebMCP canary,
+  `test/webmcp-spike/webmcp.test.ts`): a tool registered without annotations has none in
+  `getTools()`; a tool with any annotations, `{}`, `null` or only `readOnlyHint: false`
+  included, has all four hints as booleans, missing ones false (`"yes"` becomes true,
+  a string in place of the object is refused). So `{}` reads as `consequentialHint:
+  false`; only a tool without annotations is "nothing known". The content script sends
+  `consequentialHint` only when it is a boolean; the bridge takes a missing one as true.
+- **Firefox and Chrome without WebMCP** (the polyfill, DEC-188) list annotations the same
+  way: none without, otherwise all four as booleans, a non-object refused with a
+  `TypeError`. Before, the polyfill passed on what the page gave as it was.
+- **`webmcp_tools`** lists `destructive` next to `readOnly` for each tool, the same
+  value as the `page_<name>` tool's hint. Its own annotations and those of `webmcp_call`
+  stay as they are.
+- **When the extension asks does not change:** before every call of a page tool that is
+  not read-only (DEC-141), "Always allow" on a host as before. The hint only describes
+  the tool; `consequentialHint` never skips the extension's question.
+- **A change of the hint is a new tool:** the bridge re-registers a tool when anything
+  the content script sends for it changes, the hint included, so the AI app gets a
+  tools-changed notice when a page registers a tool again with another hint.

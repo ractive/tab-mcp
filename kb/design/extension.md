@@ -85,7 +85,12 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   notification asks again (iteration 43, DEC-181; the popup window of the extension's
   that showed the question in that case is gone).
   The bridge asks itself for both ways of calling a page tool (`page_<name>` is not
-  `consequentialHint`, DEC-141), so the AI app hears why a call did not run. "Don't ask
+  `consequentialHint`, DEC-141), so the AI app hears why a call did not run. What the AI
+  app is told about a tool does not depend on that: `page_<name>` carries MCP's
+  `destructiveHint` as the page's `consequentialHint` says (true only when a page that
+  registers with WebMCP itself gave no annotations at all; a page with the client library
+  always gives them, a tool without hints as not consequential), and the bridge asks before every call of a tool that is not
+  read-only either way (DEC-214). "Don't ask
   again on <host>" in a question writes the site's "allowed" entry, as the panel's "Always allow"
   switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
   notification has "Allow once" only.
@@ -255,8 +260,8 @@ with a second extension).
 | Tool | Kind | What it does |
 |---|---|---|
 | `page_info` | read | Address, title, language, whether WebMCP is available on the page and how many tools it registered (iteration 19) |
-| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, and why a tool is left out (iteration 20) |
-| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
+| `webmcp_tools` | read | The page's own WebMCP tools: each one's `page_<name>`, input schema (iteration 35), whether it only reads, whether it is destructive (DEC-214), and why a tool is left out (iteration 20) |
+| `page_<name>` | as the page marks it | Each page tool, called with `executeTool()`; not read-only means the user confirms each call (iteration 20). `readOnlyHint` as the page's; `destructiveHint` false for a read-only tool, else the page's `consequentialHint`, true when a page registering with WebMCP itself gave no annotations (a page with the client library always gives them; a tool without hints is not consequential there) (DEC-214). A tool that navigates the tab answers with the new page's `page_info`, not an error (iteration 35) |
 | `webmcp_call` | as the called tool | Calls a tool of the page in front by its WebMCP name, with the same rules (schema check, confirmation, the page it was listed from); for AI apps that read their tool list once (Claude, Codex), which never see the `page_<name>` tools of a later tab (iteration 20 review, `src/worker/tools.ts`) |
 | `navigate` | navigates; another origin asks | Opens an http(s) address in the tab in front, if the extension may read it; waits for the load (30 s) and answers with the new page's `page_info`, or `readable: false` and why (iteration 27, DEC-121, `src/worker/navigation.ts`) |
 | `go_back`, `go_forward` | navigates; another or unknown origin asks | One step in the tab's history; a target on the page's origin is known from the Navigation API (same-origin entries only), any other one asks |

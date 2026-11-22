@@ -146,6 +146,11 @@ export interface PageTool {
 		readOnlyHint?: boolean;
 		/** WebMCP's hint for tools meant for developers: not offered (WM 8). */
 		debugging?: boolean;
+		/**
+		 * The page's own; missing when the page gave no annotations (Chrome
+		 * then lists none) or no boolean: nothing is known (DEC-214).
+		 */
+		consequentialHint?: boolean;
 	};
 }
 

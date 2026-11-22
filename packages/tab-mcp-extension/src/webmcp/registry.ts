@@ -116,16 +116,51 @@ export function readTool(raw: PageObject): Entry {
 		if (inputSchema !== undefined) info.inputSchema = inputSchema;
 		const outputSchema = copyJson(raw.outputSchema);
 		if (outputSchema !== undefined) info.outputSchema = outputSchema;
-		const annotations = copyJson(raw.annotations);
-		if (annotations !== null && typeof annotations === "object")
-			info.annotations = annotations as Record<string, unknown>;
 	} catch (error) {
 		throw new PageError(
 			"TypeError",
 			`the tool ${name} has a schema that is no JSON: ${messageOf(error)}`,
 		);
 	}
+	const annotations = annotationsOf(name, raw.annotations);
+	if (annotations !== undefined) info.annotations = annotations;
 	return { info, tool: raw, execute };
+}
+
+/** WebMCP's hints, in the order Chrome lists them. */
+const HINTS = [
+	"consequentialHint",
+	"debugging",
+	"readOnlyHint",
+	"untrustedContentHint",
+] as const;
+
+/**
+ * A tool's annotations as Chrome lists them (DEC-214): none when the page
+ * gave none; otherwise all four hints, each a boolean (missing ones false,
+ * `"yes"` true), `null` taken as no hints. Anything else is refused, as
+ * Chrome's `registerTool()` refuses it.
+ */
+function annotationsOf(
+	name: string,
+	raw: PageObject,
+): Record<string, boolean> | undefined {
+	if (raw === undefined) return undefined;
+	if (raw !== null && typeof raw !== "object" && typeof raw !== "function")
+		throw new PageError(
+			"TypeError",
+			`the annotations of the tool ${name} are not an object`,
+		);
+	const hints: Record<string, boolean> = {};
+	try {
+		for (const hint of HINTS) hints[hint] = Boolean(raw?.[hint]);
+	} catch (error) {
+		throw new PageError(
+			"TypeError",
+			`the annotations of the tool ${name} cannot be read: ${messageOf(error)}`,
+		);
+	}
+	return hints;
 }
 
 /**
