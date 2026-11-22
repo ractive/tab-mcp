@@ -622,7 +622,13 @@ export class Browser {
 		}
 	}
 
-	/** Close every tab but `keep` (the windows a test opened go with them). */
+	/**
+	 * Close every tab but `keep` (the windows a test opened go with them), and
+	 * wait until they are gone: `Target.closeTarget` answers before the tab is,
+	 * and `clickIcon` finds a tab by its address, so a closing tab of the test
+	 * before, at the same address, could be the one it clicks on ("cannot
+	 * retrieve host for the provided id").
+	 */
 	async closeTabsBut(keep: Page): Promise<void> {
 		const { targetInfos } = (await this.send("Target.getTargets")) as {
 			targetInfos: { targetId: string; type: string }[];
@@ -632,6 +638,20 @@ export class Browser {
 				await this.send("Target.closeTarget", {
 					targetId: target.targetId,
 				}).catch(() => {});
+		const end = Date.now() + 5_000;
+		for (;;) {
+			// `filter: [{}]` lists every kind of target, "tab" ones too.
+			const { targetInfos: now } = (await this.send("Target.getTargets", {
+				filter: [{}],
+			})) as { targetInfos: { type: string; url: string }[] };
+			const tabs = now.filter((t) => t.type === "tab");
+			if (tabs.length <= 1) return;
+			if (Date.now() > end)
+				throw new Error(
+					`tabs stayed open after closing all but one: ${tabs.map((t) => t.url).join(", ")}`,
+				);
+			await Bun.sleep(25);
+		}
 	}
 
 	/** The sessions on service workers, for `detachServiceWorkers()`. */
