@@ -4,13 +4,28 @@
  * address id in the `/tab` URL, DEC-098) went with the fixed address
  * (DEC-196).
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { MemoryTokenStore } from "../src/store/memory.ts";
 import type { TokenRecord } from "../src/store/types.ts";
 import { startRelay, type TestRelay } from "./helpers.ts";
 
+/**
+ * `run` on a clock 1.1 s on, past the second for which a probe's answer is
+ * reused (`Date.now()` in the relay); the real clock is back when it ends,
+ * however it ends.
+ */
+async function pastReuse<T>(run: () => Promise<T>): Promise<T> {
+	setSystemTime(Date.now() + 1_100);
+	try {
+		return await run();
+	} finally {
+		setSystemTime();
+	}
+}
+
 const relays: TestRelay[] = [];
 afterEach(async () => {
+	setSystemTime(); // first: whatever fails below, no moved clock stays
 	for (const r of relays.splice(0)) await r.stop();
 });
 
@@ -104,9 +119,8 @@ describe("/healthz checks the token store", () => {
 		// The store recovers, but the first read is lost for good.
 		store.mode = "ok";
 		const gets = store.gets;
-		await Bun.sleep(1100);
-		// The next probe after the reused second reads again.
-		const res = await fetch(`${r.relay.url}/healthz`);
+		// Past the reused second, on the clock the relay reads (no real wait).
+		const res = await pastReuse(() => fetch(`${r.relay.url}/healthz`));
 		expect(res.status).toBe(200);
 		expect(store.gets).toBe(gets + 1);
 	});
@@ -126,7 +140,7 @@ describe("/healthz checks the token store", () => {
 			"store_unavailable",
 		);
 		throwNow = false;
-		await Bun.sleep(1100);
-		expect((await fetch(`${r.relay.url}/healthz`)).status).toBe(200);
+		const res = await pastReuse(() => fetch(`${r.relay.url}/healthz`));
+		expect(res.status).toBe(200);
 	});
 });

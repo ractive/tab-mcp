@@ -21,6 +21,7 @@ import {
 	nextEvent,
 	readEvents,
 	rpc,
+	setTiming,
 	startRelay,
 	type TestRelay,
 	tokenFor,
@@ -28,12 +29,18 @@ import {
 
 let r: TestRelay;
 const tabs: TabMcp[] = [];
+/** A replaced tab's wait for a sibling's `claimed`: 100 ms, not 1 s (not what these tests are about). */
+let restoreGrace: () => void;
 
 beforeAll(() => {
 	// pageWaitMs 0: "the page is not open" at once (DEC-074).
 	r = startRelay({ keepAliveMs: 50, pageWaitMs: 0 });
+	restoreGrace = setTiming({ siblingGraceMs: 100 });
 });
-afterAll(() => r.stop());
+afterAll(() => {
+	restoreGrace();
+	return r.stop();
+});
 afterEach(() => {
 	for (const tab of tabs.splice(0)) tab.disconnect();
 });

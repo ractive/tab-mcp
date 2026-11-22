@@ -16,7 +16,13 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseLstart, refuseBase, runId } from "../test/browser-dirs.ts";
-import { GRACE_MS, parseOwner, waitMsFrom } from "../test/browser-lock.ts";
+import {
+	GRACE_MS,
+	parseOwner,
+	pollMsFrom,
+	staleWaitMsFrom,
+	waitMsFrom,
+} from "../test/browser-lock.ts";
 import {
 	type Proc,
 	planSweep,
@@ -50,7 +56,15 @@ function holder(
 		console.log("done", Date.now());
 	`;
 	return Bun.spawn([process.execPath, "-e", script], {
-		env: { ...process.env, TAB_MCP_BROWSER_DIR: base, ...env },
+		env: {
+			...process.env,
+			TAB_MCP_BROWSER_DIR: base,
+			// Shorter than as shipped (up to 2 s, 5 s), with the same rules; the
+			// least each allows (pollMsFrom, staleWaitMsFrom).
+			TAB_MCP_BROWSER_POLL_MS: "100",
+			TAB_MCP_BROWSER_STALE_WAIT_MS: "500",
+			...env,
+		},
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -69,7 +83,7 @@ async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 test("a second run waits, says who holds the lock, and runs once it is free", async () => {
-	const first = holder("first", 1_500);
+	const first = holder("first", 600);
 	expect(await firstLine(first.stdout)).toStartWith("taken");
 	const second = holder("second", 0, { TAB_MCP_BROWSER_WAIT_MS: "20000" });
 	const [line, firstEnd] = await Promise.all([
@@ -101,7 +115,7 @@ test("--no-wait fails at once while another run holds the lock", async () => {
 test("a waiting run gives up after its limit", async () => {
 	const first = holder("first", 3_000);
 	expect(await firstLine(first.stdout)).toStartWith("taken");
-	const second = holder("second", 0, { TAB_MCP_BROWSER_WAIT_MS: "500" });
+	const second = holder("second", 0, { TAB_MCP_BROWSER_WAIT_MS: "200" });
 	expect(await firstLine(second.stdout)).toContain("giving up");
 	expect(await second.exited).toBe(1);
 	first.kill();
@@ -205,8 +219,8 @@ async function lines(proc: ReturnType<typeof holder>) {
 test("two runs taking over the same stale lock: one wins, the other waits for it", async () => {
 	await staleLock(await goneOwner());
 	const env = { TAB_MCP_BROWSER_WAIT_MS: "20000" };
-	const a = holder("a", 1_000, env);
-	const b = holder("b", 1_000, env);
+	const a = holder("a", 300, env);
+	const b = holder("b", 300, env);
 	const [la, lb] = await Promise.all([lines(a), lines(b)]);
 	expect(await a.exited).toBe(0);
 	expect(await b.exited).toBe(0);
@@ -249,6 +263,23 @@ test("a wait that is not a positive number of milliseconds is the default", () =
 	for (const value of [undefined, "", "10m", "NaN", "-5", "0", "Infinity"])
 		expect(waitMsFrom(value)).toBe(15 * 60_000);
 	expect(waitMsFrom("500")).toBe(500);
+});
+
+test("the tests' poll and stale wait stay within bounds, whatever is left exported", () => {
+	const wait = 15 * 60_000;
+	// The poll: a twentieth of the wait, within 100 ms to 2 s, set or not.
+	expect(
+		[undefined, "", "0", "-5", "x"].map((v) => pollMsFrom(v, wait)),
+	).toEqual([2_000, 2_000, 2_000, 2_000, 2_000]);
+	expect(pollMsFrom(undefined, 600)).toBe(100);
+	expect(
+		["1", "100", "300", "2000", "3600000"].map((v) => pollMsFrom(v, wait)),
+	).toEqual([100, 100, 300, 2_000, 2_000]);
+	// The stale wait: 5 s, only shorter, never under 500 ms.
+	expect(
+		["", "0", "x", "1", "500", "2000", "5000", "3600000"].map(staleWaitMsFrom),
+	).toEqual([5_000, 5_000, 5_000, 500, 500, 2_000, 5_000, 5_000]);
+	expect(staleWaitMsFrom(undefined)).toBe(5_000);
 });
 
 const RUNS = "/home/u/.cache/tab-mcp/browser-tests/runs";

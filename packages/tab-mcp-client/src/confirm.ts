@@ -52,6 +52,15 @@ function showArguments(args: Record<string, unknown>): string | undefined {
  */
 export const ALLOW_DELAY_MS = 750;
 
+/**
+ * Tests only: the delay a dialog gets when its caller passes none, for tests
+ * whose subject is not the delay (the library's own `TabMcp` passes none).
+ * Pages never change it; it starts as {@link ALLOW_DELAY_MS}.
+ */
+export const confirmTiming: { allowDelayMs: number } = {
+	allowDelayMs: ALLOW_DELAY_MS,
+};
+
 /** The user's answer: "always" allows this tool for this AI app (Always allow, or until reload). */
 export type DialogAnswer = "allow" | "always" | "deny";
 
@@ -165,7 +174,7 @@ function showConfirm(
 	next: () => void,
 ): Promise<DialogAnswer> {
 	const s = options.strings ?? stringsOf(undefined);
-	const delay = options.allowDelayMs ?? ALLOW_DELAY_MS;
+	const delay = options.allowDelayMs ?? confirmTiming.allowDelayMs;
 	const tool = request.tool.title ?? request.tool.name;
 	const client = clientLabel(request.client, s);
 	const names = { tool, client };

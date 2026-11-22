@@ -2,7 +2,14 @@
  * Iteration 11: the relay's request path (review of 2026-10-24). Each block
  * pins one finding; finding 3 is in identity.test.ts.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import { addressIdFromSecret, newSecret } from "../src/address.ts";
 import type { CreateRelayOptions } from "../src/relay.ts";
 import { MemoryTokenStore } from "../src/store/memory.ts";
@@ -183,66 +190,93 @@ describe("1: a listen stream must be an event stream", () => {
 });
 
 describe("2: Bun's idle timeout comes back after an authenticated request", () => {
-	test("after a page-not-open answer the keep-alive socket is closed when idle", async () => {
-		const r = relay({ httpIdleTimeoutS: 1, pageWaitMs: 200 });
-		const secret = newSecret();
-		const address = new URL(r.relay.addressFor(APP));
-		const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
-		const probe = await rawRequest(
-			r.relay.port,
-			address.pathname,
-			rpc(1, "tools/list"),
-			token,
-		);
+	// Each case waits for Bun to close an idle keep-alive socket, which takes
+	// about 4 s whatever the configured second (uWebSockets checks its
+	// timeouts in steps of a few seconds). The three run at once, each on a
+	// relay of its own, before the tests; each test checks its own result.
+	interface Seen {
+		received: string;
+		/** When the server closed the socket; -1 if it did not within 6 s. */
+		ms: number;
+	}
+	const relays: TestRelay[] = [];
+	const own = (options: CreateRelayOptions) => {
+		const r = startRelay(options);
+		relays.push(r);
+		return r;
+	};
+	async function closedWhenIdle(
+		r: TestRelay,
+		path: string,
+		body: unknown,
+		token: string,
+	): Promise<Seen> {
+		const probe = await rawRequest(r.relay.port, path, body, token);
 		const ms = await Promise.race([
 			probe.closedAfterMs,
 			Bun.sleep(6000).then(() => -1),
 		]);
 		probe.end();
-		expect(probe.received()).toStartWith("HTTP/1.1 200");
-		expect(probe.received()).toContain('"code":-31001');
-		expect(ms).toBeGreaterThan(0);
-	}, 8000);
+		return { received: probe.received(), ms };
+	}
+	let seen: Record<"pageNotOpen" | "forwarded" | "refused", Seen>;
 
-	test("after a forwarded request the keep-alive socket is closed when idle", async () => {
-		const r = relay({ httpIdleTimeoutS: 1 });
-		const { address, token } = await connected(r, undefined);
-		const probe = await rawRequest(
-			r.relay.port,
-			new URL(address).pathname,
-			rpc(1, "tools/list"),
-			token,
-		);
-		const ms = await Promise.race([
-			probe.closedAfterMs,
-			Bun.sleep(6000).then(() => -1),
+	beforeAll(async () => {
+		const [pageNotOpen, forwarded, refused] = await Promise.all([
+			(async () => {
+				const r = own({ httpIdleTimeoutS: 1, pageWaitMs: 200 });
+				const secret = newSecret();
+				const address = new URL(r.relay.addressFor(APP));
+				const token = await tokenFor(r.store, addressIdFromSecret(secret, APP));
+				return closedWhenIdle(r, address.pathname, rpc(1, "tools/list"), token);
+			})(),
+			(async () => {
+				const r = own({ httpIdleTimeoutS: 1 });
+				const { address, token } = await connected(r, undefined);
+				return closedWhenIdle(
+					r,
+					new URL(address).pathname,
+					rpc(1, "tools/list"),
+					token,
+				);
+			})(),
+			(async () => {
+				const r = own({ httpIdleTimeoutS: 1, maxConcurrentRequests: 1 });
+				const { address, token } = await connected(r, () => {}); // never answers
+				void mcpPost(address, rpc(1, "tools/list"), { token }).catch(
+					() => undefined,
+				);
+				await Bun.sleep(50);
+				return closedWhenIdle(
+					r,
+					new URL(address).pathname,
+					rpc(2, "tools/list"),
+					token,
+				);
+			})(),
 		]);
-		probe.end();
-		expect(probe.received()).toStartWith("HTTP/1.1 200");
-		expect(ms).toBeGreaterThan(0);
-	}, 8000);
+		seen = { pageNotOpen, forwarded, refused };
+	}, 12_000);
 
-	test("after a refused request (429) the keep-alive socket is closed when idle", async () => {
-		const r = relay({ httpIdleTimeoutS: 1, maxConcurrentRequests: 1 });
-		const { address, token } = await connected(r, () => {}); // never answers
-		void mcpPost(address, rpc(1, "tools/list"), { token }).catch(
-			() => undefined,
-		);
-		await Bun.sleep(50);
-		const probe = await rawRequest(
-			r.relay.port,
-			new URL(address).pathname,
-			rpc(2, "tools/list"),
-			token,
-		);
-		const ms = await Promise.race([
-			probe.closedAfterMs,
-			Bun.sleep(6000).then(() => -1),
-		]);
-		probe.end();
-		expect(probe.received()).toStartWith("HTTP/1.1 429");
-		expect(ms).toBeGreaterThan(0);
-	}, 8000);
+	afterAll(async () => {
+		await Promise.all(relays.splice(0).map((r) => r.stop()));
+	});
+
+	test("after a page-not-open answer the keep-alive socket is closed when idle", () => {
+		expect(seen.pageNotOpen.received).toStartWith("HTTP/1.1 200");
+		expect(seen.pageNotOpen.received).toContain('"code":-31001');
+		expect(seen.pageNotOpen.ms).toBeGreaterThan(0);
+	});
+
+	test("after a forwarded request the keep-alive socket is closed when idle", () => {
+		expect(seen.forwarded.received).toStartWith("HTTP/1.1 200");
+		expect(seen.forwarded.ms).toBeGreaterThan(0);
+	});
+
+	test("after a refused request (429) the keep-alive socket is closed when idle", () => {
+		expect(seen.refused.received).toStartWith("HTTP/1.1 429");
+		expect(seen.refused.ms).toBeGreaterThan(0);
+	});
 });
 
 describe("4: requests wait for a page within its site's limit", () => {

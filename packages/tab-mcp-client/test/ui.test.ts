@@ -12,9 +12,11 @@ import { Window } from "happy-dom";
 import { addressIdOf } from "../src/address.ts";
 import { allowedFor } from "../src/always-allowed.ts";
 import {
+	ALLOW_DELAY_MS,
 	type AskedRequest,
 	confirmDialog,
 	confirmInPage,
+	confirmTiming,
 } from "../src/confirm.ts";
 import {
 	CODE_USED_WAIT_MS,
@@ -42,14 +44,30 @@ let window: Window;
 let doc: Document;
 /** Puts the library's waits back after a test that changed them. */
 let restoreTiming: (() => void) | undefined;
+let restoreGrace: () => void;
+
+/** The delay as the library ships it, read before any test changes it. */
+const SHIPPED_DELAY_MS = confirmTiming.allowDelayMs;
+/**
+ * The delay of a dialog whose caller passes none, in every test here but the
+ * ones about the delay ("the delay" below sets it back to the shipped one):
+ * the dialog still starts with Allow disabled, a moment instead of 750 ms.
+ */
+const TEST_DELAY_MS = 20;
 
 beforeEach(() => {
 	window = new Window({ url: "https://page.example/" });
 	doc = window.document as unknown as Document;
+	confirmTiming.allowDelayMs = TEST_DELAY_MS;
+	// A replaced tab's wait for a sibling (1 s as shipped; protocol.test.ts
+	// keeps one test at it) is not what these tests are about.
+	restoreGrace = setTiming({ siblingGraceMs: 100 });
 });
 afterEach(async () => {
 	restoreTiming?.();
 	restoreTiming = undefined;
+	restoreGrace();
+	confirmTiming.allowDelayMs = SHIPPED_DELAY_MS;
 	await window.happyDOM.close();
 });
 
@@ -633,7 +651,13 @@ describe("confirmDialog: what the arguments look like (iteration 13)", () => {
 });
 
 describe("confirmDialog: the delay (iteration 13, CU 17)", () => {
+	// The delay itself is the subject: as shipped, not the other tests' moment.
+	beforeEach(() => {
+		confirmTiming.allowDelayMs = SHIPPED_DELAY_MS;
+	});
+
 	test("is 750 ms, a constant", async () => {
+		expect([ALLOW_DELAY_MS, SHIPPED_DELAY_MS]).toEqual([750, 750]);
 		{
 			const started = Date.now();
 			const answer = confirmDialog(question(), doc);
@@ -3167,15 +3191,17 @@ describe("the confirmation chunk's confirmInPage with a host of the caller's own
 	test("the options ui and allowDelayMs reach the dialog again", async () => {
 		const host = new Host();
 		const started = Date.now();
+		// Longer than this file's default for dialogs (TEST_DELAY_MS), which
+		// a lost option would give.
 		const answer = confirmInPage(host, question(), doc, {
 			ui: { strings: { allow: "Erlauben" } },
-			allowDelayMs: 1_200,
+			allowDelayMs: 300,
 		});
 		const allow = byText(dialog(), "Erlauben");
-		await Bun.sleep(900); // past the default 750 ms
+		await Bun.sleep(150); // past the default the dialog would have had
 		expect(allow.disabled).toBe(true);
 		await enabled(allow);
-		expect(Date.now() - started).toBeGreaterThanOrEqual(1_190);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(290);
 		allow.click();
 		expect(await answer).toBe(true);
 	});

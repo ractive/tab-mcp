@@ -58,18 +58,28 @@ function nativeContext(): ModelContext | undefined {
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
+ * How long a replaced tab that heard no `claimed` yet waits for one before it
+ * reports `replaced`: the sibling's session and this tab's `bye` leave the
+ * relay at about the same time, so the message usually comes after the `bye`.
+ */
+export const SIBLING_GRACE_MS = 1_000;
+
+/**
  * The library's waits, in milliseconds: constants for pages (CU 17), which
  * only tests change. `reconnectDelaysMs`: before each reconnect attempt,
  * the last one repeating. `answerTimeoutMs`: for an identity assertion and
  * the relay's answer to it, and for the relay's answer to `revoke()` and
- * `signOut()`.
+ * `signOut()`. `siblingGraceMs`: {@link SIBLING_GRACE_MS}, passed to the
+ * connection.
  */
 export const timing: {
 	reconnectDelaysMs: number[];
 	answerTimeoutMs: number;
+	siblingGraceMs: number;
 } = {
 	reconnectDelaysMs: [5_000, 10_000, 20_000, 40_000, 60_000],
 	answerTimeoutMs: 15_000,
+	siblingGraceMs: SIBLING_GRACE_MS,
 };
 /** Reasons after which the library connects again by itself. */
 const RECONNECT_REASONS = new Set<DisconnectReason>([
@@ -603,6 +613,7 @@ export class TabMcp extends EventTarget {
 		const connection = openConnection(this.#host(ref), relayUrl, secret, {
 			address,
 			revokeAll: !!takeBack,
+			siblingGraceMs: timing.siblingGraceMs,
 		});
 		if (!takeBack) ref.connection = connection;
 		this.#connection = connection;

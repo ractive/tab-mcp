@@ -472,25 +472,41 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		// Bounded: a call that never answers fails here, not the tests after.
 		const real = await stack.panel.eval<{
 			created: string;
-			listed: boolean;
-			cleared: boolean;
+			/** What getAll had for it: its options, or none. */
+			listed: Record<string, unknown> | null;
+			cleared: unknown;
 			after: boolean;
 		}>(`Promise.race([
 			(async () => {
 				const created = await browser.notifications.create("real-api-check", ${JSON.stringify(shown)});
-				const listed = Object.keys(await browser.notifications.getAll()).includes(created);
+				const listed = (await browser.notifications.getAll())[created] ?? null;
 				const cleared = await browser.notifications.clear(created);
 				const after = Object.keys(await browser.notifications.getAll()).includes(created);
 				return { created, listed, cleared, after };
 			})(),
 			new Promise((_, reject) => setTimeout(() => reject(new Error("the real notifications API did not answer in 10 s")), 10_000)),
 		])`);
-		expect(real).toEqual({
-			created: "real-api-check",
-			listed: true,
-			cleared: true,
-			after: false,
-		});
+		// What this test is for: the real API takes what the product passes
+		// (the permission in the manifest, every option, the icon) and answers.
+		// A rejection of any of it fails the eval above.
+		expect(real.created).toBe("real-api-check");
+		// Not what it is for: whether the system keeps the notification.
+		// Without a notification service (a CI runner) it can be gone as soon
+		// as it is made: CI run 45002871065, attempts 2 and 3, had it listed
+		// and then `clear` false, gone already. So both are accepted; when it
+		// is still listed, it is listed as made.
+		// Which way it went, both halves: listed or not, and what clear said.
+		console.log(
+			`notifications: Firefox: listed after create ${real.listed !== null}, clear returned ${real.cleared}`,
+		);
+		if (real.listed !== null)
+			expect(real.listed).toMatchObject({
+				type: "basic",
+				title: shown.title,
+				message: shown.message,
+			});
+		expect(typeof real.cleared).toBe("boolean");
+		expect(real.after).toBe(false);
 	});
 
 	test("cancelling a call aborts the page's signal", async () => {

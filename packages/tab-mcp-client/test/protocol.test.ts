@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { TabMcp } from "../src/index.ts";
+import { SIBLING_GRACE_MS, timing } from "../src/tab-mcp.ts";
 import type {
 	DisconnectReason,
 	Grant,
@@ -16,12 +17,19 @@ import {
 	newTab,
 	nextEnd,
 	nextEvent,
+	setTiming,
 	startRelay,
 } from "./helpers.ts";
 import { STUB_LIMITS, StubRelay } from "./stub-relay.ts";
 
 let relay: StubRelay;
 let t: TabMcp;
+/**
+ * A replaced tab's wait for a sibling's `claimed` (1 s as shipped) is not
+ * what these tests are about: 100 ms here, but in the test that keeps it
+ * ("a sibling whose hello was never answered does not count").
+ */
+let restoreGrace: () => void;
 
 const GRANT: Grant = {
 	grantId: "g_1",
@@ -34,12 +42,14 @@ const GRANT: Grant = {
 };
 
 beforeEach(() => {
+	restoreGrace = setTiming({ siblingGraceMs: 100 });
 	relay = new StubRelay();
 	t = newTab(relay.url, { appName: "saturnus" });
 });
 afterEach(async () => {
 	t.disconnect();
 	await relay.stop();
+	restoreGrace();
 });
 
 test("hello carries the library, the app (its id from the server name, its name) and the secret, and nothing else", async () => {
@@ -1021,6 +1031,10 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 	});
 
 	test("a sibling whose hello was never answered does not count", async () => {
+		// The one test that waits the shipped grace in full.
+		restoreGrace();
+		restoreGrace = () => {};
+		expect([timing.siblingGraceMs, SIBLING_GRACE_MS]).toEqual([1_000, 1_000]);
 		await t.connect();
 		relay.answerHello = false;
 		const sibling = newTab(relay.url, { storage });
@@ -1034,8 +1048,13 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		sibling.disconnect();
 		await failed.catch(() => {});
 		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
+		const started = performance.now();
 		replaceFirst();
 		expect((await replaced).detail).toEqual({ sibling: false });
+		// It waited the shipped grace for a `claimed` before it said so.
+		expect(performance.now() - started).toBeGreaterThanOrEqual(
+			SIBLING_GRACE_MS - 20,
+		);
 	});
 
 	test("a sibling whose session started counts", async () => {

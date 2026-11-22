@@ -12,6 +12,7 @@ import {
 	beforeAll,
 	describe,
 	expect,
+	setSystemTime,
 	test,
 } from "bun:test";
 import { shortAddress } from "../src/address.ts";
@@ -62,6 +63,8 @@ afterAll(async () => {
 	await provider.stop();
 });
 afterEach(async () => {
+	// First, so that nothing below can leave a moved clock to the next tests.
+	setSystemTime();
 	for (const t of tabs.splice(0)) if (t.ws.readyState <= 1) t.close();
 	await current?.stop();
 	current = undefined;
@@ -448,8 +451,16 @@ describe("identity binding: no page of the signed-in person is connecting", () =
 		const back = await provider.signIn(await connect(ctx, flow.page));
 		// It started while the dialog counted, and comes back after.
 		expect(Date.now()).toBeLessThan(until);
-		await Bun.sleep(until - Date.now() + 10);
-		const refused = await ctx.browser.open(back);
+		// Past the dialog's time on the clock the relay reads (`Date.now()`),
+		// not by waiting it out, for this one request only: the real clock is
+		// back before anything else runs (it is still short of `until`).
+		setSystemTime(until + 10);
+		let refused: Awaited<ReturnType<typeof ctx.browser.open>>;
+		try {
+			refused = await ctx.browser.open(back);
+		} finally {
+			setSystemTime();
+		}
 		expect(refused.status).toBe(403);
 		expect(refused.location).toBeUndefined();
 		expect(refused.html).toContain(NO_PAGE_TEXT);
