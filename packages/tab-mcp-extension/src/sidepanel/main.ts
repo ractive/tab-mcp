@@ -293,8 +293,14 @@ let movedUntil = 0;
 /**
  * Until when the same controls ignore a click after the questions' dialog
  * closed: the second click of a double click on its last "Allow once" lands
- * on the panel under it. Not shown: nothing moved, and the switches would
- * flicker after every answer.
+ * on the panel under it. Not shown, as the switches would flicker after every
+ * answer. Where scrollbars take room (Linux, Windows) and the panel does not
+ * scroll, the panel can also move sideways by a scrollbar's width at the
+ * close: it keeps a scrollbar while a question waits, so the question keeps
+ * its width (style.css). That moves right-aligned controls (an AI app's
+ * Disconnect, the AI access switch, the tools' switches) by that much; under
+ * the dialog's buttons, at its left, lies text that does not move, and the
+ * tools' switches take no click until this passes.
  */
 let quietUntil = 0;
 const quiet = (): boolean => Date.now() < quietUntil;
@@ -327,7 +333,9 @@ function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 				{ ...q, args: args.get(q.id) ?? "" },
 				(answer) => send({ type: "answer", id: q.id, answer }),
 			);
-			$("questions").append(card);
+			// Above the focus hint, which then comes and goes under the
+			// questions and moves none of their buttons.
+			$("focus-hint").before(card);
 			const now = Date.now();
 			cards.set(q.id, { card, shownAt: now, question: q });
 			// A short line for screen readers, not the card with its arguments
