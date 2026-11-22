@@ -135,6 +135,7 @@ export class Browser {
 	readonly #listeners = new Set<Listener>();
 	readonly serve: Serve | undefined;
 	#nextId = 0;
+	#closed = false;
 
 	private constructor(
 		proc: Subprocess<"ignore", "ignore", "pipe">,
@@ -360,7 +361,13 @@ export class Browser {
 		throw new Error(`the service worker of ${id} did not start`);
 	}
 
+	/** `close()` was called: what still waits fails because of it. */
+	get closed(): boolean {
+		return this.#closed;
+	}
+
 	async close(): Promise<void> {
+		this.#closed = true;
 		try {
 			await Promise.race([this.send("Browser.close"), Bun.sleep(2000)]);
 		} catch {
@@ -425,6 +432,9 @@ export class Page extends Target {
 	readonly console: string[] = [];
 	/** Contexts of the page and of its out-of-process frames, by session. */
 	readonly #contexts = new Map<string, Map<number, ExecutionContext>>();
+	/** Sessions of frames that went away (removed, or the page closed). */
+	readonly #detached = new Set<string>();
+	#closed = false;
 
 	constructor(browser: Browser, sessionId: string, targetId: string) {
 		super(browser, sessionId);
@@ -443,8 +453,20 @@ export class Page extends Target {
 				const args = params["args"] as Remote[];
 				this.console.push(args.map((a) => a.value ?? a.description).join(" "));
 			} else if (method === "Target.attachedToTarget") {
-				// An out-of-process frame (site isolation): a session of its own.
-				void this.attached(params["sessionId"] as string);
+				// An out-of-process frame (site isolation): a session of its own,
+				// attached without anyone awaiting it.
+				const frame = params["sessionId"] as string;
+				this.attached(frame).catch((error: unknown) => {
+					// The frame went away while it was attached: closing the browser
+					// or the page, or a frame removed, fails what is still on its
+					// way. Any other failure is thrown on, unhandled, so that the
+					// test run shows it.
+					if (this.browser.closed || this.#closed || this.#detached.has(frame))
+						return;
+					throw error;
+				});
+			} else if (method === "Target.detachedFromTarget") {
+				this.#detached.add(params["sessionId"] as string);
 			}
 		});
 	}
@@ -468,6 +490,7 @@ export class Page extends Target {
 
 	/** Close the tab. */
 	async close(): Promise<void> {
+		this.#closed = true;
 		await this.browser.send("Target.closeTarget", { targetId: this.targetId });
 	}
 
