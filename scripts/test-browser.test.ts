@@ -469,7 +469,7 @@ test("test:browser fails before any run when a browser is missing", () => {
 	);
 	expect(run.exitCode).toBe(1);
 	expect(run.stderr.toString()).toContain(
-		"Firefox 128 or newer is needed, none was found",
+		"Firefox 140 or newer is needed, none was found",
 	);
 	expect(run.stdout.toString()).not.toContain("browser tests:");
 });

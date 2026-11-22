@@ -6,7 +6,7 @@
  * with filling in turned on, as the smoke's first test leaves it.
  * Harness: firefox-fill.ts.
  *
- * Needs Firefox 128 or newer, as firefox-fill-smoke.browser.test.ts.
+ * Needs Firefox 140 or newer, as firefox-fill-smoke.browser.test.ts.
  */
 
 import {

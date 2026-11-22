@@ -9,7 +9,7 @@
  * firefox-full.browser.test.ts (browser-full.yml); `bun run test:browser
  * firefox` runs both.
  *
- * Needs Firefox 128 or newer (`FIREFOX_PATH`, or the pinned test Firefox,
+ * Needs Firefox 140 or newer (`FIREFOX_PATH`, or the pinned test Firefox,
  * test/browsers.ts): required in CI, skipped elsewhere without it.
  */
 

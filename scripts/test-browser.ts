@@ -101,7 +101,7 @@ const LOOKUP: Record<Need, { label: string; min: number; code: string }> = {
 	},
 	firefox: {
 		label: "Firefox",
-		min: 128,
+		min: 140,
 		code: `import { findFirefox as find, firefoxMajor as major } from ${module(`${EXTENSION}/firefox.ts`)};`,
 	},
 };

@@ -5,9 +5,12 @@ All notable changes to the tab-mcp browser extension (called tab-mcp for Chrome 
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store. Each release
-attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
-`tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`.
+The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store, Microsoft
+Edge Add-ons and addons.mozilla.org. Each release attaches its store package,
+`tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
+`tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`;
+from 0.3.3 also the Firefox package `tab-mcp-browser-extension-firefox-<version>-store.zip`
+and the source archive `tab-mcp-<version>-source.zip` it builds from.
 
 ## Unreleased
 
@@ -37,6 +40,10 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 - **The side panel while AI access is off** says "This page has tab-mcp built in." for
   a page that announced the library, but the warning about an AI app that sees the
   page's tools twice comes only once AI access is on (a moment after connecting).
+- Firefox: needs Firefox 140 or later (was 128), where Firefox reads the data collection
+  the add-on declares (DEC-195).
+- A release publishes the Firefox package to addons.mozilla.org too, with the source
+  archive for its reviewers, as it publishes to the Chrome Web Store and Edge Add-ons.
 
 ### Fixed
 

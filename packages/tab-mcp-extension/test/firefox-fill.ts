@@ -22,13 +22,13 @@ let binary: string | undefined;
 /**
  * The Firefox `startFill` launches: `found`, the test file's own
  * `findFirefox()` (scripts/test-browser.ts reads which browsers a file
- * needs from its calls), if it is 128 or newer. Whether the tests run.
+ * needs from its calls), if it is 140 or newer. Whether the tests run.
  */
 export function useFirefox(found: string | undefined): boolean {
-	const ok = found !== undefined && firefoxMajor(found) >= 128;
+	const ok = found !== undefined && firefoxMajor(found) >= 140;
 	if (browserTests && !ok && process.env["CI"])
 		throw new Error(
-			"Firefox 128 or newer is needed for the extension's Firefox fill test in CI",
+			"Firefox 140 or newer is needed for the extension's Firefox fill test in CI",
 		);
 	binary = ok ? found : undefined;
 	return ok;

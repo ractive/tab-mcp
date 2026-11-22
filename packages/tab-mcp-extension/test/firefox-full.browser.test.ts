@@ -9,7 +9,7 @@
  * an issue within minutes when it fails; 20 s on every pull request is not
  * worth that earlier warning.
  *
- * Needs Firefox 128 or newer, as firefox-smoke.browser.test.ts.
+ * Needs Firefox 140 or newer, as firefox-smoke.browser.test.ts.
  */
 
 import {

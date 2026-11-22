@@ -8,7 +8,7 @@ extension passes them on (iterations 19 and 20). A page needs nothing of tab-mcp
 this. How the extension, the relay and the client library fit together, with a picture:
 [How the parts fit together](../../README.md#how-the-parts-fit-together).
 
-- **What the browser must have:** Chrome 116 or later; Firefox 128 or later for the
+- **What the browser must have:** Chrome 116 or later; Firefox 140 or later for the
   Firefox build. It needs no WebMCP of its own.
 - **What the extension adds:** the page's WebMCP tools for the AI app. Where the browser
   has WebMCP on (Chrome with `chrome://flags/#enable-webmcp-testing`, or a site in
@@ -361,14 +361,16 @@ Firefox has no WebMCP. The Firefox build gives every page `document.modelContext
 page starts loading, from its content script (`src/firefox/webmcp.ts`, DEC-188), so pages
 that register their tools wherever the API exists (Shopify's storefronts, Mintlify, GitBook
 and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
-the extension offers them to the AI app as in Chrome. Iteration 44; not on
-addons.mozilla.org yet (its release is
-[pull request 163](https://github.com/ractive/tab-mcp/pull/163)), so it is loaded from a
-build, as below.
-A page can therefore tell that the extension is installed: the API is there where Firefox
-has none, and it behaves as this extension's (accepted, 2026-11-16; `PRIVACY.md`).
+the extension offers them to the AI app as in Chrome. A page can therefore tell that the
+extension is installed: the API is there where Firefox has none, and it behaves as this
+extension's (accepted, 2026-11-16; `PRIVACY.md`).
 
-1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 128 or later).
+It is on its way to addons.mozilla.org (add-on id `tab-mcp@ractive.ch`; 0.2.0 went in by
+hand). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (minified,
+no source maps) and the source archive `tab-mcp-<version>-source.zip` AMO's reviewers build
+it from, and publishes both there (DEC-195, "Releases" below).
+
+1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 140 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
    `dist-firefox/manifest.json`. (Or `ff-rdp launch --temporary-addon dist-firefox <url>`.)
    **Reload** keeps its UUID and storage, and with them the AI app's pairing (checked
@@ -425,14 +427,17 @@ WebMCP sites with it and lists the tools each registers (needs the network).
 ## Releases
 
 A tag `extension-v<version>` on main (the version in `package.json`) builds the store zip,
-creates the GitHub release with it and then, after the owner's approval, publishes it to
-the Chrome Web Store (`.github/workflows/extension-release.yml`). The release job attests
-the zip's build provenance; check a release's zip with
+the Firefox store zip and the source archive, creates the GitHub release with them and
+then, after the owner's approval in each store's environment, publishes them to the
+Chrome Web Store, Microsoft Edge Add-ons and addons.mozilla.org
+(`.github/workflows/extension-release.yml`). The release job attests the zips' build
+provenance; check a release's zip with
 `gh attestation verify tab-mcp-browser-extension-<version>-store.zip -R ractive/tab-mcp`. The
-publish job takes only a zip that verifies, packs it into a CRX signed with the item's
-verified-upload key and submits it for review. The
-"Extension publish" workflow repeats that publish by hand, for a release whose publish
-failed. The attestation covers the GitHub release's zip and the upload, not the installed
+publish jobs take only zips that verify: the Chrome job packs the store zip into a CRX
+signed with the item's verified-upload key, the Edge job uploads it as it is, the Firefox
+job uploads the Firefox zip with the source archive; each submits for review. The
+"Extension publish" workflow repeats a store's publish by hand, for a release whose
+publish failed. The attestation covers the GitHub release's zip and the upload, not the installed
 extension: the Chrome Web Store signs what it serves itself. The owner's setup, the listing, the permission justifications and the review notes:
 `kb/operations/chrome-web-store.md`. The listing's screenshots are in `assets/store/`;
 `bun scripts/screenshots.ts` takes them again (Chrome for Testing, `CHROME_PATH`).
@@ -506,7 +511,7 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   instead of showing them (`src/worker/notifications.ts`, test build only).
 - `test/firefox-smoke.browser.test.ts` (every pull request) and
   `test/firefox-full.browser.test.ts` (the full run, browser-full.yml): the Firefox test
-  build in Firefox 128 or newer (`FIREFOX_PATH`, else the pinned test Firefox in
+  build in Firefox 140 or newer (`FIREFOX_PATH`, else the pinned test Firefox in
   Puppeteer's cache; skipped without it) over WebDriver BiDi (`test/firefox.ts`, a
   temporary add-on; harness `test/firefox-e2e.ts`): the same test page registers its tools
   with the extension's `document.modelContext` as it loads, and a relay and an MCP client

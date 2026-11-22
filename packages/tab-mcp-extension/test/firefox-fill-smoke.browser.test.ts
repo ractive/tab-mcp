@@ -6,7 +6,7 @@
  * speak for the page. Always allow repeats the Chrome test on shared code:
  * firefox-fill-full.browser.test.ts. Harness: firefox-fill.ts.
  *
- * Needs Firefox 128 or newer: required in CI, skipped elsewhere without it.
+ * Needs Firefox 140 or newer: required in CI, skipped elsewhere without it.
  */
 
 import {

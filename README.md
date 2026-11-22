@@ -86,7 +86,7 @@ library alone, without `webmcp: true`, has none for it.
 
 ### The tab-mcp browser extension
 
-- **What the browser must have:** Chrome 116 or later, or Firefox 128 or later for the
+- **What the browser must have:** Chrome 116 or later, or Firefox 140 or later for the
   Firefox build. It needs no WebMCP of its own.
 - **What the extension adds:** it passes the page's WebMCP tools on to the AI app. Where
   the browser has WebMCP on (Chrome with the flag, or a site in Chrome's origin trial),

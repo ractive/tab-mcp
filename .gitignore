@@ -11,6 +11,8 @@ dist-firefox-store
 *.tgz
 # the extension's store package (bun scripts/build.ts --store --zip)
 tab-mcp-browser-extension-*.zip
+# its source archive for addons.mozilla.org (scripts/source-archive.ts)
+tab-mcp-*-source.zip
 
 # code coverage
 coverage

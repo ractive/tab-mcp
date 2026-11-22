@@ -187,7 +187,9 @@ export function createFirefoxManifest(
 		browser_specific_settings: {
 			gecko: {
 				id: FIREFOX_ID,
-				strict_min_version: "128.0",
+				// data_collection_permissions needs Firefox 140 (web-ext lint
+				// warns below it); 140 is also the current ESR.
+				strict_min_version: "140.0",
 				// Required for new add-ons on addons.mozilla.org since 2025-11:
 				// the page's tools, their inputs and results go to the AI app.
 				data_collection_permissions: {
