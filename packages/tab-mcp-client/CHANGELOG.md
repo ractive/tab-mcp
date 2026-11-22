@@ -61,7 +61,7 @@ the Git tag `client-v<version>`. The format follows
   validator compiles output schemas (the MCP SDK's client) could not use it. Results
   are still not checked against the output schema.
 - The setup commands (`./setup`, "How do I add it?") put an address with `[`, `]` or `~`
-  in double quotes: zsh refused `claude mcp add --transport http test
+  in double quotes (DEC-217): zsh refused `claude mcp add --transport http test
   http://[::1]:8080/s/test/mcp` with "no matches found" (`~` with `extendedglob`). POSIX
   shells, zsh, fish, PowerShell and cmd.exe read the quoted address the same. An address
   with any other character than letters, digits and `. : [ ] / _ ~ -` still gets the

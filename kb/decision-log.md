@@ -5145,36 +5145,39 @@ coding agent"), the root README's "Agent skill" first, before the plugin.
   to update. The plugin comes from `main` and can be ahead of the last release.
 - The website (ractive.ch, another repository) is not changed here.
 
-## DEC-217: An answer to a tool's question holds for the tool as it was offered
+## DEC-217: After the review of 2026-11-22: answers, schemas without patterns, quoted addresses
 
-2026-11-22, from the outside review of that day (finding 1,
-[review](/research/review-2026-11-22.md)). After the user's answer the bridge checked that
-the tool was still the same one (tab, origin, document, name, read-only claim), but not
-its title, description, schemas or `consequentialHint`. A page could register the tool
-again while the question waited, as "Publish the draft publicly" in place of "Save a
-draft only", and "Allow" ran the changed tool.
+2026-11-22, from the outside review of that day (findings 1, 2 and 4,
+[review](/research/review-2026-11-22.md); CR-05, CR-06 and CR-08 of the code review
+of the same day, `research/code-review-2026-11-22.md`, found them again). Three rules of the
+bridge and the setup commands change.
+
+**1. An answer to a tool's question holds for the tool as it was offered.** After the
+user's answer the bridge checked that the tool was still the same one (tab, origin,
+document, name, read-only claim), but not its title, description, schemas or
+`consequentialHint`. A page could register the tool again while the question waited, as
+"Publish the draft publicly" in place of "Save a draft only", and "Allow" ran the changed
+tool.
 
 - **The rule:** the check after the answer compares the tool as it was offered when the
   call started with the tool offered now: the bridge's `keyOf` (tab, document and
   everything the content script sent for the tool: name, title, description, input and
   output schema, annotations) and the origin. Anything else is a tool that changed while
   the user was asked: it does not run, and the AI app hears so, in the words the bridge
-  already used for a navigation.
+  already used for a navigation. Both ways of calling it (`page_<name>`, `webmcp_call`).
 - **The same key as for re-registration:** a page that registers the same tool again
   unchanged (a `toolchange` with new objects) keeps its key and runs; the bridge offers a
   changed tool anew by the same key, so the AI app gets a tools-changed notice for it too.
+  The arguments were checked against that same schema.
 - The question itself is not withdrawn when the tool changes: the user still answers it,
   and the answer is refused. That keeps the questions' code as it is.
 
-## DEC-218: A page tool's schema without its regular expressions is never stricter
-
-2026-11-22, from the outside review of that day (finding 2,
-[review](/research/review-2026-11-22.md)). The bridge leaves out `pattern` and
-`patternProperties` so that a page's catastrophic regular expression cannot freeze the
-extension (ES 2, WM 8). Taking a keyword away loosens a schema only where nothing around
-it turns that around: without `patternProperties`, its keys fell to
-`additionalProperties: false`, and `{"x-name": "Alice"}` was refused for a schema that
-takes it.
+**2. A page tool's schema without its regular expressions is never stricter.** The
+bridge leaves out `pattern` and `patternProperties` so that a page's catastrophic regular
+expression cannot freeze the extension (ES 2, WM 8). Taking a keyword away loosens a
+schema only where nothing around it turns that around: without `patternProperties`, its
+keys fell to `additionalProperties: false`, and `{"x-name": "Alice"}` was refused for a
+schema that takes it.
 
 - **The rule:** the schema the bridge checks and offers may let through more than the
   page's, never less. The page checks its arguments with its own schema in any case: a
@@ -5199,13 +5202,10 @@ takes it.
   argument the page's schema takes (validated in full) is taken by the offered schema
   too; a schema without regular expressions is offered unchanged.
 
-## DEC-219: A setup command's address with `[`, `]` or `~` is in double quotes
-
-2026-11-22, from the outside review of that day (finding 4,
-[review](/research/review-2026-11-22.md)); amends DEC-093's shell rule for addresses.
-`commandAddress` let `[`, `]` and `~` through bare, and zsh refused
-`claude mcp add --transport http test http://[::1]:8080/s/test/mcp` ("no matches
-found"; `~` is a pattern with `extendedglob`).
+**3. A setup command's address with `[`, `]` or `~` is in double quotes**; amends
+DEC-093's shell rule for addresses. `commandAddress` let `[`, `]` and `~` through bare,
+and zsh refused `claude mcp add --transport http test http://[::1]:8080/s/test/mcp` ("no
+matches found"; `~` is a pattern with `extendedglob`).
 
 - **The rule:** an address goes into a command only with nothing but http or https,
   letters, digits and `. : [ ] / _ ~ -`, as before; one with `[`, `]` or `~` goes in

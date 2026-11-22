@@ -178,7 +178,7 @@ const has = (keywords: Record<string, unknown>, key: string) =>
  * `MAX_PATTERN` characters), so that the AI app still knows the format the
  * page wants (WM 8); so are the names `patternProperties` allowed.
  *
- * The copy only ever accepts more than the page's schema, never less (DEC-218):
+ * The copy only ever accepts more than the page's schema, never less (DEC-217):
  * a check that is too loose here lets through arguments the page then refuses
  * with its own error (the page checks its input as it likes, and the bridge
  * is only a first check), while one that is too strict would refuse calls the

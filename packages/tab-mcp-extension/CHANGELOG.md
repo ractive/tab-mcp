@@ -59,7 +59,7 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   the tool changed while the user was asked. A page that registers the same tool again
   unchanged is not affected.
 
-- **Arguments a page's schema takes are no longer refused** (DEC-218). The extension
+- **Arguments a page's schema takes are no longer refused** (DEC-217). The extension
   leaves a schema's regular expressions out (`pattern`, `patternProperties`), and that
   could make the schema stricter: with `patternProperties: { "^x-": … }` and
   `additionalProperties: false`, `{ "x-name": "Alice" }` was refused before it reached

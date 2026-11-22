@@ -364,14 +364,14 @@ describe("names, descriptions, schemas", () => {
 	];
 
 	for (const [name, schema, values] of cases)
-		test(`what the page's schema takes, the offered one takes: ${name} (DEC-218)`, () => {
+		test(`what the page's schema takes, the offered one takes: ${name} (DEC-217)`, () => {
 			for (const value of values) {
 				expect(accepts(schema, value)).toBe(true);
 				expect(accepts(offered(schema), value)).toBe(true);
 			}
 		});
 
-	test("the review's schema: offered without its regular expression, the names noted (DEC-218)", () => {
+	test("the review's schema: offered without its regular expression, the names noted (DEC-217)", () => {
 		expect(
 			offered({
 				type: "object",
@@ -385,7 +385,7 @@ describe("names, descriptions, schemas", () => {
 		});
 	});
 
-	test("only what the regular expressions touch goes (DEC-218)", () => {
+	test("only what the regular expressions touch goes (DEC-217)", () => {
 		// propertyNames and properties only get looser: they stay.
 		expect(
 			offered({
@@ -448,7 +448,7 @@ describe("names, descriptions, schemas", () => {
 		expect(offered(schema)).toEqual(schema);
 	});
 
-	test("the review's arguments reach the page through webmcp_call (DEC-218)", async () => {
+	test("the review's arguments reach the page through webmcp_call (DEC-217)", async () => {
 		const { state, chrome } = fakeChrome(
 			page([
 				pageTool("tag", {
@@ -1260,24 +1260,33 @@ describe("PageToolBridge", () => {
 			},
 			{ outputSchema: { type: "object" } },
 		];
-		for (const change of changes) {
-			const reg = registrar();
-			const { state, chrome } = fakeChrome(page([draft]));
-			let bridge: PageToolBridge | undefined;
-			const asked: string[] = [];
-			const confirm: Confirm = async (request) => {
-				asked.push(request.tool.description);
-				state.page = page([{ ...draft, ...change }]);
-				await bridge?.refresh();
-			};
-			bridge = new PageToolBridge(reg, chrome, { confirm });
-			await bridge.refresh();
-			await expect(bridge.callByName("save", {}, options())).rejects.toThrow(
-				"The page's tool save changed while the user was asked; it did not run.",
-			);
-			expect(asked[0]).toContain("Save a draft only.");
-			expect(state.calls).toEqual([]);
-		}
+		// Both ways of calling it: webmcp_call and the page_save tool.
+		for (const way of ["webmcp_call", "page_save"])
+			for (const change of changes) {
+				const reg = registrar();
+				const { state, chrome } = fakeChrome(page([draft]));
+				let bridge: PageToolBridge | undefined;
+				const asked: string[] = [];
+				const confirm: Confirm = async (request) => {
+					asked.push(request.tool.description);
+					state.page = page([{ ...draft, ...change }]);
+					await bridge?.refresh();
+				};
+				bridge = new PageToolBridge(reg, chrome, { confirm });
+				await bridge.refresh();
+				const call =
+					way === "webmcp_call"
+						? bridge.callByName("save", {}, options())
+						: Promise.resolve(
+								reg.tools.get("page_save")?.execute({}, options()),
+							);
+				await expect(call).rejects.toThrow(
+					"The page's tool save changed while the user was asked; it did not run.",
+				);
+				expect(asked).toHaveLength(1);
+				expect(asked[0]).toContain("Save a draft only.");
+				expect(state.calls).toEqual([]);
+			}
 	});
 
 	test("a tool offered again unchanged while the user was asked still runs", async () => {
