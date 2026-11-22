@@ -33,7 +33,7 @@ docker run --rm -p 8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
   -e TAB_MCP_STORE=memory \
-  ractive/tab-mcp:0.13.1-rc.1
+  ractive/tab-mcp:0.13.1
 ```
 
 For production, see
@@ -981,14 +981,14 @@ sign in with the account you use on this page" only once it is `bound`. Until th
 says what is missing: "Checking your sign-in…" (`pending`), "Sign in to this page first."
 (`none`), or that the sign-in was not accepted, with `identityMessage` (`refused`).
 
-An open dialog counts for 10 minutes (relays after 0.13.1-rc.1): a sign-in pairs the page
+An open dialog counts for 10 minutes (relays after 0.13.1): a sign-in pairs the page
 only until 10 minutes after the last `startPairing()`, which the dialog calls when it
 opens. The relay says for how long (`pairing.open`); the library counts that on the
 page's own clock from the message's arrival and keeps the end in `pairingUntil` (an ISO
 time, event `pairinguntil`), so a page whose clock differs from the relay's still shows
 the right moment. `pairingUntil` is `undefined` while pairing is off, from each
 `startPairing()` until the relay answers, after the session ended (`disconnect()`,
-`disconnectAll()`, a refusal), and with a relay up to 0.13.1-rc.1. The dialog shows "Your AI
+`disconnectAll()`, a refusal), and with a relay up to 0.13.1. The dialog shows "Your AI
 app can connect until 14:32." under the sign-in line and, once that time is up (also
 checked when the tab comes back to the front), "The time to connect your AI app is up"
 with Continue, which calls `startPairing()` again. Nothing starts the 10 minutes again
@@ -996,7 +996,7 @@ by itself: not a timer, and not a reconnect the library makes by itself once the
 was sent, answered or not (after one, `pairingUntil` is the time of the reconnect, so
 the dialog shows Continue). `connect()` from a click while reconnecting ("Connect again")
 does ask again; codes always come again after a reconnect. A custom UI does the same:
-call `startPairing()` only from the user's click. With a relay up to 0.13.1-rc.1 an open dialog
+call `startPairing()` only from the user's click. With a relay up to 0.13.1 an open dialog
 counts as long as it is open, and after a reconnect the dialog shows Continue too. A
 sign-in that comes back after the time is up gets the relay's answer that no page is
 connecting with that account; Continue, then Connect again on the relay's page, pairs it.
@@ -1022,7 +1022,7 @@ the session ends after the message was sent and before the relay answered, and w
 or may not have done it, and `grants` says so once the page is connected again. They
 also reject with the relay's refusal of that message, an `Error` whose `code` is
 `store_unavailable` (the relay could not save the change: try again) or `unknown_id`.
-A relay after 0.13.1-rc.1 names the message it answers (`for`, and `grantId` for a
+A relay after 0.13.1 names the message it answers (`for`, and `grantId` for a
 revocation), so with several revocations pending only the one it answers rejects; an
 older relay's refusal rejects every pending `revoke()` and `signOut()`. When the relay
 does not know a grant the page lists (it expired), the grant leaves `grants` (with
