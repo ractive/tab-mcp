@@ -500,6 +500,22 @@ describe("mirroring", () => {
 			consequentialHint: false,
 		});
 	});
+
+	test("a tool without hints is mirrored with annotations all the same: Chrome then lists it as not consequential, not as unknown (DEC-214)", async () => {
+		const t = tab();
+		await t.registerTool({
+			name: "note",
+			description: "Adds a note",
+			execute: () => "noted",
+		});
+		await settle();
+		// Chrome lists every hint as false for annotations given, even with no
+		// member (the spike's canary), and none for annotations left out; the
+		// extension takes none for "may be destructive" (DEC-214).
+		const annotations = native.tools.get("note")?.annotations;
+		expect(annotations).toBeObject();
+		expect(annotations?.["consequentialHint"]).toBeUndefined();
+	});
 });
 
 describe("every failure stays with the mirror", () => {
