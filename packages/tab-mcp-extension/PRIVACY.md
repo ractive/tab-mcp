@@ -15,8 +15,10 @@ a tab it reads the page's address (with its query and fragment, as the browser s
 title and language, and the tools the page registered itself with WebMCP
 (`document.modelContext`): their names, titles, descriptions, input schemas and
 annotations (such as read-only). Apart
-from that and what the page's own tools return when the AI app calls them, it reads
-nothing else of the page: no page text, no form fields, no cookies, no screenshots. It
+from that, what the page's own tools return when the AI app calls them, and the two
+cases below (a page that uses the tab-mcp library, and the relay's pairing page with
+"Fill in the code for me" on), it reads nothing of the page: no page text, no form
+fields, no cookies, no screenshots. It
 reads no browsing history, with one exception: when the AI app asks to go back or forward
 in the tab, it checks, in the page, whether the page before or after is on the same
 origin (and its address if so), and how many entries the tab's history has; that stays
@@ -29,20 +31,23 @@ gives each page `document.modelContext` as it starts loading, so that it can reg
 its tools; in Firefox, a tab the user gave it by clicking its icon gets it then. A page's
 script can see that the API is there and, from how it behaves, that it is this
 extension's. It learns nothing else from it: not who the user is, not the relay, not the
-AI app.
+AI app. A page that uses the tab-mcp library learns more, as the next paragraph says.
 
 A page that uses the tab-mcp client library and offers its tools to agents in the
 browser announces that to the extension (any page script could pretend to). Such a page,
-and only such a page among those the extension may read, learns from the extension its
-name and version, whether AI access is on, and the names and verified hosts of the AI
-apps connected to the extension now, while it is open; and, right before one of its own
-tools runs because the user allowed the call in the extension, that tool's name, the
-arguments the page gets anyway, and which of those AI apps made the call. So the page
-does not ask the user a second time. It learns nothing else: not who the user is, not
-the relay, not the extension's address, not other tabs. From the page the extension
-reads only what it announced: the library's version, its app id and the names and hosts
-of the AI apps connected to the page directly, which the panel shows and which stay in
-the browser.
+and only such a page among those the extension may read (in every tab, not only the one
+in front), learns from the extension while it is open: the extension's name and version
+and whether AI access is on, also while it is off; and while AI access is on, the names
+and verified hosts of the AI apps connected to the extension. Right before one of its own
+tools runs because the user allowed the call in the extension, it also learns that
+tool's name, the arguments the page gets anyway, and which of those AI apps made the
+call, so that the page does not ask the user a second time. It learns nothing else: not
+who the user is, not the relay, not the extension's address, not other tabs. This
+reaches the page inside the browser; the page's script can send it on to its site, and
+what the site does with it is under that site's own privacy policy. From the page the
+extension reads only what it announced: the library's version, its app id and the names
+and hosts of the AI apps connected to the page directly, which the panel shows and which
+stay in the browser.
 
 After the user turns on the "Fill in the code for me" switch (off by default, also with
 access to all sites), the extension sees the pairing page of the relay the user chose, and only that
@@ -50,7 +55,7 @@ page of it (`<relay>/authorize`). There it reads three attributes of the pairing
 (the app the AI app asks to connect to, the AI app's name and its host, which the relay
 put there for this) and the form's hidden request id (the relay's id of that sign-in,
 so that it can tell a page shown again after a wrong code from a new one). It reads
-nothing else of the page. While AI access is on, it asks the user whether to connect
+nothing else of that page. While AI access is on, it asks the user whether to connect
 that AI app, and only after the user's Allow it writes its own pairing code into the
 form's code field and submits the form, as the user would by typing it; for an AI app
 whose host the user chose "Always allow" for, it does so without asking and tells the
@@ -91,7 +96,7 @@ disconnects an AI app, and 90 days after it connected at the latest.
 
 ## What leaves the browser
 
-Only while AI access is on, and only to the relay the user chose:
+To the relay the user chose, and only while AI access is on:
 
 - the connection to the relay and the connecting of an AI app (the relay stores a grant for
   each connected AI app; see the relay's own policy below);
@@ -115,13 +120,22 @@ The hosted relay `tab-mcp.ractive.ch` is run by the same developer. What it pass
 stores and logs: https://ractive.ch/tab-mcp/privacy/. A relay the user runs or chooses
 themselves has its operator's policy.
 
+To a page that uses the tab-mcp client library, inside the browser (see "What it reads"
+above): the extension's name and version and whether AI access is on, also while it is
+off; while AI access is on, the names and verified hosts of the AI apps connected to the
+extension, and right before a call the user allowed in the extension, the tool's name,
+its arguments and which AI app made the call. The page's script can send this on to its
+site, whose own privacy policy applies.
+
 ## What it does not do
 
 - No analytics, no tracking, no advertising, no crash reports.
 - No data is sold or given to third parties, other than the relay and the AI app the user
-  chose, as above, and the relay's host (for the hosted relay bunny.net).
-- No use of the data for anything but passing a page's tools to the user's AI app and
-  opening pages in the tab for it, and none to determine creditworthiness or for lending.
+  chose, as above, the relay's host (for the hosted relay bunny.net), and a page that uses
+  the tab-mcp library, which learns what the handshake tells it (above).
+- No use of the data for anything but passing a page's tools to the user's AI app,
+  opening pages in the tab for it, and telling a page that uses the tab-mcp library which
+  AI apps reach its tools, and none to determine creditworthiness or for lending.
 - No remote code: all the extension's code is in its package.
 
 ## Questions
