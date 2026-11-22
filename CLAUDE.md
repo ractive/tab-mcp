@@ -122,15 +122,20 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
 `extension-v0.1.0`), `test/e2e` (end-to-end test with its test page).
 
 - Commands: `bun run verify` (Biome CI, type check, tests; no browser, about a
-  minute and a half) before every commit. `bun run test:browser [filter]` (the
-  `*.browser.test.ts` files, Chrome and Firefox) before a commit that changes
-  code a browser runs: the extension, the client library's browser code, the
-  relay's pages, the test pages and the browser harnesses; with the filter for
-  the part touched (`bun run test:browser fill`). Never several browser runs at
-  once on one machine. A change to `kb/` or docs alone needs neither. CI runs
-  both on every pull request. `bun run fix` to format. Type check per
-  workspace with `bun check -p <dir>` (no script may be named `check`: it
-  shadows `bun check`).
+  minute and a half) before every commit, docs included (tests read them). A
+  change to `kb/` alone needs nothing.
+- `bun run test:browser [filter…]` (the `*.browser.test.ts` files, Chrome and
+  Firefox; a filter matches the file's name) before a commit that changes code
+  a browser test runs, with the filters for the part touched: the extension
+  (`extension fill firefox`), the client library's browser code (`page webmcp
+  serve`), the relay's pages, server and protocol (`code-field calculator page
+  react-todo`), the test pages and harnesses (the files that use them). It
+  fails when a browser it needs is missing; `--no-firefox` or `--no-chrome`
+  leaves those files out and says so. Never several browser runs at once on one
+  machine. CI runs both on every pull request; its required check `verify`
+  needs both.
+- `bun run fix` to format. Type check per workspace with `bun check -p <dir>`
+  (no script may be named `check`: it shadows `bun check`).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency,
   pinned exactly. Use Bun's built-ins before adding a package.
 - Biome ignores `.claude/` and `kb/` (vendored and knowledge files).

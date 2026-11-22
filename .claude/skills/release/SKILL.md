@@ -73,13 +73,14 @@ old client is refused by a new relay and a new client by an old one.
    `## Unreleased` until the stable release), say so and set the version by hand.
 4. `bun run verify` (no browser), and check its exit code (never through a pipe). The test
    "docs and plugin manifests name only the current package versions" fails on any version
-   left over. A version bump changes no code a browser runs: leave `bun run test:browser`
-   to CI's `browser` job.
+   left over. Locally the fast `verify` is enough: the version a bump changes reaches the
+   browser tests too (the client's `hello`, the relay's pages), and CI's `browser` job and
+   the release workflow's `verify:all` run them.
 5. Commit (author james@ractive.ch, with the session's `Co-Authored-By` trailer), push, PR
    titled "Client 0.14.0" / "Relay 0.10.0". The content was reviewed in its own PRs; a pure
    version PR needs no review run.
-6. Wait for CI, both jobs, `verify` (required on main) and `browser`
-   (`gh pr checks <n> --watch`), then
+6. Wait for CI (`gh pr checks <n> --watch`): `verify`, the required check, passes only when
+   `fast` and `browser` passed. Then
    `gh pr merge <n> --merge --author-email james@ractive.ch`. `client-pack` and `relay-pack`
    check the published file list and `exports` against `scripts/npm-pack.ts`: a new entry
    point or chunk name must be added there.

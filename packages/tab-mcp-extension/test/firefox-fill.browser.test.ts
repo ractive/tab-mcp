@@ -6,7 +6,8 @@
  * that Firefox (`oauth.ts`). Firefox's port senders carry no `origin`: the
  * address decides there.
  *
- * Needs Firefox 128 or newer, as `firefox.browser.test.ts`; skipped without it.
+ * Needs Firefox 128 or newer, as `firefox.browser.test.ts`: required in CI,
+ * skipped elsewhere without it.
  */
 
 import {
@@ -35,6 +36,10 @@ setDefaultTimeout(60_000);
 
 const binary = browserTests ? findFirefox() : undefined;
 const firefoxOk = binary !== undefined && firefoxMajor(binary) >= 128;
+if (browserTests && !firefoxOk && process.env["CI"])
+	throw new Error(
+		"Firefox 128 or newer is needed for the extension's Firefox fill test in CI",
+	);
 
 /** The add-on's UUID in the test profile, so the panel's address is known. */
 const UUID = "5b2e7d14-8c3a-4f6e-a1d9-0e7c3b5a9f21";

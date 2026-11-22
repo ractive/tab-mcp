@@ -17,8 +17,9 @@ The owner, 2026-11-22: the local browser tests "got completely out of hand" (man
 browsers at once, notifications, a machine at load 96). A Claude agent read the tests
 and wrote this report; nothing was run. The plan's pull requests are the tasks of
 [iteration 50](/iterations/iteration-50-browser-tests.md); the split and the rule are
-DEC-220. The report follows unchanged, with the file names as they were before the
-renames of its section 6.
+DEC-218. The report follows unchanged, with the file names as they were before the
+renames of its section 6; where pull request 1 did otherwise is under "Afterwards" at
+the end.
 
 Read at origin/main 9f11a91 in a detached worktree (`/Users/james/devel/tab-mcp-wt/test-audit`).
 No test was run and no browser was started. Every time below is either the CI number from
@@ -779,3 +780,23 @@ check, tests) before every commit"):
   start) come from dividing the 51 s of hooks by the starts. They are not measured.
 - **Whether no test reads `kb/`.** I grepped the test sources and found none. Confirm it in
   the PR that adds `paths-ignore`.
+
+# Afterwards
+
+Pull request 1 ([iteration 50](/iterations/iteration-50-browser-tests.md), DEC-218)
+differs from section 6 where these held:
+
+- No `paths-ignore: kb/**`: it would leave the required check without a report on a
+  pull request that changes only `kb/`. Both test jobs start and pass at once instead,
+  and the required `verify` waits for `fast` and `browser`. `bun run verify` passed with
+  the same counts in a copy without `kb/`.
+- `bun test .browser.test fill` does not narrow: Bun joins positional filters with "or".
+  `scripts/test-browser.ts` picks the files itself; a filter matches the file's name.
+- Bun counts the `beforeAll`/`afterAll` of a skipped `describe` as skipped tests (32 in
+  the browser files), so "the same counts" means the passes per file.
+- Measured on CI: `bun test` without browsers 86 s, the browser files 155 to 170 s.
+
+# Citations
+
+- [CI of main at 9f11a91: 1,890 tests in 86 files, bun test 242.65 s](https://github.com/ractive/tab-mcp/actions/runs/44984541830)
+- [The test sources at 9f11a91](https://github.com/ractive/tab-mcp/tree/9f11a91329abe3f88591d71b55365aee6737930a)
