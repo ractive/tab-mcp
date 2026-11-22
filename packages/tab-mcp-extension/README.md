@@ -427,7 +427,7 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   descriptions, schemas (a parameter called `pattern`), results (the image budget, a
   tool that navigates), the origin checked against Chrome's, why a call did not run, and
   how its tools follow the page.
-- `test/e2e.test.ts`: the test build and the store package in Chrome for Testing 156 or
+- `test/extension.browser.test.ts`: the test build and the store package in Chrome for Testing 156 or
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
@@ -441,15 +441,16 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   retries). `TAB_MCP_E2E_IDLE=1` adds a two-minute check that the service
   worker keeps running on a quiet connection and stops once AI access is off. Pages are served
   through the DevTools Protocol on made-up https origins. They take a few seconds and
-  run in CI on every change.
+  run in CI on every change. Locally: `bun run test:browser extension` (every file named
+  `*.browser.test.ts` runs only with `bun run test:browser`, never in plain `bun test`).
 - `test/fill.test.ts`: filling in the code on the relay's page: which page is one (top
   frame, `/authorize`, its own app, a code field), who may speak for it (the relay's
   exact origin; a look-alike, a frame, another extension), the question and its
   notification, Allow, Don't allow, a timeout, the page going, the AI app connecting
   meanwhile, AI access off, the setting off, too many questions, one more fill for the
   same request only and no third, the code taken despite a clock ahead, the content
-  script's registration and the panel's line. `test/fill-e2e.test.ts` and
-  `test/firefox-fill-e2e.test.ts` do it end to end in Chrome for Testing and Firefox
+  script's registration and the panel's line. `test/fill.browser.test.ts` and
+  `test/firefox-fill.browser.test.ts` do it end to end in Chrome for Testing and Firefox
   with a relay and an OAuth client (`test/oauth.ts`): off by default, turned on with a
   real click, a look-alike on another port gets no question, Don't allow then typing by
   hand, the tab closing, Allow pairs the AI app, AI access off (also while a question
@@ -457,7 +458,7 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   have access to all sites at install.
 - `test/hosted.ts` (by hand): the development build connects to the hosted relay and
   shows an address and a pairing code.
-- `test/firefox-e2e.test.ts`: the Firefox test build in Firefox 128 or newer
+- `test/firefox.browser.test.ts`: the Firefox test build in Firefox 128 or newer
   (`FIREFOX_PATH`, else where it is installed; skipped without it) over WebDriver BiDi
   (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
   extension's `document.modelContext` as it loads, and a relay and an MCP client list,

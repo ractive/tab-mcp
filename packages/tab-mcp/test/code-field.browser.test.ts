@@ -14,6 +14,7 @@ import {
 	setDefaultTimeout,
 	test,
 } from "bun:test";
+import { browserTests } from "../../../test/browser-gate.ts";
 import {
 	Browser,
 	findChrome,
@@ -31,8 +32,8 @@ import {
 
 setDefaultTimeout(30_000);
 
-const chrome = findChrome();
-if (chrome === undefined && process.env["CI"])
+const chrome = browserTests ? findChrome() : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error("Chrome is needed for the code field's browser test in CI");
 
 let cimd: CimdServer;

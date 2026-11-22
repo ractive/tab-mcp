@@ -50,7 +50,7 @@ relay).
 
 ## Test
 
-`test/e2e.test.ts` (part of `bun test`) drives the page in headless Chrome with a real
+`test/react-todo.browser.test.ts` (part of `bun run test:browser`) drives the page in headless Chrome with a real
 relay and the MCP SDK client: it lists the tools, adds, completes and deletes todos
 (clicking Allow in the page's confirmation), restarts the relay and checks that the page
 reconnects to the same address by itself, then turns on the switch for `delete_todos` and

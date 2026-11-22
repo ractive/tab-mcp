@@ -404,7 +404,9 @@ Requires [Bun](https://bun.sh) 1.4.4 or newer.
 
 ```sh
 bun install
-bun run verify     # Biome, type check, tests, MCP conformance suite
+bun run verify     # Biome, type check, tests, MCP conformance suite; no browser
+bun run test:browser [filter]  # the browser tests (*.browser.test.ts), Chrome and Firefox
+bun run verify:all # both
 bun run conformance  # only the official MCP conformance suite (relay and library)
 bun run fix        # format and apply safe lint fixes
 ```

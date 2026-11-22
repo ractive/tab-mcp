@@ -7,6 +7,7 @@
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/client";
+import { browserTests } from "../../browser-gate.ts";
 import {
 	CLIENT_NAME,
 	clickButton,
@@ -21,8 +22,8 @@ import {
 	waitFor,
 } from "./stack.ts";
 
-const chrome = findChrome();
-if (chrome === undefined && process.env["CI"])
+const chrome = browserTests ? findChrome() : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error("Chrome is needed for the calculator e2e test in CI");
 
 let stack: Stack | undefined;

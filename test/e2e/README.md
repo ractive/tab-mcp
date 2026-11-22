@@ -18,12 +18,12 @@ machine, never to the hosted relay.
 ## Tests
 
 - `test/calculator.test.ts`: the calculator logic.
-- `test/e2e.test.ts`: the relay, this page in headless Chrome, and the MCP SDK client as
-  the AI app. The client does the whole OAuth flow, and the test types the pairing code
-  from the page's dialog on the relay's `/authorize` page. Then it calls the tools and
-  checks that `clear_memory` waits for your answer in the page. Needs Chrome
-  (`CHROME_PATH` or a usual install location). It runs in CI and is skipped
-  elsewhere if no Chrome is found.
+- `test/calculator.browser.test.ts`: the relay, this page in headless Chrome, and the MCP
+  SDK client as the AI app. The client does the whole OAuth flow, and the test types the
+  pairing code from the page's dialog on the relay's `/authorize` page. Then it calls the
+  tools and checks that `clear_memory` waits for your answer in the page. Needs Chrome
+  (`CHROME_PATH` or a usual install location). It runs with `bun run test:browser` and
+  in CI, and is skipped elsewhere if no Chrome is found.
 - `test/claude-code.ts` (`bun run e2e:claude`): local only, never in CI, because it needs a
   Claude login and spends tokens. It pairs like the e2e test and hands the access token to
   `claude -p` through `${TABMCP_TOKEN}` in the MCP config. Then it checks that "Use the

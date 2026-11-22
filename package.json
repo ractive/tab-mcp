@@ -9,6 +9,8 @@
 	],
 	"scripts": {
 		"verify": "biome ci . && bun run typecheck && bun test && bun run conformance",
+		"test:browser": "bun scripts/test-browser.ts",
+		"verify:all": "bun run verify && bun run test:browser",
 		"typecheck": "bun check -p packages/tab-mcp && bun check -p packages/tab-mcp/tsconfig.browser.json && bun check -p packages/tab-mcp-client && bun check -p packages/tab-mcp-client/tsconfig.test.json && bun check -p test/e2e && bun check -p test/webmcp-spike && bun check -p packages/tab-mcp-extension && bun check -p examples/react-todo && bun check -p scripts",
 		"lint": "biome check .",
 		"fix": "biome check --write .",

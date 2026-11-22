@@ -31,12 +31,13 @@ import {
 	type TestRelay,
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
 
 setDefaultTimeout(30_000);
 
-const binary = findFirefox();
+const binary = browserTests ? findFirefox() : undefined;
 const firefoxOk = binary !== undefined && firefoxMajor(binary) >= 128;
 
 /** The add-on's UUID in the test profile, so the panel's address is known. */

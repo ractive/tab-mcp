@@ -6,7 +6,7 @@
  * that Firefox (`oauth.ts`). Firefox's port senders carry no `origin`: the
  * address decides there.
  *
- * Needs Firefox 128 or newer, as `firefox-e2e.test.ts`; skipped without it.
+ * Needs Firefox 128 or newer, as `firefox.browser.test.ts`; skipped without it.
  */
 
 import {
@@ -20,6 +20,7 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
 import {
@@ -32,7 +33,7 @@ import {
 
 setDefaultTimeout(60_000);
 
-const binary = findFirefox();
+const binary = browserTests ? findFirefox() : undefined;
 const firefoxOk = binary !== undefined && firefoxMajor(binary) >= 128;
 
 /** The add-on's UUID in the test profile, so the panel's address is known. */
@@ -126,7 +127,7 @@ describe.skipIf(!firefoxOk)(
 			const allow = `[...document.querySelectorAll('[data-question] button[data-answer="allow"]')].at(-1)`;
 			// Allow counts once the panel has been in front a while; BiDi
 			// cannot activate an extension's page, the panel brings its own
-			// window forward (as in firefox-e2e.test.ts).
+			// window forward (as in firefox.browser.test.ts).
 			await panel.waitFor(
 				`(void chrome.windows.getCurrent().then((w) => chrome.windows.update(w.id, { focused: true })), ${allow} && ${allow}.getAttribute("aria-disabled") !== "true")`,
 				10_000,

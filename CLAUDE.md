@@ -121,9 +121,16 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
 `packages/tab-mcp-extension` (the tab-mcp browser extension, Chrome Web Store from
 `extension-v0.1.0`), `test/e2e` (end-to-end test with its test page).
 
-- Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
-  `bun run fix` to format. Type check per workspace with `bun check -p <dir>`
-  (no script may be named `check`: it shadows `bun check`).
+- Commands: `bun run verify` (Biome CI, type check, tests; no browser, about a
+  minute) before every commit. `bun run test:browser [filter]` (the
+  `*.browser.test.ts` files, Chrome and Firefox) before a commit that changes
+  code a browser runs: the extension, the client library's browser code, the
+  relay's pages, the test pages and the browser harnesses; with the filter for
+  the part touched (`bun run test:browser fill`). Never several browser runs at
+  once on one machine. A change to `kb/` or docs alone needs neither. CI runs
+  both on every pull request. `bun run fix` to format. Type check per
+  workspace with `bun check -p <dir>` (no script may be named `check`: it
+  shadows `bun check`).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency,
   pinned exactly. Use Bun's built-ins before adding a package.
 - Biome ignores `.claude/` and `kb/` (vendored and knowledge files).

@@ -11,7 +11,7 @@
  * relay's site alone ("Fill in the code for me") cannot be answered from
  * here and is not tested end to end.
  *
- * Needs Chrome for Testing 156 or newer, as `e2e.test.ts`.
+ * Needs Chrome for Testing 156 or newer, as `extension.browser.test.ts`.
  */
 
 import {
@@ -25,6 +25,7 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
 import {
 	Browser,
@@ -43,10 +44,10 @@ import {
 
 setDefaultTimeout(60_000);
 
-const found = findChromeForTesting();
+const found = browserTests ? findChromeForTesting() : undefined;
 const chrome =
 	found !== undefined && chromeMajor(found) >= 156 ? found : undefined;
-if (chrome === undefined && process.env["CI"])
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error(
 		"Chrome for Testing 156 or newer is needed for the extension's end-to-end tests in CI",
 	);
@@ -241,7 +242,7 @@ describe.skipIf(chrome === undefined)(
 			// than the panel, the dialog's own content going past its height
 			// (questions stacking up), the focus hint coming or going. The
 			// dialog stays within the panel's edge, scrollbar left out ("the
-			// look" in e2e.test.ts).
+			// look" in extension.browser.test.ts).
 			await stack.panel.eval(
 				`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-scrollbars", textContent: "::-webkit-scrollbar { width: 15px; height: 15px; } ::-webkit-scrollbar-thumb { background: #888; }" }))`,
 			);

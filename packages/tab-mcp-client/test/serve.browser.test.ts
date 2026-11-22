@@ -2,13 +2,14 @@
  * `serve` in a browser (iteration 28): a page without a relay hands a port to
  * a chat in a frame on another origin, after checking the frame's origin, and
  * the chat calls the page's tools through `createTunnelFetch`. Pages are
- * served through the DevTools Protocol, as in `webmcp-browser.test.ts`. Runs
+ * served through the DevTools Protocol, as in `webmcp.browser.test.ts`. Runs
  * with any Chrome for Testing (`CHROME_PATH`, or Puppeteer's or Playwright's
  * cache); the WebMCP part needs 156 or newer. Required in CI, skipped
  * elsewhere without a browser.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
+import { browserTests } from "../../../test/browser-gate.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -18,9 +19,9 @@ import {
 } from "../../../test/webmcp-spike/browser.ts";
 
 const WEBMCP_MAJOR = 156;
-const chrome = findChromeForTesting();
+const chrome = browserTests ? findChromeForTesting() : undefined;
 const major = chrome === undefined ? 0 : chromeMajor(chrome);
-if (process.env["CI"] && major < WEBMCP_MAJOR)
+if (browserTests && process.env["CI"] && major < WEBMCP_MAJOR)
 	throw new Error(
 		`Chrome for Testing ${WEBMCP_MAJOR} or newer is needed for the serve browser test in CI`,
 	);

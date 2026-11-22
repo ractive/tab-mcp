@@ -3,8 +3,8 @@
  * library (DEC-207): the content script's `PageHandshake`, the vouch in
  * `callTool` and the bridge, the worker's check of who asks, the panel's
  * lines; and both sides together, the real library in a happy-dom page
- * with a fake native WebMCP. End to end in `e2e.test.ts` (Chrome) and
- * `firefox-e2e.test.ts`.
+ * with a fake native WebMCP. End to end in `extension.browser.test.ts`
+ * (Chrome) and `firefox.browser.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";

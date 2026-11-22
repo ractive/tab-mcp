@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { Browser, findChrome, type Page } from "./cdp.ts";
 import {
 	connectClient,
@@ -17,8 +18,8 @@ import {
 	tokenFor,
 } from "./helpers.ts";
 
-const chrome = findChrome();
-if (chrome === undefined && process.env["CI"])
+const chrome = browserTests ? findChrome() : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error("Chrome is needed for the browser test in CI");
 
 const PAGE = `<!doctype html>
@@ -73,6 +74,7 @@ let browser: Browser | undefined;
 let page: Page;
 
 beforeAll(async () => {
+	if (chrome === undefined) return;
 	const build = await Bun.build({
 		entrypoints: [join(import.meta.dir, "../src/index.ts")],
 		target: "browser",
