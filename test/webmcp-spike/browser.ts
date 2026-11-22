@@ -11,6 +11,59 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
+/** The profiles of the Chromes this process started and has not closed yet. */
+const running = new Set<string>();
+let reapOnExit = false;
+
+/**
+ * Kill every process of the Chrome that uses `profile` and remove the profile.
+ * Its helpers (renderers, GPU, network) outlive a SIGKILL of the main process
+ * and would stay behind under launchd; each carries the profile's path, as
+ * given, in its `--user-data-dir`. The pattern is that whole argument and
+ * nothing more, so no other Chrome (another run's, another tool's) matches.
+ */
+function reap(profile: string): void {
+	try {
+		Bun.spawnSync(["pkill", "-9", "-f", profilePattern(profile)]);
+	} catch {
+		// no pkill: only the main process was killed
+	}
+	try {
+		rmSync(profile, { recursive: true, force: true });
+	} catch {
+		// still busy right after the kill: left in the temp directory
+	}
+	running.delete(profile);
+}
+
+/** The `--user-data-dir` argument of `profile`, whole, as a pkill pattern. */
+export function profilePattern(profile: string): string {
+	return `user-data-dir=${profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`;
+}
+
+/**
+ * Remember `profile` until its Chrome is closed; a test process that ends
+ * first (a failed hook, a timeout, Ctrl-C, a kill with SIGTERM) still takes
+ * its Chromes with it.
+ */
+function track(profile: string): void {
+	running.add(profile);
+	if (reapOnExit) return;
+	reapOnExit = true;
+	// reap() does not throw: every profile is reaped, and a signal still exits.
+	const reapAll = () => {
+		for (const p of [...running]) reap(p);
+	};
+	process.on("exit", reapAll);
+	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
+		process.once(signal, () => {
+			reapAll();
+			process.exit(
+				128 + (signal === "SIGINT" ? 2 : signal === "SIGTERM" ? 15 : 1),
+			);
+		});
+}
+
 /** Chrome's major version, from `--version`; 0 if it does not say. */
 export function chromeMajor(binary: string): number {
 	const { stdout } = Bun.spawnSync([binary, "--version"]);
@@ -135,6 +188,7 @@ export class Browser {
 	readonly #listeners = new Set<Listener>();
 	readonly serve: Serve | undefined;
 	#nextId = 0;
+	#closed = false;
 
 	private constructor(
 		proc: Subprocess<"ignore", "ignore", "pipe">,
@@ -209,6 +263,7 @@ export class Browser {
 		options: LaunchOptions = {},
 	): Promise<Browser> {
 		const profile = mkdtempSync(join(tmpdir(), "webmcp-spike-"));
+		track(profile);
 		if (options.labs?.length)
 			await Bun.write(
 				join(profile, "Local State"),
@@ -278,7 +333,7 @@ export class Browser {
 			// No Browser to close: kill what started and remove the profile here.
 			proc?.kill("SIGKILL");
 			await proc?.exited;
-			rmSync(profile, { recursive: true, force: true });
+			reap(profile);
 			throw error;
 		}
 	}
@@ -360,7 +415,13 @@ export class Browser {
 		throw new Error(`the service worker of ${id} did not start`);
 	}
 
+	/** `close()` was called: what still waits fails because of it. */
+	get closed(): boolean {
+		return this.#closed;
+	}
+
 	async close(): Promise<void> {
+		this.#closed = true;
 		try {
 			await Promise.race([this.send("Browser.close"), Bun.sleep(2000)]);
 		} catch {
@@ -369,7 +430,7 @@ export class Browser {
 		this.#ws.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
-		rmSync(this.#profile, { recursive: true, force: true });
+		reap(this.#profile);
 	}
 }
 
@@ -425,6 +486,9 @@ export class Page extends Target {
 	readonly console: string[] = [];
 	/** Contexts of the page and of its out-of-process frames, by session. */
 	readonly #contexts = new Map<string, Map<number, ExecutionContext>>();
+	/** Sessions of frames that went away (removed, or the page closed). */
+	readonly #detached = new Set<string>();
+	#closed = false;
 
 	constructor(browser: Browser, sessionId: string, targetId: string) {
 		super(browser, sessionId);
@@ -443,8 +507,23 @@ export class Page extends Target {
 				const args = params["args"] as Remote[];
 				this.console.push(args.map((a) => a.value ?? a.description).join(" "));
 			} else if (method === "Target.attachedToTarget") {
-				// An out-of-process frame (site isolation): a session of its own.
-				void this.attached(params["sessionId"] as string);
+				// An out-of-process frame (site isolation): a session of its own,
+				// attached without anyone awaiting it.
+				const frame = params["sessionId"] as string;
+				this.attached(frame).catch(async (error: unknown) => {
+					// The frame went away while it was attached: closing the browser
+					// or the page, or a frame removed, fails what is still on its
+					// way. Any other failure is thrown on, unhandled, so that the
+					// test run shows it. Chrome can answer a command of a session
+					// before it reports that session detached: decide a moment
+					// later, once that report is in.
+					await Bun.sleep(50);
+					if (this.browser.closed || this.#closed || this.#detached.has(frame))
+						return;
+					throw error;
+				});
+			} else if (method === "Target.detachedFromTarget") {
+				this.#detached.add(params["sessionId"] as string);
 			}
 		});
 	}
@@ -468,6 +547,7 @@ export class Page extends Target {
 
 	/** Close the tab. */
 	async close(): Promise<void> {
+		this.#closed = true;
 		await this.browser.send("Target.closeTarget", { targetId: this.targetId });
 	}
 
