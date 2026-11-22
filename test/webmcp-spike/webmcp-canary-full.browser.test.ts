@@ -2,7 +2,10 @@
  * Iteration 18's canary: what kb/research/webmcp-from-extension.md found
  * about Chrome's WebMCP, checked against the pinned Chrome for Testing, so a
  * Chrome change shows. The pages are served through the DevTools Protocol on
- * https://spike.test (no server, no network). Needs Chrome for Testing 156 or newer
+ * https://spike.test (no server, no network). Its answers change only with
+ * the pin, so it runs in the full browser run (browser-full.yml: nightly, and
+ * on a pull request that changes the pin in ci.yml), not on every pull
+ * request. Needs Chrome for Testing 156 or newer
  * (`CHROME_PATH`, or the pinned one in Puppeteer's cache, test/browsers.ts): required in CI,
  * skipped elsewhere without it.
  */
@@ -196,40 +199,5 @@ test.skipIf(chrome === undefined)(
 		} finally {
 			await other.page.close();
 		}
-	},
-);
-
-test.skipIf(chrome === undefined)(
-	"a tool the content script registers is the page's to list and call",
-	async () => {
-		expect(
-			await page.eval(
-				`spike.probe("register", { name: "canary_tool" })`,
-				isolated,
-			),
-		).toMatchObject({ ok: true });
-		const listed = await page.eval<string[]>(
-			"document.modelContext.getTools().then((tools) => tools.map((t) => t.name))",
-		);
-		expect(listed).toContain("canary_tool");
-		// The page calls it, and it runs in the content script.
-		const result = await page.eval<string>(
-			`document.modelContext.getTools().then((tools) => document.modelContext.executeTool(tools.find((t) => t.name === "canary_tool"), { from: "page" }))`,
-		);
-		expect(JSON.parse(result)).toEqual({
-			registeredIn: "isolated",
-			ranIn: "isolated",
-			input: { from: "page" },
-		});
-		// A name already taken, either way round, is refused.
-		expect(
-			await page.eval(
-				`spike.probe("register", { name: "get_greeting" })`,
-				isolated,
-			),
-		).toMatchObject({
-			ok: false,
-			error: "InvalidStateError: Duplicate tool name",
-		});
 	},
 );

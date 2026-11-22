@@ -10,6 +10,8 @@
  */
 
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Window } from "happy-dom";
 import type {
@@ -57,7 +59,31 @@ afterEach(async () => {
  * it, its timers the window's (closed with it). `show` gives it a state as
  * the worker's port would.
  */
-async function openPanel() {
+/**
+ * main.ts as the Firefox build has it (`TAB_MCP_FIREFOX` true: its words,
+ * its sidebar, its server name), bundled once into a file of its own.
+ */
+let firefoxMain: Promise<string> | undefined;
+function firefoxBundle(): Promise<string> {
+	firefoxMain ??= (async () => {
+		const result = await Bun.build({
+			entrypoints: [join(import.meta.dir, "../src/sidepanel/main.ts")],
+			target: "browser",
+			format: "esm",
+			define: { TAB_MCP_TEST: "true", TAB_MCP_FIREFOX: "true" },
+		});
+		const [output] = result.outputs;
+		if (!result.success || output === undefined)
+			throw new Error(`the Firefox panel did not build: ${result.logs}`);
+		const dir = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-panel-"));
+		const file = join(dir, "main.js");
+		await Bun.write(file, await output.text());
+		return file;
+	})();
+	return firefoxMain;
+}
+
+async function openPanel(options: { firefox?: boolean } = {}) {
 	const win = new Window({
 		url: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/sidepanel/index.html",
 	});
@@ -97,7 +123,7 @@ async function openPanel() {
 		},
 	};
 	await import(
-		`../src/sidepanel/main.ts?panel=${windows.length}-${Date.now()}`
+		`${options.firefox ? await firefoxBundle() : "../src/sidepanel/main.ts"}?panel=${windows.length}-${Date.now()}`
 	);
 	const doc = win.document as unknown as Document;
 	const panel = {
@@ -350,5 +376,27 @@ describe("the sign-in hosts filled in for without a question (DEC-213)", () => {
 		expect(panel.take()).toEqual([
 			{ type: "forget-fill-host", host: "claude.ai" },
 		]);
+	});
+});
+
+describe("the Firefox build's panel", () => {
+	test("the panel speaks of Firefox, not Chrome", async () => {
+		const panel = await openPanel({ firefox: true });
+		// With the address shown, so the setup commands are made.
+		panel.show({
+			...stateWith([]),
+			status: "waiting",
+			grants: [],
+			pairing: true,
+			address: "https://relay.example/s/abcdefghijklmnop/mcp",
+			code: "BCDF-GHJK",
+		});
+		expect(panel.doc.title).toBe("tab-mcp browser extension");
+		const html = panel.doc.body.innerHTML;
+		expect(html).not.toContain("Chrome");
+		expect(html).not.toContain("chrome://");
+		expect(html).toContain("tab-mcp-browser-extension-firefox");
+		expect(html).toContain("Click into the sidebar to answer.");
+		expect(html.toLowerCase()).not.toContain("for-chrome");
 	});
 });

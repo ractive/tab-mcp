@@ -136,12 +136,19 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
   commands (or `CHROME_PATH` / `FIREFOX_PATH`; an installed Firefox only with
   `--system-firefox`), and no notification reaches the desktop. It fails when
   a browser it needs is missing and prints the line that installs it;
-  `--no-firefox` or `--no-chrome` leaves those files out and says so. One browser run per machine: a second
+  `--no-firefox` or `--no-chrome` leaves those files out and says so;
+  `--no-full` leaves out the full run's files (`*-full.browser.test.ts`: the
+  rest of Firefox, the WebMCP canary), as the pull requests' browser job does.
+  Every Firefox browser file is `*-smoke` (on every pull request) or `*-full`
+  (a test checks); `test:browser firefox` runs both. One browser run per machine: a second
   run (also `TAB_MCP_BROWSER=1 bun test <file>`) says whose run holds the lock
   and waits for it; `--no-wait` fails instead. Each run first stops the test
   browsers of killed runs and removes their folders (`bun run test:browser
-  --sweep --dry-run` shows what). CI runs both on every pull request; its
-  required check `verify` needs both.
+  --sweep --dry-run` shows what). CI runs both on every pull request (the
+  browser job with `--no-full`); its required check `verify` needs both.
+  `.github/workflows/browser-full.yml` runs every browser file nightly, on
+  demand and on changes to main (not required); a red run there opens an
+  issue labelled `browser-full`.
 - `bun run fix` to format. Type check per workspace with `bun check -p <dir>`
   (no script may be named `check`: it shadows `bun check`).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency,

@@ -1,5 +1,5 @@
 /**
- * `bun run test:browser [--no-chrome] [--no-firefox] [--system-firefox]
+ * `bun run test:browser [--no-chrome] [--no-firefox] [--no-full] [--system-firefox]
  * [--no-wait] [filter…]`: the browser
  * tests, the files named `*.browser.test.ts`, which plain `bun test` loads and
  * skips (test/browser-gate.ts). A filter narrows the run to the files whose
@@ -14,7 +14,10 @@
  * never the owner's own Chrome or Firefox; an installed Firefox only with
  * `--system-firefox`).
  * `--no-chrome` or `--no-firefox` leaves out the files that need that browser
- * instead, and says which were not tested. After the run, a file with no
+ * instead, and says which were not tested. `--no-full` leaves out the files
+ * of the full run only, `*-full.browser.test.ts` (iteration 50: the pull
+ * requests' browser job; `.github/workflows/browser-full.yml` runs them),
+ * and says so too. After the run, a file with no
  * passed test fails it too. SIGINT, SIGTERM and SIGHUP go on to the test run.
  *
  * One browser run per machine: it takes the machine-wide lock
@@ -51,6 +54,25 @@ export async function browserTestFiles(
 	}
 	return files.sort();
 }
+
+/**
+ * A file of the full browser run only (`*-full.browser.test.ts`): left out
+ * of pull requests' browser job with `--no-full` (ci.yml), run nightly and
+ * on changes to main by browser-full.yml, and locally like any other file.
+ */
+export const fullOnly = (file: string): boolean =>
+	/-full\.browser\.test\.tsx?$/.test(basename(file));
+
+/** The flags test:browser takes; any other `--` argument fails the run. */
+export const FLAGS = [
+	"--no-chrome",
+	"--no-firefox",
+	"--no-full",
+	"--system-firefox",
+	"--no-wait",
+	"--sweep",
+	"--dry-run",
+];
 
 export type Need = "chrome" | "chrome-for-testing" | "firefox";
 
@@ -130,6 +152,13 @@ async function main(): Promise<number> {
 		);
 		return plan.kept ? 1 : 0;
 	}
+	const unknown = args.filter((a) => a.startsWith("--") && !FLAGS.includes(a));
+	if (unknown.length > 0) {
+		console.error(
+			`unknown ${unknown.join(" ")}: test:browser takes ${FLAGS.join(" ")}`,
+		);
+		return 1;
+	}
 	const without = new Set<Need>();
 	if (args.includes("--no-chrome")) {
 		without.add("chrome");
@@ -149,13 +178,20 @@ async function main(): Promise<number> {
 	const fileNeeds = new Map<string, Need[]>();
 	for (const file of chosen)
 		fileNeeds.set(file, needs(await Bun.file(join(ROOT, file)).text()));
+	const noFull = args.includes("--no-full");
 	const files = chosen.filter(
-		(f) => !(fileNeeds.get(f) ?? []).some((n) => without.has(n)),
+		(f) =>
+			!(fileNeeds.get(f) ?? []).some((n) => without.has(n)) &&
+			!(noFull && fullOnly(f)),
 	);
 	const left = chosen.filter((f) => !files.includes(f));
+	const reasons = [
+		...without,
+		...(noFull ? ["the full run's *-full files"] : []),
+	];
 	if (left.length > 0)
 		console.error(
-			`\nNOT TESTED (${[...without].join(", ")} left out on request):\n${left.map((f) => `  ${f}`).join("\n")}\n`,
+			`\nNOT TESTED (${reasons.join(", ")} left out on request):\n${left.map((f) => `  ${f}`).join("\n")}\n`,
 		);
 	if (files.length === 0) {
 		console.error("no browser test file left to run");

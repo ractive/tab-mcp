@@ -486,7 +486,8 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   meanwhile, AI access off, the setting off, too many questions, one more fill for the
   same request only and no third, the code taken despite a clock ahead, the content
   script's registration and the panel's line. `test/fill.browser.test.ts` and
-  `test/firefox-fill.browser.test.ts` do it end to end in Chrome for Testing and Firefox
+  `test/firefox-fill-smoke.browser.test.ts` (Firefox's gesture rule and senders without
+  `origin`; Always allow in `-full`, the full run's) do it end to end in Chrome for Testing and Firefox
   with a relay and an OAuth client (`test/oauth.ts`): off by default, turned on with a
   real click, a look-alike on another port gets no question, Don't allow then typing by
   hand, the tab closing, Allow pairs the AI app, AI access off (also while a question
@@ -498,14 +499,19 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   build works and never reaches the desktop. Every test Chrome starts without its macOS
   notifications (`test/browsers.ts`); the Firefox test build records its notifications
   instead of showing them (`src/worker/notifications.ts`, test build only).
-- `test/firefox.browser.test.ts`: the Firefox test build in Firefox 128 or newer
-  (`FIREFOX_PATH`, else the pinned test Firefox in Puppeteer's cache; skipped without it) over WebDriver BiDi
-  (`test/firefox.ts`, a temporary add-on): the same test page registers its tools with the
-  extension's `document.modelContext` as it loads, and a relay and an MCP client list,
-  call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page replacing
-  the getter); the event page outlasts Firefox's idle timeout with the panel closed; the
-  panel says Firefox, not Chrome. Pages on http://localhost. `test/firefox-sites.ts` (by
-  hand, the network): real sites.
+- `test/firefox-smoke.browser.test.ts` (every pull request) and
+  `test/firefox-full.browser.test.ts` (the full run, browser-full.yml): the Firefox test
+  build in Firefox 128 or newer (`FIREFOX_PATH`, else the pinned test Firefox in
+  Puppeteer's cache; skipped without it) over WebDriver BiDi (`test/firefox.ts`, a
+  temporary add-on; harness `test/firefox-e2e.ts`): the same test page registers its tools
+  with the extension's `document.modelContext` as it loads, and a relay and an MCP client
+  list, call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page
+  replacing the getter), notifications as Firefox has them, an extension reload, the
+  client library; in the full run, the event page outlasts Firefox's idle timeout with
+  the panel open and closed. The panel's Firefox words, the arguments check, an MCP
+  result, the hints and the polyfill's limits are unit tests (`sidepanel.test.ts`,
+  `unit.test.ts`, `bridge.test.ts`). Pages on http://localhost. `test/firefox-sites.ts`
+  (by hand, the network): real sites.
 
 ## Licence
 

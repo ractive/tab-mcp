@@ -26,7 +26,12 @@ import { expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
-import { browserTestFiles, needs, passedPerFile } from "./test-browser.ts";
+import {
+	browserTestFiles,
+	fullOnly,
+	needs,
+	passedPerFile,
+} from "./test-browser.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const GATE = join(ROOT, "test/browser-gate.ts");
@@ -218,12 +223,14 @@ test("plain bun test starts no browser from any browser file", async () => {
 
 interface Workflow {
 	on: Record<string, Record<string, unknown> | null>;
+	permissions?: Record<string, string>;
 	jobs: Record<
 		string,
 		{
 			needs?: string[];
 			if?: string;
-			steps: { run?: string; env?: Record<string, string> }[];
+			permissions?: Record<string, string>;
+			steps: { run?: string; shell?: string; env?: Record<string, string> }[];
 		}
 	>;
 }
@@ -239,7 +246,8 @@ const runs = (wf: Workflow, job: string): string[] =>
 test("CI: fast and browser run on every pull request, unfiltered, and verify (the required check) needs both", async () => {
 	const ci = await workflow("ci.yml");
 	expect(runs(ci, "fast")).toContain("bun run verify");
-	expect(runs(ci, "browser")).toContain("bun run test:browser");
+	// Every browser file but the full run's (iteration 50, task 7).
+	expect(runs(ci, "browser")).toContain("bun run test:browser --no-full");
 	for (const job of ["fast", "browser"])
 		expect(runs(ci, job)[0]).toBe("bash scripts/ci-changes.sh");
 	const verify = ci.jobs["verify"];
@@ -270,12 +278,107 @@ test("a release runs the browser tests too", async () => {
 		expect(runs(wf, job)).toContain("bun run verify:all");
 		expect(runs(wf, job)).not.toContain("bun run verify");
 	}
+	// All of them, the full run's files too.
+	const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as {
+		scripts: Record<string, string>;
+	};
+	expect(pkg.scripts["verify:all"]).toBe(
+		"bun run verify && bun run test:browser",
+	);
+});
+
+test("the full browser run: every browser file, nightly, on demand and on changes to main; required by nothing", async () => {
+	const full = await workflow("browser-full.yml");
+	expect(runs(full, "browser")).toContain(
+		"bun run test:browser 2>&1 | tee browser-full.log",
+	);
+	// Nothing left out: the opt-in idle test of the extension runs too.
+	expect(
+		full.jobs["browser"]?.steps.find((s) => s.run?.includes("test:browser")),
+	).toMatchObject({ shell: "bash", env: { TAB_MCP_E2E_IDLE: "1" } });
+	expect(Object.keys(full.on).sort()).toEqual([
+		"pull_request",
+		"push",
+		"schedule",
+		"workflow_dispatch",
+	]);
+	expect(full.on["push"]?.["branches"]).toEqual(["main"]);
+	const paths = full.on["push"]?.["paths"] as string[];
+	for (const covered of [
+		"packages/tab-mcp-extension/**",
+		"packages/tab-mcp-client/src/**",
+		"test/**",
+		"bun.lock",
+		".github/workflows/ci.yml",
+	])
+		expect(paths).toContain(covered);
+	// On a pull request only for the workflows (the Chrome pin): it is not
+	// a check that most pull requests would wait for.
+	expect(full.on["pull_request"]?.["paths"]).toEqual([
+		".github/workflows/ci.yml",
+		".github/workflows/browser-full.yml",
+	]);
+	const ci = await workflow("ci.yml");
+	expect(ci.jobs["verify"]?.needs).not.toContain("browser-full");
+	// Write access for the issue only, in the job that runs no test.
+	expect(full.permissions).toEqual({ contents: "read" });
+	expect(full.jobs["report"]?.permissions).toEqual({
+		contents: "read",
+		issues: "write",
+	});
+	expect(full.jobs["browser"]?.permissions).toBeUndefined();
+	expect(full.jobs["report"]?.if).toContain("github.ref == 'refs/heads/main'");
+	expect(runs(full, "report")).toEqual(["bun scripts/browser-full-issue.ts"]);
+});
+
+test("each Firefox browser file is the pull requests' smoke or the full run's, by its name", async () => {
+	const firefox: string[] = [];
+	for (const file of await browserTestFiles(ROOT))
+		if (needs(await Bun.file(join(ROOT, file)).text()).includes("firefox"))
+			firefox.push(file);
+	expect(firefox.length).toBeGreaterThan(0);
+	for (const file of firefox)
+		expect({
+			file,
+			set: /-(smoke|full)\.browser\.test\.tsx?$/.exec(file)?.[1] ?? "neither",
+		}).toEqual({ file, set: expect.stringMatching(/^(smoke|full)$/) });
+	expect(firefox.filter(fullOnly)).not.toEqual([]);
+	expect(firefox.filter((f) => !fullOnly(f))).not.toEqual([]);
+	// The full run's files are the ones --no-full leaves out.
+	expect((await browserTestFiles(ROOT)).filter(fullOnly).sort()).toEqual([
+		"packages/tab-mcp-extension/test/firefox-fill-full.browser.test.ts",
+		"packages/tab-mcp-extension/test/firefox-full.browser.test.ts",
+		"test/webmcp-spike/webmcp-canary-full.browser.test.ts",
+	]);
+});
+
+test("test:browser --no-full leaves out the full run's files and says so; an unknown flag fails", () => {
+	const run = (...args: string[]) => {
+		const done = Bun.spawnSync(
+			[process.execPath, join(ROOT, "scripts/test-browser.ts"), ...args],
+			{ cwd: ROOT, env: { ...process.env }, stdout: "pipe", stderr: "pipe" },
+		);
+		return { code: done.exitCode, err: done.stderr.toString() };
+	};
+	const left = run("--no-full", "-full.browser");
+	expect(left.code).toBe(1);
+	expect(left.err).toContain(
+		"NOT TESTED (the full run's *-full files left out on request):",
+	);
+	expect(left.err).toContain(
+		"  packages/tab-mcp-extension/test/firefox-full.browser.test.ts",
+	);
+	expect(left.err).toContain("no browser test file left to run");
+	const typo = run("--no-ful", "firefox");
+	expect(typo.code).toBe(1);
+	expect(typo.err).toContain("unknown --no-ful: test:browser takes");
 });
 
 test("a filter narrows test:browser to the files whose name contains it", async () => {
 	expect(await browserTestFiles(ROOT, ["fill"])).toEqual([
 		"packages/tab-mcp-extension/test/fill.browser.test.ts",
-		"packages/tab-mcp-extension/test/firefox-fill.browser.test.ts",
+		"packages/tab-mcp-extension/test/firefox-fill-full.browser.test.ts",
+		"packages/tab-mcp-extension/test/firefox-fill-smoke.browser.test.ts",
 	]);
 	expect(await browserTestFiles(ROOT, ["extension"])).toEqual([
 		"packages/tab-mcp-extension/test/extension.browser.test.ts",
@@ -286,7 +389,7 @@ test("test:browser knows which browsers a file needs", async () => {
 	const need = async (file: string) =>
 		needs(await Bun.file(join(ROOT, file)).text());
 	expect(
-		await need("packages/tab-mcp-extension/test/firefox.browser.test.ts"),
+		await need("packages/tab-mcp-extension/test/firefox-smoke.browser.test.ts"),
 	).toEqual(["firefox"]);
 	expect(
 		await need("packages/tab-mcp-client/test/page.browser.test.ts"),
