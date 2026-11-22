@@ -1310,26 +1310,19 @@ describe.skipIf(chrome === undefined)(
 		const stored = async <T>(key: string) =>
 			((await kvAll(stack.worker))[key] ?? null) as T;
 
-		test("commands run one after another: a connect then a stop ends off, two allowed writes both hold", async () => {
+		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
+			// AI access off first, which the test before this one left behind
+			// until it went (connection.test.ts has its commands now).
 			await stack.panel.eval(`(async () => {
 				const port = chrome.runtime.connect({ name: "panel" });
-				port.postMessage({ type: "connect" });
 				port.postMessage({ type: "stop" });
-				for (const name of ["a", "b"])
-					port.postMessage({ type: "set-allowed", origin: "${SITE}", name, on: true });
-				await new Promise((resolve) => setTimeout(resolve, 1500));
+				await new Promise((resolve) => setTimeout(resolve, 300));
 				port.disconnect();
 			})()`);
 			expect(await stored<boolean>("aiOn")).toBe(false);
 			await stack.panel.waitFor(
 				`document.getElementById("state").dataset.state === "off"`,
 			);
-			expect(
-				(await stored<Record<string, string[]>>("allowedTools"))[SITE],
-			).toEqual(["a", "b"]);
-		});
-
-		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
 			await stack.panel.click("#connect");
 			// The AI app (the test's client) is paired by now: the card lists it
 			// and keeps the address out of sight until "+ Connect another AI app".

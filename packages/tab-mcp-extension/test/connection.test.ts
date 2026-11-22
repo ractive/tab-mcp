@@ -317,6 +317,26 @@ describe("Always allow all from the panel (set-allowed-all)", () => {
 	});
 });
 
+describe("the panel's commands", () => {
+	test("run one after another: a connect then a stop ends off, two allowed writes both hold", async () => {
+		const { c, kv } = await connection();
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		receive({ type: "connect" });
+		receive({ type: "stop" });
+		for (const name of ["a", "b"])
+			receive({ type: "set-allowed", origin: SITE, name, on: true });
+		await until(
+			() => (kv.data.get("allowedTools") as AllowedTools)?.[SITE]?.length === 2,
+			"both writes",
+		);
+		await Bun.sleep(20);
+		expect(kv.data.get("aiOn")).toBe(false);
+		expect(panel.state()?.status).toBe("off");
+		expect(await allowedOn(kv, SITE)).toEqual(["a", "b"]);
+	});
+});
+
 describe("a question's notification (no panel)", () => {
 	test("closing it is Don't allow: nothing is filled in", async () => {
 		const { c, fake } = await connection({ aiOn: true, fill: true });
