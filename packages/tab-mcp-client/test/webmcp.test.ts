@@ -359,6 +359,113 @@ describe("mirroring", () => {
 		expect(native.options[1]?.exposedTo).toBeUndefined();
 	});
 
+	describe("a tool that asks with exposedTo, without onConfirm, is warned about once (DEC-215)", () => {
+		const exposedWarnings = () =>
+			warn.mock.calls
+				.map((args) => String(args[0]))
+				.filter((text) => text.includes("(its exposedTo)"));
+
+		test("warned once per tool, also when registered again; it is still mirrored", async () => {
+			const t = tab();
+			const first = new AbortController();
+			await t.registerTool(wipe, {
+				exposedTo: ["https://embedder.example", "https://page.example"],
+				signal: first.signal,
+			});
+			await settle();
+			first.abort();
+			await t.registerTool(wipe, { exposedTo: ["https://embedder.example"] });
+			await t.registerTool(
+				{
+					name: "remove",
+					description: "d",
+					annotations: { destructiveHint: true },
+					execute: () => 1,
+				},
+				{ exposedTo: ["https://embedder.example"] },
+			);
+			await settle();
+			expect(exposedWarnings()).toEqual([
+				"tab-mcp: wipe asks before it runs, but documents of https://embedder.example (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.",
+				"tab-mcp: remove asks before it runs, but documents of https://embedder.example (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.",
+			]);
+			expect(native.tools.has("wipe")).toBe(true);
+		});
+
+		test("not with onConfirm, not without exposedTo, not for the page's own origin, not for a tool that does not ask", async () => {
+			const asking = tab({ onConfirm: () => false });
+			await asking.registerTool(wipe, {
+				exposedTo: ["https://embedder.example"],
+			});
+			await settle();
+			scope.abort();
+			scope = new AbortController();
+			const t = tab();
+			await t.registerTool(wipe);
+			await t.registerTool(
+				{ ...wipe, name: "own_origin" },
+				{
+					exposedTo: [
+						"https://page.example",
+						"HTTPS://Page.Example:443/",
+						"https://page.example/path?q#h",
+					],
+				},
+			);
+			await t.registerTool(
+				{
+					...wipe,
+					name: "not_asking",
+					annotations: { consequentialHint: false, destructiveHint: true },
+				},
+				{ exposedTo: ["https://embedder.example"] },
+			);
+			await t.registerTool(add, { exposedTo: ["https://embedder.example"] });
+			await settle();
+			expect(exposedWarnings()).toEqual([]);
+			expect(native.tools.has("own_origin")).toBe(true);
+		});
+
+		test("not when the native registration fails: only that warning", async () => {
+			native.refuse = new DOMException("insecure origin", "SecurityError");
+			const t = tab();
+			await t.registerTool(wipe, { exposedTo: ["http://embedder.example"] });
+			await settle();
+			expect(exposedWarnings()).toEqual([]);
+			expect(warn.mock.calls.map((args) => String(args[0]))).toContain(
+				"tab-mcp: wipe is not offered through WebMCP:",
+			);
+		});
+
+		test("an exposedTo of the wrong type never breaks registration or the mirror of later tools", async () => {
+			const t = tab();
+			const bad: unknown[] = [
+				"https://embedder.example",
+				5,
+				null,
+				[1, { origin: "x" }],
+				["not a url"],
+			];
+			for (const [i, exposedTo] of bad.entries())
+				await expect(
+					t.registerTool(
+						{ ...wipe, name: `bad_${i}` },
+						{ exposedTo: exposedTo as string[] },
+					),
+				).resolves.toBeUndefined();
+			await t.registerTool(add);
+			await settle();
+			for (const i of bad.keys())
+				expect(native.tools.has(`bad_${i}`)).toBe(true);
+			expect(native.tools.has("add")).toBe(true);
+			expect(native.options.map((o): unknown => o.exposedTo)).toEqual([
+				...bad,
+				undefined,
+			]);
+			expect(exposedWarnings()).toEqual([]);
+		});
+	});
+
 	test("destructiveHint counts as consequentialHint: mirrored as consequential (WM 5)", async () => {
 		const t = tab();
 		const remove = {

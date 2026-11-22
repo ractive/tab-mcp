@@ -863,6 +863,77 @@ test("an onConfirm added after the first render is used; without one, the page's
 	}
 });
 
+test("the provider without the page's onConfirm warns about a tool that asks with exposedTo; with one it does not (DEC-215)", async () => {
+	const g = globalThis as Record<string, unknown>;
+	const savedDocument = g["Document"];
+	const Doc = window.Document as unknown as { prototype: object };
+	const registered: string[] = [];
+	Object.defineProperty(Doc.prototype, "modelContext", {
+		configurable: true,
+		get: () => ({
+			registerTool: (tool: { name: string }) => {
+				registered.push(tool.name);
+			},
+		}),
+	});
+	g["Document"] = Doc;
+	const warned: string[] = [];
+	const quiet = console.warn;
+	console.warn = (...args: unknown[]) => warned.push(String(args[0]));
+	function Probe() {
+		useTool(
+			{
+				name: "clear",
+				description: "Clear everything",
+				annotations: { consequentialHint: true },
+				execute: () => "cleared",
+			},
+			{ exposedTo: ["https://embedder.example"] },
+		);
+		return null;
+	}
+	const exposed = () => warned.filter((w) => w.includes("(its exposedTo)"));
+	try {
+		render(
+			<TabMcpProvider
+				server={{ name: "bare", version: "1" }}
+				storage={null}
+				webmcp
+			>
+				<Probe />
+			</TabMcpProvider>,
+		);
+		await until(() => exposed().length > 0);
+		expect(exposed()).toHaveLength(1);
+		act(() => root?.unmount());
+		root = undefined;
+		warned.length = 0;
+		render(
+			<TabMcpProvider
+				server={{ name: "asks", version: "1" }}
+				storage={null}
+				webmcp
+				onConfirm={() => false}
+			>
+				<Probe />
+			</TabMcpProvider>,
+		);
+		// Mirrored by the second provider, and the step after the registration
+		// (where the warning would be) has run.
+		await until(() => registered.length === 2);
+		await act(async () => {
+			await Bun.sleep(5);
+		});
+		expect(registered).toEqual(["clear", "clear"]);
+		expect(exposed()).toEqual([]);
+	} finally {
+		console.warn = quiet;
+		delete (Doc.prototype as { modelContext?: unknown }).modelContext;
+		if (savedDocument === undefined) delete g["Document"];
+		else g["Document"] = savedDocument;
+	}
+});
+
 test("an agent in the browser: a tool that asks runs without the library's dialog; an onConfirm added later decides (DEC-215)", async () => {
 	interface Native {
 		name: string;

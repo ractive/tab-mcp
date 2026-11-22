@@ -46,6 +46,13 @@ the Git tag `client-v<version>`. The format follows
 
 ### Added
 
+- **A console warning for a tool that asks with `exposedTo`** (DEC-215): with
+  `webmcp: true`, a tool marked `consequentialHint` (or only `destructiveHint`) whose
+  `exposedTo` names other origins, on a page without `onConfirm` (in React: the
+  provider without one), is warned about once per tool, when the browser accepted its
+  registration (an `onConfirm` removed later is not caught). Documents of those origins can
+  call it through WebMCP, and the library no longer asks them. Refuse such calls in
+  `onConfirm`, or leave `exposedTo` off.
 - The agent skill ships in the package as `skill/SKILL.md` (with `skill/references/`),
   written for this version (DEC-216). With a coding agent, install the package and tell
   it: "Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to

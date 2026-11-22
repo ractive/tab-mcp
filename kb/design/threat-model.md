@@ -561,7 +561,10 @@ an `onConfirm` that refuses them and a tool offered to WebMCP: an agent that ign
 hint runs a consequential tool unasked (it could already click the page's own controls
 or the dialog); an extension that asks nothing runs it on its AI app's say, a prompt
 injection included; script of an `exposedTo` origin runs it unasked. `callers` without
-`"webmcp"` and no `exposedTo` keep a tool from all three. Only the native object is
+`"webmcp"` and no `exposedTo` keep a tool from all three; a tool that asks with an
+`exposedTo` naming other origins, on a page without `onConfirm`, gets a console warning
+once, when the browser accepted its registration (none for mirroring alone: it would be
+noise on almost every such page; the remedy is the same, `onConfirm` or `callers`). Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a

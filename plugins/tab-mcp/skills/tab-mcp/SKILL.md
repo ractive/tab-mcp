@@ -318,7 +318,8 @@ const mcp = new TabMcp({ relay, server, webmcp: true });
 await mcp.registerTool(deleteNoteTool); // an AI app is asked; an unvouched WebMCP call is not
 ```
 
-Who asks before a tool that asks runs (DEC-215). The last three rows all arrive as
+Whether anyone asks before a tool that asks runs, and who, depends on the caller
+(DEC-215); for some callers nobody does. The last three rows all arrive as
 `client: { kind: "webmcp" }` without `via`; the page cannot tell them apart:
 
 | Caller | Can it click in the tab? | Who asks |
@@ -338,14 +339,17 @@ Who asks before a tool that asks runs (DEC-215). The last three rows all arrive 
   (since client 0.20, DEC-209): hiding them did not stop an agent that drives the tab, it
   clicked the page's own controls instead, with no question. `callers` without
   `"webmcp"` keeps a tool out (React: `useTool(tool, { callers: ["relay", "local"] })`).
-- The library shows an unvouched WebMCP call no question (since DEC-215): an agent that
+- The library shows an unvouched WebMCP call no question (since client 0.21, DEC-215;
+  0.20 showed its dialog): an agent that
   drives the tab clicked "Allow once" in the dialog itself. For another extension or an
   `exposedTo` origin the dialog was a real check, and it is gone too. Such a tool is
   registered with `consequentialHint: true`, so a caller that heeds it asks its user.
   The page's `onConfirm` still gets the call (`client.kind === "webmcp"`, no `via`):
   decide there in code (refuse, or a rule), never by showing something, which an agent
   can click too. Without `onConfirm` the call runs. A tool that must not run on such a
-  caller's word leaves `"webmcp"` out of `callers`, and gets no `exposedTo`.
+  caller's word leaves `"webmcp"` out of `callers`, and gets no `exposedTo` (the library
+  warns in the console about a tool that asks with `exposedTo` on a page without
+  `onConfirm`).
 - **The tab-mcp browser extension.** With `webmcp: true` the page and the extension
   shake hands. A call the user has just allowed in the extension (asked in its side
   panel, or covered by its "Always allow" switch; the same tool, equal arguments, within

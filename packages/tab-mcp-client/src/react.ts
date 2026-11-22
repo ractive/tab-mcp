@@ -200,14 +200,17 @@ export function TabMcpProvider(props: TabMcpProviderProps): ReactElement {
 		// Always installed, so that a handler added, changed or removed in a
 		// later render counts: without one, the library's own behaviour.
 		const handlers = () => latest.current as Partial<TabMcpOptions>;
+		const onConfirm = (request: ConfirmRequest) => {
+			const ask = handlers().onConfirm;
+			return ask === undefined ? instance.confirmInPage(request) : ask(request);
+		};
+		// Whether the page gave a handler: the WebMCP mirror warns without one.
+		Object.defineProperty(onConfirm, "own", {
+			get: () => handlers().onConfirm !== undefined,
+		});
 		const instance: TabMcp = new TabMcp({
 			...options,
-			onConfirm: (request: ConfirmRequest) => {
-				const ask = handlers().onConfirm;
-				return ask === undefined
-					? instance.confirmInPage(request)
-					: ask(request);
-			},
+			onConfirm,
 			identityAssertion: (request: IdentityAssertionRequest) =>
 				handlers().identityAssertion?.(request) ?? null,
 		});
