@@ -122,7 +122,7 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
 `extension-v0.1.0`), `test/e2e` (end-to-end test with its test page).
 
 - Commands: `bun run verify` (Biome CI, type check, tests; no browser, about a
-  minute) before every commit. `bun run test:browser [filter]` (the
+  minute and a half) before every commit. `bun run test:browser [filter]` (the
   `*.browser.test.ts` files, Chrome and Firefox) before a commit that changes
   code a browser runs: the extension, the client library's browser code, the
   relay's pages, the test pages and the browser harnesses; with the filter for

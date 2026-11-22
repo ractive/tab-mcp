@@ -42,6 +42,7 @@ jobs:
           code=true
           if [ "$EVENT" = pull_request ] && git rev-parse --verify --quiet HEAD^2 > /dev/null; then
             changed=$(git diff --name-only HEAD^1 HEAD)
+            git diff --stat HEAD^1 HEAD | tail -n 1
             if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qv '^kb/'; then
               echo "Only kb/ changed: nothing to build or test."
               code=false
@@ -73,6 +74,7 @@ jobs:
           code=true
           if [ "$EVENT" = pull_request ] && git rev-parse --verify --quiet HEAD^2 > /dev/null; then
             changed=$(git diff --name-only HEAD^1 HEAD)
+            git diff --stat HEAD^1 HEAD | tail -n 1
             if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qv '^kb/'; then
               echo "Only kb/ changed: nothing to build or test."
               code=false

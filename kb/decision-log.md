@@ -5161,7 +5161,7 @@ iteration 50).
   named so, or does not import the gate. An environment gate, not a `bun test` ignore
   flag: a file with a browser test that is loaded by mistake still starts nothing.
 - **The rule (`CLAUDE.md`):** `bun run verify` before every commit (no browser, about a
-  minute); `bun run test:browser <filter>` before a commit that changes code a browser
+  minute and a half: 85 s here and 1 min 41 s for the CI job, against 4 min 14 s before); `bun run test:browser <filter>` before a commit that changes code a browser
   runs (the extension, the client library's browser code, the relay's pages, the test
   pages and harnesses), with the filter for the part touched; never several browser runs
   at once on one machine; nothing for a change to `kb/` or docs alone. CI runs both on
