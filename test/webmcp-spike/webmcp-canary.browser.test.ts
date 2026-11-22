@@ -3,7 +3,7 @@
  * about Chrome's WebMCP, checked against the pinned Chrome for Testing, so a
  * Chrome change shows. The pages are served through the DevTools Protocol on
  * https://spike.test (no server, no network). Needs Chrome for Testing 156 or newer
- * (`CHROME_PATH`, or Puppeteer's or Playwright's cache): required in CI,
+ * (`CHROME_PATH`, or the pinned one in Puppeteer's cache, test/browsers.ts): required in CI,
  * skipped elsewhere without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";

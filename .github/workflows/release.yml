@@ -208,6 +208,9 @@ jobs:
         id: chrome
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+        if: github.event_name != 'pull_request'
       - run: bun run verify:all
         if: github.event_name != 'pull_request'
         env:
@@ -382,6 +385,9 @@ jobs:
         id: chrome
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+        if: github.event_name != 'pull_request'
       - run: bun run verify:all
         if: github.event_name != 'pull_request'
         env:

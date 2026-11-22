@@ -94,6 +94,29 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   longer than Bun's 5 s on CI).
 - **The rule:** "a second run waits" in place of "never several at once".
 
+## What changed (pull request 3)
+
+- **No notification on the desktop** (DEC-220, [research](/research/test-browser-notifications.md)):
+  every test Chrome starts with `--disable-features=NativeNotifications`
+  (`test/browsers.ts`, used by the three Chrome harnesses). Tried first, as the team lead
+  asked: macOS's log showed a delivery without the switch and none with it, and `create`,
+  `getAll` and `clear` answered the same, so Chrome keeps the real API and no test's
+  assertion changed. `notifications.browser.test.ts` checks it on macOS on every browser
+  run. Firefox's pref for the same (`alerts.useSystemBackend: false`) opened alert
+  windows that took the focus from the panel and failed a test. So the Firefox test build
+  records its notifications (`src/worker/notifications.ts`); no store or development build
+  has the recorder (`build.test.ts`). `firefox.browser.test.ts` reads the recorder (a
+  question's notification, answered through it) and calls Firefox's real API once with
+  the same options, cleared at once. The macOS guard has no positive control, and says
+  so; a unit test fails when a Chrome launch lacks the switch.
+- **Only the pinned test browsers:** Chrome for Testing `156.0.8078.80` (CI's) and Firefox
+  `stable_160.0.1`, from `CHROME_PATH` / `FIREFOX_PATH` or Puppeteer's cache. Never an
+  installed Chrome. An installed Firefox only with `--system-firefox`
+  (`TAB_MCP_SYSTEM_FIREFOX=1`), and then over the cached one. `cdp.ts` no longer falls
+  back to the owner's Chrome, and the Firefox tests no longer fall back to
+  `/Applications/Firefox.app`. `test:browser` prints the install line for a missing one.
+  CI and the release jobs install the same pinned Firefox.
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
@@ -101,8 +124,9 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   rule
 - [x] 2. The machine-wide lock and the start-up sweep, one profile parent for every
   harness (`test/browser-lock.ts`, `test/browser-sweep.ts`, `test/browser-dirs.ts`)
-- [ ] 3. The notification recorder in the test build; Chrome for Testing instead of the
-  branded Chrome in `cdp.ts`; `FIREFOX_PATH` in the README
+- [x] 3. No notification on the desktop (a switch per browser, found by trying, in place
+  of the recorder); only the pinned test browsers, never the owner's (`test/browsers.ts`);
+  the one-time set-up in the README
 - [ ] 4. The fast suite's timers (`timing.allowDelayMs`, the relay's idle test)
 - [ ] 5. The extension's logic tests to unit tests (the UNIT rows of the audit's 1.1 and
   1.3), each new unit test shown to fail against a mutant first
@@ -116,6 +140,7 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 # Citations
 
 - [The audit of the browser tests](/research/browser-test-audit-2026-11-22.md)
-- [Decision log](/decision-log.md), DEC-216, DEC-218, DEC-219
+- [Decision log](/decision-log.md), DEC-216, DEC-218, DEC-219, DEC-220
+- [Test browsers and the owner's desktop](/research/test-browser-notifications.md)
 - [CI of main at 9f11a91, before the split: 1,890 tests, bun test 242.65 s](https://github.com/ractive/tab-mcp/actions/runs/44984541830)
 - [CI of main at aab7ad3, before the split: 1,915 tests, the job 4 min 14 s](https://github.com/ractive/tab-mcp/actions/runs/44986990412)

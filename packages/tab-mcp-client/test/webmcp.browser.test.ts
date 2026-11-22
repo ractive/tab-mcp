@@ -4,8 +4,8 @@
  * served through the DevTools Protocol on https://webmcp.test (as in
  * `test/webmcp-spike/`: no server, no network but the polyfill's download).
  * An agent's calls go through the native `executeTool()`. Needs Chrome for
- * Testing 156 or newer (`CHROME_PATH`, or Puppeteer's or Playwright's
- * cache): required in CI, skipped elsewhere without it.
+ * Testing 156 or newer (`CHROME_PATH`, or the pinned one in Puppeteer's
+ * cache, test/browsers.ts): required in CI, skipped elsewhere without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";

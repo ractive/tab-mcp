@@ -7,11 +7,13 @@
  * `test/webmcp-spike/browser.ts`.
  */
 
-import { readdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import type { Subprocess } from "bun";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
+import {
+	chromeSwitches,
+	findChromeForTesting as findPinnedChrome,
+} from "../../../test/browsers.ts";
 
 /**
  * The profiles of the Chromes this process started and has not closed yet,
@@ -78,41 +80,8 @@ export function chromeMajor(binary: string): number {
 	return Number(/(\d+)\.\d+\.\d+/.exec(stdout.toString())?.[1] ?? 0);
 }
 
-/**
- * Chrome for Testing: `CHROME_PATH`, else the newest one in Puppeteer's or
- * Playwright's cache. Branded Chrome ignores `--load-extension`.
- */
-export function findChromeForTesting(): string | undefined {
-	const fromEnv = process.env["CHROME_PATH"];
-	if (fromEnv) return fromEnv;
-	const binaries = [
-		"chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-		"chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-		"chrome-linux64/chrome",
-	];
-	const caches = [
-		join(homedir(), ".cache/puppeteer/chrome"),
-		join(homedir(), "Library/Caches/ms-playwright"),
-		join(homedir(), ".cache/ms-playwright"),
-	];
-	const found: string[] = [];
-	for (const cache of caches) {
-		let dirs: string[];
-		try {
-			dirs = readdirSync(cache);
-		} catch {
-			continue;
-		}
-		for (const dir of dirs)
-			for (const binary of binaries) {
-				const path = join(cache, dir, binary);
-				if (Bun.file(path).size > 0) found.push(path);
-			}
-	}
-	return found
-		.map((path) => ({ path, major: chromeMajor(path) }))
-		.sort((a, b) => b.major - a.major)[0]?.path;
-}
+/** Chrome for Testing in the pinned version (test/browsers.ts). */
+export const findChromeForTesting = findPinnedChrome;
 
 type Pending = {
 	resolve: (v: Record<string, unknown>) => void;
@@ -367,7 +336,7 @@ export class Browser {
 					// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
 					"--use-mock-keychain",
 					"--password-store=basic",
-					...(options.args ?? []),
+					...chromeSwitches(options.args),
 					...(process.platform === "linux" ? ["--no-sandbox"] : []),
 					"about:blank",
 				],

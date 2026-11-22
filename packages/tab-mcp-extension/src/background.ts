@@ -28,9 +28,28 @@ import {
 } from "./protocol.ts";
 import { ALL_SITES, injectInto, isSitePage, SITE_MATCHES } from "./tabs.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
+import {
+	notificationRecorder,
+	useNotificationApi,
+} from "./worker/notifications.ts";
 
 /** `true` only in the test build (`scripts/build.ts --test`, a `define`). */
 declare const TAB_MCP_TEST: boolean;
+
+// The Firefox test build keeps its notifications to itself (DEC-220): a
+// test Firefox's system notifications reach the owner's desktop, and its own
+// alert windows (`alerts.useSystemBackend: false`) take the focus from the
+// panel. firefox.browser.test.ts reads them with `tabMcpNotificationRecorder()`
+// (from the panel, through `runtime.getBackgroundPage()`), answers through the
+// hooks below, and calls the real API once itself. Chrome's tests keep the
+// real API and turn the desktop's off with a switch (test/browsers.ts).
+if (TAB_MCP_TEST && FIREFOX) {
+	const recorder = notificationRecorder();
+	useNotificationApi(recorder);
+	Object.assign(globalThis, {
+		tabMcpNotificationRecorder: () => Object.fromEntries(recorder.shown),
+	});
+}
 
 /** The connection, once its start has succeeded. */
 let started: Connection | undefined;

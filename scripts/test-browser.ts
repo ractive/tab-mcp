@@ -1,5 +1,6 @@
 /**
- * `bun run test:browser [--no-chrome] [--no-firefox] [filter…]`: the browser
+ * `bun run test:browser [--no-chrome] [--no-firefox] [--system-firefox]
+ * [--no-wait] [filter…]`: the browser
  * tests, the files named `*.browser.test.ts`, which plain `bun test` loads and
  * skips (test/browser-gate.ts). A filter narrows the run to the files whose
  * name contains it: `bun run test:browser extension` runs
@@ -8,7 +9,10 @@
  *
  * It does not pass without having tested. Before the run it finds the
  * browsers the chosen files need, with the harnesses' own lookup, and prints
- * each one's path and version; a missing or too old browser fails the run.
+ * each one's path and version; a missing or too old browser fails the run,
+ * with the command that installs the pinned test browser (test/browsers.ts:
+ * never the owner's own Chrome or Firefox; an installed Firefox only with
+ * `--system-firefox`).
  * `--no-chrome` or `--no-firefox` leaves out the files that need that browser
  * instead, and says which were not tested. After the run, a file with no
  * passed test fails it too. SIGINT, SIGTERM and SIGHUP go on to the test run.
@@ -26,6 +30,7 @@ import { constants, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { holdBrowserLock } from "../test/browser-lock.ts";
 import { sweep } from "../test/browser-sweep.ts";
+import { INSTALL } from "../test/browsers.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 
@@ -68,7 +73,7 @@ const LOOKUP: Record<Need, { label: string; min: number; code: string }> = {
 		code: `import { findChromeForTesting as find, chromeMajor as major } from ${module(`${EXTENSION}/browser.ts`)};`,
 	},
 	chrome: {
-		label: "Chrome",
+		label: "Chrome for Testing (cdp.ts)",
 		min: 1,
 		code: `import { findChrome as find } from ${module("packages/tab-mcp-client/test/cdp.ts")}; import { chromeMajor as major } from ${module(`${EXTENSION}/browser.ts`)};`,
 	},
@@ -86,6 +91,8 @@ function lookUp(need: Need): { path?: string; major: number } {
 	const script = `${LOOKUP[need].code} const path = find(); console.log(JSON.stringify({ path, major: path === undefined ? 0 : major(path) }));`;
 	const { stdout, success } = Bun.spawnSync([process.execPath, "-e", script], {
 		cwd: ROOT,
+		// The current environment: `--system-firefox` sets a variable in it.
+		env: { ...process.env },
 		stderr: "inherit",
 	});
 	if (!success) return { major: 0 };
@@ -129,6 +136,9 @@ async function main(): Promise<number> {
 		without.add("chrome-for-testing");
 	}
 	if (args.includes("--no-firefox")) without.add("firefox");
+	// The installed Firefox, asked for: the lookup and the run see it (test/browsers.ts).
+	if (args.includes("--system-firefox"))
+		process.env["TAB_MCP_SYSTEM_FIREFOX"] = "1";
 	const filters = args.filter((a) => !a.startsWith("--"));
 	const chosen = await browserTestFiles(ROOT, filters);
 	if (chosen.length === 0) {
@@ -161,10 +171,13 @@ async function main(): Promise<number> {
 			continue;
 		}
 		missing = true;
-		const flag = need === "firefox" ? "--no-firefox" : "--no-chrome";
-		const env = need === "firefox" ? "FIREFOX_PATH" : "CHROME_PATH";
+		const firefox = need === "firefox";
 		console.error(
-			`${label} ${min} or newer is needed, ${path === undefined ? "none was found" : `${path} is ${major}`}: set ${env}, or leave its files out with ${flag}`,
+			[
+				`${label} ${min} or newer is needed, ${path === undefined ? "none was found" : `${path} is ${major}`}. Never the installed one; once:`,
+				`  ${firefox ? INSTALL.firefox : INSTALL.chrome}`,
+				`or set ${firefox ? "FIREFOX_PATH" : "CHROME_PATH"}, or leave its files out with ${firefox ? "--no-firefox" : "--no-chrome"}${firefox ? " (an installed Firefox only with --system-firefox)" : ""}.`,
+			].join("\n"),
 		);
 	}
 	if (missing) return 1;

@@ -5,7 +5,7 @@
  * while that attach is on its way (the browser or the page closed, the frame
  * removed), nothing is left unhandled; an attach that fails otherwise still
  * shows. Bun fails a test with an unhandled rejection in it. Needs a Chrome
- * for Testing (`CHROME_PATH`, or Puppeteer's or Playwright's cache):
+ * for Testing (`CHROME_PATH`, or the pinned one in Puppeteer's cache, test/browsers.ts):
  * required in CI, skipped elsewhere without it. The tests that need Chrome
  * run with `bun run test:browser` only (test/browser-gate.ts).
  */

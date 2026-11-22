@@ -4,27 +4,18 @@
  * free port, an extension installed as a temporary add-on
  * (`webExtension.install`, which needs no signature), tabs opened and pages
  * evaluated in. BiDi is built into Firefox, so this needs no driver and no
- * package; `FIREFOX_PATH` names the binary, else the usual places are tried.
+ * package. Which Firefox: test/browsers.ts (`FIREFOX_PATH`, else the pinned
+ * test Firefox in Puppeteer's cache; an installed one only when asked for).
  */
 
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
+import { findTestFirefox } from "../../../test/browsers.ts";
 
-/** Firefox: `FIREFOX_PATH`, else where macOS and Linux put it. */
-export function findFirefox(): string | undefined {
-	const fromEnv = process.env["FIREFOX_PATH"];
-	if (fromEnv) return fromEnv;
-	const candidates = [
-		"/Applications/Firefox.app/Contents/MacOS/firefox",
-		"/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
-		"/usr/bin/firefox",
-		"/usr/local/bin/firefox",
-		"/snap/bin/firefox",
-	];
-	return candidates.find((path) => Bun.file(path).size > 0);
-}
+/** The test Firefox in the pinned version, `FIREFOX_PATH` or Puppeteer's cache (test/browsers.ts). */
+export const findFirefox = findTestFirefox;
 
 /** Firefox's major version, from `--version`; 0 if it does not say. */
 export function firefoxMajor(binary: string): number {

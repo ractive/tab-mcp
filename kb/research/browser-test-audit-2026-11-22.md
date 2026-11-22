@@ -795,6 +795,12 @@ differs from section 6 where these held:
 - Bun counts the `beforeAll`/`afterAll` of a skipped `describe` as skipped tests (32 in
   the browser files), so "the same counts" means the passes per file.
 - Measured on CI: `bun test` without browsers 86 s, the browser files 155 to 170 s.
+- Pull request 3 (DEC-220): section 5's switch was found for Chrome.
+  `--disable-features=NativeNotifications` keeps its notifications off the macOS desktop,
+  and the API answers the same ([the experiment](/research/test-browser-notifications.md)),
+  so Chrome's tests need no recorder. Firefox's `alerts.useSystemBackend: false` changed
+  focus in the panel, so the recorder is built for the Firefox test build only. The tests
+  start only the pinned test browsers from Puppeteer's cache, never the owner's own.
 
 # Citations
 

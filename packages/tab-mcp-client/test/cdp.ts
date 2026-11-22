@@ -6,6 +6,10 @@
 import { rmSync } from "node:fs";
 import type { Subprocess } from "bun";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
+import {
+	chromeSwitches,
+	findChromeForTesting,
+} from "../../../test/browsers.ts";
 
 /**
  * The profiles of the Chromes this process started and has not closed yet.
@@ -63,29 +67,11 @@ function track(profile: string): void {
 		});
 }
 
-const CANDIDATES = [
-	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-	"/Applications/Chromium.app/Contents/MacOS/Chromium",
-	"google-chrome",
-	"google-chrome-stable",
-	"chromium",
-	"chromium-browser",
-];
-
-/** The Chrome binary: `CHROME_PATH`, else a usual location; `undefined` if none. */
-export function findChrome(): string | undefined {
-	const fromEnv = process.env["CHROME_PATH"];
-	if (fromEnv) return fromEnv;
-	for (const candidate of CANDIDATES) {
-		const found = candidate.startsWith("/")
-			? Bun.file(candidate).size > 0
-				? candidate
-				: null
-			: Bun.which(candidate);
-		if (found) return found;
-	}
-	return undefined;
-}
+/**
+ * The Chrome binary: Chrome for Testing in the pinned version, `CHROME_PATH`
+ * or Puppeteer's cache (test/browsers.ts); never an installed Chrome.
+ */
+export const findChrome = findChromeForTesting;
 
 type Pending = {
 	resolve: (v: Record<string, unknown>) => void;
@@ -152,6 +138,7 @@ export class Browser {
 				// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
 				"--use-mock-keychain",
 				"--password-store=basic",
+				...chromeSwitches(),
 				...(process.platform === "linux" ? ["--no-sandbox"] : []),
 				"about:blank",
 			],

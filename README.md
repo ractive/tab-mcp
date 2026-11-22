@@ -425,9 +425,15 @@ Requires [Bun](https://bun.sh) 1.4.4 or newer.
 
 ```sh
 bun install
+# Once, for the browser tests: the pinned test browsers, never your own Chrome or Firefox
+# (CI uses the same versions: Chrome for Testing through setup-chrome, this Firefox install)
+bunx @puppeteer/browsers@3.2.7 install chrome@156.0.8078.80 --path ~/.cache/puppeteer
+bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
 bun run verify     # Biome, type check, tests, MCP conformance suite; no browser
 bun run test:browser [filter]  # the browser tests (*.browser.test.ts), Chrome and Firefox;
-                               # one run per machine, a second waits (--no-wait: fails)
+                               # one run per machine, a second waits (--no-wait: fails);
+                               # --no-firefox / --no-chrome leave files out, --system-firefox
+                               # takes the installed Firefox; no notification on the desktop
 bun run test:browser --sweep --dry-run  # what a run would clean up from killed runs
                                         # (in ~/.cache/tab-mcp/browser-tests only; takes the lock)
 bun run verify:all # both
