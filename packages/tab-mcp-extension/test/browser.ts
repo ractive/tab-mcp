@@ -177,8 +177,7 @@ function pipe(
 	})();
 	return {
 		send(message) {
-			writer.write(`${message}\0`);
-			void writer.flush();
+			write(writer, `${message}\0`);
 		},
 		// The descriptors are numbers the next Chrome may get again: closing
 		// them late would close that Chrome's pipe. So wait until both are shut.
@@ -191,6 +190,28 @@ function pipe(
 			await Promise.race([reading, Bun.sleep(5000)]);
 		},
 	};
+}
+
+/** The part of Bun's `FileSink` that `write` uses. */
+export interface Sink {
+	write(chunk: string): unknown;
+	flush(): number | Promise<number>;
+}
+
+/**
+ * Write and flush, dropping a failure: once Chrome is gone the pipe's write
+ * end fails with EPIPE, either at once or in the flush's promise, and that
+ * would be an unhandled error in whichever test was running. The calls
+ * still waiting are failed when the read end closes.
+ */
+export function write(sink: Sink, chunk: string): void {
+	try {
+		sink.write(chunk);
+		const flushed = sink.flush();
+		if (flushed instanceof Promise) flushed.catch(() => {});
+	} catch {
+		// The pipe went away.
+	}
 }
 
 type ChromeProcess = Subprocess<"ignore", "ignore", "ignore">;
@@ -210,6 +231,8 @@ export class Browser {
 	 */
 	extensionWorker: Worker | undefined;
 	#nextId = 0;
+	/** The DevTools connection closed: a call now would wait forever. */
+	#gone = false;
 
 	private constructor(
 		proc: ChromeProcess,
@@ -245,6 +268,7 @@ export class Browser {
 			},
 			// A closed connection (Chrome gone) fails every call still waiting.
 			() => {
+				this.#gone = true;
 				for (const p of this.#pending.values())
 					p.reject(new Error("the DevTools connection closed"));
 				this.#pending.clear();
@@ -407,6 +431,8 @@ export class Browser {
 		params: Record<string, unknown> = {},
 		sessionId?: string,
 	): Promise<Record<string, unknown>> {
+		if (this.#gone)
+			return Promise.reject(new Error("the DevTools connection closed"));
 		const id = ++this.#nextId;
 		this.#transport.send(
 			JSON.stringify({

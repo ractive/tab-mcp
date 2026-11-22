@@ -164,6 +164,25 @@ test.skipIf(chrome === undefined)(
 	30_000,
 );
 
+test.skipIf(chrome === undefined)(
+	"a call after the browser closed fails at once",
+	async () => {
+		const browser = await Browser.launch(chrome as string, { serve });
+		await browser.close();
+		// Without the check it would wait forever: the write is dropped and
+		// the calls still waiting were failed when the connection closed.
+		const answer = await Promise.race([
+			browser.send("Browser.getVersion").then(
+				() => "answered",
+				(error: Error) => error.message,
+			),
+			Bun.sleep(2000).then(() => "still waiting"),
+		]);
+		expect(answer).toBe("the DevTools connection closed");
+	},
+	30_000,
+);
+
 test("an attach that fails otherwise is thrown on, unhandled", async () => {
 	// A browser that answers the page and fails the frame: in a process of its
 	// own, as the unhandled rejection would fail this test.
