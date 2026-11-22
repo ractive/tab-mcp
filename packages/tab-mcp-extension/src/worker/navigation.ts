@@ -64,6 +64,36 @@ const message = (error: unknown) =>
  * loaded: status `complete` after `loading`. A navigation that has not
  * started loading `quietMs` after `start` resolved, the tab being complete,
  * counts as done. Rejects with `start`'s error, or when `signal` aborts.
+ *
+ * Two sources say what the tab is: its status events, which come in order,
+ * and status reads, each of which answers what the tab was at some moment
+ * between its ask and its answer. So a read counts only if no status event
+ * came while it was out: then nothing changed after the moment it saw, and
+ * what it says is the tab now. If an event came, the event is the fresher
+ * source and the read is dropped. One read is out at a time, and none after
+ * the wait has ended.
+ *
+ * Who decides what:
+ * - The read right after `start` resolved only notes a load under way
+ *   (`loading`), or a tab gone. Its `complete` never ends the wait: a
+ *   navigation may not have begun loading yet.
+ * - From the events: `loading` notes a load under way; `complete` once one
+ *   has been noted ends the wait. A `complete` before any is ignored: it
+ *   may be the end of the load before this navigation.
+ * - Every `quietMs` after the first read, a read is made until one counts.
+ *   `complete` ends the wait (also a navigation that never started loading,
+ *   within the document); `loading` notes a load, whose `complete` comes as
+ *   an event after it; a tab gone ends the wait at once, from any read.
+ *
+ * Why no finished load is lost: an ignored or missed `complete` is
+ * followed, `quietMs` later, by a read asked after it. If no event comes
+ * while that read is out, it answers `complete` and ends the wait; if one
+ * comes, the events go on and a read follows again.
+ *
+ * Why the wait never ends on a page about to be left: the next page's
+ * `loading` is an event. A read out while it comes is dropped, whatever it
+ * answers. A read asked after it answers `loading`, or the next page's
+ * `complete`.
  */
 export function waitForLoad(
 	events: TabEvents,
@@ -75,6 +105,8 @@ export function waitForLoad(
 	return new Promise<Loaded>((resolve, reject) => {
 		let started = false;
 		let done = false;
+		/** Status events so far: a read that saw one come while it was out is dropped. */
+		let seen = 0;
 		const timers: ReturnType<typeof setTimeout>[] = [];
 		const finish = (result: Loaded | Error) => {
 			if (done) return;
@@ -94,11 +126,36 @@ export function waitForLoad(
 		// Before `start`: its first events may come before it resolves.
 		const unwatch = events.watch(tabId, {
 			status: (status) => {
+				seen++;
 				if (status === "loading") started = true;
 				else if (status === "complete" && started) finish("complete");
 			},
 			removed: () => finish("closed"),
 		});
+		/**
+		 * The tab's status from a read that counts; `undefined` for a tab that
+		 * is gone, `"dropped"` for one that does not count (an event came while
+		 * it was out, or the wait ended meanwhile).
+		 */
+		const read = async (): Promise<string | undefined> => {
+			const before = seen;
+			const status = await events.status(tabId);
+			if (status === undefined) return undefined;
+			return done || seen !== before ? "dropped" : status;
+		};
+		/** The read `quietMs` from now, and again after one that is dropped. */
+		const quietRead = () =>
+			timers.push(
+				setTimeout(async () => {
+					if (done) return;
+					const now = await read();
+					if (done) return;
+					if (now === undefined) finish("closed");
+					else if (now === "dropped") quietRead();
+					else if (now === "complete") finish("complete");
+					else if (now === "loading") started = true;
+				}, quietMs),
+			);
 		if (signal.aborted) {
 			aborted();
 			return;
@@ -107,17 +164,11 @@ export function waitForLoad(
 		timers.push(setTimeout(() => finish("timeout"), timeoutMs));
 		start().then(
 			async () => {
-				const status = await events.status(tabId);
+				const status = await read();
+				if (done) return;
 				if (status === undefined) return finish("closed");
 				if (status === "loading") started = true;
-				timers.push(
-					setTimeout(async () => {
-						if (started || done) return;
-						const now = await events.status(tabId);
-						if (now === undefined) finish("closed");
-						else if (!started && now === "complete") finish("complete");
-					}, quietMs),
-				);
+				quietRead();
 			},
 			(error: unknown) =>
 				finish(error instanceof Error ? error : new Error(message(error))),

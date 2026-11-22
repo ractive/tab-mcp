@@ -38,6 +38,7 @@ import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
+import { LOAD_TIMEOUT_MS } from "../src/worker/navigation.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -50,6 +51,20 @@ import {
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
+// A test that waits for pages to load gives each of them the extension's
+// own limit and 15 s more: 45 s for one load, 75 s for two (back and
+// forward; reload and #part; a navigation and one more). So a load the
+// extension gives up on fails with the extension's answer: at the test's
+// timeout Bun kills the block's Chrome, and every test after it fails too,
+// naming nothing.
+for (const [loads, timeout] of [
+	[1, 45_000],
+	[2, 75_000],
+] as const)
+	if (loads * LOAD_TIMEOUT_MS + 15_000 > timeout)
+		throw new Error(
+			`LOAD_TIMEOUT_MS grew: raise the ${timeout} ms of the tests that wait for ${loads} load(s)`,
+		);
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
@@ -1111,7 +1126,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(String(result.structuredContent?.["note"])).toContain(
 			"may have completed",
 		);
-	});
+	}, 45_000);
 
 	test("it follows a navigation", async () => {
 		await tab.goto(`${SITE}/plain.html`);
@@ -2043,7 +2058,7 @@ describe.skipIf(chrome === undefined)(
 			});
 			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 			await noQuestion(stack);
-		});
+		}, 45_000);
 
 		test("to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes", async () => {
 			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
@@ -2073,7 +2088,7 @@ describe.skipIf(chrome === undefined)(
 				url: `${OTHER}/plain.html`,
 				title: "Plain page",
 			});
-		});
+		}, 45_000);
 
 		test("back to another origin asks too, its address not known", async () => {
 			const back = call(stack, "go_back");
@@ -2086,7 +2101,7 @@ describe.skipIf(chrome === undefined)(
 			expect((await back).structuredContent).toMatchObject({
 				url: `${SITE}/webmcp.html`,
 			});
-		});
+		}, 45_000);
 
 		test("back and forward on the page's origin run at once", async () => {
 			const back = await call(stack, "go_back");
@@ -2098,7 +2113,7 @@ describe.skipIf(chrome === undefined)(
 				url: `${SITE}/webmcp.html`,
 			});
 			await noQuestion(stack);
-		});
+		}, 75_000);
 
 		test("reload stays and never asks; within the page (#part) it answers at once", async () => {
 			await stack.tab.eval("window.e2eMarker = 1");
@@ -2114,7 +2129,7 @@ describe.skipIf(chrome === undefined)(
 			});
 			expect(Date.now() - started).toBeLessThan(5_000);
 			await noQuestion(stack);
-		});
+		}, 75_000);
 	},
 );
 
@@ -2141,7 +2156,7 @@ describe.skipIf(chrome === undefined)(
 				webmcp: { available: true, tools: 5 },
 			});
 			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-		});
+		}, 45_000);
 
 		test("to another origin, once allowed, the result says the new page needs a click; then nothing more", async () => {
 			const going = call(stack, "navigate", { url: `${OTHER}/plain.html` });
@@ -2168,7 +2183,7 @@ describe.skipIf(chrome === undefined)(
 				(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
 					.structuredContent,
 			).toMatchObject({ url: `${OTHER}/webmcp.html` });
-		});
+		}, 75_000);
 	},
 );
 
