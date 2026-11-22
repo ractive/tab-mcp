@@ -68,7 +68,7 @@ export interface CallContext {
 	tools: ToolSource;
 	/**
 	 * Ask the user before a consequential tool runs (a throw is a refusal);
-	 * for an agent in the browser, the page's own `onConfirm` or nothing
+	 * for an unvouched WebMCP call, the page's own `onConfirm` or nothing
 	 * (DEC-215).
 	 */
 	confirm: ConfirmHandler;

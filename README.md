@@ -273,10 +273,13 @@ the site's own chat. See
 
 `new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
 where the browser has it, so that agents in the browser call them without pairing, with
-the same argument check, tools that ask included. Such an agent drives the tab and could
-click "Allow" itself, so the library shows it no question: a tool that asks is marked
-`consequentialHint` for it, so that it asks its user in its own chat, and the page's
-`onConfirm` can still refuse it in code. `callers` in a tool's registration says which
+the same argument check, tools that ask included. The library shows no question for a
+WebMCP call that the tab-mcp browser extension did not vouch for: an agent that drives
+the tab answered it itself. Such a call can also come from another extension for an AI
+app outside the browser, or from a document of an origin named in `exposedTo`, which
+cannot click in the page; the page cannot tell them apart. A tool that asks is marked
+`consequentialHint`, so that a caller that heeds it asks its user; beyond that only the
+page's `onConfirm`, in code, or `callers` without `"webmcp"` stops such a call. `callers` in a tool's registration says which
 callers see it. See [who asks](packages/tab-mcp-client/README.md#who-asks-before-a-tool-that-asks-runs)
 in the client README.
 

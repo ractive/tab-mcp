@@ -29,9 +29,10 @@ export { pieces, servePort } from "./serve.ts";
  * same path as an AI app's (`webMcpCall` in `mcp.ts`). `by`: the tab-mcp
  * browser extension vouched for this very call, for that AI app (DEC-207):
  * the user allowed it there, so the page neither asks nor calls `onConfirm`.
- * Any other WebMCP call comes from an agent that drives the tab and would
- * answer the library's dialog itself (DEC-215): the page's own `onConfirm`
- * decides a tool that asks, in code; without one the tool runs, and the
+ * Any other WebMCP call (an agent that may drive the tab and would answer
+ * the library's dialog itself, another extension, an `exposedTo` origin;
+ * DEC-215): the page's own `onConfirm` decides a tool that asks, in code;
+ * without one the tool runs, and the
  * confirmation's chunk is not loaded. Everything else (the arguments'
  * check, the events, the tool still being the one registered) is as for
  * any call.

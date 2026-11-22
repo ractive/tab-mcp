@@ -1036,8 +1036,7 @@ export class TabMcp extends EventTarget {
 	 * `onConfirm`), in `options.document` (default: the global one). An
 	 * `onConfirm` may hand some calls to it. A call the user allowed for its
 	 * AI app resolves `true` unasked. A WebMCP call resolves `true` unasked
-	 * too, without loading the dialog: an agent in the browser would answer
-	 * it itself (DEC-215). Resolves `false` where there is no document.
+	 * too, without loading the dialog, as without `onConfirm` (DEC-215). Resolves `false` where there is no document.
 	 */
 	confirmInPage(
 		request: ConfirmRequest,

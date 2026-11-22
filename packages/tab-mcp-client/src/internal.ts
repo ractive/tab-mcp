@@ -27,7 +27,7 @@ export interface CallHost {
 	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
 	/**
 	 * The page's own `onConfirm`, if it has one: it asks, not the library's
-	 * dialog in the tab. For an agent in the browser it is the only check
+	 * dialog in the tab. For an unvouched WebMCP call it is the only check
 	 * (DEC-215).
 	 */
 	onConfirm(): ConfirmHandler | undefined;

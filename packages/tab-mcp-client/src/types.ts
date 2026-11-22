@@ -45,11 +45,13 @@ export interface RelayClient {
 }
 
 /**
- * An agent in this browser that calls a mirrored tool through WebMCP
- * (`webmcp: true`). Not paired and not identified: nothing more is known,
- * unless the tab-mcp browser extension vouched for the call (DEC-207). Such
- * an agent can drive the tab and click whatever the page shows, so the
- * library never shows it its confirmation (DEC-215): only the page's own
+ * Whatever calls a mirrored tool through the browser's WebMCP
+ * (`webmcp: true`): an agent in the browser, which may drive the tab,
+ * another extension that passes on an AI app's calls, or a document of an
+ * origin in the tool's `exposedTo`. Not paired and not identified: nothing
+ * more is known, and the page cannot tell these apart, unless the tab-mcp
+ * browser extension vouched for the call (DEC-207). The library never shows
+ * an unvouched call its confirmation (DEC-215): only the page's own
  * `onConfirm` decides, in code.
  */
 export interface WebMcpClient {
@@ -209,20 +211,22 @@ export interface RegisterToolOptions {
 	signal?: AbortSignal;
 	/**
 	 * Which callers see the tool: `"relay"` (AI apps through the relay),
-	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (agents
-	 * in the browser, with `TabMcpOptions.webmcp` on). Others neither list nor
+	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (whatever
+	 * calls through the browser's WebMCP, with `TabMcpOptions.webmcp` on). Others neither list nor
 	 * call it: for them it does not exist. By default all of them, tools that
 	 * ask included (DEC-209). Leave a caller out for privacy or identity, e.g.
 	 * `["local"]` for data the site's own assistant may read but an AI app
-	 * through the relay may not, or `["relay", "local"]` for a tool an agent
-	 * in the browser must not run: the library does not ask such an agent
-	 * (DEC-215).
+	 * through the relay may not, or `["relay", "local"]` for a tool no WebMCP
+	 * caller may run unasked: the library does not ask an unvouched WebMCP
+	 * call (DEC-215).
 	 */
 	callers?: readonly ToolCaller[];
 	/**
 	 * WebMCP's origins of other documents in this tab that may see the tool:
 	 * passed on to the native `registerTool` of a mirrored tool, which checks
-	 * it (an invalid list only warns). No effect on AI apps.
+	 * it (an invalid list only warns). A document of a listed origin can run
+	 * the tool, and the library does not ask it (DEC-215): only `onConfirm`
+	 * stops it. No effect on AI apps.
 	 */
 	exposedTo?: string[];
 }
@@ -353,13 +357,14 @@ export interface TabMcpOptions {
 	appName?: string;
 	/**
 	 * Approves consequential tool calls; default: a dialog in the page. It
-	 * gets every such call of an AI app through the relay and of an agent in
-	 * the browser (WebMCP), not one the tab-mcp browser extension vouched for.
-	 * An agent in the browser is never shown the library's dialog: it drives
-	 * the tab and could answer it itself (DEC-215), and it can click whatever
-	 * this handler shows too. For it, decide in code (`request.client.kind`
-	 * is `"webmcp"`), or keep the tool from it with `callers`; without a
-	 * handler its call runs.
+	 * gets every such call of an AI app through the relay and every WebMCP
+	 * call, not one the tab-mcp browser extension vouched for. A WebMCP call is
+	 * never shown the library's dialog (DEC-215): it may come from an agent
+	 * that drives the tab and can click whatever the page shows, this
+	 * handler's UI too, from another extension, or from an `exposedTo`
+	 * origin. For it, decide in code (`request.client.kind` is `"webmcp"`),
+	 * or keep the tool from WebMCP with `callers`; without a handler its call
+	 * runs.
 	 */
 	onConfirm?: ConfirmHandler;
 	/**
@@ -418,8 +423,9 @@ export interface TabMcpOptions {
 	 * tool goes there unless its `callers` leave `"webmcp"` out, tools that ask
 	 * included, marked `consequentialHint` (a tool marked only
 	 * `destructiveHint` too: WebMCP has no `destructiveHint`; DEC-209), so
-	 * that the agent asks its user. The library shows such an agent no
-	 * question (DEC-215): its call runs unless `onConfirm` refuses it. A
+	 * that a caller that heeds it asks its user. The library shows an
+	 * unvouched WebMCP call no question (DEC-215): it runs unless `onConfirm`
+	 * refuses it. A
 	 * failed native registration only warns in the console.
 	 *
 	 * With it, the page and the tab-mcp browser extension know of each other

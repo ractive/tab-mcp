@@ -40,7 +40,7 @@ Becomes `SECURITY.md` (reporting, supported versions) and `docs/threat-model.md`
 | Relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or altering traffic |
 | AI app | the tools it is allowed to call, their results | following the user's intent (it is driven by a model) |
 | Model provider behind the AI app | the same as the AI app | — |
-| Agent in the browser (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP, their results | — |
+| WebMCP caller: agent in the browser, another extension, an `exposedTo` origin (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP, their results | — |
 | Network | nothing (TLS everywhere; `wss:` and `https:` only outside development) | — |
 
 The relay cannot be made blind: the AI app speaks HTTPS to the relay and the MCP payload
@@ -180,7 +180,8 @@ does not export and which refuses to run outside development (DEC-059).
   "everything" also covers tools the user has not seen. A tool whose title or
   description changed asks again; the page's own `onConfirm` is not asked for an
   allowed call. Only relay AI apps can be allowed, never WebMCP agents or served ports
-  (agents in the browser are not asked by the library at all, A14).
+  (an unvouched WebMCP call is not asked by the library at all; only the page's
+  `onConfirm` decides, A14).
 
 ### A7: Cross-site attacks on the relay's pages
 
@@ -523,7 +524,7 @@ single page: whoever holds a person's unused assertion can bind a session of the
 that person (DEC-196). The threats and mitigations are in `docs/threat-model.md` (A12)
 and DEC-076 to DEC-079.
 
-### A14: Agents in the browser calling mirrored tools (WebMCP, iteration 25)
+### A14: WebMCP callers of mirrored tools (iteration 25)
 
 With `webmcp: true` the library also registers the page's tools with the browser's own
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`). Agents
@@ -535,11 +536,20 @@ instead, with no question (DEC-209): now every tool is mirrored unless its `call
 leave `"webmcp"` out, and calls get the same schema check, never "Always allow". In
 0.20 they got the library's dialog too; with ChatGPT's browser the call waited on it
 until the agent's own timeout (40 to 50 s), then the agent clicked "Allow once" itself
-(2026-11-22). Since DEC-215 the library shows such an agent no question: a tool that
-asks is registered with `consequentialHint: true`, so that the agent asks its user in
-its own chat, and the page's `onConfirm`, if any, decides in code; without one the call
-runs. Residual risk: an agent that ignores the hint runs a consequential tool unasked;
-it could already click the page's own controls or the dialog. Only the native object is
+(2026-11-22). Since DEC-215 the library shows no question for any WebMCP call the
+tab-mcp browser extension did not vouch for: a tool that asks is registered with
+`consequentialHint: true`, so that a caller that heeds it asks its user, and the page's
+`onConfirm`, if any, decides in code; without one the call runs. Such a call is not
+always an agent that drives the tab: it can come from another extension that passes on
+an AI app's calls (which cannot click in the page, unless that extension lets it), or
+from a document of an origin named in the tool's `exposedTo` (Chrome 156 lets it list
+and run the tool, [research](/research/webmcp-register-tool.md)); the page cannot tell
+them apart. For those two the dialog was a real check. Residual risk, for a page without
+an `onConfirm` that refuses them and a tool offered to WebMCP: an agent that ignores the
+hint runs a consequential tool unasked (it could already click the page's own controls
+or the dialog); an extension that asks nothing runs it on its AI app's say, a prompt
+injection included; script of an `exposedTo` origin runs it unasked. `callers` without
+`"webmcp"` and no `exposedTo` keep a tool from all three. Only the native object is
 used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a

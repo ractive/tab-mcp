@@ -255,8 +255,9 @@ await mcp.registerTool<{ id: string }>({
 ```
 
 Write the description as what the tool does and that it cannot be undone; do not promise
-a question ("the page asks first"): an agent in the browser is not asked by the page
-(section 5), and one told it will be may click the page's own buttons instead.
+a question ("the page asks first"): the library does not ask a WebMCP call the tab-mcp
+browser extension did not vouch for (section 5), and an agent told it will be asked may
+click the page's own buttons instead.
 
 The page then asks before every call of an AI app: a dialog names the AI app and shows the arguments,
 "Don't allow" has the focus, and "Allow once" turns on only after the page has been visible and
@@ -286,16 +287,19 @@ calls are declined.
 
 ```ts
 const mcp = new TabMcp({ relay, server, webmcp: true });
-await mcp.registerTool(deleteNoteTool); // an AI app is asked; an agent in the browser asks its user
+await mcp.registerTool(deleteNoteTool); // an AI app is asked; an unvouched WebMCP call is not
 ```
 
-Who asks before a tool that asks runs (DEC-215):
+Who asks before a tool that asks runs (DEC-215). The last three rows all arrive as
+`client: { kind: "webmcp" }` without `via`; the page cannot tell them apart:
 
 | Caller | Can it click in the tab? | Who asks |
 |---|---|---|
 | An AI app through the relay | no | the page: `onConfirm`, else the library's dialog |
 | An AI app through the tab-mcp browser extension (a WebMCP call it vouched for) | no | the extension, in its side panel |
-| An agent in the browser (any other WebMCP call) | yes | the agent, in its chat (`consequentialHint`); the page's `onConfirm` if any; never the library's dialog |
+| An agent in the browser that drives the tab | yes | the agent in its chat, if it heeds `consequentialHint`; the page's `onConfirm` if any; never the library's dialog |
+| Another extension passing on an AI app's calls | no, unless that extension lets it | that extension, if it asks; the page's `onConfirm` if any; never the library's dialog |
+| A document of an origin in the tool's `exposedTo` | no, not in the page | only the page's `onConfirm`, if any |
 
 - `webmcp: true` (off by default) also registers each tool with the browser's native
   `document.modelContext.registerTool()`, where the browser has it (in Chrome: sites in
@@ -306,13 +310,14 @@ Who asks before a tool that asks runs (DEC-215):
   (since client 0.20, DEC-209): hiding them did not stop an agent that drives the tab, it
   clicked the page's own controls instead, with no question. `callers` without
   `"webmcp"` keeps a tool out (React: `useTool(tool, { callers: ["relay", "local"] })`).
-- The library shows an agent in the browser no question (since DEC-215): it drives the
-  tab and clicked "Allow once" in the dialog itself. Such a tool is registered with
-  `consequentialHint: true`, so the agent asks its user in its own chat. The page's
-  `onConfirm` still gets the call (`client.kind === "webmcp"`, no `via`): decide there in
-  code (refuse, or a rule), never by showing something, which the agent can click too.
-  Without `onConfirm` the call runs. A tool an agent must not run leaves `"webmcp"` out
-  of `callers`.
+- The library shows an unvouched WebMCP call no question (since DEC-215): an agent that
+  drives the tab clicked "Allow once" in the dialog itself. For another extension or an
+  `exposedTo` origin the dialog was a real check, and it is gone too. Such a tool is
+  registered with `consequentialHint: true`, so a caller that heeds it asks its user.
+  The page's `onConfirm` still gets the call (`client.kind === "webmcp"`, no `via`):
+  decide there in code (refuse, or a rule), never by showing something, which an agent
+  can click too. Without `onConfirm` the call runs. A tool that must not run on such a
+  caller's word leaves `"webmcp"` out of `callers`, and gets no `exposedTo`.
 - A WebMCP call gets the same argument check and fires `toolcall` and `toolcallend` with
   `client.kind === "webmcp"`, so the page's record of calls still lists it.
 - The agent gets what `execute` returned. A failure (invalid arguments, a refusal of

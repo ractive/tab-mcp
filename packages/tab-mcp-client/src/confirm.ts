@@ -26,7 +26,7 @@ import type {
 	RelayClient,
 } from "./types.ts";
 
-/** A request the dialog is shown for: never an agent in the browser's (DEC-215). */
+/** A request the dialog is shown for: never a WebMCP call's (DEC-215). */
 export type AskedRequest = ConfirmRequest & {
 	client: RelayClient | LocalClient;
 };
@@ -429,9 +429,8 @@ export interface ConfirmInPageOptions {
  * `TabMcp.confirmInPage`: the confirmation, and the tools the user allowed
  * (`always-allowed.ts`), which run unasked. Those only for an AI app through
  * the relay: a served port has no identity to remember an answer for
- * (DEC-115, DEC-124). An agent in the browser (WebMCP) is never shown it:
- * it drives the tab and would answer the question itself, so its call
- * resolves `true` (DEC-215).
+ * (DEC-115, DEC-124). A WebMCP call is never shown it (an agent that drives
+ * the tab would answer it itself; DEC-215): it resolves `true`.
  *
  * Code that loads this chunk itself may pass a stand-in of its own for
  * `mcp` (`ConfirmHost`: `grants`, optionally `grantschange` events). Its
