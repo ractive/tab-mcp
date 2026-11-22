@@ -2218,6 +2218,9 @@ describe.skipIf(chrome === undefined)(
 			await stack?.stop();
 		});
 
+		// Seven loads in its steps (1, 1, 1, 2, 2): each the extension's own
+		// limit (30 s) and 15 s more, so a load it gives up on fails with its
+		// answer, not with this test's timeout.
 		test("navigate on the page's origin runs at once, with the new page's page_info and tools", async () => {
 			await step(
 				"navigate on the page's origin runs at once, with the new page's page_info and tools",
@@ -2322,7 +2325,7 @@ describe.skipIf(chrome === undefined)(
 					await noQuestion(stack);
 				},
 			);
-		}, 150_000);
+		}, 225_000);
 	},
 );
 
