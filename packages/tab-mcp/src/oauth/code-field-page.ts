@@ -16,7 +16,7 @@
  * Type-checked with `tsconfig.browser.json` (the DOM), not with the relay.
  */
 
-import { boxAt, type Edit, tidy } from "./code-field.ts";
+import { boxAt, caretSide, type Edit, tidy } from "./code-field.ts";
 
 const field = document.getElementById("code");
 const row = field?.parentElement;
@@ -33,14 +33,23 @@ if (
 		const start = field.selectionStart;
 		const at =
 			!composing &&
+			document.hasFocus() &&
 			document.activeElement === field &&
 			start !== null &&
 			start === field.selectionEnd
 				? boxAt(start)
 				: -1;
-		boxes.forEach((box, i) => {
-			box.classList.toggle("at", i === at);
-		});
+		// The classes go and come back after a reflow, so that the caret's blink
+		// starts again, visible, as a native caret's does.
+		for (const box of boxes)
+			box.classList.remove("at", "caret-after", "caret-empty");
+		const box = boxes[at];
+		if (box instanceof HTMLElement && start !== null) {
+			void box.offsetWidth;
+			box.classList.add("at");
+			const side = caretSide(start, field.value);
+			if (side !== "before") box.classList.add(`caret-${side}`);
+		}
 		row.classList.toggle("has-dash", field.value.includes("-"));
 	};
 
@@ -74,6 +83,10 @@ if (
 		if (event instanceof InputEvent && event.isComposing) return;
 		apply(done);
 	});
+	// The field keeps `activeElement` when the window loses the focus, but a
+	// native caret is gone then, and so is the drawn one.
+	window.addEventListener("blur", paint);
+	window.addEventListener("focus", paint);
 	field.addEventListener("compositionstart", () => {
 		composing = true;
 		paint();
