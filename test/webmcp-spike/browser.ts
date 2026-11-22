@@ -8,55 +8,8 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { Subprocess } from "bun";
-
-/** The profiles of the Chromes this process started and has not closed yet. */
-const running = new Set<string>();
-let reapOnExit = false;
-
-/**
- * Kill every process of the Chrome that uses `profile` and remove the profile.
- * Its helpers (renderers, GPU, network) outlive a SIGKILL of the main process
- * and would stay behind under launchd; each carries the profile's unique
- * name in its `--user-data-dir`.
- */
-function reap(profile: string): void {
-	try {
-		Bun.spawnSync([
-			"pkill",
-			"-9",
-			"-f",
-			`user-data-dir=.*${basename(profile)}`,
-		]);
-	} catch {
-		// no pkill: only the main process was killed
-	}
-	rmSync(profile, { recursive: true, force: true });
-	running.delete(profile);
-}
-
-/**
- * Remember `profile` until its Chrome is closed; a test process that ends
- * first (a failed hook, a timeout, Ctrl-C, a kill with SIGTERM) still takes
- * its Chromes with it.
- */
-function track(profile: string): void {
-	running.add(profile);
-	if (reapOnExit) return;
-	reapOnExit = true;
-	const reapAll = () => {
-		for (const p of [...running]) reap(p);
-	};
-	process.on("exit", reapAll);
-	for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
-		process.once(signal, () => {
-			reapAll();
-			process.exit(
-				128 + (signal === "SIGINT" ? 2 : signal === "SIGTERM" ? 15 : 1),
-			);
-		});
-}
 
 /** Chrome's major version, from `--version`; 0 if it does not say. */
 export function chromeMajor(binary: string): number {
@@ -256,7 +209,6 @@ export class Browser {
 		options: LaunchOptions = {},
 	): Promise<Browser> {
 		const profile = mkdtempSync(join(tmpdir(), "webmcp-spike-"));
-		track(profile);
 		if (options.labs?.length)
 			await Bun.write(
 				join(profile, "Local State"),
@@ -326,7 +278,7 @@ export class Browser {
 			// No Browser to close: kill what started and remove the profile here.
 			proc?.kill("SIGKILL");
 			await proc?.exited;
-			reap(profile);
+			rmSync(profile, { recursive: true, force: true });
 			throw error;
 		}
 	}
@@ -417,7 +369,7 @@ export class Browser {
 		this.#ws.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
-		reap(this.#profile);
+		rmSync(this.#profile, { recursive: true, force: true });
 	}
 }
 
