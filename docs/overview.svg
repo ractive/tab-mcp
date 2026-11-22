@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 286" width="980" height="286" role="img" aria-labelledby="tmo-title tmo-desc">
   <title id="tmo-title">tab-mcp: how the parts connect</title>
-  <desc id="tmo-desc">Two paths lead through the tab-mcp relay to AI apps such as Claude, ChatGPT, Claude Code and Codex. First path: a page with tab-mcp-client, in any browser, with nothing for the user to install, connects to the relay with a WebSocket. Second path: in Chrome with WebMCP on and the tab-mcp extension installed, the tab-mcp browser extension reads the WebMCP tools of a page and connects to the relay with a WebSocket. The AI apps reach the relay over MCP.</desc>
+  <desc id="tmo-desc">Two paths lead through the tab-mcp relay to AI apps such as Claude, ChatGPT, Claude Code and Codex. First path: a page with tab-mcp-client, in any browser, with nothing for the user to install, connects to the relay with a WebSocket. Second path: in Chrome with the tab-mcp extension installed, the tab-mcp browser extension reads the WebMCP tools of a page and connects to the relay with a WebSocket. The AI apps reach the relay over MCP.</desc>
   <!-- Drawn by hand in the look of the diagrams on https://ractive.ch/tab-mcp/
        (scripts/flowchart.ts and src/css/tab-mcp-overview.css in ractive/ractive.ch):
        their boxes, arrows, label tags and colours, light and dark. It is a file of
@@ -85,7 +85,7 @@
   <circle class="dot muted" cx="49" cy="167" r="3"/>
   <circle class="dot muted" cx="59" cy="167" r="3"/>
   <rect class="field" x="72" y="157" width="416" height="20" rx="10"/>
-  <text class="muted" x="84" y="171.5">Chrome with WebMCP on, and the tab-mcp extension installed</text>
+  <text class="muted" x="84" y="171.5">Chrome with the tab-mcp extension installed</text>
 
   <!-- the links, and their labels on them. The two to the relay leave their
        browser window straight through its side and turn into the relay from

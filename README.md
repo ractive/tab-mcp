@@ -27,7 +27,7 @@ Claude Desktop, then Claude calling the page's tools (45 s; waiting cut, Claude'
      https://ractive.ch/tab-mcp/ (boxes, arrows, label tags; light and dark). A copy is
      static/images/tab-mcp-overview.svg in ractive.ch, shown there with a short version
      of this text; keep them in step. -->
-![Two paths lead through the tab-mcp relay to AI apps. A page with tab-mcp-client, in any browser with nothing for the user to install, connects to the relay with a WebSocket. A page with WebMCP tools, in Chrome with WebMCP on and the tab-mcp extension installed, is read by the tab-mcp browser extension, which connects to the relay with a WebSocket. The AI apps reach the relay over MCP.](docs/overview.svg)
+![Two paths lead through the tab-mcp relay to AI apps. A page with tab-mcp-client, in any browser with nothing for the user to install, connects to the relay with a WebSocket. A page with WebMCP tools, in Chrome with the tab-mcp extension installed, is read by the tab-mcp browser extension, which connects to the relay with a WebSocket. The AI apps reach the relay over MCP.](docs/overview.svg)
 
 tab-mcp has three parts:
 
@@ -51,23 +51,24 @@ reach only agents inside the browser, and only where the browser has WebMCP turn
 Chrome has it for sites in its
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) and behind a
 flag (`chrome://flags/#enable-webmcp-testing`), Edge for sites in its own origin trial;
-Firefox and Safari do not have it.
+Firefox and Safari do not have it. Where the browser has none, the tab-mcp browser
+extension gives pages a WebMCP of its own (below).
 
 A page's tools reach an AI app outside the browser on one of two paths. Which one
 depends on how the page offers its tools:
 
 | | Page with the client library | Page with WebMCP tools only |
 |---|---|---|
-| The site | builds in `@ractive-ch/tab-mcp-client` and has a relay that allows its origin | calls `document.modelContext.registerTool()` and takes part in Chrome's WebMCP origin trial (or its users turn on the flag); needs nothing of tab-mcp |
-| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | Chrome with WebMCP on, and the tab-mcp browser extension installed from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) |
+| The site | builds in `@ractive-ch/tab-mcp-client` and has a relay that allows its origin | calls `document.modelContext.registerTool()` where the page finds it; needs nothing of tab-mcp |
+| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | the tab-mcp browser extension, from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) in Chrome; with Chrome's WebMCP off (no flag, the site not in the origin trial), its access to all sites too ([the extension](#the-tab-mcp-browser-extension)) |
 | The user connects | in the page: "Connect your AI app" shows the address and the code | in the extension's side panel, once: one address for whatever page is in front |
 | The user is asked | by the page, before a tool the site marked as consequential | by the extension, before a tool the page did not mark read-only, and before its navigation tools take the tab to another site |
 
 **If you run a site**, the client library reaches the most users: it works in every
 current browser and your users install nothing. You run a relay for it
 ([Self-hosting](#self-hosting)). With WebMCP tools only, you run nothing, but your tools
-reach AI apps outside the browser only for users of Chrome who have WebMCP on and the
-tab-mcp extension installed. You can do both: `new TabMcp({ ..., webmcp: true })` also registers
+reach AI apps outside the browser only for users who installed the tab-mcp browser
+extension. You can do both: `new TabMcp({ ..., webmcp: true })` also registers
 the library's tools with WebMCP. The
 [diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) does, so it works on
 both paths.
@@ -81,8 +82,26 @@ which page is in front, and `navigate`, `go_back`, `go_forward` and `reload` mov
 tab.
 
 The extension reads only WebMCP tools. A page that offers its tools with the client
-library alone, without `webmcp: true`, has none for it. There is no extension for
-Firefox or Safari; pages reach those browsers with the client library.
+library alone, without `webmcp: true`, has none for it.
+
+### The tab-mcp browser extension
+
+- **What the browser must have:** Chrome 116 or later, or Firefox 128 or later for the
+  Firefox build. It needs no WebMCP of its own.
+- **What the extension adds:** it passes the page's WebMCP tools on to the AI app. Where
+  the browser has WebMCP on (Chrome with the flag, or a site in Chrome's origin trial),
+  those are the tools the page registered with the browser. Where it has none (Firefox,
+  Chrome without either), the extension gives each https page (and localhost) its own
+  `document.modelContext` as the page starts loading, so that a page that registers its
+  tools wherever the API exists registers them with the extension. That needs "Give
+  access to all sites": a click on the icon comes after the page has looked for the API.
+- **Where it can be installed today:** the Chrome build from the
+  [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh).
+  The Firefox build is not on addons.mozilla.org yet (its release is
+  [pull request 163](https://github.com/ractive/tab-mcp/pull/163)); it can be built from
+  this repository and loaded as a temporary add-on
+  ([In Firefox](packages/tab-mcp-extension/README.md#in-firefox)). There is none for
+  Safari; pages reach Safari users with the client library.
 
 ## Live examples
 
