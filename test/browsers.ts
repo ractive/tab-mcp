@@ -10,9 +10,11 @@
  *
  * And no notification of a test on the owner's desktop: Chrome without its
  * macOS notifications (`--disable-features=NativeNotifications`: its own
- * notification center, which a headless Chrome does not show), Firefox
- * without them (`alerts.useSystemBackend: false`). The API answers the same
- * (kb/research/test-browser-notifications.md).
+ * notification center, which a headless Chrome does not show; the API
+ * answers the same). Firefox has no such switch that leaves its behaviour
+ * alone (`alerts.useSystemBackend: false` opens alert windows that take the
+ * focus from the panel): its test build records its notifications instead
+ * (src/background.ts). kb/research/test-browser-notifications.md.
  */
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -112,8 +114,3 @@ export function chromeSwitches(args: readonly string[] = []): string[] {
 	}
 	return [`--disable-features=${[...disable].join(",")}`, ...rest];
 }
-
-/** The prefs a test Firefox gets: its notifications off the desktop. */
-export const FIREFOX_PREFS: Record<string, string | number | boolean> = {
-	"alerts.useSystemBackend": false,
-};

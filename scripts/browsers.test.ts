@@ -1,7 +1,7 @@
 /**
  * Which browsers the tests start (test/browsers.ts): only the pinned test
  * browsers, never an installed Chrome, an installed Firefox only on request,
- * and the switches that keep notifications off the desktop.
+ * and the switch that keeps Chrome's notifications off the desktop.
  */
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -10,7 +10,6 @@ import { join, resolve } from "node:path";
 import {
 	CHROME_VERSION,
 	chromeSwitches,
-	FIREFOX_PREFS,
 	FIREFOX_VERSION,
 	INSTALL,
 } from "../test/browsers.ts";
@@ -117,7 +116,6 @@ test("a test Chrome's notifications stay off the desktop, merged with the caller
 		"--enable-features=WebMCP",
 		"--x",
 	]);
-	expect(FIREFOX_PREFS["alerts.useSystemBackend"]).toBe(false);
 });
 
 test("the pinned Chrome is CI's and the releases', and the install commands name the pins", async () => {

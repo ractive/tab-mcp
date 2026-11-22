@@ -1,7 +1,7 @@
 ---
 type: research
 title: "Test browsers and the owner's desktop: notifications off, never the installed browsers"
-description: "Tried on 2026-11-22 against Chrome for Testing 156.0.8078.80 and Firefox 160.0.1 on macOS: --disable-features=NativeNotifications (Chrome) and alerts.useSystemBackend=false (Firefox) keep an extension's notifications off the macOS desktop while chrome.notifications create, getAll and clear answer as before; how it was observed (usernoted's log), and the pinned test browsers from Puppeteer's cache."
+description: "Tried on 2026-11-22 against Chrome for Testing 156.0.8078.80 and Firefox 160.0.1 on macOS: --disable-features=NativeNotifications keeps Chrome's notifications off the macOS desktop while chrome.notifications create, getAll and clear answer as before; Firefox's alerts.useSystemBackend=false does too but its alert windows take the focus from the panel, so the Firefox test build records its notifications instead; how it was observed (usernoted's log), and the pinned test browsers from Puppeteer's cache."
 timestamp: 2026-11-22T08:10:00+01:00
 tags: [tests, browser, notifications, chrome, firefox, macos]
 ---
@@ -57,16 +57,24 @@ without and once with the switch, the Chrome pair twice in both orders:
   notification center, which a headless Chrome does not draw. The extension API answers
   as before.
 - **Firefox:** with `alerts.useSystemBackend` false, Firefox uses its own alert windows,
-  which headless Firefox does not show.
+  which headless Firefox does not show, but **they change behaviour**. In the first
+  browser run with the pref, `firefox.browser.test.ts` "a tool not marked read-only asks
+  in the panel first" failed: the panel's focus hint was still showing when the question
+  was answered. Its helper's comment already says headless Firefox hands the focus "to a
+  window it created after the panel's, at times", and an alert window is such a window.
+  The test had passed with the system backend. So Firefox keeps its system backend, and
+  the **Firefox test build records its notifications** instead (`src/background.ts`,
+  `src/worker/notifications.ts`, `tabMcpNotificationRecorder()`). No Firefox test reads
+  a notification, so no assertion changes. The recorder is in the Firefox test build only:
+  `build.test.ts` checks the store and development builds of both browsers.
 - **Clicks:** the tests answer a notification through the worker's own handlers
   (`tabMcpNotificationButton`, `tabMcpNotificationClicked`, `tabMcpNotificationDismissed`,
   the same functions the `chrome.notifications` events call); no test clicks a macOS
-  notification. So nothing a test asserts depends on the desktop. A recorder in the test
-  build, as the audit proposed, is not needed.
+  notification. So nothing a test asserts depends on the desktop. Chrome needs no recorder:
+  its tests keep the real API, `create`, `getAll` and `clear` included.
 - **Limits:** one machine (macOS, arm64), one version of each browser, two tries for
   Chrome and one for Firefox. A Chrome that renames or drops the feature would show
-  notifications again: the guard test checks it on macOS on every browser run. For
-  Firefox there is no guard: its log lines carry no id.
+  notifications again: the guard test checks it on macOS on every browser run.
 - The experiment ran at a load of about 14 (another session's tests); it does not depend
   on load.
 

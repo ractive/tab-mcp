@@ -11,7 +11,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
-import { FIREFOX_PREFS, findTestFirefox } from "../../../test/browsers.ts";
+import { findTestFirefox } from "../../../test/browsers.ts";
 
 /** The test Firefox in the pinned version, `FIREFOX_PATH` or Puppeteer's cache (test/browsers.ts). */
 export const findFirefox = findTestFirefox;
@@ -50,8 +50,6 @@ const BASE_PREFS: Record<string, string | number | boolean> = {
 	"browser.startup.homepage_override.mstone": "ignore",
 	"datareporting.policy.dataSubmissionEnabled": false,
 	"toolkit.telemetry.reportingpolicy.firstRun": false,
-	// No notification of a test on the desktop.
-	...FIREFOX_PREFS,
 };
 
 export class Firefox {

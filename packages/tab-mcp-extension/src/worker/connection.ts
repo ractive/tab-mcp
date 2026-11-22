@@ -81,6 +81,7 @@ import {
 } from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
+import { notificationApi } from "./notifications.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
@@ -140,9 +141,9 @@ async function iconsFor(): Promise<Icon[]> {
 /** Clear every notification of the extension. */
 async function clearNotifications(): Promise<void> {
 	try {
-		const all = await chrome.notifications.getAll();
+		const all = await notificationApi().getAll();
 		await Promise.all(
-			Object.keys(all).map((id) => chrome.notifications.clear(id)),
+			Object.keys(all).map((id) => notificationApi().clear(id)),
 		);
 	} catch {
 		// None to clear, or notifications not available.
@@ -943,7 +944,7 @@ export class Connection {
 		this.#fillNotice = { text: filledText(client), at: Date.now() };
 		this.#changed();
 		const text = filledNotification(client);
-		chrome.notifications
+		notificationApi()
 			.create(
 				`${FILLED_PREFIX}${crypto.randomUUID()}`,
 				notificationOptions({
@@ -1009,7 +1010,7 @@ export class Connection {
 				return (await chrome.windows.get(windowId)).focused;
 			},
 			notify: async (id, text) => {
-				await chrome.notifications.create(
+				await notificationApi().create(
 					id,
 					notificationOptions({
 						type: "basic",
@@ -1023,7 +1024,10 @@ export class Connection {
 					}),
 				);
 			},
-			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
+			clear: (id) =>
+				void notificationApi()
+					.clear(id)
+					.catch(() => {}),
 			showQuestion: ({ tabId, windowId }) =>
 				this.#showQuestion(tabId, windowId),
 			changed: () => this.#changed(),

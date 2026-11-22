@@ -5376,15 +5376,21 @@ folders in the temp folder that day).
 `requireInteraction: true`. Without `CHROME_PATH` or `FIREFOX_PATH`, the tests also
 started his own Chrome and Firefox.
 
-- **A switch, not a recorder.** Tried first
-  ([research](/research/test-browser-notifications.md)): Chrome for Testing 156 with
-  `--disable-features=NativeNotifications` and Firefox 160 with
-  `alerts.useSystemBackend: false` deliver nothing to macOS (usernoted's log), while
-  `chrome.notifications.create`, `getAll` and `clear` answer as before. Every test Chrome
-  and Firefox gets them (`test/browsers.ts`, `chromeSwitches` merges them with a caller's
+- **Chrome: a switch, not a recorder.** Tried first
+  ([research](/research/test-browser-notifications.md)). Chrome for Testing 156 with
+  `--disable-features=NativeNotifications` delivers nothing to macOS (usernoted's log),
+  while `chrome.notifications.create`, `getAll` and `clear` answer as before. Every test
+  Chrome gets the switch (`test/browsers.ts`; `chromeSwitches` merges it with a caller's
   `--disable-features`). The tests answer notifications through the worker's own handlers,
-  so no assertion changed. The recorder the audit proposed for the test build is not
-  built; the store and development builds are untouched.
+  so no assertion changed, and Chrome's tests keep the real API.
+- **Firefox: a recorder in its test build only.** Firefox 160's `alerts.useSystemBackend:
+  false` also kept notifications off the desktop, but its alert windows took the focus
+  from the panel, and a Firefox test failed. Firefox keeps its system backend, and its
+  test build records its notifications (`src/worker/notifications.ts`, installed in
+  `background.ts` under `TAB_MCP_TEST && FIREFOX`, read with
+  `tabMcpNotificationRecorder()`). No Firefox test read a notification before.
+  `build.test.ts` checks that no store or development build of either browser has the
+  recorder.
 - **The guard:** `notifications.browser.test.ts`, macOS only, creates a question-like
   notification and fails if usernoted's log names it.
 - **Pinned test browsers only:** Chrome for Testing in CI's version (`CHROME_VERSION`,

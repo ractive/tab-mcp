@@ -144,6 +144,48 @@ test("the development profile keeps the add-on's UUID and storage, and what user
 	expect(userPref(own, name)).toBe("false");
 });
 
+test("the notification recorder is in the Firefox test build only (DEC-220)", async () => {
+	const background = async (outdir: string) =>
+		Bun.file(join(outdir, "background.js")).text();
+	const firefoxTest = await build({
+		outdir: join(dir, "firefox-test"),
+		firefox: true,
+		test: true,
+		minify: false,
+	});
+	expect(await background(firefoxTest.outdir)).toContain(
+		"tabMcpNotificationRecorder",
+	);
+	// No store or development build records, Chrome's or Firefox's. (Chrome's
+	// test build carries the branch, never taken: FIREFOX is false there, and
+	// its tests turn the desktop's notifications off with a switch.)
+	const chromeDev = await build({
+		outdir: join(dir, "chrome-dev-recorder"),
+		minify: false,
+	});
+	const firefoxDev = await build({
+		outdir: join(dir, "firefox-dev-recorder"),
+		firefox: true,
+		allSites: true,
+	});
+	const firefoxStore = await build({
+		outdir: join(dir, "firefox-store-recorder"),
+		firefox: true,
+		store: true,
+	});
+	for (const outdir of [
+		chromeDev.outdir,
+		firefoxDev.outdir,
+		firefoxStore.outdir,
+		join(dir, "firefox"),
+		join(dir, "store"),
+	])
+		expect({
+			outdir,
+			recorder: (await background(outdir)).includes("NotificationRecorder"),
+		}).toEqual({ outdir, recorder: false });
+}, 60_000);
+
 test("the test build keeps its source maps", async () => {
 	const { outdir } = await build({ outdir: join(dir, "test"), test: true });
 	const files = await readdir(outdir, { recursive: true });

@@ -97,12 +97,15 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 ## What changed (pull request 3)
 
 - **No notification on the desktop** (DEC-220, [research](/research/test-browser-notifications.md)):
-  every test Chrome starts with `--disable-features=NativeNotifications` and every test
-  Firefox with `alerts.useSystemBackend: false` (`test/browsers.ts`, used by the four
-  harnesses). Tried first, as the team lead asked: macOS's log showed a delivery without
-  the switch and none with it, and `create`, `getAll` and `clear` answered the same, so the
-  recorder the audit proposed is not built and no test's assertion changed.
-  `notifications.browser.test.ts` checks it on macOS on every browser run.
+  every test Chrome starts with `--disable-features=NativeNotifications`
+  (`test/browsers.ts`, used by the three Chrome harnesses). Tried first, as the team lead
+  asked: macOS's log showed a delivery without the switch and none with it, and `create`,
+  `getAll` and `clear` answered the same, so Chrome keeps the real API and no test's
+  assertion changed. `notifications.browser.test.ts` checks it on macOS on every browser
+  run. Firefox's pref for the same (`alerts.useSystemBackend: false`) opened alert
+  windows that took the focus from the panel and failed a test. So the Firefox test build
+  records its notifications (`src/worker/notifications.ts`); no store or development build
+  has the recorder (`build.test.ts`).
 - **Only the pinned test browsers:** Chrome for Testing `156.0.8078.80` (CI's) and Firefox
   `stable_160.0.1`, from `CHROME_PATH` / `FIREFOX_PATH` or Puppeteer's cache. Never an
   installed Chrome. An installed Firefox only with `--system-firefox`

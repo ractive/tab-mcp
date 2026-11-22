@@ -7,8 +7,9 @@
  * notification's id (`req:"r|Default|<extension>-<id>"`): after a question-like
  * notification of the test build, the log must not name it. macOS only, where
  * the owner's desktop is; it fails if Chrome renames or drops the feature.
- * Firefox's switch (`alerts.useSystemBackend: false`) has no such check: its
- * log lines carry no id to tell a test's from the owner's own Firefox.
+ * Firefox's test build records its notifications instead of showing them
+ * (src/worker/notifications.ts; build.test.ts keeps that out of every other
+ * build).
  * Runs with `bun run test:browser` only (test/browser-gate.ts).
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
