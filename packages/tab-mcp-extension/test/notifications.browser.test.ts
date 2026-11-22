@@ -39,7 +39,7 @@ let browser: Browser | undefined;
 let worker: Worker;
 
 beforeAll(async () => {
-	if (chrome === undefined || !onMac) return;
+	if (chrome === undefined) return;
 	dir = browserTempDir("notifications-build-");
 	const outdir = join(dir, "dist");
 	await build({ outdir, test: true, minify: false });
@@ -52,31 +52,45 @@ afterAll(async () => {
 	if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+/** Create a question-like notification `id` in the worker, through the real API. */
+const create = (id: string) =>
+	worker.eval<string>(`chrome.notifications.create(${JSON.stringify(id)}, {
+		type: "basic",
+		iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+		title: "tab-mcp test",
+		message: "never on the desktop",
+		buttons: [{ title: "Allow" }, { title: "Don't allow" }],
+		requireInteraction: true,
+		priority: 2,
+	})`);
+const listed = () =>
+	worker.eval<string[]>(
+		"chrome.notifications.getAll().then((all) => Object.keys(all))",
+	);
+const clear = (id: string) =>
+	worker.eval<boolean>(`chrome.notifications.clear(${JSON.stringify(id)})`);
+
+test.skipIf(chrome === undefined)(
+	"with the switch, the real API creates, lists and clears a notification as before",
+	async () => {
+		const id = `api-${Date.now()}`;
+		expect(await create(id)).toBe(id);
+		expect(await listed()).toContain(id);
+		expect(await clear(id)).toBe(true);
+		expect(await listed()).not.toContain(id);
+	},
+	30_000,
+);
+
 test.skipIf(chrome === undefined || !onMac)(
-	"a notification of the test build works and never reaches macOS",
+	"a notification of the test build never reaches macOS",
 	async () => {
 		const id = `guard-${Date.now()}`;
-		await worker.eval(`chrome.notifications.create(${JSON.stringify(id)}, {
-			type: "basic",
-			iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-			title: "tab-mcp test",
-			message: "never on the desktop",
-			buttons: [{ title: "Allow" }, { title: "Don't allow" }],
-			requireInteraction: true,
-			priority: 2,
-		})`);
-		expect(
-			await worker.eval<string[]>(
-				"chrome.notifications.getAll().then((all) => Object.keys(all))",
-			),
-		).toContain(id);
+		await create(id);
+		expect(await listed()).toContain(id);
 		// What macOS delivers shows within a second (it did in the experiment).
 		await Bun.sleep(3_000);
-		expect(
-			await worker.eval<boolean>(
-				`chrome.notifications.clear(${JSON.stringify(id)})`,
-			),
-		).toBe(true);
+		expect(await clear(id)).toBe(true);
 		const log = Bun.spawnSync(
 			[
 				"/usr/bin/log",
