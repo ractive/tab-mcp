@@ -38,6 +38,7 @@ import {
 import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
+import { step } from "../../../test/step.ts";
 import { build } from "../scripts/build.ts";
 import { LOAD_TIMEOUT_MS } from "../src/worker/navigation.ts";
 import {
@@ -46,7 +47,6 @@ import {
 	findChromeForTesting,
 	type Page,
 	type Served,
-	step,
 	type Worker,
 } from "./browser.ts";
 

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { browserTests } from "../../../test/browser-gate.ts";
-import { step } from "../../tab-mcp-extension/test/browser.ts";
+import { step } from "../../../test/step.ts";
 import { Browser, findChrome, type Page } from "./cdp.ts";
 import {
 	connectClient,
@@ -122,168 +122,248 @@ afterAll(async () => {
 });
 
 test.skipIf(chrome === undefined)(
-	"a page connects with a click and serves tool calls through the relay",
+	"a page connects with a click and serves tool calls through the relay; its secret is in the browser's localStorage, kept over a reload, and a second tab takes over",
 	async () => {
-		await page.goto(`http://127.0.0.1:${server.port}/`);
-		await page.eval(
-			"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })",
-		);
-
-		// Before the click only the core is loaded.
-		const before = await page.eval<string[]>(
-			"performance.getEntriesByType('resource').map((e) => e.name)",
-		);
-		expect(before.some((n) => n.includes("/lib/index.js"))).toBe(true);
-		expect(before.some((n) => n.includes("/lib/connection-"))).toBe(false);
-
-		// Without a user action, connect() is refused.
-		expect(
-			await page.eval("mcp.connect().then(() => 'connected', (e) => e.name)"),
-		).toBe("NotAllowedError");
-
-		const connected = page.eval<string>(
-			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
-		);
-		await page.send("Network.enable");
-		const socket = (browser as Browser).event(
-			"Network.webSocketCreated",
-			page.sessionId,
-		);
-		await page.click("#connect");
-		const address = await connected;
-		// The app's address: the server name as an app id (DEC-196).
-		expect(address).toBe(`${relay.url}/s/browser-test/mcp`);
-		// The socket Chrome opened: /tab and nothing else, no query (DEC-196).
-		expect((await socket)["url"]).toBe(
-			`${relay.url.replace("http", "ws")}/tab`,
-		);
-		const [oldId] = relay.relay.pagesOf("browser-test");
-		expect(oldId).toMatch(/^[a-z2-7]{52}$/);
-		const after = await page.eval<string[]>(
-			"performance.getEntriesByType('resource').map((e) => e.name)",
-		);
-		expect(after.some((n) => n.includes("/lib/connection-"))).toBe(true);
-
-		// The default dialog shows the address; closing it ends the code.
-		const dialog = await page.eval<{
-			open: boolean;
-			address: string;
-			status: string;
-		}>(
-			// The page is connected before the dialog is built (its chunk loads after
-			// connect()), so wait for it to be open instead of reading it at once.
-			"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-connect'); if (d === null || !d.open) return setTimeout(w, 10); r({ open: d.open, address: d.querySelector('input').value, status: d.querySelector('.tab-mcp-status').textContent }); }; w(); })",
-		);
-		expect(dialog).toEqual({
-			open: true,
-			address,
-			status: "browser test is ready for your AI app.",
-		});
-		await page.press("Escape");
-		expect(
-			await page.eval(
-				"new Promise((r) => { const w = () => (document.querySelector('dialog') ? setTimeout(w, 10) : r(mcp.pairingCode === undefined)); w(); })",
-			),
-		).toBe(true);
-
-		let client: Client | undefined;
-		const token = await tokenFor(relay, address);
-		try {
-			client = await connectClient(address, token);
-			expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
-				"add",
-				"clear_memory",
-			]);
-			expect(
-				(await client.callTool({ name: "add", arguments: { a: 40, b: 2 } }))
-					.content,
-			).toEqual([{ type: "text", text: "42" }]);
-
-			// A consequential tool waits for "Allow once" in the page's dialog.
-			const call = client.callTool({ name: "clear_memory", arguments: {} });
-			const question = await page.eval<string>(
-				"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-confirm'); d ? r(d.textContent) : setTimeout(w, 10); }; w(); })",
-			);
-			expect(question).toContain("Allow Clear memory?");
-			expect(question).toContain("client.example wants to run Clear memory.");
-			expect(await page.eval("memory()")).toBe(7);
-			// "Allow once" starts disabled (a click meant for the page cannot approve).
-			expect(
+		await step(
+			"a page connects with a click and serves tool calls through the relay",
+			async () => {
+				await page.goto(`http://127.0.0.1:${server.port}/`);
 				await page.eval(
-					`new Promise((resolve) => {
-					const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow once');
-					const wasDisabled = allow.disabled;
-					const click = () => { allow.click(); resolve(wasDisabled); };
-					if (!allow.disabled) return click();
-					new MutationObserver((_, o) => { if (!allow.disabled) { o.disconnect(); click(); } }).observe(allow, { attributes: true });
-				})`,
-				),
-			).toBe(true);
-			expect((await call).content).toEqual([{ type: "text", text: "cleared" }]);
-			expect(await page.eval("memory()")).toBe(0);
-		} finally {
-			await client?.close();
-		}
+					"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })",
+				);
 
-		// "Disconnect all apps" in the dialog: it asks, revokes the app and connects again.
-		await page.eval("mcp.disconnect()");
-		const reconnected = page.eval<string>(
-			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
-		);
-		await page.click("#connect");
-		expect(await reconnected).toBe(address);
-		await page.eval(
-			"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps li') ? r(true) : setTimeout(w, 10)); w(); })",
-		);
-		// An app is connected: "Disconnect all apps" is behind "Connect another AI app".
-		expect(
-			await page.eval(
-				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-disconnect-all').checkVisibility()",
-			),
-		).toBe(false);
-		await page.click("dialog.tab-mcp-connect .tab-mcp-setup-toggle");
-		await page.click("dialog.tab-mcp-connect .tab-mcp-disconnect-all");
-		expect(
-			await page.eval<string>(
-				"document.querySelector('.tab-mcp-disconnect-all-question p').textContent",
-			),
-		).toBe(
-			"This disconnects Test client (client.example). To use this page with it again, connect it again.",
-		);
-		const renewed = page.eval<string>(
-			"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
-		);
-		// A real click: the reconnect needs the user action.
-		await page.click("dialog.tab-mcp-connect .tab-mcp-disconnect-all-confirm");
-		// The address names the app and stays; the page's secret is new.
-		expect(await renewed).toBe(address);
-		expect(
-			await page.eval(
-				"document.querySelector('dialog.tab-mcp-connect input').value",
-			),
-		).toBe(address);
-		expect(
-			await page.eval(
-				"document.querySelector('dialog.tab-mcp-connect .tab-mcp-status').textContent",
-			),
-		).toBe("Every AI app is disconnected. Connect yours again.");
-		expect(await page.eval("mcp.grants.length")).toBe(0);
-		const [newId] = relay.relay.pagesOf("browser-test");
-		expect(newId).toMatch(/^[a-z2-7]{52}$/);
-		expect(newId).not.toBe(oldId);
-		// The relay revoked the old secret's grant: its token is refused.
-		expect(await relay.store.listGrants(oldId as string, Date.now())).toEqual(
-			[],
-		);
-		expect(
-			(await mcpPost(address, rpc(1, "tools/list"), { token })).status,
-		).toBe(401);
-		await page.press("Escape");
+				// Before the click only the core is loaded.
+				const before = await page.eval<string[]>(
+					"performance.getEntriesByType('resource').map((e) => e.name)",
+				);
+				expect(before.some((n) => n.includes("/lib/index.js"))).toBe(true);
+				expect(before.some((n) => n.includes("/lib/connection-"))).toBe(false);
 
-		await page.eval("mcp.disconnect()");
-		expect(await page.eval("mcp.state")).toBe("disconnected");
+				// Without a user action, connect() is refused.
+				expect(
+					await page.eval(
+						"mcp.connect().then(() => 'connected', (e) => e.name)",
+					),
+				).toBe("NotAllowedError");
+
+				const connected = page.eval<string>(
+					"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
+				);
+				await page.send("Network.enable");
+				const socket = (browser as Browser).event(
+					"Network.webSocketCreated",
+					page.sessionId,
+				);
+				await page.click("#connect");
+				const address = await connected;
+				// The app's address: the server name as an app id (DEC-196).
+				expect(address).toBe(`${relay.url}/s/browser-test/mcp`);
+				// The socket Chrome opened: /tab and nothing else, no query (DEC-196).
+				expect((await socket)["url"]).toBe(
+					`${relay.url.replace("http", "ws")}/tab`,
+				);
+				const [oldId] = relay.relay.pagesOf("browser-test");
+				expect(oldId).toMatch(/^[a-z2-7]{52}$/);
+				const after = await page.eval<string[]>(
+					"performance.getEntriesByType('resource').map((e) => e.name)",
+				);
+				expect(after.some((n) => n.includes("/lib/connection-"))).toBe(true);
+
+				// The default dialog shows the address; closing it ends the code.
+				const dialog = await page.eval<{
+					open: boolean;
+					address: string;
+					status: string;
+				}>(
+					// The page is connected before the dialog is built (its chunk loads after
+					// connect()), so wait for it to be open instead of reading it at once.
+					"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-connect'); if (d === null || !d.open) return setTimeout(w, 10); r({ open: d.open, address: d.querySelector('input').value, status: d.querySelector('.tab-mcp-status').textContent }); }; w(); })",
+				);
+				expect(dialog).toEqual({
+					open: true,
+					address,
+					status: "browser test is ready for your AI app.",
+				});
+				await page.press("Escape");
+				expect(
+					await page.eval(
+						"new Promise((r) => { const w = () => (document.querySelector('dialog') ? setTimeout(w, 10) : r(mcp.pairingCode === undefined)); w(); })",
+					),
+				).toBe(true);
+
+				let client: Client | undefined;
+				const token = await tokenFor(relay, address);
+				try {
+					client = await connectClient(address, token);
+					expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
+						"add",
+						"clear_memory",
+					]);
+					expect(
+						(await client.callTool({ name: "add", arguments: { a: 40, b: 2 } }))
+							.content,
+					).toEqual([{ type: "text", text: "42" }]);
+
+					// A consequential tool waits for "Allow once" in the page's dialog.
+					const call = client.callTool({ name: "clear_memory", arguments: {} });
+					const question = await page.eval<string>(
+						"new Promise((r) => { const w = () => { const d = document.querySelector('dialog.tab-mcp-confirm'); d ? r(d.textContent) : setTimeout(w, 10); }; w(); })",
+					);
+					expect(question).toContain("Allow Clear memory?");
+					expect(question).toContain(
+						"client.example wants to run Clear memory.",
+					);
+					expect(await page.eval("memory()")).toBe(7);
+					// "Allow once" starts disabled (a click meant for the page cannot approve).
+					expect(
+						await page.eval(
+							`new Promise((resolve) => {
+						const allow = [...document.querySelectorAll('dialog.tab-mcp-confirm button')].find((b) => b.textContent === 'Allow once');
+						const wasDisabled = allow.disabled;
+						const click = () => { allow.click(); resolve(wasDisabled); };
+						if (!allow.disabled) return click();
+						new MutationObserver((_, o) => { if (!allow.disabled) { o.disconnect(); click(); } }).observe(allow, { attributes: true });
+					})`,
+						),
+					).toBe(true);
+					expect((await call).content).toEqual([
+						{ type: "text", text: "cleared" },
+					]);
+					expect(await page.eval("memory()")).toBe(0);
+				} finally {
+					await client?.close();
+				}
+
+				// "Disconnect all apps" in the dialog: it asks, revokes the app and connects again.
+				await page.eval("mcp.disconnect()");
+				const reconnected = page.eval<string>(
+					"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
+				);
+				await page.click("#connect");
+				expect(await reconnected).toBe(address);
+				await page.eval(
+					"new Promise((r) => { const w = () => (document.querySelector('dialog.tab-mcp-connect .tab-mcp-apps li') ? r(true) : setTimeout(w, 10)); w(); })",
+				);
+				// An app is connected: "Disconnect all apps" is behind "Connect another AI app".
+				expect(
+					await page.eval(
+						"document.querySelector('dialog.tab-mcp-connect .tab-mcp-disconnect-all').checkVisibility()",
+					),
+				).toBe(false);
+				await page.click("dialog.tab-mcp-connect .tab-mcp-setup-toggle");
+				await page.click("dialog.tab-mcp-connect .tab-mcp-disconnect-all");
+				expect(
+					await page.eval<string>(
+						"document.querySelector('.tab-mcp-disconnect-all-question p').textContent",
+					),
+				).toBe(
+					"This disconnects Test client (client.example). To use this page with it again, connect it again.",
+				);
+				const renewed = page.eval<string>(
+					"new Promise((r) => mcp.addEventListener('statechange', function f(e) { if (e.detail.state !== 'connected') return; mcp.removeEventListener('statechange', f); r(mcp.session.address); }))",
+				);
+				// A real click: the reconnect needs the user action.
+				await page.click(
+					"dialog.tab-mcp-connect .tab-mcp-disconnect-all-confirm",
+				);
+				// The address names the app and stays; the page's secret is new.
+				expect(await renewed).toBe(address);
+				expect(
+					await page.eval(
+						"document.querySelector('dialog.tab-mcp-connect input').value",
+					),
+				).toBe(address);
+				expect(
+					await page.eval(
+						"document.querySelector('dialog.tab-mcp-connect .tab-mcp-status').textContent",
+					),
+				).toBe("Every AI app is disconnected. Connect yours again.");
+				expect(await page.eval("mcp.grants.length")).toBe(0);
+				const [newId] = relay.relay.pagesOf("browser-test");
+				expect(newId).toMatch(/^[a-z2-7]{52}$/);
+				expect(newId).not.toBe(oldId);
+				// The relay revoked the old secret's grant: its token is refused.
+				expect(
+					await relay.store.listGrants(oldId as string, Date.now()),
+				).toEqual([]);
+				expect(
+					(await mcpPost(address, rpc(1, "tools/list"), { token })).status,
+				).toBe(401);
+				await page.press("Escape");
+
+				await page.eval("mcp.disconnect()");
+				expect(await page.eval("mcp.state")).toBe("disconnected");
+			},
+			60_000,
+		);
+		// The library's default storage, the only place a real one is used
+		// (every unit test passes a MemoryStorage): a fallback to memory or
+		// sessionStorage would cost the user the page's address on each reload.
+		await step(
+			"with the defaults the secret is in localStorage: the page's other tabs read it, and a reload keeps it",
+			async () => {
+				const b = browser as Browser;
+				const ready =
+					"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })";
+				const key = `tab-mcp:secret:${new URL(relay.url).origin}:browser-test`;
+				const stored = (p: Page) =>
+					p.eval<{ local: string | null; session: string | null }>(
+						`({ local: localStorage.getItem(${JSON.stringify(key)}), session: sessionStorage.getItem(${JSON.stringify(key)}) })`,
+					);
+				await page.goto(`http://127.0.0.1:${server.port}/`);
+				await page.eval(ready);
+				await page.eval("mcp.connect({ resume: true }).then(() => true)");
+				const first = await stored(page);
+				expect(first.local).toMatch(/\S{16,}/);
+				expect(first.session).toBeNull();
+				const address = await page.eval<string>("mcp.session.address");
+				await page.eval("mcp.disconnect()");
+				const second = await b.newPage();
+				try {
+					await second.goto(`http://127.0.0.1:${server.port}/`);
+					await second.eval(ready);
+					expect(await stored(second)).toEqual(first);
+				} finally {
+					await second.close();
+				}
+				await page.goto(`http://127.0.0.1:${server.port}/`);
+				await page.eval(ready);
+				expect(await stored(page)).toEqual(first);
+				// Resumed with that secret: the same address, nothing new stored.
+				await page.eval("mcp.connect({ resume: true }).then(() => true)");
+				expect(await page.eval("mcp.session.address")).toBe(address);
+				expect(await stored(page)).toEqual(first);
+				await page.eval("mcp.disconnect()");
+			},
+			30_000,
+		);
+		await step(
+			"a second tab of the page takes over: the first hears it on its BroadcastChannel (iteration 10)",
+			async () => {
+				const b = browser as Browser;
+				const ready =
+					"new Promise((r) => { const w = () => (window.ready ? r(true) : setTimeout(w, 10)); w(); })";
+				await page.goto(`http://127.0.0.1:${server.port}/`);
+				await page.eval(ready);
+				await page.eval("mcp.connect({ resume: true }).then(() => true)");
+				const replaced = page.eval<{ sibling: boolean }>(
+					"new Promise((r) => mcp.addEventListener('replaced', (e) => r(e.detail), { once: true }))",
+				);
+				const second = await b.newPage();
+				try {
+					await second.goto(`http://127.0.0.1:${server.port}/`);
+					await second.eval(ready);
+					await second.eval("mcp.connect({ resume: true }).then(() => true)");
+					expect(await replaced).toEqual({ sibling: true });
+					await second.eval("mcp.disconnect()");
+				} finally {
+					await second.close();
+				}
+			},
+			30_000,
+		);
 	},
-	60_000,
+	160_000,
 );
 
 /**

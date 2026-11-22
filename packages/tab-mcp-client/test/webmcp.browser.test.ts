@@ -5,7 +5,9 @@
  * `test/webmcp-spike/`: no server, no network; `@mcp-b/global` from
  * `test/vendor/`). Only the contract the unit tests' fake native
  * `ModelContext` stands for (webmcp.test.ts): what Chrome lists and hands an
- * agent, its duplicate rule, a polyfill over it, `allow="tools"` in a frame,
+ * agent, its duplicate rule, a polyfill over it, a call without `onConfirm`
+ * (no confirmation chunk loaded: the built bundle), the abort of
+ * `registerTool()`'s signal, `allow="tools"` in a frame,
  * and `exposedTo` across origins (iteration 50).
  * An agent's calls go through the native `executeTool()`. Needs Chrome for
  * Testing 156 or newer (`CHROME_PATH`, or the pinned one in Puppeteer's
@@ -14,6 +16,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import { browserTests } from "../../../test/browser-gate.ts";
+import { step } from "../../../test/step.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -21,7 +24,6 @@ import {
 	type Page,
 	type Served,
 } from "../../../test/webmcp-spike/browser.ts";
-import { step } from "../../tab-mcp-extension/test/browser.ts";
 
 const MIN_MAJOR = 156;
 const found = browserTests ? findChromeForTesting() : undefined;
@@ -44,7 +46,7 @@ const POLYFILL_SRI =
 	"sha384-MjmUqfRCVKBDYdxv/Rlj1fc1tRkKQdtCI04fbUUMgSL8uJf1ydjQep7E4G43bnQn";
 
 /**
- * The test page: the library with `webmcp: true` (`?off`: without), its
+ * The test page: the library with `webmcp: true`, its
  * tools, and what the harness reads. `?native=<name>` registers a tool of
  * that name natively before the library does; `?poly` loads `@mcp-b/global`
  * first; `?default` has no `onConfirm` (the library's own behaviour). `agent()`
@@ -71,7 +73,7 @@ const mcp = new TabMcp({
 	server: { name: "webmcp-test", version: "1.0.0" },
 	storage: null,
 	alwaysAllow: true,
-	webmcp: !q.has("off"),
+	webmcp: true,
 	...(q.has("default") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
 });
 mcp.addEventListener("toolcall", (e) => calls.push({ start: e.detail.tool, client: e.detail.client }));
@@ -248,7 +250,7 @@ async function open(query = ""): Promise<Page> {
 const on = test.skipIf(chrome === undefined);
 
 on(
-	"the mirror as Chrome has it: what getTools() lists, what an agent reads, a native duplicate, @mcp-b/global over native WebMCP (DEC-209, WM 4-6)",
+	"the mirror as Chrome has it: what getTools() lists, what an agent reads, a native duplicate, @mcp-b/global over native WebMCP, a call without onConfirm, unmirroring and registering again (DEC-209, DEC-215, WM 4-6)",
 	async () => {
 		await step(
 			"getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
@@ -404,8 +406,78 @@ on(
 			},
 			5_000,
 		);
+		await step(
+			"without onConfirm a tool that asks runs for an agent in the browser: no dialog, the confirmation's chunk not loaded (DEC-215)",
+			async () => {
+				const page = await open("?default");
+				try {
+					expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
+						ok: true,
+						value: "wiped",
+					});
+					expect(await page.eval(`agent("wipe", {})`)).toEqual({
+						ok: true,
+						value: "wiped",
+					});
+					expect(
+						await page.eval(`document.querySelector("dialog") === null`),
+					).toBe(true);
+					expect(
+						await page.eval(
+							`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.startsWith("/lib/confirm-"))`,
+						),
+					).toEqual([]);
+					// The page's record still lists the calls, with their caller.
+					expect(await page.eval("calls")).toEqual([
+						{ start: "wipe_named", client: { kind: "webmcp" } },
+						{ end: "wipe_named", outcome: "ok", client: { kind: "webmcp" } },
+						{ start: "wipe", client: { kind: "webmcp" } },
+						{ end: "wipe", outcome: "ok", client: { kind: "webmcp" } },
+					]);
+					// The agent is still told that the tool is consequential.
+					expect(
+						await page.eval(
+							`native.getTools().then((ts) => ts.find((t) => t.name === "wipe").annotations.consequentialHint)`,
+						),
+					).toBe(true);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"aborting unmirrors; registering again mirrors again",
+			async () => {
+				const page = await open();
+				try {
+					await page.eval("addControl.abort()");
+					expect(await page.eval("nativeNames()")).toEqual([
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					// As React's useTool does: abort and register again at once.
+					await page.eval(`(async () => {
+					const c = new AbortController();
+					await mcp.registerTool({ name: "again", description: "d", execute: () => "one" }, { signal: c.signal });
+					c.abort();
+					await mcp.registerTool({ name: "again", description: "d", execute: () => "two" });
+				})()`);
+					await Bun.sleep(50);
+					expect(await page.eval(`agent("again", {})`)).toEqual({
+						ok: true,
+						value: "two",
+					});
+					expect(await page.eval("warnings")).toEqual([]);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
 	},
-	25_000,
+	35_000,
 );
 
 on(

@@ -1,0 +1,3 @@
+# Third-party files for tests, byte for byte: their integrity hashes are
+# checked (packages/tab-mcp-client/test/vendor/, an SRI in webmcp.browser.test.ts).
+packages/tab-mcp-client/test/vendor/** -text

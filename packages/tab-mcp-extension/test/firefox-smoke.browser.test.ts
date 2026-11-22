@@ -22,8 +22,8 @@ import {
 	test,
 } from "bun:test";
 import { browserTests } from "../../../test/browser-gate.ts";
+import { step } from "../../../test/step.ts";
 import { FIREFOX_ID } from "../scripts/build.ts";
-import { step } from "./browser.ts";
 import { findFirefox } from "./firefox.ts";
 import {
 	answerInPanel,
