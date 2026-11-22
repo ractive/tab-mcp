@@ -6,7 +6,7 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
-## [0.21.0-rc.2][client-0.21.0-rc.2] - 2026-11-22
+## [0.21.0][client-0.21.0] - 2026-11-22
 
 ### Breaking
 
@@ -1170,7 +1170,7 @@ First alpha of the browser library, on the npm dist-tag `alpha`.
   `<script type="module">` under `@ractive-ch/tab-mcp-client/cdn`.
 - The connect dialog shows the pairing code from the relay.
 
-[client-0.21.0-rc.2]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.21.0-rc.2
+[client-0.21.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.21.0
 [client-0.20.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.20.0
 [client-0.19.0]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.19.0
 [client-0.18.1]: https://github.com/ractive/tab-mcp/releases/tag/client-v0.18.1
