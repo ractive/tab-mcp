@@ -6,10 +6,21 @@
  * logs every notification it delivers, with the extension's id and the
  * notification's id (`req:"r|Default|<extension>-<id>"`): after a question-like
  * notification of the test build, the log must not name it. macOS only, where
- * the owner's desktop is; it fails if Chrome renames or drops the feature.
+ * the owner's desktop is.
+ *
+ * What it can and cannot see: it has no positive control, because one would
+ * put a notification on the owner's desktop at every run. So it passes too
+ * when macOS would not show Chrome for Testing's notifications anyway (never
+ * allowed in System Settings), when usernoted hides the request id
+ * (`<private>`) or logs in another format, or when the log has no line for
+ * it. On the machine of the experiment (kb/research/test-browser-notifications.md)
+ * it fails if Chrome renames or drops the feature. The weight is carried
+ * without a browser: scripts/browsers.test.ts fails when a Chrome launch list
+ * lacks `chromeSwitches(…)`.
+ *
  * Firefox's test build records its notifications instead of showing them
- * (src/worker/notifications.ts; build.test.ts keeps that out of every other
- * build).
+ * (src/worker/notifications.ts, read in firefox.browser.test.ts;
+ * build.test.ts keeps it out of every other build).
  * Runs with `bun run test:browser` only (test/browser-gate.ts).
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -91,7 +102,9 @@ test.skipIf(chrome === undefined || !onMac)(
 		// What macOS delivers shows within a second (it did in the experiment).
 		await Bun.sleep(3_000);
 		expect(await clear(id)).toBe(true);
-		const log = Bun.spawnSync(
+		// The last minute only, and at most 15 s: past that the log could not
+		// be read, which is no pass of the check.
+		const log = Bun.spawn(
 			[
 				"/usr/bin/log",
 				"show",
@@ -104,10 +117,19 @@ test.skipIf(chrome === undefined || !onMac)(
 			],
 			{ stdout: "pipe", stderr: "pipe" },
 		);
-		expect({ exit: log.exitCode, error: log.stderr.toString().trim() }).toEqual(
-			{ exit: 0, error: "" },
-		);
-		const text = log.stdout.toString();
+		const timer = setTimeout(() => log.kill("SIGKILL"), 15_000);
+		const [exit, out, err] = await Promise.all([
+			log.exited,
+			new Response(log.stdout).text(),
+			new Response(log.stderr).text(),
+		]);
+		clearTimeout(timer);
+		if (log.signalCode !== null)
+			throw new Error(
+				"could not check: macOS's log did not answer within 15 s, so whether the notification reached the desktop is unknown",
+			);
+		expect({ exit, error: err.trim() }).toEqual({ exit: 0, error: "" });
+		const text = out;
 		// The log was read: its header, even when usernoted was quiet.
 		expect(text).toStartWith("Timestamp");
 		expect(text.split("\n").filter((l) => l.includes(`-${id}"`))).toEqual([]);

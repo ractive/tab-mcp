@@ -208,12 +208,13 @@ jobs:
         id: chrome
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+        if: github.event_name != 'pull_request'
       - run: bun run verify:all
         if: github.event_name != 'pull_request'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
-          # The runner image's Firefox, named: the tests never pick an installed one by themselves.
-          FIREFOX_PATH: /usr/bin/firefox
       - run: bun run build
         working-directory: packages/tab-mcp-client
       - id: pack
@@ -384,12 +385,13 @@ jobs:
         id: chrome
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
+        if: github.event_name != 'pull_request'
       - run: bun run verify:all
         if: github.event_name != 'pull_request'
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
-          # The runner image's Firefox, named: the tests never pick an installed one by themselves.
-          FIREFOX_PATH: /usr/bin/firefox
       - run: bun run build
         working-directory: packages/tab-mcp
       - id: pack

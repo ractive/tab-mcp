@@ -5388,16 +5388,23 @@ started his own Chrome and Firefox.
   from the panel, and a Firefox test failed. Firefox keeps its system backend, and its
   test build records its notifications (`src/worker/notifications.ts`, installed in
   `background.ts` under `TAB_MCP_TEST && FIREFOX`, read with
-  `tabMcpNotificationRecorder()`). No Firefox test read a notification before.
-  `build.test.ts` checks that no store or development build of either browser has the
-  recorder.
-- **The guard:** `notifications.browser.test.ts`, macOS only, creates a question-like
-  notification and fails if usernoted's log names it.
+  `tabMcpNotificationRecorder()`). `build.test.ts` checks that no store or development
+  build of either browser has the recorder. `firefox.browser.test.ts` reads it: a
+  question's notification with its text, without buttons or `requireInteraction`, answered
+  through the hook; and one call of Firefox's real API with those options, cleared at
+  once (the one Firefox notification of a run that could reach a desktop).
+- **The guard:** `notifications.browser.test.ts`: on every platform the real API works
+  with the switch; on macOS it fails if usernoted's log names the notification (15 s at
+  most, else "could not check"). It has no positive control (that would put a
+  notification on the desktop at every run), so a macOS that hides the id or never
+  showed Chrome for Testing's notifications passes it. `scripts/browsers.test.ts` carries
+  the weight: every Chrome launch list in the code must spread `chromeSwitches(…)`.
 - **Pinned test browsers only:** Chrome for Testing in CI's version (`CHROME_VERSION`,
   `156.0.8078.80`, checked against the workflows) and a test Firefox (`stable_160.0.1`),
   from `CHROME_PATH` / `FIREFOX_PATH` or Puppeteer's cache (`~/.cache/puppeteer`, installed
   once with `bunx @puppeteer/browsers@3.2.7 install …`, as the README's commands say).
   Never an installed Chrome. An installed Firefox only on request (`--system-firefox`,
-  `TAB_MCP_SYSTEM_FIREFOX=1`), with a line saying so. `test:browser` prints the install
-  line when one is missing. Playwright's cache is no longer looked at. CI names the
-  runner's Firefox (`FIREFOX_PATH: /usr/bin/firefox`).
+  `TAB_MCP_SYSTEM_FIREFOX=1`), and then over the cached one, with a line saying so.
+  `test:browser` prints the install line when one is missing. Playwright's cache is no
+  longer looked at. CI and the release jobs install the same pinned Firefox with the same
+  line.

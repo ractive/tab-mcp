@@ -64,9 +64,22 @@ without and once with the switch, the Chrome pair twice in both orders:
   window it created after the panel's, at times", and an alert window is such a window.
   The test had passed with the system backend. So Firefox keeps its system backend, and
   the **Firefox test build records its notifications** instead (`src/background.ts`,
-  `src/worker/notifications.ts`, `tabMcpNotificationRecorder()`). No Firefox test reads
-  a notification, so no assertion changes. The recorder is in the Firefox test build only:
-  `build.test.ts` checks the store and development builds of both browsers.
+  `src/worker/notifications.ts`, `tabMcpNotificationRecorder()`). The recorder is in the
+  Firefox test build only: `build.test.ts` checks the store and development builds of both
+  browsers. `firefox.browser.test.ts` (review of PR 213) reads it from the panel through
+  `runtime.getBackgroundPage()`:
+  - a question shows up as a notification with its title, message, context line and icon,
+    and with neither buttons nor `requireInteraction`, as `notificationOptions` strips them
+    for Firefox;
+  - answered through the hook (button 0 is Allow), the call runs and the notification is
+    cleared;
+  - and one test passes those recorded options to Firefox's real `notifications.create`,
+    then `getAll` and `clear` at once.
+
+  That real call is the one Firefox notification of a run that could reach a desktop. In
+  the run of 2026-11-22 08:52, usernoted logged no Firefox delivery at all: the
+  reinstalled test Firefox has perhaps never been allowed to notify. That cannot be told
+  from here.
 - **Clicks:** the tests answer a notification through the worker's own handlers
   (`tabMcpNotificationButton`, `tabMcpNotificationClicked`, `tabMcpNotificationDismissed`,
   the same functions the `chrome.notifications` events call); no test clicks a macOS
@@ -74,7 +87,16 @@ without and once with the switch, the Chrome pair twice in both orders:
   its tests keep the real API, `create`, `getAll` and `clear` included.
 - **Limits:** one machine (macOS, arm64), one version of each browser, two tries for
   Chrome and one for Firefox. A Chrome that renames or drops the feature would show
-  notifications again: the guard test checks it on macOS on every browser run.
+  notifications again.
+- **What the macOS guard can and cannot see** (`notifications.browser.test.ts`): it has
+  no positive control, since a control would put a notification on the owner's desktop at
+  every run. So it also passes when macOS would not show Chrome for Testing's
+  notifications anyway (never allowed in System Settings), when usernoted hides the
+  request id (`<private>`) or logs in another format, or when `log show` has no line for
+  it. On a machine like the experiment's it fails if the switch stops working. The weight
+  is carried without a browser: `scripts/browsers.test.ts` fails when a Chrome launch list
+  in the code lacks `chromeSwitches(…)`. `log show` gets 15 s; past that the test fails as
+  "could not check".
 - The experiment ran at a load of about 14 (another session's tests); it does not depend
   on load.
 
@@ -89,11 +111,14 @@ without and once with the switch, the Chrome pair twice in both orders:
   (`bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer`
   puts it at `~/.cache/puppeteer/firefox/mac_arm-stable_160.0.1/Firefox.app`; its bundle id
   is `org.mozilla.firefox`, as the owner's). Or `FIREFOX_PATH`. An installed Firefox only
-  with `TAB_MCP_SYSTEM_FIREFOX=1` (`test:browser --system-firefox`), said on stderr.
-  Before, the tests used `/Applications/Firefox.app`, the owner's own.
-- **CI:** Chrome for Testing from `browser-actions/setup-chrome` (`CHROME_PATH`), and the
-  runner image's Firefox named as `FIREFOX_PATH: /usr/bin/firefox` (160 on 2026-11-22),
-  not pinned.
+  with `TAB_MCP_SYSTEM_FIREFOX=1` (`test:browser --system-firefox`), and then even when
+  the pinned one is cached, said on stderr. Before, the tests used
+  `/Applications/Firefox.app`, the owner's own.
+- **CI:** Chrome for Testing from `browser-actions/setup-chrome` (`CHROME_PATH`), and
+  since the review of PR 213 the same pinned test Firefox, installed in each job with the
+  same `bunx @puppeteer/browsers` line (`scripts/browsers.test.ts` checks every job that
+  runs the browser tests). The first version named the runner image's Firefox instead
+  (`/usr/bin/firefox`, 160 on 2026-11-22, not pinned).
 
 # Citations
 

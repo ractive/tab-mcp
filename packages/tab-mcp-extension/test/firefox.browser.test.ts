@@ -203,6 +203,45 @@ async function start(
 	}
 }
 
+/** `expression` evaluated in the extension's background page, as `bg`, from the panel. */
+const inBackground = <T = unknown>(stack: Stack, expression: string) =>
+	stack.panel.eval<T>(
+		`browser.runtime.getBackgroundPage().then((bg) => JSON.parse(JSON.stringify(${expression} ?? null)))`,
+	);
+
+interface Shown {
+	title: string;
+	message: string;
+	contextMessage?: string;
+	iconUrl?: string;
+	buttons?: unknown;
+	requireInteraction?: unknown;
+}
+
+/** What the Firefox test build's recorder holds: shown notifications by id. */
+const recorded = (stack: Stack) =>
+	inBackground<Record<string, Shown>>(stack, "bg.tabMcpNotificationRecorder()");
+
+/** The recorded notification whose message names `word`, once there. */
+async function notificationFor(
+	stack: Stack,
+	word: string,
+): Promise<[string, Shown]> {
+	for (
+		const end = Date.now() + 10_000;
+		Date.now() < end;
+		await Bun.sleep(100)
+	) {
+		const hit = Object.entries(await recorded(stack)).find(([, shown]) =>
+			shown.message.includes(word),
+		);
+		if (hit) return hit;
+	}
+	throw new Error(
+		`no notification for ${word}: ${JSON.stringify(await recorded(stack))}`,
+	);
+}
+
 const call = (
 	stack: Stack,
 	name: string,
@@ -388,6 +427,70 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		expect(await stack.tab.eval("window.calls.map((c) => c[1])")).not.toContain(
 			"coffee",
 		);
+	});
+
+	test("a question is a notification too: recorded with its text, and answered through it", async () => {
+		// The panel is in another window than the page: the question also goes
+		// out as a notification, which the Firefox test build records
+		// (src/worker/notifications.ts, DEC-220) instead of showing.
+		const asked = call(stack, "page_place_order", { item: "recorded" });
+		const [id, shown] = await notificationFor(stack, "recorded");
+		expect(shown.title).toMatch(/^Allow .+\?$/);
+		expect(shown.message).toContain("wants to run");
+		expect(shown.contextMessage).toContain("localhost");
+		expect(shown.iconUrl).toBe(`moz-extension://${UUID}/icons/icon-128.png`);
+		// Firefox's notifications have neither (notificationOptions).
+		expect(shown.buttons).toBeUndefined();
+		expect(shown.requireInteraction).toBeUndefined();
+		// Past the guard against an Allow that comes too soon.
+		await Bun.sleep(1_000);
+		await inBackground(
+			stack,
+			`bg.tabMcpNotificationButton(${JSON.stringify(id)}, 0)`,
+		);
+		const result = await asked;
+		expect(result.isError).toBeFalsy();
+		expect(result.content[0]?.text).toContain("recorded");
+		// Answered: the notification is cleared.
+		expect(Object.keys(await recorded(stack))).not.toContain(id);
+	});
+
+	test("Firefox's real notifications API takes what the product passes (one, cleared at once)", async () => {
+		// The one test of the real API in Firefox. On a desktop it shows for a
+		// moment: Firefox has no switch that keeps it off without changing the
+		// panel's focus (kb/research/test-browser-notifications.md).
+		// The options of a real question, as the worker passed them.
+		const allowed = call(stack, "page_place_order", { item: "real" });
+		const [id, shown] = await notificationFor(stack, "real");
+		await Bun.sleep(1_000);
+		// Button 0 is Allow; Firefox's notifications have no other.
+		await inBackground(
+			stack,
+			`bg.tabMcpNotificationButton(${JSON.stringify(id)}, 0)`,
+		);
+		expect((await allowed).isError).toBeFalsy();
+		// Bounded: a call that never answers fails here, not the tests after.
+		const real = await stack.panel.eval<{
+			created: string;
+			listed: boolean;
+			cleared: boolean;
+			after: boolean;
+		}>(`Promise.race([
+			(async () => {
+				const created = await browser.notifications.create("real-api-check", ${JSON.stringify(shown)});
+				const listed = Object.keys(await browser.notifications.getAll()).includes(created);
+				const cleared = await browser.notifications.clear(created);
+				const after = Object.keys(await browser.notifications.getAll()).includes(created);
+				return { created, listed, cleared, after };
+			})(),
+			new Promise((_, reject) => setTimeout(() => reject(new Error("the real notifications API did not answer in 10 s")), 10_000)),
+		])`);
+		expect(real).toEqual({
+			created: "real-api-check",
+			listed: true,
+			cleared: true,
+			after: false,
+		});
 	});
 
 	test("cancelling a call aborts the page's signal", async () => {

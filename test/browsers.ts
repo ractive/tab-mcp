@@ -4,9 +4,11 @@
  * pinned version, both from Puppeteer's cache (`~/.cache/puppeteer`), where
  * `bunx @puppeteer/browsers install` puts them (`INSTALL`), or the binary in
  * `CHROME_PATH` / `FIREFOX_PATH`. An installed Firefox only when the caller
- * asks for it (`TAB_MCP_SYSTEM_FIREFOX=1`, `test:browser --system-firefox`),
- * and then with a line saying so. No installed Chrome ever: branded Chrome
- * also ignores `--load-extension`.
+ * asks for it (`TAB_MCP_SYSTEM_FIREFOX=1`, `test:browser --system-firefox`):
+ * then it is taken even when the pinned one is cached, with a line saying so.
+ * No installed Chrome ever: branded Chrome also ignores `--load-extension`.
+ * CI installs the same pinned Firefox (`INSTALL.firefox`, checked by
+ * scripts/browsers.test.ts).
  *
  * And no notification of a test on the owner's desktop: Chrome without its
  * macOS notifications (`--disable-features=NativeNotifications`: its own
@@ -19,12 +21,15 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Chrome for Testing as CI pins it (`CHROME_VERSION` in the workflows, checked by scripts/test-browser.test.ts). */
+/** Chrome for Testing as CI pins it (`CHROME_VERSION` in the workflows, checked by scripts/browsers.test.ts). */
 export const CHROME_VERSION = "156.0.8078.80";
-/** The test Firefox, as `@puppeteer/browsers` names it. */
+/** The test Firefox, as `@puppeteer/browsers` names it; CI installs the same (scripts/browsers.test.ts). */
 export const FIREFOX_VERSION = "stable_160.0.1";
 export const PUPPETEER_BROWSERS = "@puppeteer/browsers@3.2.7";
-export const CACHE = join(homedir(), ".cache", "puppeteer");
+
+/** Puppeteer's cache, under the home folder as `HOME` says now. */
+export const cache = (): string =>
+	join(process.env["HOME"] || homedir(), ".cache", "puppeteer");
 
 export const INSTALL = {
 	chrome: `bunx ${PUPPETEER_BROWSERS} install chrome@${CHROME_VERSION} --path ~/.cache/puppeteer`,
@@ -47,7 +52,7 @@ export function findChromeForTesting(): string | undefined {
 	if (fromEnv) return fromEnv;
 	const p = platform();
 	if (p === undefined) return undefined;
-	const dir = join(CACHE, "chrome", `${p}-${CHROME_VERSION}`);
+	const dir = join(cache(), "chrome", `${p}-${CHROME_VERSION}`);
 	return [
 		"chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
 		"chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
@@ -58,7 +63,7 @@ export function findChromeForTesting(): string | undefined {
 }
 
 /** Where Firefox is installed, for `TAB_MCP_SYSTEM_FIREFOX=1` only. */
-const SYSTEM_FIREFOX = [
+export const SYSTEM_FIREFOX = [
 	"/Applications/Firefox.app/Contents/MacOS/firefox",
 	"/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
 	"/usr/bin/firefox",
@@ -69,34 +74,36 @@ const SYSTEM_FIREFOX = [
 let told = false;
 
 /**
- * The test Firefox: `FIREFOX_PATH`, else the pinned version in Puppeteer's
- * cache, else, with `TAB_MCP_SYSTEM_FIREFOX=1`, an installed one (said on
- * stderr); `undefined` if none.
+ * The test Firefox: `FIREFOX_PATH`; else, asked for with
+ * `TAB_MCP_SYSTEM_FIREFOX=1` (`test:browser --system-firefox`), an installed
+ * one from `system`, said once on stderr, even when the pinned one is cached;
+ * else the pinned version in Puppeteer's cache. `undefined` if none.
  */
-export function findTestFirefox(): string | undefined {
+export function findTestFirefox(
+	system: readonly string[] = SYSTEM_FIREFOX,
+): string | undefined {
 	const fromEnv = process.env["FIREFOX_PATH"];
 	if (fromEnv) return fromEnv;
+	if (process.env["TAB_MCP_SYSTEM_FIREFOX"] === "1") {
+		const installed = system.find(exists);
+		if (installed !== undefined && !told) {
+			console.error(
+				`using the installed Firefox ${installed} (TAB_MCP_SYSTEM_FIREFOX=1)`,
+			);
+			told = true;
+		}
+		return installed;
+	}
 	const p = platform();
-	if (p !== undefined) {
-		const dir = join(CACHE, "firefox", `${p}-${FIREFOX_VERSION}`);
-		const found = [
-			"Firefox.app/Contents/MacOS/firefox",
-			"Firefox Nightly.app/Contents/MacOS/firefox",
-			"firefox/firefox",
-		]
-			.map((binary) => join(dir, binary))
-			.find(exists);
-		if (found) return found;
-	}
-	if (process.env["TAB_MCP_SYSTEM_FIREFOX"] !== "1") return undefined;
-	const system = SYSTEM_FIREFOX.find(exists);
-	if (system !== undefined && !told) {
-		console.error(
-			`using the installed Firefox ${system} (TAB_MCP_SYSTEM_FIREFOX=1)`,
-		);
-		told = true;
-	}
-	return system;
+	if (p === undefined) return undefined;
+	const dir = join(cache(), "firefox", `${p}-${FIREFOX_VERSION}`);
+	return [
+		"Firefox.app/Contents/MacOS/firefox",
+		"Firefox Nightly.app/Contents/MacOS/firefox",
+		"firefox/firefox",
+	]
+		.map((binary) => join(dir, binary))
+		.find(exists);
 }
 
 /** The switches a test Chrome gets besides `args`: its notifications off the desktop, merged into one `--disable-features`. */

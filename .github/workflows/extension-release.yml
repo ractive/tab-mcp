@@ -95,12 +95,12 @@ jobs:
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun install --frozen-lockfile
+      # The pinned test Firefox, as in ci.yml (test/browsers.ts).
+      - run: bunx @puppeteer/browsers@3.2.7 install firefox@stable_160.0.1 --path ~/.cache/puppeteer
       # verify and the browser tests (verify:all).
       - run: bun run verify:all
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
-          # The runner image's Firefox, named: the tests never pick an installed one by themselves.
-          FIREFOX_PATH: /usr/bin/firefox
       # The build refuses to pack a manifest with a key or host_permissions,
       # or a source map (zipStoreBuild in scripts/build.ts).
       - run: bun scripts/build.ts --store --zip

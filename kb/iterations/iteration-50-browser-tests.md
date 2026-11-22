@@ -105,14 +105,17 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   run. Firefox's pref for the same (`alerts.useSystemBackend: false`) opened alert
   windows that took the focus from the panel and failed a test. So the Firefox test build
   records its notifications (`src/worker/notifications.ts`); no store or development build
-  has the recorder (`build.test.ts`).
+  has the recorder (`build.test.ts`). `firefox.browser.test.ts` reads the recorder (a
+  question's notification, answered through it) and calls Firefox's real API once with
+  the same options, cleared at once. The macOS guard has no positive control, and says
+  so; a unit test fails when a Chrome launch lacks the switch.
 - **Only the pinned test browsers:** Chrome for Testing `156.0.8078.80` (CI's) and Firefox
   `stable_160.0.1`, from `CHROME_PATH` / `FIREFOX_PATH` or Puppeteer's cache. Never an
   installed Chrome. An installed Firefox only with `--system-firefox`
-  (`TAB_MCP_SYSTEM_FIREFOX=1`). `cdp.ts` no longer falls back to the owner's Chrome, and
-  the Firefox tests no longer fall back to `/Applications/Firefox.app`. `test:browser`
-  prints the install line for a missing one. CI names the runner's Firefox
-  (`FIREFOX_PATH: /usr/bin/firefox`).
+  (`TAB_MCP_SYSTEM_FIREFOX=1`), and then over the cached one. `cdp.ts` no longer falls
+  back to the owner's Chrome, and the Firefox tests no longer fall back to
+  `/Applications/Firefox.app`. `test:browser` prints the install line for a missing one.
+  CI and the release jobs install the same pinned Firefox.
 
 ## Tasks
 

@@ -39,9 +39,10 @@ declare const TAB_MCP_TEST: boolean;
 // The Firefox test build keeps its notifications to itself (DEC-220): a
 // test Firefox's system notifications reach the owner's desktop, and its own
 // alert windows (`alerts.useSystemBackend: false`) take the focus from the
-// panel. The tests read them with `tabMcpNotificationRecorder()` and answer
-// through the hooks below, as for Chrome, whose tests turn the desktop's off
-// with a switch instead (test/browsers.ts).
+// panel. firefox.browser.test.ts reads them with `tabMcpNotificationRecorder()`
+// (from the panel, through `runtime.getBackgroundPage()`), answers through the
+// hooks below, and calls the real API once itself. Chrome's tests keep the
+// real API and turn the desktop's off with a switch (test/browsers.ts).
 if (TAB_MCP_TEST && FIREFOX) {
 	const recorder = notificationRecorder();
 	useNotificationApi(recorder);

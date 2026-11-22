@@ -4,7 +4,8 @@
  * free port, an extension installed as a temporary add-on
  * (`webExtension.install`, which needs no signature), tabs opened and pages
  * evaluated in. BiDi is built into Firefox, so this needs no driver and no
- * package; `FIREFOX_PATH` names the binary, else the usual places are tried.
+ * package. Which Firefox: test/browsers.ts (`FIREFOX_PATH`, else the pinned
+ * test Firefox in Puppeteer's cache; an installed one only when asked for).
  */
 
 import { rmSync } from "node:fs";
