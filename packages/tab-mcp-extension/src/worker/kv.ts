@@ -115,15 +115,24 @@ export async function openKv(name = DATABASE): Promise<Kv> {
 	};
 }
 
-/** A `Kv` in memory, for tests. */
+/**
+ * A `Kv` in memory, for tests (no product code uses it). Like IndexedDB, it
+ * keeps copies: what goes in and what comes out are never the caller's
+ * objects, so a change made in memory and not written stays unwritten.
+ */
 export function memoryKv(initial: Record<string, unknown> = {}): Kv & {
 	data: Map<string, unknown>;
 } {
-	const data = new Map(Object.entries(initial));
+	const data = new Map(
+		Object.entries(initial).map(([key, value]) => [
+			key,
+			structuredClone(value),
+		]),
+	);
 	return {
 		data,
-		get: async (key) => data.get(key),
-		all: async () => Object.fromEntries(data),
+		get: async (key) => structuredClone(data.get(key)),
+		all: async () => structuredClone(Object.fromEntries(data)),
 		async set(entries) {
 			// Clone all first, as IndexedDB's transaction is all or nothing.
 			const cloned = Object.entries(entries).map(

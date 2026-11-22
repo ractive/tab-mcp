@@ -3,8 +3,10 @@
  * happy-dom, with a fake Chrome: what it draws from the worker's state,
  * what its clicks send, and the waits that keep a click from counting
  * (EQ 11). The end-to-end tests asked this of a real Chrome where only
- * this code decided (iteration 50); the dialog's being modal (`:modal`,
- * the rest inert) is Chrome's, and the kept browser tests answer in it.
+ * this code decided (iteration 50). The dialog's being modal (`:modal`,
+ * the rest inert) is Chrome's: extension.browser.test.ts "a question in the
+ * panel of the tab's focused window sends no notification" checks it; here,
+ * that the panel shows it with `showModal()` (happy-dom has no `:modal`).
  */
 
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";

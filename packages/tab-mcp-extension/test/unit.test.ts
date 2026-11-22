@@ -34,6 +34,16 @@ import { ask, callFailed, noAccess } from "../src/tabs.ts";
 import { PageError, readTool, ToolRegistry } from "../src/webmcp/registry.ts";
 import { createTools } from "../src/worker/tools.ts";
 
+const transpiler = new Bun.Transpiler({ loader: "ts" });
+
+/**
+ * Whether TypeScript `source` uses `chrome.storage` or `browser.storage` in
+ * its code: comments left out by the transpiler, strings kept whole.
+ */
+function usesStorage(source: string): boolean {
+	return /\b(chrome|browser)\.storage\b/.test(transpiler.transformSync(source));
+}
+
 describe("manifest", () => {
 	test("the development build has the key and no host access", () => {
 		const manifest = createManifest("1.2.3", { key: "KEY" });
@@ -79,14 +89,25 @@ describe("manifest", () => {
 			expect(manifest["permissions"]).not.toContain("unlimitedStorage");
 		}
 		// The settings go through kv.ts (IndexedDB in the extension's origin).
+		// The check itself: a use is seen also on a line with a URL in a
+		// string, and a comment that names the API is not one.
+		expect(
+			usesStorage(
+				'const u = "https://shop.example/x"; chrome.storage.local.get("a");',
+			),
+		).toBe(true);
+		expect(usesStorage("const s = browser.storage;")).toBe(true);
+		expect(
+			usesStorage(
+				"// there is no chrome.storage\n/* nor browser.storage */\nconst n = 1;",
+			),
+		).toBe(false);
 		const users: string[] = [];
 		for await (const file of new Bun.Glob("**/*.ts").scan(
 			join(import.meta.dir, "../src"),
 		)) {
 			const text = await Bun.file(join(import.meta.dir, "../src", file)).text();
-			// Code, not the comments that say why there is none.
-			const code = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-			if (/\b(chrome|browser)\.storage\b/.test(code)) users.push(file);
+			if (usesStorage(text)) users.push(file);
 		}
 		expect(users).toEqual([]);
 	});

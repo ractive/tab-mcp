@@ -7,6 +7,11 @@
  */
 
 import { afterAll, describe, expect, spyOn, test } from "bun:test";
+import {
+	TabMcp,
+	type Tool,
+	type ToolExecuteOptions,
+} from "@ractive-ch/tab-mcp-client";
 import type { PagePort } from "@ractive-ch/tab-mcp-client/extension";
 import type { PageTool, PageTools } from "../src/messages.ts";
 import type { PanelState } from "../src/protocol.ts";
@@ -15,6 +20,7 @@ import type { AllowedTools } from "../src/worker/allowed.ts";
 import { Connection } from "../src/worker/connection.ts";
 import { FillSetting } from "../src/worker/fill.ts";
 import { memoryKv } from "../src/worker/kv.ts";
+import { ARGS_CUT_NOTE } from "../src/worker/questions.ts";
 import { CachedSecretStorage } from "../src/worker/secret.ts";
 
 const ID = "abcdefghijklmnopabcdefghijklmnop";
@@ -25,16 +31,23 @@ const RELAY = "https://relay.example";
 /** What the fake Chrome answers, and what it was asked. */
 interface Fake {
 	tools: PageTool[];
+	/** Whether the window (id 1) has the focus; it has by default. */
+	focused: boolean;
 	/** Every call of a function the fake does not answer itself. */
 	calls: string[];
 	/** The ids of the notifications made, in order. */
 	notifications: string[];
+	/** The options each was made with, as the worker passed them. */
+	notificationOptions: Record<string, unknown>[];
+	/** The page tools the content script was asked to run, by name. */
+	pageCalls: string[];
 }
 
 /**
  * A Chrome with one normal window and one tab of `SITE`, whose content
- * script lists `fake.tools`. The side panel never opens (as without a
- * user's gesture). Any other function: recorded, resolves to nothing.
+ * script lists `fake.tools` and answers a call with "done". The side panel
+ * never opens (as without a user's gesture). Any other function: recorded,
+ * resolves to nothing.
  */
 function fakeChrome(fake: Fake) {
 	const tab = {
@@ -63,11 +76,21 @@ function fakeChrome(fake: Fake) {
 			getURL: (path: string) => `chrome-extension://${ID}/${path}`,
 			getManifest: () => ({ version: "1.0.0" }),
 		},
-		windows: { getLastFocused: async () => ({ id: 1, focused: true }) },
+		windows: {
+			getLastFocused: async () => ({ id: 1, focused: fake.focused }),
+			get: async (id: number) => ({ id, focused: fake.focused }),
+		},
 		tabs: {
 			query: async () => [tab],
 			get: async () => ({ ...tab, status: "complete" }),
-			sendMessage: async (_tabId: number, request: { type: string }) => {
+			sendMessage: async (
+				_tabId: number,
+				request: { type: string; name?: string },
+			) => {
+				if (request.type === "webmcp-call") {
+					fake.pageCalls.push(request.name ?? "");
+					return { ok: true, value: "done" };
+				}
 				if (request.type === "webmcp-list")
 					return {
 						ok: true,
@@ -97,8 +120,9 @@ function fakeChrome(fake: Fake) {
 			},
 		},
 		notifications: {
-			create: async (id: string) => {
+			create: async (id: string, options: Record<string, unknown>) => {
 				fake.notifications.push(id);
+				fake.notificationOptions.push(options);
 				return id;
 			},
 			clear: async () => true,
@@ -178,24 +202,81 @@ function pairingPage(): PagePort & { closed: boolean; sent: unknown[] } {
 	return port;
 }
 
-/** Until `check` holds, at most a second. */
+/** Until `check` holds, at most 5 s (it returns as soon as it does). */
 async function until(
 	check: () => boolean | Promise<boolean>,
 	what: string,
 ): Promise<void> {
-	const end = Date.now() + 1_000;
+	const end = Date.now() + 5_000;
 	while (!(await check())) {
 		if (Date.now() > end) throw new Error(`never: ${what}`);
 		await Bun.sleep(5);
 	}
 }
 
+/**
+ * A WebSocket that never reaches a relay (no network from unit tests): the
+ * library's connect makes one, its disconnect closes it.
+ */
+class FakeSocket extends EventTarget {
+	static readonly CONNECTING = 0;
+	static readonly OPEN = 1;
+	static readonly CLOSING = 2;
+	static readonly CLOSED = 3;
+	static made: string[] = [];
+	readyState = FakeSocket.CONNECTING;
+	constructor(readonly url: string) {
+		super();
+		FakeSocket.made.push(url);
+	}
+	send(): void {}
+	close(code = 1000, reason = ""): void {
+		if (this.readyState === FakeSocket.CLOSED) return;
+		this.readyState = FakeSocket.CLOSED;
+		this.dispatchEvent(
+			Object.assign(new Event("close"), { code, reason, wasClean: true }),
+		);
+	}
+}
+
+/** Every tool a connection's library was given, the newest last. */
+const registered = spyOn(TabMcp.prototype, "registerTool");
+/** Every connect of a connection's library (to the fake socket). */
+const connected = spyOn(TabMcp.prototype, "connect");
+
+/**
+ * Call the page tool `name` as an AI app through the relay would, through
+ * the tool the worker registered with its library.
+ */
+function callTool(name: string, args: Record<string, unknown> = {}) {
+	const tool = registered.mock.calls
+		.map(([t]) => t as Tool)
+		.findLast((t) => t.name === name);
+	if (tool === undefined) throw new Error(`no tool ${name} registered`);
+	return Promise.resolve(
+		tool.execute(args, {
+			signal: new AbortController().signal,
+			client: {
+				kind: "relay",
+				grantId: "g1",
+				name: "Claude",
+				host: "claude.ai",
+			},
+		} as ToolExecuteOptions),
+	);
+}
+
 // Each test's own Chrome; the one before (none, in Bun) is back after the
-// file. Every test ends with nothing of its connection still waiting.
-const g = globalThis as { chrome?: unknown };
-const before = g.chrome;
+// file, as are the WebSocket and the library's registerTool. Every test
+// ends with nothing of its connection still waiting.
+const g = globalThis as { chrome?: unknown; WebSocket: unknown };
+const before = { chrome: g.chrome, WebSocket: g.WebSocket };
+g.WebSocket = FakeSocket;
 afterAll(() => {
-	g.chrome = before;
+	g.chrome = before.chrome;
+	g.WebSocket = before.WebSocket;
+	registered.mockRestore();
+	connected.mockRestore();
 });
 
 /** A connection as `Connection.start()` makes one, from these settings. */
@@ -211,8 +292,11 @@ async function connection(
 ) {
 	const fake: Fake = {
 		tools: options.tools ?? [],
+		focused: true,
 		calls: [],
 		notifications: [],
+		notificationOptions: [],
+		pageCalls: [],
 	};
 	g.chrome = fakeChrome(fake);
 	// Stored, as start() loads them.
@@ -253,15 +337,20 @@ const allowedOn = async (
 	((await kv.get("allowedTools")) as AllowedTools | undefined)?.[origin] ?? [];
 
 describe("Always allow all from the panel (set-allowed-all)", () => {
-	test("Allow all takes only tools the worker offers on that origin now, that ask first", async () => {
+	test("Allow all takes only tools the worker offers on that origin now, that ask first, and that the panel listed", async () => {
 		const { c, kv } = await connection({
-			tools: [pageTool("place_order", false), pageTool("get_greeting", true)],
+			tools: [
+				pageTool("place_order", false),
+				pageTool("pay", false),
+				pageTool("get_greeting", true),
+			],
 		});
 		const panel = fakePanel();
 		const receive = c.addPanel(panel.port);
+		receive({ type: "hello", windowId: 1 });
 		// The bridge has read the tab (for the panel).
 		await until(
-			() => panel.state()?.tab?.tools.length === 2,
+			() => panel.state()?.tab?.tools.length === 3,
 			"the tab's tools in the panel",
 		);
 		receive({
@@ -278,9 +367,18 @@ describe("Always allow all from the panel (set-allowed-all)", () => {
 		});
 		await until(() => kv.data.has("allowedTools"), "a write");
 		await Bun.sleep(20);
-		// Not a name it does not offer, not a read-only one, not another site.
+		// Not a name it does not offer, not a read-only one, not another site,
+		// and not pay: it asks first too, but the panel did not list it.
 		expect(await allowedOn(kv, SITE)).toEqual(["place_order"]);
 		expect(await allowedOn(kv, OTHER)).toEqual([]);
+		const paid = callTool("page_pay");
+		await until(() => panel.state()?.questions.length === 1, "pay asks");
+		receive({
+			type: "answer",
+			id: panel.state()?.questions[0]?.id ?? "",
+			answer: "deny",
+		});
+		await expect(paid).rejects.toThrow("did not allow");
 		// The panel's state shows it allowed (its switch on).
 		await until(
 			() =>
@@ -333,6 +431,7 @@ describe("the panel's commands", () => {
 		const { c, kv } = await connection();
 		const panel = fakePanel();
 		const receive = c.addPanel(panel.port);
+		const connects = connected.mock.calls.length;
 		receive({ type: "connect" });
 		receive({ type: "stop" });
 		for (const name of ["a", "b"])
@@ -345,6 +444,120 @@ describe("the panel's commands", () => {
 		expect(kv.data.get("aiOn")).toBe(false);
 		expect(panel.state()?.status).toBe("off");
 		expect(await allowedOn(kv, SITE)).toEqual(["a", "b"]);
+		// The connect did set out for the relay (any socket a fake: no network).
+		expect(connected.mock.calls.length - connects).toBe(1);
+	});
+});
+
+describe("a page tool's question", () => {
+	test("Always allow on <host>: kept for the site, shown in the panel; that tool runs unasked after, another still asks (EQ 10)", async () => {
+		const { c, kv, fake } = await connection({
+			tools: [pageTool("place_order", false), pageTool("pay", false)],
+		});
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		receive({ type: "hello", windowId: 1 });
+		await until(
+			() => panel.state()?.tab?.tools.length === 2,
+			"the tab's tools in the panel",
+		);
+		const first = callTool("page_place_order");
+		await until(() => panel.state()?.questions.length === 1, "a question");
+		receive({
+			type: "answer",
+			id: panel.state()?.questions[0]?.id ?? "",
+			answer: "site",
+		});
+		expect(await first).toBe("done");
+		expect(await allowedOn(kv, SITE)).toEqual(["place_order"]);
+		// The panel's tab is read again: its switch is on.
+		await until(
+			() =>
+				panel.state()?.tab?.tools.find((t) => t.name === "place_order")
+					?.allowed === true,
+			"allowed in the panel's state",
+		);
+		// The same tool again: no question.
+		expect(await callTool("page_place_order")).toBe("done");
+		expect(panel.state()?.questions).toEqual([]);
+		expect(fake.pageCalls).toEqual(["place_order", "place_order"]);
+		// Another tool of the site still asks.
+		const paid = callTool("page_pay");
+		await until(() => panel.state()?.questions.length === 1, "pay asks");
+		receive({
+			type: "answer",
+			id: panel.state()?.questions[0]?.id ?? "",
+			answer: "deny",
+		});
+		await expect(paid).rejects.toThrow("did not allow");
+		expect(fake.pageCalls).toEqual(["place_order", "place_order"]);
+	});
+
+	test("in the panel of the tab's focused window, no notification; with the window not focused, a notification too", async () => {
+		const { c, fake } = await connection({
+			tools: [pageTool("place_order", false)],
+		});
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		receive({ type: "hello", windowId: 1 });
+		await until(
+			() => panel.state()?.tab?.tools.length === 1,
+			"the tab's tools in the panel",
+		);
+		const answer = async (call: Promise<unknown>) => {
+			await until(() => panel.state()?.questions.length === 1, "a question");
+			receive({
+				type: "answer",
+				id: panel.state()?.questions[0]?.id ?? "",
+				answer: "deny",
+			});
+			await call.catch(() => {});
+		};
+		await answer(callTool("page_place_order"));
+		expect(fake.notifications).toEqual([]);
+		fake.focused = false;
+		const second = callTool("page_place_order");
+		await until(() => fake.notifications.length === 1, "a notification");
+		await answer(second);
+	});
+
+	test("without a panel, a notification: Allow once its only button, the tool, the site and the AI app in it; arguments cut say so", async () => {
+		const { c, fake } = await connection({
+			tools: [pageTool("place_order", false)],
+		});
+		// The bridge reads the page once a panel or a connection needs it.
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		await until(
+			() => panel.state()?.tab?.tools.length === 1,
+			"the tab's tools",
+		);
+		const short = callTool("page_place_order", { item: "tea" });
+		await until(() => fake.notifications.length === 1, "a notification");
+		expect(fake.notificationOptions[0]).toEqual({
+			type: "basic",
+			iconUrl: `chrome-extension://${ID}/icons/icon-128.png`,
+			title: "Allow place_order?",
+			message:
+				'Claude (claude.ai) wants to run page_place_order: {"item":"tea"}',
+			contextMessage: "On shop.example · Closing this is Don't allow",
+			buttons: [{ title: "Allow once" }],
+			requireInteraction: true,
+			priority: 2,
+		});
+		c.notificationDismissed(fake.notifications[0] as string);
+		await expect(short).rejects.toThrow("did not allow");
+		const long = callTool("page_place_order", { item: "x".repeat(5_000) });
+		await until(() => fake.notifications.length === 2, "a notification");
+		expect(String(fake.notificationOptions[1]?.["message"])).toEndWith(
+			`\n${ARGS_CUT_NOTE}`,
+		);
+		expect(fake.notificationOptions[1]?.["buttons"]).toEqual([
+			{ title: "Allow once" },
+		]);
+		c.notificationDismissed(fake.notifications[1] as string);
+		await expect(long).rejects.toThrow("did not allow");
+		expect(fake.pageCalls).toEqual([]);
 	});
 });
 

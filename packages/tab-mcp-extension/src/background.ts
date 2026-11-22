@@ -274,9 +274,10 @@ if (FIREFOX)
  * A notification's answer: its button Allow; its closing is Don't allow; a
  * click on its body opens the side panel of the tab's window, where the
  * whole question is (if Chrome refuses, the notification comes back). In
- * the test build on the worker's global object too, for the DevTools
- * Protocol, which cannot click a notification: the end-to-end tests answer
- * through the same functions a click calls. Not in the store build (ES 7).
+ * the test build the button's function is on the worker's global object
+ * too, for the DevTools Protocol, which cannot click a notification: the
+ * end-to-end tests answer through the same function a click calls. Not in
+ * the store build (ES 7).
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));
@@ -311,9 +312,8 @@ if (TAB_MCP_TEST && FIREFOX)
 				active: true,
 			}),
 	);
+// Closing and a click on the body come from Chrome's own events only: the
+// tests close one with chrome.notifications.clear (onClosed), and Chrome
+// gives no way to click one from outside.
 if (TAB_MCP_TEST)
-	Object.assign(globalThis, {
-		tabMcpNotificationButton: notificationButton,
-		tabMcpNotificationDismissed: notificationDismissed,
-		tabMcpNotificationClicked: notificationClicked,
-	});
+	Object.assign(globalThis, { tabMcpNotificationButton: notificationButton });

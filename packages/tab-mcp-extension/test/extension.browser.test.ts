@@ -1184,6 +1184,13 @@ describe.skipIf(chrome === undefined)(
 			const asked = call(stack, "page_place_order", { item: "panel" });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			expect(await badge()).toBe("?");
+			// A modal dialog, the rest of the panel inert: the browser's part
+			// (sidepanel.test.ts has the panel's own, that it calls showModal).
+			expect(
+				await stack.panel.eval(
+					`[document.getElementById("questions").open, document.getElementById("questions").matches(":modal")]`,
+				),
+			).toEqual([true, true]);
 			// A short line for screen readers, not the card (EQ 11), in the
 			// dialog's own status line (the panel's is inert while it is
 			// open); the time left on the card (EQ 13).
@@ -1232,6 +1239,22 @@ describe.skipIf(chrome === undefined)(
 			const result = await call(stack, "page_get_greeting", { name: "Cy" });
 			expect(result.content).toEqual([{ type: "text", text: "Hello, Cy!" }]);
 			expect(await badge()).toBe("on");
+		});
+
+		test("a notification closed is Don't allow, through Chrome's onClosed: the call is refused, the tool does not run", async () => {
+			const asked = call(stack, "page_place_order", { item: "closed" });
+			const id = await newNotification(stack);
+			// Chrome's own closing (onClosed), as when the user closes it; the
+			// rest of what a closing does is connection.test.ts's and
+			// worker.test.ts's.
+			await stack.worker.eval(
+				`chrome.notifications.clear(${JSON.stringify(id)})`,
+			);
+			expect((await asked).isError).toBe(true);
+			expect(
+				await stack.tab.eval("window.calls.map((c) => c[1])"),
+			).not.toContain("closed");
+			expect(await notifications(stack)).toEqual([]);
 		});
 
 		test("reopening the panel shows the same connection", async () => {
@@ -1313,13 +1336,17 @@ describe.skipIf(chrome === undefined)(
 		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
 			// AI access off first, which the test before this one left behind
 			// until it went (connection.test.ts has its commands now).
-			await stack.panel.eval(`(async () => {
-				const port = chrome.runtime.connect({ name: "panel" });
-				port.postMessage({ type: "stop" });
-				await new Promise((resolve) => setTimeout(resolve, 300));
-				port.disconnect();
+			await stack.panel.eval(`(() => {
+				window.e2eStop = chrome.runtime.connect({ name: "panel" });
+				window.e2eStop.postMessage({ type: "stop" });
 			})()`);
-			expect(await stored<boolean>("aiOn")).toBe(false);
+			// Stored by the worker once the stop ran.
+			const end = Date.now() + 10_000;
+			while ((await stored<boolean>("aiOn")) !== false) {
+				if (Date.now() > end) throw new Error("AI access never went off");
+				await Bun.sleep(100);
+			}
+			await stack.panel.eval("window.e2eStop.disconnect()");
 			await stack.panel.waitFor(
 				`document.getElementById("state").dataset.state === "off"`,
 			);
