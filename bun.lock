@@ -26,7 +26,7 @@
     },
     "packages/tab-mcp": {
       "name": "@ractive-ch/tab-mcp",
-      "version": "0.13.2-rc.1",
+      "version": "0.13.2",
       "bin": {
         "tab-mcp": "./src/main.ts",
       },
@@ -38,7 +38,7 @@
     },
     "packages/tab-mcp-client": {
       "name": "@ractive-ch/tab-mcp-client",
-      "version": "0.21.0-rc.2",
+      "version": "0.21.0",
       "dependencies": {
         "@cfworker/json-schema": "4.1.6",
       },
@@ -64,7 +64,7 @@
     },
     "packages/tab-mcp-extension": {
       "name": "tab-mcp-extension",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "dependencies": {
         "@cfworker/json-schema": "4.1.6",
         "@ractive-ch/tab-mcp-client": "workspace:*",

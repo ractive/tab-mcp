@@ -235,7 +235,7 @@ for an AI app you started yourself. See [SECURITY.md](SECURITY.md).
      -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
      -e TAB_MCP_ALLOWED_ORIGINS=http://localhost:3000 \
      -e TAB_MCP_STORE=memory \
-     ractive/tab-mcp:0.13.2-rc.1
+     ractive/tab-mcp:0.13.2
    ```
 
 2. Install the browser library:
@@ -360,7 +360,7 @@ The relay is one process with a SQLite file. Run it with Docker:
 docker run -d --name tab-mcp -p 127.0.0.1:8080:8080 -v tab-mcp-data:/data \
   -e TAB_MCP_PUBLIC_URL=https://relay.example.com \
   -e TAB_MCP_ALLOWED_ORIGINS=https://app.example.com \
-  ractive/tab-mcp:0.13.2-rc.1
+  ractive/tab-mcp:0.13.2
 ```
 
 Put it behind a reverse proxy or CDN with TLS, and run exactly one instance.
@@ -386,7 +386,7 @@ so a relay is exactly one process.
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh): "tab-mcp browser extension" 0.3.1 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh): "tab-mcp browser extension" 0.3.2 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
@@ -405,12 +405,12 @@ so a relay is exactly one process.
 
 ## Status
 
-**0.21.0-rc.2**. Until 1.0, a new minor version can still change
+**0.21.0**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what changed.
 
-- Released: relay `@ractive-ch/tab-mcp` 0.13.2-rc.1 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.21.0-rc.2, on the npm tag `latest`.
-- The tab-mcp browser extension 0.3.1 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
+- Released: relay `@ractive-ch/tab-mcp` 0.13.2 (npm and Docker) and browser library
+  `@ractive-ch/tab-mcp-client` 0.21.0, on the npm tag `latest`.
+- The tab-mcp browser extension 0.3.2 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16). A development build loaded unpacked has the store's id, which the hosted
   relay allows ([README](packages/tab-mcp-extension/README.md)).
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register

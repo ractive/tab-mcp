@@ -112,14 +112,14 @@ for that page's address id.
 
 | Type | Dir | Fields | Meaning |
 |---|---|---|---|
-| `pairing.start` | T→R | none | The page's "Connect your AI app" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. With `oidc` it marks the dialog as open for 10 minutes from now and answers `pairing.open`: a sign-in pairs the page only while that time lasts (DEC-202). Sent again, also after the time is up, it counts 10 minutes from then; a session that ends, or `pairing.stop`, ends it. The relay cannot tell why a page sends it: libraries after 0.21.0-rc.2 send it on an `oidc` session only when their user opens the dialog, continues or connects with a click, never by a timer or on a reconnect they make by themselves; libraries up to 0.21.0-rc.2 also send it after every reconnect, so with them each reconnect starts the 10 minutes again. |
+| `pairing.start` | T→R | none | The page's "Connect your AI app" dialog is open; the relay starts issuing codes (only on sites whose pairing method is `code`). Sent again while codes are on, it repeats the current code. With `oidc` it marks the dialog as open for 10 minutes from now and answers `pairing.open`: a sign-in pairs the page only while that time lasts (DEC-202). Sent again, also after the time is up, it counts 10 minutes from then; a session that ends, or `pairing.stop`, ends it. The relay cannot tell why a page sends it: libraries after 0.21.0 send it on an `oidc` session only when their user opens the dialog, continues or connects with a click, never by a timer or on a reconnect they make by themselves; libraries up to 0.21.0 also send it after every reconnect, so with them each reconnect starts the 10 minutes again. |
 | `pairing.code` | R→T | `code`, `expiresAt`, optional `reason` | The code to show: 8 letters of `BCDFGHJKLMNPQRSTVWXZ`, sent as `XXXX-XXXX`; single-use, valid 2 minutes, and no two pages of the relay show the same code at once. A fresh one follows by itself after expiry or use while pairing is on. `/authorize` takes it in any case, with or without the dash and spaces. A code counts only at the address of its page's app; typed at another app's address it is a wrong code and stays valid. Wrong codes are limited per network (10, then one a minute), not per code or page; input that is not 8 of these letters does not count. `reason` says why this code comes: `start` (after `pairing.start`, a new code or the current one again), `used` (the last code was entered; its AI app is about to finish pairing) or `expired`. A tab treats a missing or unknown `reason` as no reason given. |
-| `pairing.open` | R→T | `expiresAt`, `expiresInMs` | From relays after 0.13.2-rc.1, to sites with `oidc` only: the answer to each `pairing.start`. For `expiresInMs` (600 000, 10 minutes) from now, until `expiresAt` on the relay's clock (ISO time), a sign-in of the page's user pairs this page; a sign-in that comes back later gets the answer that no page is connecting, as for a closed dialog. Nothing is sent when the time is up: the page counts `expiresInMs` on its own clock from the message's arrival (its clock may differ from the relay's; the library takes `expiresAt` only when `expiresInMs` is missing or not a number from 0 to 2 147 483 647), shows the end, and offers to continue, which sends `pairing.start` again. Libraries up to 0.21.0-rc.2 ignore the message (an unknown type) and re-send `pairing.start` after every reconnect, so for their pages the limit holds only between reconnects; it is complete with a library after 0.21.0-rc.2. |
+| `pairing.open` | R→T | `expiresAt`, `expiresInMs` | From relays after 0.13.2, to sites with `oidc` only: the answer to each `pairing.start`. For `expiresInMs` (600 000, 10 minutes) from now, until `expiresAt` on the relay's clock (ISO time), a sign-in of the page's user pairs this page; a sign-in that comes back later gets the answer that no page is connecting, as for a closed dialog. Nothing is sent when the time is up: the page counts `expiresInMs` on its own clock from the message's arrival (its clock may differ from the relay's; the library takes `expiresAt` only when `expiresInMs` is missing or not a number from 0 to 2 147 483 647), shows the end, and offers to continue, which sends `pairing.start` again. Libraries up to 0.21.0 ignore the message (an unknown type) and re-send `pairing.start` after every reconnect, so for their pages the limit holds only between reconnects; it is complete with a library after 0.21.0. |
 | `pairing.stop` | T→R | none | The dialog closed; the current code becomes invalid and no more codes come. |
 | `grant.added` | R→T | `grant` | An AI app finished pairing (the token endpoint issued its first tokens). |
 | `grant.revoke` | T→R | `grantId` | The user pressed Disconnect for one app; its tokens stop working at once. A grant that does not belong to this page's address id, or has expired, gets `error` `unknown_id` with `for` and `grantId` ([Errors](#errors-between-tab-and-relay)). |
 | `grants.revokeAll` | T→R | none | Revoke every grant of this page's address id. |
-| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "Disconnect all apps", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every 10 minutes) tells each connected page of its grants that no longer have a usable token, so it comes up to that long after the last token ran out (relays up to 0.13.2-rc.1 did not announce it). The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
+| `grant.removed` | R→T | `grantId`, `reason` | A grant ended: `revoked` (Disconnect, `/revoke`, "Disconnect all apps", sign-out, another user signed in to the page) or `reuse_detected` (an authorization code or refresh token was presented twice). `expired`: the grant has no usable token left (not refreshed in time, or at the latest 90 days after pairing); the relay's sweep (every 10 minutes) tells each connected page of its grants that no longer have a usable token, so it comes up to that long after the last token ran out (relays up to 0.13.2 did not announce it). The grant's requests in flight on this session, listen streams included, end with it: the AI app gets `-31009` (HTTP 401, or an error event on a stream already open) and the page gets `http.cancel` for each. |
 
 A grant as the tab sees it:
 
@@ -260,7 +260,7 @@ the tab is online (see below), the concurrency limit and, for
 `subscriptions/listen`, the listen streams of the grant (429, `-31004`). The last two are
 checked in the same step as the request is counted and sent, after any wait for the page:
 requests that waited for the page and are let go together when it connects get no more
-slots than the page allows (relays up to 0.13.2-rc.1 let them all through). The token's
+slots than the page allows (relays up to 0.13.2 let them all through). The token's
 record names the page the request is for (its address id) and the app; a token is valid
 only at the address of its app, and gets 401 at any other. Without a valid token every
 address `/s/<app>/mcp` with a well-formed app id answers alike, whether or not a page of
@@ -370,7 +370,7 @@ only logs it at debug level; libraries up to 0.15 sent one for a message they co
 read.
 
 An `unknown_id` or `store_unavailable` that answers a `grant.revoke`, `grants.revokeAll`
-or `identity.logout` names that message in `for` (relays after 0.13.2-rc.1), and the
+or `identity.logout` names that message in `for` (relays after 0.13.2), and the
 grant of a `grant.revoke` in `grantId`:
 
 ```json
@@ -379,8 +379,8 @@ grant of a `grant.revoke` in `grantId`:
 ```
 
 A page with several of these pending settles only the one named. Without `for` (relays
-up to 0.13.2-rc.1) the error may answer any of them; the library (after 0.21.0-rc.2) then
-settles every pending one, as 0.21.0-rc.2 did. Older libraries ignore the two fields.
+up to 0.13.2) the error may answer any of them; the library (after 0.21.0) then
+settles every pending one, as 0.21.0 did. Older libraries ignore the two fields.
 
 | Code | Sent by | Meaning |
 |---|---|---|

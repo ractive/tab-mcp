@@ -46,7 +46,7 @@ function TodoList() {
   changed, must not read `useState` values: `setState` only schedules the next render.
   Keep the state in a store, or the current value in a ref beside the state, changed by
   one function that the page's own UI uses too
-  ([Tools in a `useState` app](https://github.com/ractive/tab-mcp/blob/client-v0.21.0-rc.2/packages/tab-mcp-client/README.md#tools-in-a-usestate-app)).
+  ([Tools in a `useState` app](https://github.com/ractive/tab-mcp/blob/client-v0.21.0/packages/tab-mcp-client/README.md#tools-in-a-usestate-app)).
 - `webmcp` on the provider registers the tools with the browser's WebMCP too, tools that
   ask included; the library shows an unvouched WebMCP call no question (the provider's
   `onConfirm`, if given, still decides in code); `useTool(tool, { callers: ["relay",
@@ -55,5 +55,5 @@ function TodoList() {
   dialog and labels itself by state.
 - The module starts with `"use client"`: in Next.js's app router the provider renders on
   the client and never connects on the server.
-  [examples/react-todo](https://github.com/ractive/tab-mcp/tree/client-v0.21.0-rc.2/examples/react-todo)
+  [examples/react-todo](https://github.com/ractive/tab-mcp/tree/client-v0.21.0/examples/react-todo)
   is a complete app.
