@@ -9,7 +9,7 @@ The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store. E
 attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
 `tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`.
 
-## Unreleased
+## [0.3.2][extension-0.3.2] - 2026-11-22
 
 ### Added
 
@@ -274,6 +274,7 @@ First release.
   `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[extension-0.3.2]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.3.2
 [extension-0.3.1]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.3.1
 [extension-0.3.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.3.0
 [extension-0.2.1]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.2.1
