@@ -217,14 +217,19 @@ that saves the most first. The decision on the split and the rule is DEC-218.
     An unknown `--` flag fails `test:browser` now, so a typo cannot run everything
     quietly.
   - The full run's files: `firefox-full` (the event page against Firefox's idle
-    timeout, two waits of 10 s), `firefox-fill-full` (Always allow, which repeats the
-    Chrome test of shared code) and `webmcp-canary-full` (Chrome's WebMCP at the pin).
+    timeout, two waits of 10 s; no pull request runs it, since the full run follows
+    every change to the extension on main within minutes) and `firefox-fill-full`
+    (Always allow, which repeats the Chrome test of shared code).
 - **The smoke** (`firefox-smoke`, `firefox-fill-smoke`): what is Firefox's own.
   - The polyfill as the page meets it: it is there as the page loads; a round trip over
     the `moz-extension://` relay origin, as one scenario with page_info, a read-only
-    tool, an MCP result, a cancel (a page-realm signal) and `toolchange`.
+    tool, an MCP result, a wrong argument refused by the page's schema, a cancel (a
+    page-realm signal) and `toolchange`.
   - The panel's focus rules; notifications as the recorder sees them and as Firefox's
-    own API takes them; a replaced getter; register and unregister in one tick.
+    own API takes them; a replaced getter; register and unregister in one tick;
+    `provideContext`, whose errors reach the page as its own `TypeError` and
+    `QuotaExceededError` with their messages (review of PR 220: only Firefox shows
+    an error crossing the worlds).
   - Dead objects after a reload; the client library in Firefox's worlds.
   - In fill: the gesture rule for `permissions.request`, and senders without `origin`.
 - **The audit's verdicts that did not hold:**
@@ -233,28 +238,36 @@ that saves the most first. The decision on the split and the rule is DEC-218.
     starts.
   - 16 (the panel closed) is not dropped: with the panel open, its port may keep the
     event page alive by itself, so 15 does not prove 16. Both run in the full run only.
-- **Five tests moved to unit tests**, each shown to fail against a mutant first:
+- **Four tests moved to unit tests, and one got a unit test too**, each unit test
+  shown to fail against a mutant first:
   - The panel's Firefox words: `sidepanel.test.ts` builds `main.ts` with
     `TAB_MCP_FIREFOX` and checks what the browser test checked.
   - The arguments check and the hints: the twins from pull request 5 (`bridge.test.ts`,
-    the client's `relay.test.ts`, `unit.test.ts`).
+    the client's `relay.test.ts`, `unit.test.ts`); the smoke keeps one refused call.
   - An MCP result: `resultText`, which had no unit test.
-  - `provideContext`: an invalid tool changes nothing, and the 1024-tool limit over both
-    ways of registering. It had no unit test either.
-- **The canary:** its test 6 is dropped (the product never registers on Chrome's
-  native WebMCP from a content script). It runs in the full run, and on a pull request
-  that changes ci.yml, where the Chrome pin is.
+  - `provideContext`: the registry's rules (an invalid tool changes nothing, the
+    1024-tool limit over both ways of registering) are a unit test now; the smoke keeps
+    the errors as the page gets them.
+- **The canary** (`webmcp-canary-smoke`): its test 6 is dropped (the product never
+  registers on Chrome's native WebMCP from a content script). It costs about 4 s, so
+  it stays in every pull request's run: a Chrome pin bump meets it in the required
+  check.
 - **`browser-full.yml`:** every browser file, and the opt-in idle test of the
   extension's service worker (`TAB_MCP_E2E_IDLE=1`, over two minutes). It runs
-  nightly, on demand, and on a push to main that changes the
-  extension, the client, the relay's `config.ts`, `test/`, the lockfile or the
-  workflows. It is not required. A red run on main opens an issue labelled
-  `browser-full` with the failing tests, or comments on the open one. The next green
-  run closes it (`scripts/browser-full-issue.ts`, in a job of its own with the only
-  write access).
-- **Locally:** the Firefox part of the pull request run takes 18.6 s (13.1 s smoke,
+  nightly (in this repository only, not in a fork), on demand, and on a push to main
+  that changes the extension, the client, the relay, `test/`, `scripts/`, a
+  `package.json`, the lockfile or the workflows. It is not required.
+  - A hang is stopped after 25 minutes and counts as a failure, with its log (a job
+    past its own limit counts as cancelled, and nobody would hear of it).
+  - A red run on main opens an issue labelled `browser-full` with the failing tests
+    (each a code span, at most 50, the body capped), or comments on the open ones. A
+    green run of main's current head closes them; a green run of an older commit
+    only comments. The script finds its own issues by a marker in the body
+    (`scripts/browser-full-issue.ts`, in a job of its own with the only write access).
+- **Locally:** the Firefox part of the pull request run takes about 20 s (14 s smoke,
   5.6 s fill smoke). Before, it was 44.8 s for the two files. `expect()` calls went from
-  70 to 55; the 15 removed are the five moved tests'.
+  70 to 64: 15 went with the moved tests, 9 came with the refused argument and
+  `provideContext` in the page.
 
 ## Tasks
 

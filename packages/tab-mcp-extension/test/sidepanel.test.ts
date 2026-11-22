@@ -9,8 +9,15 @@
  * that the panel shows it with `showModal()` (happy-dom has no `:modal`).
  */
 
-import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import {
+	afterAll,
+	afterEach,
+	describe,
+	expect,
+	setSystemTime,
+	test,
+} from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Window } from "happy-dom";
@@ -55,15 +62,12 @@ afterEach(async () => {
 });
 
 /**
- * A panel of its own: index.html in a new window, main.ts loaded anew in
- * it, its timers the window's (closed with it). `show` gives it a state as
- * the worker's port would.
- */
-/**
  * main.ts as the Firefox build has it (`TAB_MCP_FIREFOX` true: its words,
- * its sidebar, its server name), bundled once into a file of its own.
+ * its sidebar, its server name), bundled once into a folder of its own,
+ * removed after the file's tests.
  */
 let firefoxMain: Promise<string> | undefined;
+let firefoxDir: string | undefined;
 function firefoxBundle(): Promise<string> {
 	firefoxMain ??= (async () => {
 		const result = await Bun.build({
@@ -75,14 +79,23 @@ function firefoxBundle(): Promise<string> {
 		const [output] = result.outputs;
 		if (!result.success || output === undefined)
 			throw new Error(`the Firefox panel did not build: ${result.logs}`);
-		const dir = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-panel-"));
-		const file = join(dir, "main.js");
+		firefoxDir = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-panel-"));
+		const file = join(firefoxDir, "main.js");
 		await Bun.write(file, await output.text());
 		return file;
 	})();
 	return firefoxMain;
 }
+afterAll(() => {
+	if (firefoxDir !== undefined)
+		rmSync(firefoxDir, { recursive: true, force: true });
+});
 
+/**
+ * A panel of its own: index.html in a new window, main.ts loaded anew in
+ * it, its timers the window's (closed with it). `show` gives it a state as
+ * the worker's port would.
+ */
 async function openPanel(options: { firefox?: boolean } = {}) {
 	const win = new Window({
 		url: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/sidepanel/index.html",

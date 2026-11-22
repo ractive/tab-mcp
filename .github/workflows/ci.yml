@@ -82,7 +82,7 @@ jobs:
       - if: steps.changes.outputs.code == 'true'
         run: bun install --frozen-lockfile
       # Every browser file but the full run's (*-full.browser.test.ts: the
-      # rest of Firefox, the WebMCP canary), which browser-full.yml runs.
+      # rest of Firefox), which browser-full.yml runs.
       - if: steps.changes.outputs.code == 'true'
         run: bun run test:browser --no-full
         env:

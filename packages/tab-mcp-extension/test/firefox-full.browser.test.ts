@@ -1,10 +1,13 @@
 /**
  * The rest of Firefox (iteration 50, task 7): only in the full browser run
- * (browser-full.yml: nightly, on demand, on changes to main and to pull
- * requests that touch the extension or the harness) and locally with
+ * (browser-full.yml: nightly, on demand, on changes to main, and on pull
+ * requests that change the workflows) and locally with
  * `bun run test:browser firefox`. The event page outlasting Firefox's idle
  * timeout: two waits of 10 s, a Firefox lifetime that only changes with the
- * extension.
+ * extension. No pull request runs it, on purpose (review of PR 220): the
+ * full run starts on every push to main that touches the extension and opens
+ * an issue within minutes when it fails; 20 s on every pull request is not
+ * worth that earlier warning.
  *
  * Needs Firefox 128 or newer, as firefox-smoke.browser.test.ts.
  */

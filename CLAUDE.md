@@ -138,7 +138,7 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
   a browser it needs is missing and prints the line that installs it;
   `--no-firefox` or `--no-chrome` leaves those files out and says so;
   `--no-full` leaves out the full run's files (`*-full.browser.test.ts`: the
-  rest of Firefox, the WebMCP canary), as the pull requests' browser job does.
+  rest of Firefox), as the pull requests' browser job does.
   Every Firefox browser file is `*-smoke` (on every pull request) or `*-full`
   (a test checks); `test:browser firefox` runs both. One browser run per machine: a second
   run (also `TAB_MCP_BROWSER=1 bun test <file>`) says whose run holds the lock

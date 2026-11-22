@@ -3,9 +3,10 @@
  * about Chrome's WebMCP, checked against the pinned Chrome for Testing, so a
  * Chrome change shows. The pages are served through the DevTools Protocol on
  * https://spike.test (no server, no network). Its answers change only with
- * the pin, so it runs in the full browser run (browser-full.yml: nightly, and
- * on a pull request that changes the pin in ci.yml), not on every pull
- * request. Needs Chrome for Testing 156 or newer
+ * the pin, but it runs on every pull request (`-smoke`): about 4 s, and so a
+ * pull request that bumps the Chrome pin meets it in the required check, not
+ * only in the advisory full run (iteration 50, review of PR 220). Needs
+ * Chrome for Testing 156 or newer
  * (`CHROME_PATH`, or the pinned one in Puppeteer's cache, test/browsers.ts): required in CI,
  * skipped elsewhere without it.
  */

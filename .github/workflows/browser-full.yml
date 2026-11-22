@@ -2,21 +2,22 @@ name: Browser tests (full)
 
 # Every browser test, Chrome and Firefox, nothing left out: `bun run
 # test:browser`, with the files a pull request's browser job leaves out
-# (*-full.browser.test.ts: the rest of Firefox, the WebMCP canary of the
-# pinned Chrome; ci.yml runs `--no-full`) and the opt-in idle test of the
-# extension's service worker (TAB_MCP_E2E_IDLE). Iteration 50, task 9.
+# (*-full.browser.test.ts: the rest of Firefox; ci.yml runs `--no-full`) and
+# the opt-in idle test of the extension's service worker (TAB_MCP_E2E_IDLE).
+# Iteration 50, task 9.
 #
 # Nightly, on demand, and on a change to main in what these tests cover: the
-# extension, the client library, the relay's allowed origins, the harnesses,
-# the pins and the lockfile. On a pull request only when it changes this
-# workflow or ci.yml (where the Chrome pin is): the canary checks a new pin
-# before it is merged.
+# extension, the client library, the relay, the harnesses and scripts, the
+# packages' manifests, the pins and the lockfile. On a pull request only when
+# it changes this workflow or ci.yml (where the browser pins are). The nightly
+# run is this repository's only, not a fork's.
 #
 # Not a required check: a path-filtered workflow does not report on most pull
 # requests, and a required check that never reports blocks the merge. A red
-# run on main (nightly, on demand or after a change) opens an issue labelled
-# browser-full with the failing tests, or adds them to the open one; the next
-# green run on main closes it (scripts/browser-full-issue.ts).
+# run on main (nightly, on demand or after a change), a timed-out one too,
+# opens an issue labelled browser-full with the failing tests, or comments on
+# the open one; a green run of main's current head closes it
+# (scripts/browser-full-issue.ts).
 
 on:
   schedule:
@@ -28,9 +29,10 @@ on:
       - packages/tab-mcp-extension/**
       - packages/tab-mcp-client/src/**
       - packages/tab-mcp-client/test/**
-      - packages/tab-mcp/src/config.ts
+      - packages/tab-mcp/src/**
+      - "**/package.json"
       - test/**
-      - scripts/test-browser.ts
+      - scripts/**
       - bun.lock
       - .github/workflows/ci.yml
       - .github/workflows/browser-full.yml
@@ -52,8 +54,10 @@ env:
 
 jobs:
   browser:
+    # A fork's Actions do not run the nightly (they may still run it by hand).
+    if: github.event_name != 'schedule' || github.repository == 'ractive/tab-mcp'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,10 +73,18 @@ jobs:
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun install --frozen-lockfile
-      # bash -eo pipefail: the step fails when the tests do; the log is
-      # kept for the report.
+      # A hang fails the step with its log, well before the job's own limit
+      # (a job past that limit counts as cancelled, and nobody would hear of
+      # it). The step's exit code is the tests' (pipefail), or timeout's.
       - shell: bash
-        run: bun run test:browser 2>&1 | tee browser-full.log
+        run: |
+          set -o pipefail
+          status=0
+          timeout --kill-after=60s 25m bun run test:browser 2>&1 | tee browser-full.log || status=$?
+          if [ "$status" = 124 ] || [ "$status" = 137 ]; then
+            echo "browser-full: timed out after 25 minutes" | tee -a browser-full.log
+          fi
+          exit "$status"
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           # The service worker on a quiet connection, over two minutes:
@@ -87,11 +99,11 @@ jobs:
           retention-days: 14
 
   # The issue: on main only, never for a pull request (its run shows there)
-  # and not for a cancelled run. A job of its own, so the test run's job
-  # gets no write access.
+  # and not for a cancelled run; only in this repository. A job of its own,
+  # so the test run's job gets no write access.
   report:
     needs: [browser]
-    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (needs.browser.result == 'success' || needs.browser.result == 'failure')
+    if: always() && github.repository == 'ractive/tab-mcp' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (needs.browser.result == 'success' || needs.browser.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -117,3 +129,4 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}

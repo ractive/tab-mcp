@@ -138,6 +138,14 @@ export function passedPerFile(junit: string): Map<string, number> {
 
 async function main(): Promise<number> {
 	const args = process.argv.slice(2);
+	// Before anything, `--sweep` too: a typo never runs or sweeps quietly.
+	const unknown = args.filter((a) => a.startsWith("--") && !FLAGS.includes(a));
+	if (unknown.length > 0) {
+		console.error(
+			`unknown ${unknown.join(" ")}: test:browser takes ${FLAGS.join(" ")}`,
+		);
+		return 1;
+	}
 	if (args.includes("--sweep")) {
 		// Under the lock, without waiting: a running run's own sweep is enough.
 		try {
@@ -151,13 +159,6 @@ async function main(): Promise<number> {
 			`sweep: ${plan.kill.length} process${plan.kill.length === 1 ? "" : "es"}, ${plan.remove.length} folder${plan.remove.length === 1 ? "" : "s"}${args.includes("--dry-run") ? " (dry run)" : ""}${plan.kept ? ", kept everything" : ""}`,
 		);
 		return plan.kept ? 1 : 0;
-	}
-	const unknown = args.filter((a) => a.startsWith("--") && !FLAGS.includes(a));
-	if (unknown.length > 0) {
-		console.error(
-			`unknown ${unknown.join(" ")}: test:browser takes ${FLAGS.join(" ")}`,
-		);
-		return 1;
 	}
 	const without = new Set<Need>();
 	if (args.includes("--no-chrome")) {

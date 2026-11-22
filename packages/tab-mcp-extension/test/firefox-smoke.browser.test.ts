@@ -124,6 +124,21 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 				]);
 			},
 		);
+		// The page's inputSchema reached the worker through the polyfill: the
+		// tool's schema refuses a wrong argument (the checks themselves:
+		// bridge.test.ts).
+		await step(
+			"a wrong argument is refused with the schema's message, and the page's tool does not run",
+			async () => {
+				const before = await stack.tab.eval<number>("window.calls.length");
+				const result = await call(stack, "page_get_greeting", { name: 42 });
+				expect(result.isError).toBe(true);
+				expect(result.content[0]?.text).toContain(
+					'Invalid arguments for tool page_get_greeting: #/name Instance type "number" is invalid. Expected "string".',
+				);
+				expect(await stack.tab.eval("window.calls.length")).toBe(before);
+			},
+		);
 		await step("cancelling a call aborts the page's signal", async () => {
 			const controller = new AbortController();
 			const pending = call(
@@ -157,7 +172,7 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 				await waitForTools(stack, (n) => !n.includes("page_registered_later"));
 			},
 		);
-	}, 190_000);
+	}, 220_000);
 
 	test("a tool not marked read-only asks in the panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
@@ -279,6 +294,56 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 			return (await context.getTools()).map((t) => t.name);
 		})()`);
 		expect(names).not.toContain("short_lived");
+	});
+
+	// Last in this block: it leaves the page with 1024 tools. The registry's
+	// rules are unit tests (unit.test.ts); here, that provideContext works
+	// across Firefox's worlds and its errors reach the page as the page's
+	// own (made in its realm, not "An exception was thrown").
+	test("provideContext gives the page's tools; an invalid tool and too many reach the page as its TypeError and QuotaExceededError, with their messages", async () => {
+		await stack.tab.eval(
+			`navigator.modelContext.provideContext({ tools: [{ name: "provided_one", description: "d", execute: () => "x" }] }).then(() => true)`,
+		);
+		await waitForTools(stack, (n) => n.includes("page_provided_one"));
+		const seen = await stack.tab.eval<Record<string, unknown>>(`(async () => {
+			const context = navigator.modelContext;
+			const tool = (name) => ({ name, description: "d", execute: () => "x" });
+			const names = async () => (await context.getTools()).map((t) => t.name);
+			const failure = async (work) => {
+				try { await work(); return { name: "none" }; }
+				catch (e) {
+					return { name: e.name, message: e.message, type: e instanceof TypeError, dom: e instanceof DOMException };
+				}
+			};
+			const provided = (await names()).includes("provided_one");
+			const before = (await names()).length;
+			const invalid = await failure(() => context.provideContext({ tools: [tool("ok_one"), { name: "broken" }] }));
+			const afterInvalid = (await names()).length - before;
+			const room = 1024 - (await names()).length;
+			for (let i = 0; i < room; i++) await context.registerTool(tool("r" + i));
+			const quota = await failure(() => context.registerTool(tool("one_more")));
+			const many = await failure(() => context.provideContext({ tools: Array.from({ length: 30 }, (_, i) => tool("p" + i)) }));
+			return { provided, invalid, afterInvalid, quota, many, total: (await names()).length };
+		})()`);
+		expect(seen["provided"]).toBe(true);
+		expect(seen["invalid"]).toEqual({
+			name: "TypeError",
+			message: "the tool broken has no execute",
+			type: true,
+			dom: false,
+		});
+		expect(seen["afterInvalid"]).toBe(0);
+		for (const key of ["quota", "many"])
+			expect({ key, error: seen[key] }).toEqual({
+				key,
+				error: {
+					name: "QuotaExceededError",
+					message: "too many tools",
+					type: false,
+					dom: true,
+				},
+			});
+		expect(seen["total"]).toBe(1024);
 	});
 });
 

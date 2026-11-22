@@ -435,7 +435,7 @@ bun run test:browser [filter]  # the browser tests (*.browser.test.ts), Chrome a
                                # --no-firefox / --no-chrome leave files out, --system-firefox
                                # takes the installed Firefox; no notification on the desktop
 bun run test:browser --no-full  # what a pull request runs: all but the *-full.browser.test.ts
-                                # files (the rest of Firefox, the WebMCP canary), which
+                                # files (the rest of Firefox), which
                                 # browser-full.yml runs nightly and on changes to main
 bun run test:browser --sweep --dry-run  # what a run would clean up from killed runs
                                         # (in ~/.cache/tab-mcp/browser-tests only; takes the lock)

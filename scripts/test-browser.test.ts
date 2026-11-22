@@ -26,6 +26,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
+import { TIMED_OUT } from "./browser-full-issue.ts";
 import {
 	browserTestFiles,
 	fullOnly,
@@ -230,6 +231,7 @@ interface Workflow {
 			needs?: string[];
 			if?: string;
 			permissions?: Record<string, string>;
+			"timeout-minutes"?: number;
 			steps: { run?: string; shell?: string; env?: Record<string, string> }[];
 		}
 	>;
@@ -289,13 +291,30 @@ test("a release runs the browser tests too", async () => {
 
 test("the full browser run: every browser file, nightly, on demand and on changes to main; required by nothing", async () => {
 	const full = await workflow("browser-full.yml");
-	expect(runs(full, "browser")).toContain(
-		"bun run test:browser 2>&1 | tee browser-full.log",
+	const testStep = full.jobs["browser"]?.steps.find((s) =>
+		s.run?.includes("test:browser"),
 	);
+	// Every file (no --no-full); a hang fails the step, with a line the
+	// report reads, before the job's own limit; the exit code is the tests'.
+	expect(testStep?.run).toContain(
+		"timeout --kill-after=60s 25m bun run test:browser 2>&1 | tee browser-full.log || status=$?",
+	);
+	expect(testStep?.run).toContain("set -o pipefail");
+	expect(testStep?.run).toContain(`echo "${TIMED_OUT} 25 minutes"`);
+	expect(testStep?.run).toContain('exit "$status"');
+	expect(full.jobs["browser"]?.["timeout-minutes"]).toBeGreaterThan(25 + 5);
 	// Nothing left out: the opt-in idle test of the extension runs too.
-	expect(
-		full.jobs["browser"]?.steps.find((s) => s.run?.includes("test:browser")),
-	).toMatchObject({ shell: "bash", env: { TAB_MCP_E2E_IDLE: "1" } });
+	expect(testStep).toMatchObject({
+		shell: "bash",
+		env: { TAB_MCP_E2E_IDLE: "1" },
+	});
+	// A fork's Actions do not run the nightly, nor ever the report.
+	expect(full.jobs["browser"]?.if).toBe(
+		"github.event_name != 'schedule' || github.repository == 'ractive/tab-mcp'",
+	);
+	expect(full.jobs["report"]?.if).toContain(
+		"github.repository == 'ractive/tab-mcp'",
+	);
 	expect(Object.keys(full.on).sort()).toEqual([
 		"pull_request",
 		"push",
@@ -307,6 +326,9 @@ test("the full browser run: every browser file, nightly, on demand and on change
 	for (const covered of [
 		"packages/tab-mcp-extension/**",
 		"packages/tab-mcp-client/src/**",
+		"packages/tab-mcp/src/**",
+		"**/package.json",
+		"scripts/**",
 		"test/**",
 		"bun.lock",
 		".github/workflows/ci.yml",
@@ -348,8 +370,14 @@ test("each Firefox browser file is the pull requests' smoke or the full run's, b
 	expect((await browserTestFiles(ROOT)).filter(fullOnly).sort()).toEqual([
 		"packages/tab-mcp-extension/test/firefox-fill-full.browser.test.ts",
 		"packages/tab-mcp-extension/test/firefox-full.browser.test.ts",
-		"test/webmcp-spike/webmcp-canary-full.browser.test.ts",
 	]);
+	// The canary is in the pull requests' set: a pin bump meets it in the
+	// required check.
+	expect(
+		(await browserTestFiles(ROOT, ["webmcp-canary"])).filter(
+			(f) => !fullOnly(f),
+		),
+	).toEqual(["test/webmcp-spike/webmcp-canary-smoke.browser.test.ts"]);
 });
 
 test("test:browser --no-full leaves out the full run's files and says so; an unknown flag fails", () => {
@@ -372,6 +400,11 @@ test("test:browser --no-full leaves out the full run's files and says so; an unk
 	const typo = run("--no-ful", "firefox");
 	expect(typo.code).toBe(1);
 	expect(typo.err).toContain("unknown --no-ful: test:browser takes");
+	// With --sweep too: no quiet sweep.
+	const sweepTypo = run("--sweep", "--dry-rn");
+	expect(sweepTypo.code).toBe(1);
+	expect(sweepTypo.err).toContain("unknown --dry-rn: test:browser takes");
+	expect(sweepTypo.err).not.toContain("sweep:");
 });
 
 test("a filter narrows test:browser to the files whose name contains it", async () => {
