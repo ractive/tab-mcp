@@ -784,8 +784,9 @@ not seen, and ones the page adds later. The relay cannot help: its one OAuth sco
    server by a label made from `server.name` that every shell reads as one plain word:
    lower case, letters without marks, each run of other characters as `-`, at most 40
    characters, `tools` if nothing is left ("Bücher" gives `bucher`). The address goes
-   into a command only if it has nothing but plain URL characters; otherwise the help
-   shows the steps without commands. Each entry ends with the step that starts the
+   into a command only if it has nothing but plain URL characters (in double quotes when
+   it has `[`, `]` or `~`, as an IPv6 address does: zsh reads those as patterns);
+   otherwise the help shows the steps without commands. Each entry ends with the step that starts the
    sign-in: `/mcp` and Authenticate in Claude Code, `codex mcp login <name>` as the third
    line of Codex's command. Codex 0.163 needs its feature `mcp_2026_07_28` for the relay's MCP
    revision, so its command turns that on first. The steps are the minimum; the link at

@@ -5089,3 +5089,23 @@ takes it.
 - Tests (`packages/tab-mcp-extension/test/bridge.test.ts`): for each such case, an
   argument the page's schema takes (validated in full) is taken by the offered schema
   too; a schema without regular expressions is offered unchanged.
+
+## DEC-219: A setup command's address with `[`, `]` or `~` is in double quotes
+
+2026-11-22, from the outside review of that day (finding 4,
+[review](/research/review-2026-11-22.md)); amends DEC-093's shell rule for addresses.
+`commandAddress` let `[`, `]` and `~` through bare, and zsh refused
+`claude mcp add --transport http test http://[::1]:8080/s/test/mcp` ("no matches
+found"; `~` is a pattern with `extendedglob`).
+
+- **The rule:** an address goes into a command only with nothing but http or https,
+  letters, digits and `. : [ ] / _ ~ -`, as before; one with `[`, `]` or `~` goes in
+  double quotes. DEC-093's "quoting cannot be right for every shell at once" is about
+  arbitrary text (the server's name, which stays a plain word); for these characters
+  double quotes are: nothing else inside is special to POSIX shells, zsh, fish,
+  PowerShell or cmd.exe. Single quotes are not, as cmd.exe passes them on to the program.
+- **Chosen over** the steps without a command for such an address: an IPv6 relay on the
+  developer's computer is where a command helps most.
+- `packages/tab-mcp-client/test/setup.test.ts` runs the words through each shell found
+  on the computer (sh, dash, bash, zsh with and without `extendedglob`, fish,
+  PowerShell) and expects every address back as it is.

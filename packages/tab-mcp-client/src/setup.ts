@@ -21,11 +21,11 @@ const CODEX_FEATURE = "mcp_2026_07_28";
  * The steps for one AI app. All strings are plain text (set them with
  * `textContent`). `command`, where present, is safe to show and to run: the
  * server's name and the address in it are words that every shell (POSIX
- * shells, PowerShell, cmd.exe) reads as plain, with nothing to quote. It is
- * absent for apps without a command, and when the address is not
- * shell-plain (only http or https, letters, digits and `. : [ ] / _ ~ -`);
- * then `text` names the command instead. The relay's addresses are
- * shell-plain.
+ * shells, zsh, PowerShell, cmd.exe) reads the same, an address with `[`, `]`
+ * or `~` (an IPv6 address) in double quotes, as zsh reads those as patterns.
+ * It is absent for apps without a command, and when the address has anything
+ * but http or https, letters, digits and `. : [ ] / _ ~ -`; then `text` names
+ * the command instead. The relay's addresses are plain words.
  */
 export interface SetupInstruction extends SetupStep {
 	/** Which app, stable across versions: `claude`, `chatgpt`, `claude-code` or `codex`. */

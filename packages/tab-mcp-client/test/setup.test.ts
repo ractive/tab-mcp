@@ -45,11 +45,28 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 		expect(commandAddress("http://127.0.0.1:8080/s/x/mcp")).toBe(
 			"http://127.0.0.1:8080/s/x/mcp",
 		);
+		// zsh reads [ ] and ~ as patterns: in double quotes (the review of 2026-11-22).
 		expect(commandAddress("http://[::1]:8080/s/x/mcp")).toBe(
-			"http://[::1]:8080/s/x/mcp",
+			'"http://[::1]:8080/s/x/mcp"',
+		);
+		expect(commandAddress("https://relay.example/~x/s/x/mcp")).toBe(
+			'"https://relay.example/~x/s/x/mcp"',
 		);
 		for (const unsafe of [
 			"https://relay.example/s/x/mcp?q=1&calc",
+			"https://relay.example/s/x?/mcp",
+			"https://relay.example/s/x*/mcp",
+			"https://relay.example/s/x&calc/mcp",
+			"https://relay.example/s/x;calc/mcp",
+			"https://relay.example/s/x!calc/mcp",
+			"https://relay.example/s/x calc/mcp",
+			'https://relay.example/s/x"calc/mcp',
+			"https://relay.example/s/x`calc`/mcp",
+			"https://relay.example/s/x%calc%/mcp",
+			"https://relay.example/s/x^calc/mcp",
+			"https://relay.example/s/x{a,b}/mcp",
+			"https://relay.example/s/x<calc/mcp",
+			"https://relay.example/s/x|calc/mcp",
 			"https://relay.example/s/$(calc)/mcp",
 			"https://relay.example/s/x%0Acalc/mcp",
 			"https://relay.example/s/'x'/mcp",
@@ -62,6 +79,50 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 				unsafe,
 				command: undefined,
 			});
+	});
+
+	/** The shells on this computer that the commands are for, each with how it runs a line. */
+	const shells: [string, string[]][] = [
+		["sh", ["sh", "-c"]],
+		["dash", ["dash", "-c"]],
+		["bash", ["bash", "-c"]],
+		["zsh", ["zsh", "-fc"]],
+		["zsh with extendedglob", ["zsh", "-fc", "setopt extendedglob;"]],
+		["fish", ["fish", "--no-config", "-c"]],
+		["PowerShell", ["pwsh", "-NoProfile", "-NonInteractive", "-Command"]],
+	];
+
+	test("each shell here passes the address in a command on as it is", () => {
+		const addresses = [
+			"https://relay.example/s/abc234/mcp",
+			"http://[::1]:8080/s/test/mcp",
+			"http://[2001:db8::1]/s/x/mcp",
+			"https://relay.example/~x/s/x/mcp",
+			"https://relay.example/s/a.b_c-d/mcp",
+		];
+		const words = addresses.map((a) => commandAddress(a) ?? "");
+		let ran = 0;
+		for (const [name, [program, ...args]] of shells) {
+			if (program === undefined || Bun.which(program) === null) continue;
+			const line = `printf '%s\\n' ${words.join(" ")}`;
+			// zsh's setopt goes before the line, in the same argument.
+			const argv = name.endsWith("extendedglob")
+				? [program, ...args.slice(0, -1), `${args.at(-1)} ${line}`]
+				: [program, ...args, line];
+			const run = Bun.spawnSync(argv, { stderr: "pipe" });
+			expect({
+				name,
+				out: run.stdout.toString(),
+				err: run.stderr.toString(),
+			}).toEqual({
+				name,
+				out: addresses.map((a) => `${new URL(a).href}\n`).join(""),
+				err: "",
+			});
+			ran++;
+		}
+		// sh at least, on every computer the tests run on.
+		expect(ran).toBeGreaterThan(0);
 	});
 
 	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {

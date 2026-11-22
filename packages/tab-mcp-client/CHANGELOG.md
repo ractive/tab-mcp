@@ -24,6 +24,12 @@ the Git tag `client-v<version>`. The format follows
   ("the outputSchema of …"). Until now such a tool was listed, and an AI app whose
   validator compiles output schemas (the MCP SDK's client) could not use it. Results
   are still not checked against the output schema.
+- The setup commands (`./setup`, "How do I add it?") put an address with `[`, `]` or `~`
+  in double quotes: zsh refused `claude mcp add --transport http test
+  http://[::1]:8080/s/test/mcp` with "no matches found" (`~` with `extendedglob`). POSIX
+  shells, zsh, fish, PowerShell and cmd.exe read the quoted address the same. An address
+  with any other character than letters, digits and `. : [ ] / _ ~ -` still gets the
+  steps without a command.
 
 ## [0.20.0][client-0.20.0] - 2026-11-22
 

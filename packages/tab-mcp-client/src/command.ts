@@ -26,14 +26,21 @@ export function commandName(name: string): string {
 }
 
 /**
- * The address for a command, only when all of it is plain in every shell
- * (http or https, letters, digits and . : [ ] / _ ~ -); else `undefined`, and
- * the help shows the steps without commands. The relay's addresses are.
+ * The address for a command, only when it has nothing but http or https,
+ * letters, digits and . : [ ] / _ ~ -; else `undefined`, and the help shows
+ * the steps without commands. The relay's addresses are plain words.
+ *
+ * `[`, `]` (an IPv6 address, `http://[::1]:8080/…`) and `~` are patterns in
+ * zsh, which refuses the command ("no matches found"; `~` with its
+ * `extendedglob`): such an address goes in double quotes. With nothing else
+ * in it, POSIX shells, zsh, fish, PowerShell and cmd.exe all read that as
+ * the address (single quotes would reach the program in cmd.exe).
  */
 export function commandAddress(address: string): string | undefined {
 	try {
 		const href = new URL(address).href;
-		return /^https?:\/\/[A-Za-z0-9.:[\]/_~-]+$/.test(href) ? href : undefined;
+		if (!/^https?:\/\/[A-Za-z0-9.:[\]/_~-]+$/.test(href)) return undefined;
+		return /[[\]~]/.test(href) ? `"${href}"` : href;
 	} catch {
 		return undefined;
 	}
