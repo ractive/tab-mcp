@@ -2180,7 +2180,7 @@ turns WebMCP on with an origin trial token, and that a tool it registers is the 
   name (both ways fail with `InvalidStateError`), which such an option would have to
   handle.
 - **Tests**: Chrome for Testing has WebMCP behind `--enable-features=WebMCP`, headless
-  included; `test/webmcp-spike/webmcp.test.ts` keeps the findings as a canary, so a
+  included; `test/webmcp-spike/webmcp-canary.browser.test.ts` keeps the findings as a canary, so a
   Chrome change shows.
 
 Recipes were dropped altogether later (DEC-114).
@@ -2392,7 +2392,7 @@ own `document.modelContext` and leaves the getter alone.
   not an AI app through the relay, which cannot happen there today.
 - **Tests**: unit tests against a fake `ModelContext` behind a `Document.prototype`
   getter (`capture()`, internal to `webmcp.ts`, takes the getter again for them), and a
-  browser test in Chrome for Testing 156 (`test/webmcp-browser.test.ts`).
+  browser test in Chrome for Testing 156 (`test/webmcp.browser.test.ts`).
 
 ## DEC-120: WebMCP calls resolve with an error the agent can read (owner)
 
@@ -3408,7 +3408,7 @@ says one of these, and a word says it too:
   one focus rule; the reduced-motion block names every selector with a transition; the
   forced-colours block names the states that outweigh it. A new colour or pair fails
   the test until the table has it.
-- `test/e2e.test.ts` in Chrome for Testing: nothing reaches past the panel's edge at
+- `test/extension.browser.test.ts` in Chrome for Testing: nothing reaches past the panel's edge at
   345, 360 and 420 px in its widest states; no button is amber; the tokens arrive as
   computed under an emulated light and dark scheme; both switches' contrast is measured
   from the computed colours.
@@ -3956,7 +3956,7 @@ WebMCP; the owner's idea: the extension supplies it.
 - **Tests**: `test/firefox.ts` drives Firefox over WebDriver BiDi (built in, no driver):
   the test build installed as a temporary add-on, the panel opened by the test build in
   a tab (BiDi reaches neither the sidebar nor an extension page by navigation).
-  `test/firefox-e2e.test.ts` runs Chrome's test page through a relay and an MCP client.
+  `test/firefox.browser.test.ts` runs Chrome's test page through a relay and an MCP client.
   `test/firefox-sites.ts` checks real sites by hand. ff-rdp's `launch --temporary-addon`
   (ff-rdp#371) works with the build too.
 
@@ -5000,7 +5000,7 @@ tools. The hint has nothing to do with it.
   connection (MCP's hint wins there, DEC-022) and not destructive through the extension.
   WebMCP has only the one hint, and the page set it to false itself. Not changed.
 - **What Chrome tells apart** (checked in the WebMCP canary,
-  `test/webmcp-spike/webmcp.test.ts`): a tool registered without annotations has none in
+  `test/webmcp-spike/webmcp-canary.browser.test.ts`): a tool registered without annotations has none in
   `getTools()`; a tool with any annotations, `{}`, `null` or only `readOnlyHint: false`
   included, has all four hints as booleans, missing ones false (`"yes"` becomes true,
   a string in place of the object is refused). So `{}` reads as `consequentialHint:
@@ -5144,3 +5144,35 @@ coding agent"), the root README's "Agent skill" first, before the plugin.
   holds. Each place that gives the line says that a missing file means an older version
   to update. The plugin comes from `main` and can be ahead of the last release.
 - The website (ractive.ch, another repository) is not changed here.
+
+## DEC-220: Browser tests run on their own, `verify` starts no browser
+
+2026-11-22, the owner: the local browser tests "got completely out of hand" (many
+browsers at once, notifications, a machine at load 96). One `bun run verify`, the rule
+before every commit, started 27 browsers and built the extension 12 times, and several
+agents ran it at once ([the audit](/research/browser-test-audit-2026-11-22.md),
+iteration 50).
+
+- **The split:** a test file that launches a browser, or tests a browser harness, is
+  named `*.browser.test.ts` and looks for its browser only behind `test/browser-gate.ts`
+  (`TAB_MCP_BROWSER=1`). Plain `bun test`, and so `bun run verify`, loads it and starts
+  nothing. `bun run test:browser [filter]` runs those files; `bun run verify:all` runs
+  both. `scripts/test-browser.test.ts` fails for a file that reaches a harness and is not
+  named so, or does not import the gate. An environment gate, not a `bun test` ignore
+  flag: a file with a browser test that is loaded by mistake still starts nothing.
+- **The rule (`CLAUDE.md`):** `bun run verify` before every commit (no browser, about a
+  minute); `bun run test:browser <filter>` before a commit that changes code a browser
+  runs (the extension, the client library's browser code, the relay's pages, the test
+  pages and harnesses), with the filter for the part touched; never several browser runs
+  at once on one machine; nothing for a change to `kb/` or docs alone. CI runs both on
+  every pull request.
+- **CI:** `ci.yml` has two jobs in parallel: `verify` (the required check of `main`,
+  name unchanged) runs the fast `verify`, `browser` runs `test:browser`. No `paths` or
+  `paths-ignore`: a required check that never reports leaves a pull request
+  unmergeable. A pull request that changes only `kb/` passes both jobs at once, from the
+  merge commit's diff against its base; nothing that is built or tested reads `kb/`.
+  The release workflows' pack jobs run `verify:all`, so a release still runs every
+  browser test.
+- **Later, in the audit's order:** the machine-wide lock and the sweep of orphaned
+  browsers, the notification recorder, the fast suite's timers, logic moved to unit
+  tests, shared browsers, Firefox smoke and full, `browser-full.yml`.

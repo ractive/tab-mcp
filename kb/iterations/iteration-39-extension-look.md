@@ -73,7 +73,7 @@ No behaviour of the worker, no message of the protocol and no stored value chang
   undefined, no opacity or blurred shadow, hover never reaches an unavailable button,
   amber on the dot only, one focus rule, reduced motion names every transition, forced
   colours name the states that outweigh them)
-- [x] `test/e2e.test.ts`, "the look" (Chrome for Testing): nothing past the panel's
+- [x] `test/extension.browser.test.ts`, "the look" (Chrome for Testing): nothing past the panel's
   edge at 345, 360 and 420 px with the tools, the address and code, "How do I add it?"
   and Settings open, both notices and a question with unbreakable arguments; no amber
   button; the tokens as computed in light and dark (paper, ink, a button's and a field's

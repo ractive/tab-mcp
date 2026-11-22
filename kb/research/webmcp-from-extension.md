@@ -11,7 +11,7 @@ Iteration 18 asked whether an extension can reach a page's WebMCP tools, and fro
 world. It can, from its content script, with nothing in the page's world. Everything
 below was observed in Chrome for Testing 156.0.8078.80 (the version CI pins) with
 `test/webmcp-spike/` (`bun test/webmcp-spike/spike.ts` prints the full report as JSON);
-`test/webmcp-spike/webmcp.test.ts` keeps the main findings as a canary.
+`test/webmcp-spike/webmcp-canary.browser.test.ts` keeps the main findings as a canary.
 
 ## 1. Turning it on
 

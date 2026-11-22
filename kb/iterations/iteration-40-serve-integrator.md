@@ -47,7 +47,7 @@ DEC-164 to DEC-167.
 - [x] React `useTool` registers again when `callers` changes by value
 - [x] Tests: `registry.test.ts` (validation, copy, `toolsFor`), `serve.test.ts` (list,
   call as unknown, `list_changed` per port), `relay.test.ts` (the same from the relay),
-  `webmcp.test.ts` and `webmcp-browser.test.ts` moved to `callers`, `react.test.tsx`
+  `webmcp.test.ts` and `webmcp.browser.test.ts` moved to `callers`, `react.test.tsx`
 
 ## 3. A time limit per request on the page's side (DEC-167)
 
@@ -60,7 +60,7 @@ DEC-164 to DEC-167.
 - [x] `docs/protocol.md`: the page's own `-31002`
 - [x] Tests: `serve.test.ts` (the page's limit with a longer tunnel limit, a late answer,
   a question that waits too long, listen and `tools/list` not cut, bad values);
-  `serve-browser.test.ts` waits for the dialog's `close` event
+  `serve.browser.test.ts` waits for the dialog's `close` event
 
 ## 4. The untrusted marker on every result (DEC-166)
 

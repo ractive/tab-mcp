@@ -1,15 +1,16 @@
 /**
- * The extension's browser harness itself (as `test/webmcp-spike/browser.test.ts`
- * for the spike's). An out-of-process frame (site isolation) gets a session
+ * The harness itself. An out-of-process frame (site isolation) gets a session
  * of its own, attached without anyone awaiting it: when the frame goes away
  * while that attach is on its way (the browser or the page closed, the frame
  * removed), nothing is left unhandled; an attach that fails otherwise still
  * shows. Bun fails a test with an unhandled rejection in it. Needs a Chrome
  * for Testing (`CHROME_PATH`, or Puppeteer's or Playwright's cache):
- * required in CI, skipped elsewhere without it.
+ * required in CI, skipped elsewhere without it. The tests that need Chrome
+ * run with `bun run test:browser` only (test/browser-gate.ts).
  */
 import { expect, test } from "bun:test";
 import { join } from "node:path";
+import { browserTests } from "../browser-gate.ts";
 import {
 	Browser,
 	findChromeForTesting,
@@ -18,8 +19,8 @@ import {
 	type Served,
 } from "./browser.ts";
 
-const chrome = findChromeForTesting();
-if (chrome === undefined && process.env["CI"])
+const chrome = browserTests ? findChromeForTesting() : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error("Chrome for Testing is needed for the harness test in CI");
 
 const SITE = "https://site.test";
@@ -174,7 +175,7 @@ test("an attach that fails otherwise is thrown on, unhandled", async () => {
 			send: (method, params, session) =>
 				session === "frame" ? Promise.reject(new Error("attach failed")) : Promise.resolve({}),
 		};
-		const page = new Page(browser, "page", "target", false);
+		const page = new Page(browser, "page", "target");
 		await page.attached("page");
 		listener("Target.attachedToTarget", { sessionId: "frame" }, "page");
 		await Bun.sleep(500);
@@ -195,11 +196,11 @@ test("reap's pattern matches only the profile's own Chrome", async () => {
 	// Stand-ins for Chromes, as pgrep sees them: the profile's own, one whose
 	// profile only starts the same, one that names it in another argument.
 	// A dot, to check that it stands for itself.
-	const profile = `/tmp/reap-check-${process.pid}/tab-mcp-extension-a.b`;
+	const profile = `/tmp/reap-check-${process.pid}/webmcp-spike-a.b`;
 	const args = [
 		[`--user-data-dir=${profile}`, "--type=renderer"],
 		[`--user-data-dir=${profile}x`],
-		[`--user-data-dir=/tmp/reap-check-${process.pid}/tab-mcp-extension-aXb`],
+		[`--user-data-dir=/tmp/reap-check-${process.pid}/webmcp-spike-aXb`],
 		["--user-data-dir=/tmp/other", `--note=${profile}`],
 	];
 	const procs = args.map((a) =>
