@@ -85,6 +85,13 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   into the side panel to answer." stood above the questions and went away as that click
   focused the panel, moving the questions up between the press and the release, so the
   click missed. It now stands under the questions.
+- **A tool the page registered on its own is not removed by its next
+  `provideContext()`.** Where the extension provides WebMCP itself (Firefox, and Chrome
+  without WebMCP), a tool that an earlier `provideContext()` gave, then unregistered and
+  registered again with `registerTool()` under the same name, still counted as the
+  context's: the next `provideContext()` removed or replaced it, and a content script
+  taking over the page's tools kept that mistake. The context now owns the registrations
+  it made, not their names (code review 2026-11-22, CR-04).
 
 ## [0.3.1][extension-0.3.1] - 2026-11-21
 

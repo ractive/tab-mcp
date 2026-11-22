@@ -825,6 +825,47 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 		expect(changes).toBe(2);
 	});
 
+	describe("code review 2026-11-22, CR-04: provideContext owns its registrations, not their names", () => {
+		/** "save" given by provideContext, unregistered, then registered on its own. */
+		const independent = () => {
+			const registry = new ToolRegistry(() => {});
+			registry.provide([{ ...tool("save"), description: "old context" }]);
+			registry.unregister("save");
+			registry.register({ ...tool("save"), description: "independent tool" });
+			return registry;
+		};
+		const description = (registry: ToolRegistry) =>
+			registry.get("save")?.info.description;
+
+		test("the next provideContext() leaves the tool registered on its own", () => {
+			const registry = independent();
+			registry.provide([]);
+			expect(description(registry)).toBe("independent tool");
+		});
+
+		test("a new context with a tool of that name does not replace it", () => {
+			const registry = independent();
+			registry.provide([{ ...tool("save"), description: "new context" }]);
+			expect(description(registry)).toBe("independent tool");
+			registry.provide([]);
+			expect(description(registry)).toBe("independent tool");
+		});
+
+		test("records() and restore() keep it the page's own", () => {
+			const registry = independent();
+			registry.provide([tool("other")]);
+			const records = registry.records();
+			expect(records.map((r) => [r.tool.name, r.provided])).toEqual([
+				["save", false],
+				["other", true],
+			]);
+			const next = new ToolRegistry(() => {});
+			next.restore(records);
+			next.provide([]);
+			expect(next.list().map((t) => t.name)).toEqual(["save"]);
+		});
+	});
+
 	test("a record that no longer reads as a tool is left out", () => {
 		const next = new ToolRegistry(() => {});
 		next.restore([

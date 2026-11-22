@@ -66,6 +66,13 @@ the Git tag `client-v<version>`. The format follows
   shells, zsh, fish, PowerShell and cmd.exe read the quoted address the same. An address
   with any other character than letters, digits and `. : [ ] / _ ~ -` still gets the
   steps without a command.
+- `disconnectAll()` with a `storage` that reads but cannot be written (full, blocked, or
+  a custom one whose writes fail) connected again with the old secret: the new one was
+  kept only in memory, and the next read of storage returned the old one over it. The
+  grants were revoked, but the secret was not changed, so whoever held the old one could
+  still take the page's place. The new secret now stays in use until the page is
+  reloaded, and storage is not read over it until a write succeeds (code review
+  2026-11-22, CR-02).
 
 ## [0.20.0][client-0.20.0] - 2026-11-22
 

@@ -372,6 +372,73 @@ describe("3: response size and backpressure", () => {
 	});
 });
 
+describe("code review 2026-11-22, CR-03: an event's end split across chunks", () => {
+	/** An event stream of the tab, with keep-alives every 10 ms. */
+	function streaming(): Exchange {
+		const exchange = new Exchange({
+			id: "r1",
+			rpcId: 1,
+			isListen: true,
+			requestTimeoutMs: 60_000,
+			keepAliveMs: 10,
+			maxBodyBytes: 100_000,
+			extraHeaders: {},
+			cancel: () => {},
+			onDone: () => {},
+		});
+		exchange.onStart({
+			type: "http.response.start",
+			id: "r1",
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+		return exchange;
+	}
+
+	/** What the AI app got after `chunks`, three keep-alive intervals and a failure. */
+	async function received(chunks: string[]): Promise<string> {
+		const exchange = streaming();
+		const res = await exchange.response;
+		for (const c of chunks) exchange.onChunk(c);
+		await Bun.sleep(35);
+		exchange.fail(504, -31005, "The page did not answer in time.", false);
+		return res.text();
+	}
+
+	const error =
+		'event: message\ndata: {"jsonrpc":"2.0","id":1,"error":{"code":-31005,"message":"The page did not answer in time."}}\n\n';
+
+	for (const end of ["\n\n", "\r\n\r\n", "\r\r", "\n\r\n", "\r\n\n", "\n\r"]) {
+		test(`${JSON.stringify(end)} split at every character: keep-alives and the error event`, async () => {
+			const event = `data: {}${end}`;
+			const splits: string[][] = [];
+			for (let at = 1; at < event.length; at++) {
+				splits.push([event.slice(0, at), event.slice(at)]);
+			}
+			const bodies = await Promise.all(splits.map(received));
+			for (const [i, body] of bodies.entries()) {
+				const at = i + 1;
+				expect({ at, body }).toEqual({
+					at,
+					body: expect.stringMatching(/^data: \{\}[\r\n]+(: keep-alive\n\n)+/),
+				});
+				expect(body.endsWith(error)).toBe(true);
+			}
+		});
+	}
+
+	test("inside an unfinished event: no keep-alive and no error event", async () => {
+		const cases = [
+			["data: {}\n"],
+			["data: {}\r", "\n"],
+			["data: {}\n\n", "data: 1\n"],
+			["data: {}\r\n\r\n", "data: 1", "\r\n"],
+		];
+		const bodies = await Promise.all(cases.map(received));
+		expect(bodies).toEqual(cases.map((c) => c.join("")));
+	});
+});
+
 describe("4: an open listen stream keeps the session from going idle", () => {
 	test("a session whose only request is a listen stream is not closed as idle", async () => {
 		const r = relay({ heartbeatMs: 20, idleTimeoutMs: 80, keepAliveMs: 40 });

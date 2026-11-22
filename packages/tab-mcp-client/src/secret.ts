@@ -42,6 +42,13 @@ export class SecretStore {
 	readonly storage: SecretStorage | null;
 	readonly key: string;
 	#memory: string | undefined;
+	/**
+	 * The last rotation could not be written (quota, blocked, read-only):
+	 * memory holds the new secret for the page's lifetime and storage, which
+	 * may still hold the old one, is not read over it until a write succeeds
+	 * (code review 2026-11-22, CR-02).
+	 */
+	#unsaved = false;
 
 	constructor(storage: SecretStorage | null | undefined, key: string) {
 		this.storage = storage === undefined ? defaultStorage() : storage;
@@ -50,9 +57,11 @@ export class SecretStore {
 
 	/**
 	 * The current secret, or `undefined` while this page has none (none made
-	 * yet); storage first, so a rotation in another tab is seen.
+	 * yet); storage first, so a rotation in another tab is seen, unless the
+	 * last rotation could not be written.
 	 */
 	current(): string | undefined {
+		if (this.#unsaved) return this.#memory;
 		let stored: string | null = null;
 		try {
 			stored = this.storage?.getItem(this.key) ?? null;
@@ -70,8 +79,10 @@ export class SecretStore {
 	rotate(): string {
 		const secret = newSecret();
 		this.#memory = secret;
+		this.#unsaved = true;
 		try {
 			this.storage?.setItem(this.key, secret);
+			this.#unsaved = false;
 		} catch {
 			// quota or blocked: the secret lives as long as the page
 		}
