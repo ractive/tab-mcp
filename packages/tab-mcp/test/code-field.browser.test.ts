@@ -492,28 +492,87 @@ function geometry(page: Page): Promise<{
 	})()`);
 }
 
+/** Wait until exactly the boxes `expected` are marked as the caret's. */
+async function atIs(page: Page, expected: number[]): Promise<void> {
+	const deadline = Date.now() + 3000;
+	let at: number[] = [];
+	while (Date.now() < deadline) {
+		at = (await geometry(page)).at;
+		if (JSON.stringify(at) === JSON.stringify(expected)) return;
+		await Bun.sleep(20);
+	}
+	expect(at).toEqual(expected);
+}
+
+const caretColor = (page: Page) =>
+	page.eval<string>(`getComputedStyle(${FIELD}).caretColor`);
+
+/**
+ * The one assumption the box arithmetic rests on: every letter of the code's
+ * alphabet and the dash is exactly `1ch` wide in the font the input uses.
+ */
+function advances(page: Page): Promise<{ font: string; worst: number }> {
+	return page.eval(`(() => {
+		const f = ${FIELD};
+		const font = getComputedStyle(f).font;
+		const probe = document.createElement("span");
+		probe.style.cssText = "position:absolute;visibility:hidden;width:1ch;font:" + font;
+		document.body.append(probe);
+		const ch = probe.getBoundingClientRect().width;
+		probe.remove();
+		const ctx = document.createElement("canvas").getContext("2d");
+		ctx.font = font;
+		let worst = 0;
+		for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ-") worst = Math.max(worst, Math.abs(ctx.measureText(c).width - ch));
+		return { font, worst };
+	})()`);
+}
+
 describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
-	test("the box marks the caret, so the input's own caret is hidden; one box is marked when empty, full and with a selection", async () => {
+	test("the box marks the caret and the input's own caret hides only then; one box when empty, full and in the middle, none with a selection", async () => {
 		const page = await openPairingPage();
-		expect(
-			await page.eval<string>(`getComputedStyle(${FIELD}).caretColor`),
-		).toBe("rgba(0, 0, 0, 0)");
-		expect((await geometry(page)).at).toEqual([0]);
+		expect(await caretColor(page)).toBe("rgba(0, 0, 0, 0)");
+		await atIs(page, [0]);
 		await typeKeys(page, "nhnxmnmh");
-		expect((await geometry(page)).at).toEqual([8]);
+		await atIs(page, [8]);
 		await caretAt(page, 3);
-		await Bun.sleep(100);
-		expect((await geometry(page)).at).toEqual([3]);
-		// A selection of several letters: the native highlight shows them, no box.
+		await atIs(page, [3]);
+		// A selection of several letters: the native highlight shows them, no
+		// box, and the native caret is back.
 		await clear(page);
-		await Bun.sleep(100);
-		expect((await geometry(page)).at).toEqual([]);
+		await atIs(page, []);
+		expect(await caretColor(page)).not.toBe("rgba(0, 0, 0, 0)");
 		await page.close();
 	});
 
-	test("each letter is centred in its box, the dash between the groups, boxes roomier than the letters, at 320 px and at desktop width", async () => {
-		for (const width of [320, 1280]) {
+	test("while an input method composes no box is marked and the native caret shows; the box is back afterwards", async () => {
+		const page = await openPairingPage();
+		await typeKeys(page, "nh");
+		await atIs(page, [2]);
+		await page.eval(
+			`${FIELD}.dispatchEvent(new CompositionEvent("compositionstart"))`,
+		);
+		await atIs(page, []);
+		expect(await caretColor(page)).not.toBe("rgba(0, 0, 0, 0)");
+		// A selection change during the composition paints no box either.
+		await caretAt(page, 1);
+		await Bun.sleep(100);
+		await atIs(page, []);
+		await page.eval(
+			`${FIELD}.dispatchEvent(new CompositionEvent("compositionend"))`,
+		);
+		await atIs(page, [1]);
+		expect(await caretColor(page)).toBe("rgba(0, 0, 0, 0)");
+		await page.close();
+	});
+
+	test("each letter is centred in its box, the dash between the groups, boxes roomier than the letters, nothing scrolled or cropped, from 263 px to desktop width", async () => {
+		// 263 px is 280 px less a classic scrollbar of 17 px.
+		for (const width of [263, 280, 320, 1280]) {
 			const page = await openPairingPage({ width });
+			const font = await advances(page);
+			expect(font.font).not.toBe("");
+			expect(font.worst).toBeLessThan(0.5);
 			// Four letters: no dash typed, and no box of the second group used.
 			await typeKeys(page, "nhnx");
 			let g = await geometry(page);
@@ -531,6 +590,11 @@ describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
 			expect(g.rowRight).toBeLessThanOrEqual(g.viewport);
 			// Roomier than the letters: a box is at least twice a letter wide.
 			expect(g.boxWidth).toBeGreaterThanOrEqual(g.letterWidth * 2);
+			expect(await fits(page)).toEqual({
+				scroll: true,
+				inView: true,
+				page: true,
+			});
 			await page.close();
 		}
 	});
@@ -545,8 +609,7 @@ describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
 			[9, 8],
 		] as const) {
 			await caretAt(page, caret);
-			await Bun.sleep(100); // the page paints on `selectionchange`
-			expect((await geometry(page)).at).toEqual([box]);
+			await atIs(page, [box]);
 		}
 		await page.close();
 	});
