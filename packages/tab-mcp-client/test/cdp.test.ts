@@ -1,6 +1,7 @@
 /**
  * The CDP helper's reap: its pkill pattern is one Chrome's `--user-data-dir`
- * and nothing more (as in `test/webmcp-spike/browser.test.ts`).
+ * and nothing more (as in `test/webmcp-spike/harness.browser.test.ts`).
+ * Stand-in processes, no browser: part of the fast suite.
  */
 import { expect, test } from "bun:test";
 import { profilePattern } from "./cdp.ts";

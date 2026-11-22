@@ -1,7 +1,7 @@
 /**
  * The pairing page's code field (DEC-211): the text and the caret after each
  * edit, as the page's script sets them, and the script being up to date.
- * The browser side is in code-field-browser.test.ts.
+ * The browser side is in code-field.browser.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import { buildCodeFieldScript } from "../scripts/code-field.ts";

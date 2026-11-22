@@ -44,7 +44,7 @@ dictionary ModelContextRegisterToolOptions {
 
 `RegisteredTool` (what `getTools()` lists) has `name`, `title`, `description`,
 `inputSchema`, `outputSchema`, `annotations`, `window` and `origin`. Chrome 156 gives no
-`outputSchema` (the canary in `test/webmcp-spike/webmcp.test.ts`).
+`outputSchema` (the canary in `test/webmcp-spike/webmcp-canary.browser.test.ts`).
 
 The steps of `registerTool`, as far as tab-mcp mirrors them:
 
@@ -85,7 +85,7 @@ Notes for tab-mcp:
 ## `exposedTo` in Chrome: another origin calls the page's tool
 
 Checked 2026-11-22 in Chrome for Testing 156.0.8078.80 with `--enable-features=WebMCP`
-(`packages/tab-mcp-client/test/webmcp-browser.test.ts`, the `exposedTo` test, for the
+(`packages/tab-mcp-client/test/webmcp.browser.test.ts`, the `exposedTo` test, for the
 review of PR 202). The top page `https://webmcp.test` registers a consequential tool
 through the library with `exposedTo: ["https://other.test"]`; a frame of
 `https://other.test` with `allow="tools"` runs script in it:

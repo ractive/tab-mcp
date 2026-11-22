@@ -73,7 +73,7 @@ Branch `handshake/page-extension`. `main` held client 0.18.1 with unreleased cha
   the tool and never for a call that does not run; the bridge's vouch (allowed, both
   ways of calling; none for read-only, a refusal or a page that changed); the worker's
   sender check; the panel's lines; both sides together with the real library
-- [x] End to end (`test/e2e.test.ts`, `test/firefox-e2e.test.ts`, page
+- [x] End to end (`test/extension.browser.test.ts`, `test/firefox.browser.test.ts`, page
   `test/pages/library.html` with the library bundled): Chrome's own WebMCP (the page's
   state with the app's name; the panel's line; the switch on: no question in the page;
   off: the extension asks once and the page not at all, also for Don't allow; a WebMCP

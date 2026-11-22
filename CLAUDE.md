@@ -121,8 +121,20 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
 `packages/tab-mcp-extension` (the tab-mcp browser extension, Chrome Web Store from
 `extension-v0.1.0`), `test/e2e` (end-to-end test with its test page).
 
-- Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
-  `bun run fix` to format. Type check per workspace with `bun check -p <dir>`
+- Commands: `bun run verify` (Biome CI, type check, tests; no browser, about a
+  minute and a half) before every commit, docs included (tests read them). A
+  change to `kb/` alone needs nothing.
+- `bun run test:browser [filter…]` (the `*.browser.test.ts` files, Chrome and
+  Firefox; a filter matches the file's name) before a commit that changes code
+  a browser test runs, with the filters for the part touched: the extension
+  (`extension fill firefox`), the client library's browser code (`page webmcp
+  serve`), the relay's pages, server and protocol (`code-field calculator page
+  react-todo`), the test pages and harnesses (the files that use them). It
+  fails when a browser it needs is missing; `--no-firefox` or `--no-chrome`
+  leaves those files out and says so. Never several browser runs at once on one
+  machine. CI runs both on every pull request; its required check `verify`
+  needs both.
+- `bun run fix` to format. Type check per workspace with `bun check -p <dir>`
   (no script may be named `check`: it shadows `bun check`).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency,
   pinned exactly. Use Bun's built-ins before adding a package.

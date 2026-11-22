@@ -10,7 +10,8 @@
  * a click on the icon there, until the tab goes to another origin.
  *
  * Needs Chrome for Testing 156 or newer (`CHROME_PATH`, or Puppeteer's or
- * Playwright's cache): required in CI, skipped elsewhere without it.
+ * Playwright's cache): required in CI, skipped elsewhere without it. Runs
+ * with `bun run test:browser` only (test/browser-gate.ts).
  */
 
 import {
@@ -34,6 +35,7 @@ import {
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
 import { TabMcp } from "@ractive-ch/tab-mcp-client";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
 import {
 	Browser,
@@ -44,8 +46,8 @@ import {
 	type Worker,
 } from "./browser.ts";
 
-// `bun run verify` runs these with Bun's default of 5 s a test: too short on
-// CI for a navigation, an icon click and the tools following.
+// `bun run test:browser` runs these with Bun's default of 5 s a test: too
+// short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
 
 const SITE = "https://site.test";
@@ -53,10 +55,10 @@ const OTHER = "https://other.test";
 /** Same site as SITE, another origin. */
 const SUBDOMAIN = "https://www.site.test";
 
-const found = findChromeForTesting();
+const found = browserTests ? findChromeForTesting() : undefined;
 const chrome =
 	found !== undefined && chromeMajor(found) >= 156 ? found : undefined;
-if (chrome === undefined && process.env["CI"])
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error(
 		"Chrome for Testing 156 or newer is needed for the extension's end-to-end tests in CI",
 	);

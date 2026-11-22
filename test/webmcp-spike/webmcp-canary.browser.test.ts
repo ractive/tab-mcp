@@ -7,6 +7,7 @@
  * skipped elsewhere without it.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { browserTests } from "../browser-gate.ts";
 import type { Browser, Page, World } from "./browser.ts";
 import { chromeMajor, findChromeForTesting } from "./browser.ts";
 import { launch, openPage, pageUrl, WEBMCP_ON } from "./spike.ts";
@@ -14,10 +15,10 @@ import { launch, openPage, pageUrl, WEBMCP_ON } from "./spike.ts";
 /** The Chrome the findings are for (the `debugging` annotation is new in 156). */
 const MIN_MAJOR = 156;
 
-const found = findChromeForTesting();
+const found = browserTests ? findChromeForTesting() : undefined;
 const chrome =
 	found !== undefined && chromeMajor(found) >= MIN_MAJOR ? found : undefined;
-if (chrome === undefined && process.env["CI"])
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error(
 		`Chrome for Testing ${MIN_MAJOR} or newer is needed for the WebMCP canary in CI`,
 	);

@@ -5,6 +5,7 @@
 ## research
 
 * [AI app support for MCP 2026-07-28 and CIMD (October 2026)](ai-app-support.md) - Which AI apps speak the stateless 2026-07-28 revision and register OAuth clients via Client ID Metadata Documents, and the client bugs a strict server hits.
+* [Audit of tab-mcp's browser tests, 2026-11-22](browser-test-audit-2026-11-22.md) - A read-only audit of the 134 browser tests in 14 files after one `bun run verify` started 27 browsers; a verdict per test (keep, merge, unit, drop), the Firefox files, browser start-ups, slow tests without a browser, notifications, a structure with *.browser.test.ts files and a gate, and a plan in nine pull requests.
 * [Bun 1.4.3, TypeScript 7 and publishing for tab-mcp](bun-runtime-and-publishing.md) - Bun.serve WebSockets and long-held requests, crypto and CSRF helpers, declaration emit with TypeScript 7, browser bundles, npm trusted publishing and Docker.
 * [bunny.net Magic Containers for the relay](bunny-magic-containers.md) - Notes for the deployment iteration — WebSockets, long requests, single instance, health checks, client IP and pricing on bunny.net Magic Containers.
 * [Code review of tab-mcp, 2026-11-22](code-review-2026-11-22.md) - Implementation review at a6e154c, with four newly reproduced correctness bugs and four reconfirmed findings from the website and code review, including fixes to consider and regression-test cases.

@@ -7,8 +7,8 @@
  * app. Firefox has no WebMCP: the page's tools reach the AI app only through
  * the extension's own `document.modelContext` (`src/firefox/webmcp.ts`).
  *
- * Needs Firefox 128 or newer (`FIREFOX_PATH`, or where it is installed);
- * skipped without it.
+ * Needs Firefox 128 or newer (`FIREFOX_PATH`, or where it is installed):
+ * required in CI, skipped elsewhere without it.
  */
 
 import {
@@ -31,13 +31,18 @@ import {
 	type TestRelay,
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
 
 setDefaultTimeout(30_000);
 
-const binary = findFirefox();
+const binary = browserTests ? findFirefox() : undefined;
 const firefoxOk = binary !== undefined && firefoxMajor(binary) >= 128;
+if (browserTests && !firefoxOk && process.env["CI"])
+	throw new Error(
+		"Firefox 128 or newer is needed for the extension's Firefox tests in CI",
+	);
 
 /** The add-on's UUID in the test profile, so the panel's address is known. */
 const UUID = "3f9a6c2e-1b7d-4e8a-9c5f-2d4b6a8e0c1f";

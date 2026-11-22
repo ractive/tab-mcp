@@ -3,7 +3,7 @@ name: Extension release
 # The tab-mcp browser extension (iteration 23, kb/operations/chrome-web-store.md).
 #
 # Pushing a tag extension-v<version> (on a commit of main, with that version in
-# packages/tab-mcp-extension/package.json) runs verify, builds the store
+# packages/tab-mcp-extension/package.json) runs verify:all, builds the store
 # package tab-mcp-browser-extension-<version>-store.zip, and only then creates the
 # GitHub release with the zip attached. A failed build leaves no release, and a
 # published release is never changed afterwards (so this also works with
@@ -95,7 +95,8 @@ jobs:
         with:
           chrome-version: ${{ env.CHROME_VERSION }}
       - run: bun install --frozen-lockfile
-      - run: bun run verify
+      # verify and the browser tests (verify:all).
+      - run: bun run verify:all
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       # The build refuses to pack a manifest with a key or host_permissions,

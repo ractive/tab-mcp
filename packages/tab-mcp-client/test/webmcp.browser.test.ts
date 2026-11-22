@@ -9,6 +9,7 @@
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
+import { browserTests } from "../../../test/browser-gate.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -18,10 +19,10 @@ import {
 } from "../../../test/webmcp-spike/browser.ts";
 
 const MIN_MAJOR = 156;
-const found = findChromeForTesting();
+const found = browserTests ? findChromeForTesting() : undefined;
 const chrome =
 	found !== undefined && chromeMajor(found) >= MIN_MAJOR ? found : undefined;
-if (chrome === undefined && process.env["CI"])
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error(
 		`Chrome for Testing ${MIN_MAJOR} or newer is needed for the WebMCP browser test in CI`,
 	);

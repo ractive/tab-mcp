@@ -2,8 +2,8 @@
  * The page's side of the handshake with the tab-mcp browser extension
  * (DEC-207), against a fake native `ModelContext` as in `webmcp.test.ts`;
  * the test plays the extension with the DOM events it would send. With the
- * real extension: `packages/tab-mcp-extension/test/e2e.test.ts` (Chrome) and
- * `packages/tab-mcp-extension/test/firefox-e2e.test.ts`.
+ * real extension: `packages/tab-mcp-extension/test/extension.browser.test.ts`
+ * (Chrome) and `packages/tab-mcp-extension/test/firefox.browser.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";

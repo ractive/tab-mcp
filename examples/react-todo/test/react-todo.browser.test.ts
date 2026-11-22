@@ -20,10 +20,11 @@ import {
 	type TestRelay,
 	tokenFor,
 } from "../../../packages/tab-mcp-client/test/helpers.ts";
+import { browserTests } from "../../../test/browser-gate.ts";
 import { serveExample } from "../server.ts";
 
-const chrome = findChrome();
-if (chrome === undefined && process.env["CI"])
+const chrome = browserTests ? findChrome() : undefined;
+if (browserTests && chrome === undefined && process.env["CI"])
 	throw new Error("Chrome is needed for the React todo e2e test in CI");
 
 let relay: TestRelay | undefined;

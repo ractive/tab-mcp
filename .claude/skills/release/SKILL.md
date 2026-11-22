@@ -71,12 +71,16 @@ old client is refused by a new relay and a new client by an old one.
    is also the other package's version: then edit by hand. If it does not take a candidate's
    version or what it does to the changelog is wrong for one (the section should stay
    `## Unreleased` until the stable release), say so and set the version by hand.
-4. `bun run verify`, and check its exit code (never through a pipe). The test "docs and
-   plugin manifests name only the current package versions" fails on any version left over.
+4. `bun run verify` (no browser), and check its exit code (never through a pipe). The test
+   "docs and plugin manifests name only the current package versions" fails on any version
+   left over. Locally the fast `verify` is enough: the version a bump changes reaches the
+   browser tests too (the client's `hello`, the relay's pages), and CI's `browser` job and
+   the release workflow's `verify:all` run them.
 5. Commit (author james@ractive.ch, with the session's `Co-Authored-By` trailer), push, PR
    titled "Client 0.14.0" / "Relay 0.10.0". The content was reviewed in its own PRs; a pure
    version PR needs no review run.
-6. Wait for CI (`gh pr checks <n> --watch`; main has no required checks), then
+6. Wait for CI (`gh pr checks <n> --watch`): `verify`, the required check, passes only when
+   `fast` and `browser` passed. Then
    `gh pr merge <n> --merge --author-email james@ractive.ch`. `client-pack` and `relay-pack`
    check the published file list and `exports` against `scripts/npm-pack.ts`: a new entry
    point or chunk name must be added there.
@@ -92,8 +96,9 @@ old client is refused by a new relay and a new client by an old one.
    `scripts/npm-pack.ts` then publishes it under the npm dist-tag of its name (`alpha`,
    `beta` or `rc`), never `latest`, and refuses a mismatch between the flag and the version.
 3. The `Release` workflow publishes (client: npm; relay: npm, ghcr.io, Docker Hub). Watch it:
-   `gh run list -w release.yml -L 1`, then `gh run watch <id> --exit-status`. The relay-pack job
-   has a flaky extension e2e test; `gh run rerun <id> --failed` once before investigating.
+   `gh run list -w release.yml -L 1`, then `gh run watch <id> --exit-status`. The pack jobs
+   run `bun run verify:all` (verify, then the browser tests); the relay-pack job has a flaky
+   test in `extension.browser.test.ts`; `gh run rerun <id> --failed` once before investigating.
 4. Done when the registry lists the version, asked directly, as `npm view` answers from a
    cache for minutes: `curl -s https://registry.npmjs.org/@ractive-ch%2Ftab-mcp-client` and
    its `dist-tags` (wait with an until-loop). For the client, the CDN build answers 200:
