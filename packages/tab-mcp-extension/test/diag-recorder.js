@@ -36,6 +36,7 @@
 				t(),
 				name(entry.target),
 				Math.round(entry.contentRect.height),
+				Math.round(entry.contentRect.width),
 			]);
 	});
 	const watch = (el) => {
@@ -43,6 +44,8 @@
 		for (const child of el.querySelectorAll("*")) sizes.observe(child);
 	};
 	watch(dialog);
+	sizes.observe(document.documentElement);
+	sizes.observe(document.body);
 	new MutationObserver((ms) => {
 		for (const m of ms) {
 			if (m.type === "attributes") {
@@ -85,6 +88,17 @@
 			if (top !== globalThis.__lastTop) events.push(["deny-top", t(), top]);
 			globalThis.__lastTop = top;
 		}
+		// The page behind: its width without the scrollbar, its height.
+		const page = [
+			document.documentElement.clientWidth,
+			document.documentElement.scrollHeight,
+			Math.round(document.body.getBoundingClientRect().height),
+			innerWidth,
+			innerHeight,
+			dialog.clientWidth,
+		].join(",");
+		if (page !== globalThis.__lastPage) events.push(["page", t(), page]);
+		globalThis.__lastPage = page;
 		requestAnimationFrame(frame);
 	};
 	requestAnimationFrame(frame);
