@@ -9,6 +9,17 @@ The browser extension (`packages/tab-mcp-extension`), in the Chrome Web Store. E
 attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up to 0.1.0
 `tab-mcp-for-chrome-<version>-store.zip`), to the GitHub release `extension-v<version>`.
 
+## Unreleased
+
+### Fixed
+
+- **A page tool that takes the tab to another page could take 30 seconds to answer.**
+  Sometimes the new page finished loading while the extension was still reading the
+  tab's state. The extension then missed it and waited for its 30 s limit before it
+  answered, with the page still "loading". It now looks at the tab again after a
+  second, so it answers as soon as the page has loaded, whatever the order of Chrome's
+  events.
+
 ## [0.3.2][extension-0.3.2] - 2026-11-22
 
 ### Added

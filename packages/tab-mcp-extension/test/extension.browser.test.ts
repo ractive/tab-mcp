@@ -38,6 +38,7 @@ import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
+import { LOAD_TIMEOUT_MS } from "../src/worker/navigation.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -50,6 +51,13 @@ import {
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
+/**
+ * A test that waits for a page to load: above the extension's own limit
+ * (`LOAD_TIMEOUT_MS`), so that a load the extension gives up on fails with
+ * the extension's answer. At the test's timeout Bun kills the block's
+ * Chrome, and every test after it fails too, naming nothing.
+ */
+const LOAD_WAIT_TEST_MS = LOAD_TIMEOUT_MS + 15_000;
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
@@ -1099,19 +1107,23 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(names).not.toContain("page_get_greeting");
 	});
 
-	test("a page tool that takes the tab to another page answers with that page, not a failure (WM 2)", async () => {
-		await tab.goto(`${SITE}/checkout.html`);
-		await waitForTools(stack, (n) => n.includes("page_checkout"));
-		const result = await call(stack, "page_checkout");
-		expect(result.isError).toBeFalsy();
-		expect(result.structuredContent).toMatchObject({
-			navigated: true,
-			page: { url: `${SITE}/plain.html`, title: "Plain page" },
-		});
-		expect(String(result.structuredContent?.["note"])).toContain(
-			"may have completed",
-		);
-	});
+	test(
+		"a page tool that takes the tab to another page answers with that page, not a failure (WM 2)",
+		async () => {
+			await tab.goto(`${SITE}/checkout.html`);
+			await waitForTools(stack, (n) => n.includes("page_checkout"));
+			const result = await call(stack, "page_checkout");
+			expect(result.isError).toBeFalsy();
+			expect(result.structuredContent).toMatchObject({
+				navigated: true,
+				page: { url: `${SITE}/plain.html`, title: "Plain page" },
+			});
+			expect(String(result.structuredContent?.["note"])).toContain(
+				"may have completed",
+			);
+		},
+		LOAD_WAIT_TEST_MS,
+	);
 
 	test("it follows a navigation", async () => {
 		await tab.goto(`${SITE}/plain.html`);
@@ -2033,88 +2045,112 @@ describe.skipIf(chrome === undefined)(
 			await stack?.stop();
 		});
 
-		test("navigate on the page's origin runs at once, with the new page's page_info and tools", async () => {
-			const result = await call(stack, "navigate", { url: "/webmcp.html" });
-			expect(result.isError).toBeFalsy();
-			expect(result.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-				title: "Page with WebMCP tools",
-				webmcp: { available: true, tools: 5 },
-			});
-			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-			await noQuestion(stack);
-		});
+		test(
+			"navigate on the page's origin runs at once, with the new page's page_info and tools",
+			async () => {
+				const result = await call(stack, "navigate", { url: "/webmcp.html" });
+				expect(result.isError).toBeFalsy();
+				expect(result.structuredContent).toMatchObject({
+					url: `${SITE}/webmcp.html`,
+					title: "Page with WebMCP tools",
+					webmcp: { available: true, tools: 5 },
+				});
+				await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+				await noQuestion(stack);
+			},
+			LOAD_WAIT_TEST_MS,
+		);
 
-		test("to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes", async () => {
-			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
-			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
-			const [ask, ...lines] = await questionLines(stack);
-			expect(ask).toEndWith(
-				" wants to take the tab to another site (navigate).",
-			);
-			expect(lines).toEqual([
-				`From (verified) ${SITE}`,
-				`To ${OTHER}/plain.html`,
-			]);
-			expect(
-				await stack.panel.eval<boolean>(
-					`!!document.querySelector('[data-question] button[data-answer="site"]')`,
-				),
-			).toBe(false);
-			await answerInPanel(stack, "deny");
-			const result = await declined;
-			expect(result.isError).toBe(true);
-			expect(result.content[0]?.text).toContain("did not allow");
-			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
-			const allowed = call(stack, "navigate", { url: `${OTHER}/plain.html` });
-			await answerInPanel(stack, "allow");
-			// With host access the new page is read.
-			expect((await allowed).structuredContent).toMatchObject({
-				url: `${OTHER}/plain.html`,
-				title: "Plain page",
-			});
-		});
+		test(
+			"to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes",
+			async () => {
+				const declined = call(stack, "navigate", {
+					url: `${OTHER}/plain.html`,
+				});
+				await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+				const [ask, ...lines] = await questionLines(stack);
+				expect(ask).toEndWith(
+					" wants to take the tab to another site (navigate).",
+				);
+				expect(lines).toEqual([
+					`From (verified) ${SITE}`,
+					`To ${OTHER}/plain.html`,
+				]);
+				expect(
+					await stack.panel.eval<boolean>(
+						`!!document.querySelector('[data-question] button[data-answer="site"]')`,
+					),
+				).toBe(false);
+				await answerInPanel(stack, "deny");
+				const result = await declined;
+				expect(result.isError).toBe(true);
+				expect(result.content[0]?.text).toContain("did not allow");
+				expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
+				const allowed = call(stack, "navigate", { url: `${OTHER}/plain.html` });
+				await answerInPanel(stack, "allow");
+				// With host access the new page is read.
+				expect((await allowed).structuredContent).toMatchObject({
+					url: `${OTHER}/plain.html`,
+					title: "Plain page",
+				});
+			},
+			LOAD_WAIT_TEST_MS,
+		);
 
-		test("back to another origin asks too, its address not known", async () => {
-			const back = call(stack, "go_back");
-			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
-			const lines = await questionLines(stack);
-			expect(lines[1]).toBe(`From (verified) ${OTHER}`);
-			expect(lines[2]).toContain("previous page");
-			expect(lines[2]).toContain("not known");
-			await answerInPanel(stack, "allow");
-			expect((await back).structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-			});
-		});
+		test(
+			"back to another origin asks too, its address not known",
+			async () => {
+				const back = call(stack, "go_back");
+				await stack.panel.waitFor(`document.querySelector("[data-question]")`);
+				const lines = await questionLines(stack);
+				expect(lines[1]).toBe(`From (verified) ${OTHER}`);
+				expect(lines[2]).toContain("previous page");
+				expect(lines[2]).toContain("not known");
+				await answerInPanel(stack, "allow");
+				expect((await back).structuredContent).toMatchObject({
+					url: `${SITE}/webmcp.html`,
+				});
+			},
+			LOAD_WAIT_TEST_MS,
+		);
 
-		test("back and forward on the page's origin run at once", async () => {
-			const back = await call(stack, "go_back");
-			expect(back.structuredContent).toMatchObject({
-				url: `${SITE}/plain.html`,
-			});
-			const forward = await call(stack, "go_forward");
-			expect(forward.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-			});
-			await noQuestion(stack);
-		});
+		test(
+			"back and forward on the page's origin run at once",
+			async () => {
+				const back = await call(stack, "go_back");
+				expect(back.structuredContent).toMatchObject({
+					url: `${SITE}/plain.html`,
+				});
+				const forward = await call(stack, "go_forward");
+				expect(forward.structuredContent).toMatchObject({
+					url: `${SITE}/webmcp.html`,
+				});
+				await noQuestion(stack);
+			},
+			LOAD_WAIT_TEST_MS,
+		);
 
-		test("reload stays and never asks; within the page (#part) it answers at once", async () => {
-			await stack.tab.eval("window.e2eMarker = 1");
-			const reloaded = await call(stack, "reload");
-			expect(reloaded.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-			});
-			expect(await stack.tab.eval("typeof window.e2eMarker")).toBe("undefined");
-			const started = Date.now();
-			const part = await call(stack, "navigate", { url: "#part" });
-			expect(part.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html#part`,
-			});
-			expect(Date.now() - started).toBeLessThan(5_000);
-			await noQuestion(stack);
-		});
+		test(
+			"reload stays and never asks; within the page (#part) it answers at once",
+			async () => {
+				await stack.tab.eval("window.e2eMarker = 1");
+				const reloaded = await call(stack, "reload");
+				expect(reloaded.structuredContent).toMatchObject({
+					url: `${SITE}/webmcp.html`,
+				});
+				expect(await stack.tab.eval("typeof window.e2eMarker")).toBe(
+					"undefined",
+				);
+				const started = Date.now();
+				const part = await call(stack, "navigate", { url: "#part" });
+				expect(part.structuredContent).toMatchObject({
+					url: `${SITE}/webmcp.html#part`,
+				});
+				expect(Date.now() - started).toBeLessThan(5_000);
+				await noQuestion(stack);
+			},
+			LOAD_WAIT_TEST_MS,
+		);
 	},
 );
 
@@ -2132,43 +2168,53 @@ describe.skipIf(chrome === undefined)(
 			await stack?.stop();
 		});
 
-		test("on the page's origin the click's access holds: the new page is read", async () => {
-			const result = await call(stack, "navigate", {
-				url: `${SITE}/webmcp.html`,
-			});
-			expect(result.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-				webmcp: { available: true, tools: 5 },
-			});
-			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-		});
-
-		test("to another origin, once allowed, the result says the new page needs a click; then nothing more", async () => {
-			const going = call(stack, "navigate", { url: `${OTHER}/plain.html` });
-			await answerInPanel(stack, "allow");
-			const result = await going;
-			expect(result.isError).toBeFalsy();
-			expect(result.structuredContent?.["readable"]).toBe(false);
-			expect(String(result.structuredContent?.["reason"])).toContain(
-				"may not read this tab yet",
-			);
-			expect(await tabUrl(stack)).toBe(`${OTHER}/plain.html`);
-			// A tab the extension may not read is not navigated.
-			for (const name of ["navigate", "go_back", "reload"]) {
-				const refused = await call(stack, name, {
-					...(name === "navigate" ? { url: `${OTHER}/webmcp.html` } : {}),
+		test(
+			"on the page's origin the click's access holds: the new page is read",
+			async () => {
+				const result = await call(stack, "navigate", {
+					url: `${SITE}/webmcp.html`,
 				});
-				expect(refused.isError).toBe(true);
-				expect(refused.content[0]?.text).toContain("may not read this tab yet");
-			}
-			expect(await tabUrl(stack)).toBe(`${OTHER}/plain.html`);
-			// A click on the icon gives the new page, and its origin.
-			await stack.browser.clickIcon(stack.tab);
-			expect(
-				(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
-					.structuredContent,
-			).toMatchObject({ url: `${OTHER}/webmcp.html` });
-		});
+				expect(result.structuredContent).toMatchObject({
+					url: `${SITE}/webmcp.html`,
+					webmcp: { available: true, tools: 5 },
+				});
+				await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+			},
+			LOAD_WAIT_TEST_MS,
+		);
+
+		test(
+			"to another origin, once allowed, the result says the new page needs a click; then nothing more",
+			async () => {
+				const going = call(stack, "navigate", { url: `${OTHER}/plain.html` });
+				await answerInPanel(stack, "allow");
+				const result = await going;
+				expect(result.isError).toBeFalsy();
+				expect(result.structuredContent?.["readable"]).toBe(false);
+				expect(String(result.structuredContent?.["reason"])).toContain(
+					"may not read this tab yet",
+				);
+				expect(await tabUrl(stack)).toBe(`${OTHER}/plain.html`);
+				// A tab the extension may not read is not navigated.
+				for (const name of ["navigate", "go_back", "reload"]) {
+					const refused = await call(stack, name, {
+						...(name === "navigate" ? { url: `${OTHER}/webmcp.html` } : {}),
+					});
+					expect(refused.isError).toBe(true);
+					expect(refused.content[0]?.text).toContain(
+						"may not read this tab yet",
+					);
+				}
+				expect(await tabUrl(stack)).toBe(`${OTHER}/plain.html`);
+				// A click on the icon gives the new page, and its origin.
+				await stack.browser.clickIcon(stack.tab);
+				expect(
+					(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
+						.structuredContent,
+				).toMatchObject({ url: `${OTHER}/webmcp.html` });
+			},
+			LOAD_WAIT_TEST_MS,
+		);
 	},
 );
 

@@ -173,6 +173,120 @@ describe("waiting for the load", () => {
 		controller.abort();
 		await expect(cancelled).rejects.toThrow("cancelled");
 	});
+
+	test("a page that finished loading while the tab's status was being read: done, not the time limit (WM 2)", async () => {
+		// The order seen once in CI (run 45007732915): a page tool navigated
+		// the tab, so the wait starts with the load under way. The status is
+		// asked; the new page's `complete` comes before that answer; the
+		// answer is the `loading` of when it was asked.
+		const events = fakeEvents("loading");
+		const now = events.status;
+		let answer: (status: string) => void = () => {};
+		let reads = 0;
+		// The first read answers late; the ones after it, what the tab is.
+		events.status = (tabId) =>
+			++reads === 1
+				? new Promise((resolve) => {
+						answer = resolve;
+					})
+				: now(tabId);
+		const done = waitForLoad(events, 1, async () => {}, {
+			signal: signal(),
+			timeoutMs: 300,
+			quietMs: 10,
+		});
+		await Bun.sleep(5);
+		events.emit("complete");
+		events.set("complete");
+		answer("loading");
+		const started = Date.now();
+		expect(await done).toBe("complete");
+		expect(Date.now() - started).toBeLessThan(200);
+	});
+
+	/** A wait as after a page tool navigated: nothing to start, short limits. */
+	const settled = (events: TabEvents) =>
+		waitForLoad(events, 1, async () => {}, {
+			signal: signal(),
+			timeoutMs: 300,
+			quietMs: 10,
+		});
+
+	test("the page's complete before the first read: done", async () => {
+		const events = fakeEvents("loading");
+		const done = settled(events);
+		// At once, before the read is answered: it says complete.
+		events.emit("complete");
+		events.set("complete");
+		expect(await done).toBe("complete");
+	});
+
+	test("complete after a read that said loading: done at the event, not later", async () => {
+		const events = fakeEvents("loading");
+		const done = settled(events);
+		await Bun.sleep(30);
+		const at = Date.now();
+		events.emit("complete");
+		events.set("complete");
+		expect(await done).toBe("complete");
+		expect(Date.now() - at).toBeLessThan(10);
+	});
+
+	test("a slow load: still loading at the quiet time, done at its complete only", async () => {
+		const events = fakeEvents("loading");
+		let result: Loaded | undefined;
+		const done = settled(events).then((r) => {
+			result = r;
+			return r;
+		});
+		await Bun.sleep(60);
+		expect(result).toBeUndefined();
+		events.emit("complete");
+		events.set("complete");
+		expect(await done).toBe("complete");
+	});
+
+	test("a navigation within the document (no load at all): done after the quiet time", async () => {
+		const events = fakeEvents("complete");
+		expect(await settled(events)).toBe("complete");
+		expect(events.watching()).toBe(0);
+	});
+
+	test("the tab closed while waiting, also when only a read finds it gone", async () => {
+		const removed = fakeEvents("loading");
+		const closed = settled(removed);
+		await Bun.sleep(5);
+		removed.remove();
+		expect(await closed).toBe("closed");
+		// A late `loading` read, and the tab gone by the quiet time's read.
+		const gone = fakeEvents("loading");
+		const now = gone.status;
+		let answer: (status: string) => void = () => {};
+		let reads = 0;
+		gone.status = (tabId) =>
+			++reads === 1
+				? new Promise((resolve) => {
+						answer = resolve;
+					})
+				: now(tabId);
+		const waiting = settled(gone);
+		await Bun.sleep(5);
+		gone.set(undefined);
+		answer("loading");
+		expect(await waiting).toBe("closed");
+	});
+
+	test("a second navigation during the wait: done when the tab is complete", async () => {
+		const events = fakeEvents("loading");
+		const done = settled(events);
+		await Bun.sleep(30);
+		// The page goes on to another before it finished: loading again.
+		events.emit("loading");
+		await Bun.sleep(30);
+		events.emit("complete");
+		events.set("complete");
+		expect(await done).toBe("complete");
+	});
 });
 
 /** A tab and its pages, as the fake Chrome shows them. */

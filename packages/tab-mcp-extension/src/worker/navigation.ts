@@ -64,6 +64,15 @@ const message = (error: unknown) =>
  * loaded: status `complete` after `loading`. A navigation that has not
  * started loading `quietMs` after `start` resolved, the tab being complete,
  * counts as done. Rejects with `start`'s error, or when `signal` aborts.
+ *
+ * No order of events and status reads loses a finished load: a status read
+ * answers what the tab was when it was asked, so it can be older than an
+ * event that came before its answer (a `complete` ignored while no load
+ * had been seen to start, then a `loading` read that says one has). So the
+ * read made `quietMs` after the first one decides in every case, a load
+ * seen or not: it is asked after every event before the first read's
+ * answer, and `complete` then is done. What comes after it, the events
+ * show.
  */
 export function waitForLoad(
 	events: TabEvents,
@@ -112,10 +121,10 @@ export function waitForLoad(
 				if (status === "loading") started = true;
 				timers.push(
 					setTimeout(async () => {
-						if (started || done) return;
+						if (done) return;
 						const now = await events.status(tabId);
 						if (now === undefined) finish("closed");
-						else if (!started && now === "complete") finish("complete");
+						else if (now === "complete") finish("complete");
 					}, quietMs),
 				);
 			},
