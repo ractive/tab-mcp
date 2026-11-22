@@ -28,8 +28,7 @@ You only need the install:
 npm install @ractive-ch/tab-mcp-client
 ```
 
-Then point your coding agent (Claude Code, Codex or another) at the guide in the package.
-That's the whole tutorial:
+Then tell your coding agent (Claude Code, Codex or another):
 
 ```text
 Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to this app.
@@ -195,7 +194,7 @@ written for the native API behaves differently here:
   mirrored tool, and AI apps never see it. A document of a listed origin can run the
   tool, and the library does not ask it ([who asks](#who-asks-before-a-tool-that-asks-runs)).
   A tool that asks, with an `exposedTo` naming other origins, on a page without
-  `onConfirm` gets a console warning once.
+  `onConfirm` gets a console warning once, when it is registered with WebMCP.
 
 An already aborted `signal` rejects with its reason and registers nothing, as in the
 draft.
@@ -228,10 +227,17 @@ trial token that a script adds later counts for a `TabMcp` made after it.
 #### Who asks before a tool that asks runs
 
 A "tool that asks" is one marked `consequentialHint` (for WebMCP calls also one marked
-only `destructiveHint`). Whether anyone asks before it runs, and who, depends on the
-caller (DEC-215): the page asks an AI app through the relay, the tab-mcp browser
-extension asks for the calls it vouches for, and for any other WebMCP call the library
-asks no one; only the page's `onConfirm`, or the caller itself, can. Every WebMCP call that the
+only `destructiveHint`). Whether the user is asked before it runs, and by whom, depends
+on the caller (DEC-215):
+
+- an AI app through the relay, or the site's own assistant on a served port: the page
+  asks the user (`onConfirm`, else the library's dialog), unless the user already
+  allowed that tool for that AI app ("Always allow", [below](#tools-that-run-without-asking));
+- a WebMCP call the tab-mcp browser extension vouched for: the extension asked the user;
+- any other WebMCP call: the library asks no one; only the page's `onConfirm`, in code,
+  or the caller itself can.
+
+The table has the details. Every WebMCP call that the
 tab-mcp browser extension did not vouch for reaches the page as
 `client: { kind: "webmcp" }`, whoever made it: the page cannot tell the last three rows
 apart.
@@ -264,7 +270,8 @@ tool away:
   unasked. A document of such an origin lists and runs the tool (Chrome 156). With
   `webmcp: true` the library warns in the console, once per tool, about a tool that asks
   whose `exposedTo` names other origins on a page without `onConfirm` (in React: the
-  provider without one).
+  provider without one), when the browser accepted the registration. It is decided then:
+  an `onConfirm` removed later is not caught.
 
 None of these stops an agent that drives the tab from clicking the page's own controls,
 which ask nothing either.

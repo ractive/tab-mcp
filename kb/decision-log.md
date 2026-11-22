@@ -5100,12 +5100,13 @@ keeps a tool from all three kinds.
   changelog under Breaking.
 - **Added later (after 0.21.0-rc.1):** a console warning, once per tool, from the
   WebMCP mirror for a tool that asks whose `exposedTo` names other origins, on a page
-  without `onConfirm` (React's provider counts only the page's own handler): a page
+  without `onConfirm` (React's provider counts only the page's own handler), given once
+  the browser accepted the registration and decided then: a page
   that set `exposedTo` lost a real check with the upgrade, and nothing said so at run
   time. No warning for a tool that asks and is mirrored without `exposedTo`, though
-  another extension can call it too: that is every page with `webmcp: true` and such a
-  tool, the behaviour this entry chose, so it would warn on almost every page and
-  name nothing to do short of leaving WebMCP.
+  another extension can call it too: it would be noise on almost every page with
+  `webmcp: true` and such a tool, for the behaviour this entry chose; the remedy there
+  is the same (`onConfirm` in code, or `callers`).
 
 ## DEC-216: The agent skill ships inside the client's npm package (owner)
 

@@ -58,8 +58,8 @@ const HINTS = [
  * (`trustExtension`, and `onConfirm` for the warning below), `version` the
  * library's. A tool that asks, mirrored with an `exposedTo` that names
  * other origins on a page without `onConfirm`, is warned about once per
- * name: documents of those origins can run it, and the library asks no
- * WebMCP caller (DEC-215). The extension's state is `mcp.extension`, defined
+ * name (`warnUnasked`): documents of those origins can run it, and the
+ * library asks no WebMCP caller (DEC-215). The extension's state is `mcp.extension`, defined
  * here on the instance (the core only declares it, for its bytes), and
  * `extensionchange` is sent here.
  */
@@ -99,6 +99,42 @@ export function mirror(
 	const mirrors = new Map<RegisteredTool, AbortController>();
 	const warned = new Set<string>();
 	const unasked = new Set<string>();
+	/**
+	 * The warning about a tool that asks with `exposedTo` (DEC-215), once its
+	 * native registration succeeded (so Chrome accepted every origin), once
+	 * per name. Decided then: a handler the page removes later is not
+	 * caught. Never throws, whatever `exposedTo` holds.
+	 */
+	const warnUnasked = (tool: RegisteredTool, asks: boolean | undefined) => {
+		try {
+			// React's provider always passes a handler; `own` says whether the
+			// page gave one.
+			const ask = options.onConfirm as { own?: boolean } | undefined;
+			const page = globalThis.document?.location?.origin;
+			const others = (
+				Array.isArray(tool.exposedTo) ? tool.exposedTo : []
+			).filter((entry: unknown) => {
+				try {
+					return new URL(String(entry)).origin !== page;
+				} catch {
+					return false; // the browser refuses it anyway
+				}
+			});
+			if (
+				asks !== true ||
+				others.length === 0 ||
+				(ask && ask.own !== false) ||
+				unasked.has(tool.name)
+			)
+				return;
+			unasked.add(tool.name);
+			console.warn(
+				`tab-mcp: ${tool.name} asks before it runs, but documents of ${others.join(", ")} (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.`,
+			);
+		} catch {
+			// a warning never stops the mirror
+		}
+	};
 	const sync = (): void => {
 		for (const [tool, controller] of mirrors) {
 			if (registry.get(tool.name) === tool) continue;
@@ -111,29 +147,6 @@ export function mirror(
 				annotations.consequentialHint ?? annotations.destructiveHint;
 			// The one place of the rule for WebMCP (the relay and a port: `toolsFor`).
 			if (mirrors.has(tool) || !(callers?.includes("webmcp") ?? true)) continue;
-			// React's provider always passes a handler; `own` says whether the
-			// page gave one.
-			const ask = options.onConfirm as { own?: boolean } | undefined;
-			const others = tool.exposedTo?.filter((entry) => {
-				try {
-					return (
-						new URL(entry).origin !== globalThis.document?.location?.origin
-					);
-				} catch {
-					return false; // the browser refuses it anyway
-				}
-			});
-			if (
-				consequential === true &&
-				others?.length &&
-				!(ask && ask.own !== false) &&
-				!unasked.has(tool.name)
-			) {
-				unasked.add(tool.name);
-				console.warn(
-					`tab-mcp: ${tool.name} asks before it runs, but documents of ${others.join(", ")} (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.`,
-				);
-			}
 			const controller = new AbortController();
 			mirrors.set(tool, controller);
 			const hints: Record<string, boolean | undefined> = {
@@ -169,6 +182,9 @@ export function mirror(
 							{ signal, exposedTo: tool.exposedTo },
 						),
 				)
+				.then(() => {
+					if (!signal.aborted) warnUnasked(tool, consequential);
+				})
 				.catch((error: unknown) => {
 					if (signal.aborted) return; // unmirrored meanwhile
 					if (warned.has(tool.name)) return;

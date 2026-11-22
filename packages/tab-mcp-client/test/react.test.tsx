@@ -867,9 +867,14 @@ test("the provider without the page's onConfirm warns about a tool that asks wit
 	const g = globalThis as Record<string, unknown>;
 	const savedDocument = g["Document"];
 	const Doc = window.Document as unknown as { prototype: object };
+	const registered: string[] = [];
 	Object.defineProperty(Doc.prototype, "modelContext", {
 		configurable: true,
-		get: () => ({ registerTool: () => {} }),
+		get: () => ({
+			registerTool: (tool: { name: string }) => {
+				registered.push(tool.name);
+			},
+		}),
 	});
 	g["Document"] = Doc;
 	const warned: string[] = [];
@@ -913,9 +918,13 @@ test("the provider without the page's onConfirm warns about a tool that asks wit
 				<Probe />
 			</TabMcpProvider>,
 		);
+		// Mirrored by the second provider, and the step after the registration
+		// (where the warning would be) has run.
+		await until(() => registered.length === 2);
 		await act(async () => {
-			await Bun.sleep(50);
+			await Bun.sleep(5);
 		});
+		expect(registered).toEqual(["clear", "clear"]);
 		expect(exposed()).toEqual([]);
 	} finally {
 		console.warn = quiet;
