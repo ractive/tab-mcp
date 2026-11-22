@@ -425,6 +425,10 @@ describe.skipIf(chrome === undefined)("the code field in Chrome", () => {
 			),
 		).toEqual({ enhanced: false, boxes: "none", maxlength: "12" });
 		await page.eval(`${FIELD}.focus()`);
+		// The plain input keeps its own caret.
+		expect(
+			await page.eval<string>(`getComputedStyle(${FIELD}).caretColor`),
+		).not.toBe("rgba(0, 0, 0, 0)");
 		const typed = `${code.slice(0, 4).toLowerCase()} - ${code.slice(5).toLowerCase()}`;
 		await page.send("Input.insertText", { text: typed });
 		expect((await field(page)).value).toBe(typed);
@@ -489,6 +493,24 @@ function geometry(page: Page): Promise<{
 }
 
 describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
+	test("the box marks the caret, so the input's own caret is hidden; one box is marked when empty, full and with a selection", async () => {
+		const page = await openPairingPage();
+		expect(
+			await page.eval<string>(`getComputedStyle(${FIELD}).caretColor`),
+		).toBe("rgba(0, 0, 0, 0)");
+		expect((await geometry(page)).at).toEqual([0]);
+		await typeKeys(page, "nhnxmnmh");
+		expect((await geometry(page)).at).toEqual([8]);
+		await caretAt(page, 3);
+		await Bun.sleep(100);
+		expect((await geometry(page)).at).toEqual([3]);
+		// A selection of several letters: the native highlight shows them, no box.
+		await clear(page);
+		await Bun.sleep(100);
+		expect((await geometry(page)).at).toEqual([]);
+		await page.close();
+	});
+
 	test("each letter is centred in its box, the dash between the groups, boxes roomier than the letters, at 320 px and at desktop width", async () => {
 		for (const width of [320, 1280]) {
 			const page = await openPairingPage({ width });

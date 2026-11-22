@@ -52,7 +52,7 @@ label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
 .code-field input { font: 1.5rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; width: calc(12ch + 2.4em + 1rem + 4px); max-width: 100%; padding: 0.4rem 0.5rem; border: 2px solid GrayText; border-radius: 0.4rem; background: Field; color: FieldText; }
 .code-boxes { display: none; }
 .code-field.enhanced { font: min(1.5rem, 5.9vw)/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.code-field.enhanced input { position: relative; font: inherit; letter-spacing: 1.5ch; width: calc(23.25ch + 2px); height: 1.8em; padding: 0 0 0 0.75ch; border: 0; background: transparent; }
+.code-field.enhanced input { position: relative; font: inherit; caret-color: transparent; letter-spacing: 1.5ch; width: calc(23.25ch + 2px); height: 1.8em; padding: 0 0 0 0.75ch; border: 0; background: transparent; }
 .code-field.enhanced input:focus-visible { outline: none; }
 .code-field.enhanced .code-boxes { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: 22.5ch; pointer-events: none; border-radius: 0.4rem; }
 .code-field.enhanced:has(input:focus-visible) .code-boxes { outline: 3px solid var(--accent); outline-offset: 2px; }
