@@ -489,9 +489,17 @@ main > .card ~ .settings {
 
 /* --- questions: a modal dialog over the panel ---------------------------------- */
 
+/*
+ * As wide as the panel's window, whether the panel behind scrolls or not:
+ * where scrollbars take room (Linux, Windows), `auto` follows the panel's
+ * scrollbar coming and going (the panel behind changing its height while a
+ * question waits), and the questions' text then wraps anew and moves their
+ * buttons between a look and a click. `100vw` counts the scrollbar in; the
+ * dialog covers it, over a panel that is inert and dimmed anyway.
+ */
 .questions {
 	box-sizing: border-box;
-	width: auto;
+	width: calc(100vw - 2 * var(--s3));
 	max-width: none;
 	max-height: calc(100% - 2 * var(--s3));
 	margin: var(--s3);

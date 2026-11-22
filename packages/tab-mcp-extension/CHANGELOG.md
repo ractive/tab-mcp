@@ -50,6 +50,15 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   itself when the site does (with access to all sites, say). Turning it on asks for the
   site again.
 
+### Fixed
+
+- **A question no longer moves under the pointer** where scrollbars take room (Linux,
+  Windows): when the panel behind the questions' dialog grew taller or shorter than its
+  window while a question waited, its scrollbar came or went, the dialog got narrower or
+  wider, and the question's text wrapped anew, moving its buttons; a click meant for
+  "Don't allow" could land beside it. The dialog is now as wide as the panel's window
+  either way.
+
 ## [0.3.1][extension-0.3.1] - 2026-11-21
 
 ### Fixed

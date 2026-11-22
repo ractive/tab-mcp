@@ -129,6 +129,10 @@ const alwaysHosts = (stack: Stack) =>
 		`[...document.querySelectorAll("#fill-always-list .always-host")].map((e) => e.textContent)`,
 	);
 
+/** A sign-in page of the AI app on a public name, the one "Always allow" is for. */
+const alwaysPage = (stack: Stack) =>
+	authorizeUrl(stack.oauth, stack.address, stack.oauth.alwaysClientId);
+
 /** Answer the newest question in the side panel. */
 async function answer(
 	stack: Stack,
@@ -229,6 +233,48 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(questionCount(0));
 		});
 
+		test("a question stays in place when the panel behind it scrolls or stops scrolling (classic scrollbars)", async () => {
+			// Scrollbars that take room, as on Linux and Windows (macOS lays
+			// them over the page): the panel's page behind the dialog getting
+			// taller than the panel, or shorter, adds or removes one. Its width
+			// must not change the dialog's, or a question's buttons move between
+			// a look and a click (CI, 2026-11-22).
+			await stack.panel.eval(
+				`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-scrollbars", textContent: "::-webkit-scrollbar { width: 15px; height: 15px; } ::-webkit-scrollbar-thumb { background: #888; }" }))`,
+			);
+			const { url } = await authorizeUrl(stack.oauth, stack.address);
+			const page = await stack.browser.newPage(url);
+			try {
+				await stack.panel.waitFor(questionCount(1));
+				const place = () =>
+					stack.panel.eval<string>(
+						`(() => { const b = [...document.querySelectorAll('[data-question] button[data-answer="deny"]')].at(-1).getBoundingClientRect(); return [document.getElementById("questions").clientWidth, b.left, b.top, b.width].map(Math.round).join(); })()`,
+					);
+				const scrolls = () =>
+					stack.panel.eval<boolean>(
+						`document.documentElement.scrollHeight > innerHeight`,
+					);
+				// The page behind taller than the panel: it scrolls.
+				await stack.panel.eval(
+					`document.body.append(Object.assign(document.createElement("div"), { id: "e2e-tall", style: "height: 2000px" }))`,
+				);
+				expect(await scrolls()).toBe(true);
+				const scrolling = await place();
+				// Nothing behind but the dialog: it does not.
+				await stack.panel.eval(
+					`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-short", textContent: "body *:not(:has(#questions), #questions, #questions *) { display: none !important; }" }))`,
+				);
+				expect(await scrolls()).toBe(false);
+				expect(await place()).toBe(scrolling);
+			} finally {
+				await stack.panel.eval(
+					`for (const id of ["e2e-tall", "e2e-short", "e2e-scrollbars"]) document.getElementById(id)?.remove()`,
+				);
+				await page.close();
+				await stack.panel.waitFor(questionCount(0));
+			}
+		});
+
 		test("Don't allow fills in nothing, and typing the code by hand pairs as before", async () => {
 			const { url, provider, transport } = await authorizeUrl(
 				stack.oauth,
@@ -289,66 +335,92 @@ describe.skipIf(chrome === undefined)(
 
 		test("Always allow (DEC-213): the same host's next pages are filled in without a question, with a notice; the fourth in ten minutes asks", async () => {
 			const host = stack.oauth.alwaysHost;
-			const always = () =>
-				authorizeUrl(stack.oauth, stack.address, stack.oauth.alwaysClientId);
-			const first = await always();
-			let callback = stack.oauth.nextCallback();
-			let page = await stack.browser.newPage(first.url);
-			await stack.panel.waitFor(questionCount(1));
-			expect(await questionButtons(stack)).toEqual([
-				"Don't allow",
-				"Allow once",
-				"Always allow",
-			]);
-			const [card] = await questions(stack);
-			expect(card).toContain(
-				`Always allow: from now on tab-mcp fills in the code for ${host} without asking`,
-			);
-			await answer(stack, "site");
-			expect((await callback).get("code")).toBeString();
-			await page.close().catch(() => {});
-			await stack.panel.waitFor(questionCount(0));
-			expect(await alwaysHosts(stack)).toEqual([host]);
-			const notice = `Filled in the code for ${ALWAYS_CLIENT_NAME} (${host}).`;
-			const filledNotifications = () =>
-				stack.panel.eval<number>(
-					`chrome.notifications.getAll().then((all) => Object.keys(all).filter((id) => id.startsWith("filled:")).length)`,
+			const opened: Page[] = [];
+			const open = async (url: string) => {
+				const page = await stack.browser.newPage(url);
+				opened.push(page);
+				return page;
+			};
+			try {
+				const first = await alwaysPage(stack);
+				let callback = stack.oauth.nextCallback();
+				let page = await open(first.url);
+				await stack.panel.waitFor(questionCount(1));
+				expect(await questionButtons(stack)).toEqual([
+					"Don't allow",
+					"Allow once",
+					"Always allow",
+				]);
+				const [card] = await questions(stack);
+				expect(card).toContain(
+					`Always allow: from now on tab-mcp fills in the code for ${host} without asking`,
 				);
-			const before = await filledNotifications();
-			for (let i = 1; i <= 3; i++) {
-				const { url } = await always();
-				callback = stack.oauth.nextCallback();
-				page = await stack.browser.newPage(url);
-				// Filled in and sent: no question on the way.
+				await answer(stack, "site");
 				expect((await callback).get("code")).toBeString();
-				expect(await questions(stack)).toEqual([]);
 				await page.close().catch(() => {});
-				expect(
-					await stack.panel.waitFor<string>(
-						`!document.getElementById("fill-notice").hidden && document.getElementById("fill-notice").textContent`,
-					),
-				).toBe(notice);
-				await stack.panel.waitFor(
-					`chrome.notifications.getAll().then((all) => Object.keys(all).filter((id) => id.startsWith("filled:")).length >= ${before + i})`,
-				);
+				await stack.panel.waitFor(questionCount(0));
+				expect(await alwaysHosts(stack)).toEqual([host]);
+				const notice = `Filled in the code for ${ALWAYS_CLIENT_NAME} (${host}).`;
+				const filledNotifications = () =>
+					stack.panel.eval<number>(
+						`chrome.notifications.getAll().then((all) => Object.keys(all).filter((id) => id.startsWith("filled:")).length)`,
+					);
+				const before = await filledNotifications();
+				for (let i = 1; i <= 3; i++) {
+					const { url } = await alwaysPage(stack);
+					callback = stack.oauth.nextCallback();
+					page = await open(url);
+					// Filled in and sent: no question on the way.
+					expect((await callback).get("code")).toBeString();
+					expect(await questions(stack)).toEqual([]);
+					await page.close().catch(() => {});
+					expect(
+						await stack.panel.waitFor<string>(
+							`!document.getElementById("fill-notice").hidden && document.getElementById("fill-notice").textContent`,
+						),
+					).toBe(notice);
+					await stack.panel.waitFor(
+						`chrome.notifications.getAll().then((all) => Object.keys(all).filter((id) => id.startsWith("filled:")).length >= ${before + i})`,
+					);
+				}
+				// The brake: the fourth without a question in ten minutes asks,
+				// with all three answers.
+				const fourth = await alwaysPage(stack);
+				page = await open(fourth.url);
+				await stack.panel.waitFor(questionCount(1));
+				expect(await questionButtons(stack)).toEqual([
+					"Don't allow",
+					"Allow once",
+					"Always allow",
+				]);
+				await answer(stack, "deny");
+				await stack.panel.waitFor(questionCount(0));
+			} finally {
+				// A page left open keeps its question, and the dialog over the
+				// panel: the next test would click into it.
+				for (const page of opened) await page.close().catch(() => {});
 			}
-			// The brake: the fourth without a question in ten minutes asks,
-			// with all three answers.
-			const fourth = await always();
-			page = await stack.browser.newPage(fourth.url);
-			await stack.panel.waitFor(questionCount(1));
-			expect(await questionButtons(stack)).toEqual([
-				"Don't allow",
-				"Allow once",
-				"Always allow",
-			]);
-			await answer(stack, "deny");
-			await stack.panel.waitFor(questionCount(0));
-			await page.close();
 		});
 
 		test("removing the host under the switch: its next page asks again", async () => {
 			const host = stack.oauth.alwaysHost;
+			await stack.panel.waitFor(questionCount(0));
+			// On its own feet: the host is remembered here if the test before
+			// did not get that far.
+			if (!(await alwaysHosts(stack)).includes(host)) {
+				const { url } = await alwaysPage(stack);
+				const callback = stack.oauth.nextCallback();
+				const page = await stack.browser.newPage(url);
+				try {
+					await stack.panel.waitFor(questionCount(1));
+					await answer(stack, "site");
+					expect((await callback).get("code")).toBeString();
+				} finally {
+					await page.close().catch(() => {});
+				}
+				await stack.panel.waitFor(questionCount(0));
+				expect(await alwaysHosts(stack)).toEqual([host]);
+			}
 			await stack.panel.eval(`document.getElementById("add-app").click()`);
 			await stack.panel.waitFor(
 				`document.getElementById("pairing").hidden === false`,
@@ -358,14 +430,13 @@ describe.skipIf(chrome === undefined)(
 				`document.getElementById("fill-always").hidden && document.querySelectorAll("#fill-always-list li").length === 0`,
 			);
 			await stack.panel.eval(`document.getElementById("pair-done").click()`);
-			const { url } = await authorizeUrl(
-				stack.oauth,
-				stack.address,
-				stack.oauth.alwaysClientId,
-			);
+			const { url } = await alwaysPage(stack);
 			const page = await stack.browser.newPage(url);
-			await stack.panel.waitFor(questionCount(1));
-			await page.close();
+			try {
+				await stack.panel.waitFor(questionCount(1));
+			} finally {
+				await page.close();
+			}
 			await stack.panel.waitFor(questionCount(0));
 		});
 
