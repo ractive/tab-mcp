@@ -3,10 +3,9 @@
  * open a page, evaluate, click and type. Uses Bun's WebSocket; no Playwright.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import type { Subprocess } from "bun";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 
 /**
  * The profiles of the Chromes this process started and has not closed yet.
@@ -137,7 +136,7 @@ export class Browser {
 	}
 
 	static async launch(binary: string): Promise<Browser> {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-chrome-"));
+		const profile = browserTempDir("chrome-");
 		track(profile);
 		const proc = Bun.spawn(
 			[

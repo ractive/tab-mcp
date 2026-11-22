@@ -16,6 +16,7 @@ import {
 	sign as signWith,
 } from "node:crypto";
 import { join } from "node:path";
+import { holdBrowserLock } from "../browser-lock.ts";
 import {
 	Browser,
 	findChromeForTesting,
@@ -178,6 +179,8 @@ const inMain = (call: string) =>
 	`(() => { ${probeSource}; return ${call}; })()`;
 
 async function main(): Promise<void> {
+	// One browser run per machine (test/browser-lock.ts).
+	await holdBrowserLock({ filter: "spike.ts" });
 	const binary = findChromeForTesting();
 	if (binary === undefined)
 		throw new Error("no Chrome for Testing; set CHROME_PATH");

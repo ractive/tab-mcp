@@ -111,35 +111,41 @@ describe("the commands in the help (dialog design, review of PR 34)", () => {
 		},
 	];
 
-	test("each shell here passes the address in a command on as it is", () => {
-		const addresses = [
-			"https://relay.example/s/abc234/mcp",
-			"http://[::1]:8080/s/test/mcp",
-			"http://[2001:db8::1]/s/x/mcp",
-			"https://relay.example/~x/s/x/mcp",
-			"https://relay.example/s/a.b_c-d/mcp",
-		];
-		const words = addresses.map((a) => commandAddress(a) ?? "");
-		let ran = 0;
-		for (const { name, argv, print } of shells) {
-			const [program] = argv;
-			if (program === undefined || Bun.which(program) === null) continue;
-			const run = Bun.spawnSync([...argv, `${print} ${words.join(" ")}`], {
-				stderr: "pipe",
-			});
-			expect({
-				name,
-				out: run.stdout.toString().replaceAll("\r\n", "\n"),
-				err: run.stderr.toString(),
-			}).toEqual({
-				name,
-				out: addresses.map((a) => `${new URL(a).href}\n`).join(""),
-				err: "",
-			});
-			ran++;
-		}
-		// sh at least, on every computer the tests run on.
-		expect(ran).toBeGreaterThan(0);
+	const addresses = [
+		"https://relay.example/s/abc234/mcp",
+		"http://[::1]:8080/s/test/mcp",
+		"http://[2001:db8::1]/s/x/mcp",
+		"https://relay.example/~x/s/x/mcp",
+		"https://relay.example/s/a.b_c-d/mcp",
+	];
+	const installed = (argv: string[]) =>
+		argv[0] !== undefined && Bun.which(argv[0]) !== null;
+
+	// One test per shell, each started once for all the addresses, with time
+	// for a cold start: PowerShell took more than Bun's 5 s on CI (run
+	// 44989682575).
+	for (const { name, argv, print } of shells)
+		test.skipIf(!installed(argv))(
+			`${name} passes the address in a command on as it is`,
+			() => {
+				const words = addresses.map((a) => commandAddress(a) ?? "");
+				const run = Bun.spawnSync([...argv, `${print} ${words.join(" ")}`], {
+					stderr: "pipe",
+				});
+				expect({
+					out: run.stdout.toString().replaceAll("\r\n", "\n"),
+					err: run.stderr.toString(),
+				}).toEqual({
+					out: addresses.map((a) => `${new URL(a).href}\n`).join(""),
+					err: "",
+				});
+			},
+			30_000,
+		);
+
+	test("sh at least runs here, on every computer the tests run on", () => {
+		expect(shells.filter((s) => installed(s.argv)).length).toBeGreaterThan(0);
+		expect(installed(["sh"])).toBe(true);
 	});
 
 	test("Codex turns on its MCP 2026-07-28 feature first, one command per line", () => {

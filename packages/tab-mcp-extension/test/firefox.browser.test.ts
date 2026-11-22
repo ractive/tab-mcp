@@ -19,8 +19,7 @@ import {
 	setDefaultTimeout,
 	test,
 } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import {
 	Client,
@@ -31,6 +30,7 @@ import {
 	type TestRelay,
 	tokenFor,
 } from "@ractive-ch/tab-mcp/testing";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
@@ -150,7 +150,7 @@ async function start(
 	page: string,
 	prefs: Record<string, string | number | boolean> = {},
 ): Promise<Stack> {
-	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-ext-"));
+	const dir = browserTempDir("firefox-build-");
 	const relay = startTestRelay();
 	const server = serve();
 	let firefox: Firefox | undefined;

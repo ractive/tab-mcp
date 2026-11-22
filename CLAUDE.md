@@ -131,9 +131,12 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
   serve`), the relay's pages, server and protocol (`code-field calculator page
   react-todo`), the test pages and harnesses (the files that use them). It
   fails when a browser it needs is missing; `--no-firefox` or `--no-chrome`
-  leaves those files out and says so. Never several browser runs at once on one
-  machine. CI runs both on every pull request; its required check `verify`
-  needs both.
+  leaves those files out and says so. One browser run per machine: a second
+  run (also `TAB_MCP_BROWSER=1 bun test <file>`) says whose run holds the lock
+  and waits for it; `--no-wait` fails instead. Each run first stops the test
+  browsers of killed runs and removes their folders (`bun run test:browser
+  --sweep --dry-run` shows what). CI runs both on every pull request; its
+  required check `verify` needs both.
 - `bun run fix` to format. Type check per workspace with `bun check -p <dir>`
   (no script may be named `check`: it shadows `bun check`).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency,
