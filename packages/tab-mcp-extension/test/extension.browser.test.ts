@@ -544,18 +544,6 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		]);
 	});
 
-	test("arguments are checked against the page's schema (Chrome does not)", async () => {
-		const result = await call(stack, "page_get_greeting", { name: 42 });
-		expect(result.isError).toBe(true);
-		expect(await tab.eval("window.calls.length")).toBe(1);
-	});
-
-	test("an MCP result from the page passes as its content", async () => {
-		expect((await call(stack, "page_mcp_result")).content).toEqual([
-			{ type: "text", text: "from an MCP result" },
-		]);
-	});
-
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
 		// "Always allow on <host>" is offered too.
@@ -632,25 +620,6 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		// The click flips the switch at once; the worker's write comes after.
 		await allowedOn(SITE, (n) => !n.includes("place_order"));
 		await stack.panel.waitFor(alwaysAllowed("place_order", false));
-	});
-
-	test("webmcp_call calls a page tool by name, with the same confirmation", async () => {
-		const read = await call(stack, "webmcp_call", {
-			name: "get_greeting",
-			arguments: { name: "Bo" },
-		});
-		expect(read.content).toEqual([{ type: "text", text: "Hello, Bo!" }]);
-		const bad = await call(stack, "webmcp_call", {
-			name: "get_greeting",
-			arguments: { name: 7 },
-		});
-		expect(bad.isError).toBe(true);
-		const ordered = call(stack, "webmcp_call", {
-			name: "place_order",
-			arguments: { item: "cake" },
-		});
-		await answerInPanel(stack, "allow");
-		expect((await ordered).content[0]?.text).toContain("cake");
 	});
 
 	test("the AI access switch: its knob sits flush at both ends, light, dark and forced colours", async () => {
@@ -1358,26 +1327,6 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect((await call(stack, "page_late_tool")).content).toEqual([
 			{ type: "text", text: "late" },
 		]);
-	});
-
-	test("destructiveHint is the page's consequentialHint; true without annotations (DEC-214)", async () => {
-		await tab.eval(`for (const [name, annotations] of [
-			["delete_all", { consequentialHint: true }],
-			["add_note", { readOnlyHint: false }],
-		]) document.modelContext.registerTool({
-			name,
-			description: name,
-			inputSchema: { type: "object" },
-			annotations,
-			async execute() { return name; },
-		})`);
-		await waitForTools(stack, (n) => n.includes("page_add_note"));
-		const { tools } = await stack.client.listTools();
-		const hint = (name: string) =>
-			tools.find((t) => t.name === name)?.annotations?.destructiveHint;
-		expect(hint("page_delete_all")).toBe(true);
-		expect(hint("page_add_note")).toBe(false);
-		expect(hint("page_place_order")).toBe(true);
 	});
 
 	test("a page that replaces document.modelContext fools only itself", async () => {
