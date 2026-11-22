@@ -55,9 +55,10 @@ function readOwner(): LockOwner | undefined {
 /** How a waiting run names the holder. */
 export function describeOwner(owner: LockOwner): string {
 	const since = new Date(owner.since);
+	// In UTC: bun test runs in UTC, a shell in local time; one way for both.
 	const time = Number.isNaN(since.getTime())
 		? owner.since
-		: since.toTimeString().slice(0, 5);
+		: `${since.toISOString().slice(11, 16)} UTC`;
 	return `browser tests of PID ${owner.pid} in ${owner.worktree} running since ${time}${owner.filter ? ` (${owner.filter})` : ""}`;
 }
 
