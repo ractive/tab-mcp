@@ -204,6 +204,135 @@ describe("waiting for the load", () => {
 		expect(Date.now() - started).toBeLessThan(200);
 	});
 
+	/**
+	 * Status reads the test answers by hand, in the order they were asked:
+	 * `asked()` is how many, `answer(i, status)` answers read `i`.
+	 */
+	function heldReads(events: TabEvents) {
+		const held: ((status: string | undefined) => void)[] = [];
+		events.status = () =>
+			new Promise((resolve) => {
+				held.push(resolve);
+			});
+		return {
+			asked: () => held.length,
+			answer: (i: number, status: string | undefined) => held[i]?.(status),
+		};
+	}
+
+	/** Until `check` holds (at most a second). */
+	async function until(check: () => boolean): Promise<void> {
+		const end = Date.now() + 1_000;
+		while (!check()) {
+			if (Date.now() > end) throw new Error("never");
+			await Bun.sleep(1);
+		}
+	}
+
+	test("the next page's loading during the quiet read, which answers the old page's complete: not done until the next page is (review of PR 218)", async () => {
+		// The mirror of the race above: the navigation starts while the read
+		// is on its way, and the read answers the page about to be left.
+		const events = fakeEvents("complete");
+		const reads = heldReads(events);
+		let result: Loaded | undefined;
+		const done = waitForLoad(events, 1, async () => {}, {
+			signal: signal(),
+			timeoutMs: 1_000,
+			quietMs: 10,
+		}).then((r) => {
+			result = r;
+			return r;
+		});
+		await until(() => reads.asked() === 1);
+		reads.answer(0, "complete");
+		// The quiet read is asked; the next page starts loading; the read
+		// answers what it saw when asked: the old page, complete.
+		await until(() => reads.asked() === 2);
+		events.emit("loading");
+		reads.answer(1, "complete");
+		await Bun.sleep(30);
+		expect(result).toBeUndefined();
+		// The next page loads.
+		events.emit("complete");
+		expect(await done).toBe("complete");
+	});
+
+	test("a read that saw no event decides: complete after the quiet time, or loading and then the event", async () => {
+		const complete = fakeEvents("complete");
+		const first = heldReads(complete);
+		const done = settled(complete);
+		await until(() => first.asked() === 1);
+		first.answer(0, "complete");
+		await until(() => first.asked() === 2);
+		first.answer(1, "complete");
+		expect(await done).toBe("complete");
+		// A read that says loading, with no event in between, is taken: the
+		// load's complete comes as an event after it.
+		const loading = fakeEvents("loading");
+		const reads = heldReads(loading);
+		let result: Loaded | undefined;
+		const waiting = settled(loading).then((r) => {
+			result = r;
+			return r;
+		});
+		await until(() => reads.asked() === 1);
+		reads.answer(0, "loading");
+		await until(() => reads.asked() === 2);
+		reads.answer(1, "loading");
+		await Bun.sleep(30);
+		expect(result).toBeUndefined();
+		expect(reads.asked()).toBe(2);
+		loading.emit("complete");
+		expect(await waiting).toBe("complete");
+	});
+
+	test("a quiet read dropped for an event that came while it was out is made again, and that one decides", async () => {
+		const events = fakeEvents("complete");
+		const reads = heldReads(events);
+		const done = settled(events);
+		await until(() => reads.asked() === 1);
+		reads.answer(0, "complete");
+		// The quiet read is out; a `complete` comes (ignored: no load seen);
+		// the read answers the `loading` of when it was asked: dropped.
+		await until(() => reads.asked() === 2);
+		events.emit("complete");
+		reads.answer(1, "loading");
+		// The next read, with nothing in between, decides.
+		await until(() => reads.asked() === 3);
+		reads.answer(2, "complete");
+		expect(await done).toBe("complete");
+	});
+
+	test("one read at a time: a read that answers late keeps the next from being asked", async () => {
+		const events = fakeEvents("loading");
+		const reads = heldReads(events);
+		const done = settled(events);
+		await until(() => reads.asked() === 1);
+		// Well past the quiet time, the first still unanswered: no second.
+		await Bun.sleep(50);
+		expect(reads.asked()).toBe(1);
+		reads.answer(0, "complete");
+		await until(() => reads.asked() === 2);
+		reads.answer(1, "complete");
+		expect(await done).toBe("complete");
+	});
+
+	test("a read that answers after the wait ended does nothing: no result changed, no read after it", async () => {
+		const events = fakeEvents("loading");
+		const reads = heldReads(events);
+		const done = settled(events);
+		await until(() => reads.asked() === 1);
+		reads.answer(0, "loading");
+		await until(() => reads.asked() === 2);
+		// The tab goes while the quiet read is out.
+		events.remove();
+		expect(await done).toBe("closed");
+		reads.answer(1, "complete");
+		await Bun.sleep(30);
+		expect(reads.asked()).toBe(2);
+		expect(events.watching()).toBe(0);
+	});
+
 	/** A wait as after a page tool navigated: nothing to start, short limits. */
 	const settled = (events: TabEvents) =>
 		waitForLoad(events, 1, async () => {}, {

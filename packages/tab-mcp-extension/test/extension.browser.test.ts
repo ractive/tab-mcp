@@ -51,14 +51,20 @@ import {
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
-// The tests that wait for a page to load give 45 s, above the extension's
-// own limit, so that a load the extension gives up on fails with the
-// extension's answer: at the test's timeout Bun kills the block's Chrome,
-// and every test after it fails too, naming nothing.
-if (LOAD_TIMEOUT_MS + 10_000 > 45_000)
-	throw new Error(
-		"LOAD_TIMEOUT_MS grew: raise the 45_000 of the tests that wait for a load",
-	);
+// A test that waits for pages to load gives each of them the extension's
+// own limit and 15 s more: 45 s for one load, 75 s for two (back and
+// forward; reload and #part; a navigation and one more). So a load the
+// extension gives up on fails with the extension's answer: at the test's
+// timeout Bun kills the block's Chrome, and every test after it fails too,
+// naming nothing.
+for (const [loads, timeout] of [
+	[1, 45_000],
+	[2, 75_000],
+] as const)
+	if (loads * LOAD_TIMEOUT_MS + 15_000 > timeout)
+		throw new Error(
+			`LOAD_TIMEOUT_MS grew: raise the ${timeout} ms of the tests that wait for ${loads} load(s)`,
+		);
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
@@ -2107,7 +2113,7 @@ describe.skipIf(chrome === undefined)(
 				url: `${SITE}/webmcp.html`,
 			});
 			await noQuestion(stack);
-		}, 45_000);
+		}, 75_000);
 
 		test("reload stays and never asks; within the page (#part) it answers at once", async () => {
 			await stack.tab.eval("window.e2eMarker = 1");
@@ -2123,7 +2129,7 @@ describe.skipIf(chrome === undefined)(
 			});
 			expect(Date.now() - started).toBeLessThan(5_000);
 			await noQuestion(stack);
-		}, 45_000);
+		}, 75_000);
 	},
 );
 
@@ -2177,7 +2183,7 @@ describe.skipIf(chrome === undefined)(
 				(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
 					.structuredContent,
 			).toMatchObject({ url: `${OTHER}/webmcp.html` });
-		}, 45_000);
+		}, 75_000);
 	},
 );
 

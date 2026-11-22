@@ -13,12 +13,10 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Fixed
 
-- **A page tool that takes the tab to another page could take 30 seconds to answer.**
-  Sometimes the new page finished loading while the extension was still reading the
-  tab's state. The extension then missed it and waited for its 30 s limit before it
-  answered, with the page still "loading". It now looks at the tab again after a
-  second, so it answers as soon as the page has loaded, whatever the order of Chrome's
-  events.
+- **A page tool that takes the tab to another page could take 30 seconds to answer**
+  although the page had loaded, and then said it was still loading. The extension now
+  notices the finished load whichever of Chrome's two signals arrives first, and it
+  does not answer with the page the tab is about to leave.
 
 ## [0.3.2][extension-0.3.2] - 2026-11-22
 
