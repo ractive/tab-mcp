@@ -269,6 +269,45 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   70 to 64: 15 went with the moved tests, 9 came with the refused argument and
   `provideContext` in the page.
 
+## What changed (pull request 8)
+
+- **The client's browser files keep what only a browser shows** (the audit's 1.5 and
+  1.6). Six tests went, each because a unit test already fails without what it
+  showed; each unit test was run against a mutant first:
+  - page 3, a confirmation in a background tab: `ui.test.ts` "opened in a hidden tab"
+    (the hidden check in `confirm.ts` taken out). Its fake assumes how Chrome brings a
+    tab forward (visible and focused before `visibilitychange`); `ui.test.ts` says so.
+    Put back as a step it would cost 3.4 s, so only the hand check pins that order.
+  - webmcp 2, 3, 5 and 11: `webmcp.test.ts`. The mutants were the validator's
+    unmirror, the arguments check, the refusal's message, a throw's message, a cancel
+    while asked, and `webmcp` on by default.
+- **Three came back as steps** (review of pull request 221): their unit tests' fakes
+  assume what only the real browser shows.
+  - page 4, a second tab takes over, now with a step that the library's default
+    storage is the real `localStorage`: the page's other tabs read the secret, and a
+    reload keeps it (every unit test passes a MemoryStorage).
+  - webmcp 4: a call without `onConfirm` loads no confirmation chunk (the built
+    bundle).
+  - webmcp 7: aborting the signal given to Chrome's `registerTool()` removes the tool,
+    and the same name registers again at once (React's `useTool`).
+- **The MERGE rows are scenarios with steps**, their bodies unchanged:
+  - page 1 with 4 and the storage step; page 5 and 6: a page's own styles and the
+    dialogs.
+  - webmcp 1, 4, 6, 7, 8 and 10: the mirror as Chrome has it, the contract of the unit
+    tests' fake `ModelContext`.
+  - webmcp 9 (frames) and 12 (`exposedTo`) stay as they are.
+- **`step` is shared:** `test/step.ts` (tested in `scripts/step.test.ts`), imported by
+  the extension's and the client's browser tests alike.
+- **No network:** `@mcp-b/global` 6.0.3 is vendored in `packages/tab-mcp-client/test/vendor/`
+  (unchanged, MIT licence, the same SRI; `.gitattributes` keeps its bytes). Biome leaves
+  `test/vendor/` alone.
+- **The examples: declined, no example file changed.** The audit's MERGE rows for them
+  (react-todo with the calculator, and the client's serve 3 with the webmcp file) need
+  one Chrome across files, against the independence chosen in task 6: each file keeps
+  its own browser.
+- **Counts:** 18 tests down to 6, `expect()` calls from 108 to 93. Locally the two files
+  take 7.2 s instead of 11.5 s.
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
@@ -285,7 +324,8 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - [x] 6. The extension's browser tests merged, one browser per build and flag
 - [x] 7. Firefox: a smoke block on every change, the full file when the extension
   changes and nightly
-- [ ] 8. The client's and the examples' browser files trimmed
+- [x] 8. The client's browser files trimmed; the examples' declined (one Chrome across
+  files, against task 6's independence), no example file changed
 - [x] 9. The canary and the full browser run in `browser-full.yml` (path filter,
   nightly, not required); the CI split itself is done in pull request 1
 

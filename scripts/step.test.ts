@@ -1,11 +1,11 @@
 /**
- * `step()` of the browser tests' harness (test/browser.ts), without a
+ * `step()` of the browser tests (test/step.ts), without a
  * browser: a failing step is named, also for a thrown value that is no
  * `Error`, and a step past its deadline fails as such.
  */
 
 import { expect, test } from "bun:test";
-import { step } from "./browser.ts";
+import { step } from "../test/step.ts";
 
 test("a failing step is named, for an Error and for any other thrown value", async () => {
 	await expect(

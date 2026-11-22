@@ -27,13 +27,13 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
+import { step } from "../../../test/step.ts";
 import { build } from "../scripts/build.ts";
 import {
 	Browser,
 	chromeMajor,
 	findChromeForTesting,
 	type Page,
-	step,
 } from "./browser.ts";
 import {
 	ALWAYS_CLIENT_NAME,

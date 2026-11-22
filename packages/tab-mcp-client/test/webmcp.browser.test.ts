@@ -2,7 +2,13 @@
  * The WebMCP mirror (iteration 25) in Chrome for Testing with
  * `--enable-features=WebMCP`: the library, built as for a page, on pages
  * served through the DevTools Protocol on https://webmcp.test (as in
- * `test/webmcp-spike/`: no server, no network but the polyfill's download).
+ * `test/webmcp-spike/`: no server, no network; `@mcp-b/global` from
+ * `test/vendor/`). Only the contract the unit tests' fake native
+ * `ModelContext` stands for (webmcp.test.ts): what Chrome lists and hands an
+ * agent, its duplicate rule, a polyfill over it, a call without `onConfirm`
+ * (no confirmation chunk loaded: the built bundle), the abort of
+ * `registerTool()`'s signal, `allow="tools"` in a frame,
+ * and `exposedTo` across origins (iteration 50).
  * An agent's calls go through the native `executeTool()`. Needs Chrome for
  * Testing 156 or newer (`CHROME_PATH`, or the pinned one in Puppeteer's
  * cache, test/browsers.ts): required in CI, skipped elsewhere without it.
@@ -10,6 +16,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import { browserTests } from "../../../test/browser-gate.ts";
+import { step } from "../../../test/step.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -29,12 +36,17 @@ if (browserTests && chrome === undefined && process.env["CI"])
 
 const SITE = "https://webmcp.test";
 const OTHER = "https://other.test";
+/** Served from the vendored copy (test/vendor/): no download. */
 const POLYFILL = "https://unpkg.com/@mcp-b/global@6.0.3/dist/index.iife.js";
+const VENDORED = join(
+	import.meta.dir,
+	"vendor/mcp-b-global-6.0.3/index.iife.js",
+);
 const POLYFILL_SRI =
 	"sha384-MjmUqfRCVKBDYdxv/Rlj1fc1tRkKQdtCI04fbUUMgSL8uJf1ydjQep7E4G43bnQn";
 
 /**
- * The test page: the library with `webmcp: true` (`?off`: without), its
+ * The test page: the library with `webmcp: true`, its
  * tools, and what the harness reads. `?native=<name>` registers a tool of
  * that name natively before the library does; `?poly` loads `@mcp-b/global`
  * first; `?default` has no `onConfirm` (the library's own behaviour). `agent()`
@@ -61,7 +73,7 @@ const mcp = new TabMcp({
 	server: { name: "webmcp-test", version: "1.0.0" },
 	storage: null,
 	alwaysAllow: true,
-	webmcp: !q.has("off"),
+	webmcp: true,
 	...(q.has("default") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
 });
 mcp.addEventListener("toolcall", (e) => calls.push({ start: e.detail.tool, client: e.detail.client }));
@@ -146,7 +158,7 @@ let polyfill: Uint8Array | undefined;
 async function serve(url: string): Promise<Served> {
 	const { origin, pathname, searchParams } = new URL(url);
 	if (url === POLYFILL) {
-		polyfill ??= new Uint8Array(await (await fetch(POLYFILL)).arrayBuffer());
+		polyfill ??= await Bun.file(VENDORED).bytes();
 		return {
 			status: 200,
 			headers: {
@@ -238,281 +250,235 @@ async function open(query = ""): Promise<Page> {
 const on = test.skipIf(chrome === undefined);
 
 on(
-	"getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
+	"the mirror as Chrome has it: what getTools() lists, what an agent reads, a native duplicate, @mcp-b/global over native WebMCP, a call without onConfirm, unmirroring and registering again (DEC-209, DEC-215, WM 4-6)",
 	async () => {
-		const page = await open();
-		try {
-			expect(await page.eval("nativeNames()")).toEqual([
-				"add",
-				"refused",
-				"wipe",
-				"wipe_named",
-			]);
-			expect(
-				await page.eval(
-					`native.getTools().then((ts) => { const t = ts.find((x) => x.name === "add"); return { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }; })`,
-				),
-			).toEqual({
-				title: "Add",
-				description: "Adds two numbers",
-				inputSchema: {
-					type: "object",
-					properties: { a: { type: "number" }, b: { type: "number" } },
-					required: ["a", "b"],
-				},
-				annotations: {
-					consequentialHint: false,
-					debugging: false,
-					readOnlyHint: true,
-					untrustedContentHint: false,
-				},
-			});
-			// The page is not marked: <html data-tab-mcp-webmcp> is gone.
-			expect(
-				await page.eval(
-					`document.documentElement.hasAttribute("data-tab-mcp-webmcp")`,
-				),
-			).toBe(false);
-			expect(await page.eval("mcp.tools")).toEqual([
-				"add",
-				"wipe",
-				"wipe_named",
-				"hidden",
-				"refused",
-			]);
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on(
-	"a call runs; the first one loads the validator, which unmirrors the refused tool",
-	async () => {
-		const page = await open();
-		try {
-			expect(await page.eval(`agent("add", { a: 1, b: 2 })`)).toEqual({
-				ok: true,
-				value: '{"sum":3,"caller":"webmcp"}',
-			});
-			expect(await page.eval("calls")).toEqual([
-				{ start: "add", client: { kind: "webmcp" } },
-				{ end: "add", outcome: "ok", client: { kind: "webmcp" } },
-			]);
-			expect(await page.eval("nativeNames()")).toEqual([
-				"add",
-				"wipe",
-				"wipe_named",
-			]);
-			expect(await page.eval("mcp.tools")).not.toContain("refused");
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on(
-	"a bad argument, Don't allow and a throw reach the agent as a readable error (DEC-120)",
-	async () => {
-		const page = await open();
-		try {
-			await page.eval(
-				`mcp.registerTool({ name: "broken", description: "Always fails", execute: () => { throw new Error("Out of paper"); } })`,
-			);
-			await Bun.sleep(20);
-			const bad = await page.eval<{ ok: boolean; value: string }>(
-				`agent("add", { a: "one", b: 2 })`,
-			);
-			expect(bad.ok).toBe(true);
-			expect(JSON.parse(bad.value).error).toStartWith(
-				"Input validation error: Invalid arguments for tool add: ",
-			);
-			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
-				ok: true,
-				value: '{"error":"The user did not allow wipe_named to run."}',
-			});
-			expect(await page.eval("asked")).toEqual([{ kind: "webmcp" }]);
-			expect(await page.eval(`agent("broken", {})`)).toEqual({
-				ok: true,
-				value: '{"error":"Out of paper"}',
-			});
-			expect(
-				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
-			).toEqual(["error", "declined", "error"]);
-			await page.eval("answer = true");
-			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
-				ok: true,
-				value: "wiped",
-			});
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on(
-	"without onConfirm a tool that asks runs for an agent in the browser: no dialog, the confirmation's chunk not loaded (DEC-215)",
-	async () => {
-		const page = await open("?default");
-		try {
-			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
-				ok: true,
-				value: "wiped",
-			});
-			expect(await page.eval(`agent("wipe", {})`)).toEqual({
-				ok: true,
-				value: "wiped",
-			});
-			expect(await page.eval(`document.querySelector("dialog") === null`)).toBe(
-				true,
-			);
-			expect(
-				await page.eval(
-					`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.startsWith("/lib/confirm-"))`,
-				),
-			).toEqual([]);
-			// The page's record still lists the calls, with their caller.
-			expect(await page.eval("calls")).toEqual([
-				{ start: "wipe_named", client: { kind: "webmcp" } },
-				{ end: "wipe_named", outcome: "ok", client: { kind: "webmcp" } },
-				{ start: "wipe", client: { kind: "webmcp" } },
-				{ end: "wipe", outcome: "ok", client: { kind: "webmcp" } },
-			]);
-			// The agent is still told that the tool is consequential.
-			expect(
-				await page.eval(
-					`native.getTools().then((ts) => ts.find((t) => t.name === "wipe").annotations.consequentialHint)`,
-				),
-			).toBe(true);
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on(
-	"a call the agent cancels while onConfirm decides ends cancelled (review of PR 103)",
-	async () => {
-		const page = await open();
-		try {
-			// Never answers (not awaited here: the comma returns true).
-			await page.eval("(answer = new Promise(() => {})), true");
-			expect(await page.eval(`agent("wipe_named", {}, 300)`)).toEqual({
-				ok: false,
-				error: "AbortError",
-			});
-			expect(await page.eval("asked")).toEqual([{ kind: "webmcp" }]);
-			expect(
-				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
-			).toEqual(["cancelled"]);
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on(
-	"results as the agent reads them: nothing, an MCP result, a destructive tool (WM 4, WM 5, WM 6)",
-	async () => {
-		const page = await open();
-		try {
-			await page.eval(`(async () => {
-				await mcp.registerTool({ name: "noop", description: "Returns nothing", annotations: { readOnlyHint: true }, execute: () => {} });
-				await mcp.registerTool({ name: "structured", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "n is 1" }], structuredContent: { n: 1 } }) });
-				await mcp.registerTool({ name: "picture", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "The diagram:" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] }) });
-				await mcp.registerTool({ name: "remove", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" });
-				await mcp.registerTool({ name: "remove_named", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" }, { callers: ["relay", "webmcp"] });
-				await mcp.registerTool({ name: "typed", description: "d", annotations: { readOnlyHint: true }, outputSchema: { type: "object", properties: { n: { type: "number" } } }, execute: () => ({ n: 2 }) });
-			})()`);
-			await Bun.sleep(50);
-			// Chrome 156 passes a string on as it is (the draft would JSON-encode
-			// it): what matters is that the call succeeds.
-			expect(await page.eval(`agent("noop", {})`)).toEqual({
-				ok: true,
-				value: "Done.",
-			});
-			expect(await page.eval(`agent("structured", {})`)).toEqual({
-				ok: true,
-				value: '{"n":1}',
-			});
-			const picture = await page.eval<{ ok: boolean; value: string }>(
-				`agent("picture", {})`,
-			);
-			expect(picture.ok).toBe(true);
-			expect(picture.value).toContain(
-				"[image content left out: WebMCP results are text.]",
-			);
-			expect(picture.value).not.toContain("iVBORw0KGgo");
-			expect(await page.eval(`agent("typed", {})`)).toEqual({
-				ok: true,
-				value: '{"n":2}',
-			});
-			// Destructive: mirrored with or without callers, as consequential (DEC-209).
-			const names = await page.eval<string[]>("nativeNames()");
-			expect(names).toContain("remove");
-			expect(names).toContain("remove_named");
-			for (const name of ["remove", "remove_named"])
-				expect(
-					await page.eval(
-						`native.getTools().then((ts) => ts.find((t) => t.name === ${JSON.stringify(name)}).annotations.consequentialHint)`,
-					),
-				).toBe(true);
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on("aborting unmirrors; registering again mirrors again", async () => {
-	const page = await open();
-	try {
-		await page.eval("addControl.abort()");
-		expect(await page.eval("nativeNames()")).toEqual([
-			"refused",
-			"wipe",
-			"wipe_named",
-		]);
-		// As React's useTool does: abort and register again at once.
-		await page.eval(`(async () => {
-			const c = new AbortController();
-			await mcp.registerTool({ name: "again", description: "d", execute: () => "one" }, { signal: c.signal });
-			c.abort();
-			await mcp.registerTool({ name: "again", description: "d", execute: () => "two" });
-		})()`);
-		await Bun.sleep(50);
-		expect(await page.eval(`agent("again", {})`)).toEqual({
-			ok: true,
-			value: "two",
-		});
-		expect(await page.eval("warnings")).toEqual([]);
-	} finally {
-		await page.close();
-	}
-});
-
-on("a native duplicate in either order keeps its owner", async () => {
-	const page = await open("?native=add");
-	try {
-		// The page's own came first: the mirror warns, the relay still has it.
-		expect(await page.eval(`agent("add", { a: 1, b: 2 })`)).toEqual({
-			ok: true,
-			value: "page",
-		});
-		expect(await page.eval("warnings.length")).toBe(1);
-		expect(await page.eval("warnings[0]")).toContain(
-			"add is not offered through WebMCP",
+		await step(
+			"getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
+			async () => {
+				const page = await open();
+				try {
+					expect(await page.eval("nativeNames()")).toEqual([
+						"add",
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					expect(
+						await page.eval(
+							`native.getTools().then((ts) => { const t = ts.find((x) => x.name === "add"); return { title: t.title, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations }; })`,
+						),
+					).toEqual({
+						title: "Add",
+						description: "Adds two numbers",
+						inputSchema: {
+							type: "object",
+							properties: { a: { type: "number" }, b: { type: "number" } },
+							required: ["a", "b"],
+						},
+						annotations: {
+							consequentialHint: false,
+							debugging: false,
+							readOnlyHint: true,
+							untrustedContentHint: false,
+						},
+					});
+					// The page is not marked: <html data-tab-mcp-webmcp> is gone.
+					expect(
+						await page.eval(
+							`document.documentElement.hasAttribute("data-tab-mcp-webmcp")`,
+						),
+					).toBe(false);
+					expect(await page.eval("mcp.tools")).toEqual([
+						"add",
+						"wipe",
+						"wipe_named",
+						"hidden",
+						"refused",
+					]);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
 		);
-		expect(await page.eval("mcp.tools")).toContain("add");
-		// The mirror came first: the page's own registration fails.
-		expect(
-			await page.eval(
-				`native.registerTool({ name: "wipe_named", description: "d", execute: () => 1 }).then(() => "ok", (e) => e.name)`,
-			),
-		).toBe("InvalidStateError");
-	} finally {
-		await page.close();
-	}
-});
+		await step(
+			"results as the agent reads them: nothing, an MCP result, a destructive tool (WM 4, WM 5, WM 6)",
+			async () => {
+				const page = await open();
+				try {
+					await page.eval(`(async () => {
+					await mcp.registerTool({ name: "noop", description: "Returns nothing", annotations: { readOnlyHint: true }, execute: () => {} });
+					await mcp.registerTool({ name: "structured", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "n is 1" }], structuredContent: { n: 1 } }) });
+					await mcp.registerTool({ name: "picture", description: "d", annotations: { readOnlyHint: true }, execute: () => ({ content: [{ type: "text", text: "The diagram:" }, { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] }) });
+					await mcp.registerTool({ name: "remove", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" });
+					await mcp.registerTool({ name: "remove_named", description: "d", annotations: { destructiveHint: true }, execute: () => "removed" }, { callers: ["relay", "webmcp"] });
+					await mcp.registerTool({ name: "typed", description: "d", annotations: { readOnlyHint: true }, outputSchema: { type: "object", properties: { n: { type: "number" } } }, execute: () => ({ n: 2 }) });
+				})()`);
+					await Bun.sleep(50);
+					// Chrome 156 passes a string on as it is (the draft would JSON-encode
+					// it): what matters is that the call succeeds.
+					expect(await page.eval(`agent("noop", {})`)).toEqual({
+						ok: true,
+						value: "Done.",
+					});
+					expect(await page.eval(`agent("structured", {})`)).toEqual({
+						ok: true,
+						value: '{"n":1}',
+					});
+					const picture = await page.eval<{ ok: boolean; value: string }>(
+						`agent("picture", {})`,
+					);
+					expect(picture.ok).toBe(true);
+					expect(picture.value).toContain(
+						"[image content left out: WebMCP results are text.]",
+					);
+					expect(picture.value).not.toContain("iVBORw0KGgo");
+					expect(await page.eval(`agent("typed", {})`)).toEqual({
+						ok: true,
+						value: '{"n":2}',
+					});
+					// Destructive: mirrored with or without callers, as consequential (DEC-209).
+					const names = await page.eval<string[]>("nativeNames()");
+					expect(names).toContain("remove");
+					expect(names).toContain("remove_named");
+					for (const name of ["remove", "remove_named"])
+						expect(
+							await page.eval(
+								`native.getTools().then((ts) => ts.find((t) => t.name === ${JSON.stringify(name)}).annotations.consequentialHint)`,
+							),
+						).toBe(true);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"a native duplicate in either order keeps its owner",
+			async () => {
+				const page = await open("?native=add");
+				try {
+					// The page's own came first: the mirror warns, the relay still has it.
+					expect(await page.eval(`agent("add", { a: 1, b: 2 })`)).toEqual({
+						ok: true,
+						value: "page",
+					});
+					expect(await page.eval("warnings.length")).toBe(1);
+					expect(await page.eval("warnings[0]")).toContain(
+						"add is not offered through WebMCP",
+					);
+					expect(await page.eval("mcp.tools")).toContain("add");
+					// The mirror came first: the page's own registration fails.
+					expect(
+						await page.eval(
+							`native.registerTool({ name: "wipe_named", description: "d", execute: () => 1 }).then(() => "ok", (e) => e.name)`,
+						),
+					).toBe("InvalidStateError");
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"with @mcp-b/global over native WebMCP, the tools go to the native object",
+			async () => {
+				const page = await open("?poly");
+				try {
+					expect(
+						await page.eval(
+							`Object.hasOwn(document, "modelContext") && document.modelContext !== native`,
+						),
+					).toBe(true);
+					expect(await page.eval("nativeNames()")).toEqual([
+						"add",
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					expect(await page.eval(`agent("add", { a: 2, b: 2 })`)).toEqual({
+						ok: true,
+						value: '{"sum":4,"caller":"webmcp"}',
+					});
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"without onConfirm a tool that asks runs for an agent in the browser: no dialog, the confirmation's chunk not loaded (DEC-215)",
+			async () => {
+				const page = await open("?default");
+				try {
+					expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
+						ok: true,
+						value: "wiped",
+					});
+					expect(await page.eval(`agent("wipe", {})`)).toEqual({
+						ok: true,
+						value: "wiped",
+					});
+					expect(
+						await page.eval(`document.querySelector("dialog") === null`),
+					).toBe(true);
+					expect(
+						await page.eval(
+							`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.startsWith("/lib/confirm-"))`,
+						),
+					).toEqual([]);
+					// The page's record still lists the calls, with their caller.
+					expect(await page.eval("calls")).toEqual([
+						{ start: "wipe_named", client: { kind: "webmcp" } },
+						{ end: "wipe_named", outcome: "ok", client: { kind: "webmcp" } },
+						{ start: "wipe", client: { kind: "webmcp" } },
+						{ end: "wipe", outcome: "ok", client: { kind: "webmcp" } },
+					]);
+					// The agent is still told that the tool is consequential.
+					expect(
+						await page.eval(
+							`native.getTools().then((ts) => ts.find((t) => t.name === "wipe").annotations.consequentialHint)`,
+						),
+					).toBe(true);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+		await step(
+			"aborting unmirrors; registering again mirrors again",
+			async () => {
+				const page = await open();
+				try {
+					await page.eval("addControl.abort()");
+					expect(await page.eval("nativeNames()")).toEqual([
+						"refused",
+						"wipe",
+						"wipe_named",
+					]);
+					// As React's useTool does: abort and register again at once.
+					await page.eval(`(async () => {
+					const c = new AbortController();
+					await mcp.registerTool({ name: "again", description: "d", execute: () => "one" }, { signal: c.signal });
+					c.abort();
+					await mcp.registerTool({ name: "again", description: "d", execute: () => "two" });
+				})()`);
+					await Bun.sleep(50);
+					expect(await page.eval(`agent("again", {})`)).toEqual({
+						ok: true,
+						value: "two",
+					});
+					expect(await page.eval("warnings")).toEqual([]);
+				} finally {
+					await page.close();
+				}
+			},
+			5_000,
+		);
+	},
+	35_000,
+);
 
 on(
 	'a frame without allow="tools" warns and keeps its tools for the relay',
@@ -548,46 +514,6 @@ on(
 		}
 	},
 );
-
-on(
-	"with @mcp-b/global over native WebMCP, the tools go to the native object",
-	async () => {
-		const page = await open("?poly");
-		try {
-			expect(
-				await page.eval(
-					`Object.hasOwn(document, "modelContext") && document.modelContext !== native`,
-				),
-			).toBe(true);
-			expect(await page.eval("nativeNames()")).toEqual([
-				"add",
-				"refused",
-				"wipe",
-				"wipe_named",
-			]);
-			expect(await page.eval(`agent("add", { a: 2, b: 2 })`)).toEqual({
-				ok: true,
-				value: '{"sum":4,"caller":"webmcp"}',
-			});
-		} finally {
-			await page.close();
-		}
-	},
-);
-
-on("webmcp off registers nothing", async () => {
-	const page = await open("?off");
-	try {
-		expect(await page.eval("nativeNames()")).toEqual([]);
-		expect(
-			await page.eval(
-				`document.documentElement.hasAttribute("data-tab-mcp-webmcp")`,
-			),
-		).toBe(false);
-	} finally {
-		await page.close();
-	}
-});
 
 on(
 	"exposedTo: a document of that origin lists and runs a tool that asks; the page sees an agent in the browser (DEC-215)",

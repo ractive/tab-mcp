@@ -457,6 +457,14 @@ describe("confirmDialog: only while the user sees the page (iteration 13)", () =
 	afterEach(() => {
 		jest.useRealTimers();
 	});
+	/**
+	 * The tab brought to the front, as this fake assumes Chrome does it: the
+	 * document is visible and already has the focus (`focused` stays true)
+	 * when `visibilitychange` arrives, and no `focus` event follows. No
+	 * automated test checks that order in Chrome any more (the browser test
+	 * "a confirmation opened in a background tab…" went in iteration 50: it
+	 * cost 3.4 s); only the hand check of the dialogs pins it.
+	 */
 	const show = () => {
 		hidden = false;
 		doc.dispatchEvent(new window.Event("visibilitychange") as unknown as Event);

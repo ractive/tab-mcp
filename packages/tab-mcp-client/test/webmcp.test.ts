@@ -1,7 +1,8 @@
 /**
  * Mirroring the tools into WebMCP (iteration 25): against a fake native
  * `ModelContext` behind `Document.prototype`'s getter, as Chrome 156 has it
- * (`test/webmcp.browser.test.ts` checks the same in Chrome for Testing).
+ * (`test/webmcp.browser.test.ts` checks that contract in Chrome for Testing:
+ * what Chrome lists and hands an agent, its duplicates, frames, exposedTo).
  */
 import {
 	afterEach,
