@@ -256,7 +256,10 @@ else 405), the body size and JSON (413, 400), the `MCP-Protocol-Version` header 
 JSON-RPC error `-32022` naming the supported version `2026-07-28`, or `-32020` when the
 header is missing), the bearer token (401 with `WWW-Authenticate`), that
 the tab is online (see below), the concurrency limit and, for
-`subscriptions/listen`, the listen streams of the grant (429, `-31004`). The token's
+`subscriptions/listen`, the listen streams of the grant (429, `-31004`). The last two are
+checked in the same step as the request is counted and sent, after any wait for the page:
+requests that waited for the page and are let go together when it connects get no more
+slots than the page allows (relays up to 0.13.1 let them all through). The token's
 record names the page the request is for (its address id) and the app; a token is valid
 only at the address of its app, and gets 401 at any other. Without a valid token every
 address `/s/<app>/mcp` with a well-formed app id answers alike, whether or not a page of

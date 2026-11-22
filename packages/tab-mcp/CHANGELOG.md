@@ -9,6 +9,19 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Fixed
+
+- Requests that waited for their page and were let go together when it connected all
+  reached it, beyond its limits: the page's concurrent requests (`maxConcurrentRequests`,
+  its site's as configured) and the 2 listen streams per grant. The limits were checked
+  before the relay checked the token again and the request was counted only after that,
+  so every waiting request saw the same free slots. They are now checked in the same
+  step as the request is counted and sent; the others get 429 (`-31004`). A request that
+  ends, is cancelled or is sent again after the page came back frees its slot as before
+  (code review 2026-11-22, CR-01).
+
 ## [0.13.1][relay-0.13.1] - 2026-11-22
 
 ### Changed

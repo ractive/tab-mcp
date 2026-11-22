@@ -4,6 +4,7 @@ import type { CreateRelayOptions } from "../src/relay.ts";
 import {
 	APP,
 	mcpPost,
+	ORIGIN,
 	rpc,
 	ScriptedTab,
 	startRelay,
@@ -340,6 +341,86 @@ describe("the grace period", () => {
 		expect((await rpcMessage(other)).error?.code).toBe(-31001);
 		abort.abort();
 		expect(await first).toBe("aborted");
+	});
+
+	/**
+	 * Code review 2026-11-22, CR-01: eight requests that waited for the page
+	 * are let go together when it connects. The page's limits are checked
+	 * and counted in one step, so no more reach it than it allows.
+	 */
+	async function burst(
+		r: TestRelay,
+		method: string,
+		options: TabOptions = {},
+	): Promise<{
+		t: ScriptedTab;
+		token: string;
+		address: string;
+		statuses: number[];
+		abort: AbortController[];
+	}> {
+		const { secret, token, address } = await closedAddress(r);
+		const statuses: number[] = [];
+		const abort: AbortController[] = [];
+		for (let i = 0; i < 8; i++) {
+			const controller = new AbortController();
+			abort.push(controller);
+			mcpPost(address, rpc(i, method), { token, signal: controller.signal })
+				.then((res) => {
+					statuses.push(res.status);
+					return res.body?.cancel();
+				})
+				.catch(() => {});
+		}
+		await Bun.sleep(150);
+		const t = tab(r, { ...options, secret, onRequest: () => {} }); // never answers
+		await t.connect();
+		await waitFor(
+			() => forwarded(t) + refusals(statuses) === 8,
+			"every request forwarded or refused",
+		);
+		await Bun.sleep(100);
+		return { t, token, address, statuses, abort };
+	}
+
+	const forwarded = (t: ScriptedTab) =>
+		t.received.filter((m) => m.type === "http.request").length;
+	const refusals = (statuses: number[]) =>
+		statuses.filter((s) => s === 429).length;
+
+	test("CR-01: a site's request limit holds for requests that waited for the page", async () => {
+		const r = relay({
+			pageWaitMs: 5_000,
+			maxConcurrentRequests: 16,
+			allowedOrigins: [],
+			sites: [{ origin: ORIGIN, limits: { maxConcurrentRequests: 2 } }],
+		});
+		const { t, token, address, statuses, abort } = await burst(r, "tools/list");
+		expect(forwarded(t)).toBe(2);
+		expect(refusals(statuses)).toBe(6);
+		// A cancelled request frees its slot: the next one reaches the page.
+		const held = t.received.filter((m) => m.type === "http.request");
+		for (const c of abort) c.abort();
+		await waitFor(
+			() => t.received.filter((m) => m.type === "http.cancel").length === 2,
+			"both cancels",
+		);
+		expect(held).toHaveLength(2);
+		const next = new AbortController();
+		mcpPost(address, rpc(9, "tools/list"), {
+			token,
+			signal: next.signal,
+		}).catch(() => {});
+		await waitFor(() => forwarded(t) === 3, "the next request");
+		next.abort();
+	});
+
+	test("CR-01: the listen-stream limit holds for listen requests that waited for the page", async () => {
+		const r = relay({ pageWaitMs: 5_000 });
+		const { t, statuses, abort } = await burst(r, "subscriptions/listen");
+		expect(forwarded(t)).toBe(2);
+		expect(refusals(statuses)).toBe(6);
+		for (const c of abort) c.abort();
 	});
 
 	test("stopping the relay ends waiting requests", async () => {
