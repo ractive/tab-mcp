@@ -543,6 +543,11 @@ export class Browser {
 
 	#closed: Promise<void> | undefined;
 
+	/** `close()` was called: what still waits fails because of it. */
+	get closed(): boolean {
+		return this.#closed !== undefined;
+	}
+
 	/** Close Chrome; once closed, calling it again does nothing. */
 	close(): Promise<void> {
 		this.#closed ??= this.#close();
@@ -644,6 +649,9 @@ export class Page extends Target {
 	readonly #recent: string[] = [];
 	/** Contexts of the page and of its out-of-process frames, by session. */
 	readonly #contexts = new Map<string, Map<number, ExecutionContext>>();
+	/** Sessions of frames that went away (removed, or the page closed). */
+	readonly #detached = new Set<string>();
+	#closed = false;
 
 	/** Whether this page's requests are answered by the browser's `serve`. */
 	readonly #served: boolean;
@@ -680,8 +688,20 @@ export class Page extends Target {
 				const args = params["args"] as Remote[];
 				this.console.push(args.map((a) => a.value ?? a.description).join(" "));
 			} else if (method === "Target.attachedToTarget") {
-				// An out-of-process frame (site isolation): a session of its own.
-				void this.attached(params["sessionId"] as string);
+				// An out-of-process frame (site isolation): a session of its own,
+				// attached without anyone awaiting it.
+				const frame = params["sessionId"] as string;
+				this.attached(frame).catch((error: unknown) => {
+					// The frame went away while it was attached: closing the browser
+					// or the page, or a frame removed, fails what is still on its
+					// way. Any other failure is thrown on, unhandled, so that the
+					// test run shows it.
+					if (this.browser.closed || this.#closed || this.#detached.has(frame))
+						return;
+					throw error;
+				});
+			} else if (method === "Target.detachedFromTarget") {
+				this.#detached.add(params["sessionId"] as string);
 			}
 		});
 	}
@@ -762,6 +782,7 @@ export class Page extends Target {
 
 	/** Close the tab. */
 	async close(): Promise<void> {
+		this.#closed = true;
 		await this.browser.send("Target.closeTarget", { targetId: this.targetId });
 	}
 
