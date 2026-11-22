@@ -43,7 +43,7 @@ gives the zip whose SHA-256 `extension-release.yml` prints, with the same Bun ve
    ```
 
 3. `extension-release.yml` checks that the tag is a Chrome version on main and matches
-   `package.json`, runs `verify`, builds the store zip and the Firefox store zip, checks
+   `package.json`, runs `verify:all`, builds the store zip and the Firefox store zip, checks
    their manifests again, packs the source archive `tab-mcp-<version>-source.zip` (the
    built commit, with a `SOURCE_DATE_EPOCH` file) and builds the Firefox zip from it again,
    which must give the same bytes; only then does it create the GitHub release

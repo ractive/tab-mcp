@@ -103,20 +103,23 @@ jobs:
         file (the release workflow checks that); dist-firefox-store/ holds the unpacked
         files. SOURCE_DATE_EPOCH only sets the zip entries' time (the archive has no Git
         history). Sources: packages/tab-mcp-extension/src (background: worker/, content
-        script: content.ts and firefox/webmcp.ts, sidebar: sidepanel/), and the library
-        packages/tab-mcp-client/src, which it bundles.
+        scripts: content.ts with firefox/webmcp.ts, and pairing-page.ts; sidebar:
+        sidepanel/), and the library packages/tab-mcp-client/src, which it bundles.
         What it does: it gives pages document.modelContext (WebMCP), which Firefox lacks,
         from its content script, so pages can register tools for AI agents. When the user
-        turns on AI access in the sidebar and pairs an AI app (Claude, ChatGPT, ...) with a
-        code, the extension connects to a tab-mcp relay (default https://tab-mcp.ractive.ch,
-        run by the developer) over a WebSocket and lets that AI app list and call the tools
-        of the page in front. A tool that is not marked read-only asks the user first. No
-        remote code is executed: the relay connection carries data only (tool lists, calls,
-        results). Host access is optional and asked for at runtime: per tab with a click on
-        the toolbar icon, or for all sites when the user clicks "Give access to all sites".
+        turns on AI access in the sidebar and connects an AI app (Claude, ChatGPT, ...) with
+        a code, the extension connects to a tab-mcp relay (default
+        https://tab-mcp.ractive.ch, run by the developer) over a WebSocket and lets that AI
+        app list and call the tools of the page in front. A tool that is not marked
+        read-only asks the user first. No remote code is executed: the relay connection
+        carries data only (tool lists, calls, results). Host access is optional and asked
+        for at runtime: per tab with a click on the toolbar icon, for all sites when the
+        user clicks "Give access to all sites", or for the relay's site alone when the user
+        turns on "Fill in the code for me" (off by default): then pairing.js runs on the
+        relay's sign-in page only and, after the user allows it, fills in the code there.
         Testing: open https://ractive.ch/tab-mcp/examples/diagram/ (a page with WebMCP
-        tools), click the toolbar icon, the sidebar shows its tools. Pairing an AI app needs
-        an MCP client such as Claude Code: claude mcp add --transport http
+        tools), click the toolbar icon, the sidebar shows its tools. Connecting an AI app
+        needs an MCP client such as Claude Code: claude mcp add --transport http
         tab-mcp-browser-extension-firefox <address shown in the sidebar>.
         Privacy policy: https://ractive.ch/tab-mcp/privacy/. Source and issues:
         https://github.com/ractive/tab-mcp; this is the release of tag ${{ github.ref_name }},

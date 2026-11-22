@@ -125,6 +125,27 @@ test("both workflows publish to addons.mozilla.org with the source and the same 
 	}
 });
 
+test("AMO's reviewers are told the Bun version the release builds with", async () => {
+	const w = (await workflow("extension-release.yml")) as unknown as {
+		jobs: Record<
+			string,
+			{
+				steps?: { uses?: string; with?: Record<string, unknown> }[];
+				with?: Record<string, unknown>;
+			}
+		>;
+	};
+	const bun = w.jobs["build"]?.steps?.find((s) =>
+		s.uses?.startsWith("oven-sh/setup-bun@"),
+	)?.with?.["bun-version"];
+	expect(String(bun)).toMatch(/^\d+\.\d+\.\d+$/);
+	// A newer Bun may bundle differently, and the reviewers' build would not
+	// give the uploaded bytes.
+	expect(String(w.jobs["publish-firefox"]?.with?.["notes"])).toContain(
+		`install Bun ${bun} (`,
+	);
+});
+
 test("the release attaches what the publish jobs download", async () => {
 	const text = await Bun.file(
 		join(import.meta.dir, "../.github/workflows/extension-release.yml"),
