@@ -6,6 +6,7 @@
 
 import { expect, test } from "bun:test";
 import { join } from "node:path";
+import { sourceArchiveNames } from "../packages/tab-mcp-extension/scripts/source-archive.ts";
 
 interface Job {
 	if?: string;
@@ -146,6 +147,45 @@ test("AMO's reviewers are told the Bun version the release builds with", async (
 	);
 });
 
+test("the release and every pull request check the source archive with the same script", async () => {
+	type Step = {
+		run?: string;
+		"working-directory"?: string;
+		if?: string;
+	};
+	const steps = async (file: string, job: string) =>
+		(
+			(await workflow(file)) as unknown as {
+				jobs: Record<string, { steps?: Step[] }>;
+			}
+		).jobs[job]?.steps ?? [];
+	const script = (s: Step) =>
+		s.run?.startsWith("bun scripts/source-archive.ts") === true;
+
+	const release = await steps("extension-release.yml", "build");
+	const inRelease = release.filter(script);
+	expect(inRelease).toHaveLength(1);
+	// The tag's commit, against the Firefox zip the job built before it.
+	expect(inRelease[0]?.run).toBe(
+		'bun scripts/source-archive.ts --commit "$BUILT" --built',
+	);
+	const runs = release.map((s) => s.run ?? "");
+	expect(runs.indexOf(inRelease[0]?.run ?? "")).toBeGreaterThan(
+		runs.indexOf("bun scripts/build.ts --firefox --store --zip"),
+	);
+	// The script is the one place that packs the archive.
+	expect(runs.some((run) => run.includes("git archive"))).toBe(false);
+
+	const ci = await steps("ci.yml", "fast");
+	const inCi = ci.filter(script);
+	expect(inCi).toHaveLength(1);
+	// The pull request's checkout as it is (HEAD), built by the script itself.
+	expect(inCi[0]?.run).toBe("bun scripts/source-archive.ts");
+	expect(inCi[0]?.if).toBe("steps.changes.outputs.code == 'true'");
+	for (const step of [...inRelease, ...inCi])
+		expect(step["working-directory"]).toBe("packages/tab-mcp-extension");
+});
+
 test("the release attaches what the publish jobs download", async () => {
 	const text = await Bun.file(
 		join(import.meta.dir, "../.github/workflows/extension-release.yml"),
@@ -158,4 +198,11 @@ test("the release attaches what the publish jobs download", async () => {
 		'"tab-mcp-browser-extension-firefox-$VERSION-store.zip"',
 	])
 		expect(text).toContain(name);
+	// The script packs the archive under that name, beside the Firefox zip
+	// the publish job asks for.
+	expect(sourceArchiveNames("1.2.3")).toEqual({
+		archive: "tab-mcp-1.2.3-source.zip",
+		prefix: "tab-mcp-1.2.3/",
+		firefoxZip: "tab-mcp-browser-extension-firefox-1.2.3-store.zip",
+	});
 });

@@ -132,35 +132,16 @@ jobs:
             sha256sum "$zip"
           done
       # For addons.mozilla.org's reviewers, who must be able to build the
-      # Firefox zip from source: the built commit's files, and the time its zip
-      # entries carry (the archive has no Git history, sourceDate in build.ts).
-      - name: The source archive of the built commit
-        env:
-          VERSION: ${{ steps.tag.outputs.version }}
-          BUILT: ${{ steps.tag.outputs.commit }}
-        run: |
-          set -euo pipefail
-          epoch="$(git log -1 --format=%ct "$BUILT")"
-          git archive --format=zip --prefix="tab-mcp-$VERSION/" \
-            --add-virtual-file="tab-mcp-$VERSION/SOURCE_DATE_EPOCH:$epoch" \
-            -o "packages/tab-mcp-extension/tab-mcp-$VERSION-source.zip" "$BUILT"
-          sha256sum "packages/tab-mcp-extension/tab-mcp-$VERSION-source.zip"
+      # Firefox zip from source: tab-mcp-<version>-source.zip, the built
+      # commit's files and the time its zip entries carry, packed and then
+      # built as the reviewers' notes say; it fails unless that gives the
+      # Firefox zip above byte for byte. ci.yml runs the same script on every
+      # pull request.
       - name: The source archive builds the same Firefox zip
+        working-directory: packages/tab-mcp-extension
         env:
-          VERSION: ${{ steps.tag.outputs.version }}
-        run: |
-          set -euo pipefail
-          # The steps the reviewers' notes give, in an empty directory.
-          dir="$RUNNER_TEMP/from-source"
-          mkdir "$dir"
-          unzip -q "packages/tab-mcp-extension/tab-mcp-$VERSION-source.zip" -d "$dir"
-          cd "$dir/tab-mcp-$VERSION"
-          bun install --frozen-lockfile
-          cd packages/tab-mcp-extension
-          SOURCE_DATE_EPOCH="$(cat ../../SOURCE_DATE_EPOCH)" bun scripts/build.ts --firefox --store --zip
-          zip="tab-mcp-browser-extension-firefox-$VERSION-store.zip"
-          cmp "$zip" "$GITHUB_WORKSPACE/packages/tab-mcp-extension/$zip" \
-            || { echo "::error::the source archive builds another $zip"; exit 1; }
+          BUILT: ${{ steps.tag.outputs.commit }}
+        run: bun scripts/source-archive.ts --commit "$BUILT" --built
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-zips

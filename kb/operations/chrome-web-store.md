@@ -196,8 +196,12 @@ On failure the log shows AMO's answer.
 - **Source archive:** AMO's reviewers need the source of minified code and the steps to
   build it. `tab-mcp-<version>-source.zip` is `git archive` of the built commit plus a
   file `SOURCE_DATE_EPOCH` with its commit time, which the zip's entries carry (the archive
-  has no Git history for `sourceDate`). The release workflow builds the Firefox zip from
-  that archive, as the notes tell the reviewers to, and stops when the bytes differ.
+  has no Git history for `sourceDate`). `packages/tab-mcp-extension/scripts/source-archive.ts`
+  packs it and builds the Firefox zip from it in an empty directory, as the notes tell the
+  reviewers to, and fails when the bytes differ from the checkout's Firefox zip. The
+  release's build job runs it on the tag's commit (and stops there), CI's `fast` job on
+  every pull request, so a change that breaks it shows before a release; locally, on a
+  clean checkout: `bun scripts/source-archive.ts` in `packages/tab-mcp-extension`.
 - **Credentials:** AMO → Developer Hub → Manage API Keys
   (<https://addons.mozilla.org/developers/addon/api/key/>): the JWT issuer and secret, as
   the environment secrets `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` of `firefox-add-ons`; both

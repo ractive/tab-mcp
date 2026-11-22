@@ -48,6 +48,14 @@ jobs:
           bun-version: 1.4.4
       - if: steps.changes.outputs.code == 'true'
         run: bun install --frozen-lockfile
+      # The release's check that AMO's reviewers can build the Firefox zip
+      # from the source archive byte for byte (extension-release.yml, DEC-195),
+      # here on the pull request's merge commit, so a release is never its
+      # first run. Before verify, on the clean checkout it compares against.
+      - if: steps.changes.outputs.code == 'true'
+        name: The source archive builds the same Firefox zip
+        working-directory: packages/tab-mcp-extension
+        run: bun scripts/source-archive.ts
       - if: steps.changes.outputs.code == 'true'
         run: bun run verify
 
