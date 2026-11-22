@@ -500,25 +500,6 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
 	});
 
-	test("there is no chrome.storage: the settings are where a content script cannot reach", async () => {
-		// No `storage` permission: no area a content script could read or
-		// write, in its world (where a page's compromised renderer would run
-		// its code with the extension's APIs) or in the worker.
-		expect(
-			await stack.worker.eval("chrome.runtime.getManifest().permissions"),
-		).not.toContain("storage");
-		const world = await tab.isolatedWorld("tab-mcp browser extension");
-		// The world is the content script's: it has the extension's runtime.
-		expect(await tab.eval("typeof chrome.runtime?.sendMessage", world)).toBe(
-			"function",
-		);
-		expect(await tab.eval("typeof chrome.storage", world)).toBe("undefined");
-		expect(await stack.worker.eval("typeof chrome.storage")).toBe("undefined");
-		// The settings are in IndexedDB, in the extension's origin, which a
-		// content script (in the page's origin) cannot open at all.
-		expect(Object.keys(await kvAll(stack.worker))).toContain("relay");
-	});
-
 	test("page_info tells the page in front and its WebMCP tools", async () => {
 		const result = await pageInfo(stack);
 		expect(result.isError).toBeFalsy();

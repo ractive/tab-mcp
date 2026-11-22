@@ -5,7 +5,9 @@
 
 import { describe, expect, test } from "bun:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { join } from "node:path";
 import {
+	createFirefoxManifest,
 	createManifest,
 	extensionId,
 	mitText,
@@ -59,6 +61,34 @@ describe("manifest", () => {
 		const store = createManifest("1.0.0", {});
 		expect(store["key"]).toBeUndefined();
 		expect(store["host_permissions"]).toBeUndefined();
+	});
+
+	test("no build has the storage permission, and no code uses chrome.storage: the settings are in IndexedDB, where a content script cannot reach", async () => {
+		// Without the permission Chrome and Firefox give no `storage` area at
+		// all, in the worker or in a content script's world (where a page's
+		// compromised renderer would run its code with the extension's APIs).
+		for (const manifest of [
+			createManifest("1.0.0", {}),
+			createManifest("1.0.0", { test: true }),
+			createManifest("1.0.0", { key: "KEY" }),
+			createFirefoxManifest("1.0.0", {}),
+			createFirefoxManifest("1.0.0", { test: true }),
+			createFirefoxManifest("1.0.0", { allSites: true }),
+		]) {
+			expect(manifest["permissions"]).not.toContain("storage");
+			expect(manifest["permissions"]).not.toContain("unlimitedStorage");
+		}
+		// The settings go through kv.ts (IndexedDB in the extension's origin).
+		const users: string[] = [];
+		for await (const file of new Bun.Glob("**/*.ts").scan(
+			join(import.meta.dir, "../src"),
+		)) {
+			const text = await Bun.file(join(import.meta.dir, "../src", file)).text();
+			// Code, not the comments that say why there is none.
+			const code = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+			if (/\b(chrome|browser)\.storage\b/.test(code)) users.push(file);
+		}
+		expect(users).toEqual([]);
 	});
 
 	test("the description is the store summary: at most 132 characters", () => {
