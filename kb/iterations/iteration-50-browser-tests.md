@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 50: browser tests out of the default run, then fewer and lighter"
-status: in-progress
+status: completed
 description: >-
   One `bun run verify`, the rule before every commit, started 27 browsers and built the
   extension 12 times, and several agents ran it at once. The audit of 2026-11-22 plans
