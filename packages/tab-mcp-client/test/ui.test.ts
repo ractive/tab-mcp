@@ -11,7 +11,11 @@ import {
 import { Window } from "happy-dom";
 import { addressIdOf } from "../src/address.ts";
 import { allowedFor } from "../src/always-allowed.ts";
-import { confirmDialog, confirmInPage } from "../src/confirm.ts";
+import {
+	type AskedRequest,
+	confirmDialog,
+	confirmInPage,
+} from "../src/confirm.ts";
 import {
 	CODE_USED_WAIT_MS,
 	replacedNotice,
@@ -87,7 +91,7 @@ const APP: RelayClient = {
 	host: "claude.ai",
 };
 
-function question(signal = new AbortController().signal): ConfirmRequest {
+function question(signal = new AbortController().signal): AskedRequest {
 	return {
 		tool: {
 			name: "clear_memory",
@@ -291,42 +295,35 @@ describe("confirmDialog: Always allow", () => {
 	});
 });
 
-describe("a WebMCP caller (iteration 25)", () => {
-	test("is named an agent in this browser and never offered or given Always allow", async () => {
+describe("a WebMCP caller (iteration 25, DEC-215)", () => {
+	test("is never shown the confirmation: it drives the tab and would answer it itself", async () => {
 		const g = globalThis as { document?: Document | undefined };
 		const saved = g.document;
 		g.document = doc;
 		const mcp = newTab("http://127.0.0.1:9", { alwaysAllow: true });
-		const ask = () =>
-			mcp.confirmInPage({ ...question(), client: { kind: "webmcp" } });
-		const dialog = () =>
-			new Promise<HTMLDialogElement>((resolve) => {
-				const poll = () => {
-					const found = doc.querySelector("dialog.tab-mcp-confirm");
-					if (found !== null) resolve(found as HTMLDialogElement);
-					else setTimeout(poll, 1);
-				};
-				poll();
-			});
+		const webmcp = (client: ConfirmRequest["client"]): ConfirmRequest => ({
+			...question(),
+			client,
+		});
 		try {
-			const first = ask();
-			const shown = await dialog();
-			expect(shown.textContent).toContain(
-				"An agent in this browser wants to run Clear memory.",
-			);
-			expect(buttons(shown).map((b) => b.textContent)).toEqual([
-				"Don't allow",
-				"Allow once",
-			]);
-			expect(shown.querySelector(".tab-mcp-always-note")).toBeNull();
-			const allow = byText(shown, "Allow once");
-			await enabled(allow);
-			allow.click();
-			expect(await first).toBe(true);
-			// Every call asks again.
-			const again = ask();
-			byText(await dialog(), "Don't allow").click();
-			expect(await again).toBe(false);
+			// TabMcp's, as an onConfirm hands a call to it (and React's default).
+			expect(await mcp.confirmInPage(webmcp({ kind: "webmcp" }))).toBe(true);
+			// The chunk's, with a host of the caller's own.
+			expect(
+				await confirmInPage(mcp, webmcp({ kind: "webmcp" }), doc, {
+					alwaysAllow: true,
+				}),
+			).toBe(true);
+			expect(doc.querySelector("dialog")).toBeNull();
+			// Nothing is kept for it: an AI app's call is still asked.
+			const asked = mcp.confirmInPage(question());
+			let shown: Element | null = null;
+			while (shown === null) {
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				shown = doc.querySelector("dialog.tab-mcp-confirm");
+			}
+			byText(shown as HTMLElement, "Don't allow").click();
+			expect(await asked).toBe(false);
 		} finally {
 			g.document = saved;
 		}
@@ -2650,13 +2647,14 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 					lang: "de",
 					confirmTitle: "{tool} erlauben?",
 					confirmWho: "{client} möchte {tool} ausführen.",
+					clientLocal: "{name} (Assistent dieser Seite)",
 					deny: "Nicht erlauben",
 					allow: "Erlauben",
 				},
 			},
 		});
 		const answer = mcp.confirmInPage(
-			{ ...question(), client: { kind: "webmcp" } },
+			{ ...question(), client: { kind: "local", id: "chat", name: "Hilfe" } },
 			{ document: doc },
 		);
 		const dialog = await waitFor("dialog.tab-mcp-confirm");
@@ -2668,7 +2666,7 @@ describe("the dialogs' texts, help and Allow until reload (iteration 38)", () =>
 		// The names stay isolated inside the page's sentence.
 		expect(dialog.querySelector("h2 bdi")?.textContent).toBe("Clear memory");
 		expect(dialog.textContent).toContain(
-			"An agent in this browser möchte Clear memory ausführen.",
+			"Hilfe (Assistent dieser Seite) möchte Clear memory ausführen.",
 		);
 		expect(buttons(dialog).map((b) => b.textContent)).toEqual([
 			"Nicht erlauben",

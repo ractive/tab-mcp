@@ -74,7 +74,7 @@ export function callContext(host: CallHost, kind: ToolCaller): CallContext {
 	return {
 		tools: kind === "webmcp" ? host.registry : toolsFor(host.registry, kind),
 		confirm: (request) => host.confirm(request),
-		ownConfirm: host.ownConfirm(),
+		ownConfirm: !!host.onConfirm(),
 		observe: {
 			start: (call) => host.toolCallStarted(call),
 			end: (call) => host.toolCallEnded(call),

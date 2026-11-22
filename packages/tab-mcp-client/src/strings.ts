@@ -61,7 +61,6 @@ const english = {
 	titlePrefix: "Allow? – ",
 
 	// How the dialogs name a caller.
-	clientWebMcp: "An agent in this browser",
 	clientLocal: "{name} (this site's assistant)",
 	/** An AI app through the relay: its name and the host of its client id. */
 	clientRelay: "{name} ({host})",

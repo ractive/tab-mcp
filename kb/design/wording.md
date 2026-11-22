@@ -90,8 +90,9 @@ the decision; this file is the reference for new texts.
   listed now on the site; a tool added later asks and turns it off. The library's "Always
   allow everything" covers every tool for that AI app, also future, changed and
   destructive ones (DEC-200).
-- **Other callers are not AI apps:** "An agent in this browser" (WebMCP) and "{name}
-  (this site's assistant)" (`serve`).
+- **Other callers are not AI apps:** "an agent in this browser" (WebMCP; the label in a
+  page's record of calls, since the library shows such an agent no dialog, DEC-215) and
+  "{name} (this site's assistant)" (`serve`).
 - **The extension's two "connected"**: AI access (the extension to the relay: on, off,
   connecting) and an AI app's access (connected or not). The state line keeps them apart
   by its structure ("AI access is off · your AI apps stay connected for next time",

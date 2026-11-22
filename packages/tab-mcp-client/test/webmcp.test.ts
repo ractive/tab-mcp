@@ -628,7 +628,32 @@ describe("calls", () => {
 		expect(events.start).toEqual([]);
 	});
 
-	test("a consequential tool mirrored by default asks a WebMCP call (DEC-209)", async () => {
+	test("a tool that asks runs for an agent in the browser without onConfirm: no dialog, the events name the caller (DEC-215)", async () => {
+		const t = tab({ alwaysAllow: true });
+		await t.registerTool(wipe);
+		await t.registerTool({
+			name: "remove",
+			description: "Removes an element",
+			annotations: { destructiveHint: true },
+			execute: () => "removed",
+		});
+		const events = watched(t);
+		await settle();
+		await expect(native.call("wipe", {})).resolves.toBe("wiped");
+		await expect(native.call("remove", {})).resolves.toBe("removed");
+		expect(window.document.querySelector("dialog")).toBeNull();
+		expect(events.start.map((c) => [c.tool, c.client])).toEqual([
+			["wipe", { kind: "webmcp" }],
+			["remove", { kind: "webmcp" }],
+		]);
+		expect(events.end.map((c) => c.outcome)).toEqual(["ok", "ok"]);
+		// Still marked for the agent, so that it asks its user (WebMCP's hint).
+		expect(native.tools.get("wipe")?.annotations?.["consequentialHint"]).toBe(
+			true,
+		);
+	});
+
+	test("a consequential tool mirrored by default asks the page's onConfirm for a WebMCP call (DEC-209, DEC-215)", async () => {
 		const asked: ConfirmRequest[] = [];
 		const t = tab({
 			onConfirm: (request) => {
@@ -644,7 +669,7 @@ describe("calls", () => {
 		expect(asked.map((r) => r.client)).toEqual([{ kind: "webmcp" }]);
 	});
 
-	test("a tool marked only destructiveHint asks a WebMCP call too, not an AI app's (DEC-022, DEC-209)", async () => {
+	test("a tool marked only destructiveHint asks onConfirm for a WebMCP call too, not for an AI app's (DEC-022, DEC-209)", async () => {
 		const asked: ConfirmRequest[] = [];
 		const t = tab({
 			onConfirm: (request) => {
@@ -696,9 +721,14 @@ describe("calls", () => {
 		expect(events.end[1]?.outcome).toBe("ok");
 	});
 
-	test('onConfirm\'s "unanswered" resolves with its own error and outcome; another value is a refusal', async () => {
+	test('onConfirm\'s "unanswered" resolves with its own error and outcome; another value or a throw is a refusal', async () => {
 		let answer: unknown = "unanswered";
-		const t = tab({ onConfirm: () => answer as boolean });
+		const t = tab({
+			onConfirm: () => {
+				if (answer === "throw") throw new Error("no");
+				return answer as boolean;
+			},
+		});
 		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		const events = watched(t);
 		await settle();
@@ -715,6 +745,11 @@ describe("calls", () => {
 			error: "The user did not allow wipe to run.",
 		});
 		expect(events.end[1]?.outcome).toBe("declined");
+		answer = "throw";
+		await expect(native.call("wipe", {})).resolves.toEqual({
+			error: "The user did not allow wipe to run.",
+		});
+		expect(events.end[2]?.outcome).toBe("declined");
 	});
 
 	test('a call cancelled while asked stays cancelled, even if onConfirm then says "unanswered" (review of PR 112)', async () => {

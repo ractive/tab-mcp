@@ -8,6 +8,42 @@ the Git tag `client-v<version>`. The format follows
 
 ## Unreleased
 
+### Breaking
+
+- **The library no longer asks a WebMCP call that the tab-mcp browser extension did
+  not vouch for** (DEC-215). Its confirmation dialog is never shown for such a call: a
+  tool that asks (`consequentialHint`, or only `destructiveHint`) runs, unless the
+  page's `onConfirm` refuses it. The tool is still registered with
+  `consequentialHint: true`, so that a caller that heeds the hint asks its user. Calls of
+  AI apps through the relay or a port, and calls the extension vouched for, are
+  unchanged.
+- **Who loses the dialog.** Every unvouched WebMCP call, and the page cannot tell their
+  kinds apart: an agent in the browser that drives the tab (it clicked "Allow once"
+  itself, after waiting most of a minute for the dialog, so the dialog did not check
+  it); another extension that passes on calls of an AI app outside the browser; and a
+  document of an origin the page named in `exposedTo` (Chrome 156 lets it list and run
+  the tool). The last two cannot click in the page: for them the dialog was a real
+  check, and now only the calling extension's own question, if it has one, or the
+  page's `onConfirm` stands between them and the tool.
+- **What a page has to do:** nothing to get the new behaviour. A page with a tool that
+  must not run on an unvouched WebMCP caller's word either decides in `onConfirm`
+  (`request.client.kind === "webmcp"`; refuse, or apply a rule of your own, without
+  showing anything an agent could click), keeps the tool from WebMCP with
+  `callers: ["relay", "local"]`, or leaves `exposedTo` off it. Search your tool
+  descriptions and server instructions for "the page asks" (or similar) and remove the
+  promise of a question: an agent told that the page asks may click the page's own
+  buttons instead of calling the tool.
+- `TabMcp.confirmInPage()` and the confirmation chunk's `confirmInPage()` resolve `true`
+  for a WebMCP call without showing anything, so an `onConfirm` that hands such a call
+  to them, as React's `TabMcpProvider` does without a handler of the page, does what the
+  library does without `onConfirm`. The confirmation's chunk is not loaded for such a
+  call.
+- `trustExtension: false` now treats a vouched call as any other WebMCP call: `onConfirm`
+  decides, without one it runs.
+- **`ui.strings.clientWebMcp` is removed** ("An agent in this browser"): no dialog names
+  this caller any more. A page's own text under that key is no longer used, as any
+  unknown key (the type check flags it in an object literal); remove it.
+
 ### Added
 
 - The agent skill ships in the package as `skill/SKILL.md` (with `skill/references/`),

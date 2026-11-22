@@ -2726,8 +2726,9 @@ describe.skipIf(chrome === undefined)(
 
 /**
  * A page that uses the client library with `webmcp: true` (DEC-207): the page
- * and the extension know of each other. The page asks with the library's own
- * confirmation; the AI app is the test's MCP client ("Test client" at
+ * and the extension know of each other. The page has no `onConfirm`: the
+ * library's own confirmation, which an agent in the browser is never shown
+ * (DEC-215); the AI app is the test's MCP client ("Test client" at
  * client.example).
  */
 const TEST_APP = { name: "Test client", host: "client.example" };
@@ -2846,6 +2847,12 @@ describe.skipIf(chrome === undefined)(
 			const result = await pending;
 			expect(result.isError).toBeFalsy();
 			expect(await tab.eval(pageAsks)).toBe(false);
+			// Vouched for: the page knows the AI app.
+			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				...TEST_APP,
+			});
 			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
 			// Declined in the extension: the page is not asked and nothing runs.
 			const declined = call(stack, "page_complete_todo", { id: 9 });
@@ -2855,21 +2862,18 @@ describe.skipIf(chrome === undefined)(
 			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
 		});
 
-		test("a WebMCP call that does not come from the extension is still asked by the page", async () => {
+		test("a WebMCP call that does not come from the extension runs without the page's question, as an agent in the browser's (DEC-215)", async () => {
 			await tab.eval(`(async () => {
 				const context = document.modelContext;
 				const tool = (await context.getTools()).find((t) => t.name === "complete_todo");
 				window.ownCall = context.executeTool(tool, { id: 3 }).then(String, String);
 			})()`);
-			await tab.waitFor(pageAsks);
+			await tab.eval("window.ownCall");
+			expect(await tab.eval(pageAsks)).toBe(false);
 			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
 				kind: "webmcp",
 			});
-			await tab.eval(
-				`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].find((b) => b.textContent === "Don't allow").click()`,
-			);
-			await tab.eval("window.ownCall");
-			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
+			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2, 3]);
 		});
 
 		test("the page's state follows when the app is disconnected in the extension", async () => {

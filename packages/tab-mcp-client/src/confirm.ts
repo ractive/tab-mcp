@@ -22,7 +22,14 @@ import type {
 	ConfirmHandler,
 	ConfirmRequest,
 	DialogOptions,
+	LocalClient,
+	RelayClient,
 } from "./types.ts";
+
+/** A request the dialog is shown for: never a WebMCP call's (DEC-215). */
+export type AskedRequest = ConfirmRequest & {
+	client: RelayClient | LocalClient;
+};
 
 /**
  * The arguments as text, in full: what the user approves must be visible.
@@ -98,7 +105,7 @@ const queues = new WeakMap<Document, ConfirmQueue>();
  * without showing it.
  */
 export function confirmDialog(
-	request: ConfirmRequest,
+	request: AskedRequest,
 	doc: Document,
 	options: ConfirmDialogOptions = {},
 ): Promise<DialogAnswer> {
@@ -151,7 +158,7 @@ export function confirmDialog(
 
 /** `confirmDialog` once it is this request's turn; calls `next` when it closes. */
 function showConfirm(
-	request: ConfirmRequest,
+	request: AskedRequest,
 	doc: Document,
 	options: ConfirmDialogOptions,
 	queue: ConfirmQueue,
@@ -420,9 +427,10 @@ export interface ConfirmInPageOptions {
 
 /**
  * `TabMcp.confirmInPage`: the confirmation, and the tools the user allowed
- * (`always-allowed.ts`), which run unasked. Only for an AI app through the
- * relay: an agent in the browser and a served port have no identity to
- * remember an answer for (DEC-115, DEC-124).
+ * (`always-allowed.ts`), which run unasked. Those only for an AI app through
+ * the relay: a served port has no identity to remember an answer for
+ * (DEC-115, DEC-124). A WebMCP call is never shown it (an agent that drives
+ * the tab would answer it itself; DEC-215): it resolves `true`.
  *
  * Code that loads this chunk itself may pass a stand-in of its own for
  * `mcp` (`ConfirmHost`: `grants`, optionally `grantschange` events). Its
@@ -437,12 +445,14 @@ export function confirmInPage(
 	options: ConfirmInPageOptions = {},
 ): Promise<boolean> {
 	const { client } = request;
+	if (client.kind === "webmcp") return Promise.resolve(true);
 	const strings = stringsOf(options.ui);
 	const { allowDelayMs } = options;
 	if (client.kind !== "relay")
-		return confirmDialog(request, doc, { strings, allowDelayMs }).then(
-			(answer) => answer === "allow",
-		);
+		return confirmDialog({ ...request, client }, doc, {
+			strings,
+			allowDelayMs,
+		}).then((answer) => answer === "allow");
 	const { grantId } = client;
 	const allowed = allowedFor(mcp);
 	const allowedNow = () => allowed.allows(grantId, request.tool);
@@ -450,7 +460,7 @@ export function confirmInPage(
 	const offer = options.alwaysAllow ?? allowed.offered;
 	// Asked again when its turn comes: the call before it in the queue may
 	// have been allowed meanwhile.
-	return confirmDialog(request, doc, {
+	return confirmDialog({ ...request, client }, doc, {
 		strings,
 		allowDelayMs,
 		// "Always" only where it outlives a reload.
