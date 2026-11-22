@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!.claude", "!kb"]
+		"includes": ["**", "!.claude", "!kb", "!**/test/vendor"]
 	},
 	"formatter": {
 		"enabled": true,

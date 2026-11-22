@@ -146,7 +146,8 @@ browser tab. Bun workspaces: `packages/tab-mcp` (relay, `@ractive-ch/tab-mcp`),
   (no script may be named `check`: it shadows `bun check`).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency,
   pinned exactly. Use Bun's built-ins before adding a package.
-- Biome ignores `.claude/` and `kb/` (vendored and knowledge files).
+- Biome ignores `.claude/`, `kb/` and `test/vendor/` folders (vendored and knowledge
+  files; a test's third-party file, unchanged, with its licence).
 - Knowledge, plans and decisions live in `kb/` (hyalo, OKF profile). No `kb/log.md`
   (owner, 2026-11-14): iteration files, the decision log and git history are the record.
 - Commits: author email james@ractive.ch. MIT licence with `AI_NOTICE`.

@@ -206,6 +206,31 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - **Steps have deadlines:** a step's own (its test's timeout before) comes before the
   scenario's, so a slow step fails named.
 
+## What changed (pull request 8)
+
+- **The client's browser files keep what only a browser shows** (the audit's 1.5 and
+  1.6). Eight tests went, each because a unit test already fails without what it
+  showed; each unit test was run against a mutant first:
+  - page 3, a confirmation in a background tab: `ui.test.ts` "opened in a hidden tab"
+    (the hidden check in `confirm.ts` taken out).
+  - page 4, a second tab takes over: `protocol.test.ts` "telling a sibling tab from an
+    impostor" (no `claimed` sent).
+  - webmcp 2, 3, 4, 5, 7 and 11: `webmcp.test.ts`. The mutants were the validator's
+    unmirror, the arguments check, the refusal's message, a throw's message, running
+    without `onConfirm`, a cancel while asked, an abort that unmirrors, and `webmcp`
+    on by default.
+- **The MERGE rows are scenarios with steps**, their bodies unchanged:
+  - page 5 and 6: a page's own styles and the dialogs.
+  - webmcp 1, 6, 8 and 10: the mirror as Chrome has it, the contract of the unit
+    tests' fake `ModelContext`.
+  - webmcp 9 (frames) and 12 (`exposedTo`) stay as they are.
+- **No network:** `@mcp-b/global` 6.0.3 is vendored in `packages/tab-mcp-client/test/vendor/`
+  (unchanged, MIT licence, the same SRI). Biome leaves `test/vendor/` alone.
+- **Not done:** one Chrome across files (webmcp with serve, react-todo with the
+  calculator). Each file keeps its own browser, as decided in pull request 6.
+- **Counts:** 18 tests down to 6, `expect()` calls from 108 to 77. Locally the two files
+  take 6.7 s instead of 11.5 s.
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
@@ -222,7 +247,7 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - [x] 6. The extension's browser tests merged, one browser per build and flag
 - [ ] 7. Firefox: a smoke block on every change, the full file when the extension
   changes and nightly
-- [ ] 8. The client's and the examples' browser files trimmed
+- [x] 8. The client's and the examples' browser files trimmed
 - [ ] 9. The canary and the full browser run in `browser-full.yml` (path filter,
   nightly, not required); the CI split itself is done in pull request 1
 
