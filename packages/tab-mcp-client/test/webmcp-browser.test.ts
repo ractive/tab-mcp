@@ -36,7 +36,7 @@ const POLYFILL_SRI =
  * The test page: the library with `webmcp: true` (`?off`: without), its
  * tools, and what the harness reads. `?native=<name>` registers a tool of
  * that name natively before the library does; `?poly` loads `@mcp-b/global`
- * first; `?dialog` asks with the library's own confirmation. `agent()`
+ * first; `?default` has no `onConfirm` (the library's own behaviour). `agent()`
  * calls a tool as an agent does, through the native `executeTool()`, which
  * hands back the result as JSON text.
  */
@@ -61,7 +61,7 @@ const mcp = new TabMcp({
 	storage: null,
 	alwaysAllow: true,
 	webmcp: !q.has("off"),
-	...(q.has("dialog") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
+	...(q.has("default") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
 });
 mcp.addEventListener("toolcall", (e) => calls.push({ start: e.detail.tool, client: e.detail.client }));
 mcp.addEventListener("toolcallend", (e) => calls.push({ end: e.detail.tool, outcome: e.detail.outcome, client: e.detail.client }));
@@ -81,6 +81,7 @@ await mcp.registerTool({
 	inputSchema: { type: "object", properties: { a: { $id: "https://y.example/t", $ref: "#/$defs/s" } }, $defs: { s: { type: "string" } } },
 	execute: () => "ran",
 });
+if (q.has("expose")) await mcp.registerTool({ name: "exposed_wipe", description: "Wipes, exposed to other.test", annotations: { consequentialHint: true }, execute: () => "wiped" }, { exposedTo: ["https://other.test"] });
 window.mcp = mcp;
 window.native = native;
 window.nativeNames = async () => (await native.getTools()).map((t) => t.name).sort();
@@ -111,6 +112,32 @@ const nativeNames = async () => { try { return (await document.modelContext.getT
 setTimeout(async () => parent.postMessage({ frame: location.search.slice(1), tools: mcp.tools, warnings, native: await nativeNames() }, "*"), 200);
 </script></body></html>`;
 
+/**
+ * A cross-origin frame (`allow="tools"`) that looks for the top page's
+ * `exposed_wipe` with `getTools({ fromOrigins })` and calls it, as script of
+ * an origin named in `exposedTo` could.
+ */
+const CALLER = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+const mc = document.modelContext;
+const report = { fromTop: null, own: null, call: null };
+try {
+	let tool;
+	for (const end = Date.now() + 5000; Date.now() < end; ) {
+		const listed = await mc.getTools({ fromOrigins: ["${SITE}"] });
+		report.fromTop = listed.map((t) => t.name);
+		tool = listed.find((t) => t.name === "exposed_wipe");
+		if (tool) break;
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+	report.own = (await mc.getTools()).map((t) => t.name);
+	if (tool) {
+		try { report.call = { ok: true, value: await mc.executeTool(tool, {}) }; }
+		catch (e) { report.call = { ok: false, error: e.name + ": " + e.message }; }
+	}
+} catch (e) { report.error = e.name + ": " + e.message; }
+parent.postMessage({ caller: report }, "*");
+</script></body></html>`;
+
 let browser: Browser | undefined;
 const lib = new Map<string, string>();
 let polyfill: Uint8Array | undefined;
@@ -138,6 +165,12 @@ async function serve(url: string): Promise<Served> {
 			},
 			body: code,
 		};
+	if (pathname === "/caller.html")
+		return {
+			status: 200,
+			headers: { "content-type": "text/html; charset=utf-8" },
+			body: CALLER,
+		};
 	if (pathname === "/frame.html")
 		return {
 			status: 200,
@@ -156,7 +189,10 @@ async function serve(url: string): Promise<Served> {
 		searchParams.has("frames")
 			? `<script>window.frames_ = []; addEventListener("message", (e) => { if (e.data?.frame) frames_.push(e.data); });</script>
 <iframe src="${OTHER}/frame.html?plain"></iframe><iframe allow="tools" src="${OTHER}/frame.html?allowed"></iframe>`
-			: "",
+			: searchParams.has("expose")
+				? `<script>window.caller_ = null; addEventListener("message", (e) => { if (e.data?.caller) caller_ = e.data.caller; });</script>
+<iframe allow="tools" src="${OTHER}/caller.html"></iframe>`
+				: "",
 	);
 	return {
 		status: 200,
@@ -314,34 +350,39 @@ on(
 );
 
 on(
-	'the default confirmation offers no "Always allow" to an agent in the browser',
+	"without onConfirm a tool that asks runs for an agent in the browser: no dialog, the confirmation's chunk not loaded (DEC-215)",
 	async () => {
-		const page = await open("?dialog");
+		const page = await open("?default");
 		try {
-			const call = page.eval(`agent("wipe_named", {})`);
-			let buttons: string[] = [];
-			for (let i = 0; i < 100 && buttons.length === 0; i++) {
-				await Bun.sleep(50);
-				buttons = await page.eval<string[]>(
-					`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].map((b) => b.textContent)`,
-				);
-			}
-			expect(buttons).toEqual(["Don't allow", "Allow once"]);
+			expect(await page.eval(`agent("wipe_named", {})`)).toEqual({
+				ok: true,
+				value: "wiped",
+			});
+			expect(await page.eval(`agent("wipe", {})`)).toEqual({
+				ok: true,
+				value: "wiped",
+			});
+			expect(await page.eval(`document.querySelector("dialog") === null`)).toBe(
+				true,
+			);
 			expect(
 				await page.eval(
-					`document.querySelector("dialog.tab-mcp-confirm").textContent.includes("An agent in this browser wants to run")`,
+					`performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname).filter((p) => p.startsWith("/lib/confirm-"))`,
+				),
+			).toEqual([]);
+			// The page's record still lists the calls, with their caller.
+			expect(await page.eval("calls")).toEqual([
+				{ start: "wipe_named", client: { kind: "webmcp" } },
+				{ end: "wipe_named", outcome: "ok", client: { kind: "webmcp" } },
+				{ start: "wipe", client: { kind: "webmcp" } },
+				{ end: "wipe", outcome: "ok", client: { kind: "webmcp" } },
+			]);
+			// The agent is still told that the tool is consequential.
+			expect(
+				await page.eval(
+					`native.getTools().then((ts) => ts.find((t) => t.name === "wipe").annotations.consequentialHint)`,
 				),
 			).toBe(true);
-			await page.eval(
-				`[...document.querySelectorAll("dialog.tab-mcp-confirm button")].find((b) => b.textContent === "Don't allow").click()`,
-			);
-			expect(await call).toEqual({
-				ok: true,
-				value: '{"error":"The user did not allow wipe_named to run."}',
-			});
-			expect(
-				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
-			).toEqual(["declined"]);
 		} finally {
 			await page.close();
 		}
@@ -349,26 +390,17 @@ on(
 );
 
 on(
-	"a call the agent cancels aborts execute's signal and closes the dialog (review of PR 103)",
+	"a call the agent cancels while onConfirm decides ends cancelled (review of PR 103)",
 	async () => {
-		const page = await open("?dialog");
+		const page = await open();
 		try {
-			const call = page.eval(`agent("wipe_named", {}, 300)`);
-			let open = false;
-			for (let i = 0; i < 100 && !open; i++) {
-				await Bun.sleep(20);
-				open = await page.eval<boolean>(
-					`document.querySelector("dialog.tab-mcp-confirm") !== null`,
-				);
-			}
-			expect(open).toBe(true);
-			expect(await call).toEqual({ ok: false, error: "AbortError" });
-			await Bun.sleep(50);
-			expect(
-				await page.eval(
-					`document.querySelector("dialog.tab-mcp-confirm") === null`,
-				),
-			).toBe(true);
+			// Never answers (not awaited here: the comma returns true).
+			await page.eval("(answer = new Promise(() => {})), true");
+			expect(await page.eval(`agent("wipe_named", {}, 300)`)).toEqual({
+				ok: false,
+				error: "AbortError",
+			});
+			expect(await page.eval("asked")).toEqual([{ kind: "webmcp" }]);
 			expect(
 				await page.eval("calls.filter((c) => c.end).map((c) => c.outcome)"),
 			).toEqual(["cancelled"]);
@@ -555,3 +587,50 @@ on("webmcp off registers nothing", async () => {
 		await page.close();
 	}
 });
+
+on(
+	"exposedTo: a document of that origin lists and runs a tool that asks; the page sees an agent in the browser (DEC-215)",
+	async () => {
+		const callerReport = async (query: string) => {
+			const page = await open(query);
+			try {
+				let report: unknown = null;
+				for (let i = 0; i < 100 && report === null; i++) {
+					await Bun.sleep(100);
+					report = await page.eval("caller_");
+				}
+				return {
+					report,
+					calls: await page.eval("calls"),
+					asked: await page.eval("asked"),
+				};
+			} finally {
+				await page.close();
+			}
+		};
+		// Without onConfirm: the frame of other.test runs it, no question. Only
+		// the exposed tool is listed to it; the page cannot tell the caller
+		// from an agent that drives the tab.
+		expect(await callerReport("?expose&default")).toEqual({
+			report: {
+				fromTop: ["exposed_wipe"],
+				own: [],
+				call: { ok: true, value: "wiped" },
+			},
+			calls: [
+				{ start: "exposed_wipe", client: { kind: "webmcp" } },
+				{ end: "exposed_wipe", outcome: "ok", client: { kind: "webmcp" } },
+			],
+			asked: [],
+		});
+		// The page's onConfirm decides it in code.
+		const refused = await callerReport("?expose");
+		expect(refused.report).toMatchObject({
+			call: {
+				ok: true,
+				value: '{"error":"The user did not allow exposed_wipe to run."}',
+			},
+		});
+		expect(refused.asked).toEqual([{ kind: "webmcp" }]);
+	},
+);

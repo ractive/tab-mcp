@@ -8,7 +8,12 @@
 
 import { type DialogStrings, type PluralText, withEnglish } from "./strings.ts";
 import { directionOf, format, listFormat, pluralForm } from "./text.ts";
-import type { DialogOptions, Grant, ToolCallClient } from "./types.ts";
+import type {
+	DialogOptions,
+	Grant,
+	LocalClient,
+	RelayClient,
+} from "./types.ts";
 import { escapeInvisible } from "./visible.ts";
 
 export { format, listOf, plural } from "./text.ts";
@@ -142,10 +147,9 @@ export const visible: (text: string) => string = escapeInvisible;
  * the caller of a served port, the name the page gave it and what it is.
  */
 export function clientLabel(
-	client: ToolCallClient | Grant["client"],
+	client: RelayClient | LocalClient | Grant["client"],
 	s: DialogStrings,
 ): string {
-	if ("kind" in client && client.kind === "webmcp") return s.clientWebMcp;
 	if ("kind" in client && client.kind === "local")
 		return format(s.clientLocal, { name: visible(client.name ?? client.id) });
 	const host = visible(client.host || client.id);

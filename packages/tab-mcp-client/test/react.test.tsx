@@ -863,6 +863,81 @@ test("an onConfirm added after the first render is used; without one, the page's
 	}
 });
 
+test("an agent in the browser: a tool that asks runs without the library's dialog; an onConfirm added later decides (DEC-215)", async () => {
+	interface Native {
+		name: string;
+		execute: (input: unknown, options: { signal: AbortSignal }) => unknown;
+	}
+	const native = new Map<string, Native>();
+	const g = globalThis as Record<string, unknown>;
+	const savedDocument = g["Document"];
+	const Doc = window.Document as unknown as { prototype: object };
+	Object.defineProperty(Doc.prototype, "modelContext", {
+		configurable: true,
+		get: () => ({
+			registerTool: (tool: Native) => {
+				native.set(tool.name, tool);
+			},
+		}),
+	});
+	g["Document"] = Doc;
+	const asked: string[] = [];
+	let setConfirm: ((on: boolean) => void) | undefined;
+	function Probe() {
+		useTool({
+			name: "clear",
+			description: "Clear everything",
+			annotations: { consequentialHint: true },
+			execute: () => "cleared",
+		});
+		return null;
+	}
+	function App() {
+		const [on, setOn] = useState(false);
+		setConfirm = setOn;
+		return (
+			<TabMcpProvider
+				server={{ name: "todo", version: "1" }}
+				storage={null}
+				webmcp
+				{...(on
+					? {
+							onConfirm: () => {
+								asked.push("page");
+								return false;
+							},
+						}
+					: {})}
+			>
+				<Probe />
+			</TabMcpProvider>
+		);
+	}
+	const call = () =>
+		act(() =>
+			native
+				.get("clear")
+				?.execute({}, { signal: new AbortController().signal }),
+		);
+	try {
+		render(<App />);
+		await until(() => native.has("clear"));
+		// No onConfirm: the provider's default is the library's, which shows
+		// an agent in the browser nothing.
+		expect(await call()).toBe("cleared");
+		expect(doc.querySelector("dialog")).toBeNull();
+		act(() => setConfirm?.(true));
+		expect(await call()).toEqual({
+			error: "The user did not allow clear to run.",
+		});
+		expect(asked).toEqual(["page"]);
+	} finally {
+		delete (Doc.prototype as { modelContext?: unknown }).modelContext;
+		if (savedDocument === undefined) delete g["Document"];
+		else g["Document"] = savedDocument;
+	}
+});
+
 test("game feedback 3: the default label says the connection is lost after three failed attempts", () => {
 	const t = tab();
 	let attempt = 1;

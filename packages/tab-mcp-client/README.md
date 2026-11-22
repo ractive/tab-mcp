@@ -159,7 +159,8 @@ WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-call
   an AI app through the relay (`id`, verified `host`, declared `name`),
   `{ kind: "local", id, name? }` for the site's own assistant on a served port, with the
   `id` and `name` the page gave `serve` ([Your own assistant](#your-own-assistant-on-the-page)),
-  or `{ kind: "webmcp" }` for an agent in the browser ([WebMCP](#webmcp)), of which nothing
+  or `{ kind: "webmcp" }` for a WebMCP caller ([WebMCP](#webmcp): an agent in the
+  browser, another extension, or a document of an `exposedTo` origin), of which nothing
   more is known (unless the tab-mcp browser extension vouched for the call: then
   `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, [with the
   extension](#with-the-tab-mcp-browser-extension)). Check `client.kind` before you read `host`. Return a
@@ -191,7 +192,8 @@ written for the native API behaves differently here:
 - `execute` may return an MCP result; through WebMCP it goes out as its
   `structuredContent` or its text ([WebMCP](#webmcp)).
 - `exposedTo` matters only for WebMCP: it is passed on to the native registration of a
-  mirrored tool, and AI apps never see it.
+  mirrored tool, and AI apps never see it. A document of a listed origin can run the
+  tool, and the library does not ask it ([who asks](#who-asks-before-a-tool-that-asks-runs)).
 
 An already aborted `signal` rejects with its reason and registers nothing, as in the
 draft.
@@ -221,27 +223,61 @@ Chrome has WebMCP for sites in its
 `webmcp: true` does nothing. Each `new TabMcp` looks for WebMCP when it is made, so a
 trial token that a script adds later counts for a `TabMcp` made after it.
 
-- Every tool goes there, tools marked `consequentialHint` or MCP's `destructiveHint`
-  included, and they ask every WebMCP call (below). A WebMCP call asks by
-  `consequentialHint ?? destructiveHint`, so a tool marked only `destructiveHint` asks
-  there too, though it does not ask an AI app (its own client sees the hint). `callers` without
-  `"webmcp"` keeps a tool out of WebMCP
-  ([which callers see a tool](#which-callers-see-a-tool)). Until 0.20 such tools were
-  left out unless `callers` listed `"webmcp"`; an agent that found no tool to delete with
-  then clicked the page's own Delete buttons, with no question at all (DEC-209). An agent
-  that drives the tab can click Allow in the page's dialog too, so a tool the page wants
-  kept from agents in the browser leaves `"webmcp"` out of `callers`. A tool marked only
-  `destructiveHint: true` is registered natively with `consequentialHint: true`, since
-  WebMCP has no `destructiveHint` (DEC-022 maps the other way).
+#### Who asks before a tool that asks runs
+
+A tool marked `consequentialHint` (or, for WebMCP calls, only `destructiveHint`) asks
+before it runs. Who asks depends on the caller (DEC-215). Every WebMCP call that the
+tab-mcp browser extension did not vouch for reaches the page as
+`client: { kind: "webmcp" }`, whoever made it: the page cannot tell the last three rows
+apart.
+
+| Caller | Can it click in the tab? | Who asks |
+|---|---|---|
+| An AI app through the relay | no | the page: `onConfirm`, else the library's dialog |
+| An AI app through the tab-mcp browser extension (a WebMCP call the extension vouched for) | no | the extension, in its side panel; the page does not ask again |
+| An agent in the browser that drives the tab (unvouched WebMCP call) | yes | the agent, in its own chat, if it heeds `consequentialHint`; the page's `onConfirm` if it has one; never the library's dialog |
+| Another extension that passes on calls of an AI app outside the browser (unvouched WebMCP call) | no, unless that extension lets it | that extension, if it asks (as the tab-mcp browser extension does in its side panel); the page's `onConfirm` if it has one; never the library's dialog |
+| A document of another origin that the page named in `exposedTo` (unvouched WebMCP call) | no, not in the page | only the page's `onConfirm`, if it has one; never the library's dialog |
+
+The library shows no question for an unvouched WebMCP call: without `onConfirm` a tool
+that asks runs. For an agent that drives the tab the dialog was no check (with ChatGPT's
+browser the call waited most of a minute, then the agent clicked "Allow once" itself).
+For the other two it was one, and it is gone: whether the user is asked then depends on
+the calling extension or the other origin's script, which the page does not know. A
+page with a tool that must not run on such a caller's word decides in code or keeps the
+tool away:
+
+- **`onConfirm`** gets the call with `request.client.kind === "webmcp"` (no `via`). Decide
+  there without showing anything an agent could click: refuse every such call, or apply
+  a rule of your own (arguments, the time of day, what the user is signed in as). A
+  question of your own in the page is no better than the library's against an agent
+  that drives the tab.
+- **`callers`** without `"webmcp"` keeps the tool out of WebMCP altogether
+  ([which callers see a tool](#which-callers-see-a-tool)), for example
+  `{ callers: ["relay", "local"] }`.
+- **`exposedTo`**: leave it off a tool that asks unless the listed origins may run it
+  unasked. A document of such an origin lists and runs the tool (Chrome 156).
+
+None of these stops an agent that drives the tab from clicking the page's own controls,
+which ask nothing either.
+
+- Every tool goes to WebMCP, tools marked `consequentialHint` or MCP's `destructiveHint`
+  included. A tool marked only `destructiveHint: true` is registered natively with
+  `consequentialHint: true`, since WebMCP has no `destructiveHint` (DEC-022 maps the other
+  way), and `onConfirm` gets its WebMCP calls by `consequentialHint ?? destructiveHint`,
+  though an AI app's call of it does not ask (its own client sees the hint). Until 0.20
+  such tools were left out unless `callers` listed `"webmcp"`; an agent that found no tool
+  to delete with then clicked the page's own Delete buttons (DEC-209). In 0.20 the
+  library's dialog asked every unvouched WebMCP call (DEC-215).
 - The native registration gets the WebMCP fields: `name`, `title`, `description`,
   `inputSchema`, `outputSchema` and the WebMCP hints, and `exposedTo` from
   `registerTool`'s options (origins of other documents in the tab that may see the
   tool; the browser checks it, and an invalid list only warns, as below).
 - A WebMCP call takes the same path as an AI app's: the arguments are checked against
-  `inputSchema` (Chrome does not check them), a consequential tool asks (`onConfirm`, or
-  the library's dialog, which names the caller "An agent in this browser"), and
-  `toolcall` and `toolcallend` fire with `client: { kind: "webmcp" }`. "Always allow" is
-  never offered or applied for these calls: there is no identity to remember it for.
+  `inputSchema` (Chrome does not check them), a tool that asks goes to `onConfirm` if
+  the page has one (above), and `toolcall` and `toolcallend` fire with
+  `client: { kind: "webmcp" }`, so a page's record of calls still lists it ("an agent
+  in this browser", say). "Always allow" and the switches never apply to these calls.
 - The call resolves with what `execute` returned, which the browser hands the agent as
   JSON text. An MCP result goes out as its `structuredContent` if it has one, else as
   its text blocks, one per line, each other block (an image, a resource) as a line that
@@ -250,9 +286,9 @@ trial token that a script adds later counts for a `TabMcp` made after it.
   serialize, and an empty MCP result resolve as `"Done."`.
 - A failure resolves too, as
   `{ error: "<message>" }`, so that the agent can read it: invalid arguments (the same
-  message as for an AI app), "Don't allow" (`The user did not allow <tool> to run.`), a
-  question not answered (`The user did not answer whether <tool> may run.`), a tool that
-  is gone, an error thrown by `execute` (its message) and an MCP result with
+  message as for an AI app), a refusal of `onConfirm` (`The user did not allow <tool> to
+  run.`), its `"unanswered"` (`The user did not answer whether <tool> may run.`), a tool
+  that is gone, an error thrown by `execute` (its message) and an MCP result with
   `isError: true` (its text). A rejection would not help: the draft hands the agent
   every rejection as an `OperationError` without its message, on purpose (a failure the
   agent should read belongs in the result), and Chrome 156 as `UnknownError`. Two cases still
@@ -304,8 +340,8 @@ that an AI app reaches it through the extension:
 - **A vouched call.** Right before the extension runs a tool the user allowed there
   (asked and allowed, or covered by its "Always allow" switch), it tells the page the
   tool, the exact arguments and the AI app. The next WebMCP call of that tool with equal
-  arguments (key order aside) within 2 seconds runs without the page's question and
-  without `onConfirm`: the user just allowed exactly that call. Its caller in
+  arguments (key order aside) within 2 seconds runs without `onConfirm`: the user just
+  allowed exactly that call. Its caller in
   `execute`, `toolcall` and `toolcallend` is
   `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, so an activity view can say
   "Claude (claude.ai) through the tab-mcp browser extension". A vouch is used once and
@@ -314,9 +350,10 @@ that an AI app reaches it through the extension:
   events fire, a tool that is gone does not run. Once the extension's call ended or
   failed, the extension withdraws the vouch, and one still unused (the call never
   reached the page) is dropped. Any call that matches no vouch (an agent in the
-  browser, a call after the 2 seconds) is asked as before.
-- **`trustExtension: false`** keeps asking every WebMCP call, vouched or not, for a site
-  that insists on its own question; `extension` is still reported.
+  browser, another extension, an `exposedTo` origin, a call after the 2 seconds) is an
+  unvouched WebMCP call: `onConfirm` decides, without one it runs.
+- **`trustExtension: false`** treats a vouched call as any other WebMCP call, for a site
+  whose `onConfirm` insists on its own rule; `extension` is still reported.
 - **What the page tells the extension:** the library's version, the app id and the AI
   apps connected to the page directly (`name`, `host`, as `grants` has them; at most
   64), again on
@@ -329,9 +366,9 @@ that an AI app reaches it through the extension:
   `src/handshake.ts`). Script in the page could fake the extension, but script in the
   page can already skip any question of the page: this is a convenience between two
   parts the user trusts, not a security boundary. Only the top frame takes part.
-- Old and new mix: an extension that does not know the handshake says nothing, and the
-  page asks as before; the extension says nothing to a page that did not announce the
-  library.
+- Old and new mix: an extension that does not know the handshake says nothing, and its
+  calls are unvouched WebMCP calls, which the library does not ask; the extension says nothing to a page that
+  did not announce the library.
 
 A page that registers its WebMCP tools itself, without the library's mirror, can take
 part the same way: answer the events as `src/handshake.ts` does, skip its own
@@ -490,7 +527,8 @@ a read-only tool such as `get_page_context` (`readOnlyHint: true`, perhaps
 
 A consequential tool asks before every call. For the calls through one port, `serve`'s
 `onConfirm` asks instead of the page's `onConfirm` and the library's dialog; calls through
-the relay and WebMCP keep those. That is the recommended way for a site's own assistant:
+the relay keep those, and WebMCP calls the page's `onConfirm` ([who asks](#who-asks-before-a-tool-that-asks-runs)).
+That is the recommended way for a site's own assistant:
 the question appears where the user talks to the assistant, in the user's language. It
 answers as the page's `onConfirm` does: `true`, `false` or `"unanswered"`; anything else,
 and a throw, is a refusal. `request.signal` aborts when the call is cancelled, takes longer
@@ -512,8 +550,11 @@ between that text and the tool.
 
 `registerTool(tool, { callers })` lists the callers that see a tool: `"relay"` (AI apps
 through the relay), `"local"` (a served port) and `"webmcp"` (agents in the browser),
-by default all of them. A tool that asks asks each of them; whether a tool deletes
-something is no reason to hide it from a caller. `callers` is for who may see it at all.
+by default all of them. A tool that asks asks AI apps and the site's own assistant; a
+WebMCP call the tab-mcp browser extension did not vouch for is not shown the library's
+dialog
+([who asks](#who-asks-before-a-tool-that-asks-runs)). `callers` is for who may see a tool
+at all.
 For a caller that is not listed the tool does not exist: `tools/list` leaves it out,
 `notifications/tools/list_changed` does not fire for it, and a call gets the same error
 as a call of an unknown tool. For example:
@@ -524,6 +565,9 @@ as a call of an unknown tool. For example:
 - `{ callers: ["relay"] }`: a tool that needs to know which AI app calls (a paired,
   named app; an audit line, "Always allow" remembered per app), which an anonymous
   WebMCP caller is not.
+- `{ callers: ["relay", "local"] }`: kept from WebMCP, for a tool that must not run on
+  the word of an unvouched WebMCP caller (the library does not ask one; an `onConfirm`
+  that refuses them does the same for the call but still lists the tool).
 - `{ callers: ["relay", "webmcp"] }`: kept from the port, when the page serves it to a
   chat frame of another origin.
 
@@ -577,9 +621,11 @@ instructions, as the recipe does with a delimited block.
 ### Consequential tools
 
 Mark tools that change or delete something with `consequentialHint: true`. The page then
-asks the user before every call ("Don't allow" or "Allow once"), showing the AI app and the
-arguments. A refusal reaches the AI app as an error result, and so does a call whose tool
-was removed while the user was asked.
+asks the user before every call of an AI app ("Don't allow" or "Allow once"), showing the
+AI app and the arguments. A refusal reaches the AI app as an error result, and so does a
+call whose tool was removed while the user was asked. A WebMCP call the tab-mcp browser
+extension did not vouch for is not shown this dialog, whoever made it; see
+[who asks](#who-asks-before-a-tool-that-asks-runs).
 
 `alwaysAllow: true` adds "Always allow", which lets that tool run without asking for that
 AI app from then on; see [Tools that run without asking](#tools-that-run-without-asking).
@@ -625,8 +671,11 @@ const mcp = new TabMcp({
   server: { name: "calculator", version: "1.0.0" },
   onConfirm: (request) => {
     const { tool, arguments: args, client, signal } = request;
-    // An agent in the browser (`webmcp`), or the site's own assistant (`local`) on a
-    // port served without its own onConfirm: the library's own dialog.
+    // An unvouched WebMCP call (an agent that may drive the tab, another
+    // extension, an exposedTo origin): decide in code, show nothing.
+    if (client.kind === "webmcp") return false;
+    // The site's own assistant (`local`) on a port served without its own
+    // onConfirm: the library's own dialog.
     if (client.kind !== "relay") return mcp.confirmInPage(request);
     const name = client.name ? escapeInvisible(client.name) : undefined;
     const app = name ? `${name} (${client.host})` : client.host;
@@ -643,7 +692,8 @@ outcome `unanswered`. Any other value, and a throw, is a refusal.
 
 `mcp.confirmInPage(request, { document })` is the library's own dialog, for an
 `onConfirm` that handles only some calls itself (`document` defaults to the global one).
-A call the user allowed for its AI app resolves `true` without the dialog.
+A call the user allowed for its AI app resolves `true` without the dialog, and so does
+every WebMCP call: handed one, it does what the library does without `onConfirm`.
 
 An app that shows the dialog for an MCP endpoint of its own, without a `TabMcp` (a
 desktop app, say), can load the built confirmation chunk (`confirm-<hash>.js`; its name
@@ -655,15 +705,16 @@ grant is in `grants`, also without an event. `options` are
 `alwaysAllow` (`true` or `"until-reload"` offers "Allow until reload" for that call;
 without it nothing is allowed or kept), `ui` (the dialog's texts) and `allowDelayMs`
 (tests only). Such allowances live in memory, for the host's grants, until a reload; only
-a client with `kind: "relay"` can be allowed.
+a client with `kind: "relay"` can be allowed. A client with `kind: "webmcp"` resolves
+`true` without the dialog.
 
 ### Tools that run without asking
 
 The user can let a consequential tool run without asking, for one connected AI app: one
 tool at a time ("Always allow" this tool), or everything ("Always allow everything"). An allowed call runs at once, with the library's dialog and with your own
-`onConfirm` alike: neither is asked. Only AI apps through the relay can be allowed; an
-agent in the browser (WebMCP) and a served port have no grant to remember it for and are
-always asked.
+`onConfirm` alike: neither is asked. Only AI apps through the relay can be allowed; a
+served port has no grant to remember it for and is always asked. An unvouched WebMCP
+call is not asked by the library at all ([who asks](#who-asks-before-a-tool-that-asks-runs)).
 
 The option `alwaysAllow` decides what the library's dialogs offer:
 

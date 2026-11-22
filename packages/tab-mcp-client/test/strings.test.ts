@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Window } from "happy-dom";
-import { confirmDialog } from "../src/confirm.ts";
+import { type AskedRequest, confirmDialog } from "../src/confirm.ts";
 import { pluralNames } from "../src/dialog.ts";
 import { setupInstructions } from "../src/setup.ts";
 import {
@@ -15,7 +15,6 @@ import {
 	withEnglish,
 } from "../src/strings.ts";
 import { directionOf, listOf, plural } from "../src/text.ts";
-import type { ConfirmRequest } from "../src/types.ts";
 
 const de = (more: Partial<DialogStrings> = {}): DialogStrings =>
 	withEnglish({ lang: "de", ...more });
@@ -129,10 +128,10 @@ describe("a page's own table", () => {
 		const window = new Window({ url: "https://page.example/" });
 		const doc = window.document as unknown as Document;
 		try {
-			const request: ConfirmRequest = {
+			const request: AskedRequest = {
 				tool: { name: "clear", description: "Clears" },
 				arguments: {},
-				client: { kind: "webmcp" },
+				client: { kind: "local", id: "chat" },
 				signal: new AbortController().signal,
 			};
 			const answer = confirmDialog(request, doc, {

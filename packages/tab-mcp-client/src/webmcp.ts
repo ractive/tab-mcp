@@ -5,7 +5,7 @@
  * `AbortController`, aborted when the tool leaves the registry. A chunk of
  * its own (DEC-171), loaded by a `TabMcp` whose constructor found native
  * WebMCP (`nativeContext` in the core); a call loads the connection chunk,
- * which checks, confirms and runs it. The handshake with the tab-mcp browser
+ * which checks and runs it. The handshake with the tab-mcp browser
  * extension (`handshake.ts`, DEC-207) is here too: only a page that mirrors
  * takes part.
  */
@@ -48,8 +48,10 @@ const HINTS = [
 /**
  * Mirror `registry`'s tools into `context`, now and whenever the registry
  * changes: every tool, unless its `callers` leave `"webmcp"` out (DEC-165,
- * DEC-209). A tool that asks asks a WebMCP caller as it asks an AI app; MCP's
- * `destructiveHint` counts as `consequentialHint` (DEC-143). Every failure of the native `registerTool()`
+ * DEC-209). A tool that asks is marked `consequentialHint`, so that the agent
+ * asks its user; MCP's `destructiveHint` counts as `consequentialHint`
+ * (DEC-143). The page's `onConfirm` decides such a call, never the library's
+ * dialog (DEC-215). Every failure of the native `registerTool()`
  * stays here: warned once per name, the tool still offered through the relay.
  * The page joins the handshake with the tab-mcp browser extension: `mcp`
  * is its `TabMcp`, `app` its app id, `options` its options
@@ -87,7 +89,7 @@ export function mirror(
 			},
 		});
 	} catch (error) {
-		// The tools are mirrored all the same; their calls are asked.
+		// The tools are mirrored all the same; no call is vouched for.
 		console.warn("tab-mcp: no handshake with the browser extension:", error);
 	}
 	const mirrors = new Map<RegisteredTool, AbortController>();

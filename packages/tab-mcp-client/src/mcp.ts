@@ -31,6 +31,7 @@ import type { GrantRef } from "./protocol.ts";
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
 import type {
 	ConfirmAnswer,
+	ConfirmHandler,
 	ConfirmRequest,
 	ServerInfo,
 	ToolCallClient,
@@ -65,8 +66,12 @@ export interface ToolSource {
 /** What a tool call needs, through the relay or through WebMCP. */
 export interface CallContext {
 	tools: ToolSource;
-	/** Ask the user before a consequential tool runs. */
-	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
+	/**
+	 * Ask the user before a consequential tool runs (a throw is a refusal);
+	 * for an unvouched WebMCP call, the page's own `onConfirm` or nothing
+	 * (DEC-215).
+	 */
+	confirm: ConfirmHandler;
 	/**
 	 * `confirm` is an own `onConfirm` (the page's, or a serve's), which may
 	 * ask anywhere: `tools/list` then does not say where (DEC-169).
@@ -438,7 +443,9 @@ async function decideAndRun(
 	cancelled.catch(() => {});
 	// A WebMCP call asks by the mirror's rule: MCP's `destructiveHint` counts as
 	// `consequentialHint` there, as WebMCP has no `destructiveHint` (DEC-143,
-	// DEC-209). For AI apps the hints are mapped as DEC-022 says.
+	// DEC-209); its `confirm` is the page's own `onConfirm` or none, never
+	// the library's dialog (DEC-215). For AI apps the hints are mapped as
+	// DEC-022 says.
 	const { consequentialHint, destructiveHint } = tool.annotations;
 	const asks =
 		client.kind === "webmcp"
@@ -497,8 +504,8 @@ async function decideAndRun(
  * same path as an AI app's call (`runCall`), its outcome as WebMCP has it.
  * Resolves with what `execute` returned, as `webMcpValue` maps it. Every
  * failure the agent should read resolves too, as `{ error: "<message>" }`:
- * invalid arguments, "Don't allow", a question not answered, a tool that is
- * gone, what `execute` threw, an `isError` result.
+ * invalid arguments, a refusal or `"unanswered"` of the page's `onConfirm`,
+ * a tool that is gone, what `execute` threw, an `isError` result.
  * WebMCP hands the agent a rejection without its message (the draft: an
  * `OperationError`; Chrome 156: `UnknownError`), so the agent would learn
  * neither why nor what to change (DEC-120). Only a call the browser

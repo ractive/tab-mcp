@@ -138,15 +138,19 @@ page can say that an AI app is connected through the extension
   or was cancelled before it reached the page leaves no vouch. The library keeps it
   2 s, for the tool registered under that name then, and uses it once for the next
   WebMCP call of that tool with equal arguments (canonical JSON, keys sorted): no
-  question, no `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension",
-  name, host }`. `trustExtension: false` in the page asks anyway.
+  `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`.
+  `trustExtension: false` in the page hands it to `onConfirm` anyway. A WebMCP call
+  without a vouch (an agent in the browser, another extension, an `exposedTo`
+  origin; the page cannot tell which) gets no question from the library, only the
+  page's `onConfirm` decides (DEC-215).
 - **The panel.** For the tab in front, when the page announced the library: "This page
   has tab-mcp built in.", and when an AI app connected to the extension is also connected
   to the page directly (same name and host, as the page announced its grants), that it
   sees the page's tools twice and to disconnect it in one of the two.
 - **No proof** of either side: a convenience between two parts the user trusts, not a
   security boundary (threat model A13, A14). Old and new mix: a page without the
-  handshake hears nothing, an old extension says nothing, and the page asks as before.
+  handshake hears nothing, an old extension says nothing, and its calls are unvouched
+  WebMCP calls, which the library does not ask.
 
 ## Filling in the code on the relay's page
 

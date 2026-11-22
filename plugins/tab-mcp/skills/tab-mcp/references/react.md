@@ -48,8 +48,9 @@ function TodoList() {
   one function that the page's own UI uses too
   ([Tools in a `useState` app](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md#tools-in-a-usestate-app)).
 - `webmcp` on the provider registers the tools with the browser's WebMCP too, tools that
-  ask included; `useTool(tool, { callers: ["relay", "local"] })` keeps one out
-  (SKILL.md, section 5).
+  ask included; the library shows an unvouched WebMCP call no question (the provider's
+  `onConfirm`, if given, still decides in code); `useTool(tool, { callers: ["relay",
+  "local"] })` keeps one out (SKILL.md, section 5).
 - `useToolCalls({ limit })` lists the AI app's recent calls; `ConnectButton` opens the
   dialog and labels itself by state.
 - The module starts with `"use client"`: in Next.js's app router the provider renders on

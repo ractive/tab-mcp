@@ -22,7 +22,7 @@ const SERVER = {
 	title: "Todo list",
 	version: "1.0.0",
 	instructions:
-		"A todo list in the user's browser tab, which the user also edits. Call list_todos first to get the ids; complete_todo takes one, delete_todos one or more (delete several in one call). Deleting asks the user first.",
+		"A todo list in the user's browser tab, which the user also edits. Call list_todos first to get the ids; complete_todo takes one, delete_todos one or more (delete several in one call). Deleted todos cannot be restored.",
 };
 
 export function App(props: { relay: string; todos: TodoList }) {
@@ -193,12 +193,14 @@ function Todos({ todos }: { todos: TodoList }) {
 		annotations: { idempotentHint: true },
 		execute: ({ id, done }) => todos.complete(id, done !== false),
 	});
-	// Cannot be undone in the page: the page asks the user first.
+	// Cannot be undone in the page: consequential, so the page asks an AI app
+	// first. The description says what it does, not that a question follows:
+	// an agent told the page asks may click the Delete buttons instead (DEC-215).
 	useTool<{ ids: string[] }>({
 		name: "delete_todos",
 		title: "Delete todos",
 		description:
-			"Delete one or more todos by their ids from list_todos, in one call. The page asks once for all of them; deleted todos cannot be restored.",
+			"Delete one or more todos by their ids from list_todos, in one call. Deleted todos cannot be restored.",
 		inputSchema: {
 			type: "object",
 			properties: {

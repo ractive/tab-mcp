@@ -7,6 +7,7 @@ import type { GrantRef, SessionMessage, TabMessage } from "./protocol.ts";
 import type { ToolRegistry } from "./registry.ts";
 import type {
 	ConfirmAnswer,
+	ConfirmHandler,
 	ConfirmRequest,
 	DisconnectReason,
 	Grant,
@@ -24,8 +25,12 @@ export interface CallHost {
 	readonly registry: ToolRegistry;
 	/** Ask the user about a consequential tool call. */
 	confirm(request: ConfirmRequest): Promise<ConfirmAnswer>;
-	/** The page's own `onConfirm` asks, not the library's dialog in the tab. */
-	ownConfirm(): boolean;
+	/**
+	 * The page's own `onConfirm`, if it has one: it asks, not the library's
+	 * dialog in the tab. For an unvouched WebMCP call it is the only check
+	 * (DEC-215).
+	 */
+	onConfirm(): ConfirmHandler | undefined;
 	/** A tool call started or ended (the `toolcall` and `toolcallend` events). */
 	toolCallStarted(call: ToolCallStart): void;
 	toolCallEnded(call: ToolCallEnd): void;
