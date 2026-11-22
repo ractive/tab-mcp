@@ -141,6 +141,32 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   late hello (1.5 s) of the extension's polyfill, the shipped Allow delay and sibling
   grace, and the real processes (a nested `bun test`, the relay process, PowerShell).
 
+## What changed (pull request 5)
+
+- **21 of the 22 UNIT rows of the audit's 1.1 and 1.3 moved** (e2e #2, 6, 7, 9, 10, 15
+  to 18, 21, 27, 30, 31, 34, 48, 60, 63; fill #2, 8, 9, 10). A browser test went only
+  once a unit test failed for the mutant of the code it caught; the PR lists each one.
+- **Kept: e2e #46** ("with AI access off and the panel closed the page is not read").
+  It counts the page's own `getTools()` calls, from every reader at once. Part of that
+  is the content script's `toolchange` handler, which runs only as a real content
+  script.
+- **Two new unit test files**, for code no unit test reached before:
+  - `sidepanel.test.ts`: the side panel's page in happy-dom, with a fake port.
+  - `connection.test.ts`: the worker's `Connection`, with settings in memory and a fake
+    Chrome.
+- **Audit verdicts that did not hold:**
+  - #34's twin covered only `attachPanel`'s order, not the Connection's queue.
+  - Fill #9 and #10 had twins in the client library's `extension.test.ts`, but the
+    worker's wiring had none.
+  - #60's "no hints is not destructive" had no unit test in the library.
+  - The new tests fill each of these gaps.
+- **One real fact kept:** that `sidePanel.open` is refused without a gesture is now a
+  line of the kept #28.
+- **Two kept tests no longer depend on a removed one:** each now sets up the AI access
+  it needs itself.
+- **Scope:** the Firefox UNIT rows (1.2) are for pull request 7, and the client's (1.5,
+  1.6) for pull request 8.
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
@@ -152,7 +178,7 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   of the recorder); only the pinned test browsers, never the owner's (`test/browsers.ts`);
   the one-time set-up in the README
 - [x] 4. The fast suite's timers (`timing.allowDelayMs`, the relay's idle test)
-- [ ] 5. The extension's logic tests to unit tests (the UNIT rows of the audit's 1.1 and
+- [x] 5. The extension's logic tests to unit tests (the UNIT rows of the audit's 1.1 and
   1.3), each new unit test shown to fail against a mutant first
 - [ ] 6. The extension's browser tests merged, one browser per build and flag
 - [ ] 7. Firefox: a smoke block on every change, the full file when the extension
