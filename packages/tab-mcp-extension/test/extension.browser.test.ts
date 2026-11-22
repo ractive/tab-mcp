@@ -17,7 +17,8 @@
 
 import {
 	afterAll,
-	beforeAll,
+	afterEach,
+	beforeEach,
 	describe,
 	expect,
 	setDefaultTimeout,
@@ -45,18 +46,18 @@ import {
 	findChromeForTesting,
 	type Page,
 	type Served,
+	step,
 	type Worker,
 } from "./browser.ts";
 
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
-// A test that waits for pages to load gives each of them the extension's
-// own limit and 15 s more: 45 s for one load, 75 s for two (back and
-// forward; reload and #part; a navigation and one more). So a load the
-// extension gives up on fails with the extension's answer: at the test's
-// timeout Bun kills the block's Chrome, and every test after it fails too,
-// naming nothing.
+// A test or step that waits for pages to load gives each of them the
+// extension's own limit and 15 s more: 45 s for one load, 75 s for two
+// (back and forward; reload and #part; a navigation and one more). So a
+// load the extension gives up on fails with the extension's answer, not
+// with the test's timeout. A scenario's timeout is the sum of its steps'.
 for (const [loads, timeout] of [
 	[1, 45_000],
 	[2, 75_000],
@@ -232,31 +233,160 @@ async function mcpClient(relay: TestRelay, address: string): Promise<Client> {
 	return client;
 }
 
+/** The builds, made once per run: the test build, the store package. */
+const builds = new Map<boolean, Promise<string>>();
+const buildDirs: string[] = [];
+function builtFor(store: boolean): Promise<string> {
+	let made = builds.get(store);
+	if (made === undefined) {
+		const dir = browserTempDir("extension-build-");
+		buildDirs.push(dir);
+		const outdir = join(dir, "dist");
+		made = build({
+			outdir,
+			...(store ? { store: true } : { test: true, minify: false }),
+		}).then(() => outdir);
+		builds.set(store, made);
+	}
+	return made;
+}
+
 /**
- * Chrome with a build of the extension, `first` open in a tab, the side panel
- * opened by a click on the icon there, set to the test relay and connected,
- * and an MCP client with a token for the connection's address.
+ * One Chrome per build and WebMCP flag for the whole file. Two copies of the
+ * extension in one Chrome would both inject and both get the questions, so
+ * the store package has a Chrome of its own, as Chrome without WebMCP has.
+ */
+interface Shared {
+	browser: Browser;
+	extension: string;
+	/** A test had it: the next one gets the extension anew. */
+	used: boolean;
+	/** Other extensions a test loaded (`loadOtherExtension`), removed after it. */
+	others: Set<string>;
+}
+const sharedBrowsers = new Map<string, Promise<Shared>>();
+/** Every Chrome this file launched: shared, and the ones of their own. */
+let launches = 0;
+
+afterAll(async () => {
+	for (const shared of sharedBrowsers.values())
+		await (await shared.catch(() => undefined))?.browser.close();
+	for (const dir of buildDirs) rmSync(dir, { recursive: true, force: true });
+	if (launches > 0)
+		console.log(
+			`extension.browser.test.ts: ${launches} Chrome launches, ${builds.size} builds`,
+		);
+});
+
+const sharedKey = (store: boolean, webmcp: boolean) =>
+	`${store ? "store" : "test"}-${webmcp ? "webmcp" : "polyfill"}`;
+
+/** Starts so far, to say which one found its Chrome gone. */
+let starts = 0;
+
+/**
+ * The shared Chrome of this build and flag, ready for the next test: the
+ * extension as just installed. A Chrome that is gone (a crash, or Bun
+ * killing a timed-out test's processes) or whose reinstall failed is closed
+ * and launched again, and the log says so: one failure no longer takes the
+ * rest of the file down with it.
+ */
+async function sharedReady(store: boolean, webmcp: boolean): Promise<Shared> {
+	const key = sharedKey(store, webmcp);
+	const shared = await sharedFor(store, webmcp);
+	let why: string | undefined;
+	if (!shared.browser.running || shared.browser.closed)
+		why = `it was gone (${shared.browser.ended})`;
+	else if (shared.used)
+		try {
+			await shared.browser.reinstall(shared.extension, shared.others);
+			shared.others.clear();
+			return shared;
+		} catch (error) {
+			why = `its reinstall failed: ${error instanceof Error ? error.message : error}`;
+		}
+	if (why === undefined) {
+		shared.used = true;
+		return shared;
+	}
+	console.log(
+		`extension.browser.test.ts: relaunched Chrome (${key}) at start ${starts}: ${why}`,
+	);
+	await shared.browser.close();
+	sharedBrowsers.delete(key);
+	const again = await sharedFor(store, webmcp);
+	again.used = true;
+	return again;
+}
+
+function sharedFor(store: boolean, webmcp: boolean): Promise<Shared> {
+	const key = sharedKey(store, webmcp);
+	let shared = sharedBrowsers.get(key);
+	if (shared === undefined) {
+		shared = builtFor(store).then(async (extension) => ({
+			browser: await launch(extension, undefined, webmcp),
+			extension,
+			used: false,
+			others: new Set<string>(),
+		}));
+		sharedBrowsers.set(key, shared);
+	}
+	return shared;
+}
+
+/** Shared Chromes, by the browser: for `loadOtherExtension`. */
+const sharedOf = new Map<Browser, Shared>();
+
+/**
+ * Load the test's other extension (one with a side panel of its own) into
+ * `stack`'s Chrome; it goes before the next test's start.
+ */
+async function loadOtherExtension(stack: Stack): Promise<string> {
+	const { id } = (await stack.browser.send("Extensions.loadUnpacked", {
+		path: join(import.meta.dir, "other-extension"),
+	})) as { id: string };
+	sharedOf.get(stack.browser)?.others.add(id);
+	await stack.browser.readyWorker(id);
+	return id;
+}
+
+/**
+ * A start for one test: the extension as just installed in the Chrome of
+ * its build and WebMCP flag (shared by the file; one of its own with
+ * `own`, or for a `profile` to start again with), `first` open in a new
+ * tab and every other tab closed, the side panel opened by a click on the
+ * icon there, set to a relay of this test's own and connected, and an MCP
+ * client with a token for the connection's address. `stop()` ends the
+ * relay; it closes the Chrome only if it is the test's own.
  */
 async function start(
-	options: { store: boolean; profile?: string; webmcp?: boolean },
+	options: {
+		store: boolean;
+		profile?: string;
+		webmcp?: boolean;
+		own?: boolean;
+	},
 	first: string,
 ): Promise<Stack> {
-	const dir = browserTempDir("extension-build-");
+	const webmcp = options.webmcp ?? true;
+	const own = options.own === true || options.profile !== undefined;
 	const relay = startTestRelay();
 	let browser: Browser | undefined;
 	const stop = async () => {
-		await browser?.close();
+		if (own) await browser?.close();
 		await relay.stop();
-		rmSync(dir, { recursive: true, force: true });
 	};
 	try {
-		const outdir = join(dir, "dist");
-		await build({
-			outdir,
-			...(options.store ? { store: true } : { test: true, minify: false }),
-		});
-		browser = await launch(outdir, options.profile, options.webmcp ?? true);
+		starts++;
+		const outdir = await builtFor(options.store);
+		if (own) browser = await launch(outdir, options.profile, webmcp);
+		else {
+			const shared = await sharedReady(options.store, webmcp);
+			browser = shared.browser;
+			sharedOf.set(browser, shared);
+		}
 		const tab = await browser.newPage(first);
+		if (!own) await browser.closeTabsBut(tab);
 		const panel = await openPanel(browser, tab);
 		await setRelay(panel, relay.url);
 		await panel.click("#connect");
@@ -271,6 +401,9 @@ async function start(
 		);
 		const worker = await browser.serviceWorker(browser.extensionId as string);
 		const client = await mcpClient(relay, address);
+		// The one path that closes the client and the relay, once however
+		// often it is called.
+		let stopped: Promise<void> | undefined;
 		return {
 			browser,
 			relay,
@@ -280,7 +413,11 @@ async function start(
 			address,
 			client,
 			extension: outdir,
-			stop,
+			stop: () =>
+				(stopped ??= (async () => {
+					await client.close().catch(() => {});
+					await stop();
+				})()),
 		};
 	} catch (error) {
 		await stop();
@@ -294,6 +431,7 @@ function launch(
 	profile?: string,
 	webmcp = true,
 ): Promise<Browser> {
+	launches++;
 	return Browser.launch(chrome as string, {
 		extension,
 		args: [
@@ -488,76 +626,144 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	let stack: Stack;
 	let tab: Page;
 
-	beforeAll(async () => {
+	beforeEach(async () => {
 		stack = await start({ store: false }, `${SITE}/webmcp.html`);
 		tab = stack.tab;
 	}, 60_000);
 
-	afterAll(async () => {
-		await stack?.client.close();
+	afterEach(async () => {
 		await stack?.stop();
+		stack = undefined as unknown as Stack;
 	});
 
 	test("the AI app gets page_info, webmcp_tools and the page's tools", async () => {
-		const names = await waitForTools(
-			stack,
-			(n) => n.length >= OWN_TOOLS.length + PAGE_TOOLS.length,
+		await step(
+			"the AI app gets page_info, webmcp_tools and the page's tools",
+			async () => {
+				const names = await waitForTools(
+					stack,
+					(n) => n.length >= OWN_TOOLS.length + PAGE_TOOLS.length,
+				);
+				// mirrored_tool is a tab-mcp page's mirror, offered all the same: the
+				// AI app may not be paired with the page itself (WM 1).
+				expect(names).toEqual([...OWN_TOOLS, ...PAGE_TOOLS].sort());
+				const { tools } = await stack.client.listTools();
+				const byName = (name: string) => tools.find((t) => t.name === name);
+				expect(byName("page_info")?.annotations?.readOnlyHint).toBe(true);
+				const greeting = byName("page_get_greeting");
+				expect(greeting?.description).toBe(`From ${SITE}: Greets a name.`);
+				expect(greeting?.annotations?.readOnlyHint).toBe(true);
+				expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(
+					false,
+				);
+			},
 		);
-		// mirrored_tool is a tab-mcp page's mirror, offered all the same: the
-		// AI app may not be paired with the page itself (WM 1).
-		expect(names).toEqual([...OWN_TOOLS, ...PAGE_TOOLS].sort());
-		const { tools } = await stack.client.listTools();
-		const byName = (name: string) => tools.find((t) => t.name === name);
-		expect(byName("page_info")?.annotations?.readOnlyHint).toBe(true);
-		const greeting = byName("page_get_greeting");
-		expect(greeting?.description).toBe(`From ${SITE}: Greets a name.`);
-		expect(greeting?.annotations?.readOnlyHint).toBe(true);
-		expect(byName("page_place_order")?.annotations?.readOnlyHint).toBe(false);
-	});
-
-	test("page_info tells the page in front and its WebMCP tools", async () => {
-		const result = await pageInfo(stack);
-		expect(result.isError).toBeFalsy();
-		expect(result.structuredContent).toEqual({
-			url: `${SITE}/webmcp.html`,
-			title: "Page with WebMCP tools",
-			language: "de-CH",
-			webmcp: { available: true, tools: 5 },
+		await step(
+			"page_info tells the page in front and its WebMCP tools",
+			async () => {
+				const result = await pageInfo(stack);
+				expect(result.isError).toBeFalsy();
+				expect(result.structuredContent).toEqual({
+					url: `${SITE}/webmcp.html`,
+					title: "Page with WebMCP tools",
+					language: "de-CH",
+					webmcp: { available: true, tools: 5 },
+				});
+			},
+		);
+		await step("webmcp_tools lists them with their input schemas", async () => {
+			const result = await call(stack, "webmcp_tools");
+			expect(result.structuredContent).toMatchObject({
+				origin: SITE,
+				available: true,
+			});
+			expect(result.structuredContent).not.toHaveProperty("mirrored");
+			const tools = result.structuredContent?.["tools"] as {
+				name: string;
+				tool?: string;
+				readOnly: boolean;
+				inputSchema?: unknown;
+			}[];
+			expect(tools.map((t) => t.tool).sort()).toEqual(PAGE_TOOLS);
+			expect(tools.find((t) => t.name === "place_order")?.readOnly).toBe(false);
+			// What webmcp_call needs to call a tool the AI app has no entry for (EQ 1).
+			expect(tools.find((t) => t.name === "get_greeting")?.inputSchema).toEqual(
+				{
+					type: "object",
+					properties: { name: { type: "string" } },
+					required: ["name"],
+				},
+			);
 		});
-	});
-
-	test("webmcp_tools lists them with their input schemas", async () => {
-		const result = await call(stack, "webmcp_tools");
-		expect(result.structuredContent).toMatchObject({
-			origin: SITE,
-			available: true,
+		await step(
+			"a read-only tool runs at once, with the page's answer",
+			async () => {
+				const result = await call(stack, "page_get_greeting", { name: "Ada" });
+				expect(result.isError).toBeFalsy();
+				expect(result.content).toEqual([{ type: "text", text: "Hello, Ada!" }]);
+				expect(await tab.eval("window.calls.at(-1)")).toEqual([
+					"get_greeting",
+					"Ada",
+				]);
+			},
+		);
+		await step(
+			"a toolchange and the reads around it (AI app, worker, panel) cost one getTools()",
+			async () => {
+				await readsSettled(stack.tab);
+				await toolReads(stack.tab);
+				await registerLater(stack.tab, "later_one");
+				// The AI app asks at once; the worker reads after the content
+				// script's message (250 ms), the panel after each of the bridge's
+				// reads. Before DEC-177 that was five calls.
+				const [info] = await Promise.all([
+					pageInfo(stack),
+					call(stack, "webmcp_tools"),
+				]);
+				expect(info.structuredContent).toMatchObject({
+					webmcp: { available: true, tools: 6 },
+				});
+				await waitForTools(stack, (n) => n.includes("page_later_one"));
+				await stack.panel.waitFor(
+					`[...document.querySelectorAll("#tools li")].some((li) => li.textContent.includes("later_one"))`,
+				);
+				await readsSettled(stack.tab);
+				// One where all of it comes within SHARE_READ_MS of the first read
+				// (locally and in CI so far); a slow runner may need a second.
+				expect(await toolReads(stack.tab)).toBeLessThanOrEqual(2);
+			},
+		);
+		await step("cancelling a call cancels it in the page", async () => {
+			const controller = new AbortController();
+			const slow = call(
+				stack,
+				"page_slow_tool",
+				{},
+				{ signal: controller.signal },
+			);
+			// Once the page's tool runs: aborted earlier, it would never start.
+			await tab.waitFor("window.slowStarted");
+			controller.abort();
+			await slow.catch(() => undefined);
+			await tab.waitFor("window.aborted");
 		});
-		expect(result.structuredContent).not.toHaveProperty("mirrored");
-		const tools = result.structuredContent?.["tools"] as {
-			name: string;
-			tool?: string;
-			readOnly: boolean;
-			inputSchema?: unknown;
-		}[];
-		expect(tools.map((t) => t.tool).sort()).toEqual(PAGE_TOOLS);
-		expect(tools.find((t) => t.name === "place_order")?.readOnly).toBe(false);
-		// What webmcp_call needs to call a tool the AI app has no entry for (EQ 1).
-		expect(tools.find((t) => t.name === "get_greeting")?.inputSchema).toEqual({
-			type: "object",
-			properties: { name: { type: "string" } },
-			required: ["name"],
-		});
-	});
-
-	test("a read-only tool runs at once, with the page's answer", async () => {
-		const result = await call(stack, "page_get_greeting", { name: "Ada" });
-		expect(result.isError).toBeFalsy();
-		expect(result.content).toEqual([{ type: "text", text: "Hello, Ada!" }]);
-		expect(await tab.eval("window.calls.at(-1)")).toEqual([
-			"get_greeting",
-			"Ada",
-		]);
-	});
+		await step(
+			"the list follows toolchange, without a navigation",
+			async () => {
+				await tab.eval(`document.modelContext.registerTool({
+				name: "late_tool",
+				description: "Registered later.",
+				inputSchema: { type: "object" },
+				annotations: { readOnlyHint: true },
+				async execute() { return "late"; },
+			})`);
+				await waitForTools(stack, (n) => n.includes("page_late_tool"));
+				expect((await call(stack, "page_late_tool")).content).toEqual([
+					{ type: "text", text: "late" },
+				]);
+			},
+		);
+	}, 220_000);
 
 	test("a tool not marked read-only asks in the side panel first", async () => {
 		const allowed = call(stack, "page_place_order", { item: "tea" });
@@ -601,509 +807,503 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		);
 	});
 
-	test("the AI access switch: its knob sits flush at both ends, light, dark and forced colours", async () => {
-		/**
-		 * The track's width, the knob's gaps to the track's outer edges, on
-		 * and off, and whether the track may grow. The knob sits in the padding
-		 * box, so a border or padding moves it: the text fields' rules (8 px
-		 * padding, a 1 px border, flex: 1) once made the track wider than the
-		 * knob's travel. Without the transition, so no waiting.
-		 */
-		const measure = () =>
-			stack.panel.eval<{
-				width: number;
-				on: [number, number];
-				off: [number, number];
-				grows: string;
-			}>(`(() => {
-				const input = document.getElementById("ai-switch");
-				const still = document.createElement("style");
-				still.textContent = "#ai-switch, #ai-switch::after { transition: none !important; }";
-				document.head.append(still);
-				const was = input.checked;
-				const style = getComputedStyle(input);
-				const width = input.getBoundingClientRect().width;
-				const gaps = (checked) => {
-					// Not a click: no change event, no command.
-					input.checked = checked;
-					const knob = getComputedStyle(input, "::after");
-					const left =
-						parseFloat(style.borderLeftWidth) +
-						parseFloat(knob.left) +
-						new DOMMatrix(knob.transform === "none" ? "" : knob.transform).m41;
-					return [left, width - left - parseFloat(knob.width)];
-				};
-				const result = { width, on: gaps(true), off: gaps(false), grows: style.flexGrow };
-				input.checked = was;
-				still.remove();
-				return result;
-			})()`);
-		const flush: Awaited<ReturnType<typeof measure>> = {
-			width: 34,
-			on: [16, 2],
-			off: [2, 16],
-			grows: "0",
-		};
-		for (const features of [
-			[{ name: "prefers-color-scheme", value: "light" }],
-			[{ name: "prefers-color-scheme", value: "dark" }],
-			[{ name: "forced-colors", value: "active" }],
-		]) {
-			await stack.panel.send("Emulation.setEmulatedMedia", { features });
-			expect(await measure()).toEqual(flush);
-		}
-		// Forced colours: the track is outlined, not left to a background.
-		expect(
-			await stack.panel.eval(
-				`getComputedStyle(document.getElementById("ai-switch")).borderTopStyle`,
-			),
-		).toBe("solid");
-		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
-	});
-
-	test("the AI access switch and a tool's Always allow: knob on track and track on the paper at least 3:1, light and dark, on and off (EQ 17, DEC-160)", async () => {
-		/** The contrast ratios Chrome's computed colours give, on and off. */
-		const contrast = (selector: string) =>
-			stack.panel.eval<{
-				on: { knob: number; track: number };
-				off: { knob: number; track: number };
-			}>(`(() => {
-				const input = document.querySelector(${JSON.stringify(selector)});
-				const still = document.createElement("style");
-				still.textContent = "input, input::after { transition: none !important; }";
-				document.head.append(still);
-				const was = input.checked;
-				const rgb = (color) => {
-					const c = document.createElement("canvas").getContext("2d");
-					c.fillStyle = color;
-					c.fillRect(0, 0, 1, 1);
-					return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3);
-				};
-				const lum = (color) => {
-					const [r, g, b] = rgb(color).map((v) => {
-						const s = v / 255;
-						return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-					});
-					return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-				};
-				const ratio = (a, b) => {
-					const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
-					return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100;
-				};
-				// The sections are on the paper (the body), not on a card.
-				const card = getComputedStyle(document.body).backgroundColor;
-				// The wait after the layout moved makes a tool's switch flat.
-				const waits = input.getAttribute("aria-disabled");
-				input.removeAttribute("aria-disabled");
-				const at = (checked) => {
-					input.checked = checked;
-					const track = getComputedStyle(input).backgroundColor;
-					const knob = getComputedStyle(input, "::after").backgroundColor;
-					return { knob: ratio(knob, track), track: ratio(track, card) };
-				};
-				const result = { on: at(true), off: at(false) };
-				input.checked = was;
-				if (waits !== null) input.setAttribute("aria-disabled", waits);
-				still.remove();
-				return result;
-			})()`);
-		await stack.panel.waitFor(`document.querySelector("input.always-allow")`);
-		for (const selector of ["#ai-switch", "input.always-allow"]) {
-			const measured: Record<string, unknown> = {};
-			for (const value of ["light", "dark"]) {
-				await stack.panel.send("Emulation.setEmulatedMedia", {
-					features: [{ name: "prefers-color-scheme", value }],
-				});
-				const m = await contrast(selector);
-				measured[value] = m;
-				for (const ratio of [m.on.knob, m.on.track, m.off.knob, m.off.track])
-					expect(ratio).toBeGreaterThanOrEqual(3);
-			}
-			// The tokens' pairs (test/contrast.test.ts): on, the knob
-			// (--on-strong) on the ink track (--strong), which is ink on paper,
-			// or for a tool's "Always allow" on the green track (--ok, DEC-184);
-			// off, the knob on the edge (--edge), and the edge on paper. Before
-			// the tokens: 5.02 / 3.77 in light, 9.48 / 3.42 in dark; before
-			// EQ 17 the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
-			const green = selector === "input.always-allow";
-			expect(measured).toEqual({
-				light: {
-					on: green
-						? { knob: 6.44, track: 5.86 }
-						: { knob: 16.07, track: 14.61 },
-					off: { knob: 3.86, track: 3.51 },
-				},
-				dark: {
-					on: green
-						? { knob: 9.85, track: 9.85 }
-						: { knob: 15.89, track: 15.89 },
-					off: { knob: 4.39, track: 4.39 },
-				},
-			});
-		}
-		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
-	});
-
-	test("How do I add it? under the address: the commands fit, light and dark, Copy keeps its width", async () => {
-		// With an app paired, the address is behind "+ Connect another AI app".
-		const adding = !(await stack.panel.eval<boolean>(
-			`document.getElementById("pairing").hidden === false`,
-		));
-		if (adding) await stack.panel.click("#add-app");
-		await stack.panel.waitFor(
-			`!document.getElementById("setup").hidden && document.getElementById("setup").offsetHeight > 0`,
-		);
-		expect(
-			await stack.panel.eval<boolean>(`document.getElementById("setup").open`),
-		).toBe(false);
-		await stack.panel.click("#setup summary");
-		await stack.panel.waitFor(`document.getElementById("setup").open`);
-		const measure = () =>
-			stack.panel.eval<{
-				apps: string[];
-				commands: string[];
-				overflow: boolean;
-				widths: [number, number];
-				pre: [string, string];
-			}>(`(() => {
-				const setup = document.getElementById("setup");
-				const pres = [...setup.querySelectorAll("pre")];
-				const copy = setup.querySelector("button.copy");
-				const before = copy.getBoundingClientRect().width;
-				copy.textContent = "Copied";
-				const after = copy.getBoundingClientRect().width;
-				copy.textContent = "Copy";
-				const style = getComputedStyle(pres[0]);
-				return {
-					apps: [...setup.querySelectorAll("li > strong")].map((e) => e.textContent),
-					commands: pres.map((e) => e.textContent),
-					overflow:
-						document.documentElement.scrollWidth > document.documentElement.clientWidth ||
-						pres.some((e) => e.scrollWidth > e.clientWidth),
-					widths: [before, after],
-					pre: [style.color, style.backgroundColor],
-				};
-			})()`);
-		const seen: [string, string][] = [];
-		for (const value of ["light", "dark"]) {
-			await stack.panel.send("Emulation.setEmulatedMedia", {
-				features: [{ name: "prefers-color-scheme", value }],
-			});
-			const m = await measure();
-			expect(m.apps).toEqual([
-				"Claude (claude.ai and the desktop app)",
-				"ChatGPT",
-				"Claude Code",
-				"Codex",
-			]);
-			expect(m.commands).toEqual([
-				`claude mcp add --transport http tab-mcp-browser-extension ${stack.address}`,
-				`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-browser-extension --url ${stack.address}\ncodex mcp login tab-mcp-browser-extension`,
-			]);
-			expect(m.overflow).toBe(false);
-			expect(m.widths[1]).toBe(m.widths[0]);
-			expect(m.pre[0]).not.toBe(m.pre[1]);
-			seen.push(m.pre);
-		}
-		// The scheme's own colours, not one fixed pair.
-		expect(seen[0]).not.toEqual(seen[1]);
-		await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
-		await stack.panel.click("#setup summary");
-		if (adding) await stack.panel.click("#pair-done");
-	});
-
 	test("the look: nothing past the panel's edge at 345, 360 and 420 px, no amber button, each scheme's tokens (DEC-160 to DEC-163)", async () => {
-		const panel = stack.panel;
-		/**
-		 * Chrome's narrowest side panel with a classic scrollbar beside its
-		 * content (15 px on Windows and Linux), the same without one, and a
-		 * common width.
-		 */
-		const WIDTHS = [345, 360, 420];
-		const AMBER = "rgb(255, 176, 0)";
-		/**
-		 * What reaches past the right edge of the panel's content (the
-		 * scrolling element's `clientWidth`: the window's less a scrollbar),
-		 * and the buttons filled or outlined in amber.
-		 */
-		const measure = () =>
-			panel.eval<{
-				scroll: number;
-				client: number;
-				past: string[];
-				amber: string[];
-			}>(`(() => {
-				const shown = (e) => e.getClientRects().length > 0;
-				const root = document.scrollingElement;
-				return {
-					scroll: root.scrollWidth,
-					client: root.clientWidth,
-					past: [...document.querySelectorAll("body *")]
-						.filter((e) => shown(e) && !e.closest(".visually-hidden") && e.getBoundingClientRect().right > root.clientWidth + 0.5)
-						.map((e) => e.tagName + "#" + e.id + "." + e.className),
-					amber: [...document.querySelectorAll("button")]
-						.filter((e) => {
-							const style = getComputedStyle(e);
-							return style.backgroundColor === ${JSON.stringify(AMBER)} || style.borderTopColor === ${JSON.stringify(AMBER)};
-						})
-						.map((e) => e.id || e.textContent),
-				};
-			})()`);
-		/** At each width: no sideways scroll, nothing past the edge, no amber. */
-		const holds = async () => {
-			for (const width of WIDTHS) {
-				await panel.send("Emulation.setDeviceMetricsOverride", {
-					width,
-					height: 900,
-					deviceScaleFactor: 1,
-					mobile: false,
-				});
-				await panel.waitFor(`innerWidth === ${width}`);
-				const seen = await measure();
-				expect(seen.client).toBeLessThanOrEqual(width);
-				expect(seen.scroll).toBeLessThanOrEqual(seen.client);
-				expect(seen.past).toEqual([]);
-				expect(seen.amber).toEqual([]);
-			}
-		};
-		const adding = !(await panel.eval<boolean>(
-			`document.getElementById("pairing").hidden === false`,
-		));
-		try {
-			// The tab's tools with their switches, and the address and the code.
-			if (adding) await panel.click("#add-app");
-			await panel.waitFor(
-				`!document.getElementById("pairing").hidden && !document.getElementById("tools-head").hidden && document.querySelector("input.always-allow") !== null`,
-			);
-			await holds();
-			// "How do I add it?" (its commands) and Settings open, and the two
-			// notices, with words that have nowhere to break. The next state
-			// hides the notices again.
-			const LONG = "x".repeat(120);
-			await panel.eval(`(() => {
-				document.getElementById("setup").open = true;
-				document.querySelector("details.settings").open = true;
-				for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = false;
-				document.getElementById("local-problem").textContent = "Could not reach the relay at https://${LONG}.example";
-				document.getElementById("replaced-text").textContent = "Another tab or program took over this address ${LONG}";
-			})()`);
-			await holds();
-			// A problem is red in its fill and edge, its words in ink; the
-			// notice is the warning's; a button on it keeps its edge.
-			expect(
-				await panel.eval<string[]>(`(() => {
-					const css = (id) => getComputedStyle(document.getElementById(id));
-					const root = getComputedStyle(document.documentElement);
-					const token = (name) => {
-						const probe = document.createElement("i");
-						probe.style.color = "var(" + name + ")";
-						document.body.append(probe);
-						const colour = getComputedStyle(probe).color;
-						probe.remove();
-						return colour;
-					};
-					return [
-						css("local-problem").backgroundColor === token("--danger-bg"),
-						css("local-problem").borderTopColor === token("--danger"),
-						css("local-problem").color === token("--ink"),
-						css("replaced").backgroundColor === token("--warn-bg"),
-						css("replaced").borderTopColor === token("--warn-edge"),
-						css("replaced-disconnect-all").borderTopColor === token("--edge"),
-					].map(String);
-				})()`),
-			).toEqual(["true", "true", "true", "true", "true", "true"]);
-			// A question with arguments and a title that have nowhere to break.
-			const asked = call(stack, "page_place_order", { item: LONG.repeat(4) });
-			await panel.waitFor(`document.querySelector("[data-question] pre")`);
-			await holds();
-			// It is a sheet with an edge; "Allow once" is drawn as "Don't
-			// allow" is, the default button (DEC-180), and while it takes no
-			// click it is flat, in colours of its own. The pointer off the
-			// dialog first: it opens where the last click was, and a button
-			// under the pointer takes its hover colour.
-			await panel.send("Input.dispatchMouseEvent", {
-				type: "mouseMoved",
-				x: 1,
-				y: 1,
-			});
-			const question = await panel.eval<Record<string, string>>(`(() => {
-				const card = getComputedStyle(document.querySelector("[data-question]"));
-				const button = (answer) => document.querySelector('[data-question] button[data-answer="' + answer + '"]');
-				const allow = button("allow");
-				const deny = button("deny");
-				const was = allow.getAttribute("aria-disabled");
-				const still = document.createElement("style");
-				still.textContent = "button { transition: none !important; }";
-				document.head.append(still);
-				allow.setAttribute("aria-disabled", "true");
-				const waiting = getComputedStyle(allow).backgroundColor;
-				const opacity = getComputedStyle(allow).opacity;
-				allow.removeAttribute("aria-disabled");
-				const look = (b) => {
-					const s = getComputedStyle(b);
-					return [s.backgroundColor, s.color, s.borderTopColor, s.fontWeight].join(" ");
-				};
-				const ready = getComputedStyle(allow).backgroundColor;
-				const same = look(allow) === look(deny);
-				if (was !== null) allow.setAttribute("aria-disabled", was);
-				still.remove();
-				return {
-					sheet: card.backgroundColor,
-					edge: card.borderTopColor,
-					shadow: card.boxShadow,
-					class: allow.className + "|" + deny.className,
-					same: String(same),
-					waiting,
-					opacity,
-					ready,
-				};
-			})()`);
-			await answerInPanel(stack, "deny");
-			expect((await asked).isError).toBe(true);
-			await panel.waitFor(
-				`document.querySelectorAll("[data-question]").length === 0`,
-			);
-			// Each scheme's tokens arrive: paper and ink, a default button's
-			// edge, the strong button's fill, an armed button's red.
-			const read = () =>
-				panel.eval<Record<string, string>>(`(() => {
-					const root = getComputedStyle(document.documentElement);
+		await step(
+			"the AI access switch: its knob sits flush at both ends, light, dark and forced colours",
+			async () => {
+				/**
+				 * The track's width, the knob's gaps to the track's outer edges, on
+				 * and off, and whether the track may grow. The knob sits in the padding
+				 * box, so a border or padding moves it: the text fields' rules (8 px
+				 * padding, a 1 px border, flex: 1) once made the track wider than the
+				 * knob's travel. Without the transition, so no waiting.
+				 */
+				const measure = () =>
+					stack.panel.eval<{
+						width: number;
+						on: [number, number];
+						off: [number, number];
+						grows: string;
+					}>(`(() => {
+					const input = document.getElementById("ai-switch");
 					const still = document.createElement("style");
-					still.textContent = "button { transition: none !important; }";
+					still.textContent = "#ai-switch, #ai-switch::after { transition: none !important; }";
 					document.head.append(still);
-					const armed = document.createElement("button");
-					armed.className = "small";
-					armed.setAttribute("data-armed", "");
-					armed.textContent = "Disconnect? Click again";
-					document.querySelector("main").append(armed);
-					const result = {
-						paper: root.getPropertyValue("--paper").trim(),
-						ink: root.getPropertyValue("--ink").trim(),
-						body: getComputedStyle(document.body).backgroundColor,
-						text: getComputedStyle(document.body).color,
-						section: getComputedStyle(document.querySelector("main > .card")).backgroundColor,
-						edge: getComputedStyle(document.getElementById("replaced-disconnect-all")).borderTopColor,
-						field: getComputedStyle(document.getElementById("relay")).borderTopColor,
-						strong: getComputedStyle(document.querySelector("#relay-form button")).backgroundColor,
-						onStrong: getComputedStyle(document.querySelector("#relay-form button")).color,
-						armed: getComputedStyle(armed).backgroundColor,
-						onArmed: getComputedStyle(armed).color,
+					const was = input.checked;
+					const style = getComputedStyle(input);
+					const width = input.getBoundingClientRect().width;
+					const gaps = (checked) => {
+						// Not a click: no change event, no command.
+						input.checked = checked;
+						const knob = getComputedStyle(input, "::after");
+						const left =
+							parseFloat(style.borderLeftWidth) +
+							parseFloat(knob.left) +
+							new DOMMatrix(knob.transform === "none" ? "" : knob.transform).m41;
+						return [left, width - left - parseFloat(knob.width)];
 					};
-					armed.remove();
+					const result = { width, on: gaps(true), off: gaps(false), grows: style.flexGrow };
+					input.checked = was;
 					still.remove();
 					return result;
 				})()`);
-			const scheme = (value: string) =>
-				panel.send("Emulation.setEmulatedMedia", {
-					features: [{ name: "prefers-color-scheme", value }],
-				});
-			await scheme("light");
-			// Wait for the "Always allow all" switch to take clicks
-			// again: it is flat for a moment after the layout moved.
-			await panel.waitFor(takesClicks("#allow-tools"));
-			expect(await read()).toEqual({
-				paper: "#f6f4ee",
-				ink: "#1b2130",
-				body: "rgb(246, 244, 238)",
-				text: "rgb(27, 33, 48)",
-				// A section is on the paper: no card.
-				section: "rgba(0, 0, 0, 0)",
-				edge: "rgb(123, 130, 145)",
-				field: "rgb(123, 130, 145)",
-				strong: "rgb(27, 33, 48)",
-				onStrong: "rgb(255, 255, 255)",
-				armed: "rgb(179, 38, 30)",
-				onArmed: "rgb(255, 255, 255)",
-			});
-			expect(question).toEqual({
-				sheet: "rgb(255, 255, 255)",
-				edge: "rgb(123, 130, 145)",
-				shadow: "none",
-				class: "|",
-				same: "true",
-				waiting: "rgb(235, 232, 224)",
-				opacity: "1",
-				ready: "rgb(255, 255, 255)",
-			});
-			await scheme("dark");
-			expect(await read()).toEqual({
-				paper: "#11141a",
-				ink: "#eceef3",
-				body: "rgb(17, 20, 26)",
-				text: "rgb(236, 238, 243)",
-				section: "rgba(0, 0, 0, 0)",
-				edge: "rgb(115, 124, 142)",
-				field: "rgb(115, 124, 142)",
-				strong: "rgb(236, 238, 243)",
-				onStrong: "rgb(17, 20, 26)",
-				armed: "rgb(255, 143, 133)",
-				onArmed: "rgb(17, 20, 26)",
-			});
-			// Nothing is said in a tooltip alone: the address is shown whole,
-			// and what "Always allow" does is a line over the list.
-			expect(
-				await panel.eval(`(() => {
-					const address = document.getElementById("address");
-					const input = document.querySelector("input.always-allow");
-					return [
-						address.title,
-						address.scrollWidth <= address.clientWidth,
-						input.closest("label").title,
-						input.getAttribute("aria-describedby"),
-						document.getElementById("always-allow-note").textContent,
-						// As the panel is drawn now, not only as its HTML is.
-						[...document.querySelectorAll("[title]")].map((e) => e.id || e.className),
-					];
-				})()`),
-			).toEqual([
-				"",
-				true,
-				"",
-				"always-allow-note",
-				`Always allow, on: the tool runs without asking on ${SITE}, for every connected AI app. Off: it asks you before each call.`,
-				[],
-			]);
-		} finally {
-			await panel.send("Emulation.setEmulatedMedia", { features: [] });
-			await panel.send("Emulation.clearDeviceMetricsOverride");
-			await panel.eval(`(() => {
-				document.getElementById("setup").open = false;
-				document.querySelector("details.settings").open = false;
-				for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = true;
-			})()`);
-			if (adding)
-				await panel.eval(`document.getElementById("pair-done").click()`);
-		}
-	}, 90_000);
-
-	test("cancelling a call cancels it in the page", async () => {
-		const controller = new AbortController();
-		const slow = call(
-			stack,
-			"page_slow_tool",
-			{},
-			{ signal: controller.signal },
+				const flush: Awaited<ReturnType<typeof measure>> = {
+					width: 34,
+					on: [16, 2],
+					off: [2, 16],
+					grows: "0",
+				};
+				for (const features of [
+					[{ name: "prefers-color-scheme", value: "light" }],
+					[{ name: "prefers-color-scheme", value: "dark" }],
+					[{ name: "forced-colors", value: "active" }],
+				]) {
+					await stack.panel.send("Emulation.setEmulatedMedia", { features });
+					expect(await measure()).toEqual(flush);
+				}
+				// Forced colours: the track is outlined, not left to a background.
+				expect(
+					await stack.panel.eval(
+						`getComputedStyle(document.getElementById("ai-switch")).borderTopStyle`,
+					),
+				).toBe("solid");
+				await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
+			},
 		);
-		// Once the page's tool runs: aborted earlier, it would never start.
-		await tab.waitFor("window.slowStarted");
-		controller.abort();
-		await slow.catch(() => undefined);
-		await tab.waitFor("window.aborted");
-	});
-
-	test("the list follows toolchange, without a navigation", async () => {
-		await tab.eval(`document.modelContext.registerTool({
-			name: "late_tool",
-			description: "Registered later.",
-			inputSchema: { type: "object" },
-			annotations: { readOnlyHint: true },
-			async execute() { return "late"; },
-		})`);
-		await waitForTools(stack, (n) => n.includes("page_late_tool"));
-		expect((await call(stack, "page_late_tool")).content).toEqual([
-			{ type: "text", text: "late" },
-		]);
-	});
+		await step(
+			"the AI access switch and a tool's Always allow: knob on track and track on the paper at least 3:1, light and dark, on and off (EQ 17, DEC-160)",
+			async () => {
+				/** The contrast ratios Chrome's computed colours give, on and off. */
+				const contrast = (selector: string) =>
+					stack.panel.eval<{
+						on: { knob: number; track: number };
+						off: { knob: number; track: number };
+					}>(`(() => {
+					const input = document.querySelector(${JSON.stringify(selector)});
+					const still = document.createElement("style");
+					still.textContent = "input, input::after { transition: none !important; }";
+					document.head.append(still);
+					const was = input.checked;
+					const rgb = (color) => {
+						const c = document.createElement("canvas").getContext("2d");
+						c.fillStyle = color;
+						c.fillRect(0, 0, 1, 1);
+						return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3);
+					};
+					const lum = (color) => {
+						const [r, g, b] = rgb(color).map((v) => {
+							const s = v / 255;
+							return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+						});
+						return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+					};
+					const ratio = (a, b) => {
+						const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+						return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100;
+					};
+					// The sections are on the paper (the body), not on a card.
+					const card = getComputedStyle(document.body).backgroundColor;
+					// The wait after the layout moved makes a tool's switch flat.
+					const waits = input.getAttribute("aria-disabled");
+					input.removeAttribute("aria-disabled");
+					const at = (checked) => {
+						input.checked = checked;
+						const track = getComputedStyle(input).backgroundColor;
+						const knob = getComputedStyle(input, "::after").backgroundColor;
+						return { knob: ratio(knob, track), track: ratio(track, card) };
+					};
+					const result = { on: at(true), off: at(false) };
+					input.checked = was;
+					if (waits !== null) input.setAttribute("aria-disabled", waits);
+					still.remove();
+					return result;
+				})()`);
+				await stack.panel.waitFor(
+					`document.querySelector("input.always-allow")`,
+				);
+				for (const selector of ["#ai-switch", "input.always-allow"]) {
+					const measured: Record<string, unknown> = {};
+					for (const value of ["light", "dark"]) {
+						await stack.panel.send("Emulation.setEmulatedMedia", {
+							features: [{ name: "prefers-color-scheme", value }],
+						});
+						const m = await contrast(selector);
+						measured[value] = m;
+						for (const ratio of [
+							m.on.knob,
+							m.on.track,
+							m.off.knob,
+							m.off.track,
+						])
+							expect(ratio).toBeGreaterThanOrEqual(3);
+					}
+					// The tokens' pairs (test/contrast.test.ts): on, the knob
+					// (--on-strong) on the ink track (--strong), which is ink on paper,
+					// or for a tool's "Always allow" on the green track (--ok, DEC-184);
+					// off, the knob on the edge (--edge), and the edge on paper. Before
+					// the tokens: 5.02 / 3.77 in light, 9.48 / 3.42 in dark; before
+					// EQ 17 the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
+					const green = selector === "input.always-allow";
+					expect(measured).toEqual({
+						light: {
+							on: green
+								? { knob: 6.44, track: 5.86 }
+								: { knob: 16.07, track: 14.61 },
+							off: { knob: 3.86, track: 3.51 },
+						},
+						dark: {
+							on: green
+								? { knob: 9.85, track: 9.85 }
+								: { knob: 15.89, track: 15.89 },
+							off: { knob: 4.39, track: 4.39 },
+						},
+					});
+				}
+				await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
+			},
+		);
+		await step(
+			"How do I add it? under the address: the commands fit, light and dark, Copy keeps its width",
+			async () => {
+				// With an app paired, the address is behind "+ Connect another AI app".
+				const adding = !(await stack.panel.eval<boolean>(
+					`document.getElementById("pairing").hidden === false`,
+				));
+				if (adding) await stack.panel.click("#add-app");
+				await stack.panel.waitFor(
+					`!document.getElementById("setup").hidden && document.getElementById("setup").offsetHeight > 0`,
+				);
+				expect(
+					await stack.panel.eval<boolean>(
+						`document.getElementById("setup").open`,
+					),
+				).toBe(false);
+				await stack.panel.click("#setup summary");
+				await stack.panel.waitFor(`document.getElementById("setup").open`);
+				const measure = () =>
+					stack.panel.eval<{
+						apps: string[];
+						commands: string[];
+						overflow: boolean;
+						widths: [number, number];
+						pre: [string, string];
+					}>(`(() => {
+					const setup = document.getElementById("setup");
+					const pres = [...setup.querySelectorAll("pre")];
+					const copy = setup.querySelector("button.copy");
+					const before = copy.getBoundingClientRect().width;
+					copy.textContent = "Copied";
+					const after = copy.getBoundingClientRect().width;
+					copy.textContent = "Copy";
+					const style = getComputedStyle(pres[0]);
+					return {
+						apps: [...setup.querySelectorAll("li > strong")].map((e) => e.textContent),
+						commands: pres.map((e) => e.textContent),
+						overflow:
+							document.documentElement.scrollWidth > document.documentElement.clientWidth ||
+							pres.some((e) => e.scrollWidth > e.clientWidth),
+						widths: [before, after],
+						pre: [style.color, style.backgroundColor],
+					};
+				})()`);
+				const seen: [string, string][] = [];
+				for (const value of ["light", "dark"]) {
+					await stack.panel.send("Emulation.setEmulatedMedia", {
+						features: [{ name: "prefers-color-scheme", value }],
+					});
+					const m = await measure();
+					expect(m.apps).toEqual([
+						"Claude (claude.ai and the desktop app)",
+						"ChatGPT",
+						"Claude Code",
+						"Codex",
+					]);
+					expect(m.commands).toEqual([
+						`claude mcp add --transport http tab-mcp-browser-extension ${stack.address}`,
+						`codex features enable mcp_2026_07_28\ncodex mcp add tab-mcp-browser-extension --url ${stack.address}\ncodex mcp login tab-mcp-browser-extension`,
+					]);
+					expect(m.overflow).toBe(false);
+					expect(m.widths[1]).toBe(m.widths[0]);
+					expect(m.pre[0]).not.toBe(m.pre[1]);
+					seen.push(m.pre);
+				}
+				// The scheme's own colours, not one fixed pair.
+				expect(seen[0]).not.toEqual(seen[1]);
+				await stack.panel.send("Emulation.setEmulatedMedia", { features: [] });
+				await stack.panel.click("#setup summary");
+				if (adding) await stack.panel.click("#pair-done");
+			},
+		);
+		await step(
+			"the look: nothing past the panel's edge at 345, 360 and 420 px, no amber button, each scheme's tokens (DEC-160 to DEC-163)",
+			async () => {
+				const panel = stack.panel;
+				/**
+				 * Chrome's narrowest side panel with a classic scrollbar beside its
+				 * content (15 px on Windows and Linux), the same without one, and a
+				 * common width.
+				 */
+				const WIDTHS = [345, 360, 420];
+				const AMBER = "rgb(255, 176, 0)";
+				/**
+				 * What reaches past the right edge of the panel's content (the
+				 * scrolling element's `clientWidth`: the window's less a scrollbar),
+				 * and the buttons filled or outlined in amber.
+				 */
+				const measure = () =>
+					panel.eval<{
+						scroll: number;
+						client: number;
+						past: string[];
+						amber: string[];
+					}>(`(() => {
+					const shown = (e) => e.getClientRects().length > 0;
+					const root = document.scrollingElement;
+					return {
+						scroll: root.scrollWidth,
+						client: root.clientWidth,
+						past: [...document.querySelectorAll("body *")]
+							.filter((e) => shown(e) && !e.closest(".visually-hidden") && e.getBoundingClientRect().right > root.clientWidth + 0.5)
+							.map((e) => e.tagName + "#" + e.id + "." + e.className),
+						amber: [...document.querySelectorAll("button")]
+							.filter((e) => {
+								const style = getComputedStyle(e);
+								return style.backgroundColor === ${JSON.stringify(AMBER)} || style.borderTopColor === ${JSON.stringify(AMBER)};
+							})
+							.map((e) => e.id || e.textContent),
+					};
+				})()`);
+				/** At each width: no sideways scroll, nothing past the edge, no amber. */
+				const holds = async () => {
+					for (const width of WIDTHS) {
+						await panel.send("Emulation.setDeviceMetricsOverride", {
+							width,
+							height: 900,
+							deviceScaleFactor: 1,
+							mobile: false,
+						});
+						await panel.waitFor(`innerWidth === ${width}`);
+						const seen = await measure();
+						expect(seen.client).toBeLessThanOrEqual(width);
+						expect(seen.scroll).toBeLessThanOrEqual(seen.client);
+						expect(seen.past).toEqual([]);
+						expect(seen.amber).toEqual([]);
+					}
+				};
+				const adding = !(await panel.eval<boolean>(
+					`document.getElementById("pairing").hidden === false`,
+				));
+				try {
+					// The tab's tools with their switches, and the address and the code.
+					if (adding) await panel.click("#add-app");
+					await panel.waitFor(
+						`!document.getElementById("pairing").hidden && !document.getElementById("tools-head").hidden && document.querySelector("input.always-allow") !== null`,
+					);
+					await holds();
+					// "How do I add it?" (its commands) and Settings open, and the two
+					// notices, with words that have nowhere to break. The next state
+					// hides the notices again.
+					const LONG = "x".repeat(120);
+					await panel.eval(`(() => {
+					document.getElementById("setup").open = true;
+					document.querySelector("details.settings").open = true;
+					for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = false;
+					document.getElementById("local-problem").textContent = "Could not reach the relay at https://${LONG}.example";
+					document.getElementById("replaced-text").textContent = "Another tab or program took over this address ${LONG}";
+				})()`);
+					await holds();
+					// A problem is red in its fill and edge, its words in ink; the
+					// notice is the warning's; a button on it keeps its edge.
+					expect(
+						await panel.eval<string[]>(`(() => {
+						const css = (id) => getComputedStyle(document.getElementById(id));
+						const root = getComputedStyle(document.documentElement);
+						const token = (name) => {
+							const probe = document.createElement("i");
+							probe.style.color = "var(" + name + ")";
+							document.body.append(probe);
+							const colour = getComputedStyle(probe).color;
+							probe.remove();
+							return colour;
+						};
+						return [
+							css("local-problem").backgroundColor === token("--danger-bg"),
+							css("local-problem").borderTopColor === token("--danger"),
+							css("local-problem").color === token("--ink"),
+							css("replaced").backgroundColor === token("--warn-bg"),
+							css("replaced").borderTopColor === token("--warn-edge"),
+							css("replaced-disconnect-all").borderTopColor === token("--edge"),
+						].map(String);
+					})()`),
+					).toEqual(["true", "true", "true", "true", "true", "true"]);
+					// A question with arguments and a title that have nowhere to break.
+					const asked = call(stack, "page_place_order", {
+						item: LONG.repeat(4),
+					});
+					await panel.waitFor(`document.querySelector("[data-question] pre")`);
+					await holds();
+					// It is a sheet with an edge; "Allow once" is drawn as "Don't
+					// allow" is, the default button (DEC-180), and while it takes no
+					// click it is flat, in colours of its own. The pointer off the
+					// dialog first: it opens where the last click was, and a button
+					// under the pointer takes its hover colour.
+					await panel.send("Input.dispatchMouseEvent", {
+						type: "mouseMoved",
+						x: 1,
+						y: 1,
+					});
+					const question = await panel.eval<Record<string, string>>(`(() => {
+					const card = getComputedStyle(document.querySelector("[data-question]"));
+					const button = (answer) => document.querySelector('[data-question] button[data-answer="' + answer + '"]');
+					const allow = button("allow");
+					const deny = button("deny");
+					const was = allow.getAttribute("aria-disabled");
+					const still = document.createElement("style");
+					still.textContent = "button { transition: none !important; }";
+					document.head.append(still);
+					allow.setAttribute("aria-disabled", "true");
+					const waiting = getComputedStyle(allow).backgroundColor;
+					const opacity = getComputedStyle(allow).opacity;
+					allow.removeAttribute("aria-disabled");
+					const look = (b) => {
+						const s = getComputedStyle(b);
+						return [s.backgroundColor, s.color, s.borderTopColor, s.fontWeight].join(" ");
+					};
+					const ready = getComputedStyle(allow).backgroundColor;
+					const same = look(allow) === look(deny);
+					if (was !== null) allow.setAttribute("aria-disabled", was);
+					still.remove();
+					return {
+						sheet: card.backgroundColor,
+						edge: card.borderTopColor,
+						shadow: card.boxShadow,
+						class: allow.className + "|" + deny.className,
+						same: String(same),
+						waiting,
+						opacity,
+						ready,
+					};
+				})()`);
+					await answerInPanel(stack, "deny");
+					expect((await asked).isError).toBe(true);
+					await panel.waitFor(
+						`document.querySelectorAll("[data-question]").length === 0`,
+					);
+					// Each scheme's tokens arrive: paper and ink, a default button's
+					// edge, the strong button's fill, an armed button's red.
+					const read = () =>
+						panel.eval<Record<string, string>>(`(() => {
+						const root = getComputedStyle(document.documentElement);
+						const still = document.createElement("style");
+						still.textContent = "button { transition: none !important; }";
+						document.head.append(still);
+						const armed = document.createElement("button");
+						armed.className = "small";
+						armed.setAttribute("data-armed", "");
+						armed.textContent = "Disconnect? Click again";
+						document.querySelector("main").append(armed);
+						const result = {
+							paper: root.getPropertyValue("--paper").trim(),
+							ink: root.getPropertyValue("--ink").trim(),
+							body: getComputedStyle(document.body).backgroundColor,
+							text: getComputedStyle(document.body).color,
+							section: getComputedStyle(document.querySelector("main > .card")).backgroundColor,
+							edge: getComputedStyle(document.getElementById("replaced-disconnect-all")).borderTopColor,
+							field: getComputedStyle(document.getElementById("relay")).borderTopColor,
+							strong: getComputedStyle(document.querySelector("#relay-form button")).backgroundColor,
+							onStrong: getComputedStyle(document.querySelector("#relay-form button")).color,
+							armed: getComputedStyle(armed).backgroundColor,
+							onArmed: getComputedStyle(armed).color,
+						};
+						armed.remove();
+						still.remove();
+						return result;
+					})()`);
+					const scheme = (value: string) =>
+						panel.send("Emulation.setEmulatedMedia", {
+							features: [{ name: "prefers-color-scheme", value }],
+						});
+					await scheme("light");
+					// Wait for the "Always allow all" switch to take clicks
+					// again: it is flat for a moment after the layout moved.
+					await panel.waitFor(takesClicks("#allow-tools"));
+					expect(await read()).toEqual({
+						paper: "#f6f4ee",
+						ink: "#1b2130",
+						body: "rgb(246, 244, 238)",
+						text: "rgb(27, 33, 48)",
+						// A section is on the paper: no card.
+						section: "rgba(0, 0, 0, 0)",
+						edge: "rgb(123, 130, 145)",
+						field: "rgb(123, 130, 145)",
+						strong: "rgb(27, 33, 48)",
+						onStrong: "rgb(255, 255, 255)",
+						armed: "rgb(179, 38, 30)",
+						onArmed: "rgb(255, 255, 255)",
+					});
+					expect(question).toEqual({
+						sheet: "rgb(255, 255, 255)",
+						edge: "rgb(123, 130, 145)",
+						shadow: "none",
+						class: "|",
+						same: "true",
+						waiting: "rgb(235, 232, 224)",
+						opacity: "1",
+						ready: "rgb(255, 255, 255)",
+					});
+					await scheme("dark");
+					expect(await read()).toEqual({
+						paper: "#11141a",
+						ink: "#eceef3",
+						body: "rgb(17, 20, 26)",
+						text: "rgb(236, 238, 243)",
+						section: "rgba(0, 0, 0, 0)",
+						edge: "rgb(115, 124, 142)",
+						field: "rgb(115, 124, 142)",
+						strong: "rgb(236, 238, 243)",
+						onStrong: "rgb(17, 20, 26)",
+						armed: "rgb(255, 143, 133)",
+						onArmed: "rgb(17, 20, 26)",
+					});
+					// Nothing is said in a tooltip alone: the address is shown whole,
+					// and what "Always allow" does is a line over the list.
+					expect(
+						await panel.eval(`(() => {
+						const address = document.getElementById("address");
+						const input = document.querySelector("input.always-allow");
+						return [
+							address.title,
+							address.scrollWidth <= address.clientWidth,
+							input.closest("label").title,
+							input.getAttribute("aria-describedby"),
+							document.getElementById("always-allow-note").textContent,
+							// As the panel is drawn now, not only as its HTML is.
+							[...document.querySelectorAll("[title]")].map((e) => e.id || e.className),
+						];
+					})()`),
+					).toEqual([
+						"",
+						true,
+						"",
+						"always-allow-note",
+						`Always allow, on: the tool runs without asking on ${SITE}, for every connected AI app. Off: it asks you before each call.`,
+						[],
+					]);
+				} finally {
+					await panel.send("Emulation.setEmulatedMedia", { features: [] });
+					await panel.send("Emulation.clearDeviceMetricsOverride");
+					await panel.eval(`(() => {
+					document.getElementById("setup").open = false;
+					document.querySelector("details.settings").open = false;
+					for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = true;
+				})()`);
+					if (adding)
+						await panel.eval(`document.getElementById("pair-done").click()`);
+				}
+			},
+			90_000,
+		);
+	}, 190_000);
 
 	test("a page that replaces document.modelContext fools only itself", async () => {
 		await tab.goto(`${SITE}/forged.html`);
@@ -1150,6 +1350,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 	});
 
 	test("it follows a tab switch, tools included", async () => {
+		// This tab on a page without tools, the other with them.
+		await tab.goto(`${SITE}/plain.html`);
+		await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
 		const other = await stack.browser.newPage(`${OTHER}/webmcp.html`);
 		await other.activate();
 		expect((await pageInfo(stack)).structuredContent).toMatchObject({
@@ -1173,14 +1376,14 @@ describe.skipIf(chrome === undefined)(
 	() => {
 		let stack: Stack;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: false }, `${SITE}/webmcp.html`);
 			await waitForTools(stack, (n) => n.includes("page_place_order"));
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		const badge = () =>
@@ -1227,36 +1430,73 @@ describe.skipIf(chrome === undefined)(
 		});
 
 		test("a panel closed during a question hands it to a notification", async () => {
-			const asked = call(stack, "page_place_order", { item: "handed" });
-			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
-			await closePanel(stack);
-			const id = await newNotification(stack);
-			// Chrome's rule the panel's way back from a notification is built on
-			// (EQ 18; connection.test.ts and worker.test.ts for the rest):
-			// without a user's gesture, which the DevTools Protocol does not
-			// give, sidePanel.open is refused.
-			expect(
-				await stack.worker.eval(
-					`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.sidePanel.open({ tabId: t.id, windowId: t.windowId })).then(() => "opened", (e) => e.message)`,
-				),
-			).toContain("user gesture");
-			// After the guard against an Allow that came too soon.
-			await Bun.sleep(600);
-			await clickNotification(stack, id, 0);
-			const result = await asked;
-			expect(result.isError).toBeFalsy();
-			expect(result.content[0]?.text).toContain("handed");
-			// Answered: the notification is gone.
-			expect(await notifications(stack)).toEqual([]);
-		});
-
-		test("with the panel closed the AI app still calls the page's tools", async () => {
-			const result = await call(stack, "page_get_greeting", { name: "Cy" });
-			expect(result.content).toEqual([{ type: "text", text: "Hello, Cy!" }]);
-			expect(await badge()).toBe("on");
-		});
+			await step(
+				"a panel closed during a question hands it to a notification",
+				async () => {
+					const asked = call(stack, "page_place_order", { item: "handed" });
+					await stack.panel.waitFor(
+						`document.querySelector("[data-question]")`,
+					);
+					await closePanel(stack);
+					const id = await newNotification(stack);
+					// Chrome's rule the panel's way back from a notification is built on
+					// (EQ 18; connection.test.ts and worker.test.ts for the rest):
+					// without a user's gesture, which the DevTools Protocol does not
+					// give, sidePanel.open is refused.
+					expect(
+						await stack.worker.eval(
+							`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.sidePanel.open({ tabId: t.id, windowId: t.windowId })).then(() => "opened", (e) => e.message)`,
+						),
+					).toContain("user gesture");
+					// After the guard against an Allow that came too soon.
+					await Bun.sleep(600);
+					await clickNotification(stack, id, 0);
+					const result = await asked;
+					expect(result.isError).toBeFalsy();
+					expect(result.content[0]?.text).toContain("handed");
+					// Answered: the notification is gone.
+					expect(await notifications(stack)).toEqual([]);
+				},
+			);
+			await step(
+				"with the panel closed the AI app still calls the page's tools",
+				async () => {
+					const result = await call(stack, "page_get_greeting", { name: "Cy" });
+					expect(result.content).toEqual([
+						{ type: "text", text: "Hello, Cy!" },
+					]);
+					expect(await badge()).toBe("on");
+				},
+			);
+			await step("reopening the panel shows the same connection", async () => {
+				stack.panel = await openPanel(stack.browser, stack.tab);
+				// Connected all along: on (the test's AI app listed) or waiting
+				// for one, never connecting again.
+				const status = await stack.panel.waitFor<string>(
+					`["on", "waiting"].includes(document.getElementById("state").dataset.state) && document.getElementById("state").dataset.state`,
+				);
+				const grants = await stack.panel.eval<string[]>(
+					`[...document.querySelectorAll("#grants .app-name")].map((s) => s.textContent)`,
+				);
+				expect(grants).toEqual(status === "on" ? ["Test client"] : []);
+				// The same address: shown with the code (at once with no app paired,
+				// else after "+ Connect another AI app").
+				if (status === "on") await stack.panel.click("#add-app");
+				await stack.panel.waitFor(
+					`document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
+				);
+				if (status === "on") await stack.panel.click("#pair-done");
+				expect(
+					await stack.panel.eval(
+						`document.getElementById("tab-title").textContent`,
+					),
+				).toBe("Page with WebMCP tools");
+			});
+		}, 100_000);
 
 		test("a notification closed is Don't allow, through Chrome's onClosed: the call is refused, the tool does not run", async () => {
+			// No panel, so the question is a notification.
+			await closePanel(stack);
 			const asked = call(stack, "page_place_order", { item: "closed" });
 			const id = await newNotification(stack);
 			// Chrome's own closing (onClosed), as when the user closes it; the
@@ -1272,37 +1512,9 @@ describe.skipIf(chrome === undefined)(
 			expect(await notifications(stack)).toEqual([]);
 		});
 
-		test("reopening the panel shows the same connection", async () => {
-			stack.panel = await openPanel(stack.browser, stack.tab);
-			// Connected all along: on (the test's AI app listed) or waiting
-			// for one, never connecting again.
-			const status = await stack.panel.waitFor<string>(
-				`["on", "waiting"].includes(document.getElementById("state").dataset.state) && document.getElementById("state").dataset.state`,
-			);
-			const grants = await stack.panel.eval<string[]>(
-				`[...document.querySelectorAll("#grants .app-name")].map((s) => s.textContent)`,
-			);
-			expect(grants).toEqual(status === "on" ? ["Test client"] : []);
-			// The same address: shown with the code (at once with no app paired,
-			// else after "+ Connect another AI app").
-			if (status === "on") await stack.panel.click("#add-app");
-			await stack.panel.waitFor(
-				`document.getElementById("address").textContent === ${JSON.stringify(stack.address)}`,
-			);
-			if (status === "on") await stack.panel.click("#pair-done");
-			expect(
-				await stack.panel.eval(
-					`document.getElementById("tab-title").textContent`,
-				),
-			).toBe("Page with WebMCP tools");
-		});
-
 		test("a panel covered by another extension's panel for the tab hands its questions to notifications", async () => {
 			const { browser } = stack;
-			const { id: other } = (await browser.send("Extensions.loadUnpacked", {
-				path: join(import.meta.dir, "other-extension"),
-			})) as { id: string };
-			await browser.readyWorker(other);
+			const other = await loadOtherExtension(stack);
 			// A new page, as the user would have it.
 			await stack.tab.goto(`${SITE}/webmcp.html`);
 			// webmcp_tools reads the page again: its tools are registered anew.
@@ -1336,21 +1548,21 @@ describe.skipIf(chrome === undefined)(
 	() => {
 		let stack: Stack;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: false }, `${SITE}/webmcp.html`);
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		const stored = async <T>(key: string) =>
 			((await kvAll(stack.worker))[key] ?? null) as T;
 
 		test("a takeover is kept across a restart: no taking the address back by itself, the notice stays", async () => {
-			// AI access off first, which the test before this one left behind
-			// until it went (connection.test.ts has its commands now).
+			// From the start's connected state to off, over the panel's port: the
+			// test turns AI access on with a click on Connect below.
 			await stack.panel.eval(`(() => {
 				window.e2eStop = chrome.runtime.connect({ name: "panel" });
 				window.e2eStop.postMessage({ type: "stop" });
@@ -1587,11 +1799,6 @@ describe.skipIf(chrome === undefined)(
 		}
 
 		test("the database deleted under the worker: the next write opens it again, and it holds across a start", async () => {
-			// The test before reloaded the extension: the worker may have restarted.
-			stack.worker = await stack.browser.serviceWorker(
-				stack.browser.extensionId as string,
-			);
-			stack.panel = await openPanel(stack.browser, stack.tab);
 			// The site data cleared, say: the worker's connection is asked to
 			// close, and closes.
 			await stack.worker.eval(`new Promise((resolve, reject) => {
@@ -1625,86 +1832,95 @@ describe.skipIf(chrome === undefined)(
 );
 
 describe.skipIf(chrome === undefined)("a restart", () => {
-	test("the same profile connects again by itself, with the same address", async () => {
+	// One scenario in three launches of one profile (a Chrome of its own: the
+	// profile must outlive the browser): start and connect; Chrome again,
+	// which connects by itself; Chrome again with the relay gone, which
+	// keeps trying.
+	test("the same profile connects again by itself, with the same address; with the relay out of reach at a start, it keeps trying (EQ 3, EQ 14)", async () => {
 		const profile = browserTempDir("extension-profile-");
 		let stack: Stack | undefined;
 		let again: Browser | undefined;
+		let third: Browser | undefined;
 		try {
 			stack = await start({ store: false, profile }, `${SITE}/plain.html`);
-			expect((await pageInfo(stack)).isError).toBeFalsy();
-			await stack.client.close();
-			await stack.browser.close();
-			// Chrome again, with the same profile and build; no click, no panel.
-			again = await launch(stack.extension, profile);
-			await again.newPage(`${SITE}/plain.html`);
-			const end = Date.now() + 20_000;
-			let client: Client | undefined;
-			while (client === undefined) {
-				client = await mcpClient(stack.relay, stack.address).catch(
-					() => undefined,
-				);
-				if (client === undefined) {
-					if (Date.now() > end)
-						throw new Error("the address did not answer after the restart");
-					await Bun.sleep(250);
-				}
-			}
-			const result = (await client.callTool({
-				name: "page_info",
-			})) as CallResult;
-			expect(result.structuredContent).toMatchObject({
-				url: `${SITE}/plain.html`,
-			});
-			await client.close();
-		} finally {
-			await again?.close();
-			await stack?.stop();
-			rmSync(profile, { recursive: true, force: true });
-		}
-	}, 90_000);
-
-	test("with the relay out of reach at a start, it keeps trying: the alarm is set and the panel says so (EQ 3, EQ 14)", async () => {
-		const profile = browserTempDir("extension-profile-");
-		let stack: Stack | undefined;
-		let again: Browser | undefined;
-		try {
-			stack = await start({ store: false, profile }, `${SITE}/plain.html`);
-			await stack.client.close();
-			// As after an update, which clears the alarms.
-			await stack.worker.eval(`chrome.alarms.clear("tab-mcp-keepup")`);
-			await stack.browser.close();
-			// The relay is gone; Chrome starts again with AI access left on.
-			await stack.relay.stop();
-			again = await launch(stack.extension, profile);
-			const tab = await again.newPage(`${SITE}/plain.html`);
-			const worker = await again.serviceWorker(again.extensionId as string);
-			const end = Date.now() + 10_000;
-			while (
-				!(await worker.eval<boolean>(
-					`chrome.alarms.get("tab-mcp-keepup").then((a) => a?.periodInMinutes === 1)`,
-				))
-			) {
-				if (Date.now() > end)
-					throw new Error("no keep-up alarm after the start");
-				await Bun.sleep(100);
-			}
-			const panel = await openPanel(again, tab);
-			// Not "off": the switch stays on, and the alarm brings it back.
-			await panel.waitFor(
-				`document.getElementById("state").dataset.state === "retrying"`,
+			const first = stack;
+			await step(
+				"the same profile connects again by itself, with the same address",
+				async () => {
+					expect((await pageInfo(first)).isError).toBeFalsy();
+					await first.client.close();
+					await first.browser.close();
+					// Chrome again, with the same profile and build; no click, no panel.
+					again = await launch(first.extension, profile);
+					await again.newPage(`${SITE}/plain.html`);
+					const end = Date.now() + 20_000;
+					let client: Client | undefined;
+					while (client === undefined) {
+						client = await mcpClient(first.relay, first.address).catch(
+							() => undefined,
+						);
+						if (client === undefined) {
+							if (Date.now() > end)
+								throw new Error("the address did not answer after the restart");
+							await Bun.sleep(250);
+						}
+					}
+					const result = (await client.callTool({
+						name: "page_info",
+					})) as CallResult;
+					expect(result.structuredContent).toMatchObject({
+						url: `${SITE}/plain.html`,
+					});
+					await client.close();
+				},
+				90_000,
 			);
-			expect(
-				await panel.eval(`document.getElementById("ai-switch").checked`),
-			).toBe(true);
-			expect(
-				await panel.eval(`document.getElementById("connect").hidden`),
-			).toBe(true);
+			await step(
+				"with the relay out of reach at a start, it keeps trying: the alarm is set and the panel says so (EQ 3, EQ 14)",
+				async () => {
+					const running = again as Browser;
+					const before = await running.serviceWorker(
+						running.extensionId as string,
+					);
+					// As after an update, which clears the alarms.
+					await before.eval(`chrome.alarms.clear("tab-mcp-keepup")`);
+					await running.close();
+					// The relay is gone; Chrome starts again with AI access left on.
+					await first.relay.stop();
+					third = await launch(first.extension, profile);
+					const tab = await third.newPage(`${SITE}/plain.html`);
+					const worker = await third.serviceWorker(third.extensionId as string);
+					const end = Date.now() + 10_000;
+					while (
+						!(await worker.eval<boolean>(
+							`chrome.alarms.get("tab-mcp-keepup").then((a) => a?.periodInMinutes === 1)`,
+						))
+					) {
+						if (Date.now() > end)
+							throw new Error("no keep-up alarm after the start");
+						await Bun.sleep(100);
+					}
+					const panel = await openPanel(third, tab);
+					// Not "off": the switch stays on, and the alarm brings it back.
+					await panel.waitFor(
+						`document.getElementById("state").dataset.state === "retrying"`,
+					);
+					expect(
+						await panel.eval(`document.getElementById("ai-switch").checked`),
+					).toBe(true);
+					expect(
+						await panel.eval(`document.getElementById("connect").hidden`),
+					).toBe(true);
+				},
+				90_000,
+			);
 		} finally {
+			await third?.close();
 			await again?.close();
 			await stack?.stop().catch(() => {});
 			rmSync(profile, { recursive: true, force: true });
 		}
-	}, 90_000);
+	}, 190_000);
 });
 
 /**
@@ -1739,7 +1955,11 @@ describe.skipIf(chrome === undefined || !process.env["TAB_MCP_E2E_IDLE"])(
 		}
 
 		test("it keeps running while connected, and stops once AI access is off", async () => {
-			const stack = await start({ store: false }, `${SITE}/webmcp.html`);
+			const stack = await start(
+				// Its own Chrome: the service worker's lifetime, with nothing else attached.
+				{ store: false, own: true },
+				`${SITE}/webmcp.html`,
+			);
 			try {
 				await closePanel(stack);
 				await stack.browser.detachServiceWorkers();
@@ -1822,14 +2042,14 @@ describe.skipIf(chrome === undefined)(
 		let stack: Stack;
 		let tab: Page;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: true }, `${SITE}/plain.html`);
 			tab = stack.tab;
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("the tab the icon was clicked on can be read", async () => {
@@ -1839,68 +2059,99 @@ describe.skipIf(chrome === undefined)(
 		});
 
 		test("on the same origin after a navigation too (Chrome keeps the grant)", async () => {
-			await tab.goto(`${SITE}/webmcp.html`);
-			expect((await pageInfo(stack)).structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-				webmcp: { available: true, tools: 5 },
-			});
-		});
+			await step(
+				"on the same origin after a navigation too (Chrome keeps the grant)",
+				async () => {
+					await tab.goto(`${SITE}/webmcp.html`);
+					expect((await pageInfo(stack)).structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html`,
+						webmcp: { available: true, tools: 5 },
+					});
+				},
+			);
+			await step(
+				"on the page's origin the click's access holds: the new page is read",
+				async () => {
+					// From a page without tools, as this test began before it was a
+					// step: only the page that navigate loads has the 5 tools.
+					await tab.goto(`${SITE}/plain.html`);
+					await waitForTools(stack, (n) => !n.includes("page_get_greeting"));
+					const result = await call(stack, "navigate", {
+						url: `${SITE}/webmcp.html`,
+					});
+					expect(result.structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html`,
+						webmcp: { available: true, tools: 5 },
+					});
+					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+				},
+				45_000,
+			);
+		}, 85_000);
 
 		test("another origin of the same site needs a click too", async () => {
-			await readsSettled(tab);
-			await tab.goto(`${SUBDOMAIN}/plain.html`);
-			const refused = await pageInfo(stack);
-			expect(refused.isError).toBe(true);
-			expect(refused.content[0]?.text).toContain("may not read this tab yet");
-			// The panel in its own words: the toolbar icon, or host access,
-			// whose button is explained before Chrome's prompt (EQ 6, EQ 9).
-			await stack.panel.waitFor(
-				`document.getElementById("tab-badges").textContent === "Not readable"`,
+			await step(
+				"another origin of the same site needs a click too",
+				async () => {
+					await readsSettled(tab);
+					await tab.goto(`${SUBDOMAIN}/plain.html`);
+					const refused = await pageInfo(stack);
+					expect(refused.isError).toBe(true);
+					expect(refused.content[0]?.text).toContain(
+						"may not read this tab yet",
+					);
+					// The panel in its own words: the toolbar icon, or host access,
+					// whose button is explained before Chrome's prompt (EQ 6, EQ 9).
+					await stack.panel.waitFor(
+						`document.getElementById("tab-badges").textContent === "Not readable"`,
+					);
+					const [access, hidden, button] = await stack.panel.eval<
+						[string, boolean, string]
+					>(
+						`[document.getElementById("tab-access").textContent, document.getElementById("host-access").hidden, document.getElementById("allow-all").textContent]`,
+					);
+					// Chrome reports the address of this tab or hides it, depending on
+					// when it is asked: the same line either way.
+					expect(access).toBe(
+						"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+					);
+					expect([hidden, button]).toEqual([false, "Give access to all sites"]);
+					await stack.browser.clickIcon(tab);
+					expect((await pageInfo(stack)).structuredContent).toMatchObject({
+						url: `${SUBDOMAIN}/plain.html`,
+					});
+				},
 			);
-			const [access, hidden, button] = await stack.panel.eval<
-				[string, boolean, string]
-			>(
-				`[document.getElementById("tab-access").textContent, document.getElementById("host-access").hidden, document.getElementById("allow-all").textContent]`,
+			await step(
+				"on another site it may not, until the next click there",
+				async () => {
+					await readsSettled(tab);
+					await tab.goto(`${OTHER}/webmcp.html`);
+					const refused = await pageInfo(stack);
+					expect(refused.isError).toBe(true);
+					expect(refused.content[0]?.text).toContain(
+						"may not read this tab yet",
+					);
+					// No page tools, and webmcp_tools says why.
+					const listed = await call(stack, "webmcp_tools");
+					expect(listed.structuredContent?.["error"]).toContain(
+						"may not read this tab yet",
+					);
+					expect(await toolNames(stack)).toEqual(OWN_TOOLS);
+					await stack.browser.clickIcon(tab);
+					expect((await pageInfo(stack)).structuredContent).toMatchObject({
+						url: `${OTHER}/webmcp.html`,
+						webmcp: { available: true, tools: 5 },
+					});
+					// After the click its tools are offered (the content script says so).
+					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+				},
 			);
-			// Chrome reports the address of this tab or hides it, depending on
-			// when it is asked: the same line either way.
-			expect(access).toBe(
-				"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
-			);
-			expect([hidden, button]).toEqual([false, "Give access to all sites"]);
-			await stack.browser.clickIcon(tab);
-			expect((await pageInfo(stack)).structuredContent).toMatchObject({
-				url: `${SUBDOMAIN}/plain.html`,
-			});
-		});
-
-		test("on another site it may not, until the next click there", async () => {
-			await readsSettled(tab);
-			await tab.goto(`${OTHER}/webmcp.html`);
-			const refused = await pageInfo(stack);
-			expect(refused.isError).toBe(true);
-			expect(refused.content[0]?.text).toContain("may not read this tab yet");
-			// No page tools, and webmcp_tools says why.
-			const listed = await call(stack, "webmcp_tools");
-			expect(listed.structuredContent?.["error"]).toContain(
-				"may not read this tab yet",
-			);
-			expect(await toolNames(stack)).toEqual(OWN_TOOLS);
-			await stack.browser.clickIcon(tab);
-			expect((await pageInfo(stack)).structuredContent).toMatchObject({
-				url: `${OTHER}/webmcp.html`,
-				webmcp: { available: true, tools: 5 },
-			});
-			// After the click its tools are offered (the content script says so).
-			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-		});
+		}, 70_000);
 
 		test("a click shows the panel over another extension's panel for the tab, and gives the tab's tools", async () => {
 			const { browser } = stack;
-			const { id: other } = (await browser.send("Extensions.loadUnpacked", {
-				path: join(import.meta.dir, "other-extension"),
-			})) as { id: string };
-			await browser.readyWorker(other);
+			const other = await loadOtherExtension(stack);
 			// A new tab, so no click has granted anything there yet.
 			const page = await browser.newPage(`${SITE}/webmcp.html`);
 			/** Whether the panel at `url` is the one on screen. */
@@ -1957,38 +2208,14 @@ describe.skipIf(chrome === undefined)(
 	() => {
 		let stack: Stack;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: false }, `${SITE}/webmcp.html`);
 			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
-		});
-
-		test("a toolchange and the reads around it (AI app, worker, panel) cost one getTools()", async () => {
-			await readsSettled(stack.tab);
-			await toolReads(stack.tab);
-			await registerLater(stack.tab, "later_one");
-			// The AI app asks at once; the worker reads after the content
-			// script's message (250 ms), the panel after each of the bridge's
-			// reads. Before DEC-177 that was five calls.
-			const [info] = await Promise.all([
-				pageInfo(stack),
-				call(stack, "webmcp_tools"),
-			]);
-			expect(info.structuredContent).toMatchObject({
-				webmcp: { available: true, tools: 6 },
-			});
-			await waitForTools(stack, (n) => n.includes("page_later_one"));
-			await stack.panel.waitFor(
-				`[...document.querySelectorAll("#tools li")].some((li) => li.textContent.includes("later_one"))`,
-			);
-			await readsSettled(stack.tab);
-			// One where all of it comes within SHARE_READ_MS of the first read
-			// (locally and in CI so far); a slow runner may need a second.
-			expect(await toolReads(stack.tab)).toBeLessThanOrEqual(2);
+			stack = undefined as unknown as Stack;
 		});
 
 		test("with AI access off and the panel closed the page is not read; the panel opened reads it", async () => {
@@ -2039,97 +2266,127 @@ describe.skipIf(chrome === undefined)(
 	() => {
 		let stack: Stack;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: false }, `${SITE}/plain.html`);
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
+		// Its steps wait for 1, 1, 1, 2 and 2 loads: 45 s or 75 s each (by the
+		// rule at the top), the test their sum and 10 s.
 		test("navigate on the page's origin runs at once, with the new page's page_info and tools", async () => {
-			const result = await call(stack, "navigate", { url: "/webmcp.html" });
-			expect(result.isError).toBeFalsy();
-			expect(result.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-				title: "Page with WebMCP tools",
-				webmcp: { available: true, tools: 5 },
-			});
-			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-			await noQuestion(stack);
-		}, 45_000);
-
-		test("to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes", async () => {
-			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
-			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
-			const [ask, ...lines] = await questionLines(stack);
-			expect(ask).toEndWith(
-				" wants to take the tab to another site (navigate).",
+			await step(
+				"navigate on the page's origin runs at once, with the new page's page_info and tools",
+				async () => {
+					const result = await call(stack, "navigate", { url: "/webmcp.html" });
+					expect(result.isError).toBeFalsy();
+					expect(result.structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html`,
+						title: "Page with WebMCP tools",
+						webmcp: { available: true, tools: 5 },
+					});
+					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+					await noQuestion(stack);
+				},
+				45_000,
 			);
-			expect(lines).toEqual([
-				`From (verified) ${SITE}`,
-				`To ${OTHER}/plain.html`,
-			]);
-			expect(
-				await stack.panel.eval<boolean>(
-					`!!document.querySelector('[data-question] button[data-answer="site"]')`,
-				),
-			).toBe(false);
-			await answerInPanel(stack, "deny");
-			const result = await declined;
-			expect(result.isError).toBe(true);
-			expect(result.content[0]?.text).toContain("did not allow");
-			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
-			const allowed = call(stack, "navigate", { url: `${OTHER}/plain.html` });
-			await answerInPanel(stack, "allow");
-			// With host access the new page is read.
-			expect((await allowed).structuredContent).toMatchObject({
-				url: `${OTHER}/plain.html`,
-				title: "Plain page",
-			});
-		}, 45_000);
-
-		test("back to another origin asks too, its address not known", async () => {
-			const back = call(stack, "go_back");
-			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
-			const lines = await questionLines(stack);
-			expect(lines[1]).toBe(`From (verified) ${OTHER}`);
-			expect(lines[2]).toContain("previous page");
-			expect(lines[2]).toContain("not known");
-			await answerInPanel(stack, "allow");
-			expect((await back).structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-			});
-		}, 45_000);
-
-		test("back and forward on the page's origin run at once", async () => {
-			const back = await call(stack, "go_back");
-			expect(back.structuredContent).toMatchObject({
-				url: `${SITE}/plain.html`,
-			});
-			const forward = await call(stack, "go_forward");
-			expect(forward.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-			});
-			await noQuestion(stack);
-		}, 75_000);
-
-		test("reload stays and never asks; within the page (#part) it answers at once", async () => {
-			await stack.tab.eval("window.e2eMarker = 1");
-			const reloaded = await call(stack, "reload");
-			expect(reloaded.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-			});
-			expect(await stack.tab.eval("typeof window.e2eMarker")).toBe("undefined");
-			const started = Date.now();
-			const part = await call(stack, "navigate", { url: "#part" });
-			expect(part.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html#part`,
-			});
-			expect(Date.now() - started).toBeLessThan(5_000);
-			await noQuestion(stack);
-		}, 75_000);
+			await step(
+				"to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes",
+				async () => {
+					const declined = call(stack, "navigate", {
+						url: `${OTHER}/plain.html`,
+					});
+					await stack.panel.waitFor(
+						`document.querySelector("[data-question]")`,
+					);
+					const [ask, ...lines] = await questionLines(stack);
+					expect(ask).toEndWith(
+						" wants to take the tab to another site (navigate).",
+					);
+					expect(lines).toEqual([
+						`From (verified) ${SITE}`,
+						`To ${OTHER}/plain.html`,
+					]);
+					expect(
+						await stack.panel.eval<boolean>(
+							`!!document.querySelector('[data-question] button[data-answer="site"]')`,
+						),
+					).toBe(false);
+					await answerInPanel(stack, "deny");
+					const result = await declined;
+					expect(result.isError).toBe(true);
+					expect(result.content[0]?.text).toContain("did not allow");
+					expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
+					const allowed = call(stack, "navigate", {
+						url: `${OTHER}/plain.html`,
+					});
+					await answerInPanel(stack, "allow");
+					// With host access the new page is read.
+					expect((await allowed).structuredContent).toMatchObject({
+						url: `${OTHER}/plain.html`,
+						title: "Plain page",
+					});
+				},
+				45_000,
+			);
+			await step(
+				"back to another origin asks too, its address not known",
+				async () => {
+					const back = call(stack, "go_back");
+					await stack.panel.waitFor(
+						`document.querySelector("[data-question]")`,
+					);
+					const lines = await questionLines(stack);
+					expect(lines[1]).toBe(`From (verified) ${OTHER}`);
+					expect(lines[2]).toContain("previous page");
+					expect(lines[2]).toContain("not known");
+					await answerInPanel(stack, "allow");
+					expect((await back).structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html`,
+					});
+				},
+				45_000,
+			);
+			await step(
+				"back and forward on the page's origin run at once",
+				async () => {
+					const back = await call(stack, "go_back");
+					expect(back.structuredContent).toMatchObject({
+						url: `${SITE}/plain.html`,
+					});
+					const forward = await call(stack, "go_forward");
+					expect(forward.structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html`,
+					});
+					await noQuestion(stack);
+				},
+				75_000,
+			);
+			await step(
+				"reload stays and never asks; within the page (#part) it answers at once",
+				async () => {
+					await stack.tab.eval("window.e2eMarker = 1");
+					const reloaded = await call(stack, "reload");
+					expect(reloaded.structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html`,
+					});
+					expect(await stack.tab.eval("typeof window.e2eMarker")).toBe(
+						"undefined",
+					);
+					const started = Date.now();
+					const part = await call(stack, "navigate", { url: "#part" });
+					expect(part.structuredContent).toMatchObject({
+						url: `${SITE}/webmcp.html#part`,
+					});
+					expect(Date.now() - started).toBeLessThan(5_000);
+					await noQuestion(stack);
+				},
+				75_000,
+			);
+		}, 295_000);
 	},
 );
 
@@ -2138,25 +2395,14 @@ describe.skipIf(chrome === undefined)(
 	() => {
 		let stack: Stack;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: true }, `${SITE}/plain.html`);
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
-
-		test("on the page's origin the click's access holds: the new page is read", async () => {
-			const result = await call(stack, "navigate", {
-				url: `${SITE}/webmcp.html`,
-			});
-			expect(result.structuredContent).toMatchObject({
-				url: `${SITE}/webmcp.html`,
-				webmcp: { available: true, tools: 5 },
-			});
-			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-		}, 45_000);
 
 		test("to another origin, once allowed, the result says the new page needs a click; then nothing more", async () => {
 			const going = call(stack, "navigate", { url: `${OTHER}/plain.html` });
@@ -2192,7 +2438,7 @@ describe.skipIf(chrome === undefined)(
 	() => {
 		let stack: Stack;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start(
 				{ store: false, webmcp: false },
 				`${SITE}/plain.html`,
@@ -2201,69 +2447,80 @@ describe.skipIf(chrome === undefined)(
 			await stack.tab.goto(`${SITE}/webmcp.html`);
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("Chrome has no WebMCP here; the page finds the polyfill's as it loads", async () => {
-			const world = await stack.tab.isolatedWorld("tab-mcp browser extension");
-			// The content script's world: no document.modelContext of Chrome's.
-			expect(await stack.tab.eval(`"modelContext" in document`, world)).toBe(
-				false,
+			await step(
+				"Chrome has no WebMCP here; the page finds the polyfill's as it loads",
+				async () => {
+					const world = await stack.tab.isolatedWorld(
+						"tab-mcp browser extension",
+					);
+					// The content script's world: no document.modelContext of Chrome's.
+					expect(
+						await stack.tab.eval(`"modelContext" in document`, world),
+					).toBe(false);
+					expect(
+						await stack.tab.eval<string[]>(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name).sort())",
+						),
+					).toEqual([
+						"get_greeting",
+						"mcp_result",
+						"mirrored_tool",
+						"place_order",
+						"slow_tool",
+					]);
+				},
 			);
-			expect(
-				await stack.tab.eval<string[]>(
-					"document.modelContext.getTools().then((t) => t.map((x) => x.name).sort())",
-				),
-			).toEqual([
-				"get_greeting",
-				"mcp_result",
-				"mirrored_tool",
-				"place_order",
-				"slow_tool",
-			]);
-		});
-
-		test("the AI app gets the page's tools and calls them", async () => {
-			await waitForTools(stack, (n) => n.includes("page_get_greeting"));
-			const result = await call(stack, "page_get_greeting", { name: "Ada" });
-			expect(result.isError).toBeFalsy();
-			expect(result.content).toEqual([{ type: "text", text: "Hello, Ada!" }]);
-			expect((await call(stack, "page_mcp_result")).content).toEqual([
-				{ type: "text", text: "from an MCP result" },
-			]);
-			expect(
-				(await call(stack, "page_info")).structuredContent?.["webmcp"],
-			).toEqual({
-				available: true,
-				tools: 5,
+			await step(
+				"the AI app gets the page's tools and calls them",
+				async () => {
+					await waitForTools(stack, (n) => n.includes("page_get_greeting"));
+					const result = await call(stack, "page_get_greeting", {
+						name: "Ada",
+					});
+					expect(result.isError).toBeFalsy();
+					expect(result.content).toEqual([
+						{ type: "text", text: "Hello, Ada!" },
+					]);
+					expect((await call(stack, "page_mcp_result")).content).toEqual([
+						{ type: "text", text: "from an MCP result" },
+					]);
+					expect(
+						(await call(stack, "page_info")).structuredContent?.["webmcp"],
+					).toEqual({
+						available: true,
+						tools: 5,
+					});
+				},
+			);
+			await step("cancelling a call aborts the page's signal", async () => {
+				const controller = new AbortController();
+				const pending = call(
+					stack,
+					"page_slow_tool",
+					{},
+					{ signal: controller.signal },
+				);
+				await stack.tab.waitFor("window.slowStarted === true");
+				controller.abort();
+				await pending.catch(() => {});
+				await stack.tab.waitFor("window.aborted === true");
 			});
-		});
-
-		test("cancelling a call aborts the page's signal", async () => {
-			const controller = new AbortController();
-			const pending = call(
-				stack,
-				"page_slow_tool",
-				{},
-				{ signal: controller.signal },
-			);
-			await stack.tab.waitFor("window.slowStarted === true");
-			controller.abort();
-			await pending.catch(() => {});
-			await stack.tab.waitFor("window.aborted === true");
-		});
-
-		test("the list follows toolchange", async () => {
-			await stack.tab.eval(`document.modelContext.registerTool({
-				name: "registered_later",
-				description: "Registered after the load.",
-				annotations: { readOnlyHint: true },
-				execute: () => "later",
-			})`);
-			await waitForTools(stack, (n) => n.includes("page_registered_later"));
-		});
+			await step("the list follows toolchange", async () => {
+				await stack.tab.eval(`document.modelContext.registerTool({
+					name: "registered_later",
+					description: "Registered after the load.",
+					annotations: { readOnlyHint: true },
+					execute: () => "later",
+				})`);
+				await waitForTools(stack, (n) => n.includes("page_registered_later"));
+			});
+		}, 130_000);
 	},
 );
 
@@ -2302,101 +2559,118 @@ describe.skipIf(chrome === undefined)(
 		let stack: Stack;
 		let tab: Page;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start({ store: false }, `${SITE}/library.html`);
 			tab = stack.tab;
 			await listTestApp(stack);
 			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("the page shows the AI app connected through the extension; the panel says the page has tab-mcp built in", async () => {
-			await tab.waitFor(
-				"window.tabMcpPage?.mcp.extension?.apps.length === 1",
-				15_000,
-			);
-			const version = await stack.worker.eval<string>(
-				"chrome.runtime.getManifest().version",
-			);
-			expect(await tab.eval("window.tabMcpPage.mcp.extension ?? null")).toEqual(
-				{
-					name: "tab-mcp browser extension",
-					version,
-					apps: [TEST_APP],
-					whileInFront: true,
+			await step(
+				"the page shows the AI app connected through the extension; the panel says the page has tab-mcp built in",
+				async () => {
+					await tab.waitFor(
+						"window.tabMcpPage?.mcp.extension?.apps.length === 1",
+						15_000,
+					);
+					const version = await stack.worker.eval<string>(
+						"chrome.runtime.getManifest().version",
+					);
+					expect(
+						await tab.eval("window.tabMcpPage.mcp.extension ?? null"),
+					).toEqual({
+						name: "tab-mcp browser extension",
+						version,
+						apps: [TEST_APP],
+						whileInFront: true,
+					});
+					await stack.panel.waitFor(
+						`!document.getElementById("tab-library").hidden`,
+					);
+					// The AI app is not connected to the page directly: no second line.
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("tab-both").hidden`,
+						),
+					).toBe(true);
 				},
 			);
-			await stack.panel.waitFor(
-				`!document.getElementById("tab-library").hidden`,
+			await step(
+				"with the extension's Always allow on, the AI app's call runs with no question in the page",
+				async () => {
+					const toggle = alwaysAllow("complete_todo");
+					await stack.panel.waitFor(takesClicks(toggle));
+					await stack.panel.click(toggle);
+					// The click flips the switch at once; the worker's write comes after,
+					// and a call before it would still be asked (or, off, not asked).
+					await workerAllows(stack, SITE, "complete_todo", true);
+					await stack.panel.waitFor(alwaysAllowed("complete_todo", true));
+					const result = await call(stack, "page_complete_todo", { id: 1 });
+					expect(result.isError).toBeFalsy();
+					expect(result.content[0]?.text).toContain("Todo 1 is done.");
+					expect(await tab.eval(pageAsks)).toBe(false);
+					expect(
+						await tab.eval("window.tabMcpPage.calls.at(-1).client"),
+					).toEqual({
+						kind: "webmcp",
+						via: "tab-mcp-extension",
+						...TEST_APP,
+					});
+					await stack.panel.waitFor(takesClicks(toggle));
+					await stack.panel.click(toggle);
+					await workerAllows(stack, SITE, "complete_todo", false);
+					await stack.panel.waitFor(alwaysAllowed("complete_todo", false));
+				},
 			);
-			// The AI app is not connected to the page directly: no second line.
-			expect(
-				await stack.panel.eval(`document.getElementById("tab-both").hidden`),
-			).toBe(true);
-		});
-
-		test("with the extension's Always allow on, the AI app's call runs with no question in the page", async () => {
-			const toggle = alwaysAllow("complete_todo");
-			await stack.panel.waitFor(takesClicks(toggle));
-			await stack.panel.click(toggle);
-			// The click flips the switch at once; the worker's write comes after,
-			// and a call before it would still be asked (or, off, not asked).
-			await workerAllows(stack, SITE, "complete_todo", true);
-			await stack.panel.waitFor(alwaysAllowed("complete_todo", true));
-			const result = await call(stack, "page_complete_todo", { id: 1 });
-			expect(result.isError).toBeFalsy();
-			expect(result.content[0]?.text).toContain("Todo 1 is done.");
-			expect(await tab.eval(pageAsks)).toBe(false);
-			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
-				kind: "webmcp",
-				via: "tab-mcp-extension",
-				...TEST_APP,
-			});
-			await stack.panel.waitFor(takesClicks(toggle));
-			await stack.panel.click(toggle);
-			await workerAllows(stack, SITE, "complete_todo", false);
-			await stack.panel.waitFor(alwaysAllowed("complete_todo", false));
-		});
-
-		test("with it off, the extension asks once and the page not at all", async () => {
-			const pending = call(stack, "page_complete_todo", { id: 2 });
-			await answerInPanel(stack, "allow");
-			const result = await pending;
-			expect(result.isError).toBeFalsy();
-			expect(await tab.eval(pageAsks)).toBe(false);
-			// Vouched for: the page knows the AI app.
-			expect(await tab.eval("window.tabMcpPage.calls.at(-1).client")).toEqual({
-				kind: "webmcp",
-				via: "tab-mcp-extension",
-				...TEST_APP,
-			});
-			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
-			// Declined in the extension: the page is not asked and nothing runs.
-			const declined = call(stack, "page_complete_todo", { id: 9 });
-			await answerInPanel(stack, "deny");
-			expect((await declined).isError).toBe(true);
-			expect(await tab.eval(pageAsks)).toBe(false);
-			expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
-		});
-
-		test("the page's state follows when the app is disconnected in the extension", async () => {
-			// Disconnect asks first: a click arms it, a second one after a
-			// moment disconnects.
-			await stack.panel.click("#grants button");
-			await Bun.sleep(800);
-			await stack.panel.click("#grants button");
-			await tab.waitFor(
-				"window.tabMcpPage.mcp.extension?.apps.length === 0",
-				15_000,
+			await step(
+				"with it off, the extension asks once and the page not at all",
+				async () => {
+					const pending = call(stack, "page_complete_todo", { id: 2 });
+					await answerInPanel(stack, "allow");
+					const result = await pending;
+					expect(result.isError).toBeFalsy();
+					expect(await tab.eval(pageAsks)).toBe(false);
+					// Vouched for: the page knows the AI app.
+					expect(
+						await tab.eval("window.tabMcpPage.calls.at(-1).client"),
+					).toEqual({
+						kind: "webmcp",
+						via: "tab-mcp-extension",
+						...TEST_APP,
+					});
+					expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
+					// Declined in the extension: the page is not asked and nothing runs.
+					const declined = call(stack, "page_complete_todo", { id: 9 });
+					await answerInPanel(stack, "deny");
+					expect((await declined).isError).toBe(true);
+					expect(await tab.eval(pageAsks)).toBe(false);
+					expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
+				},
 			);
-			expect(
-				await tab.eval("document.getElementById('extension').textContent"),
-			).toContain('"apps":[]');
-		});
+			await step(
+				"the page's state follows when the app is disconnected in the extension",
+				async () => {
+					// Disconnect asks first: a click arms it, a second one after a
+					// moment disconnects.
+					await stack.panel.click("#grants button");
+					await Bun.sleep(800);
+					await stack.panel.click("#grants button");
+					await tab.waitFor(
+						"window.tabMcpPage.mcp.extension?.apps.length === 0",
+						15_000,
+					);
+					expect(
+						await tab.eval("document.getElementById('extension').textContent"),
+					).toContain('"apps":[]');
+				},
+			);
+		}, 130_000);
 	},
 );
 
@@ -2406,7 +2680,7 @@ describe.skipIf(chrome === undefined)(
 		let stack: Stack;
 		let tab: Page;
 
-		beforeAll(async () => {
+		beforeEach(async () => {
 			stack = await start(
 				{ store: false, webmcp: false },
 				`${SITE}/plain.html`,
@@ -2418,9 +2692,9 @@ describe.skipIf(chrome === undefined)(
 			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
 		}, 60_000);
 
-		afterAll(async () => {
-			await stack?.client.close();
+		afterEach(async () => {
 			await stack?.stop();
+			stack = undefined as unknown as Stack;
 		});
 
 		test("the page knows the extension, and a call allowed there is not asked again", async () => {
