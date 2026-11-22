@@ -353,7 +353,7 @@ describe.skipIf(chrome === undefined)(
 			// DIAGNOSTIC (temporary): recorded from before the page opens, read
 			// only after the click, so the click comes as soon as on main.
 			await stack.panel.eval(
-				`globalThis.__events = []; for (const type of ["pointerdown", "pointerup", "click", "focus", "blur"]) document.addEventListener(type, (e) => __events.push([type, Date.now() % 100000, e.clientX ?? null, e.clientY ?? null, e.target?.tagName + "." + (e.target?.className ?? "") + ":" + (e.target?.textContent ?? "").slice(0, 20), document.hasFocus()]), true); new MutationObserver((ms) => { for (const m of ms) { for (const n of m.addedNodes) if (n.nodeType === 1) __events.push(["add", Date.now() % 100000, n.tagName + "." + n.className + ":" + (n.textContent ?? "").slice(0, 30), document.hasFocus()]); for (const n of m.removedNodes) if (n.nodeType === 1) __events.push(["remove", Date.now() % 100000, n.tagName + "." + n.className]); if (m.type === "attributes") __events.push(["attr", Date.now() % 100000, (m.target.id || m.target.tagName) + "." + m.attributeName + "=" + m.target.getAttribute(m.attributeName)]); } }).observe(document.getElementById("questions"), { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open", "aria-disabled"] });`,
+				await Bun.file(`${import.meta.dir}/diag-recorder.js`).text(),
 			);
 			const fourth = await always();
 			page = await stack.browser.newPage(fourth.url);
