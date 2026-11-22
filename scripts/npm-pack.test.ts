@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import { PUBLISHED_EXPORTS } from "../packages/tab-mcp-client/scripts/published-exports.ts";
 import {
 	checkManifest,
@@ -120,4 +121,25 @@ test("the relay's manifest needs its bin and both exports", () => {
 	).join("\n");
 	expect(problems).toContain("bin");
 	expect(problems).toContain("exports");
+});
+
+test("the relay's sources without a declaration exist, and the build leaves the browser script out (review of PR 194)", async () => {
+	const spec = PACKAGES["relay"];
+	if (spec === undefined) throw new Error("no relay spec");
+	const src = join(
+		import.meta.dir,
+		"..",
+		spec.workspace,
+		spec.declarationsFrom,
+	);
+	for (const file of spec.noDeclarations ?? []) {
+		expect(await Bun.file(join(src, file)).exists()).toBe(true);
+	}
+	// The pairing page's script is checked with the DOM on its own, so the
+	// declaration build (tsconfig.build.json extends tsconfig.json) skips it.
+	const tsconfig = (await Bun.file(
+		join(import.meta.dir, "..", spec.workspace, "tsconfig.json"),
+	).json()) as { exclude?: string[] };
+	expect(tsconfig.exclude).toContain("src/oauth/code-field-page.ts");
+	expect(spec.noDeclarations).toContain("oauth/code-field-page.ts");
 });
