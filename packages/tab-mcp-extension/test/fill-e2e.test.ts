@@ -350,6 +350,11 @@ describe.skipIf(chrome === undefined)(
 			}
 			// The brake: the fourth without a question in ten minutes asks,
 			// with all three answers.
+			// DIAGNOSTIC (temporary): recorded from before the page opens, read
+			// only after the click, so the click comes as soon as on main.
+			await stack.panel.eval(
+				`globalThis.__events = []; for (const type of ["pointerdown", "pointerup", "click", "focus", "blur"]) document.addEventListener(type, (e) => __events.push([type, Date.now() % 100000, e.clientX ?? null, e.clientY ?? null, e.target?.tagName + "." + (e.target?.className ?? "") + ":" + (e.target?.textContent ?? "").slice(0, 20), document.hasFocus()]), true); new MutationObserver((ms) => { for (const m of ms) { for (const n of m.addedNodes) if (n.nodeType === 1) __events.push(["add", Date.now() % 100000, n.tagName + "." + n.className + ":" + (n.textContent ?? "").slice(0, 30), document.hasFocus()]); for (const n of m.removedNodes) if (n.nodeType === 1) __events.push(["remove", Date.now() % 100000, n.tagName + "." + n.className]); if (m.type === "attributes") __events.push(["attr", Date.now() % 100000, (m.target.id || m.target.tagName) + "." + m.attributeName + "=" + m.target.getAttribute(m.attributeName)]); } }).observe(document.getElementById("questions"), { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open", "aria-disabled"] });`,
+			);
 			const fourth = await always();
 			page = await stack.browser.newPage(fourth.url);
 			await stack.panel.waitFor(questionCount(1));
@@ -358,16 +363,15 @@ describe.skipIf(chrome === undefined)(
 				"Allow once",
 				"Always allow",
 			]);
-			// DIAGNOSTIC (temporary): what the panel looks like around the click.
 			const look = `JSON.stringify({ t: Date.now() % 100000, focus: document.hasFocus(), vis: document.visibilityState, hint: document.getElementById("focus-hint").hidden, open: document.getElementById("questions").open, scroll: [document.getElementById("questions").scrollTop, document.getElementById("questions").clientHeight, document.getElementById("questions").scrollHeight], view: [innerWidth, innerHeight], cards: [...document.querySelectorAll("[data-question]")].map((c) => [c.dataset.question, c.getBoundingClientRect().top, c.textContent.slice(0, 50)]), deny: (() => { const b = [...document.querySelectorAll('[data-question] button[data-answer="deny"]')].at(-1); if (!b) return null; const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return { rect: [r.x, r.y, r.width, r.height], at: e ? e.tagName + "." + e.className + ":" + (e.textContent ?? "").slice(0, 30) : null }; })(), active: document.activeElement?.tagName + ":" + (document.activeElement?.textContent ?? "").slice(0, 20) })`;
-			await stack.panel.eval(
-				`globalThis.__events = []; for (const type of ["pointerdown", "pointerup", "click", "focus", "blur"]) document.addEventListener(type, (e) => __events.push([type, Date.now() % 100000, e.clientX ?? null, e.clientY ?? null, e.target?.tagName + "." + (e.target?.className ?? "") + ":" + (e.target?.textContent ?? "").slice(0, 20)]), true); new MutationObserver((ms) => { for (const m of ms) { for (const n of m.addedNodes) if (n.nodeType === 1) __events.push(["add", Date.now() % 100000, n.tagName + "." + n.className + ":" + (n.textContent ?? "").slice(0, 30)]); for (const n of m.removedNodes) if (n.nodeType === 1) __events.push(["remove", Date.now() % 100000, n.tagName + "." + n.className]); if (m.type === "attributes") __events.push(["attr", Date.now() % 100000, m.target.id + "." + m.attributeName + "=" + m.target.getAttribute(m.attributeName)]); } }).observe(document.getElementById("questions"), { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open"] });`,
-			);
-			console.log("DIAG before", await stack.panel.eval(look));
 			await answer(stack, "deny");
-			console.log("DIAG after", await stack.panel.eval(look));
 			try {
 				await stack.panel.waitFor(questionCount(0));
+				console.log("DIAG passed", await stack.panel.eval(look));
+				console.log(
+					"DIAG events",
+					await stack.panel.eval(`JSON.stringify(globalThis.__events)`),
+				);
 			} catch (error) {
 				console.log("DIAG failed", await stack.panel.eval(look));
 				console.log(
