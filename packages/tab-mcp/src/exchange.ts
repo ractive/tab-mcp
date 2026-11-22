@@ -88,10 +88,40 @@ function isEventStream(headers: Record<string, string>): boolean {
 		.startsWith("text/event-stream");
 }
 
-function endsAtBoundary(text: string): boolean {
-	return (
-		text.endsWith("\n\n") || text.endsWith("\r\n\r\n") || text.endsWith("\r\r")
-	);
+/**
+ * Where an event stream is between writes: whether it ended an event (a blank
+ * line), the line so far has text, and the last character was a CR (an LF
+ * after it belongs to the same line end). SSE ends a line with LF, CRLF or CR,
+ * and a page's chunk may end anywhere, a line end's CR and LF included (code
+ * review 2026-11-22, CR-03).
+ */
+interface Framing {
+	atBoundary: boolean;
+	inLine: boolean;
+	afterCr: boolean;
+}
+
+/** `framing` after `text` was written. Only the text after its last line's text counts. */
+function frame(framing: Framing, text: string): Framing {
+	let i = text.length;
+	while (i > 0 && (text[i - 1] === "\n" || text[i - 1] === "\r")) i--;
+	let { atBoundary, inLine, afterCr } = framing;
+	if (i > 0) {
+		atBoundary = false;
+		inLine = true;
+		afterCr = false;
+	}
+	for (; i < text.length; i++) {
+		const lf = text[i] === "\n";
+		if (lf && afterCr) {
+			afterCr = false;
+			continue;
+		}
+		atBoundary = !inLine;
+		inLine = false;
+		afterCr = !lf;
+	}
+	return { atBoundary, inLine, afterCr };
 }
 
 /** One SSE `message` event carrying `data` (split into `data:` lines). */
@@ -152,8 +182,8 @@ export class Exchange {
 	/** The buffered body in `relay_wrapped`. */
 	#wrapped = "";
 	#controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-	/** The last write to the AI app ended an SSE event (or nothing was sent). */
-	#atBoundary = true;
+	/** Where the AI app's stream is; `atBoundary`: between events (or empty). */
+	#framing: Framing = { atBoundary: true, inLine: false, afterCr: false };
 	/**
 	 * The AI app's stream is an event stream: the relay's own, or the tab's
 	 * with `text/event-stream`. Only then are keep-alive comments and error
@@ -318,7 +348,7 @@ export class Exchange {
 				}),
 				200,
 			);
-		} else if (this.#eventStream && this.#atBoundary) {
+		} else if (this.#eventStream && this.#framing.atBoundary) {
 			this.#write(sseEvent(body));
 		}
 		this.#finish("page_gone");
@@ -344,7 +374,7 @@ export class Exchange {
 			);
 		} else if (
 			this.#eventStream &&
-			this.#atBoundary &&
+			this.#framing.atBoundary &&
 			this.#options.rpcId !== undefined
 		) {
 			this.#write(sseEvent(rpcErrorBody(this.#options.rpcId, code, message)));
@@ -455,7 +485,7 @@ export class Exchange {
 			this.clientClosed();
 			return;
 		}
-		this.#atBoundary = endsAtBoundary(text);
+		this.#framing = frame(this.#framing, text);
 		const room = this.#controller.desiredSize;
 		if (room !== null && room < 0) {
 			// The AI app is not reading: stop the tab, drop the stream. No error
@@ -485,7 +515,7 @@ export class Exchange {
 			return;
 		}
 		this.#keepAliveTimer = setTimeout(() => {
-			if (this.#atBoundary) this.#write(": keep-alive\n\n");
+			if (this.#framing.atBoundary) this.#write(": keep-alive\n\n");
 			else this.#scheduleKeepAlive();
 		}, this.#options.keepAliveMs);
 	}

@@ -204,10 +204,11 @@ the grants of the previous one and ends their requests in flight.
 - On streamed responses that are event streams (the relay's own, or the tab's with
   `content-type: text/event-stream`) the relay writes an SSE comment (`: keep-alive`) to
   the AI app every `keepAliveMs` while the tab is silent, but only at an event boundary
-  (when the bytes forwarded so far end with a blank line). An error or "page closed"
-  event at the end goes into event streams only as well. A streamed body of any other
-  type gets the tab's bytes and nothing else; if it ends early, it is cut off. The tab
-  never sends keep-alives.
+  (when the bytes forwarded so far end with a blank line; a line ends with LF, CRLF or
+  CR, and the tab's chunks may split a line end or the blank line anywhere). An error
+  or "page closed" event at the end goes into event streams only as well. A streamed
+  body of any other type gets the tab's bytes and nothing else; if it ends early, it is
+  cut off. The tab never sends keep-alives.
 - A request gets either one `http.response`, or one `http.response.start` followed by
   any number of `http.response.chunk` and one `http.response.end`. An `http.response`
   after `http.response.start`, a second `http.response.start`, or a chunk before
