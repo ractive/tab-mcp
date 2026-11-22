@@ -32,6 +32,7 @@ import type {
 	Tool,
 	ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
+import { canonicalJson } from "../canonical.ts";
 import type {
 	CallResult,
 	PageLibrary,
@@ -176,36 +177,192 @@ const has = (keywords: Record<string, unknown>, key: string) =>
  *
  * A `pattern` that goes is added to the schema's `description` (cut to
  * `MAX_PATTERN` characters), so that the AI app still knows the format the
- * page wants (WM 8).
+ * page wants (WM 8); so are the names `patternProperties` allowed.
+ *
+ * The copy only ever accepts more than the page's schema, never less (DEC-217).
+ * For a page built with the client library this check is a first one: the
+ * library checks the arguments again with the page's full schema. For a page
+ * that registers with the browser's WebMCP itself, or with the extension's
+ * own (`webmcp/registry.ts`), it is the only one: neither the browser nor the
+ * extension's WebMCP checks arguments. There an argument the page's regular
+ * expressions would have refused reaches its `execute`, as it always did
+ * (patterns were never run here), and the page has to check its input
+ * itself. A check that is too strict, on the other hand, refuses calls the
+ * page takes, with no way around it for the AI app. Taking a keyword away
+ * loosens only where the schema around it does not turn it around, so:
+ * - without `patternProperties`, its keys become "additional": a restricting
+ *   `additionalProperties` (false or a schema) goes with it;
+ * - `unevaluatedProperties` and `unevaluatedItems` go wherever something
+ *   below them went (fewer keys or items count as evaluated);
+ * - `not` goes when something below it went (a looser `not` is stricter),
+ *   and so does `if` with its `then` and `else` (a looser `if` picks `then`
+ *   more often); `oneOf` becomes `anyOf` (two branches that now both match
+ *   would fail it), or goes when there is an `anyOf` already; `maxContains`
+ *   goes when its `contains` got looser;
+ * - a `$ref` counts as something below that went when what it leads to lost
+ *   something, itself or through its own `$ref`s (`lostRefs`, the second
+ *   pass of `widen`); one that may lead anywhere (not a `#/…` pointer, an
+ *   `$id` below the root, `$dynamicRef`, `$recursiveRef`) always does.
+ * `propertyNames`, `properties`, `items`, `allOf`, `anyOf`, `then`, `else`
+ * and the like only get looser with what is below them, and stay.
  */
 function withoutPatterns(schema: unknown): unknown {
-	if (!isObject(schema)) return schema;
+	const first = widen(schema);
+	return first.loosened
+		? widen(schema, lostRefs(schema, first)).schema
+		: first.schema;
+}
+
+const REFS = ["$ref", "$dynamicRef", "$recursiveRef"];
+
+/** What `widen` makes of a schema. */
+interface Widened {
+	schema: unknown;
+	/** Something in it went (or, with `lost`, it has a `$ref` that counts so). */
+	loosened: boolean;
+	/** The `$ref`s in it, as written. */
+	refs: string[];
+	/** It has an `$id` below the root, which moves where `#/…` resolves. */
+	ids: boolean;
+}
+
+/**
+ * Which `$ref`s of `root` (its first pass, `first`) lead to a schema that
+ * lost something, itself or through its own `$ref`s, to any depth: a fixed
+ * point over the distinct pointers, so that cycles end and no path is
+ * walked twice. A `$ref` that is not a `#/…` pointer into `root`, or any one
+ * in a schema with an `$id` below the root, counts as lost.
+ */
+function lostRefs(root: unknown, first: Widened): (ref: string) => boolean {
+	if (first.ids) return () => true;
+	const targets = new Map<string, Widened | undefined>();
+	const queue = [...first.refs];
+	for (let ref = queue.pop(); ref !== undefined; ref = queue.pop()) {
+		if (targets.has(ref)) continue;
+		const target = pointed(root, ref);
+		const made = target === undefined ? undefined : widen(target.value);
+		targets.set(ref, made);
+		if (made !== undefined) queue.push(...made.refs);
+	}
+	const lost = new Map<string, boolean>();
+	for (const [ref, made] of targets) lost.set(ref, made?.loosened ?? true);
+	for (let changed = true; changed; ) {
+		changed = false;
+		for (const [ref, made] of targets)
+			if (!lost.get(ref) && made?.refs.some((r) => lost.get(r) ?? true)) {
+				lost.set(ref, true);
+				changed = true;
+			}
+	}
+	return (ref) => lost.get(ref) ?? true;
+}
+
+/** What `#` or a `#/…` JSON pointer `ref` names in `root`; `undefined` if nothing. */
+function pointed(root: unknown, ref: string): { value: unknown } | undefined {
+	if (ref !== "#" && !ref.startsWith("#/")) return undefined;
+	let node = root;
+	for (const raw of ref === "#" ? [] : ref.slice(2).split("/")) {
+		let part: string;
+		try {
+			part = decodeURIComponent(raw)
+				.replaceAll("~1", "/")
+				.replaceAll("~0", "~");
+		} catch {
+			return undefined;
+		}
+		if (Array.isArray(node) && /^(0|[1-9]\d*)$/.test(part))
+			node = node[Number(part)];
+		else if (isObject(node) && Object.hasOwn(node, part)) node = node[part];
+		else return undefined;
+	}
+	return node === undefined ? undefined : { value: node };
+}
+
+/**
+ * `withoutPatterns` for `schema` (`root`: it is the whole schema), and
+ * whether anything in it went; with `lost`, a `$ref` counts as something
+ * that went where `lost` says its target lost something.
+ */
+function widen(
+	schema: unknown,
+	lost?: (ref: string) => boolean,
+	root = true,
+): Widened {
+	if (!isObject(schema))
+		return { schema, loosened: false, refs: [], ids: false };
 	const out: Record<string, unknown> = {};
-	const { pattern, description } = schema;
-	// A description that is not a string (not valid JSON Schema) gives way.
+	const looser = new Set<string>();
+	const refs: string[] = [];
+	let ids = !root && "$id" in schema;
+	const notes: string[] = [];
+	const { pattern, patternProperties, description } = schema;
 	if (typeof pattern === "string")
-		out["description"] =
-			`${typeof description === "string" && description ? `${description} ` : ""}(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`;
+		notes.push(
+			`(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`,
+		);
+	if (isObject(patternProperties) && Object.keys(patternProperties).length)
+		notes.push(
+			`(Properties whose names match the regular expression ${Object.keys(
+				patternProperties,
+			)
+				.map((p) => cut(p, MAX_PATTERN))
+				.join(" or ")} are allowed too.)`,
+		);
+	const sub = (key: string, value: unknown) => {
+		const made = widen(value, lost, false);
+		if (made.loosened) looser.add(key);
+		refs.push(...made.refs);
+		ids ||= made.ids;
+		return made.schema;
+	};
 	for (const [key, value] of Object.entries(schema)) {
-		if (key === "pattern" || key === "patternProperties") continue;
-		if (key === "description" && "description" in out) continue;
+		if (key === "pattern" || key === "patternProperties") {
+			looser.add(key);
+			continue;
+		}
+		if (REFS.includes(key)) {
+			const pointer = key === "$ref" && typeof value === "string";
+			if (pointer) refs.push(value);
+			if (lost !== undefined && (!pointer || lost(value))) looser.add(key);
+		}
 		if (
 			(has(schemaMapKeyword, key) || key === "dependencies") &&
 			isObject(value)
 		) {
 			// Names, each with a schema (`dependencies`: or a list of names).
 			const map: Record<string, unknown> = {};
-			for (const [name, sub] of Object.entries(value))
-				map[name] = withoutPatterns(sub);
+			for (const [name, item] of Object.entries(value))
+				map[name] = sub(key, item);
 			out[key] = map;
 		} else if (Array.isArray(value))
 			out[key] = has(schemaArrayKeyword, key)
-				? value.map(withoutPatterns)
+				? value.map((item) => sub(key, item))
 				: value;
 		else if (has(ignoredKeyword, key)) out[key] = value;
-		else out[key] = withoutPatterns(value);
+		else out[key] = sub(key, value);
 	}
-	return out;
+	if (notes.length)
+		// A description that is not a string (not valid JSON Schema) gives way.
+		out["description"] = [
+			...(typeof description === "string" && description ? [description] : []),
+			...notes,
+		].join(" ");
+	if (!looser.size) return { schema: out, loosened: false, refs, ids };
+	if (looser.has("patternProperties")) delete out["additionalProperties"];
+	delete out["unevaluatedProperties"];
+	delete out["unevaluatedItems"];
+	if (looser.has("not")) delete out["not"];
+	if (looser.has("if")) {
+		delete out["if"];
+		delete out["then"];
+		delete out["else"];
+	}
+	if (looser.has("oneOf")) {
+		if (!("anyOf" in out)) out["anyOf"] = out["oneOf"];
+		delete out["oneOf"];
+	}
+	if (looser.has("contains")) delete out["maxContains"];
+	return { schema: out, loosened: true, refs, ids };
 }
 
 /** The input schema to offer, or why the tool is left out. */
@@ -380,6 +537,11 @@ export interface CallTarget {
 	documentId: string;
 	name: string;
 	readOnly: boolean;
+	/**
+	 * The tool as it was offered, as `canonicalJson` of its `PageTool`: the
+	 * content script runs it only if the page's tool is still that one.
+	 */
+	definition: string;
 }
 
 /** What the bridge needs from Chrome. */
@@ -445,6 +607,8 @@ export const PAGE_CHANGED_RETRY_MS = 1000;
 
 /** A tool of the page in front as the bridge keeps it, to call. */
 interface Callable {
+	/** The tool as the page offered it (`keyOf`). */
+	key: string;
 	tabId: number;
 	origin: string;
 	target: CallTarget;
@@ -467,13 +631,14 @@ export function destructiveOf(tool: PageTool): boolean {
 	return tool.annotations?.consequentialHint !== false;
 }
 
-/** Whether `a` and `b` are the same tool of the same page in the same tab. */
+/**
+ * Whether `a` and `b` are the same tool of the same page in the same tab, as
+ * the page offered it: its title, description, schemas and hints too
+ * (`keyOf`), so that an answer the user gave about one definition never
+ * runs another.
+ */
 const sameTool = (a: Callable, b: Callable): boolean =>
-	a.tabId === b.tabId &&
-	a.origin === b.origin &&
-	a.target.documentId === b.target.documentId &&
-	a.target.name === b.target.name &&
-	a.target.readOnly === b.target.readOnly;
+	a.key === b.key && a.origin === b.origin;
 
 /** A page tool's schema and validator, or why it has none. */
 type Compiled =
@@ -493,9 +658,13 @@ function compile(tool: PageTool): Compiled {
 	}
 }
 
-/** What makes two offers the same tool: re-register only when it changes. */
+/**
+ * What makes two offers the same tool: re-register only when it changes.
+ * `canonicalJson`, so that the same tool with its fields in another order
+ * is the same (DEC-217).
+ */
 const keyOf = (tabId: number, documentId: string, tool: PageTool) =>
-	JSON.stringify([tabId, documentId, tool]);
+	canonicalJson([tabId, documentId, tool]);
 
 /** The origin of `url` as Chrome reports a tab's address; `undefined` if none. */
 function originOf(url: string): string | undefined {
@@ -650,7 +819,9 @@ export class PageToolBridge {
 				},
 			);
 			// A page that changed while the question was open (a navigation,
-			// another tab in front with a tool of the same name) gets nothing.
+			// another tab in front with a tool of the same name, the tool
+			// offered again with another title, description, schema or hint)
+			// gets nothing.
 			const now = this.#callable.get(target.name);
 			if (now === undefined || !sameTool(now, callable))
 				throw new Error(
@@ -828,9 +999,17 @@ export class PageToolBridge {
 			const output = outputSchemaOf(pageTool.outputSchema);
 			if (output !== undefined) entry.outputSchema = output;
 			const item: Callable = {
+				key,
 				tabId: tab.id,
 				origin: tools.origin,
-				target: { documentId: tools.documentId, name: pageTool.name, readOnly },
+				target: {
+					documentId: tools.documentId,
+					name: pageTool.name,
+					readOnly,
+					// The content script compares it with the tool it is about
+					// to call (DEC-217): the same spelling as its `definitionOf`.
+					definition: canonicalJson(pageTool),
+				},
 				title,
 				description,
 				validator,

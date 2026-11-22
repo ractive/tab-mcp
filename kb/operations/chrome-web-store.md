@@ -257,20 +257,23 @@ code and message.
 > The relay is https://tab-mcp.ractive.ch by default; you can run your own (the relay is
 > open source, MIT) and enter its address in the settings.
 >
-> WebMCP is on in Chrome only where a site takes part in Chrome's origin trial, or after
-> you turn on chrome://flags/#enable-webmcp-testing.
+> Chrome's own WebMCP is on only where a site takes part in Chrome's origin trial, or
+> after you turn on chrome://flags/#enable-webmcp-testing. Elsewhere, after "Give access
+> to all sites", the extension gives https pages a WebMCP of its own as they load.
 >
 > A page built with the tab-mcp client library and the extension know of each other: a
 > call you allowed in the extension is not asked again in the page, and the page can show
 > which AI apps reach it through the extension. Such a page learns the extension's name
-> and version, whether AI access is on and the names of the AI apps connected to it,
-> nothing else.
+> and version and whether AI access is on, also while it is off; while it is on, the
+> names and verified hosts of the AI apps connected to it; and right before a call you
+> allowed, the tool, its arguments and which AI app made the call. Nothing else.
 >
 > The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
 > tabs, and only the page's address, title, language and its WebMCP tools (and what a
-> page with the tab-mcp client library tells it about itself). It sends data
-> only while AI access is on, only to the relay you chose, and only what your AI app asks
-> for. No analytics.
+> page with the tab-mcp client library tells it about itself). It sends your AI app's
+> requests and the page's answers only while AI access is on, only to the relay you
+> chose, and only what your AI app asks for; a page with the tab-mcp client library gets,
+> inside the browser, what is said above. No analytics.
 
 **Single purpose:** Letting an AI app outside the browser that the user connected work
 with the page in front, through a tab-mcp relay: passing on the WebMCP tools the page
@@ -305,10 +308,15 @@ sends.
 - Not collected: personally identifiable information, health, financial, authentication
   information, personal communications, location, user activity (clicks, keystrokes).
 - Stored locally only (IndexedDB): the relay address, whether AI access is on, a random
-  secret that identifies this installation to the relay, the tools allowed per site.
-  Transmitted only to the
+  secret per relay that identifies this installation to it, the connected AI apps as the
+  relay last listed them (grant id, name, verified host), the tools allowed per site, and
+  with "Fill in the code for me" on its relay and the hosts chosen for "Always allow"
+  (PRIVACY.md has the full list). Transmitted only to the
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
-  app the user connected, only while AI access is on.
+  app the user connected, only while AI access is on; and, inside the browser, to a page
+  that uses the tab-mcp client library: the extension's name and version, whether AI
+  access is on, the connected AI apps' names and verified hosts, and for a call the user
+  allowed, the tool, its arguments and which AI app made it.
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to
   the single purpose; not used to determine creditworthiness or for lending.
 - **Privacy policy URL:** the ractive.ch page with PRIVACY.md (setup step 2).

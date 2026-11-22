@@ -5144,3 +5144,113 @@ coding agent"), the root README's "Agent skill" first, before the plugin.
   holds. Each place that gives the line says that a missing file means an older version
   to update. The plugin comes from `main` and can be ahead of the last release.
 - The website (ractive.ch, another repository) is not changed here.
+
+## DEC-217: After the review of 2026-11-22: answers, schemas without patterns, quoted addresses
+
+2026-11-22, from the outside review of that day (findings 1, 2 and 4,
+[review](/research/review-2026-11-22.md); CR-05, CR-06 and CR-08 of the code review
+of the same day, `research/code-review-2026-11-22.md`, found them again). Three rules of the
+bridge and the setup commands change.
+
+**1. An answer to a tool's question holds for the tool as it was offered.** After the
+user's answer the bridge checked that the tool was still the same one (tab, origin,
+document, name, read-only claim), but not its title, description, schemas or
+`consequentialHint`. A page could register the tool again while the question waited, as
+"Publish the draft publicly" in place of "Save a draft only", and "Allow" ran the changed
+tool.
+
+- **The rule:** the check after the answer compares the tool as it was offered when the
+  call started with the tool offered now: the bridge's `keyOf` (tab, document and
+  everything the content script sent for the tool: name, title, description, input and
+  output schema, annotations) and the origin. Anything else is a tool that changed while
+  the user was asked: it does not run, and the AI app hears so, in the words the bridge
+  already used for a navigation. Both ways of calling it (`page_<name>`, `webmcp_call`).
+- **And where the call is made:** the bridge's list can be behind the page (a
+  `toolchange` whose read has not finished when the user answers). So each call carries
+  the tool's definition as offered (`CallTarget.definition`), and the content script,
+  which reads the page's tools again right before it calls one, runs it only if that
+  read gives the same definition; otherwise the call is "gone" and the AI app is told
+  that the tool changed since it was offered.
+- **One spelling:** both compare `canonicalJson` (`src/canonical.ts`): JSON with every
+  object's keys sorted, so the same tool registered again with its fields in another
+  order is the same tool (not offered anew, not refused).
+- **The same key as for re-registration:** a page that registers the same tool again
+  unchanged (a `toolchange` with new objects) keeps its key and runs; the bridge offers a
+  changed tool anew by the same key, so the AI app gets a tools-changed notice for it too.
+  The arguments were checked against that same schema.
+- The question itself is not withdrawn when the tool changes: the user still answers it,
+  and the answer is refused. That keeps the questions' code as it is.
+- **"Always allow on <host>" is not tied to a definition**, and stays so: it is the
+  user's standing word for a site's tool by name, kept until taken back (DEC-139,
+  DEC-184), and it covers the tool when the page changes its title, description, schema
+  or hints. A page decides what its tool does and can change that without changing a
+  word of its description, so tying the switch to the definition would promise more than
+  it can hold. A question that waits is different: it shows one definition, and the
+  answer is for what was shown. A tool that is read-only gets no switch (the panel shows
+  none, and "Always allow all" takes only tools that ask), so one that becomes
+  consequential asks; an entry the user set while it asked stays while it is read-only
+  and applies again when it asks again.
+
+**2. A page tool's schema without its regular expressions is never stricter.** The
+bridge leaves out `pattern` and `patternProperties` so that a page's catastrophic regular
+expression cannot freeze the extension (ES 2, WM 8). Taking a keyword away loosens a
+schema only where nothing around it turns that around: without `patternProperties`, its
+keys fell to `additionalProperties: false`, and `{"x-name": "Alice"}` was refused for a
+schema that takes it.
+
+- **The rule:** the schema the bridge checks and offers may let through more than the
+  page's, never less. A stricter one costs a call the AI app cannot make at all.
+- **What the check is, and what looser means:** for a page built with the client
+  library it is a first check; the library checks the arguments again with the page's
+  full schema. For a page that registers with the browser's WebMCP itself, or with the
+  extension's own (`src/webmcp/registry.ts`), it is the only one: neither the browser nor
+  the extension's WebMCP checks arguments. There an argument the page's regular
+  expressions would have refused reaches its `execute`, as it always did, since the
+  extension never ran a page's patterns; such a page has to check its own input. The
+  extension does not run them because a page's catastrophic pattern would freeze the
+  service worker, and with it the connection for every tab.
+- **What goes with a regular expression:** a restricting `additionalProperties` beside a
+  `patternProperties` that went; `unevaluatedProperties` and `unevaluatedItems` of every
+  schema something below went from (fewer keys and items count as evaluated); a `not`
+  something below went from; an `if` likewise, with its `then` and `else`; `maxContains`
+  when its `contains` lost something. A `oneOf` that lost something becomes an `anyOf`
+  (two branches that both match now would fail it), or goes when the schema has an
+  `anyOf` already. A `$ref` counts as below a schema that lost something when what it
+  points to lost something, itself or through its own `$ref`s to any depth (a second
+  pass, `lostRefs`: a fixed point over the distinct pointers, so cycles end). Only `#`
+  and `#/…` pointers into the schema are followed; any other `$ref`, every `$dynamicRef`
+  and `$recursiveRef`, and every `$ref` of a schema with an `$id` below its root (which
+  moves where a pointer resolves) count as leading to one that did. So one harmless
+  pattern elsewhere leaves a `not` or `oneOf` around a clean `$ref` as it is.
+  `propertyNames`, `properties`, `items`, `allOf`, `anyOf`, `then`, `else` and the like
+  only get looser and stay.
+- **Chosen over** leaving the schema unchecked whenever it has a regular expression: the
+  schema is also what the AI app is shown, and a page with one pattern would lose the
+  first check altogether. The names `patternProperties` allowed are noted in the
+  schema's description ("Properties whose names match the regular expression … are
+  allowed too."), as a `pattern` is.
+- Tests (`packages/tab-mcp-extension/test/bridge.test.ts`): for each such case, an
+  argument the page's schema takes (validated in full) is taken by the offered schema
+  too; a schema without regular expressions is offered unchanged.
+
+**3. A setup command's address with `[`, `]` or `~` is in double quotes**; amends
+DEC-093's shell rule for addresses. `commandAddress` let `[`, `]` and `~` through bare,
+and zsh refused `claude mcp add --transport http test http://[::1]:8080/s/test/mcp` ("no
+matches found"; `~` is a pattern with `extendedglob`).
+
+- **The rule:** an address goes into a command only with nothing but http or https,
+  letters, digits and `. : [ ] / _ ~ -`, as before; one with `[`, `]` or `~` goes in
+  double quotes. DEC-093's "quoting cannot be right for every shell at once" is about
+  arbitrary text (the server's name, which stays a plain word); for these characters
+  double quotes are: nothing else inside is special to POSIX shells, zsh, fish,
+  PowerShell or cmd.exe. Single quotes are not, as cmd.exe passes them on to the program.
+- **Chosen over** the steps without a command for such an address: an IPv6 relay on the
+  developer's computer is where a command helps most.
+- `packages/tab-mcp-client/test/setup.test.ts` runs the words through each shell found
+  on the computer (sh, dash, bash, zsh with and without `extendedglob`, fish, PowerShell),
+  each printing its arguments with its own builtin (`printf`, PowerShell's
+  `Write-Output`), and expects every address back as it is. cmd.exe is not run (no
+  Windows in CI): for it the rule rests on how it reads double quotes. Inside `"…"` only
+  `%`, `!` (with delayed expansion) and `"` itself are special to it, none of which the
+  address may have, and it leaves the quotes in the command line, where the program's
+  own argument parsing (the Windows convention Node and Rust follow) takes them off.

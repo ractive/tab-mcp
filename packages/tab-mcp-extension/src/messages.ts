@@ -27,6 +27,8 @@ export type ContentRequest =
 			name: string;
 			/** The read-only claim the tool was offered with. */
 			readOnly: boolean;
+			/** The tool as it was offered (`definitionOf`, DEC-217). */
+			definition: string;
 			input: unknown;
 			/**
 			 * The user allowed this call (DEC-207): told to a page with the

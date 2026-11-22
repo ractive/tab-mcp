@@ -299,7 +299,12 @@ export function callFailed(error: unknown): CallResult {
  */
 export async function callInTab(
 	tabId: number,
-	target: { documentId: string; name: string; readOnly: boolean },
+	target: {
+		documentId: string;
+		name: string;
+		readOnly: boolean;
+		definition: string;
+	},
 	input: unknown,
 	signal: AbortSignal,
 	vouch?: Vouch,
@@ -315,6 +320,7 @@ export async function callInTab(
 			documentId: target.documentId,
 			name: target.name,
 			readOnly: target.readOnly,
+			definition: target.definition,
 			input,
 			...(vouch !== undefined ? { vouch } : {}),
 		})) as CallResult | undefined;

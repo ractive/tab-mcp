@@ -51,8 +51,12 @@ honest.
 A page that also registers its tools with the browser's
 [WebMCP](https://webmachinelearning.github.io/webmcp/) (the client library's
 `webmcp: true`) offers them to agents in your browser without pairing; which agents may
-call them is the browser's decision. Tools that change something go there only if the
-page names them, and then ask in the page as well
+call them is the browser's decision. Every tool the page registers goes there, tools
+that change something included, unless the page keeps it from WebMCP (`callers`). The
+page does not ask you before such a call: a tool it marks as consequential or
+destructive goes there marked consequential, for an agent that heeds the hint to ask you
+in its own chat, and only the page's own code (`onConfirm`) can refuse a call; a call
+the tab-mcp browser extension asked you about runs as you allowed it there
 ([threat model](docs/threat-model.md), A14).
 
 A relay accepts pages only from the origins its operator lists. This keeps other

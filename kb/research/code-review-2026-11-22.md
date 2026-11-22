@@ -385,4 +385,7 @@ one commit each.
   context's entries, not names; removing a tool drops its entry, and the quota counts
   the live ones. Tests in `packages/tab-mcp-extension/test/unit.test.ts` ("CR-04: …"):
   the sequence, a new context with a tool of that name, `records()`/`restore()`.
-- **CR-05 to CR-08:** see the pull request of the branch `review/2026-11-22`.
+- **CR-05 to CR-08:** fixed in [tab-mcp#205](https://github.com/ractive/tab-mcp/pull/205)
+  (DEC-217), as findings 1 to 4 of the
+  [website, code and wording review](review-2026-11-22.md); its Outcome says where and
+  with which tests.

@@ -16,6 +16,7 @@ import { openSidebar, type SidebarAction } from "../src/browser.ts";
 import { connectPolyfill } from "../src/chrome/webmcp-port.ts";
 import {
 	callTool,
+	definitionOf,
 	FIREFOX_NO_WEBMCP_NOTE,
 	MAX_LANGUAGE,
 	MAX_PAGE_TITLE,
@@ -252,7 +253,7 @@ function toolDocument(
 	result = "ran",
 ) {
 	const executed: string[] = [];
-	const registered = tools.map((t) => ({
+	const registered: Record<string, unknown>[] = tools.map((t) => ({
 		name: t.name,
 		description: `${t.name}.`,
 		inputSchema: { type: "object" },
@@ -274,24 +275,77 @@ function toolDocument(
 			},
 		},
 	} as unknown as Document;
-	return { doc, executed };
+	return { doc, executed, registered };
+}
+
+/**
+ * The call target of `name` as the bridge sends it for `doc`'s tool as
+ * listed now, with the read-only claim `readOnly`.
+ */
+async function target(doc: Document, name: string, readOnly: boolean) {
+	const tool = (await pageTools(doc, "doc-A")).tools.find(
+		(t) => t.name === name,
+	);
+	if (tool === undefined) throw new Error(`no tool ${name}`);
+	return {
+		documentId: "doc-A",
+		name,
+		readOnly,
+		definition: definitionOf(tool),
+	};
 }
 
 describe("calls in the content script", () => {
 	const signal = new AbortController().signal;
+
+	test("a tool registered again with another definition since it was offered never runs (DEC-217)", async () => {
+		const changes: Record<string, unknown>[] = [
+			{ description: "Publish the draft publicly." },
+			{ title: "Publish" },
+			{ inputSchema: { type: "object", properties: { to: {} } } },
+			{ outputSchema: { type: "object" } },
+			{ annotations: { readOnlyHint: false, consequentialHint: true } },
+		];
+		for (const change of changes) {
+			const { doc, executed, registered } = toolDocument([
+				{ name: "save", readOnly: false },
+			]);
+			const offered = await target(doc, "save", false);
+			registered[0] = { ...registered[0], ...change };
+			expect(await callTool(offered, {}, signal, doc, "doc-A")).toEqual({
+				ok: false,
+				error:
+					"The page's tool save changed since it was offered; it did not run.",
+				gone: true,
+			});
+			expect(executed).toEqual([]);
+		}
+	});
+
+	test("the same tool registered again with its fields in another order runs (DEC-217)", async () => {
+		const { doc, executed, registered } = toolDocument([
+			{ name: "save", readOnly: false },
+		]);
+		const offered = await target(doc, "save", false);
+		registered[0] = {
+			annotations: { readOnlyHint: false },
+			inputSchema: { type: "object" },
+			description: "save.",
+			name: "save",
+		};
+		expect(await callTool(offered, {}, signal, doc, "doc-A")).toEqual({
+			ok: true,
+			value: "ran",
+		});
+		expect(executed).toEqual(["save"]);
+	});
 
 	test("a call listed from this page, with the same claim, runs", async () => {
 		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
 		const listed = await pageTools(doc, "doc-A");
 		expect(listed.documentId).toBe("doc-A");
 		expect(
-			await callTool(
-				{ documentId: "doc-A", name: "buy", readOnly: false },
-				{},
-				signal,
-				doc,
-				"doc-A",
-			),
+			await callTool(await target(doc, "buy", false), {}, signal, doc, "doc-A"),
 		).toEqual({ ok: true, value: "ran" });
 		expect(executed).toEqual(["buy"]);
 	});
@@ -299,7 +353,7 @@ describe("calls in the content script", () => {
 	test("a call listed from another page (the tab navigated) never runs", async () => {
 		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
 		const result = await callTool(
-			{ documentId: "doc-A", name: "buy", readOnly: false },
+			await target(doc, "buy", false),
 			{},
 			signal,
 			doc,
@@ -313,7 +367,7 @@ describe("calls in the content script", () => {
 		// Offered as read-only (no confirmation), now consequential: refused.
 		const { doc, executed } = toolDocument([{ name: "buy", readOnly: false }]);
 		const result = await callTool(
-			{ documentId: "doc-A", name: "buy", readOnly: true },
+			await target(doc, "buy", true),
 			{},
 			signal,
 			doc,
@@ -338,7 +392,7 @@ describe("calls in the content script", () => {
 		expect(listed).not.toHaveProperty("mirrored");
 		expect(
 			await callTool(
-				{ documentId: "doc-A", name: "mirror", readOnly: true },
+				await target(doc, "mirror", true),
 				{},
 				signal,
 				doc,
@@ -355,7 +409,7 @@ describe("calls in the content script", () => {
 			"r".repeat(MAX_SEND_RESULT + 1),
 		);
 		const result = await callTool(
-			{ documentId: "doc-A", name: "big", readOnly: true },
+			await target(doc, "big", true),
 			{},
 			signal,
 			doc,
