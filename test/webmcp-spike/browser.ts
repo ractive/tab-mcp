@@ -28,7 +28,11 @@ function reap(profile: string): void {
 	} catch {
 		// no pkill: only the main process was killed
 	}
-	rmSync(profile, { recursive: true, force: true });
+	try {
+		rmSync(profile, { recursive: true, force: true });
+	} catch {
+		// still busy right after the kill: left in the temp directory
+	}
 	running.delete(profile);
 }
 
@@ -46,6 +50,7 @@ function track(profile: string): void {
 	running.add(profile);
 	if (reapOnExit) return;
 	reapOnExit = true;
+	// reap() does not throw: every profile is reaped, and a signal still exits.
 	const reapAll = () => {
 		for (const p of [...running]) reap(p);
 	};
@@ -505,11 +510,14 @@ export class Page extends Target {
 				// An out-of-process frame (site isolation): a session of its own,
 				// attached without anyone awaiting it.
 				const frame = params["sessionId"] as string;
-				this.attached(frame).catch((error: unknown) => {
+				this.attached(frame).catch(async (error: unknown) => {
 					// The frame went away while it was attached: closing the browser
 					// or the page, or a frame removed, fails what is still on its
 					// way. Any other failure is thrown on, unhandled, so that the
-					// test run shows it.
+					// test run shows it. Chrome can answer a command of a session
+					// before it reports that session detached: decide a moment
+					// later, once that report is in.
+					await Bun.sleep(50);
 					if (this.browser.closed || this.#closed || this.#detached.has(frame))
 						return;
 					throw error;

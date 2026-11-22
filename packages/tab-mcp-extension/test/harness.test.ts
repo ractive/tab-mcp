@@ -36,33 +36,84 @@ function serve(url: string): Served {
 	};
 }
 
-/** Call `then` as soon as a frame's session comes, its attach just begun. */
-function onFrameAttached(browser: Browser, then: () => unknown): Promise<void> {
+/**
+ * Hold every command for the page's frames (any session but the page's own)
+ * until `release()`, and count those Chrome fails then: the frame's attach
+ * is still on its way when the frame goes away, whatever the timing.
+ */
+function holdFrames(browser: Browser, page: Page) {
+	const send = browser.send.bind(browser);
+	let release = () => {};
+	const released = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const held = { failed: 0, release };
+	browser.send = async (
+		method: string,
+		params: Record<string, unknown> = {},
+		sessionId?: string,
+	) => {
+		if (sessionId === undefined || sessionId === page.sessionId)
+			return send(method, params, sessionId);
+		await released;
+		return send(method, params, sessionId).catch((error: unknown) => {
+			held.failed++;
+			throw error;
+		});
+	};
+	return held;
+}
+
+/** The session of the next frame that attaches. */
+function frameAttached(browser: Browser): Promise<string> {
 	return new Promise((resolve) => {
 		const off = browser.on((method, params) => {
 			const type = (params["targetInfo"] as { type?: string } | undefined)
 				?.type;
 			if (method !== "Target.attachedToTarget" || type !== "iframe") return;
 			off();
-			resolve(Promise.resolve(then()).then(() => {}));
+			resolve(params["sessionId"] as string);
 		});
 	});
 }
 
+/** Chrome reported `sessionId` detached. */
+function detached(browser: Browser, sessionId: string): Promise<void> {
+	return new Promise((resolve) => {
+		const off = browser.on((method, params) => {
+			if (method !== "Target.detachedFromTarget") return;
+			if (params["sessionId"] !== sessionId) return;
+			off();
+			resolve();
+		});
+	});
+}
+
+/**
+ * Add a frame on another site to a page, and make it go away (`goAway`)
+ * while its attach is on its way.
+ */
 async function withFrame(
-	whenAttached: (browser: Browser, page: Page) => unknown,
-): Promise<void> {
+	goAway: (browser: Browser, page: Page) => unknown,
+): Promise<{ failed: number }> {
 	const browser = await Browser.launch(chrome as string, { serve });
 	try {
 		const page = await browser.newPage(`${SITE}/`);
-		// The page's own listener comes first, so the attach has begun.
-		const done = onFrameAttached(browser, () => whenAttached(browser, page));
+		const held = holdFrames(browser, page);
+		const attached = frameAttached(browser);
 		await page.eval(
 			`document.body.append(Object.assign(document.createElement("iframe"), { src: "${FRAME}/" }))`,
 		);
-		await done;
+		const frame = await attached;
+		const gone = detached(browser, frame);
+		await goAway(browser, page);
+		// Gone: Chrome says so (or 5 s pass; then the count below tells).
+		await Promise.race([gone, Bun.sleep(5_000)]);
+		// Only now do the frame's commands reach Chrome.
+		held.release();
 		// A rejection is reported a task or more later: let it come.
 		await Bun.sleep(300);
+		return { failed: held.failed };
 	} finally {
 		if (!browser.closed) await browser.close();
 	}
@@ -70,22 +121,44 @@ async function withFrame(
 
 test.skipIf(chrome === undefined)(
 	"the browser closed while a frame is attached: nothing unhandled",
-	() => withFrame((browser) => browser.close()),
+	async () => {
+		const browser = await Browser.launch(chrome as string, { serve });
+		try {
+			const page = await browser.newPage(`${SITE}/`);
+			// The page's own listener comes first: the attach has begun, and the
+			// connection closes under it.
+			const closing = frameAttached(browser).then(() => browser.close());
+			await page
+				.eval(
+					`document.body.append(Object.assign(document.createElement("iframe"), { src: "${FRAME}/" }))`,
+				)
+				.catch(() => {});
+			await closing;
+			await Bun.sleep(300);
+		} finally {
+			if (!browser.closed) await browser.close();
+		}
+	},
 	30_000,
 );
 
 test.skipIf(chrome === undefined)(
 	"the page closed while a frame is attached: nothing unhandled",
-	() => withFrame((_, page) => page.close()),
+	async () => {
+		const { failed } = await withFrame((_, page) => page.close());
+		expect(failed).toBeGreaterThan(0);
+	},
 	30_000,
 );
 
 test.skipIf(chrome === undefined)(
 	"a frame removed while it is attached: nothing unhandled",
-	() =>
-		withFrame((_, page) =>
+	async () => {
+		const { failed } = await withFrame((_, page) =>
 			page.eval(`document.querySelector("iframe").remove()`),
-		),
+		);
+		expect(failed).toBeGreaterThan(0);
+	},
 	30_000,
 );
 
@@ -104,7 +177,7 @@ test("an attach that fails otherwise is thrown on, unhandled", async () => {
 		const page = new Page(browser, "page", "target", false);
 		await page.attached("page");
 		listener("Target.attachedToTarget", { sessionId: "frame" }, "page");
-		await Bun.sleep(50);
+		await Bun.sleep(500);
 	`;
 	const proc = Bun.spawn([process.execPath, "-e", script], {
 		stdout: "ignore",

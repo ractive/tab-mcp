@@ -28,7 +28,11 @@ function reap(profile: string): void {
 	} catch {
 		// no pkill: only the main process was killed
 	}
-	rmSync(profile, { recursive: true, force: true });
+	try {
+		rmSync(profile, { recursive: true, force: true });
+	} catch {
+		// still busy right after the kill: left in the temp directory
+	}
 	running.delete(profile);
 }
 
@@ -46,6 +50,7 @@ function track(profile: string): void {
 	running.add(profile);
 	if (reapOnExit) return;
 	reapOnExit = true;
+	// reap() does not throw: every profile is reaped, and a signal still exits.
 	const reapAll = () => {
 		for (const p of [...running]) reap(p);
 	};
