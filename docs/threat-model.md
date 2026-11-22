@@ -322,8 +322,12 @@ stops script on another origin of the relay; a program can send any `Origin`.
   pairing the holder finished just before does not become a grant either. Only once the
   relay confirmed it (no grants in `session`) does the page make the new secret; taken
   over again first, or the relay unreachable, the page keeps the old secret, says so,
-  and the user tries again. The MCP address stays the same through all of this: the AI
-  apps the user wants back pair again with a new code.
+  and the user tries again. Where storage cannot keep the new secret but still reads
+  the old one, the page uses the new one until it is reloaded (client 0.20.0 and older
+  read the old one back and connected with it: its grants were revoked, but its holder
+  could still take the page's place); after a reload the page has the old secret again,
+  without grants. The MCP address stays the same through all of this: the AI apps the
+  user wants back pair again with a new code.
 - **What the page sees:** the library tells a takeover by a second tab of the same page
   from one by someone else. Tabs that share the secret say on a `BroadcastChannel` (per
   relay origin and storage key, with a hash of the secret, never the secret) when the

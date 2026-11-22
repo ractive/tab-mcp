@@ -1340,6 +1340,17 @@ function startRelay(
 					corsHeaders,
 				);
 			}
+			return session;
+		};
+
+		/**
+		 * The 429 when the page has no room for this request. Called in the same
+		 * synchronous step as `forward`, which counts it: a check before an
+		 * await would let requests released together all pass (code review
+		 * 2026-11-22, CR-01). A refused or cancelled request, or one the page
+		 * lost, leaves `pending` when its exchange ends.
+		 */
+		const full = (session: TabSession): Response | undefined => {
 			if (session.pending.size >= session.limits.maxConcurrentRequests) {
 				logDone(429, method);
 				return rpcError(
@@ -1363,7 +1374,7 @@ function startRelay(
 					corsHeaders,
 				);
 			}
-			return session;
+			return undefined;
 		};
 
 		if (readySession(addressId, usable) === undefined && waitMs > 0) {
@@ -1382,6 +1393,11 @@ function startRelay(
 			if (revokedLately(auth)) {
 				idle(true);
 				return refused("invalid", "revoked");
+			}
+			const refusal = full(session);
+			if (refusal !== undefined) {
+				idle(true);
+				return refusal;
 			}
 			idle(false);
 			let retry: () => void = () => {};

@@ -76,6 +76,70 @@ test("without storage, or with storage that throws, the secret lives as long as 
 	expect(got(throwing)).toBe(s);
 });
 
+/** Storage that reads `old` and cannot be written (code review 2026-11-22, CR-02). */
+function readOnly(old: string) {
+	return {
+		getItem: () => old,
+		setItem: () => {
+			throw new Error("read-only storage");
+		},
+	};
+}
+
+test("a rotated secret that storage could not keep wins over the old stored one for the page's lifetime", () => {
+	const old = newSecret();
+	const store = new SecretStore(readOnly(old), "k");
+	expect(store.current()).toBe(old);
+	const fresh = store.rotate();
+	expect(fresh).not.toBe(old);
+	expect(store.current()).toBe(fresh);
+	expect(got(store)).toBe(fresh);
+	// Once a write works again, storage counts again.
+	const storage = new MemoryStorage();
+	storage.setItem("k", old);
+	let fail = true;
+	const flaky = new SecretStore(
+		{
+			getItem: (key) => storage.getItem(key),
+			setItem: (key, value) => {
+				if (fail) throw new Error("quota");
+				storage.setItem(key, value);
+			},
+		},
+		"k",
+	);
+	const kept = flaky.rotate();
+	expect(flaky.current()).toBe(kept);
+	fail = false;
+	const saved = flaky.rotate();
+	expect(storage.items.get("k")).toBe(saved);
+	const other = newSecret();
+	storage.setItem("k", other); // another tab rotated
+	expect(flaky.current()).toBe(other);
+});
+
+test("disconnectAll() with storage that cannot be written: the new connection has the new secret", async () => {
+	const relay = new StubRelay();
+	try {
+		const old = newSecret();
+		const t = newTab(relay.url, { storage: readOnly(old) });
+		await t.connect();
+		expect((await relay.next("hello"))["secret"]).toBe(old);
+		await t.disconnectAll();
+		expect(await relay.next("hello")).toMatchObject({
+			secret: old,
+			revokeAll: true,
+		});
+		const fresh = await relay.next("hello");
+		expect(isSecret(fresh["secret"])).toBe(true);
+		expect(fresh["secret"]).not.toBe(old);
+		expect(fresh["revokeAll"]).toBeUndefined();
+		t.disconnect();
+	} finally {
+		await relay.stop();
+	}
+});
+
 test("TabMcp keys the secret by relay origin and the URI-encoded server name; an explicit storageKey is used as given", async () => {
 	const relay = new StubRelay();
 	try {
