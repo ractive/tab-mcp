@@ -890,7 +890,13 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
   consequential tool. A prompt injection that reaches the AI app behind such an
   extension runs the tool unasked when that extension asks nothing. A page that wants a
   tool kept from all of them leaves `"webmcp"` out of its `callers` and gives the tool
-  no `exposedTo`, or refuses `client.kind === "webmcp"` in `onConfirm`.
+  no `exposedTo`, or refuses `client.kind === "webmcp"` in `onConfirm`. A tool that asks,
+  with an `exposedTo` naming other origins, on a page without `onConfirm` gets a
+  console warning once per tool: a page that set `exposedTo` before 0.21 lost that
+  check with the upgrade. There is no warning for a tool that asks and is mirrored
+  without `exposedTo`: that is every such page with `webmcp: true`, the behaviour
+  DEC-215 chose, and the warning would say nothing the page can act on short of
+  leaving WebMCP.
 - **The same check, in code only.** Arguments are checked against the tool's schema
   before `execute` (Chrome does not), a tool that asks goes to the page's `onConfirm`
   if it has one (`client.kind` `"webmcp"`), which must decide without showing anything

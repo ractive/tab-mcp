@@ -359,6 +359,67 @@ describe("mirroring", () => {
 		expect(native.options[1]?.exposedTo).toBeUndefined();
 	});
 
+	describe("a tool that asks with exposedTo, without onConfirm, is warned about once (DEC-215)", () => {
+		const exposedWarnings = () =>
+			warn.mock.calls
+				.map((args) => String(args[0]))
+				.filter((text) => text.includes("(its exposedTo)"));
+
+		test("warned once per tool, also when registered again; it is still mirrored", async () => {
+			const t = tab();
+			const first = new AbortController();
+			await t.registerTool(wipe, {
+				exposedTo: ["https://embedder.example", "https://page.example"],
+				signal: first.signal,
+			});
+			await settle();
+			first.abort();
+			await t.registerTool(wipe, { exposedTo: ["https://embedder.example"] });
+			await t.registerTool(
+				{
+					name: "remove",
+					description: "d",
+					annotations: { destructiveHint: true },
+					execute: () => 1,
+				},
+				{ exposedTo: ["https://embedder.example"] },
+			);
+			await settle();
+			expect(exposedWarnings()).toEqual([
+				"tab-mcp: wipe asks before it runs, but documents of https://embedder.example (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.",
+				"tab-mcp: remove asks before it runs, but documents of https://embedder.example (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.",
+			]);
+			expect(native.tools.has("wipe")).toBe(true);
+		});
+
+		test("not with onConfirm, not without exposedTo, not for the page's own origin, not for a tool that does not ask", async () => {
+			const asking = tab({ onConfirm: () => false });
+			await asking.registerTool(wipe, {
+				exposedTo: ["https://embedder.example"],
+			});
+			await settle();
+			scope.abort();
+			scope = new AbortController();
+			const t = tab();
+			await t.registerTool(wipe);
+			await t.registerTool(
+				{ ...wipe, name: "own_origin" },
+				{ exposedTo: ["https://page.example"] },
+			);
+			await t.registerTool(
+				{
+					...wipe,
+					name: "not_asking",
+					annotations: { consequentialHint: false, destructiveHint: true },
+				},
+				{ exposedTo: ["https://embedder.example"] },
+			);
+			await t.registerTool(add, { exposedTo: ["https://embedder.example"] });
+			await settle();
+			expect(exposedWarnings()).toEqual([]);
+		});
+	});
+
 	test("destructiveHint counts as consequentialHint: mirrored as consequential (WM 5)", async () => {
 		const t = tab();
 		const remove = {

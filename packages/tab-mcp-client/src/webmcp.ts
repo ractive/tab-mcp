@@ -55,7 +55,11 @@ const HINTS = [
  * stays here: warned once per name, the tool still offered through the relay.
  * The page joins the handshake with the tab-mcp browser extension: `mcp`
  * is its `TabMcp`, `app` its app id, `options` its options
- * (`trustExtension`), `version` the library's. The extension's state is `mcp.extension`, defined
+ * (`trustExtension`, and `onConfirm` for the warning below), `version` the
+ * library's. A tool that asks, mirrored with an `exposedTo` that names
+ * other origins on a page without `onConfirm`, is warned about once per
+ * name: documents of those origins can run it, and the library asks no
+ * WebMCP caller (DEC-215). The extension's state is `mcp.extension`, defined
  * here on the instance (the core only declares it, for its bytes), and
  * `extensionchange` is sent here.
  */
@@ -65,7 +69,7 @@ export function mirror(
 	call: WebMcpCall,
 	mcp: HandshakePage["mcp"],
 	app: string,
-	options: { trustExtension?: boolean },
+	options: { trustExtension?: boolean; onConfirm?: unknown },
 	version: string,
 ): void {
 	let state: BrowserExtension | undefined;
@@ -94,6 +98,7 @@ export function mirror(
 	}
 	const mirrors = new Map<RegisteredTool, AbortController>();
 	const warned = new Set<string>();
+	const unasked = new Set<string>();
 	const sync = (): void => {
 		for (const [tool, controller] of mirrors) {
 			if (registry.get(tool.name) === tool) continue;
@@ -106,6 +111,29 @@ export function mirror(
 				annotations.consequentialHint ?? annotations.destructiveHint;
 			// The one place of the rule for WebMCP (the relay and a port: `toolsFor`).
 			if (mirrors.has(tool) || !(callers?.includes("webmcp") ?? true)) continue;
+			// React's provider always passes a handler; `own` says whether the
+			// page gave one.
+			const ask = options.onConfirm as { own?: boolean } | undefined;
+			const others = tool.exposedTo?.filter((entry) => {
+				try {
+					return (
+						new URL(entry).origin !== globalThis.document?.location?.origin
+					);
+				} catch {
+					return false; // the browser refuses it anyway
+				}
+			});
+			if (
+				consequential === true &&
+				others?.length &&
+				!(ask && ask.own !== false) &&
+				!unasked.has(tool.name)
+			) {
+				unasked.add(tool.name);
+				console.warn(
+					`tab-mcp: ${tool.name} asks before it runs, but documents of ${others.join(", ")} (its exposedTo) can call it through WebMCP without a question: the library asks no WebMCP caller. Refuse such calls in onConfirm, or leave exposedTo off.`,
+				);
+			}
 			const controller = new AbortController();
 			mirrors.set(tool, controller);
 			const hints: Record<string, boolean | undefined> = {

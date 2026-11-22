@@ -194,6 +194,8 @@ written for the native API behaves differently here:
 - `exposedTo` matters only for WebMCP: it is passed on to the native registration of a
   mirrored tool, and AI apps never see it. A document of a listed origin can run the
   tool, and the library does not ask it ([who asks](#who-asks-before-a-tool-that-asks-runs)).
+  A tool that asks, with an `exposedTo` naming other origins, on a page without
+  `onConfirm` gets a console warning once.
 
 An already aborted `signal` rejects with its reason and registers nothing, as in the
 draft.
@@ -225,8 +227,11 @@ trial token that a script adds later counts for a `TabMcp` made after it.
 
 #### Who asks before a tool that asks runs
 
-A tool marked `consequentialHint` (or, for WebMCP calls, only `destructiveHint`) asks
-before it runs. Who asks depends on the caller (DEC-215). Every WebMCP call that the
+A "tool that asks" is one marked `consequentialHint` (for WebMCP calls also one marked
+only `destructiveHint`). Whether anyone asks before it runs, and who, depends on the
+caller (DEC-215): the page asks an AI app through the relay, the tab-mcp browser
+extension asks for the calls it vouches for, and for any other WebMCP call the library
+asks no one; only the page's `onConfirm`, or the caller itself, can. Every WebMCP call that the
 tab-mcp browser extension did not vouch for reaches the page as
 `client: { kind: "webmcp" }`, whoever made it: the page cannot tell the last three rows
 apart.
@@ -256,7 +261,10 @@ tool away:
   ([which callers see a tool](#which-callers-see-a-tool)), for example
   `{ callers: ["relay", "local"] }`.
 - **`exposedTo`**: leave it off a tool that asks unless the listed origins may run it
-  unasked. A document of such an origin lists and runs the tool (Chrome 156).
+  unasked. A document of such an origin lists and runs the tool (Chrome 156). With
+  `webmcp: true` the library warns in the console, once per tool, about a tool that asks
+  whose `exposedTo` names other origins on a page without `onConfirm` (in React: the
+  provider without one).
 
 None of these stops an agent that drives the tab from clicking the page's own controls,
 which ask nothing either.
@@ -267,8 +275,8 @@ which ask nothing either.
   way), and `onConfirm` gets its WebMCP calls by `consequentialHint ?? destructiveHint`,
   though an AI app's call of it does not ask (its own client sees the hint). Until 0.20
   such tools were left out unless `callers` listed `"webmcp"`; an agent that found no tool
-  to delete with then clicked the page's own Delete buttons (DEC-209). In 0.20 the
-  library's dialog asked every unvouched WebMCP call (DEC-215).
+  to delete with then clicked the page's own Delete buttons (DEC-209). 0.20 showed the
+  library's dialog for every unvouched WebMCP call; since 0.21 it shows none (DEC-215).
 - The native registration gets the WebMCP fields: `name`, `title`, `description`,
   `inputSchema`, `outputSchema` and the WebMCP hints, and `exposedTo` from
   `registerTool`'s options (origins of other documents in the tab that may see the
