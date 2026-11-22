@@ -5056,3 +5056,36 @@ draft only", and "Allow" ran the changed tool.
   changed tool anew by the same key, so the AI app gets a tools-changed notice for it too.
 - The question itself is not withdrawn when the tool changes: the user still answers it,
   and the answer is refused. That keeps the questions' code as it is.
+
+## DEC-218: A page tool's schema without its regular expressions is never stricter
+
+2026-11-22, from the outside review of that day (finding 2,
+[review](/research/review-2026-11-22.md)). The bridge leaves out `pattern` and
+`patternProperties` so that a page's catastrophic regular expression cannot freeze the
+extension (ES 2, WM 8). Taking a keyword away loosens a schema only where nothing around
+it turns that around: without `patternProperties`, its keys fell to
+`additionalProperties: false`, and `{"x-name": "Alice"}` was refused for a schema that
+takes it.
+
+- **The rule:** the schema the bridge checks and offers may let through more than the
+  page's, never less. The page checks its arguments with its own schema in any case: a
+  looser first check costs an error from the page, a stricter one a call the AI app
+  cannot make at all.
+- **What goes with a regular expression:** a restricting `additionalProperties` beside a
+  `patternProperties` that went; `unevaluatedProperties` and `unevaluatedItems` of every
+  schema something below went from (fewer keys and items count as evaluated); a `not`
+  something below went from; an `if` likewise, with its `then` and `else`; `maxContains`
+  when its `contains` lost something. A `oneOf` that lost something becomes an `anyOf`
+  (two branches that both match now would fail it), or goes when the schema has an
+  `anyOf` already. A `$ref` (`$dynamicRef`, `$recursiveRef`) may lead to a schema that
+  lost something, so in a schema that lost any keyword, every `$ref` counts as below
+  such a schema (a second pass). `propertyNames`, `properties`, `items`, `allOf`,
+  `anyOf`, `then`, `else` and the like only get looser and stay.
+- **Chosen over** leaving the schema unchecked whenever it has a regular expression: the
+  schema is also what the AI app is shown, and a page with one pattern would lose the
+  first check altogether. The names `patternProperties` allowed are noted in the
+  schema's description ("Properties whose names match the regular expression … are
+  allowed too."), as a `pattern` is.
+- Tests (`packages/tab-mcp-extension/test/bridge.test.ts`): for each such case, an
+  argument the page's schema takes (validated in full) is taken by the offered schema
+  too; a schema without regular expressions is offered unchanged.

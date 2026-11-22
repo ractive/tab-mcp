@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { Validator } from "@cfworker/json-schema";
 import type {
 	ConfirmRequest,
 	Tool,
@@ -140,6 +141,8 @@ describe("names, descriptions, schemas", () => {
 		).toEqual({
 			schema: {
 				type: "object",
+				description:
+					"(Properties whose names match the regular expression ^x are allowed too.)",
 				properties: {
 					q: {
 						type: "string",
@@ -214,6 +217,255 @@ describe("names, descriptions, schemas", () => {
 				],
 			},
 		});
+	});
+
+	/** Whether `schema` (validated in full, patterns included) accepts `value`. */
+	const accepts = (schema: unknown, value: unknown) =>
+		new Validator(schema as Record<string, unknown>, "2020-12", false).validate(
+			value,
+		).valid;
+	const offered = (schema: Record<string, unknown>) => {
+		const made = schemaFor({ inputSchema: schema });
+		if (!("schema" in made)) throw new Error(made.problem);
+		return made.schema;
+	};
+	/**
+	 * Each case: a schema with a regular expression where taking it away
+	 * would have refused arguments the page's schema takes, and such arguments.
+	 */
+	const cases: [string, Record<string, unknown>, unknown[]][] = [
+		[
+			"patternProperties with additionalProperties: false (the review's)",
+			{
+				type: "object",
+				patternProperties: { "^x-": { type: "string" } },
+				additionalProperties: false,
+			},
+			[{ "x-name": "Alice" }, {}],
+		],
+		[
+			"patternProperties with an additionalProperties schema",
+			{
+				type: "object",
+				patternProperties: { "^x-": { type: "string" } },
+				additionalProperties: { type: "number" },
+			},
+			[{ "x-name": "Alice", n: 1 }],
+		],
+		[
+			"patternProperties with unevaluatedProperties: false",
+			{
+				type: "object",
+				patternProperties: { "^x-": { type: "string" } },
+				unevaluatedProperties: false,
+			},
+			[{ "x-name": "Alice" }],
+		],
+		[
+			"patternProperties in an allOf, unevaluatedProperties beside it",
+			{
+				type: "object",
+				allOf: [{ patternProperties: { "^x-": { type: "string" } } }],
+				unevaluatedProperties: false,
+			},
+			[{ "x-name": "Alice" }],
+		],
+		[
+			"patternProperties nested in a property",
+			{
+				type: "object",
+				properties: {
+					tags: {
+						type: "object",
+						patternProperties: { "^[a-z]+$": { type: "string" } },
+						additionalProperties: false,
+					},
+				},
+			},
+			[{ tags: { colour: "red" } }],
+		],
+		[
+			"a pattern under not",
+			{
+				type: "object",
+				properties: { code: { type: "string", not: { pattern: "^x" } } },
+			},
+			[{ code: "abc" }],
+		],
+		[
+			"patternProperties under not",
+			{
+				type: "object",
+				not: { patternProperties: { "^x-": { type: "number" } } },
+			},
+			[{ "x-a": "text" }],
+		],
+		[
+			"patterns in oneOf",
+			{
+				type: "object",
+				properties: {
+					id: {
+						oneOf: [
+							{ type: "string", pattern: "^a" },
+							{ type: "string", pattern: "^b" },
+						],
+					},
+				},
+			},
+			[{ id: "abc" }],
+		],
+		[
+			"a pattern in if",
+			{
+				type: "object",
+				properties: { id: { type: "string" } },
+				if: { properties: { id: { pattern: "^x" } } },
+				// biome-ignore lint/suspicious/noThenProperty: a JSON Schema keyword
+				then: { required: ["extra"] },
+			},
+			[{ id: "abc" }],
+		],
+		[
+			"a pattern in contains with maxContains",
+			{
+				type: "object",
+				properties: {
+					list: {
+						type: "array",
+						contains: { type: "string", pattern: "^x" },
+						maxContains: 1,
+					},
+				},
+			},
+			[{ list: ["x1", "a", "b"] }],
+		],
+		[
+			"a pattern in a $defs entry that a not reaches by $ref",
+			{
+				type: "object",
+				$defs: { x: { type: "string", pattern: "^x" } },
+				properties: { code: { not: { $ref: "#/$defs/x" } } },
+			},
+			[{ code: "abc" }],
+		],
+		[
+			"a pattern in a $defs entry, unevaluatedProperties beside its $ref",
+			{
+				type: "object",
+				$defs: {
+					tags: { patternProperties: { "^x-": { type: "string" } } },
+				},
+				$ref: "#/$defs/tags",
+				unevaluatedProperties: false,
+			},
+			[{ "x-name": "Alice" }],
+		],
+	];
+
+	for (const [name, schema, values] of cases)
+		test(`what the page's schema takes, the offered one takes: ${name} (DEC-218)`, () => {
+			for (const value of values) {
+				expect(accepts(schema, value)).toBe(true);
+				expect(accepts(offered(schema), value)).toBe(true);
+			}
+		});
+
+	test("the review's schema: offered without its regular expression, the names noted (DEC-218)", () => {
+		expect(
+			offered({
+				type: "object",
+				patternProperties: { "^x-": { type: "string" } },
+				additionalProperties: false,
+			}),
+		).toEqual({
+			type: "object",
+			description:
+				"(Properties whose names match the regular expression ^x- are allowed too.)",
+		});
+	});
+
+	test("only what the regular expressions touch goes (DEC-218)", () => {
+		// propertyNames and properties only get looser: they stay.
+		expect(
+			offered({
+				type: "object",
+				description: "Tags.",
+				propertyNames: { pattern: "^[a-z]+$", maxLength: 8 },
+				properties: { a: { type: "string", pattern: "^a" } },
+				additionalProperties: false,
+				required: ["a"],
+			}),
+		).toEqual({
+			type: "object",
+			description: "Tags.",
+			propertyNames: {
+				maxLength: 8,
+				description: "(Must match the regular expression ^[a-z]+$.)",
+			},
+			properties: {
+				a: {
+					type: "string",
+					description: "(Must match the regular expression ^a.)",
+				},
+			},
+			additionalProperties: false,
+			required: ["a"],
+		});
+		// A oneOf beside an anyOf goes; maxContains without a looser contains stays.
+		expect(
+			offered({
+				type: "object",
+				anyOf: [{ required: ["a"] }, { required: ["b"] }],
+				oneOf: [{ properties: { a: { pattern: "^a" } } }, { required: ["c"] }],
+				properties: {
+					list: { contains: { type: "number" }, maxContains: 2 },
+				},
+			}),
+		).toEqual({
+			type: "object",
+			anyOf: [{ required: ["a"] }, { required: ["b"] }],
+			properties: { list: { contains: { type: "number" }, maxContains: 2 } },
+		});
+	});
+
+	test("a schema without regular expressions is offered as it is, $ref, not and oneOf included", () => {
+		const schema = {
+			type: "object",
+			$defs: { s: { type: "string" } },
+			properties: {
+				a: { $ref: "#/$defs/s" },
+				b: { not: { type: "number" } },
+				c: { oneOf: [{ type: "string" }, { type: "number" }] },
+				d: { type: "array", contains: { type: "number" }, maxContains: 1 },
+			},
+			if: { required: ["a"] },
+			// biome-ignore lint/suspicious/noThenProperty: a JSON Schema keyword
+			then: { required: ["b"] },
+			additionalProperties: false,
+			unevaluatedProperties: false,
+		};
+		expect(offered(schema)).toEqual(schema);
+	});
+
+	test("the review's arguments reach the page through webmcp_call (DEC-218)", async () => {
+		const { state, chrome } = fakeChrome(
+			page([
+				pageTool("tag", {
+					inputSchema: {
+						type: "object",
+						patternProperties: { "^x-": { type: "string" } },
+						additionalProperties: false,
+					},
+				}),
+			]),
+		);
+		const bridge = new PageToolBridge(registrar(), chrome);
+		await bridge.refresh();
+		expect(
+			await bridge.callByName("tag", { "x-name": "Alice" }, options()),
+		).toBe("done");
+		expect(state.calls.map((c) => c.input)).toEqual([{ "x-name": "Alice" }]);
 	});
 });
 

@@ -176,36 +176,109 @@ const has = (keywords: Record<string, unknown>, key: string) =>
  *
  * A `pattern` that goes is added to the schema's `description` (cut to
  * `MAX_PATTERN` characters), so that the AI app still knows the format the
- * page wants (WM 8).
+ * page wants (WM 8); so are the names `patternProperties` allowed.
+ *
+ * The copy only ever accepts more than the page's schema, never less (DEC-218):
+ * a check that is too loose here lets through arguments the page then refuses
+ * with its own error (the page checks its input as it likes, and the bridge
+ * is only a first check), while one that is too strict would refuse calls the
+ * page takes, with no way around it for the AI app. Taking a keyword away
+ * loosens only where the schema around it does not turn it around, so:
+ * - without `patternProperties`, its keys become "additional": a restricting
+ *   `additionalProperties` (false or a schema) goes with it;
+ * - `unevaluatedProperties` and `unevaluatedItems` go wherever something
+ *   below them went (fewer keys or items count as evaluated);
+ * - `not` goes when something below it went (a looser `not` is stricter),
+ *   and so does `if` with its `then` and `else` (a looser `if` picks `then`
+ *   more often); `oneOf` becomes `anyOf` (two branches that now both match
+ *   would fail it), or goes when there is an `anyOf` already; `maxContains`
+ *   goes when its `contains` got looser;
+ * - a `$ref` may lead anywhere, so in a schema that lost any keyword, each
+ *   `$ref` counts as something below that went (the second pass of `widen`).
+ * `propertyNames`, `properties`, `items`, `allOf`, `anyOf`, `then`, `else`
+ * and the like only get looser with what is below them, and stay.
  */
 function withoutPatterns(schema: unknown): unknown {
-	if (!isObject(schema)) return schema;
+	const first = widen(schema, false);
+	return first.loosened ? widen(schema, true).schema : first.schema;
+}
+
+const REFS = ["$ref", "$dynamicRef", "$recursiveRef"];
+
+/**
+ * `withoutPatterns` for `schema`, and whether anything in it went (with
+ * `refs`, a `$ref` counts as something that went).
+ */
+function widen(
+	schema: unknown,
+	refs: boolean,
+): { schema: unknown; loosened: boolean } {
+	if (!isObject(schema)) return { schema, loosened: false };
 	const out: Record<string, unknown> = {};
-	const { pattern, description } = schema;
-	// A description that is not a string (not valid JSON Schema) gives way.
+	const looser = new Set<string>();
+	const notes: string[] = [];
+	const { pattern, patternProperties, description } = schema;
 	if (typeof pattern === "string")
-		out["description"] =
-			`${typeof description === "string" && description ? `${description} ` : ""}(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`;
+		notes.push(
+			`(Must match the regular expression ${cut(pattern, MAX_PATTERN)}.)`,
+		);
+	if (isObject(patternProperties) && Object.keys(patternProperties).length)
+		notes.push(
+			`(Properties whose names match the regular expression ${Object.keys(
+				patternProperties,
+			)
+				.map((p) => cut(p, MAX_PATTERN))
+				.join(" or ")} are allowed too.)`,
+		);
+	const sub = (key: string, value: unknown) => {
+		const made = widen(value, refs);
+		if (made.loosened) looser.add(key);
+		return made.schema;
+	};
 	for (const [key, value] of Object.entries(schema)) {
-		if (key === "pattern" || key === "patternProperties") continue;
-		if (key === "description" && "description" in out) continue;
+		if (key === "pattern" || key === "patternProperties") {
+			looser.add(key);
+			continue;
+		}
+		if (refs && REFS.includes(key)) looser.add(key);
 		if (
 			(has(schemaMapKeyword, key) || key === "dependencies") &&
 			isObject(value)
 		) {
 			// Names, each with a schema (`dependencies`: or a list of names).
 			const map: Record<string, unknown> = {};
-			for (const [name, sub] of Object.entries(value))
-				map[name] = withoutPatterns(sub);
+			for (const [name, item] of Object.entries(value))
+				map[name] = sub(key, item);
 			out[key] = map;
 		} else if (Array.isArray(value))
 			out[key] = has(schemaArrayKeyword, key)
-				? value.map(withoutPatterns)
+				? value.map((item) => sub(key, item))
 				: value;
 		else if (has(ignoredKeyword, key)) out[key] = value;
-		else out[key] = withoutPatterns(value);
+		else out[key] = sub(key, value);
 	}
-	return out;
+	if (notes.length)
+		// A description that is not a string (not valid JSON Schema) gives way.
+		out["description"] = [
+			...(typeof description === "string" && description ? [description] : []),
+			...notes,
+		].join(" ");
+	if (!looser.size) return { schema: out, loosened: false };
+	if (looser.has("patternProperties")) delete out["additionalProperties"];
+	delete out["unevaluatedProperties"];
+	delete out["unevaluatedItems"];
+	if (looser.has("not")) delete out["not"];
+	if (looser.has("if")) {
+		delete out["if"];
+		delete out["then"];
+		delete out["else"];
+	}
+	if (looser.has("oneOf")) {
+		if (!("anyOf" in out)) out["anyOf"] = out["oneOf"];
+		delete out["oneOf"];
+	}
+	if (looser.has("contains")) delete out["maxContains"];
+	return { schema: out, loosened: true };
 }
 
 /** The input schema to offer, or why the tool is left out. */

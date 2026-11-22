@@ -321,7 +321,9 @@ did, by connecting the extension.
 - **Arguments are checked by the library** against the page's schema before the call;
   Chrome does not check them. The schema's `pattern` and `patternProperties` are left
   out in keyword position only (a parameter called `pattern` stays), so a page's
-  catastrophic regular expression cannot freeze the connection. Calls end for the AI app
+  catastrophic regular expression cannot freeze the connection. What goes with them
+  keeps the check from getting stricter than the page's (DEC-218): the check can only
+  let through more than the page's schema, which the page still applies itself. Calls end for the AI app
   after 60 s or on its cancellation even if the page never answers; a page that does not
   answer the list, `page_info` or history in 5 s is given up, so a stuck page cannot hold
   the bridge for every other tab (iteration 35).

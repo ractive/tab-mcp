@@ -65,7 +65,12 @@ The page's tools are the page's word:
   regular expressions, which a page could make freeze the extension; the page checks those
   itself; a parameter that is called `pattern` stays). The schema the AI app gets has no
   `pattern` either: each one is added to its property's description instead ("Must match
-  the regular expression …", cut to 200 characters). A call that the page does not
+  the regular expression …", cut to 200 characters), and so are the names
+  `patternProperties` allows. Without them the check only ever lets through more than the
+  page's schema, never less: a restricting `additionalProperties` beside
+  `patternProperties`, an `unevaluatedProperties` or `unevaluatedItems` above them, a
+  `not` or `if` around them and a `maxContains` go too, and a `oneOf` becomes an `anyOf`.
+  A call that the page does not
   answer in 60 s ends for the AI app, also when the page is stuck; cancelling in the AI
   app cancels it in the page. A page that does not answer the extension's other questions
   (its tools, `page_info`) in 5 s is given up, so a stuck page cannot hold the other

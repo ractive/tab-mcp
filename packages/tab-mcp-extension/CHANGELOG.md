@@ -59,6 +59,18 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   the tool changed while the user was asked. A page that registers the same tool again
   unchanged is not affected.
 
+- **Arguments a page's schema takes are no longer refused** (DEC-218). The extension
+  leaves a schema's regular expressions out (`pattern`, `patternProperties`), and that
+  could make the schema stricter: with `patternProperties: { "^x-": … }` and
+  `additionalProperties: false`, `{ "x-name": "Alice" }` was refused before it reached
+  the page. Now what goes with a regular expression is what would turn its absence into
+  a refusal: a restricting `additionalProperties` beside `patternProperties`,
+  `unevaluatedProperties` and `unevaluatedItems` above it, a `not` or `if` around it
+  (with its `then` and `else`), a `maxContains` for its `contains`; a `oneOf` around it
+  becomes an `anyOf`, and a `$ref` counts as around it. The names `patternProperties`
+  allows are noted in the schema's description. The page checks its arguments with its
+  own schema as before.
+
 - **A question no longer moves under the pointer.** Where scrollbars take room (Linux,
   Windows), the panel behind the questions' dialog growing taller or shorter than its
   window while a question waited added or took away its scrollbar; the dialog got
