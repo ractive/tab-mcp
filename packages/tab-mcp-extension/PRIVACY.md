@@ -67,10 +67,19 @@ In the extension's own IndexedDB in the browser, used by its service worker only
 - the address of the relay the user chose (by default `https://tab-mcp.ractive.ch`);
 - whether AI access is on, and whether another tab or program took its place at the
   relay;
-- a random secret that identifies this installation to the relay (the address the AI
-  app is given is the same for every installation; the secret is what tells them apart);
+- for each relay it connected to, a random secret that identifies this installation to
+  that relay (the address the AI app is given is the same for every installation; the
+  secret is what tells them apart);
+- the AI apps connected to it, as the relay last listed them: for each, the relay's id of
+  its grant, the name the AI app gives itself and its verified host (for example
+  `claude.ai`), so that the panel can show them while AI access is off; replaced by the
+  relay's list whenever it connects, emptied by "Disconnect all apps" and when the relay
+  changes;
 - the tools the user allowed to run without asking, per site: the site's origin and the
   tool names;
+- with "Fill in the code for me" on, the relay it is on for; when it went off because the
+  user took the relay's site away in the browser's settings, that relay instead, for the
+  panel's note;
 - with "Fill in the code for me" on, the AI apps' hosts the user chose "Always allow"
   for (for example `claude.ai`) and the times of the last fills without a question (at
   most the last 3 per host, for the limit of 3 in 10 minutes); forgotten when the

@@ -284,7 +284,9 @@ The manifest sets `"incognito": "not_allowed"`: Incognito tabs are never offered
 app.
 
 No `storage` permission: the relay address, whether AI access is on, the tools allowed per
-site and the secret by which the relay knows this installation are in IndexedDB, used by
+site, the secret by which the relay knows this installation, the connected AI apps as the
+relay last listed them and the "Fill in the code for me" setting with its hosts (the full
+list is in [PRIVACY.md](PRIVACY.md#what-it-stores)) are in IndexedDB, used by
 the service worker only, which content scripts (in the page's origin) cannot reach; there
 is no `chrome.storage` area for them to read or write.
 
