@@ -55,7 +55,9 @@ The page's tools are the page's word:
   first", no switch).
 - A call runs only on the page its tool was listed from, and only if the tool still
   makes the read-only claim it was offered with; after a navigation, or a tool that
-  changed (also while you were asked), the AI app is told to list the tools again.
+  changed (also while you were asked), the AI app is told to list the tools again. An
+  answer is for the tool as you were asked about it: a page that registers it again
+  with another title, description, schema or hint meanwhile gets nothing run.
 - A tool that takes the tab to another page (a checkout, a search) is not a failure: the
   answer says the page changed while the tool ran, that the tool may have completed, and
   gives the new page's `page_info` once it has loaded; its tools are offered by then.

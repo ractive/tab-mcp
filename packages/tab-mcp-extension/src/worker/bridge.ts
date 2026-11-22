@@ -445,6 +445,8 @@ export const PAGE_CHANGED_RETRY_MS = 1000;
 
 /** A tool of the page in front as the bridge keeps it, to call. */
 interface Callable {
+	/** The tool as the page offered it (`keyOf`). */
+	key: string;
 	tabId: number;
 	origin: string;
 	target: CallTarget;
@@ -467,13 +469,14 @@ export function destructiveOf(tool: PageTool): boolean {
 	return tool.annotations?.consequentialHint !== false;
 }
 
-/** Whether `a` and `b` are the same tool of the same page in the same tab. */
+/**
+ * Whether `a` and `b` are the same tool of the same page in the same tab, as
+ * the page offered it: its title, description, schemas and hints too
+ * (`keyOf`), so that an answer the user gave about one definition never
+ * runs another.
+ */
 const sameTool = (a: Callable, b: Callable): boolean =>
-	a.tabId === b.tabId &&
-	a.origin === b.origin &&
-	a.target.documentId === b.target.documentId &&
-	a.target.name === b.target.name &&
-	a.target.readOnly === b.target.readOnly;
+	a.key === b.key && a.origin === b.origin;
 
 /** A page tool's schema and validator, or why it has none. */
 type Compiled =
@@ -650,7 +653,9 @@ export class PageToolBridge {
 				},
 			);
 			// A page that changed while the question was open (a navigation,
-			// another tab in front with a tool of the same name) gets nothing.
+			// another tab in front with a tool of the same name, the tool
+			// offered again with another title, description, schema or hint)
+			// gets nothing.
 			const now = this.#callable.get(target.name);
 			if (now === undefined || !sameTool(now, callable))
 				throw new Error(
@@ -828,6 +833,7 @@ export class PageToolBridge {
 			const output = outputSchemaOf(pageTool.outputSchema);
 			if (output !== undefined) entry.outputSchema = output;
 			const item: Callable = {
+				key,
 				tabId: tab.id,
 				origin: tools.origin,
 				target: { documentId: tools.documentId, name: pageTool.name, readOnly },

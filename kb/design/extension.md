@@ -93,7 +93,10 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   read-only either way (DEC-214). "Don't ask
   again on <host>" in a question writes the site's "allowed" entry, as the panel's "Always allow"
   switch does; the ephemeral Always allow per AI app and page is gone (DEC-139), and the
-  notification has "Allow once" only.
+  notification has "Allow once" only. An answer is for the tool as it was offered
+  (`keyOf`: its tab, document and everything the content script sent for it, title,
+  description, schemas and hints included); a tool offered differently by the time the
+  user answers does not run (DEC-217).
 - The origin a page's tools carry (the description's prefix, the "allowed" key, the
   question's "Site (verified)") is checked against the origin of the address Chrome
   reports for the tab; a page that says otherwise gets no tools (iteration 35).

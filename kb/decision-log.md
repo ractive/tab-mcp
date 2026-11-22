@@ -5035,3 +5035,24 @@ coding agent"), the root README's "Agent skill" first, before the plugin.
   holds. Each place that gives the line says that a missing file means an older version
   to update. The plugin comes from `main` and can be ahead of the last release.
 - The website (ractive.ch, another repository) is not changed here.
+
+## DEC-217: An answer to a tool's question holds for the tool as it was offered
+
+2026-11-22, from the outside review of that day (finding 1,
+[review](/research/review-2026-11-22.md)). After the user's answer the bridge checked that
+the tool was still the same one (tab, origin, document, name, read-only claim), but not
+its title, description, schemas or `consequentialHint`. A page could register the tool
+again while the question waited, as "Publish the draft publicly" in place of "Save a
+draft only", and "Allow" ran the changed tool.
+
+- **The rule:** the check after the answer compares the tool as it was offered when the
+  call started with the tool offered now: the bridge's `keyOf` (tab, document and
+  everything the content script sent for the tool: name, title, description, input and
+  output schema, annotations) and the origin. Anything else is a tool that changed while
+  the user was asked: it does not run, and the AI app hears so, in the words the bridge
+  already used for a navigation.
+- **The same key as for re-registration:** a page that registers the same tool again
+  unchanged (a `toolchange` with new objects) keeps its key and runs; the bridge offers a
+  changed tool anew by the same key, so the AI app gets a tools-changed notice for it too.
+- The question itself is not withdrawn when the tool changes: the user still answers it,
+  and the answer is refused. That keeps the questions' code as it is.

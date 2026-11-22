@@ -308,7 +308,8 @@ did, by connecting the extension.
   and kept until taken back: "Always allow on <host>" in a question, or the "Always allow" switch in
   the panel; both write the same entry (the ephemeral per-AI-app, per-page "Always
   allow" is gone, DEC-139). A tool that changed while the question was open (a
-  navigation, another tab in front with a tool of the same name) does not run. An
+  navigation, another tab in front with a tool of the same name, the tool registered
+  again with another title, description, schema or hint) does not run (DEC-217). An
   allowed tool runs whatever the AI app (or a prompt injection steering it) asks of it.
   A page can only mark its own tools read-only, so a lie harms that page's own user
   session, which its scripts could reach anyway.

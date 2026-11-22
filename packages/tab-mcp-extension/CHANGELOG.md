@@ -52,6 +52,13 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ### Fixed
 
+- **An answer holds only for the tool it was about** (DEC-217). A page that registered a
+  tool again while its question waited, under the same name and read-only hint but with
+  another title, description, input or output schema or `consequentialHint`, got the
+  changed tool run on "Allow". Now such a call does not run, and the AI app is told that
+  the tool changed while the user was asked. A page that registers the same tool again
+  unchanged is not affected.
+
 - **A question no longer moves under the pointer.** Where scrollbars take room (Linux,
   Windows), the panel behind the questions' dialog growing taller or shorter than its
   window while a question waited added or took away its scrollbar; the dialog got
