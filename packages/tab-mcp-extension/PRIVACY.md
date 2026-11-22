@@ -45,8 +45,9 @@ its own events, which the extension still listens to. A page it told that AI acc
 on is told once that it went off. Right before one of its own
 tools runs because the user allowed the call in the extension, it also learns that
 tool's name, the arguments the page gets anyway, and which of those AI apps made the
-call, so that the page does not ask the user a second time. It learns nothing else: not
-who the user is, not the relay, not the extension's address, not other tabs. This
+call, so that the page does not ask the user a second time. When that call is over, the
+page is told that too, also after AI access went off. It learns nothing else: not who
+the user is, not the relay, not the extension's address, not other tabs. This
 reaches the page inside the browser; the page's script can send it on to its site, and
 what the site does with it is under that site's own privacy policy. From the page the
 extension reads only what it announced: the library's version, its app id and the names
@@ -128,8 +129,9 @@ To a page that uses the tab-mcp client library, inside the browser (see "What it
 above), only while AI access is on: the extension's name, that AI access is on, the
 names and verified hosts of the AI apps connected to the extension, and right before a
 call the user allowed in the extension, the tool's name, its arguments and which AI app
-made the call; once AI access goes off, that it went off, and then nothing. The page's
-script can send this on to its site, whose own privacy policy applies.
+made the call; once AI access goes off, that it went off, and then only that a call
+allowed before is over. The page's script can send this on to its site, whose own
+privacy policy applies.
 
 ## What it does not do
 

@@ -306,7 +306,8 @@ On failure the log shows AMO's answer.
 > which AI apps reach it through the extension. Only while AI access is on, such a page
 > learns the extension's name, that AI access is on, the names and verified hosts of the
 > AI apps connected to it, and right before a call you allowed, the tool, its arguments
-> and which AI app made the call. While AI access is off, the extension answers no page
+> and which AI app made the call; when that call is over, the page is told that too, also
+> after AI access went off. While AI access is off, the extension answers no page
 > and sends it nothing. A page can still see that the extension is installed where it
 > provides WebMCP itself (in browsers without their own), and could try to time its own
 > events, which the extension still listens to. A page that was told AI access is on is
@@ -361,7 +362,7 @@ sends.
   that uses the tab-mcp client library, only while AI access is on: the extension's
   name, that AI access is on, the connected AI apps' names and verified hosts, and for a
   call the user allowed, the tool, its arguments and which AI app made it (and, once,
-  that AI access went off).
+  that AI access went off, and that a call allowed before is over).
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to
   the single purpose; not used to determine creditworthiness or for lending.
 - **Privacy policy URL:** the ractive.ch page with PRIVACY.md (setup step 2).
