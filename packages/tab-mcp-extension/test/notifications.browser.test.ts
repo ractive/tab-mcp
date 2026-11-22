@@ -114,12 +114,15 @@ test.skipIf(chrome === undefined)(
 		// there, it is there as made (Chrome's getAll gives no fields).
 		const now = await all();
 		const kept = id in now;
+		// Gone already: false. Either way it answers, and is gone after.
+		const cleared = await clear(id);
+		// Which way it went, both halves, before any check can fail: listed or
+		// not, and what clear said.
 		console.log(
-			`notifications: Chrome ${kept ? "kept" : "did not keep"} the notification`,
+			`notifications: Chrome: listed after create ${kept}, clear returned ${cleared}`,
 		);
 		if (kept) expect(now[id]).toBe(true);
-		// Gone already: false. Either way it answers, and is gone after.
-		expect(typeof (await clear(id))).toBe("boolean");
+		expect(typeof cleared).toBe("boolean");
 		expect(await listed()).not.toContain(id);
 	},
 	30_000,

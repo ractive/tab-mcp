@@ -131,13 +131,6 @@ export function chunkSize(maxMessageBytes: number): number | undefined {
 export const SIBLING_WINDOW_MS = 10_000;
 
 /**
- * How long a replaced tab that heard no `claimed` yet waits for one before it
- * reports `replaced`: the sibling's session and this tab's `bye` leave the
- * relay at about the same time, so the message usually comes after the `bye`.
- */
-export const SIBLING_GRACE_MS = 1_000;
-
-/**
  * The tabs of one page (same relay, same storage key) tell each other on a
  * `BroadcastChannel` when the relay accepted their claim of an address
  * (`claimed`, once their `session` arrived), so that a replaced tab can tell
@@ -149,11 +142,13 @@ export const SIBLING_GRACE_MS = 1_000;
  * a tab on another address (after `disconnectAll()` there), cannot have caused
  * the replacement (CC 5). A claim without an address counts for any. Without
  * `BroadcastChannel` nothing is heard, and every `replaced` counts as unknown.
+ * `graceMs`: how long a replaced tab that heard no `claimed` yet waits for one
+ * (`SIBLING_GRACE_MS` in tab-mcp.ts).
  */
 function siblingTabs(
 	name: string | undefined,
 	address: string | undefined,
-	graceMs = SIBLING_GRACE_MS,
+	graceMs: number,
 ): {
 	/** The own session arrived: say so, and listen to the others from now on. */
 	claimed(): void;
@@ -290,8 +285,8 @@ export function onWake(now: () => void): () => void {
  * Open the WebSocket and run the session. `address`: the secret's address id
  * (`addressIdOf`). `revokeAll`: take the address back (DEC-095); the relay
  * revokes every grant as it claims the address, and its `session` lists none.
- * `siblingGraceMs`: {@link SIBLING_GRACE_MS} unless a test sets
- * `timing.siblingGraceMs`.
+ * `siblingGraceMs`: `timing.siblingGraceMs` (tab-mcp.ts), the one place it
+ * is set.
  */
 export function openConnection(
 	host: ConnectionHost,
@@ -300,8 +295,8 @@ export function openConnection(
 	options: {
 		address?: string | undefined;
 		revokeAll?: boolean;
-		siblingGraceMs?: number;
-	} = {},
+		siblingGraceMs: number;
+	},
 ): ConnectionHandle {
 	const revokeAll = options.revokeAll === true;
 	const ws = new WebSocket(url, SUBPROTOCOL);

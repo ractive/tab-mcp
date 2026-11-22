@@ -495,8 +495,9 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		// as it is made: CI run 45002871065, attempts 2 and 3, had it listed
 		// and then `clear` false, gone already. So both are accepted; when it
 		// is still listed, it is listed as made.
+		// Which way it went, both halves: listed or not, and what clear said.
 		console.log(
-			`notifications: Firefox ${real.listed === null ? "did not keep" : "kept"} the notification`,
+			`notifications: Firefox: listed after create ${real.listed !== null}, clear returned ${real.cleared}`,
 		);
 		if (real.listed !== null)
 			expect(real.listed).toMatchObject({

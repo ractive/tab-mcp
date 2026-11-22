@@ -16,7 +16,13 @@
  *   `test:browser` alone does not free it while its `bun test` runs.
  * - A second run says who holds it and waits, polling, up to
  *   `TAB_MCP_BROWSER_WAIT_MS` (15 minutes), then fails; with `wait: false`
- *   (`--no-wait`, or `TAB_MCP_BROWSER_NO_WAIT=1`) it fails at once.
+ *   (`--no-wait`, or `TAB_MCP_BROWSER_NO_WAIT=1`) it fails at once, but
+ *   gives a stale lock 5 s to clear.
+ * - Tests only (scripts/browser-run.test.ts): `TAB_MCP_BROWSER_POLL_MS`, the
+ *   poll while waiting (a twentieth of the wait, always within 100 ms to
+ *   2 s), and `TAB_MCP_BROWSER_STALE_WAIT_MS`, the stale lock's time without
+ *   waiting (only shorter than 5 s, never under 500 ms): `pollMsFrom`,
+ *   `staleWaitMsFrom`.
  * - Taken over only on proof: the holder and every process of its run are
  *   gone (test/browser-dirs.ts `runState`; "unknown" keeps), or `owner.json`
  *   is missing or not valid for longer than `GRACE_MS`. A takeover holds
@@ -101,6 +107,27 @@ export function waitMsFrom(value: string | undefined): number {
 
 /** Without waiting for a holder, how long a stale lock gets to clear. */
 const STALE_WAIT_MS = 5_000;
+
+const clamp = (ms: number, min: number, max: number) =>
+	Math.min(max, Math.max(min, ms));
+
+/**
+ * The poll while waiting: a twentieth of the wait, within 100 ms to 2 s;
+ * `TAB_MCP_BROWSER_POLL_MS` (tests) within the same bounds, so a value left
+ * exported never makes a real run spin on the lock or sleep past its wait.
+ */
+export function pollMsFrom(value: string | undefined, waitMs: number): number {
+	return clamp(msFrom(value, waitMs / 20), 100, 2_000);
+}
+
+/**
+ * Without waiting for a holder, a stale lock's time to clear: 5 s;
+ * `TAB_MCP_BROWSER_STALE_WAIT_MS` (tests) only shorter, and never under
+ * 500 ms (a few polls, time for a stale lock's takeover).
+ */
+export function staleWaitMsFrom(value: string | undefined): number {
+	return clamp(msFrom(value, STALE_WAIT_MS), 500, STALE_WAIT_MS);
+}
 
 /** How a waiting run names the holder. */
 export function describeOwner(owner: LockOwner): string {
@@ -207,17 +234,14 @@ export async function holdBrowserLock(
 	const wait = options.wait ?? process.env["TAB_MCP_BROWSER_NO_WAIT"] !== "1";
 	const waitMs = waitMsFrom(process.env["TAB_MCP_BROWSER_WAIT_MS"]);
 	// Tests only: the poll and the stale lock's time without waiting, shorter
-	// (scripts/browser-run.test.ts); the same rules either way.
-	const poll = msFrom(
-		process.env["TAB_MCP_BROWSER_POLL_MS"],
-		Math.min(2_000, Math.max(100, waitMs / 20)),
-	);
+	// (scripts/browser-run.test.ts), within bounds; the same rules either way.
+	const poll = pollMsFrom(process.env["TAB_MCP_BROWSER_POLL_MS"], waitMs);
 	// Without waiting for a holder, a stale lock still gets this long to clear.
 	const deadline =
 		Date.now() +
 		(wait
 			? waitMs
-			: msFrom(process.env["TAB_MCP_BROWSER_STALE_WAIT_MS"], STALE_WAIT_MS));
+			: staleWaitMsFrom(process.env["TAB_MCP_BROWSER_STALE_WAIT_MS"]));
 	let told = false;
 	// First: without a readable start of its own, a run does not start.
 	const me = runId();

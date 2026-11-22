@@ -10,18 +10,22 @@ import type { TokenRecord } from "../src/store/types.ts";
 import { startRelay, type TestRelay } from "./helpers.ts";
 
 /**
- * The clock 1.1 s on, past the second for which a probe's answer is reused
- * (`Date.now()` in the relay); set back after each test.
+ * `run` on a clock 1.1 s on, past the second for which a probe's answer is
+ * reused (`Date.now()` in the relay); the real clock is back when it ends,
+ * however it ends.
  */
-function pastReuse(): void {
+async function pastReuse<T>(run: () => Promise<T>): Promise<T> {
 	setSystemTime(Date.now() + 1_100);
+	try {
+		return await run();
+	} finally {
+		setSystemTime();
+	}
 }
-afterEach(() => {
-	setSystemTime();
-});
 
 const relays: TestRelay[] = [];
 afterEach(async () => {
+	setSystemTime(); // first: whatever fails below, no moved clock stays
 	for (const r of relays.splice(0)) await r.stop();
 });
 
@@ -116,8 +120,7 @@ describe("/healthz checks the token store", () => {
 		store.mode = "ok";
 		const gets = store.gets;
 		// Past the reused second, on the clock the relay reads (no real wait).
-		pastReuse();
-		const res = await fetch(`${r.relay.url}/healthz`);
+		const res = await pastReuse(() => fetch(`${r.relay.url}/healthz`));
 		expect(res.status).toBe(200);
 		expect(store.gets).toBe(gets + 1);
 	});
@@ -137,7 +140,7 @@ describe("/healthz checks the token store", () => {
 			"store_unavailable",
 		);
 		throwNow = false;
-		pastReuse();
-		expect((await fetch(`${r.relay.url}/healthz`)).status).toBe(200);
+		const res = await pastReuse(() => fetch(`${r.relay.url}/healthz`));
+		expect(res.status).toBe(200);
 	});
 });

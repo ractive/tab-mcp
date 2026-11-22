@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { TabMcp } from "../src/index.ts";
-import { timing } from "../src/tab-mcp.ts";
+import { SIBLING_GRACE_MS, timing } from "../src/tab-mcp.ts";
 import type {
 	DisconnectReason,
 	Grant,
@@ -1034,7 +1034,7 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		// The one test that waits the shipped grace in full.
 		restoreGrace();
 		restoreGrace = () => {};
-		expect(timing.siblingGraceMs).toBe(1_000);
+		expect([timing.siblingGraceMs, SIBLING_GRACE_MS]).toEqual([1_000, 1_000]);
 		await t.connect();
 		relay.answerHello = false;
 		const sibling = newTab(relay.url, { storage });
@@ -1048,8 +1048,13 @@ describe("telling a sibling tab from an impostor (review of PR 39, DEC-095)", ()
 		sibling.disconnect();
 		await failed.catch(() => {});
 		const replaced = nextEvent<{ sibling: boolean }>(t, "replaced");
+		const started = performance.now();
 		replaceFirst();
 		expect((await replaced).detail).toEqual({ sibling: false });
+		// It waited the shipped grace for a `claimed` before it said so.
+		expect(performance.now() - started).toBeGreaterThanOrEqual(
+			SIBLING_GRACE_MS - 20,
+		);
 	});
 
 	test("a sibling whose session started counts", async () => {

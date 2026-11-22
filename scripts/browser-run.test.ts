@@ -16,7 +16,13 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseLstart, refuseBase, runId } from "../test/browser-dirs.ts";
-import { GRACE_MS, parseOwner, waitMsFrom } from "../test/browser-lock.ts";
+import {
+	GRACE_MS,
+	parseOwner,
+	pollMsFrom,
+	staleWaitMsFrom,
+	waitMsFrom,
+} from "../test/browser-lock.ts";
 import {
 	type Proc,
 	planSweep,
@@ -53,8 +59,9 @@ function holder(
 		env: {
 			...process.env,
 			TAB_MCP_BROWSER_DIR: base,
-			// Shorter than as shipped (2 s, 5 s), with the same rules.
-			TAB_MCP_BROWSER_POLL_MS: "50",
+			// Shorter than as shipped (up to 2 s, 5 s), with the same rules; the
+			// least each allows (pollMsFrom, staleWaitMsFrom).
+			TAB_MCP_BROWSER_POLL_MS: "100",
 			TAB_MCP_BROWSER_STALE_WAIT_MS: "500",
 			...env,
 		},
@@ -256,6 +263,23 @@ test("a wait that is not a positive number of milliseconds is the default", () =
 	for (const value of [undefined, "", "10m", "NaN", "-5", "0", "Infinity"])
 		expect(waitMsFrom(value)).toBe(15 * 60_000);
 	expect(waitMsFrom("500")).toBe(500);
+});
+
+test("the tests' poll and stale wait stay within bounds, whatever is left exported", () => {
+	const wait = 15 * 60_000;
+	// The poll: a twentieth of the wait, within 100 ms to 2 s, set or not.
+	expect(
+		[undefined, "", "0", "-5", "x"].map((v) => pollMsFrom(v, wait)),
+	).toEqual([2_000, 2_000, 2_000, 2_000, 2_000]);
+	expect(pollMsFrom(undefined, 600)).toBe(100);
+	expect(
+		["1", "100", "300", "2000", "3600000"].map((v) => pollMsFrom(v, wait)),
+	).toEqual([100, 100, 300, 2_000, 2_000]);
+	// The stale wait: 5 s, only shorter, never under 500 ms.
+	expect(
+		["", "0", "x", "1", "500", "2000", "5000", "3600000"].map(staleWaitMsFrom),
+	).toEqual([5_000, 5_000, 5_000, 500, 500, 2_000, 5_000, 5_000]);
+	expect(staleWaitMsFrom(undefined)).toBe(5_000);
 });
 
 const RUNS = "/home/u/.cache/tab-mcp/browser-tests/runs";
