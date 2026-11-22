@@ -4989,3 +4989,40 @@ tools. The hint has nothing to do with it.
 - **A change of the hint is a new tool:** the bridge re-registers a tool when anything
   the content script sends for it changes, the hint included, so the AI app gets a
   tools-changed notice when a page registers a tool again with another hint.
+
+## DEC-216: The agent skill ships inside the client's npm package (owner)
+
+2026-11-22, the owner: a developer with a coding agent should need only
+`npm install @ractive-ch/tab-mcp-client` and one line to the agent, "Read
+node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to this app."
+The READMEs say it that way, the client README in its own section near the top ("With a
+coding agent"), the root README's "Agent skill" first, before the plugin.
+
+- **What ships, where:** `skill/SKILL.md` and `skill/references/*.md` in
+  `@ractive-ch/tab-mcp-client`, from the next client release on. The plugin's
+  `agents/openai.yaml` (Codex's display name) stays out; the skill does not need it.
+- **Why in the package:** the files in `node_modules` describe the version that is
+  installed. A plugin or a web page describes the newest release, and the library still
+  has breaking changes between minor versions. The plugin stays, as the second way, for
+  agents that load skills from a marketplace (Claude Code, Codex, claude.ai).
+- **One source:** `plugins/tab-mcp/skills/tab-mcp/`. No copy is checked in: the client's
+  build (`packages/tab-mcp-client/scripts/skill.ts`, called by `scripts/build.ts`) writes
+  it to `dist/skill/`. The only change is in links: the plugin links the client's README,
+  CHANGELOG and sources on GitHub at `client-v<version>`, the copy links the README,
+  CHANGELOG and `.d.ts` files beside it. Every other link stays absolute, at
+  `relay-v<version>` or `client-v<version>` where the content is version-bound, at
+  `main` for the compatibility list and the security policy.
+- **Drift:** the tarball check (`scripts/npm-pack.ts`) expects the skill's files and
+  compares each with what `skill.ts` makes from the source, so a stale or missing copy
+  fails the release. `packages/tab-mcp-client/test/skill.test.ts` checks that every
+  relative link of the copy names a file of the package (headings included), that none
+  leaves the package, that the plugin's copy links by a relative path only into its own
+  folder, and that the links into the repository name files that exist at `main` or a
+  current release's tag. The references joined `scripts/pinned-files.ts`, so
+  `bump-version.ts` keeps their versions current. The release's install test checks the
+  path the READMEs give.
+- **The skill's content:** it now says near the top which version it describes and that
+  the package's README is the full reference, adds the relay address for development, a
+  section of common mistakes, and React's `useState` pitfall; old version notes left
+  the sign-in reference.
+- The website (ractive.ch, another repository) is not changed here.

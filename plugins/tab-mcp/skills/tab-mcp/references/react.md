@@ -36,14 +36,23 @@ function TodoList() {
 
 - `TabMcpProvider` takes the `TabMcp` options; a changed `relay` or `server.name` makes a
   new instance. `useTabMcp()` returns it for `disconnectAll()`, `revoke()`, `signOut()`.
-- `useTabMcpState()` returns `{ state, session, grants, pairingCode, identity,
-  identityMessage, reconnecting, tools }` (the address is `session?.address`) and renders
-  again only on change.
+- `useTabMcpState()` returns `{ state, session, grants, pairingCode, pairingUntil,
+  identity, identityMessage, reconnecting, tools, extension }` (the address is
+  `session?.address`) and renders again only on change.
 - `useTool(tool, options?)` always calls the latest `execute`; it registers again
   only when the name, title, description, schemas or annotations change, or
   `options.callers` or `options.exposedTo` (by value). A duplicate name throws from render (use an error boundary).
+- A tool that changes state and returns it, or that reads what the previous call
+  changed, must not read `useState` values: `setState` only schedules the next render.
+  Keep the state in a store, or the current value in a ref beside the state, changed by
+  one function that the page's own UI uses too
+  ([Tools in a `useState` app](https://github.com/ractive/tab-mcp/blob/client-v0.20.0/packages/tab-mcp-client/README.md#tools-in-a-usestate-app)).
 - `webmcp` on the provider registers the tools with the browser's WebMCP too, tools that
   ask included; `useTool(tool, { callers: ["relay", "local"] })` keeps one out
   (SKILL.md, section 5).
 - `useToolCalls({ limit })` lists the AI app's recent calls; `ConnectButton` opens the
   dialog and labels itself by state.
+- The module starts with `"use client"`: in Next.js's app router the provider renders on
+  the client and never connects on the server.
+  [examples/react-todo](https://github.com/ractive/tab-mcp/tree/client-v0.20.0/examples/react-todo)
+  is a complete app.

@@ -319,6 +319,8 @@ test("the build produces a package whose declarations type-check for a consumer"
 		"README.md",
 		"CHANGELOG.md",
 		"THIRD-PARTY-NOTICES.txt",
+		// The agent skill (DEC-216).
+		"skill/SKILL.md",
 	]) {
 		expect(await Bun.file(join(dist, file)).exists()).toBe(true);
 	}

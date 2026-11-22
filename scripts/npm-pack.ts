@@ -18,6 +18,7 @@
 import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseArgs } from "node:util";
+import { packagedSkill } from "../packages/tab-mcp-client/scripts/skill.ts";
 
 /** The exact repository URL npm compares with the provenance statement. */
 export const REPOSITORY_URL = "git+https://github.com/ractive/tab-mcp.git";
@@ -45,6 +46,11 @@ interface PackageSpec {
 	declarationsFrom: string;
 	/** Source files (relative to `declarationsFrom`) that ship no `.d.ts`. */
 	noDeclarations?: string[];
+	/**
+	 * Files the build makes from a source elsewhere in the repository, as
+	 * they must be in the tarball: path in the package to text.
+	 */
+	copies?: (repo: string, version: string) => Promise<Map<string, string>>;
 }
 
 /** Packages this script knows. */
@@ -132,8 +138,13 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			// two entries (DEC-200).
 			"cdn/tab-mcp-client-[hash].min.js",
 			"cdn/tab-mcp-client-[hash].min.js.map",
+			// The agent skill, made from plugins/tab-mcp/skills/tab-mcp (DEC-216).
+			"skill/SKILL.md",
+			"skill/references/react.md",
+			"skill/references/sign-in.md",
 		],
 		declarationsFrom: "src",
+		copies: packagedSkill,
 	},
 	relay: {
 		name: "@ractive-ch/tab-mcp",
@@ -248,6 +259,22 @@ export function checkManifest(
 	return problems;
 }
 
+/**
+ * Every file the tarball must hold, sorted: `files` and a `.d.ts` per source
+ * file under `declarationsFrom` (`repo` is the repository root).
+ */
+export function expectedFiles(repo: string, spec: PackageSpec): string[] {
+	const declarations = readdirSync(
+		join(repo, spec.workspace, spec.declarationsFrom),
+		{ recursive: true, encoding: "utf8" },
+	)
+		.map((f) => f.split(sep).join("/"))
+		.filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+		.filter((f) => !spec.noDeclarations?.includes(f))
+		.map((f) => f.replace(/\.ts$/, ".d.ts"));
+	return [...spec.files, ...declarations].sort();
+}
+
 /** One package in `npm pack --json`'s report. */
 interface PackResult {
 	name: string;
@@ -333,15 +360,7 @@ async function main() {
 		problems.push(`packed ${packed.name}@${packed.version}`);
 
 	// The file list, with chunk hashes normalised and declarations derived.
-	const declarations = readdirSync(join(workspace, spec.declarationsFrom), {
-		recursive: true,
-		encoding: "utf8",
-	})
-		.map((f) => f.split(sep).join("/"))
-		.filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
-		.filter((f) => !spec.noDeclarations?.includes(f))
-		.map((f) => f.replace(/\.ts$/, ".d.ts"));
-	const expected = [...spec.files, ...declarations].sort();
+	const expected = expectedFiles(root, spec);
 	const actual = packed.files.map((f) => normalizeChunk(f.path)).sort();
 	const missing = expected.filter((f) => !actual.includes(f));
 	const extra = actual.filter((f) => !expected.includes(f));
@@ -361,6 +380,13 @@ async function main() {
 			(p) => `tarball: ${p}`,
 		),
 	);
+	// Files made from a source elsewhere: the tarball's equal it.
+	for (const [path, text] of (await spec.copies?.(root, version)) ?? []) {
+		const packed = Bun.spawnSync(["tar", "-xzOf", tarball, `package/${path}`]);
+		if (packed.exitCode !== 0) problems.push(`cannot read ${path}`);
+		else if (packed.stdout.toString() !== text)
+			problems.push(`${path} differs from its source`);
+	}
 	if (problems.length > 0) fail(problems);
 
 	const outputs = {

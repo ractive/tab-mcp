@@ -9,6 +9,16 @@ browser's WebMCP too, keep the security defaults and run a tab-mcp relay. The sk
 This folder is a plugin for Claude Code and Codex. The repository root holds the
 marketplace files that point here.
 
+## Without a plugin
+
+The npm package ships the same skill as `skill/SKILL.md`, written for the version it
+installs; the plugin describes the newest release. After
+`npm install @ractive-ch/tab-mcp-client`, tell the agent:
+
+```text
+Read node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md and add tab-mcp to this app.
+```
+
 ## Claude Code
 
 ```text
@@ -61,3 +71,10 @@ into the agent's skills directory, for example `.claude/skills/tab-mcp` or
 The plugin version follows the packages it describes (`0.20.0`). Update the
 skill and both `plugin.json` files, and the version in `.claude-plugin/marketplace.json`,
 when the client or relay API changes.
+
+This folder is the one source of the packaged skill: the client's build
+(`packages/tab-mcp-client/scripts/skill.ts`) copies `SKILL.md` and `references/` into
+the package and turns the links to the client's README, CHANGELOG and sources at
+`client-v<version>` into links to the files beside it. Link those files that way; every
+other file of the repository by an absolute URL, at a release's tag where its content
+depends on the version.
