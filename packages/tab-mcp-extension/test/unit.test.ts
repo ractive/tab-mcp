@@ -31,7 +31,13 @@ import {
 import { SERVER_NAME } from "../src/protocol.ts";
 import { relayProblem } from "../src/relay.ts";
 import { ask, callFailed, noAccess } from "../src/tabs.ts";
-import { PageError, readTool, ToolRegistry } from "../src/webmcp/registry.ts";
+import {
+	MAX_TOOLS,
+	PageError,
+	readTool,
+	resultText,
+	ToolRegistry,
+} from "../src/webmcp/registry.ts";
 import { createTools } from "../src/worker/tools.ts";
 
 const transpiler = new Bun.Transpiler({ loader: "ts" });
@@ -1005,5 +1011,52 @@ describe("the polyfill's registry: taken over by the next content script (Firefo
 			consequentialHint: true,
 		});
 		expect(() => annotations("consequential")).toThrow(PageError);
+	});
+
+	/** The kind of `PageError` `run` throws, or "none". */
+	const kindOf = (run: () => void) => {
+		try {
+			run();
+			return "none";
+		} catch (error) {
+			return error instanceof PageError ? error.kind : String(error);
+		}
+	};
+
+	test("provideContext with an invalid tool changes nothing; at most MAX_TOOLS tools over registerTool and provideContext (QuotaExceededError)", () => {
+		const registry = new ToolRegistry(() => {});
+		registry.register(tool("kept"));
+		registry.provide([tool("given")]);
+		// All read and checked first: one invalid tool, and nothing changes.
+		expect(
+			kindOf(() => registry.provide([tool("ok_one"), { name: "broken" }])),
+		).toBe("TypeError");
+		expect(registry.list().map((t) => t.name)).toEqual(["kept", "given"]);
+		// The limit holds over all the page's tools, both ways of giving them.
+		for (let i = 0; registry.list().length < MAX_TOOLS - 1; i++)
+			registry.register(tool(`r${i}`));
+		expect(
+			kindOf(() =>
+				registry.provide(Array.from({ length: 3 }, (_, i) => tool(`p${i}`))),
+			),
+		).toBe("QuotaExceededError");
+		expect(registry.list()).toHaveLength(MAX_TOOLS - 1);
+		registry.register(tool("last"));
+		expect(registry.list()).toHaveLength(MAX_TOOLS);
+		expect(kindOf(() => registry.register(tool("one_more")))).toBe(
+			"QuotaExceededError",
+		);
+		expect(registry.list()).toHaveLength(MAX_TOOLS);
+	});
+
+	test("a tool's result as Chrome's executeTool gives it: a string as it is, nothing as null, anything else as its JSON, a page's object read through its wrapper (Firefox)", () => {
+		expect(resultText("Hello")).toBe("Hello");
+		expect(resultText(undefined)).toBeNull();
+		expect(resultText(null)).toBeNull();
+		const mcp = { content: [{ type: "text", text: "from an MCP result" }] };
+		expect(resultText(mcp)).toBe(JSON.stringify(mcp));
+		// A page-realm object in Firefox: its JSON is the page's own object's.
+		expect(resultText({ wrappedJSObject: mcp })).toBe(JSON.stringify(mcp));
+		expect(resultText(() => {})).toBeNull();
 	});
 });

@@ -2,7 +2,8 @@ name: CI
 
 # Two test jobs in parallel: fast (Biome, type check, the tests without a
 # browser, conformance: `bun run verify`) and browser (the *.browser.test.ts
-# files: `bun run test:browser`). The job verify, the required check of main,
+# files but the full run's: `bun run test:browser --no-full`; all of them run
+# in browser-full.yml, not required). The job verify, the required check of main,
 # waits for both and passes only when both passed, so a red browser job blocks
 # a merge as before the split (DEC-218). No path filter: a required check that
 # never reports leaves a pull request unmergeable. A pull request that changes
@@ -80,8 +81,10 @@ jobs:
           chrome-version: ${{ env.CHROME_VERSION }}
       - if: steps.changes.outputs.code == 'true'
         run: bun install --frozen-lockfile
+      # Every browser file but the full run's (*-full.browser.test.ts: the
+      # rest of Firefox), which browser-full.yml runs.
       - if: steps.changes.outputs.code == 'true'
-        run: bun run test:browser
+        run: bun run test:browser --no-full
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
 
