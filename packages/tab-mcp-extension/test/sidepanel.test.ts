@@ -146,7 +146,20 @@ function stateWith(
 	};
 }
 
+const question = (id: string): QuestionSummary => ({
+	id,
+	app: "Claude (claude.ai)",
+	host: "claude.ai",
+	tool: "page_place_order",
+	title: "place_order",
+	origin: SITE,
+	site: true,
+	expiresAt: Date.now() + 60_000,
+});
+
 const switchOf = (name: string) => `input.always-allow[data-tool="${name}"]`;
+const allowOf = (id: string) =>
+	`[data-question="${id}"] button[data-answer="allow"]`;
 const disabled = (e: Element | null) => e?.getAttribute("aria-disabled");
 
 describe("a tool's Always allow switch", () => {
@@ -251,6 +264,69 @@ describe("Always allow all, a switch over the list", () => {
 				names: ["place_order", "late_order"],
 				on: false,
 			},
+		]);
+	});
+});
+
+describe("questions in the panel", () => {
+	test("a modal dialog; the question left after an answer waits again; a click right after the dialog closed allows nothing; the switches under it keep their look", async () => {
+		const modal: string[] = [];
+		const panel = await openPanel();
+		const dialog = panel.$<HTMLDialogElement>(
+			"#questions",
+		) as HTMLDialogElement;
+		const showModal = dialog.showModal.bind(dialog);
+		dialog.showModal = () => {
+			modal.push("showModal");
+			showModal();
+		};
+		panel.show(stateWith([tool("place_order")]));
+		panel.later(WAIT_MS);
+		panel.show(stateWith([tool("place_order")], [question("q1")]));
+		// Modal (the rest of the panel inert is Chrome's), over the panel.
+		expect([dialog.open, modal]).toEqual([true, ["showModal"]]);
+		// Nothing moved under it: the switch does not wait, also once the
+		// panel's own check of its waits ran.
+		panel.later(0);
+		expect(disabled(panel.$(switchOf("place_order")))).toBeNull();
+		panel.show(
+			stateWith([tool("place_order")], [question("q1"), question("q2")]),
+		);
+		expect(disabled(panel.$(allowOf("q1")))).toBe("true");
+		panel.later(WAIT_MS);
+		expect(disabled(panel.$(allowOf("q1")))).toBeNull();
+		expect(disabled(panel.$(allowOf("q2")))).toBeNull();
+		panel.take();
+		panel.$<HTMLButtonElement>(allowOf("q1"))?.click();
+		expect(panel.take()).toEqual([
+			{ type: "answer", id: "q1", answer: "allow" },
+		]);
+		// The question left moved up in the dialog: its Allow waits again.
+		panel.show(stateWith([tool("place_order")], [question("q2")]));
+		expect(disabled(panel.$(allowOf("q2")))).toBe("true");
+		panel.later(WAIT_MS);
+		panel
+			.$<HTMLButtonElement>(`[data-question="q2"] button[data-answer="deny"]`)
+			?.click();
+		expect(panel.take()).toEqual([
+			{ type: "answer", id: "q2", answer: "deny" },
+		]);
+		// The last answer closes the dialog; a click on the switch right after
+		// it (the second click of a double click) changes nothing.
+		panel.show(stateWith([tool("place_order")]));
+		expect(dialog.open).toBe(false);
+		const toggle = panel.$<HTMLInputElement>(switchOf("place_order"));
+		expect(disabled(toggle)).toBeNull();
+		expect(panel.doc.body.hasAttribute("data-quiet")).toBe(true);
+		toggle?.click();
+		expect(panel.take()).toEqual([]);
+		expect(toggle?.checked).toBe(false);
+		// After the quiet time it counts again.
+		panel.later(WAIT_MS);
+		expect(panel.doc.body.hasAttribute("data-quiet")).toBe(false);
+		toggle?.click();
+		expect(panel.take()).toEqual([
+			{ type: "set-allowed", origin: SITE, name: "place_order", on: true },
 		]);
 	});
 });

@@ -6,9 +6,11 @@
  * this code decided (iteration 50).
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
+import type { PagePort } from "@ractive-ch/tab-mcp-client/extension";
 import type { PageTool, PageTools } from "../src/messages.ts";
 import type { PanelState } from "../src/protocol.ts";
+import { APP_ID } from "../src/protocol.ts";
 import type { AllowedTools } from "../src/worker/allowed.ts";
 import { Connection } from "../src/worker/connection.ts";
 import { FillSetting } from "../src/worker/fill.ts";
@@ -143,6 +145,37 @@ function fakePanel() {
 			onDisconnect: { addListener: () => {} },
 		} as unknown as chrome.runtime.Port,
 	};
+}
+
+/** The relay's pairing page in tab 1, as the content script's port gives it. */
+function pairingPage(): PagePort & { closed: boolean; sent: unknown[] } {
+	const gone = new AbortController();
+	const port = {
+		sender: {
+			id: ID,
+			url: `${RELAY}/authorize?response_type=code&client_id=x`,
+			origin: RELAY,
+			tab: { id: 1 },
+			frameId: 0,
+		},
+		hello: Promise.resolve({
+			type: "pairing-page",
+			nonce: "0123456789abcdef0123",
+			app: APP_ID,
+			clientName: "Claude",
+			clientHost: "claude.ai",
+			requestId: "Zm9vYmFyYmF6cXV4cXV1eHh5enp6",
+		}),
+		signal: gone.signal,
+		sent: [] as unknown[],
+		closed: false,
+		send: (message: unknown) => void port.sent.push(message),
+		close: () => {
+			port.closed = true;
+			gone.abort();
+		},
+	};
+	return port;
 }
 
 /** Until `check` holds, at most a second. */
@@ -281,5 +314,41 @@ describe("Always allow all from the panel (set-allowed-all)", () => {
 			"place_order taken away",
 		);
 		expect(await allowedOn(kv, SITE)).toEqual([]);
+	});
+});
+
+describe("a question's notification (no panel)", () => {
+	test("closing it is Don't allow: nothing is filled in", async () => {
+		const { c, fake } = await connection({ aiOn: true, fill: true });
+		const page = pairingPage();
+		c.pairingPage(page);
+		await until(() => fake.notifications.length === 1, "a notification");
+		c.notificationDismissed(fake.notifications[0] as string);
+		await until(() => page.closed, "the page's port closed");
+		expect(page.sent).toEqual([]);
+	});
+
+	test("a click on its body where Chrome refuses the side panel: a new notification asks again (EQ 18)", async () => {
+		const { c, fake } = await connection({ aiOn: true, fill: true });
+		const page = pairingPage();
+		c.pairingPage(page);
+		await until(() => fake.notifications.length === 1, "a notification");
+		// What the worker logs where Chrome refuses the panel.
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			c.notificationClicked(fake.notifications[0] as string);
+			await until(() => fake.notifications.length === 2, "a new notification");
+			expect(String(warn.mock.calls[0]?.[0])).toContain("side panel");
+		} finally {
+			warn.mockRestore();
+		}
+		expect(fake.notifications[1]).not.toBe(fake.notifications[0]);
+		// The question still waits: the old one's closing answers nothing.
+		c.notificationDismissed(fake.notifications[0] as string);
+		await Bun.sleep(20);
+		expect(page.closed).toBe(false);
+		c.notificationDismissed(fake.notifications[1] as string);
+		await until(() => page.closed, "the page's port closed");
+		expect(page.sent).toEqual([]);
 	});
 });

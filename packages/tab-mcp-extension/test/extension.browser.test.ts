@@ -1204,70 +1204,20 @@ describe.skipIf(chrome === undefined)(
 			expect(await stack.worker.eval("globalThis.e2eCreated")).toEqual([]);
 		});
 
-		test("questions are a modal dialog; a click right after it closed allows nothing, and the switches keep their look", async () => {
-			const first = call(stack, "page_place_order", { item: "first" });
-			await stack.panel.waitFor(
-				`document.querySelectorAll("[data-question]").length === 1`,
-			);
-			// Over the panel, the rest inert; the switches under it do not
-			// wait in the disabled look (nothing moved).
-			expect(
-				await stack.panel.eval(
-					`[document.getElementById("questions").open, document.getElementById("questions").matches(":modal"), [...document.querySelectorAll("input.always-allow")].map((b) => b.getAttribute("aria-disabled"))]`,
-				),
-			).toEqual([true, true, [null]]);
-			const second = call(stack, "page_place_order", { item: "second" });
-			await stack.panel.waitFor(
-				`document.querySelectorAll("[data-question]").length === 2`,
-			);
-			await stack.panel.send("Emulation.setFocusEmulationEnabled", {
-				enabled: true,
-			});
-			const top = `document.querySelector('[data-question] button[data-answer="allow"]')`;
-			await stack.panel.waitFor(
-				`${top}.getAttribute("aria-disabled") !== "true"`,
-			);
-			await stack.panel.eval(`${top}.id = "e2e-answer"`);
-			await stack.panel.click("#e2e-answer");
-			expect((await first).isError).toBeFalsy();
-			await stack.panel.waitFor(
-				`document.querySelectorAll("[data-question]").length === 1`,
-			);
-			// The question left moved up in the dialog: its Allow waits again.
-			expect(
-				await stack.panel.eval(
-					`[...document.querySelectorAll('[data-question] button[data-answer]:not([data-answer="deny"])')].map((b) => b.getAttribute("aria-disabled"))`,
-				),
-			).toEqual(["true", "true"]);
-			// The last answer closes the dialog; a click on the switch right
-			// after it (the second click of a double click) changes nothing.
-			// Clicked at once, before the AI app's answer is awaited, and the
-			// quiet time checked as the click goes: a late click would be a
-			// slow runner, not the panel.
-			await answerInPanel(stack, "deny");
-			await stack.panel.waitFor(`!document.getElementById("questions").open`);
-			expect(
-				await stack.panel.eval(
-					`[document.querySelector(${JSON.stringify(alwaysAllow("place_order"))}).getAttribute("aria-disabled"), document.body.hasAttribute("data-quiet")]`,
-				),
-			).toEqual([null, true]);
-			await stack.panel.click(alwaysAllow("place_order"));
-			expect((await second).isError).toBe(true);
-			await Bun.sleep(300);
-			expect(await stack.panel.eval(alwaysAllowed("place_order", false))).toBe(
-				true,
-			);
-			const allowedTools = (await kvAll(stack.worker))["allowedTools"] as
-				| Record<string, string[]>
-				| undefined;
-			expect(allowedTools?.[SITE] ?? []).not.toContain("place_order");
-		});
-
 		test("a panel closed during a question hands it to a notification", async () => {
 			const asked = call(stack, "page_place_order", { item: "handed" });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
 			await closePanel(stack);
 			const id = await newNotification(stack);
+			// Chrome's rule the panel's way back from a notification is built on
+			// (EQ 18; connection.test.ts and worker.test.ts for the rest):
+			// without a user's gesture, which the DevTools Protocol does not
+			// give, sidePanel.open is refused.
+			expect(
+				await stack.worker.eval(
+					`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.sidePanel.open({ tabId: t.id, windowId: t.windowId })).then(() => "opened", (e) => e.message)`,
+				),
+			).toContain("user gesture");
 			// After the guard against an Allow that came too soon.
 			await Bun.sleep(600);
 			await clickNotification(stack, id, 0);
@@ -1282,128 +1232,6 @@ describe.skipIf(chrome === undefined)(
 			const result = await call(stack, "page_get_greeting", { name: "Cy" });
 			expect(result.content).toEqual([{ type: "text", text: "Hello, Cy!" }]);
 			expect(await badge()).toBe("on");
-		});
-
-		test("with the panel closed a question is a notification: Allow, closing it, late clicks, no second button", async () => {
-			const denied = call(stack, "page_place_order", { item: "no" });
-			const first = await newNotification(stack);
-			expect(await badge()).toBe("?");
-			expect(
-				await stack.worker.eval(
-					`chrome.notifications.getAll().then((all) => Object.keys(all).length)`,
-				),
-			).toBe(1);
-			// Don't allow is closing it.
-			await stack.worker.eval(
-				`tabMcpNotificationDismissed(${JSON.stringify(first)})`,
-			);
-			const no = await denied;
-			expect(no.isError).toBe(true);
-			expect(
-				await stack.tab.eval("window.calls.map((c) => c[1])"),
-			).not.toContain("no");
-			// A click on a notification whose call is settled answers nothing.
-			const allowed = call(stack, "page_place_order", { item: "yes" });
-			const second = await newNotification(stack, [first]);
-			await Bun.sleep(600);
-			await clickNotification(stack, first, 0);
-			await Bun.sleep(200);
-			expect(await notifications(stack)).toEqual([second]);
-			await clickNotification(stack, second, 0);
-			expect((await allowed).content[0]?.text).toContain("yes");
-			// Allow is its only button: allowing a tool on the site needs the
-			// whole question (the side panel). A second
-			// button counts as nothing.
-			await stack.worker.eval(`(() => {
-				globalThis.e2eButtons = [];
-				const create = chrome.notifications.create.bind(chrome.notifications);
-				chrome.notifications.create = (id, options) => {
-					globalThis.e2eButtons.push(options.buttons.map((b) => b.title));
-					return create(id, options);
-				};
-			})()`);
-			const once = call(stack, "page_place_order", { item: "once" });
-			const third = await newNotification(stack, [first, second]);
-			expect(await stack.worker.eval("globalThis.e2eButtons")).toEqual([
-				["Allow once"],
-			]);
-			await Bun.sleep(600);
-			await clickNotification(stack, third, 1);
-			await Bun.sleep(200);
-			expect(await notifications(stack)).toEqual([third]);
-			await clickNotification(stack, third, 0);
-			expect((await once).isError).toBeFalsy();
-			// Allowed once: the next call asks again.
-			const again = call(stack, "page_place_order", { item: "again" });
-			const fourth = await newNotification(stack, [first, second, third]);
-			await stack.worker.eval(
-				`tabMcpNotificationDismissed(${JSON.stringify(fourth)})`,
-			);
-			expect((await again).isError).toBe(true);
-			expect(await notifications(stack)).toEqual([]);
-		});
-
-		test("a click on a notification's body where Chrome refuses the side panel: the notification asks again (EQ 18)", async () => {
-			await stack.tab.goto(`${SITE}/webmcp.html`);
-			await call(stack, "webmcp_tools");
-			// What the notifications say.
-			await stack.worker.eval(`(() => {
-				globalThis.e2eMessages = [];
-				const create = chrome.notifications.create.bind(chrome.notifications);
-				chrome.notifications.create = (id, options) => {
-					globalThis.e2eMessages.push(options.message);
-					return create(id, options);
-				};
-			})()`);
-			const item = `long ${"z".repeat(6000)} end`;
-			const asked = call(stack, "page_place_order", { item });
-			const id = await newNotification(stack);
-			const [text] = await stack.worker.eval<string[]>(
-				"globalThis.e2eMessages",
-			);
-			expect(text).toEndWith("Arguments cut: click to see them in full.");
-			// The DevTools Protocol gives no user gesture (Chrome gives one to a
-			// real click on a notification): sidePanel.open is refused here.
-			expect(
-				await stack.worker.eval(
-					`chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => chrome.sidePanel.open({ tabId: t.id, windowId: t.windowId })).then(() => "opened", (e) => e.message)`,
-				),
-			).toContain("user gesture");
-			await stack.worker.eval(
-				`tabMcpNotificationClicked(${JSON.stringify(id)})`,
-			);
-			// The question waits: a new notification asks again, with Allow
-			// once, and the icon says "?" (a click on it opens the panel).
-			const again = await newNotification(stack, [id]);
-			expect(await notifications(stack)).toEqual([again]);
-			expect(await badge()).toBe("?");
-			// The first one's closing answers nothing now.
-			await stack.worker.eval(
-				`tabMcpNotificationDismissed(${JSON.stringify(id)})`,
-			);
-			await Bun.sleep(200);
-			expect(await notifications(stack)).toEqual([again]);
-			expect(await stack.tab.eval("window.calls.length")).toBe(0);
-			await Bun.sleep(600);
-			await clickNotification(stack, again, 0);
-			const result = await asked;
-			expect(result.isError).toBeFalsy();
-			expect(result.content[0]?.text).toContain("end");
-			// Again, and the notification that came back closed: Don't allow.
-			const declined = call(stack, "page_place_order", { item: "closed" });
-			const second = await newNotification(stack, [id, again]);
-			await stack.worker.eval(
-				`tabMcpNotificationClicked(${JSON.stringify(second)})`,
-			);
-			const back = await newNotification(stack, [id, again, second]);
-			await stack.worker.eval(
-				`tabMcpNotificationDismissed(${JSON.stringify(back)})`,
-			);
-			expect((await declined).isError).toBe(true);
-			expect(
-				await stack.tab.eval("window.calls.map((c) => c[1])"),
-			).not.toContain("closed");
-			expect(await notifications(stack)).toEqual([]);
 		});
 
 		test("reopening the panel shows the same connection", async () => {
