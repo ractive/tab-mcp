@@ -330,3 +330,23 @@ describe("questions in the panel", () => {
 		]);
 	});
 });
+
+describe("the sign-in hosts filled in for without a question (DEC-213)", () => {
+	test("Remove sends that host for the worker to forget", async () => {
+		const panel = await openPanel();
+		panel.show({
+			...stateWith([]),
+			fillCode: true,
+			fillAlways: ["claude.ai", "chatgpt.com"],
+		});
+		const remove = panel.$<HTMLButtonElement>(
+			'#fill-always-list button[data-host="claude.ai"]',
+		);
+		expect(remove).not.toBeNull();
+		panel.take();
+		remove?.click();
+		expect(panel.take()).toEqual([
+			{ type: "forget-fill-host", host: "claude.ai" },
+		]);
+	});
+});

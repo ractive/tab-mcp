@@ -205,6 +205,8 @@ async function connection(
 		allowed?: AllowedTools;
 		aiOn?: boolean;
 		fill?: boolean;
+		/** The AI apps' hosts filled in for without a question (DEC-213). */
+		alwaysHosts?: string[];
 	} = {},
 ) {
 	const fake: Fake = {
@@ -218,6 +220,15 @@ async function connection(
 		relay: RELAY,
 		...(options.allowed ? { allowedTools: options.allowed } : {}),
 		...(options.fill ? { fillCodeFor: RELAY } : {}),
+		...(options.alwaysHosts
+			? {
+					fillCodeAlways: {
+						relay: RELAY,
+						hosts: options.alwaysHosts,
+						unasked: {},
+					},
+				}
+			: {}),
 	});
 	// The constructor `start()` uses, without IndexedDB.
 	const make = Connection as unknown as new (...args: unknown[]) => Connection;
@@ -334,6 +345,58 @@ describe("the panel's commands", () => {
 		expect(kv.data.get("aiOn")).toBe(false);
 		expect(panel.state()?.status).toBe("off");
 		expect(await allowedOn(kv, SITE)).toEqual(["a", "b"]);
+	});
+});
+
+describe("the relay's pairing page (DEC-203)", () => {
+	test("with AI access off, the page gets no question", async () => {
+		const { c, fake } = await connection({ aiOn: false, fill: true });
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		const page = pairingPage();
+		c.pairingPage(page);
+		await until(() => page.closed, "the page's port closed");
+		expect(panel.state()?.questions).toEqual([]);
+		expect(fake.notifications).toEqual([]);
+	});
+
+	test("turning AI access off withdraws a question that waits", async () => {
+		const { c } = await connection({ aiOn: true, fill: true });
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		receive({ type: "hello", windowId: 1 });
+		const page = pairingPage();
+		c.pairingPage(page);
+		await until(() => panel.state()?.questions.length === 1, "the question");
+		receive({ type: "stop" });
+		await until(() => panel.state()?.questions.length === 0, "withdrawn");
+		await until(() => page.closed, "the page's port closed");
+		expect(page.sent).toEqual([]);
+	});
+
+	test("a host removed under the switch (Remove in the panel): its next page asks again (DEC-213)", async () => {
+		const { c } = await connection({
+			aiOn: true,
+			fill: true,
+			alwaysHosts: ["claude.ai"],
+		});
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		receive({ type: "hello", windowId: 1 });
+		await until(
+			() => panel.state()?.fillAlways?.includes("claude.ai") === true,
+			"the host listed",
+		);
+		receive({ type: "forget-fill-host", host: "claude.ai" });
+		await until(
+			() => panel.state()?.fillAlways?.length === 0,
+			"the host removed",
+		);
+		const page = pairingPage();
+		c.pairingPage(page);
+		await until(() => panel.state()?.questions.length === 1, "the question");
+		receive({ type: "stop" });
+		await until(() => page.closed, "the page's port closed");
 	});
 });
 

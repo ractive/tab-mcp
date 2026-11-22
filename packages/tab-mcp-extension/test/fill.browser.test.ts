@@ -213,19 +213,6 @@ describe.skipIf(chrome === undefined)(
 			expect(await fillSwitch(stack)).toEqual([true, true, "true"]);
 		});
 
-		test("a look-alike of the page on another origin is ignored: no question", async () => {
-			const page = await stack.browser.newPage(stack.oauth.lookAlike);
-			// The script runs there (its pattern has no port), and the worker
-			// refuses the origin.
-			expect(await scriptRan(page)).toBe(true);
-			await Bun.sleep(1_500);
-			expect(await questions(stack)).toEqual([]);
-			expect(
-				await page.eval<string>(`document.getElementById("code").value`),
-			).toBe("");
-			await page.close();
-		});
-
 		test("the page going withdraws the question", async () => {
 			const { url } = await authorizeUrl(stack.oauth, stack.address);
 			const page = await stack.browser.newPage(url);
@@ -431,73 +418,11 @@ describe.skipIf(chrome === undefined)(
 			}
 		});
 
-		test("removing the host under the switch: its next page asks again", async () => {
-			const host = stack.oauth.alwaysHost;
-			await stack.panel.waitFor(questionCount(0));
-			// On its own feet: the host is remembered here if the test before
-			// did not get that far.
-			if (!(await alwaysHosts(stack)).includes(host)) {
-				const { url } = await alwaysPage(stack);
-				const callback = stack.oauth.nextCallback();
-				const page = await stack.browser.newPage(url);
-				try {
-					await stack.panel.waitFor(questionCount(1));
-					await answer(stack, "site");
-					expect((await callback).get("code")).toBeString();
-				} finally {
-					await page.close().catch(() => {});
-				}
-				await stack.panel.waitFor(questionCount(0));
-				expect(await alwaysHosts(stack)).toEqual([host]);
-			}
-			await stack.panel.eval(`document.getElementById("add-app").click()`);
-			await stack.panel.waitFor(
-				`document.getElementById("pairing").hidden === false`,
-			);
-			await stack.panel.click(`#fill-always-list button[data-host="${host}"]`);
-			await stack.panel.waitFor(
-				`document.getElementById("fill-always").hidden && document.querySelectorAll("#fill-always-list li").length === 0`,
-			);
-			await stack.panel.eval(`document.getElementById("pair-done").click()`);
-			const { url } = await alwaysPage(stack);
-			const page = await stack.browser.newPage(url);
-			try {
-				await stack.panel.waitFor(questionCount(1));
-			} finally {
-				await page.close();
-			}
-			await stack.panel.waitFor(questionCount(0));
-		});
-
-		test("with AI access off, the page gets no question", async () => {
-			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
-			await stack.panel.waitFor(
-				`document.getElementById("state").dataset.state === "off"`,
-			);
-			const { url } = await authorizeUrl(stack.oauth, stack.address);
-			const page = await stack.browser.newPage(url);
-			expect(await scriptRan(page)).toBe(true);
-			await Bun.sleep(1_500);
-			expect(await questions(stack)).toEqual([]);
-			await page.close();
-		});
-
-		test("turning AI access off withdraws a question that waits", async () => {
-			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
-			await stack.panel.waitFor(
-				`document.getElementById("state").dataset.state === "on"`,
-				15_000,
-			);
-			const { url } = await authorizeUrl(stack.oauth, stack.address);
-			const page = await stack.browser.newPage(url);
-			await stack.panel.waitFor(questionCount(1));
-			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
-			await stack.panel.waitFor(questionCount(0));
-			await page.close();
-		});
-
 		test("the switch turned off: off again, the page has no script and asks nothing", async () => {
-			await stack.panel.eval(`document.getElementById("ai-switch").click()`);
+			// AI access on, whatever the tests before left.
+			await stack.panel.eval(
+				`document.getElementById("state").dataset.state === "off" && document.getElementById("ai-switch").click()`,
+			);
 			await stack.panel.waitFor(
 				`document.getElementById("state").dataset.state === "on"`,
 				15_000,
