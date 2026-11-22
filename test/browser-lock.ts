@@ -83,16 +83,24 @@ function readOwner(): LockOwner | undefined {
 	}
 }
 
-/** The wait from `TAB_MCP_BROWSER_WAIT_MS`: a positive number of milliseconds, else 15 minutes. */
-export function waitMsFrom(value: string | undefined): number {
+/** `value` as a positive number of milliseconds, else `fallback`. */
+export function msFrom(value: string | undefined, fallback: number): number {
 	const ms = Number(value);
 	return value !== undefined &&
 		value.trim() !== "" &&
 		Number.isFinite(ms) &&
 		ms > 0
 		? ms
-		: WAIT_MS;
+		: fallback;
 }
+
+/** The wait from `TAB_MCP_BROWSER_WAIT_MS`: a positive number of milliseconds, else 15 minutes. */
+export function waitMsFrom(value: string | undefined): number {
+	return msFrom(value, WAIT_MS);
+}
+
+/** Without waiting for a holder, how long a stale lock gets to clear. */
+const STALE_WAIT_MS = 5_000;
 
 /** How a waiting run names the holder. */
 export function describeOwner(owner: LockOwner): string {
@@ -198,9 +206,18 @@ export async function holdBrowserLock(
 	const log = options.log ?? ((line: string) => console.error(line));
 	const wait = options.wait ?? process.env["TAB_MCP_BROWSER_NO_WAIT"] !== "1";
 	const waitMs = waitMsFrom(process.env["TAB_MCP_BROWSER_WAIT_MS"]);
-	const poll = Math.min(2_000, Math.max(100, waitMs / 20));
+	// Tests only: the poll and the stale lock's time without waiting, shorter
+	// (scripts/browser-run.test.ts); the same rules either way.
+	const poll = msFrom(
+		process.env["TAB_MCP_BROWSER_POLL_MS"],
+		Math.min(2_000, Math.max(100, waitMs / 20)),
+	);
 	// Without waiting for a holder, a stale lock still gets this long to clear.
-	const deadline = Date.now() + (wait ? waitMs : 5_000);
+	const deadline =
+		Date.now() +
+		(wait
+			? waitMs
+			: msFrom(process.env["TAB_MCP_BROWSER_STALE_WAIT_MS"], STALE_WAIT_MS));
 	let told = false;
 	// First: without a readable start of its own, a run does not start.
 	const me = runId();

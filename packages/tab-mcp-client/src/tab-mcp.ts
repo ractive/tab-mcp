@@ -62,14 +62,17 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
  * only tests change. `reconnectDelaysMs`: before each reconnect attempt,
  * the last one repeating. `answerTimeoutMs`: for an identity assertion and
  * the relay's answer to it, and for the relay's answer to `revoke()` and
- * `signOut()`.
+ * `signOut()`. `siblingGraceMs`: a replaced tab's wait for a sibling's
+ * `claimed` (`SIBLING_GRACE_MS` in connection.ts, passed to it).
  */
 export const timing: {
 	reconnectDelaysMs: number[];
 	answerTimeoutMs: number;
+	siblingGraceMs: number;
 } = {
 	reconnectDelaysMs: [5_000, 10_000, 20_000, 40_000, 60_000],
 	answerTimeoutMs: 15_000,
+	siblingGraceMs: 1_000,
 };
 /** Reasons after which the library connects again by itself. */
 const RECONNECT_REASONS = new Set<DisconnectReason>([
@@ -603,6 +606,7 @@ export class TabMcp extends EventTarget {
 		const connection = openConnection(this.#host(ref), relayUrl, secret, {
 			address,
 			revokeAll: !!takeBack,
+			siblingGraceMs: timing.siblingGraceMs,
 		});
 		if (!takeBack) ref.connection = connection;
 		this.#connection = connection;

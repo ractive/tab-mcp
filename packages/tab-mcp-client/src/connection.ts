@@ -153,6 +153,7 @@ export const SIBLING_GRACE_MS = 1_000;
 function siblingTabs(
 	name: string | undefined,
 	address: string | undefined,
+	graceMs = SIBLING_GRACE_MS,
 ): {
 	/** The own session arrived: say so, and listen to the others from now on. */
 	claimed(): void;
@@ -196,7 +197,7 @@ function siblingTabs(
 			if (Date.now() - at <= SIBLING_WINDOW_MS) return Promise.resolve(true);
 			if (channel === undefined) return Promise.resolve(false);
 			return new Promise((resolve) => {
-				const timer = setTimeout(() => resolve(false), SIBLING_GRACE_MS);
+				const timer = setTimeout(() => resolve(false), graceMs);
 				onClaim = () => {
 					clearTimeout(timer);
 					resolve(true);
@@ -289,12 +290,18 @@ export function onWake(now: () => void): () => void {
  * Open the WebSocket and run the session. `address`: the secret's address id
  * (`addressIdOf`). `revokeAll`: take the address back (DEC-095); the relay
  * revokes every grant as it claims the address, and its `session` lists none.
+ * `siblingGraceMs`: {@link SIBLING_GRACE_MS} unless a test sets
+ * `timing.siblingGraceMs`.
  */
 export function openConnection(
 	host: ConnectionHost,
 	url: string,
 	secret: string,
-	options: { address?: string | undefined; revokeAll?: boolean } = {},
+	options: {
+		address?: string | undefined;
+		revokeAll?: boolean;
+		siblingGraceMs?: number;
+	} = {},
 ): ConnectionHandle {
 	const revokeAll = options.revokeAll === true;
 	const ws = new WebSocket(url, SUBPROTOCOL);
@@ -305,7 +312,11 @@ export function openConnection(
 	let maxBodyBytes: number | undefined;
 	let heartbeat: ReturnType<typeof setTimeout> | undefined;
 	let heartbeatMs = 0;
-	const siblings = siblingTabs(host.tabs, options.address);
+	const siblings = siblingTabs(
+		host.tabs,
+		options.address,
+		options.siblingGraceMs,
+	);
 
 	let resolveReady!: (session: SessionInfo) => void;
 	let rejectReady!: (error: Error) => void;

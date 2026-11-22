@@ -50,7 +50,14 @@ function holder(
 		console.log("done", Date.now());
 	`;
 	return Bun.spawn([process.execPath, "-e", script], {
-		env: { ...process.env, TAB_MCP_BROWSER_DIR: base, ...env },
+		env: {
+			...process.env,
+			TAB_MCP_BROWSER_DIR: base,
+			// Shorter than as shipped (2 s, 5 s), with the same rules.
+			TAB_MCP_BROWSER_POLL_MS: "50",
+			TAB_MCP_BROWSER_STALE_WAIT_MS: "500",
+			...env,
+		},
 		stdout: "pipe",
 		stderr: "pipe",
 	});
@@ -69,7 +76,7 @@ async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 test("a second run waits, says who holds the lock, and runs once it is free", async () => {
-	const first = holder("first", 1_500);
+	const first = holder("first", 600);
 	expect(await firstLine(first.stdout)).toStartWith("taken");
 	const second = holder("second", 0, { TAB_MCP_BROWSER_WAIT_MS: "20000" });
 	const [line, firstEnd] = await Promise.all([
@@ -101,7 +108,7 @@ test("--no-wait fails at once while another run holds the lock", async () => {
 test("a waiting run gives up after its limit", async () => {
 	const first = holder("first", 3_000);
 	expect(await firstLine(first.stdout)).toStartWith("taken");
-	const second = holder("second", 0, { TAB_MCP_BROWSER_WAIT_MS: "500" });
+	const second = holder("second", 0, { TAB_MCP_BROWSER_WAIT_MS: "200" });
 	expect(await firstLine(second.stdout)).toContain("giving up");
 	expect(await second.exited).toBe(1);
 	first.kill();
@@ -205,8 +212,8 @@ async function lines(proc: ReturnType<typeof holder>) {
 test("two runs taking over the same stale lock: one wins, the other waits for it", async () => {
 	await staleLock(await goneOwner());
 	const env = { TAB_MCP_BROWSER_WAIT_MS: "20000" };
-	const a = holder("a", 1_000, env);
-	const b = holder("b", 1_000, env);
+	const a = holder("a", 300, env);
+	const b = holder("b", 300, env);
 	const [la, lb] = await Promise.all([lines(a), lines(b)]);
 	expect(await a.exited).toBe(0);
 	expect(await b.exited).toBe(0);

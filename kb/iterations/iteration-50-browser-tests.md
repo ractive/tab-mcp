@@ -117,6 +117,30 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   `/Applications/Firefox.app`. `test:browser` prints the install line for a missing one.
   CI and the release jobs install the same pinned Firefox.
 
+## What changed (pull request 4)
+
+- **The fast suite's waits:** `bun test` from 103 s to 60 s on the owner's Mac, with the
+  same tests, names and assertions (two expects added, none dropped).
+- **Settings only tests change**, the shipped values untouched:
+  - `confirmTiming.allowDelayMs` (`confirm.ts`): the Allow delay a dialog gets when its
+    caller passes none. ui.test.ts sets it to 20 ms; the tests of the delay set back the
+    shipped 750 ms and check it, and the re-arm tests keep their own 600 ms.
+  - `timing.siblingGraceMs` (`tab-mcp.ts`, passed to `openConnection`): a replaced tab's
+    wait for a sibling's `claimed`. 100 ms in the client's tests; the test of a sibling
+    whose hello was never answered keeps the shipped second.
+  - `TAB_MCP_BROWSER_POLL_MS` and `TAB_MCP_BROWSER_STALE_WAIT_MS` (`test/browser-lock.ts`):
+    the lock's poll and a stale lock's time without waiting, 50 ms and 500 ms in
+    `scripts/browser-run.test.ts`, whose holders keep the lock shorter. Every case stays.
+- **The clock moved, not waited for** (`setSystemTime`): `/healthz`'s reused second and
+  the pairing dialog's time (DEC-202) in identity.test.ts.
+- **Bun's idle timeout:** the three cases of request-path.test.ts wait at once, each on a
+  relay of its own. Bun closes an idle socket only in steps of a few seconds, so a shorter
+  setting would not help.
+- **Still slow, on purpose:** where the wait is what is tested: Bun's idle timeout
+  (relay.test.ts tunnel, hardening.test.ts), the 1 s store deadline of `/healthz`, the
+  late hello (1.5 s) of the extension's polyfill, the shipped Allow delay and sibling
+  grace, and the real processes (a nested `bun test`, the relay process, PowerShell).
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
@@ -127,7 +151,7 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - [x] 3. No notification on the desktop (a switch per browser, found by trying, in place
   of the recorder); only the pinned test browsers, never the owner's (`test/browsers.ts`);
   the one-time set-up in the README
-- [ ] 4. The fast suite's timers (`timing.allowDelayMs`, the relay's idle test)
+- [x] 4. The fast suite's timers (`timing.allowDelayMs`, the relay's idle test)
 - [ ] 5. The extension's logic tests to unit tests (the UNIT rows of the audit's 1.1 and
   1.3), each new unit test shown to fail against a mutant first
 - [ ] 6. The extension's browser tests merged, one browser per build and flag
