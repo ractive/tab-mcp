@@ -19,7 +19,7 @@
  * lacks `chromeSwitches(…)`.
  *
  * Firefox's test build records its notifications instead of showing them
- * (src/worker/notifications.ts, read in firefox.browser.test.ts;
+ * (src/worker/notifications.ts, read in firefox-smoke.browser.test.ts;
  * build.test.ts keeps it out of every other build).
  * Runs with `bun run test:browser` only (test/browser-gate.ts).
  */

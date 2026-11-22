@@ -206,7 +206,12 @@ test("every Chrome the code starts gets the switch: each launch list has chromeS
 });
 
 test("the pins are CI's and the releases', and the install commands name them", async () => {
-	for (const name of ["ci.yml", "release.yml", "extension-release.yml"]) {
+	for (const name of [
+		"ci.yml",
+		"browser-full.yml",
+		"release.yml",
+		"extension-release.yml",
+	]) {
 		const text = await Bun.file(
 			resolve(import.meta.dir, "../.github/workflows", name),
 		).text();
