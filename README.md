@@ -405,11 +405,11 @@ so a relay is exactly one process.
 
 ## Status
 
-**0.21.0-rc.1**. Until 1.0, a new minor version can still change
+**0.21.0-rc.2**. Until 1.0, a new minor version can still change
 settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what changed.
 
 - Released: relay `@ractive-ch/tab-mcp` 0.13.2-rc.1 (npm and Docker) and browser library
-  `@ractive-ch/tab-mcp-client` 0.21.0-rc.1, on the npm tag `latest`.
+  `@ractive-ch/tab-mcp-client` 0.21.0-rc.2, on the npm tag `latest`.
 - The tab-mcp browser extension 0.3.1 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16). A development build loaded unpacked has the store's id, which the hosted
   relay allows ([README](packages/tab-mcp-extension/README.md)).
