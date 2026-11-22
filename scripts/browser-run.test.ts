@@ -4,11 +4,25 @@
  * (test/browser-sweep.ts) on made-up process and folder lists.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { parseLstart, runId } from "../test/browser-dirs.ts";
-import { type Proc, planSweep } from "../test/browser-sweep.ts";
+import { parseLstart, refuseBase, runId } from "../test/browser-dirs.ts";
+import { GRACE_MS, parseOwner, waitMsFrom } from "../test/browser-lock.ts";
+import {
+	type Proc,
+	planSweep,
+	profileFlag,
+	sweep,
+} from "../test/browser-sweep.ts";
 
 const LOCK = resolve(import.meta.dir, "../test/browser-lock.ts");
 let base: string;
@@ -33,6 +47,7 @@ function holder(
 			process.exit(1);
 		}
 		await Bun.sleep(${holdMs});
+		console.log("done", Date.now());
 	`;
 	return Bun.spawn([process.execPath, "-e", script], {
 		env: { ...process.env, TAB_MCP_BROWSER_DIR: base, ...env },
@@ -155,19 +170,108 @@ test("the holder's own processes hold it on: no deadlock in a run", async () => 
 	expect(run.exitCode).toBe(0);
 }, 30_000);
 
+/** A lock folder as a run that is gone left it, its `owner.json` given as text. */
+async function staleLock(ownerJson: string, ageMs = 0) {
+	rmSync(join(base, "lock"), { recursive: true, force: true });
+	mkdirSync(join(base, "lock"), { recursive: true });
+	writeFileSync(join(base, "lock", "owner.json"), ownerJson);
+	if (ageMs > 0) {
+		const then = (Date.now() - ageMs) / 1000;
+		utimesSync(join(base, "lock"), then, then);
+	}
+}
+
+async function goneOwner(): Promise<string> {
+	const gone = Bun.spawn(["true"]);
+	await gone.exited;
+	return JSON.stringify({
+		id: `${gone.pid}-1700000000`,
+		pid: gone.pid,
+		worktree: "/somewhere",
+		filter: "",
+		since: new Date().toISOString(),
+	});
+}
+
+/** The lines a holder printed, as [word, time]. */
+async function lines(proc: ReturnType<typeof holder>) {
+	const text = await new Response(proc.stdout).text();
+	return text
+		.trim()
+		.split("\n")
+		.map((l) => l.split(" ") as [string, string]);
+}
+
+test("two runs taking over the same stale lock: one wins, the other waits for it", async () => {
+	await staleLock(await goneOwner());
+	const env = { TAB_MCP_BROWSER_WAIT_MS: "20000" };
+	const a = holder("a", 1_000, env);
+	const b = holder("b", 1_000, env);
+	const [la, lb] = await Promise.all([lines(a), lines(b)]);
+	expect(await a.exited).toBe(0);
+	expect(await b.exited).toBe(0);
+	const span = (l: [string, string][]) => {
+		expect(l.map((x) => x[0])).toEqual(["taken", "done"]);
+		return [Number(l[0]?.[1]), Number(l[1]?.[1])] as const;
+	};
+	const [as, ae] = span(la);
+	const [bs, be] = span(lb);
+	// Never both at once: one holds it from taking to done, then the other.
+	expect(ae <= bs || be <= as).toBe(true);
+}, 30_000);
+
+test("owner.json must have its shape; a bad one is taken over after the grace time", async () => {
+	for (const bad of [
+		"",
+		"null",
+		"{}",
+		'{"id":"x"}',
+		'{"pid":1,"id":"1-2"}',
+		"[1]",
+	])
+		expect({ bad, owner: parseOwner(bad) }).toEqual({ bad, owner: undefined });
+	expect(parseOwner(await goneOwner())).toBeDefined();
+	// Fresh: being made, perhaps; a run with --no-wait gives up after a short while.
+	await staleLock("null");
+	const fresh = holder("fresh", 0, { TAB_MCP_BROWSER_NO_WAIT: "1" });
+	expect(await firstLine(fresh.stdout)).toContain("no valid owner.json");
+	expect(await fresh.exited).toBe(1);
+	for (const bad of ["null", '{"pid": 1}', "not json"]) {
+		// Older than the grace time: stale, taken over.
+		await staleLock(bad, GRACE_MS + 5_000);
+		const next = holder("next", 0, { TAB_MCP_BROWSER_NO_WAIT: "1" });
+		expect(await firstLine(next.stdout)).toStartWith("taken");
+		expect(await next.exited).toBe(0);
+	}
+}, 60_000);
+
+test("a wait that is not a positive number of milliseconds is the default", () => {
+	for (const value of [undefined, "", "10m", "NaN", "-5", "0", "Infinity"])
+		expect(waitMsFrom(value)).toBe(15 * 60_000);
+	expect(waitMsFrom("500")).toBe(500);
+});
+
 const RUNS = "/home/u/.cache/tab-mcp/browser-tests/runs";
-const T = "/tmp/T";
-const NOW = 1_800_000_000_000;
+/** The same folder through a symbolic link of the home. */
+const REAL = "/Volumes/data/u/.cache/tab-mcp/browser-tests/runs";
+const SELF = { pid: 42, start: 1_000 };
 
 function proc(pid: number, ppid: number, command: string, start = 1_000): Proc {
 	return { pid, ppid, start, command };
 }
 
-test("the sweep stops the browsers of runs that are gone, and only those", () => {
-	const plan = planSweep({
-		runsDir: RUNS,
-		now: NOW,
-		processes: [
+/** A listing with the sweeper in it, as the real one has. */
+const listing = (...processes: Proc[]) => [
+	proc(SELF.pid, 1, "bun scripts/test-browser.ts"),
+	...processes,
+];
+
+const plan = (processes: Proc[], folders: string[] = []) =>
+	planSweep({ processes, folders, runsDirs: [RUNS, REAL], self: SELF });
+
+test("the sweep stops a gone run's browsers by their profile flag, and nothing else", () => {
+	const { kill } = plan(
+		listing(
 			// A live run (pid 100) and its Chrome with a helper.
 			proc(100, 50, "bun test ./a.browser.test.ts"),
 			proc(
@@ -180,22 +284,35 @@ test("the sweep stops the browsers of runs that are gone, and only those", () =>
 				101,
 				`chrome --type=renderer --user-data-dir=${RUNS}/100-1000/chrome-abcdef`,
 			),
-			// A run that is gone (pid 200): its Chrome lives on under launchd.
+			// A run that is gone (pid 200): its Chrome, a helper, a Firefox.
 			proc(201, 1, `chrome --user-data-dir=${RUNS}/200-1000/chrome-ghijkl`),
 			proc(
 				202,
 				201,
 				`chrome --type=gpu --user-data-dir=${RUNS}/200-1000/chrome-ghijkl`,
 			),
-			// Firefox of the gone run.
 			proc(
 				203,
 				1,
-				`firefox --headless --no-remote --profile ${RUNS}/200-1000/firefox-mnopqr`,
+				`firefox --headless --no-remote --profile ${RUNS}/200-1000/firefox-mnopqr --remote-debugging-port 0`,
 			),
-			// The PID of a gone run used again by another process (another start).
-			proc(300, 1, "some other program", 5_000),
-			proc(301, 1, `chrome --user-data-dir=${RUNS}/300-1000/chrome-stuvwx`),
+			proc(204, 1, `firefox -profile ${RUNS}/200-1000/firefox-stuvwx`),
+			// Not browsers: an editor, a pager, a shell naming the gone run's folder.
+			proc(301, 1, `vim ${RUNS}/200-1000/chrome-ghijkl/Default/Preferences`),
+			proc(302, 1, `less ${RUNS}/200-1000/log.txt`),
+			proc(303, 1, `zsh -c tail -f ${RUNS}/200-1000/x --user-data-dir`),
+			proc(
+				304,
+				1,
+				`node tool.js --note=--user-data-dir=${RUNS}/200-1000/chrome-ghijkl`,
+			),
+			// A run folder elsewhere with the same shape: not ours.
+			proc(305, 1, "chrome --user-data-dir=/tmp/runs/200-1000/chrome-xyz"),
+			proc(
+				306,
+				1,
+				`chrome --user-data-dir=/elsewhere${RUNS}/200-1000/chrome-xyz`,
+			),
 			// The owner's own browsers: never.
 			proc(
 				400,
@@ -205,84 +322,194 @@ test("the sweep stops the browsers of runs that are gone, and only those", () =>
 			proc(
 				401,
 				400,
-				"Google Chrome Helper (Renderer) --type=renderer --user-data-dir=/Users/u/Library/Application Support/Google/Chrome",
+				"Google Chrome Helper --type=renderer --user-data-dir=/Users/u/Library/Application Support/Google/Chrome",
 			),
 			proc(402, 1, "/Applications/Firefox.app/Contents/MacOS/firefox"),
-		],
-		folders: [],
-	});
-	expect(plan.kill.map((k) => k.pid).sort()).toEqual([201, 202, 203, 301]);
+		),
+	);
+	expect(kill.map((k) => k.pid).sort()).toEqual([201, 202, 203, 204]);
 });
 
-test("old temp profiles: a browser stops only when no test process is above it", () => {
-	const plan = planSweep({
-		runsDir: RUNS,
-		now: NOW,
-		processes: [
-			// An old branch's live run: its Chrome's parent is the test process.
-			proc(500, 60, "bun test e2e.test.ts"),
-			proc(501, 500, `chrome --user-data-dir=${T}/tab-mcp-extension-aaaaaa`),
+test("a PID used again by another process counts as gone; its own run never", () => {
+	const { kill } = plan(
+		listing(
+			proc(300, 1, "some other program", 5_000),
+			proc(301, 1, `chrome --user-data-dir=${RUNS}/300-1000/chrome-aaaaaa`),
 			proc(
-				502,
-				501,
-				`chrome --type=renderer --user-data-dir=${T}/tab-mcp-extension-aaaaaa`,
-			),
-			proc(
-				503,
+				302,
 				1,
-				`chrome_crashpad --user-data-dir=${T}/tab-mcp-extension-aaaaaa`,
+				`chrome --user-data-dir=${RUNS}/${SELF.pid}-${SELF.start}/chrome-bbbbbb`,
 			),
-			// An orphan: main and helpers under launchd only.
-			proc(601, 1, `chrome --user-data-dir=${T}/tab-mcp-chrome-bbbbbb`),
-			proc(
-				602,
-				601,
-				`chrome --type=gpu --user-data-dir=${T}/tab-mcp-chrome-bbbbbb`,
-			),
-			// An orphaned Firefox with an old profile.
-			proc(
-				701,
-				1,
-				`firefox --headless --no-remote --profile ${T}/tab-mcp-firefox-cccccc --remote-debugging-port 0`,
-			),
-			// A profile in another place with a similar name: not one of ours.
-			proc(801, 1, "chrome --user-data-dir=/tmp/my-tab-mcp-chrome"),
-		],
-		folders: [],
-	});
-	expect(plan.kill.map((k) => k.pid).sort()).toEqual([601, 602, 701]);
+		),
+	);
+	expect(kill.map((k) => k.pid)).toEqual([301]);
 });
 
-test("the sweep removes the folders of runs that are gone and old unused temp folders", () => {
-	const hourAgo = NOW - 2 * 3_600_000;
-	const plan = planSweep({
-		runsDir: RUNS,
-		now: NOW,
-		processes: [
-			proc(100, 50, "bun test"),
-			proc(501, 1, `chrome --user-data-dir=${T}/tab-mcp-ext-dddddd`),
-		],
-		folders: [
-			{ path: `${RUNS}/100-1000`, mtimeMs: hourAgo },
-			{ path: `${RUNS}/200-1000`, mtimeMs: NOW },
-			{ path: `${T}/tab-mcp-extension-eeeeee`, mtimeMs: hourAgo },
-			{ path: `${T}/webmcp-spike-ffffff`, mtimeMs: hourAgo },
-			// Too new: an old branch's run may be using it.
-			{ path: `${T}/tab-mcp-fill-gggggg`, mtimeMs: NOW - 60_000 },
-			// Named by a running browser.
-			{ path: `${T}/tab-mcp-ext-dddddd`, mtimeMs: hourAgo },
-			// Not one of the browser tests' prefixes.
-			{ path: `${T}/tab-mcp-store-hhhhhh`, mtimeMs: hourAgo },
-			{ path: `${T}/tab-mcp-extension-build-iiiiii`, mtimeMs: hourAgo },
-		],
-	});
-	expect(plan.remove.map((r) => r.path).sort()).toEqual([
+test("a path through a symbolic link is the same folder: given and resolved both match", () => {
+	const { kill, remove } = plan(
+		listing(
+			proc(201, 1, `chrome --user-data-dir=${REAL}/200-1000/chrome-cccccc`),
+		),
+		[`${REAL}/200-1000`, `${RUNS}/200-1000`],
+	);
+	expect(kill.map((k) => k.pid)).toEqual([201]);
+	expect(remove.map((r) => r.path)).toEqual([
+		`${REAL}/200-1000`,
 		`${RUNS}/200-1000`,
-		`${T}/tab-mcp-extension-eeeeee`,
-		`${T}/webmcp-spike-ffffff`,
 	]);
-	// The old Chrome above is an orphan (parent launchd): it stops, its folder goes next time.
-	expect(plan.kill.map((k) => k.pid)).toEqual([501]);
+});
+
+test("folders: those of gone runs go, a live run's and anything else stay", () => {
+	const { remove } = plan(listing(proc(100, 50, "bun test")), [
+		`${RUNS}/100-1000`,
+		`${RUNS}/200-1000`,
+		`${RUNS}/${SELF.pid}-${SELF.start}`,
+		`${RUNS}/notes`,
+		"/tmp/T/200-1000",
+	]);
+	expect(remove.map((r) => r.path)).toEqual([`${RUNS}/200-1000`]);
+});
+
+test("an empty listing, or one without the sweeper, keeps everything", () => {
+	for (const processes of [
+		[],
+		[proc(100, 1, "bun test")],
+		[proc(SELF.pid, 1, "bun", SELF.start + 60)],
+	]) {
+		const result = plan(processes, [`${RUNS}/200-1000`]);
+		expect(result.kill).toEqual([]);
+		expect(result.remove).toEqual([]);
+		expect(result.kept).toBeString();
+	}
+});
+
+test("sweep(): a failing or unparsable listing keeps everything, and says why", () => {
+	const lines: string[] = [];
+	for (const listProcesses of [
+		() => {
+			throw new Error("ps failed (1)");
+		},
+		() => {
+			throw new Error("ps printed a line this does not understand: ???");
+		},
+	]) {
+		const result = sweep({
+			runsDirs: [RUNS],
+			self: SELF,
+			listFolders: () => [`${RUNS}/200-1000`],
+			listProcesses,
+			confirmGone: () => true,
+			log: (line) => lines.push(line),
+			dryRun: true,
+		});
+		expect(result.remove).toEqual([]);
+	}
+	expect(
+		lines.every((l) => l.startsWith("sweep: keeping everything: ps")),
+	).toBe(true);
+});
+
+test("sweep(): folders are listed before processes, so a run made in between is kept", () => {
+	// The new run 500 makes its folder after the folder listing and before the process
+	// listing: the folder is not in the plan, though its process is in the listing.
+	const order: string[] = [];
+	const result = sweep({
+		runsDirs: [RUNS],
+		self: SELF,
+		listFolders: () => {
+			order.push("folders");
+			return [`${RUNS}/200-1000`];
+		},
+		listProcesses: () => {
+			order.push("processes");
+			return listing(proc(500, 1, "bun test"));
+		},
+		confirmGone: () => true,
+		log: () => {},
+		dryRun: true,
+	});
+	expect(order).toEqual(["folders", "processes"]);
+	expect(result.remove.map((r) => r.path)).toEqual([`${RUNS}/200-1000`]);
+});
+
+test("sweep(): a run the second witness does not see as gone is kept", () => {
+	const result = sweep({
+		runsDirs: [RUNS],
+		self: SELF,
+		listFolders: () => [`${RUNS}/200-1000`, `${RUNS}/300-1000`],
+		listProcesses: () => listing(),
+		confirmGone: (run) => run === "300-1000",
+		log: () => {},
+		dryRun: true,
+	});
+	expect(result.remove.map((r) => r.path)).toEqual([`${RUNS}/300-1000`]);
+});
+
+test("a profile flag counts only as a whole argument with a run folder as its value", () => {
+	const flag = profileFlag([RUNS]);
+	expect(flag.exec(`x --user-data-dir=${RUNS}/1-2/p y`)?.[1]).toBe("1-2");
+	expect(flag.exec(`x --profile ${RUNS}/1-2/p`)?.[1]).toBe("1-2");
+	expect(flag.exec(`x -profile ${RUNS}/1-2`)?.[1]).toBe("1-2");
+	expect(flag.exec(`x --user-data-dir=${RUNS}/1-2x/p`)).toBeNull();
+	expect(flag.exec(`x --user-data-dir=${RUNS}x/1-2/p`)).toBeNull();
+	expect(flag.exec(`x a--user-data-dir=${RUNS}/1-2/p`)).toBeNull();
+	expect(flag.exec(`cat ${RUNS}/1-2/p`)).toBeNull();
+});
+
+test("an unsafe TAB_MCP_BROWSER_DIR is refused", () => {
+	for (const dir of [
+		"tmp",
+		"./x/y/z",
+		"/",
+		"/tmp",
+		"/private/tmp",
+		homedir(),
+		tmpdir(),
+		"/a/b",
+		"/a b/c/d",
+	])
+		expect({ dir, refused: refuseBase(dir) !== undefined }).toEqual({
+			dir,
+			refused: true,
+		});
+	expect(refuseBase("/Users/u/.cache/tab-mcp/x")).toBeUndefined();
+	expect(refuseBase(join(tmpdir(), "tab-mcp-x"))).toBeUndefined();
+	const run = Bun.spawnSync(
+		[
+			process.execPath,
+			"-e",
+			`import { runsDir } from ${JSON.stringify(resolve(import.meta.dir, "../test/browser-dirs.ts"))}; runsDir();`,
+		],
+		{ env: { ...process.env, TAB_MCP_BROWSER_DIR: "/tmp" }, stderr: "pipe" },
+	);
+	expect(run.exitCode).not.toBe(0);
+	expect(run.stderr.toString()).toContain(
+		"TAB_MCP_BROWSER_DIR=/tmp is refused",
+	);
+});
+
+test("the runs folder through a symbolic link is known by both paths", () => {
+	const real = mkdtempSync(join(tmpdir(), "tab-mcp-real-"));
+	const link = `${real}-link`;
+	try {
+		symlinkSync(real, link);
+		mkdirSync(join(real, "runs"));
+		const run = Bun.spawnSync(
+			[
+				process.execPath,
+				"-e",
+				`import { runsDirs } from ${JSON.stringify(resolve(import.meta.dir, "../test/browser-dirs.ts"))}; console.log(JSON.stringify(runsDirs()));`,
+			],
+			{ env: { ...process.env, TAB_MCP_BROWSER_DIR: link } },
+		);
+		expect(JSON.parse(run.stdout.toString())).toEqual([
+			join(link, "runs"),
+			join(realpathSync(real), "runs"),
+		]);
+	} finally {
+		rmSync(link, { force: true });
+		rmSync(real, { recursive: true, force: true });
+	}
 });
 
 test("a process's start is the same in every time zone: ps runs in UTC", () => {

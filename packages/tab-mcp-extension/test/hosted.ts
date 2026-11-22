@@ -8,15 +8,19 @@
  *   bun packages/tab-mcp-extension/test/hosted.ts
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
+import { holdBrowserLock } from "../../../test/browser-lock.ts";
 import { build } from "../scripts/build.ts";
 import { Browser, findChromeForTesting } from "./browser.ts";
 
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "hosted.ts" });
+
 const binary = findChromeForTesting();
 if (binary === undefined) throw new Error("no Chrome for Testing");
-const outdir = join(mkdtempSync(join(tmpdir(), "tab-mcp-ext-")), "dist");
+const outdir = join(browserTempDir("hosted-build-"), "dist");
 const built = await build({ outdir, minify: false });
 const browser = await Browser.launch(binary, { extension: outdir });
 try {

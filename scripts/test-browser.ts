@@ -110,11 +110,18 @@ export function passedPerFile(junit: string): Map<string, number> {
 async function main(): Promise<number> {
 	const args = process.argv.slice(2);
 	if (args.includes("--sweep")) {
+		// Under the lock, without waiting: a running run's own sweep is enough.
+		try {
+			await holdBrowserLock({ wait: false, filter: "--sweep" });
+		} catch (error) {
+			console.error(`not sweeping: ${(error as Error).message}`);
+			return 1;
+		}
 		const plan = sweep({ dryRun: args.includes("--dry-run") });
 		console.error(
-			`sweep: ${plan.kill.length} process${plan.kill.length === 1 ? "" : "es"}, ${plan.remove.length} folder${plan.remove.length === 1 ? "" : "s"}${args.includes("--dry-run") ? " (dry run)" : ""}`,
+			`sweep: ${plan.kill.length} process${plan.kill.length === 1 ? "" : "es"}, ${plan.remove.length} folder${plan.remove.length === 1 ? "" : "s"}${args.includes("--dry-run") ? " (dry run)" : ""}${plan.kept ? ", kept everything" : ""}`,
 		);
-		return 0;
+		return plan.kept ? 1 : 0;
 	}
 	const without = new Set<Need>();
 	if (args.includes("--no-chrome")) {

@@ -3,20 +3,26 @@
  * `<base>/lock` (test/browser-dirs.ts), made with one `mkdir`, which either
  * makes it or finds it there; `owner.json` in it says who holds it.
  *
- * - `bun run test:browser` takes it before it starts anything, and so does
- *   test/browser-gate.ts for a browser file run with `TAB_MCP_BROWSER=1 bun
- *   test <file>`: nothing gets past it.
+ * - `bun run test:browser` takes it before it starts anything, and so do
+ *   test/browser-gate.ts (a browser file run with `TAB_MCP_BROWSER=1 bun test
+ *   <file>`), `test:browser --sweep` and the scripts that start a browser by
+ *   hand: nothing gets past it.
  * - The holder's processes take it again freely: the holder puts its id in
  *   `TAB_MCP_BROWSER_LOCK`, which its `bun test` inherits, and a process that
  *   holds it already (another file of the same run) holds it on. A child
  *   gets the variable only with `env: { ...process.env }`: without `env`,
- *   `Bun.spawn` passes the environment the process started with.
+ *   `Bun.spawn` passes the environment the process started with. Each such
+ *   process leaves `<pid>-<start>.holder` in the lock, so a `kill -9` of
+ *   `test:browser` alone does not free it while its `bun test` runs.
  * - A second run says who holds it and waits, polling, up to
  *   `TAB_MCP_BROWSER_WAIT_MS` (15 minutes), then fails; with `wait: false`
  *   (`--no-wait`, or `TAB_MCP_BROWSER_NO_WAIT=1`) it fails at once.
- * - A lock whose holder is gone (its PID does not run, or runs a process
- *   that started at another time), and every process of its run too, is
- *   taken over.
+ * - Taken over only on proof: the holder and every process of its run are
+ *   gone (test/browser-dirs.ts `runState`; "unknown" keeps), or `owner.json`
+ *   is missing or not valid for longer than `GRACE_MS`. A takeover holds
+ *   `<base>/lock.takeover` (one `mkdir`) and looks again inside it before it
+ *   removes the lock, so of two takers only one removes it, and a fresh lock
+ *   the other just made is never removed.
  * - Released at exit, and on SIGINT, SIGTERM and SIGHUP unless the caller
  *   handles those itself (scripts/test-browser.ts waits for its run first).
  */
@@ -24,13 +30,13 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
-	renameSync,
+	rmdirSync,
 	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { browserTestsBase, runAlive, runId } from "./browser-dirs.ts";
+import { browserTestsBase, runId, runState } from "./browser-dirs.ts";
 
 export interface LockOwner {
 	id: string;
@@ -41,15 +47,51 @@ export interface LockOwner {
 }
 
 export const lockDir = (): string => join(browserTestsBase(), "lock");
+const takeoverDir = (): string => join(browserTestsBase(), "lock.takeover");
 
-function readOwner(): LockOwner | undefined {
+/** How long a lock may be without a valid `owner.json` (being made) before it counts as stale. */
+export const GRACE_MS = 10_000;
+const WAIT_MS = 15 * 60_000;
+
+/** `owner.json` when it has the right shape; `undefined` for a missing or bad one. */
+export function parseOwner(text: string): LockOwner | undefined {
+	let value: unknown;
 	try {
-		return JSON.parse(
-			readFileSync(join(lockDir(), "owner.json"), "utf8"),
-		) as LockOwner;
+		value = JSON.parse(text);
 	} catch {
 		return undefined;
 	}
+	if (typeof value !== "object" || value === null) return undefined;
+	const o = value as Record<string, unknown>;
+	if (
+		typeof o["id"] !== "string" ||
+		!/^\d+-\d+$/.test(o["id"]) ||
+		typeof o["pid"] !== "number" ||
+		typeof o["worktree"] !== "string" ||
+		typeof o["filter"] !== "string" ||
+		typeof o["since"] !== "string"
+	)
+		return undefined;
+	return o as unknown as LockOwner;
+}
+
+function readOwner(): LockOwner | undefined {
+	try {
+		return parseOwner(readFileSync(join(lockDir(), "owner.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+/** The wait from `TAB_MCP_BROWSER_WAIT_MS`: a positive number of milliseconds, else 15 minutes. */
+export function waitMsFrom(value: string | undefined): number {
+	const ms = Number(value);
+	return value !== undefined &&
+		value.trim() !== "" &&
+		Number.isFinite(ms) &&
+		ms > 0
+		? ms
+		: WAIT_MS;
 }
 
 /** How a waiting run names the holder. */
@@ -62,6 +104,9 @@ export function describeOwner(owner: LockOwner): string {
 	return `browser tests of PID ${owner.pid} in ${owner.worktree} running since ${time}${owner.filter ? ` (${owner.filter})` : ""}`;
 }
 
+const lastResort = () =>
+	`If no browser test runs on this machine and this does not clear, remove ${lockDir()} by hand.`;
+
 let held: LockOwner | undefined;
 
 function release(): void {
@@ -71,30 +116,65 @@ function release(): void {
 	held = undefined;
 }
 
-/** Whether the holder or a process of its run (a `<pid>-<start>.holder` file) still runs. */
+/** Whether the holder or a process of its run (a `<pid>-<start>.holder` file) may still run: only "gone" for all counts. */
 function lockAlive(owner: LockOwner): boolean {
-	if (runAlive(owner.id)) return true;
-	let names: string[] = [];
+	if (runState(owner.id) !== "gone") return true;
+	let names: string[];
 	try {
 		names = readdirSync(lockDir());
 	} catch {
-		return false;
+		return true; // cannot look: keep
 	}
 	return names.some(
 		(name) =>
-			name.endsWith(".holder") && runAlive(name.slice(0, -".holder".length)),
+			name.endsWith(".holder") &&
+			runState(name.slice(0, -".holder".length)) !== "gone",
 	);
 }
 
-/** Take the lock away from a holder that is gone: rename it first, so only one of two takers gets it. */
-function takeOver(): void {
-	const stale = `${lockDir()}.stale-${process.pid}`;
+/** The lock's age in milliseconds, `undefined` when it is not there. */
+function lockAge(): number | undefined {
 	try {
-		renameSync(lockDir(), stale);
+		return Date.now() - statSync(lockDir()).mtimeMs;
 	} catch {
-		return; // someone else took it over first
+		return undefined;
 	}
-	rmSync(stale, { recursive: true, force: true });
+}
+
+/**
+ * Remove the lock if it is still the stale one judged so (`judged`: the
+ * gone owner's id, or `undefined` for a lock without a valid owner), under
+ * the takeover lock. Returns whether it removed it.
+ */
+function takeOver(judged: string | undefined): boolean {
+	try {
+		mkdirSync(takeoverDir());
+	} catch {
+		// another takeover runs, or one died in it
+		try {
+			if (Date.now() - statSync(takeoverDir()).mtimeMs > 30_000)
+				rmdirSync(takeoverDir());
+		} catch {
+			// gone meanwhile
+		}
+		return false;
+	}
+	try {
+		const owner = readOwner();
+		const stillStale =
+			judged === undefined
+				? owner === undefined && (lockAge() ?? 0) > GRACE_MS
+				: owner?.id === judged && !lockAlive(owner);
+		if (!stillStale) return false;
+		rmSync(lockDir(), { recursive: true, force: true });
+		return true;
+	} finally {
+		try {
+			rmdirSync(takeoverDir());
+		} catch {
+			// already gone
+		}
+	}
 }
 
 export interface LockOptions {
@@ -109,17 +189,29 @@ export interface LockOptions {
 /**
  * Hold the machine-wide lock of the browser tests: `"taken"` when this call
  * took it, `"held"` when this process or the run it belongs to holds it.
+ * Throws when another run holds it and this one may not wait, or waited too
+ * long.
  */
 export async function holdBrowserLock(
 	options: LockOptions = {},
 ): Promise<"taken" | "held"> {
 	const log = options.log ?? ((line: string) => console.error(line));
 	const wait = options.wait ?? process.env["TAB_MCP_BROWSER_NO_WAIT"] !== "1";
-	const waitMs = Number(process.env["TAB_MCP_BROWSER_WAIT_MS"] ?? 15 * 60_000);
+	const waitMs = waitMsFrom(process.env["TAB_MCP_BROWSER_WAIT_MS"]);
 	const poll = Math.min(2_000, Math.max(100, waitMs / 20));
-	const deadline = Date.now() + waitMs;
+	// Without waiting for a holder, a stale lock still gets this long to clear.
+	const deadline = Date.now() + (wait ? waitMs : 5_000);
 	let told = false;
+	// First: without a readable start of its own, a run does not start.
+	const me = runId();
 	mkdirSync(browserTestsBase(), { recursive: true });
+	const retry = async (why: string) => {
+		if (Date.now() > deadline)
+			throw new Error(
+				`could not take the browser test lock: ${why}. ${lastResort()}`,
+			);
+		await Bun.sleep(poll);
+	};
 	for (;;) {
 		const owner = readOwner();
 		if (owner !== undefined && owner.id === held?.id) return "held";
@@ -130,7 +222,7 @@ export async function holdBrowserLock(
 			// A process of the holder's run: it keeps the lock held should the
 			// holder die first (a `kill -9` of `test:browser` leaves its bun test).
 			try {
-				writeFileSync(join(lockDir(), `${runId()}.holder`), "");
+				writeFileSync(join(lockDir(), `${me}.holder`), "");
 			} catch {
 				// the lock went meanwhile
 			}
@@ -139,24 +231,32 @@ export async function holdBrowserLock(
 		try {
 			mkdirSync(lockDir());
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			if ((error as { code?: string }).code !== "EEXIST") throw error;
 			if (owner === undefined) {
-				// Just made and owner.json not written yet, or left half made.
-				const age = Date.now() - statSync(lockDir()).mtimeMs;
-				if (age > 10_000) takeOver();
-				else await Bun.sleep(100);
+				const age = lockAge();
+				if (age === undefined) continue; // released meanwhile: try again at once
+				if (age > GRACE_MS && takeOver(undefined)) {
+					log("took over a lock without a valid owner.json");
+					continue;
+				}
+				await retry("the lock has no valid owner.json");
 				continue;
 			}
 			if (!lockAlive(owner)) {
-				log(`taking over the lock of ${describeOwner(owner)}: it is gone`);
-				takeOver();
+				if (takeOver(owner.id)) {
+					log(`took over the lock of ${describeOwner(owner)}: it is gone`);
+					continue;
+				}
+				await retry(
+					`the lock of ${describeOwner(owner)} is stale and could not be taken over`,
+				);
 				continue;
 			}
 			if (!wait)
 				throw new Error(`${describeOwner(owner)}; not waiting (--no-wait)`);
 			if (Date.now() > deadline)
 				throw new Error(
-					`${describeOwner(owner)}; waited ${Math.round(waitMs / 1000)} s, giving up`,
+					`${describeOwner(owner)}; waited ${Math.round(waitMs / 1000)} s, giving up. ${lastResort()}`,
 				);
 			if (!told) {
 				log(
@@ -168,7 +268,7 @@ export async function holdBrowserLock(
 			continue;
 		}
 		held = {
-			id: runId(),
+			id: me,
 			pid: process.pid,
 			worktree: process.cwd(),
 			filter: options.filter ?? "",

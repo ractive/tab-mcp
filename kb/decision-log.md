@@ -5320,23 +5320,42 @@ folders in the temp folder that day).
   `<pid>-<start>.holder` file, so a `kill -9` of `test:browser` alone does not free
   the lock while its `bun test` still runs). A second run says whose run holds it and
   waits, polling, up to 15 minutes, then fails; `--no-wait` (or
-  `TAB_MCP_BROWSER_NO_WAIT=1`) fails at once. A lock whose holder and run are gone is
-  taken over (renamed away first, so only one of two takers wins). Released at exit and
-  on SIGINT, SIGTERM and SIGHUP. Waiting, not failing, so agents do not retry in a
-  loop.
-- **A process is known by `<pid>-<start>`**, the start from `ps -o lstart` read in UTC:
-  `bun test` runs in UTC and other processes in local time, so a start read as local
-  time differed by an hour between them.
+  `TAB_MCP_BROWSER_NO_WAIT=1`) fails at once. Released at exit and on SIGINT, SIGTERM
+  and SIGHUP. Waiting, not failing, so agents do not retry in a loop. Also taken by
+  `test:browser --sweep` (without waiting) and by every script that starts a browser
+  by hand (`hosted.ts`, `firefox-sites.ts`, `screenshots.ts`, `promo.ts`, the spike's
+  `spike.ts`, `claude-code.ts`; `hold-chrome.ts` holds it through its test run).
+- **The principle (review of PR 209):** this code kills and deletes on the owner's
+  machine, so when anything is uncertain it keeps, and it acts only on what it can
+  prove is this project's and dead.
+  - A lock is taken over only when its holder and every process of its run are gone
+    by `runState` ("unknown" keeps), or its `owner.json` is missing or of the wrong
+    shape for longer than 10 s. A takeover holds `lock.takeover` (one `mkdir`) and
+    looks again inside it, so of two takers one removes the stale lock and a fresh one
+    is never removed. Every retry sleeps and keeps to the time limit and `--no-wait`;
+    a bad `TAB_MCP_BROWSER_WAIT_MS` is the default; the messages say how to clear a
+    lock by hand as a last resort.
+  - A process is known by `<pid>-<start>`, the start from `ps -o lstart` read in UTC
+    (`bun test` runs in UTC, other processes in local time: a start read as local time
+    differed by an hour). A run without a readable start of its own does not start.
+    "Gone" needs evidence: `process.kill(pid, 0)` says ESRCH, or `ps` reads another
+    start for the PID.
 - **One parent folder:** every profile and build of the browser tests is
-  `runs/<pid>-<start>/<kind>-XXXXXX` (`test/browser-dirs.ts`; the four harnesses and
-  the browser test files), in place of nine `tab-mcp-*-` and `webmcp-spike-` prefixes
-  in the temp folder. An empty run folder goes at exit.
-- **The sweep** (`test/browser-sweep.ts`), after taking the lock: it stops the
-  processes whose command line names a run folder whose run is gone, and removes those
-  folders. Never by a program's name: the owner's Chrome and Firefox, and anything not
-  in a run folder, are never chosen. During the transition also: a browser with an old
-  temp profile when nothing but launchd is above its processes, and an old temp folder
-  older than an hour that no process names. The harnesses' own reap (PR 204) stays;
+  `runs/<pid>-<start>/<kind>-XXXXXX` (`test/browser-dirs.ts`; the four harnesses, the
+  browser test files, `hosted.ts`), in place of nine `tab-mcp-*-` and `webmcp-spike-`
+  prefixes in the temp folder. An empty run folder goes at exit. `TAB_MCP_BROWSER_DIR`
+  must be absolute, three levels deep at least, without white space, and not a home or
+  temp folder itself.
+- **The sweep** (`test/browser-sweep.ts`), under the lock, before and after a run. It
+  touches nothing outside its own parent folder. It stops a process only when a browser
+  profile flag of it, as a whole argument, has a run folder of a gone run as its value
+  (`--user-data-dir=<runs>/<id>/…`, `--profile`/`-profile <runs>/<id>/…`), given or
+  resolved path; never by a program's name, never an editor or a shell that names the
+  folder. It removes run folders of gone runs. "Gone" is read from a listing parsed
+  whole that contains the sweeper itself with its start, and asked again before acting;
+  a failing, empty, partial or unparsable listing keeps everything. Folders are listed
+  before processes. No transition rules for the old temp folders (the first run removed
+  this machine's 120; CI machines are fresh). The harnesses' own reap (PR 204) stays;
   the sweep is for what it cannot do. `bun run test:browser --sweep --dry-run` lists
   what it would do.
 - **The rule (`CLAUDE.md`):** "never several at once" became "a second run waits".

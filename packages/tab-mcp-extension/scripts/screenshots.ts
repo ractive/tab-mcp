@@ -18,8 +18,12 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { holdBrowserLock } from "../../../test/browser-lock.ts";
 import { Browser, findChromeForTesting, type Page } from "../test/browser.ts";
 import { build } from "./build.ts";
+
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "screenshots.ts" });
 
 const ROOT = join(import.meta.dir, "..");
 const OUT = join(ROOT, "assets/store");

@@ -15,8 +15,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { holdBrowserLock } from "../../../test/browser-lock.ts";
 import { build } from "../scripts/build.ts";
 import { Firefox, findFirefox } from "./firefox.ts";
+
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "firefox-sites.ts" });
 
 const WAIT_MS = 10_000;
 

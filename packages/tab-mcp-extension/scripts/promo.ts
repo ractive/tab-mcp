@@ -15,7 +15,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
+import { holdBrowserLock } from "../../../test/browser-lock.ts";
 import { Browser, findChromeForTesting } from "../test/browser.ts";
+
+// One browser run per machine (test/browser-lock.ts).
+await holdBrowserLock({ filter: "promo.ts" });
 
 const OUT = join(import.meta.dir, "../assets/store");
 const GREEN = "#0c4733";

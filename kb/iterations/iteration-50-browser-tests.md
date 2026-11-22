@@ -69,18 +69,25 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 - **One browser run per machine** (DEC-219, `test/browser-lock.ts`): a lock folder under
   `~/.cache/tab-mcp/browser-tests/`, taken by `test:browser` before it starts anything
   and by the gate for a browser file run on its own; a second run says whose run holds
-  it and waits (15 minutes at most), `--no-wait` fails at once; a lock whose run is gone
-  is taken over; the run's own processes hold it on.
+  it and waits (15 minutes at most), `--no-wait` fails at once; a lock whose run is
+  proven gone is taken over (one of two takers); the run's own processes hold it on;
+  `test:browser --sweep` and every script that starts a browser by hand take it too.
 - **One parent folder** (`test/browser-dirs.ts`): every profile and build of the browser
-  tests is `runs/<pid>-<start>/<kind>-XXXXXX`, for the harnesses and the browser files.
-- **The sweep** (`test/browser-sweep.ts`), after the lock: the browsers and folders of
-  runs that are gone, and during the transition old orphaned temp profiles and old
-  unused temp folders; never a browser by its program's name. `bun run test:browser
-  --sweep --dry-run` lists what it would do. The first sweep removed 120 old folders.
+  tests is `runs/<pid>-<start>/<kind>-XXXXXX`, for the harnesses, the browser files and
+  `hosted.ts`; an unsafe `TAB_MCP_BROWSER_DIR` is refused.
+- **The sweep** (`test/browser-sweep.ts`), under the lock, before and after a run: only
+  inside its own parent folder, only browsers whose profile flag names a run folder of a
+  run proven gone, and those folders; in doubt (a listing that fails, is empty, partial
+  or unparsable) it keeps everything and says why. No rules for the old temp folders:
+  the first sweep had removed this machine's 120. `bun run test:browser --sweep
+  --dry-run` lists what it would do.
 - **Tests:** the lock with real processes (a second run waits and then runs, `--no-wait`,
   a time limit, a gone holder taken over, a gone holder whose run still has a process
-  not, no deadlock within a run), the sweep's choice on made-up process and folder
-  lists, `ps` start times the same in every time zone, and one real check
+  not, two takers of one stale lock, bad `owner.json` files, no deadlock within a run, a
+  bad wait), the sweep's choice on made-up lists (an editor naming a gone run's folder is
+  not chosen; an empty, failing or unparsable listing keeps everything; folders listed
+  before processes; symbolic links; a second look), an unsafe `TAB_MCP_BROWSER_DIR`,
+  `ps` start times the same in every time zone, and one real check
   (`scripts/sweep.browser.test.ts`): a test process killed with SIGKILL leaves its
   Chrome, and the next sweep stops it and removes its folder.
 - **`setup.test.ts`:** one test per shell with 30 s each (PowerShell's cold start took
