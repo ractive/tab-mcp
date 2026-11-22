@@ -17,7 +17,8 @@
  * (test/browser-lock.ts) before it starts anything, and waits while another
  * run holds it, saying whose (`--no-wait` fails at once instead). Then it
  * sweeps the browsers and folders of runs that are gone
- * (test/browser-sweep.ts). `--sweep` only sweeps, `--sweep --dry-run` only
+ * (test/browser-sweep.ts), and again after the run. `--sweep` only sweeps,
+ * `--sweep --dry-run` only
  * says what it would stop and remove.
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -202,6 +203,9 @@ async function main(): Promise<number> {
 			},
 		);
 		const code = await run.exited;
+		// Its run folder (a harness's reap empties it at exit, after the
+		// folder's own exit hook has run) and anything a crash left.
+		sweep();
 		const signal = run.signalCode;
 		if (signal !== null)
 			return (
