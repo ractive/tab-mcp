@@ -4821,8 +4821,10 @@ of the code is too long to be completely shown", and "we anyway should show a fo
 when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
 
 - **One input, not eight.** The field on `/authorize` stays one `<input>` and is drawn
-  as four boxes, a dash and four boxes: a monospace font with a letter spacing of 1ch
-  puts each character in a cell of 2ch, and decorative boxes behind the input (hidden
+  as four boxes, a dash and four boxes: a monospace font with a letter spacing of 1.5ch
+  puts each character in a cell of 2.5ch (boxes of 2.1ch, set wider on 2026-11-22 at the
+  owner's wish; the font size follows the width of the page's column, `main` being a
+  size container, so the row of 23.25ch fits down to 263 px), and decorative boxes behind the input (hidden
   from assistive technology) mark the cells. The pages where such fields are hard to use
   are mostly the ones with one input per letter: paste, selection, deleting, input
   methods, screen readers, mobile keyboards and autofill all have to be rebuilt there.
@@ -4835,7 +4837,11 @@ when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
   the letter after it. Nothing happens while an input method composes, and nothing
   submits by itself. It removes `maxlength`, which would cut a paste with spaces around
   it before the script could tidy it, and marks the field as enhanced, which draws the
-  boxes and highlights the box the caret is in. The rules are pure functions in
+  boxes and highlights the box the caret is in. That box stands in for the input's own
+  caret, which is hidden only while a box is highlighted: it shows again with a
+  selection, during an input method's composition (the script marks no box then), and in
+  forced-colors mode (the highlighted box differs there by `Highlight` alone). The box
+  has a thicker border and a bar along its bottom edge besides its colour. The rules are pure functions in
   `src/oauth/code-field.ts` with unit tests; `src/oauth/code-field-page.ts` (type-checked
   with the DOM in `tsconfig.browser.json`) wires them to the field.
 - **Undo is not kept** (review of PR 194). Setting the field's `value` clears the

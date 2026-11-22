@@ -26,10 +26,13 @@ if (
 ) {
 	const boxes = row.querySelectorAll(".code-boxes > span");
 	let edit: Edit | undefined;
+	// While an input method composes, no box stands in for the caret.
+	let composing = false;
 
 	const paint = () => {
 		const start = field.selectionStart;
 		const at =
+			!composing &&
 			document.activeElement === field &&
 			start !== null &&
 			start === field.selectionEnd
@@ -71,7 +74,14 @@ if (
 		if (event instanceof InputEvent && event.isComposing) return;
 		apply(done);
 	});
-	field.addEventListener("compositionend", () => apply());
+	field.addEventListener("compositionstart", () => {
+		composing = true;
+		paint();
+	});
+	field.addEventListener("compositionend", () => {
+		composing = false;
+		apply();
+	});
 	field.addEventListener("change", () => apply());
 	for (const type of [
 		"focus",

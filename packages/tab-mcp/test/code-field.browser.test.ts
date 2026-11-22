@@ -425,6 +425,10 @@ describe.skipIf(chrome === undefined)("the code field in Chrome", () => {
 			),
 		).toEqual({ enhanced: false, boxes: "none", maxlength: "12" });
 		await page.eval(`${FIELD}.focus()`);
+		// The plain input keeps its own caret.
+		expect(
+			await page.eval<string>(`getComputedStyle(${FIELD}).caretColor`),
+		).not.toBe("rgba(0, 0, 0, 0)");
 		const typed = `${code.slice(0, 4).toLowerCase()} - ${code.slice(5).toLowerCase()}`;
 		await page.send("Input.insertText", { text: typed });
 		expect((await field(page)).value).toBe(typed);
@@ -436,6 +440,177 @@ describe.skipIf(chrome === undefined)("the code field in Chrome", () => {
 		const callback = nextCallback();
 		await page.click('button[value="connect"]');
 		expect((await callback).get("code")).toBeTruthy();
+		await page.close();
+	});
+});
+
+/**
+ * Where each letter sits against its box, from the geometry of the page
+ * itself (so any cell width passes): the letter's horizontal centre, from the
+ * input's padding, the width of `1ch` and the letter spacing, against the
+ * centre of the box drawn for it; the boxes' rectangles, the `.at` boxes
+ * and whether the page scrolls sideways.
+ */
+function geometry(page: Page): Promise<{
+	offsets: number[];
+	dash: number;
+	at: number[];
+	overflow: boolean;
+	boxWidth: number;
+	letterWidth: number;
+	rowRight: number;
+	viewport: number;
+}> {
+	return page.eval(`(() => {
+		const f = ${FIELD};
+		const cs = getComputedStyle(f);
+		const probe = document.createElement("span");
+		probe.style.cssText = "position:absolute;visibility:hidden;width:1ch;font:" + cs.font;
+		document.body.append(probe);
+		const ch = probe.getBoundingClientRect().width;
+		probe.remove();
+		const cell = ch + parseFloat(cs.letterSpacing);
+		const left = f.getBoundingClientRect().left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft) - f.scrollLeft;
+		const boxes = [...document.querySelectorAll(".code-boxes > span")].map((b) => b.getBoundingClientRect());
+		const mid = (r) => (r.left + r.right) / 2;
+		const letters = f.value.replace("-", "").length;
+		const offsets = [];
+		for (let i = 0; i < letters; i++) {
+			const index = i < 4 ? i : i + 1;
+			offsets.push(left + index * cell + ch / 2 - mid(boxes[index]));
+		}
+		return {
+			offsets,
+			dash: mid(boxes[4]) - (boxes[3].right + boxes[5].left) / 2,
+			at: boxes.map((b, i) => document.querySelectorAll(".code-boxes > span")[i].classList.contains("at") ? i : -1).filter((i) => i >= 0),
+			overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+			boxWidth: boxes[0].width,
+			letterWidth: ch,
+			rowRight: document.querySelector(".code-boxes").getBoundingClientRect().right,
+			viewport: document.documentElement.clientWidth,
+		};
+	})()`);
+}
+
+/** Wait until exactly the boxes `expected` are marked as the caret's. */
+async function atIs(page: Page, expected: number[]): Promise<void> {
+	const deadline = Date.now() + 3000;
+	let at: number[] = [];
+	while (Date.now() < deadline) {
+		at = (await geometry(page)).at;
+		if (JSON.stringify(at) === JSON.stringify(expected)) return;
+		await Bun.sleep(20);
+	}
+	expect(at).toEqual(expected);
+}
+
+const caretColor = (page: Page) =>
+	page.eval<string>(`getComputedStyle(${FIELD}).caretColor`);
+
+/**
+ * The one assumption the box arithmetic rests on: every letter of the code's
+ * alphabet and the dash is exactly `1ch` wide in the font the input uses.
+ */
+function advances(page: Page): Promise<{ font: string; worst: number }> {
+	return page.eval(`(() => {
+		const f = ${FIELD};
+		const font = getComputedStyle(f).font;
+		const probe = document.createElement("span");
+		probe.style.cssText = "position:absolute;visibility:hidden;width:1ch;font:" + font;
+		document.body.append(probe);
+		const ch = probe.getBoundingClientRect().width;
+		probe.remove();
+		const ctx = document.createElement("canvas").getContext("2d");
+		ctx.font = font;
+		let worst = 0;
+		for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ-") worst = Math.max(worst, Math.abs(ctx.measureText(c).width - ch));
+		return { font, worst };
+	})()`);
+}
+
+describe.skipIf(chrome === undefined)("the code boxes in Chrome", () => {
+	test("the box marks the caret and the input's own caret hides only then; one box when empty, full and in the middle, none with a selection", async () => {
+		const page = await openPairingPage();
+		expect(await caretColor(page)).toBe("rgba(0, 0, 0, 0)");
+		await atIs(page, [0]);
+		await typeKeys(page, "nhnxmnmh");
+		await atIs(page, [8]);
+		await caretAt(page, 3);
+		await atIs(page, [3]);
+		// A selection of several letters: the native highlight shows them, no
+		// box, and the native caret is back.
+		await clear(page);
+		await atIs(page, []);
+		expect(await caretColor(page)).not.toBe("rgba(0, 0, 0, 0)");
+		await page.close();
+	});
+
+	test("while an input method composes no box is marked and the native caret shows; the box is back afterwards", async () => {
+		const page = await openPairingPage();
+		await typeKeys(page, "nh");
+		await atIs(page, [2]);
+		await page.eval(
+			`${FIELD}.dispatchEvent(new CompositionEvent("compositionstart"))`,
+		);
+		await atIs(page, []);
+		expect(await caretColor(page)).not.toBe("rgba(0, 0, 0, 0)");
+		// A selection change during the composition paints no box either.
+		await caretAt(page, 1);
+		await Bun.sleep(100);
+		await atIs(page, []);
+		await page.eval(
+			`${FIELD}.dispatchEvent(new CompositionEvent("compositionend"))`,
+		);
+		await atIs(page, [1]);
+		expect(await caretColor(page)).toBe("rgba(0, 0, 0, 0)");
+		await page.close();
+	});
+
+	test("each letter is centred in its box, the dash between the groups, boxes roomier than the letters, nothing scrolled or cropped, from 263 px to desktop width", async () => {
+		// 263 px is 280 px less a classic scrollbar of 17 px.
+		for (const width of [263, 280, 320, 1280]) {
+			const page = await openPairingPage({ width });
+			const font = await advances(page);
+			expect(font.font).not.toBe("");
+			expect(font.worst).toBeLessThan(0.5);
+			// Four letters: no dash typed, and no box of the second group used.
+			await typeKeys(page, "nhnx");
+			let g = await geometry(page);
+			expect(g.offsets).toHaveLength(4);
+			for (const o of g.offsets) expect(Math.abs(o)).toBeLessThan(1);
+			expect(g.overflow).toBe(false);
+			// Eight letters: the dash is there.
+			await typeKeys(page, "mnmh");
+			expect((await field(page)).value).toBe("NHNX-MNMH");
+			g = await geometry(page);
+			expect(g.offsets).toHaveLength(8);
+			for (const o of g.offsets) expect(Math.abs(o)).toBeLessThan(1);
+			expect(Math.abs(g.dash)).toBeLessThan(1);
+			expect(g.overflow).toBe(false);
+			expect(g.rowRight).toBeLessThanOrEqual(g.viewport);
+			// Roomier than the letters: a box is at least twice a letter wide.
+			expect(g.boxWidth).toBeGreaterThanOrEqual(g.letterWidth * 2);
+			expect(await fits(page)).toEqual({
+				scroll: true,
+				inView: true,
+				page: true,
+			});
+			await page.close();
+		}
+	});
+
+	test("the highlighted box follows the caret at the start, in front of the dash and at the end", async () => {
+		const page = await openPairingPage();
+		await typeKeys(page, "nhnxmnmh");
+		for (const [caret, box] of [
+			[0, 0],
+			[4, 5],
+			[8, 8],
+			[9, 8],
+		] as const) {
+			await caretAt(page, caret);
+			await atIs(page, [box]);
+		}
 		await page.close();
 	});
 });

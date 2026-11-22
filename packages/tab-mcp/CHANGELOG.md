@@ -9,6 +9,13 @@ All notable changes to the relay `@ractive-ch/tab-mcp`, released with the Git ta
 The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 `ghcr.io/ractive/tab-mcp`, tagged with the version.
 
+## Unreleased
+
+### Changed
+
+- The boxes of the connect page's code field are wider: the letters no longer nearly
+  fill them.
+
 ## [0.13.2][relay-0.13.2] - 2026-11-22
 
 ### Fixed

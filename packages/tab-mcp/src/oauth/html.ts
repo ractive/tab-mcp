@@ -40,7 +40,7 @@ export const AUTHORIZE_CSS = `:root { color-scheme: light dark; --accent: #1d4ed
 @media (prefers-color-scheme: dark) { :root { --accent: #93b4ff; --error: #fca5a5; } }
 * { box-sizing: border-box; }
 body { margin: 0; font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: Canvas; color: CanvasText; }
-main { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; }
+main { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; container-type: inline-size; }
 h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 1rem; }
 p { margin: 0 0 1rem; }
 code, .origin { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
@@ -51,16 +51,18 @@ label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
 .code-field { display: inline-block; position: relative; max-width: 100%; vertical-align: top; }
 .code-field input { font: 1.5rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; width: calc(12ch + 2.4em + 1rem + 4px); max-width: 100%; padding: 0.4rem 0.5rem; border: 2px solid GrayText; border-radius: 0.4rem; background: Field; color: FieldText; }
 .code-boxes { display: none; }
-.code-field.enhanced { font: min(1.5rem, 7.5vw)/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.code-field.enhanced input { position: relative; font: inherit; letter-spacing: 1ch; width: calc(18.5ch + 2px); height: 1.8em; padding: 0 0 0 0.5ch; border: 0; background: transparent; }
+.code-field.enhanced { font: min(1.5rem, 5.6vw)/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code-field.enhanced { font: min(1.5rem, calc((100cqi - 2px) / 14.6))/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code-field.enhanced input { position: relative; font: inherit; letter-spacing: 1.5ch; width: calc(23.25ch + 2px); height: 1.8em; padding: 0 0 0 0.75ch; border: 0; background: transparent; }
 .code-field.enhanced input:focus-visible { outline: none; }
-.code-field.enhanced .code-boxes { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: 18ch; pointer-events: none; border-radius: 0.4rem; }
+.code-field.enhanced:has(.at) input { caret-color: transparent; }
+.code-field.enhanced .code-boxes { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: 22.5ch; pointer-events: none; border-radius: 0.4rem; }
 .code-field.enhanced:has(input:focus-visible) .code-boxes { outline: 3px solid var(--accent); outline-offset: 2px; }
-.code-boxes > span { width: 1.7ch; margin: 0 0.15ch; border: 2px solid GrayText; border-radius: 0.3em; background: Field; }
+.code-boxes > span { width: 2.1ch; margin: 0 0.2ch; border: 2px solid GrayText; border-radius: 0.3em; background: Field; }
 .code-boxes > .code-dash { display: flex; align-items: center; justify-content: center; border-color: transparent; background: none; }
 .code-boxes > .code-dash::before { content: ""; width: 0.8ch; border-top: 2px solid GrayText; }
 .code-field.has-dash .code-dash::before { visibility: hidden; }
-.code-boxes > .at { border-color: var(--accent); }
+.code-boxes > .at { border-width: 3px; border-color: var(--accent); box-shadow: inset 0 -0.18em 0 var(--accent); }
 @media (forced-colors: active) {
   .code-field.enhanced input { forced-color-adjust: none; color: CanvasText; }
   .code-field.enhanced:has(input:focus-visible) .code-boxes { outline-color: Highlight; }
@@ -68,7 +70,8 @@ label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
   .code-boxes > span { border-color: CanvasText; background: Canvas; }
   .code-boxes > .code-dash { border-color: transparent; background: none; }
   .code-boxes > .code-dash::before { border-color: CanvasText; }
-  .code-boxes > .at { border-color: Highlight; }
+  .code-boxes > .at { border-color: Highlight; box-shadow: inset 0 -0.18em 0 Highlight; }
+  .code-field.enhanced:has(.at) input { caret-color: auto; }
 }
 input[type="text"]:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 1.25rem; }
