@@ -1,9 +1,16 @@
 /**
  * The convention that keeps browsers out of plain `bun test`: a test file
- * that reaches a browser harness (through its imports, at any depth) is
- * named `*.browser.test.ts`, imports test/browser-gate.ts, and looks for its
- * browser only behind the gate. `bun run test:browser` runs exactly these
- * files.
+ * that can launch a browser is named `*.browser.test.ts`, imports
+ * test/browser-gate.ts, and looks for its browser only behind the gate.
+ * `bun run test:browser` runs exactly these files.
+ *
+ * A file can launch a browser when it reaches a harness through its imports
+ * (at any depth) and finds a browser: it, or a module on the way that is not
+ * a harness, calls a harness's `find…()` or reads `CHROME_PATH` or
+ * `FIREFOX_PATH`. Every harness launches only the binary it is given, so a
+ * file that takes a pure helper from a harness and finds no browser
+ * (`cdp.test.ts`, its `profilePattern`) launches none and stays in the fast
+ * suite.
  */
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -38,17 +45,31 @@ async function imports(file: string): Promise<string[]> {
 		.filter((path) => existsSync(path));
 }
 
-/** Whether `file` reaches a harness through its relative imports. */
-async function reachesHarness(file: string): Promise<boolean> {
+/** A call of a harness's browser discovery, or a read of where a browser is. */
+const FINDS =
+	/\bfind(Chrome|ChromeForTesting|Firefox)\(|\b(CHROME|FIREFOX)_PATH\b/;
+
+/**
+ * Whether `file` can launch a browser: it reaches a harness through its
+ * relative imports, and it or a module it reaches that is not a harness
+ * finds a browser.
+ */
+async function launchesBrowser(file: string): Promise<boolean> {
 	const seen = new Set<string>();
 	const todo = [file];
+	let harness = false;
+	let finds = false;
 	for (let next = todo.pop(); next !== undefined; next = todo.pop()) {
-		if (HARNESSES.includes(next)) return true;
 		if (seen.has(next)) continue;
 		seen.add(next);
+		if (HARNESSES.includes(next)) {
+			harness = true;
+			continue;
+		}
+		if (FINDS.test(await Bun.file(next).text())) finds = true;
 		todo.push(...(await imports(next)));
 	}
-	return false;
+	return harness && finds;
 }
 
 async function testFiles(): Promise<string[]> {
@@ -66,12 +87,20 @@ test("the harnesses exist", () => {
 		expect(existsSync(harness)).toBe(true);
 });
 
-test("a test file that reaches a browser harness is named *.browser.test.ts, and only such a file", async () => {
-	const reaching: string[] = [];
+test("a test file that can launch a browser is named *.browser.test.ts, and only such a file", async () => {
+	const launching: string[] = [];
 	for (const file of await testFiles())
-		if (await reachesHarness(join(ROOT, file))) reaching.push(file);
-	expect(reaching.length).toBeGreaterThan(0);
-	expect(reaching).toEqual(await browserTestFiles(ROOT));
+		if (await launchesBrowser(join(ROOT, file))) launching.push(file);
+	expect(launching.length).toBeGreaterThan(0);
+	expect(launching).toEqual(await browserTestFiles(ROOT));
+});
+
+test("a test of a harness's pure helper launches nothing and stays in the fast suite", async () => {
+	const cdp = join(ROOT, "packages/tab-mcp-client/test/cdp.test.ts");
+	expect((await imports(cdp)).filter((i) => HARNESSES.includes(i))).toEqual([
+		join(ROOT, "packages/tab-mcp-client/test/cdp.ts"),
+	]);
+	expect(await launchesBrowser(cdp)).toBe(false);
 });
 
 test("every browser test file imports the gate and looks for a browser only behind it", async () => {

@@ -21,20 +21,23 @@ that saves the most first. The decision on the split and the rule is DEC-220.
 
 ## What changed (pull request 1)
 
-- **Names and the gate.** A test file that launches a browser, or tests a browser
-  harness, is named `*.browser.test.ts` and imports `test/browser-gate.ts`; it looks
-  for its browser only when `TAB_MCP_BROWSER=1`. Plain `bun test` loads it and starts
-  nothing: no browser, no build of the extension, no relay. Renamed: the extension's
-  `e2e`, `fill-e2e`, `firefox-e2e`, `firefox-fill-e2e` (`extension`, `fill`, `firefox`,
-  `firefox-fill`) and `harness`; the client's `browser` (`page`), `webmcp-browser`,
-  `serve-browser` and `cdp`; the relay's `code-field-browser`; the spike's `webmcp`
-  (`webmcp-canary`) and `browser` (`harness`); the calculator's `e2e` (`calculator`); the
-  React example's `e2e` (`react-todo`).
-- **The convention test** (`scripts/test-browser.test.ts`): a test file that reaches a
-  harness (`cdp.ts`, the extension's `browser.ts` and `firefox.ts`, the spike's
-  `browser.ts`) through its imports is named so, and only such a file; each imports the
-  gate and looks for a browser only behind it; CI and the release workflows run what
-  they should.
+- **Names and the gate.** A test file that launches a browser is named
+  `*.browser.test.ts` and imports `test/browser-gate.ts`; it looks for its browser only
+  when `TAB_MCP_BROWSER=1`. Plain `bun test` loads it and starts nothing: no browser, no
+  build of the extension, no relay. Renamed: the extension's `e2e`, `fill-e2e`,
+  `firefox-e2e`, `firefox-fill-e2e` (`extension`, `fill`, `firefox`, `firefox-fill`) and
+  `harness`; the client's `browser` (`page`), `webmcp-browser` and `serve-browser`; the
+  relay's `code-field-browser`; the spike's `webmcp` (`webmcp-canary`) and `browser`
+  (`harness`); the calculator's `e2e` (`calculator`); the React example's `e2e`
+  (`react-todo`). The client's `cdp.test.ts` (the reap's pattern against stand-in
+  processes) launches none and stays.
+- **The convention test** (`scripts/test-browser.test.ts`): a test file that can launch
+  a browser is named so, and only such a file. It can when it reaches a harness
+  (`cdp.ts`, the extension's `browser.ts` and `firefox.ts`, the spike's `browser.ts`)
+  through its imports and finds a browser (it, or a module on the way that is not a
+  harness, calls a `find…()` or reads `CHROME_PATH`/`FIREFOX_PATH`): every harness
+  launches only the binary it is given. Each browser file imports the gate and looks
+  for a browser only behind it; CI and the release workflows run what they should.
 - **Scripts.** `verify` keeps its text and starts no browser. `test:browser [filter]`
   (`scripts/test-browser.ts`) runs the browser files, or those whose path contains a
   filter, in one `bun test`. `verify:all` runs both.

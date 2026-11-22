@@ -5153,12 +5153,14 @@ before every commit, started 27 browsers and built the extension 12 times, and s
 agents ran it at once ([the audit](/research/browser-test-audit-2026-11-22.md),
 iteration 50).
 
-- **The split:** a test file that launches a browser, or tests a browser harness, is
-  named `*.browser.test.ts` and looks for its browser only behind `test/browser-gate.ts`
-  (`TAB_MCP_BROWSER=1`). Plain `bun test`, and so `bun run verify`, loads it and starts
-  nothing. `bun run test:browser [filter]` runs those files; `bun run verify:all` runs
-  both. `scripts/test-browser.test.ts` fails for a file that reaches a harness and is not
-  named so, or does not import the gate. An environment gate, not a `bun test` ignore
+- **The split:** a test file that launches a browser is named `*.browser.test.ts` and
+  looks for its browser only behind `test/browser-gate.ts` (`TAB_MCP_BROWSER=1`). Plain
+  `bun test`, and so `bun run verify`, loads it and starts nothing. `bun run
+  test:browser [filter]` runs those files; `bun run verify:all` runs both.
+  `scripts/test-browser.test.ts` fails for a file that can launch a browser (it reaches a
+  harness and finds a browser) and is not named so, for a file named so that cannot,
+  and for one that does not import the gate. A test of a harness's pure helper
+  (`cdp.test.ts`) stays in the fast suite. An environment gate, not a `bun test` ignore
   flag: a file with a browser test that is loaded by mistake still starts nothing.
 - **The rule (`CLAUDE.md`):** `bun run verify` before every commit (no browser, about a
   minute and a half: 85 s here and 1 min 41 s for the CI job, against 4 min 14 s before); `bun run test:browser <filter>` before a commit that changes code a browser
