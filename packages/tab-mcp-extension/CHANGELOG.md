@@ -50,6 +50,23 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
   itself when the site does (with access to all sites, say). Turning it on asks for the
   site again.
 
+### Fixed
+
+- **A question no longer moves under the pointer.** Where scrollbars take room (Linux,
+  Windows), the panel behind the questions' dialog growing taller or shorter than its
+  window while a question waited added or took away its scrollbar; the dialog got
+  narrower or wider and the question's text wrapped anew, moving its buttons, so a click
+  meant for "Don't allow" could land beside it. The same happened inside the dialog when
+  questions stacked past its height. Now, while a question waits, the panel keeps a
+  scrollbar (a track shows beside the dimmed panel even when nothing scrolls, and the
+  panel can move sideways by its width when the last question is answered), and the
+  dialog keeps room for its own, so a question keeps one width and its buttons their
+  place.
+- **The first click into an unfocused panel reaches "Don't allow".** The line "Click
+  into the side panel to answer." stood above the questions and went away as that click
+  focused the panel, moving the questions up between the press and the release, so the
+  click missed. It now stands under the questions.
+
 ## [0.3.1][extension-0.3.1] - 2026-11-21
 
 ### Fixed

@@ -489,6 +489,20 @@ main > .card ~ .settings {
 
 /* --- questions: a modal dialog over the panel ---------------------------------- */
 
+/*
+ * While a question waits, the panel behind keeps its scrollbar, whatever its
+ * height. Where scrollbars take room (Linux, Windows) the panel behind changing
+ * its height (the state that brings a question re-renders it) would add or take
+ * away its scrollbar, the dialog would get narrower or wider, and the
+ * question's text would wrap anew and move its buttons between a look and a
+ * click. Set in the same style pass as the dialog's opening: the question's
+ * first layout already has the width it keeps. (`scrollbar-gutter` does not do:
+ * Chrome sizes a modal dialog by the scrollbar shown.)
+ */
+html:has(#questions[open]) {
+	overflow-y: scroll;
+}
+
 .questions {
 	box-sizing: border-box;
 	width: auto;
@@ -500,6 +514,12 @@ main > .card ~ .settings {
 	background: transparent;
 	color: inherit;
 	overflow: auto;
+	/*
+	 * Its own scrollbar's room kept too: questions stacking past its height,
+	 * or a notice or the focus hint coming or going near it, would otherwise
+	 * add or take away a scrollbar inside it and change every question's width.
+	 */
+	scrollbar-gutter: stable;
 	display: flex;
 	flex-direction: column;
 	gap: var(--s3);
