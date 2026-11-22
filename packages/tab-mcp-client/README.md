@@ -894,8 +894,10 @@ page back: it connects with the stored secret, and the relay revokes every grant
 for it in the same step (`hello.revokeAll`), whether the page was connected or not.
 Then it makes the new secret, clears `grants`, and connects with it if the page was
 connected, connecting or reconnecting (or taken over). A page that never had a secret
-makes one without connecting. If the page cannot be taken back (the relay is
-unreachable, or someone takes it over again first), it rejects and keeps the old secret,
+makes one without connecting. If storage cannot keep the new secret (full, blocked, or a
+`storage` whose writes fail), the page uses it until it is reloaded and does not read the
+old one over it; after a reload it reads the old one, whose grants were revoked. If the
+page cannot be taken back (the relay is unreachable, or someone takes it over again first), it rejects and keeps the old secret,
 so calling it again tries again. A second call while it runs returns the same promise;
 `connect()` meanwhile waits for it and then connects with the new secret. A page with
 its own UI calls `disconnectAll()` from a click. Connected apps keep working after a reload once the page connects
