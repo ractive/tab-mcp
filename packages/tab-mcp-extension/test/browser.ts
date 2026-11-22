@@ -86,6 +86,8 @@ export const findChromeForTesting = findPinnedChrome;
 type Pending = {
 	resolve: (v: Record<string, unknown>) => void;
 	reject: (e: Error) => void;
+	/** The DevTools method asked, for its error: Chrome's message names none. */
+	method: string;
 };
 
 type Listener = (
@@ -275,7 +277,8 @@ export class Browser {
 				if (msg.id !== undefined) {
 					const p = this.#pending.get(msg.id);
 					this.#pending.delete(msg.id);
-					if (msg.error) p?.reject(new Error(msg.error.message));
+					if (msg.error)
+						p?.reject(new Error(`${p.method}: ${msg.error.message}`));
 					else p?.resolve(msg.result ?? {});
 				} else if (msg.method !== undefined) {
 					for (const l of this.#listeners)
@@ -459,7 +462,7 @@ export class Browser {
 			}),
 		);
 		return new Promise((resolve, reject) =>
-			this.#pending.set(id, { resolve, reject }),
+			this.#pending.set(id, { resolve, reject, method }),
 		);
 	}
 
@@ -552,6 +555,19 @@ export class Browser {
 		for (const other of others)
 			await this.send("Extensions.uninstall", { id: other }).catch(() => {});
 		await this.send("Extensions.uninstall", { id });
+		// Gone before it comes back: an old worker still listed would be
+		// found, and attached to, as the new one.
+		const prefix = `chrome-extension://${id}/`;
+		const end = Date.now() + 5_000;
+		for (;;) {
+			const { targetInfos } = (await this.send("Target.getTargets", {
+				filter: [{}],
+			})) as { targetInfos: { url: string }[] };
+			if (!targetInfos.some((t) => t.url.startsWith(prefix))) break;
+			if (Date.now() > end)
+				throw new Error(`the extension ${id} stayed after its uninstall`);
+			await Bun.sleep(50);
+		}
 		await this.send("Extensions.loadUnpacked", { path });
 		await this.readyWorker(id);
 	}
@@ -584,6 +600,7 @@ export class Browser {
 	/** The service worker of extension `id`, to call `chrome.*` from. */
 	async serviceWorker(id: string): Promise<Worker> {
 		const prefix = `chrome-extension://${id}/`;
+		let last: unknown;
 		for (let attempt = 0; attempt < 50; attempt++) {
 			const { targetInfos } = (await this.send("Target.getTargets")) as {
 				targetInfos: { targetId: string; type: string; url: string }[];
@@ -592,18 +609,29 @@ export class Browser {
 				(t) => t.type === "service_worker" && t.url.startsWith(prefix),
 			);
 			if (target) {
-				const { sessionId } = (await this.send("Target.attachToTarget", {
-					targetId: target.targetId,
-					flatten: true,
-				})) as { sessionId: string };
-				this.#workerSessions.add(sessionId);
-				const worker = new Worker(this, sessionId);
-				await worker.send("Runtime.enable");
-				return worker;
+				// A worker that went between the list and the attach (a reload,
+				// an update): the next round finds the one there now.
+				let attached: { sessionId: string } | undefined;
+				try {
+					attached = (await this.send("Target.attachToTarget", {
+						targetId: target.targetId,
+						flatten: true,
+					})) as { sessionId: string };
+				} catch (error) {
+					last = error;
+				}
+				if (attached !== undefined) {
+					this.#workerSessions.add(attached.sessionId);
+					const worker = new Worker(this, attached.sessionId);
+					await worker.send("Runtime.enable");
+					return worker;
+				}
 			}
 			await Bun.sleep(100);
 		}
-		throw new Error(`the service worker of ${id} did not start`);
+		throw new Error(
+			`the service worker of ${id} did not start${last === undefined ? "" : ` (last: ${last})`}`,
+		);
 	}
 
 	/**
