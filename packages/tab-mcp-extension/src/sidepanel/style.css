@@ -514,6 +514,12 @@ html:has(#questions[open]) {
 	background: transparent;
 	color: inherit;
 	overflow: auto;
+	/*
+	 * Its own scrollbar's room kept too: questions stacking past its height,
+	 * or a notice or the focus hint coming or going near it, would otherwise
+	 * add or take away a scrollbar inside it and change every question's width.
+	 */
+	scrollbar-gutter: stable;
 	display: flex;
 	flex-direction: column;
 	gap: var(--s3);

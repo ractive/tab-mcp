@@ -233,14 +233,15 @@ describe.skipIf(chrome === undefined)(
 			await stack.panel.waitFor(questionCount(0));
 		});
 
-		test("a question stays in place when the panel behind it scrolls or stops scrolling (classic scrollbars)", async () => {
+		test("a question stays in place when the panel behind it, the dialog or the focus hint change (classic scrollbars)", async () => {
 			// Scrollbars that take room, as on Linux and Windows (macOS lays
-			// them over the page): the panel's page behind the dialog getting
-			// taller than the panel, or shorter, must not add or remove one
-			// while a question waits, or the dialog changes its width and the
-			// question's buttons move between a look and a click (CI,
-			// 2026-11-22). The dialog stays within the panel's edge, scrollbar
-			// left out ("the look" in e2e.test.ts).
+			// them over the page). Nothing that changes while a question waits
+			// may change its width or move its buttons between a look and a
+			// click (CI, 2026-11-22): the panel behind getting taller or shorter
+			// than the panel, the dialog's own content going past its height
+			// (questions stacking up), the focus hint coming or going. The
+			// dialog stays within the panel's edge, scrollbar left out ("the
+			// look" in e2e.test.ts).
 			await stack.panel.eval(
 				`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-scrollbars", textContent: "::-webkit-scrollbar { width: 15px; height: 15px; } ::-webkit-scrollbar-thumb { background: #888; }" }))`,
 			);
@@ -248,10 +249,10 @@ describe.skipIf(chrome === undefined)(
 			const page = await stack.browser.newPage(url);
 			try {
 				await stack.panel.waitFor(questionCount(1));
-				const place = () =>
-					stack.panel.eval<string>(
-						`(() => { const b = [...document.querySelectorAll('[data-question] button[data-answer="deny"]')].at(-1).getBoundingClientRect(); const dialog = document.getElementById("questions"); const inside = dialog.getBoundingClientRect().right <= document.documentElement.clientWidth; return [dialog.clientWidth, b.left, b.top, b.width].map(Math.round).join() + (inside ? "" : " past the edge"); })()`,
-					);
+				// The question's width and its "Don't allow" button's place,
+				// and whether the dialog reaches past the panel's edge.
+				const placeOf = `(() => { const card = [...document.querySelectorAll("[data-question]")].at(-1); const b = card.querySelector('button[data-answer="deny"]').getBoundingClientRect(); const dialog = document.getElementById("questions"); const inside = dialog.getBoundingClientRect().right <= document.documentElement.clientWidth; return [card.clientWidth, b.left, b.top, b.width].map(Math.round).join() + (inside ? "" : " past the edge"); })()`;
+				const place = () => stack.panel.eval<string>(placeOf);
 				const scrolls = () =>
 					stack.panel.eval<boolean>(
 						`document.documentElement.scrollHeight > innerHeight`,
@@ -261,17 +262,41 @@ describe.skipIf(chrome === undefined)(
 					`document.body.append(Object.assign(document.createElement("div"), { id: "e2e-tall", style: "height: 2000px" }))`,
 				);
 				expect(await scrolls()).toBe(true);
+				// The scrollbar takes room here, or this test proves nothing.
+				expect(
+					await stack.panel.eval<number>(
+						`innerWidth - document.documentElement.clientWidth`,
+					),
+				).toBeGreaterThan(0);
 				const scrolling = await place();
 				expect(scrolling).not.toContain("past the edge");
-				// Nothing behind but the dialog: it does not.
+				// Nothing behind but the dialog: it does not scroll.
 				await stack.panel.eval(
 					`document.head.append(Object.assign(document.createElement("style"), { id: "e2e-short", textContent: "body *:not(:has(#questions), #questions, #questions *) { display: none !important; }" }))`,
 				);
 				expect(await scrolls()).toBe(false);
 				expect(await place()).toBe(scrolling);
+				// The dialog's own content past its height: it scrolls itself.
+				await stack.panel.eval(
+					`document.getElementById("questions").append(Object.assign(document.createElement("div"), { id: "e2e-stack", style: "height: 2000px; flex: none" }))`,
+				);
+				expect(
+					await stack.panel.eval<boolean>(
+						`(() => { const d = document.getElementById("questions"); return d.scrollHeight > d.clientHeight; })()`,
+					),
+				).toBe(true);
+				expect(await place()).toBe(scrolling);
+				await stack.panel.eval(`document.getElementById("e2e-stack").remove()`);
+				expect(await place()).toBe(scrolling);
+				// The focus hint shown and hidden, measured in one go (the
+				// panel sets it from its focus every 100 ms).
+				const hint = await stack.panel.eval<string[]>(
+					`(() => { const h = document.getElementById("focus-hint"); const was = h.hidden; h.hidden = false; const shown = ${placeOf}; h.hidden = true; const hidden = ${placeOf}; h.hidden = was; return [shown, hidden]; })()`,
+				);
+				expect(hint).toEqual([scrolling, scrolling]);
 			} finally {
 				await stack.panel.eval(
-					`for (const id of ["e2e-tall", "e2e-short", "e2e-scrollbars"]) document.getElementById(id)?.remove()`,
+					`for (const id of ["e2e-tall", "e2e-short", "e2e-stack", "e2e-scrollbars"]) document.getElementById(id)?.remove()`,
 				);
 				await page.close();
 				await stack.panel.waitFor(questionCount(0));
