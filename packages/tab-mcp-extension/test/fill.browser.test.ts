@@ -22,9 +22,9 @@ import {
 	setDefaultTimeout,
 	test,
 } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
 import {
@@ -62,7 +62,7 @@ interface Stack {
 
 /** Chrome with the test build, its panel open, set to the relay and connected. */
 async function start(): Promise<Stack> {
-	const dir = mkdtempSync(join(tmpdir(), "tab-mcp-fill-"));
+	const dir = browserTempDir("fill-build-");
 	const oauth = await startOAuth("tab-mcp-extension");
 	let browser: Browser | undefined;
 	const stop = async () => {

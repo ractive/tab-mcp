@@ -64,13 +64,36 @@ that saves the most first. The decision on the split and the rule is DEC-218.
   relay's pages, server and protocol, test pages and harnesses); never several browser
   runs at once.
 
+## What changed (pull request 2)
+
+- **One browser run per machine** (DEC-219, `test/browser-lock.ts`): a lock folder under
+  `~/.cache/tab-mcp/browser-tests/`, taken by `test:browser` before it starts anything
+  and by the gate for a browser file run on its own; a second run says whose run holds
+  it and waits (15 minutes at most), `--no-wait` fails at once; a lock whose run is gone
+  is taken over; the run's own processes hold it on.
+- **One parent folder** (`test/browser-dirs.ts`): every profile and build of the browser
+  tests is `runs/<pid>-<start>/<kind>-XXXXXX`, for the harnesses and the browser files.
+- **The sweep** (`test/browser-sweep.ts`), after the lock: the browsers and folders of
+  runs that are gone, and during the transition old orphaned temp profiles and old
+  unused temp folders; never a browser by its program's name. `bun run test:browser
+  --sweep --dry-run` lists what it would do. The first sweep removed 120 old folders.
+- **Tests:** the lock with real processes (a second run waits and then runs, `--no-wait`,
+  a time limit, a gone holder taken over, a gone holder whose run still has a process
+  not, no deadlock within a run), the sweep's choice on made-up process and folder
+  lists, `ps` start times the same in every time zone, and one real check
+  (`scripts/sweep.browser.test.ts`): a test process killed with SIGKILL leaves its
+  Chrome, and the next sweep stops it and removes its folder.
+- **`setup.test.ts`:** one test per shell with 30 s each (PowerShell's cold start took
+  longer than Bun's 5 s on CI).
+- **The rule:** "a second run waits" in place of "never several at once".
+
 ## Tasks
 
 - [x] 1. Browsers out of the default run: the renames, the gate, the convention test,
   `test:browser` and `verify:all`, the two CI jobs and the required check over both, the
   rule
-- [ ] 2. The machine-wide lock and the start-up sweep, one profile parent for every
-  harness (`scripts/test-browser.ts`, `scripts/browser-lock.ts`)
+- [x] 2. The machine-wide lock and the start-up sweep, one profile parent for every
+  harness (`test/browser-lock.ts`, `test/browser-sweep.ts`, `test/browser-dirs.ts`)
 - [ ] 3. The notification recorder in the test build; Chrome for Testing instead of the
   branded Chrome in `cdp.ts`; `FIREFOX_PATH` in the README
 - [ ] 4. The fast suite's timers (`timing.allowDelayMs`, the relay's idle test)
@@ -86,6 +109,6 @@ that saves the most first. The decision on the split and the rule is DEC-218.
 # Citations
 
 - [The audit of the browser tests](/research/browser-test-audit-2026-11-22.md)
-- [Decision log](/decision-log.md), DEC-216, DEC-218
+- [Decision log](/decision-log.md), DEC-216, DEC-218, DEC-219
 - [CI of main at 9f11a91, before the split: 1,890 tests, bun test 242.65 s](https://github.com/ractive/tab-mcp/actions/runs/44984541830)
 - [CI of main at aab7ad3, before the split: 1,915 tests, the job 4 min 14 s](https://github.com/ractive/tab-mcp/actions/runs/44986990412)

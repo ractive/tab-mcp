@@ -7,10 +7,10 @@
  * package; `FIREFOX_PATH` names the binary, else the usual places are tried.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 
 /** Firefox: `FIREFOX_PATH`, else where macOS and Linux put it. */
 export function findFirefox(): string | undefined {
@@ -130,7 +130,7 @@ export class Firefox {
 		binary: string,
 		options: FirefoxOptions,
 	): Promise<Firefox> {
-		const profile = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-"));
+		const profile = browserTempDir("firefox-");
 		const log = options.log ?? Boolean(process.env["FIREFOX_LOG"]);
 		const prefs = {
 			...BASE_PREFS,

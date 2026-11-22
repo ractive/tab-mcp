@@ -18,9 +18,9 @@ import {
 	setDefaultTimeout,
 	test,
 } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build, FIREFOX_ID } from "../scripts/build.ts";
 import { Firefox, findFirefox, firefoxMajor, Tab } from "./firefox.ts";
@@ -58,7 +58,7 @@ describe.skipIf(!firefoxOk)(
 		let dir: string;
 
 		beforeAll(async () => {
-			dir = mkdtempSync(join(tmpdir(), "tab-mcp-firefox-fill-"));
+			dir = browserTempDir("firefox-fill-build-");
 			oauth = await startOAuth("tab-mcp-extension-firefox");
 			const outdir = join(dir, "dist");
 			await build({ outdir, firefox: true, test: true, minify: false });

@@ -5299,3 +5299,44 @@ iteration 50).
 - **Later, in the audit's order:** the machine-wide lock and the sweep of orphaned
   browsers, the notification recorder, the fast suite's timers, logic moved to unit
   tests, shared browsers, Firefox smoke and full, `browser-full.yml`.
+
+## DEC-219: One browser run per machine; a sweep of what killed runs left
+
+2026-11-22, iteration 50's second pull request (the audit's section 6, with the team
+lead's decisions). Several agents ran the browser tests at once, and a run killed with
+`kill -9` or a closed terminal left its Chromes and profiles behind (about 120 old
+folders in the temp folder that day).
+
+- **Where:** `~/.cache/tab-mcp/browser-tests/` (`TAB_MCP_BROWSER_DIR` overrides it).
+  Not under `TMPDIR`, which a sandboxed agent can have of its own; the home is the
+  same for every session of the owner. Checked from this agent's shell with and
+  without the sandbox: `/tmp`, `~/.cache` and the temp folder were writable both ways,
+  and `TMPDIR` was the same; other sessions could not be checked from here.
+- **The lock** (`test/browser-lock.ts`): the folder `lock/`, made with one `mkdir`,
+  `owner.json` in it (PID and start, worktree, filter, since). `bun run test:browser`
+  takes it before it starts anything, and so does `test/browser-gate.ts`, so a browser
+  file run with `TAB_MCP_BROWSER=1 bun test <file>` cannot get past it. The run's own
+  processes hold it on (`TAB_MCP_BROWSER_LOCK`, inherited; each leaves a
+  `<pid>-<start>.holder` file, so a `kill -9` of `test:browser` alone does not free
+  the lock while its `bun test` still runs). A second run says whose run holds it and
+  waits, polling, up to 15 minutes, then fails; `--no-wait` (or
+  `TAB_MCP_BROWSER_NO_WAIT=1`) fails at once. A lock whose holder and run are gone is
+  taken over (renamed away first, so only one of two takers wins). Released at exit and
+  on SIGINT, SIGTERM and SIGHUP. Waiting, not failing, so agents do not retry in a
+  loop.
+- **A process is known by `<pid>-<start>`**, the start from `ps -o lstart` read in UTC:
+  `bun test` runs in UTC and other processes in local time, so a start read as local
+  time differed by an hour between them.
+- **One parent folder:** every profile and build of the browser tests is
+  `runs/<pid>-<start>/<kind>-XXXXXX` (`test/browser-dirs.ts`; the four harnesses and
+  the browser test files), in place of nine `tab-mcp-*-` and `webmcp-spike-` prefixes
+  in the temp folder. An empty run folder goes at exit.
+- **The sweep** (`test/browser-sweep.ts`), after taking the lock: it stops the
+  processes whose command line names a run folder whose run is gone, and removes those
+  folders. Never by a program's name: the owner's Chrome and Firefox, and anything not
+  in a run folder, are never chosen. During the transition also: a browser with an old
+  temp profile when nothing but launchd is above its processes, and an old temp folder
+  older than an hour that no process names. The harnesses' own reap (PR 204) stays;
+  the sweep is for what it cannot do. `bun run test:browser --sweep --dry-run` lists
+  what it would do.
+- **The rule (`CLAUDE.md`):** "never several at once" became "a second run waits".
