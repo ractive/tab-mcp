@@ -39,6 +39,7 @@ import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { browserTempDir } from "../../../test/browser-dirs.ts";
 import { browserTests } from "../../../test/browser-gate.ts";
 import { build } from "../scripts/build.ts";
+import { LOAD_TIMEOUT_MS } from "../src/worker/navigation.ts";
 import {
 	Browser,
 	chromeMajor,
@@ -52,6 +53,21 @@ import {
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
 setDefaultTimeout(30_000);
+// A test that waits for pages to load gives each of them the extension's
+// own limit and 15 s more: 45 s for one load, 75 s for two (back and
+// forward; reload and #part; a navigation and one more), 225 s for the
+// navigation scenario's seven. So a load the extension gives up on fails
+// with the extension's answer: at the test's timeout Bun kills the block's
+// Chrome, and every test after it fails too, naming nothing.
+for (const [loads, timeout] of [
+	[1, 45_000],
+	[2, 75_000],
+	[7, 225_000],
+] as const)
+	if (loads * LOAD_TIMEOUT_MS + 15_000 > timeout)
+		throw new Error(
+			`LOAD_TIMEOUT_MS grew: raise the ${timeout} ms of the tests that wait for ${loads} load(s)`,
+		);
 
 const SITE = "https://site.test";
 const OTHER = "https://other.test";
@@ -1270,7 +1286,7 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(String(result.structuredContent?.["note"])).toContain(
 			"may have completed",
 		);
-	});
+	}, 45_000);
 
 	test("it follows a navigation", async () => {
 		await tab.goto(`${SITE}/plain.html`);
@@ -2368,7 +2384,7 @@ describe.skipIf(chrome === undefined)(
 				(await call(stack, "navigate", { url: `${OTHER}/webmcp.html` }))
 					.structuredContent,
 			).toMatchObject({ url: `${OTHER}/webmcp.html` });
-		});
+		}, 75_000);
 	},
 );
 
