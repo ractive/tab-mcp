@@ -246,10 +246,11 @@ test("CI: fast and browser run on every pull request, unfiltered, and verify (th
 	expect(verify?.needs).toEqual(["fast", "browser"]);
 	expect(verify?.if).toBe("always()");
 	const check = verify?.steps.find((s) => s.run?.includes("test "));
-	expect(check?.env).toEqual({
-		FAST: "${{ needs.fast.result }}",
-		BROWSER: "${{ needs.browser.result }}",
-	});
+	expect(Object.keys(check?.env ?? {})).toEqual(["FAST", "BROWSER"]);
+	expect(check?.env?.["FAST"]).toMatch(/^\$\{\{ needs\.fast\.result \}\}$/);
+	expect(check?.env?.["BROWSER"]).toMatch(
+		/^\$\{\{ needs\.browser\.result \}\}$/,
+	);
 	expect(check?.run).toContain('test "$FAST" = success');
 	expect(check?.run).toContain('test "$BROWSER" = success');
 	for (const trigger of Object.values(ci.on)) {
