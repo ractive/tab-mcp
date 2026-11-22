@@ -183,9 +183,20 @@ does not export and which refuses to run outside development (DEC-059).
 
 ### A7: Cross-site attacks on the relay's pages
 
-- `/authorize` sends `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
-  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store`; the
-  page has no JavaScript. Framing is refused so the code field cannot be overlaid.
+- `/authorize` sends `Content-Security-Policy: default-src 'none'; script-src 'sha256-<code field script>'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' <redirect origin>`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store`.
+  The only JavaScript is the code field's own small inline script (DEC-211): it tidies
+  the typed text to `XXXX-XXXX` and draws the field as boxes, touches nothing else, loads
+  nothing and posts nothing. `script-src` allows exactly its text by the hash the relay
+  computes at start-up; no other script, inline handler or `eval` runs. A page that
+  pairs by sign-in only has no script and no `script-src`. Framing is refused so the
+  code field cannot be overlaid.
+- Every response of the relay, not only its pages, carries `X-Content-Type-Options:
+  nosniff`, set in one place every answer passes through (DEC-212): no answer is taken
+  as a script or style sheet by a browser that guesses types.
+- The home page (`/`) has the same protection from the same function (`pageHeaders`,
+  DEC-212): `default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`; it has no script and no form.
 - The form posts only a pending-request id; its `Bun.CSRF` token is bound to that request
   and to a first-party `HttpOnly`, `SameSite=Lax` cookie, and posts with a foreign `Origin`
   or `Sec-Fetch-Site` are refused (DEC-057). No `Cross-Origin-Opener-Policy`, because

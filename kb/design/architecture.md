@@ -77,7 +77,7 @@ for why.
 | `/.well-known/oauth-authorization-server` | GET | RFC 8414 metadata (issuer = relay origin) |
 | `/authorize` | GET, POST | pairing page in the user's browser: names the AI app and the app of the address, asks for the code |
 | `/authorize/callback` | GET | the return from the OpenID Connect provider (identity binding, DEC-079) |
-| `/authorize.css` | GET | the pairing page's stylesheet (the page has no scripts; DEC-057) |
+| `/authorize.css` | GET | the pairing page's stylesheet (the page's only script is the code field's, inline and allowed by its hash; DEC-057, DEC-211) |
 | `/token` | POST | authorization code + PKCE → tokens; refresh token rotation |
 | `/revoke` | POST | RFC 7009 token revocation |
 | `/healthz` | GET | health (`{"status":"ok","version":"…","counters":{"claudeHeaderWorkaround":n}}`); 503 with a reason when the token store does not answer (DEC-099) |
@@ -144,6 +144,8 @@ credentials (DEC-036), unless `TAB_MCP_CORS=off`.
    from the configuration alone (`pairingKindsOf`). The form carries `data-tab-mcp-*` hooks for an extension in
    the same browser (DEC-199).
 9. The user types the code shown in the tab, in any case, with or without the dash. The
+   field is one input drawn as `▢▢▢▢-▢▢▢▢`; its script keeps the text as `XXXX-XXXX`
+   while typing and pasting, and without it the field is a plain input (DEC-211). The
    relay finds the session that shows this code in its index of live codes; it counts
    only if that session is a page of the address's app. A wrong or expired code gets one
    message and is charged to the network's guesses (10, then 1 a minute; a sign-in is

@@ -624,6 +624,10 @@ refuses such a name in its constructor, so a page cannot trip over it.
 
 ## DEC-057: The /authorize form: a pending request, Bun.CSRF and a cookie, no scripts
 
+**Amended by DEC-211:** a page with the code field has one script, the field's own,
+inline and allowed by its hash in `script-src`; every other script stays forbidden, and
+a page that pairs by sign-in only still has none.
+
 A valid authorization request becomes a pending request kept in memory for 10 minutes;
 the form posts only its random id, the pairing fields and a CSRF token. The token is
 `Bun.CSRF.generate` bound (`sessionId`) to the pending request and to a random visit id
@@ -4767,6 +4771,83 @@ button it read like an action that fills in the code now.
   not turn it on; the panel sends another "off", so the site granted late goes back.
 - **No pattern for the relay's address:** the sentence alone, no switch; the switch only
   while the setting is somehow on there, to turn it off.
+
+## DEC-211: The code field is one input drawn as boxes, with one script allowed by its hash
+
+2026-11-22. The owner, 2026-11-21: "The entry field for the code is too small. The text
+of the code is too long to be completely shown", and "we anyway should show a form like
+▢▢▢▢-▢▢▢▢ … smart enough that you can type and the next form field is then selected,
+when deleting you jump to the last one etc. cmd-v should work". Amends DEC-057.
+
+- **One input, not eight.** The field on `/authorize` stays one `<input>` and is drawn
+  as four boxes, a dash and four boxes: a monospace font with a letter spacing of 1ch
+  puts each character in a cell of 2ch, and decorative boxes behind the input (hidden
+  from assistive technology) mark the cells. The pages where such fields are hard to use
+  are mostly the ones with one input per letter: paste, selection, deleting, input
+  methods, screen readers, mobile keyboards and autofill all have to be rebuilt there.
+  With one input the browser keeps doing these, and the label, `aria-describedby` and
+  DEC-199's hooks stay on the one field. Undo is the exception (below).
+- **The script.** After each edit the browser made, a small script tidies the text to
+  `XXXX-XXXX` (upper case, nothing but letters, at most eight; the dash with the fifth
+  letter, so Backspace never stops at it) and puts the caret back after the same letters.
+  Backspace right behind the dash takes the letter in front of it, Delete in front of it
+  the letter after it. Nothing happens while an input method composes, and nothing
+  submits by itself. It removes `maxlength`, which would cut a paste with spaces around
+  it before the script could tidy it, and marks the field as enhanced, which draws the
+  boxes and highlights the box the caret is in. The rules are pure functions in
+  `src/oauth/code-field.ts` with unit tests; `src/oauth/code-field-page.ts` (type-checked
+  with the DOM in `tsconfig.browser.json`) wires them to the field.
+- **Undo is not kept** (review of PR 194). Setting the field's `value` clears the
+  browser's undo history for it, so once the script rewrote the text (upper case, the
+  dash, dropped characters) undo does nothing or stops at that point. It never throws
+  or loops: setting `value` fires no `input` event, and a browser test presses undo after
+  typing and after a paste and types on. Keeping undo would take the deprecated
+  `document.execCommand`; for a field of eight letters that is not worth it.
+- **How the policy allows it.** The script is inline, and `script-src` names its SHA-256
+  hash, which the relay computes from the script's text when it starts; no `'self'`, no
+  nonce, no other script. A hash fits because the text never changes between pages, and an
+  inline script runs while the page is parsed, without a second request, so the field
+  does not first show plain; a file at the relay with `script-src 'self'` would have allowed every script the
+  relay could ever serve. `scripts/code-field.ts` bundles the page file into
+  `src/oauth/code-field-script.ts` (generated and committed, like `src/icons.ts`), so the
+  npm build and the container image need no extra step; a test fails while that file is
+  out of date. Only the code method has a script: a page that pairs by sign-in only has
+  no script and no `script-src`.
+- **Without the script** (blocked or not yet run) the field is a plain input wide enough
+  for twelve characters, with `pattern` and `maxlength="12"` as before, and the relay
+  accepts what it accepted (`normalizeCode` drops spaces and dashes).
+- **For extensions** nothing changes: the field keeps `id="code"`, `name="code"` and
+  `data-tab-mcp-field="code"`, the form and the Connect button keep theirs, the hooks stay
+  version 1. An extension that writes the code and fires `input` gets it tidied; one that
+  submits right away is submitted as before.
+
+## DEC-212: nosniff on every response; every page with the sign-in page's headers (owner)
+
+2026-11-22. The owner: "Send nosniff, yes", and "Also protect the homepage".
+`X-Content-Type-Options: nosniff` was on
+the pages, the stylesheet and the icons only; `/healthz`, the OAuth metadata, the 404
+answer and the MCP address's answers went without it (checked on the hosted relay).
+
+- Every answer gets it from `src/headers.ts`: `commonHeaderRoutes` wraps each route's
+  handler and fixed response, and the fallback and the error handler pass their answer
+  through `withCommonHeaders` too. Error answers, redirects, 405s and the answers built
+  from a tab's response are covered without each naming the header; the per-response
+  copies are gone. A WebSocket upgrade (no response) passes through unchanged.
+- A test asks one path of each kind (pages, stylesheet, icons, `/healthz`, the metadata,
+  `/authorize` with and without a request, a redirect, `/token`, `/revoke`, an MCP
+  address with GET and POST, a tab's answer, unknown paths) and names every answer
+  without the header.
+- **The home page** sent only `default-src 'none'; style-src 'self'; img-src 'self';
+  frame-ancestors 'none'`. Every HTML page of the relay (the home page and every
+  `/authorize` answer, error pages included; there are no others) now takes its headers
+  from one function, `pageHeaders` in `src/oauth/html.ts`, so they cannot drift:
+  `default-src 'none'`, `style-src 'self'`, `img-src 'self'`, `base-uri 'none'`,
+  `frame-ancestors 'none'`, a `form-action`, `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. What differs is passed in: the home page has no form
+  (`form-action 'none'`), no script and keeps `Cache-Control: public, max-age=3600`;
+  the sign-in page keeps `form-action 'self' <redirect origin>`, its one script
+  (DEC-211) and `no-store`. A test checks every HTML answer for these.
+- HSTS stays the job of whatever terminates TLS (bunny's edge for the hosted relay).
 
 ## DEC-213: "Always allow" for the sign-in question of the code fill-in, per verified host (owner)
 

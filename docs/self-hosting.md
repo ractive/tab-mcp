@@ -316,6 +316,11 @@ leave `TAB_MCP_TRUST_PROXY=none`.
   off: two AI apps' MCP requests must never be merged.
 - **Cookies.** The pairing page sets a first-party cookie for its form and checks it on
   the post. A proxy or CDN that strips cookies makes every pairing fail.
+- **The page as sent.** The pairing page's one script, which draws the code field as
+  boxes, is allowed by the hash of its exact text. A proxy or CDN that rewrites HTML
+  (minifying, injecting scripts) or sets its own `Content-Security-Policy` blocks it;
+  the field is then a plain input and pairing still works. Leave the relay's responses
+  as they are.
 
 ### nginx
 

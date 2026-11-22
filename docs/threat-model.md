@@ -397,8 +397,19 @@ stops script on another origin of the relay; a program can send any `Origin`.
   the relay only, `frame-ancestors 'none'`, `form-action` limited to the relay and the
   client's redirect origin; for a loopback redirect to `[::1]` the scheme `http:`,
   because CSP has no syntax for an IPv6 literal and Chrome drops one), `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and
-  `Cache-Control: no-store`. The page has no JavaScript. Framing is refused, so the code
-  field cannot be overlaid.
+  `Cache-Control: no-store`. The only JavaScript on the page is the code field's own
+  small inline script: it keeps the typed code in the form `XXXX-XXXX` and draws the
+  field as boxes, touches nothing else on the page, loads nothing and sends nothing. The
+  policy allows exactly that script by its SHA-256 hash, which the relay computes when it
+  starts; no other script, inline event handler or `eval` can run. Without the script the
+  field is a plain input and the page works as before. A page that pairs by sign-in only
+  has no script at all. Framing is refused, so the code field cannot be overlaid.
+- Every response of the relay, not only its pages, carries `X-Content-Type-Options:
+  nosniff`, so a browser never takes an answer as a script or style sheet it guessed.
+- The relay's home page has the same protection as the sign-in page: the same policy
+  with no script and no form (`form-action 'none'`), `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. Both pages take these headers from one function, so
+  they cannot drift apart.
 - The form posts only the id of a pending request. Its CSRF token is bound to that
   request and to a first-party `HttpOnly`, `SameSite=Lax` cookie. Posts with a foreign
   `Origin` or `Sec-Fetch-Site` are refused. The page sets no `Cross-Origin-Opener-Policy`,

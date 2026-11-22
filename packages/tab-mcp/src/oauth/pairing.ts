@@ -8,6 +8,8 @@
 
 import type { PairingKind } from "../config.ts";
 import { sha256Base64url } from "../crypto.ts";
+import { CODE_FIELD_SCRIPT } from "./code-field-script.ts";
+import { scriptHash } from "./html.ts";
 
 /** A page a pairing method found: the grant is made for its address. */
 export interface PairingTarget {
@@ -81,6 +83,8 @@ export interface PairingMethod {
 	prepare?(): Promise<void>;
 	/** Extra origins the page's form may lead to (CSP `form-action`). */
 	formTargets?(): readonly string[];
+	/** Hash sources of the inline scripts in `render()` (CSP `script-src`). */
+	scripts?(): readonly string[];
 	/** The pending request ended (paired, cancelled, expired, evicted): drop its state. */
 	forget?(requestId: string): void;
 	/** The answer of a method that redirected (`/authorize/callback`). */
@@ -266,6 +270,13 @@ const MALFORMED = `Type the ${CODE_LENGTH} letters of the code.`;
 const LIMITED =
 	"Too many wrong codes from your network. Wait a few minutes and try again.";
 
+/**
+ * The code field's boxes (DEC-211): four, the dash, four. Decoration only,
+ * hidden from assistive technology and shown once the script ran.
+ */
+const BOXES = `<span class="code-boxes" aria-hidden="true">${"<span></span>".repeat(CODE_LENGTH / 2)}<span class="code-dash"></span>${"<span></span>".repeat(CODE_LENGTH / 2)}</span>`;
+const CODE_FIELD_HASH = scriptHash(CODE_FIELD_SCRIPT);
+
 /** The code typed at `/authorize` (DEC-028, DEC-196). */
 export const codePairing: PairingMethod = {
 	kind: "code",
@@ -276,9 +287,18 @@ export const codePairing: PairingMethod = {
 		// manager or text message has it, and with that hint password managers
 		// put their button into the field. `off` and the managers' own opt-outs
 		// (1Password, LastPass, Bitwarden, Dashlane) say there is nothing to fill.
+		// One input drawn as boxes, not one input per letter (DEC-211): paste,
+		// selection, screen readers and the extensions' hooks stay as they
+		// are. The script after it draws the boxes and keeps the text as
+		// `XXXX-XXXX` (which costs the field's undo history); without it the
+		// field is a plain input.
 		return `<p><label for="code">Code</label>
-<input id="code" name="code" type="text" data-tab-mcp-field="code" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocapitalize="characters" spellcheck="false" pattern="[A-Za-z \\-]{${CODE_LENGTH},${CODE_LENGTH + 4}}" maxlength="${CODE_LENGTH + 4}" required autofocus aria-describedby="code-help"></p>
+<span class="code-field">${BOXES}<input id="code" name="code" type="text" data-tab-mcp-field="code" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" autocapitalize="characters" spellcheck="false" pattern="[A-Za-z \\-]{${CODE_LENGTH},${CODE_LENGTH + 4}}" maxlength="${CODE_LENGTH + 4}" required autofocus aria-describedby="code-help"></span></p>
+<script>${CODE_FIELD_SCRIPT}</script>
 <p id="code-help" class="help">“Connect your AI app” on the page or in the browser extension you want to connect shows a code of ${CODE_LENGTH} letters. It changes every 2 minutes and after each use.</p>`;
+	},
+	scripts(): readonly string[] {
+		return [CODE_FIELD_HASH];
 	},
 	check(pool, form, admit): PairingResult {
 		const code = normalizeCode(form.get("code") ?? "");

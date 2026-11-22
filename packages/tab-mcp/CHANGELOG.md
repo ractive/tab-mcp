@@ -11,6 +11,23 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
 
 ## Unreleased
 
+### Changed
+
+- **The code field on the sign-in page shows the whole code, as boxes** (DEC-211): four
+  boxes, a dash and four boxes, each letter in its own box and the box the caret is in
+  highlighted. It is still one input: a small inline script keeps the text as
+  `XXXX-XXXX` while you type, delete or paste (`abcd-efgh`, `ABCD EFGH` and `ABCDEFGH`
+  all give the code), and keeps the caret where you are. When it rewrites the text, the
+  browser's undo history for the field is lost: undo then does nothing or stops there
+  (it never throws or loops). The page's policy allows that
+  one script by its hash (`script-src 'sha256-…'`) and no other; a page that pairs by
+  sign-in only has none. Without the script the field is a plain input, now wide
+  enough for the whole code: it was cut off before. The field's hooks for browser
+  extensions (DEC-199) are unchanged.
+- **The home page names both ways a page offers its tools**: with the tab-mcp client
+  library, which connects it to the relay, or with the browser's WebMCP, whose tools the
+  tab-mcp browser extension passes on.
+
 ### Fixed
 
 - A JWT with an unknown `kid` that came in the same millisecond as the last fetch of
@@ -19,6 +36,17 @@ The relay. Each relay release is also a Docker image, `ractive/tab-mcp` and
   (`temporarily_unavailable`, 503), though the keys had not been fetched again for it.
   Whether they were is now told by the order of fetches and calls, not by comparing
   millisecond times. Which keys verify a signature is unchanged.
+
+### Security
+
+- **`X-Content-Type-Options: nosniff` on every response** (DEC-212): it was missing on
+  `/healthz`, the OAuth metadata, the 404 answer, redirects, 405s and the MCP
+  address's answers. It is now set in one place that every answer passes through,
+  error answers and the answers passed on from a tab included.
+- **The home page has the sign-in page's protection** (DEC-212): its policy adds
+  `base-uri 'none'` and `form-action 'none'`, and it sends `X-Frame-Options: DENY` and
+  `Referrer-Policy: same-origin`. Every HTML page of the relay now takes these headers
+  from one function, so they cannot drift apart. Its cache time of one hour stays.
 
 ## [0.13.0][relay-0.13.0] - 2026-11-21
 

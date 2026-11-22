@@ -14,6 +14,8 @@ import {
 	expect,
 	test,
 } from "bun:test";
+import { CODE_FIELD_SCRIPT } from "../src/oauth/code-field-script.ts";
+import { scriptHash } from "../src/oauth/html.ts";
 import { normalizeCode, type PairingMethod } from "../src/oauth/pairing.ts";
 import type { CreateRelayOptions, RelayTestHooks } from "../src/relay.ts";
 import {
@@ -1319,19 +1321,30 @@ describe("threat model A7: the /authorize page", () => {
 		);
 	};
 
-	test("CSP without scripts, no framing, no referrer, form-action limited to the redirect origin", async () => {
+	test("CSP with the code field's script alone (by its hash), no framing, no referrer, form-action limited to the redirect origin", async () => {
 		const ctx = await setup();
 		const page = await open(ctx, clientId, "https://app.example/cb");
 		const csp = page.headers.get("content-security-policy") ?? "";
 		expect(csp).toContain("default-src 'none'");
 		expect(csp).toContain("frame-ancestors 'none'");
 		expect(csp).toContain("form-action 'self' https://app.example");
-		expect(csp).not.toContain("script-src");
+		// One script (DEC-211): inline, without attributes, the field's own,
+		// and the policy allows exactly that text.
+		const hash = scriptHash(CODE_FIELD_SCRIPT);
+		expect(csp).toContain(`script-src ${hash};`);
+		expect(csp.match(/script-src[^;]*/)?.[0]).toBe(`script-src ${hash}`);
+		expect(csp).not.toContain("unsafe");
+		expect(elements(page.html, "script")).toEqual([
+			{ tag: "script", attributes: {} },
+		]);
+		const scripts = [...page.html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+		expect(scripts.map((m) => m[1])).toEqual([CODE_FIELD_SCRIPT]);
+		expect(page.html.split("<script").length).toBe(2);
+		expect(page.html).not.toMatch(/\son[a-z]+=/);
 		expect(page.headers.get("x-frame-options")).toBe("DENY");
 		// same-origin, not no-referrer: with no-referrer browsers post `Origin: null`.
 		expect(page.headers.get("referrer-policy")).toBe("same-origin");
 		expect(page.headers.get("cache-control")).toBe("no-store");
-		expect(page.html).not.toContain("<script");
 		expect(page.html).toContain('<html lang="en">');
 		expect(page.html).toContain('<label for="code">Code</label>');
 		// The page's own UI is "on the page" (kb/design/wording.md, review of PR 181).
@@ -1364,9 +1377,12 @@ describe("threat model A7: the /authorize page", () => {
 		expect(page.html).toContain(
 			`<title>Connect ${escaped} from ${host}</title>`,
 		);
-		// As a browser reads the tags: no element of the name's making, and the
-		// form has its own attributes only.
-		expect(elements(page.html, "img, script, b")).toEqual([]);
+		// As a browser reads the tags: no element of the name's making (the one
+		// script is the code field's), and the form has its own attributes only.
+		expect(elements(page.html, "img, b")).toEqual([]);
+		expect(elements(page.html, "script")).toEqual([
+			{ tag: "script", attributes: {} },
+		]);
 		expect(elements(page.html, "form")).toEqual([
 			{
 				tag: "form",

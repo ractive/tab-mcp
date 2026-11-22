@@ -20,6 +20,7 @@ import {
 	type RpcId,
 	rpcErrorBody,
 } from "./exchange.ts";
+import { commonHeaderRoutes, withCommonHeaders } from "./headers.ts";
 import { APPLE_TOUCH_ICON, FAVICON_ICO, FAVICON_SVG } from "./icons.ts";
 import { MISMATCH_TEXT, TabAssertionVerifier } from "./identity.ts";
 import { forwardedIp, ipPrefixKey, ipSessionKeys } from "./ip.ts";
@@ -31,7 +32,7 @@ import {
 	notOpenAnswer,
 	type RelayInfo,
 } from "./notopen.ts";
-import { STYLESHEET } from "./oauth/html.ts";
+import { pageHeaders, STYLESHEET } from "./oauth/html.ts";
 import { CodeIndex, type PairingPool } from "./oauth/pairing.ts";
 import {
 	AuthorizationServer,
@@ -252,6 +253,7 @@ const INDEX_HTML = `<!doctype html>
 <header class="brand"><img src="/favicon.svg" alt="" width="56" height="56">
 <div><h1>tab-mcp relay</h1><p class="help">Version ${VERSION}</p></div></header>
 <p class="lead">This server passes MCP requests from AI apps to the tools a web page offers in a browser tab.</p>
+<p>A page offers its tools with the tab-mcp client library, which connects it to this relay. A page that offers its tools with the browser's WebMCP reaches it through the tab-mcp browser extension, which passes those tools on.</p>
 <div class="flow" role="img" aria-label="An AI app sends MCP requests to the relay, which passes them over a WebSocket to the browser tab.">
 <span class="node">AI app</span><span class="link">MCP</span><span class="node relay">relay</span><span class="link">WebSocket</span><span class="node">browser tab</span>
 </div>
@@ -265,7 +267,6 @@ function icon(body: string | Uint8Array<ArrayBuffer>, type: string): Response {
 		headers: {
 			"content-type": type,
 			"content-security-policy": "default-src 'none'",
-			"x-content-type-options": "nosniff",
 			"cache-control": "public, max-age=86400",
 		},
 	});
@@ -1602,7 +1603,8 @@ function startRelay(
 		development: false,
 		maxRequestBodySize: largest + 1024,
 		idleTimeout: config.httpIdleTimeoutS,
-		routes: {
+		// Every answer passes through `withCommonHeaders` (nosniff).
+		routes: commonHeaderRoutes({
 			"/healthz": {
 				// no-store: a CDN in front caches answers without cache headers
 				// (bunny for 30 days), and a deploy check would read the old version.
@@ -1629,14 +1631,9 @@ function startRelay(
 			},
 			"/": {
 				GET: () =>
+					// The sign-in page's headers: no script, no form.
 					new Response(INDEX_HTML, {
-						headers: {
-							"content-type": "text/html; charset=utf-8",
-							"content-security-policy":
-								"default-src 'none'; style-src 'self'; img-src 'self'; frame-ancestors 'none'",
-							"x-content-type-options": "nosniff",
-							"cache-control": "public, max-age=3600",
-						},
+						headers: pageHeaders({ cacheControl: "public, max-age=3600" }),
 					}),
 			},
 			// The relay's icon, for the AI apps' connector lists and browser tabs.
@@ -1684,16 +1681,18 @@ function startRelay(
 				PUT: methodNotAllowed,
 				PATCH: methodNotAllowed,
 			},
-		},
-		fetch: () => new Response("Not found", { status: 404 }),
+		}),
+		fetch: () => withCommonHeaders(new Response("Not found", { status: 404 })),
 		// A handler that throws: one JSON log line with the error's name only
 		// (DEC-047), not Bun's own output with message and stack (RQ 20).
 		error(error) {
 			logger.error("http.handler_error", { ...errorFields(error) });
-			return new Response("Internal error", {
-				status: 500,
-				headers: { "content-type": "text/plain; charset=utf-8" },
-			});
+			return withCommonHeaders(
+				new Response("Internal error", {
+					status: 500,
+					headers: { "content-type": "text/plain; charset=utf-8" },
+				}),
+			);
 		},
 		websocket: {
 			data: {} as WsData,

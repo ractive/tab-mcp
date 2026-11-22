@@ -4,5 +4,6 @@
 		"types": ["bun"],
 		"resolveJsonModule": true
 	},
-	"include": ["src", "test"]
+	"include": ["src", "test"],
+	"exclude": ["src/oauth/code-field-page.ts"]
 }

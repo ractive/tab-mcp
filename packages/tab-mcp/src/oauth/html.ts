@@ -2,9 +2,16 @@ import { version } from "../../package.json" with { type: "json" };
 
 /**
  * Server-rendered HTML for `/authorize` (threat model A7): every value is
- * escaped, the page has no scripts, and its headers forbid framing, inline
- * code and foreign form targets.
+ * escaped, the only script is the code field's (DEC-211, allowed by its
+ * hash), and the headers forbid framing, any other code and foreign form
+ * targets.
  */
+
+/** A CSP hash source for an inline script: `'sha256-…'` of its text. */
+export function scriptHash(script: string): string {
+	const digest = new Bun.CryptoHasher("sha256").update(script).digest("base64");
+	return `'sha256-${digest}'`;
+}
 
 /**
  * The stylesheet's URL. The version in the query keeps a cached sheet from
@@ -41,7 +48,28 @@ strong, .origin { unicode-bidi: isolate; }
 .help { color: GrayText; font-size: 0.9rem; }
 .error { color: var(--error); font-weight: 600; }
 label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
-input[type="text"] { font: 1.5rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; width: 10ch; padding: 0.4rem 0.5rem; border: 2px solid GrayText; border-radius: 0.4rem; background: Field; color: FieldText; }
+.code-field { display: inline-block; position: relative; max-width: 100%; vertical-align: top; }
+.code-field input { font: 1.5rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; width: calc(12ch + 2.4em + 1rem + 4px); max-width: 100%; padding: 0.4rem 0.5rem; border: 2px solid GrayText; border-radius: 0.4rem; background: Field; color: FieldText; }
+.code-boxes { display: none; }
+.code-field.enhanced { font: min(1.5rem, 7.5vw)/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code-field.enhanced input { position: relative; font: inherit; letter-spacing: 1ch; width: calc(18.5ch + 2px); height: 1.8em; padding: 0 0 0 0.5ch; border: 0; background: transparent; }
+.code-field.enhanced input:focus-visible { outline: none; }
+.code-field.enhanced .code-boxes { display: flex; position: absolute; top: 0; bottom: 0; left: 0; width: 18ch; pointer-events: none; border-radius: 0.4rem; }
+.code-field.enhanced:has(input:focus-visible) .code-boxes { outline: 3px solid var(--accent); outline-offset: 2px; }
+.code-boxes > span { width: 1.7ch; margin: 0 0.15ch; border: 2px solid GrayText; border-radius: 0.3em; background: Field; }
+.code-boxes > .code-dash { display: flex; align-items: center; justify-content: center; border-color: transparent; background: none; }
+.code-boxes > .code-dash::before { content: ""; width: 0.8ch; border-top: 2px solid GrayText; }
+.code-field.has-dash .code-dash::before { visibility: hidden; }
+.code-boxes > .at { border-color: var(--accent); }
+@media (forced-colors: active) {
+  .code-field.enhanced input { forced-color-adjust: none; color: CanvasText; }
+  .code-field.enhanced:has(input:focus-visible) .code-boxes { outline-color: Highlight; }
+  .code-boxes { forced-color-adjust: none; }
+  .code-boxes > span { border-color: CanvasText; background: Canvas; }
+  .code-boxes > .code-dash { border-color: transparent; background: none; }
+  .code-boxes > .code-dash::before { border-color: CanvasText; }
+  .code-boxes > .at { border-color: Highlight; }
+}
 input[type="text"]:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1.5rem 0 1.25rem; }
 .alternative { border-top: 1px solid GrayText; margin-top: 1.5rem; padding-top: 0.25rem; }
@@ -68,21 +96,44 @@ footer { margin-top: 2.5rem; font-size: 0.85rem; color: GrayText; }
 }
 `;
 
-/** Security headers of every `/authorize` response. */
-export function pageHeaders(formTargets: readonly string[] = []): Headers {
-	// Chrome applies form-action to the redirect after a POST, so the client's
-	// redirect origin must be allowed explicitly.
-	const formAction = ["'self'", ...formTargets].join(" ");
+/** What differs between the relay's HTML pages. */
+export interface PageHeaderOptions {
+	/** Where the page's form may post (`form-action`); none given: `'none'`. */
+	formAction?: readonly string[];
+	/**
+	 * Hash sources (`'sha256-…'`) of the page's inline scripts: a page with
+	 * none gets no `script-src`, so `default-src 'none'` forbids every script.
+	 */
+	scripts?: readonly string[];
+	/** Default `no-store`. */
+	cacheControl?: string;
+}
+
+/**
+ * Security headers of every HTML page of the relay: the home page and every
+ * `/authorize` response (threat model A7). `nosniff` is added to every
+ * response in one place (`headers.ts`).
+ */
+export function pageHeaders(options: PageHeaderOptions = {}): Headers {
+	const { formAction = [], scripts = [], cacheControl = "no-store" } = options;
+	const policy = [
+		"default-src 'none'",
+		...(scripts.length === 0 ? [] : [`script-src ${scripts.join(" ")}`]),
+		"style-src 'self'",
+		"img-src 'self'",
+		"base-uri 'none'",
+		"frame-ancestors 'none'",
+		`form-action ${formAction.length === 0 ? "'none'" : formAction.join(" ")}`,
+	].join("; ");
 	return new Headers({
 		"content-type": "text/html; charset=utf-8",
-		"content-security-policy": `default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action ${formAction}`,
+		"content-security-policy": policy,
 		"x-frame-options": "DENY",
-		"x-content-type-options": "nosniff",
-		// Not no-referrer: browsers then send `Origin: null` on the form post,
-		// which the origin check must refuse. same-origin still sends nothing
-		// to the client's redirect.
+		// Not no-referrer: browsers then send `Origin: null` on the sign-in
+		// page's form post, which the origin check must refuse. same-origin
+		// still sends nothing to the client's redirect or to another site.
 		"referrer-policy": "same-origin",
-		"cache-control": "no-store",
+		"cache-control": cacheControl,
 	});
 }
 

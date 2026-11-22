@@ -160,7 +160,10 @@ export const PACKAGES: Record<string, PackageSpec> = {
 			"testing.js.map",
 		],
 		declarationsFrom: "src",
-		noDeclarations: ["main.ts"],
+		// main.ts has no exports. code-field-page.ts is the pairing page's
+		// browser script (DEC-211), checked with the DOM by its own tsconfig
+		// and shipped only as the text in code-field-script.ts.
+		noDeclarations: ["main.ts", "oauth/code-field-page.ts"],
 	},
 };
 
