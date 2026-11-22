@@ -289,6 +289,22 @@ describe.skipIf(chrome === undefined)(
 
 		test("Always allow (DEC-213): the same host's next pages are filled in without a question, with a notice; the fourth in ten minutes asks", async () => {
 			const host = stack.oauth.alwaysHost;
+			const worker = await stack.browser.serviceWorker(
+				stack.browser.extensionId as string,
+			);
+			if (process.env["DIAG_THROTTLE"])
+				console.log(
+					"DIAG throttle",
+					await worker
+						.send("Emulation.setCPUThrottlingRate", {
+							rate: Number(process.env["DIAG_THROTTLE"]),
+						})
+						.then(
+							() => "ok",
+							(e: unknown) => String(e),
+						),
+				);
+
 			const always = () =>
 				authorizeUrl(stack.oauth, stack.address, stack.oauth.alwaysClientId);
 			const first = await always();
@@ -358,6 +374,7 @@ describe.skipIf(chrome === undefined)(
 					"DIAG events",
 					await stack.panel.eval(`JSON.stringify(globalThis.__events)`),
 				);
+				console.log("DIAG worker console", JSON.stringify(worker.console));
 				throw error;
 			}
 			await page.close();
