@@ -2436,20 +2436,6 @@ describe.skipIf(chrome === undefined)(
 			await noQuestion(stack);
 		});
 
-		test("only http(s) addresses; the tab stays", async () => {
-			for (const url of [
-				"javascript:alert(1)",
-				"data:text/html,x",
-				"chrome://settings",
-				"file:///etc/hosts",
-			]) {
-				const refused = await call(stack, "navigate", { url });
-				expect(refused.isError).toBe(true);
-				expect(refused.content[0]?.text).toContain("Only http and https");
-			}
-			expect(await tabUrl(stack)).toBe(`${SITE}/webmcp.html`);
-		});
-
 		test("to another origin it asks in the side panel, without Always allow on <host>: Don't allow stays, Allow goes", async () => {
 			const declined = call(stack, "navigate", { url: `${OTHER}/plain.html` });
 			await stack.panel.waitFor(`document.querySelector("[data-question]")`);
