@@ -346,13 +346,24 @@ did, by connecting the extension.
   own pages talk to the content script.
 - **A page with the client library (DEC-207).** The content script speaks only to a page
   that announced the library (its `hello` on `document`, or
-  `<html data-tab-mcp-handshake>`): the extension's name and version, whether AI access
-  is on and connected, and the names and verified hosts of the AI apps connected now
-  (the worker sends changes to every content script of a site it may read; each passes
-  them on only to such a page). Any page script can announce the library, so any page
-  the extension may read can learn those names by pretending; not the relay, the
-  address or other tabs. Right before a tool runs that the user allowed, a vouch goes to
-  such a page: made only in `#allowedThenRun` after the user's answer (or the site's
+  `<html data-tab-mcp-handshake>`), and only while AI access is on and connected
+  (DEC-221): the extension's name and the names and verified hosts of the AI apps
+  connected now (the worker sends changes to every content script of a site it may
+  read; each passes them on only to such a page, field by field). Any page script can
+  announce the library, so any page the extension may read can learn those names by
+  pretending while AI access is on; not the version, the relay, the address or other
+  tabs. While AI access is off, the extension answers no page and sends it nothing, of
+  any type, and marks nothing; until a document was told "on" the content script does
+  not read its events either (not `detail`: Chrome copies an object `detail` into the
+  reading world and runs the page's getters, which a browser test checks for the store
+  and the test build). A page can still see that the extension is installed where it
+  provides WebMCP itself (in browsers without their own), and could try to time its own
+  events, which the extension still listens to. A document the content script told
+  "on" hears `on: false` once when it goes off, also after the back/forward cache
+  (asked again), after host access was withdrawn (the worker sends "off" to the tabs it
+  can no longer read), and after the extension was disabled or updated (at the page's
+  next event or `pageshow`). Right before a tool runs that the user allowed, a vouch goes to such a page,
+  only to a document told "on": made only in `#allowedThenRun` after the user's answer (or the site's
   "allowed") and the same-tool check, never for a read-only tool, sent by the content
   script only after its own checks (listed from this document, the same read-only
   claim), synchronously before `executeTool`, and withdrawn (`withdraw`, its nonce) once

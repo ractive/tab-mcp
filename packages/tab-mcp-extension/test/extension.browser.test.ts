@@ -2036,6 +2036,72 @@ async function readsSettled(tab: Page, quietMs = 1000): Promise<void> {
 	}
 }
 
+/** Turn AI access off from the panel and wait until the panel says so. */
+async function aiOff(stack: Stack): Promise<void> {
+	await stack.panel.eval(`(async () => {
+		const port = chrome.runtime.connect({ name: "panel" });
+		port.postMessage({ type: "stop" });
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		port.disconnect();
+	})()`);
+	await stack.panel.waitFor(
+		`document.getElementById("state").dataset.state === "off"`,
+	);
+}
+
+/**
+ * A page's `tab-mcp-page` event with an object as `detail`, whose getter
+ * records that it ran; then what was recorded. No script of the page
+ * listens: a getter that runs means another world read the detail (Chrome
+ * copies an object across worlds, which runs its getters).
+ */
+const getterRan = `(async () => {
+	const ran = [];
+	document.dispatchEvent(new CustomEvent("tab-mcp-page", {
+		detail: { get v() { ran.push("v"); return 1; } },
+	}));
+	document.dispatchEvent(new CustomEvent("tab-mcp-page", {
+		detail: JSON.stringify({ v: 1, type: "hello", library: "0", app: "x", apps: [] }),
+	}));
+	document.dispatchEvent(new CustomEvent("tab-mcp-page", {
+		detail: { get v() { ran.push("after a hello"); return 1; } },
+	}));
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	return ran;
+})()`;
+
+for (const store of [false, true])
+	describe.skipIf(chrome === undefined)(
+		`AI access off: a page cannot see the content script listen (DEC-221, the ${store ? "store" : "test"} build)`,
+		() => {
+			let stack: Stack;
+
+			beforeEach(async () => {
+				stack = await start({ store }, `${SITE}/plain.html`);
+			}, 60_000);
+
+			afterEach(async () => {
+				await stack?.stop();
+				stack = undefined as unknown as Stack;
+			});
+
+			test("an object detail's getter does not run", async () => {
+				await aiOff(stack);
+				// The content script is there, and listens.
+				const world = await stack.tab.isolatedWorld(
+					"tab-mcp browser extension",
+				);
+				expect(
+					await stack.tab.eval<boolean>(
+						"globalThis.tabMcpContentScript === true",
+						world,
+					),
+				).toBe(true);
+				expect(await stack.tab.eval<string[]>(getterRan)).toEqual([]);
+			});
+		},
+	);
+
 describe.skipIf(chrome === undefined)(
 	"the store package (no host access)",
 	() => {
@@ -2579,14 +2645,11 @@ describe.skipIf(chrome === undefined)(
 						"window.tabMcpPage?.mcp.extension?.apps.length === 1",
 						15_000,
 					);
-					const version = await stack.worker.eval<string>(
-						"chrome.runtime.getManifest().version",
-					);
+					// No version (DEC-221).
 					expect(
 						await tab.eval("window.tabMcpPage.mcp.extension ?? null"),
 					).toEqual({
 						name: "tab-mcp browser extension",
-						version,
 						apps: [TEST_APP],
 						whileInFront: true,
 					});
@@ -2668,6 +2731,21 @@ describe.skipIf(chrome === undefined)(
 					expect(
 						await tab.eval("document.getElementById('extension').textContent"),
 					).toContain('"apps":[]');
+				},
+			);
+			await step(
+				"AI access off: the page, told on before, hears off and shows no extension (DEC-221)",
+				async () => {
+					await stack.panel.eval(`(async () => {
+						const port = chrome.runtime.connect({ name: "panel" });
+						port.postMessage({ type: "stop" });
+						await new Promise((resolve) => setTimeout(resolve, 300));
+						port.disconnect();
+					})()`);
+					await tab.waitFor(
+						"window.tabMcpPage.mcp.extension === undefined",
+						15_000,
+					);
 				},
 			);
 		}, 130_000);

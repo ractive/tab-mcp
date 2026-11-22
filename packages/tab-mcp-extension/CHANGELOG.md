@@ -11,6 +11,33 @@ attaches its store package, `tab-mcp-browser-extension-<version>-store.zip` (up 
 
 ## Unreleased
 
+### Changed
+
+- **While AI access is off, the extension answers no page and sends it nothing**
+  (DEC-221). It does not even read what a page sends then: a page can no longer tell
+  from the extension's answer, or from Chrome running the page's own code when the
+  extension reads it, that the extension is installed. A page can still see that the
+  extension is installed where it provides WebMCP itself (in browsers without their
+  own), and could try to time its own events, which the extension still listens to.
+- **A page it told that AI access is on is told once that it went off**, also when the
+  page comes back from the browser's back/forward cache, when host access to its site
+  was withdrawn, and, the next time the page speaks or is shown again, when the
+  extension was disabled, removed or updated. No vouch goes to a page that was not told
+  "on"; a call that comes before the page was told tells it first, so that the page
+  does not ask again.
+- **The extension no longer tells such a page its version.** While AI access is on, the
+  page learns its name, that AI access is on and the AI apps connected now, as before.
+- **With client 0.21.0 and older** a page no longer shows the AI apps connected through
+  the extension (the library takes "on" only with a version), and the panel does not
+  warn that an AI app connected to the page directly too sees its tools twice (such a
+  page does not answer the extension's greeting) until the page's own AI apps change.
+  The panel still says "This page has tab-mcp built in.", and calls the user allowed in
+  the extension are still not asked again in the page. Client versions after 0.21.0
+  have all of it.
+- **The side panel while AI access is off** says "This page has tab-mcp built in." for
+  a page that announced the library, but the warning about an AI app that sees the
+  page's tools twice comes only once AI access is on (a moment after connecting).
+
 ### Fixed
 
 - **A page tool that takes the tab to another page could take 30 seconds to answer**

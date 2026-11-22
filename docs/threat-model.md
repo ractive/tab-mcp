@@ -708,12 +708,20 @@ like any other, `chrome-extension://<id>` (A11).
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
 - **A page with the client library** (DEC-207). A page that announces the library
-  (DOM events, or `<html data-tab-mcp-handshake>`) is told the extension's name and
-  version, whether AI access is on and the names and verified hosts of the AI apps
+  (DOM events, or `<html data-tab-mcp-handshake>`) is told, while AI access is on and
+  connected, the extension's name and the names and verified hosts of the AI apps
   connected now, again when that changes; a page that does not announce it is told
   nothing. Any page script can announce it, so any page the extension may read can learn
-  those names by pretending; nothing else (not the relay, the address, other tabs) is
-  told. Right before a tool runs that the user allowed (asked, or allowed for the site),
+  those names by pretending while AI access is on; nothing else (not the version, the
+  relay, the address, other tabs) is told. While AI access is off, the extension
+  answers no page and sends it nothing (DEC-221), and does not read what a page sends:
+  in Chrome reading an object `detail` from another world runs the page's getters,
+  which would show that it listens. A page can still see that the extension is
+  installed where it provides WebMCP itself (in browsers without their own), and could
+  try to time its own events, which the extension still listens to. A page it told
+  "on" hears `on: false` once when AI access goes off (also after the back/forward
+  cache and after host access was withdrawn; after the extension was disabled or
+  updated, the next time the page speaks or is shown). Right before a tool runs that the user allowed (asked, or allowed for the site),
   the extension vouches for that one call to such a page: the tool, the arguments and
   the AI app, after its own checks (the page the tool was listed from, its read-only
   claim). The vouch is made in one place, after the user's answer and the check that

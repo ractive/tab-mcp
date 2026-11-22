@@ -13,7 +13,7 @@ import {
 	type ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
 import type { PagePort } from "@ractive-ch/tab-mcp-client/extension";
-import type { PageTool, PageTools } from "../src/messages.ts";
+import type { ExtensionState, PageTool, PageTools } from "../src/messages.ts";
 import type { PanelState } from "../src/protocol.ts";
 import { APP_ID } from "../src/protocol.ts";
 import type { AllowedTools } from "../src/worker/allowed.ts";
@@ -41,6 +41,12 @@ interface Fake {
 	notificationOptions: Record<string, unknown>[];
 	/** The page tools the content script was asked to run, by name. */
 	pageCalls: string[];
+	/** More tabs than the one of `SITE` (`tabs.query` lists them after it). */
+	moreTabs?: { id: number; url?: string; active: boolean; windowId: number }[];
+	/** The `extension-state` messages sent, by tab id. */
+	states?: [number, unknown][];
+	/** Each page call's vouch and the state that came with it. */
+	vouches?: { vouch: unknown; state: unknown }[];
 }
 
 /**
@@ -81,14 +87,22 @@ function fakeChrome(fake: Fake) {
 			get: async (id: number) => ({ id, focused: fake.focused }),
 		},
 		tabs: {
-			query: async () => [tab],
+			query: async () => [tab, ...(fake.moreTabs ?? [])],
 			get: async () => ({ ...tab, status: "complete" }),
 			sendMessage: async (
-				_tabId: number,
-				request: { type: string; name?: string },
+				tabId: number,
+				request: {
+					type: string;
+					name?: string;
+					state?: unknown;
+					vouch?: unknown;
+				},
 			) => {
+				if (request.type === "extension-state")
+					fake.states?.push([tabId, request.state]);
 				if (request.type === "webmcp-call") {
 					fake.pageCalls.push(request.name ?? "");
+					fake.vouches?.push({ vouch: request.vouch, state: request.state });
 					return { ok: true, value: "done" };
 				}
 				if (request.type === "webmcp-list")
@@ -449,11 +463,61 @@ describe("the panel's commands", () => {
 	});
 });
 
+describe("the state for pages with the client library (DEC-207, DEC-221)", () => {
+	test("its name, on and the AI apps: no version, nothing of the relay", async () => {
+		const { c } = await connection();
+		expect(c.handshakeState()).toEqual({
+			name: "tab-mcp browser extension",
+			on: false,
+			apps: [],
+			whileInFront: true,
+		});
+	});
+
+	test("host access changed: told again, also to a tab it may no longer read (only off), never to a page that is not a site", async () => {
+		const { c, fake } = await connection();
+		fake.states = [];
+		fake.moreTabs = [
+			// Host access withdrawn: Chrome gives no address.
+			{ id: 2, active: false, windowId: 1 },
+			{ id: 3, url: "chrome://settings/", active: false, windowId: 1 },
+		];
+		c.hostAccessChanged();
+		await until(() => fake.states?.length === 2, "both tabs told");
+		await Bun.sleep(10);
+		const off: ExtensionState = {
+			name: "tab-mcp browser extension",
+			on: false,
+			apps: [],
+			whileInFront: true,
+		};
+		expect(fake.states).toEqual([
+			[1, off],
+			[2, off],
+		]);
+		// On: the tab it may read hears it, the other one still only off.
+		const on = {
+			...off,
+			on: true,
+			apps: [{ name: "Claude", host: "claude.ai" }],
+		};
+		spyOn(c, "handshakeState").mockReturnValue(on);
+		fake.states = [];
+		c.hostAccessChanged();
+		await until(() => fake.states?.length === 2, "both tabs told again");
+		expect(fake.states).toEqual([
+			[1, on],
+			[2, off],
+		]);
+	});
+});
+
 describe("a page tool's question", () => {
 	test("Always allow on <host>: kept for the site, shown in the panel; that tool runs unasked after, another still asks (EQ 10)", async () => {
 		const { c, kv, fake } = await connection({
 			tools: [pageTool("place_order", false), pageTool("pay", false)],
 		});
+		fake.vouches = [];
 		const panel = fakePanel();
 		const receive = c.addPanel(panel.port);
 		receive({ type: "hello", windowId: 1 });
@@ -481,6 +545,13 @@ describe("a page tool's question", () => {
 		expect(await callTool("page_place_order")).toBe("done");
 		expect(panel.state()?.questions).toEqual([]);
 		expect(fake.pageCalls).toEqual(["place_order", "place_order"]);
+		// Each with its vouch and the state for a page not told on yet
+		// (DEC-221).
+		expect(fake.vouches).toHaveLength(2);
+		for (const v of fake.vouches ?? []) {
+			expect(v.vouch).toMatchObject({ app: { host: expect.any(String) } });
+			expect(v.state).toEqual(c.handshakeState());
+		}
 		// Another tool of the site still asks.
 		const paid = callTool("page_pay");
 		await until(() => panel.state()?.questions.length === 1, "pay asks");

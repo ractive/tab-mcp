@@ -335,7 +335,6 @@ test("useTabMcpState re-renders only when the state changes", async () => {
 	// The tab-mcp browser extension (DEC-207), as the mirror's chunk sets it.
 	const extension = Object.freeze({
 		name: "tab-mcp browser extension",
-		version: "0.3.0",
 		apps: Object.freeze([{ name: "Claude", host: "claude.ai" }]),
 		whileInFront: true,
 	});
