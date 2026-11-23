@@ -24,10 +24,11 @@ Claude Desktop, then Claude calling the page's tools (45 s; waiting cut, Claude'
 ## How the parts fit together
 
 <!-- The picture is docs/overview.svg, drawn by hand in the look of the diagrams on
-     https://ractive.ch/tab-mcp/ (boxes, arrows, label tags; light and dark). A copy is
-     static/images/tab-mcp-overview.svg in ractive.ch, shown there with a short version
-     of this text; keep them in step. -->
-![Two paths lead through the tab-mcp relay to AI apps. A page with tab-mcp-client, in any browser with nothing for the user to install, connects to the relay with a WebSocket. A page with WebMCP tools, in Chrome with the tab-mcp extension installed, is read by the tab-mcp browser extension, which connects to the relay with a WebSocket. The AI apps reach the relay over MCP.](docs/overview.svg)
+     https://ractive.ch/tab-mcp/ (boxes, arrows, label tags; light and dark). The same
+     file is static/images/tab-mcp-overview.svg in ractive.ch, shown there under
+     "Where it fits" with a short version of this text; keep the two files and the alt
+     text in step. -->
+![Three paths from a page's tools to an AI. First, in any browser and with nothing for the user to install, a page with tab-mcp-client connects to the tab-mcp relay with a WebSocket. Second, in Chrome or Firefox with the tab-mcp extension, the extension reads the page's WebMCP tools and connects to the relay with a WebSocket. On both paths, AI apps such as Claude, ChatGPT, Claude Code and Codex reach the relay over MCP. Third, coming, in a browser with WebMCP support, the AI in the browser calls the page's WebMCP tools directly. That path needs no tab-mcp.](docs/overview.svg)
 
 tab-mcp has three parts:
 
