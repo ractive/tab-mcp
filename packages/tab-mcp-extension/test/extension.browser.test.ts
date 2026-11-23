@@ -49,6 +49,7 @@ import {
 	type Served,
 	type Worker,
 } from "./browser.ts";
+import { picturesThroughTheExtension } from "./pictures.ts";
 
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
@@ -2616,14 +2617,14 @@ describe.skipIf(chrome === undefined)(
 /**
  * A page that uses the client library with its default, the WebMCP mirror on
  * (`test/pages/library.ts` sets no `webmcp`, DEC-207): the page and the
- * extension know of each other. The page has no `onConfirm`: the
- * library's own confirmation, which an agent in the browser is never shown
- * (DEC-215); the AI app is the test's MCP client ("Test client" at
- * client.example).
+ * extension know of each other. The page's `onConfirm` allows and records
+ * every question: the library asks a WebMCP call only through it (DEC-215),
+ * never one the extension vouched for. The AI app is the test's MCP client
+ * ("Test client" at client.example).
  */
 const TEST_APP = { name: "Test client", host: "client.example" };
-/** The page's own confirmation is open. */
-const pageAsks = `document.querySelector("dialog.tab-mcp-confirm") !== null`;
+/** The page asked: its `onConfirm` was called, or a dialog of the library is open. */
+const pageAsks = `window.tabMcpPage.asked.length > 0 || document.querySelector("dialog.tab-mcp-confirm") !== null`;
 
 /**
  * AI access off and on again, so that the relay lists the test's AI app
@@ -2653,7 +2654,10 @@ describe.skipIf(chrome === undefined)(
 			stack = await start({ store: false }, `${SITE}/library.html`);
 			tab = stack.tab;
 			await listTestApp(stack);
-			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+			await waitForTools(
+				stack,
+				(n) => n.includes("page_complete_todo") && n.includes("page_snapshot"),
+			);
 		}, 60_000);
 
 		afterEach(async () => {
@@ -2741,6 +2745,15 @@ describe.skipIf(chrome === undefined)(
 				},
 			);
 			await step(
+				"a read-only tool's picture of 300 KiB reaches the AI app whole; a script in the page calling it through WebMCP gets the text (DEC-224)",
+				() =>
+					picturesThroughTheExtension(
+						() => call(stack, "page_snapshot"),
+						(expression) => tab.eval(expression),
+						TEST_APP,
+					),
+			);
+			await step(
 				"the page's state follows when the app is disconnected in the extension",
 				async () => {
 					// Disconnect asks first: a click arms it, a second one after a
@@ -2791,7 +2804,10 @@ describe.skipIf(chrome === undefined)(
 			await listTestApp(stack);
 			// Loaded after the install registered the polyfill for every page.
 			await tab.goto(`${SITE}/library.html`);
-			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+			await waitForTools(
+				stack,
+				(n) => n.includes("page_complete_todo") && n.includes("page_snapshot"),
+			);
 		}, 60_000);
 
 		afterEach(async () => {
@@ -2799,7 +2815,7 @@ describe.skipIf(chrome === undefined)(
 			stack = undefined as unknown as Stack;
 		});
 
-		test("the page knows the extension, and a call allowed there is not asked again", async () => {
+		test("the page knows the extension, and a call allowed there is not asked again; a read-only tool's picture reaches the AI app (DEC-224)", async () => {
 			await tab.waitFor(
 				"window.tabMcpPage?.mcp.extension?.apps.length === 1",
 				15_000,
@@ -2813,6 +2829,15 @@ describe.skipIf(chrome === undefined)(
 				via: "tab-mcp-extension",
 				...TEST_APP,
 			});
+			await step(
+				"a picture of 300 KiB through the port to the page-world polyfill, whole; a script in the page gets the text",
+				() =>
+					picturesThroughTheExtension(
+						() => call(stack, "page_snapshot"),
+						(expression) => tab.eval(expression),
+						TEST_APP,
+					),
+			);
 		});
 
 		test("without a click, with access to all sites: the library found the polyfill as the page loaded, also while AI access is off (DEC-191, not DEC-223's late install)", async () => {
@@ -2825,7 +2850,7 @@ describe.skipIf(chrome === undefined)(
 					// `webmcp-install`.
 					expect(info.structuredContent?.["webmcp"]).toEqual({
 						available: true,
-						tools: 1,
+						tools: 2,
 					});
 				},
 			);
@@ -2842,9 +2867,9 @@ describe.skipIf(chrome === undefined)(
 					await tab.waitFor(libraryMirrors, 15_000);
 					expect(
 						await tab.eval(
-							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name).sort())",
 						),
-					).toEqual(["complete_todo"]);
+					).toEqual(["complete_todo", "snapshot"]);
 				},
 			);
 		});
@@ -2907,7 +2932,7 @@ describe.skipIf(chrome === undefined)(
 					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
 					expect(await tab.eval(libraryMirrors)).toBe(true);
 					await stack.panel.waitFor(
-						`!document.getElementById("tab-library").hidden && document.querySelectorAll("#tools li").length === 1`,
+						`!document.getElementById("tab-library").hidden && document.querySelectorAll("#tools li").length === 2`,
 					);
 					expect(
 						await stack.panel.eval(
