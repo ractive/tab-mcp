@@ -5,8 +5,8 @@ revision 2026-07-28 and registers AI apps only through OAuth Client ID Metadata
 Documents (CIMD), with no dynamic client registration and no older protocol revision.
 An app that cannot do both cannot connect. How to add a page to each app:
 [connecting an AI app](https://ractive.ch/tab-mcp/connect/). Agents in the browser that
-call a page's tools through WebMCP (the client library's `webmcp: true`) do not use the
-relay and are not listed here.
+call a page's tools through WebMCP (the client library's mirror, on unless a page sets
+`webmcp: false`) do not use the relay and are not listed here.
 
 "Revision" is the tab-mcp commit that was tested.
 

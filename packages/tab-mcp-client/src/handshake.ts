@@ -1,7 +1,7 @@
 /**
  * The page's side of the handshake with the tab-mcp browser extension
- * (DEC-207), in the WebMCP mirror's chunk: only a page that offers its tools
- * to agents in the browser (`webmcp: true`) takes part.
+ * (DEC-207), in the WebMCP mirror's chunk: only a page that mirrors its
+ * tools into WebMCP (unless `webmcp: false`) takes part.
  *
  * Plain DOM events on `document`, each with a JSON string as `detail`
  * (objects do not cross between a content script's world and the page's in

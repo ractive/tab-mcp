@@ -46,7 +46,7 @@ export interface RelayClient {
 
 /**
  * Whatever calls a mirrored tool through the browser's WebMCP
- * (`webmcp: true`): an agent in the browser, which may drive the tab,
+ * (unless `webmcp: false`): an agent in the browser, which may drive the tab,
  * another extension that passes on an AI app's calls, or a document of an
  * origin in the tool's `exposedTo`. Not paired and not identified: nothing
  * more is known, and the page cannot tell these apart, unless the tab-mcp
@@ -211,7 +211,7 @@ export interface RegisterToolOptions {
 	/**
 	 * Which callers see the tool: `"relay"` (AI apps through the relay),
 	 * `"local"` (this site's own assistant over `serve`), `"webmcp"` (whatever
-	 * calls through the browser's WebMCP, with `TabMcpOptions.webmcp` on). Others neither list nor
+	 * calls through the browser's WebMCP, unless `TabMcpOptions.webmcp` is `false`). Others neither list nor
 	 * call it: for them it does not exist. By default all of them, tools that
 	 * ask included (DEC-209). Leave a caller out for privacy or identity, e.g.
 	 * `["local"]` for data the site's own assistant may read but an AI app
@@ -418,7 +418,8 @@ export interface TabMcpOptions {
 	/**
 	 * Also register the tools with the browser's own WebMCP
 	 * (`document.modelContext.registerTool()`), where it has it, so that agents
-	 * in the browser can call them, without pairing. Off by default. Every
+	 * in the browser can call them, without pairing. On by default; `false`
+	 * keeps every tool out of WebMCP and the page out of the handshake. Every
 	 * tool goes there unless its `callers` leave `"webmcp"` out, tools that ask
 	 * included, marked `consequentialHint` (a tool marked only
 	 * `destructiveHint` too: WebMCP has no `destructiveHint`; DEC-209), so
@@ -434,7 +435,7 @@ export interface TabMcpOptions {
 	 */
 	webmcp?: boolean;
 	/**
-	 * With `webmcp: true`: a WebMCP call the tab-mcp browser extension vouches
+	 * Unless `webmcp: false`: a WebMCP call the tab-mcp browser extension vouches
 	 * for runs without `onConfirm` (the user allowed exactly that call there,
 	 * a moment before). On by default; `false` treats it as any other WebMCP
 	 * call: `onConfirm` decides, without one it runs (DEC-215). `extension`

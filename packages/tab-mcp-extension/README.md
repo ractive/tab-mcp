@@ -119,8 +119,9 @@ The page's tools are the page's word:
   `webmcp_call` either), a schema that is no object schema or over 16 KB, tools marked
   `debugging` (WebMCP's hint for tools meant for the page's developers), and more than
   64 tools. `webmcp_tools` lists each of them with the reason.
-- Tools a tab-mcp page mirrors into WebMCP (the client library's `webmcp: true`) are
-  offered like any other: the extension cannot know whether your AI app is also paired
+- Tools a tab-mcp page mirrors into WebMCP (a page with the client library 0.23.0 or
+  later does unless it sets `webmcp: false`; with an older version only with
+  `webmcp: true`) are offered like any other: the extension cannot know whether your AI app is also paired
   with the page itself. An AI app connected to both sees such a tool twice, once from
   each connector. Such a page and the extension know of each other (DEC-207, client
   library 0.19.0 and later): a call you allowed here is not asked again in the page

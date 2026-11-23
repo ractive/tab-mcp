@@ -34,7 +34,9 @@ extension's. It learns nothing else from it: not who the user is, not the relay,
 AI app. A page that uses the tab-mcp library learns more, as the next paragraph says.
 
 A page that uses the tab-mcp client library and offers its tools to agents in the
-browser announces that to the extension (any page script could pretend to). Such a page,
+browser announces that to the extension (any page script could pretend to). With the
+library 0.23.0 or later a page offers them unless it sets `webmcp: false`; with an older
+version only when it set `webmcp: true`. Such a page,
 and only such a page among those the extension may read (in every tab, not only the one
 in front), learns from the extension while it is open and AI access is on: the
 extension's name, that AI access is on, and the names and verified hosts of the AI apps

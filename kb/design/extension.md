@@ -70,8 +70,8 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
   A relay can reserve the first id for the extension's origins; the Firefox id stays
   unreserved, as no list can name a Firefox extension (DEC-197). Commands reach the worker only
   over the panel's port (threat model A13).
-- A page with the client library and `webmcp: true` (client 0.13.0, DEC-115, DEC-119)
-  registers its tools with WebMCP too. The extension offers them like any other page
+- A page with the client library registers its tools with WebMCP too (client 0.13.0 with
+  `webmcp: true`, DEC-115, DEC-119; by default since DEC-222, unless `webmcp: false`). The extension offers them like any other page
   tool (DEC-140): it cannot know whether the AI app is paired with the page itself. An AI
   app connected to both gets such a tool twice. (Until iteration 35 it left out the names
   listed in `<html data-tab-mcp-webmcp>`, which hid them from an AI app connected only
@@ -108,7 +108,8 @@ AI app ──MCP──▶ relay ◀──WebSocket── service worker (tab-mcp
 
 ## Pages with the client library (DEC-207)
 
-A page that uses the client library with `webmcp: true` and the extension shake hands,
+A page that uses the client library with the WebMCP mirror on (unless `webmcp: false`,
+DEC-222) and the extension shake hands,
 so that a call the user allowed in the extension is not asked again by the page, and the
 page can say that an AI app is connected through the extension
 ([iteration 48](/iterations/iteration-48-page-extension-handshake.md)).

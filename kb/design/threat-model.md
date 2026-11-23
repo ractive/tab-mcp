@@ -40,7 +40,7 @@ Becomes `SECURITY.md` (reporting, supported versions) and `docs/threat-model.md`
 | Relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or altering traffic |
 | AI app | the tools it is allowed to call, their results | following the user's intent (it is driven by a model) |
 | Model provider behind the AI app | the same as the AI app | — |
-| WebMCP caller: agent in the browser, another extension, an `exposedTo` origin (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP, their results | — |
+| WebMCP caller: agent in the browser, another extension, an `exposedTo` origin (unless the page sets `webmcp: false`, A14) | the tools the page mirrors into WebMCP, their results | — |
 | Network | nothing (TLS everywhere; `wss:` and `https:` only outside development) | — |
 
 The relay cannot be made blind: the AI app speaks HTTPS to the relay and the MCP payload
@@ -549,10 +549,18 @@ and DEC-076 to DEC-079.
 
 ### A14: WebMCP callers of mirrored tools (iteration 25)
 
-With `webmcp: true` the library also registers the page's tools with the browser's own
-[WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`). Agents
-in the browser call them without pairing and without an identity (`client.kind`
-`"webmcp"`). Such an agent often drives the tab and can click Allow itself; until client
+Unless a page sets `webmcp: false`, the library also registers the page's tools with
+the browser's own [WebMCP](https://webmachinelearning.github.io/webmcp/)
+(`document.modelContext`), where the tab has it (also the tab-mcp browser extension's own
+where the browser has none). Agents in the browser call them without pairing and without
+an identity (`client.kind` `"webmcp"`). On by default since DEC-222 (owner, 2026-11-23;
+before, only with `webmcp: true`): the extension sees a page's tools only in WebMCP, a
+mirroring page also reaches the browser's own AI, and DEC-209 already lists `"webmcp"`
+in every tool's default `callers`. The cost: a site that never chose WebMCP now faces
+these callers; on a page without `onConfirm`, an extension that passes on an AI app's
+calls and asks nothing runs a consequential tool unasked, which before needed the site
+to opt in. `webmcp: false`, `callers: ["relay", "local"]` or an `onConfirm` that refuses
+`client.kind === "webmcp"` take it back. Such an agent often drives the tab and can click Allow itself; until client
 0.20 consequential tools were therefore mirrored only when their `callers` listed
 `"webmcp"`. That did not stop such an agent, which clicked the page's own controls
 instead, with no question (DEC-209): now every tool is mirrored unless its `callers`
@@ -594,7 +602,7 @@ the vouch stays usable until it comes: a moment after a failure, up to the 2 s w
 `executeTool` neither runs the tool nor settles, or on a page that takes vouches with
 its own code and ignores `withdraw`. `trustExtension: false`
 treats every WebMCP call as an agent in the browser's (`onConfirm` decides). The full
-analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119, DEC-207, DEC-215).
+analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119, DEC-207, DEC-215, DEC-222).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 

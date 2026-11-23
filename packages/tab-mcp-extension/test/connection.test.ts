@@ -463,6 +463,31 @@ describe("the panel's commands", () => {
 	});
 });
 
+test("the extension's own library mirrors nothing into WebMCP, even with a document that has it (webmcp: false, DEC-222)", async () => {
+	const w = globalThis as { Document?: unknown; document?: unknown };
+	const saved = { Document: w.Document, document: w.document };
+	const native: string[] = [];
+	class FakeDocument extends EventTarget {}
+	Object.defineProperty(FakeDocument.prototype, "modelContext", {
+		configurable: true,
+		get: () => ({
+			registerTool: (tool: { name: string }) => {
+				native.push(tool.name);
+			},
+		}),
+	});
+	w.Document = FakeDocument;
+	w.document = new FakeDocument();
+	try {
+		await connection({ aiOn: true });
+		await Bun.sleep(20); // the mirror's chunk would have loaded by now
+		expect(registered.mock.calls.length).toBeGreaterThan(0);
+		expect(native).toEqual([]);
+	} finally {
+		Object.assign(w, saved);
+	}
+});
+
 describe("the state for pages with the client library (DEC-207, DEC-221)", () => {
 	test("its name, on and the AI apps: no version, nothing of the relay", async () => {
 		const { c } = await connection();

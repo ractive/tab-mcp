@@ -42,7 +42,7 @@ const { TabMcp } = await import("/lib/index.js");
 window.calls = [];
 window.reports = [];
 window.refused = [];
-const mcp = new TabMcp({ server: { name: "serve-test", version: "1.0.0" }, alwaysAllow: true, webmcp: q.has("webmcp") });
+const mcp = new TabMcp({ server: { name: "serve-test", version: "1.0.0" }, alwaysAllow: true, ...(q.has("webmcp") ? {} : { webmcp: false }) });
 mcp.addEventListener("toolcallend", (e) => calls.push({ tool: e.detail.tool, outcome: e.detail.outcome, client: e.detail.client }));
 await mcp.registerTool({
 	name: "add", description: "Adds two numbers",
@@ -317,7 +317,7 @@ test.skipIf(chrome === undefined)(
 );
 
 test.skipIf(major < WEBMCP_MAJOR)(
-	"with webmcp: true, one tool reaches the chat over the port and an agent in the browser",
+	"with the mirror on (the default, no webmcp option), one tool reaches the chat over the port and an agent in the browser",
 	async () => {
 		const page = await open("?webmcp");
 		try {

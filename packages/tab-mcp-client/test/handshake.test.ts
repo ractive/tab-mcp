@@ -90,9 +90,9 @@ afterEach(async () => {
 	await window.happyDOM.close();
 });
 
-/** A page's `TabMcp` with `webmcp: true`; its tools go when the test ends. */
+/** A page's `TabMcp`, the mirror on by default; its tools go when the test ends. */
 function tab(options: Partial<TabMcpOptions> = {}): TabMcp {
-	const t = newTab("https://relay.example", { webmcp: true, ...options });
+	const t = newTab("https://relay.example", options);
 	const register = t.registerTool.bind(t);
 	t.registerTool = (tool, opts = {}) =>
 		register(tool, {
@@ -174,7 +174,7 @@ async function todoPage(options: Partial<TabMcpOptions> = {}) {
 }
 
 describe("the announcement", () => {
-	test("a page that mirrors says hello once it starts and marks <html>", async () => {
+	test("a page that mirrors (the default, no webmcp option) says hello once it starts and marks <html>", async () => {
 		tab();
 		await settle();
 		expect(heard).toEqual([
@@ -185,13 +185,19 @@ describe("the announcement", () => {
 		).toBe("1");
 	});
 
-	test("without webmcp: true, or without WebMCP, the page says nothing and is not marked", async () => {
-		newTab("https://relay.example");
+	test("with webmcp: false, or without WebMCP, the page says nothing and is not marked", async () => {
+		const off = newTab("https://relay.example", { webmcp: false });
+		tabs.push(off);
+		await settle();
 		delete (window.Document.prototype as { modelContext?: unknown })
 			.modelContext;
 		tabs.push(tab());
 		await settle();
+		// Nor does it answer the extension, or hear it.
+		tell(ON);
+		tell({ ...ON, type: "hello" });
 		expect(heard).toEqual([]);
+		expect(off.extension).toBeUndefined();
 		expect(
 			window.document.documentElement.hasAttribute("data-tab-mcp-handshake"),
 		).toBe(false);
@@ -220,7 +226,7 @@ describe("the announcement", () => {
 			},
 			createdAt: new Date().toISOString(),
 		};
-		const t = newTab(relay.url, { webmcp: true });
+		const t = newTab(relay.url);
 		tabs.push(t);
 		try {
 			await settle();
@@ -576,7 +582,7 @@ describe("the vouch", () => {
 describe("the connect dialog", () => {
 	test("says first which AI apps are connected through the extension; connecting here stays as it was", async () => {
 		const relay = new StubRelay();
-		const t = newTab(relay.url, { webmcp: true });
+		const t = newTab(relay.url);
 		tabs.push(t);
 		const doc = window.document as unknown as Document;
 		try {

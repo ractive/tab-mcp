@@ -6,6 +6,20 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Breaking
+
+- **`webmcp` is on by default** (DEC-222): the page's tools are also registered with the
+  browser's WebMCP, where the tab has it. Set `webmcp: false` for the old behaviour.
+- In a browser extension's own pages, and on a page that registers the same tool names
+  with `document.modelContext` itself, set `webmcp: false`.
+
+### Changed
+
+- A tool the browser refused to register with WebMCP is tried again whenever the page's
+  tools change, not only when that tool is registered again.
+
 ## [0.22.0][client-0.22.0] - 2026-11-23
 
 ### Breaking

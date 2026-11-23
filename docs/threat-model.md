@@ -48,7 +48,7 @@ See the [protocol](protocol.md) for the details.
 | The relay operator | **every tool argument and result in clear text** (TLS ends at the relay), client ids, IP addresses, timing | not logging or changing traffic |
 | The AI app | the tools it may call and their results | following the user's intent (a model drives it) |
 | The model provider behind the AI app | the same as the AI app | nothing |
-| A WebMCP caller: an agent in the browser, another extension, an `exposedTo` origin (only with `webmcp: true`, A14) | the tools the page mirrors into WebMCP and their results | nothing |
+| A WebMCP caller: an agent in the browser, another extension, an `exposedTo` origin (unless the page sets `webmcp: false`, A14) | the tools the page mirrors into WebMCP and their results | nothing |
 | The network | nothing: TLS everywhere, `wss:` and `https:` only outside development | nothing |
 
 The relay cannot be made blind. The AI app speaks HTTPS to the relay, and the relay must
@@ -852,9 +852,13 @@ like any other, `chrome-extension://<id>` (A11).
 
 ### A14: WebMCP callers of a page's mirrored tools (agents in the browser, extensions, other origins)
 
-With `webmcp: true` (off by default), the client library also registers the page's
-tools with the browser's own [WebMCP](https://webmachinelearning.github.io/webmcp/)
-(`document.modelContext`). Whatever calls them there without the tab-mcp browser
+Unless a page sets `webmcp: false` (on by default, DEC-222; until then only with
+`webmcp: true`), the client library also registers the page's tools with the browser's
+own [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`),
+where the tab has it: Chrome with the origin trial or the flag, and, where the browser
+has none, the tab-mcp browser extension's own `document.modelContext`, which it puts on
+`Document.prototype` after "Give access to all sites" (A13), so that the library takes
+it for the browser's. Whatever calls them there without the tab-mcp browser
 extension's vouch (DEC-207) is one caller to the page, `client: { kind: "webmcp" }`,
 which the page cannot tell apart from the others:
 
@@ -871,9 +875,31 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
 
 - **No pairing, no identity.** Any agent the browser lets call the page's WebMCP tools
   can call the mirrored ones; the relay, its grants and its pairing are not involved,
-  and the page learns nothing about the caller (`client.kind` is `"webmcp"`). Turning
-  `webmcp` on is a change in what the page exposes; the library treats it as one (off by
-  default, the client's [changelog](../packages/tab-mcp-client/CHANGELOG.md) says so).
+  and the page learns nothing about the caller (`client.kind` is `"webmcp"`).
+- **On by default, and what that costs** (DEC-222, the owner's decision of
+  2026-11-23). Until then the mirror was off unless a page set `webmcp: true`, and the
+  library treated turning it on as a change in what the page exposes. Now it is on
+  unless a page sets `webmcp: false`, so what a page exposes by default includes these
+  callers. The owner's reasons: the tab-mcp browser extension sees a page's tools only
+  in WebMCP, so a page with a "Connect your AI app" button was invisible to the
+  extension's users unless its site had set `webmcp: true`; a page that mirrors also
+  offers its tools to the browser's own AI once the browser has WebMCP; and since
+  DEC-209 every tool's `callers` include `"webmcp"` by default, which a mirror that was
+  off by default did not fit. DEC-209 also found that keeping a tool from an agent that
+  drives the tab protects nothing: the agent clicks the page's own controls instead.
+  What is lost: the site no longer chooses to face WebMCP callers, it faces them unless
+  it opts out. Against an extension that passes on an AI app's calls and asks nothing
+  itself, and against script of an `exposedTo` origin, a consequential tool on a page
+  without `onConfirm` runs unasked, on a page whose site never chose WebMCP; before,
+  only a site that set `webmcp: true` took that on. A page that upgrades the library
+  gets this without changing a line; the client's
+  [changelog](../packages/tab-mcp-client/CHANGELOG.md) marks it as breaking, and the
+  library warns nothing at run time (a warning on every page without the option would
+  be noise for every site that is fine with the default, as DEC-215 reasoned). What a
+  site does about it: `webmcp: false` for the whole page, `callers: ["relay", "local"]`
+  for one tool, or an `onConfirm` that refuses `client.kind === "webmcp"` (the tools
+  are still listed). A page that registers tools with `document.modelContext` itself
+  under the same names sets `webmcp: false`.
 - **It operates the page, its dialogs included.** Such an agent often drives the very
   tab it calls into: input it sends through the DevTools Protocol or an extension is
   trusted input, and the delay before Allow only needs the tab visible and focused,
@@ -904,7 +930,7 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
   console warning once per tool, when the browser accepted its registration: a page that
   set `exposedTo` before 0.21 lost that check with the upgrade. There is no warning for a
   tool that asks and is mirrored without `exposedTo`, though another extension can call
-  it too: it would be noise on almost every page with `webmcp: true` and such a tool,
+  it too: it would be noise on almost every page that mirrors and has such a tool,
   for the behaviour DEC-215 chose; the remedy there is the same, `onConfirm` or
   `callers`.
 - **The same check, in code only.** Arguments are checked against the tool's schema
@@ -1013,8 +1039,9 @@ sits beside the AI apps of A2 and A6 and the WebMCP callers of A14.
   where the browser reports it (`navigator.userActivation`). This guards against
   accidental connects; it is not a security boundary, since a page can always open a
   WebSocket itself.
-- The browser library registers tools with the browser's WebMCP only with
-  `webmcp: true`, every tool whose `callers` do not leave `"webmcp"` out (DEC-209); tools
+- The browser library registers tools with the browser's WebMCP unless a page sets
+  `webmcp: false` (DEC-222; this default exposes more than the old one, A14), every tool
+  whose `callers` do not leave `"webmcp"` out (DEC-209); tools
   that ask are marked `consequentialHint` there, so that a caller that heeds it asks its
   user, and the library shows an unvouched WebMCP call no question of its own (A14,
   DEC-215).
@@ -1083,9 +1110,11 @@ each default.
 - With the tab-mcp browser extension: a tool that runs without asking (marked read-only by the page,
   or with its "Always allow" switch on for its site) does whatever the AI app asks of it, and another program on
   the computer can click a notification or the side panel (A13).
-- With `webmcp: true`, a page without an `onConfirm` that refuses unvouched WebMCP
-  calls, and a consequential tool whose `callers` include `"webmcp"` (the default): the
-  library asks no WebMCP caller (A14, DEC-215).
+- With the mirror on (the default since DEC-222; a page without `webmcp: false`), a page
+  without an `onConfirm` that refuses unvouched WebMCP calls, and a consequential tool
+  whose `callers` include `"webmcp"` (the default): the library asks no WebMCP caller
+  (A14, DEC-215). A site that never thought about WebMCP is in this case once it
+  upgrades.
   - An agent in the browser that ignores `consequentialHint` runs the tool without its
     user's word. It could already click the page's own controls, or the library's
     dialog when there was one.

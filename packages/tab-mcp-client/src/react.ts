@@ -69,7 +69,7 @@ export interface TabMcpSnapshot {
 	tools: readonly string[];
 	/**
 	 * The tab-mcp browser extension while it serves the page, with the AI
-	 * apps connected through it (`TabMcp.extension`, `webmcp: true`).
+	 * apps connected through it (`TabMcp.extension`, unless `webmcp: false`).
 	 */
 	extension: BrowserExtension | undefined;
 }

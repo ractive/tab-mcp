@@ -2591,8 +2591,9 @@ describe.skipIf(chrome === undefined)(
 );
 
 /**
- * A page that uses the client library with `webmcp: true` (DEC-207): the page
- * and the extension know of each other. The page has no `onConfirm`: the
+ * A page that uses the client library with its default, the WebMCP mirror on
+ * (`test/pages/library.ts` sets no `webmcp`, DEC-207): the page and the
+ * extension know of each other. The page has no `onConfirm`: the
  * library's own confirmation, which an agent in the browser is never shown
  * (DEC-215); the AI app is the test's MCP client ("Test client" at
  * client.example).

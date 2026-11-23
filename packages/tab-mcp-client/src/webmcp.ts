@@ -1,6 +1,6 @@
 /**
  * Mirroring the tools into the browser's own WebMCP (iteration 25, DEC-115,
- * DEC-119, DEC-143): with `webmcp: true`, each tool that is offered there is
+ * DEC-119, DEC-143): unless `webmcp: false`, each tool that is offered there is
  * also registered with `document.modelContext.registerTool()`, under its own
  * `AbortController`, aborted when the tool leaves the registry. A chunk of
  * its own (DEC-171), loaded by a `TabMcp` whose constructor found native
@@ -187,6 +187,9 @@ export function mirror(
 				})
 				.catch((error: unknown) => {
 					if (signal.aborted) return; // unmirrored meanwhile
+					// Tried again at the registry's next change: the name may be
+					// free by then.
+					if (mirrors.get(tool) === controller) mirrors.delete(tool);
 					if (warned.has(tool.name)) return;
 					warned.add(tool.name);
 					console.warn(

@@ -219,7 +219,7 @@ type Listener<K extends keyof TabMcpEventMap> = (
 export class TabMcp extends EventTarget {
 	readonly #registry = new ToolRegistry();
 	/**
-	 * With `webmcp: true`: the tab-mcp browser extension while it serves this
+	 * Unless `webmcp: false`: the tab-mcp browser extension while it serves this
 	 * page, with the AI apps that reach the page's tools through it (DEC-207);
 	 * `extensionchange` says when it changes. `undefined` without it, while
 	 * its AI access is off, and without WebMCP. Declared only: the mirror's
@@ -341,7 +341,7 @@ export class TabMcp extends EventTarget {
 		// every tool whose `callers` do not leave "webmcp" out (DEC-209). The getter
 		// is read now (WM 10); the mirror loads only then (DEC-171), with the
 		// handshake with the tab-mcp browser extension (DEC-207).
-		const context = options.webmcp === true ? nativeContext() : undefined;
+		const context = options.webmcp !== false ? nativeContext() : undefined;
 		if (context !== undefined)
 			import("./webmcp.ts").then(
 				(m) =>

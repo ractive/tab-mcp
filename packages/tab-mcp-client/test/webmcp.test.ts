@@ -131,7 +131,7 @@ function scoped(t: TabMcp): TabMcp {
 }
 
 function tab(options: Partial<TabMcpOptions> = {}): TabMcp {
-	return scoped(newTab("https://relay.example", { webmcp: true, ...options }));
+	return scoped(newTab("https://relay.example", options));
 }
 
 const attribute = () =>
@@ -167,14 +167,30 @@ const wipe = {
 	execute: () => "wiped",
 };
 
-describe("off by default", () => {
-	test("without webmcp: true nothing is registered, not even a tool whose callers list webmcp", async () => {
+describe("on by default", () => {
+	test("without the option every tool is mirrored, a consequential one too; webmcp: true does the same", async () => {
 		const t = scoped(newTab("https://relay.example"));
+		await t.registerTool(add);
+		await t.registerTool(wipe);
+		await settle();
+		expect([...native.tools.keys()]).toEqual(["add", "wipe"]);
+		expect(native.tools.get("wipe")?.annotations).toEqual({
+			consequentialHint: true,
+		});
+		const explicit = tab({ webmcp: true });
+		await explicit.registerTool({ ...add, name: "explicit" });
+		await settle();
+		expect([...native.tools.keys()]).toEqual(["add", "wipe", "explicit"]);
+	});
+
+	test("with webmcp: false nothing is registered, not even a tool whose callers list webmcp", async () => {
+		const t = tab({ webmcp: false });
 		await t.registerTool(add);
 		await t.registerTool(wipe, { callers: ["relay", "webmcp"] });
 		await settle();
 		expect(native.registrations).toBe(0);
 		expect(attribute()).toBeNull();
+		expect(t.tools).toEqual(["add", "wipe"]);
 	});
 
 	test("without native WebMCP nothing happens", async () => {
@@ -255,7 +271,7 @@ describe("mirroring", () => {
 
 	test("after connect() too", async () => {
 		const relay = new StubRelay();
-		const t = scoped(newTab(relay.url, { webmcp: true }));
+		const t = scoped(newTab(relay.url));
 		try {
 			await t.registerTool(add);
 			await t.connect({ resume: true });
@@ -562,6 +578,35 @@ describe("every failure stays with the mirror", () => {
 		expect(native.tools.size).toBe(0);
 		expect(t.tools).toEqual(["add"]);
 		expect(warn).toHaveBeenCalledTimes(1);
+	});
+
+	test("a refused tool is tried again when the registry changes, and warned about once", async () => {
+		const held = new AbortController();
+		await native.registerTool(
+			{ name: "add", description: "The page's own", execute: () => "page" },
+			{ signal: held.signal },
+		);
+		const t = tab();
+		await t.registerTool(add);
+		await settle();
+		expect(native.tools.get("add")?.description).toBe("The page's own");
+		// Still refused at the next change: tried, no second warning.
+		const before = native.registrations;
+		const first = new AbortController();
+		await t.registerTool(wipe, { signal: first.signal });
+		await settle();
+		expect(native.registrations).toBe(before + 2);
+		expect(native.tools.get("add")?.description).toBe("The page's own");
+		// The page gave the name up: the next change mirrors the tool.
+		held.abort();
+		first.abort();
+		await settle();
+		expect(native.tools.get("add")?.description).toBe(add.description);
+		expect(
+			warn.mock.calls.filter((call) =>
+				String(call[0]).includes("add is not offered through WebMCP"),
+			),
+		).toHaveLength(1);
 	});
 
 	test("a tool unregistered before its registration ran is not registered, whatever the browser does with an aborted signal (review of PR 103)", async () => {
