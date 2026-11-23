@@ -49,6 +49,7 @@ import {
 	type Served,
 	type Worker,
 } from "./browser.ts";
+import { glowsWhileCalling } from "./glow.ts";
 import { picturesThroughTheExtension } from "./pictures.ts";
 
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
@@ -806,6 +807,15 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(await tab.eval("window.calls.map((c) => c[1])")).not.toContain(
 			"coffee",
 		);
+	});
+
+	test("the AI access switch glows while an AI app's call runs, a question waiting included, and for the hold after (DEC-225)", async () => {
+		const result = await glowsWhileCalling(
+			(expression) => stack.panel.eval(expression),
+			() => call(stack, "page_place_order", { item: "tea" }),
+			() => answerInPanel(stack, "allow"),
+		);
+		expect(result.content[0]?.text).toContain("tea");
 	});
 
 	test("the look: nothing past the panel's edge at 345, 360 and 420 px, no amber button, each scheme's tokens (DEC-160 to DEC-163)", async () => {

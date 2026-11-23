@@ -37,6 +37,16 @@
 	--warn: #7d4500;
 	--warn-bg: #fff0cc;
 	--warn-edge: #a86400;
+	/*
+	 * An AI app calling (DEC-225): the ring and the halo of the AI access
+	 * switch, Sitegloss's colours; the same in dark, where they glow as much
+	 */
+	--glow-1: #2fd4c0;
+	--glow-2: #4c7dff;
+	--glow-3: #a14dff;
+	--glow-4: #ff4da0;
+	--glow-5: #ff9838;
+	--glow-6: #ffd746;
 	/* Type */
 	--font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 	--font-mono:
@@ -370,6 +380,71 @@ input:is([type="text"], [type="url"]) {
 
 .allow-switch input[aria-disabled="true"]::after {
 	background: var(--ink-2);
+}
+
+/*
+ * An AI app is calling (DEC-225): while its call runs and 5 s after the
+ * last, the AI access switch wears the many-coloured ring of Sitegloss's AI
+ * button, with a halo of the same colours that breathes. Both are layers on
+ * the switch's label, behind the track: the switch keeps its size, nothing
+ * moves, and only the halo's opacity is animated. The ring is 2 px round the
+ * track; the halo is the ring blurred 3 px, within the section's 16 px
+ * padding. `isolation` keeps the layers over the section's paper. A style
+ * alone: no text, name or `aria-*` value changes.
+ */
+.switch[data-calling] {
+	--glow: linear-gradient(
+		90deg,
+		var(--glow-1),
+		var(--glow-2),
+		var(--glow-3),
+		var(--glow-4),
+		var(--glow-5),
+		var(--glow-6)
+	);
+	position: relative;
+	isolation: isolate;
+}
+
+/* The ring: the track's own fill covers its inside. */
+.switch[data-calling]::before,
+.switch[data-calling]::after {
+	content: "";
+	position: absolute;
+	z-index: -1;
+	inset: -2px;
+	border-radius: var(--r-pill);
+	background: var(--glow);
+	pointer-events: none;
+}
+
+/* The halo: the same colours, blurred, breathing. */
+.switch[data-calling]::after {
+	filter: blur(3px);
+	animation: calling 0.6s ease-in-out infinite alternate;
+}
+
+/*
+ * With the keyboard's focus on the switch the halo goes and the ring stays;
+ * the focus ring moves out by 2 px, so paper lies between the two and not a
+ * blur of colours close to its own.
+ */
+.switch[data-calling] input:focus-visible {
+	outline-offset: 4px;
+}
+
+.switch[data-calling]:has(input:focus-visible)::after {
+	display: none;
+}
+
+@keyframes calling {
+	from {
+		opacity: 0.2;
+	}
+
+	to {
+		opacity: 0.95;
+	}
 }
 
 /* --- pills, notices ----------------------------------------------------------- */
@@ -963,6 +1038,12 @@ html [hidden] {
 	:is(.switch, .allow-switch) input::after {
 		transition: none;
 	}
+
+	/* The ring and the halo, steady, for the same time. */
+	.switch[data-calling]::after {
+		animation: none;
+		opacity: 0.6;
+	}
 }
 
 /*
@@ -1024,5 +1105,25 @@ html [hidden] {
 	/* The state is in the sentence beside it; the dot keeps its colour. */
 	.dot {
 		forced-color-adjust: none;
+	}
+
+	/*
+	 * The user's colours have no gradient: the ring is Highlight with Canvas
+	 * between it and the track (on while an AI app calls, so Highlight too),
+	 * and no halo; the focus ring moves out past it.
+	 */
+	.switch[data-calling]::before {
+		inset: -4px;
+		border: 2px solid Highlight;
+		background: Canvas;
+		forced-color-adjust: none;
+	}
+
+	.switch[data-calling] input:focus-visible {
+		outline-offset: 6px;
+	}
+
+	.switch[data-calling]::after {
+		display: none;
 	}
 }

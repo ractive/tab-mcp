@@ -29,6 +29,7 @@ import {
 	setAllowedMany,
 } from "../src/worker/allowed.ts";
 import type { LookedUp } from "../src/worker/bridge.ts";
+import { RunningCalls } from "../src/worker/calls.ts";
 import { panelStatus } from "../src/worker/connection.ts";
 import { decide } from "../src/worker/decide.ts";
 import { memoryKv } from "../src/worker/kv.ts";
@@ -915,6 +916,66 @@ describe("the panel's status", () => {
 	});
 });
 
+describe("the AI apps' calls running, for the panel's glow (DEC-225)", () => {
+	const start = (mcp: EventTarget, id: number) =>
+		mcp.dispatchEvent(new CustomEvent("toolcall", { detail: { id } }));
+	const end = (mcp: EventTarget, id: number) =>
+		mcp.dispatchEvent(new CustomEvent("toolcallend", { detail: { id } }));
+
+	function watched() {
+		let told = 0;
+		const calls = new RunningCalls(() => told++);
+		const mcp = new EventTarget();
+		const listening = new AbortController();
+		calls.watch(mcp, listening.signal);
+		return { calls, mcp, listening, told: () => told };
+	}
+
+	test("calls that overlap: the panels are told when the first starts and the last ends, not for each", () => {
+		const t = watched();
+		expect(t.calls.any).toBe(false);
+		start(t.mcp, 1);
+		expect([t.calls.any, t.told()]).toEqual([true, 1]);
+		for (const id of [2, 3, 4]) start(t.mcp, id);
+		for (const id of [1, 3, 2]) end(t.mcp, id);
+		expect([t.calls.any, t.told()]).toEqual([true, 1]);
+		end(t.mcp, 4);
+		expect([t.calls.any, t.told()]).toEqual([false, 2]);
+	});
+
+	test("one call after the other: told at each start and end", () => {
+		const t = watched();
+		for (const id of [1, 2]) {
+			start(t.mcp, id);
+			end(t.mcp, id);
+		}
+		expect([t.calls.any, t.told()]).toEqual([false, 4]);
+	});
+
+	test("an end with no start counts for nothing", () => {
+		const t = watched();
+		start(t.mcp, 1);
+		end(t.mcp, 7);
+		expect([t.calls.any, t.told()]).toEqual([true, 1]);
+	});
+
+	test("a new connection (another relay): the old one's calls in flight are cleared, and its events, which still fire, are no longer heard", () => {
+		const t = watched();
+		start(t.mcp, 1);
+		t.listening.abort();
+		const next = new EventTarget();
+		t.calls.watch(next, new AbortController().signal);
+		expect([t.calls.any, t.told()]).toEqual([false, 2]);
+		// The old connection's end of call 1, and a start, after its signal.
+		start(t.mcp, 2);
+		end(t.mcp, 1);
+		expect([t.calls.any, t.told()]).toEqual([false, 2]);
+		// The ids go on across connections (unique in the worker).
+		start(next, 3);
+		expect([t.calls.any, t.told()]).toEqual([true, 3]);
+	});
+});
+
 describe("the worker's start", () => {
 	test("the panel's state for a failed start carries the problem and nothing to act on", () => {
 		const state = startProblem(new Error("IndexedDB refused"));
@@ -925,6 +986,7 @@ describe("the worker's start", () => {
 			questions: [],
 			expired: [],
 			pairing: false,
+			calling: false,
 		});
 	});
 

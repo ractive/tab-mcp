@@ -26,6 +26,13 @@ import {
 	webmcpNote,
 } from "../src/sidepanel/card.ts";
 import {
+	GLOW_AFTER_MS,
+	Glow,
+	type GlowInput,
+	glowAfterMs,
+	TEST_GLOW_AFTER_MS,
+} from "../src/sidepanel/glow.ts";
+import {
 	countdownText,
 	questionAnnouncement,
 	timeLeftShare,
@@ -42,6 +49,7 @@ const base: PanelState = {
 	status: "off",
 	grants: [],
 	pairing: false,
+	calling: false,
 	allSites: false,
 	questions: [],
 	expired: [],
@@ -180,6 +188,118 @@ describe("the card's clicks", () => {
 			checked: true,
 			intent: undefined,
 		});
+	});
+});
+
+describe("the AI access switch glows while an AI app calls (DEC-225)", () => {
+	/** A glow on timers the test runs by hand; `shown`: what it drew, in order. */
+	function glowing() {
+		const shown: boolean[] = [];
+		const pending = new Set<{ run: () => void; ms: number }>();
+		const glow = new Glow((on) => shown.push(on), GLOW_AFTER_MS, {
+			set: (run, ms) => {
+				const timer = { run, ms };
+				pending.add(timer);
+				return timer;
+			},
+			clear: (timer) =>
+				pending.delete(timer as { run: () => void; ms: number }),
+		});
+		const holds = () => [...pending].map((t) => t.ms);
+		/** The hold runs out. */
+		const later = () => {
+			for (const timer of [...pending]) {
+				pending.delete(timer);
+				timer.run();
+			}
+		};
+		return { glow, shown, holds, later };
+	}
+	const on: GlowInput = { status: "on", calling: false };
+	const calling: GlowInput = { status: "on", calling: true };
+
+	test("on while a call runs, held for 5 s after it ended, then gone", () => {
+		const t = glowing();
+		t.glow.update(on);
+		expect(t.shown).toEqual([]);
+		t.glow.update(calling);
+		expect(t.glow.on).toBe(true);
+		expect(t.holds()).toEqual([]);
+		t.glow.update(on);
+		// Still on: most calls take a blink.
+		expect(t.glow.on).toBe(true);
+		expect(t.holds()).toEqual([GLOW_AFTER_MS]);
+		// Other states meanwhile (a tab change) start no other hold.
+		t.glow.update(on);
+		expect(t.holds()).toEqual([GLOW_AFTER_MS]);
+		t.later();
+		expect(t.glow.on).toBe(false);
+		// Drawn once each way, not on every state.
+		expect(t.shown).toEqual([true, false]);
+	});
+
+	test("a call while it is held keeps it on; the hold starts again after that call", () => {
+		const t = glowing();
+		t.glow.update(calling);
+		t.glow.update(on);
+		expect(t.holds()).toEqual([GLOW_AFTER_MS]);
+		t.glow.update(calling);
+		expect(t.holds()).toEqual([]);
+		expect(t.glow.on).toBe(true);
+		t.glow.update(on);
+		expect(t.holds()).toEqual([GLOW_AFTER_MS]);
+		t.later();
+		expect(t.shown).toEqual([true, false]);
+	});
+
+	test("calls that overlap: one glow, one hold after the last (the worker says calling until then)", () => {
+		const t = glowing();
+		// Two calls, then the first ends: the worker's flag stays on.
+		for (const state of [calling, calling, calling]) t.glow.update(state);
+		expect(t.holds()).toEqual([]);
+		t.glow.update(on);
+		expect(t.holds()).toEqual([GLOW_AFTER_MS]);
+		t.later();
+		expect(t.shown).toEqual([true, false]);
+	});
+
+	test("gone at once when the connection goes, during a call or in the hold, and not back with it", () => {
+		for (const down of ["off", "connecting", "retrying"] as const) {
+			const during = glowing();
+			during.glow.update(calling);
+			during.glow.update({ status: down, calling: true });
+			expect(during.glow.on).toBe(false);
+			expect(during.holds()).toEqual([]);
+
+			const held = glowing();
+			held.glow.update(calling);
+			held.glow.update(on);
+			held.glow.update({ status: down, calling: false });
+			expect(held.glow.on).toBe(false);
+			// The hold is dropped: the connection back is no glow.
+			expect(held.holds()).toEqual([]);
+			held.glow.update(on);
+			expect(held.glow.on).toBe(false);
+			expect(held.shown).toEqual([true, false]);
+		}
+	});
+
+	test("only while the connection is up: connected with or without an app paired", () => {
+		for (const status of ["off", "connecting", "retrying"] as const) {
+			const t = glowing();
+			t.glow.update({ status, calling: true });
+			expect(t.shown).toEqual([]);
+		}
+		const waiting = glowing();
+		waiting.glow.update({ status: "waiting", calling: true });
+		expect(waiting.glow.on).toBe(true);
+	});
+
+	test("5 s in the extension, 1.5 s in the test build only", () => {
+		expect(GLOW_AFTER_MS).toBe(5000);
+		expect(TEST_GLOW_AFTER_MS).toBe(1500);
+		// No `define` here, as in the store build.
+		expect(glowAfterMs).toBe(GLOW_AFTER_MS);
 	});
 });
 

@@ -5772,3 +5772,53 @@ browser's AI only by the vouch, which the extension sent only for calls it asked
   call, the caller's origin): WebMCP gives the page nothing that tells callers apart.
   **Rejected: images through WebMCP to every caller** (DEC-143's reason holds: the
   browser's AI gets base64 as JSON text, tokens for nothing).
+
+## DEC-225: The AI access switch glows while an AI app calls (owner)
+
+2026-11-23. The owner: "One feature I would like to see is a glowing AI button. The
+Sitegloss extension has a button that shows whether the AI is on or off, and it glows
+when it's receiving WebMCP calls or calls from the connected AI. It would be really nice
+to have something similar in tab-mcp." For the next extension release.
+
+- **When:** while a tool call of a connected AI app runs through the extension, any of
+  its tools (`page_info`, `webmcp_tools`, `webmcp_call`, the `page_<name>` tools, the
+  navigation tools), a call that waits for the user's answer included, and for 5 s
+  after the last one ended: most calls take a blink, and the glow has to be seen
+  (Sitegloss's `TALKING_AFTER_MS`). Only while the connection is up (status `on`, or
+  `waiting`: connected with no app listed); off, connecting, retrying or taken over, it
+  goes at once, a hold included, and does not come back with the connection. The same
+  when the panel's port to the worker goes (an update, a reload, the worker stopping):
+  no state may come any more, and a restarted worker's first state puts the glow back
+  if a call really runs (review of PR 241).
+- **Where:** the AI access switch beside the section's heading, the one control that
+  shows AI access on or off. The ring (Sitegloss's six colours, 2 px round the track)
+  and the halo (the ring blurred 3 px, its opacity breathing between 0.2 and 0.95 every
+  0.6 s) are `::before` and `::after` of the switch's label, behind the track, in a
+  stacking context of their own (`isolation`): the switch keeps its size, nothing moves,
+  the panel at 345 px is as before, and the halo stays within the section's 16 px
+  padding. The colours are tokens, the same in light and dark (the gradient reads on
+  both papers). With the keyboard's focus on the switch the halo goes and the focus ring
+  moves out to 4 px, so paper lies between it and the ring. Reduced motion: the ring and
+  a steady halo (0.6). Forced colours: a Highlight ring with Canvas between it and the
+  track (which is Highlight while on), no halo, the focus ring at 6 px.
+- **How the panel knows:** the worker counts the calls running from the library's
+  `toolcall` and `toolcallend` events of its `TabMcp` (`src/worker/calls.ts`; the
+  library sends every start its end, also on an error, a decline or a cancel). The
+  panel's state carries `calling`; the worker tells the panels only when it flips (the
+  first call starts, the last ends), so calls that overlap cost two states however many
+  there are. A new connection (another relay) forgets the old one's calls. The hold
+  lives in the panel (`src/sidepanel/glow.ts`), from the first state that says no call
+  runs; a call within the hold keeps it on and the hold starts again after it. The test
+  build holds 1.5 s.
+- **A style alone** (Sitegloss's reason): an attribute on the label, no text, name,
+  `role` or `aria-*` value changes, no live region speaks. Calls come in bursts, and the
+  panel's question already says the calls that wait for the user.
+- **The toolbar badge does not change** (the owner decides later). It would be cheap:
+  `#showBadge` already runs on every change and could read the same count (for example
+  the "on" badge in another colour while a call runs, with the same hold in the worker),
+  but a badge that changes every few seconds is noise with the panel closed.
+- **Rejected: the dot of the state line or the AI app's row** (Sitegloss glows its AI
+  button, the control that turns it on or off; the state line is hidden while an app is
+  listed). **Rejected: a box shadow** as Sitegloss first had (DEC-063 there): the
+  style sheet allows no shadow with a blur, and one colour says less than the ring that
+  AI buttons have come to wear.

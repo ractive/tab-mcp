@@ -240,6 +240,14 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   back). "Disconnect all apps", also under the pairing code, disconnects every AI app
   and makes a new secret; the address stays, and each AI app connects again with a new
   code. With apps paired, the button under the code asks for a second click first.
+- While an AI app's tool call runs through the extension (any of its tools, a call that
+  waits for your answer in the panel included) and for 5 seconds after the last one
+  ended, the AI access switch glows: a many-coloured ring round it with a halo that
+  breathes (DEC-225). Only while AI access is on and connected: off or with the
+  connection lost, the glow goes at once. It is a style alone, so a screen reader hears
+  nothing of it; with reduced motion the ring and the halo show without moving, in
+  forced colours the ring is the system's highlight colour. The toolbar icon does not
+  change with it.
 - The "Fill in the code for me" switch, under the code, turns on filling in its code on
   the relay's sign-in page when an AI app opens it in this browser (an AI app on the
   desktop opens it in the default browser). It is off by default, also with access to
@@ -504,20 +512,24 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   while pairing, the first look, Disconnect only while connected), "How do I add it?" and
   its Copy buttons, its clicks (Disconnect's double click, the switch), "Always allow
   all" over the tool list, the tab card's texts (an unreadable tab, no tools), the
-  labels and live regions of `index.html`, a question's countdown and its end.
+  labels and live regions of `index.html`, a question's countdown and its end, the AI
+  access switch's glow (on while a call runs, held 5 s after, gone at once with the
+  connection, calls that overlap).
 - `test/contrast.test.ts`: the panel's look (`kb/design/extension-look.md`). Every pair
   of colours the style sheet uses, from its two token blocks (light and dark): text at
   least 4.5:1, edges, dots and the switches' parts at least 3:1; the badge's colours
   (`src/look.ts`); and the style sheet's rules: every colour is a token, none is unused,
-  nothing is dimmed by opacity, no hover reaches a button that takes no click, no button
-  is amber, one focus ring, reduced motion stops every transition, forced colours name
-  every state. A new colour or pair goes into the test's table first.
+  nothing is dimmed by opacity (but the glow's halo), no hover reaches a button that
+  takes no click, no button is amber, one focus ring, reduced motion stops every
+  transition and the halo's breath, forced colours name every state. A new colour or
+  pair goes into the test's table first.
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, a click on the body and a panel
   Chrome refuses, cut arguments, the panel, the time limit), invisible characters, the
   address secret's storage, "Always allow on <host>" (the site's "allowed"), the panel's status
-  while the relay is out of reach, a panel's messages across the worker's start (their
+  while the relay is out of reach, the calls running for the glow (the panels told when
+  the first starts and the last ends), a panel's messages across the worker's start (their
   order, a failed start, a panel gone before it), a bundle without dynamic `import()`.
 - `test/bridge.test.ts`: the bridge's names (also one that becomes the extension's own),
   descriptions, schemas (a parameter called `pattern`), results (the image budget, a
@@ -527,7 +539,8 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   newer (`CHROME_PATH`), the side panel opened by a real click on the icon, a relay in
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
-  colours as computed, both switches' contrast; confirmation in the panel, cancellation, `toolchange`, a forged
+  colours as computed, both switches' contrast; confirmation in the panel, the AI access
+  switch's glow while a call runs and its hold, cancellation, `toolchange`, a forged
   `document.modelContext`, a tool that takes the tab to another page, "Always allow on <host>")
   across navigations and tab switches; a `toolchange` read with one `getTools()`, and
   none with AI access off and the panel closed; with the panel closed
@@ -565,7 +578,8 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   Puppeteer's cache; skipped without it) over WebDriver BiDi (`test/firefox.ts`, a
   temporary add-on; harness `test/firefox-e2e.ts`): the same test page registers its tools
   with the extension's `document.modelContext` as it loads, and a relay and an MCP client
-  list, call, confirm, cancel and follow them (`toolchange`, a signal's abort, a page
+  list, call, confirm (the AI access switch glowing meanwhile and for the hold after),
+  cancel and follow them (`toolchange`, a signal's abort, a page
   replacing the getter), notifications as Firefox has them, an extension reload, the
   client library; in the full run, the event page outlasts Firefox's idle timeout with
   the panel open and closed. The panel's Firefox words, the arguments check, an MCP

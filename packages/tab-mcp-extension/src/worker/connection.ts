@@ -67,6 +67,7 @@ import {
 	setAllowedMany,
 } from "./allowed.ts";
 import { type LookedUp, PageToolBridge } from "./bridge.ts";
+import { RunningCalls } from "./calls.ts";
 import { decide } from "./decide.ts";
 import {
 	codeWithPairingOn,
@@ -205,6 +206,11 @@ export class Connection {
 	#mcp: TabMcp;
 	#bridge: PageToolBridge;
 	#listening = new AbortController();
+	/**
+	 * The AI apps' calls running now (DEC-225): only the panels hear when
+	 * none or some run; the badge and the pages do not change with it.
+	 */
+	readonly #calls = new RunningCalls(() => this.#tellPanels());
 	#problem: string | undefined;
 	readonly #kv: Kv;
 	/** Taken over (kept in storage too, so it holds across worker restarts). */
@@ -419,6 +425,7 @@ export class Connection {
 		this.#listening.abort();
 		this.#listening = new AbortController();
 		const { signal } = this.#listening;
+		this.#calls.watch(mcp, signal);
 		const changed = () => this.#changed();
 		// `statechange` and `grantschange` have their own listeners below, which
 		// call `#changed` too.
@@ -1178,6 +1185,7 @@ export class Connection {
 			...(address !== undefined ? { address } : {}),
 			grants: this.#grants,
 			pairing: [...this.#panels].some((p) => p.pairing),
+			calling: this.#calls.any,
 			...(code !== undefined ? { code } : {}),
 			...(problem !== undefined ? { problem } : {}),
 			...(this.#replaced !== undefined
@@ -1272,10 +1280,15 @@ export class Connection {
 		});
 	}
 
-	/** Tell the panels (once per turn of the event loop) and set the badge. */
+	/** Tell the panels and the pages, and set the badge. */
 	#changed(): void {
 		this.#showBadge();
 		this.#tellPages();
+		this.#tellPanels();
+	}
+
+	/** Tell the panels, once per turn of the event loop. */
+	#tellPanels(): void {
 		if (this.#sending) return;
 		this.#sending = true;
 		queueMicrotask(() => {
