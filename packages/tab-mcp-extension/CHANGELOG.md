@@ -35,19 +35,17 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
   own while AI access is on, and that pages which look for it only as they load need
   access to all sites and a reload. It no longer shows while the extension's WebMCP is
   on its way to the page.
-- **A tab the extension may not read: new words in the side panel, so that the icon is
-  found.** The notice says "tab-mcp may not read this tab yet. Click its icon in
-  Chrome's toolbar, or give it access to all sites." with the extension's icon after
-  "Click its icon". The line under "Give access to all sites" says what that access
-  does ("With access to all sites, tab-mcp reads every tab without a click on its icon
-  and gives every page WebMCP as it loads. Chrome asks you first."), and a last line says
-  where to pin the icon when it is not in the toolbar.
+- **A tab the extension may not read: the side panel shows the icon to click.** The
+  notice says "Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it
+  read this tab." with the extension's own icon after "Click the tab-mcp icon", and the
+  line under "Give access to all sites" says "Or let it read every tab without a click.
+  Chrome asks you first."
 - **Firefox: a click counts for one page.** Firefox ends the click's access at every
-  navigation, a reload and the same origin included; the panel ("Without that access,
-  Firefox asks for the click again on every new page."), `page_info`'s refusal and the
-  navigation tools now say so (they said, as for Chrome, that the access lasts until the
-  tab goes to another origin). The privacy policy says it too. The sidebar's last line
-  names Firefox's Extensions button and its Pin to Toolbar.
+  navigation, a reload and the same origin included; the sidebar ("Click the tab-mcp
+  icon in Firefox's toolbar or extensions panel to let it read this page. Firefox asks
+  again on every new page."), `page_info`'s refusal and the navigation tools now say so
+  (they said, as for Chrome, that the access lasts until the tab goes to another
+  origin). The privacy policy says it too.
 - **After a click, nothing goes into the page while AI access is off.** The content
   script that a click puts into a page without host access sends nothing into the page
   and installs nothing until AI access is on: in Chrome it no longer posts its port to

@@ -92,11 +92,14 @@ export function introText(relay: string): string {
  * The words in the click's line after which the panel shows the
  * extension's own icon (`main.ts`), so that the user knows what to look for.
  */
-export const ICON_AFTER = "Click its icon";
+export const ICON_AFTER = "Click the tab-mcp icon";
 
+// Where an icon that is not pinned sits: Chrome's puzzle-piece (Extensions)
+// menu; Firefox's extensions panel, which its Extensions button (a puzzle
+// piece, Firefox 109 and later) opens.
 const CLICK_ICON = FIREFOX
-	? `tab-mcp may not read this page yet. ${ICON_AFTER} in Firefox's toolbar, or give it access to all sites. Without that access, Firefox asks for the click again on every new page.`
-	: `tab-mcp may not read this tab yet. ${ICON_AFTER} in ${BROWSER}'s toolbar, or give it access to all sites.`;
+	? `${ICON_AFTER} in Firefox's toolbar or extensions panel to let it read this page. Firefox asks again on every new page.`
+	: `${ICON_AFTER} in ${BROWSER}'s toolbar or puzzle-piece menu to let it read this tab.`;
 const BROWSER_PAGE = `${BROWSER} does not let extensions read browser pages.`;
 
 /**

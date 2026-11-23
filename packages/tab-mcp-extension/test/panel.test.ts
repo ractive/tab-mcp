@@ -222,7 +222,7 @@ describe("the tab card's texts", () => {
 
 	test("an unreadable tab in the user's words: the toolbar icon, no AI app wording (EQ 6)", () => {
 		const click =
-			"tab-mcp may not read this tab yet. Click its icon in Chrome's toolbar, or give it access to all sites.";
+			"Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it read this tab.";
 		expect(noAccessText("no-grant", false)).toBe(click);
 		// The panel puts the extension's icon right after these words.
 		expect(click).toContain(`${ICON_AFTER} in`);
@@ -291,12 +291,9 @@ describe("the tab card's texts", () => {
 			expect(text("allow-all")).toBe("");
 			expect(allSitesButton).toBe("Give access to all sites");
 			expect(text("disallow-all")).toBe("Remove access to all sites");
-			// What changes, that Chrome asks first, and where the icon is.
+			// What changes, and that Chrome asks first.
 			expect(text("host-access-note")).toBe(
-				"With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Chrome asks you first.",
-			);
-			expect(text("toolbar-hint")).toBe(
-				"Icon not in the toolbar? Open the puzzle-piece menu next to the address bar and pin tab-mcp.",
+				"Or let it read every tab without a click. Chrome asks you first.",
 			);
 			// A switch for all the tools' switches, named as they are.
 			const allowTools = doc.getElementById("allow-tools");

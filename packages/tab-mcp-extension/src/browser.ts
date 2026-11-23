@@ -30,11 +30,7 @@ export const FIREFOX_PANEL_TEXTS: Readonly<Record<string, string>> = {
 	"pairing-profile":
 		"Use the AI app outside this Firefox profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.",
 	"host-access-note":
-		"With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Firefox asks you first.",
-	// Firefox 109 and later: the Extensions button (a puzzle piece) at the
-	// toolbar's end; an extension is pinned from its gear menu there.
-	"toolbar-hint":
-		"Icon not in the toolbar? Open the Extensions button (the puzzle piece) in the toolbar, click the gear next to tab-mcp and choose Pin to Toolbar.",
+		"Or let it read every page without a click. Firefox asks you first.",
 };
 
 /**

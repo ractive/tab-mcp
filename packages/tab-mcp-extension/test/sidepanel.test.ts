@@ -425,7 +425,8 @@ describe("a tab the extension may not read (the owner's words, iteration 51)", (
 			button: panel.$("#allow-all")?.textContent,
 			shown: !(panel.$("#host-access") as HTMLElement).hidden,
 			note: panel.$("#host-access-note")?.textContent,
-			hint: panel.$("#toolbar-hint")?.textContent,
+			/** No line of its own on pinning the icon (the owner's shorter words). */
+			hint: panel.$("#toolbar-hint"),
 		};
 	};
 	const icon = {
@@ -434,18 +435,18 @@ describe("a tab the extension may not read (the owner's words, iteration 51)", (
 		hidden: "true",
 	};
 
-	test("Chrome: the line with the extension's icon after its words, the button, what access to all sites does, where the icon is", async () => {
+	test("Chrome: the line with the extension's icon after its words, the button, what access to all sites does", async () => {
 		const panel = await openPanel();
 		panel.show(unreadable());
 		expect(seen(panel)).toEqual({
 			access:
-				"tab-mcp may not read this tab yet. Click its icon in Chrome's toolbar, or give it access to all sites.",
-			beforeIcon: "tab-mcp may not read this tab yet. Click its icon",
+				"Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it read this tab.",
+			beforeIcon: "Click the tab-mcp icon",
 			icon,
 			button: "Give access to all sites",
 			shown: true,
-			note: "With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Chrome asks you first.",
-			hint: "Icon not in the toolbar? Open the puzzle-piece menu next to the address bar and pin tab-mcp.",
+			note: "Or let it read every tab without a click. Chrome asks you first.",
+			hint: null,
 		});
 		// The same state again leaves the line as it is (a live region).
 		const line = panel.$("#tab-access")?.firstChild;
@@ -456,18 +457,18 @@ describe("a tab the extension may not read (the owner's words, iteration 51)", (
 		expect(seen(panel).shown).toBe(false);
 	});
 
-	test("Firefox: its words, a click on every new page, its Extensions button", async () => {
+	test("Firefox: its words, its extensions panel, a click on every new page", async () => {
 		const panel = await openPanel({ firefox: true });
 		panel.show(unreadable());
 		expect(seen(panel)).toEqual({
 			access:
-				"tab-mcp may not read this page yet. Click its icon in Firefox's toolbar, or give it access to all sites. Without that access, Firefox asks for the click again on every new page.",
-			beforeIcon: "tab-mcp may not read this page yet. Click its icon",
+				"Click the tab-mcp icon in Firefox's toolbar or extensions panel to let it read this page. Firefox asks again on every new page.",
+			beforeIcon: "Click the tab-mcp icon",
 			icon,
 			button: "Give access to all sites",
 			shown: true,
-			note: "With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Firefox asks you first.",
-			hint: "Icon not in the toolbar? Open the Extensions button (the puzzle piece) in the toolbar, click the gear next to tab-mcp and choose Pin to Toolbar.",
+			note: "Or let it read every page without a click. Firefox asks you first.",
+			hint: null,
 		});
 	});
 });

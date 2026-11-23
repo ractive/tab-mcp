@@ -365,7 +365,7 @@ A library page, plain Chrome, the store package:
 
 | Moment | Today | With this iteration |
 |---|---|---|
-| Before the click | badge "Not readable"; "Click the tab-mcp icon in Chrome's toolbar to let it read this tab." (`card.ts:96-97`); "Give access to all sites" | the owner's new words (below): "tab-mcp may not read this tab yet. Click its icon [the icon] in Chrome's toolbar, or give it access to all sites."; "Give access to all sites"; the note; "Icon not in the toolbar? …" |
+| Before the click | badge "Not readable"; "Click the tab-mcp icon in Chrome's toolbar to let it read this tab." (`card.ts:96-97`); "Give access to all sites" | the owner's new words (below): "Click the tab-mcp icon [the icon] in Chrome's toolbar or puzzle-piece menu to let it read this tab."; "Give access to all sites"; "Or let it read every tab without a click. Chrome asks you first." |
 | After the click, AI access on | no badge; `no-webmcp` (`index.html:86`); no "built in" line (the library never spoke) | a moment later: "WebMCP · N tools", "This page has tab-mcp built in.", the tools with their switches; never the `no-webmcp` text in between |
 | After the click, AI access off | as above | `no-webmcp` (new draft below); once AI access connects, the tools come without another click |
 | Same-origin navigation or reload, AI access on | `no-webmcp` again | Chrome: the tools again, without a click. Firefox: "Not readable" and the click text, as on another origin (the grant ends at every navigation, spike task 0) |
@@ -392,22 +392,18 @@ A library page, plain Chrome, the store package:
   click per origin. Its label is in one place, `allSitesButton` in `browser.ts`, with a
   suffix per browser that is empty for now (the owner may add "(recommended)").
 - **A tab it may not read, the owner's words** (2026-11-23, after his own test: people
-  may not find the icon):
-  - Chrome, the notice: "tab-mcp may not read this tab yet. Click its icon in Chrome's
-    toolbar, or give it access to all sites." with the extension's 16 px icon after
-    "Click its icon" (decorative: empty alt, `aria-hidden`).
-  - Chrome, under the button: "With access to all sites, tab-mcp reads every tab
-    without a click on its icon and gives every page WebMCP as it loads. Chrome asks you
+  may not find the icon; then shortened by him):
+  - Chrome, the notice: "Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu
+    to let it read this tab." with the extension's 16 px icon after "Click the tab-mcp
+    icon" (decorative: empty alt, `aria-hidden`).
+  - Chrome, under the button: "Or let it read every tab without a click. Chrome asks you
     first."
-  - Chrome, last: "Icon not in the toolbar? Open the puzzle-piece menu next to the
-    address bar and pin tab-mcp."
-  - Firefox, the notice: "tab-mcp may not read this page yet. Click its icon in Firefox's
-    toolbar, or give it access to all sites. Without that access, Firefox asks for the
-    click again on every new page."
-  - Firefox, under the button: the same note with "Firefox asks you first."
-  - Firefox, last: "Icon not in the toolbar? Open the Extensions button (the puzzle
-    piece) in the toolbar, click the gear next to tab-mcp and choose Pin to Toolbar."
-    Firefox names it the Extensions button, and pins from the gear menu there.
+  - Firefox, the notice: "Click the tab-mcp icon in Firefox's toolbar or extensions panel
+    to let it read this page. Firefox asks again on every new page." Firefox's
+    Extensions button (a puzzle piece) opens its extensions panel, where an add-on that
+    is not pinned sits.
+  - Firefox, under the button: "Or let it read every page without a click. Firefox asks
+    you first."
 
 ### 9. Tests
 

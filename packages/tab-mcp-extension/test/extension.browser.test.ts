@@ -2179,7 +2179,7 @@ describe.skipIf(chrome === undefined)(
 					// Chrome reports the address of this tab or hides it, depending on
 					// when it is asked: the same line either way.
 					expect(access).toBe(
-						"tab-mcp may not read this tab yet. Click its icon in Chrome's toolbar, or give it access to all sites.",
+						"Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it read this tab.",
 					);
 					expect([hidden, button]).toEqual([false, "Give access to all sites"]);
 					// The extension's icon in the line, loaded, 16 px; and at the
