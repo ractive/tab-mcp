@@ -1,17 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 286" width="980" height="286" role="img" aria-labelledby="tmo-title tmo-desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 424" width="980" height="424" role="img" aria-labelledby="tmo-title tmo-desc">
   <title id="tmo-title">tab-mcp: how the parts connect</title>
-  <desc id="tmo-desc">Two paths lead through the tab-mcp relay to AI apps such as Claude, ChatGPT, Claude Code and Codex. First path: a page with tab-mcp-client, in any browser, with nothing for the user to install, connects to the relay with a WebSocket. Second path: in Chrome with the tab-mcp extension installed, the tab-mcp browser extension reads the WebMCP tools of a page and connects to the relay with a WebSocket. The AI apps reach the relay over MCP.</desc>
+  <desc id="tmo-desc">Three paths lead from the tools of a page to an AI. First, in any browser, with nothing for the user to install: a page with tab-mcp-client connects to the tab-mcp relay with a WebSocket. Second, in Chrome or Firefox with the tab-mcp extension: the extension reads the WebMCP tools of a page and connects to the relay with a WebSocket. On both paths, AI apps such as Claude, ChatGPT, Claude Code and Codex reach the relay over MCP. Third, coming, in a browser with WebMCP support (a preview): a page with WebMCP tools offers them to the AI in the browser over WebMCP. That needs no tab-mcp.</desc>
   <!-- Drawn by hand in the look of the diagrams on https://ractive.ch/tab-mcp/
-       (scripts/flowchart.ts and src/css/tab-mcp-overview.css in ractive/ractive.ch):
+       (scripts/flowchart.ts and src/css/tab-mcp-overview.css here):
        their boxes, arrows, label tags and colours, light and dark. It is a file of
        its own, not that renderer's output, because the README needs a picture that
-       stands by itself. A copy of this file is static/images/tab-mcp-overview.svg
-       in ractive.ch; keep the two in step. Text is set in the reader's own font:
-       leave room in the boxes. -->
+       stands by itself. A copy of this file is docs/overview.svg in ractive/tab-mcp,
+       shown in its README; keep the two in step. Text is set in the reader's own
+       font: leave room in the boxes. -->
   <style>
     .card { fill: #fffcf1; stroke: #d9d3b8; }
     .box { fill: #faf4d4; stroke: #00362a; stroke-width: 1.5; }
     .window { fill: none; stroke: #45655b; stroke-width: 1.25; }
+    .coming { stroke-dasharray: 6 4; }
     .bar { fill: #efe9c9; }
     .field { fill: #fffcf1; }
     .line { fill: none; stroke: #1e1c09; stroke-width: 1.5; }
@@ -66,10 +67,13 @@
       <path d="M81 15 Q82.5 24 91 25.5 Q82.5 27 81 36 Q79.5 27 71 25.5 Q79.5 24 81 15 Z" fill="#fffae3"/>
     </g>
   </defs>
-  <rect class="card" x="0.5" y="0.5" width="979" height="285" rx="12"/>
+  <rect class="card" x="0.5" y="0.5" width="979" height="423" rx="12"/>
 
   <!-- what the user's browser needs: one browser window per path, drawn as a
-       toolbar with its address field, which holds the caption -->
+       toolbar with its address field, which holds the caption. The first two
+       paths are there today and share the relay and the AI apps outside the
+       browser; the third is coming, so its window is dashed, and its AI is in
+       the window too. -->
   <path class="bar" d="M24 54 V34 a10 10 0 0 1 10 -10 H490 a10 10 0 0 1 10 10 V54 Z"/>
   <path class="window" d="M24 54 H500"/>
   <rect class="window" x="24" y="24" width="476" height="110" rx="10"/>
@@ -85,7 +89,15 @@
   <circle class="dot muted" cx="49" cy="167" r="3"/>
   <circle class="dot muted" cx="59" cy="167" r="3"/>
   <rect class="field" x="72" y="157" width="416" height="20" rx="10"/>
-  <text class="muted" x="84" y="171.5">Chrome with the tab-mcp extension installed</text>
+  <text class="muted" x="84" y="171.5">Chrome or Firefox with the tab-mcp extension</text>
+  <path class="bar" d="M24 320 V300 a10 10 0 0 1 10 -10 H490 a10 10 0 0 1 10 10 V320 Z"/>
+  <path class="window coming" d="M24 320 H500"/>
+  <rect class="window coming" x="24" y="290" width="476" height="110" rx="10"/>
+  <circle class="dot muted" cx="39" cy="305" r="3"/>
+  <circle class="dot muted" cx="49" cy="305" r="3"/>
+  <circle class="dot muted" cx="59" cy="305" r="3"/>
+  <rect class="field" x="72" y="295" width="416" height="20" rx="10"/>
+  <text class="muted" x="84" y="309.5">Coming: browser with WebMCP support (preview)</text>
 
   <!-- the links, and their labels on them. The two to the relay leave their
        browser window straight through its side and turn into the relay from
@@ -95,6 +107,7 @@
     <line class="line" x1="208" y1="222" x2="336" y2="222"/>
     <path class="line" d="M488 222 H686 Q694 222 694 214 V188"/>
     <line class="line" x1="762" y1="158" x2="840" y2="158"/>
+    <line class="line" x1="208" y1="360" x2="336" y2="360"/>
   </g>
   <g text-anchor="middle">
     <rect class="tag" x="553" y="83.5" width="74" height="21" rx="4"/>
@@ -105,6 +118,8 @@
     <text x="590" y="226.5">WebSocket</text>
     <rect class="tag" x="782" y="147.5" width="38" height="21" rx="4"/>
     <text x="801" y="162.5">MCP</text>
+    <rect class="tag" x="242" y="349.5" width="60" height="21" rx="4"/>
+    <text x="272" y="364.5">WebMCP</text>
   </g>
 
   <!-- the page with the client library -->
@@ -113,7 +128,7 @@
   <text class="label" x="84" y="89">Page with</text>
   <text class="label" x="84" y="107">tab-mcp-client</text>
 
-  <!-- the page with WebMCP tools only, and the extension that reads them -->
+  <!-- the page with WebMCP tools, and the extension that reads them -->
   <rect class="box" x="38" y="194" width="168" height="56" rx="10"/>
   <use href="#tmo-page" x="50" y="210"/>
   <text class="label" x="84" y="217">Page with</text>
@@ -123,16 +138,30 @@
   <text class="label" x="384" y="217">tab-mcp</text>
   <text class="label" x="384" y="235">extension</text>
 
-  <!-- the relay, halfway between the two paths -->
+  <!-- the relay, halfway between the two paths that need it -->
   <rect class="box" x="628" y="130" width="132" height="56" rx="10"/>
   <use href="#tmo-relay" x="640" y="146"/>
   <text class="label" x="674" y="153">tab-mcp</text>
   <text class="label" x="674" y="171">relay</text>
 
-  <!-- the AI apps -->
+  <!-- the AI apps, outside the browser -->
   <rect class="box" x="842" y="130" width="112" height="56" rx="10"/>
   <use href="#tmo-ai" x="854" y="146"/>
   <text class="label" x="888" y="163">AI apps</text>
   <text class="muted" x="898" y="207" text-anchor="middle">Claude, ChatGPT,</text>
   <text class="muted" x="898" y="224" text-anchor="middle">Claude Code, Codex</text>
+
+  <!-- coming: the page with WebMCP tools, and the AI in the same browser that
+       calls them, without tab-mcp -->
+  <rect class="box" x="38" y="332" width="168" height="56" rx="10"/>
+  <use href="#tmo-page" x="50" y="348"/>
+  <text class="label" x="84" y="355">Page with</text>
+  <text class="label" x="84" y="373">WebMCP tools</text>
+  <rect class="box" x="338" y="332" width="148" height="56" rx="10"/>
+  <use href="#tmo-ai" x="350" y="348"/>
+  <text class="label" x="384" y="355">AI in the</text>
+  <text class="label" x="384" y="373">browser</text>
+  <text class="label" x="528" y="350">No tab-mcp needed</text>
+  <text class="muted" x="528" y="368">The AI that comes with the browser,</text>
+  <text class="muted" x="528" y="385">or with an AI app's own browser</text>
 </svg>
