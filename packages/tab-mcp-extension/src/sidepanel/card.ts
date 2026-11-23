@@ -6,7 +6,7 @@
  * tab card's texts, in the user's words.
  */
 
-import { BROWSER, STORE_TEXT } from "../browser.ts";
+import { BROWSER, FIREFOX, STORE_TEXT } from "../browser.ts";
 import type { PanelState, TabView } from "../protocol.ts";
 import type { NoAccessReason } from "../tabs.ts";
 
@@ -88,7 +88,9 @@ export function introText(relay: string): string {
 	return `Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay ${host}.`;
 }
 
-const CLICK_ICON = `Click the tab-mcp icon in ${BROWSER}'s toolbar to let it read this tab.`;
+const CLICK_ICON = FIREFOX
+	? "Click the tab-mcp icon in Firefox's toolbar to let it read this page. Firefox asks for the click again on every new page, of the same site too."
+	: `Click the tab-mcp icon in ${BROWSER}'s toolbar to let it read this tab.`;
 const BROWSER_PAGE = `${BROWSER} does not let extensions read browser pages.`;
 
 /**
@@ -115,13 +117,18 @@ export function noAccessText(
 	}
 }
 
-/** The tab card's line about the page's tools, when it has none to list (EQ 7). */
+/**
+ * The tab card's line about the page's tools, when it has none to list
+ * (EQ 7): none while the extension's own WebMCP is on its way, and its own
+ * line for a page that got it late and registered nothing (DEC-223).
+ */
 export function webmcpNote(
 	tab: TabView | undefined,
-): "no-webmcp" | "no-tools" | undefined {
-	if (tab?.webmcp === undefined) return undefined;
+): "no-webmcp" | "late-webmcp" | "no-tools" | undefined {
+	if (tab?.webmcp === undefined || tab.webmcp.pending) return undefined;
 	if (!tab.webmcp.available) return "no-webmcp";
-	return tab.webmcp.tools === 0 ? "no-tools" : undefined;
+	if (tab.webmcp.tools > 0) return undefined;
+	return tab.webmcp.late ? "late-webmcp" : "no-tools";
 }
 
 /** "A", "A and B", "A, B and C". */

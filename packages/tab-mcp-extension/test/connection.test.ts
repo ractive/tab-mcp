@@ -47,6 +47,8 @@ interface Fake {
 	states?: [number, unknown][];
 	/** Each page call's vouch and the state that came with it. */
 	vouches?: { vouch: unknown; state: unknown }[];
+	/** The page has no WebMCP (it has by default). */
+	noWebmcp?: boolean;
 }
 
 /**
@@ -112,7 +114,7 @@ function fakeChrome(fake: Fake) {
 						origin: SITE,
 						documentId: "doc-1",
 						more: 0,
-						available: true,
+						available: fake.noWebmcp !== true,
 						tools: fake.tools,
 					} satisfies { ok: true } & PageTools;
 				if (request.type === "page-info")
@@ -120,7 +122,10 @@ function fakeChrome(fake: Fake) {
 						ok: true,
 						url: tab.url,
 						title: tab.title,
-						webmcp: { available: true, tools: fake.tools.length },
+						webmcp: {
+							available: fake.noWebmcp !== true,
+							tools: fake.tools.length,
+						},
 					};
 				return { ok: true, value: null };
 			},
@@ -534,6 +539,78 @@ describe("the state for pages with the client library (DEC-207, DEC-221)", () =>
 			[1, on],
 			[2, off],
 		]);
+	});
+});
+
+describe("WebMCP given late to a page without it (DEC-223)", () => {
+	const on: ExtensionState = {
+		name: "tab-mcp browser extension",
+		on: true,
+		apps: [],
+		whileInFront: true,
+	};
+	const gives = (fake: Fake) =>
+		fake.calls.filter((call) => call.startsWith("scripting.executeScript"));
+
+	test("while on: the page-world polyfill into the top frame's main world, once per document; the panel waits for it", async () => {
+		const { c, fake } = await connection();
+		fake.noWebmcp = true;
+		spyOn(c, "handshakeState").mockReturnValue(on);
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		await until(() => gives(fake).length === 1, "the polyfill given");
+		expect(
+			JSON.parse(
+				gives(fake)[0]?.slice("scripting.executeScript ".length) ?? "",
+			),
+		).toEqual([
+			{
+				target: { tabId: 1, frameIds: [0] },
+				world: "MAIN",
+				files: ["webmcp-main.js"],
+			},
+		]);
+		// While it is on its way, the panel does not say there is none.
+		await until(
+			() => panel.state()?.tab?.webmcp?.pending === true,
+			"pending shown",
+		);
+		// Read after it was given (the content script's change): what the
+		// page has now is what it gets, and the same document is not given
+		// again.
+		c.tabChanged();
+		await until(
+			() =>
+				panel.state()?.tab?.webmcp !== undefined &&
+				panel.state()?.tab?.webmcp?.pending === undefined,
+			"settled",
+		);
+		c.tabChanged();
+		await Bun.sleep(50);
+		expect(gives(fake)).toHaveLength(1);
+		expect(panel.state()?.tab?.webmcp).toEqual({ available: false, tools: 0 });
+	});
+
+	test("while off: nothing given, and the panel says the page has none at once", async () => {
+		const { c, fake } = await connection();
+		fake.noWebmcp = true;
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		await until(() => panel.state()?.tab !== undefined, "the tab read");
+		c.tabChanged();
+		await Bun.sleep(50);
+		expect(gives(fake)).toEqual([]);
+		expect(panel.state()?.tab?.webmcp).toEqual({ available: false, tools: 0 });
+	});
+
+	test("a page with WebMCP: nothing given", async () => {
+		const { c, fake } = await connection();
+		spyOn(c, "handshakeState").mockReturnValue(on);
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		await until(() => panel.state()?.tab !== undefined, "the tab read");
+		await Bun.sleep(50);
+		expect(gives(fake)).toEqual([]);
 	});
 });
 

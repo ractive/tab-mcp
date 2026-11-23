@@ -7,11 +7,14 @@
  * none: there this script defines one for the page and keeps its tools
  * (`firefox/webmcp.ts`, iteration 44). With a page whose client library
  * mirrors its tools into WebMCP it shakes hands (`page-handshake.ts`, DEC-207).
+ * Where the page had no WebMCP when the worker read it, the worker gives it
+ * the extension's own late, while AI access is on (`webmcp-install`, DEC-223).
  */
 
+import { PANEL } from "./browser.ts";
 import { canonicalJson } from "./canonical.ts";
 import { connectPolyfill } from "./chrome/webmcp-port.ts";
-import { installWebMCP } from "./firefox/webmcp.ts";
+import { hasKeptState, installWebMCP } from "./firefox/webmcp.ts";
 import type {
 	CallResult,
 	ContentEvent,
@@ -80,6 +83,25 @@ declare const TAB_MCP_FIREFOX: boolean | undefined;
  */
 let ownContext: ModelContext | undefined;
 
+/**
+ * `ownContext` came late, on the worker's `webmcp-install` (DEC-223): after
+ * the page's scripts had looked for WebMCP.
+ */
+let late = false;
+
+/**
+ * Give the page the extension's own WebMCP now (`webmcp-install`); set by
+ * the script's start below.
+ */
+let installLate: () => void = () => {};
+
+/**
+ * How long the content script waits for Chrome's polyfill, put in late, to
+ * answer before it has the page read again anyway: where the polyfill
+ * stepped aside (the page's own, an insecure page) it never answers.
+ */
+export const LATE_WAIT_MS = 1_000;
+
 /** The handshake with a page that has the client library (DEC-207). */
 let handshake: PageHandshake | undefined;
 
@@ -97,7 +119,13 @@ const message = (error: unknown) =>
  * page its WebMCP as it loads (`firefox/webmcp.ts`).
  */
 export const FIREFOX_NO_WEBMCP_NOTE =
-	"tab-mcp gives a page its WebMCP as the page starts loading: ask the user to reload the page if it loaded before tab-mcp had access to the site. Only https pages (and localhost) get it.";
+	"tab-mcp gives a page its WebMCP as the page starts loading (with access to all sites) or, while AI access is on, when the user clicks its icon on the page. Only https pages (and localhost) get it, and not a page that brought its own.";
+
+/**
+ * `page_info`'s word on a page that got the extension's WebMCP late and
+ * registered no tools (DEC-223).
+ */
+export const LATE_WEBMCP_NOTE = `tab-mcp gave this page WebMCP after it had loaded, and it registered no tools: a page that looks for WebMCP only while it loads needs the user to click "Give access to all sites" in the ${PANEL} and reload it.`;
 
 /**
  * A read of the page's tools is shared for this long after it started
@@ -166,6 +194,9 @@ function readsOf(context: ModelContext): ToolReads {
 	return found;
 }
 
+/** `context` is the extension's own WebMCP, given late (DEC-223). */
+const isLate = (context: ModelContext) => late && context === ownContext;
+
 export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 	const context = contextOf(doc);
 	const webmcp: PageInfo["webmcp"] = {
@@ -183,6 +214,11 @@ export async function pageInfo(doc: Document = document): Promise<PageInfo> {
 			webmcp.tools = (await readsOf(context).get()).length;
 		} catch (error) {
 			webmcp.error = message(error);
+		}
+		if (isLate(context)) {
+			webmcp.late = true;
+			if (webmcp.tools === 0 && webmcp.error === undefined)
+				webmcp.note = LATE_WEBMCP_NOTE;
 		}
 	}
 	const language = cutText(doc.documentElement.lang.trim(), MAX_LANGUAGE);
@@ -253,6 +289,9 @@ export async function pageTools(
 		origin: doc.location.origin,
 		documentId,
 		available: context !== undefined,
+		...(context !== undefined && isLate(context)
+			? { late: true as const }
+			: {}),
 		more: 0,
 		...(library !== undefined ? { library } : {}),
 	};
@@ -435,6 +474,9 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 		case "extension-state":
 			handshake?.stateChanged(request.state);
 			return { ok: true, value: null };
+		case "webmcp-install":
+			installLate();
+			return { ok: true, value: null };
 	}
 }
 
@@ -445,6 +487,7 @@ const REQUESTS = new Set([
 	"webmcp-cancel",
 	"history",
 	"extension-state",
+	"webmcp-install",
 ]);
 
 declare global {
@@ -456,8 +499,16 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	globalThis.tabMcpContentScript = true;
 	// First of all, at `document_start`: the page's scripts look for it as
 	// they load. Where Firefox has WebMCP of its own, the native one is used.
-	// The build's `define` itself, not `FIREFOX`: so Chrome's bundle drops it.
-	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) {
+	// Injected later (a click on the icon, or an open page after an install),
+	// only on the worker's `webmcp-install`, which comes while AI access is
+	// on (DEC-223); a page whose earlier content script left its WebMCP is
+	// taken over at once, as it had it already. The build's `define` itself,
+	// not `FIREFOX`, here and below: so Chrome's bundle drops it.
+	if (
+		typeof TAB_MCP_FIREFOX !== "undefined" &&
+		TAB_MCP_FIREFOX &&
+		(document.readyState === "loading" || hasKeptState(window))
+	) {
 		try {
 			ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
 		} catch {
@@ -509,17 +560,47 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	});
 	handshake.start();
 	// Chrome without WebMCP of its own: the page-world polyfill, if it is
-	// there (registered with host access), answers on a port.
+	// there (registered with host access), answers on a port. Put in late by
+	// the worker, it answers a port posted after it came (`webmcp-install`);
+	// one posted before it is lost, and of two ports only the first to be
+	// answered counts.
+	const connect = (isLate: boolean) =>
+		void connectPolyfill(window).then((context) => {
+			if ("modelContext" in document || ownContext !== undefined) return;
+			ownContext = context as unknown as ModelContext;
+			late = isLate;
+			context.addEventListener("toolchange", changed);
+			changed();
+		});
 	if (
 		!(typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) &&
 		!("modelContext" in document)
 	)
-		void connectPolyfill(window).then((context) => {
-			if ("modelContext" in document) return;
-			ownContext = context as unknown as ModelContext;
-			context.addEventListener("toolchange", changed);
+		connect(false);
+	// The worker found no WebMCP in the page, while AI access is on
+	// (DEC-223): Firefox installs its own now; in Chrome the worker has put
+	// the page-world polyfill in, which a new port reaches. The page is read
+	// again either way, so that the worker learns what came of it.
+	installLate = () => {
+		if (contextOf(document) !== undefined) return;
+		if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) {
+			try {
+				ownContext = installWebMCP(window) as unknown as
+					| ModelContext
+					| undefined;
+			} catch {
+				// As at the start: no WebMCP of ours.
+			}
+			if (ownContext !== undefined) {
+				late = true;
+				ownContext.addEventListener("toolchange", changed);
+			}
 			changed();
-		});
+			return;
+		}
+		connect(true);
+		setTimeout(changed, LATE_WAIT_MS);
+	};
 	// A page Chrome shows again from its back/forward cache loads nothing:
 	// its tools are read again as after a change.
 	globalThis.addEventListener?.("pageshow", (event) => {

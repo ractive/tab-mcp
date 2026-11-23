@@ -15,8 +15,14 @@
  *
  * It shares the page's world: the page can see, change or replace it. That
  * harms only the page's own tools; nothing here has the extension's powers.
+ *
+ * Without host access the worker puts it in late, once a click on the icon
+ * gave the tab and AI access is on (`giveWebMCP` in `tabs.ts`, DEC-223):
+ * then it says so with `WEBMCP_EVENT` on `document`, so that the client
+ * library, which looked for WebMCP as the page loaded, looks again.
  */
 
+import { WEBMCP_EVENT } from "@ractive-ch/tab-mcp-client/extension";
 import { CONNECT, type PortMessage, type PortRequest } from "../webmcp/port.ts";
 import {
 	messageOf,
@@ -187,6 +193,9 @@ function install(): void {
 			void answer(port, calls, message.data as PortRequest);
 		send(port, { type: "hello" });
 	});
+	// A client library that looked for WebMCP before (this script came late)
+	// looks again (DEC-223). At `document_start` no page script listens yet.
+	document.dispatchEvent(new Event(WEBMCP_EVENT));
 }
 
 install();

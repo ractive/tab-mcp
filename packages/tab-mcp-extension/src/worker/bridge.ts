@@ -519,6 +519,8 @@ export interface Offered {
 export interface BridgeState {
 	/** The tab it was read from. */
 	tabId?: number;
+	/** The page in it (the content script's id), once read. */
+	documentId?: string;
 	url?: string;
 	origin?: string;
 	/** `document.modelContext` is there. */
@@ -1023,6 +1025,7 @@ export class PageToolBridge {
 		this.#compiled = compiled;
 		this.#state = {
 			tabId: tab.id,
+			documentId: tools.documentId,
 			url: tools.url,
 			origin: tools.origin,
 			available: tools.available,

@@ -14,6 +14,7 @@ import {
 	type PageInfo,
 	type PageTools,
 	type Vouch,
+	WEBMCP_MAIN_SCRIPT,
 } from "./messages.ts";
 
 /**
@@ -40,6 +41,24 @@ export async function injectInto(tabId: number): Promise<void> {
 		target: { tabId },
 		files: [CONTENT_SCRIPT],
 	});
+}
+
+/**
+ * Give the page in tab `tabId` the extension's own WebMCP now, after it
+ * loaded (DEC-223): in Chrome the page-world polyfill into the top frame's
+ * main world (which tells the page with `WEBMCP_EVENT`), then the content
+ * script connects to it; in Firefox the content script installs it. Needs a
+ * click's grant (`activeTab`) or host access; rejects without.
+ */
+export async function giveWebMCP(tabId: number): Promise<void> {
+	if (!FIREFOX)
+		await chrome.scripting.executeScript({
+			target: { tabId, frameIds: [0] },
+			world: "MAIN",
+			files: [WEBMCP_MAIN_SCRIPT],
+		});
+	const install: ContentRequest = { type: "webmcp-install" };
+	await chrome.tabs.sendMessage(tabId, install, { frameId: 0 });
 }
 
 /** The tab a tool acts on. */
@@ -111,7 +130,7 @@ export class NoAccessError extends Error {
 	}
 }
 
-const NO_GRANT = `The ${PRODUCT} may not read this tab yet. The user can click its icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.`;
+const NO_GRANT = `The ${PRODUCT} may not read this tab yet. The user can click its icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.${FIREFOX ? " In Firefox a click counts for that one page: each new page, of the same site too, needs another." : ""}`;
 
 /**
  * The hosts Firefox keeps extensions out of (its default

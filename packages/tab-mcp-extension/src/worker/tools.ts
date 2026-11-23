@@ -44,8 +44,10 @@ export const MAX_LISTED_SCHEMAS = 192 * 1024;
  */
 export function listing(state: BridgeState): BridgeState {
 	let room = MAX_LISTED_SCHEMAS;
+	// The page's id is the worker's own business (DEC-223's bookkeeping).
+	const { documentId: _, ...shown } = state;
 	return {
-		...state,
+		...shown,
 		tools: state.tools.map((tool) => {
 			// Not offered: no schema of either kind (DEC-144).
 			if (tool.inputSchema === undefined) {

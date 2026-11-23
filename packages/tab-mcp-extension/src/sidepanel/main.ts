@@ -605,6 +605,7 @@ function showTab(s: PanelState): void {
 	const note = webmcpNote(tab);
 	$("no-tools").hidden = note !== "no-tools";
 	$("no-webmcp").hidden = note !== "no-webmcp";
+	$("late-webmcp").hidden = note !== "late-webmcp";
 	const allowAll = allowAllView(tab);
 	// The page changed what the switch over the list is for (other tools, so
 	// also on or off, or it just came): it and the switches below wait, so a

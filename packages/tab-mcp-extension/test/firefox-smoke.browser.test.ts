@@ -28,6 +28,7 @@ import { findFirefox } from "./firefox.ts";
 import {
 	answerInPanel,
 	call,
+	clickIcon,
 	findPanel,
 	inBackground,
 	notificationFor,
@@ -479,5 +480,117 @@ describe.skipIf(!firefoxOk)(
 				host: "client.example",
 			});
 		});
+	},
+);
+
+describe.skipIf(!firefoxOk)(
+	"a page with the client library, no access to all sites: WebMCP on a click (DEC-223)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start("plain.html");
+		}, 90_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		/** AI access off or on, as the panel's switch does it. */
+		const aiAccess = async (on: boolean) => {
+			await stack.panel.eval(`(async () => {
+				const port = chrome.runtime.connect({ name: "panel" });
+				port.postMessage({ type: ${JSON.stringify(on ? "connect" : "stop")} });
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				port.disconnect();
+			})()`);
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === ${JSON.stringify(on ? "on" : "off")}`,
+				15_000,
+			);
+		};
+		const mirrors = `"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`;
+
+		test("a click gives the page WebMCP while AI access is on; Firefox wants a click on every new page", async () => {
+			await step(
+				"the test build's access to all sites taken away: no content script at load any more",
+				async () => {
+					await stack.panel.eval(
+						`browser.permissions.remove({ origins: ["http://*/*", "https://*/*"] })`,
+					);
+					await stack.panel.waitFor(
+						`browser.scripting.getRegisteredContentScripts().then((s) => s.length === 0)`,
+					);
+					await stack.tab.navigate(`${stack.site}/library.html`);
+					expect(await stack.tab.eval(`"modelContext" in document`)).toBe(
+						false,
+					);
+				},
+			);
+			await step(
+				"while AI access is off a click gives the page nothing",
+				async () => {
+					await aiAccess(false);
+					await clickIcon(stack);
+					await stack.panel.waitFor(
+						`!document.getElementById("no-webmcp").hidden`,
+						15_000,
+					);
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("no-webmcp").textContent`,
+						),
+					).toContain("While AI access is on");
+					expect(await stack.tab.eval(`"modelContext" in document`)).toBe(
+						false,
+					);
+				},
+			);
+			await step(
+				"AI access on: the page gets WebMCP and the library's tool is offered, without another click",
+				async () => {
+					await aiAccess(true);
+					await stack.tab.waitFor(mirrors, 15_000);
+					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+				},
+			);
+			await step(
+				"a page of the same origin needs a click again in Firefox; the click gives it WebMCP",
+				async () => {
+					await stack.tab.navigate(`${stack.site}/library.html?again`);
+					const refused = await call(stack, "page_info");
+					expect(refused.isError).toBe(true);
+					expect(refused.content[0]?.text).toContain(
+						"In Firefox a click counts for that one page",
+					);
+					await stack.panel.waitFor(
+						`document.getElementById("tab-access").textContent.includes("on every new page")`,
+						15_000,
+					);
+					await clickIcon(stack);
+					await stack.tab.waitFor(mirrors, 15_000);
+					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+				},
+			);
+			await step(
+				"a page that looks for WebMCP only as it loads gets it and registers nothing: page_info says why",
+				async () => {
+					await stack.tab.navigate(`${stack.site}/webmcp.html`);
+					await clickIcon(stack);
+					await stack.tab.waitFor(`"modelContext" in document`, 15_000);
+					await stack.panel.waitFor(
+						`!document.getElementById("late-webmcp").hidden`,
+						15_000,
+					);
+					const info = await call(stack, "page_info");
+					expect(info.structuredContent?.["webmcp"]).toMatchObject({
+						available: true,
+						tools: 0,
+						late: true,
+					});
+				},
+			);
+		}, 90_000);
 	},
 );
