@@ -88,9 +88,15 @@ export function introText(relay: string): string {
 	return `Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay ${host}.`;
 }
 
+/**
+ * The words in the click's line after which the panel shows the
+ * extension's own icon (`main.ts`), so that the user knows what to look for.
+ */
+export const ICON_AFTER = "Click its icon";
+
 const CLICK_ICON = FIREFOX
-	? "Click the tab-mcp icon in Firefox's toolbar to let it read this page. Firefox asks for the click again on every new page, of the same site too."
-	: `Click the tab-mcp icon in ${BROWSER}'s toolbar to let it read this tab.`;
+	? `tab-mcp may not read this page yet. ${ICON_AFTER} in Firefox's toolbar, or give it access to all sites. Without that access, Firefox asks for the click again on every new page.`
+	: `tab-mcp may not read this tab yet. ${ICON_AFTER} in ${BROWSER}'s toolbar, or give it access to all sites.`;
 const BROWSER_PAGE = `${BROWSER} does not let extensions read browser pages.`;
 
 /**

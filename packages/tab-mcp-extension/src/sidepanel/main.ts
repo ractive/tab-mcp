@@ -7,7 +7,13 @@
  * pairing, which stops.
  */
 
-import { FIREFOX, FIREFOX_PANEL_TEXTS, PANEL, PRODUCT } from "../browser.ts";
+import {
+	allSitesButton,
+	FIREFOX,
+	FIREFOX_PANEL_TEXTS,
+	PANEL,
+	PRODUCT,
+} from "../browser.ts";
 import {
 	PANEL_PORT,
 	type PanelCommand,
@@ -24,6 +30,7 @@ import {
 	alwaysAllowNote,
 	cardView,
 	confirms,
+	ICON_AFTER,
 	introText,
 	libraryNotes,
 	noAccessText,
@@ -60,7 +67,35 @@ function setText(element: HTMLElement, text: string): void {
 	if (element.textContent !== text) element.textContent = text;
 }
 
+/**
+ * The access line: `text`, with the extension's own 16 px icon right after
+ * the words that ask for a click on it (`ICON_AFTER`), so that the user
+ * knows what to look for. Decorative: empty alt, hidden from screen readers
+ * (the words say it); the text stays the same, the icon has no space of its
+ * own in it. Only when it changes, as `setText`: the line is a live region.
+ */
+function setAccessText(element: HTMLElement, text: string): void {
+	const at = text.indexOf(ICON_AFTER);
+	if (at < 0) {
+		setText(element, text);
+		return;
+	}
+	if (element.textContent === text && element.querySelector("img") !== null)
+		return;
+	const end = at + ICON_AFTER.length;
+	const icon = document.createElement("img");
+	icon.src = chrome.runtime.getURL("icons/icon-16.png");
+	icon.alt = "";
+	icon.width = 16;
+	icon.height = 16;
+	icon.className = "inline-icon";
+	icon.setAttribute("aria-hidden", "true");
+	element.replaceChildren(text.slice(0, end), icon, text.slice(end));
+}
+
 $("focus-hint").textContent = `Click into the ${PANEL} to answer.`;
+// The button's label in one place (`allSitesButton`).
+$("allow-all").textContent = allSitesButton;
 
 // Firefox's words where the panel's page names Chrome (iteration 44).
 if (FIREFOX) {
@@ -588,8 +623,9 @@ function showTab(s: PanelState): void {
 					? [badge(`WebMCP · ${count} tool${count === 1 ? "" : "s"}`, "ok")]
 					: []),
 	);
-	// The panel's own words for why it may not read the tab (EQ 6).
-	setText(
+	// The panel's own words for why it may not read the tab (EQ 6), with the
+	// extension's icon where they ask for a click on it.
+	setAccessText(
 		$("tab-access"),
 		tab?.noAccess !== undefined
 			? noAccessText(tab.noAccess, s.allSites)

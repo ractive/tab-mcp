@@ -436,6 +436,14 @@ input:is([type="text"], [type="url"]) {
 	color: var(--ink);
 }
 
+/* The extension's own icon in the line that asks for a click on it. */
+.inline-icon {
+	width: 16px;
+	height: 16px;
+	margin: 0 1px 0 4px;
+	vertical-align: -3px;
+}
+
 /* Something stands in the way and there is a way out: the address is in use elsewhere. */
 .replaced {
 	display: flex;

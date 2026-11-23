@@ -178,8 +178,9 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   "Give access to all sites" in the side panel lets it read every http(s) tab
   without a click; Chrome asks first ("Read and change all your data on all
   websites"). On a tab it may not read, a notice in the
-  panel says to click the icon in the toolbar (or that Chrome does not let extensions
-  read the page); on a tab it may read whose tools could not be read
+  panel says to click its icon in the toolbar, showing the icon, or to give it access to
+  all sites (or that Chrome does not let extensions read the page), and a last line says
+  how to pin the icon when it is not in the toolbar (the puzzle-piece menu); on a tab it may read whose tools could not be read
   (the page changed meanwhile, or says it is another site), the notice says that.
   On a page without tools it says so, that `page_info` and the navigation tools still
   work, and, where WebMCP is off, how Chrome turns it on.

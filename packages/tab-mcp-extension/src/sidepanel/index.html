@@ -93,9 +93,11 @@
 		<ul id="tools" class="tools" aria-label="The page's WebMCP tools"></ul>
 		<div id="host-access" class="host-access" hidden>
 			<div class="buttons">
-				<button id="allow-all" type="button">Give access to all sites</button>
+				<!-- Its label: `allSitesButton` in browser.ts, the one place. -->
+				<button id="allow-all" type="button"></button>
 			</div>
-			<p id="host-access-note" class="muted small">Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Chrome asks you first.</p>
+			<p id="host-access-note" class="muted small">With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Chrome asks you first.</p>
+			<p id="toolbar-hint" class="muted small">Icon not in the toolbar? Open the puzzle-piece menu next to the address bar and pin tab-mcp.</p>
 		</div>
 		<p id="allowed-all" class="muted small" hidden>
 			tab-mcp has access to all sites. <button id="disallow-all" type="button" class="link">Remove access to all sites</button>

@@ -365,7 +365,7 @@ A library page, plain Chrome, the store package:
 
 | Moment | Today | With this iteration |
 |---|---|---|
-| Before the click | badge "Not readable"; "Click the tab-mcp icon in Chrome's toolbar to let it read this tab." (`card.ts:96-97`); "Give access to all sites" | the same |
+| Before the click | badge "Not readable"; "Click the tab-mcp icon in Chrome's toolbar to let it read this tab." (`card.ts:96-97`); "Give access to all sites" | the owner's new words (below): "tab-mcp may not read this tab yet. Click its icon [the icon] in Chrome's toolbar, or give it access to all sites."; "Give access to all sites"; the note; "Icon not in the toolbar? …" |
 | After the click, AI access on | no badge; `no-webmcp` (`index.html:86`); no "built in" line (the library never spoke) | a moment later: "WebMCP · N tools", "This page has tab-mcp built in.", the tools with their switches; never the `no-webmcp` text in between |
 | After the click, AI access off | as above | `no-webmcp` (new draft below); once AI access connects, the tools come without another click |
 | Same-origin navigation or reload, AI access on | `no-webmcp` again | Chrome: the tools again, without a click. Firefox: "Not readable" and the click text, as on another origin (the grant ends at every navigation, spike task 0) |
@@ -387,11 +387,27 @@ A library page, plain Chrome, the store package:
   the user to click "Give access to all sites" in the side panel and reload it."
   `FIREFOX_NO_WEBMCP_NOTE` drops "if it loaded before tab-mcp had access" in favour of
   the same two cases.
-- **"Give access to all sites" stays**, with the same words and the same note
-  (`index.html:93-98`), shown whenever it is not granted (`sidepanel/main.ts:576`). It
-  is still the only way for WebMCP-only pages, and it spares a click per origin. The
-  note "Then tab-mcp reads every tab without a click on its icon, and gives every page
-  WebMCP as it loads" stays true.
+- **"Give access to all sites" stays**, shown whenever it is not granted
+  (`sidepanel/main.ts`). It is still the only way for WebMCP-only pages, and it spares a
+  click per origin. Its label is in one place, `allSitesButton` in `browser.ts`, with a
+  suffix per browser that is empty for now (the owner may add "(recommended)").
+- **A tab it may not read, the owner's words** (2026-11-23, after his own test: people
+  may not find the icon):
+  - Chrome, the notice: "tab-mcp may not read this tab yet. Click its icon in Chrome's
+    toolbar, or give it access to all sites." with the extension's 16 px icon after
+    "Click its icon" (decorative: empty alt, `aria-hidden`).
+  - Chrome, under the button: "With access to all sites, tab-mcp reads every tab
+    without a click on its icon and gives every page WebMCP as it loads. Chrome asks you
+    first."
+  - Chrome, last: "Icon not in the toolbar? Open the puzzle-piece menu next to the
+    address bar and pin tab-mcp."
+  - Firefox, the notice: "tab-mcp may not read this page yet. Click its icon in Firefox's
+    toolbar, or give it access to all sites. Without that access, Firefox asks for the
+    click again on every new page."
+  - Firefox, under the button: the same note with "Firefox asks you first."
+  - Firefox, last: "Icon not in the toolbar? Open the Extensions button (the puzzle
+    piece) in the toolbar, click the gear next to tab-mcp and choose Pin to Toolbar."
+    Firefox names it the Extensions button, and pins from the gear menu there.
 
 ### 9. Tests
 

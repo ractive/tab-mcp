@@ -2179,9 +2179,32 @@ describe.skipIf(chrome === undefined)(
 					// Chrome reports the address of this tab or hides it, depending on
 					// when it is asked: the same line either way.
 					expect(access).toBe(
-						"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+						"tab-mcp may not read this tab yet. Click its icon in Chrome's toolbar, or give it access to all sites.",
 					);
 					expect([hidden, button]).toEqual([false, "Give access to all sites"]);
+					// The extension's icon in the line, loaded, 16 px; and at the
+					// panel's narrowest width nothing reaches past its edge.
+					expect(
+						await stack.panel.eval(
+							`(() => { const i = document.querySelector("#tab-access img"); return [i.complete && i.naturalWidth > 0, i.getBoundingClientRect().width, i.alt, i.getAttribute("aria-hidden")]; })()`,
+						),
+					).toEqual([true, 16, "", "true"]);
+					await stack.panel.send("Emulation.setDeviceMetricsOverride", {
+						width: 345,
+						height: 900,
+						deviceScaleFactor: 1,
+						mobile: false,
+					});
+					try {
+						await stack.panel.waitFor("innerWidth === 345");
+						expect(
+							await stack.panel.eval(
+								`(() => { const root = document.scrollingElement; return [root.scrollWidth <= root.clientWidth, [...document.querySelectorAll("#tab-access, #tab-access *, #host-access, #host-access *")].filter((e) => e.getBoundingClientRect().right > root.clientWidth + 0.5).map((e) => e.tagName + "#" + e.id)]; })()`,
+							),
+						).toEqual([true, []]);
+					} finally {
+						await stack.panel.send("Emulation.clearDeviceMetricsOverride");
+					}
 					await stack.browser.clickIcon(tab);
 					expect((await pageInfo(stack)).structuredContent).toMatchObject({
 						url: `${SUBDOMAIN}/plain.html`,

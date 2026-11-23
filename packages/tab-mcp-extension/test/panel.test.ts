@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { join } from "node:path";
 import { SETUP_GUIDE } from "@ractive-ch/tab-mcp-client/setup";
 import { Window } from "happy-dom";
+import { allSitesButton } from "../src/browser.ts";
 import type { PanelState, TabView } from "../src/protocol.ts";
 import {
 	ALWAYS_ALLOW_ALL,
@@ -16,6 +17,7 @@ import {
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
+	ICON_AFTER,
 	introText,
 	noAccessText,
 	type SwitchIntent,
@@ -219,14 +221,14 @@ describe("the tab card's texts", () => {
 	});
 
 	test("an unreadable tab in the user's words: the toolbar icon, no AI app wording (EQ 6)", () => {
-		expect(noAccessText("no-grant", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
-		);
+		const click =
+			"tab-mcp may not read this tab yet. Click its icon in Chrome's toolbar, or give it access to all sites.";
+		expect(noAccessText("no-grant", false)).toBe(click);
+		// The panel puts the extension's icon right after these words.
+		expect(click).toContain(`${ICON_AFTER} in`);
 		// A hidden address may be a browser page, where the click cannot help
 		// (not worth a sentence); with host access on all sites it can only be one.
-		expect(noAccessText("hidden", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
-		);
+		expect(noAccessText("hidden", false)).toBe(click);
 		expect(noAccessText("hidden", true)).toBe(
 			"Chrome does not let extensions read browser pages.",
 		);
@@ -285,11 +287,16 @@ describe("the tab card's texts", () => {
 		try {
 			const text = (id: string) =>
 				doc.getElementById(id)?.textContent?.replace(/\s+/g, " ").trim();
-			expect(text("allow-all")).toBe("Give access to all sites");
+			// The button's label is set from one place (`allSitesButton`).
+			expect(text("allow-all")).toBe("");
+			expect(allSitesButton).toBe("Give access to all sites");
 			expect(text("disallow-all")).toBe("Remove access to all sites");
-			// What changes, and that Chrome asks first.
-			expect(text("host-access")).toContain(
-				"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Chrome asks you first.",
+			// What changes, that Chrome asks first, and where the icon is.
+			expect(text("host-access-note")).toBe(
+				"With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Chrome asks you first.",
+			);
+			expect(text("toolbar-hint")).toBe(
+				"Icon not in the toolbar? Open the puzzle-piece menu next to the address bar and pin tab-mcp.",
 			);
 			// A switch for all the tools' switches, named as they are.
 			const allowTools = doc.getElementById("allow-tools");

@@ -30,8 +30,30 @@ export const FIREFOX_PANEL_TEXTS: Readonly<Record<string, string>> = {
 	"pairing-profile":
 		"Use the AI app outside this Firefox profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.",
 	"host-access-note":
-		"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Firefox asks you first.",
+		"With access to all sites, tab-mcp reads every tab without a click on its icon and gives every page WebMCP as it loads. Firefox asks you first.",
+	// Firefox 109 and later: the Extensions button (a puzzle piece) at the
+	// toolbar's end; an extension is pinned from its gear menu there.
+	"toolbar-hint":
+		"Icon not in the toolbar? Open the Extensions button (the puzzle piece) in the toolbar, click the gear next to tab-mcp and choose Pin to Toolbar.",
 };
+
+/**
+ * The words after "Give access to all sites" on the panel's button, per
+ * browser: none now (the owner may add one, "(recommended)" say). The one
+ * place of the button's label is `allSitesButton`.
+ */
+const ALL_SITES_SUFFIX: Readonly<{ chrome: string; firefox: string }> = {
+	chrome: "",
+	firefox: "",
+};
+
+/** The panel's button that asks for access to all sites, as it reads. */
+export const allSitesButton: string = [
+	"Give access to all sites",
+	FIREFOX ? ALL_SITES_SUFFIX.firefox : ALL_SITES_SUFFIX.chrome,
+]
+	.filter((part) => part !== "")
+	.join(" ");
 
 /** The pages the browser keeps extensions out of, in the user's words. */
 export const STORE_TEXT: string = FIREFOX
