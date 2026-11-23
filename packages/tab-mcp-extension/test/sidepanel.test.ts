@@ -22,11 +22,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Window } from "happy-dom";
 import type {
+	CallView,
 	PanelCommand,
 	PanelState,
 	QuestionSummary,
 	ToolView,
+	WorkerMessage,
 } from "../src/protocol.ts";
+import {
+	CALLS_EMPTY,
+	CALLS_NOTE,
+	MAX_SHOWN,
+	summaryText,
+} from "../src/sidepanel/calls.ts";
 
 const SITE = "https://shop.example";
 /** The panel's waits (main.ts `ALLOW_DELAY_MS`), and a bit. */
@@ -152,6 +160,8 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 		doc,
 		sent,
 		show: (state: PanelState) => deliver({ type: "state", state }),
+		/** Any other message of the worker's. */
+		post: (message: WorkerMessage) => deliver(message),
 		/** Chrome ends the port (the worker stopped, an update, a reload). */
 		drop: () => dropped(),
 		/** The clock `ms` on, and the panel's own check of its waits run. */
@@ -184,6 +194,7 @@ function stateWith(
 		grants: [{ grantId: "g1", name: "Claude", host: "claude.ai" }],
 		pairing: false,
 		calling: false,
+		recentCalls: 0,
 		allSites: true,
 		questions,
 		expired: [],
@@ -214,6 +225,166 @@ const switchOf = (name: string) => `input.always-allow[data-tool="${name}"]`;
 const allowOf = (id: string) =>
 	`[data-question="${id}"] button[data-answer="allow"]`;
 const disabled = (e: Element | null) => e?.getAttribute("aria-disabled");
+
+describe("Recent calls (DEC-226)", () => {
+	const call = (id: number, more: Partial<CallView> = {}): CallView => ({
+		id,
+		at: Date.UTC(2026, 10, 24, 9, 30, id),
+		app: "Claude",
+		host: "claude.ai",
+		tool: "page_get_greeting",
+		args: '{"name":"Ada"}',
+		state: "ok",
+		...more,
+	});
+
+	async function opened() {
+		const panel = await openPanel();
+		panel.show({ ...stateWith([]), recentCalls: 2 });
+		const section = panel.$<HTMLDetailsElement>("#calls");
+		if (section === null) throw new Error("no #calls");
+		// happy-dom fires `toggle` as the attribute changes (a browser, a task later).
+		const toggle = (open: boolean) => {
+			section.open = open;
+		};
+		const rows = () =>
+			[...panel.doc.querySelectorAll("#calls-list > li")].map((li) =>
+				[...li.children].map((e) => e.textContent),
+			);
+		const summary = () => panel.$("#calls-summary")?.textContent;
+		return { panel, section, toggle, rows, summary };
+	}
+
+	test("closed at first, its count from the state, nothing asked for until it opens", async () => {
+		const { panel, section, summary } = await opened();
+		expect(section.open).toBe(false);
+		expect(summary()).toBe(summaryText(2));
+		expect(panel.sent.some((c) => c.type === "calls")).toBe(false);
+		expect(panel.$("#calls-note")?.textContent).toBe(CALLS_NOTE);
+		expect(panel.$("#calls-empty")?.textContent).toBe(CALLS_EMPTY);
+		// A list, no live region: the calls are not read out as they come.
+		expect(panel.$("#calls-list")?.tagName).toBe("OL");
+		expect(
+			panel.doc.querySelectorAll(
+				"#calls [aria-live], #calls [role=status], #calls [role=alert]",
+			),
+		).toHaveLength(0);
+	});
+
+	test("opened: it asks for the list, shows it newest first, follows each change, and stops asking once closed", async () => {
+		const { panel, toggle, rows, summary } = await opened();
+		toggle(true);
+		expect(panel.take().filter((c) => c.type === "calls")).toEqual([
+			{ type: "calls", open: true },
+		]);
+		panel.post({
+			type: "calls",
+			calls: [
+				call(1),
+				call(2, {
+					tool: "page_place_order",
+					args: '{"item":"tea"}',
+					site: "https://shop.example",
+					state: "declined",
+				}),
+			],
+		});
+		const time = (id: number) =>
+			new Date(Date.UTC(2026, 10, 24, 9, 30, id)).toLocaleTimeString(
+				undefined,
+				{ hour: "2-digit", minute: "2-digit", second: "2-digit" },
+			);
+		expect(rows()).toEqual([
+			[
+				`page_place_order${time(2)}`,
+				"Declined by you",
+				"Claude (claude.ai) · on shop.example",
+				'{"item":"tea"}',
+			],
+			[
+				`page_get_greeting${time(1)}`,
+				"Ran",
+				"Claude (claude.ai)",
+				'{"name":"Ada"}',
+			],
+		]);
+		expect(panel.$("#calls-empty")?.hidden).toBe(true);
+		// A new call, running, then waiting, then allowed and done.
+		panel.post({ type: "call", call: call(3, { state: "running" }) });
+		expect(rows()[0]?.[1]).toBe("Running");
+		expect(summary()).toBe(summaryText(3));
+		panel.post({ type: "call", call: call(3, { state: "waiting" }) });
+		expect(rows()[0]?.[1]).toBe("Waiting for your answer");
+		panel.post({ type: "call", call: call(3, { allowed: "once" }) });
+		expect(rows()[0]?.[1]).toBe("Allowed by you · Ran");
+		expect(rows()).toHaveLength(3);
+		// A state that comes meanwhile changes neither list nor count.
+		panel.show({ ...stateWith([]), recentCalls: 3 });
+		expect(rows()).toHaveLength(3);
+		toggle(false);
+		expect(panel.take().filter((c) => c.type === "calls")).toEqual([
+			{ type: "calls", open: false },
+		]);
+	});
+
+	test("each outcome in words", async () => {
+		const { panel, toggle, rows } = await opened();
+		toggle(true);
+		const outcomes: [Partial<CallView>, string][] = [
+			[
+				{ state: "failed", error: "The page's tool threw." },
+				"Failed: The page's tool threw.",
+			],
+			[
+				{ state: "failed", allowed: "always", error: "x" },
+				"Always allowed · Failed: x",
+			],
+			[{ state: "unanswered" }, "Not answered in time"],
+			[{ state: "cancelled" }, "Cancelled by the AI app"],
+			[{ state: "timeout" }, "The page did not answer in time"],
+			[{ state: "ok", allowed: "always" }, "Always allowed · Ran"],
+			[{ state: "ok", app: "" }, "Ran"],
+		];
+		panel.post({
+			type: "calls",
+			calls: outcomes.map(([more], i) => call(i + 1, more)),
+		});
+		expect(rows().map((r) => r[1])).toEqual(
+			outcomes.map(([, words]) => words).reverse(),
+		);
+		// No name of its own: the verified host alone.
+		expect(rows()[0]?.[2]).toBe("claude.ai");
+	});
+
+	test("empty: the line says so; at most 100 shown; other people's text stays text", async () => {
+		const { panel, toggle, rows } = await opened();
+		toggle(true);
+		panel.post({ type: "calls", calls: [] });
+		expect(panel.$("#calls-empty")?.hidden).toBe(false);
+		expect(panel.$("#calls-list")?.hidden).toBe(true);
+		panel.post({
+			type: "calls",
+			calls: Array.from({ length: MAX_SHOWN + 3 }, (_, i) => call(i + 1)),
+		});
+		expect(rows()).toHaveLength(MAX_SHOWN);
+		panel.post({
+			type: "call",
+			call: call(500, {
+				tool: "<b>bold</b>",
+				app: '<img src=x onerror="alert(1)">',
+				args: '{"html":"<script>alert(1)</script>"}',
+			}),
+		});
+		expect(rows()).toHaveLength(MAX_SHOWN);
+		const first = panel.doc.querySelector("#calls-list > li");
+		expect(first?.querySelectorAll("b, img, script")).toHaveLength(0);
+		expect(rows()[0]?.[3]).toBe('{"html":"<script>alert(1)</script>"}');
+		// The whole of the cut arguments on hover.
+		expect(first?.querySelector(".call-args")?.getAttribute("title")).toBe(
+			'{"html":"<script>alert(1)</script>"}',
+		);
+	});
+});
 
 describe("the glow while an AI app calls (DEC-225)", () => {
 	/** Every text and `aria-*` or `role` value of the panel. */

@@ -519,6 +519,14 @@ export interface BridgeOptions {
 	changed?: () => void;
 	/** Asks the user; without it, every tool that is not read-only is refused. */
 	confirm?: Confirm;
+	/**
+	 * More of the call whose `execute` got `signal`, for "Recent calls"
+	 * (DEC-226): the site it runs on, that the page did not answer in time.
+	 */
+	note?: (
+		signal: AbortSignal,
+		fact: { site: string } | { timedOut: true },
+	) => void;
 	timeoutMs?: number;
 	/** How long after a read that caught the tab between two pages it reads once more. */
 	pageChangedRetryMs?: number;
@@ -613,6 +621,7 @@ export class PageToolBridge {
 	#retried = false;
 	readonly #changed: () => void;
 	readonly #confirm: Confirm;
+	readonly #note: NonNullable<BridgeOptions["note"]>;
 	/** The registered tools by AI app name, with what they were made from. */
 	readonly #registered = new Map<
 		string,
@@ -637,6 +646,7 @@ export class PageToolBridge {
 		this.#chrome = chrome;
 		this.#changed = options.changed ?? (() => {});
 		this.#confirm = options.confirm ?? refuse;
+		this.#note = options.note ?? (() => {});
 		this.#timeoutMs = options.timeoutMs ?? CALL_TIMEOUT_MS;
 		this.#pageChangedRetryMs =
 			options.pageChangedRetryMs ?? PAGE_CHANGED_RETRY_MS;
@@ -725,6 +735,7 @@ export class PageToolBridge {
 	): Promise<unknown> {
 		const { target } = callable;
 		const { client } = options;
+		this.#note(options.signal, { site: callable.origin });
 		if (!target.readOnly) {
 			await this.#confirm(
 				{
@@ -787,10 +798,12 @@ export class PageToolBridge {
 			abortedWith(signal).catch(() => "aborted" as const),
 		]);
 		if (result === "aborted" || timeout.aborted) {
-			if (timeout.aborted)
+			if (timeout.aborted) {
+				this.#note(options.signal, { timedOut: true });
 				throw new Error(
 					`The page's tool ${target.name} did not answer within ${Math.round(this.#timeoutMs / 1000)} s.`,
 				);
+			}
 			throw new Error(`The call to ${target.name} was cancelled.`);
 		}
 		if (result.ok ? result.value === null : result.navigated === true) {

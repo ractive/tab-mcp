@@ -468,6 +468,126 @@ describe("Always allow all from the panel (set-allowed-all)", () => {
 	});
 });
 
+describe("Recent calls in the worker (DEC-226)", () => {
+	let lastId = 1000;
+	/**
+	 * A call as the library makes it for an AI app: `toolcall`, the tool the
+	 * worker registered (wrapped), `toolcallend` with how it went.
+	 */
+	async function libraryCall(
+		mcp: TabMcp,
+		name: string,
+		args: Record<string, unknown>,
+	): Promise<void> {
+		const id = ++lastId;
+		const client = {
+			kind: "relay",
+			grantId: "g1",
+			id: "https://claude.ai/client",
+			name: "Claude",
+			host: "claude.ai",
+		};
+		mcp.dispatchEvent(
+			new CustomEvent("toolcall", {
+				detail: { id, tool: name, arguments: args, client },
+			}),
+		);
+		let outcome = "ok";
+		let text = "done";
+		try {
+			await callTool(name, args);
+		} catch (error) {
+			outcome = "error";
+			text = (error as Error).message;
+		}
+		mcp.dispatchEvent(
+			new CustomEvent("toolcallend", {
+				detail: {
+					id,
+					tool: name,
+					client,
+					outcome,
+					result: {
+						content: [{ type: "text", text }],
+						...(outcome === "ok" ? {} : { isError: true }),
+					},
+					durationMs: 1,
+				},
+			}),
+		);
+	}
+
+	const messages = (posted: unknown[], type: string) =>
+		posted.filter((m) => (m as { type?: string }).type === type) as {
+			calls?: { tool: string; state: string; site?: string }[];
+			call?: { tool: string; state: string; site?: string };
+		}[];
+
+	test("the state carries the count; a panel that opens the section gets the list, then each change; nothing of it is stored", async () => {
+		const { c, kv, fake } = await connection({
+			tools: [pageTool("get_greeting", true), pageTool("place_order", false)],
+		});
+		const mcp = registered.mock.contexts.at(-1) as TabMcp;
+		const panel = fakePanel();
+		const receive = c.addPanel(panel.port);
+		receive({ type: "hello", windowId: 1 });
+		await until(
+			() => panel.state()?.tab?.tools.length === 2,
+			"the tab's tools in the panel",
+		);
+		const storedBefore = JSON.stringify([...kv.data]);
+		expect(panel.state()?.recentCalls).toBe(0);
+
+		// A read-only call with the section closed: only the count.
+		await libraryCall(mcp, "page_get_greeting", { name: "Ada" });
+		await until(() => panel.state()?.recentCalls === 1, "the count");
+		expect(messages(panel.posted, "calls")).toEqual([]);
+		expect(messages(panel.posted, "call")).toEqual([]);
+
+		// Opened: the list, with the site the page tool ran on.
+		receive({ type: "calls", open: true });
+		await until(() => messages(panel.posted, "calls").length === 1, "the list");
+		expect(messages(panel.posted, "calls")[0]?.calls).toMatchObject([
+			{ tool: "page_get_greeting", state: "ok", site: SITE },
+		]);
+
+		// A call the user declines: running, waiting, declined, as it goes.
+		const declined = libraryCall(mcp, "page_place_order", { item: "tea" });
+		await until(() => panel.state()?.questions.length === 1, "a question");
+		receive({
+			type: "answer",
+			id: panel.state()?.questions[0]?.id ?? "",
+			answer: "deny",
+		});
+		await declined;
+		expect(
+			messages(panel.posted, "call").map((m) => [m.call?.tool, m.call?.state]),
+		).toEqual([
+			["page_place_order", "running"],
+			["page_place_order", "running"], // its site
+			["page_place_order", "waiting"],
+			["page_place_order", "running"], // the answer
+			["page_place_order", "declined"],
+		]);
+		await until(() => panel.state()?.recentCalls === 2, "the count");
+
+		// Closed: no more changes to it.
+		receive({ type: "calls", open: false });
+		await until(
+			() => (panel.posted.at(-1) as { type?: string }).type !== "calls",
+			"the close handled",
+		);
+		const before = messages(panel.posted, "call").length;
+		await libraryCall(mcp, "page_get_greeting", { name: "Bo" });
+		await until(() => panel.state()?.recentCalls === 3, "the count");
+		expect(messages(panel.posted, "call")).toHaveLength(before);
+
+		// Memory only: the settings as they were, no storage API asked.
+		expect(JSON.stringify([...kv.data])).toBe(storedBefore);
+		expect(fake.calls.filter((name) => /storage/i.test(name))).toEqual([]);
+	});
+});
+
 describe("the panel's commands", () => {
 	test("run one after another: a connect then a stop ends off, two allowed writes both hold", async () => {
 		const { c, kv } = await connection();

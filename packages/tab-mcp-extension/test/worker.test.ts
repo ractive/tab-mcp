@@ -987,6 +987,7 @@ describe("the worker's start", () => {
 			expired: [],
 			pairing: false,
 			calling: false,
+			recentCalls: 0,
 		});
 	});
 

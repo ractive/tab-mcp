@@ -24,6 +24,7 @@ import {
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
+import { CallList, drawCalls, summaryText } from "./calls.ts";
 import {
 	allowAllLabel,
 	allowAllView,
@@ -159,6 +160,13 @@ function connect(): void {
 	opened.onMessage.addListener((message: WorkerMessage) => {
 		if (message?.type === "question-args") args.set(message.id, message.args);
 		else if (message?.type === "state") show(message.state);
+		else if (message?.type === "calls") {
+			callList.set(message.calls);
+			showCalls();
+		} else if (message?.type === "call") {
+			callList.put(message.call);
+			showCalls();
+		}
 	});
 	opened.onDisconnect.addListener(() => {
 		if (port === opened) port = undefined;
@@ -171,7 +179,33 @@ function connect(): void {
 	if (windowId !== undefined) send({ type: "hello", windowId });
 	sendVisible();
 	if (pairing) send({ type: "pair", on: true });
+	// A restarted worker has a list of its own (empty): open, it comes again.
+	if (callsSection.open) send({ type: "calls", open: true });
 }
+
+// --- Recent calls (DEC-226) ---
+
+const callsSection = $<HTMLDetailsElement>("calls");
+const callList = new CallList();
+
+/**
+ * The count in the summary: the list's while open (it may be ahead of the
+ * last state), else the state's; and the list, while open, unless only a
+ * state came (`list` false), which does not change it.
+ */
+function showCalls(list = true): void {
+	const open = callsSection.open;
+	const count = open ? callList.calls.length : (state?.recentCalls ?? 0);
+	setText($("calls-summary"), summaryText(count));
+	if (open && list)
+		drawCalls($("calls-list"), $("calls-empty"), callList.calls);
+}
+
+// Asked for when it opens, its changes while it is open; nothing while closed.
+callsSection.addEventListener("toggle", () => {
+	send({ type: "calls", open: callsSection.open });
+	showCalls();
+});
 
 // --- The AI app ---
 
@@ -724,6 +758,7 @@ function show(s: PanelState): void {
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
+	showCalls(false);
 	showFillNotice(s);
 	fill.show(s);
 	showQuestions(s.questions, s.expired);

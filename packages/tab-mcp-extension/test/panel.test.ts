@@ -50,6 +50,7 @@ const base: PanelState = {
 	grants: [],
 	pairing: false,
 	calling: false,
+	recentCalls: 0,
 	allSites: false,
 	questions: [],
 	expired: [],

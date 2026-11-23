@@ -5826,3 +5826,55 @@ to have something similar in tab-mcp." For the next extension release.
   listed). **Rejected: a box shadow** as Sitegloss first had (DEC-063 there): the
   style sheet allows no shadow with a blur, and one colour says less than the ring that
   AI buttons have come to wear.
+
+## DEC-226: "Recent calls" in the side panel, in the worker's memory only (owner)
+
+2026-11-23. The owner asked: "Should we have an expandable section that shows the last n
+AI app calls?", and chose the arguments shortened ("short args"), the last 100 calls, for
+the next extension release (0.4.0). No line in the privacy policy for it: "i would not.
+it's such a detail".
+
+- **Why:** read-only calls run without a question, so until now nobody saw them; after
+  something odd the user can see which AI app called which tool on which site; and it
+  puts the glow (DEC-225), which is a style alone, into words.
+- **Memory only:** the record is a plain array in the service worker
+  (`src/worker/recent.ts`), never IndexedDB or `chrome.storage` (neither `local` nor
+  `session`). It is gone when the worker stops, which with AI access on does not happen
+  (the relay connection keeps it running); that is accepted. Nothing is stored, which is
+  why the privacy policy needs no line: its "What it stores" stays true, and no sentence
+  of it, the README or the threat model says the extension keeps nothing of a call.
+- **What each entry holds:** when the call started, the AI app (its own name and its
+  verified host), the tool as the AI app named it, for a page tool or a navigation the
+  site (the tab's origin), the arguments as one line of JSON, and how it is going or
+  went: running, waiting for the user's answer, ran, failed (the error's first line),
+  declined by the user, not answered in time, cancelled by the AI app, the page did not
+  answer in time; "Allowed by you" (in the question) or "Always allowed" ("Always allow
+  on <host>" in the question, the tool allowed on the site before, or "Always allow
+  all") before it. No results.
+- **Where the facts come from:** the library's `toolcall` and `toolcallend` events of the
+  worker's `TabMcp` (every call of every tool of the extension's, its own and the page's,
+  both ways of calling a page tool, with its AI app, tool name, arguments and outcome;
+  the same source as the glow), and the tools' `execute`, wrapped where the worker
+  registers them: its signal binds the call (the library calls `execute` right after
+  `toolcall`, so the newest unbound running call of that tool by that AI app is it), and
+  the bridge, the questions and the navigation tools add to the call by that signal:
+  the site, waiting, the answer, allowed before, the page out of time. A declined or
+  unanswered call is an error to the library (the extension asks, not the library), so
+  only the noted answer tells it apart from a failure. The ends of a connection that
+  went (another relay) are still heard, so no call stays "running".
+- **Lengths, other people's text:** the arguments cut to 150 characters (as a
+  notification's), names, hosts and sites to 80, an error to 120; invisible and
+  direction characters escaped, every run of white space one space, cut in the worker,
+  so it never holds a long value. The panel sets every text as text, never HTML. One
+  line of arguments shows at 345 px (about 40 characters of the monospace), with an
+  ellipsis; the whole cut line on hover (`title`), and a screen reader reads it whole.
+- **The panel:** a `<details>` "Recent calls (<count>)" at the foot of the AI access
+  card, closed by default, an `<ol>` newest first, times as the user's locale writes
+  them (hours, minutes, seconds), an empty line ("No AI app has called a tool since the
+  extension started."), no live region. The state carries only the count; the panel asks
+  for the list when the section opens (`{ type: "calls", open }`) and gets each change
+  while it is open (`call` messages), so the repeated state never carries the entries.
+  The glow's `calling` flag stays as it was.
+- **Rejected:** the list in every state (up to 100 entries on each state change);
+  `chrome.storage.session` (survives a worker restart, but is storage, and would want a
+  line in the policy); the results (other people's data, and large).
