@@ -314,6 +314,10 @@ export class Connection {
 			// No tool of the extension is consequential: the page tools ask in
 			// the bridge, the navigation tools themselves (DEC-141).
 			onConfirm: () => false,
+			// Never into WebMCP (on by default, DEC-222): Firefox's event page
+			// has a document, which gets `modelContext` once Firefox turns
+			// WebMCP on, and the extension's tools are for its AI apps only.
+			webmcp: false,
 		});
 		const bridge = new PageToolBridge(
 			mcp,

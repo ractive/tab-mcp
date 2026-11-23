@@ -2206,6 +2206,9 @@ an extension.
 
 ## DEC-115: The client library can also register its tools with WebMCP (owner)
 
+**Amended by DEC-222:** the mirror is on by default; a page turns it off with
+`webmcp: false`. "Off by default" below no longer holds.
+
 **Amended by DEC-209 and DEC-215:** consequential tools are mirrored too, and the page's
 dialog that this entry calls weaker against an agent in the browser is not shown for any
 WebMCP call the tab-mcp browser extension did not vouch for; the page's `onConfirm`
@@ -3439,6 +3442,9 @@ owner on 2026-11-13. Amends DEC-124's advice.
 
 ## DEC-165: `callers` per tool replaces the `webmcp` registration option (owner)
 
+**Amended by DEC-222:** `TabMcpOptions.webmcp` is on by default; `webmcp: false` turns
+WebMCP off for the page.
+
 **Amended by DEC-215** (after DEC-209): every tool is mirrored by default, and a
 mirrored tool that asks gets no question from the library for an unvouched WebMCP
 call (an agent in the browser, another extension, an `exposedTo` origin); `callers`
@@ -3584,6 +3590,9 @@ is a list of origins and is passed through to the native registration (DEC-143).
   attempt.
 
 ## DEC-171: The WebMCP mirror is a chunk of its own
+
+**Amended by DEC-222:** the chunk loads whenever the constructor finds native WebMCP,
+unless the page set `webmcp: false`.
 
 2026-11-14, iteration 41. Carries out DEC-119's plan; keeps DEC-115 and DEC-143.
 
@@ -4577,6 +4586,10 @@ extension is its first user. The shape below is the library's, not the owner's.
 
 ## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
 
+**Amended by DEC-222:** every page that mirrors takes part, which is every client page
+where the tab has WebMCP unless it sets `webmcp: false` (not only pages with
+`webmcp: true`).
+
 **Amended by DEC-221:** the extension says nothing to a page while AI access is off
 (a page it told "on" hears "off" once), reads nothing a page sends before it told it
 "on", sends no vouch to a page it did not tell "on", and no longer tells its version.
@@ -5540,3 +5553,60 @@ decided:
     "connected through the extension" line and the connect dialog's sentence about it,
     and the panel's "sees the page's tools twice" warning; it keeps the vouch and the
     panel's "This page has tab-mcp built in."
+
+## DEC-222: The WebMCP mirror is on by default (owner)
+
+2026-11-23; amends DEC-115 ("Off by default"), DEC-165 (`TabMcpOptions.webmcp` "turns
+WebMCP on"), DEC-171 and DEC-207 ("only pages with `webmcp: true` take part"). The
+client library's `TabMcpOptions.webmcp` was off unless a page set `webmcp: true`; now it
+is on unless the page sets `webmcp: false` (`options.webmcp !== false` in the
+constructor, also through React's `TabMcpProvider`). Nothing else about the mirror
+changes: which tools go there (`callers`, DEC-209), the hints (DEC-143), the handshake
+with the tab-mcp browser extension (DEC-207), `trustExtension`, and no question from the
+library for an unvouched WebMCP call (DEC-215). The owner's reasons (from the ractive.ch
+session):
+
+- **The extension saw nothing.** The tab-mcp browser extension sees a client page's
+  tools only when the page mirrors them into WebMCP, so a page with a "Connect your AI
+  app" button was invisible to the extension's users unless its site had set
+  `webmcp: true`.
+- **The browser's own AI.** A page that mirrors also offers its tools to the browser's
+  own AI, once the browser has WebMCP.
+- **It did not fit DEC-209.** Since client 0.20 every tool's `callers` include
+  `"webmcp"` by default; a mirror that is off by default did not fit that. A site keeps
+  a tool out with `callers: ["relay", "local"]`, or the whole page with
+  `webmcp: false`. DEC-209 also found that hiding a tool from an agent that drives the
+  tab protects nothing: the agent clicks the page's own controls instead.
+
+What it costs:
+
+- **The site no longer chooses to face WebMCP callers; it faces them unless it opts
+  out.** DEC-115 kept the mirror off so that a page would choose to answer every
+  in-browser caller without pairing. Now a page that upgrades, where the tab has WebMCP
+  (Chrome's origin trial or flag, or the tab-mcp browser extension's own
+  `document.modelContext` where the browser has none, which the library takes for the
+  browser's because it sits on `Document.prototype`), offers every tool whose `callers`
+  do not leave `"webmcp"` out to every WebMCP caller, without a change of its own.
+- **Unasked consequential calls by default.** Against an extension that passes on an AI
+  app's calls and asks nothing itself, and against script of an origin in a tool's
+  `exposedTo`, a consequential tool on a page without `onConfirm` runs unasked
+  (DEC-215). Before, only a site that set `webmcp: true` took that on.
+- **Names.** A page that registers tools with `document.modelContext` itself under the
+  same names now collides with the mirror (the first registration keeps the name, the
+  other fails and warns); it sets `webmcp: false`.
+- **The extension's own `TabMcp`** (its worker's connection, `src/worker/connection.ts`)
+  sets `webmcp: false`: Firefox's event page has a document, and the extension's tools
+  are for its AI apps, not for WebMCP callers.
+
+The ways out, in the client's CHANGELOG (Breaking), README, the threat models (A14) and
+the agent skill: `webmcp: false` for the page, `callers: ["relay", "local"]` for one
+tool, or an `onConfirm` that refuses `client.kind === "webmcp"` (the tools are still
+listed). A page that set `webmcp: true` needs no change.
+
+Rejected:
+
+- **A console warning for a page that did not set the option.** It would be noise on
+  every page that is fine with the default, the same reasoning as DEC-215's for mirrored
+  tools that ask. The CHANGELOG's Breaking entry is where an upgrading site learns it.
+- **A compatibility shim** (the old default for pages built against an older version):
+  no shims (owner).

@@ -90,9 +90,9 @@ afterEach(async () => {
 	await window.happyDOM.close();
 });
 
-/** A page's `TabMcp` with `webmcp: true`; its tools go when the test ends. */
+/** A page's `TabMcp`, the mirror on by default; its tools go when the test ends. */
 function tab(options: Partial<TabMcpOptions> = {}): TabMcp {
-	const t = newTab("https://relay.example", { webmcp: true, ...options });
+	const t = newTab("https://relay.example", options);
 	const register = t.registerTool.bind(t);
 	t.registerTool = (tool, opts = {}) =>
 		register(tool, {
@@ -174,7 +174,7 @@ async function todoPage(options: Partial<TabMcpOptions> = {}) {
 }
 
 describe("the announcement", () => {
-	test("a page that mirrors says hello once it starts and marks <html>", async () => {
+	test("a page that mirrors (the default, no webmcp option) says hello once it starts and marks <html>", async () => {
 		tab();
 		await settle();
 		expect(heard).toEqual([
@@ -185,13 +185,19 @@ describe("the announcement", () => {
 		).toBe("1");
 	});
 
-	test("without webmcp: true, or without WebMCP, the page says nothing and is not marked", async () => {
-		newTab("https://relay.example");
+	test("with webmcp: false, or without WebMCP, the page says nothing and is not marked", async () => {
+		const off = newTab("https://relay.example", { webmcp: false });
+		tabs.push(off);
+		await settle();
 		delete (window.Document.prototype as { modelContext?: unknown })
 			.modelContext;
 		tabs.push(tab());
 		await settle();
+		// Nor does it answer the extension, or hear it.
+		tell(ON);
+		tell({ ...ON, type: "hello" });
 		expect(heard).toEqual([]);
+		expect(off.extension).toBeUndefined();
 		expect(
 			window.document.documentElement.hasAttribute("data-tab-mcp-handshake"),
 		).toBe(false);
@@ -220,7 +226,7 @@ describe("the announcement", () => {
 			},
 			createdAt: new Date().toISOString(),
 		};
-		const t = newTab(relay.url, { webmcp: true });
+		const t = newTab(relay.url);
 		tabs.push(t);
 		try {
 			await settle();
@@ -256,6 +262,28 @@ describe("the announcement", () => {
 		const apps = heard.at(-1)?.["apps"] as unknown[];
 		expect(apps).toHaveLength(64);
 		expect(apps[63]).toEqual({ name: "App 63", host: "x" });
+	});
+
+	test("two TabMcp of one app say one list: the one without AI apps does not replace the other's (review of PR 232)", async () => {
+		const used = tab();
+		// React's strict mode makes a second one and drops it; it stays joined.
+		tab();
+		const other = tab({ app: "other" });
+		await settle();
+		const grant = (name: string): Grant => ({
+			grantId: name,
+			client: { id: `https://${name}.example`, name, host: "x" },
+			createdAt: new Date().toISOString(),
+		});
+		Object.defineProperty(used, "grants", { value: [grant("A")] });
+		Object.defineProperty(other, "grants", { value: [grant("B")] });
+		heard = [];
+		tell({ ...ON, type: "hello" });
+		expect(heard.map((m) => [m["app"], m["apps"]])).toEqual([
+			["test-page", [{ name: "A", host: "x" }]],
+			["test-page", [{ name: "A", host: "x" }]],
+			["other", [{ name: "B", host: "x" }]],
+		]);
 	});
 
 	test("in a frame the page takes no part (the extension speaks to the top frame only)", async () => {
@@ -576,7 +604,7 @@ describe("the vouch", () => {
 describe("the connect dialog", () => {
 	test("says first which AI apps are connected through the extension; connecting here stays as it was", async () => {
 		const relay = new StubRelay();
-		const t = newTab(relay.url, { webmcp: true });
+		const t = newTab(relay.url);
 		tabs.push(t);
 		const doc = window.document as unknown as Document;
 		try {

@@ -1,6 +1,6 @@
 ---
 name: tab-mcp
-description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code, Codex) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (`webmcp: true`), serving them to the site's own assistant without a relay (`serve`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
+description: Add tab-mcp to a web app so that AI apps (Claude, ChatGPT, Claude Code, Codex) can call the page's functions as MCP tools while it is open in a browser tab. Covers installing @ractive-ch/tab-mcp-client, registering tools WebMCP-style, the React bindings, the connect and pairing flow (by code or by sign-in), confirmation for consequential tools, registering the same tools with the browser's WebMCP (on by default; `webmcp: false`), serving them to the site's own assistant without a relay (`serve`), security defaults and running a tab-mcp relay. Use when the user wants to expose a web page's features to AI apps over MCP, mentions tab-mcp, WebMCP or registerTool, "Connect your AI app", or needs to self-host the tab-mcp relay.
 license: MIT
 compatibility: Browser library for any web page (ES modules); the relay needs Bun 1.4.4+ or Docker.
 ---
@@ -33,8 +33,8 @@ Facts to keep in mind:
 - The page needs a relay that allows its origin; run one (section 7).
 - [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`) is the
   browser's own API for tools that agents in the browser call. tab-mcp is for AI apps
-  outside the browser. With `webmcp: true` the library offers the page's tools both ways
-  (section 5). A page that only registers WebMCP tools natively needs no library: the tab-mcp browser extension passes them on to an AI app through a relay.
+  outside the browser. Unless `webmcp: false`, the library offers the page's tools both
+  ways (section 5). A page that only registers WebMCP tools natively needs no library: the tab-mcp browser extension passes them on to an AI app through a relay.
 - tab-mcp fits state that lives only in the browser, and acting as the signed-in user in
   their open tab. If the state lives on the site's server, suggest an MCP server on that
   backend instead: it works without an open tab and without a relay.
@@ -261,7 +261,7 @@ const served = await mcp.serve(port, {
 - `served.close()` (or `options.signal`) ends it; close it when the channel is gone.
   Without `relay`, `connect()`, `showConnectDialog()` and `disconnectAll()` reject with a
   `TypeError` and React's `ConnectButton` renders nothing. `serve`, the relay and
-  `webmcp: true` can be used together: one registration reaches all three.
+  the WebMCP mirror can be used together: one registration reaches all three.
 
 ## 4. Consequential tools
 
@@ -314,7 +314,7 @@ calls are declined.
 ## 5. WebMCP: agents in the browser
 
 ```ts
-const mcp = new TabMcp({ relay, server, webmcp: true });
+const mcp = new TabMcp({ relay, server }); // the mirror is on unless webmcp: false
 await mcp.registerTool(deleteNoteTool); // an AI app is asked; an unvouched WebMCP call is not
 ```
 
@@ -330,11 +330,13 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
 | Another extension passing on an AI app's calls | no, unless that extension lets it | that extension, if it asks; the page's `onConfirm` if any; never the library's dialog |
 | A document of an origin in the tool's `exposedTo` | no, not in the page | only the page's `onConfirm`, if any |
 
-- `webmcp: true` (off by default) also registers each tool with the browser's native
-  `document.modelContext.registerTool()`, where the browser has it (in Chrome: sites in
-  the WebMCP origin trial, or `chrome://flags/#enable-webmcp-testing`). Agents in the
-  browser (built in, or an extension) then call the tools without pairing. It is a
-  change in what the page exposes: turn it on only when the user wants that.
+- The library also registers each tool with the browser's native
+  `document.modelContext.registerTool()`, where the tab has it (in Chrome: sites in
+  the WebMCP origin trial, or `chrome://flags/#enable-webmcp-testing`; where the
+  browser has none, the tab-mcp browser extension's own). On by default (since client
+  0.23, DEC-222); `webmcp: false` turns it off. Agents in the
+  browser (built in, or an extension) call the mirrored tools without pairing: ask the
+  user whether that is wanted, and set `webmcp: false` when it is not.
 - Every tool goes there, tools with `consequentialHint` or `destructiveHint` included
   (since client 0.20, DEC-209): hiding them did not stop an agent that drives the tab, it
   clicked the page's own controls instead, with no question. `callers` without
@@ -350,8 +352,8 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   caller's word leaves `"webmcp"` out of `callers`, and gets no `exposedTo` (the library
   warns in the console about a tool that asks with `exposedTo` on a page without
   `onConfirm`).
-- **The tab-mcp browser extension.** With `webmcp: true` the page and the extension
-  shake hands. A call the user has just allowed in the extension (asked in its side
+- **The tab-mcp browser extension.** Unless `webmcp: false`, the page and the extension
+  shake hands; it sees the page's tools only through the mirror. A call the user has just allowed in the extension (asked in its side
   panel, or covered by its "Always allow" switch; the same tool, equal arguments, within
   2 seconds) runs without `onConfirm`, so `onConfirm` is not a hook that sees every
   call; its caller is `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`.
@@ -373,10 +375,12 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   bare `UnknownError`. Two cases still reject: a call the browser cancelled
   (`AbortError`), and a call when the library's lazily loaded part cannot be loaded (a
   new deploy while the page stays open, the network); reloading the page fixes that.
-- Only the native object is used, never a polyfill such as `@mcp-b/global`. A failed
+- Only the object behind `Document.prototype`'s getter is used (the browser's, or the
+  one a browser extension such as tab-mcp's put there), never a `document.modelContext`
+  a page script defines (a polyfill such as `@mcp-b/global`). A failed
   native registration (a name already registered natively, a frame without
   `allow="tools"`) only warns in the console; the tool stays offered through the relay.
-  A page that registers tools natively itself leaves `webmcp` off or uses other names.
+  A page that registers tools natively itself sets `webmcp: false` or uses other names.
 - The tab-mcp browser extension offers mirrored tools like any page tool, so an AI app connected to
   both the page and the extension sees them twice.
 

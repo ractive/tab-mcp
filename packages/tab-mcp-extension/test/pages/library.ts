@@ -1,5 +1,6 @@
 /**
- * A page that uses the client library with `webmcp: true` (DEC-207), for the
+ * A page that uses the client library with its default, the WebMCP mirror
+ * on (DEC-207, no `webmcp` option), for the
  * extension's end-to-end test of the handshake: one tool that asks, the
  * library's own confirmation (shown to an AI app through a relay, never to an
  * agent in the browser), no relay of its own. Bundled by the test and
@@ -10,7 +11,6 @@ import { TabMcp, type ToolCallStart } from "@ractive-ch/tab-mcp-client";
 
 const mcp = new TabMcp({
 	server: { name: "Todos", version: "1.0.0" },
-	webmcp: true,
 });
 const calls: ToolCallStart[] = [];
 const done: number[] = [];

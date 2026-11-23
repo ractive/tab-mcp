@@ -5,8 +5,8 @@
  * DEC-116) about the page and its WebMCP tools and calls them. In this world `document.modelContext` is the browser's own,
  * whatever the page put on its own `document` (iteration 18). Firefox has
  * none: there this script defines one for the page and keeps its tools
- * (`firefox/webmcp.ts`, iteration 44). With a page that uses the client
- * library with `webmcp: true` it shakes hands (`page-handshake.ts`, DEC-207).
+ * (`firefox/webmcp.ts`, iteration 44). With a page whose client library
+ * mirrors its tools into WebMCP it shakes hands (`page-handshake.ts`, DEC-207).
  */
 
 import { canonicalJson } from "./canonical.ts";

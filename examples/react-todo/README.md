@@ -24,8 +24,8 @@ with the React bindings `@ractive-ch/tab-mcp-client/react`:
   memory, not for a page whose data matters.
 
 The live version at <https://ractive.ch/tab-mcp/examples/todo/> is based on this one; it
-also keeps the list in the browser, keeps AI access on after a reload and registers the
-tools with WebMCP. All live examples:
+also keeps the list in the browser and keeps AI access on after a reload. Both register
+the tools with WebMCP where the tab has it (the library's default). All live examples:
 <https://ractive.ch/tab-mcp/>.
 
 The list is a small external store (`src/todos.ts`) read with `useSyncExternalStore`, so

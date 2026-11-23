@@ -1,7 +1,7 @@
 /**
  * The page's side of the handshake with the tab-mcp browser extension
- * (DEC-207), in the WebMCP mirror's chunk: only a page that offers its tools
- * to agents in the browser (`webmcp: true`) takes part.
+ * (DEC-207), in the WebMCP mirror's chunk: only a page that mirrors its
+ * tools into WebMCP (unless `webmcp: false`) takes part.
  *
  * Plain DOM events on `document`, each with a JSON string as `detail`
  * (objects do not cross between a content script's world and the page's in
@@ -141,12 +141,15 @@ class Handshake {
 					type,
 					library: page.version,
 					app: page.app,
-					// Capped as the extension cuts what it hears: more would
-					// not be heard anyway.
-					apps: page.mcp.grants.slice(0, MAX_APPS).map((g) => ({
-						name: g.client.name,
-						host: g.client.host,
-					})),
+					// Of every `TabMcp` of this app: the extension keeps one list
+					// per app, and one made and dropped (React's strict mode, a
+					// provider whose relay changed) has none. Capped as the
+					// extension cuts what it hears: more would not be heard anyway.
+					apps: this.#pages
+						.filter((p) => p.app === page.app)
+						.flatMap((p) => p.mcp.grants)
+						.slice(0, MAX_APPS)
+						.map((g) => ({ name: g.client.name, host: g.client.host })),
 				}),
 			}),
 		);

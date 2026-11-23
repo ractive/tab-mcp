@@ -6,8 +6,8 @@ Offer a web page's functions as [MCP](https://modelcontextprotocol.io) tools to 
 shows its app's address, which is the same for every page of the app. The user adds that
 address to their AI app and types a pairing code from the page, which tells the relay
 which page is meant; the AI app then calls the page's tools while the tab stays open. Nothing
-is installed on the user's computer. With `webmcp: true` the library also registers the
-tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A site's own
+is installed on the user's computer. Unless a page sets `webmcp: false`, the library also
+registers the tools with the browser's own [WebMCP](#webmcp), for agents in the browser. A site's own
 assistant can call the same tools over a port, without a relay:
 [Your own assistant on the page](#your-own-assistant-on-the-page). A browser extension
 that is a tab-mcp page itself can fill in its pairing code on the relay's page for its
@@ -108,7 +108,7 @@ button.addEventListener("click", () => mcp.showConnectDialog());
 ```
 
 Importing the library loads only a small core; `connect()` loads the rest, and
-`webmcp: true` loads the WebMCP mirror where the browser has WebMCP.
+the WebMCP mirror loads where the browser has WebMCP (unless `webmcp: false`).
 
 `server` is what the AI app sees: `name`, `version`, optional `title` and
 `instructions`, and `icons`. Without `icons`, the page's own `<link rel="icon">` and
@@ -210,18 +210,22 @@ added and removed tools.
 
 ### WebMCP
 
-`new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's own
+`new TabMcp({ ... })` also registers the tools with the browser's own
 WebMCP (`document.modelContext.registerTool()`, the
 [WebMCP draft](https://webmachinelearning.github.io/webmcp/) of the W3C Web Machine
 Learning Community Group; [explainer](https://github.com/webmachinelearning/webmcp)),
 where the browser has it, so that agents in the browser can call them: an agent built
-into the browser, or an extension. Off by default. Turning it on is a change in what the
-page exposes: any agent in the browser can then call the mirrored tools without pairing.
+into the browser, or an extension such as the
+[tab-mcp browser extension](#with-the-tab-mcp-browser-extension), which sees a page's
+tools only there. On by default: where the tab has WebMCP, any agent in the browser can
+call the mirrored tools without pairing. `webmcp: false` keeps every tool out of WebMCP
+(and the page out of the handshake with the extension); `callers: ["relay", "local"]`
+keeps one tool out ([which callers see a tool](#which-callers-see-a-tool)).
 Chrome has WebMCP for sites in its
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
 162; a site needs a trial token) and with `chrome://flags/#enable-webmcp-testing`
 ([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Without either,
-`webmcp: true` does nothing. Each `new TabMcp` looks for WebMCP when it is made, so a
+the mirror does nothing. Each `new TabMcp` looks for WebMCP when it is made, so a
 trial token that a script adds later counts for a `TabMcp` made after it.
 
 #### Who asks before a tool that asks runs
@@ -263,12 +267,15 @@ tool away:
   a rule of your own (arguments, the time of day, what the user is signed in as). A
   question of your own in the page is no better than the library's against an agent
   that drives the tab.
+- **`webmcp: false`** keeps every tool of the page out of WebMCP. The mirror is on by
+  default (it was off until 0.22): a page that upgrades without setting it offers its
+  tools there.
 - **`callers`** without `"webmcp"` keeps the tool out of WebMCP altogether
   ([which callers see a tool](#which-callers-see-a-tool)), for example
   `{ callers: ["relay", "local"] }`.
 - **`exposedTo`**: leave it off a tool that asks unless the listed origins may run it
   unasked. A document of such an origin lists and runs the tool (Chrome 156). With
-  `webmcp: true` the library warns in the console, once per tool, about a tool that asks
+  the mirror on the library warns in the console, once per tool, about a tool that asks
   whose `exposedTo` names other origins on a page without `onConfirm` (in React: the
   provider without one), when the browser accepted the registration. It is decided then:
   an `onConfirm` removed later is not caught.
@@ -313,10 +320,11 @@ which ask nothing either.
   Content Security Policy); reloading the page fixes the latter.
   `toolcallend` reports the outcome as for an AI app (`error`, `declined`, `unanswered`,
   `cancelled`).
-- Only the native object is used, read through `Document.prototype`'s getter: an own
-  `document.modelContext` (a polyfill such as `@mcp-b/global`, or a page script) is
-  passed by, and with native WebMCP and the polyfill both present the tools go to the
-  native object.
+- Only the object behind `Document.prototype`'s getter is used: the browser's, or the one
+  a browser extension put there as the page started (the tab-mcp browser extension does,
+  where the browser has no WebMCP). An own `document.modelContext` (a polyfill such as
+  `@mcp-b/global`, or a page script) is passed by, and with native WebMCP and the
+  polyfill both present the tools go to the native object.
 - A tool leaves WebMCP whenever it leaves the page's registry: its `signal`, or the
   validator, which the first WebMCP call loads (as `connect()` does), refusing its
   schema.
@@ -327,7 +335,7 @@ which ask nothing either.
   once): a name the page or another script already registered
   natively keeps its owner, and a frame without `allow="tools"` refuses all. The other
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
-  fails: a page that registers tools natively itself leaves `webmcp` off or uses other
+  fails: a page that registers tools natively itself sets `webmcp: false` or uses other
   names.
 - The tab-mcp browser extension offers mirrored tools like any page tool, since it cannot know
   whether the AI app is also paired with the page, so an AI app connected to the page and
@@ -338,7 +346,7 @@ which ask nothing either.
 
 The [tab-mcp browser extension](https://github.com/ractive/tab-mcp/tree/main/packages/tab-mcp-extension)
 calls a page's tools through WebMCP for AI apps connected to it, and asks the user
-first about every tool that is not read-only. With `webmcp: true` the page and the
+first about every tool that is not read-only. Unless `webmcp: false`, the page and the
 extension shake hands (DEC-207), so that a call is not asked twice and the page can say
 that an AI app reaches it through the extension:
 
@@ -620,7 +628,7 @@ instructions, as the recipe does with a delimited block.
   open confirmation would stay otherwise. Where the port fires `close` when its other end
   goes away (Bun does; Chrome only with the `MessagePortCloseEvent` Blink feature), the
   serve closes itself then. `serve` may be called for several ports (each port once at a
-  time), and next to a relay connection and `webmcp: true`: one registration reaches all
+  time), and next to a relay connection and the WebMCP mirror: one registration reaches all
   three.
 - A port has none of the relay's limits: no cap on requests in flight, listen streams,
   body size or rate. The other end is the site's own code (threat model A15). The
@@ -1162,7 +1170,7 @@ ends connecting or reconnecting. It is absent on every other change: `connecting
 `disconnected` after a refusal stopped reconnecting (the `error` just before says why).
 
 For an activity log, `toolcall`
-and `toolcallend` report every call by an AI app (or, with `webmcp`, an agent in the
+and `toolcallend` report every call by an AI app (or, through the WebMCP mirror, an agent in the
 browser, or the assistant on a served port): its id, tool, arguments and caller as it starts, then its outcome (`ok`,
 `error`, `declined`, `unanswered` or `cancelled`), result and duration.
 
@@ -1419,7 +1427,7 @@ function TodoList() {
   again only when its name, title, description, input or output schema or annotations
   change, or `options.callers` or `options.exposedTo` (by value: a new array with the same
   entries is no change; [which callers see a tool](#which-callers-see-a-tool),
-  [WebMCP](#webmcp), whose `webmcp` on the provider turns it on). Registered again unchanged, an allowed tool stays
+  [WebMCP](#webmcp), which `webmcp: false` on the provider turns off). Registered again unchanged, an allowed tool stays
   allowed. StrictMode's double mount registers it once at a time. A duplicate name or an
   invalid tool is thrown from the component's render, for an error boundary. Tools that
   read state right after another tool changed it should read it from a store (as the

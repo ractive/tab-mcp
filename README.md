@@ -68,8 +68,8 @@ depends on how the page offers its tools:
 current browser and your users install nothing. You run a relay for it
 ([Self-hosting](#self-hosting)). With WebMCP tools only, you run nothing, but your tools
 reach AI apps outside the browser only for users who installed the tab-mcp browser
-extension. You can do both: `new TabMcp({ ..., webmcp: true })` also registers
-the library's tools with WebMCP. The
+extension. The client library does both: unless a page sets `webmcp: false`, it also
+registers its tools with WebMCP. The
 [diagram editor](https://ractive.ch/tab-mcp/examples/diagram/) does, so it works on
 both paths.
 
@@ -81,8 +81,8 @@ also has tools of its own, which work on pages without tools too: `page_info` sa
 which page is in front, and `navigate`, `go_back`, `go_forward` and `reload` move the
 tab.
 
-The extension reads only WebMCP tools. A page that offers its tools with the client
-library alone, without `webmcp: true`, has none for it.
+The extension reads only WebMCP tools. A page with the client library has them unless
+it sets `webmcp: false` (with older versions of the library, only with `webmcp: true`).
 
 ### The tab-mcp browser extension
 
@@ -291,15 +291,15 @@ calls then come with `client.kind === "local"`, and `serve`'s `onConfirm` asks f
 the site's own chat. See
 [Your own assistant on the page](packages/tab-mcp-client/README.md#your-own-assistant-on-the-page).
 
-`new TabMcp({ ..., webmcp: true })` also registers the tools with the browser's WebMCP
-where the browser has it, so that agents in the browser call them without pairing, with
+`new TabMcp({ ... })` also registers the tools with the browser's WebMCP
+where the browser has it (unless `webmcp: false`), so that agents in the browser call them without pairing, with
 the same argument check, tools that ask included. The library shows no question for a
 WebMCP call that the tab-mcp browser extension did not vouch for: an agent that drives
 the tab answered it itself. Such a call can also come from another extension for an AI
 app outside the browser, or from a document of an origin named in `exposedTo`, which
 cannot click in the page; the page cannot tell them apart. A tool that asks is marked
 `consequentialHint`, so that a caller that heeds it asks its user; beyond that only the
-page's `onConfirm`, in code, or `callers` without `"webmcp"` stops such a call. `callers` in a tool's registration says which
+page's `onConfirm`, in code, `callers` without `"webmcp"` or `webmcp: false` stops such a call. `callers` in a tool's registration says which
 callers see it. See [who asks](packages/tab-mcp-client/README.md#who-asks-before-a-tool-that-asks-runs)
 in the client README.
 

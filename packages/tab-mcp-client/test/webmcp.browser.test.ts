@@ -46,8 +46,8 @@ const POLYFILL_SRI =
 	"sha384-MjmUqfRCVKBDYdxv/Rlj1fc1tRkKQdtCI04fbUUMgSL8uJf1ydjQep7E4G43bnQn";
 
 /**
- * The test page: the library with `webmcp: true`, its
- * tools, and what the harness reads. `?native=<name>` registers a tool of
+ * The test page: the library with its default (the mirror on; `?off` sets
+ * `webmcp: false`), its tools, and what the harness reads. `?native=<name>` registers a tool of
  * that name natively before the library does; `?poly` loads `@mcp-b/global`
  * first; `?default` has no `onConfirm` (the library's own behaviour). `agent()`
  * calls a tool as an agent does, through the native `executeTool()`, which
@@ -73,7 +73,7 @@ const mcp = new TabMcp({
 	server: { name: "webmcp-test", version: "1.0.0" },
 	storage: null,
 	alwaysAllow: true,
-	webmcp: true,
+	...(q.has("off") ? { webmcp: false } : {}),
 	...(q.has("default") ? {} : { onConfirm: (r) => { asked.push(r.client); return answer; } }),
 });
 mcp.addEventListener("toolcall", (e) => calls.push({ start: e.detail.tool, client: e.detail.client }));
@@ -253,7 +253,30 @@ on(
 	"the mirror as Chrome has it: what getTools() lists, what an agent reads, a native duplicate, @mcp-b/global over native WebMCP, a call without onConfirm, unmirroring and registering again (DEC-209, DEC-215, WM 4-6)",
 	async () => {
 		await step(
-			"getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
+			"with webmcp: false getTools() lists none of the page's tools and the page joins no handshake",
+			async () => {
+				const page = await open("?off");
+				try {
+					expect(await page.eval("nativeNames()")).toEqual([]);
+					expect(
+						await page.eval(
+							`document.documentElement.hasAttribute("data-tab-mcp-handshake")`,
+						),
+					).toBe(false);
+					expect(await page.eval("mcp.tools")).toEqual([
+						"add",
+						"wipe",
+						"wipe_named",
+						"hidden",
+						"refused",
+					]);
+				} finally {
+					await page.close();
+				}
+			},
+		);
+		await step(
+			"by default (no webmcp option) getTools() lists the mirrored tools, consequential ones too, not those whose callers leave webmcp out (DEC-209)",
 			async () => {
 				const page = await open();
 				try {
@@ -288,6 +311,12 @@ on(
 							`document.documentElement.hasAttribute("data-tab-mcp-webmcp")`,
 						),
 					).toBe(false);
+					// It takes part in the handshake with the extension (DEC-207).
+					expect(
+						await page.eval(
+							`document.documentElement.hasAttribute("data-tab-mcp-handshake")`,
+						),
+					).toBe(true);
 					expect(await page.eval("mcp.tools")).toEqual([
 						"add",
 						"wipe",

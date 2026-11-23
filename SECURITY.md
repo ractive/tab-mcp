@@ -49,10 +49,11 @@ honest.
 - Disconnect AI apps you no longer use, in the page's "Connect your AI app" dialog.
 
 A page that also registers its tools with the browser's
-[WebMCP](https://webmachinelearning.github.io/webmcp/) (the client library's
-`webmcp: true`) offers them to agents in your browser without pairing; which agents may
+[WebMCP](https://webmachinelearning.github.io/webmcp/) (the client library does so by
+default, unless the page sets `webmcp: false`) offers them to agents in your browser
+without pairing; which agents may
 call them is the browser's decision. Every tool the page registers goes there, tools
-that change something included, unless the page keeps it from WebMCP (`callers`). The
+that change something included, unless the page keeps it from WebMCP (`callers`, or `webmcp: false` for all). The
 page does not ask you before such a call: a tool it marks as consequential or
 destructive goes there marked consequential, for an agent that heeds the hint to ask you
 in its own chat, and only the page's own code (`onConfirm`) can refuse a call; a call
