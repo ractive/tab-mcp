@@ -86,7 +86,7 @@ old client is refused by a new relay and a new client by an old one.
 6. Wait for CI (`gh pr checks <n> --watch`): `verify`, the required check, passes only when
    `fast` and `browser` passed. Then
    `gh pr merge <n> --merge --delete-branch --author-email james@ractive.ch` (it also
-   removes the branch's local worktree). `client-pack` and `relay-pack`
+   removed the branch's local worktree here, gh 2.105; `git worktree list` shows). `client-pack` and `relay-pack`
    check the published file list and `exports` against `scripts/npm-pack.ts`: a new entry
    point or chunk name must be added there.
 

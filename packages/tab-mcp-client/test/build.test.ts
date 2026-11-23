@@ -639,7 +639,9 @@ function boundaries(text: string, versions: string[]): string[] {
 	const flat = text.replace(/\s+/g, " ");
 	return [
 		new RegExp(
-			`\\b(?:after|before|until|since|up to|from|older than|newer than|as of|through|below|above)\\s+(?:\\w+\\s+){0,2}?\`?(?:${v})(?![\\d.-])`,
+			// The end of a version as the bump script reads it: a full stop that
+			// ends the sentence belongs to the sentence, not to the version.
+			`\\b(?:after|before|until|since|up to|from|older than|newer than|as of|through|below|above)\\s+(?:\\w+\\s+){0,2}?\`?(?:${v})(?!\\.?\\d|-[0-9A-Za-z])`,
 			"gi",
 		),
 		new RegExp(
@@ -660,12 +662,13 @@ function boundaries(text: string, versions: string[]): string[] {
 test("docs do not use a current version as a boundary of history, which the next bump would move", async () => {
 	expect(
 		boundaries(
-			"Libraries after 0.18.1 send it; client 0.18.1 and\nolder do not. From `0.18.1` on it works. Relay 0.9.0 did.",
+			"Libraries after 0.18.1 send it; client 0.18.1 and\nolder do not. From `0.18.1` on it works. Relay 0.9.0 did. Not with a relay up to 0.9.0.",
 			["0.18.1", "0.9.0"],
 		),
 	).toEqual([
 		"after 0.18.1",
 		"From `0.18.1",
+		"up to 0.9.0",
 		"0.18.1 and older",
 		"0.18.1` on",
 		"0.9.0 did",

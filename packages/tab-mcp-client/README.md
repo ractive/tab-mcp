@@ -1132,7 +1132,7 @@ page's own clock from the message's arrival and keeps the end in `pairingUntil` 
 time, event `pairinguntil`), so a page whose clock differs from the relay's still shows
 the right moment. `pairingUntil` is `undefined` while pairing is off, from each
 `startPairing()` until the relay answers, after the session ended (`disconnect()`,
-`disconnectAll()`, a refusal), and with a relay up to 0.13.3. The dialog shows "Your AI
+`disconnectAll()`, a refusal), and with a relay before 0.13. The dialog shows "Your AI
 app can connect until 14:32." under the sign-in line and, once that time is up (also
 checked when the tab comes back to the front), "The time to connect your AI app is up"
 with Continue, which calls `startPairing()` again. Nothing starts the 10 minutes again
