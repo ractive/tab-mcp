@@ -311,7 +311,7 @@ input:is([type="text"], [type="url"]) {
  * The track and the knob from the same three sizes, so the knob sits flush
  * at both ends. The track takes none of the text fields' rules (flex,
  * padding, border), which made it wider than the knob's travel. Off the
- * track is an edge, on it is ink; the knob is at least 3:1 on both, in both
+ * track is an edge, on it is green; the knob is at least 3:1 on both, in both
  * schemes (EQ 17).
  */
 :is(.switch, .allow-switch) input {
@@ -351,12 +351,12 @@ input:is([type="text"], [type="url"]) {
 	transition: transform 0.15s;
 }
 
+/*
+ * On is green, as the connected dots: a tool allowed without asking
+ * (DEC-184), and AI access too (owner, 2026-11-24: the ink track did not say
+ * whether it was on or off).
+ */
 :is(.switch, .allow-switch) input:checked {
-	background: var(--strong);
-}
-
-/* A tool allowed without asking: green, as the connected dots (DEC-184). */
-.allow-switch input:checked {
 	background: var(--ok);
 }
 
@@ -1082,8 +1082,7 @@ html [hidden] {
 		forced-color-adjust: none;
 	}
 
-	:is(.switch, .allow-switch) input:checked,
-	.allow-switch input:checked {
+	:is(.switch, .allow-switch) input:checked {
 		background: Highlight;
 		forced-color-adjust: none;
 	}

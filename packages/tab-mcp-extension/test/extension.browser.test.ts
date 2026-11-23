@@ -949,23 +949,20 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 							expect(ratio).toBeGreaterThanOrEqual(3);
 					}
 					// The tokens' pairs (test/contrast.test.ts): on, the knob
-					// (--on-strong) on the ink track (--strong), which is ink on paper,
-					// or for a tool's "Always allow" on the green track (--ok, DEC-184);
-					// off, the knob on the edge (--edge), and the edge on paper. Before
-					// the tokens: 5.02 / 3.77 in light, 9.48 / 3.42 in dark; before
-					// EQ 17 the dark "on" knob was 1.7:1, the light "off" track 2.5:1.
-					const green = selector === "input.always-allow";
+					// (--on-strong) on the green track (--ok), which is green on
+					// paper, for a tool's "Always allow" (DEC-184) and for AI access
+					// (since 2026-11-24; before, an ink track: 16.07 / 14.61 in light,
+					// 15.89 / 15.89 in dark); off, the knob on the edge (--edge), and
+					// the edge on paper. Before the tokens: 5.02 / 3.77 in light,
+					// 9.48 / 3.42 in dark; before EQ 17 the dark "on" knob was 1.7:1,
+					// the light "off" track 2.5:1.
 					expect(measured).toEqual({
 						light: {
-							on: green
-								? { knob: 6.44, track: 5.86 }
-								: { knob: 16.07, track: 14.61 },
+							on: { knob: 6.44, track: 5.86 },
 							off: { knob: 3.86, track: 3.51 },
 						},
 						dark: {
-							on: green
-								? { knob: 9.85, track: 9.85 }
-								: { knob: 15.89, track: 15.89 },
+							on: { knob: 9.85, track: 9.85 },
 							off: { knob: 4.39, track: 4.39 },
 						},
 					});

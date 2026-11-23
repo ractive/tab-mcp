@@ -76,8 +76,11 @@ const PAIRS: Row[] = [
 		[9.19, 8.32, 7.16, 7.29],
 		TEXT,
 	],
-	// A strong button's words, and the knob on the "on" track.
+	// A strong button's words.
 	["--on-strong", ["--strong"], [16.07], [15.89], TEXT],
+	// The knob on the "on" track, which is green (DEC-184; AI access since
+	// 2026-11-24); the track on what it stands on is `--ok` on the surfaces, below.
+	["--on-strong", ["--ok"], [6.44], [9.85], EDGE],
 	[
 		"--ok",
 		["--paper", "--sheet", "--ok-bg"],
@@ -104,7 +107,7 @@ const PAIRS: Row[] = [
 	["--edge", SURFACES, [3.51, 3.86, 3.15], [4.39, 3.97, 3.42], EDGE],
 	// A button on a notice.
 	["--edge", NOTICES, [3.41, 3.22], [3.48, 3.81], EDGE],
-	// The knob on the "off" track; the "on" track on what it stands on.
+	// The knob on the "off" track; a strong button on what it stands on.
 	["--on-strong", ["--edge"], [3.86], [4.39], EDGE],
 	["--strong", ["--paper", "--sheet"], [14.61, 16.07], [15.89, 14.37], EDGE],
 	[
@@ -441,7 +444,7 @@ describe("the style sheet's rules", () => {
 			)
 			.flatMap((r) => selectors(r.selector))
 			.filter((s) => s.includes("input"));
-		expect(coloured.length).toBe(6);
+		expect(coloured.length).toBe(5);
 		const named = forced.flatMap((r) => selectors(r.selector));
 		for (const s of coloured) expect(named).toContain(s);
 		// The glow (DEC-225): the switch is on, its track Highlight, so the

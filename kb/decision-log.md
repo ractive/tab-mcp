@@ -3827,6 +3827,10 @@ Branch `release/per-package-changelog`.
 
 2026-11-15, before the first store release; amends DEC-154 and DEC-176.
 
+**Added 2026-11-24 (owner):** the AI access switch is green (`--ok`) while on too, as
+these switches are; its ink track (`--strong`) "doesn't tell you if it's on or off".
+One rule colours every switch that is on.
+
 - Each tool's switch in the side panel's tool list was "Ask first", on by default: the
   switch that is on asked, and turning it off allowed. A permission switch that is on
   grants, in Chrome's site settings, macOS and iOS; a list of switches that are all on
