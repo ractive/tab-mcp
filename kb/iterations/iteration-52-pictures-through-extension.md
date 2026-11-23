@@ -64,22 +64,29 @@ text or a base64 PNG/JPEG/GIF/WebP image into its whole JSON as text.
 | it threw; invalid arguments; gone; `onConfirm` refused (claim) | `{ content: [{ type: "text", text: "<message>" }], isError: true }` | `{ error: "<message>" }` |
 | a string, another value, `undefined` | as today (`"Done."` for `undefined`) | the same |
 
-The extension's `resultOf` then gives the AI app (read from the code, the limits tested
-in `bridge.test.ts`):
+The extension's `resultOf` (`src/result.ts` since the review of PR 236) then gives the
+AI app (read from the code, the limits tested in `bridge.test.ts`):
 
-- text blocks, all together cut to 100,000 characters (`MAX_RESULT`);
+- text blocks, all together cut to 100,000 characters (`MAX_RESULT`), the notes below
+  counted first;
 - PNG, JPEG, GIF, WebP images with base64 data, up to 640 KiB of base64 together
   (`MAX_IMAGES_BASE64`); one beyond is a note line (as before);
 - `isError` (as before);
 - **new:** `structuredContent` (an object) where its JSON fits in what the text left of
-  the 100,000 (it was dropped); so text + images + structured stay under the relay's
-  1 MiB as before;
-- **new:** each other MCP block (audio, `resource_link`, `resource`, an image of another
-  type or not base64) is a line "[… was left out: …]" (before, the whole result went out
-  as its JSON, cut, base64 included);
-- **new:** past 32 blocks (`MAX_BLOCKS`) the rest are one line (before: the whole JSON).
+  the 100,000 (it was dropped), else a note line; so text + images + structured stay
+  under the relay's 1 MiB as before;
+- **new:** the text of an embedded text resource, after its uri, as a text block;
+- **new:** each other MCP block (audio, `resource_link`, a binary `resource`, an image of
+  another type, or not base64, with its own reason) is a line "[… was left out: …]"
+  (before, the whole result went out as its JSON, cut, base64 included);
+- **new:** past 32 blocks (`MAX_BLOCKS`; 31 with `structuredContent`, whose note may need
+  the last) the rest are one line (before: the whole JSON).
 - A value that is not MCP blocks (a ProseMirror `content`) stays text, as before.
-- 2 MiB (`MAX_SEND_RESULT`, content script) still refuses a longer result.
+- 2 MiB (`MAX_SEND_RESULT`, content script) refuses a longer result, except an MCP
+  result, which the content script first makes what the AI app gets (`shrunk`, the same
+  function), so that a picture of several MiB is a note, not a failed call (review of
+  PR 236; before this iteration the library sent such a result reduced to text). The
+  worker's pass over the shrunk result changes nothing.
 
 ## The way through the page
 
@@ -109,7 +116,8 @@ client README and in `types.ts`.
 
 While AI access is on: the AI app (name, verified host) and the tool of every call the
 extension makes there for an AI app, read-only ones included (the `toolcall` event's
-`client` then has `via`, `name`, `host`). Nothing new while off (DEC-221). Residual
+`client` then has `via`, `name`, `host`, and `allowed`: `true` only for a call the user
+allowed, `false` for a claimed one; review of PR 236). Nothing new while off (DEC-221). Residual
 (threat model A14): an agent in the browser that calls the same tool with equal
 arguments in the moment before the extension's call reaches the page takes the vouch or
 claim, and with it the whole result (pictures) and the AI app's name; the extension's
@@ -150,6 +158,10 @@ only change it sees.
   and not in the page (`onConfirm` recorded); each check failed against a mutant first.
 - [x] Docs: client README, extension README and PRIVACY.md, both threat models,
   `kb/design/extension.md`, the skill, changelogs, DEC-224, DEC-207 and DEC-143 amended.
+- [x] Review of PR 236: an MCP result over 2 MiB shrunk in the content script
+  (`src/result.ts`, shared with the worker), `client.allowed`, the README's `onConfirm`
+  line, a note for dropped `structuredContent`, its own reason for an image that is not
+  base64, text resources as text.
 - [ ] Not here: the site's privacy page (ractive.ch), saturnus, releases.
 
 # Citations

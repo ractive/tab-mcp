@@ -42,10 +42,17 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
 
 - **MCP results the extension does not carry whole**: its `structuredContent` now
   reaches the AI app where its JSON fits in what the text blocks left of the 100,000
-  characters (it was dropped), each block other than text or a PNG, JPEG, GIF or WebP
-  image is a line that says it was left out, and past 32 blocks the rest are one such
-  line. Before, any such result reached the AI app as its whole JSON as text, cut to
-  100,000 characters, base64 images included.
+  characters (it was dropped silently), else a line says it was left out. The text of
+  an embedded text resource reaches it as a text block after the resource's uri.
+  Everything else it does not carry is a line that says so, with its reason: an image
+  of another type than PNG, JPEG, GIF or WebP, one whose data is not base64, audio, a
+  resource link, a binary resource, and the blocks past 32 (past 31 with
+  `structuredContent`; one line). Before, any such result reached the AI app as its
+  whole JSON as text, cut to 100,000 characters, base64 images included.
+- **An MCP result over 2 MiB is no longer refused**: the content script makes it what
+  the AI app would get (the pictures beyond 640 KiB of base64 as notes, the text cut)
+  before it sends it, so a large picture becomes a note and the call, whose tool ran,
+  does not fail. Any other result over 2 MiB is still refused.
 
 - **The side panel's "This page has no WebMCP" text** says that tab-mcp gives a page its
   own while AI access is on, and that pages which look for it only as they load need

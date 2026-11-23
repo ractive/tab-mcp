@@ -5715,15 +5715,29 @@ browser's AI only by the vouch, which the extension sent only for calls it asked
 - **The extension** announces every page-tool call it makes for an AI app through the
   relay, right before `executeTool`, as the vouch was: a `vouch` for a call the user
   allowed (as before), a `claim` for a read-only tool (new), the same fields, withdrawn
-  the same way. Both carry `result: "mcp"`. It passes the answer on with `resultOf`:
-  text cut to 100,000 characters, PNG, JPEG, GIF and WebP images up to 640 KiB of base64
-  together, `isError`, and now `structuredContent` where its JSON fits in what the text
-  left, each other MCP block (audio, a resource, another image type) a line that says it
-  was left out, and past 32 blocks the rest one such line (before: such a result went
-  out as its whole JSON as text).
+  the same way. Both carry `result: "mcp"`. It passes the answer on with `resultOf`
+  (`src/result.ts`): text, and the text of an embedded text resource after its uri, cut
+  to 100,000 characters together with the notes, PNG, JPEG, GIF and WebP images up to
+  640 KiB of base64 together, `isError`, and now `structuredContent` where its JSON
+  fits in what the text left, and a line for everything left out (an image beyond the
+  budget, of another type or not base64, audio, a link, a binary resource,
+  `structuredContent` that does not fit, the blocks past 32, or 31 with
+  `structuredContent`); before, such a result went out as its whole JSON as text.
+- **A result too long to send is shrunk in the page, not refused** (review of PR 236,
+  team lead's decision: degrade in the extension, the library does not know its
+  budgets). The content script refuses a result over 2 MiB; a whole result with a
+  picture of 2 MiB of base64 would have failed a call whose tool had run. Now an MCP
+  result over 2 MiB is first made what the AI app would get (`shrunk`, the same
+  function as the worker's), which always fits, and the worker's pass over it changes
+  nothing (notes counted first, the text cut to what they leave). Done in the content
+  script, not by letting such results through to the worker: the 2 MiB keep the one
+  service worker of all tabs, and Chrome's message limit of 64 MiB, out of a page's
+  reach, and the content script already holds the string, in the page's own process.
 - **The library** keeps claims with the vouches (the same 16, the same 2 s). A call
   that matches either is named as the AI app's (`via`, `name`, `host`); only a vouch
-  skips `onConfirm`. With `result: "mcp"` such a call resolves with the whole MCP result
+  skips `onConfirm`. `client.allowed` tells them apart (review of PR 236): `true` for
+  a vouch, `false` for a claim, in `execute`, `toolcall`, `toolcallend` and
+  `onConfirm`'s request alike, as `via` alone no longer means the user allowed the call. With `result: "mcp"` such a call resolves with the whole MCP result
   (`content` with images, `structuredContent`, `isError`, no `_meta`; every failure as
   an `isError` result with its message), any other value as before. Any other WebMCP
   call, a vouch without `result`, and every call with `trustExtension: false` resolve as

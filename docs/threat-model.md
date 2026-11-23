@@ -1018,7 +1018,10 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
   tool the extension runs without asking (read-only), it sends a `claim` with the same
   fields; the call that matches it is named as the AI app's and allows nothing (the
   page's `onConfirm` decides a tool that asks, as for any WebMCP call; only the type
-  `vouch` skips it, whatever else a message says). A vouch or claim with
+  `vouch` skips it, whatever else a message says). So `client.via` no longer means
+  that the user allowed the call; `client.allowed` is `true` only for a vouched call
+  and `false` for a claimed one, in `execute`, the events and `onConfirm`'s request
+  alike, for a page that asks in `execute` itself. A vouch or claim with
   `result: "mcp"` makes the matching call resolve with the whole MCP result, images
   included, instead of the text any other WebMCP caller gets. The window above now has
   one more consequence: an agent in the browser that calls the same tool with equal

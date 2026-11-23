@@ -162,7 +162,8 @@ WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-call
   browser, another extension, or a document of an `exposedTo` origin), of which nothing
   more is known (unless the tab-mcp browser extension announced the call, with a vouch
   or a claim: then
-  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, [with the
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host, allowed }`, `allowed` true
+  only when the user allowed that call in the extension, [with the
   extension](#with-the-tab-mcp-browser-extension)). Check `client.kind` before you read `host`. Return a
   string (one text block), an MCP result (passed through with its `_meta`: an object
   whose `content` is an array of MCP content blocks, each with `type` `text`, `image`,
@@ -269,7 +270,10 @@ the calling extension or the other origin's script, which the page does not know
 page with a tool that must not run on such a caller's word decides in code or keeps the
 tool away:
 
-- **`onConfirm`** gets the call with `request.client.kind === "webmcp"` (no `via`). Decide
+- **`onConfirm`** gets the call with `request.client.kind === "webmcp"`: without `via`,
+  or, for a call the tab-mcp browser extension only claimed (it ran a tool it takes for
+  read-only, nobody asked), with `via`, `name`, `host` and `allowed: false`. A call the
+  extension vouched for (`allowed: true`) never reaches it. Decide
   there without showing anything an agent could click: refuse every such call, or apply
   a rule of your own (arguments, the time of day, what the user is signed in as). A
   question of your own in the page is no better than the library's against an agent
@@ -382,7 +386,8 @@ that an AI app reaches it through the extension:
   arguments (key order aside) within 2 seconds runs without `onConfirm`: the user just
   allowed exactly that call. Its caller in
   `execute`, `toolcall` and `toolcallend` is
-  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, so an activity view can say
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host, allowed: true }` (`allowed`
+  from the release after 0.23 on), so an activity view can say
   "Claude (claude.ai) through the tab-mcp browser extension". A vouch is used once and
   only for the tool registered under its name when it came (a tool registered anew
   since asks). Everything else is as for any call: the arguments are checked, the
@@ -394,8 +399,10 @@ that an AI app reaches it through the extension:
 - **A claimed call** (from the release after 0.23 on, DEC-224). Right before the
   extension runs a tool it does not ask about (one marked `readOnlyHint`), it tells the
   page the same as for a vouch, as a `claim`. The call that matches it is named as the
-  extension's (`via`, `name`, `host`, as above) and allows nothing: a tool that asks
-  goes to `onConfirm` as for any WebMCP call. So the page learns which AI app calls its
+  extension's (`via`, `name`, `host`, as above, with `allowed: false`) and allows
+  nothing: a tool that asks goes to `onConfirm` as for any WebMCP call. So `via` alone
+  no longer means that the user allowed the call: a page that asks in `execute` itself
+  skips its question only for `allowed: true`. The page learns which AI app calls its
   read-only tools through the extension, while the extension's AI access is on.
 - **Pictures.** The extension asks for the whole MCP result with both (`result: "mcp"`),
   and the call that matches one resolves with it ([above](#webmcp)): an AI app

@@ -101,15 +101,20 @@ The page's tools are the page's word:
   app cancels it in the page. A page that does not answer the extension's other questions
   (its tools, `page_info`) in 5 s is given up, so a stuck page cannot hold the other
   tabs. Results are marked untrusted; their text, all blocks together, is cut to 100,000
-  characters, and a result over 2 MiB is refused. A page that answers with an MCP result
+  characters, and a result over 2 MiB is refused unless it is an MCP result. A page that
+  answers with an MCP result
   (as `@mcp-b/global` pages do, and a page with the client library for a call of the
-  extension, below) gets its text blocks and PNG, JPEG, GIF and WebP images through,
+  extension, below) gets its text blocks, the text of embedded text resources (after
+  their uri) and PNG, JPEG, GIF and WebP images through,
   the images of one result up to 640 KiB of base64 together (about 480 KB of
   image data; an image beyond that is replaced by a note), so that a result stays within
   the relay's default 1 MiB per response; its `isError` too, and its `structuredContent`
-  where its JSON fits in what the text blocks left of the 100,000 characters. Each other
-  block (audio, a resource, an image of another type) is a line that says it was left
-  out, and past 32 blocks the rest are one such line. A result that is the JSON of another object
+  where its JSON fits in what the text blocks left of the 100,000 characters. Everything
+  left out is a line that says so: an image of another type or whose data is not base64,
+  audio, a resource link, a binary resource, `structuredContent` that does not fit, and
+  the blocks past 32 (one line; past 31 with `structuredContent`). An MCP result over
+  2 MiB is made so in the page first, so a large picture becomes a note, not a failed
+  call. A result that is the JSON of another object
   (within the 100,000 characters, and without a `content` key) reaches the AI app as text
   and as `structuredContent`. A result that is a JSON-encoded string (`"Hello"`, as the
   WebMCP draft encodes every result; Chrome 156 passes strings on as they are) is that
