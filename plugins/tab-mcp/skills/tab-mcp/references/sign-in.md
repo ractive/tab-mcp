@@ -16,7 +16,7 @@ from a timer. A reconnect the library makes by itself does not start the 10 minu
 again. The relay's configuration:
 [identity binding](https://github.com/ractive/tab-mcp/blob/relay-v0.13.3/docs/configuration.md#identity-binding);
 the page's side in full:
-[Identity binding (no code)](https://github.com/ractive/tab-mcp/blob/client-v0.23.0/packages/tab-mcp-client/README.md#identity-binding-no-code).
+[Identity binding (no code)](https://github.com/ractive/tab-mcp/blob/client-v0.24.0-rc.1/packages/tab-mcp-client/README.md#identity-binding-no-code).
 
 The backend signs for the user of its own session (its session cookie), and only for an
 `address` of your relay. Do not take an ID token or another bearer credential from the
