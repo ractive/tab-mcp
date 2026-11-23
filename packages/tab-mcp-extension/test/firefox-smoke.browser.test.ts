@@ -517,6 +517,32 @@ describe.skipIf(!firefoxOk)(
 					).toEqual(["complete_todo"]);
 				},
 			);
+			await step(
+				"a page that loaded before the content script came (as after an install, or Give access to all sites, with pages open), AI access still off: it gets WebMCP as the script comes, and the library mirrors (review of PR 234)",
+				async () => {
+					// No registered script: the page loads without it, and the
+					// worker's read of the tab in front (the panel is open) puts
+					// it in afterwards, with host access.
+					await stack.panel.eval(
+						`browser.scripting.unregisterContentScripts().then(() => true)`,
+					);
+					await stack.tab.reload();
+					await stack.tab.waitFor(
+						`"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`,
+						15_000,
+					);
+					expect(
+						await stack.tab.eval(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+						),
+					).toEqual(["complete_todo"]);
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("state").dataset.state`,
+						),
+					).toBe("off");
+				},
+			);
 		});
 	},
 );
@@ -567,9 +593,27 @@ describe.skipIf(!firefoxOk)(
 				},
 			);
 			await step(
-				"while AI access is off a click gives the page nothing",
+				"while AI access is off a click gives the page nothing, and takes over no state the page faked",
 				async () => {
 					await aiAccess(false);
+					// What an earlier content script would have left in the page
+					// (`keptState` in firefox/webmcp.ts), faked by the page: taken
+					// over, its object would get the extension's methods at the
+					// click (review of PR 234).
+					await stack.tab.eval(`(() => {
+						const context = { mine: true };
+						const state = new Map();
+						state.set("tab-mcp:webmcp", state);
+						state.set(undefined, context);
+						window.e2eFake = context;
+						Object.defineProperty(Document.prototype, "modelContext", {
+							get: function (key) {
+								return key === "tab-mcp:webmcp" ? state : context;
+							},
+							configurable: true,
+						});
+						return true;
+					})()`);
 					await clickIcon(stack);
 					await stack.panel.waitFor(
 						`!document.getElementById("no-webmcp").hidden`,
@@ -580,6 +624,16 @@ describe.skipIf(!firefoxOk)(
 							`document.getElementById("no-webmcp").textContent`,
 						),
 					).toContain("While AI access is on");
+					await Bun.sleep(300);
+					expect(
+						await stack.tab.eval(
+							`[Object.getOwnPropertyNames(window.e2eFake), typeof window.e2eFake.registerTool]`,
+						),
+					).toEqual([["mine"], "undefined"]);
+					// The page's fake goes; nothing else is in the page.
+					await stack.tab.eval(
+						`(delete Document.prototype.modelContext, "modelContext" in document)`,
+					);
 					expect(await stack.tab.eval(`"modelContext" in document`)).toBe(
 						false,
 					);

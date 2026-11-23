@@ -14,7 +14,7 @@
 import { PANEL } from "./browser.ts";
 import { canonicalJson } from "./canonical.ts";
 import { connectPolyfill } from "./chrome/webmcp-port.ts";
-import { hasKeptState, installWebMCP } from "./firefox/webmcp.ts";
+import { installWebMCP } from "./firefox/webmcp.ts";
 import type {
 	CallResult,
 	ContentEvent,
@@ -475,7 +475,8 @@ async function answer(request: ContentRequest): Promise<ContentResponse> {
 			handshake?.stateChanged(request.state);
 			return { ok: true, value: null };
 		case "webmcp-install":
-			installLate();
+			// For the page that was read only (the tab may show another now).
+			if (request.documentId === DOCUMENT_ID) installLate();
 			return { ok: true, value: null };
 	}
 }
@@ -492,23 +493,34 @@ const REQUESTS = new Set([
 
 declare global {
 	var tabMcpContentScript: true | undefined;
+	/**
+	 * Set in this world by the worker before it puts the script in without
+	 * host access for the page (`injectInto` in `tabs.ts`): it runs only
+	 * because of a click on the icon (DEC-223).
+	 */
+	var tabMcpByClick: true | undefined;
+	/** This page's id (`DOCUMENT_ID`), for the worker to find its document. */
+	var tabMcpDocumentId: string | undefined;
 }
 
 // Injected again on each click: answer once per page.
 if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 	globalThis.tabMcpContentScript = true;
+	globalThis.tabMcpDocumentId = DOCUMENT_ID;
+	// Without host access for the page (a click put it in), the script sends
+	// nothing into the page and installs nothing until the worker's
+	// `webmcp-install`, which comes only while AI access is on (DEC-223): no
+	// port, no WebMCP, no takeover of a state the page could have faked. With
+	// host access (registered for every page, or put into the open pages
+	// after an update) it does what it always did, whatever AI access.
+	const byClick = globalThis.tabMcpByClick === true;
 	// First of all, at `document_start`: the page's scripts look for it as
 	// they load. Where Firefox has WebMCP of its own, the native one is used.
-	// Injected later (a click on the icon, or an open page after an install),
-	// only on the worker's `webmcp-install`, which comes while AI access is
-	// on (DEC-223); a page whose earlier content script left its WebMCP is
-	// taken over at once, as it had it already. The build's `define` itself,
-	// not `FIREFOX`, here and below: so Chrome's bundle drops it.
-	if (
-		typeof TAB_MCP_FIREFOX !== "undefined" &&
-		TAB_MCP_FIREFOX &&
-		(document.readyState === "loading" || hasKeptState(window))
-	) {
+	// With host access also into a page that loaded before (an install, an
+	// update, "Give access to all sites"), taking over what an earlier script
+	// left there. The build's `define` itself, not `FIREFOX`, here and below:
+	// so Chrome's bundle drops it.
+	if (typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX && !byClick) {
 		try {
 			ownContext = installWebMCP(window) as unknown as ModelContext | undefined;
 		} catch {
@@ -574,6 +586,7 @@ if (typeof chrome !== "undefined" && !globalThis.tabMcpContentScript) {
 		});
 	if (
 		!(typeof TAB_MCP_FIREFOX !== "undefined" && TAB_MCP_FIREFOX) &&
+		!byClick &&
 		!("modelContext" in document)
 	)
 		connect(false);

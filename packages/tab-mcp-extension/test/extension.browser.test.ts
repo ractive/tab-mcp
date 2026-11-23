@@ -2994,6 +2994,15 @@ describe.skipIf(chrome === undefined)(
 					await aiAccess(stack, false);
 					// A new tab, which no click has given yet (the panel stays open).
 					const other = await stack.browser.newPage(`${SITE}/library.html`);
+					// Every message the page's window gets from now on: the content
+					// script's port handover would be one (review of PR 234).
+					await other.eval(`(() => {
+						window.e2eMessages = [];
+						addEventListener("message", (event) =>
+							window.e2eMessages.push(event.data?.type ?? String(event.data)),
+						);
+						return true;
+					})()`);
 					await stack.browser.clickIcon(other);
 					await stack.panel.waitFor(
 						`!document.getElementById("no-webmcp").hidden`,
@@ -3004,10 +3013,18 @@ describe.skipIf(chrome === undefined)(
 							`document.getElementById("no-webmcp").textContent`,
 						),
 					).toContain("While AI access is on");
+					// The content script has answered the panel's read: had it posted
+					// its port, the page would have it by now.
+					await Bun.sleep(300);
 					expect(await other.eval(`"modelContext" in document`)).toBe(false);
+					expect(await other.eval("window.e2eMessages")).toEqual([]);
 					await aiAccess(stack, true);
 					await other.waitFor(libraryMirrors, 15_000);
 					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+					// The listener hears a handover: the one after the late install.
+					expect(await other.eval("window.e2eMessages")).toEqual([
+						"tab-mcp:webmcp-connect",
+					]);
 					tab = other;
 				},
 			);

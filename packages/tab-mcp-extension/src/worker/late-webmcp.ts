@@ -33,20 +33,38 @@ interface Tried {
 	settled: boolean;
 }
 
+const LOOPBACK = /^(localhost|.+\.localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
+
+/**
+ * Whether a page of `origin` can take the extension's WebMCP at all: the
+ * polyfill (`chrome/webmcp-main.ts`, `firefox/webmcp.ts`) installs only in a
+ * secure context, so only https pages and the loopback host's http ones.
+ */
+export function canTakeWebMCP(origin: string): boolean {
+	try {
+		const { protocol, hostname } = new URL(origin);
+		return (
+			protocol === "https:" || (protocol === "http:" && LOOPBACK.test(hostname))
+		);
+	} catch {
+		return false;
+	}
+}
+
 export class LateWebMCP {
-	readonly #give: (tabId: number) => Promise<void>;
+	readonly #give: (tabId: number, documentId: string) => Promise<boolean>;
 	readonly #may: () => boolean;
 	readonly #failed: () => void;
 	readonly #tabs = new Map<number, Tried>();
 
 	/**
-	 * `give`: puts the extension's WebMCP into the tab (`giveWebMCP`); `may`:
+	 * `give`: puts the extension's WebMCP into the tab's page that was read
+	 * (`giveWebMCP`), `false` if the tab shows another page now; `may`:
 	 * whether it may now (`mayGiveLate` of the worker's state); `failed`:
-	 * `give` rejected (no grant any more, the page went away), so that the
-	 * panel is told.
+	 * `give` rejected or found another page, so that the panel is told.
 	 */
 	constructor(
-		give: (tabId: number) => Promise<void>,
+		give: (tabId: number, documentId: string) => Promise<boolean>,
 		may: () => boolean,
 		failed: () => void = () => {},
 	) {
@@ -55,7 +73,11 @@ export class LateWebMCP {
 		this.#failed = failed;
 	}
 
-	/** The worker read `tabId`'s tools: give it WebMCP where it has none and may. */
+	/**
+	 * The worker read `tabId`'s tools: give the page WebMCP where it has
+	 * none, can take it and may. A page that can never take it (not a secure
+	 * context) is settled at once, so that the panel says it has none.
+	 */
 	read(tabId: number, tools: PageTools): void {
 		const tried = this.#tabs.get(tabId);
 		if (tried?.documentId === tools.documentId) {
@@ -69,16 +91,20 @@ export class LateWebMCP {
 			settled: false,
 		};
 		this.#tabs.set(tabId, entry);
-		this.#give(tabId).then(
-			() => {
-				entry.given = true;
-			},
-			() => {
-				entry.given = true;
-				entry.settled = true;
-				this.#failed();
-			},
-		);
+		if (!canTakeWebMCP(tools.origin)) {
+			entry.given = true;
+			entry.settled = true;
+			return;
+		}
+		const gone = () => {
+			entry.given = true;
+			entry.settled = true;
+			this.#failed();
+		};
+		this.#give(tabId, tools.documentId).then((given) => {
+			if (given) entry.given = true;
+			else gone();
+		}, gone);
 	}
 
 	/**

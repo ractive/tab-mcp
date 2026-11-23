@@ -709,16 +709,37 @@ describe("asking a tab's content script", () => {
 		sendMessage: () => Promise<unknown>;
 		status?: string;
 		inject?: () => Promise<unknown>;
+		/** Host access for the page (`permissions.contains`); none by default. */
+		hostAccess?: boolean;
 	}) {
 		const injected: number[] = [];
+		/** Each injection, in order: the content script's file, or a function. */
+		const injections: string[] = [];
 		const before = (globalThis as { chrome?: unknown }).chrome;
 		(globalThis as { chrome?: unknown }).chrome = {
 			tabs: {
 				sendMessage: stub.sendMessage,
 				get: async () => ({ status: stub.status ?? "complete" }),
 			},
+			permissions: { contains: async () => stub.hostAccess === true },
 			scripting: {
-				executeScript: async ({ target }: { target: { tabId: number } }) => {
+				executeScript: async ({
+					target,
+					files,
+					func,
+				}: {
+					target: { tabId: number };
+					files?: string[];
+					func?: () => void;
+				}) => {
+					if (func !== undefined) {
+						// Run here, on this test's global: what it leaves is the
+						// content script's world as it starts.
+						func();
+						injections.push("func");
+						return [];
+					}
+					injections.push(String(files));
 					injected.push(target.tabId);
 					return stub.inject?.();
 				},
@@ -726,6 +747,7 @@ describe("asking a tab's content script", () => {
 		};
 		return {
 			injected,
+			injections,
 			restore: () => {
 				(globalThis as { chrome?: unknown }).chrome = before;
 			},
@@ -783,6 +805,33 @@ describe("asking a tab's content script", () => {
 			expect(chrome.injected).toEqual([4]);
 		} finally {
 			chrome.restore();
+		}
+	});
+
+	test("without host access for the page the content script is told it came by a click, first; with host access not (review of PR 234)", async () => {
+		for (const hostAccess of [false, true]) {
+			let sent = 0;
+			const chrome = stubChrome({
+				hostAccess,
+				sendMessage: async () => {
+					if (sent++ === 0) throw new Error("Receiving end does not exist.");
+					return { ok: true, value: null };
+				},
+			});
+			const world = globalThis as { tabMcpByClick?: true };
+			try {
+				await ask(tab, { type: "page-info" });
+				// The flag first, at once (a click's gesture reaches the page with
+				// the first injection); with host access taken away again; then
+				// the script.
+				expect(chrome.injections).toEqual(
+					hostAccess ? ["func", "func", "content.js"] : ["func", "content.js"],
+				);
+				expect(world.tabMcpByClick).toBe(hostAccess ? undefined : true);
+			} finally {
+				delete world.tabMcpByClick;
+				chrome.restore();
+			}
 		}
 	});
 

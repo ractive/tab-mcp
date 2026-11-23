@@ -49,6 +49,8 @@ interface Fake {
 	vouches?: { vouch: unknown; state: unknown }[];
 	/** The page has no WebMCP (it has by default). */
 	noWebmcp?: boolean;
+	/** The content script id the tab shows when probed ("doc-1", the page read, by default). */
+	shownDocument?: string;
 }
 
 /**
@@ -99,9 +101,14 @@ function fakeChrome(fake: Fake) {
 					state?: unknown;
 					vouch?: unknown;
 				},
+				options?: unknown,
 			) => {
 				if (request.type === "extension-state")
 					fake.states?.push([tabId, request.state]);
+				if (request.type === "webmcp-install")
+					fake.calls.push(
+						`tabs.sendMessage ${JSON.stringify([tabId, request, options])}`,
+					);
 				if (request.type === "webmcp-call") {
 					fake.pageCalls.push(request.name ?? "");
 					fake.vouches?.push({ vouch: request.vouch, state: request.state });
@@ -131,6 +138,22 @@ function fakeChrome(fake: Fake) {
 			},
 		},
 		permissions: { contains: async () => true },
+		// A function's injection (the probe for Chrome's id of the page that
+		// was read) finds the content script of "doc-1" in "chrome-doc-1".
+		scripting: {
+			executeScript: async (details: { func?: unknown }) => {
+				fake.calls.push(`scripting.executeScript ${JSON.stringify([details])}`);
+				return details.func === undefined
+					? []
+					: [
+							{
+								frameId: 0,
+								documentId: "chrome-doc-1",
+								result: fake.shownDocument ?? "doc-1",
+							},
+						];
+			},
+		},
 		sidePanel: {
 			open: async () => {
 				throw new Error(
@@ -549,23 +572,40 @@ describe("WebMCP given late to a page without it (DEC-223)", () => {
 		apps: [],
 		whileInFront: true,
 	};
+	/** The polyfill's injections into a main world. */
 	const gives = (fake: Fake) =>
-		fake.calls.filter((call) => call.startsWith("scripting.executeScript"));
+		fake.calls.filter(
+			(call) =>
+				call.startsWith("scripting.executeScript") &&
+				call.includes('"world":"MAIN"'),
+		);
+	const installs = (fake: Fake) =>
+		fake.calls.filter((call) => call.includes('"webmcp-install"'));
 
-	test("while on: the page-world polyfill into the top frame's main world, once per document; the panel waits for it", async () => {
+	test("while on: the page-world polyfill into the main world of the very document that was read, once per document; the panel waits for it", async () => {
 		const { c, fake } = await connection();
 		fake.noWebmcp = true;
 		spyOn(c, "handshakeState").mockReturnValue(on);
 		const panel = fakePanel();
 		c.addPanel(panel.port);
-		await until(() => gives(fake).length === 1, "the polyfill given");
+		await until(() => installs(fake).length === 1, "the polyfill given");
+		// Pinned to Chrome's id of the page that was read (review of PR 234):
+		// the polyfill and the message go to that document only, and the
+		// message names the content script's page too.
+		expect(installs(fake)).toEqual([
+			`tabs.sendMessage ${JSON.stringify([
+				1,
+				{ type: "webmcp-install", documentId: "doc-1" },
+				{ documentId: "chrome-doc-1" },
+			])}`,
+		]);
 		expect(
 			JSON.parse(
 				gives(fake)[0]?.slice("scripting.executeScript ".length) ?? "",
 			),
 		).toEqual([
 			{
-				target: { tabId: 1, frameIds: [0] },
+				target: { tabId: 1, documentIds: ["chrome-doc-1"] },
 				world: "MAIN",
 				files: ["webmcp-main.js"],
 			},
@@ -589,6 +629,23 @@ describe("WebMCP given late to a page without it (DEC-223)", () => {
 		await Bun.sleep(50);
 		expect(gives(fake)).toHaveLength(1);
 		expect(panel.state()?.tab?.webmcp).toEqual({ available: false, tools: 0 });
+	});
+
+	test("the tab shows another page by the time of the give: nothing goes into it (review of PR 234)", async () => {
+		const { c, fake } = await connection();
+		fake.noWebmcp = true;
+		fake.shownDocument = "doc-2";
+		spyOn(c, "handshakeState").mockReturnValue(on);
+		const panel = fakePanel();
+		c.addPanel(panel.port);
+		await until(
+			() =>
+				fake.calls.some((call) => call.startsWith("scripting.executeScript")),
+			"the probe",
+		);
+		await Bun.sleep(50);
+		expect(gives(fake)).toEqual([]);
+		expect(installs(fake)).toEqual([]);
 	});
 
 	test("while off: nothing given, and the panel says the page has none at once", async () => {

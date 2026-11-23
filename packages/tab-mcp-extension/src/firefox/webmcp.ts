@@ -115,15 +115,6 @@ function keptState(
 }
 
 /**
- * Whether an earlier content script of this extension left its state in
- * `win`'s page (an extension reload or update): then the next one takes it
- * over at once, whatever the AI access, as the page had WebMCP already.
- */
-export function hasKeptState(win: Window): boolean {
-	return hasExportHelpers() && keptState(waive(win)) !== undefined;
-}
-
-/**
  * Define `document.modelContext` (and `navigator.modelContext`, which older
  * pages use) in `win`'s page for its own scripts. `undefined` where Firefox
  * has WebMCP of its own (a native attribute is visible through the Xrays,

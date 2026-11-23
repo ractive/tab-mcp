@@ -49,9 +49,11 @@ export type ContentRequest =
 	/**
 	 * The page had no WebMCP when the worker read it: give it the extension's
 	 * own now, late (DEC-223). Chrome: the worker has just put the page-world
-	 * polyfill in, so connect to it; Firefox: install it here.
+	 * polyfill in, so connect to it; Firefox: install it here. Only for the
+	 * page that was read (`documentId`, the content script's id): another
+	 * page's content script ignores it.
 	 */
-	| { type: "webmcp-install" };
+	| { type: "webmcp-install"; documentId: string };
 
 /** An AI app connected to the extension: its own name and verified host. */
 export interface AppView {
