@@ -37,6 +37,14 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
   pictures as it does when connected to the page directly. Such a page now also learns
   which AI app calls its read-only tools, while AI access is on. An older library
   ignores the claim and answers with text as before.
+- **The AI access switch glows while an AI app calls** (DEC-225). While a connected AI
+  app's tool call runs through the extension (any of its tools, a call waiting for your
+  answer in the panel included) and for 5 seconds after the last one ended, the side
+  panel's AI access switch wears a many-coloured ring with a halo that breathes, as
+  Sitegloss's AI button does. Only while AI access is on and connected: off or with the
+  connection lost, it goes at once. A style alone: no text or name changes, so a screen
+  reader hears nothing of it; with reduced motion nothing moves. The toolbar icon does
+  not change.
 
 ### Changed
 

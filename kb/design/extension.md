@@ -346,7 +346,9 @@ with a second extension).
 The side panel shows the connection and its apps, the pairing view, questions, the tab in
 front with its tools ("reads", "asks first", or an "Always allow" switch where a tool can be
 allowed on the site), and the relay address under
-Settings. The icon's badge shows "on", "…" or "?" (a question waits). The connector
+Settings. While an AI app's call runs and 5 s after the last, the AI access switch glows
+(a many-coloured ring and a breathing halo, a style alone; DEC-225). The icon's badge
+shows "on", "…" or "?" (a question waits), not the calls. The connector
 carries the extension's icon. The panel's look (paper and ink on tokens whose pairs are
 held to their contrast in light and dark, no amber button, what each colour says) is
 [tab-mcp browser extension: the look](extension-look.md) (iteration 39, DEC-160 to DEC-163).

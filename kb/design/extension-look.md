@@ -64,7 +64,9 @@ build differs from the plan, with screenshots.
    edge) where something failed. The text is always `--ink`; the colour is in the
    fill, the edge and a sign.
 9. **Motion**: two short transitions (0.12 s on a button's fill and border, 0.15 s on
-   the switch), all off under `prefers-reduced-motion: reduce`.
+   the switch), all off under `prefers-reduced-motion: reduce`. The one animation, the
+   AI access switch's halo breathing while an AI app calls (DEC-225), stops there too;
+   the ring and the halo then show steady.
 10. **Forced colours**: every edge stays an edge (filled buttons get a `ButtonText`
     border), fills that carry meaning are set in system colours, and a forced-colours
     rule names the hover and focus selectors too, since those are more specific
