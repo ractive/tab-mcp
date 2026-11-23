@@ -40,6 +40,17 @@
 import type { TabMcp } from "./tab-mcp.ts";
 import type { PairingCode } from "./types.ts";
 
+/**
+ * The event a script dispatches on `document` (a plain `Event`, no
+ * `detail`) once it has given the page `document.modelContext` after the
+ * page's scripts ran: the tab-mcp browser extension at a click on its icon
+ * (DEC-223). A `TabMcp` that found no WebMCP when it was made reads
+ * `Document.prototype`'s getter again then, and mirrors its tools if it
+ * finds one. The core spells the name out itself (`tab-mcp.ts`), so that it
+ * imports nothing of this entry; a test checks both are the same.
+ */
+export const WEBMCP_EVENT = "tab-mcp-webmcp";
+
 // --- What the content script and the worker say to each other ---
 
 /** The name of the port a pairing page's content script opens. */

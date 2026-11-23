@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PINNED_FILES } from "../../../scripts/pinned-files.ts";
+import { WEBMCP_EVENT } from "../src/extension.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -82,6 +83,9 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	// chunk, not the core (DEC-207): 2 KB since, 1 KB before.
 	expect(files.get(mirrorChunk)).toContain("tab-mcp-extension");
 	expect(coreCode).not.toContain("tab-mcp-extension");
+	// The core listens for WebMCP that comes late (DEC-223), by the name of
+	// `./extension`'s `WEBMCP_EVENT`, spelt out: it imports nothing of it.
+	expect(coreCode).toContain(`"${WEBMCP_EVENT}"`);
 	const mirrorGz = gz(files.get(mirrorChunk) ?? "");
 	console.log(`mirror ${mirrorGz} B gzipped`);
 	expect(mirrorGz).toBeLessThanOrEqual(2 * 1024);

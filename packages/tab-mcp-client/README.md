@@ -225,8 +225,14 @@ Chrome has WebMCP for sites in its
 [origin trial](https://developer.chrome.com/blog/ai-webmcp-origin-trial) (Chrome 149 to
 162; a site needs a trial token) and with `chrome://flags/#enable-webmcp-testing`
 ([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Without either,
-the mirror does nothing. Each `new TabMcp` looks for WebMCP when it is made, so a
-trial token that a script adds later counts for a `TabMcp` made after it.
+the mirror does nothing, unless the tab-mcp browser extension gives the tab WebMCP of
+its own. Each `new TabMcp` looks for WebMCP when it is made, so a trial token that a
+script adds later counts for a `TabMcp` made after it. A `TabMcp` that found none looks
+again when `document` hears the event `tab-mcp-webmcp` (`WEBMCP_EVENT` of
+`@ractive-ch/tab-mcp-client/extension`), and starts its mirror if `Document.prototype`
+has `modelContext` then (from 0.24 on, DEC-223): the tab-mcp browser extension
+dispatches it when it gives the tab its WebMCP after the page loaded, at a click on its
+icon. A page script that installs WebMCP late may dispatch it too.
 
 #### Who asks before a tool that asks runs
 

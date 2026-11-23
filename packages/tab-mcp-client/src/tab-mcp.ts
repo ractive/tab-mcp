@@ -340,9 +340,21 @@ export class TabMcp extends EventTarget {
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
 		// every tool whose `callers` do not leave "webmcp" out (DEC-209). The getter
 		// is read now (WM 10); the mirror loads only then (DEC-171), with the
-		// handshake with the tab-mcp browser extension (DEC-207).
-		const context = options.webmcp !== false ? nativeContext() : undefined;
-		if (context !== undefined)
+		// handshake with the tab-mcp browser extension (DEC-207). Without it,
+		// read again when `document` hears "tab-mcp-webmcp" (`WEBMCP_EVENT` of
+		// `./extension`, spelt out here so the core imports nothing of it): the
+		// tab-mcp browser extension installed its own late, at a click on its
+		// icon (DEC-223). Only the getter counts then too; the first time it
+		// gives an object, the mirror starts and the listener goes.
+		if (options.webmcp === false) return;
+		const look = (): void => {
+			const context = nativeContext();
+			if (context === undefined) return;
+			globalThis.document?.removeEventListener("tab-mcp-webmcp", look);
+			mirrorIn(context);
+		};
+		globalThis.document?.addEventListener("tab-mcp-webmcp", look);
+		const mirrorIn = (context: ModelContext) =>
 			import("./webmcp.ts").then(
 				(m) =>
 					m.mirror(
@@ -363,6 +375,7 @@ export class TabMcp extends EventTarget {
 				(error: unknown) =>
 					console.warn("tab-mcp: no tools are offered through WebMCP:", error),
 			);
+		look();
 	}
 
 	/**

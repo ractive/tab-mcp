@@ -14,6 +14,7 @@ import {
 	test,
 } from "bun:test";
 import { Window } from "happy-dom";
+import { WEBMCP_EVENT } from "../src/extension.ts";
 import type { TabMcp } from "../src/tab-mcp.ts";
 import type {
 	ConfirmRequest,
@@ -619,6 +620,133 @@ describe("every failure stays with the mirror", () => {
 		await settle();
 		expect(t.tools).toEqual(["add"]);
 		expect(warn).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("WebMCP installed after the TabMcp was made: tab-mcp-webmcp (DEC-223)", () => {
+	const proto = () => window.Document.prototype as { modelContext?: unknown };
+	let getter: PropertyDescriptor | undefined;
+	/** The page without WebMCP, as when the `TabMcp`s are made. */
+	const noWebmcp = () => {
+		getter = Object.getOwnPropertyDescriptor(proto(), "modelContext");
+		delete proto().modelContext;
+	};
+	/** The extension installs it late. */
+	const install = () =>
+		Object.defineProperty(
+			proto(),
+			"modelContext",
+			getter as PropertyDescriptor,
+		);
+	const arrive = () =>
+		window.document.dispatchEvent(new window.Event(WEBMCP_EVENT));
+	/** What the page said to the extension (`tab-mcp-page`), parsed. */
+	const said = () => {
+		const heard: Record<string, unknown>[] = [];
+		window.document.addEventListener("tab-mcp-page", (event) =>
+			heard.push(
+				JSON.parse(String((event as unknown as { detail: unknown }).detail)),
+			),
+		);
+		return heard;
+	};
+
+	test("the event with the getter there: every tool is mirrored, and the page joins the handshake", async () => {
+		noWebmcp();
+		const heard = said();
+		const t = tab();
+		await t.registerTool(add);
+		await t.registerTool(wipe);
+		await settle();
+		expect(native.registrations).toBe(0);
+		expect(heard).toEqual([]);
+		install();
+		arrive();
+		await settle();
+		expect([...native.tools.keys()]).toEqual(["add", "wipe"]);
+		expect(
+			window.document.documentElement.hasAttribute("data-tab-mcp-handshake"),
+		).toBe(true);
+		expect(heard.map((m) => [m["type"], m["app"]])).toEqual([
+			["hello", "test-page"],
+		]);
+	});
+
+	test("an event before the getter is there changes nothing, and the next one still counts", async () => {
+		noWebmcp();
+		const t = tab();
+		await t.registerTool(add);
+		arrive();
+		await settle();
+		expect(native.registrations).toBe(0);
+		install();
+		arrive();
+		await settle();
+		expect([...native.tools.keys()]).toEqual(["add"]);
+	});
+
+	test("the event twice: one mirror, each tool registered once", async () => {
+		noWebmcp();
+		const t = tab();
+		await t.registerTool(add);
+		install();
+		arrive();
+		arrive();
+		await settle();
+		arrive();
+		await settle();
+		expect(native.registrations).toBe(1);
+	});
+
+	test("a TabMcp that found WebMCP when it was made mirrors once, whatever the event", async () => {
+		const t = tab();
+		await t.registerTool(add);
+		await settle();
+		arrive();
+		await settle();
+		expect(native.registrations).toBe(1);
+	});
+
+	test("webmcp: false: the event mirrors nothing", async () => {
+		noWebmcp();
+		const t = tab({ webmcp: false });
+		await t.registerTool(add);
+		install();
+		arrive();
+		await settle();
+		expect(native.registrations).toBe(0);
+	});
+
+	test("two TabMcps: each mirrors its own tools, both join one handshake", async () => {
+		noWebmcp();
+		const heard = said();
+		const first = tab();
+		const second = tab({ server: { name: "Other app", version: "1.0.0" } });
+		await first.registerTool(add);
+		await second.registerTool(wipe);
+		install();
+		arrive();
+		await settle();
+		expect([...native.tools.keys()].sort()).toEqual(["add", "wipe"]);
+		expect(heard.map((m) => m["app"]).sort()).toEqual([
+			"other-app",
+			"test-page",
+		]);
+	});
+
+	test("only the prototype's getter counts: an own document.modelContext and the event mirror nothing", async () => {
+		noWebmcp();
+		const polyfill = { registerTool: jest.fn(() => Promise.resolve()) };
+		Object.defineProperty(window.document, "modelContext", {
+			value: polyfill,
+			configurable: true,
+		});
+		const t = tab();
+		await t.registerTool(add);
+		arrive();
+		await settle();
+		expect(polyfill.registerTool).not.toHaveBeenCalled();
+		expect(native.registrations).toBe(0);
 	});
 });
 
