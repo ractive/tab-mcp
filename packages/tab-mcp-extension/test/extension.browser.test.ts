@@ -2938,15 +2938,30 @@ describe.skipIf(chrome === undefined)(
 				await step(
 					`after ${what} the new page gets WebMCP again, without a click, and the panel never says it has none`,
 					async () => {
+						// The AI app sees only the tool's name, the same for both
+						// pages, so the condition is the panel's list: the bridge's
+						// first read of the new page finds no WebMCP and offers no
+						// tools (the panel's list empties), and its read after the
+						// late install offers the new page's tool, registered before
+						// the panel is told (the list fills again). A
+						// MutationObserver misses neither, however short.
+						await stack.panel.eval(`(() => {
+							const list = document.getElementById("tools");
+							const seen = { emptied: false, back: false };
+							window.e2eTools = seen;
+							new MutationObserver(() => {
+								if (list.querySelectorAll("li").length === 0) seen.emptied = true;
+								else if (seen.emptied) seen.back = true;
+							}).observe(list, { childList: true });
+							return true;
+						})()`);
 						await go();
 						await tab.waitFor(libraryMirrors, 15_000);
 						await tab.waitFor(
 							"window.tabMcpPage?.mcp.extension?.apps.length === 1",
 							15_000,
 						);
-						// The bridge offers the new page's tool once it has read it
-						// (the content script's 250 ms, the worker's round trip).
-						await Bun.sleep(1_500);
+						await stack.panel.waitFor("window.e2eTools.back", 15_000);
 						await waitForTools(stack, (n) => n.includes("page_complete_todo"));
 						const pending = call(stack, "page_complete_todo", { id: 5 });
 						await answerInPanel(stack, "allow");
