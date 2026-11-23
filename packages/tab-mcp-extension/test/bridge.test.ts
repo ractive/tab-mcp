@@ -590,18 +590,87 @@ describe("results", () => {
 		expect(MAX_IMAGES_BASE64 + MAX_RESULT * 3).toBeLessThan(1024 * 1024);
 	});
 
-	test("too many blocks, bad images, other JSON stay (cut) text", () => {
-		const tooMany = JSON.stringify({
-			content: Array.from({ length: MAX_BLOCKS + 1 }, () => ({
-				type: "text",
-				text: "t",
-			})),
-		});
-		expect(typeof resultOf(tooMany)).toBe("string");
-		const notBase64 = JSON.stringify({
-			content: [{ type: "image", data: "<svg/>", mimeType: "image/png" }],
-		});
-		expect(resultOf(notBase64)).toBe(notBase64);
+	test("past 32 blocks the rest are one line; MCP blocks it does not carry are a line each (DEC-224)", () => {
+		const many = (n: number) =>
+			JSON.stringify({
+				content: Array.from({ length: n }, (_, i) => ({
+					type: "text",
+					text: `t${i}`,
+				})),
+			});
+		const exactly = resultOf(many(MAX_BLOCKS)) as {
+			content: { text: string }[];
+		};
+		expect(exactly.content).toHaveLength(MAX_BLOCKS);
+		expect(exactly.content.at(-1)?.text).toBe(`t${MAX_BLOCKS - 1}`);
+		const over = resultOf(many(MAX_BLOCKS + 8)) as {
+			content: { text: string }[];
+		};
+		expect(over.content).toHaveLength(MAX_BLOCKS);
+		expect(over.content.at(-1)?.text).toBe(
+			"[9 more content blocks left out: the tab-mcp browser extension passes on 32 blocks of a result.]",
+		);
+		const others = resultOf(
+			JSON.stringify({
+				content: [
+					{ type: "image", data: "<svg/>", mimeType: "image/png" },
+					{ type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" },
+					{ type: "audio", data: "AAAA", mimeType: "audio/wav" },
+					{ type: "resource_link", uri: "https://a.example/x", name: "x" },
+					{ type: "resource", resource: { uri: "file:///x", text: "x" } },
+					{ type: "text", text: "after" },
+				],
+			}),
+		) as { content: { type: string; text?: string }[] };
+		expect(others.content.map((b) => b.text)).toEqual([
+			"[An image (image/png) was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
+			"[An image (image/svg+xml) was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
+			"[audio content was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
+			"[resource_link content was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
+			"[resource content was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
+			"after",
+		]);
+	});
+
+	test("structuredContent passes where it fits the text budget the blocks left, with isError (DEC-224)", () => {
+		const text = { type: "text", text: '{"n":1}' };
+		expect(
+			resultOf(
+				JSON.stringify({
+					content: [text],
+					structuredContent: { n: 1 },
+					isError: true,
+					_meta: { "example.com/x": 1 },
+					other: 2,
+				}),
+			),
+		).toEqual({ content: [text], structuredContent: { n: 1 }, isError: true });
+		// Not an object: left out.
+		expect(
+			resultOf(JSON.stringify({ content: [text], structuredContent: [1] })),
+		).toEqual({ content: [text] });
+		// The blocks' text and the structuredContent's JSON together within MAX_RESULT.
+		const half = "y".repeat(MAX_RESULT / 2);
+		const fits = { s: "y".repeat(MAX_RESULT / 2 - 20) };
+		expect(
+			resultOf(
+				JSON.stringify({
+					content: [{ type: "text", text: half }],
+					structuredContent: fits,
+				}),
+			),
+		).toMatchObject({ structuredContent: fits });
+		expect(
+			resultOf(
+				JSON.stringify({
+					content: [{ type: "text", text: half }],
+					structuredContent: { s: half },
+				}),
+			),
+		).toEqual({ content: [{ type: "text", text: half }] });
+	});
+
+	test("content that is not MCP blocks, other JSON stay (cut) text", () => {
 		const odd = JSON.stringify({
 			content: [{ type: "resource", uri: "file:///etc/passwd" }],
 		});

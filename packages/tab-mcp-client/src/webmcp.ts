@@ -13,7 +13,7 @@
 import {
 	type HandshakePage,
 	joinHandshake,
-	type VouchedBy,
+	type Vouched,
 } from "./handshake.ts";
 import type { RegisteredTool, ToolRegistry } from "./registry.ts";
 import type { BrowserExtension } from "./types.ts";
@@ -28,13 +28,14 @@ export interface ModelContext {
 
 /**
  * Runs a call of a mirrored tool; `signal` is the browser's, if it gives
- * one; `by`: the AI app the tab-mcp browser extension vouched for it.
+ * one; `by`: the tab-mcp browser extension announced it for an AI app
+ * (a vouch or a claim).
  */
 export type WebMcpCall = (
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
-	by: VouchedBy | undefined,
+	by: Vouched | undefined,
 ) => Promise<unknown>;
 
 /** The WebMCP hints; the MCP-only ones are left out. */

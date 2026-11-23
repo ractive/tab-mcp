@@ -20,8 +20,14 @@
  * - The extension says what it is and which AI apps are connected to it
  *   (`hello`, `update`), and, right before it runs a page tool the user
  *   allowed there, `vouch`: the tool, the exact arguments, a nonce and the
- *   AI app; once that call ended or failed, `withdraw` with the nonce, and
- *   a vouch still unused is dropped. It speaks only while it serves the
+ *   AI app; right before one it runs without asking (read-only for it),
+ *   `claim` with the same fields (DEC-224); once that call ended or failed,
+ *   `withdraw` with the nonce, and one still unused is dropped. With
+ *   `result: "mcp"` on either, the call resolves with the whole MCP result
+ *   (pictures too), which the extension passes on; without it (an older
+ *   extension), with the value any WebMCP caller gets. A `claim` only
+ *   names the caller and asks for the whole result: `onConfirm` decides as
+ *   for any WebMCP call. It speaks only while it serves the
  *   page (DEC-221): while its AI access is off the page hears nothing, as
  *   without the extension, except `on: false` once if it was told "on".
  * - Each side cuts the other's list of AI apps to 64 and sends no more.
@@ -68,12 +74,25 @@ export interface VouchedBy {
 	host: string;
 }
 
-interface Vouch {
+/** A call the extension announced, as its WebMCP call takes it. */
+export interface Vouched {
+	app: VouchedBy;
+	/**
+	 * The user allowed it in the extension (`vouch`): it runs without
+	 * `onConfirm`. `false` for a `claim`, a call the extension made without
+	 * asking (it took the tool for read-only): `onConfirm` decides as for
+	 * any WebMCP call.
+	 */
+	allowed: boolean;
+	/** The extension takes the whole MCP result (`result: "mcp"`, DEC-224). */
+	whole: boolean;
+}
+
+interface Vouch extends Vouched {
 	tool: RegisteredTool;
 	/** The arguments, canonical (`canonical`). */
 	args: string;
 	nonce: string;
-	app: VouchedBy;
 	at: number;
 }
 
@@ -163,7 +182,7 @@ class Handshake {
 			return;
 		}
 		if (!isObject(m) || m["v"] !== 1) return;
-		if (m["type"] === "vouch") this.#vouch(m);
+		if (m["type"] === "vouch" || m["type"] === "claim") this.#vouch(m);
 		// The call it was for ended or never reached the page: an unused vouch
 		// must not wait its 2 s for another caller.
 		else if (m["type"] === "withdraw")
@@ -207,6 +226,8 @@ class Handshake {
 				nonce,
 				app,
 				at: now(),
+				allowed: m["type"] === "vouch",
+				whole: m["result"] === "mcp",
 			});
 			if (this.#vouches.length > MAX_VOUCHES) this.#vouches.shift();
 			return;
@@ -220,16 +241,16 @@ class Handshake {
 	}
 
 	/**
-	 * The vouch for this call of `tool` with `input`, used up; `undefined`
-	 * if there is none (the call is asked as without the extension).
+	 * The vouch or claim for this call of `tool` with `input`, used up;
+	 * `undefined` if there is none (the call is any WebMCP call).
 	 */
-	take(tool: RegisteredTool, input: unknown): VouchedBy | undefined {
+	take(tool: RegisteredTool, input: unknown): Vouched | undefined {
 		this.#drop();
 		const args = canonical(input);
 		const i = this.#vouches.findIndex(
 			(v) => v.tool === tool && v.args === args,
 		);
-		return i < 0 ? undefined : this.#vouches.splice(i, 1)[0]?.app;
+		return i < 0 ? undefined : this.#vouches.splice(i, 1)[0];
 	}
 }
 

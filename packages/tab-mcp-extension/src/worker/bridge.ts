@@ -16,9 +16,11 @@
  *
  * A call the user allowed (asked, or allowed for its site) goes to the page
  * with a vouch, so that a page with the client library does not ask again
- * (DEC-207). Only `#allowedThenRun` makes one, after the user's "allow" and
- * the check that the tool is still the one asked about; a read-only tool,
- * which nobody asks about, gets none.
+ * (DEC-207); an AI app's call of a read-only tool, which nobody asks about,
+ * with a claim, which allows nothing (DEC-224). Either tells the library to
+ * answer with the whole MCP result, pictures included. Only
+ * `#allowedThenRun` makes them, a vouch after the user's "allow" and the
+ * check that the tool is still the one asked about.
  */
 
 import {
@@ -408,55 +410,122 @@ type Block =
 	| { type: "image"; data: string; mimeType: string };
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+/** The image types passed on: those every AI app shows. */
+const IMAGE_TYPE = /^image\/(png|jpeg|gif|webp)$/;
 
-/** The blocks of an MCP result, within the budget; `undefined` if it is none. */
+const isString = (value: unknown): value is string => typeof value === "string";
+
+/**
+ * Whether `item` is an MCP content block with the fields its type requires,
+ * as the client library's `isContentBlock` checks it: `text`; `image` and
+ * `audio`; `resource_link`; `resource`. Anything else makes the value data
+ * that only has a `content` key (a ProseMirror document), not an MCP result.
+ */
+function isBlock(item: unknown): item is Record<string, unknown> {
+	if (!isObject(item)) return false;
+	switch (item["type"]) {
+		case "text":
+			return isString(item["text"]);
+		case "image":
+		case "audio":
+			return isString(item["data"]) && isString(item["mimeType"]);
+		case "resource_link":
+			return isString(item["uri"]) && isString(item["name"]);
+		case "resource":
+			return isObject(item["resource"]) && isString(item["resource"]["uri"]);
+		default:
+			return false;
+	}
+}
+
+/**
+ * The blocks of an MCP result, within the budget; `undefined` if it is none.
+ * Text and images (`IMAGE_TYPE`, base64) pass; each other block (audio, a
+ * resource, an image of another type) is a line that says it was left out;
+ * past `MAX_BLOCKS` the rest are one such line.
+ */
 function blocksOf(value: unknown): Block[] | undefined {
 	if (!isObject(value) || !Array.isArray(value["content"])) return undefined;
-	if (value["content"].length > MAX_BLOCKS) return undefined;
+	const items: unknown[] = value["content"];
+	if (!items.every(isBlock)) return undefined;
 	const blocks: Block[] = [];
 	let text = MAX_RESULT;
 	let images = MAX_IMAGES_BASE64;
-	for (const item of value["content"]) {
-		if (!isObject(item)) return undefined;
-		if (item["type"] === "text" && typeof item["text"] === "string") {
+	for (const [i, item] of (items as Record<string, unknown>[]).entries()) {
+		if (i === MAX_BLOCKS - 1 && items.length > MAX_BLOCKS) {
+			blocks.push({
+				type: "text",
+				text: `[${items.length - i} more content blocks left out: the tab-mcp browser extension passes on ${MAX_BLOCKS} blocks of a result.]`,
+			});
+			break;
+		}
+		const { type, data, mimeType } = item;
+		if (type === "text" && isString(item["text"])) {
 			if (text <= 0) continue;
 			const kept = cut(item["text"], text);
 			text -= kept.length;
 			blocks.push({ type: "text", text: kept });
 		} else if (
-			item["type"] === "image" &&
-			typeof item["data"] === "string" &&
-			BASE64.test(item["data"]) &&
-			typeof item["mimeType"] === "string" &&
-			/^image\/(png|jpeg|gif|webp)$/.test(item["mimeType"])
+			type === "image" &&
+			isString(data) &&
+			BASE64.test(data) &&
+			isString(mimeType) &&
+			IMAGE_TYPE.test(mimeType)
 		) {
-			if (item["data"].length > images) {
+			if (data.length > images) {
 				blocks.push({
 					type: "text",
-					text: `[An image of ${Math.ceil(item["data"].length / 1024)} KiB (base64) was left out: the images of one result may have ${MAX_IMAGES_BASE64 / 1024} KiB together.]`,
+					text: `[An image of ${Math.ceil(data.length / 1024)} KiB (base64) was left out: the images of one result may have ${MAX_IMAGES_BASE64 / 1024} KiB together.]`,
 				});
 				continue;
 			}
-			images -= item["data"].length;
+			images -= data.length;
+			blocks.push({ type: "image", data, mimeType });
+		} else
 			blocks.push({
-				type: "image",
-				data: item["data"],
-				mimeType: item["mimeType"],
+				type: "text",
+				text: `[${type === "image" ? `An image (${cut(String(mimeType), 50)})` : `${type} content`} was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]`,
 			});
-		} else return undefined;
 	}
 	return blocks;
 }
 
 /**
+ * The MCP result the AI app gets for page result `parsed` with `blocks`: its
+ * `isError`, and its `structuredContent` (an object) where its JSON fits
+ * the text budget the blocks left; else the blocks alone.
+ */
+function mcpResultOf(
+	parsed: Record<string, unknown>,
+	blocks: Block[],
+): Record<string, unknown> {
+	const result: Record<string, unknown> = { content: blocks };
+	const structured = parsed["structuredContent"];
+	const used = blocks.reduce(
+		(n, b) => n + (b.type === "text" ? b.text.length : 0),
+		0,
+	);
+	if (
+		isObject(structured) &&
+		JSON.stringify(structured).length <= MAX_RESULT - used
+	)
+		result["structuredContent"] = structured;
+	if (parsed["isError"] === true) result["isError"] = true;
+	return result;
+}
+
+/**
  * What `executeTool()` returned, as the tool's result: a string as one text
  * block; the JSON of an MCP result (`{"content": [...]}`, what
- * `@mcp-b/global` pages return) as its text and image blocks within the
- * budget; the JSON of another object without a `content` key, within
- * `MAX_RESULT`, as that object, which the library sends as text and as
- * `structuredContent` (WM 8); a JSON-encoded string as that string: the
- * draft serializes every result as JSON, Chrome 156 passes a string on as
- * it is (WM 7). (`null`, the tool navigated, is answered with the new page.)
+ * `@mcp-b/global` pages return, and what the client library gives a call
+ * the extension announced, DEC-224) as its blocks within the budget
+ * (`blocksOf`), with its `isError` and its `structuredContent` where it
+ * fits (`mcpResultOf`); the JSON of another object without a `content`
+ * key, within `MAX_RESULT`, as that object, which the library sends as
+ * text and as `structuredContent` (WM 8); a JSON-encoded string as that
+ * string: the draft serializes every result as JSON, Chrome 156 passes a
+ * string on as it is (WM 7). (`null`, the tool navigated, is answered with
+ * the new page.)
  */
 export function resultOf(value: string): unknown {
 	if (value.startsWith("{") || value.startsWith('"')) {
@@ -464,10 +533,8 @@ export function resultOf(value: string): unknown {
 			const parsed: unknown = JSON.parse(value);
 			if (typeof parsed === "string") return cut(parsed, MAX_RESULT);
 			const blocks = blocksOf(parsed);
-			if (blocks !== undefined)
-				return isObject(parsed) && parsed["isError"] === true
-					? { content: blocks, isError: true }
-					: { content: blocks };
+			if (blocks !== undefined && isObject(parsed))
+				return mcpResultOf(parsed, blocks);
 			// Not with a `content` key: the library would take it for an MCP
 			// result past the budget above.
 			if (
@@ -550,7 +617,10 @@ export interface CallTarget {
 export interface BridgeChrome {
 	current(): Promise<TargetTab>;
 	list(tab: TargetTab): Promise<PageTools>;
-	/** `vouch`: the user allowed this call; the page is told before it runs. */
+	/**
+	 * `vouch`: an AI app's call (`allowed`: the user allowed it); the page is
+	 * told before it runs.
+	 */
 	call(
 		tabId: number,
 		target: CallTarget,
@@ -790,8 +860,10 @@ export class PageToolBridge {
 
 	/**
 	 * Ask first for a tool that is not read-only (both ways of calling it),
-	 * then run it if it is still the tool the user was asked about, with a
-	 * vouch: the one place one is made (DEC-207).
+	 * then run it if it is still the tool the user was asked about. An AI
+	 * app's call goes to the page with a vouch (allowed) or, for a
+	 * read-only tool, a claim: the one place either is made (DEC-207,
+	 * DEC-224).
 	 */
 	async #allowedThenRun(
 		callable: Callable,
@@ -799,6 +871,7 @@ export class PageToolBridge {
 		options: ToolExecuteOptions,
 	): Promise<unknown> {
 		const { target } = callable;
+		const { client } = options;
 		if (!target.readOnly) {
 			await this.#confirm(
 				{
@@ -829,16 +902,19 @@ export class PageToolBridge {
 				throw new Error(
 					`The page's tool ${cut(target.name, MAX_NAME)} changed while the user was asked; it did not run. webmcp_tools lists the tools of the page in front.`,
 				);
-			// Allowed, and still the same tool: the page may skip its own
-			// question. Only an AI app through the relay gets here (`decide`).
-			const { client } = options;
-			if (client.kind === "relay")
-				return this.#run(callable, input, options, {
+		}
+		// Allowed and still the same tool (the page may skip its own
+		// question), or read-only: the page learns the call is the
+		// extension's, for this AI app, and gives it the whole MCP result,
+		// pictures too. Only an AI app through the relay gets past `decide`;
+		// a read-only call of any other caller goes without.
+		return client.kind === "relay"
+			? this.#run(callable, input, options, {
 					nonce: crypto.randomUUID(),
 					app: { name: client.name ?? "", host: client.host },
-				});
-		}
-		return this.#run(callable, input, options);
+					allowed: !target.readOnly,
+				})
+			: this.#run(callable, input, options);
 	}
 
 	/** Call a page tool with the timeout and cancellation; the call always ends. */

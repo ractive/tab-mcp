@@ -14,10 +14,12 @@
  * extension that comes later (this script runs at `document_idle` in
  * Chrome, or after a click). And only while AI access is on and connected
  * (DEC-221): then it tells the page its name and which AI apps are
- * connected (`hello`, `update`), and, right before a page tool runs that
- * the user allowed, `vouch`, and once that call ended or failed,
- * `withdraw` with the vouch's nonce, so that a vouch its call did not use
- * does not wait for another caller. While off it says nothing; a page it
+ * connected (`hello`, `update`), and, right before a page tool runs for an
+ * AI app, `vouch` if the user allowed the call, `claim` if it runs without
+ * a question (read-only; DEC-224), both asking for the whole MCP result,
+ * and once that call ended or failed, `withdraw` with its nonce, so that
+ * one its call did not use does not wait for another caller. While off it
+ * says nothing; a page it
  * told "on" hears `update` with `on: false` once, so that its display does
  * not stay on. Nothing else: not its version, not the relay, not the
  * address, not other tabs.
@@ -208,8 +210,11 @@ export class PageHandshake {
 	}
 
 	/**
-	 * Right before the page's tool `tool` runs with `args`, which the user
-	 * allowed: tell a page that announced the library. `state` came with the
+	 * Right before the page's tool `tool` runs with `args` for an AI app:
+	 * tell a page that announced the library, `vouch` if the user allowed
+	 * the call, `claim` if the extension runs it without asking (DEC-224);
+	 * either with `result: "mcp"`, so that the library answers with the
+	 * whole MCP result, pictures included. `state` came with the
 	 * call (a call means AI access is on): a page not told "on" yet (the
 	 * call came first, or the worker did not answer) is told it first, so
 	 * that the vouch is not lost. Never to a page not told "on". Synchronous,
@@ -226,11 +231,12 @@ export class PageHandshake {
 		if (!this.#on) return;
 		this.#vouched.add(vouch.nonce);
 		this.#send({
-			type: "vouch",
+			type: vouch.allowed ? "vouch" : "claim",
 			tool,
 			arguments: args,
 			nonce: vouch.nonce,
 			app: { name: vouch.app.name, host: vouch.app.host },
+			result: "mcp",
 		});
 	}
 

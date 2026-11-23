@@ -191,7 +191,9 @@ export function resultText(result: CallToolResult, noted = false): string {
 }
 
 /**
- * What a WebMCP caller gets for what `execute` returned (WM 4, WM 6): an MCP
+ * What a WebMCP caller gets for what `execute` returned (WM 4, WM 6), unless
+ * the tab-mcp browser extension announced the call for the whole result
+ * (`mcpParts`, DEC-224): an MCP
  * result as its `structuredContent` if it has one, else as its text
  * (`resultText`, other blocks noted); `undefined` (which a browser cannot
  * serialize as JSON, so the call would fail) and an empty MCP result as
@@ -201,6 +203,21 @@ export function webMcpValue(value: unknown): unknown {
 	if (isCallToolResult(value))
 		return value.structuredContent ?? (resultText(value, true) || "Done.");
 	return value === undefined ? "Done." : value;
+}
+
+/**
+ * What a WebMCP call the tab-mcp browser extension announced with
+ * `result: "mcp"` gets for an MCP result (DEC-224): its `content` (images
+ * included), `structuredContent` and `isError`, nothing else (no `_meta`).
+ * The extension passes these on to its AI app within its own limits.
+ */
+export function mcpParts(result: CallToolResult): CallToolResult {
+	const { content, structuredContent, isError } = result;
+	return {
+		content,
+		...(structuredContent ? { structuredContent } : {}),
+		...(isError ? { isError } : {}),
+	};
 }
 
 /** A thrown value → an `isError` result with its message. */

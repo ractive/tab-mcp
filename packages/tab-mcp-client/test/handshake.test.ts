@@ -601,6 +601,200 @@ describe("the vouch", () => {
 	});
 });
 
+/** A read-only tool that answers with a picture (as saturnus's `read_display`). */
+const PNG = "iVBORw0KGgoAAAANSUhEUg==";
+const picture = {
+	name: "snapshot",
+	description: "The page as a picture",
+	annotations: { readOnlyHint: true },
+	execute: () => ({
+		content: [
+			{ type: "text", text: "The page:" },
+			{ type: "image", data: PNG, mimeType: "image/png" },
+		],
+		_meta: { "example.com/kept": true },
+	}),
+};
+const PICTURE_TEXT =
+	"The page:\n[image content left out: WebMCP results are text.]";
+/** The extension's announcement of a call it runs without asking (DEC-224). */
+const claim = (args: Record<string, unknown>, extra: object = {}) => ({
+	...vouch(args),
+	type: "claim",
+	tool: "snapshot",
+	result: "mcp",
+	...extra,
+});
+
+/** A page with `snapshot` and `complete_todo` mirrored. */
+async function picturePage(options: Partial<TabMcpOptions> = {}) {
+	const page = await todoPage(options);
+	await page.t.registerTool(picture, callers);
+	await settle();
+	return page;
+}
+
+describe("the claim and the whole result (DEC-224)", () => {
+	test("a claimed call gets the whole MCP result, picture included, and names the AI app", async () => {
+		const { asked, calls } = await picturePage();
+		tell(claim({}));
+		await expect(native.call("snapshot", {})).resolves.toEqual({
+			content: [
+				{ type: "text", text: "The page:" },
+				{ type: "image", data: PNG, mimeType: "image/png" },
+			],
+		});
+		expect(asked).toEqual([]);
+		expect(calls.map((c) => c.client)).toEqual([
+			{
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				name: "Claude",
+				host: "claude.ai",
+			},
+		]);
+	});
+
+	test("without a claim, or with one of an older extension (no result: mcp), the reduced text as today", async () => {
+		await picturePage();
+		await expect(native.call("snapshot", {})).resolves.toBe(PICTURE_TEXT);
+		tell(claim({}, { result: undefined }));
+		await expect(native.call("snapshot", {})).resolves.toBe(PICTURE_TEXT);
+		// An older extension's vouch: the same.
+		tell(vouch({}, { tool: "snapshot" }));
+		await expect(native.call("snapshot", {})).resolves.toBe(PICTURE_TEXT);
+	});
+
+	test("a claim does not allow: onConfirm decides a tool that asks, and is told the AI app", async () => {
+		const { asked, calls } = await picturePage();
+		// A page script can say `allowed`; only the type `vouch` allows.
+		tell(claim({ id: 3 }, { tool: "complete_todo", allowed: true }));
+		// A plain value stays as it is.
+		await expect(native.call("complete_todo", { id: 3 })).resolves.toBe(
+			"done 3",
+		);
+		expect(asked.map((r) => r.client)).toEqual([
+			{
+				kind: "webmcp",
+				via: "tab-mcp-extension",
+				name: "Claude",
+				host: "claude.ai",
+			},
+		]);
+		expect(calls).toHaveLength(1);
+	});
+
+	test("a vouch with result: mcp runs unasked and gets the whole result; a refusal of onConfirm on a claim is an isError result", async () => {
+		const { asked } = await picturePage({ onConfirm: () => false });
+		tell(vouch({ id: 1 }, { result: "mcp" }));
+		await expect(native.call("complete_todo", { id: 1 })).resolves.toBe(
+			"done 1",
+		);
+		tell(vouch({}, { tool: "snapshot", result: "mcp" }));
+		await expect(native.call("snapshot", {})).resolves.toMatchObject({
+			content: [{}, { type: "image", data: PNG }],
+		});
+		expect(asked).toEqual([]);
+		tell(claim({ id: 2 }, { tool: "complete_todo" }));
+		await expect(native.call("complete_todo", { id: 2 })).resolves.toEqual({
+			content: [
+				{ type: "text", text: "The user did not allow complete_todo to run." },
+			],
+			isError: true,
+		});
+	});
+
+	test("whole: structuredContent and isError pass, a failure is an isError result, a plain value is as today", async () => {
+		const { t } = await picturePage();
+		const returns: unknown[] = [
+			{
+				content: [{ type: "text", text: '{"n":1}' }],
+				structuredContent: { n: 1 },
+			},
+			{ content: [{ type: "text", text: "no" }], isError: true },
+			"plain",
+			{ n: 2 },
+			undefined,
+		];
+		let next = 0;
+		await t.registerTool(
+			{
+				name: "many",
+				description: "Answers with what the test wants",
+				annotations: { readOnlyHint: true },
+				execute: ({ fail }: Record<string, unknown>) => {
+					if (fail) throw new Error("It broke.");
+					return returns[next++];
+				},
+			},
+			callers,
+		);
+		await settle();
+		const whole = () => {
+			tell(claim({}, { tool: "many" }));
+			return native.call("many", {});
+		};
+		expect(await whole()).toEqual({
+			content: [{ type: "text", text: '{"n":1}' }],
+			structuredContent: { n: 1 },
+		});
+		expect(await whole()).toEqual({
+			content: [{ type: "text", text: "no" }],
+			isError: true,
+		});
+		expect(await whole()).toBe("plain");
+		expect(await whole()).toEqual({ n: 2 });
+		expect(await whole()).toBe("Done.");
+		tell(claim({ fail: true }, { tool: "many" }));
+		expect(await native.call("many", { fail: true })).toEqual({
+			content: [{ type: "text", text: "It broke." }],
+			isError: true,
+		});
+		// Unannounced, the same failure as today.
+		expect(await native.call("many", { fail: true })).toEqual({
+			error: "It broke.",
+		});
+	});
+
+	test("trustExtension: false ignores claims too: the reduced text, no AI app named", async () => {
+		const { calls } = await picturePage({ trustExtension: false });
+		tell(claim({}));
+		await expect(native.call("snapshot", {})).resolves.toBe(PICTURE_TEXT);
+		expect(calls[0]?.client).toEqual({ kind: "webmcp" });
+	});
+
+	test("a withdrawn claim is dropped; a claim is used once", async () => {
+		await picturePage();
+		const once = claim({});
+		tell(once);
+		tell({ v: 1, type: "withdraw", nonce: once.nonce });
+		await expect(native.call("snapshot", {})).resolves.toBe(PICTURE_TEXT);
+		tell(claim({}));
+		await native.call("snapshot", {});
+		await expect(native.call("snapshot", {})).resolves.toBe(PICTURE_TEXT);
+	});
+
+	test("past 16 waiting, the oldest is dropped: its call gets the reduced text and does not fail", async () => {
+		const { t } = await picturePage();
+		await t.registerTool(
+			{
+				...picture,
+				name: "page",
+				inputSchema: { type: "object", properties: { n: { type: "number" } } },
+			},
+			callers,
+		);
+		await settle();
+		for (let n = 0; n < 17; n++) tell(claim({ n }, { tool: "page" }));
+		const results = await Promise.all(
+			Array.from({ length: 17 }, (_, n) => native.call("page", { n })),
+		);
+		expect(results[0]).toBe(PICTURE_TEXT);
+		for (const result of results.slice(1))
+			expect(result).toMatchObject({ content: [{}, { type: "image" }] });
+	});
+});
+
 describe("the connect dialog", () => {
 	test("says first which AI apps are connected through the extension; connecting here stays as it was", async () => {
 		const relay = new StubRelay();
