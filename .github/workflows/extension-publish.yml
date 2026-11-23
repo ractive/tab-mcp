@@ -54,7 +54,7 @@ jobs:
 
   publish-edge:
     if: inputs.store == 'edge' || inputs.store == 'all'
-    uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@f1fde0fc2dfb016201659084f5d9d4f2ad2cea5a # v0.7.0
+    uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@e481d39debc964c304c97327982d28431bc9604a # v0.8.2
     secrets: inherit
     permissions:
       contents: read

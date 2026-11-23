@@ -150,7 +150,7 @@ serves.
 
 The same release goes to its Edge Add-ons item (DEC-194): `extension-release.yml`'s job
 `publish-edge` runs beside `publish`, after the release, and calls
-[edge-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.7.0/.github/workflows/edge-extension-publish.yml)
+[edge-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.8.2/.github/workflows/edge-extension-publish.yml)
 of ractive/release-workflows (pinned to a commit) in the environment `edge-add-ons`
 (required reviewer, tags `extension-v*` only). It runs the same checks of the tag, the
 manifest and the zip's build provenance, then uploads the zip itself (Edge takes no CRX

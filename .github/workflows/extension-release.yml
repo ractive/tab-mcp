@@ -264,7 +264,7 @@ jobs:
     # not hold back the other. Each waits for the owner's approval in its own
     # environment.
     needs: release
-    uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@f1fde0fc2dfb016201659084f5d9d4f2ad2cea5a # v0.7.0
+    uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@e481d39debc964c304c97327982d28431bc9604a # v0.8.2
     # The environment edge-add-ons (required reviewer, tags extension-v* only)
     # holds EDGE_CLIENT_ID and EDGE_API_KEY; inherit passes them on, as above.
     secrets: inherit
