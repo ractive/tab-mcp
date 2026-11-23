@@ -60,6 +60,11 @@ export type PanelCommand =
 	| { type: "stop" }
 	/** The pairing view opened (`on`) or closed: codes only while it is open. */
 	| { type: "pair"; on: boolean }
+	/**
+	 * "Recent calls" opened (`open`) or closed (DEC-226): the list comes
+	 * once it opens, its changes while it is open.
+	 */
+	| { type: "calls"; open: boolean }
 	| { type: "revoke"; grantId: string }
 	| { type: "disconnect-all" }
 	| { type: "set-relay"; relay: string }
@@ -179,6 +184,8 @@ export interface PanelState {
 	 * (DEC-225).
 	 */
 	calling: boolean;
+	/** How many calls "Recent calls" lists (DEC-226), at most `MAX_CALLS`. */
+	recentCalls: number;
 	/** The last error, until the next connection. */
 	problem?: string;
 	/** Another tab or program took the address over. */
@@ -209,11 +216,49 @@ export interface PanelState {
 /** A question as the repeated state lists it: all but its arguments. */
 export type QuestionSummary = Omit<QuestionView, "args">;
 
+/**
+ * A call of an AI app through the extension, as "Recent calls" lists it
+ * (DEC-226). Every text is cut and on one line, invisible characters
+ * escaped (`worker/recent.ts`); the panel shows it as text.
+ */
+export interface CallView {
+	/** The library's id of the call. */
+	id: number;
+	/** When it started (ms since the epoch). */
+	at: number;
+	/** The AI app: its own name ("" if none) and its verified host. */
+	app: string;
+	host: string;
+	/** The tool as the AI app named it. */
+	tool: string;
+	/** A page tool's or a navigation's site: the tab's origin. */
+	site?: string;
+	/** The arguments as one line of JSON, cut. */
+	args: string;
+	state:
+		| "running"
+		| "waiting"
+		| "ok"
+		| "failed"
+		| "declined"
+		| "unanswered"
+		| "cancelled"
+		| "timeout";
+	/** Allowed by the user: in its question, or by "Always allow". */
+	allowed?: "once" | "always";
+	/** A failed call's error, its first line, cut. */
+	error?: string;
+}
+
 /** From the service worker. */
 export type WorkerMessage =
 	| { type: "state"; state: PanelState }
 	/** A question's arguments, in full, once per panel. */
-	| { type: "question-args"; id: string; args: string };
+	| { type: "question-args"; id: string; args: string }
+	/** "Recent calls", newest first: once the section opened. */
+	| { type: "calls"; calls: CallView[] }
+	/** A call added or changed, while the section is open. */
+	| { type: "call"; call: CallView };
 
 /**
  * What a panel shows when the worker could not start: the problem, and
@@ -229,6 +274,7 @@ export function startProblem(error: unknown): PanelState {
 		grants: [],
 		pairing: false,
 		calling: false,
+		recentCalls: 0,
 		problem: `The ${PRODUCT} could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],
@@ -335,6 +381,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "pair":
 			return typeof m["on"] === "boolean"
 				? { type: "pair", on: m["on"] }
+				: undefined;
+		case "calls":
+			return typeof m["open"] === "boolean"
+				? { type: "calls", open: m["open"] }
 				: undefined;
 		case "revoke":
 			return isString(m["grantId"])

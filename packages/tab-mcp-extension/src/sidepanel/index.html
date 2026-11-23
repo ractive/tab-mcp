@@ -72,6 +72,12 @@
 			<p id="disconnect-all-note" class="muted small" hidden>This disconnects every AI app; each has to connect again with a new code. Click again to do it.</p>
 		</div>
 		<p class="muted small">AI access stays on with this panel closed, until you turn it off.</p>
+		<details id="calls" class="calls">
+			<summary id="calls-summary">Recent calls (0)</summary>
+			<p id="calls-note" class="muted small">The last 100 calls of your AI apps, newest first, with their arguments cut. Not saved: they are gone when the extension stops.</p>
+			<p id="calls-empty" class="muted small">No AI app has called a tool since the extension started.</p>
+			<ol id="calls-list" class="calls-list" aria-labelledby="calls-summary" hidden></ol>
+		</details>
 	</section>
 
 	<section class="card" aria-labelledby="tab-heading">

@@ -347,7 +347,14 @@ The side panel shows the connection and its apps, the pairing view, questions, t
 front with its tools ("reads", "asks first", or an "Always allow" switch where a tool can be
 allowed on the site), and the relay address under
 Settings. While an AI app's call runs and 5 s after the last, the AI access switch glows
-(a many-coloured ring and a breathing halo, a style alone; DEC-225). The icon's badge
+(a many-coloured ring and a breathing halo, a style alone; DEC-225). "Recent calls",
+folded at the foot of the AI access card, lists the AI apps' last 100 calls, newest
+first: start time, tool, outcome, AI app, site and the arguments cut to one line, no
+results; held in the service worker's memory only, never stored, and sent to a panel
+only while the section is open (DEC-226, `src/worker/recent.ts`,
+`src/sidepanel/calls.ts`). Each arguments line wider than the panel unfolds and is one
+tab stop, so an open list of 100 long calls is up to 100 stops; it stays so (the review
+of PR 243), since the section is closed by default. The icon's badge
 shows "on", "…" or "?" (a question waits), not the calls. The connector
 carries the extension's icon. The panel's look (paper and ink on tokens whose pairs are
 held to their contrast in light and dark, no amber button, what each colour says) is

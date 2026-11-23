@@ -24,6 +24,7 @@ import {
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
+import { CallsView, summaryText } from "./calls.ts";
 import {
 	allowAllLabel,
 	allowAllView,
@@ -159,6 +160,8 @@ function connect(): void {
 	opened.onMessage.addListener((message: WorkerMessage) => {
 		if (message?.type === "question-args") args.set(message.id, message.args);
 		else if (message?.type === "state") show(message.state);
+		else if (message?.type === "calls") calls.set(message.calls);
+		else if (message?.type === "call") calls.put(message.call);
 	});
 	opened.onDisconnect.addListener(() => {
 		if (port === opened) port = undefined;
@@ -171,7 +174,31 @@ function connect(): void {
 	if (windowId !== undefined) send({ type: "hello", windowId });
 	sendVisible();
 	if (pairing) send({ type: "pair", on: true });
+	// A restarted worker has a list of its own (empty): open, it comes again.
+	if (callsSection.open) send({ type: "calls", open: true });
 }
+
+// --- Recent calls (DEC-226) ---
+
+const callsSection = $<HTMLDetailsElement>("calls");
+const calls = new CallsView($("calls-list"), $("calls-empty"), {
+	drawn: () => showCallCount(),
+});
+
+/**
+ * The count in the summary: the list's while open (it may be ahead of the
+ * last state), else the state's.
+ */
+function showCallCount(): void {
+	const count = callsSection.open ? calls.count : (state?.recentCalls ?? 0);
+	setText($("calls-summary"), summaryText(count));
+}
+
+// Asked for when it opens, its changes while it is open; nothing while closed.
+callsSection.addEventListener("toggle", () => {
+	send({ type: "calls", open: callsSection.open });
+	showCallCount();
+});
 
 // --- The AI app ---
 
@@ -724,6 +751,7 @@ function show(s: PanelState): void {
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
+	showCallCount();
 	showFillNotice(s);
 	fill.show(s);
 	showQuestions(s.questions, s.expired);

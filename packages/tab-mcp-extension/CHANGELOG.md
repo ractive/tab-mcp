@@ -45,6 +45,14 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
   connection lost, it goes at once. A style alone: no text or name changes, so a screen
   reader hears nothing of it; with reduced motion nothing moves. The toolbar icon does
   not change.
+- **Recent calls in the side panel** (DEC-226). A folded section "Recent calls" in the
+  AI access card lists the last 100 tool calls of your AI apps through the extension,
+  read-only ones included, newest first: when each started, the tool, how it went (ran,
+  failed with the error's first words, allowed by you or always allowed, declined by
+  you, not answered in time, cancelled by the AI app, the page did not answer in time;
+  running or waiting for your answer meanwhile), the AI app, the site, and the
+  arguments on one line, cut to 150 characters. No results. Kept in the service
+  worker's memory only, never stored: gone when the worker stops.
 
 ### Changed
 

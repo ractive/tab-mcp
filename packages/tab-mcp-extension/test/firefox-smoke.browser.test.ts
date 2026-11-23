@@ -44,6 +44,7 @@ import {
 } from "./firefox-e2e.ts";
 import { glowsWhileCalling } from "./glow.ts";
 import { picturesThroughTheExtension } from "./pictures.ts";
+import { listsTheCalls } from "./recent-calls.ts";
 
 setDefaultTimeout(30_000);
 
@@ -205,6 +206,22 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		expect(await stack.tab.eval("window.calls.map((c) => c[1])")).not.toContain(
 			"coffee",
 		);
+	});
+
+	test("Recent calls lists a read-only call and a declined one, newest first, once opened (DEC-226)", async () => {
+		await listsTheCalls(
+			(expression) => stack.panel.eval(expression),
+			() => call(stack, "page_get_greeting", { name: "Ada" }),
+			async () => {
+				const declined = call(stack, "page_place_order", { item: "tea" });
+				await answerInPanel(stack, "deny");
+				expect((await declined).isError).toBe(true);
+			},
+			() => stack.panel.click("#calls-summary"),
+			new URL(stack.site).host,
+		);
+		// Closed again for the tests after.
+		await stack.panel.eval(`document.getElementById("calls").open = false`);
 	});
 
 	test("a question is a notification too: recorded with its text, and answered through it", async () => {

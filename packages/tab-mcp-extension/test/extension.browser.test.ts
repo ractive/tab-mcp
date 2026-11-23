@@ -51,6 +51,7 @@ import {
 } from "./browser.ts";
 import { glowsWhileCalling } from "./glow.ts";
 import { picturesThroughTheExtension } from "./pictures.ts";
+import { listsTheCalls } from "./recent-calls.ts";
 
 // `bun run test:browser` runs these with Bun's default of 5 s a test: too
 // short on CI for a navigation, an icon click and the tools following.
@@ -818,6 +819,25 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(result.content[0]?.text).toContain("tea");
 	});
 
+	test("Recent calls lists a read-only call and a declined one, newest first, once opened, with the AI app's name (DEC-226)", async () => {
+		// The relay lists the AI app: its name comes with the calls.
+		await listTestApp(stack);
+		await listsTheCalls(
+			(expression) => stack.panel.eval(expression),
+			() => call(stack, "page_get_greeting", { name: "Ada" }),
+			async () => {
+				const declined = call(stack, "page_place_order", { item: "tea" });
+				await answerInPanel(stack, "deny");
+				expect((await declined).isError).toBe(true);
+			},
+			() => stack.panel.click("#calls-summary"),
+			new URL(SITE).host,
+			TEST_APP,
+		);
+		// Closed again, as the Firefox check leaves it.
+		await stack.panel.eval(`document.getElementById("calls").open = false`);
+	});
+
 	test("the look: nothing past the panel's edge at 345, 360 and 420 px, no amber button, each scheme's tokens (DEC-160 to DEC-163)", async () => {
 		await step(
 			"the AI access switch: its knob sits flush at both ends, light, dark and forced colours",
@@ -1115,6 +1135,8 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 					await panel.eval(`(() => {
 					document.getElementById("setup").open = true;
 					document.querySelector("details.settings").open = true;
+					// "Recent calls" open: the question's call below lists its long arguments.
+					document.getElementById("calls").open = true;
 					for (const id of ["local-problem", "replaced"]) document.getElementById(id).hidden = false;
 					document.getElementById("local-problem").textContent = "Could not reach the relay at https://${LONG}.example";
 					document.getElementById("replaced-text").textContent = "Another tab or program took over this address ${LONG}";
@@ -1149,7 +1171,33 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 						item: LONG.repeat(4),
 					});
 					await panel.waitFor(`document.querySelector("[data-question] pre")`);
+					// Its call in "Recent calls", the arguments unfolded: they wrap.
+					await panel.waitFor(
+						`document.querySelector("#calls-list details.call-args") !== null`,
+					);
+					/** The chevron before the arguments: drawn, and its turn. */
+					const chevron = () =>
+						panel.eval<{ width: number; transform: string }>(`(() => {
+						const s = getComputedStyle(document.querySelector("#calls-list details.call-args summary"), "::before");
+						return { width: parseFloat(s.width) + parseFloat(s.borderRightWidth), transform: s.transform };
+					})()`);
+					const folded = await chevron();
+					await panel.eval(
+						`document.querySelector("#calls-list details.call-args").open = true`,
+					);
+					// A row that unfolds shows it: a chevron that turns when open.
+					const open = await chevron();
+					expect(folded.width).toBeGreaterThan(4);
+					expect(open.width).toBe(folded.width);
+					expect(open.transform).not.toBe(folded.transform);
 					await holds();
+					// Unfolded, the whole cut line shows: nothing clipped, several lines.
+					expect(
+						await panel.eval<[boolean, boolean]>(`(() => {
+						const c = document.querySelector("#calls-list details.call-args code");
+						return [c.scrollWidth <= c.clientWidth, c.offsetHeight > 30];
+					})()`),
+					).toEqual([true, true]);
 					// It is a sheet with an edge; "Allow once" is drawn as "Don't
 					// allow" is, the default button (DEC-180), and while it takes no
 					// click it is flat, in colours of its own. The pointer off the

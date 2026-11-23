@@ -14,6 +14,7 @@ import {
 	type Icon,
 	type ReplacedDetail,
 	TabMcp,
+	type Tool,
 } from "@ractive-ch/tab-mcp-client";
 import {
 	CodeFiller,
@@ -36,6 +37,7 @@ import { BADGE_LOOK } from "../look.ts";
 import type { ContentRequest, ExtensionState } from "../messages.ts";
 import {
 	APP_ID,
+	type CallView,
 	type GrantView,
 	type PanelCommand,
 	type PanelState,
@@ -87,6 +89,7 @@ import { LateWebMCP, mayGiveLate } from "./late-webmcp.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { notificationApi } from "./notifications.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
+import { RecentCalls } from "./recent.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	loadAiOn,
@@ -118,6 +121,8 @@ interface Panel {
 	visible: boolean;
 	/** The questions whose arguments it got (they are sent once). */
 	argsSent: Set<string>;
+	/** Its "Recent calls" is open: it gets the calls' changes (DEC-226). */
+	calls: boolean;
 }
 
 /** The extension's icon for the AI app's connector list (a PNG `data:` URI). */
@@ -180,6 +185,25 @@ export function panelStatus(s: StatusInput): PanelState["status"] {
 	return "off";
 }
 
+/**
+ * A navigation tool whose call "Recent calls" names with the site of the
+ * tab in front as it starts, the tab it acts on (DEC-226).
+ */
+function withSite(tool: Tool, recent: RecentCalls): Tool {
+	return {
+		...tool,
+		execute: (input, options) => {
+			void tabInFront()
+				.then((tab) => {
+					const { origin } = new URL(tab.url);
+					if (origin !== "null") recent.note(options.signal, { site: origin });
+				})
+				.catch(() => {});
+			return tool.execute(input, options);
+		},
+	};
+}
+
 export class Connection {
 	readonly #storage: CachedSecretStorage;
 	readonly #icons: Icon[];
@@ -211,6 +235,19 @@ export class Connection {
 	 * none or some run; the badge and the pages do not change with it.
 	 */
 	readonly #calls = new RunningCalls(() => this.#tellPanels());
+	/**
+	 * "Recent calls" (DEC-226), in memory only: each change goes to the
+	 * panels that have it open; the state carries only the count.
+	 */
+	readonly #recent = new RecentCalls(
+		(call, added) => this.#callChanged(call, added),
+		{
+			nameOf: (grantId) =>
+				this.#grants.find((g) => g.grantId === grantId)?.name,
+		},
+	);
+	/** The count the panels were last told. */
+	#recentSent = 0;
 	#problem: string | undefined;
 	readonly #kv: Kv;
 	/** Taken over (kept in storage too, so it holds across worker restarts). */
@@ -333,8 +370,14 @@ export class Connection {
 			// WebMCP on, and the extension's tools are for its AI apps only.
 			webmcp: false,
 		});
+		// Every tool of the extension's, the page's too, binds its call for
+		// "Recent calls" as it runs (DEC-226).
+		const recent = this.#recent;
 		const bridge = new PageToolBridge(
-			mcp,
+			{
+				registerTool: (tool, options) =>
+					mcp.registerTool(recent.wrap(tool), options),
+			},
 			{
 				current: tabInFront,
 				// A page without WebMCP gets the extension's own now, where it
@@ -360,13 +403,14 @@ export class Connection {
 			{
 				changed: () => void this.#readTab(),
 				confirm: (request, tool) => this.#decide(request, tool),
+				note: (signal, fact) => recent.note(signal, fact),
 			},
 		);
 		for (const tool of createTools(
 			{ current: tabInFront, page: askPage },
 			() => bridge,
 		))
-			void mcp.registerTool(tool);
+			void mcp.registerTool(recent.wrap(tool));
 		// Navigation (iteration 27, DEC-121): to another origin it asks
 		// through the same questions, never "allowed".
 		for (const tool of navigationTools(
@@ -377,14 +421,28 @@ export class Connection {
 				history: askHistory,
 				go: goInTab,
 			},
-			(request, where) => this.#questions.ask(request, where),
+			(request, where) => this.#ask(request, where),
 			() => bridge.refresh(),
 		))
-			void mcp.registerTool(tool);
+			void mcp.registerTool(recent.wrap(withSite(tool, recent)));
 		// A new connection is not up yet: it reads the page once it is, or
 		// for a panel (`#readsWanted`).
 		if (this.#panels.size > 0) void bridge.refresh();
 		return [mcp, bridge];
+	}
+
+	/**
+	 * A question for a page tool or a navigation; "Recent calls" shows it
+	 * waiting, then the answer (DEC-226).
+	 */
+	async #ask(
+		request: Parameters<Questions["ask"]>[0],
+		where: Parameters<Questions["ask"]>[1],
+	): ReturnType<Questions["ask"]> {
+		this.#recent.note(request.signal, { waiting: true });
+		const answer = await this.#questions.ask(request, where);
+		this.#recent.note(request.signal, { answer });
+		return answer;
 	}
 
 	/**
@@ -395,8 +453,12 @@ export class Connection {
 	#decide(request: ConfirmRequest, tool: LookedUp): Promise<void> {
 		return decide(
 			{
-				allowed: (origin, name) => isAllowed(this.#allowed, origin, name),
-				ask: (r, where) => this.#questions.ask(r, where),
+				allowed: (origin, name) => {
+					const yes = isAllowed(this.#allowed, origin, name);
+					if (yes) this.#recent.note(request.signal, { allowedBefore: true });
+					return yes;
+				},
+				ask: (r, where) => this.#ask(r, where),
 				allow: (origin, name) =>
 					this.#queue(async () => {
 						this.#allowed = await setAllowed(this.#kv, origin, name, true);
@@ -426,6 +488,7 @@ export class Connection {
 		this.#listening = new AbortController();
 		const { signal } = this.#listening;
 		this.#calls.watch(mcp, signal);
+		this.#recent.watch(mcp, signal);
 		const changed = () => this.#changed();
 		// `statechange` and `grantschange` have their own listeners below, which
 		// call `#changed` too.
@@ -651,6 +714,7 @@ export class Connection {
 			pairing: false,
 			visible: true,
 			argsSent: new Set(),
+			calls: false,
 		};
 		this.#panels.add(panel);
 		const receive = (raw: unknown) => {
@@ -707,6 +771,11 @@ export class Connection {
 				if (command.on) this.#mcp.startPairing();
 				else this.#pairingOff();
 				this.#changed();
+				return;
+			case "calls":
+				panel.calls = command.open;
+				if (command.open)
+					this.#post(panel, { type: "calls", calls: this.#recent.list });
 				return;
 			case "revoke":
 				// Only the relay can disconnect an app: not while down (EQ 8). The
@@ -1186,6 +1255,7 @@ export class Connection {
 			grants: this.#grants,
 			pairing: [...this.#panels].some((p) => p.pairing),
 			calling: this.#calls.any,
+			recentCalls: this.#recent.count,
 			...(code !== undefined ? { code } : {}),
 			...(problem !== undefined ? { problem } : {}),
 			...(this.#replaced !== undefined
@@ -1285,6 +1355,27 @@ export class Connection {
 		this.#showBadge();
 		this.#tellPages();
 		this.#tellPanels();
+	}
+
+	/**
+	 * A call added to "Recent calls" or changed: to the panels that have it
+	 * open; the others learn only the count, in the state, while it grows.
+	 */
+	#callChanged(call: CallView, added: boolean): void {
+		for (const panel of this.#panels)
+			if (panel.calls) this.#post(panel, { type: "call", call });
+		if (added && this.#recent.count !== this.#recentSent) {
+			this.#recentSent = this.#recent.count;
+			this.#tellPanels();
+		}
+	}
+
+	#post(panel: Panel, message: WorkerMessage): void {
+		try {
+			panel.port.postMessage(message);
+		} catch {
+			// Closed meanwhile: its onDisconnect removes it.
+		}
 	}
 
 	/** Tell the panels, once per turn of the event loop. */

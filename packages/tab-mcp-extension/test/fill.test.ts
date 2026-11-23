@@ -385,6 +385,7 @@ function panel(granted: boolean) {
 		relay: RELAY,
 		pairing: true,
 		calling: false,
+		recentCalls: 0,
 		grants: [],
 		allSites: false,
 		questions: [],

@@ -997,6 +997,115 @@ button.copy {
 	gap: var(--s2);
 }
 
+/*
+ * "Recent calls" (DEC-226): a folding sheet as "How do I add it?", the calls
+ * in rows between rules as the AI apps are. Each row: the tool (monospace)
+ * and the time, how it went, the AI app and the site, the arguments on one
+ * line (cut with an ellipsis; a longer one unfolds to the whole, wrapped,
+ * with a click or the keyboard: nothing is said in a `title` alone).
+ */
+.calls {
+	margin-top: var(--s3);
+	padding: 0 10px;
+	border: 1px solid var(--rule);
+	border-radius: var(--r-control);
+	background: var(--paper);
+}
+
+.calls > summary {
+	padding: 6px 0;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.calls[open] {
+	padding-bottom: 10px;
+}
+
+.calls-list {
+	list-style: none;
+	margin: var(--s2) 0 0;
+	padding: 0;
+}
+
+.calls-list li {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	padding: var(--s2) 0;
+	border-top: 1px solid var(--rule);
+	overflow-wrap: anywhere;
+}
+
+.call-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--s2);
+}
+
+.call-head time {
+	flex: none;
+}
+
+.call-tool {
+	font-weight: 600;
+}
+
+.call-line {
+	display: block;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--ink-2);
+}
+
+/* The AI app as the AI access card lists it: its name in ink, its host muted. */
+.call-who .call-app {
+	color: var(--ink);
+}
+
+/*
+ * Arguments that unfold: a chevron before them, pointing right while folded
+ * and down while open (no transition), as a row that unfolds looks.
+ */
+.call-args summary {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	list-style: none;
+	cursor: pointer;
+}
+
+.call-args summary::-webkit-details-marker {
+	display: none;
+}
+
+.call-args summary::before {
+	content: "";
+	flex: none;
+	width: 5px;
+	height: 5px;
+	border-right: 1.5px solid var(--ink-2);
+	border-bottom: 1.5px solid var(--ink-2);
+	transform: translateY(-2px) rotate(-45deg);
+}
+
+.call-args[open] summary::before {
+	transform: translateY(-3px) rotate(45deg);
+}
+
+.call-args summary .call-line {
+	flex: 1;
+	min-width: 0;
+}
+
+.call-args[open] .call-line {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
 /* --- settings ----------------------------------------------------------------- */
 
 .settings summary {

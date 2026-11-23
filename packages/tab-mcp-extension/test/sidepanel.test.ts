@@ -22,11 +22,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Window } from "happy-dom";
 import type {
+	CallView,
 	PanelCommand,
 	PanelState,
 	QuestionSummary,
 	ToolView,
+	WorkerMessage,
 } from "../src/protocol.ts";
+import {
+	ARGS_LINE,
+	CALLS_EMPTY,
+	CALLS_NOTE,
+	CallsView,
+	displayWidth,
+	MAX_SHOWN,
+	summaryText,
+} from "../src/sidepanel/calls.ts";
 
 const SITE = "https://shop.example";
 /** The panel's waits (main.ts `ALLOW_DELAY_MS`), and a bit. */
@@ -48,6 +59,8 @@ const GLOBALS = [
 	"clearTimeout",
 	"setInterval",
 	"clearInterval",
+	"requestAnimationFrame",
+	"cancelAnimationFrame",
 ] as const;
 
 const g = globalThis as Record<string, unknown>;
@@ -152,6 +165,8 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 		doc,
 		sent,
 		show: (state: PanelState) => deliver({ type: "state", state }),
+		/** Any other message of the worker's. */
+		post: (message: WorkerMessage) => deliver(message),
 		/** Chrome ends the port (the worker stopped, an update, a reload). */
 		drop: () => dropped(),
 		/** The clock `ms` on, and the panel's own check of its waits run. */
@@ -163,6 +178,11 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 			doc.querySelector(selector) as T | null,
 		/** The commands sent since the last call. */
 		take: () => sent.splice(0),
+		/** The next animation frame drawn (the panel's own, asked for before, first). */
+		frame: () =>
+			new Promise<void>((resolve) =>
+				win.requestAnimationFrame(() => resolve()),
+			),
 	};
 	return panel;
 }
@@ -184,6 +204,7 @@ function stateWith(
 		grants: [{ grantId: "g1", name: "Claude", host: "claude.ai" }],
 		pairing: false,
 		calling: false,
+		recentCalls: 0,
 		allSites: true,
 		questions,
 		expired: [],
@@ -214,6 +235,258 @@ const switchOf = (name: string) => `input.always-allow[data-tool="${name}"]`;
 const allowOf = (id: string) =>
 	`[data-question="${id}"] button[data-answer="allow"]`;
 const disabled = (e: Element | null) => e?.getAttribute("aria-disabled");
+
+describe("Recent calls (DEC-226)", () => {
+	const call = (id: number, more: Partial<CallView> = {}): CallView => ({
+		id,
+		at: Date.UTC(2026, 10, 24, 9, 30, id),
+		app: "Claude",
+		host: "claude.ai",
+		tool: "page_get_greeting",
+		args: '{"name":"Ada"}',
+		state: "ok",
+		...more,
+	});
+
+	async function opened() {
+		const panel = await openPanel();
+		panel.show({ ...stateWith([]), recentCalls: 2 });
+		const section = panel.$<HTMLDetailsElement>("#calls");
+		if (section === null) throw new Error("no #calls");
+		// happy-dom fires `toggle` as the attribute changes (a browser, a task later).
+		const toggle = (open: boolean) => {
+			section.open = open;
+		};
+		const rows = () =>
+			[...panel.doc.querySelectorAll("#calls-list > li")].map((li) =>
+				[...li.children].map((e) => e.textContent),
+			);
+		const summary = () => panel.$("#calls-summary")?.textContent;
+		return { panel, section, toggle, rows, summary };
+	}
+
+	test("closed at first, its count from the state, nothing asked for until it opens", async () => {
+		const { panel, section, summary } = await opened();
+		expect(section.open).toBe(false);
+		expect(summary()).toBe(summaryText(2));
+		expect(panel.sent.some((c) => c.type === "calls")).toBe(false);
+		expect(panel.$("#calls-note")?.textContent).toBe(CALLS_NOTE);
+		expect(panel.$("#calls-empty")?.textContent).toBe(CALLS_EMPTY);
+		// A list, no live region: the calls are not read out as they come.
+		expect(panel.$("#calls-list")?.tagName).toBe("OL");
+		expect(
+			panel.doc.querySelectorAll(
+				"#calls [aria-live], #calls [role=status], #calls [role=alert]",
+			),
+		).toHaveLength(0);
+	});
+
+	test("opened: it asks for the list, shows it newest first, follows each change, and stops asking once closed", async () => {
+		const { panel, toggle, rows, summary } = await opened();
+		toggle(true);
+		expect(panel.take().filter((c) => c.type === "calls")).toEqual([
+			{ type: "calls", open: true },
+		]);
+		panel.post({
+			type: "calls",
+			calls: [
+				call(1),
+				call(2, {
+					tool: "page_place_order",
+					args: '{"item":"tea"}',
+					site: "https://shop.example",
+					state: "declined",
+				}),
+			],
+		});
+		const time = (id: number) =>
+			new Date(Date.UTC(2026, 10, 24, 9, 30, id)).toLocaleTimeString(
+				undefined,
+				{ hour: "2-digit", minute: "2-digit", second: "2-digit" },
+			);
+		expect(rows()).toEqual([
+			[
+				`page_place_order${time(2)}`,
+				"Declined by you",
+				"Claude claude.ai · on shop.example",
+				'{"item":"tea"}',
+			],
+			[
+				`page_get_greeting${time(1)}`,
+				"Ran",
+				"Claude claude.ai",
+				'{"name":"Ada"}',
+			],
+		]);
+		// The AI app as the AI access card lists it: its name, then its host.
+		expect(
+			[...(panel.$("#calls-list li .call-who")?.children ?? [])].map((e) => [
+				e.className,
+				e.textContent,
+			]),
+		).toEqual([
+			["call-app", "Claude"],
+			["call-host", "claude.ai"],
+		]);
+		expect(panel.$("#calls-empty")?.hidden).toBe(true);
+		// A new call, running, then waiting, then allowed and done.
+		panel.post({ type: "call", call: call(3, { state: "running" }) });
+		await panel.frame();
+		expect(rows()[0]?.[1]).toBe("Running");
+		expect(summary()).toBe(summaryText(3));
+		panel.post({ type: "call", call: call(3, { state: "waiting" }) });
+		await panel.frame();
+		expect(rows()[0]?.[1]).toBe("Waiting for your answer");
+		panel.post({ type: "call", call: call(3, { allowed: "once" }) });
+		await panel.frame();
+		expect(rows()[0]?.[1]).toBe("Allowed by you · Ran");
+		expect(rows()).toHaveLength(3);
+		// A state that comes meanwhile changes neither list nor count.
+		panel.show({ ...stateWith([]), recentCalls: 3 });
+		expect(rows()).toHaveLength(3);
+		toggle(false);
+		expect(panel.take().filter((c) => c.type === "calls")).toEqual([
+			{ type: "calls", open: false },
+		]);
+	});
+
+	test("each outcome in words", async () => {
+		const { panel, toggle, rows } = await opened();
+		toggle(true);
+		const outcomes: [Partial<CallView>, string][] = [
+			[
+				{ state: "failed", error: "The page's tool threw." },
+				"Failed: The page's tool threw.",
+			],
+			[
+				{ state: "failed", allowed: "always", error: "x" },
+				"Always allowed · Failed: x",
+			],
+			[{ state: "unanswered" }, "Not answered in time"],
+			[{ state: "cancelled" }, "Cancelled by the AI app"],
+			[{ state: "timeout" }, "The page did not answer in time"],
+			[{ state: "ok", allowed: "always" }, "Always allowed · Ran"],
+			[{ state: "ok", app: "" }, "Ran"],
+		];
+		panel.post({
+			type: "calls",
+			calls: outcomes.map(([more], i) => call(i + 1, more)),
+		});
+		expect(rows().map((r) => r[1])).toEqual(
+			outcomes.map(([, words]) => words).reverse(),
+		);
+		// No name of its own: the verified host alone.
+		expect(rows()[0]?.[2]).toBe("claude.ai");
+	});
+
+	test("empty: the line says so; at most 100 shown; other people's text stays text", async () => {
+		const { panel, toggle, rows } = await opened();
+		toggle(true);
+		panel.post({ type: "calls", calls: [] });
+		expect(panel.$("#calls-empty")?.hidden).toBe(false);
+		expect(panel.$("#calls-list")?.hidden).toBe(true);
+		panel.post({
+			type: "calls",
+			calls: Array.from({ length: MAX_SHOWN + 3 }, (_, i) => call(i + 1)),
+		});
+		expect(rows()).toHaveLength(MAX_SHOWN);
+		panel.post({
+			type: "call",
+			call: call(500, {
+				tool: "<b>bold</b>",
+				app: '<img src=x onerror="alert(1)">',
+				args: '{"html":"<script>alert(1)</script>"}',
+			}),
+		});
+		await panel.frame();
+		expect(rows()).toHaveLength(MAX_SHOWN);
+		// The newest at the top, the oldest gone.
+		expect(panel.$("#calls-list > li")?.dataset["call"]).toBe("500");
+		expect(panel.$("#calls-list > li:last-child")?.dataset["call"]).toBe("5");
+		const first = panel.doc.querySelector("#calls-list > li");
+		expect(first?.querySelectorAll("b, img, script")).toHaveLength(0);
+		expect(rows()[0]?.[3]).toBe('{"html":"<script>alert(1)</script>"}');
+		// Nothing in a `title`: a line longer than ARGS_LINE unfolds instead.
+		expect(panel.doc.querySelectorAll("#calls [title]")).toHaveLength(0);
+	});
+
+	test("arguments wider than a line unfold, and stay unfolded, with the focus, as other calls change and come", async () => {
+		const { panel, toggle } = await opened();
+		toggle(true);
+		const long = `{"item":"${"t".repeat(ARGS_LINE)}"}`;
+		// The reviewer's: 30 code units, but its characters take two columns.
+		const cjk = '{"q":"東京都千代田区丸の内一丁目九番一号東京駅"}';
+		expect(cjk.length).toBeLessThanOrEqual(ARGS_LINE);
+		expect(displayWidth(cjk)).toBeGreaterThan(ARGS_LINE);
+		expect(displayWidth("🙂a")).toBe(3);
+		panel.post({
+			type: "calls",
+			calls: [
+				call(1),
+				call(2, { args: long, state: "running" }),
+				call(3, { args: cjk }),
+			],
+		});
+		const args = (id: number) =>
+			panel.$(`#calls-list li[data-call="${id}"] .call-args`);
+		// Short: a line of code, nothing to unfold.
+		expect(args(1)?.tagName).toBe("CODE");
+		expect(args(2)?.tagName).toBe("DETAILS");
+		expect(args(3)?.tagName).toBe("DETAILS");
+		expect(args(2)?.querySelector("summary code")?.textContent).toBe(long);
+		const row = panel.$('#calls-list li[data-call="2"]');
+		const unfolded = args(2) as HTMLDetailsElement;
+		unfolded.open = true;
+		const summary = unfolded.querySelector<HTMLElement>("summary");
+		summary?.focus();
+		// Another call changes, a new one comes, then this one ends.
+		panel.post({ type: "call", call: call(1, { state: "failed" }) });
+		panel.post({ type: "call", call: call(4, { state: "running" }) });
+		await panel.frame();
+		panel.post({ type: "call", call: call(2, { args: long, state: "ok" }) });
+		await panel.frame();
+		expect(row?.getAttribute("data-state")).toBe("ok");
+		// The same nodes, not new ones: open and focused as the user left them.
+		expect(panel.$('#calls-list li[data-call="2"]')).toBe(row);
+		expect(args(2)).toBe(unfolded);
+		expect(unfolded.open).toBe(true);
+		expect(panel.doc.activeElement).toBe(summary);
+		expect(
+			[...panel.doc.querySelectorAll("#calls-list > li")].map(
+				(li) => (li as HTMLElement).dataset["call"],
+			),
+		).toEqual(["4", "3", "2", "1"]);
+	});
+
+	test("a burst of changes is drawn once, in the next frame", () => {
+		const win = new Window();
+		windows.push(win);
+		const doc = win.document as unknown as Document;
+		const list = doc.createElement("ol");
+		const empty = doc.createElement("p");
+		const frames: (() => void)[] = [];
+		let drawn = 0;
+		const view = new CallsView(list, empty, {
+			schedule: (draw) => frames.push(draw),
+			drawn: () => drawn++,
+		});
+		for (let id = 1; id <= 20; id++)
+			for (const state of ["running", "waiting", "ok"] as const)
+				view.put(call(id, { state }));
+		expect([frames.length, view.draws, list.children.length]).toEqual([
+			1, 0, 0,
+		]);
+		frames.shift()?.();
+		expect([view.draws, drawn, view.count]).toEqual([1, 1, 20]);
+		expect((list.firstElementChild as HTMLElement).dataset["call"]).toBe("20");
+		expect(
+			[...list.children].every(
+				(li) => (li as HTMLElement).dataset["state"] === "ok",
+			),
+		).toBe(true);
+		expect(frames).toEqual([]);
+	});
+});
 
 describe("the glow while an AI app calls (DEC-225)", () => {
 	/** Every text and `aria-*` or `role` value of the panel. */

@@ -248,6 +248,19 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   nothing of it; with reduced motion the ring and the halo show without moving, in
   forced colours the ring is the system's highlight colour. The toolbar icon does not
   change with it.
+- "Recent calls", folded at the foot of the AI access card, lists the last 100 tool
+  calls of your AI apps through the extension, newest first, with their count in its
+  title (DEC-226): read-only ones too, which run without a question. Each says when it
+  started (as your browser writes times), the tool as the AI app named it, how it went
+  ("Running", "Waiting for your answer", "Ran", "Failed: <the error's first words>",
+  "Declined by you", "Not answered in time", "Cancelled by the AI app", "The page did
+  not answer in time", with "Allowed by you" or "Always allowed" before it when it
+  asked or was allowed for its site), the AI app (its name and verified host, as the
+  card lists it), the site for a page tool or a navigation (a long host keeps its end), and the arguments on one line, cut to 150
+  characters (a longer line unfolds to all of that with a click, Enter or Space). No
+  results. The list lives only in the service
+  worker's memory: nothing of it is stored, and it is gone when the worker stops (with
+  AI access on it keeps running). It changes while it is open, without being read out.
 - The "Fill in the code for me" switch, under the code, turns on filling in its code on
   the relay's sign-in page when an AI app opens it in this browser (an AI app on the
   desktop opens it in the default browser). It is off by default, also with access to
@@ -515,6 +528,14 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   labels and live regions of `index.html`, a question's countdown and its end, the AI
   access switch's glow (on while a call runs, held 5 s after, gone at once with the
   connection, calls that overlap).
+- `test/recent.test.ts`: "Recent calls" in the worker (`src/worker/recent.ts`): 100
+  kept and the oldest dropped, each way a call ends, a note bound to its own call, the
+  ends of a connection that went, other people's text (long, markup, invisible and
+  control characters) cut to one line, no storage API. `test/sidepanel.test.ts` and
+  `test/connection.test.ts` cover the section in the panel (closed at first, the list
+  asked for only when it opens, order, count, the empty line, each outcome's words,
+  text never as HTML) and the worker's side (the count in the state, the list and its
+  changes only to a panel that has it open, nothing stored).
 - `test/contrast.test.ts`: the panel's look (`kb/design/extension-look.md`). Every pair
   of colours the style sheet uses, from its two token blocks (light and dark): text at
   least 4.5:1, edges, dots and the switches' parts at least 3:1; the badge's colours
@@ -540,7 +561,8 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   the test process, an MCP client calling `page_info`, `webmcp_tools` and the page's
   tools (the look: nothing past the panel's edge at 345, 360 and 420 px, each scheme's
   colours as computed, both switches' contrast; confirmation in the panel, the AI access
-  switch's glow while a call runs and its hold, cancellation, `toolchange`, a forged
+  switch's glow while a call runs and its hold, "Recent calls" after a read-only and a
+  declined call, cancellation, `toolchange`, a forged
   `document.modelContext`, a tool that takes the tab to another page, "Always allow on <host>")
   across navigations and tab switches; a `toolchange` read with one `getTools()`, and
   none with AI access off and the panel closed; with the panel closed
@@ -578,7 +600,8 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   Puppeteer's cache; skipped without it) over WebDriver BiDi (`test/firefox.ts`, a
   temporary add-on; harness `test/firefox-e2e.ts`): the same test page registers its tools
   with the extension's `document.modelContext` as it loads, and a relay and an MCP client
-  list, call, confirm (the AI access switch glowing meanwhile and for the hold after),
+  list, call, confirm (the AI access switch glowing meanwhile and for the hold after;
+  "Recent calls" listing a read-only and a declined call),
   cancel and follow them (`toolchange`, a signal's abort, a page
   replacing the getter), notifications as Firefox has them, an extension reload, the
   client library; in the full run, the event page outlasts Firefox's idle timeout with
