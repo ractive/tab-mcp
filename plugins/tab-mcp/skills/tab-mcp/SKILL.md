@@ -114,7 +114,9 @@ Rules for tools:
 - Write `description` for a model: what the tool does, its units, an example.
 - `execute` results: a string becomes one text block; an MCP result (`content` an array
   of MCP content blocks: `text`, `image`, `audio`, `resource_link`, `resource`) is passed
-  through (use it for images); any other JSON value, also an object whose `content` holds
+  through (use it for images; an AI app through the tab-mcp browser extension gets them
+  too, from the release after 0.23 on; any other WebMCP caller gets the text, each image
+  a line that says it was left out); any other JSON value, also an object whose `content` holds
   something else, is sent as JSON text and, for objects, as `structuredContent`.
   Annotation hints must be `true` or `false`; anything else is a `TypeError`. A thrown error becomes an error
   result with its message, so throw errors that tell the model what to do.

@@ -28,8 +28,24 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
   own, and `page_info` in a note. With access to all sites nothing changes: a page gets
   the extension's WebMCP as it loads, or as the content script comes to a page that
   loaded before, whatever AI access.
+- **Pictures from a page with the client library** (DEC-224). Right before the extension
+  runs one of such a page's tools for an AI app, a read-only one too, it tells the page
+  the tool, the arguments and the AI app, and asks for the whole MCP result: a "claim"
+  for a read-only tool (which allows nothing), the vouch as before for a call the user
+  allowed. A page with the library from the release after 0.23 on then answers with
+  its text, images, `structuredContent` and `isError`, and the AI app gets the page's
+  pictures as it does when connected to the page directly. Such a page now also learns
+  which AI app calls its read-only tools, while AI access is on. An older library
+  ignores the claim and answers with text as before.
 
 ### Changed
+
+- **MCP results the extension does not carry whole**: its `structuredContent` now
+  reaches the AI app where its JSON fits in what the text blocks left of the 100,000
+  characters (it was dropped), each block other than text or a PNG, JPEG, GIF or WebP
+  image is a line that says it was left out, and past 32 blocks the rest are one such
+  line. Before, any such result reached the AI app as its whole JSON as text, cut to
+  100,000 characters, base64 images included.
 
 - **The side panel's "This page has no WebMCP" text** says that tab-mcp gives a page its
   own while AI access is on, and that pages which look for it only as they load need

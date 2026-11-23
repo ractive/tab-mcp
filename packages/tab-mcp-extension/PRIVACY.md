@@ -52,9 +52,11 @@ the page WebMCP as the page loads (in browsers without their own, with access to
 sites, above), and could try to time
 its own events, which the extension still listens to. A page it told that AI access is
 on is told once that it went off. Right before one of its own
-tools runs because the user allowed the call in the extension, it also learns that
-tool's name, the arguments the page gets anyway, and which of those AI apps made the
-call, so that the page does not ask the user a second time. When that call is over, the
+tools runs for one of those AI apps, it also learns that tool's name, the arguments the
+page gets anyway, and which of those AI apps made the call: for a call the user allowed
+in the extension, so that the page does not ask the user a second time; for a
+read-only tool, which the extension runs without asking, so that the page answers that
+AI app with the whole result, pictures included. When that call is over, the
 page is told that too, also after AI access went off. It learns nothing else: not who
 the user is, not the relay, not the extension's address, not other tabs. This
 reaches the page inside the browser; the page's script can send it on to its site, and
@@ -136,10 +138,11 @@ themselves has its operator's policy.
 
 To a page that uses the tab-mcp client library, inside the browser (see "What it reads"
 above), only while AI access is on: the extension's name, that AI access is on, the
-names and verified hosts of the AI apps connected to the extension, and right before a
-call the user allowed in the extension, the tool's name, its arguments and which AI app
-made the call; once AI access goes off, that it went off, and then only that a call
-allowed before is over. The page's script can send this on to its site, whose own
+names and verified hosts of the AI apps connected to the extension, and right before
+each call of one of the page's tools for such an AI app (one the user allowed in the
+extension, or a read-only one), the tool's name, its arguments and which AI app made
+the call; once AI access goes off, that it went off, and then only that a call
+made before is over. The page's script can send this on to its site, whose own
 privacy policy applies.
 
 ## What it does not do

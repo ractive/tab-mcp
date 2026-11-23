@@ -50,17 +50,19 @@ export interface RelayClient {
  * another extension that passes on an AI app's calls, or a document of an
  * origin in the tool's `exposedTo`. Not paired and not identified: nothing
  * more is known, and the page cannot tell these apart, unless the tab-mcp
- * browser extension vouched for the call (DEC-207). The library never shows
- * an unvouched call its confirmation (DEC-215): only the page's own
- * `onConfirm` decides, in code.
+ * browser extension vouched for the call (DEC-207) or claimed it (DEC-224).
+ * The library never shows such a call its confirmation (DEC-215): only the
+ * page's own `onConfirm` decides, in code (not for a vouched call).
  */
 export interface WebMcpClient {
 	kind: "webmcp";
 	/**
 	 * Set when the tab-mcp browser extension ran this call for an AI app
-	 * connected to it, after the user allowed the call there: the page did
-	 * not ask (no question, no `onConfirm`). Absent for every other agent in
-	 * the browser, and with `trustExtension: false`.
+	 * connected to it: after the user allowed the call there (a vouch: the
+	 * page did not ask, no `onConfirm`), or without a question, the tool
+	 * being read-only for it (a claim: `onConfirm` decides a tool that asks,
+	 * as for any WebMCP call). Absent for every other agent in the browser,
+	 * and with `trustExtension: false`.
 	 */
 	via?: "tab-mcp-extension";
 	/** With `via`: the AI app's own name for itself, as the extension knows it. */
@@ -437,8 +439,10 @@ export interface TabMcpOptions {
 	/**
 	 * Unless `webmcp: false`: a WebMCP call the tab-mcp browser extension vouches
 	 * for runs without `onConfirm` (the user allowed exactly that call there,
-	 * a moment before). On by default; `false` treats it as any other WebMCP
-	 * call: `onConfirm` decides, without one it runs (DEC-215). `extension`
+	 * a moment before), and one it vouches for or claims names its AI app and
+	 * resolves with the whole MCP result, pictures included (DEC-224). On by
+	 * default; `false` treats both as any other WebMCP call: `onConfirm`
+	 * decides, without one it runs (DEC-215), the result as text. `extension`
 	 * is reported either way.
 	 */
 	trustExtension?: boolean;

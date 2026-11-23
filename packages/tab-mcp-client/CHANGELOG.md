@@ -17,6 +17,17 @@ the Git tag `client-v<version>`. The format follows
   gives the tab its own WebMCP, so that a page with the library offers its tools there
   in Chrome without WebMCP and in Firefox, also without access to all sites. Nothing
   changes with `webmcp: false`, or where the tab had WebMCP from the start.
+- **Pictures through the tab-mcp browser extension** (DEC-224). A WebMCP call the
+  extension announced with `result: "mcp"` (its vouch, or its new `claim` for a
+  read-only tool) resolves with the whole MCP result: `content` with its images,
+  `structuredContent` and `isError`, and every failure as an `isError` result with its
+  message. The extension passes that on, so an AI app connected through it gets a tool's
+  pictures as one connected to the page directly does. Any other WebMCP call, and a
+  vouch of an older extension, gets the value as before (an image as a line "[image
+  content left out: WebMCP results are text.]"). A tool that returns anything but an
+  MCP result is unchanged. A claim names the AI app in `toolcall` (`via`, `name`,
+  `host`) but allows nothing: `onConfirm` decides as for any WebMCP call.
+  `trustExtension: false` ignores claims as it ignores vouches.
 
 ## [0.23.0][client-0.23.0] - 2026-11-23
 

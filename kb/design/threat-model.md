@@ -376,7 +376,11 @@ did, by connecting the extension.
   "allowed") and the same-tool check, never for a read-only tool, sent by the content
   script only after its own checks (listed from this document, the same read-only
   claim), synchronously before `executeTool`, and withdrawn (`withdraw`, its nonce) once
-  `executeTool` settled. A worker message with a vouch comes only
+  `executeTool` settled. An AI app's call of a read-only tool goes with a `claim`
+  instead (DEC-224), made in the same place and sent and withdrawn the same way; it
+  allows nothing in the page. Both carry `result: "mcp"`, for the whole MCP result
+  with its pictures. So such a page learns the AI app and the tool of every call the
+  extension makes there for an AI app, while AI access is on. A worker message with a vouch comes only
   from the extension (the content script checks the sender). What the page announces
   (library version, app id, at most 64 directly connected AI apps) is the page's word
   and only feeds the panel's two lines. The worker answers the content script's request
@@ -615,9 +619,16 @@ and the extension's call reaching the page uses it: exactly the call the user al
 A withdrawal cannot close that window (it comes only after `executeTool` settled), and
 the vouch stays usable until it comes: a moment after a failure, up to the 2 s when
 `executeTool` neither runs the tool nor settles, or on a page that takes vouches with
-its own code and ignores `withdraw`. `trustExtension: false`
-treats every WebMCP call as an agent in the browser's (`onConfirm` decides). The full
-analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119, DEC-207, DEC-215, DEC-222).
+its own code and ignores `withdraw`. Since DEC-224 a read-only call of the extension
+comes with a `claim`, which only names the AI app (`onConfirm` decides as for any
+WebMCP call), and both ask for the whole MCP result: an agent that takes either in
+that window also gets the pictures and is named as the AI app; the extension's call
+then gets text. At most 16 wait in the page, each 2 s; past that the oldest is
+dropped and its call runs unannounced (text). `trustExtension: false`
+treats every WebMCP call as an agent in the browser's (`onConfirm` decides, text, no
+AI app named). The full
+analysis is A14 in `docs/threat-model.md` (DEC-115, DEC-119, DEC-207, DEC-215, DEC-222,
+DEC-224).
 
 ### A15: The site's own assistant over a port (`serve`, iteration 28)
 

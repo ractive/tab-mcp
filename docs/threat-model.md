@@ -745,7 +745,13 @@ like any other, `chrome-extension://<id>` (A11).
   the AI app, after its own checks (the page the tool was listed from, its read-only
   claim). The vouch is made in one place, after the user's answer and the check that
   the tool is still the one asked about, and never for a read-only tool or a call that
-  was not allowed; once the call settled, it is withdrawn. What the page announces (the
+  was not allowed; once the call settled, it is withdrawn. Right before an AI app's
+  call of a read-only tool, which nobody asks about, the extension tells such a page
+  the same as a `claim` (DEC-224), withdrawn the same way: it allows nothing in the
+  page, and it and the vouch ask the library for the whole MCP result, so that the AI
+  app gets the page's pictures. The page so learns, while AI access is on, which AI
+  app calls each of its tools through the extension, read-only ones included, and
+  with which arguments (which it gets anyway). What the page announces (the
   library's version, its app id, at most 64 AI apps connected to it directly) is the
   page's word and only feeds two lines in the panel. A page saying `hello` in a loop
   does not keep the extension's one service worker busy: the worker is asked at the
@@ -1008,6 +1014,24 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
   takes vouches with its own code and ignores `withdraw`. A site whose `onConfirm`
   insists on its own rule sets `trustExtension: false`. The page also learns, while the extension serves it,
   which AI apps are connected to the extension (A13).
+- **The extension claims read-only calls and gets the whole result** (DEC-224). For a
+  tool the extension runs without asking (read-only), it sends a `claim` with the same
+  fields; the call that matches it is named as the AI app's and allows nothing (the
+  page's `onConfirm` decides a tool that asks, as for any WebMCP call; only the type
+  `vouch` skips it, whatever else a message says). A vouch or claim with
+  `result: "mcp"` makes the matching call resolve with the whole MCP result, images
+  included, instead of the text any other WebMCP caller gets. The window above now has
+  one more consequence: an agent in the browser that calls the same tool with equal
+  arguments in that moment also gets the whole result, pictures included, as the
+  user's AI app would have, and its call is named as that AI app's; the extension's
+  own call then gets the text. Nothing the agent could not get otherwise: the tool runs
+  for it anyway, and the pictures are what the page shows. Equal concurrent calls of
+  two AI apps can swap their names in the page's events the same way. At most 16
+  vouches and claims wait in the page, each at most 2 seconds; a seventeenth drops the
+  oldest, whose call then runs as an unannounced one (text, and for a vouched tool that
+  asks, `onConfirm`). The relay lets at most 8 requests per tab run at once by
+  default, and the extension is one tab of it, so 16 is reached only by a page or a
+  script that sends its own. `trustExtension: false` ignores claims too.
 
 ### A15: The site's own assistant calling the page's tools over a port (`serve`)
 
