@@ -160,8 +160,10 @@ WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-call
   `id` and `name` the page gave `serve` ([Your own assistant](#your-own-assistant-on-the-page)),
   or `{ kind: "webmcp" }` for a WebMCP caller ([WebMCP](#webmcp): an agent in the
   browser, another extension, or a document of an `exposedTo` origin), of which nothing
-  more is known (unless the tab-mcp browser extension vouched for the call: then
-  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, [with the
+  more is known (unless the tab-mcp browser extension announced the call, with a vouch
+  or a claim: then
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host, allowed }`, `allowed` true
+  only when the user allowed that call in the extension, [with the
   extension](#with-the-tab-mcp-browser-extension)). Check `client.kind` before you read `host`. Return a
   string (one text block), an MCP result (passed through with its `_meta`: an object
   whose `content` is an array of MCP content blocks, each with `type` `text`, `image`,
@@ -248,7 +250,7 @@ on the caller (DEC-215):
   or the caller itself can.
 
 The table has the details. Every WebMCP call that the
-tab-mcp browser extension did not vouch for reaches the page as
+tab-mcp browser extension did not vouch for or claim reaches the page as
 `client: { kind: "webmcp" }`, whoever made it: the page cannot tell the last three rows
 apart.
 
@@ -268,7 +270,10 @@ the calling extension or the other origin's script, which the page does not know
 page with a tool that must not run on such a caller's word decides in code or keeps the
 tool away:
 
-- **`onConfirm`** gets the call with `request.client.kind === "webmcp"` (no `via`). Decide
+- **`onConfirm`** gets the call with `request.client.kind === "webmcp"`: without `via`,
+  or, for a call the tab-mcp browser extension only claimed (it ran a tool it takes for
+  read-only, nobody asked), with `via`, `name`, `host` and `allowed: false`. A call the
+  extension vouched for (`allowed: true`) never reaches it. Decide
   there without showing anything an agent could click: refuse every such call, or apply
   a rule of your own (arguments, the time of day, what the user is signed in as). A
   question of your own in the page is no better than the library's against an agent
@@ -311,7 +316,14 @@ which ask nothing either.
   its text blocks, one per line, each other block (an image, a resource) as a line that
   says it was left out: WebMCP results are text, and an image as base64 inside JSON
   costs the agent tokens for nothing. Nothing (`undefined`), which the browser cannot
-  serialize, and an empty MCP result resolve as `"Done."`.
+  serialize, and an empty MCP result resolve as `"Done."`. Not so for a call the tab-mcp
+  browser extension announced (from the release after 0.23 on, DEC-224): it passes
+  results on to an AI app outside the browser, which shows pictures, so such a call
+  resolves with the whole MCP result, its `content` with the images, its
+  `structuredContent` and its `isError` (not `_meta`), and every failure below as an
+  `isError` result with the message ([with the
+  extension](#with-the-tab-mcp-browser-extension)). A tool that returns anything else
+  resolves for it as for any caller.
 - A failure resolves too, as
   `{ error: "<message>" }`, so that the agent can read it: invalid arguments (the same
   message as for an AI app), a refusal of `onConfirm` (`The user did not allow <tool> to
@@ -374,7 +386,8 @@ that an AI app reaches it through the extension:
   arguments (key order aside) within 2 seconds runs without `onConfirm`: the user just
   allowed exactly that call. Its caller in
   `execute`, `toolcall` and `toolcallend` is
-  `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`, so an activity view can say
+  `{ kind: "webmcp", via: "tab-mcp-extension", name, host, allowed: true }` (`allowed`
+  from the release after 0.23 on), so an activity view can say
   "Claude (claude.ai) through the tab-mcp browser extension". A vouch is used once and
   only for the tool registered under its name when it came (a tool registered anew
   since asks). Everything else is as for any call: the arguments are checked, the
@@ -383,8 +396,25 @@ that an AI app reaches it through the extension:
   reached the page) is dropped. Any call that matches no vouch (an agent in the
   browser, another extension, an `exposedTo` origin, a call after the 2 seconds) is an
   unvouched WebMCP call: `onConfirm` decides, without one it runs.
-- **`trustExtension: false`** treats a vouched call as any other WebMCP call, for a site
-  whose `onConfirm` insists on its own rule; `extension` is still reported.
+- **A claimed call** (from the release after 0.23 on, DEC-224). Right before the
+  extension runs a tool it does not ask about (one marked `readOnlyHint`), it tells the
+  page the same as for a vouch, as a `claim`. The call that matches it is named as the
+  extension's (`via`, `name`, `host`, as above, with `allowed: false`) and allows
+  nothing: a tool that asks goes to `onConfirm` as for any WebMCP call. So `via` alone
+  no longer means that the user allowed the call: a page that asks in `execute` itself
+  skips its question only for `allowed: true`. The page learns which AI app calls its
+  read-only tools through the extension, while the extension's AI access is on.
+- **Pictures.** The extension asks for the whole MCP result with both (`result: "mcp"`),
+  and the call that matches one resolves with it ([above](#webmcp)): an AI app
+  connected through the extension gets a tool's images as one connected to the page
+  directly does. Any other WebMCP call, a vouch of an older extension and every call
+  with `trustExtension: false` get the result as text, each image a line "[image content
+  left out: WebMCP results are text.]". An agent in the browser that calls the same
+  tool with equal arguments in the moment before the extension's call reaches the page
+  takes the vouch or claim, and with it the whole result (A14 in the threat model).
+- **`trustExtension: false`** treats a vouched or claimed call as any other WebMCP
+  call, for a site whose `onConfirm` insists on its own rule: no AI app named, the
+  result as text. `extension` is still reported.
 - **What the page tells the extension:** the library's version, the app id and the AI
   apps connected to the page directly (`name`, `host`, as `grants` has them; at most
   64), again on
@@ -399,11 +429,15 @@ that an AI app reaches it through the extension:
   parts the user trusts, not a security boundary. Only the top frame takes part.
 - Old and new mix: an extension that does not know the handshake says nothing, and its
   calls are unvouched WebMCP calls, which the library does not ask; the extension says nothing to a page that
-  did not announce the library.
+  did not announce the library. An extension that sends no claims and no `result:
+  "mcp"` gets text as before; a library of 0.23 or older ignores claims and `result`,
+  and answers the extension's calls with text as before.
 
 A page that registers its WebMCP tools itself, without the library's mirror, can take
 part the same way: answer the events as `src/handshake.ts` does, skip its own
-question for a call that matches a vouch, and drop a vouch the extension withdraws.
+question for a call that matches a vouch (never for a claim), answer a call that
+matches either with `result: "mcp"` with the whole MCP result, and drop one the
+extension withdraws.
 
 ### Your own assistant on the page
 

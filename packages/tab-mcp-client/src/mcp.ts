@@ -20,8 +20,10 @@ import {
 	ANNOTATIONS_META_KEY,
 	type CallToolResult,
 	errorResult,
+	isCallToolResult,
 	mapAnnotations,
 	markUntrusted,
+	mcpParts,
 	resultText,
 	thrownResult,
 	toCallToolResult,
@@ -511,7 +513,13 @@ async function decideAndRun(
  * neither why nor what to change (DEC-120). Only a call the browser
  * cancelled rejects (`AbortError`): its caller has gone already. `client`:
  * an agent in the browser, or the AI app the tab-mcp browser extension
- * vouched for (DEC-207).
+ * vouched for (DEC-207) or claimed the call for (DEC-224).
+ *
+ * `whole`: the tab-mcp browser extension announced the call and takes the
+ * whole MCP result (DEC-224), which it passes on to its AI app: an MCP
+ * result resolves as its `content`, `structuredContent` and `isError`,
+ * images included; every failure as an `isError` result with its message,
+ * which the extension passes on as one. Any other value as above.
  */
 export async function webMcpCall(
 	context: CallContext,
@@ -519,8 +527,9 @@ export async function webMcpCall(
 	input: unknown,
 	signal: unknown,
 	client: WebMcpClient,
+	whole = false,
 ): Promise<unknown> {
-	const failed = (error: string) => ({ error });
+	const failed = (error: string) => (whole ? errorResult(error) : { error });
 	const gone = `The tool ${tool.name} is no longer available.`;
 	// Gone already, e.g. refused by the validator just loaded: no call.
 	if (context.tools.get(tool.name) !== tool) return failed(gone);
@@ -540,8 +549,13 @@ export async function webMcpCall(
 		return failed(`The user did not answer whether ${tool.name} may run.`);
 	if (run.stop === "gone") return failed(gone);
 	if (run.result.isError === true)
-		return failed(resultText(run.result) || "The tool failed.");
-	return webMcpValue(run.returned?.value);
+		return whole
+			? mcpParts(run.result)
+			: failed(resultText(run.result) || "The tool failed.");
+	const value = run.returned?.value;
+	return whole && isCallToolResult(value)
+		? mcpParts(value)
+		: webMcpValue(value);
 }
 
 export function createMcpHandler(options: McpHandlerOptions): McpHandler {

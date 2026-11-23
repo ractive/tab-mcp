@@ -41,6 +41,7 @@ import {
 	useFirefox,
 	waitForTools,
 } from "./firefox-e2e.ts";
+import { picturesThroughTheExtension } from "./pictures.ts";
 
 setDefaultTimeout(30_000);
 
@@ -447,7 +448,10 @@ describe.skipIf(!firefoxOk)(
 				await new Promise((resolve) => setTimeout(resolve, 500));
 				port.disconnect();
 			})()`);
-			await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+			await waitForTools(
+				stack,
+				(n) => n.includes("page_complete_todo") && n.includes("page_snapshot"),
+			);
 		}, 90_000);
 
 		afterAll(async () => {
@@ -455,7 +459,7 @@ describe.skipIf(!firefoxOk)(
 			await stack?.stop();
 		});
 
-		test("the page knows the extension and its AI app; a call allowed there is not asked again", async () => {
+		test("the page knows the extension and its AI app; a call allowed there is not asked again; a read-only tool's picture reaches the AI app (DEC-224)", async () => {
 			await stack.tab.waitFor(
 				"window.tabMcpPage?.mcp.extension?.apps.length === 1",
 				15_000,
@@ -466,9 +470,10 @@ describe.skipIf(!firefoxOk)(
 			const pending = call(stack, "page_complete_todo", { id: 5 });
 			await answerInPanel(stack, "allow");
 			expect((await pending).isError).toBeFalsy();
+			// Not asked in the page: neither its onConfirm nor a dialog.
 			expect(
 				await stack.tab.eval(
-					`document.querySelector("dialog.tab-mcp-confirm") === null`,
+					`window.tabMcpPage.asked.length === 0 && document.querySelector("dialog.tab-mcp-confirm") === null`,
 				),
 			).toBe(true);
 			expect(
@@ -478,7 +483,17 @@ describe.skipIf(!firefoxOk)(
 				via: "tab-mcp-extension",
 				name: "Test client",
 				host: "client.example",
+				allowed: true,
 			});
+			await step(
+				"a picture of 300 KiB across Firefox's worlds, whole; a script in the page gets the text",
+				() =>
+					picturesThroughTheExtension(
+						() => call(stack, "page_snapshot"),
+						(expression) => stack.tab.eval(expression),
+						{ name: "Test client", host: "client.example" },
+					),
+			);
 		});
 
 		test("without a click, with access to all sites: the library found WebMCP as the page loaded, also while AI access is off (DEC-191, not DEC-223's late install)", async () => {
@@ -488,7 +503,7 @@ describe.skipIf(!firefoxOk)(
 					const info = await call(stack, "page_info");
 					expect(info.structuredContent?.["webmcp"]).toEqual({
 						available: true,
-						tools: 1,
+						tools: 2,
 					});
 				},
 			);
@@ -512,9 +527,9 @@ describe.skipIf(!firefoxOk)(
 					);
 					expect(
 						await stack.tab.eval(
-							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name).sort())",
 						),
-					).toEqual(["complete_todo"]);
+					).toEqual(["complete_todo", "snapshot"]);
 				},
 			);
 			await step(
@@ -533,9 +548,9 @@ describe.skipIf(!firefoxOk)(
 					);
 					expect(
 						await stack.tab.eval(
-							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name).sort())",
 						),
-					).toEqual(["complete_todo"]);
+					).toEqual(["complete_todo", "snapshot"]);
 					expect(
 						await stack.panel.eval(
 							`document.getElementById("state").dataset.state`,

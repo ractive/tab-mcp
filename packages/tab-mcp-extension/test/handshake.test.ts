@@ -16,7 +16,12 @@ import {
 	type ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
 import { Window } from "happy-dom";
-import { callTool, definitionOf, pageTools } from "../src/content.ts";
+import {
+	callTool,
+	definitionOf,
+	MAX_SEND_RESULT,
+	pageTools,
+} from "../src/content.ts";
 import type {
 	CallResult,
 	ExtensionState,
@@ -37,6 +42,7 @@ import {
 	type BridgeChrome,
 	type Confirm,
 	PageToolBridge,
+	resultOf,
 } from "../src/worker/bridge.ts";
 
 const STATE: ExtensionState = {
@@ -52,6 +58,7 @@ const TOLD_OFF = { v: 1, type: "update", on: false };
 const VOUCH: Vouch = {
 	nonce: "n1",
 	app: { name: "Claude", host: "claude.ai" },
+	allowed: true,
 };
 
 let window: Window;
@@ -196,9 +203,23 @@ describe("the content script speaks only to a page that announced the library", 
 			arguments: { n: 1 },
 			nonce: "n1",
 			app: { name: "Claude", host: "claude.ai" },
+			result: "mcp",
 		});
 		h.withdraw("n1");
 		expect(told.at(-1)).toEqual({ v: 1, type: "withdraw", nonce: "n1" });
+		// A call the extension runs without asking: a claim, the same fields.
+		h.vouch("search", { q: "a" }, { ...VOUCH, nonce: "n2", allowed: false });
+		expect(told.at(-1)).toEqual({
+			v: 1,
+			type: "claim",
+			tool: "search",
+			arguments: { q: "a" },
+			nonce: "n2",
+			app: { name: "Claude", host: "claude.ai" },
+			result: "mcp",
+		});
+		h.withdraw("n2");
+		expect(told.at(-1)).toEqual({ v: 1, type: "withdraw", nonce: "n2" });
 	});
 
 	test("a worker that never answers: asked again twice, then not; nothing is told", async () => {
@@ -793,9 +814,35 @@ describe("the vouch in the bridge", () => {
 		expect(second).not.toBe(first);
 	});
 
-	test("none for a read-only tool, which nobody asks about", async () => {
-		const { calls, run } = await bridgeWith([readOnly("search")], deny);
+	test("a read-only tool, which nobody asks about, goes with a claim (not allowed); an allowed call's vouch is allowed (DEC-224)", async () => {
+		const { calls, run, bridge } = await bridgeWith(
+			[readOnly("search"), asking("buy")],
+			allow,
+		);
 		await run("page_search");
+		await bridge.callByName("search", {}, options());
+		await run("page_buy");
+		expect(
+			calls.map((c) => [c.name, c.vouch?.allowed, c.vouch?.app.host]),
+		).toEqual([
+			["search", false, "claude.ai"],
+			["search", false, "claude.ai"],
+			["buy", true, "claude.ai"],
+		]);
+		const nonces = new Set(calls.map((c) => c.vouch?.nonce));
+		expect(nonces.size).toBe(3);
+	});
+
+	test("a read-only call of another caller than an AI app through the relay goes without", async () => {
+		const { calls, bridge } = await bridgeWith([readOnly("search")], deny);
+		await bridge.callByName(
+			"search",
+			{},
+			{
+				signal: new AbortController().signal,
+				client: { kind: "webmcp" },
+			},
+		);
 		expect(calls).toEqual([{ name: "search", vouch: undefined }]);
 	});
 
@@ -974,12 +1021,119 @@ describe("both sides together: the client library in the page", () => {
 			via: "tab-mcp-extension",
 			name: "Claude",
 			host: "claude.ai",
+			allowed: true,
 		});
 		// Without the vouch (another agent in the browser): asked as before.
 		await callTool(call, { id: 7 }, signal, page, "doc-A");
 		expect(asked).toHaveLength(1);
 		h.stateChanged(OFF);
 		expect(mcp.extension).toBeUndefined();
+	});
+
+	test("a claimed read-only call brings the picture to the AI app; without the claim the page's text as before (DEC-224)", async () => {
+		const { h } = handshake();
+		const { mcp, native, asked, calls } = await libraryPage();
+		const png = "iVBORw0KGgoAAAANSUhEUg==";
+		await mcp.registerTool(
+			{
+				name: "snapshot",
+				description: "The page as a picture",
+				annotations: { readOnlyHint: true },
+				execute: () => ({
+					content: [
+						{ type: "text", text: "The page:" },
+						{ type: "image", data: png, mimeType: "image/png" },
+					],
+				}),
+			},
+			{ callers: ["relay", "webmcp"] },
+		);
+		await Bun.sleep(5);
+		const signal = new AbortController().signal;
+		const page = {
+			location: doc.location,
+			modelContext: native,
+		} as unknown as Document;
+		const call = await offered(page, "snapshot");
+		expect(call.readOnly).toBe(true);
+		const claim = { ...VOUCH, nonce: "c1", allowed: false };
+		const claimed = await callTool(call, {}, signal, page, "doc-A", {
+			send: (args) => h.vouch("snapshot", args, claim),
+			withdraw: () => h.withdraw(claim.nonce),
+		});
+		if (!claimed.ok) throw new Error(claimed.error);
+		// What the AI app gets: the bridge's unwrapping of the page's answer.
+		expect(resultOf(claimed.value ?? "")).toEqual({
+			content: [
+				{ type: "text", text: "The page:" },
+				{ type: "image", data: png, mimeType: "image/png" },
+			],
+		});
+		expect(asked).toEqual([]);
+		expect(calls[0]?.client).toEqual({
+			kind: "webmcp",
+			via: "tab-mcp-extension",
+			name: "Claude",
+			host: "claude.ai",
+			allowed: false,
+		});
+		const plain = await callTool(call, {}, signal, page, "doc-A");
+		if (!plain.ok) throw new Error(plain.error);
+		expect(resultOf(plain.value ?? "")).toBe(
+			"The page:\n[image content left out: WebMCP results are text.]",
+		);
+		expect(calls[1]?.client).toEqual({ kind: "webmcp" });
+	});
+
+	test("a picture of more than 2 MiB of base64 from a tool that asks: a note, and the call does not fail after the tool ran (review of PR 236)", async () => {
+		const { h } = handshake();
+		const { mcp, native, asked } = await libraryPage();
+		const huge = "A".repeat(2.2 * 1024 * 1024);
+		const shots: number[] = [];
+		await mcp.registerTool(
+			{
+				name: "screenshot",
+				description: "Takes a screenshot and keeps it",
+				annotations: { consequentialHint: true },
+				execute: () => {
+					shots.push(shots.length + 1);
+					return {
+						content: [
+							{ type: "text", text: "Saved." },
+							{ type: "image", data: huge, mimeType: "image/png" },
+						],
+						structuredContent: { saved: true },
+					};
+				},
+			},
+			{ callers: ["relay", "webmcp"] },
+		);
+		await Bun.sleep(5);
+		const signal = new AbortController().signal;
+		const page = {
+			location: doc.location,
+			modelContext: native,
+		} as unknown as Document;
+		const call = await offered(page, "screenshot");
+		const vouched = { ...VOUCH, nonce: "big" };
+		const result = await callTool(call, {}, signal, page, "doc-A", {
+			send: (args) => h.vouch("screenshot", args, vouched),
+			withdraw: () => h.withdraw(vouched.nonce),
+		});
+		if (!result.ok) throw new Error(result.error);
+		expect((result.value ?? "").length).toBeLessThanOrEqual(MAX_SEND_RESULT);
+		expect(shots).toEqual([1]);
+		expect(asked).toEqual([]);
+		expect(resultOf(result.value ?? "")).toEqual({
+			content: [
+				{ type: "text", text: "Saved." },
+				{
+					type: "text",
+					text: `[An image of ${Math.ceil(huge.length / 1024)} KiB (base64) was left out: the images of one result may have 640 KiB together.]`,
+				},
+			],
+			structuredContent: { saved: true },
+		});
 	});
 
 	test("AI access off: the page's TabMcp sees exactly what it sees without the extension", async () => {

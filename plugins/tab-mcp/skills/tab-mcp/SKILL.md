@@ -114,7 +114,9 @@ Rules for tools:
 - Write `description` for a model: what the tool does, its units, an example.
 - `execute` results: a string becomes one text block; an MCP result (`content` an array
   of MCP content blocks: `text`, `image`, `audio`, `resource_link`, `resource`) is passed
-  through (use it for images); any other JSON value, also an object whose `content` holds
+  through (use it for images; an AI app through the tab-mcp browser extension gets them
+  too, from the release after 0.23 on; any other WebMCP caller gets the text, each image
+  a line that says it was left out); any other JSON value, also an object whose `content` holds
   something else, is sent as JSON text and, for objects, as `structuredContent`.
   Annotation hints must be `true` or `false`; anything else is a `TypeError`. A thrown error becomes an error
   result with its message, so throw errors that tell the model what to do.
@@ -123,9 +125,11 @@ Rules for tools:
   `{ kind: "relay", grantId, id, host, name? }` for an AI app (verified `host`, declared
   `name`), `{ kind: "local", id, name? }` for the site's own assistant on a served port
   (what the page passed to `serve`, section 3), or `{ kind: "webmcp", via?, name?,
-  host? }` for a WebMCP caller: `via: "tab-mcp-extension"` with the AI app's
+  host?, allowed? }` for a WebMCP caller: `via: "tab-mcp-extension"` with the AI app's
   `name` and verified `host` when the tab-mcp browser extension ran the call for an AI
-  app connected to it (section 5), else nothing more is known (an agent in the browser,
+  app connected to it (section 5), and `allowed: true` only when the user allowed that
+  call there (`false` for a read-only tool it ran unasked; `via` alone is no "allowed"),
+  else nothing more is known (an agent in the browser,
   another extension, an `exposedTo` origin: the page cannot tell which). Check `client.kind`
   before reading `host`; a label for a log, e.g. `kind === "relay" ? name ?? host :
   kind === "local" ? name ?? id : via ? (name ?? host) + " through the tab-mcp browser
@@ -346,7 +350,8 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   drives the tab clicked "Allow once" in the dialog itself. For another extension or an
   `exposedTo` origin the dialog was a real check, and it is gone too. Such a tool is
   registered with `consequentialHint: true`, so a caller that heeds it asks its user.
-  The page's `onConfirm` still gets the call (`client.kind === "webmcp"`, no `via`):
+  The page's `onConfirm` still gets the call (`client.kind === "webmcp"`; no `via`, or
+  `via` with `allowed: false` for a read-only call the tab-mcp browser extension ran unasked):
   decide there in code (refuse, or a rule), never by showing something, which an agent
   can click too. Without `onConfirm` the call runs. A tool that must not run on such a
   caller's word leaves `"webmcp"` out of `callers`, and gets no `exposedTo` (the library
@@ -356,7 +361,8 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   shake hands; it sees the page's tools only through the mirror. A call the user has just allowed in the extension (asked in its side
   panel, or covered by its "Always allow" switch; the same tool, equal arguments, within
   2 seconds) runs without `onConfirm`, so `onConfirm` is not a hook that sees every
-  call; its caller is `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`.
+  call; its caller is `{ kind: "webmcp", via: "tab-mcp-extension", name, host,
+  allowed: true }`.
   `trustExtension: false` on `TabMcp` hands such a call to `onConfirm` like an
   unvouched one; without `onConfirm` it then runs as well, so the option only matters
   to a page with an `onConfirm`. `mcp.extension` (event `extensionchange`, React:

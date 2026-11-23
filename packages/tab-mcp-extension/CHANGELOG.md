@@ -28,8 +28,31 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
   own, and `page_info` in a note. With access to all sites nothing changes: a page gets
   the extension's WebMCP as it loads, or as the content script comes to a page that
   loaded before, whatever AI access.
+- **Pictures from a page with the client library** (DEC-224). Right before the extension
+  runs one of such a page's tools for an AI app, a read-only one too, it tells the page
+  the tool, the arguments and the AI app, and asks for the whole MCP result: a "claim"
+  for a read-only tool (which allows nothing), the vouch as before for a call the user
+  allowed. A page with the library from the release after 0.23 on then answers with
+  its text, images, `structuredContent` and `isError`, and the AI app gets the page's
+  pictures as it does when connected to the page directly. Such a page now also learns
+  which AI app calls its read-only tools, while AI access is on. An older library
+  ignores the claim and answers with text as before.
 
 ### Changed
+
+- **MCP results the extension does not carry whole**: its `structuredContent` now
+  reaches the AI app where its JSON fits in what the text blocks left of the 100,000
+  characters (it was dropped silently), else a line says it was left out. The text of
+  an embedded text resource reaches it as a text block after the resource's uri.
+  Everything else it does not carry is a line that says so, with its reason: an image
+  of another type than PNG, JPEG, GIF or WebP, one whose data is not base64, audio, a
+  resource link, a binary resource, and the blocks past 32 (past 31 with
+  `structuredContent`; one line). Before, any such result reached the AI app as its
+  whole JSON as text, cut to 100,000 characters, base64 images included.
+- **An MCP result over 2 MiB is no longer refused**: the content script makes it what
+  the AI app would get (the pictures beyond 640 KiB of base64 as notes, the text cut)
+  before it sends it, so a large picture becomes a note and the call, whose tool ran,
+  does not fail. Any other result over 2 MiB is still refused.
 
 - **The side panel's "This page has no WebMCP" text** says that tab-mcp gives a page its
   own while AI access is on, and that pages which look for it only as they load need

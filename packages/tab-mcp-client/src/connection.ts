@@ -3,7 +3,7 @@
  * HTTP tunnel and the MCP handler. Loaded by `TabMcp.connect()`.
  */
 
-import type { VouchedBy } from "./handshake.ts";
+import type { Vouched } from "./handshake.ts";
 import { pageIcons } from "./icons.ts";
 import type { CallHost, ConnectionHandle, ConnectionHost } from "./internal.ts";
 import { createMcpHandler, webMcpCall } from "./mcp.ts";
@@ -27,8 +27,12 @@ export { pieces, servePort } from "./serve.ts";
 /**
  * For the core: a WebMCP call of a mirrored tool (iteration 25), on the
  * same path as an AI app's (`webMcpCall` in `mcp.ts`). `by`: the tab-mcp
- * browser extension vouched for this very call, for that AI app (DEC-207):
- * the user allowed it there, so the page neither asks nor calls `onConfirm`.
+ * browser extension announced this very call, for that AI app. A vouch
+ * (`allowed`, DEC-207): the user allowed it there, so the page neither
+ * asks nor calls `onConfirm`. A claim (DEC-224): the extension ran it
+ * without asking (read-only for it); it is named as the extension's, and
+ * `onConfirm` decides as below. With `whole`, the call resolves with the
+ * whole MCP result, which the extension passes on (DEC-224).
  * Any other WebMCP call (an agent that may drive the tab and would answer
  * the library's dialog itself, another extension, an `exposedTo` origin;
  * DEC-215): the page's own `onConfirm` decides a tool that asks, in code;
@@ -42,23 +46,28 @@ export function callFromWebMcp(
 	tool: RegisteredTool,
 	input: unknown,
 	signal: unknown,
-	by?: VouchedBy,
+	by?: Vouched,
 ): Promise<unknown> {
 	const context = callContext(host, "webmcp");
-	return by === undefined
-		? webMcpCall(
-				{ ...context, confirm: host.onConfirm() ?? (() => true) },
-				tool,
-				input,
-				signal,
-				{ kind: "webmcp" },
-			)
-		: webMcpCall({ ...context, confirm: () => true }, tool, input, signal, {
-				kind: "webmcp",
-				via: "tab-mcp-extension",
-				name: by.name,
-				host: by.host,
-			});
+	return webMcpCall(
+		{
+			...context,
+			confirm: (by?.allowed ? undefined : host.onConfirm()) ?? (() => true),
+		},
+		tool,
+		input,
+		signal,
+		by === undefined
+			? { kind: "webmcp" }
+			: {
+					kind: "webmcp",
+					via: "tab-mcp-extension",
+					name: by.app.name,
+					host: by.app.host,
+					allowed: by.allowed,
+				},
+		by?.whole,
+	);
 }
 
 /** How long `connect()` waits for the relay's `session`. */

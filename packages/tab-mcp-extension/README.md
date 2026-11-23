@@ -101,11 +101,20 @@ The page's tools are the page's word:
   app cancels it in the page. A page that does not answer the extension's other questions
   (its tools, `page_info`) in 5 s is given up, so a stuck page cannot hold the other
   tabs. Results are marked untrusted; their text, all blocks together, is cut to 100,000
-  characters, and a result over 2 MiB is refused. A page that answers with an MCP result
-  (as `@mcp-b/global` pages do) gets its text blocks and images through, at most 32
-  blocks, the images of one result up to 640 KiB of base64 together (about 480 KB of
+  characters, and a result over 2 MiB is refused unless it is an MCP result. A page that
+  answers with an MCP result
+  (as `@mcp-b/global` pages do, and a page with the client library for a call of the
+  extension, below) gets its text blocks, the text of embedded text resources (after
+  their uri) and PNG, JPEG, GIF and WebP images through,
+  the images of one result up to 640 KiB of base64 together (about 480 KB of
   image data; an image beyond that is replaced by a note), so that a result stays within
-  the relay's default 1 MiB per response. A result that is the JSON of another object
+  the relay's default 1 MiB per response; its `isError` too, and its `structuredContent`
+  where its JSON fits in what the text blocks left of the 100,000 characters. Everything
+  left out is a line that says so: an image of another type or whose data is not base64,
+  audio, a resource link, a binary resource, `structuredContent` that does not fit, and
+  the blocks past 32 (one line; past 31 with `structuredContent`). An MCP result over
+  2 MiB is made so in the page first, so a large picture becomes a note, not a failed
+  call. A result that is the JSON of another object
   (within the 100,000 characters, and without a `content` key) reaches the AI app as text
   and as `structuredContent`. A result that is a JSON-encoded string (`"Hello"`, as the
   WebMCP draft encodes every result; Chrome 156 passes strings on as they are) is that
@@ -142,6 +151,19 @@ The page's tools are the page's word:
   that gets the extension's WebMCP late, after a click (DEC-223), learns that it is
   installed and that you gave it the tab, and when. A page it told "on" is told once that it went off. A page without the library is
   told nothing.
+- Pictures from such a page (DEC-224). Right before the extension runs any of the
+  page's tools for an AI app, a read-only one too, it tells the page the tool, the
+  arguments and the AI app (for a read-only tool a "claim", which allows nothing: the
+  page's own `onConfirm` still decides a tool that asks), and asks for the whole MCP
+  result. A page with the client library from the release after 0.23 on then answers
+  that call with its text, images, `structuredContent` and `isError`, which the
+  extension passes on as above: an AI app connected through the extension gets the
+  page's pictures (a calculator's display, a diagram) as it does when connected to the
+  page directly. Any other caller of the page's tools through WebMCP (the browser's own
+  AI) gets the text as before, each picture a line "[image content left out: WebMCP
+  results are text.]". So such a page also learns which AI app calls its read-only
+  tools, while AI access is on; one with `trustExtension: false` ignores all of it and
+  gives the text.
 - The top frame's WebMCP, which lists the tools of the page and of its same-origin
   frames (the draft and Chrome's documentation say so; not tested here); tools of
   frames of other origins are not listed. The browser's own WebMCP, or where it has none

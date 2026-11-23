@@ -2860,6 +2860,11 @@ Iteration 32 (review of 2026-11-13, CC 6, CC 7, CC 10, CC 11, CC 15). Amends DEC
 
 ## DEC-143: The client follows the WebMCP draft of 2026-11-12
 
+**Amended by DEC-224:** "Results through WebMCP" below holds for every WebMCP call
+except one the tab-mcp browser extension announced with `result: "mcp"` (its vouch or
+claim): that one resolves with the whole MCP result, images included, which the
+extension passes on to an AI app outside the browser.
+
 **Amended by DEC-215** (after DEC-209): `consequentialHint ?? destructiveHint` still sets
 the native `consequentialHint`, but no longer decides a question of the library for a
 WebMCP call: an unvouched WebMCP call gets none, only the page's `onConfirm`.
@@ -4586,6 +4591,12 @@ extension is its first user. The shape below is the library's, not the owner's.
 
 ## DEC-207: The page and the tab-mcp browser extension know of each other (owner)
 
+**Amended by DEC-224:** the extension also announces an AI app's call of a read-only
+tool, as a `claim`, which names the AI app and allows nothing (only a vouch skips
+`onConfirm`); vouch and claim carry `result: "mcp"`, and the matching call resolves
+with the whole MCP result, pictures included. "Read-only tools ... get none" below
+holds for the vouch only.
+
 **Amended by DEC-222:** every page that mirrors takes part, which is every client page
 where the tab has WebMCP unless it sets `webmcp: false` (not only pages with
 `webmcp: true`).
@@ -5687,3 +5698,77 @@ after.
   registers nothing, and the panel says so (`late-webmcp`), whose remedy (all sites, a
   reload) works. An old extension gives no event: as before. Either release may come
   first.
+
+## DEC-224: Pictures through the extension: it announces every call it makes for an AI app, the library gives it the whole MCP result (owner)
+
+2026-11-23, [iteration 52](/iterations/iteration-52-pictures-through-extension.md). An AI
+app connected to a page through the relay got a tool's pictures (saturnus's
+`read_display`, the diagram editor's `get_image`); one connected through the tab-mcp
+browser extension got none: the client library reduced every WebMCP result to its
+`structuredContent` or its text, each image a line "[image content left out: WebMCP
+results are text.]" (DEC-143), and the library could tell the extension's call from the
+browser's AI only by the vouch, which the extension sent only for calls it asked about.
+
+- **The owner's approval (2026-11-23: "ok, plan it and implement it"),** after the
+  explanation that the extension says "the next call is mine" before every call and the
+  library then gives it the picture.
+- **The extension** announces every page-tool call it makes for an AI app through the
+  relay, right before `executeTool`, as the vouch was: a `vouch` for a call the user
+  allowed (as before), a `claim` for a read-only tool (new), the same fields, withdrawn
+  the same way. Both carry `result: "mcp"`. It passes the answer on with `resultOf`
+  (`src/result.ts`): text, and the text of an embedded text resource after its uri, cut
+  to 100,000 characters together with the notes, PNG, JPEG, GIF and WebP images up to
+  640 KiB of base64 together, `isError`, and now `structuredContent` where its JSON
+  fits in what the text left, and a line for everything left out (an image beyond the
+  budget, of another type or not base64, audio, a link, a binary resource,
+  `structuredContent` that does not fit, the blocks past 32, or 31 with
+  `structuredContent`); before, such a result went out as its whole JSON as text.
+- **A result too long to send is shrunk in the page, not refused** (review of PR 236,
+  team lead's decision: degrade in the extension, the library does not know its
+  budgets). The content script refuses a result over 2 MiB; a whole result with a
+  picture of 2 MiB of base64 would have failed a call whose tool had run. Now an MCP
+  result over 2 MiB is first made what the AI app would get (`shrunk`, the same
+  function as the worker's), which always fits, and the worker's pass over it changes
+  nothing (notes counted first, the text cut to what they leave). Done in the content
+  script, not by letting such results through to the worker: the 2 MiB keep the one
+  service worker of all tabs, and Chrome's message limit of 64 MiB, out of a page's
+  reach, and the content script already holds the string, in the page's own process.
+- **The library** keeps claims with the vouches (the same 16, the same 2 s). A call
+  that matches either is named as the AI app's (`via`, `name`, `host`); only a vouch
+  skips `onConfirm`. `client.allowed` tells them apart (review of PR 236): `true` for
+  a vouch, `false` for a claim, in `execute`, `toolcall`, `toolcallend` and
+  `onConfirm`'s request alike, as `via` alone no longer means the user allowed the call. With `result: "mcp"` such a call resolves with the whole MCP result
+  (`content` with images, `structuredContent`, `isError`, no `_meta`; every failure as
+  an `isError` result with its message), any other value as before. Any other WebMCP
+  call, a vouch without `result`, and every call with `trustExtension: false` resolve as
+  before (DEC-143 holds for them). The mirror's chunk grows from 1967 to 1995 B gzipped
+  (2048 B allowed); the core does not change.
+- **A claim, not a vouch for every call** (settled from the code; the approved design
+  said "the extension vouches for every call", for read-only ones too). A vouch
+  skips `onConfirm`. A tool marked both `readOnlyHint` and `consequentialHint` (or
+  `destructiveHint`) is read-only for the extension, which runs it without asking; with
+  a vouch the page's `onConfirm` would be skipped for a call nobody allowed. A library of
+  0.23 or older takes any vouch, so with a new extension the same would happen there; it
+  ignores an unknown type, so a claim leaves such a page as it is today.
+- **`result: "mcp"`, not the vouch alone**, so that a vouch of an older extension (which
+  passes on only text and images, drops `structuredContent` and sends any other block as
+  the whole JSON) gets the value as before.
+- **What a page newly learns:** while AI access is on, the AI app (name, verified host)
+  and the tool of every call the extension makes there, read-only ones included, with
+  the arguments it gets anyway. Nothing while AI access is off (DEC-221).
+- **Kept: 16 and 2 s.** The relay lets at most 8 requests per tab run at once by default
+  (`maxConcurrentRequests`), and the extension is one tab of it, so vouches and claims
+  in flight stay at 8 or fewer; a seventeenth drops the oldest, whose call runs
+  unannounced (text, and `onConfirm` for a tool that asks). Shown in the client's unit
+  test.
+- **Known residual (A14):** an agent in the browser that calls the same tool with equal
+  arguments in the moment before the extension's call reaches the page takes the vouch
+  or claim, and with it the whole result and the AI app's name; the extension's call
+  then gets text. Equal concurrent calls of two AI apps can swap names the same way.
+- **Old and new mix:** an old extension with a new library: text as today. A new
+  extension with an old library: the claim is ignored, read-only calls give text as
+  today; a vouched call is as today (`result` ignored). Either release may come first.
+- **Rejected: the library detects the extension's call another way** (a property on the
+  call, the caller's origin): WebMCP gives the page nothing that tells callers apart.
+  **Rejected: images through WebMCP to every caller** (DEC-143's reason holds: the
+  browser's AI gets base64 as JSON text, tokens for nothing).

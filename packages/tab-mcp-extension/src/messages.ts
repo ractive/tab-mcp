@@ -31,9 +31,10 @@ export type ContentRequest =
 			definition: string;
 			input: unknown;
 			/**
-			 * The user allowed this call (DEC-207): told to a page with the
-			 * client library right before the tool runs. Only the bridge's
-			 * path after the user's "allow" sets it.
+			 * An AI app's call: told to a page with the client library right
+			 * before the tool runs, as a vouch if the user allowed it
+			 * (DEC-207), else as a claim (DEC-224). Only the bridge's
+			 * `#allowedThenRun` sets it.
 			 */
 			vouch?: Vouch;
 			/**
@@ -61,12 +62,21 @@ export interface AppView {
 	host: string;
 }
 
-/** What a vouch says besides the tool and its arguments (DEC-207). */
+/**
+ * What the page is told about an AI app's call besides the tool and its
+ * arguments (DEC-207, DEC-224).
+ */
 export interface Vouch {
 	/** One per call. */
 	nonce: string;
 	/** The AI app that made the call. */
 	app: AppView;
+	/**
+	 * The user allowed it (asked, or allowed for its site): a `vouch`, and
+	 * the page does not ask again. `false` for a tool the extension runs
+	 * without asking (read-only): a `claim`, which allows nothing.
+	 */
+	allowed: boolean;
 }
 
 /**

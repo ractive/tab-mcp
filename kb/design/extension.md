@@ -157,17 +157,36 @@ page can say that an AI app is connected through the extension
 - **The vouch.** `PageToolBridge` makes one in `#allowedThenRun` only, after the
   user's answer (or the site's "allowed") and the same-tool check, for a tool that is not
   read-only and an AI app through the relay; it goes with the `webmcp-call` message,
-  and the content script dispatches it (`tool`, `arguments`, `nonce`, `app`)
+  and the content script dispatches it (`tool`, `arguments`, `nonce`, `app`, `result`)
   synchronously right before `executeTool`, after its own checks, and `withdraw`
   (`nonce`) once `executeTool` settled, whatever the outcome, so that a call that failed
   or was cancelled before it reached the page leaves no vouch. The library keeps it
   2 s, for the tool registered under that name then, and uses it once for the next
   WebMCP call of that tool with equal arguments (canonical JSON, keys sorted): no
-  `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension", name, host }`.
+  `onConfirm`, the caller `{ kind: "webmcp", via: "tab-mcp-extension", name, host,
+  allowed: true }`.
   `trustExtension: false` in the page hands it to `onConfirm` anyway. A WebMCP call
   without a vouch (an agent in the browser, another extension, an `exposedTo`
   origin; the page cannot tell which) gets no question from the library, only the
   page's `onConfirm` decides (DEC-215).
+- **The claim and the pictures** (DEC-224). For an AI app's call of a read-only tool,
+  `#allowedThenRun` makes the same message with `allowed: false`, which the content
+  script dispatches as `claim` instead of `vouch`, and withdraws the same way. A claim
+  names the AI app in the page's events (`allowed: false`) and allows nothing
+  (`onConfirm` decides as for any WebMCP call). Both carry `result: "mcp"`: the library
+  then resolves the call with the whole MCP result (`content` with images,
+  `structuredContent`, `isError`; a failure as an `isError` result), and `resultOf`
+  (`src/result.ts`) passes it on within its limits: text and the text of embedded text
+  resources (after their uri) cut to 100,000 characters together with the notes, PNG,
+  JPEG, GIF and WebP images up to 640 KiB of base64 together, `structuredContent` where
+  its JSON fits in what the text left, and a line for everything left out (an image
+  beyond the budget, of another type or not base64, audio, a link, a binary resource,
+  the blocks past 32, or 31 with `structuredContent`, and `structuredContent` that does
+  not fit). An MCP result over the content script's 2 MiB is first made the same way
+  there (`shrunk`), so it is sent, not refused: the same function given its own output
+  returns it unchanged. Any other WebMCP call, and a page with an older library
+  (which ignores claims and `result`), gets the text as before. A tool that returns no
+  MCP result is answered as before.
 - **The panel.** For the tab in front, when the page announced the library: "This page
   has tab-mcp built in." (also while AI access is off: the page spoke, nothing it said
   was read), and when an AI app connected to the extension is also connected to the
