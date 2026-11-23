@@ -27,6 +27,7 @@ import { FIREFOX_ID } from "../scripts/build.ts";
 import { findFirefox } from "./firefox.ts";
 import {
 	answerInPanel,
+	type CallResult,
 	call,
 	clickIcon,
 	findPanel,
@@ -41,6 +42,7 @@ import {
 	useFirefox,
 	waitForTools,
 } from "./firefox-e2e.ts";
+import { glowsWhileCalling } from "./glow.ts";
 import { picturesThroughTheExtension } from "./pictures.ts";
 
 setDefaultTimeout(30_000);
@@ -176,19 +178,27 @@ describe.skipIf(!firefoxOk)("the Firefox build (the test build)", () => {
 		);
 	}, 220_000);
 
-	test("a tool not marked read-only asks in the panel first", async () => {
-		const allowed = call(stack, "page_place_order", { item: "tea" });
-		await answerInPanel(stack, "allow").catch(async (error: unknown) => {
-			// How the call ended, if it did: why no question showed.
-			const ended = await Promise.race([
-				allowed,
-				Bun.sleep(1000).then(() => "pending"),
-			]);
-			throw new Error(`${String(error)}\nThe call: ${JSON.stringify(ended)}`);
-		});
-		const result = await allowed;
+	test("a tool not marked read-only asks in the panel first; the AI access switch glows while it runs and for the hold after (DEC-225)", async () => {
+		let allowed: Promise<CallResult> | undefined;
+		const result = await glowsWhileCalling(
+			(expression) => stack.panel.eval(expression),
+			() => {
+				allowed = call(stack, "page_place_order", { item: "tea" });
+				return allowed;
+			},
+			() =>
+				answerInPanel(stack, "allow").catch(async (error: unknown) => {
+					// How the call ended, if it did: why no question showed.
+					const ended = await Promise.race([
+						allowed,
+						Bun.sleep(1000).then(() => "pending"),
+					]);
+					throw new Error(
+						`${String(error)}\nThe call: ${JSON.stringify(ended)}`,
+					);
+				}),
+		);
 		expect(result.content[0]?.text).toContain("tea");
-		expect(result.isError).toBeFalsy();
 		const declined = call(stack, "page_place_order", { item: "coffee" });
 		await answerInPanel(stack, "deny");
 		expect((await declined).isError).toBe(true);

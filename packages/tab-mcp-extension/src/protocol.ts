@@ -172,6 +172,13 @@ export interface PanelState {
 	grants: GrantView[];
 	pairing: boolean;
 	code?: string;
+	/**
+	 * A tool call of a connected AI app runs now, through any of the
+	 * extension's tools; also while it waits for the user's answer. The
+	 * panel's AI access switch glows while it does and a while after
+	 * (DEC-225).
+	 */
+	calling: boolean;
 	/** The last error, until the next connection. */
 	problem?: string;
 	/** Another tab or program took the address over. */
@@ -221,6 +228,7 @@ export function startProblem(error: unknown): PanelState {
 		status: "off",
 		grants: [],
 		pairing: false,
+		calling: false,
 		problem: `The ${PRODUCT} could not start: ${why}. Close and open this panel to try again.`,
 		allSites: false,
 		questions: [],

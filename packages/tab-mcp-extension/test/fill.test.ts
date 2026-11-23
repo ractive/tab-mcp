@@ -384,6 +384,7 @@ function panel(granted: boolean) {
 		status: "on",
 		relay: RELAY,
 		pairing: true,
+		calling: false,
 		grants: [],
 		allSites: false,
 		questions: [],

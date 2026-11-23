@@ -176,6 +176,7 @@ function stateWith(
 		status: "on",
 		grants: [{ grantId: "g1", name: "Claude", host: "claude.ai" }],
 		pairing: false,
+		calling: false,
 		allSites: true,
 		questions,
 		expired: [],
@@ -206,6 +207,38 @@ const switchOf = (name: string) => `input.always-allow[data-tool="${name}"]`;
 const allowOf = (id: string) =>
 	`[data-question="${id}"] button[data-answer="allow"]`;
 const disabled = (e: Element | null) => e?.getAttribute("aria-disabled");
+
+describe("the glow while an AI app calls (DEC-225)", () => {
+	/** Every text and `aria-*` or `role` value of the panel. */
+	const spoken = (doc: Document) => ({
+		text: doc.body.textContent,
+		aria: [...doc.querySelectorAll("*")].flatMap((e) =>
+			[...e.attributes]
+				.filter((a) => a.name.startsWith("aria-") || a.name === "role")
+				.map((a) => `${e.id || e.tagName}:${a.name}=${a.value}`),
+		),
+	});
+
+	test("on the AI access switch's label, a style alone; gone at once with the connection", async () => {
+		const panel = await openPanel();
+		const glows = () =>
+			panel.$("#ai-switch")?.closest(".switch")?.hasAttribute("data-calling");
+		panel.show(stateWith([]));
+		expect(glows()).toBe(false);
+		const before = spoken(panel.doc);
+		panel.show({ ...stateWith([]), calling: true });
+		expect(glows()).toBe(true);
+		// Only the label's attribute: no text, name or aria-* value changed.
+		expect(spoken(panel.doc)).toEqual(before);
+		expect(panel.doc.querySelectorAll("[data-calling]")).toHaveLength(1);
+		expect(panel.$(".card-head .switch")?.hasAttribute("data-calling")).toBe(
+			true,
+		);
+		// The relay's connection lost: no hold.
+		panel.show({ ...stateWith([]), status: "retrying", calling: true });
+		expect(glows()).toBe(false);
+	});
+});
 
 describe("a tool's Always allow switch", () => {
 	test("drawn from the worker's state: on where the site's tool is allowed (EQ 10)", async () => {

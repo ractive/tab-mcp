@@ -129,13 +129,14 @@ const PAIRS: Row[] = [
 
 describe("the panel's tokens", () => {
 	test("both schemes define every colour, and dark changes the ones it must", () => {
-		expect(Object.keys(light).length).toBe(21);
+		expect(Object.keys(light).length).toBe(27);
 		expect(light["--paper"]).toBe("#f6f4ee");
 		expect(dark["--paper"]).toBe("#11141a");
-		// Amber is the same in both; every other colour has a dark value.
+		// Amber and the glow's colours (DEC-225) are the same in both; every
+		// other colour has a dark value.
 		expect(
 			Object.keys(light).filter((name) => dark[name] === light[name]),
-		).toEqual(["--accent"]);
+		).toEqual(["--accent", ...[1, 2, 3, 4, 5, 6].map((i) => `--glow-${i}`)]);
 		// The look before (blue accent, cards on a background) is gone.
 		expect(
 			/--(fg|muted|line|card|bg|on|off|wait|problem|knob-color)(?![\w-])/.test(
@@ -289,13 +290,28 @@ describe("the style sheet's rules", () => {
 		expect(css).not.toMatch(/var\(--[\w-]+\s*,/);
 	});
 
-	test("nothing is dimmed by opacity, and no shadow has a blur", () => {
+	test("nothing is dimmed by opacity, and no shadow has a blur; the glow's halo alone is blurred and breathes (DEC-225)", () => {
+		const OPACITY = /(^|[;\s{])opacity\s*:/;
+		const FILTER = /(^|[;\s])filter\s*:/;
+		const HALO = ".switch[data-calling]::after";
+		const BREATH = "@keyframes calling";
 		for (const r of all) {
-			expect(r.body).not.toMatch(/(^|[;\s])opacity\s*:/);
-			expect(r.body).not.toMatch(/(^|[;\s])filter\s*:/);
 			for (const m of r.body.matchAll(/box-shadow:\s*([^;]+);/g))
 				expect(m[1]).toMatch(/^(none|(inset )?0 0 0 1px var\(--[\w-]+\))$/);
+			if (r.selector === HALO || r.selector === BREATH) continue;
+			expect(r.body).not.toMatch(OPACITY);
+			expect(r.body).not.toMatch(FILTER);
 		}
+		// The halo: a blur of the ring behind the switch, never a control's
+		// fill; its opacity only in its breath and, steady, without motion.
+		const halo = all.filter((r) => r.selector === HALO);
+		expect(halo.map((r) => r.media)).toEqual(["", REDUCED, FORCED]);
+		expect(halo[0]?.body).toContain("filter: blur(3px);");
+		expect(halo[1]?.body).toContain("opacity: 0.6;");
+		expect(halo[2]?.body).toBe("display: none;");
+		expect(
+			all.find((r) => r.selector === BREATH)?.body.match(/opacity: [\d.]+/g),
+		).toEqual(["opacity: 0.2", "opacity: 0.95"]);
 	});
 
 	test("a button or switch that takes no click has colours of its own, for disabled and aria-disabled alike", () => {
@@ -341,26 +357,39 @@ describe("the style sheet's rules", () => {
 		expect(css).not.toMatch(/\.primary\b/);
 	});
 
-	test("one focus ring for every control", () => {
+	test("one focus ring for every control; the glow only moves it out and takes its halo away (DEC-225)", () => {
 		const focus = plain.filter((r) => r.selector.includes(":focus"));
-		expect(focus.map((r) => r.selector)).toEqual([":focus-visible"]);
-		expect(focus[0]?.body).toContain("outline: 2px solid var(--focus);");
+		expect(focus.map((r) => [r.selector, r.body])).toEqual([
+			[
+				":focus-visible",
+				"outline: 2px solid var(--focus);\n\toutline-offset: 2px;",
+			],
+			[".switch[data-calling] input:focus-visible", "outline-offset: 4px;"],
+			[
+				".switch[data-calling]:has(input:focus-visible)::after",
+				"display: none;",
+			],
+		]);
 		expect(css).not.toMatch(/outline:\s*(none|0)\b/);
 	});
 
-	test("reduced motion stops every transition", () => {
-		const moving = plain
-			.filter((r) => /(^|[;\s])(transition|animation)\s*:/.test(r.body))
-			.flatMap((r) => selectors(r.selector));
-		expect(moving).toEqual([
+	test("reduced motion stops every transition and the glow's breath", () => {
+		const moving = (property: string) =>
+			plain
+				.filter((r) => new RegExp(`(^|[;\\s])${property}\\s*:`).test(r.body))
+				.flatMap((r) => selectors(r.selector));
+		expect(moving("transition")).toEqual([
 			"button",
 			":is(.switch, .allow-switch) input",
 			":is(.switch, .allow-switch) input::after",
 		]);
+		expect(moving("animation")).toEqual([".switch[data-calling]::after"]);
 		const reduced = all.filter((r) => r.media === REDUCED);
-		expect(reduced.length).toBe(1);
-		expect(selectors(reduced[0]?.selector ?? "")).toEqual(moving);
+		expect(reduced.length).toBe(2);
+		expect(selectors(reduced[0]?.selector ?? "")).toEqual(moving("transition"));
 		expect(reduced[0]?.body).toBe("transition: none;");
+		expect(selectors(reduced[1]?.selector ?? "")).toEqual(moving("animation"));
+		expect(reduced[1]?.body).toContain("animation: none;");
 	});
 
 	test("forced colours: filled buttons keep an edge in every state, the switches and the unavailable ones are in system colours", () => {
@@ -415,5 +444,13 @@ describe("the style sheet's rules", () => {
 		expect(coloured.length).toBe(6);
 		const named = forced.flatMap((r) => selectors(r.selector));
 		for (const s of coloured) expect(named).toContain(s);
+		// The glow (DEC-225): the switch is on, its track Highlight, so the
+		// Highlight ring has Canvas between, and the focus ring goes past it.
+		expect(of(".switch[data-calling]::before")).toBe(
+			"inset: -4px;\n\t\tborder: 2px solid Highlight;\n\t\tbackground: Canvas;\n\t\tforced-color-adjust: none;",
+		);
+		expect(of(".switch[data-calling] input:focus-visible")).toBe(
+			"outline-offset: 6px;",
+		);
 	});
 });

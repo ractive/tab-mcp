@@ -41,6 +41,7 @@ import {
 	webmcpNote,
 } from "./card.ts";
 import { fillPanel } from "./fill.ts";
+import { Glow } from "./glow.ts";
 import {
 	expiredText,
 	isUnavailable,
@@ -210,7 +211,16 @@ function disconnectButton(grant: PanelState["grants"][number]): HTMLElement {
 	return button;
 }
 
+/**
+ * While an AI app calls, the AI access switch glows (DEC-225): an attribute
+ * on its label, which draws the ring and the halo behind the track.
+ */
+const glow = new Glow((on) =>
+	$("ai-switch").closest(".switch")?.toggleAttribute("data-calling", on),
+);
+
 function showConnection(s: PanelState): void {
+	glow.update(s);
 	// Adding another app ends with the connection, or once none is paired.
 	if (s.status !== "on") addingApp = false;
 	const view = cardView(s, addingApp);
