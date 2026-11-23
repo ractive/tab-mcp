@@ -2179,9 +2179,32 @@ describe.skipIf(chrome === undefined)(
 					// Chrome reports the address of this tab or hides it, depending on
 					// when it is asked: the same line either way.
 					expect(access).toBe(
-						"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
+						"Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it read this tab.",
 					);
 					expect([hidden, button]).toEqual([false, "Give access to all sites"]);
+					// The extension's icon in the line, loaded, 16 px; and at the
+					// panel's narrowest width nothing reaches past its edge.
+					expect(
+						await stack.panel.eval(
+							`(() => { const i = document.querySelector("#tab-access img"); return [i.complete && i.naturalWidth > 0, i.getBoundingClientRect().width, i.alt, i.getAttribute("aria-hidden")]; })()`,
+						),
+					).toEqual([true, 16, "", "true"]);
+					await stack.panel.send("Emulation.setDeviceMetricsOverride", {
+						width: 345,
+						height: 900,
+						deviceScaleFactor: 1,
+						mobile: false,
+					});
+					try {
+						await stack.panel.waitFor("innerWidth === 345");
+						expect(
+							await stack.panel.eval(
+								`(() => { const root = document.scrollingElement; return [root.scrollWidth <= root.clientWidth, [...document.querySelectorAll("#tab-access, #tab-access *, #host-access, #host-access *")].filter((e) => e.getBoundingClientRect().right > root.clientWidth + 0.5).map((e) => e.tagName + "#" + e.id)]; })()`,
+							),
+						).toEqual([true, []]);
+					} finally {
+						await stack.panel.send("Emulation.clearDeviceMetricsOverride");
+					}
 					await stack.browser.clickIcon(tab);
 					expect((await pageInfo(stack)).structuredContent).toMatchObject({
 						url: `${SUBDOMAIN}/plain.html`,
@@ -2791,5 +2814,255 @@ describe.skipIf(chrome === undefined)(
 				...TEST_APP,
 			});
 		});
+
+		test("without a click, with access to all sites: the library found the polyfill as the page loaded, also while AI access is off (DEC-191, not DEC-223's late install)", async () => {
+			await step(
+				"page_info: WebMCP with the library's tool, not given late",
+				async () => {
+					const info = await pageInfo(stack);
+					// No `late` and no note: the content script got the polyfill
+					// registered at `document_start`, not on the worker's
+					// `webmcp-install`.
+					expect(info.structuredContent?.["webmcp"]).toEqual({
+						available: true,
+						tools: 1,
+					});
+				},
+			);
+			await step(
+				"AI access off, a reload: the page has the polyfill at load and the library mirrors into it",
+				async () => {
+					await aiAccess(stack, false);
+					const loaded = stack.browser.event(
+						"Page.loadEventFired",
+						tab.sessionId,
+					);
+					await tab.send("Page.reload");
+					await loaded;
+					await tab.waitFor(libraryMirrors, 15_000);
+					expect(
+						await tab.eval(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+						),
+					).toEqual(["complete_todo"]);
+				},
+			);
+		});
+	},
+);
+
+/** The page has the extension's WebMCP, and the library has joined the handshake. */
+const libraryMirrors = `"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`;
+
+/** AI access off or on, as the panel's switch does it; on: once connected. */
+async function aiAccess(stack: Stack, on: boolean): Promise<void> {
+	await stack.panel.eval(`(async () => {
+		const port = chrome.runtime.connect({ name: "panel" });
+		port.postMessage({ type: ${JSON.stringify(on ? "connect" : "stop")} });
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		port.disconnect();
+	})()`);
+	await stack.panel.waitFor(
+		`document.getElementById("state").dataset.state === ${JSON.stringify(on ? "on" : "off")}`,
+		15_000,
+	);
+}
+
+/**
+ * WebMCP on a click (DEC-223): Chrome without its WebMCP, the store package
+ * (no host access), a page with the client library. The click gives the tab;
+ * while AI access is on the extension gives the page its own WebMCP late,
+ * and the library, which found none as it loaded, mirrors then.
+ */
+describe.skipIf(chrome === undefined)(
+	"a page with the client library, no WebMCP and no host access: WebMCP on a click (DEC-223)",
+	() => {
+		let stack: Stack;
+		let tab: Page;
+
+		beforeEach(async () => {
+			// The click (while AI access is still off), then AI access on.
+			stack = await start(
+				{ store: true, webmcp: false },
+				`${SITE}/library.html`,
+			);
+			tab = stack.tab;
+			await listTestApp(stack);
+		}, 60_000);
+
+		afterEach(async () => {
+			await stack?.stop();
+			stack = undefined as unknown as Stack;
+		});
+
+		test("the library's tools come after the click, follow reloads and same-origin pages, and need AI access on", async () => {
+			await step(
+				"once AI access is on, the page gets WebMCP and its tool is offered, without another click",
+				async () => {
+					expect(
+						await stack.worker.eval(
+							`chrome.permissions.contains({ origins: ["https://*/*"] })`,
+						),
+					).toBe(false);
+					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+					expect(await tab.eval(libraryMirrors)).toBe(true);
+					await stack.panel.waitFor(
+						`!document.getElementById("tab-library").hidden && document.querySelectorAll("#tools li").length === 1`,
+					);
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("no-webmcp").hidden`,
+						),
+					).toBe(true);
+				},
+			);
+			await step(
+				"a call the user allows in the extension is vouched for: the page does not ask",
+				async () => {
+					await tab.waitFor(
+						"window.tabMcpPage?.mcp.extension?.apps.length === 1",
+						15_000,
+					);
+					const pending = call(stack, "page_complete_todo", { id: 3 });
+					await answerInPanel(stack, "allow");
+					expect((await pending).isError).toBeFalsy();
+					expect(await tab.eval(pageAsks)).toBe(false);
+					expect(
+						await tab.eval("window.tabMcpPage.calls.at(-1).client"),
+					).toEqual({ kind: "webmcp", via: "tab-mcp-extension", ...TEST_APP });
+				},
+			);
+			// From here on, the panel notes whether it ever said "no WebMCP".
+			await stack.panel.eval(`(() => {
+				window.e2eNoWebmcp = false;
+				const p = document.getElementById("no-webmcp");
+				new MutationObserver(() => {
+					if (!p.hidden) window.e2eNoWebmcp = true;
+				}).observe(p, { attributes: true });
+				return true;
+			})()`);
+			for (const [what, go] of [
+				[
+					"a reload",
+					async () => {
+						const loaded = stack.browser.event(
+							"Page.loadEventFired",
+							tab.sessionId,
+						);
+						await tab.send("Page.reload");
+						await loaded;
+					},
+				],
+				[
+					"a page of the same origin",
+					() => tab.goto(`${SITE}/library.html?again`),
+				],
+			] as const)
+				await step(
+					`after ${what} the new page gets WebMCP again, without a click, and the panel never says it has none`,
+					async () => {
+						// The AI app sees only the tool's name, the same for both
+						// pages, so the condition is the panel's list: the bridge's
+						// first read of the new page finds no WebMCP and offers no
+						// tools (the panel's list empties), and its read after the
+						// late install offers the new page's tool, registered before
+						// the panel is told (the list fills again). A
+						// MutationObserver misses neither, however short.
+						await stack.panel.eval(`(() => {
+							const list = document.getElementById("tools");
+							const seen = { emptied: false, back: false };
+							window.e2eTools = seen;
+							new MutationObserver(() => {
+								if (list.querySelectorAll("li").length === 0) seen.emptied = true;
+								else if (seen.emptied) seen.back = true;
+							}).observe(list, { childList: true });
+							return true;
+						})()`);
+						await go();
+						await tab.waitFor(libraryMirrors, 15_000);
+						await tab.waitFor(
+							"window.tabMcpPage?.mcp.extension?.apps.length === 1",
+							15_000,
+						);
+						await stack.panel.waitFor("window.e2eTools.back", 15_000);
+						await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+						const pending = call(stack, "page_complete_todo", { id: 5 });
+						await answerInPanel(stack, "allow");
+						expect((await pending).isError).toBeFalsy();
+						expect(await tab.eval("window.tabMcpPage.done")).toEqual([5]);
+						expect(await stack.panel.eval("window.e2eNoWebmcp")).toBe(false);
+					},
+				);
+			await step(
+				"a page that looks for WebMCP only as it loads gets it and registers nothing: the panel and page_info say why",
+				async () => {
+					await tab.goto(`${SITE}/webmcp.html`);
+					await stack.panel.waitFor(
+						`!document.getElementById("late-webmcp").hidden`,
+						15_000,
+					);
+					const info = await pageInfo(stack);
+					expect(info.structuredContent?.["webmcp"]).toMatchObject({
+						available: true,
+						tools: 0,
+						late: true,
+						note: expect.stringContaining("after it had loaded"),
+					});
+					expect(await stack.panel.eval("window.e2eNoWebmcp")).toBe(false);
+				},
+			);
+			await step(
+				"while AI access is off a click gives the page nothing; on again, the tools come without another click",
+				async () => {
+					await aiAccess(stack, false);
+					// A new tab, which no click has given yet (the panel stays open).
+					const other = await stack.browser.newPage(`${SITE}/library.html`);
+					// Every message the page's window gets from now on: the content
+					// script's port handover would be one (review of PR 234).
+					await other.eval(`(() => {
+						window.e2eMessages = [];
+						addEventListener("message", (event) =>
+							window.e2eMessages.push(event.data?.type ?? String(event.data)),
+						);
+						return true;
+					})()`);
+					await stack.browser.clickIcon(other);
+					await stack.panel.waitFor(
+						`!document.getElementById("no-webmcp").hidden`,
+						15_000,
+					);
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("no-webmcp").textContent`,
+						),
+					).toContain("While AI access is on");
+					// The content script has answered the panel's read: had it posted
+					// its port, the page would have it by now.
+					await Bun.sleep(300);
+					expect(await other.eval(`"modelContext" in document`)).toBe(false);
+					expect(await other.eval("window.e2eMessages")).toEqual([]);
+					await aiAccess(stack, true);
+					await other.waitFor(libraryMirrors, 15_000);
+					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+					// The listener hears a handover: the one after the late install.
+					expect(await other.eval("window.e2eMessages")).toEqual([
+						"tab-mcp:webmcp-connect",
+					]);
+					tab = other;
+				},
+			);
+			await step(
+				"on another origin nothing is given without a click there",
+				async () => {
+					await tab.goto(`${OTHER}/library.html`);
+					const refused = await pageInfo(stack);
+					expect(refused.isError).toBe(true);
+					expect(refused.content[0]?.text).toContain(
+						"may not read this tab yet",
+					);
+					expect(await tab.eval(`"modelContext" in document`)).toBe(false);
+				},
+			);
+		}, 150_000);
 	},
 );

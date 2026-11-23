@@ -142,7 +142,14 @@ export interface TabView {
 	title: string;
 	host: string;
 	/** `undefined`: the extension may not read it, `noAccess` or `access` says why. */
-	webmcp?: { available: boolean; tools: number };
+	webmcp?: {
+		available: boolean;
+		tools: number;
+		/** The extension's own WebMCP, given after the page loaded (DEC-223). */
+		late?: true;
+		/** No WebMCP yet, but the extension's own is on its way (DEC-223). */
+		pending?: true;
+	};
 	/** Why it may not be read, for the panel to put in its own words (EQ 6). */
 	noAccess?: NoAccessReason;
 	/** Any other reason it could not be read (a page that did not answer). */

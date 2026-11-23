@@ -26,12 +26,30 @@ export const PRODUCT = "tab-mcp browser extension";
  */
 export const FIREFOX_PANEL_TEXTS: Readonly<Record<string, string>> = {
 	"no-webmcp":
-		"This page has no WebMCP: tab-mcp gives a page its WebMCP as the page starts loading, so reload it if it loaded before tab-mcp had access to the site. Only https pages (and localhost) get it. page_info and the navigation tools still work.",
+		"This page has no WebMCP. While AI access is on, tab-mcp gives it its own, and pages with tab-mcp built in then offer their tools. Pages that look for WebMCP only as they load need access to all sites and a reload. Only https pages (and localhost) get it. page_info and the navigation tools still work.",
 	"pairing-profile":
 		"Use the AI app outside this Firefox profile (its desktop app, another browser or another profile): a chat open in a tab here becomes the tab in front while you type in it.",
 	"host-access-note":
-		"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Firefox asks you first.",
+		"Or let it read every page without a click. Firefox asks you first.",
 };
+
+/**
+ * The words after "Give access to all sites" on the panel's button, per
+ * browser: none now (the owner may add one, "(recommended)" say). The one
+ * place of the button's label is `allSitesButton`.
+ */
+const ALL_SITES_SUFFIX: Readonly<{ chrome: string; firefox: string }> = {
+	chrome: "",
+	firefox: "",
+};
+
+/** The panel's button that asks for access to all sites, as it reads. */
+export const allSitesButton: string = [
+	"Give access to all sites",
+	FIREFOX ? ALL_SITES_SUFFIX.firefox : ALL_SITES_SUFFIX.chrome,
+]
+	.filter((part) => part !== "")
+	.join(" ");
 
 /** The pages the browser keeps extensions out of, in the user's words. */
 export const STORE_TEXT: string = FIREFOX

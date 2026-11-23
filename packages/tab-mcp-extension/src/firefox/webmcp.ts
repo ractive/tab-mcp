@@ -30,6 +30,7 @@
  * errors, events, arrays), or the page cannot use it.
  */
 
+import { WEBMCP_EVENT } from "@ractive-ch/tab-mcp-client/extension";
 import {
 	copyJson,
 	MAX_TOOLS,
@@ -346,6 +347,10 @@ export function installWebMCP(win: Window): ExtensionContext | undefined {
 				configurable: true,
 				enumerable: true,
 			});
+		// A client library that looked for WebMCP before (installed late, at a
+		// click on the icon) looks again (DEC-223). At `document_start` no page
+		// script listens yet; a takeover tells nothing (the page had it).
+		win.document.dispatchEvent(new PageEvent(WEBMCP_EVENT));
 	}
 
 	return {

@@ -6,7 +6,7 @@
  * tab card's texts, in the user's words.
  */
 
-import { BROWSER, STORE_TEXT } from "../browser.ts";
+import { BROWSER, FIREFOX, STORE_TEXT } from "../browser.ts";
 import type { PanelState, TabView } from "../protocol.ts";
 import type { NoAccessReason } from "../tabs.ts";
 
@@ -88,7 +88,18 @@ export function introText(relay: string): string {
 	return `Lets an AI app outside this browser use the tab in front: read it, navigate it and call the page's WebMCP tools. AI access connects to the relay ${host}.`;
 }
 
-const CLICK_ICON = `Click the tab-mcp icon in ${BROWSER}'s toolbar to let it read this tab.`;
+/**
+ * The words in the click's line after which the panel shows the
+ * extension's own icon (`main.ts`), so that the user knows what to look for.
+ */
+export const ICON_AFTER = "Click the tab-mcp icon";
+
+// Where an icon that is not pinned sits: Chrome's puzzle-piece (Extensions)
+// menu; Firefox's extensions panel, which its Extensions button (a puzzle
+// piece, Firefox 109 and later) opens.
+const CLICK_ICON = FIREFOX
+	? `${ICON_AFTER} in Firefox's toolbar or extensions panel to let it read this page. Firefox asks again on every new page.`
+	: `${ICON_AFTER} in ${BROWSER}'s toolbar or puzzle-piece menu to let it read this tab.`;
 const BROWSER_PAGE = `${BROWSER} does not let extensions read browser pages.`;
 
 /**
@@ -115,13 +126,18 @@ export function noAccessText(
 	}
 }
 
-/** The tab card's line about the page's tools, when it has none to list (EQ 7). */
+/**
+ * The tab card's line about the page's tools, when it has none to list
+ * (EQ 7): none while the extension's own WebMCP is on its way, and its own
+ * line for a page that got it late and registered nothing (DEC-223).
+ */
 export function webmcpNote(
 	tab: TabView | undefined,
-): "no-webmcp" | "no-tools" | undefined {
-	if (tab?.webmcp === undefined) return undefined;
+): "no-webmcp" | "late-webmcp" | "no-tools" | undefined {
+	if (tab?.webmcp === undefined || tab.webmcp.pending) return undefined;
 	if (!tab.webmcp.available) return "no-webmcp";
-	return tab.webmcp.tools === 0 ? "no-tools" : undefined;
+	if (tab.webmcp.tools > 0) return undefined;
+	return tab.webmcp.late ? "late-webmcp" : "no-tools";
 }
 
 /** "A", "A and B", "A, B and C". */

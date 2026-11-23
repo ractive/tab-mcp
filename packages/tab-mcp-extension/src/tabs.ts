@@ -14,6 +14,7 @@ import {
 	type PageInfo,
 	type PageTools,
 	type Vouch,
+	WEBMCP_MAIN_SCRIPT,
 } from "./messages.ts";
 
 /**
@@ -34,12 +35,125 @@ export const ALL_SITES: chrome.permissions.Permissions = {
  */
 export const ASK_TIMEOUT_MS = 5_000;
 
-/** Put the content script into a tab's page (it answers once per page). */
-export async function injectInto(tabId: number): Promise<void> {
+/**
+ * The match pattern of `url`'s site, any port (match patterns take none):
+ * what `permissions.contains` is asked about; `undefined` for an address
+ * that is not of an http(s) site.
+ */
+export function sitePattern(url: string): string | undefined {
+	try {
+		const { protocol, hostname } = new URL(url);
+		return protocol === "http:" || protocol === "https:"
+			? `${protocol}//${hostname}/*`
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Whether the extension has host access for the page at `url` ("Give access
+ * to all sites", or the relay's site for its pairing page). A click's grant
+ * (`activeTab`) does not count: it is no permission. An address that is not
+ * known (`""`: Chrome hides it from an extension that may not read the tab,
+ * and has none for a moment during some navigations, a step back in the
+ * history say) counts as host access only with access to all sites.
+ */
+export async function hostAccessFor(url: string): Promise<boolean> {
+	const pattern = sitePattern(url);
+	try {
+		return await chrome.permissions.contains(
+			pattern === undefined ? ALL_SITES : { origins: [pattern] },
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Put the content script into a tab's page at `url` (it answers once per
+ * page). Without host access for the page it runs only because of a click
+ * (`activeTab`): it is told so first, in its own world (`tabMcpByClick`), and
+ * then sends nothing into the page and installs nothing until the worker's
+ * `webmcp-install`, which comes only while AI access is on (DEC-223). With
+ * host access it behaves as the registered script does, whatever AI access.
+ *
+ * The first injection starts at once, before anything is awaited: called
+ * from the click on the icon, it runs within the click's gesture, which
+ * Chrome passes on to the page as a user activation. Without one, Chrome's
+ * back button and `tabs.goBack` skip the page's later history entries (its
+ * history manipulation intervention): `go_back` landed on `about:blank`.
+ * So the flag is set first, and taken away again if host access says so.
+ */
+export async function injectInto(tabId: number, url: string): Promise<void> {
+	// Its failure is kept for after the host check, not left unhandled meanwhile.
+	const marked = chrome.scripting
+		.executeScript({
+			target: { tabId },
+			func: () => {
+				(globalThis as { tabMcpByClick?: true }).tabMcpByClick = true;
+			},
+		})
+		.then(
+			() => undefined,
+			(error: unknown) => ({ error }),
+		);
+	const host = await hostAccessFor(url);
+	const failed = await marked;
+	if (failed !== undefined) throw failed.error;
+	if (host)
+		await chrome.scripting.executeScript({
+			target: { tabId },
+			func: () => {
+				delete (globalThis as { tabMcpByClick?: true }).tabMcpByClick;
+			},
+		});
 	await chrome.scripting.executeScript({
 		target: { tabId },
 		files: [CONTENT_SCRIPT],
 	});
+}
+
+/**
+ * Give the page in tab `tabId` whose content script has the id `documentId`
+ * (the page that was read) the extension's own WebMCP now, after it loaded
+ * (DEC-223): in Chrome the page-world polyfill into that document's main
+ * world (which tells the page with `WEBMCP_EVENT`), then its content script
+ * connects to it; in Firefox the content script installs it. Pinned to
+ * that document: in Chrome, the content script's world names Chrome's id
+ * of its document (an injection's result carries it), and both the
+ * polyfill and the message go to that document only; a content script of
+ * another document ignores the message (it carries `documentId`). Resolves
+ * `false` if the tab shows another page now. Needs a click's grant
+ * (`activeTab`) or host access; rejects without.
+ */
+export async function giveWebMCP(
+	tabId: number,
+	documentId: string,
+): Promise<boolean> {
+	const install: ContentRequest = { type: "webmcp-install", documentId };
+	if (FIREFOX) {
+		await chrome.tabs.sendMessage(tabId, install, { frameId: 0 });
+		return true;
+	}
+	// Which of Chrome's documents is the page that was read.
+	const [probe] = await chrome.scripting.executeScript({
+		target: { tabId, frameIds: [0] },
+		func: () =>
+			(globalThis as { tabMcpDocumentId?: string }).tabMcpDocumentId ?? null,
+	});
+	const chromeDocument = probe?.documentId;
+	if (probe?.result !== documentId || chromeDocument === undefined)
+		return false;
+	await chrome.scripting.executeScript({
+		target: { tabId, documentIds: [chromeDocument] },
+		world: "MAIN",
+		files: [WEBMCP_MAIN_SCRIPT],
+	});
+	await chrome.tabs.sendMessage(tabId, install, {
+		documentId: chromeDocument,
+	});
+	return true;
 }
 
 /** The tab a tool acts on. */
@@ -111,7 +225,7 @@ export class NoAccessError extends Error {
 	}
 }
 
-const NO_GRANT = `The ${PRODUCT} may not read this tab yet. The user can click its icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.`;
+const NO_GRANT = `The ${PRODUCT} may not read this tab yet. The user can click its icon in ${BROWSER}'s toolbar while on this tab, or click "Give access to all sites" in its ${PANEL}.${FIREFOX ? " In Firefox a click counts for that one page: each new page, of the same site too, needs another." : ""}`;
 
 /**
  * The hosts Firefox keeps extensions out of (its default
@@ -219,7 +333,7 @@ async function askNow(
 		// During a navigation there may be no page to put it in yet.
 		const { status } = await chrome.tabs.get(tab.id);
 		try {
-			await injectInto(tab.id);
+			await injectInto(tab.id, tab.url);
 		} catch {
 			if (status !== "complete")
 				throw new Error("The page in the tab is still loading; try again.");

@@ -28,6 +28,7 @@ import { findFirefox } from "./firefox.ts";
 import {
 	answerInPanel,
 	call,
+	clickIcon,
 	findPanel,
 	inBackground,
 	notificationFor,
@@ -479,5 +480,209 @@ describe.skipIf(!firefoxOk)(
 				host: "client.example",
 			});
 		});
+
+		test("without a click, with access to all sites: the library found WebMCP as the page loaded, also while AI access is off (DEC-191, not DEC-223's late install)", async () => {
+			await step(
+				"page_info: WebMCP with the library's tool, not given late",
+				async () => {
+					const info = await call(stack, "page_info");
+					expect(info.structuredContent?.["webmcp"]).toEqual({
+						available: true,
+						tools: 1,
+					});
+				},
+			);
+			await step(
+				"AI access off, a reload: the page has WebMCP at load and the library mirrors into it",
+				async () => {
+					await stack.panel.eval(`(async () => {
+						const port = chrome.runtime.connect({ name: "panel" });
+						port.postMessage({ type: "stop" });
+						await new Promise((resolve) => setTimeout(resolve, 300));
+						port.disconnect();
+					})()`);
+					await stack.panel.waitFor(
+						`document.getElementById("state").dataset.state === "off"`,
+						15_000,
+					);
+					await stack.tab.reload();
+					await stack.tab.waitFor(
+						`"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`,
+						15_000,
+					);
+					expect(
+						await stack.tab.eval(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+						),
+					).toEqual(["complete_todo"]);
+				},
+			);
+			await step(
+				"a page that loaded before the content script came (as after an install, or Give access to all sites, with pages open), AI access still off: it gets WebMCP as the script comes, and the library mirrors (review of PR 234)",
+				async () => {
+					// No registered script: the page loads without it, and the
+					// worker's read of the tab in front (the panel is open) puts
+					// it in afterwards, with host access.
+					await stack.panel.eval(
+						`browser.scripting.unregisterContentScripts().then(() => true)`,
+					);
+					await stack.tab.reload();
+					await stack.tab.waitFor(
+						`"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`,
+						15_000,
+					);
+					expect(
+						await stack.tab.eval(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+						),
+					).toEqual(["complete_todo"]);
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("state").dataset.state`,
+						),
+					).toBe("off");
+				},
+			);
+		});
+	},
+);
+
+describe.skipIf(!firefoxOk)(
+	"a page with the client library, no access to all sites: WebMCP on a click (DEC-223)",
+	() => {
+		let stack: Stack;
+
+		beforeAll(async () => {
+			stack = await start("plain.html");
+		}, 90_000);
+
+		afterAll(async () => {
+			await stack?.client.close();
+			await stack?.stop();
+		});
+
+		/** AI access off or on, as the panel's switch does it. */
+		const aiAccess = async (on: boolean) => {
+			await stack.panel.eval(`(async () => {
+				const port = chrome.runtime.connect({ name: "panel" });
+				port.postMessage({ type: ${JSON.stringify(on ? "connect" : "stop")} });
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				port.disconnect();
+			})()`);
+			await stack.panel.waitFor(
+				`document.getElementById("state").dataset.state === ${JSON.stringify(on ? "on" : "off")}`,
+				15_000,
+			);
+		};
+		const mirrors = `"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`;
+
+		test("a click gives the page WebMCP while AI access is on; Firefox wants a click on every new page", async () => {
+			await step(
+				"the test build's access to all sites taken away: no content script at load any more",
+				async () => {
+					await stack.panel.eval(
+						`browser.permissions.remove({ origins: ["http://*/*", "https://*/*"] })`,
+					);
+					await stack.panel.waitFor(
+						`browser.scripting.getRegisteredContentScripts().then((s) => s.length === 0)`,
+					);
+					await stack.tab.navigate(`${stack.site}/library.html`);
+					expect(await stack.tab.eval(`"modelContext" in document`)).toBe(
+						false,
+					);
+				},
+			);
+			await step(
+				"while AI access is off a click gives the page nothing, and takes over no state the page faked",
+				async () => {
+					await aiAccess(false);
+					// What an earlier content script would have left in the page
+					// (`keptState` in firefox/webmcp.ts), faked by the page: taken
+					// over, its object would get the extension's methods at the
+					// click (review of PR 234).
+					await stack.tab.eval(`(() => {
+						const context = { mine: true };
+						const state = new Map();
+						state.set("tab-mcp:webmcp", state);
+						state.set(undefined, context);
+						window.e2eFake = context;
+						Object.defineProperty(Document.prototype, "modelContext", {
+							get: function (key) {
+								return key === "tab-mcp:webmcp" ? state : context;
+							},
+							configurable: true,
+						});
+						return true;
+					})()`);
+					await clickIcon(stack);
+					await stack.panel.waitFor(
+						`!document.getElementById("no-webmcp").hidden`,
+						15_000,
+					);
+					expect(
+						await stack.panel.eval(
+							`document.getElementById("no-webmcp").textContent`,
+						),
+					).toContain("While AI access is on");
+					await Bun.sleep(300);
+					expect(
+						await stack.tab.eval(
+							`[Object.getOwnPropertyNames(window.e2eFake), typeof window.e2eFake.registerTool]`,
+						),
+					).toEqual([["mine"], "undefined"]);
+					// The page's fake goes; nothing else is in the page.
+					await stack.tab.eval(
+						`(delete Document.prototype.modelContext, "modelContext" in document)`,
+					);
+					expect(await stack.tab.eval(`"modelContext" in document`)).toBe(
+						false,
+					);
+				},
+			);
+			await step(
+				"AI access on: the page gets WebMCP and the library's tool is offered, without another click",
+				async () => {
+					await aiAccess(true);
+					await stack.tab.waitFor(mirrors, 15_000);
+					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+				},
+			);
+			await step(
+				"a page of the same origin needs a click again in Firefox; the click gives it WebMCP",
+				async () => {
+					await stack.tab.navigate(`${stack.site}/library.html?again`);
+					const refused = await call(stack, "page_info");
+					expect(refused.isError).toBe(true);
+					expect(refused.content[0]?.text).toContain(
+						"In Firefox a click counts for that one page",
+					);
+					await stack.panel.waitFor(
+						`document.getElementById("tab-access").textContent.includes("on every new page")`,
+						15_000,
+					);
+					await clickIcon(stack);
+					await stack.tab.waitFor(mirrors, 15_000);
+					await waitForTools(stack, (n) => n.includes("page_complete_todo"));
+				},
+			);
+			await step(
+				"a page that looks for WebMCP only as it loads gets it and registers nothing: page_info says why",
+				async () => {
+					await stack.tab.navigate(`${stack.site}/webmcp.html`);
+					await clickIcon(stack);
+					await stack.tab.waitFor(`"modelContext" in document`, 15_000);
+					await stack.panel.waitFor(
+						`!document.getElementById("late-webmcp").hidden`,
+						15_000,
+					);
+					const info = await call(stack, "page_info");
+					expect(info.structuredContent?.["webmcp"]).toMatchObject({
+						available: true,
+						tools: 0,
+						late: true,
+					});
+				},
+			);
+		}, 90_000);
 	},
 );

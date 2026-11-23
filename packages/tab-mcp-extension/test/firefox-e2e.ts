@@ -225,6 +225,39 @@ export interface Shown {
 export const recorded = (stack: Stack) =>
 	inBackground<Record<string, Shown>>(stack, "bg.tabMcpNotificationRecorder()");
 
+/**
+ * A click on the extension's icon over the stack's page, as far as Firefox
+ * is concerned: the action's own `triggerAction` (what a click and the
+ * keyboard shortcut run, which grants `activeTab`), called in Firefox's
+ * chrome window whose selected tab is the page (BiDi's `moz:scope: "chrome"`,
+ * with the system access the harness has). BiDi cannot click the toolbar.
+ */
+export async function clickIcon(stack: Stack): Promise<void> {
+	const { contexts } = (await stack.firefox.send("browsingContext.getTree", {
+		maxDepth: 0,
+		"moz:scope": "chrome",
+	})) as { contexts: { context: string; url: string }[] };
+	for (const { context, url } of contexts) {
+		if (!url.startsWith("chrome://browser/content/browser.xhtml")) continue;
+		const window = new Tab(stack.firefox, context);
+		const selected = await window.eval<string>(
+			"gBrowser.selectedBrowser.currentURI.spec",
+		);
+		if (!selected.startsWith(stack.site)) continue;
+		const clicked = await window.eval<string>(`(() => {
+			const { ExtensionParent } = ChromeUtils.importESModule("resource://gre/modules/ExtensionParent.sys.mjs");
+			const extension = ExtensionParent.GlobalManager.getExtension(${JSON.stringify(FIREFOX_ID)});
+			const action = ExtensionParent.apiManager.global.browserActionFor?.(extension);
+			if (typeof action?.triggerAction !== "function") return "no triggerAction";
+			action.triggerAction(window);
+			return "clicked";
+		})()`);
+		if (clicked !== "clicked") throw new Error(`no click: ${clicked}`);
+		return;
+	}
+	throw new Error(`no Firefox window shows ${stack.site}`);
+}
+
 /** The recorded notification whose message names `word`, once there. */
 export async function notificationFor(
 	stack: Stack,

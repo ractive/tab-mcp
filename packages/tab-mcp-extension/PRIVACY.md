@@ -9,8 +9,9 @@ https://ractive.ch/tab-mcp/privacy/#chrome.
 ## What it reads
 
 Only tabs the user gave it, and only pages of http(s) sites (no `file:` pages, no
-Incognito tabs): the tab where the user clicked the extension's icon (until that tab goes
-to another origin; example.com and www.example.com are two origins), or every tab after the user clicked "Give access to all sites". From such
+Incognito tabs): the tab where the user clicked the extension's icon (in Chrome and Edge
+until that tab goes to another origin, example.com and www.example.com being two
+origins; in Firefox until it goes to another page, a reload included), or every tab after the user clicked "Give access to all sites". From such
 a tab it reads the page's address (with its query and fragment, as the browser shows it),
 title and language, and the tools the page registered itself with WebMCP
 (`document.modelContext`): their names, titles, descriptions, input schemas and
@@ -28,7 +29,12 @@ After the user clicks "Give access to all sites", every https page (and localhos
 tell that it is installed. Where the browser has no WebMCP of its own (Firefox, and
 Chrome or Edge without their WebMCP flag or a site's origin trial), the extension then
 gives each page `document.modelContext` as it starts loading, so that it can register
-its tools; in Firefox, a tab the user gave it by clicking its icon gets it then. A page's
+its tools. While AI access is on, a page in a tab the user gave it by clicking its icon
+gets it too, at that moment (in Chrome and Edge also each later page of the same origin
+in that tab, when the extension reads it), and is told so with a page event, so that a
+page with the tab-mcp library offers its tools then; such a page can tell that the
+extension is installed and that the user gave it this tab, and when. While AI access is
+off, a click puts nothing into the page that it could see: no WebMCP, and no message. A page's
 script can see that the API is there and, from how it behaves, that it is this
 extension's. It learns nothing else from it: not who the user is, not the relay, not the
 AI app. A page that uses the tab-mcp library learns more, as the next paragraph says.
@@ -41,8 +47,9 @@ and only such a page among those the extension may read (in every tab, not only 
 in front), learns from the extension while it is open and AI access is on: the
 extension's name, that AI access is on, and the names and verified hosts of the AI apps
 connected to the extension. While AI access is off, the extension answers no page and
-sends it nothing. A page can still see that the extension is installed where it
-provides WebMCP itself (in browsers without their own, above), and could try to time
+sends it nothing. A page can still see that the extension is installed where it gives
+the page WebMCP as the page loads (in browsers without their own, with access to all
+sites, above), and could try to time
 its own events, which the extension still listens to. A page it told that AI access is
 on is told once that it went off. Right before one of its own
 tools runs because the user allowed the call in the extension, it also learns that

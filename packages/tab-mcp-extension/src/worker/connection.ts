@@ -52,6 +52,7 @@ import {
 	askTools,
 	callInTab,
 	getTab,
+	giveWebMCP,
 	isSitePage,
 	NoAccessError,
 	type TargetTab,
@@ -81,6 +82,7 @@ import {
 	UnaskedFills,
 } from "./fill.ts";
 import { type Kv, openKv } from "./kv.ts";
+import { LateWebMCP, mayGiveLate } from "./late-webmcp.ts";
 import { goInTab, navigationTools, settledPage } from "./navigation.ts";
 import { notificationApi } from "./notifications.ts";
 import { argsToSend, Questions, type QuestionsHost } from "./questions.ts";
@@ -214,6 +216,12 @@ export class Connection {
 	#allSites = false;
 	#tab: TabView | undefined;
 	#tabRead = 0;
+	/** WebMCP given late, where a page read has none (DEC-223). */
+	readonly #late = new LateWebMCP(
+		giveWebMCP,
+		() => mayGiveLate(this.handshakeState()),
+		() => void this.#readTab(),
+	);
 	#sending = false;
 	/** What pages with the client library were told last, as JSON (DEC-207). */
 	#told = "";
@@ -323,7 +331,13 @@ export class Connection {
 			mcp,
 			{
 				current: tabInFront,
-				list: askTools,
+				// A page without WebMCP gets the extension's own now, where it
+				// may (DEC-223); its toolchange then has it read again.
+				list: async (tab) => {
+					const tools = await askTools(tab);
+					this.#late.read(tab.id, tools);
+					return tools;
+				},
 				// With a vouch, the state too: the page may not have it yet.
 				call: (tabId, target, input, signal, vouch) =>
 					callInTab(
@@ -978,8 +992,9 @@ export class Connection {
 			);
 	}
 
-	/** A tab closed: what was kept for its pairing page goes. */
+	/** A tab closed: what was kept for its pairing page, and for its WebMCP, goes. */
 	tabClosed(tabId: number): void {
+		this.#late.closed(tabId);
 		this.#unasked.tabClosed(tabId);
 		this.#quietFails.delete(tabId);
 	}
@@ -1085,6 +1100,13 @@ export class Connection {
 				state.origin !== undefined &&
 				state.origin === tabOrigin;
 			const origin = state.origin;
+			// WebMCP is on its way (DEC-223): the bridge has not read this tab
+			// yet, or the extension's own is being given to the page it read.
+			const pending =
+				!page.webmcp.available &&
+				(current
+					? this.#late.pending(tab.id, state.documentId)
+					: state.tabId !== tab.id && this.#late.pending(tab.id, undefined));
 			view = {
 				title: page.title || tab.title || host || "(no title)",
 				host,
@@ -1093,6 +1115,8 @@ export class Connection {
 				webmcp: {
 					available: page.webmcp.available,
 					tools: current ? state.tools.length : page.webmcp.tools,
+					...(page.webmcp.late ? { late: true as const } : {}),
+					...(pending ? { pending: true as const } : {}),
 				},
 				// Readable, but reading its tools failed: why, instead of an
 				// empty list.

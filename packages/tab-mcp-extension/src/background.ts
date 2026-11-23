@@ -91,8 +91,9 @@ chrome.action.onClicked.addListener((tab) => {
 		windowId: tab.windowId,
 	}).catch((error: unknown) => console.warn("tab-mcp: side panel", error));
 	// Only into a page of an http(s) site (DEC-142); elsewhere page_info says why.
+	// Its first injection starts here, in the click's gesture (`injectInto`).
 	if (tab.id !== undefined && isSitePage(tab.url ?? ""))
-		void injectInto(tab.id)
+		void injectInto(tab.id, tab.url ?? "")
 			.then(() => withConnection((c) => c.tabChanged()))
 			.catch(() => {
 				// A page extensions may not run on (chrome://, the Web Store):
@@ -163,7 +164,7 @@ async function reviveOpenPages(): Promise<void> {
 		tabs.map((tab) =>
 			tab.id === undefined
 				? undefined
-				: injectInto(tab.id).catch(() => {
+				: injectInto(tab.id, tab.url ?? "").catch(() => {
 						// No access to its site, or a page Firefox keeps to itself.
 					}),
 		),

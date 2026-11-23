@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { join } from "node:path";
 import { SETUP_GUIDE } from "@ractive-ch/tab-mcp-client/setup";
 import { Window } from "happy-dom";
+import { allSitesButton } from "../src/browser.ts";
 import type { PanelState, TabView } from "../src/protocol.ts";
 import {
 	ALWAYS_ALLOW_ALL,
@@ -16,6 +17,7 @@ import {
 	CONFIRM_DELAY_MS,
 	cardView,
 	confirms,
+	ICON_AFTER,
 	introText,
 	noAccessText,
 	type SwitchIntent,
@@ -219,14 +221,14 @@ describe("the tab card's texts", () => {
 	});
 
 	test("an unreadable tab in the user's words: the toolbar icon, no AI app wording (EQ 6)", () => {
-		expect(noAccessText("no-grant", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
-		);
+		const click =
+			"Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it read this tab.";
+		expect(noAccessText("no-grant", false)).toBe(click);
+		// The panel puts the extension's icon right after these words.
+		expect(click).toContain(`${ICON_AFTER} in`);
 		// A hidden address may be a browser page, where the click cannot help
 		// (not worth a sentence); with host access on all sites it can only be one.
-		expect(noAccessText("hidden", false)).toBe(
-			"Click the tab-mcp icon in Chrome's toolbar to let it read this tab.",
-		);
+		expect(noAccessText("hidden", false)).toBe(click);
 		expect(noAccessText("hidden", true)).toBe(
 			"Chrome does not let extensions read browser pages.",
 		);
@@ -259,6 +261,20 @@ describe("the tab card's texts", () => {
 		).toBeUndefined();
 	});
 
+	test("WebMCP given late (DEC-223): nothing while it is on its way, its own line when the page registered nothing", () => {
+		expect(
+			webmcpNote(
+				tab({ webmcp: { available: false, tools: 0, pending: true } }),
+			),
+		).toBeUndefined();
+		expect(
+			webmcpNote(tab({ webmcp: { available: true, tools: 0, late: true } })),
+		).toBe("late-webmcp");
+		expect(
+			webmcpNote(tab({ webmcp: { available: true, tools: 1, late: true } })),
+		).toBeUndefined();
+	});
+
 	test("the panel's texts in index.html: by what they act on (EQ 9), roles for what changes (EQ 11)", async () => {
 		const html = await Bun.file(
 			join(import.meta.dir, "../src/sidepanel/index.html"),
@@ -271,11 +287,13 @@ describe("the tab card's texts", () => {
 		try {
 			const text = (id: string) =>
 				doc.getElementById(id)?.textContent?.replace(/\s+/g, " ").trim();
-			expect(text("allow-all")).toBe("Give access to all sites");
+			// The button's label is set from one place (`allSitesButton`).
+			expect(text("allow-all")).toBe("");
+			expect(allSitesButton).toBe("Give access to all sites");
 			expect(text("disallow-all")).toBe("Remove access to all sites");
 			// What changes, and that Chrome asks first.
-			expect(text("host-access")).toContain(
-				"Then tab-mcp reads every tab without a click on its icon, and gives every page WebMCP as it loads. Chrome asks you first.",
+			expect(text("host-access-note")).toBe(
+				"Or let it read every tab without a click. Chrome asks you first.",
 			);
 			// A switch for all the tools' switches, named as they are.
 			const allowTools = doc.getElementById("allow-tools");
@@ -307,8 +325,13 @@ describe("the tab card's texts", () => {
 			expect(text("no-webmcp")).toContain(
 				"chrome://flags/#enable-webmcp-testing",
 			);
-			// The polyfill's condition first: all sites, and a page loaded since.
-			expect(text("no-webmcp")).toContain("with access to all sites");
+			// The polyfill's conditions: AI access on for a page that comes to
+			// it later (DEC-223), all sites and a reload for one that looks
+			// only as it loads.
+			expect(text("no-webmcp")).toContain("While AI access is on");
+			expect(text("no-webmcp")).toContain("access to all sites and a reload");
+			expect(text("late-webmcp")).toContain("after it had loaded");
+			expect(text("late-webmcp")).toContain("With access to all sites");
 			expect(text("no-tools")).toContain("page_info and the navigation tools");
 			// The chat in a tab of this profile (EQ 2).
 			expect(text("pairing")).toContain("outside this Chrome profile");

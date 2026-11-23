@@ -299,7 +299,9 @@ On failure the log shows AMO's answer.
 >
 > Chrome's own WebMCP is on only where a site takes part in Chrome's origin trial, or
 > after you turn on chrome://flags/#enable-webmcp-testing. Elsewhere, after "Give access
-> to all sites", the extension gives https pages a WebMCP of its own as they load.
+> to all sites", the extension gives https pages a WebMCP of its own as they load; while
+> AI access is on, a page you clicked the icon on gets it then, and a page built with the
+> tab-mcp client library offers its tools.
 >
 > A page built with the tab-mcp client library and the extension know of each other: a
 > call you allowed in the extension is not asked again in the page, and the page can show
@@ -309,8 +311,10 @@ On failure the log shows AMO's answer.
 > and which AI app made the call; when that call is over, the page is told that too, also
 > after AI access went off. While AI access is off, the extension answers no page
 > and sends it nothing. A page can still see that the extension is installed where it
-> provides WebMCP itself (in browsers without their own), and could try to time its own
-> events, which the extension still listens to. A page that was told AI access is on is
+> gives the page WebMCP as the page loads (in browsers without their own, with access to
+> all sites), and could try to time its own events, which the extension still listens to.
+> While AI access is on, a page that gets the extension's WebMCP after your click learns
+> that it is installed and that you gave it the tab. A page that was told AI access is on is
 > told once that it went off. Nothing else.
 >
 > The extension reads only tabs you give it, only pages of http(s) sites and no Incognito
@@ -329,7 +333,7 @@ registered, and opening pages in that tab.
 | Permission | Justification |
 |---|---|
 | `activeTab` | Read the tab the user clicked the icon on: its address, title, language and the WebMCP tools the page registered, also after the AI app opened another page of the same origin in it. No access to other tabs; another origin in that tab needs another click (or the optional host access). Opening pages in the tab (an address, back, forward, reload) needs no permission; to another origin it asks the user first. |
-| `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
+| `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab; and, while AI access is on, the extension's own WebMCP into a page there that has none, so that a page with the tab-mcp client library offers its tools (DEC-223). |
 | `sidePanel` | The side panel shows the connection's state, the pairing address and code, the tab's tools and the questions before a tool runs or the tab goes to another site. |
 | `notifications` | Ask the user before a tool that is not read-only runs, or the tab goes to another site, while the side panel is not in front ("Allow once"; closing it declines). |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |

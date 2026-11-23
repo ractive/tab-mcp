@@ -126,7 +126,11 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 	g["window"] = win;
 	g["chrome"] = {
 		windows: { getCurrent: async () => ({ id: 1 }) },
-		runtime: { connect: () => port },
+		runtime: {
+			connect: () => port,
+			getURL: (path: string) =>
+				`chrome-extension://abcdefghijklmnopabcdefghijklmnop/${path}`,
+		},
 		permissions: {
 			contains: async () => true,
 			request: async () => true,
@@ -389,6 +393,83 @@ describe("the sign-in hosts filled in for without a question (DEC-213)", () => {
 		expect(panel.take()).toEqual([
 			{ type: "forget-fill-host", host: "claude.ai" },
 		]);
+	});
+});
+
+describe("a tab the extension may not read (the owner's words, iteration 51)", () => {
+	/** The state of a tab it may not read, without access to all sites. */
+	const unreadable = (): PanelState => ({
+		...stateWith([]),
+		allSites: false,
+		tab: {
+			title: "Shop",
+			host: "shop.example",
+			access: "",
+			noAccess: "no-grant",
+			tools: [],
+			canAllow: false,
+		},
+	});
+	const seen = (panel: Awaited<ReturnType<typeof openPanel>>) => {
+		const access = panel.$("#tab-access") as HTMLElement;
+		const icon = access.querySelector("img");
+		return {
+			access: access.textContent,
+			/** What comes before the icon in the line. */
+			beforeIcon: icon?.previousSibling?.textContent,
+			icon: icon && {
+				src: icon.getAttribute("src"),
+				alt: icon.getAttribute("alt"),
+				hidden: icon.getAttribute("aria-hidden"),
+			},
+			button: panel.$("#allow-all")?.textContent,
+			shown: !(panel.$("#host-access") as HTMLElement).hidden,
+			note: panel.$("#host-access-note")?.textContent,
+			/** No line of its own on pinning the icon (the owner's shorter words). */
+			hint: panel.$("#toolbar-hint"),
+		};
+	};
+	const icon = {
+		src: "chrome-extension://abcdefghijklmnopabcdefghijklmnop/icons/icon-16.png",
+		alt: "",
+		hidden: "true",
+	};
+
+	test("Chrome: the line with the extension's icon after its words, the button, what access to all sites does", async () => {
+		const panel = await openPanel();
+		panel.show(unreadable());
+		expect(seen(panel)).toEqual({
+			access:
+				"Click the tab-mcp icon in Chrome's toolbar or puzzle-piece menu to let it read this tab.",
+			beforeIcon: "Click the tab-mcp icon",
+			icon,
+			button: "Give access to all sites",
+			shown: true,
+			note: "Or let it read every tab without a click. Chrome asks you first.",
+			hint: null,
+		});
+		// The same state again leaves the line as it is (a live region).
+		const line = panel.$("#tab-access")?.firstChild;
+		panel.show(unreadable());
+		expect(panel.$("#tab-access")?.firstChild).toBe(line as ChildNode);
+		// With access to all sites the button and its lines go, as before.
+		panel.show({ ...unreadable(), allSites: true });
+		expect(seen(panel).shown).toBe(false);
+	});
+
+	test("Firefox: its words, its extensions panel, a click on every new page", async () => {
+		const panel = await openPanel({ firefox: true });
+		panel.show(unreadable());
+		expect(seen(panel)).toEqual({
+			access:
+				"Click the tab-mcp icon in Firefox's toolbar or extensions panel to let it read this page. Firefox asks again on every new page.",
+			beforeIcon: "Click the tab-mcp icon",
+			icon,
+			button: "Give access to all sites",
+			shown: true,
+			note: "Or let it read every page without a click. Firefox asks you first.",
+			hint: null,
+		});
 	});
 });
 

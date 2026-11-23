@@ -357,8 +357,17 @@ did, by connecting the extension.
   not read its events either (not `detail`: Chrome copies an object `detail` into the
   reading world and runs the page's getters, which a browser test checks for the store
   and the test build). A page can still see that the extension is installed where it
-  provides WebMCP itself (in browsers without their own), and could try to time its own
-  events, which the extension still listens to. A document the content script told
+  gives the page WebMCP as the page loads (in browsers without their own, with access to
+  all sites), and could try to time its own events, which the extension still listens
+  to. While AI access is on, a page it reads without WebMCP (that can take it: https or
+  the loopback host) gets the extension's own late, with the event `tab-mcp-webmcp`
+  (DEC-223): such a page learns that the extension is installed and that the user gave
+  it this tab, and when. Before that, a content script a click put in (no host access
+  for the page; the worker says so in the script's own world) sends nothing into the
+  page and installs nothing: in Chrome no port, in Firefox no WebMCP and no takeover of
+  an earlier script's state, which a page could fake (review of PR 234). With host
+  access it behaves as before, whatever AI access. The give is pinned to the document
+  that was read (Chrome's document id, and the content script's id in the message). A document the content script told
   "on" hears `on: false` once when it goes off, also after the back/forward cache
   (asked again), after host access was withdrawn (the worker sends "off" to the tabs it
   can no longer read), and after the extension was disabled or updated (at the page's
@@ -376,7 +385,8 @@ did, by connecting the extension.
   it sent; no answer: asked again after 1 s and 5 s, then not until the next `hello`),
   so a page saying `hello` in a loop does not keep the one worker busy.
 - **Which page.** Without host access the extension reads a tab only after a click on its
-  icon there, and only on that origin. With "Give access to all sites" it reads every page in
+  icon there, and only on that origin (in Firefox only that page: its grant ends at every
+  navigation, iteration 51's spike). With "Give access to all sites" it reads every page in
   front: the AI app then gets the tools of whatever site the user looks at, each call to
   a tool not marked read-only still confirmed. Only http(s) pages (the optional host
   access is `http://*/*` and `https://*/*`, no `file:` pages) and no Incognito tabs
@@ -586,7 +596,10 @@ once, when the browser accepted its registration (none for mirroring alone: it w
 noise on almost every such page; the remedy is the same, `onConfirm` or `callers`). Only the object behind
 `Document.prototype`'s getter is used: the browser's, or one an extension put there (the
 tab-mcp browser extension's, or any other with a script in the page's world at
-`document_start`, which then gets the mirrored tools by default). The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
+`document_start`, which then gets the mirrored tools by default). A `TabMcp` that found
+none reads the getter again on `tab-mcp-webmcp` (DEC-223), so a page-world script that
+defines one later and dispatches the event gets them too; it runs with the page's
+powers already, and no event can be told apart, so there is no check. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a
 proof: the next WebMCP call of that tool with equal arguments within 2 s runs without

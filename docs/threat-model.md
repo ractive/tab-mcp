@@ -708,6 +708,23 @@ like any other, `chrome-extension://<id>` (A11).
   read at most every 250 ms, and the number and size of what a page sends are capped.
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
+- **WebMCP on a click** (DEC-223). Where a page the extension may read has no WebMCP
+  (in practice a tab given by a click on its icon: with host access a page has the
+  extension's from its load, or from the content script's start), it gives that page
+  its own `document.modelContext` after the page loaded, only while AI access is on and
+  connected, and only a page that can take it (https, or the loopback host's http), and
+  says so with the DOM event `tab-mcp-webmcp`, so that the client library looks again.
+  Such a page learns that the extension is installed and that the user gave it this
+  tab, and when. Until then a content script that a click put in (the worker tells it
+  so in its own world, as it has no host access for the page) sends nothing into the
+  page and installs nothing: no port, no WebMCP, and in Firefox no takeover of an
+  earlier script's state, which a page could fake. The give goes to the document that
+  was read: in Chrome to Chrome's id of the document whose content script answered,
+  and the message names that content script's page, so another page of the tab gets
+  neither. In Chrome the page-world script then gets a port over `window.postMessage`,
+  as it does with host access, where the content script posts it at its start
+  (`document_idle`): the page's scripts can see the port and answer it, and gain no
+  more than registering tools of their own origin gives them.
 - **A page with the client library** (DEC-207). A page that announces the library
   (DOM events, or `<html data-tab-mcp-handshake>`) is told, while AI access is on and
   connected, the extension's name and the names and verified hosts of the AI apps
@@ -718,8 +735,9 @@ like any other, `chrome-extension://<id>` (A11).
   answers no page and sends it nothing (DEC-221), and does not read what a page sends:
   in Chrome reading an object `detail` from another world runs the page's getters,
   which would show that it listens. A page can still see that the extension is
-  installed where it provides WebMCP itself (in browsers without their own), and could
-  try to time its own events, which the extension still listens to. A page it told
+  installed where it gives the page WebMCP as the page loads (in browsers without their
+  own, with access to all sites), and could try to time its own events, which the
+  extension still listens to. A page it told
   "on" hears `on: false` once when AI access goes off (also after the back/forward
   cache and after host access was withdrawn; after the extension was disabled or
   updated, the next time the page speaks or is shown). Right before a tool runs that the user allowed (asked, or allowed for the site),
@@ -857,8 +875,9 @@ Unless a page sets `webmcp: false` (on by default, DEC-222; until then only with
 own [WebMCP](https://webmachinelearning.github.io/webmcp/) (`document.modelContext`),
 where the tab has it: Chrome with the origin trial or the flag, and, where the browser
 has none, the tab-mcp browser extension's own `document.modelContext`, which it puts on
-`Document.prototype` after "Give access to all sites" (A13), so that the library takes
-it for the browser's. Whatever calls them there without the tab-mcp browser
+`Document.prototype` after "Give access to all sites" or, while AI access is on, in a
+tab given by a click on its icon (A13, DEC-223), so that the library takes it for the
+browser's. Whatever calls them there without the tab-mcp browser
 extension's vouch (DEC-207) is one caller to the page, `client: { kind: "webmcp" }`,
 which the page cannot tell apart from the others:
 
@@ -946,6 +965,14 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
   page's own world at `document_start` can. Such an extension then gets every mirrored
   tool and its `execute`, by default since DEC-222; it could read and drive the page
   without that. A page that changes `Document.prototype` itself owns the tools anyway.
+  A `TabMcp` that found none reads the getter again when `document` hears
+  `tab-mcp-webmcp` (DEC-223: the tab-mcp browser extension's WebMCP, given at a click).
+  So a script of the page, or of an extension in the page's world, that defines a getter
+  later and dispatches the event gets the mirrored tools too, where the page had no
+  WebMCP when the `TabMcp` was made. It gains no power it did not have: it already runs
+  with the page's powers. No event can be told apart (`isTrusted` is false for the
+  extension's too), so there is no check. An isolated-world content script can dispatch
+  the event but not change the page's prototypes, and gains nothing.
   Who may call into the page's WebMCP at all
   (cross-origin frames need `allow="tools"`; other documents of the tab see a tool only
   if its `exposedTo` names their origin, and can then run it; which agents and

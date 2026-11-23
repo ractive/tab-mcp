@@ -134,9 +134,9 @@ page can say that an AI app is connected through the extension
   events: it notes that the page spoke, without touching `detail` (in Chrome, reading an
   object `detail` from another world runs the page's getters), and greets the page with
   `hello` once on; told "on", it reads `detail` and takes only a string. A page can still
-  see that the extension is installed where it provides WebMCP itself (in browsers
-  without their own), and could try to time its own events, which the extension still
-  listens to. A document the content script told "on" hears
+  see that the extension is installed where it gives the page WebMCP as the page loads
+  (in browsers without their own, with access to all sites), and could try to time its
+  own events, which the extension still listens to. A document the content script told "on" hears
   `{ v: 1, type: "update", on: false }` once when it goes off; the "told on" memory is
   the content script's, per document. Back from the back/forward cache it asks the
   worker again; once the extension was disabled, removed or updated
@@ -288,7 +288,25 @@ with a second extension).
   `optional_host_permissions`, not `<all_urls>`: no `file:` pages, iteration 35): without
   it the extension runs on a tab only after a click on its icon, as Overmark does, and
   only for that origin in that tab (Chrome keeps the grant across navigations on the same
-  origin, not to another subdomain). "Give access to all sites" asks for it; the content script
+  origin, not to another subdomain; Firefox ends it at every navigation, a reload too,
+  iteration 51's spike). While AI access is on, a page it reads that has no WebMCP gets
+  the extension's own then, late (DEC-223, `worker/late-webmcp.ts`): in Chrome the
+  worker puts the page-world polyfill in with `scripting.executeScript` (`world: "MAIN"`)
+  and the content script connects to it again, in Firefox the content script installs
+  it; the page hears `tab-mcp-webmcp`, and a client library that found none as it loaded
+  looks again. Once per document, only for a page that can take it (https or the loopback
+  host), pinned to the document that was read (Chrome: the content script's world names
+  its page's id, an injection's result Chrome's document id, which `executeScript`'s
+  `documentIds` and `tabs.sendMessage`'s `documentId` then take; the message carries
+  the content script's id, and another page's content script ignores it). The panel
+  says nothing about missing WebMCP until it settled, and "tab-mcp gave this page WebMCP
+  after it had loaded…" for a page that then registered nothing. A content script put
+  in without host access for the page (`injectInto` asks `permissions.contains` for the
+  page's site; a click's grant is no permission) is told so first in its own world
+  (`tabMcpByClick`) and then sends nothing into the page and installs nothing until
+  `webmcp-install` (review of PR 234); without that flag (the registered script, the
+  revive after an update, a page put in with host access) it does what it did before
+  DEC-223, whatever AI access. "Give access to all sites" asks for host access; the content script
   is then registered for every http(s) page. The "Fill in the code for me" switch asks
   for the relay's site alone, for its pairing page (DEC-203). `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).

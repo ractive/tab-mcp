@@ -6,6 +6,18 @@ the Git tag `client-v<version>`. The format follows
 [Semantic Versioning](https://semver.org/). The relay has its own
 [changelog](https://github.com/ractive/tab-mcp/blob/main/packages/tab-mcp/CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- **WebMCP that comes after the page loaded.** A `TabMcp` that found no WebMCP when it
+  was made looks again when `document` hears `tab-mcp-webmcp` (`WEBMCP_EVENT`, exported
+  from `./extension`), and mirrors its tools if `Document.prototype` has `modelContext`
+  then (DEC-223). The tab-mcp browser extension dispatches it when a click on its icon
+  gives the tab its own WebMCP, so that a page with the library offers its tools there
+  in Chrome without WebMCP and in Firefox, also without access to all sites. Nothing
+  changes with `webmcp: false`, or where the tab had WebMCP from the start.
+
 ## [0.23.0][client-0.23.0] - 2026-11-23
 
 ### Breaking

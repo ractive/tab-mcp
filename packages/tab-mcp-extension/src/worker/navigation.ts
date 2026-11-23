@@ -12,7 +12,7 @@
  */
 
 import type { Tool, ToolExecuteOptions } from "@ractive-ch/tab-mcp-client";
-import { PANEL } from "../browser.ts";
+import { FIREFOX, PANEL } from "../browser.ts";
 import type { PageHistory, PageInfo } from "../messages.ts";
 import type { Answer } from "../protocol.ts";
 import type { TargetTab } from "../tabs.ts";
@@ -448,7 +448,9 @@ async function inFront(
 	}
 }
 
-const SAME_ORIGIN = `On the page's own origin it runs at once; to another origin it asks the user first, and the extension may then not read the new page until the user clicks its icon there (or clicked "Give access to all sites" in the ${PANEL}).`;
+const SAME_ORIGIN = FIREFOX
+	? `On the page's own origin it runs at once; to another origin it asks the user first. Unless the user clicked "Give access to all sites" in the ${PANEL}, the extension may then not read the new page, of the same origin too, until the user clicks its icon there: in Firefox a click counts for one page.`
+	: `On the page's own origin it runs at once; to another origin it asks the user first, and the extension may then not read the new page until the user clicks its icon there (or clicked "Give access to all sites" in the ${PANEL}).`;
 
 /** The four navigation tools, for the connection's `TabMcp`. */
 export function navigationTools(
