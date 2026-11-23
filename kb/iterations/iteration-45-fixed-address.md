@@ -103,10 +103,10 @@ fresh." Branch `relay/fixed-address`.
   2026-11-21)
 - [x] The relay's code field no longer invites password managers (relay 0.12.1, pull
   request 166): the owner confirmed on 2026-11-21 that Enpass's button is gone
-- [ ] tab-mcp browser extension: a store release; the published copies have the old
-  client and cannot connect (2026-11-21: 0.3.1 is tagged and built, its publish to the
-  Chrome Web Store and Edge Add-ons waits for the owner's approval; 0.3.0 was never
-  published and must not be, see its changelog)
+- [x] tab-mcp browser extension: a store release; the published copies had the old
+  client and could not connect. 0.3.3 is public in the Chrome Web Store and on
+  addons.mozilla.org since 2026-11-23; Microsoft Edge Add-ons has it in review since
+  that day (0.3.0 to 0.3.2 were never published)
 - [ ] The comparis game: client 0.18.1 (its own session, in the owner's other account)
 - [x] Sitegloss: new client; the extension fills in the code on the relay's pairing
   page after "Connect <app>?" in the side panel (optional access to the relay's

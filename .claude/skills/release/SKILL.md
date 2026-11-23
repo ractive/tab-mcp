@@ -73,7 +73,11 @@ old client is refused by a new relay and a new client by an old one.
    `## Unreleased` until the stable release), say so and set the version by hand.
 4. `bun run verify` (no browser), and check its exit code (never through a pipe). The test
    "docs and plugin manifests name only the current package versions" fails on any version
-   left over. Locally the fast `verify` is enough: the version a bump changes reaches the
+   left over. The script replaces EVERY mention of the old version in the pinned docs, so a
+   sentence there that names the release a behaviour came with must not use a full version
+   ("from 0.19 on", "before 0.19", "the first two 0.10 releases", never "after 0.18.1"):
+   the test "docs do not use a current version as a boundary of history" refuses the
+   forms a bump would move. Locally the fast `verify` is enough: the version a bump changes reaches the
    browser tests too (the client's `hello`, the relay's pages), and CI's `browser` job and
    the release workflow's `verify:all` run them.
 5. Commit (author james@ractive.ch, with the session's `Co-Authored-By` trailer), push, PR
@@ -81,7 +85,8 @@ old client is refused by a new relay and a new client by an old one.
    version PR needs no review run.
 6. Wait for CI (`gh pr checks <n> --watch`): `verify`, the required check, passes only when
    `fast` and `browser` passed. Then
-   `gh pr merge <n> --merge --author-email james@ractive.ch`. `client-pack` and `relay-pack`
+   `gh pr merge <n> --merge --delete-branch --author-email james@ractive.ch` (it also
+   removes the branch's local worktree). `client-pack` and `relay-pack`
    check the published file list and `exports` against `scripts/npm-pack.ts`: a new entry
    point or chunk name must be added there.
 
@@ -97,8 +102,9 @@ old client is refused by a new relay and a new client by an old one.
    `beta` or `rc`), never `latest`, and refuses a mismatch between the flag and the version.
 3. The `Release` workflow publishes (client: npm; relay: npm, ghcr.io, Docker Hub). Watch it:
    `gh run list -w release.yml -L 1`, then `gh run watch <id> --exit-status`. The pack jobs
-   run `bun run verify:all` (verify, then the browser tests); the relay-pack job has a flaky
-   test in `extension.browser.test.ts`; `gh run rerun <id> --failed` once before investigating.
+   run `bun run verify:all` (verify, then the browser tests). A failure there is to be read,
+   not rerun: the one known flaky test in `extension.browser.test.ts` had a cause, fixed in
+   pull request 227 (closing tabs waits until they are gone).
 4. Done when the registry lists the version, asked directly, as `npm view` answers from a
    cache for minutes: `curl -s https://registry.npmjs.org/@ractive-ch%2Ftab-mcp-client` and
    its `dist-tags` (wait with an until-loop). For the client, the CDN build answers 200:
@@ -114,9 +120,9 @@ branches and open PRs only; merges and deploys come after the stable release.
 
 | App | Who | How |
 |---|---|---|
-| ractive.ch examples (todo, diagram, connect page) | this session, or an agent of it | `~/devel/ractive.ch`: worktree, bump `@ractive-ch/tab-mcp-client` (and the dev dependency `@ractive-ch/tab-mcp`, which `check:tab-mcp` runs a relay from) in package.json, `bun install`, `bun run check`, `bun run check:tab-mcp` and `bun run check:browser`, PR, review, merge; the push to main deploys the site. Check the live bundle: the page's `<script src>` on ractive.b-cdn.net contains the version. |
-| Sign-in example (Edge Script `tab_mcp_login`, tab-mcp-login.ractive.ch) | this session | after the ractive.ch PR is merged, in `~/devel/ractive.ch` on main: `bun install`, `bun run build:login`, then `infra/tab-mcp/scripts/tofu-keychain.sh plan`; expect only `bunnynet_compute_script.tab_mcp_login` to change (and the relay's container when its site config changed); `… apply -auto-approve` only then (plain `apply` waits for a terminal), and never while `deploy-tab-mcp` runs. |
-| saturnus (ractive.ch/saturnus/app/) | its own session (`saturnus-*`, ListAgents), or an agent of this session when none runs | `just vendor-tab-mcp-version X.Y.Z` (pins version and integrity, vendors every chunk, updates `CONFIRM_MODULE` in web/ai-local.js), keep `webmcp` off (saturnus registers its WebMCP tools itself in web/ai-webmcp.js). Its desktop app calls the confirm chunk's `confirmInPage` with a host of its own: the one caller of that function outside this repository. Tests: `just web-test` plus the one ROM-gated file that drives the page through a real relay, `SATURNUS_ROM_DIR=/Users/james/devel/saturnus/roms node --test --test-timeout=300000 web/test/ai-page.test.mjs` (the ROMs live only in the main checkout; CI never has them). Not `just web-test-full` (all ROM tests, minutes) for a client bump. With the owner's go, merge its PR and dispatch `gh workflow run pages.yml -R ractive/saturnus --ref main`. |
+| ractive.ch examples (todo, diagram, connect page) | the ractive.ch session when one runs (message it), else this session or an agent of it | `~/devel/ractive.ch`: never its main checkout, which holds the owner's uncommitted edits; a worktree, bump `@ractive-ch/tab-mcp-client` (and the dev dependency `@ractive-ch/tab-mcp`, which `check:tab-mcp` runs a relay from) in package.json, `bun install`, `bun run check`, `bun run check:tab-mcp` and `bun run check:browser`, PR, review, merge; the push to main deploys the site. Check the live bundle: the page's `<script src>` on ractive.b-cdn.net contains the version. |
+| Sign-in example (Edge Script `tab_mcp_login`, tab-mcp-login.ractive.ch) | this session | after the ractive.ch PR is merged, in a clean worktree detached at `origin/main` that has `.terraform` (`~/devel/ractive.ch-wt/reserve-apps`; never the main checkout): `bun install`, `bun run build:login`, then `infra/tab-mcp/scripts/tofu-keychain.sh plan`; expect only `bunnynet_compute_script.tab_mcp_login` to change (and the relay's container when its site config changed); `… apply -auto-approve` only then (plain `apply` waits for a terminal), and never while `deploy-tab-mcp` runs. |
+| saturnus (ractive.ch/saturnus/app/) | its own session (`saturnus-*`, ListAgents), or an agent of this session when none runs | `just vendor-tab-mcp-version X.Y.Z` (pins version and integrity, vendors every chunk, updates `CONFIRM_MODULE` in web/ai-local.js). The client's WebMCP mirror is on by default since 0.23: saturnus sets `webmcp: false` as long as it registers its WebMCP tools itself (web/ai-webmcp.js), which its iteration 78 replaces with the client's mirror. Its desktop app calls the confirm chunk's `confirmInPage` with a host of its own: the one caller of that function outside this repository. Tests: `just web-test` plus the one ROM-gated file that drives the page through a real relay, `SATURNUS_ROM_DIR=/Users/james/devel/saturnus/roms node --test --test-timeout=300000 web/test/ai-page.test.mjs` (the ROMs live only in the main checkout; CI never has them). Not `just web-test-full` (all ROM tests, minutes) for a client bump. With the owner's go, merge its PR and dispatch `gh workflow run pages.yml -R ractive/saturnus --ref main`. |
 | Sitegloss (ractive/sitegloss, formerly Overmark) | its own session (`sitegloss-*`, ListAgents) | ask it to move to the new version; it merges its own PR and submits to the stores. Installed copies keep the client they shipped with until then. |
 | The comparis game (origins in the hosted relay's allow-list) | the owner | not in a repository this session knows: tell the owner it needs the version. |
 | tab-mcp browser extension | in this repo | uses the workspace client; released on its own (`kb/operations/chrome-web-store.md`). The store copies keep their client until that release. |
