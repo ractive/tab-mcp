@@ -379,7 +379,7 @@ sends.
 > https://ractive.ch/tab-mcp/examples/diagram/, a diagram editor that registers its tools
 > with WebMCP (by the extension's developer). Click the extension's icon: the side panel shows the page's tools. Turn on "AI access":
 > under "Connect your AI app" the panel shows an address and a code. Add the address in an
-> MCP client, for example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension <address>`,
+> MCP client, for example Claude Code: `claude mcp add --transport http tab-mcp-browser-extension https://tab-mcp.ractive.ch/s/tab-mcp-extension/mcp`,
 > then `/mcp` → authenticate, and type the code on the sign-in page that opens.
 > Ask Claude to draw a small flowchart in the page; a tool that is not read-only (such as
 > `page_add_shapes`) asks in the side panel first. Ask it to open https://ractive.ch/tab-mcp/

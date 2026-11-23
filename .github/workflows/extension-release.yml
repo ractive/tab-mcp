@@ -280,12 +280,14 @@ jobs:
       product-id: a9ff25ac-7200-4573-8eee-69473a630ae7
       attest-signer-workflow: .github/workflows/extension-release.yml
       notes: >-
-        Test page: https://ractive.ch/tab-mcp/examples/diagram/ (registers 8 WebMCP tools).
-        Click the toolbar icon on it; the side panel lists the tools. Turning on AI access
-        shows an address and a pairing code for an MCP client such as Claude Code:
-        claude mcp add --transport http tab-mcp-browser-extension <address>.
-        Where Edge has no WebMCP, the extension supplies document.modelContext after
-        "Give access to all sites" and a reload of the page.
+        Test page: https://ractive.ch/tab-mcp/examples/diagram/ (a diagram editor with 8 tools).
+        Click the tab-mcp icon in the toolbar on that page: the side panel opens. Turn on
+        "AI access" in it: the panel shows an address and a pairing code, and lists the
+        page's 8 tools. If it lists no tools, click "Give access to all sites" in the side
+        panel and reload the page. To connect an MCP client such as Claude Code:
+        claude mcp add --transport http tab-mcp-browser-extension https://tab-mcp.ractive.ch/s/tab-mcp-extension/mcp
+        then run /mcp in Claude Code, choose to authenticate, and type the pairing code on
+        the sign-in page that opens. No account is needed.
         Source: https://github.com/ractive/tab-mcp (packages/tab-mcp-extension); the package
         is the release zip of tag ${{ github.ref_name }}, with GitHub build provenance
         (gh attestation verify <zip> -R ractive/tab-mcp).
