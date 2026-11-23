@@ -629,3 +629,69 @@ test("docs and plugin manifests name only the current package versions", async (
 	}
 	expect(wrong).toEqual([]);
 });
+
+/**
+ * Places where one of `versions` stands as a boundary of history ("after
+ * 0.22.0", "0.22.0 and older", "from 0.22.0 on"), white space folded.
+ */
+function boundaries(text: string, versions: string[]): string[] {
+	const v = versions.map((x) => x.replaceAll(".", "\\.")).join("|");
+	const flat = text.replace(/\s+/g, " ");
+	return [
+		new RegExp(
+			// The end of a version as the bump script reads it: a full stop that
+			// ends the sentence belongs to the sentence, not to the version.
+			`\\b(?:after|before|until|since|up to|from|older than|newer than|as of|through|below|above)\\s+(?:\\w+\\s+){0,2}?\`?(?:${v})(?!\\.?\\d|-[0-9A-Za-z])`,
+			"gi",
+		),
+		new RegExp(
+			`(?<![\\d.])(?:${v})\`?\\s+(?:and|or)\\s+(?:older|later|earlier|newer|above|below|up)\\b`,
+			"gi",
+		),
+		new RegExp(`(?<![\\d.])(?:${v})\`?\\s+(?:on|onwards|did|does|do)\\b`, "gi"),
+	].flatMap((pattern) => [...flat.matchAll(pattern)].map((m) => m[0]));
+}
+
+// `scripts/bump-version.ts` replaces every mention of the current version in
+// these files with the next one. A sentence that names the release a
+// behaviour came with ("libraries after 0.18.1 send it only when …") is
+// true only while that version is the current one: the next bump rewrote
+// it, release after release (found 2026-11-23, in the threat model, the
+// protocol and the client's README). Such a sentence says it without a full
+// version: "from 0.19 on", "before 0.19", "the first two 0.10 releases".
+test("docs do not use a current version as a boundary of history, which the next bump would move", async () => {
+	expect(
+		boundaries(
+			"Libraries after 0.18.1 send it; client 0.18.1 and\nolder do not. From `0.18.1` on it works. Relay 0.9.0 did. Not with a relay up to 0.9.0.",
+			["0.18.1", "0.9.0"],
+		),
+	).toEqual([
+		"after 0.18.1",
+		"From `0.18.1",
+		"up to 0.9.0",
+		"0.18.1 and older",
+		"0.18.1` on",
+		"0.9.0 did",
+	]);
+	expect(
+		boundaries(
+			"Status: 0.18.1. Released: client 0.18.1, on the npm tag latest; from 0.19 on it works; 10.18.1 and older.",
+			["0.18.1"],
+		),
+	).toEqual([]);
+	const repo = join(root, "../..");
+	const version = async (dir: string) =>
+		(await Bun.file(join(repo, dir, "package.json")).json()).version as string;
+	const versions = [
+		await version("packages/tab-mcp-client"),
+		await version("packages/tab-mcp"),
+	];
+	const wrong: string[] = [];
+	for (const file of PINNED_FILES)
+		for (const found of boundaries(
+			await Bun.file(join(repo, file)).text(),
+			versions,
+		))
+			wrong.push(`${file}: ${found}`);
+	expect(wrong).toEqual([]);
+});
