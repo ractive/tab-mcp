@@ -48,6 +48,8 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
 
 ### Changed
 
+- **The AI access switch is green while on**, as a tool's "Always allow" switch is. Its
+  track was the ink colour, which did not say at a glance whether it was on or off.
 - **MCP results the extension does not carry whole**: its `structuredContent` now
   reaches the AI app where its JSON fits in what the text blocks left of the 100,000
   characters (it was dropped silently), else a line says it was left out. The text of

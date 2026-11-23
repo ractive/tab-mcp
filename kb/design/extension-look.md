@@ -167,8 +167,10 @@ icon are three more hex values in `worker/connection.ts`.
   forced colours the border shows and is the pill's shape). Where H turns the
   "asks first"/"allowed" toggle into a `role="switch"`, it is drawn as the small
   switch, not as a pill: a control does not look like a static badge (EQ 11).
-- **The switch.** Colours from Overmark (track off `--edge`, on `--strong`; a tool's
-  "Always allow" on `--ok` since DEC-184; knob `--on-strong`, disabled `--wash` with an inset `--rule` and a knob in `--ink-2`).
+- **The switch.** Track off `--edge`, on `--ok`: green, for a tool's "Always allow" since
+  DEC-184 and for AI access since 2026-11-24 (owner: Overmark's ink track, `--strong`,
+  "doesn't tell you if it's on or off"); knob `--on-strong`, disabled `--wash` with an
+  inset `--rule` and a knob in `--ink-2`.
   The geometry stays this extension's (`--track`, `--knob`, `--gap`, `--border`, the
   forced-colours branch): it is what the e2e test of the knob's position holds, and it
   is more exact than Overmark's fixed pixels. The knob is then 16.07:1 (light) and
@@ -281,7 +283,8 @@ Every pair passes in both schemes.
 | `--ink-2` on `--paper` / `--sheet` / `--wash` | 6.11 / 6.72 / 5.49 | 8.26 / 7.48 / 6.44 | 4.5 |
 | `--ink-2` on `--warn-bg` / `--danger-bg` | 5.95 / 5.61 | 6.55 / 7.17 | 4.5 |
 | `--link` on `--paper` / `--sheet` / `--wash` / `--warn-bg` | 6.12 / 6.73 / 5.49 / 5.95 | 9.19 / 8.32 / 7.16 / 7.29 | 4.5 |
-| `--on-strong` on `--strong` (strong button, knob on the "on" track) | 16.07 | 15.89 | 4.5 |
+| `--on-strong` on `--strong` (strong button) | 16.07 | 15.89 | 4.5 |
+| `--on-strong` on `--ok` (knob on the "on" track) | 6.44 | 9.85 | 3 |
 | `--ok` on `--paper` / `--sheet` / `--ok-bg` | 5.86 / 6.44 / 5.51 | 9.85 / 8.91 / 7.64 | 4.5 |
 | `--warn` on `--paper` / `--sheet` / `--warn-bg` | 7.01 / 7.71 / 6.83 | 12.02 / 10.87 / 9.53 | 4.5 |
 | `--danger` on `--paper` / `--sheet` / `--danger-bg` | 5.94 / 6.54 / 5.46 | 8.36 / 7.56 / 7.25 | 4.5 |
@@ -289,7 +292,7 @@ Every pair passes in both schemes.
 | `--edge` on `--paper` / `--sheet` / `--wash` | 3.51 / 3.86 / 3.15 | 4.39 / 3.97 / 3.42 | 3 |
 | `--edge` on `--warn-bg` / `--danger-bg` (a button on a notice) | 3.41 / 3.22 | 3.48 / 3.81 | 3 |
 | `--on-strong` on `--edge` (knob on the "off" track) | 3.86 | 4.39 | 3 |
-| `--strong` on `--paper` / `--sheet` ("on" track) | 14.61 / 16.07 | 15.89 / 14.37 | 3 |
+| `--strong` on `--paper` / `--sheet` (strong button) | 14.61 / 16.07 | 15.89 / 14.37 | 3 |
 | `--focus` on `--paper` / `--sheet` / `--wash` / `--warn-bg` / `--danger-bg` | 6.12 / 6.73 / 5.49 / 5.95 / 5.61 | 9.19 / 8.32 / 7.16 / 7.29 / 7.98 | 3 |
 | `--warn-edge` on `--paper` / `--sheet` / `--warn-bg` | 4.25 / 4.68 / 4.14 | 6.26 / 5.67 / 4.97 | 3 |
 | `--accent-edge` on `--paper` / `--sheet` (the waiting dot's ring) | 4.12 / 4.53 | 10.06 / 9.10 | 3 |
@@ -314,7 +317,7 @@ Every pair passes in both schemes.
 | Armed button | `--danger`, text `--on-danger`. Disconnect and Disconnect all apps after the first click. |
 | Disabled, `aria-disabled` | `--wash`, text `--ink-2`, 1 px `--rule`, default cursor. |
 | Focus | 2 px `--focus`, offset 2 px, every control, the scrollable arguments included. |
-| Switch | Track off `--edge`, on `--strong`, knob `--on-strong`; this extension's geometry; forced colours as today. |
+| Switch | Track off `--edge`, on `--ok` (green), knob `--on-strong`; this extension's geometry; forced colours as today. |
 | State line | 8 px dot and the sentence; 600 while on. |
 | App row | Name 600, host as meta, Disconnect (small) at the end; `--rule` between rows. |
 | Pairing step | Sheet, 1 px `--rule`, radius 10, 12 px padding; address and code on `--wash`. |
