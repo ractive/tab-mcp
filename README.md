@@ -60,7 +60,7 @@ depends on how the page offers its tools:
 | | Page with the client library | Page with WebMCP tools only |
 |---|---|---|
 | The site | builds in `@ractive-ch/tab-mcp-client` and has a relay that allows its origin | calls `document.modelContext.registerTool()` where the page finds it; needs nothing of tab-mcp |
-| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | the tab-mcp browser extension, from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) in Chrome; with Chrome's WebMCP off (no flag, the site not in the origin trial), its access to all sites too ([the extension](#the-tab-mcp-browser-extension)) |
+| The user needs | any browser (Chrome, Edge, Firefox, Safari), and installs nothing | the tab-mcp browser extension, from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) in Chrome or from [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/) in Firefox; with Chrome's WebMCP off (no flag, the site not in the origin trial), its access to all sites too ([the extension](#the-tab-mcp-browser-extension)) |
 | The user connects | in the page: "Connect your AI app" shows the address and the code | in the extension's side panel, once: one address for whatever page is in front |
 | The user is asked | by the page, before a tool the site marked as consequential | by the extension, before a tool the page did not mark read-only, and before its navigation tools take the tab to another site |
 
@@ -385,7 +385,7 @@ so a relay is exactly one process.
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh): "tab-mcp browser extension" 0.3.3 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) and [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/): "tab-mcp browser extension" 0.3.3 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
@@ -410,7 +410,9 @@ settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what chang
 - Released: relay `@ractive-ch/tab-mcp` 0.13.3 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.22.0, on the npm tag `latest`.
 - The tab-mcp browser extension 0.3.3 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
-  2026-11-16). A development build loaded unpacked has the store's id, which the hosted
+  2026-11-16) and, for Firefox, on
+  [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/).
+  A development build loaded unpacked has the store's id, which the hosted
   relay allows ([README](packages/tab-mcp-extension/README.md)).
 - tab-mcp speaks only MCP revision 2026-07-28 and accepts only AI apps that register
   through OAuth Client ID Metadata Documents. Claude Code, claude.ai, Claude Desktop,

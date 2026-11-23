@@ -150,8 +150,10 @@ The page's tools are the page's word:
 
 ## Install and use it
 
-Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh),
-or build it and load it unpacked (development; it has the store's id, so the two can't
+Install it from the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh)
+(Firefox: from
+[addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/),
+see [In Firefox](#in-firefox)), or build it and load it unpacked (development; it has the store's id, so the two can't
 share a Chrome profile):
 
 ```sh
@@ -368,9 +370,14 @@ extension's (accepted, 2026-11-16; `PRIVACY.md`).
 It is on
 [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/)
 (add-on id `tab-mcp@ractive.ch`; 0.2.0 went in by hand, every release from 0.3.3 on
-through the release workflow). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (minified,
-no source maps) and the source archive `tab-mcp-<version>-source.zip` AMO's reviewers build
-it from, and publishes both there (DEC-195, "Releases" below).
+through the release workflow). A release builds
+`tab-mcp-browser-extension-firefox-<version>-store.zip` (minified, no source maps) and the
+source archive `tab-mcp-<version>-source.zip` AMO's reviewers build it from, and publishes
+both there (DEC-195, "Releases" below).
+
+Installed from addons.mozilla.org ("Add to Firefox"), go on at step 4: the hosted relay,
+the default, admits it. Steps 1 and 2 are for a build made from this repository, step 3
+for a relay of your own.
 
 1. `bun scripts/build.ts --firefox` builds it into `dist-firefox/` (Firefox 140 or later).
 2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** →
