@@ -74,7 +74,8 @@ jobs:
         page's 8 tools. If it lists no tools, click "Give access to all sites" in the side
         panel and reload the page. To connect an MCP client such as Claude Code:
         claude mcp add --transport http tab-mcp-browser-extension https://tab-mcp.ractive.ch/s/tab-mcp-extension/mcp
-        and type the pairing code on the sign-in page that opens. No account is needed.
+        then run /mcp in Claude Code, choose to authenticate, and type the pairing code on
+        the sign-in page that opens. No account is needed.
         Source: https://github.com/ractive/tab-mcp (packages/tab-mcp-extension); the package
         is the release zip of tag ${{ github.ref_name }}, with GitHub build provenance
         (gh attestation verify <zip> -R ractive/tab-mcp).
