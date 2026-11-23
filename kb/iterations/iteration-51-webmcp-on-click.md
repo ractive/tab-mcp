@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 51: WebMCP on a click"
-status: planned
+status: in-progress
 description: >-
   In Chrome without WebMCP, on a site outside the origin trial, a page built with the
   client library offers the tab-mcp browser extension nothing after a click on its icon:
@@ -570,10 +570,10 @@ and the event). Either order is safe.**
       (`worker/navigation.ts:451`).
     - **Open question 4 becomes a real choice.**
     - **The size:** on main the sketch costs 44 B (6314 to 6358 B of 6400).
-- [ ] 1. **Client:** the listener (§3) in the constructor, the constant in `./extension`,
+- [x] 1. **Client:** the listener (§3) in the constructor, the constant in `./extension`,
   the unit tests, the size measured before and after, the README sentence on the event,
   and the CHANGELOG (Added).
-- [ ] 2. **Extension, Chrome:**
+- [x] 2. **Extension, Chrome:**
   - `webmcp-main.ts` dispatches the event.
   - `giveWebMCP` in `tabs.ts`.
   - `webmcp-install` and the second port in `content.ts`, with `late`.
@@ -581,12 +581,12 @@ and the event). Either order is safe.**
     with the tab.
   - The types in `messages.ts` and `protocol.ts`.
   - No flash of `no-webmcp` (§1).
-- [ ] 3. **Extension, Firefox:** the content script installs at `loading` or on a
+- [x] 3. **Extension, Firefox:** the content script installs at `loading` or on a
   takeover, and otherwise on `webmcp-install`; `installWebMCP` dispatches the event.
-- [ ] 4. **Texts:** the panel's `no-webmcp` and the new `late-webmcp` (Chrome and
+- [x] 4. **Texts:** the panel's `no-webmcp` and the new `late-webmcp` (Chrome and
   `FIREFOX_PANEL_TEXTS`), `webmcpNote` in `card.ts`, `page_info`'s note and
   `FIREFOX_NO_WEBMCP_NOTE`, all agreed with the owner.
-- [ ] 5. **Docs:**
+- [x] 5. **Docs:**
   - PRIVACY.md, the extension's README, the root README.
   - Both threat models (A13, A14), `kb/design/extension.md`, `kb/design/architecture.md`
     if it describes when the library looks.

@@ -95,6 +95,9 @@ it sets `webmcp: false` (with older versions of the library, only with `webmcp: 
   `document.modelContext` as the page starts loading, so that a page that registers its
   tools wherever the API exists registers them with the extension. That needs "Give
   access to all sites": a click on the icon comes after the page has looked for the API.
+  A page built with the tab-mcp client library is the exception: while AI access is on,
+  a click gives it the extension's WebMCP then, and the library offers its tools
+  (DEC-223).
 - **Where it can be installed today:** the Chrome build from the
   [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh)
   and the Firefox build from

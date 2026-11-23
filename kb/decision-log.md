@@ -5610,3 +5610,55 @@ Rejected:
   tools that ask. The CHANGELOG's Breaking entry is where an upgrading site learns it.
 - **A compatibility shim** (the old default for pages built against an older version):
   no shims (owner).
+
+## DEC-223: WebMCP on a click: the extension gives the tab its own late, the library mirrors then (owner, the approach)
+
+2026-11-23, [iteration 51](/iterations/iteration-51-webmcp-on-click.md). A page built
+with the client library offered the tab-mcp browser extension nothing in plain Chrome
+on a site outside the origin trial, or in Firefox, without access to all sites: the
+library looks for WebMCP when its `TabMcp` is made, and a click on the icon comes long
+after.
+
+- **The approach (owner, 2026-11-23: "try the way with registering the webmcp
+  tools").** The extension gives the tab its own `document.modelContext` late and
+  says so with a DOM event, `tab-mcp-webmcp` on `document`; a `TabMcp` that found no
+  WebMCP when it was made reads `Document.prototype`'s getter again then and starts its
+  mirror. Everything after that is the existing path: `callers` (DEC-209), the hints
+  (DEC-143), the handshake and the vouch (DEC-207, DEC-221), `onConfirm` (DEC-215).
+- **The library** (from the release after 0.23 on): one listener in the core, only in a
+  `TabMcp` that found none and not with `webmcp: false`; removed the first time the
+  getter gives an object, kept after an event without one (a forged or early event does
+  not use it up). The name is `WEBMCP_EVENT` of `./extension`, spelt out in the core,
+  which imports nothing of that entry. The core grows by 44 B gzipped (6314 to 6358 B of
+  6400 B).
+- **The extension.** Where the worker reads a page without WebMCP (the bridge's
+  `list`), it gives it the extension's own, once per document (`worker/late-webmcp.ts`):
+  in Chrome the page-world polyfill with `scripting.executeScript` (`world: "MAIN"`,
+  frame 0), whose content script then connects to it on a new port (the port posted at
+  the click was lost); in Firefox the content script installs it, which it now does at
+  its start only at `document_start` or to take over an earlier script's state. The
+  polyfill dispatches the event right after defining the getters. The panel says
+  nothing about missing WebMCP while the extension's is on its way, and "tab-mcp gave
+  this page WebMCP after it had loaded…" for a page that then registered nothing
+  (`late`), with a note in `page_info`.
+- **Shown in a browser** (iteration 51's spike, then the tests): Chrome lets
+  `executeScript` into the main world under `activeTab` alone, after the click, after a
+  same-origin navigation and after a reload; Firefox ends the click's grant at every
+  navigation, a reload included, so there each new page needs a click.
+- **Open for the owner, built as the plan recommends, each in one place:**
+  - Only while AI access is on and connected (DEC-221's "on"): `mayGiveLate` in
+    `worker/late-webmcp.ts`. While off, a page learns nothing of a click.
+  - The texts (iteration 51 lists them, old and new).
+  - Firefox's click per page, said in the panel, `page_info`'s refusal, the navigation
+    tools and PRIVACY.md.
+- **What a page learns.** A page that gets the extension's WebMCP late learns that the
+  extension is installed and that the user gave it the tab, and when. A script of the
+  page that defines a getter later and dispatches the event gets the mirrored tools of a
+  `TabMcp` that found none; it runs with the page's powers already (A14).
+- **Rejected: the extension lists and calls the library's tools over the page events,
+  past WebMCP.** A second tool transport with its own list, call, result and cancel, its
+  own `callers` value and its own tests in two browsers.
+- **Old and new mix.** An old library ignores the event: the page gets WebMCP and
+  registers nothing, and the panel says so (`late-webmcp`), whose remedy (all sites, a
+  reload) works. An old extension gives no event: as before. Either release may come
+  first.

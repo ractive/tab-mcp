@@ -15,8 +15,11 @@ this. How the extension, the relay and the client library fit together, with a p
   Chrome's origin trial), they are the tools the page registered with the browser. Where
   it has none (Firefox, Chrome without either), the extension gives each https page (and
   localhost) its own `document.modelContext` as the page starts loading, after "Give
-  access to all sites" only: a click on the icon comes after the page has looked for it
-  (DEC-188, DEC-191).
+  access to all sites" (DEC-188, DEC-191). Without it, while AI access is on, a page the
+  extension reads that has no WebMCP gets its own then, after the click on the icon
+  (DEC-223): a page built with the tab-mcp client library offers its tools then, while
+  a page that looked for WebMCP only as it loaded registers nothing and still needs
+  access to all sites and a reload.
 - **Where it can be installed today:** the Chrome build from the
   [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh),
   or built from this repository and loaded unpacked ([Install and use
@@ -132,9 +135,11 @@ The page's tools are the page's word:
   the extension tells such a page only its name, that AI access is on and the AI apps
   connected now (name and verified host), not its version. While AI access is off, the
   extension answers no page and sends it nothing (DEC-221). A page can still see that
-  the extension is installed where it provides WebMCP itself (in browsers without their
-  own, below), and could try to time its own events, which the extension still listens
-  to. A page it told "on" is told once that it went off. A page without the library is
+  the extension is installed where it gives the page WebMCP as the page loads (in
+  browsers without their own, with access to all sites, below), and could try to time
+  its own events, which the extension still listens to. While AI access is on, a page
+  that gets the extension's WebMCP late, after a click (DEC-223), learns that it is
+  installed and that you gave it the tab, and when. A page it told "on" is told once that it went off. A page without the library is
   told nothing.
 - The top frame's WebMCP, which lists the tools of the page and of its same-origin
   frames (the draft and Chrome's documentation say so; not tested here); tools of
@@ -166,7 +171,9 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
 - Click the extension's icon on a tab: the side panel opens (also over another
   extension's panel for that tab, such as Claude in Chrome's), and the extension may read
   that tab, also after navigations on the same origin, until the tab goes to another
-  origin (`www.example.com` is another origin than `example.com`).
+  origin (`www.example.com` is another origin than `example.com`). In Firefox the click
+  counts for that one page: each new page, of the same origin too, and a reload need
+  another click (the spike of iteration 51).
   "Give access to all sites" in the side panel lets it read every http(s) tab
   without a click; Chrome asks first ("Read and change all your data on all
   websites"). On a tab it may not read, a notice in the
@@ -304,7 +311,7 @@ waiting already, the panel says so: type the code, or reload the page once answe
 | Permission | Why |
 |---|---|
 | `activeTab` | Read the tab you click the icon on (its WebMCP tools), without access to other sites. |
-| `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab. |
+| `scripting` | Put the content script, which lists and calls the page's WebMCP tools, into that tab; and, while AI access is on, the extension's own WebMCP into a page there that has none (DEC-223). |
 | `sidePanel` | The side panel: the connection's state, pairing, the tab's tools, the questions. |
 | `notifications` | Ask before a tool that is not read-only runs while the side panel is not in front. |
 | `alarms` | Wake the service worker once a minute while AI access is on, so a connection lost while the computer slept comes back. |
@@ -327,6 +334,10 @@ turn on `chrome://flags/#enable-webmcp-testing`
 ([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Elsewhere, with
 access to all sites, the extension gives pages its own (`src/chrome/webmcp-main.ts`, a
 script in the page's own world at `document_start`); Chrome's wins where it has one.
+Without access to all sites, while AI access is on, the worker puts the same script into
+a tab given by a click, once it finds the page without WebMCP (`chrome.scripting`,
+`world: "MAIN"`), and the script tells the page with the event `tab-mcp-webmcp`, so that
+the client library looks again (DEC-223).
 
 ## The relay and the extension's id
 
@@ -366,7 +377,11 @@ that register their tools wherever the API exists (Shopify's storefronts, Mintli
 and ReadMe docs, pages with the MCP-B or W3C polyfill) register them in Firefox too, and
 the extension offers them to the AI app as in Chrome. A page can therefore tell that the
 extension is installed: the API is there where Firefox has none, and it behaves as this
-extension's (accepted, 2026-11-16; `PRIVACY.md`).
+extension's (accepted, 2026-11-16; `PRIVACY.md`). Without access to all sites, a click on
+the icon gives the extension that one page (Firefox ends the grant at every navigation, a
+reload too); while AI access is on, the content script then installs WebMCP late and the
+page hears `tab-mcp-webmcp`, so a page with the client library offers its tools
+(DEC-223).
 
 It is on
 [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/)
@@ -405,7 +420,8 @@ for a relay of your own.
 
 4. Click the tab-mcp icon: the sidebar opens. For a local relay, set it under **Settings**
    (`http://localhost:8080`). Then **Give access to all sites** (Firefox asks): only then does
-   every page get WebMCP as it loads; a click on the icon comes after the page looked for it.
+   every page get WebMCP as it loads; a click on the icon comes after the page looked for it
+   (except for a page with the tab-mcp client library, which looks again, DEC-223).
 5. Reload the page with the tools, turn on AI access, and add the address the sidebar shows
    (`<relay>/s/tab-mcp-extension-firefox/mcp`) to your AI app
    (`claude mcp add --transport http tab-mcp-browser-extension-firefox <address>`), with the
