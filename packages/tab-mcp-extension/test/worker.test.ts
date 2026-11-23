@@ -959,18 +959,19 @@ describe("the AI apps' calls running, for the panel's glow (DEC-225)", () => {
 		expect([t.calls.any, t.told()]).toEqual([true, 1]);
 	});
 
-	test("a new connection (another relay): the old one's calls are forgotten, its events no longer count", () => {
+	test("a new connection (another relay): the old one's calls in flight are cleared, and its events, which still fire, are no longer heard", () => {
 		const t = watched();
 		start(t.mcp, 1);
 		t.listening.abort();
 		const next = new EventTarget();
 		t.calls.watch(next, new AbortController().signal);
 		expect([t.calls.any, t.told()]).toEqual([false, 2]);
+		// The old connection's end of call 1, and a start, after its signal.
 		start(t.mcp, 2);
 		end(t.mcp, 1);
 		expect([t.calls.any, t.told()]).toEqual([false, 2]);
-		// The new one's ids may be the old one's: each counts on its own.
-		start(next, 1);
+		// The ids go on across connections (unique in the worker).
+		start(next, 3);
 		expect([t.calls.any, t.told()]).toEqual([true, 3]);
 	});
 });

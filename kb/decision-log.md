@@ -5786,7 +5786,10 @@ to have something similar in tab-mcp." For the next extension release.
   after the last one ended: most calls take a blink, and the glow has to be seen
   (Sitegloss's `TALKING_AFTER_MS`). Only while the connection is up (status `on`, or
   `waiting`: connected with no app listed); off, connecting, retrying or taken over, it
-  goes at once, a hold included, and does not come back with the connection.
+  goes at once, a hold included, and does not come back with the connection. The same
+  when the panel's port to the worker goes (an update, a reload, the worker stopping):
+  no state may come any more, and a restarted worker's first state puts the glow back
+  if a call really runs (review of PR 241).
 - **Where:** the AI access switch beside the section's heading, the one control that
   shows AI access on or off. The ring (Sitegloss's six colours, 2 px round the track)
   and the halo (the ring blurred 3 px, its opacity breathing between 0.2 and 0.95 every

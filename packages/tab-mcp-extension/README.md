@@ -521,7 +521,8 @@ extension: the Chrome Web Store signs what it serves itself. The owner's setup, 
   (`src/look.ts`); and the style sheet's rules: every colour is a token, none is unused,
   nothing is dimmed by opacity (but the glow's halo), no hover reaches a button that
   takes no click, no button is amber, one focus ring, reduced motion stops every
-  transition and the halo's breath, forced colours name every state. A new colour or pair goes into the test's table first.
+  transition and the halo's breath, forced colours name every state. A new colour or
+  pair goes into the test's table first.
 - `test/worker.test.ts`: who may send the service worker what (only the side panel's
   port gives commands; a content script can only say its page's tools changed), the
   questions (notifications, the guard, late clicks, a click on the body and a panel

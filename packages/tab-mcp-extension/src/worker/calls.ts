@@ -14,7 +14,7 @@
 import type { TabMcpEventMap } from "@ractive-ch/tab-mcp-client";
 
 export class RunningCalls {
-	/** The calls running, by the library's id (unique per `TabMcp`). */
+	/** The calls running, by the library's id (unique in the worker). */
 	readonly #ids = new Set<number>();
 	readonly #changed: () => void;
 
@@ -28,9 +28,10 @@ export class RunningCalls {
 	}
 
 	/**
-	 * Follow the calls of `mcp` until `signal` aborts; the calls of the one
-	 * before are forgotten (its ids are its own, and its ends no longer
-	 * come).
+	 * Follow the calls of `mcp` until `signal` aborts. The calls of the
+	 * connection before are cleared here: its ends still fire, but its
+	 * listeners went with its signal, so they would never be counted off
+	 * (its calls in flight end as that connection is disconnected).
 	 */
 	watch(mcp: EventTarget, signal: AbortSignal): void {
 		this.#set(() => this.#ids.clear());

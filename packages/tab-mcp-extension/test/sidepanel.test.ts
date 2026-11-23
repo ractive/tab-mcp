@@ -106,6 +106,7 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 	);
 	const sent: PanelCommand[] = [];
 	let deliver: (message: unknown) => void = () => {};
+	let dropped: () => void = () => {};
 	const port = {
 		postMessage: (m: PanelCommand) => void sent.push(m),
 		onMessage: {
@@ -113,7 +114,11 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 				deliver = l;
 			},
 		},
-		onDisconnect: { addListener: () => {} },
+		onDisconnect: {
+			addListener: (l: () => void) => {
+				dropped = l;
+			},
+		},
 		disconnect: () => {},
 	};
 	for (const key of GLOBALS) {
@@ -147,6 +152,8 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 		doc,
 		sent,
 		show: (state: PanelState) => deliver({ type: "state", state }),
+		/** Chrome ends the port (the worker stopped, an update, a reload). */
+		drop: () => dropped(),
 		/** The clock `ms` on, and the panel's own check of its waits run. */
 		later: (ms: number) => {
 			setSystemTime(Date.now() + ms);
@@ -237,6 +244,19 @@ describe("the glow while an AI app calls (DEC-225)", () => {
 		// The relay's connection lost: no hold.
 		panel.show({ ...stateWith([]), status: "retrying", calling: true });
 		expect(glows()).toBe(false);
+	});
+
+	test("gone at once when the port to the worker goes (an update, a reload), back with a state that says a call runs", async () => {
+		const panel = await openPanel();
+		const glows = () =>
+			panel.$("#ai-switch")?.closest(".switch")?.hasAttribute("data-calling");
+		panel.show({ ...stateWith([]), calling: true });
+		expect(glows()).toBe(true);
+		panel.drop();
+		expect(glows()).toBe(false);
+		// The worker restarted and a call still runs.
+		panel.show({ ...stateWith([]), calling: true });
+		expect(glows()).toBe(true);
 	});
 });
 

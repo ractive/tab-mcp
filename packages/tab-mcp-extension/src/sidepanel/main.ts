@@ -162,6 +162,10 @@ function connect(): void {
 	});
 	opened.onDisconnect.addListener(() => {
 		if (port === opened) port = undefined;
+		// No state comes any more, or not before the restarted worker's first:
+		// the glow ends now (DEC-225), and that state puts it back if a call
+		// really runs.
+		glow.update({ status: "off", calling: false });
 		setTimeout(connect, 250);
 	});
 	if (windowId !== undefined) send({ type: "hello", windowId });

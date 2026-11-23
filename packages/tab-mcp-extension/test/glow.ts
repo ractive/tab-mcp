@@ -9,9 +9,13 @@ import { TEST_GLOW_AFTER_MS } from "../src/sidepanel/glow.ts";
 
 const LABEL = `document.getElementById("ai-switch").closest(".switch")`;
 
-/** The switch's label: whether it glows, its box, what its ring and halo draw. */
+/**
+ * The switch's label: whether it glows, its box, what its ring and halo
+ * draw; and whether a question shows, read in the same look.
+ */
 interface Look {
 	glows: boolean;
+	question: boolean;
 	box: number[];
 	ring: string;
 	halo: string;
@@ -22,6 +26,7 @@ const LOOK = `(() => {
 	const box = label.getBoundingClientRect();
 	return {
 		glows: label.hasAttribute("data-calling"),
+		question: document.querySelector("[data-question]") !== null,
 		box: [box.x, box.y, box.width, box.height],
 		ring: getComputedStyle(label, "::before").backgroundImage,
 		halo: getComputedStyle(label, "::after").animationName,
@@ -30,16 +35,27 @@ const LOOK = `(() => {
 
 type Eval = <T>(expression: string) => Promise<T>;
 
-/** Wait until the switch glows (`on`) or not; the milliseconds it took. */
-async function glowsBy(panel: Eval, on: boolean, ms: number): Promise<number> {
+/**
+ * Wait for a look that passes `check`; that look, and the milliseconds it
+ * took. `what` names the wait in the error.
+ */
+async function lookUntil(
+	panel: Eval,
+	check: (look: Look) => boolean,
+	ms: number,
+	what: string,
+): Promise<{ look: Look; took: number }> {
 	const start = Date.now();
 	for (;;) {
-		if ((await panel<Look>(LOOK)).glows === on) return Date.now() - start;
+		const look = await panel<Look>(LOOK);
+		if (check(look)) return { look, took: Date.now() - start };
 		if (Date.now() - start > ms)
-			throw new Error(`the switch ${on ? "never glowed" : "kept glowing"}`);
+			throw new Error(`${what}: the last look ${JSON.stringify(look)}`);
 		await Bun.sleep(50);
 	}
 }
+
+const dark = (look: Look) => !look.glows;
 
 /**
  * `ask` starts a call that asks in the panel, `answer` allows it there. The
@@ -53,15 +69,23 @@ export async function glowsWhileCalling<R extends { isError?: boolean }>(
 	answer: () => Promise<void>,
 ): Promise<R> {
 	// The calls before this one have had their hold.
-	await glowsBy(panel, false, 10_000);
-	const before = await panel<Look>(LOOK);
+	const { look: before } = await lookUntil(
+		panel,
+		dark,
+		10_000,
+		"the switch kept glowing before the call",
+	);
 	expect(before.ring).toBe("none");
 	const pending = ask();
-	await glowsBy(panel, true, 10_000);
-	expect(
-		await panel<boolean>(`document.querySelector("[data-question]") !== null`),
-	).toBe(true);
-	const during = await panel<Look>(LOOK);
+	// The glow comes as the call starts, the question a moment later (the
+	// worker reads the tab first): glowing with the question showing, in one
+	// look, is the call running while it waits.
+	const { look: during } = await lookUntil(
+		panel,
+		(look) => look.glows && look.question,
+		10_000,
+		"the switch never glowed with the question showing",
+	);
 	expect(during.box).toEqual(before.box);
 	expect(during.ring).toStartWith("linear-gradient(");
 	expect(during.halo).toBe("calling");
@@ -69,7 +93,12 @@ export async function glowsWhileCalling<R extends { isError?: boolean }>(
 	const result = await pending;
 	expect(result.isError).toBeFalsy();
 	// Held: most calls take a blink, and the glow has to be seen.
-	const held = await glowsBy(panel, false, TEST_GLOW_AFTER_MS + 2000);
+	const { took: held } = await lookUntil(
+		panel,
+		dark,
+		TEST_GLOW_AFTER_MS + 2000,
+		"the switch kept glowing after the hold",
+	);
 	expect(held).toBeGreaterThan(TEST_GLOW_AFTER_MS - 700);
 	return result;
 }
