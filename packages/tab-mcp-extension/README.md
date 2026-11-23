@@ -20,11 +20,11 @@ this. How the extension, the relay and the client library fit together, with a p
 - **Where it can be installed today:** the Chrome build from the
   [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh),
   or built from this repository and loaded unpacked ([Install and use
-  it](#install-and-use-it)). The Firefox build is not on addons.mozilla.org yet (its
-  release is [pull request 163](https://github.com/ractive/tab-mcp/pull/163)): built from
-  this repository, it loads as a temporary add-on ([In Firefox](#in-firefox)). Every
-  release is also submitted to Microsoft Edge Add-ons (DEC-194), but that listing is not
-  public yet (checked on 2026-11-22).
+  it](#install-and-use-it)); the Firefox build from
+  [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/)
+  (Firefox 140 or later), or built from this repository and loaded as a temporary add-on
+  ([In Firefox](#in-firefox)). Every release is also submitted to Microsoft Edge Add-ons
+  (DEC-194), but that listing is not public yet (in review, checked on 2026-11-23).
 
 Privacy policy: [PRIVACY.md](PRIVACY.md).
 
@@ -365,8 +365,10 @@ the extension offers them to the AI app as in Chrome. A page can therefore tell 
 extension is installed: the API is there where Firefox has none, and it behaves as this
 extension's (accepted, 2026-11-16; `PRIVACY.md`).
 
-It is on its way to addons.mozilla.org (add-on id `tab-mcp@ractive.ch`; 0.2.0 went in by
-hand). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (minified,
+It is on
+[addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/)
+(add-on id `tab-mcp@ractive.ch`; 0.2.0 went in by hand, every release from 0.3.3 on
+through the release workflow). A release builds `tab-mcp-browser-extension-firefox-<version>-store.zip` (minified,
 no source maps) and the source archive `tab-mcp-<version>-source.zip` AMO's reviewers build
 it from, and publishes both there (DEC-195, "Releases" below).
 

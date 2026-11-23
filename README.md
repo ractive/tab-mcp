@@ -96,13 +96,12 @@ library alone, without `webmcp: true`, has none for it.
   tools wherever the API exists registers them with the extension. That needs "Give
   access to all sites": a click on the icon comes after the page has looked for the API.
 - **Where it can be installed today:** the Chrome build from the
-  [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh).
+  [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh)
+  and the Firefox build from
+  [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/)
+  (Firefox 140 or later; [In Firefox](packages/tab-mcp-extension/README.md#in-firefox)).
   Every release is also submitted to Microsoft Edge Add-ons (DEC-194), but that listing
-  is not public yet (checked on 2026-11-22).
-  The Firefox build is not on addons.mozilla.org yet (its release is
-  [pull request 163](https://github.com/ractive/tab-mcp/pull/163)); it can be built from
-  this repository and loaded as a temporary add-on
-  ([In Firefox](packages/tab-mcp-extension/README.md#in-firefox)). There is none for
+  is not public yet (in review, checked on 2026-11-23). There is none for
   Safari; pages reach Safari users with the client library.
 
 ## Live examples
