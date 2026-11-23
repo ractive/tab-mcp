@@ -375,7 +375,9 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   bare `UnknownError`. Two cases still reject: a call the browser cancelled
   (`AbortError`), and a call when the library's lazily loaded part cannot be loaded (a
   new deploy while the page stays open, the network); reloading the page fixes that.
-- Only the native object is used, never a polyfill such as `@mcp-b/global`. A failed
+- Only the object behind `Document.prototype`'s getter is used (the browser's, or the
+  one a browser extension such as tab-mcp's put there), never a `document.modelContext`
+  a page script defines (a polyfill such as `@mcp-b/global`). A failed
   native registration (a name already registered natively, a frame without
   `allow="tools"`) only warns in the console; the tool stays offered through the relay.
   A page that registers tools natively itself sets `webmcp: false` or uses other names.

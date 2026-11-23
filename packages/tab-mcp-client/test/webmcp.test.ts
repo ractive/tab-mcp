@@ -580,35 +580,6 @@ describe("every failure stays with the mirror", () => {
 		expect(warn).toHaveBeenCalledTimes(1);
 	});
 
-	test("a refused tool is tried again when the registry changes, and warned about once", async () => {
-		const held = new AbortController();
-		await native.registerTool(
-			{ name: "add", description: "The page's own", execute: () => "page" },
-			{ signal: held.signal },
-		);
-		const t = tab();
-		await t.registerTool(add);
-		await settle();
-		expect(native.tools.get("add")?.description).toBe("The page's own");
-		// Still refused at the next change: tried, no second warning.
-		const before = native.registrations;
-		const first = new AbortController();
-		await t.registerTool(wipe, { signal: first.signal });
-		await settle();
-		expect(native.registrations).toBe(before + 2);
-		expect(native.tools.get("add")?.description).toBe("The page's own");
-		// The page gave the name up: the next change mirrors the tool.
-		held.abort();
-		first.abort();
-		await settle();
-		expect(native.tools.get("add")?.description).toBe(add.description);
-		expect(
-			warn.mock.calls.filter((call) =>
-				String(call[0]).includes("add is not offered through WebMCP"),
-			),
-		).toHaveLength(1);
-	});
-
 	test("a tool unregistered before its registration ran is not registered, whatever the browser does with an aborted signal (review of PR 103)", async () => {
 		const names: string[] = [];
 		native.registerTool = (tool: NativeTool) => {

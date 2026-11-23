@@ -320,17 +320,19 @@ which ask nothing either.
   Content Security Policy); reloading the page fixes the latter.
   `toolcallend` reports the outcome as for an AI app (`error`, `declined`, `unanswered`,
   `cancelled`).
-- Only the native object is used, read through `Document.prototype`'s getter: an own
-  `document.modelContext` (a polyfill such as `@mcp-b/global`, or a page script) is
-  passed by, and with native WebMCP and the polyfill both present the tools go to the
-  native object.
+- Only the object behind `Document.prototype`'s getter is used: the browser's, or the one
+  a browser extension put there as the page started (the tab-mcp browser extension does,
+  where the browser has no WebMCP). An own `document.modelContext` (a polyfill such as
+  `@mcp-b/global`, or a page script) is passed by, and with native WebMCP and the
+  polyfill both present the tools go to the native object.
 - A tool leaves WebMCP whenever it leaves the page's registry: its `signal`, or the
   validator, which the first WebMCP call loads (as `connect()` does), refusing its
   schema.
 - A failed native registration only warns in the console, once per tool, and the tool
-  stays offered through the relay; it is tried again whenever the page's tools change (a
-  tool registered or removed), so a name that became free is taken then: a name the page
-  or another script already registered
+  stays offered through the relay; it is tried again only when the tool is registered
+  again (a browser that unregisters a tool some time after its abort would refuse a
+  registration of the same name at once after it, as a duplicate; Chrome unregisters at
+  once): a name the page or another script already registered
   natively keeps its owner, and a frame without `allow="tools"` refuses all. The other
   way round, once a name is mirrored, the page's own native `registerTool()` of that name
   fails: a page that registers tools natively itself sets `webmcp: false` or uses other

@@ -938,10 +938,15 @@ These callers sit beside the AI apps of A2 and A6, and differ from them.
   if it has one (`client.kind` `"webmcp"`), which must decide without showing anything
   an agent could click, and the calls appear in the page's `toolcall`/`toolcallend`
   events like an AI app's. The confirmation's chunk is not loaded for such a call.
-- **Only the browser's own object.** Each `TabMcp` reads `document.modelContext`
-  through `Document.prototype`'s getter when it is made; an own property (a polyfill,
-  any page script) is passed by. A page that changes `Document.prototype` before that
-  can fool this; it owns the tools anyway. Who may call into the page's WebMCP at all
+- **Only the object behind `Document.prototype`'s getter.** Each `TabMcp` reads
+  `document.modelContext` through that getter when it is made; an own property of the
+  document (a polyfill such as `@mcp-b/global`, any page script) is passed by. The
+  getter is the browser's, or one an extension put there before the page's scripts ran:
+  the tab-mcp browser extension does (A13), and any other extension with a script in the
+  page's own world at `document_start` can. Such an extension then gets every mirrored
+  tool and its `execute`, by default since DEC-222; it could read and drive the page
+  without that. A page that changes `Document.prototype` itself owns the tools anyway.
+  Who may call into the page's WebMCP at all
   (cross-origin frames need `allow="tools"`; other documents of the tab see a tool only
   if its `exposedTo` names their origin, and can then run it; which agents and
   extensions) is the browser's decision.

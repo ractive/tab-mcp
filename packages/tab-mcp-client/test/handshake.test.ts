@@ -264,6 +264,28 @@ describe("the announcement", () => {
 		expect(apps[63]).toEqual({ name: "App 63", host: "x" });
 	});
 
+	test("two TabMcp of one app say one list: the one without AI apps does not replace the other's (review of PR 232)", async () => {
+		const used = tab();
+		// React's strict mode makes a second one and drops it; it stays joined.
+		tab();
+		const other = tab({ app: "other" });
+		await settle();
+		const grant = (name: string): Grant => ({
+			grantId: name,
+			client: { id: `https://${name}.example`, name, host: "x" },
+			createdAt: new Date().toISOString(),
+		});
+		Object.defineProperty(used, "grants", { value: [grant("A")] });
+		Object.defineProperty(other, "grants", { value: [grant("B")] });
+		heard = [];
+		tell({ ...ON, type: "hello" });
+		expect(heard.map((m) => [m["app"], m["apps"]])).toEqual([
+			["test-page", [{ name: "A", host: "x" }]],
+			["test-page", [{ name: "A", host: "x" }]],
+			["other", [{ name: "B", host: "x" }]],
+		]);
+	});
+
 	test("in a frame the page takes no part (the extension speaks to the top frame only)", async () => {
 		const top = g["top"];
 		g["top"] = {};

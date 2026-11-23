@@ -187,9 +187,6 @@ export function mirror(
 				})
 				.catch((error: unknown) => {
 					if (signal.aborted) return; // unmirrored meanwhile
-					// Tried again at the registry's next change: the name may be
-					// free by then.
-					if (mirrors.get(tool) === controller) mirrors.delete(tool);
 					if (warned.has(tool.name)) return;
 					warned.add(tool.name);
 					console.warn(

@@ -583,8 +583,10 @@ injection included; script of an `exposedTo` origin runs it unasked. `callers` w
 `"webmcp"` and no `exposedTo` keep a tool from all three; a tool that asks with an
 `exposedTo` naming other origins, on a page without `onConfirm`, gets a console warning
 once, when the browser accepted its registration (none for mirroring alone: it would be
-noise on almost every such page; the remedy is the same, `onConfirm` or `callers`). Only the native object is
-used. The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
+noise on almost every such page; the remedy is the same, `onConfirm` or `callers`). Only the object behind
+`Document.prototype`'s getter is used: the browser's, or one an extension put there (the
+tab-mcp browser extension's, or any other with a script in the page's world at
+`document_start`, which then gets the mirrored tools by default). The tab-mcp browser extension offers mirrored tools like any page tool (DEC-140): an AI app
 connected to both the page and the extension sees such a tool twice. Since DEC-207 a call
 the user allowed in the extension carries a vouch, which the page believes without a
 proof: the next WebMCP call of that tool with equal arguments within 2 s runs without

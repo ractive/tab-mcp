@@ -17,8 +17,9 @@ the Git tag `client-v<version>`. The format follows
 
 ### Changed
 
-- A tool the browser refused to register with WebMCP is tried again whenever the page's
-  tools change, not only when that tool is registered again.
+- Several `TabMcp` of one app in a page (React's strict mode makes a second one and
+  drops it) tell the tab-mcp browser extension one list of AI apps: before, the one
+  made last, with none connected, replaced the other's.
 
 ## [0.22.0][client-0.22.0] - 2026-11-23
 
