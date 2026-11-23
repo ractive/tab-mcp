@@ -602,11 +602,11 @@ and the event). Either order is safe.**
 
 ## Open questions for the owner
 
-1. **Install late only while AI access is on and connected** (DEC-221's "on"), or at
-   every click? *Recommendation:* only while on. It is one rule with DEC-221, and while
-   AI access is off a page should not learn that the user just gave the extension its
-   tab. It costs a change to Firefox's content script (it no longer installs at a late
-   injection while off), the gating in the worker, and one line in the `no-webmcp` text.
+1. ~~Install late only while AI access is on and connected (DEC-221's "on"), or at
+   every click?~~ **Settled (owner, 2026-11-23: "ok, only while AI access is on"):** the
+   late install at a click happens only while the handshake's state is `on`, in Chrome
+   and Firefox (`mayGiveLate`, DEC-223). With access to all sites the install at page
+   load stays as it is, whatever AI access is (DEC-191).
 2. **The panel's texts** (§8): take the drafts for `no-webmcp` and `late-webmcp` as they
    stand, or reword? *Recommendation:* take them, and shorten `no-webmcp` if it reads
    long in the panel at 345 px.

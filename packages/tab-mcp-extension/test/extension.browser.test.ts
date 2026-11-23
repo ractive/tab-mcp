@@ -2791,6 +2791,40 @@ describe.skipIf(chrome === undefined)(
 				...TEST_APP,
 			});
 		});
+
+		test("without a click, with access to all sites: the library found the polyfill as the page loaded, also while AI access is off (DEC-191, not DEC-223's late install)", async () => {
+			await step(
+				"page_info: WebMCP with the library's tool, not given late",
+				async () => {
+					const info = await pageInfo(stack);
+					// No `late` and no note: the content script got the polyfill
+					// registered at `document_start`, not on the worker's
+					// `webmcp-install`.
+					expect(info.structuredContent?.["webmcp"]).toEqual({
+						available: true,
+						tools: 1,
+					});
+				},
+			);
+			await step(
+				"AI access off, a reload: the page has the polyfill at load and the library mirrors into it",
+				async () => {
+					await aiAccess(stack, false);
+					const loaded = stack.browser.event(
+						"Page.loadEventFired",
+						tab.sessionId,
+					);
+					await tab.send("Page.reload");
+					await loaded;
+					await tab.waitFor(libraryMirrors, 15_000);
+					expect(
+						await tab.eval(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+						),
+					).toEqual(["complete_todo"]);
+				},
+			);
+		});
 	},
 );
 

@@ -17,8 +17,8 @@ import type { ExtensionState, PageTools } from "../messages.ts";
 /**
  * Whether the extension gives a page its WebMCP late, now: only while AI
  * access is on and connected, the same "on" in which it speaks to a page at
- * all (DEC-221). Open for the owner (iteration 51, open question 1): the
- * one place that decides it.
+ * all (DEC-221); the owner's decision (DEC-223). The one place that
+ * decides it.
  */
 export function mayGiveLate(state: ExtensionState): boolean {
 	return state.on;

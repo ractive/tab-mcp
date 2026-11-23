@@ -5611,7 +5611,7 @@ Rejected:
 - **A compatibility shim** (the old default for pages built against an older version):
   no shims (owner).
 
-## DEC-223: WebMCP on a click: the extension gives the tab its own late, the library mirrors then (owner, the approach)
+## DEC-223: WebMCP on a click: the extension gives the tab its own late, the library mirrors then (owner: the approach, only while AI access is on)
 
 2026-11-23, [iteration 51](/iterations/iteration-51-webmcp-on-click.md). A page built
 with the client library offered the tab-mcp browser extension nothing in plain Chrome
@@ -5645,9 +5645,13 @@ after.
   `executeScript` into the main world under `activeTab` alone, after the click, after a
   same-origin navigation and after a reload; Firefox ends the click's grant at every
   navigation, a reload included, so there each new page needs a click.
+- **Only while AI access is on (owner, 2026-11-23: "ok, only while AI access is
+  on").** The late install at a click happens only while the handshake's state is
+  `on` (AI access on and connected, DEC-221's "on"), in Chrome and Firefox:
+  `mayGiveLate` in `worker/late-webmcp.ts`. While off, a page learns nothing of a
+  click. With access to all sites the install at page load stays as it is, whatever AI
+  access is (DEC-191).
 - **Open for the owner, built as the plan recommends, each in one place:**
-  - Only while AI access is on and connected (DEC-221's "on"): `mayGiveLate` in
-    `worker/late-webmcp.ts`. While off, a page learns nothing of a click.
   - The texts (iteration 51 lists them, old and new).
   - Firefox's click per page, said in the panel, `page_info`'s refusal, the navigation
     tools and PRIVACY.md.

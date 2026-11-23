@@ -480,6 +480,44 @@ describe.skipIf(!firefoxOk)(
 				host: "client.example",
 			});
 		});
+
+		test("without a click, with access to all sites: the library found WebMCP as the page loaded, also while AI access is off (DEC-191, not DEC-223's late install)", async () => {
+			await step(
+				"page_info: WebMCP with the library's tool, not given late",
+				async () => {
+					const info = await call(stack, "page_info");
+					expect(info.structuredContent?.["webmcp"]).toEqual({
+						available: true,
+						tools: 1,
+					});
+				},
+			);
+			await step(
+				"AI access off, a reload: the page has WebMCP at load and the library mirrors into it",
+				async () => {
+					await stack.panel.eval(`(async () => {
+						const port = chrome.runtime.connect({ name: "panel" });
+						port.postMessage({ type: "stop" });
+						await new Promise((resolve) => setTimeout(resolve, 300));
+						port.disconnect();
+					})()`);
+					await stack.panel.waitFor(
+						`document.getElementById("state").dataset.state === "off"`,
+						15_000,
+					);
+					await stack.tab.reload();
+					await stack.tab.waitFor(
+						`"modelContext" in document && document.documentElement.hasAttribute("data-tab-mcp-handshake")`,
+						15_000,
+					);
+					expect(
+						await stack.tab.eval(
+							"document.modelContext.getTools().then((t) => t.map((x) => x.name))",
+						),
+					).toEqual(["complete_todo"]);
+				},
+			);
+		});
 	},
 );
 
