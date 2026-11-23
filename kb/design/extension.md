@@ -352,7 +352,9 @@ folded at the foot of the AI access card, lists the AI apps' last 100 calls, new
 first: start time, tool, outcome, AI app, site and the arguments cut to one line, no
 results; held in the service worker's memory only, never stored, and sent to a panel
 only while the section is open (DEC-226, `src/worker/recent.ts`,
-`src/sidepanel/calls.ts`). The icon's badge
+`src/sidepanel/calls.ts`). Each arguments line wider than the panel unfolds and is one
+tab stop, so an open list of 100 long calls is up to 100 stops; it stays so (the review
+of PR 243), since the section is closed by default. The icon's badge
 shows "on", "…" or "?" (a question waits), not the calls. The connector
 carries the extension's icon. The panel's look (paper and ink on tokens whose pairs are
 held to their contrast in light and dark, no amber button, what each colour says) is

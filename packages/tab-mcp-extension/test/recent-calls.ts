@@ -27,6 +27,7 @@ type Eval = <T>(expression: string) => Promise<T>;
  * `greet` makes a read-only call (`page_get_greeting` with `{"name":"Ada"}`),
  * `decline` one of `page_place_order` with `{"item":"tea"}` the user
  * declines, `open` opens the section as the user does. `host`: the page's.
+ * `app`: the AI app as the relay lists it, when it does.
  */
 export async function listsTheCalls(
 	panel: Eval,
@@ -34,6 +35,7 @@ export async function listsTheCalls(
 	decline: () => Promise<unknown>,
 	open: () => Promise<unknown>,
 	host: string,
+	app?: { name: string; host: string },
 ): Promise<void> {
 	await greet();
 	await decline();
@@ -53,10 +55,14 @@ export async function listsTheCalls(
 		await Bun.sleep(50);
 	}
 	const [declined, greeted] = rows;
+	// With the AI app listed, as the AI access card lists it: its name, then
+	// its host. Unlisted (the relay did not announce it), its host alone.
+	const who = app ? `${app.name} ${app.host} · on ${host}` : undefined;
 	expect(declined?.args).toBe('{"item":"tea"}');
-	expect(declined?.who).toEndWith(` · on ${host}`);
 	expect(greeted?.args).toBe('{"name":"Ada"}');
-	expect(greeted?.who).toEndWith(` · on ${host}`);
+	for (const row of [declined, greeted])
+		if (who !== undefined) expect(row?.who).toBe(who);
+		else expect(row?.who).toEndWith(` · on ${host}`);
 	expect(
 		await panel<string>(`document.getElementById("calls-summary").textContent`),
 	).toBe(`Recent calls (${rows.length})`);

@@ -33,6 +33,8 @@ import {
 	ARGS_LINE,
 	CALLS_EMPTY,
 	CALLS_NOTE,
+	CallsView,
+	displayWidth,
 	MAX_SHOWN,
 	summaryText,
 } from "../src/sidepanel/calls.ts";
@@ -57,6 +59,8 @@ const GLOBALS = [
 	"clearTimeout",
 	"setInterval",
 	"clearInterval",
+	"requestAnimationFrame",
+	"cancelAnimationFrame",
 ] as const;
 
 const g = globalThis as Record<string, unknown>;
@@ -174,6 +178,11 @@ async function openPanel(options: { firefox?: boolean } = {}) {
 			doc.querySelector(selector) as T | null,
 		/** The commands sent since the last call. */
 		take: () => sent.splice(0),
+		/** The next animation frame drawn (the panel's own, asked for before, first). */
+		frame: () =>
+			new Promise<void>((resolve) =>
+				win.requestAnimationFrame(() => resolve()),
+			),
 	};
 	return panel;
 }
@@ -299,24 +308,37 @@ describe("Recent calls (DEC-226)", () => {
 			[
 				`page_place_order${time(2)}`,
 				"Declined by you",
-				"Claude (claude.ai) · on shop.example",
+				"Claude claude.ai · on shop.example",
 				'{"item":"tea"}',
 			],
 			[
 				`page_get_greeting${time(1)}`,
 				"Ran",
-				"Claude (claude.ai)",
+				"Claude claude.ai",
 				'{"name":"Ada"}',
 			],
+		]);
+		// The AI app as the AI access card lists it: its name, then its host.
+		expect(
+			[...(panel.$("#calls-list li .call-who")?.children ?? [])].map((e) => [
+				e.className,
+				e.textContent,
+			]),
+		).toEqual([
+			["call-app", "Claude"],
+			["call-host", "claude.ai"],
 		]);
 		expect(panel.$("#calls-empty")?.hidden).toBe(true);
 		// A new call, running, then waiting, then allowed and done.
 		panel.post({ type: "call", call: call(3, { state: "running" }) });
+		await panel.frame();
 		expect(rows()[0]?.[1]).toBe("Running");
 		expect(summary()).toBe(summaryText(3));
 		panel.post({ type: "call", call: call(3, { state: "waiting" }) });
+		await panel.frame();
 		expect(rows()[0]?.[1]).toBe("Waiting for your answer");
 		panel.post({ type: "call", call: call(3, { allowed: "once" }) });
+		await panel.frame();
 		expect(rows()[0]?.[1]).toBe("Allowed by you · Ran");
 		expect(rows()).toHaveLength(3);
 		// A state that comes meanwhile changes neither list nor count.
@@ -376,7 +398,11 @@ describe("Recent calls (DEC-226)", () => {
 				args: '{"html":"<script>alert(1)</script>"}',
 			}),
 		});
+		await panel.frame();
 		expect(rows()).toHaveLength(MAX_SHOWN);
+		// The newest at the top, the oldest gone.
+		expect(panel.$("#calls-list > li")?.dataset["call"]).toBe("500");
+		expect(panel.$("#calls-list > li:last-child")?.dataset["call"]).toBe("5");
 		const first = panel.doc.querySelector("#calls-list > li");
 		expect(first?.querySelectorAll("b, img, script")).toHaveLength(0);
 		expect(rows()[0]?.[3]).toBe('{"html":"<script>alert(1)</script>"}');
@@ -384,30 +410,81 @@ describe("Recent calls (DEC-226)", () => {
 		expect(panel.doc.querySelectorAll("#calls [title]")).toHaveLength(0);
 	});
 
-	test("arguments longer than a line unfold, and stay unfolded, with the focus, as the list changes", async () => {
+	test("arguments wider than a line unfold, and stay unfolded, with the focus, as other calls change and come", async () => {
 		const { panel, toggle } = await opened();
 		toggle(true);
 		const long = `{"item":"${"t".repeat(ARGS_LINE)}"}`;
+		// The reviewer's: 30 code units, but its characters take two columns.
+		const cjk = '{"q":"東京都千代田区丸の内一丁目九番一号東京駅"}';
+		expect(cjk.length).toBeLessThanOrEqual(ARGS_LINE);
+		expect(displayWidth(cjk)).toBeGreaterThan(ARGS_LINE);
+		expect(displayWidth("🙂a")).toBe(3);
 		panel.post({
 			type: "calls",
-			calls: [call(1), call(2, { args: long, state: "running" })],
+			calls: [
+				call(1),
+				call(2, { args: long, state: "running" }),
+				call(3, { args: cjk }),
+			],
 		});
 		const args = (id: number) =>
 			panel.$(`#calls-list li[data-call="${id}"] .call-args`);
 		// Short: a line of code, nothing to unfold.
 		expect(args(1)?.tagName).toBe("CODE");
 		expect(args(2)?.tagName).toBe("DETAILS");
+		expect(args(3)?.tagName).toBe("DETAILS");
 		expect(args(2)?.querySelector("summary code")?.textContent).toBe(long);
-		(args(2) as HTMLDetailsElement).open = true;
-		args(2)?.querySelector<HTMLElement>("summary")?.focus();
+		const row = panel.$('#calls-list li[data-call="2"]');
+		const unfolded = args(2) as HTMLDetailsElement;
+		unfolded.open = true;
+		const summary = unfolded.querySelector<HTMLElement>("summary");
+		summary?.focus();
+		// Another call changes, a new one comes, then this one ends.
+		panel.post({ type: "call", call: call(1, { state: "failed" }) });
+		panel.post({ type: "call", call: call(4, { state: "running" }) });
+		await panel.frame();
 		panel.post({ type: "call", call: call(2, { args: long, state: "ok" }) });
+		await panel.frame();
+		expect(row?.getAttribute("data-state")).toBe("ok");
+		// The same nodes, not new ones: open and focused as the user left them.
+		expect(panel.$('#calls-list li[data-call="2"]')).toBe(row);
+		expect(args(2)).toBe(unfolded);
+		expect(unfolded.open).toBe(true);
+		expect(panel.doc.activeElement).toBe(summary);
 		expect(
-			panel.$('#calls-list li[data-call="2"]')?.getAttribute("data-state"),
-		).toBe("ok");
-		expect((args(2) as HTMLDetailsElement).open).toBe(true);
-		expect(panel.doc.activeElement).toBe(
-			args(2)?.querySelector("summary") ?? null,
-		);
+			[...panel.doc.querySelectorAll("#calls-list > li")].map(
+				(li) => (li as HTMLElement).dataset["call"],
+			),
+		).toEqual(["4", "3", "2", "1"]);
+	});
+
+	test("a burst of changes is drawn once, in the next frame", () => {
+		const win = new Window();
+		windows.push(win);
+		const doc = win.document as unknown as Document;
+		const list = doc.createElement("ol");
+		const empty = doc.createElement("p");
+		const frames: (() => void)[] = [];
+		let drawn = 0;
+		const view = new CallsView(list, empty, {
+			schedule: (draw) => frames.push(draw),
+			drawn: () => drawn++,
+		});
+		for (let id = 1; id <= 20; id++)
+			for (const state of ["running", "waiting", "ok"] as const)
+				view.put(call(id, { state }));
+		expect([frames.length, view.draws, list.children.length]).toEqual([
+			1, 0, 0,
+		]);
+		frames.shift()?.();
+		expect([view.draws, drawn, view.count]).toEqual([1, 1, 20]);
+		expect((list.firstElementChild as HTMLElement).dataset["call"]).toBe("20");
+		expect(
+			[...list.children].every(
+				(li) => (li as HTMLElement).dataset["state"] === "ok",
+			),
+		).toBe(true);
+		expect(frames).toEqual([]);
 	});
 });
 

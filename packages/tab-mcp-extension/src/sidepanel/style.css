@@ -1053,8 +1053,7 @@ button.copy {
 	font-weight: 600;
 }
 
-code.call-args,
-.call-args code {
+.call-line {
 	display: block;
 	overflow: hidden;
 	white-space: nowrap;
@@ -1062,8 +1061,19 @@ code.call-args,
 	color: var(--ink-2);
 }
 
+/* The AI app as the AI access card lists it: its name in ink, its host muted. */
+.call-who .call-app {
+	color: var(--ink);
+}
+
+/*
+ * Arguments that unfold: a chevron before them, pointing right while folded
+ * and down while open (no transition), as a row that unfolds looks.
+ */
 .call-args summary {
-	display: block;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
 	list-style: none;
 	cursor: pointer;
 }
@@ -1072,7 +1082,26 @@ code.call-args,
 	display: none;
 }
 
-.call-args[open] code {
+.call-args summary::before {
+	content: "";
+	flex: none;
+	width: 5px;
+	height: 5px;
+	border-right: 1.5px solid var(--ink-2);
+	border-bottom: 1.5px solid var(--ink-2);
+	transform: translateY(-2px) rotate(-45deg);
+}
+
+.call-args[open] summary::before {
+	transform: translateY(-3px) rotate(45deg);
+}
+
+.call-args summary .call-line {
+	flex: 1;
+	min-width: 0;
+}
+
+.call-args[open] .call-line {
 	white-space: normal;
 	overflow-wrap: anywhere;
 }

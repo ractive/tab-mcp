@@ -819,7 +819,9 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 		expect(result.content[0]?.text).toContain("tea");
 	});
 
-	test("Recent calls lists a read-only call and a declined one, newest first, once opened (DEC-226)", async () => {
+	test("Recent calls lists a read-only call and a declined one, newest first, once opened, with the AI app's name (DEC-226)", async () => {
+		// The relay lists the AI app: its name comes with the calls.
+		await listTestApp(stack);
 		await listsTheCalls(
 			(expression) => stack.panel.eval(expression),
 			() => call(stack, "page_get_greeting", { name: "Ada" }),
@@ -830,7 +832,10 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 			},
 			() => stack.panel.click("#calls-summary"),
 			new URL(SITE).host,
+			TEST_APP,
 		);
+		// Closed again, as the Firefox check leaves it.
+		await stack.panel.eval(`document.getElementById("calls").open = false`);
 	});
 
 	test("the look: nothing past the panel's edge at 345, 360 and 420 px, no amber button, each scheme's tokens (DEC-160 to DEC-163)", async () => {
@@ -1170,9 +1175,21 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 					await panel.waitFor(
 						`document.querySelector("#calls-list details.call-args") !== null`,
 					);
+					/** The chevron before the arguments: drawn, and its turn. */
+					const chevron = () =>
+						panel.eval<{ width: number; transform: string }>(`(() => {
+						const s = getComputedStyle(document.querySelector("#calls-list details.call-args summary"), "::before");
+						return { width: parseFloat(s.width) + parseFloat(s.borderRightWidth), transform: s.transform };
+					})()`);
+					const folded = await chevron();
 					await panel.eval(
 						`document.querySelector("#calls-list details.call-args").open = true`,
 					);
+					// A row that unfolds shows it: a chevron that turns when open.
+					const open = await chevron();
+					expect(folded.width).toBeGreaterThan(4);
+					expect(open.width).toBe(folded.width);
+					expect(open.transform).not.toBe(folded.transform);
 					await holds();
 					// Unfolded, the whole cut line shows: nothing clipped, several lines.
 					expect(

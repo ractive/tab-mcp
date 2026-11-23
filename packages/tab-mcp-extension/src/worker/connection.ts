@@ -239,8 +239,12 @@ export class Connection {
 	 * "Recent calls" (DEC-226), in memory only: each change goes to the
 	 * panels that have it open; the state carries only the count.
 	 */
-	readonly #recent = new RecentCalls((call, added) =>
-		this.#callChanged(call, added),
+	readonly #recent = new RecentCalls(
+		(call, added) => this.#callChanged(call, added),
+		{
+			nameOf: (grantId) =>
+				this.#grants.find((g) => g.grantId === grantId)?.name,
+		},
 	);
 	/** The count the panels were last told. */
 	#recentSent = 0;

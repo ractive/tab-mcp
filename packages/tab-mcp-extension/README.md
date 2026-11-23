@@ -255,8 +255,8 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   ("Running", "Waiting for your answer", "Ran", "Failed: <the error's first words>",
   "Declined by you", "Not answered in time", "Cancelled by the AI app", "The page did
   not answer in time", with "Allowed by you" or "Always allowed" before it when it
-  asked or was allowed for its site), the AI app (its name and verified host), the site
-  for a page tool or a navigation, and the arguments on one line, cut to 150
+  asked or was allowed for its site), the AI app (its name and verified host, as the
+  card lists it), the site for a page tool or a navigation (a long host keeps its end), and the arguments on one line, cut to 150
   characters (a longer line unfolds to all of that with a click, Enter or Space). No
   results. The list lives only in the service
   worker's memory: nothing of it is stored, and it is gone when the worker stops (with

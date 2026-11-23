@@ -14,13 +14,20 @@ import type {
 	ToolExecuteOptions,
 } from "@ractive-ch/tab-mcp-client";
 import type { CallView } from "../src/protocol.ts";
+import { MAX_TITLE_HOST } from "../src/worker/navigation.ts";
 import {
 	argsLine,
+	hostLine,
+	jsonPrefix,
 	MAX_ARGS,
 	MAX_CALLS,
 	MAX_ERROR,
 	MAX_NAME,
+	oneLine,
+	PREFIX,
+	prefixOf,
 	RecentCalls,
+	siteLine,
 } from "../src/worker/recent.ts";
 
 const CLAUDE: RelayClient = {
@@ -55,11 +62,11 @@ const end = (
 	durationMs: 5,
 });
 
-function recorded() {
+function recorded(nameOf?: (grantId: string) => string | undefined) {
 	const changes: { call: CallView; added: boolean }[] = [];
 	const recent = new RecentCalls(
 		(call, added) => changes.push({ call, added }),
-		() => 1_700_000_000_000,
+		{ now: () => 1_700_000_000_000, ...(nameOf ? { nameOf } : {}) },
 	);
 	return { recent, changes };
 }
@@ -303,17 +310,97 @@ describe("other people's text in the record", () => {
 		expect(error.startsWith("\\u0007bad")).toBe(true);
 	});
 
-	test(`names, hosts and sites cut to ${MAX_NAME}`, () => {
+	test(`names cut to ${MAX_NAME} at their end; hosts and sites keep their end, the registrable domain`, () => {
 		const { recent } = recorded();
 		const signal = new AbortController().signal;
 		const name = "n".repeat(500);
-		recent.started(
-			start(1, name, {}, { ...CLAUDE, name, host: `${name}.example` }),
-		);
-		recent.bind(name, { ...CLAUDE, host: `${name}.example` }, signal);
-		recent.note(signal, { site: `https://${name}.example` });
+		// The reviewer's host: its start says Google, its end who it is.
+		const host = `accounts.google.com.verify-session-${"0".repeat(60)}.evil.example`;
+		recent.started(start(1, name, {}, { ...CLAUDE, name, host }));
+		recent.bind(name, { ...CLAUDE, host }, signal);
+		recent.note(signal, { site: `https://${host}:8443` });
 		const [call] = recent.list;
-		for (const text of [call?.tool, call?.app, call?.host, call?.site])
-			expect(text).toHaveLength(MAX_NAME);
+		expect(call?.tool).toHaveLength(MAX_NAME);
+		expect(call?.app).toHaveLength(MAX_NAME);
+		expect(call?.host).toHaveLength(MAX_TITLE_HOST);
+		expect(call?.host).toStartWith("…");
+		expect(call?.host).toEndWith("0000.evil.example");
+		// The site: scheme, the host cut inside it the same way, the port.
+		expect(call?.site).toBe(`https://${call?.host}:8443`);
+		expect(hostLine("claude.ai")).toBe("claude.ai");
+		expect(siteLine("https://shop.example")).toBe("https://shop.example");
+		expect(siteLine("not an origin\nat all")).toBe("not an origin at all");
+	});
+
+	test("the AI app's name from the connected apps when the library gave none", () => {
+		const { recent } = recorded((grantId) =>
+			grantId === "g1" ? "Claude from the list" : undefined,
+		);
+		const { name: _, ...nameless } = CLAUDE;
+		recent.started(start(1, "page_info", {}, nameless));
+		recent.started(start(2, "page_info", {}, { ...nameless, grantId: "g2" }));
+		expect(recent.list.map((c) => [c.app, c.host])).toEqual([
+			["", "claude.ai"],
+			["Claude from the list", "claude.ai"],
+		]);
+	});
+
+	test("cut on a code point, never inside a surrogate pair or an escape", () => {
+		// An emoji right at the cut: kept whole or left out, never half.
+		for (let pad = 140; pad < 152; pad++) {
+			const line = argsLine({ q: `${"a".repeat(pad)}🙂🙂🙂` });
+			expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+			expect(line).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+			expect(Array.from(line).length).toBeLessThanOrEqual(MAX_ARGS);
+		}
+		// An escape at the cut (U+202E as ‮): whole or left out.
+		for (let pad = 140; pad < 152; pad++) {
+			const line = oneLine(`${"a".repeat(pad)}‮‮‮`, MAX_ARGS);
+			expect(line).toEndWith("…");
+			expect(line).not.toMatch(/\\(u[0-9A-F]{0,3})?…$/);
+		}
+	});
+
+	test("a multi-megabyte value: only a bounded prefix of it is read", () => {
+		const huge = "x".repeat(5_000_000);
+		const budget = MAX_ARGS * PREFIX;
+		// The JSON made of it stops at the budget: a long string, a long
+		// array, many keys.
+		for (const value of [
+			{ text: huge },
+			{ list: Array.from({ length: 200_000 }, (_, i) => i) },
+			Object.fromEntries(
+				Array.from({ length: 50_000 }, (_, i) => [`k${i}`, i]),
+			),
+			{ [huge]: 1 },
+		]) {
+			const { json, more } = jsonPrefix(value, budget);
+			expect(more).toBe(true);
+			expect(json.length).toBeLessThanOrEqual(budget + 32);
+		}
+		// A text: the code points read, not the whole.
+		const { head, more } = prefixOf(huge, MAX_ERROR * PREFIX);
+		expect([head.length, more]).toEqual([MAX_ERROR * PREFIX, true]);
+		expect(argsLine({ text: huge })).toBe(
+			`{"text":"${"x".repeat(MAX_ARGS - 10)}…`,
+		);
+		// What follows the prefix is not even looked at.
+		let read = 0;
+		const behind = {
+			text: huge,
+			get after() {
+				read++;
+				return "never read";
+			},
+		};
+		argsLine(behind);
+		expect(read).toBe(0);
+		expect(oneLine(huge, MAX_NAME)).toBe(`${"x".repeat(MAX_NAME - 1)}…`);
+		// A short value is whole, and its JSON is JSON's.
+		const small = { a: [1, "b", null, true], c: { d: "e\n" } };
+		expect(jsonPrefix(small, budget)).toEqual({
+			json: JSON.stringify(small),
+			more: false,
+		});
 	});
 });

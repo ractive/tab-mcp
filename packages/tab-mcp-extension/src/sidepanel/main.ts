@@ -24,7 +24,7 @@ import {
 } from "../protocol.ts";
 import { relayProblem } from "../relay.ts";
 import { ALL_SITES } from "../tabs.ts";
-import { CallList, drawCalls, summaryText } from "./calls.ts";
+import { CallsView, summaryText } from "./calls.ts";
 import {
 	allowAllLabel,
 	allowAllView,
@@ -160,13 +160,8 @@ function connect(): void {
 	opened.onMessage.addListener((message: WorkerMessage) => {
 		if (message?.type === "question-args") args.set(message.id, message.args);
 		else if (message?.type === "state") show(message.state);
-		else if (message?.type === "calls") {
-			callList.set(message.calls);
-			showCalls();
-		} else if (message?.type === "call") {
-			callList.put(message.call);
-			showCalls();
-		}
+		else if (message?.type === "calls") calls.set(message.calls);
+		else if (message?.type === "call") calls.put(message.call);
 	});
 	opened.onDisconnect.addListener(() => {
 		if (port === opened) port = undefined;
@@ -186,25 +181,23 @@ function connect(): void {
 // --- Recent calls (DEC-226) ---
 
 const callsSection = $<HTMLDetailsElement>("calls");
-const callList = new CallList();
+const calls = new CallsView($("calls-list"), $("calls-empty"), {
+	drawn: () => showCallCount(),
+});
 
 /**
  * The count in the summary: the list's while open (it may be ahead of the
- * last state), else the state's; and the list, while open, unless only a
- * state came (`list` false), which does not change it.
+ * last state), else the state's.
  */
-function showCalls(list = true): void {
-	const open = callsSection.open;
-	const count = open ? callList.calls.length : (state?.recentCalls ?? 0);
+function showCallCount(): void {
+	const count = callsSection.open ? calls.count : (state?.recentCalls ?? 0);
 	setText($("calls-summary"), summaryText(count));
-	if (open && list)
-		drawCalls($("calls-list"), $("calls-empty"), callList.calls);
 }
 
 // Asked for when it opens, its changes while it is open; nothing while closed.
 callsSection.addEventListener("toggle", () => {
 	send({ type: "calls", open: callsSection.open });
-	showCalls();
+	showCallCount();
 });
 
 // --- The AI app ---
@@ -758,7 +751,7 @@ function show(s: PanelState): void {
 	state = s;
 	if (relayChanged) ($("relay") as HTMLInputElement).value = s.relay;
 	showConnection(s);
-	showCalls(false);
+	showCallCount();
 	showFillNotice(s);
 	fill.show(s);
 	showQuestions(s.questions, s.expired);

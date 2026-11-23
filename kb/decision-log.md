@@ -5863,22 +5863,33 @@ it's such a detail".
   only the noted answer tells it apart from a failure. The ends of a connection that
   went (another relay) are still heard, so no call stays "running".
 - **Lengths, other people's text:** the arguments cut to 150 characters (as a
-  notification's), names, hosts and sites to 80, an error to 120; invisible and
-  direction characters escaped, every run of white space one space, cut in the worker,
-  so it never holds a long value. The panel sets every text as text, never HTML. One
-  line of arguments shows at 345 px (about 40 characters of the monospace), with an
-  ellipsis. A line longer than 36 characters is the summary of a `<details>` of its
-  own, which unfolds to the whole cut line, wrapped (a click, Enter or Space); it stays
-  unfolded, and keeps the keyboard's focus, as the list changes. Not a `title`: the
-  panel says nothing in a tooltip alone (`kb/design/extension-look.md`). A screen
-  reader reads the whole line either way.
+  notification's), names to 80, an error to 120; invisible and direction characters
+  escaped, every run of white space one space, cut in the worker, so it never holds a
+  long value. Only a bounded prefix of a value is read (four times the length kept, in
+  code points; the arguments' JSON is written only that far), and a cut falls on a code
+  point, never inside a `\uXXXX` escape. A host, the AI app's or the site's, keeps its
+  end (`hostEnd`, 48 characters, as a question's title): the end names the site, the
+  start of a long host can say anything (`accounts.google.com.aaaa….evil.example`); a
+  site keeps its scheme and port around its cut host. The panel sets every text as text,
+  never HTML. One line of arguments shows at 345 px (about 40 columns of the
+  monospace), with an ellipsis. A line wider than 36 columns (an East Asian wide or
+  fullwidth character or an emoji counts two) is the summary of a `<details>` of its
+  own, with a chevron that turns when open, which unfolds to the whole cut line, wrapped
+  (a click, Enter or Space). Not a `title`: the panel says nothing in a tooltip alone
+  (`kb/design/extension-look.md`). A screen reader reads the whole line either way.
+- **The AI app** as the AI access card lists it: its name, then its verified host; the
+  name the library gives the call, else the one the relay's list of connected apps
+  gives its grant.
 - **The panel:** a `<details>` "Recent calls (<count>)" at the foot of the AI access
   card, closed by default, an `<ol>` newest first, times as the user's locale writes
   them (hours, minutes, seconds), an empty line ("No AI app has called a tool since the
   extension started."), no live region. The state carries only the count; the panel asks
   for the list when the section opens (`{ type: "calls", open }`) and gets each change
   while it is open (`call` messages), so the repeated state never carries the entries.
-  The glow's `calling` flag stays as it was.
+  One row per call, by its id, updated in place (a new one in at the top, the 101st
+  out), the changes of an animation frame drawn together: the other rows' nodes stay,
+  so an unfolded line stays unfolded and the focus stays where the user left it. The
+  glow's `calling` flag stays as it was.
 - **Rejected:** the list in every state (up to 100 entries on each state change);
   `chrome.storage.session` (survives a worker restart, but is storage, and would want a
   line in the policy); the results (other people's data, and large).
