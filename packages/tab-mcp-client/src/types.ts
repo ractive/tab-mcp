@@ -62,13 +62,23 @@ export interface WebMcpClient {
 	 * page did not ask, no `onConfirm`), or without a question, the tool
 	 * being read-only for it (a claim: `onConfirm` decides a tool that asks,
 	 * as for any WebMCP call). Absent for every other agent in the browser,
-	 * and with `trustExtension: false`.
+	 * and with `trustExtension: false`. Alone it does not say that the user
+	 * allowed the call: `allowed` does.
 	 */
 	via?: "tab-mcp-extension";
 	/** With `via`: the AI app's own name for itself, as the extension knows it. */
 	name?: string;
 	/** With `via`: the host of the AI app's client id, as the relay verified it for the extension. */
 	host?: string;
+	/**
+	 * With `via`: `true` when the user allowed this very call in the
+	 * extension (asked, or the tool allowed for the site; a vouch, DEC-207),
+	 * `false` when the extension ran it without asking, the tool being
+	 * read-only for it (a claim, DEC-224). Only a call with `true` skips
+	 * `onConfirm`; so a page that asks in `execute` itself skips its question
+	 * only for `allowed: true`, never for `via` alone.
+	 */
+	allowed?: boolean;
 }
 
 /**

@@ -42,8 +42,17 @@ import type {
 	PageTools,
 	Vouch,
 } from "../messages.ts";
+import { resultOf } from "../result.ts";
 import type { TargetTab } from "../tabs.ts";
 import { OWN_TOOL_NAMES } from "./tools.ts";
+
+/** A page's result as the AI app gets it: `../result.ts`, shared with the content script. */
+export {
+	MAX_BLOCKS,
+	MAX_IMAGES_BASE64,
+	MAX_RESULT,
+	resultOf,
+} from "../result.ts";
 
 /** At most this many page tools are offered (and listed). */
 export const MAX_TOOLS = 64;
@@ -66,16 +75,6 @@ export const MAX_TITLE = 100;
 export const MAX_NAME = 128;
 /** A schema bigger than this (as JSON) leaves its tool out. */
 export const MAX_SCHEMA_BYTES = 16 * 1024;
-/** A result's text, all blocks together, is cut to this many characters. */
-export const MAX_RESULT = 100_000;
-/** At most this many content blocks. */
-export const MAX_BLOCKS = 32;
-/**
- * The image data of one result, all images together (base64 characters).
- * With the text above, a result stays under the relay's default limit of
- * 1 MiB per response; an image beyond it is left out with a note.
- */
-export const MAX_IMAGES_BASE64 = 640 * 1024;
 /** A pattern noted in a description (WM 8) is cut to this many characters. */
 export const MAX_PATTERN = 200;
 /** A call the page does not answer in this time is given up. */
@@ -402,152 +401,6 @@ export function outputSchemaOf(
 	return new TextEncoder().encode(json).length > MAX_SCHEMA_BYTES
 		? undefined
 		: (JSON.parse(json) as Record<string, unknown>);
-}
-
-/** An MCP content block a page result may carry through. */
-type Block =
-	| { type: "text"; text: string }
-	| { type: "image"; data: string; mimeType: string };
-
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-/** The image types passed on: those every AI app shows. */
-const IMAGE_TYPE = /^image\/(png|jpeg|gif|webp)$/;
-
-const isString = (value: unknown): value is string => typeof value === "string";
-
-/**
- * Whether `item` is an MCP content block with the fields its type requires,
- * as the client library's `isContentBlock` checks it: `text`; `image` and
- * `audio`; `resource_link`; `resource`. Anything else makes the value data
- * that only has a `content` key (a ProseMirror document), not an MCP result.
- */
-function isBlock(item: unknown): item is Record<string, unknown> {
-	if (!isObject(item)) return false;
-	switch (item["type"]) {
-		case "text":
-			return isString(item["text"]);
-		case "image":
-		case "audio":
-			return isString(item["data"]) && isString(item["mimeType"]);
-		case "resource_link":
-			return isString(item["uri"]) && isString(item["name"]);
-		case "resource":
-			return isObject(item["resource"]) && isString(item["resource"]["uri"]);
-		default:
-			return false;
-	}
-}
-
-/**
- * The blocks of an MCP result, within the budget; `undefined` if it is none.
- * Text and images (`IMAGE_TYPE`, base64) pass; each other block (audio, a
- * resource, an image of another type) is a line that says it was left out;
- * past `MAX_BLOCKS` the rest are one such line.
- */
-function blocksOf(value: unknown): Block[] | undefined {
-	if (!isObject(value) || !Array.isArray(value["content"])) return undefined;
-	const items: unknown[] = value["content"];
-	if (!items.every(isBlock)) return undefined;
-	const blocks: Block[] = [];
-	let text = MAX_RESULT;
-	let images = MAX_IMAGES_BASE64;
-	for (const [i, item] of (items as Record<string, unknown>[]).entries()) {
-		if (i === MAX_BLOCKS - 1 && items.length > MAX_BLOCKS) {
-			blocks.push({
-				type: "text",
-				text: `[${items.length - i} more content blocks left out: the tab-mcp browser extension passes on ${MAX_BLOCKS} blocks of a result.]`,
-			});
-			break;
-		}
-		const { type, data, mimeType } = item;
-		if (type === "text" && isString(item["text"])) {
-			if (text <= 0) continue;
-			const kept = cut(item["text"], text);
-			text -= kept.length;
-			blocks.push({ type: "text", text: kept });
-		} else if (
-			type === "image" &&
-			isString(data) &&
-			BASE64.test(data) &&
-			isString(mimeType) &&
-			IMAGE_TYPE.test(mimeType)
-		) {
-			if (data.length > images) {
-				blocks.push({
-					type: "text",
-					text: `[An image of ${Math.ceil(data.length / 1024)} KiB (base64) was left out: the images of one result may have ${MAX_IMAGES_BASE64 / 1024} KiB together.]`,
-				});
-				continue;
-			}
-			images -= data.length;
-			blocks.push({ type: "image", data, mimeType });
-		} else
-			blocks.push({
-				type: "text",
-				text: `[${type === "image" ? `An image (${cut(String(mimeType), 50)})` : `${type} content`} was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]`,
-			});
-	}
-	return blocks;
-}
-
-/**
- * The MCP result the AI app gets for page result `parsed` with `blocks`: its
- * `isError`, and its `structuredContent` (an object) where its JSON fits
- * the text budget the blocks left; else the blocks alone.
- */
-function mcpResultOf(
-	parsed: Record<string, unknown>,
-	blocks: Block[],
-): Record<string, unknown> {
-	const result: Record<string, unknown> = { content: blocks };
-	const structured = parsed["structuredContent"];
-	const used = blocks.reduce(
-		(n, b) => n + (b.type === "text" ? b.text.length : 0),
-		0,
-	);
-	if (
-		isObject(structured) &&
-		JSON.stringify(structured).length <= MAX_RESULT - used
-	)
-		result["structuredContent"] = structured;
-	if (parsed["isError"] === true) result["isError"] = true;
-	return result;
-}
-
-/**
- * What `executeTool()` returned, as the tool's result: a string as one text
- * block; the JSON of an MCP result (`{"content": [...]}`, what
- * `@mcp-b/global` pages return, and what the client library gives a call
- * the extension announced, DEC-224) as its blocks within the budget
- * (`blocksOf`), with its `isError` and its `structuredContent` where it
- * fits (`mcpResultOf`); the JSON of another object without a `content`
- * key, within `MAX_RESULT`, as that object, which the library sends as
- * text and as `structuredContent` (WM 8); a JSON-encoded string as that
- * string: the draft serializes every result as JSON, Chrome 156 passes a
- * string on as it is (WM 7). (`null`, the tool navigated, is answered with
- * the new page.)
- */
-export function resultOf(value: string): unknown {
-	if (value.startsWith("{") || value.startsWith('"')) {
-		try {
-			const parsed: unknown = JSON.parse(value);
-			if (typeof parsed === "string") return cut(parsed, MAX_RESULT);
-			const blocks = blocksOf(parsed);
-			if (blocks !== undefined && isObject(parsed))
-				return mcpResultOf(parsed, blocks);
-			// Not with a `content` key: the library would take it for an MCP
-			// result past the budget above.
-			if (
-				isObject(parsed) &&
-				!Object.hasOwn(parsed, "content") &&
-				value.length <= MAX_RESULT
-			)
-				return parsed;
-		} catch {
-			// Not JSON: the text as it is.
-		}
-	}
-	return cut(value, MAX_RESULT);
 }
 
 /** A page tool as the bridge offers it, or why it does not. */

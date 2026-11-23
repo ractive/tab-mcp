@@ -610,6 +610,17 @@ describe("results", () => {
 		expect(over.content.at(-1)?.text).toBe(
 			"[9 more content blocks left out: the tab-mcp browser extension passes on 32 blocks of a result.]",
 		);
+		// With structuredContent one block less, for its note.
+		const withStructured = resultOf(
+			JSON.stringify({
+				...JSON.parse(many(MAX_BLOCKS + 8)),
+				structuredContent: { n: 1 },
+			}),
+		) as { content: { text: string }[] };
+		expect(withStructured.content).toHaveLength(MAX_BLOCKS - 1);
+		expect(withStructured.content.at(-1)?.text).toBe(
+			"[10 more content blocks left out: the tab-mcp browser extension passes on 32 blocks of a result.]",
+		);
 		const others = resultOf(
 			JSON.stringify({
 				content: [
@@ -617,19 +628,84 @@ describe("results", () => {
 					{ type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" },
 					{ type: "audio", data: "AAAA", mimeType: "audio/wav" },
 					{ type: "resource_link", uri: "https://a.example/x", name: "x" },
-					{ type: "resource", resource: { uri: "file:///x", text: "x" } },
+					{ type: "resource", resource: { uri: "file:///b", blob: "AAAA" } },
 					{ type: "text", text: "after" },
 				],
 			}),
 		) as { content: { type: string; text?: string }[] };
 		expect(others.content.map((b) => b.text)).toEqual([
-			"[An image (image/png) was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
+			"[An image (image/png) was left out: its data is not base64.]",
 			"[An image (image/svg+xml) was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
 			"[audio content was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
 			"[resource_link content was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
 			"[resource content was left out: the tab-mcp browser extension passes on text and PNG, JPEG, GIF and WebP images.]",
 			"after",
 		]);
+	});
+
+	test("a text resource passes as text after its uri, within the text budget (review of PR 236)", () => {
+		const notes = "n".repeat(MAX_RESULT);
+		expect(
+			resultOf(
+				JSON.stringify({
+					content: [
+						{ type: "text", text: "See file" },
+						{
+							type: "resource",
+							resource: {
+								uri: "file:///notes.txt",
+								mimeType: "text/plain",
+								text: notes,
+							},
+						},
+					],
+				}),
+			),
+		).toEqual({
+			content: [
+				{ type: "text", text: "See file" },
+				{
+					type: "text",
+					text: `file:///notes.txt\n${notes.slice(0, MAX_RESULT - "See file".length - "file:///notes.txt\n".length - 1)}…`,
+				},
+			],
+		});
+	});
+
+	test("what it makes comes back unchanged when given again: the content script's shrink, then the worker (review of PR 236)", () => {
+		const big = "A".repeat(MAX_IMAGES_BASE64);
+		const pages = [
+			{
+				content: [
+					{ type: "text", text: "t".repeat(MAX_RESULT) },
+					{ type: "image", data: big, mimeType: "image/png" },
+					{ type: "image", data: big, mimeType: "image/png" },
+				],
+				structuredContent: { s: "s".repeat(MAX_RESULT) },
+			},
+			{
+				content: Array.from({ length: MAX_BLOCKS }, () => ({
+					type: "text",
+					text: "x",
+				})),
+				structuredContent: { s: "s".repeat(MAX_RESULT) },
+			},
+			{
+				content: [
+					{ type: "audio", data: "AAAA", mimeType: "audio/wav" },
+					{ type: "text", text: "y".repeat(MAX_RESULT * 2) },
+				],
+			},
+		];
+		for (const page of pages) {
+			const once = resultOf(JSON.stringify(page));
+			expect(resultOf(JSON.stringify(once))).toEqual(once);
+			const text = (once as { content: { text?: string }[] }).content.reduce(
+				(n, b) => n + (b.text?.length ?? 0),
+				0,
+			);
+			expect(text).toBeLessThanOrEqual(MAX_RESULT);
+		}
 	});
 
 	test("structuredContent passes where it fits the text budget the blocks left, with isError (DEC-224)", () => {
@@ -660,14 +736,24 @@ describe("results", () => {
 				}),
 			),
 		).toMatchObject({ structuredContent: fits });
+		// Past it: left out, with a note that says so (review of PR 236).
+		const tooBig = { s: half };
 		expect(
 			resultOf(
 				JSON.stringify({
 					content: [{ type: "text", text: half }],
-					structuredContent: { s: half },
+					structuredContent: tooBig,
 				}),
 			),
-		).toEqual({ content: [{ type: "text", text: half }] });
+		).toEqual({
+			content: [
+				{ type: "text", text: half },
+				{
+					type: "text",
+					text: `[structuredContent of ${JSON.stringify(tooBig).length} characters was left out: with the text it is over the 100000 characters the tab-mcp browser extension passes on.]`,
+				},
+			],
+		});
 	});
 
 	test("content that is not MCP blocks, other JSON stay (cut) text", () => {

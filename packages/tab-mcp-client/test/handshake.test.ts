@@ -402,6 +402,7 @@ describe("the vouch", () => {
 				via: "tab-mcp-extension",
 				name: "Claude",
 				host: "claude.ai",
+				allowed: true,
 			},
 		]);
 	});
@@ -635,6 +636,56 @@ async function picturePage(options: Partial<TabMcpOptions> = {}) {
 }
 
 describe("the claim and the whole result (DEC-224)", () => {
+	test("allowed: true only for a vouched call, the same in execute, toolcall, toolcallend and onConfirm (review of PR 236)", async () => {
+		const asked: ConfirmRequest[] = [];
+		const t = tab({
+			onConfirm: (request) => {
+				asked.push(request);
+				return true;
+			},
+		});
+		const seen: Record<string, unknown[]> = {
+			execute: [],
+			toolcall: [],
+			toolcallend: [],
+		};
+		t.addEventListener("toolcall", (e) =>
+			seen["toolcall"]?.push(e.detail.client),
+		);
+		t.addEventListener("toolcallend", (e) =>
+			seen["toolcallend"]?.push(e.detail.client),
+		);
+		await t.registerTool(
+			{
+				...complete,
+				execute: ({ id }, options) => {
+					seen["execute"]?.push(options.client);
+					return `done ${id}`;
+				},
+			},
+			callers,
+		);
+		await settle();
+		tell(vouch({ id: 1 }, { result: "mcp" }));
+		await native.call("complete_todo", { id: 1 });
+		tell(claim({ id: 2 }, { tool: "complete_todo" }));
+		await native.call("complete_todo", { id: 2 });
+		await native.call("complete_todo", { id: 3 });
+		const by = { via: "tab-mcp-extension", name: "Claude", host: "claude.ai" };
+		const expected: unknown[] = [
+			{ kind: "webmcp", ...by, allowed: true },
+			{ kind: "webmcp", ...by, allowed: false },
+			{ kind: "webmcp" },
+		];
+		expect(seen).toEqual({
+			execute: expected,
+			toolcall: expected,
+			toolcallend: expected,
+		});
+		// The vouched call skipped onConfirm; the claimed and the plain one did not.
+		expect(asked.map((r): unknown => r.client)).toEqual(expected.slice(1));
+	});
+
 	test("a claimed call gets the whole MCP result, picture included, and names the AI app", async () => {
 		const { asked, calls } = await picturePage();
 		tell(claim({}));
@@ -651,6 +702,7 @@ describe("the claim and the whole result (DEC-224)", () => {
 				via: "tab-mcp-extension",
 				name: "Claude",
 				host: "claude.ai",
+				allowed: false,
 			},
 		]);
 	});
@@ -679,6 +731,7 @@ describe("the claim and the whole result (DEC-224)", () => {
 				via: "tab-mcp-extension",
 				name: "Claude",
 				host: "claude.ai",
+				allowed: false,
 			},
 		]);
 		expect(calls).toHaveLength(1);

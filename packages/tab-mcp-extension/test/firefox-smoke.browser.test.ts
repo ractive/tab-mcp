@@ -483,6 +483,7 @@ describe.skipIf(!firefoxOk)(
 				via: "tab-mcp-extension",
 				name: "Test client",
 				host: "client.example",
+				allowed: true,
 			});
 			await step(
 				"a picture of 300 KiB across Firefox's worlds, whole; a script in the page gets the text",

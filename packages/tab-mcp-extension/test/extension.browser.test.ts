@@ -2712,6 +2712,7 @@ describe.skipIf(chrome === undefined)(
 						kind: "webmcp",
 						via: "tab-mcp-extension",
 						...TEST_APP,
+						allowed: true,
 					});
 					await stack.panel.waitFor(takesClicks(toggle));
 					await stack.panel.click(toggle);
@@ -2734,6 +2735,7 @@ describe.skipIf(chrome === undefined)(
 						kind: "webmcp",
 						via: "tab-mcp-extension",
 						...TEST_APP,
+						allowed: true,
 					});
 					expect(await tab.eval("window.tabMcpPage.done")).toEqual([1, 2]);
 					// Declined in the extension: the page is not asked and nothing runs.
@@ -2828,6 +2830,7 @@ describe.skipIf(chrome === undefined)(
 				kind: "webmcp",
 				via: "tab-mcp-extension",
 				...TEST_APP,
+				allowed: true,
 			});
 			await step(
 				"a picture of 300 KiB through the port to the page-world polyfill, whole; a script in the page gets the text",
@@ -2954,7 +2957,12 @@ describe.skipIf(chrome === undefined)(
 					expect(await tab.eval(pageAsks)).toBe(false);
 					expect(
 						await tab.eval("window.tabMcpPage.calls.at(-1).client"),
-					).toEqual({ kind: "webmcp", via: "tab-mcp-extension", ...TEST_APP });
+					).toEqual({
+						kind: "webmcp",
+						via: "tab-mcp-extension",
+						...TEST_APP,
+						allowed: true,
+					});
 				},
 			);
 			// From here on, the panel notes whether it ever said "no WebMCP".

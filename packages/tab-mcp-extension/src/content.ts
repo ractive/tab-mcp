@@ -28,6 +28,7 @@ import type {
 	PageTools,
 } from "./messages.ts";
 import { PageHandshake } from "./page-handshake.ts";
+import { shrunk } from "./result.ts";
 
 /** The part of WebMCP the content script uses. */
 interface ModelContext extends EventTarget {
@@ -66,6 +67,9 @@ export const MAX_LANGUAGE = 64;
  * A tool's result longer than this (characters) is not passed on: the relay
  * carries 1 MiB per response by default, and the bridge cuts a result's text
  * to 100 000 characters anyway. Chrome's own limit for a message is 64 MiB.
+ * An MCP result is shrunk to what the worker would pass on first (`shrunk`,
+ * DEC-224), which always fits: a picture of several MiB becomes a note, not
+ * a failed call (of a tool that ran).
  */
 export const MAX_SEND_RESULT = 2 * 1024 * 1024;
 
@@ -429,6 +433,9 @@ export async function callTool(
 	} finally {
 		vouch?.withdraw();
 	}
+	// Too long for the worker: an MCP result as the worker would pass it on.
+	if (typeof value === "string" && value.length > MAX_SEND_RESULT)
+		value = shrunk(value) ?? value;
 	if (typeof value === "string" && value.length > MAX_SEND_RESULT)
 		return {
 			ok: false,

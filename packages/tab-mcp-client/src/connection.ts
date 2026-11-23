@@ -64,6 +64,7 @@ export function callFromWebMcp(
 					via: "tab-mcp-extension",
 					name: by.app.name,
 					host: by.app.host,
+					allowed: by.allowed,
 				},
 		by?.whole,
 	);

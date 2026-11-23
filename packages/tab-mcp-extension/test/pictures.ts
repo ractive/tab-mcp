@@ -37,7 +37,12 @@ export async function picturesThroughTheExtension(
 	]);
 	expect(await evalInPage("window.tabMcpPage.calls.at(-1)")).toMatchObject({
 		tool: "snapshot",
-		client: { kind: "webmcp", via: "tab-mcp-extension", ...app },
+		client: {
+			kind: "webmcp",
+			via: "tab-mcp-extension",
+			...app,
+			allowed: false,
+		},
 	});
 	const own = (await evalInPage(`(async () => {
 		const context = document.modelContext;
