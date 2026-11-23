@@ -17,8 +17,8 @@ tags: [iteration, client, extension, webmcp, privacy]
 
 A user with the tab-mcp browser extension opens a site built with the client library. The
 extension reads only what a page registered with WebMCP. The library mirrors its tools
-there by default from its next release (DEC-222, branch `client/webmcp-default`, commit
-fcd299c, not merged), but only where the tab has WebMCP when the `TabMcp` is made. The
+there by default since client 0.23.0 (DEC-222, on main through PR 232, released
+2026-11-23), but only where the tab has WebMCP when the `TabMcp` is made. The
 tab has it with Chrome's origin trial or flag, or where the extension has access to all
 sites and installs its own at `document_start` (DEC-188, DEC-191). The gap: plain
 Chrome, a site outside the trial, the extension without access to all sites. The user
@@ -30,8 +30,8 @@ the library looks again and starts its mirror. Everything after that is today's 
 `callers` (DEC-209), the hints (DEC-143), the handshake and the vouch (DEC-207, DEC-221),
 `onConfirm` (DEC-215).
 
-Line numbers are those of `main` at 98c8a58, except the client's `tab-mcp.ts`, which
-is cited from the DEC-222 branch.
+Line numbers are those of `main` at 98c8a58; the client's `tab-mcp.ts` is cited as it is
+on main since DEC-222 (client 0.23.0).
 
 ## What the code does today
 
@@ -65,7 +65,7 @@ is cited from the DEC-222 branch.
   page still offers nothing. The `FIREFOX_NO_WEBMCP_NOTE` (`content.ts:99-100`) tells
   the user to reload with access to all sites.
 
-### The library (DEC-222 branch)
+### The library (client 0.23.0)
 
 - **One look, at construction.** `nativeContext()` (`src/tab-mcp.ts:47-56`) reads
   `Document.prototype`'s `modelContext` getter once, in the constructor
@@ -89,7 +89,11 @@ is cited from the DEC-222 branch.
   across navigations on the same origin (iteration 19; iteration 27; the store
   package's test "on the same origin after a navigation too",
   `test/extension.browser.test.ts`, describe "the store package (no host access)").
-  This has been tested for `goto`, not for a reload.
+  The spike (task 0) shows it for a reload too.
+- **Firefox keeps no grant across any navigation** (spike, task 0): after a same-origin
+  navigation and after a reload, `scripting.executeScript` answers "Missing host
+  permission for the tab". In Firefox without access to all sites, the extension
+  loses the tab itself at every new page, not only its WebMCP.
 - **So the content script returns without a second click, but WebMCP does not.** The
   new document again has no WebMCP, and its new `TabMcp` again found none.
 - **The read on connecting.** The bridge also reads when the connection is
@@ -140,10 +144,11 @@ is cited from the DEC-222 branch.
   access, Chrome refuses). That document gets the extension's object a moment early,
   which is harmless. Pinning the target with `target.documentIds` would need Chrome's
   document id from a message sender; take it if it is cheap.
-- **Assumed, not known from the code:** that `executeScript` with `world: "MAIN"` and
-  `files` works under `activeTab` alone, also after a same-origin navigation and a
-  reload. Every main-world script so far is a registered content script, under host
-  access. This is spike task 0.
+- **Shown by the spike (task 0):** `executeScript` with `world: "MAIN"` and `files`
+  works under `activeTab` alone, right after the click, after a same-origin `goto` and
+  after a reload. Without the click, and on another origin, Chrome refuses it. The
+  second port is needed: without `webmcp-install` the panel listed no tools, although
+  the page had mirrored.
 
 ### 2. Firefox: the same late install
 
@@ -162,13 +167,14 @@ is cited from the DEC-222 branch.
 - **The page is told by `installWebMCP`.** It dispatches
   `new PageEvent("tab-mcp-webmcp")` on `win.document` after it defines the getters
   (`firefox/webmcp.ts:342-348`), only on the path that defines them, not on a takeover.
-- **What Firefox's `activeTab` keeps is not known from the code.** Whether a click's
-  grant lasts across a same-origin navigation or a reload in Firefox is not tested.
-  Every Firefox browser test runs the test build with `host_permissions`, and WebDriver
-  BiDi cannot click the toolbar icon. The tab text "until that tab goes to another
-  origin" (PRIVACY.md:12) comes from Chrome's tests. This is spike task 0. If Firefox
-  drops the grant on every navigation, a navigation there needs a second click; that
-  does not stop the iteration.
+- **Firefox's `activeTab` ends at every navigation** (spike, task 0): after a
+  same-origin navigation and after a reload, `executeScript` is refused. So in Firefox
+  without access to all sites, a click gives WebMCP to that one document only; each new
+  page, the same origin included, needs another click. PRIVACY.md:12 ("until that tab
+  goes to another origin") holds for Chrome and is wrong for Firefox. So are the
+  navigation tools' description (`worker/navigation.ts:451`, "On the page's own origin
+  it runs at once") and its result, where they speak of keeping access. These are
+  today's errors; this iteration corrects the words for Firefox (task 4).
 
 ### 3. The library: "WebMCP arrived"
 
@@ -196,11 +202,11 @@ look();
   installs after the library may dispatch it too.
 - **Which check.** `nativeContext()` again, only `Document.prototype`'s getter. An own
   `document.modelContext` is still passed by, as in DEC-115.
-- **What it costs.** Measured with this sketch on a copy of the DEC-222 branch
-  (`Bun.build`, minified, gzipped, as `test/build.test.ts` counts it): the core grows
-  from 6314 B to 6360 B, +46 B. The limit is 6.25 KB, 6400 B (`build.test.ts:103`), so
-  40 B would be left. If the final code does not fit, the bytes are found elsewhere; the
-  limit is not raised without the owner.
+- **What it costs.** Measured with this sketch on main (client 0.23.0; `Bun.build`,
+  minified, gzipped, as `test/build.test.ts` counts it): the core grows from 6314 B to
+  6358 B, +44 B. The limit is 6.25 KB, 6400 B (`build.test.ts:103`), so 42 B would be
+  left. If the final code does not fit, the bytes are found elsewhere; the limit is not
+  raised without the owner.
 - **Several `TabMcp`s on one page.** Each found nothing, so each has its own listener,
   and each mirrors its own registry on the event. They share one handshake per document
   (`handshake.ts:252-270`), as when WebMCP was there at construction. Name collisions
@@ -231,8 +237,9 @@ look();
   is installed. Once AI access connects, the read on `connected` installs.
 - **A page restored from the back/forward cache** keeps its polyfill and its mirror.
   The content script's `pageshow` reads it again (`content.ts:525-527`).
-- **Firefox** behaves the same if spike task 0 shows the grant holds; otherwise the user
-  must click again after a navigation there.
+- **Firefox does not behave the same** (spike, task 0): its grant ends at every
+  navigation, a reload included, so each new page needs a click. That click brings
+  the content script, WebMCP (while on) and the tools, as on the first page.
 
 ### 5. Privacy: install only while AI access is on
 
@@ -346,7 +353,7 @@ A library page, plain Chrome, the store package:
 | Before the click | badge "Not readable"; "Click the tab-mcp icon in Chrome's toolbar to let it read this tab." (`card.ts:96-97`); "Give access to all sites" | the same |
 | After the click, AI access on | no badge; `no-webmcp` (`index.html:86`); no "built in" line (the library never spoke) | a moment later: "WebMCP · N tools", "This page has tab-mcp built in.", the tools with their switches; never the `no-webmcp` text in between |
 | After the click, AI access off | as above | `no-webmcp` (new draft below); once AI access connects, the tools come without another click |
-| Same-origin navigation or reload, AI access on | `no-webmcp` again | the tools again, without a click |
+| Same-origin navigation or reload, AI access on | `no-webmcp` again | Chrome: the tools again, without a click. Firefox: "Not readable" and the click text, as on another origin (the grant ends at every navigation, spike task 0) |
 | A WebMCP-only page that looked at load, AI access on | `no-webmcp` | "WebMCP" without a count, and `late-webmcp` (draft below) |
 
 - **`no-webmcp`, new draft** (Chrome; shown while AI access is off, or where the install
@@ -460,13 +467,15 @@ and the event). Either order is safe.**
     a tested `goto`).
   - The handshake works when the page speaks after the content script started
     (`page-handshake.ts:253-268`).
-  - The core is 6314 B of 6400 B on the DEC-222 branch.
-- **Assumed** (spike task 0):
-  - `executeScript` with `world: "MAIN"` under `activeTab` alone, right after the click,
-    after a same-origin navigation and after a reload.
-  - Firefox's `activeTab` lifetime.
-  - That Chrome's mirror into a polyfill that arrives late behaves as into one that was
-    there at load (no reason to think otherwise: the same `registerTool` code).
+  - The core is 6314 B of 6400 B on main (client 0.23.0).
+- **Shown by the spike** (task 0):
+  - In Chrome, `executeScript` with `world: "MAIN"` works under `activeTab` alone,
+    right after the click, after a same-origin navigation and after a reload.
+  - In Chrome and Firefox, the library mirrors into a polyfill that arrives late.
+  - Firefox's `activeTab` ends at every navigation.
+- **Still assumed:** that the action's `triggerAction`, which the Firefox spike used in
+  place of a click, grants and ends `activeTab` as a person's click does. It is the
+  code a click runs; the hand check (task 6) confirms it with a real click.
 
 ## Rejected
 
@@ -486,7 +495,7 @@ and the event). Either order is safe.**
 
 ## Tasks
 
-- [ ] 0. **Spike, before any code** (by hand, Chrome for Testing without the WebMCP
+- [x] 0. **Spike, before any code** (by hand, Chrome for Testing without the WebMCP
   flag, the store package; Firefox with the development build without access to all
   sites):
   - **Chrome:** click on `library.html`, then call `chrome.scripting.executeScript({
@@ -504,6 +513,63 @@ and the event). Either order is safe.**
     Firefox after any navigation. Then a click is needed again there, and §4 and §8 say
     so.
   - The results go into this file.
+
+  **Spike results** (2026-11-23, Chrome for Testing 156.0.8078.80, Firefox 160.0.1).
+  Run with `bun run test:browser spike-click-chrome` and `… spike-click-firefox`.
+  - **The scratch code, uncommitted.**
+    - The client's listener: §3 in `packages/tab-mcp-client/src/tab-mcp.ts`.
+    - The event: `webmcp-main.ts` dispatches it at the end of `install()`, and
+      `firefox/webmcp.ts` after it defines the getters.
+    - In `content.ts`, a `webmcp-install` listener that connects a second port, plus
+      the guard against a second `toolchange` listener.
+    - Two scratch browser files: `packages/tab-mcp-extension/test/spike-click-chrome.browser.test.ts`
+      and `spike-click-firefox-smoke.browser.test.ts`. Each logs what it saw as JSON.
+  - **Chrome**, the store package (no host access, `permissions.contains` false), no
+    WebMCP flag, `library.html`:
+    - Before the click, `executeScript({ world: "MAIN", files: ["webmcp-main.js"] })`
+      was refused: "Cannot access contents of the page. Extension manifest must request
+      permission to access the respective host."
+    - Right after the click it succeeded. `"modelContext" in document` became true, the
+      page heard `tab-mcp-webmcp` once, `<html data-tab-mcp-handshake>` was set, and
+      the page's `document.modelContext.getTools()` listed `complete_todo`.
+    - The same held after a same-origin `goto` (`library.html?again`) and after a
+      reload, without a new click. Each new document had no `modelContext` until the
+      injection.
+    - On another origin, it was refused with the same message as before the click.
+  - **The panel, in Chrome.**
+    - It said "This page has tab-mcp built in.", and in the same moment still showed
+      the `no-webmcp` text, with no tools (that is §1's flash, seen).
+    - The tools came only after the worker's `webmcp-install` made the content script
+      connect a second port: "WebMCP · 1 tool", "Complete a todo", with its "Always
+      allow" switch.
+    - This held after the click, after the `goto` and after the reload. Without the
+      second port, two seconds after the injection the panel listed nothing. The first
+      port, posted at the click, is lost, as §1 says.
+  - **Firefox**, the test build with its host access removed at runtime
+    (`permissions.remove`; `permissions.contains` false afterwards). The click was the
+    action's `triggerAction(window)` run in Firefox's chrome over BiDi with system
+    access, since BiDi cannot click the toolbar.
+    - Before the click, `scripting.executeScript` was refused: "Missing host
+      permission for the tab".
+    - After the click it succeeded. The content script, injected by the click,
+      installed WebMCP late, the event reached the library, and the page listed
+      `complete_todo` and had the mark.
+    - After a same-origin navigation it was refused again, and the new page had no
+      `modelContext`.
+    - A second click on that page made it succeed again. After a reload it was refused
+      again.
+    - On another origin it was refused.
+  - **What it changes.**
+    - **The iteration goes on.** Chrome works as planned, the second port is needed as
+      planned, and the flash of §1 is real.
+    - **In Firefox, each new page needs a click** (§2, §4), including on the same
+      origin and after a reload.
+    - **A text error that exists today, which task 4 corrects.** The words that say the
+      click's access lasts until the tab goes to another origin are wrong in Firefox:
+      PRIVACY.md:12, and the navigation tools' description and results
+      (`worker/navigation.ts:451`).
+    - **Open question 4 becomes a real choice.**
+    - **The size:** on main the sketch costs 44 B (6314 to 6358 B of 6400).
 - [ ] 1. **Client:** the listener (§3) in the constructor, the constant in `./extension`,
   the unit tests, the size measured before and after, the README sentence on the event,
   and the CHANGELOG (Added).
@@ -544,17 +610,19 @@ and the event). Either order is safe.**
 2. **The panel's texts** (§8): take the drafts for `no-webmcp` and `late-webmcp` as they
    stand, or reword? *Recommendation:* take them, and shorten `no-webmcp` if it reads
    long in the panel at 345 px.
-3. **Hold the DEC-222 client release for this?** *Recommendation:* no. Release DEC-222
-   as planned (it is useful on its own wherever the tab has WebMCP), and ship this
-   listener in the next client minor, released before the extension.
-4. **If the spike shows that Firefox drops the click's grant at every navigation:**
-   accept a second click there, said in Firefox's texts, rather than asking Firefox
-   users for access to all sites? *Recommendation:* accept it. Access to all sites
-   stays offered either way.
+3. ~~Hold the DEC-222 client release for this?~~ **Settled:** DEC-222 is on main
+   (PR 232) and was released as client 0.23.0 on 2026-11-23, without a release
+   candidate. This listener goes into the next client minor, released before the
+   extension.
+4. **Firefox drops the click's grant at every navigation, a reload included** (the
+   spike showed it). Accept a click per page there, said in Firefox's texts, rather
+   than asking Firefox users for access to all sites? *Recommendation:* accept it.
+   Access to all sites stays offered either way. Correct PRIVACY.md and the
+   navigation tools' words for Firefox in this iteration, since they are wrong today.
 
 # Citations
 
-- [Decision log](/decision-log.md), DEC-115, DEC-143, DEC-177, DEC-188, DEC-191, DEC-207, DEC-209, DEC-215, DEC-221 (DEC-222 on branch `client/webmcp-default`)
+- [Decision log](/decision-log.md), DEC-115, DEC-143, DEC-177, DEC-188, DEC-191, DEC-207, DEC-209, DEC-215, DEC-221, DEC-222 (client 0.23.0)
 - [Iteration 44: WebMCP for Firefox, and Chrome's polyfill](/iterations/iteration-44-firefox-webmcp-spike.md)
 - [Iteration 48: the handshake](/iterations/iteration-48-page-extension-handshake.md)
 - [Iteration 27: navigation, and the click's grant](/iterations/iteration-27-navigation.md)
