@@ -5867,7 +5867,11 @@ it's such a detail".
   direction characters escaped, every run of white space one space, cut in the worker,
   so it never holds a long value. The panel sets every text as text, never HTML. One
   line of arguments shows at 345 px (about 40 characters of the monospace), with an
-  ellipsis; the whole cut line on hover (`title`), and a screen reader reads it whole.
+  ellipsis. A line longer than 36 characters is the summary of a `<details>` of its
+  own, which unfolds to the whole cut line, wrapped (a click, Enter or Space); it stays
+  unfolded, and keeps the keyboard's focus, as the list changes. Not a `title`: the
+  panel says nothing in a tooltip alone (`kb/design/extension-look.md`). A screen
+  reader reads the whole line either way.
 - **The panel:** a `<details>` "Recent calls (<count>)" at the foot of the AI access
   card, closed by default, an `<ol>` newest first, times as the user's locale writes
   them (hours, minutes, seconds), an empty line ("No AI app has called a tool since the

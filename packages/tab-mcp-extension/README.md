@@ -257,7 +257,8 @@ Then `chrome://extensions`, Developer mode on, "Load unpacked", choose `dist/`.
   not answer in time", with "Allowed by you" or "Always allowed" before it when it
   asked or was allowed for its site), the AI app (its name and verified host), the site
   for a page tool or a navigation, and the arguments on one line, cut to 150
-  characters (all of that on hover). No results. The list lives only in the service
+  characters (a longer line unfolds to all of that with a click, Enter or Space). No
+  results. The list lives only in the service
   worker's memory: nothing of it is stored, and it is gone when the worker stops (with
   AI access on it keeps running). It changes while it is open, without being read out.
 - The "Fill in the code for me" switch, under the code, turns on filling in its code on

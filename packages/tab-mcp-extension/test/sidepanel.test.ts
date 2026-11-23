@@ -30,6 +30,7 @@ import type {
 	WorkerMessage,
 } from "../src/protocol.ts";
 import {
+	ARGS_LINE,
 	CALLS_EMPTY,
 	CALLS_NOTE,
 	MAX_SHOWN,
@@ -379,9 +380,33 @@ describe("Recent calls (DEC-226)", () => {
 		const first = panel.doc.querySelector("#calls-list > li");
 		expect(first?.querySelectorAll("b, img, script")).toHaveLength(0);
 		expect(rows()[0]?.[3]).toBe('{"html":"<script>alert(1)</script>"}');
-		// The whole of the cut arguments on hover.
-		expect(first?.querySelector(".call-args")?.getAttribute("title")).toBe(
-			'{"html":"<script>alert(1)</script>"}',
+		// Nothing in a `title`: a line longer than ARGS_LINE unfolds instead.
+		expect(panel.doc.querySelectorAll("#calls [title]")).toHaveLength(0);
+	});
+
+	test("arguments longer than a line unfold, and stay unfolded, with the focus, as the list changes", async () => {
+		const { panel, toggle } = await opened();
+		toggle(true);
+		const long = `{"item":"${"t".repeat(ARGS_LINE)}"}`;
+		panel.post({
+			type: "calls",
+			calls: [call(1), call(2, { args: long, state: "running" })],
+		});
+		const args = (id: number) =>
+			panel.$(`#calls-list li[data-call="${id}"] .call-args`);
+		// Short: a line of code, nothing to unfold.
+		expect(args(1)?.tagName).toBe("CODE");
+		expect(args(2)?.tagName).toBe("DETAILS");
+		expect(args(2)?.querySelector("summary code")?.textContent).toBe(long);
+		(args(2) as HTMLDetailsElement).open = true;
+		args(2)?.querySelector<HTMLElement>("summary")?.focus();
+		panel.post({ type: "call", call: call(2, { args: long, state: "ok" }) });
+		expect(
+			panel.$('#calls-list li[data-call="2"]')?.getAttribute("data-state"),
+		).toBe("ok");
+		expect((args(2) as HTMLDetailsElement).open).toBe(true);
+		expect(panel.doc.activeElement).toBe(
+			args(2)?.querySelector("summary") ?? null,
 		);
 	});
 });

@@ -10,6 +10,11 @@ import type { CallView } from "../protocol.ts";
 
 /** The calls the panel keeps, as the worker does. */
 export const MAX_SHOWN = 100;
+/**
+ * The arguments' characters that fit one line at 345 px (about 40 of the
+ * monospace); longer ones unfold.
+ */
+export const ARGS_LINE = 36;
 
 export const CALLS_TITLE = "Recent calls";
 export const CALLS_EMPTY =
@@ -117,23 +122,47 @@ export function callItem(doc: Document, call: CallView): HTMLLIElement {
 	who.textContent = call.site
 		? `${appText(call)} · on ${siteText(call.site)}`
 		: appText(call);
-	const args = doc.createElement("code");
-	args.className = "call-args";
-	args.textContent = call.args;
-	// The whole of the cut arguments on hover; the line shows what fits.
-	args.title = call.args;
+	const code = doc.createElement("code");
+	code.textContent = call.args;
+	let args: HTMLElement = code;
+	// Longer than a line at the panel's narrowest: it unfolds to the whole of
+	// the cut line (a click, Enter or Space), never said in a `title` alone.
+	if (call.args.length > ARGS_LINE) {
+		args = doc.createElement("details");
+		const summary = doc.createElement("summary");
+		summary.append(code);
+		args.append(summary);
+	}
+	args.classList.add("call-args");
 	li.append(head, outcome, who, args);
 	return li;
 }
 
-/** Draw `calls` into `list` (an `<ol>`), and the empty line. */
+/**
+ * Draw `calls` into `list` (an `<ol>`), and the empty line. The arguments
+ * the user unfolded stay unfolded, and the keyboard's focus on one stays.
+ */
 export function drawCalls(
 	list: HTMLElement,
 	empty: HTMLElement,
 	calls: readonly CallView[],
 ): void {
 	const doc = list.ownerDocument;
+	const idOf = (e: Element | null) =>
+		e?.closest<HTMLElement>("li[data-call]")?.dataset["call"];
+	const unfolded = new Set(
+		[...list.querySelectorAll("details.call-args[open]")].map(idOf),
+	);
+	const focused = list.contains(doc.activeElement)
+		? idOf(doc.activeElement)
+		: undefined;
 	list.replaceChildren(...calls.map((call) => callItem(doc, call)));
+	for (const li of list.querySelectorAll<HTMLElement>("li[data-call]")) {
+		const id = li.dataset["call"];
+		const details = li.querySelector<HTMLDetailsElement>("details.call-args");
+		if (details !== null && unfolded.has(id)) details.open = true;
+		if (id === focused) li.querySelector<HTMLElement>("summary")?.focus();
+	}
 	empty.hidden = calls.length > 0;
 	list.hidden = calls.length === 0;
 }

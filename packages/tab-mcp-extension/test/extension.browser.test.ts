@@ -1166,7 +1166,21 @@ describe.skipIf(chrome === undefined)("the test build (host access)", () => {
 						item: LONG.repeat(4),
 					});
 					await panel.waitFor(`document.querySelector("[data-question] pre")`);
+					// Its call in "Recent calls", the arguments unfolded: they wrap.
+					await panel.waitFor(
+						`document.querySelector("#calls-list details.call-args") !== null`,
+					);
+					await panel.eval(
+						`document.querySelector("#calls-list details.call-args").open = true`,
+					);
 					await holds();
+					// Unfolded, the whole cut line shows: nothing clipped, several lines.
+					expect(
+						await panel.eval<[boolean, boolean]>(`(() => {
+						const c = document.querySelector("#calls-list details.call-args code");
+						return [c.scrollWidth <= c.clientWidth, c.offsetHeight > 30];
+					})()`),
+					).toEqual([true, true]);
 					// It is a sheet with an edge; "Allow once" is drawn as "Don't
 					// allow" is, the default button (DEC-180), and while it takes no
 					// click it is flat, in colours of its own. The pointer off the
