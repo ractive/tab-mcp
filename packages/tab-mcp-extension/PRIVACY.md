@@ -33,7 +33,8 @@ its tools. While AI access is on, a page in a tab the user gave it by clicking i
 gets it too, at that moment (in Chrome and Edge also each later page of the same origin
 in that tab, when the extension reads it), and is told so with a page event, so that a
 page with the tab-mcp library offers its tools then; such a page can tell that the
-extension is installed and that the user gave it this tab, and when. A page's
+extension is installed and that the user gave it this tab, and when. While AI access is
+off, a click puts nothing into the page that it could see: no WebMCP, and no message. A page's
 script can see that the API is there and, from how it behaves, that it is this
 extension's. It learns nothing else from it: not who the user is, not the relay, not the
 AI app. A page that uses the tab-mcp library learns more, as the next paragraph says.

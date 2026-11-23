@@ -17,14 +17,17 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
 ### Added
 
 - **WebMCP on a click** (DEC-223). Where the browser has no WebMCP (Chrome without its
-  flag on a site outside the origin trial, and Firefox) and the extension no access to
-  all sites, a page it reads after a click on its icon that has no WebMCP gets the
-  extension's own then, while AI access is on, and is told so with the page event
-  `tab-mcp-webmcp`. A page built with the tab-mcp client library (from the release after
-  0.23 on) looks again and offers its tools, with the handshake and the vouch as before.
-  In Chrome the same follows a reload or another page of the same origin without
-  another click. A page that looked for WebMCP only as it loaded registers nothing: the
-  panel says so in a line of its own, and `page_info` in a note.
+  flag on a site outside the origin trial, and Firefox), a page the extension may read
+  that has no WebMCP, in practice a tab given by a click on its icon, gets the
+  extension's own then, while AI access is on (an https page, or the loopback host's
+  http one), and is told so with the page event `tab-mcp-webmcp`. A page built with the
+  tab-mcp client library (from the release after 0.23 on) looks again and offers its
+  tools, with the handshake and the vouch as before. In Chrome the same follows a
+  reload or another page of the same origin without another click. A page that looked
+  for WebMCP only as it loaded registers nothing: the panel says so in a line of its
+  own, and `page_info` in a note. With access to all sites nothing changes: a page gets
+  the extension's WebMCP as it loads, or as the content script comes to a page that
+  loaded before, whatever AI access.
 
 ### Changed
 
@@ -36,9 +39,13 @@ and the source archive `tab-mcp-<version>-source.zip` it builds from.
   navigation, a reload and the same origin included; the panel, `page_info`'s refusal
   and the navigation tools now say so (they said, as for Chrome, that the access lasts
   until the tab goes to another origin). The privacy policy says it too.
-- **In Firefox, WebMCP comes late only while AI access is on.** Before, the content
-  script that a click put into a loaded page installed it at once, also while AI access
-  was off.
+- **After a click, nothing goes into the page while AI access is off.** The content
+  script that a click puts into a page without host access sends nothing into the page
+  and installs nothing until AI access is on: in Chrome it no longer posts its port to
+  the extension's page-world WebMCP at once (there was none without host access to
+  answer it), in Firefox it no longer installs its WebMCP at once, nor takes over a
+  state an earlier content script left there (a page could fake it). With host access
+  for the page it does what it did before, whatever AI access.
 
 ## [0.3.3][extension-0.3.3] - 2026-11-23
 

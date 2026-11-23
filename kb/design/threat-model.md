@@ -359,9 +359,15 @@ did, by connecting the extension.
   and the test build). A page can still see that the extension is installed where it
   gives the page WebMCP as the page loads (in browsers without their own, with access to
   all sites), and could try to time its own events, which the extension still listens
-  to. While AI access is on, a page it reads without WebMCP gets the extension's own
-  late, with the event `tab-mcp-webmcp` (DEC-223): such a page learns that the
-  extension is installed and that the user gave it this tab, and when. A document the content script told
+  to. While AI access is on, a page it reads without WebMCP (that can take it: https or
+  the loopback host) gets the extension's own late, with the event `tab-mcp-webmcp`
+  (DEC-223): such a page learns that the extension is installed and that the user gave
+  it this tab, and when. Before that, a content script a click put in (no host access
+  for the page; the worker says so in the script's own world) sends nothing into the
+  page and installs nothing: in Chrome no port, in Firefox no WebMCP and no takeover of
+  an earlier script's state, which a page could fake (review of PR 234). With host
+  access it behaves as before, whatever AI access. The give is pinned to the document
+  that was read (Chrome's document id, and the content script's id in the message). A document the content script told
   "on" hears `on: false` once when it goes off, also after the back/forward cache
   (asked again), after host access was withdrawn (the worker sends "off" to the tabs it
   can no longer read), and after the extension was disabled or updated (at the page's

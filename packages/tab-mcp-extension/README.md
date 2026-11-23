@@ -15,9 +15,10 @@ this. How the extension, the relay and the client library fit together, with a p
   Chrome's origin trial), they are the tools the page registered with the browser. Where
   it has none (Firefox, Chrome without either), the extension gives each https page (and
   localhost) its own `document.modelContext` as the page starts loading, after "Give
-  access to all sites" (DEC-188, DEC-191). Without it, while AI access is on, a page the
-  extension reads that has no WebMCP gets its own then, after the click on the icon
-  (DEC-223): a page built with the tab-mcp client library offers its tools then, while
+  access to all sites" (DEC-188, DEC-191). While AI access is on, a page the extension
+  may read that still has no WebMCP (in practice a tab given by a click on the icon)
+  gets its own then (DEC-223): a page built with the tab-mcp client library offers its
+  tools then, while
   a page that looked for WebMCP only as it loaded registers nothing and still needs
   access to all sites and a reload.
 - **Where it can be installed today:** the Chrome build from the
@@ -334,9 +335,10 @@ turn on `chrome://flags/#enable-webmcp-testing`
 ([Chrome's WebMCP docs](https://developer.chrome.com/docs/ai/webmcp)). Elsewhere, with
 access to all sites, the extension gives pages its own (`src/chrome/webmcp-main.ts`, a
 script in the page's own world at `document_start`); Chrome's wins where it has one.
-Without access to all sites, while AI access is on, the worker puts the same script into
-a tab given by a click, once it finds the page without WebMCP (`chrome.scripting`,
-`world: "MAIN"`), and the script tells the page with the event `tab-mcp-webmcp`, so that
+While AI access is on, the worker puts the same script into a page it may read that still
+has no WebMCP (in practice a tab given by a click), once it finds it so, into that very
+document (`chrome.scripting`, `world: "MAIN"`, `documentIds`), and the script tells the
+page with the event `tab-mcp-webmcp`, so that
 the client library looks again (DEC-223).
 
 ## The relay and the extension's id

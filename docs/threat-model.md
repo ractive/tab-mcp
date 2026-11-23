@@ -708,15 +708,23 @@ like any other, `chrome-extension://<id>` (A11).
   read at most every 250 ms, and the number and size of what a page sends are capped.
 - **A forged `document.modelContext`** in the page's own scripts does not reach the
   extension, which sees only the browser's own object.
-- **WebMCP on a click** (DEC-223). Where the browser has no WebMCP and the extension no
-  access to all sites, it gives a page it reads (a click on its icon gave the tab) its
-  own `document.modelContext` after the page loaded, only while AI access is on and
-  connected, and says so with the DOM event `tab-mcp-webmcp`, so that the client
-  library looks again. Such a page learns that the extension is installed and that the
-  user gave it this tab, and when. In Chrome the page-world script hands the content
-  script a port over `window.postMessage`, as it does at `document_start` (the content
-  script runs at `document_idle` there too): the page's scripts can see the port and
-  answer it, and gain no more than registering tools of their own origin gives them.
+- **WebMCP on a click** (DEC-223). Where a page the extension may read has no WebMCP
+  (in practice a tab given by a click on its icon: with host access a page has the
+  extension's from its load, or from the content script's start), it gives that page
+  its own `document.modelContext` after the page loaded, only while AI access is on and
+  connected, and only a page that can take it (https, or the loopback host's http), and
+  says so with the DOM event `tab-mcp-webmcp`, so that the client library looks again.
+  Such a page learns that the extension is installed and that the user gave it this
+  tab, and when. Until then a content script that a click put in (the worker tells it
+  so in its own world, as it has no host access for the page) sends nothing into the
+  page and installs nothing: no port, no WebMCP, and in Firefox no takeover of an
+  earlier script's state, which a page could fake. The give goes to the document that
+  was read: in Chrome to Chrome's id of the document whose content script answered,
+  and the message names that content script's page, so another page of the tab gets
+  neither. In Chrome the page-world script then gets a port over `window.postMessage`,
+  as it does with host access, where the content script posts it at its start
+  (`document_idle`): the page's scripts can see the port and answer it, and gain no
+  more than registering tools of their own origin gives them.
 - **A page with the client library** (DEC-207). A page that announces the library
   (DOM events, or `<html data-tab-mcp-handshake>`) is told, while AI access is on and
   connected, the extension's name and the names and verified hosts of the AI apps

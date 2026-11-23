@@ -139,11 +139,15 @@ on main since DEC-222 (client 0.23.0).
   `page-info` before the bridge's refresh, `connection.ts:651-652`). The implementation
   orders the reads, or marks the view "WebMCP on its way" until the install has
   settled. A browser test checks that the text never appears there (§9).
-- **A race.** If the tab navigates between the read and `executeScript`, the polyfill
-  lands in the next document of the same origin (on another origin, without host
-  access, Chrome refuses). That document gets the extension's object a moment early,
-  which is harmless. Pinning the target with `target.documentIds` would need Chrome's
-  document id from a message sender; take it if it is cheap.
+- **A race, closed (review of PR 234).** If the tab navigated between the read and
+  `executeScript`, the polyfill would land in the next document. The give is now pinned
+  to the document that was read. The content script puts its id (`DOCUMENT_ID`) on its
+  own world. A probe (`executeScript` with a function in the isolated world, frame 0)
+  returns it together with Chrome's `documentId` of that document. Only if it matches
+  the read does the polyfill go in, with `target.documentIds`, and `webmcp-install`
+  goes to that document (`tabs.sendMessage`'s `documentId`) with the read page's id,
+  which another page's content script ignores. Firefox has no main-world injection;
+  the message's id pins it there.
 - **Shown by the spike (task 0):** `executeScript` with `world: "MAIN"` and `files`
   works under `activeTab` alone, right after the click, after a same-origin `goto` and
   after a reload. Without the click, and on another origin, Chrome refuses it. The
@@ -157,13 +161,24 @@ on main since DEC-222 (client 0.23.0).
   It already works mechanically: `reviveOpenPages` (`background.ts:160-176`) injects the
   content script into loaded pages after an update, and firefox-smoke's test "the page's
   tools outlive the content script" exercises that late path.
-- **When the content script installs.** At its start only while
-  `document.readyState === "loading"` (the registered `document_start` script, with
-  access to all sites), or when an earlier script left its state in the page (the
-  takeover after an update, `keptState`, `firefox/webmcp.ts:95-114`; that state must be
-  restored whatever AI access is). Otherwise it installs only on the worker's
-  `webmcp-install`. This changes today's behaviour, where a click installs at once,
-  also while AI access is off (§5).
+- **When the content script installs** (as built after the review of PR 234; the
+  first build's `document.readyState === "loading"` was no safe sign of the registered
+  script, a click on a page still loading passes it, and it stopped the install on open
+  pages with host access). The worker, before it puts the content script in without
+  host access for the page (`permissions.contains` for the page's site), sets
+  `tabMcpByClick` in the script's world. The flag goes in with the first injection,
+  started at once, and is taken away again with host access. From a click it must run
+  in the click's gesture, which reaches the page as a user activation: awaited behind
+  the host check, Chrome's history intervention made `go_back` skip to `about:blank`.
+  The navigation test caught it.
+  - **With the flag** (a click), the content script installs nothing at its start, and
+    takes over no earlier script's state either, since a page could fake that state. It
+    installs only on `webmcp-install`, which comes only while AI access is on.
+  - **Without it** (the registered script, the revive after an update, a page put in
+    with host access), it installs at once, as before this iteration, also on a page
+    that loaded before, whatever AI access. `keptState` is read once, in
+    `installWebMCP`.
+  - **Chrome's content script** follows the same flag for its port.
 - **The page is told by `installWebMCP`.** It dispatches
   `new PageEvent("tab-mcp-webmcp")` on `win.document` after it defines the getters
   (`firefox/webmcp.ts:342-348`), only on the path that defines them, not on a takeover.
@@ -403,8 +418,13 @@ A library page, plain Chrome, the store package:
   `toolchange` listener.
 - `content.ts` answers `webmcp-install` (Chrome: it connects; Firefox: it installs),
   sets `late`, and does nothing once a context exists.
-- Firefox's start: it installs at `loading` and on a takeover, and not at a later
-  injection.
+- The start (after the review of PR 234):
+  - Without host access the content script is told it came by a click
+    (`unit.test.ts`).
+  - In the browser tests, after such a click with AI access off, the page heard no port
+    handover (Chrome) and kept a faked state untouched (Firefox).
+  - With host access, Firefox installs on a page that loaded before the script came,
+    with AI access off.
 - The worker's `list` wrapper (`connection.test.ts`, fake Chrome): it installs only
   while `on`, once per document, never where `available` is true, and forgets a closed
   tab.
@@ -581,8 +601,9 @@ and the event). Either order is safe.**
     with the tab.
   - The types in `messages.ts` and `protocol.ts`.
   - No flash of `no-webmcp` (§1).
-- [x] 3. **Extension, Firefox:** the content script installs at `loading` or on a
-  takeover, and otherwise on `webmcp-install`; `installWebMCP` dispatches the event.
+- [x] 3. **Extension, Firefox:** with host access the content script installs (or takes
+  over) at its start, as before; put in by a click (`tabMcpByClick`) only on
+  `webmcp-install` (review of PR 234); `installWebMCP` dispatches the event.
 - [x] 4. **Texts:** the panel's `no-webmcp` and the new `late-webmcp` (Chrome and
   `FIREFOX_PANEL_TEXTS`), `webmcpNote` in `card.ts`, `page_info`'s note and
   `FIREFOX_NO_WEBMCP_NOTE`, all agreed with the owner.

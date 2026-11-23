@@ -294,9 +294,19 @@ with a second extension).
   worker puts the page-world polyfill in with `scripting.executeScript` (`world: "MAIN"`)
   and the content script connects to it again, in Firefox the content script installs
   it; the page hears `tab-mcp-webmcp`, and a client library that found none as it loaded
-  looks again. Once per document; the panel says nothing about missing WebMCP until it
-  settled, and "tab-mcp gave this page WebMCP after it had loaded…" for a page that then
-  registered nothing. "Give access to all sites" asks for host access; the content script
+  looks again. Once per document, only for a page that can take it (https or the loopback
+  host), pinned to the document that was read (Chrome: the content script's world names
+  its page's id, an injection's result Chrome's document id, which `executeScript`'s
+  `documentIds` and `tabs.sendMessage`'s `documentId` then take; the message carries
+  the content script's id, and another page's content script ignores it). The panel
+  says nothing about missing WebMCP until it settled, and "tab-mcp gave this page WebMCP
+  after it had loaded…" for a page that then registered nothing. A content script put
+  in without host access for the page (`injectInto` asks `permissions.contains` for the
+  page's site; a click's grant is no permission) is told so first in its own world
+  (`tabMcpByClick`) and then sends nothing into the page and installs nothing until
+  `webmcp-install` (review of PR 234); without that flag (the registered script, the
+  revive after an update, a page put in with host access) it does what it did before
+  DEC-223, whatever AI access. "Give access to all sites" asks for host access; the content script
   is then registered for every http(s) page. The "Fill in the code for me" switch asks
   for the relay's site alone, for its pairing page (DEC-203). `"incognito": "not_allowed"`: no Incognito
   tabs (DEC-142).
