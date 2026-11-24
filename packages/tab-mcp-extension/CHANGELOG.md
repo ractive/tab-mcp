@@ -12,7 +12,7 @@ Edge Add-ons and addons.mozilla.org. Each release attaches its store package,
 from 0.3.3 also the Firefox package `tab-mcp-browser-extension-firefox-<version>-store.zip`
 and the source archive `tab-mcp-<version>-source.zip` it builds from.
 
-## Unreleased
+## [0.4.0][extension-0.4.0] - 2026-11-24
 
 ### Added
 
@@ -400,6 +400,7 @@ First release.
   `http://*/*` and `https://*/*` only as optional permissions. No `storage` permission: the settings are
   in the service worker's IndexedDB. Privacy policy: `packages/tab-mcp-extension/PRIVACY.md`.
 
+[extension-0.4.0]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.4.0
 [extension-0.3.3]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.3.3
 [extension-0.3.2]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.3.2
 [extension-0.3.1]: https://github.com/ractive/tab-mcp/releases/tag/extension-v0.3.1

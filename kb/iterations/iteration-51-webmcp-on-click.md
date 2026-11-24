@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 51: WebMCP on a click"
-status: in-progress
+status: completed
 description: >-
   In Chrome without WebMCP, on a site outside the origin trial, a page built with the
   client library offers the tab-mcp browser extension nothing after a click on its icon:
@@ -626,12 +626,14 @@ and the event). Either order is safe.**
   - The CHANGELOGs.
   - A decision-log entry (the late install, its gating, the event).
   - The store listings, where they say "a click comes too late".
-- [ ] 6. **Browser tests:** the Chrome `store-polyfill` scenario and the Firefox smoke
+- [x] 6. **Browser tests:** the Chrome `store-polyfill` scenario and the Firefox smoke
   scenario (§9), with `bun run test:browser extension firefox`; the hand check in
-  Firefox.
-- [ ] 7. **The site's privacy page** (ractive.ch repository, its own pull request),
-  merged before the extension release.
-- [ ] 8. **Releases** in the order of §10.
+  Firefox (the owner, 2026-11-23: a real click brings the tool, and after a reload
+  Firefox asks for the click again; in Chrome by hand too).
+- [x] 7. **The site's privacy page** (ractive.ch repository, pull request 162), merged
+  on 2026-11-23, before the extension release; it says "from version 0.4.0 on".
+- [x] 8. **Releases** in the order of §10: client 0.24.0 on 2026-11-23 (a candidate
+  first, the apps tested on it), the extension 0.4.0 on 2026-11-24.
 
 ## Open questions for the owner
 

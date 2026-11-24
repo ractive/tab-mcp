@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 52: pictures through the extension"
-status: in-progress
+status: completed
 description: >-
   An AI app connected to a page through the tab-mcp browser extension got no pictures
   from the page's tools: the client library reduced every WebMCP result to text. The
@@ -162,7 +162,11 @@ only change it sees.
   (`src/result.ts`, shared with the worker), `client.allowed`, the README's `onConfirm`
   line, a note for dropped `structuredContent`, its own reason for an image that is not
   base64, text resources as text.
-- [ ] Not here: the site's privacy page (ractive.ch), saturnus, releases.
+- [x] Not here: the site's privacy page (ractive.ch pull request 162, merged
+  2026-11-23), saturnus (its pull request 301: its normal MCP result for calls with
+  `client.via`; a picture seen end to end through the extension in the owner's Chrome on
+  2026-11-23), releases (client 0.24.0 on 2026-11-23, the extension 0.4.0 on
+  2026-11-24).
 
 # Citations
 
