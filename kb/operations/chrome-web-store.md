@@ -307,9 +307,11 @@ On failure the log shows AMO's answer.
 > call you allowed in the extension is not asked again in the page, and the page can show
 > which AI apps reach it through the extension. Only while AI access is on, such a page
 > learns the extension's name, that AI access is on, the names and verified hosts of the
-> AI apps connected to it, and right before a call you allowed, the tool, its arguments
-> and which AI app made the call; when that call is over, the page is told that too, also
-> after AI access went off. While AI access is off, the extension answers no page
+> AI apps connected to it, and right before each call of one of its tools for such an AI
+> app (one you allowed, or a read-only one, which runs without a question), the tool, its
+> arguments and which AI app made the call, so that the page answers that AI app in full,
+> pictures included; when that call is over, the page is told that too, also after AI
+> access went off. While AI access is off, the extension answers no page
 > and sends it nothing. A page can still see that the extension is installed where it
 > gives the page WebMCP as the page loads (in browsers without their own, with access to
 > all sites), and could try to time its own events, which the extension still listens to.
@@ -364,9 +366,10 @@ sends.
   relay the user chose (by default tab-mcp.ractive.ch, run by the developer) and the AI
   app the user connected, only while AI access is on; and, inside the browser, to a page
   that uses the tab-mcp client library, only while AI access is on: the extension's
-  name, that AI access is on, the connected AI apps' names and verified hosts, and for a
-  call the user allowed, the tool, its arguments and which AI app made it (and, once,
-  that AI access went off, and that a call allowed before is over).
+  name, that AI access is on, the connected AI apps' names and verified hosts, and for
+  each call of one of the page's tools for such an AI app (one the user allowed, or a
+  read-only one), the tool, its arguments and which AI app made it (and, once, that AI
+  access went off, and that a call made before is over).
 - Certify: not sold to third parties; not used or transferred for purposes unrelated to
   the single purpose; not used to determine creditworthiness or for lending.
 - **Privacy policy URL:** the ractive.ch page with PRIVACY.md (setup step 2).
