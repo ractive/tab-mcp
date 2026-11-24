@@ -39,7 +39,7 @@
 	"devDependencies": {
 		"@modelcontextprotocol/client": "2.4.0",
 		"@modelcontextprotocol/server": "2.4.0",
-		"oauth4webapi": "3.8.8"
+		"oauth4webapi": "3.8.9"
 	},
 	"exports": {
 		".": "./src/index.ts",
