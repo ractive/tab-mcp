@@ -1,6 +1,6 @@
 {
 	"name": "tab-mcp-extension",
-	"version": "0.3.3",
+	"version": "0.4.0",
 	"private": true,
 	"description": "tab-mcp browser extension: offers a page's own WebMCP tools to AI apps outside the browser, and lets them open pages in that tab, through a tab-mcp relay",
 	"type": "module",

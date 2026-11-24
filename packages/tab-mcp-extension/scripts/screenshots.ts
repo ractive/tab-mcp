@@ -169,23 +169,25 @@ try {
 		`document.getElementById("code").textContent.match(/[A-Z]{4}-[A-Z]{4}/) && document.getElementById("address").textContent`,
 		15_000,
 	);
-	// The line under the heading names the relay in the settings, this
-	// process's: the hosted relay's name, as the store build shows by default.
-	// The panel writes the line again on each state it gets: take the shot
-	// again until the line still reads so after it.
+	// The line under the heading and the one under "Fill in the code for me"
+	// name the relay in the settings, this process's: the hosted relay's name,
+	// as the store build shows by default, in every text of the panel. The
+	// panel writes its lines again on each state it gets: take the shot again
+	// until no text names this process's relay after it.
 	const hosted = new URL(PUBLIC_RELAY).host;
+	const mine = new URL(local).host;
 	for (let attempt = 0; ; attempt++) {
 		await panel.eval(`(() => {
-			const intro = document.getElementById("intro");
-			intro.textContent = intro.textContent.replace(${JSON.stringify(new URL(local).host)}, ${JSON.stringify(hosted)});
+			const texts = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+			for (let node = texts.nextNode(); node; node = texts.nextNode())
+				if (node.nodeValue.includes(${JSON.stringify(mine)}))
+					node.nodeValue = node.nodeValue.replaceAll(${JSON.stringify(mine)}, ${JSON.stringify(hosted)});
 		})()`);
 		await take("2-pairing", tab, panel);
-		const intro = await panel.eval<string>(
-			`document.getElementById("intro").textContent`,
-		);
-		if (intro.includes(hosted)) break;
+		const shown = await panel.eval<string>(`document.body.innerText`);
+		if (shown.includes(hosted) && !shown.includes(mine)) break;
 		if (attempt === 4)
-			throw new Error(`the panel names another relay: ${intro}`);
+			throw new Error(`the panel names this process's relay: ${mine}`);
 	}
 
 	const token = await tokenFor(relay, address, {

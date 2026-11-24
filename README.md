@@ -389,7 +389,7 @@ so a relay is exactly one process.
 |---|---|---|
 | `packages/tab-mcp` | npm `@ractive-ch/tab-mcp`, Docker `ractive/tab-mcp` and `ghcr.io/ractive/tab-mcp` | the relay ([README](packages/tab-mcp/README.md)) |
 | `packages/tab-mcp-client` | npm `@ractive-ch/tab-mcp-client` | the browser library a page uses ([README](packages/tab-mcp-client/README.md)) |
-| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) and [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/): "tab-mcp browser extension" 0.3.3 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
+| `packages/tab-mcp-extension` | [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) and [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/): "tab-mcp browser extension" 0.4.0 | the browser extension that offers the WebMCP tools of the page in front to an AI app ([README](packages/tab-mcp-extension/README.md)) |
 | `examples/react-todo` | – | a React todo app with the React bindings, live at <https://ractive.ch/tab-mcp/examples/todo/> ([README](examples/react-todo/README.md)) |
 | `test/e2e` | – | the end-to-end test: a relay, a test page in headless Chrome and an AI app's OAuth client ([README](test/e2e/README.md)) |
 | `plugins/tab-mcp` | – | the agent skill and its plugin manifests ([README](plugins/tab-mcp/README.md)) |
@@ -413,7 +413,7 @@ settings, the protocol or the API; the [changelogs](CHANGELOG.md) say what chang
 
 - Released: relay `@ractive-ch/tab-mcp` 0.13.3 (npm and Docker) and browser library
   `@ractive-ch/tab-mcp-client` 0.24.0, on the npm tag `latest`.
-- The tab-mcp browser extension 0.3.3 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
+- The tab-mcp browser extension 0.4.0 is in the [Chrome Web Store](https://chromewebstore.google.com/detail/tab-mcp-browser-extension/jjhddplkjikmbpcobcnfebnglgjomfgh) (public since
   2026-11-16) and, for Firefox, on
   [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/tab-mcp-browser-extension/).
   A development build loaded unpacked has the store's id, which the hosted
