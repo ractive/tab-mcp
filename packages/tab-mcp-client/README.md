@@ -188,12 +188,16 @@ behaves differently are [listed below](#where-registertool-differs-from-the-draf
 
 `registerTool` checks what the draft checks, in the same order, and rejects with the
 same errors (DEC-227): a `TypeError` for what is no tool at all (no object, no `name`,
-`description` or `execute`, `annotations` that are no object, an `exposedTo` that is
-no list), an `InvalidStateError` for a name that is taken, a name that breaks the rules
-above and an empty description, the schema's error, the reason of an already aborted
+`description` or `execute`, a schema or `annotations` that are no object, a `signal`
+that is no `AbortSignal`, an `exposedTo` that is no list), an `InvalidStateError` for
+a name that is taken, a name that breaks the rules above and an empty description, the
+schema's error (also the validator's, once `connect()` loaded it), the reason of an already aborted
 `signal` (nothing is registered then), and a `SecurityError` for an `exposedTo` entry
 that is no potentially trustworthy origin (`https:`, `wss:`, or a loopback host such as
 `http://localhost`). Where code written for the native API behaves differently here:
+
+- `registerTool` refuses the option `webmcp` of 0.15 and before with a `TypeError`,
+  rather than ignoring it: an ignored `webmcp: false` would put the tool into WebMCP.
 
 - `inputSchema` and `outputSchema` need `"type": "object"`, as MCP does; the draft takes
   any object. The library also checks the patterns and `$ref`s of both (above). Each is a

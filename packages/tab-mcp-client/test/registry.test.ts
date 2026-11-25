@@ -86,28 +86,66 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		const r = new ToolRegistry();
 		r.register(tool());
 		const aborted = AbortSignal.abort(new Error("gone"));
-		// A duplicate before the schema, the description and the signal.
+		const taken = new DOMException(
+			"registerTool: a tool named add is already registered",
+			"InvalidStateError",
+		);
+		// A duplicate before the description, the schema and the signal.
 		expect(() =>
 			r.register(tool({ description: "", inputSchema: { type: "string" } }), {
 				signal: aborted,
 			}),
-		).toThrow(expect.objectContaining({ name: "InvalidStateError" }));
+		).toThrow(taken);
+		// The description before the schema.
+		expect(() =>
+			r.register(
+				tool({ name: "b", description: "", inputSchema: { type: "string" } }),
+			),
+		).toThrow(
+			new DOMException(
+				"registerTool: b needs a description",
+				"InvalidStateError",
+			),
+		);
 		// The schema before the signal, the signal before exposedTo.
 		expect(() =>
 			r.register(tool({ name: "b", inputSchema: { type: "string" } }), {
 				signal: aborted,
 			}),
-		).toThrow(TypeError);
+		).toThrow(/"type": "object"/);
 		expect(() =>
 			r.register(tool({ name: "b" }), {
 				signal: aborted,
 				exposedTo: ["http://a.example"],
 			}),
 		).toThrow("gone");
-		// WebIDL's conversion before everything.
+		// The validator's check, once loaded, with the schemas: before the signal.
+		r.setCompiler((t) => {
+			if (t.name === "late") throw new TypeError("the validator refused it");
+		});
 		expect(() =>
-			r.register(tool({ annotations: { readOnlyHint: "yes" } as never })),
-		).toThrow(TypeError);
+			r.register(tool({ name: "late" }), { signal: aborted }),
+		).toThrow("the validator refused it");
+		// WebIDL's conversion before everything: a bad hint, a schema that is no
+		// object, a signal that is none, the old option, all on a taken name.
+		for (const [over, options] of [
+			[{ annotations: { readOnlyHint: "yes" } }, {}],
+			[{ inputSchema: "" }, {}],
+			[{ outputSchema: null }, {}],
+			[{}, { signal: {} }],
+			[{}, { signal: null }],
+			[{}, { webmcp: false }],
+		] as const)
+			expect(() => r.register(tool(over as never), options as never)).toThrow(
+				TypeError,
+			);
+		expect(r.list().map((t) => t.name)).toEqual(["add"]);
+	});
+
+	test("null options are no options, as WebIDL takes them", () => {
+		const r = new ToolRegistry();
+		r.register(tool(), null);
+		expect(r.get("add")?.callers).toBeUndefined();
 	});
 
 	test("inputSchema defaults to { type: object } and must be an object schema", () => {
@@ -412,7 +450,8 @@ describe("ToolRegistry (WebMCP rules)", () => {
 					outputSchema: bad as unknown as Record<string, unknown>,
 				}),
 			).toThrow(
-				'registerTool: the outputSchema of bad must be a JSON Schema object with "type": "object"',
+				// "x" is no object: WebIDL's conversion refuses it first.
+				/^registerTool: the outputSchema of bad must be (a JSON Schema object with "type": "object"|an object)$/,
 			);
 		// Checked like inputSchema: an AI app compiles it when it lists the tools.
 		expect(() =>
@@ -452,6 +491,8 @@ describe("ToolRegistry (WebMCP rules)", () => {
 			"http://app.localhost",
 			"http://127.1",
 			"http://[::1]:3000",
+			"http://localhost.:3000",
+			"blob:https://c.example/7d2e",
 		];
 		r.register(tool(), { exposedTo });
 		exposedTo.push("https://later.example");
@@ -462,6 +503,8 @@ describe("ToolRegistry (WebMCP rules)", () => {
 			"http://app.localhost",
 			"http://127.0.0.1",
 			"http://[::1]:3000",
+			"http://localhost.:3000",
+			"https://c.example",
 		]);
 	});
 
@@ -471,6 +514,8 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		"data:text/plain,x",
 		"file:///etc/passwd",
 		"ftp://a.example",
+		"blob:http://a.example/7d2e",
+		"http://localhost.example",
 	])(
 		"an exposedTo entry %p that is no potentially trustworthy origin is a SecurityError (DEC-227)",
 		(entry) => {
@@ -531,8 +576,15 @@ describe("ToolRegistry (WebMCP rules)", () => {
 		for (const callers of [["relay", "agents"], [true]]) {
 			expect(() => r.register(tool(), { callers: callers as never })).toThrow(
 				new TypeError(
-					'registerTool: callers must be "relay", "local" or "webmcp"',
+					'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
 				),
+			);
+		}
+		// The option `callers` replaced is refused, not ignored (review of PR 129):
+		// an ignored `webmcp: false` would put the tool into WebMCP.
+		for (const webmcp of [false, true, undefined]) {
+			expect(() => r.register(tool(), { webmcp } as never)).toThrow(
+				/option webmcp is gone/,
 			);
 		}
 		// Not a list at all.

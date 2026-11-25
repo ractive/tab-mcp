@@ -5911,17 +5911,20 @@ Against the draft of 24 November 2026 (`registerTool` steps, WebIDL of
   `ToolExecuteCallbackOptions` (`ToolAnnotations` already was); the event `toolschange`
   is `toolchange`, as the draft's. No aliases (no backwards compatibility).
 - **Errors and order:** WebIDL's conversion first (`TypeError`: no object, no `name`,
-  `description` or `execute`, `annotations` no object, `exposedTo` or `callers` no
-  list), then a duplicate, a bad name, an empty description (each an
-  `InvalidStateError`), the schemas, a duplicate again (a schema's `toJSON` may have
-  registered one), an aborted signal, then `exposedTo` (`SecurityError`).
+  `description` or `execute`, a schema or `annotations` no object, a `signal` no
+  `AbortSignal`, `exposedTo` or `callers` no list; `null` options are none), then a
+  duplicate, a bad name, an empty description (each an `InvalidStateError`), the
+  schemas (with the validator's check once `connect()` loaded it), a duplicate again (a
+  schema's `toJSON` may have registered one), an aborted signal, then `exposedTo`
+  (`SecurityError`).
 - **Conversions:** `name`, `title`, `description` become strings as WebIDL makes them
   (a `Symbol` is a `TypeError`); only the empty description is refused, not one of
   spaces; `annotations: null` is no hints.
-- **`exposedTo`:** each entry must parse as a URL with a potentially trustworthy
-  origin: `https:` or `wss:`, or a host `127.x.x.x`, `[::1]`, `localhost` or
-  `*.localhost` (opaque origins, `file:` among them, are refused, as the draft's "is
-  origin potentially trustworthy?" refuses them). The registry keeps the origins and
+- **`exposedTo`:** each entry must parse as a URL whose origin is potentially
+  trustworthy: `https:` or `wss:`, or a host `127.x.x.x`, `[::1]`, `localhost` or
+  `*.localhost`, each with a trailing dot too (opaque origins, `file:` among them, are
+  refused, as the draft's "is origin potentially trustworthy?" refuses them; a
+  `blob:https://…` URL has the origin inside it). The registry keeps the origins and
   the mirror passes them on, so its warning about a tool that asks compares origins
   directly.
 - **Kept, because they cost something:** `"type": "object"` schemas (MCP), refusing a
@@ -5931,9 +5934,13 @@ Against the draft of 24 November 2026 (`registerTool` steps, WebIDL of
   `getTools()`, and `toolcall`/`toolcallend` rather than `toolactivated`/`toolcancel`
   (they fire before the question, for every caller, with the caller and the outcome:
   the draft's names would promise its meaning).
-- **Dropped:** the refusal of `webmcp` in `registerTool`'s options (the option of 0.15,
-  DEC-165): an unknown option is ignored like any other.
-- **Size:** the checks cost about 200 bytes gzipped: the core's limit is 6.5 KB (was
+- **Kept although it is old:** the refusal of `webmcp` in `registerTool`'s options
+  (the option of 0.15, DEC-165). It is a safety check, not compatibility: ignored, a
+  `webmcp: false` would put the tool into WebMCP, where the library asks no caller
+  (review of PR 249).
+- **Not converted:** a `title` with lone surrogates is kept as it is (the draft's
+  `USVString` would replace them); a title is shown, and JSON carries it either way.
+- **Size:** the checks cost about 280 bytes gzipped: the core's limit is 6.5 KB (was
   6.25 KB), the React closure's 13.75 KB (was 13.5 KB).
 - **Not here:** the tab-mcp browser extension's own `document.modelContext` (Firefox,
   Chrome without WebMCP) copies Chrome 156, not the draft; moving it to the draft is its

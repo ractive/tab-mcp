@@ -151,11 +151,13 @@ function listOf(value: unknown, what: string): string[] | undefined {
  */
 function trustworthy(entry: string): string {
 	try {
-		const url = new URL(entry);
+		// The origin's own URL, as Secure Contexts asks of the origin: a
+		// `blob:https://a.example/x` is `https://a.example`; an opaque origin
+		// ("null") does not parse.
+		const url = new URL(new URL(entry).origin);
 		if (
-			url.origin !== "null" &&
-			(/^(https|wss):$/.test(url.protocol) ||
-				/^(127(\.\d+){3}|\[::1\]|(.+\.)?localhost)$/.test(url.hostname))
+			/^(https|wss):$/.test(url.protocol) ||
+			/^(127(\.\d+){3}|\[::1\]|(.+\.)?localhost\.?)$/.test(url.hostname)
 		)
 			return url.origin;
 	} catch {}
@@ -181,12 +183,13 @@ export class ToolRegistry {
 	 * the schema's `TypeError`, the abort reason of an aborted signal, a
 	 * `SecurityError` for an `exposedTo` entry that is no potentially
 	 * trustworthy origin. tab-mcp's own checks are `TypeError`s: a schema
-	 * without `"type": "object"` or that the validator cannot use, a hint
-	 * that is not a boolean, unknown `callers`.
+	 * without `"type": "object"` or that the validator cannot use (with the
+	 * schemas), a hint that is not a boolean, unknown `callers` and the old
+	 * option `webmcp` (with WebIDL's conversion).
 	 */
 	register(
 		tool: ModelContextTool,
-		options: ModelContextRegisterToolOptions = {},
+		options: ModelContextRegisterToolOptions | null = {},
 	): void {
 		// WebIDL's conversion of both dictionaries comes first.
 		if (!isPlainObject(tool)) fail("the tool must be an object");
@@ -207,6 +210,12 @@ export class ToolRegistry {
 		const heading = title === undefined ? undefined : text(title);
 		if (typeof execute !== "function")
 			fail(`${name} needs an execute function`);
+		for (const [what, schema] of [
+			["inputSchema", inputSchema],
+			["outputSchema", outputSchema],
+		])
+			if (schema !== undefined && (typeof schema !== "object" || !schema))
+				fail(`the ${what} of ${name} must be an object`);
 		if (annotations != null && !isPlainObject(annotations))
 			fail(`the annotations of ${name} must be an object`);
 		// A hint that is not a boolean is refused, not converted: WebIDL would
@@ -221,15 +230,26 @@ export class ToolRegistry {
 			else if (value !== undefined && /Hint$|^debugging$/.test(key))
 				fail(`${key} of ${name} must be a boolean`);
 		}
-		const { signal } = options;
+		// WebIDL takes `null` options as none.
+		const given = options ?? {};
+		const { signal } = given;
+		if (signal !== undefined && typeof signal?.throwIfAborted !== "function")
+			fail("signal must be an AbortSignal");
 		// Copies: the page's arrays may change later, what was registered
 		// does not.
-		const callers = listOf(options.callers, "callers") as
+		const callers = listOf(given.callers, "callers") as
 			| ToolCaller[]
 			| undefined;
-		if (callers?.some((c) => !/^(relay|local|webmcp)$/.test(c)))
-			fail('callers must be "relay", "local" or "webmcp"');
-		const exposed = listOf(options.exposedTo, "exposedTo");
+		// The option of 0.15 and before, refused rather than ignored: an
+		// ignored `webmcp: false` would put the tool into WebMCP (DEC-165).
+		if (
+			"webmcp" in given ||
+			callers?.some((c) => !/^(relay|local|webmcp)$/.test(c))
+		)
+			fail(
+				'callers must be "relay", "local" or "webmcp"; option webmcp is gone',
+			);
+		const exposed = listOf(given.exposedTo, "exposedTo");
 		const taken = () => {
 			if (this.#tools.has(name))
 				fail(`a tool named ${name} is already registered`, "InvalidStateError");
@@ -260,26 +280,31 @@ export class ToolRegistry {
 			if (problem !== undefined) fail(`the ${what} of ${name}: ${problem}`);
 			return copied;
 		};
-		const input = copy(inputSchema ?? { type: "object" }, "inputSchema");
-		const output =
-			outputSchema === undefined
-				? undefined
-				: copy(outputSchema, "outputSchema");
+		const checked: RegisteredTool = {
+			name,
+			title: heading,
+			description: about,
+			inputSchema:
+				inputSchema === undefined
+					? { type: "object" }
+					: copy(inputSchema, "inputSchema"),
+			outputSchema:
+				outputSchema === undefined
+					? undefined
+					: copy(outputSchema, "outputSchema"),
+			annotations: hints,
+			execute,
+			callers,
+		};
+		// The validator's check is the schemas' too.
+		this.#compile?.(checked);
 		// Script in a schema's `toJSON` may have registered the name meanwhile.
 		taken();
 		signal?.throwIfAborted();
 		const registered: RegisteredTool = {
-			name,
-			title: heading,
-			description: about,
-			inputSchema: input,
-			outputSchema: output,
-			annotations: hints,
-			execute,
-			callers,
+			...checked,
 			exposedTo: exposed?.map(trustworthy),
 		};
-		this.#compile?.(registered);
 		this.#tools.set(registered.name, registered);
 		signal?.addEventListener("abort", () => this.remove(registered), {
 			once: true,

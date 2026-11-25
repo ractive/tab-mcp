@@ -24,15 +24,18 @@ costs nothing (DEC-227): its names, its checks in its order, its errors.
   schemas before an aborted `signal`, as in the draft.
 - **WebIDL's conversions.** `name`, `title` and `description` are converted to strings
   (`42` is `"42"`; a `title` of another type was a `TypeError`). `annotations: null`
-  means no hints. An `exposedTo` or `callers` that is a string or `null` is a
-  `TypeError`.
+  means no hints, `null` options no options. An `exposedTo` or `callers` that is a
+  string or `null`, a `signal` that is no `AbortSignal` and an `inputSchema` or
+  `outputSchema` that is no object (`null` included: it was taken as none) are
+  `TypeError`s before any other check.
 - **`exposedTo` is checked.** An entry that is not a potentially trustworthy origin
   (`https:`, `wss:`, or a loopback host such as `http://localhost`) rejects the
   registration with a `SecurityError`, on every caller's side; until now the tool was
   registered and only its WebMCP mirror failed, with a console warning. The library keeps
-  the origins (`https://a.example/page` is `https://a.example`) and passes those on.
-- **`webmcp` in `registerTool`'s options**, the option of 0.15 and before, is no longer
-  refused: it is ignored like any other unknown option.
+  the origins (`https://a.example/page` is `https://a.example`,
+  `blob:https://a.example/x` too) and passes those on.
+- **The validator's check** (once `connect()` loaded it) comes with the schemas' checks,
+  before an aborted `signal` and `exposedTo`.
 
 Unchanged, and still where the library differs from the draft: schemas need
 `"type": "object"`, a hint that is not a boolean is a `TypeError` (the draft would make
