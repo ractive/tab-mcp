@@ -383,19 +383,15 @@ const quiet = (): boolean => Date.now() < quietUntil;
 /** The button over the tool list as last shown: its visibility, label and tools. */
 let allowAllShown = "";
 /**
- * The tab the panel shows, whether its tools were read since it came to the
- * front (the worker gives `origin` once they were), and until when that
- * first read may still come without a wait. The user switches tabs, the
- * page cannot: the list that comes with the switch takes clicks at once.
- * A page's own change of its tools (`toolchange`, a navigation) still
- * waits, as does a first read that comes later than this: a page that
- * answers slowly on purpose must not choose when its switches appear
- * (DEC-228).
+ * The tab the panel shows, and whether its tools were read since it came to
+ * the front (the worker gives `origin` once they were). The list that comes
+ * with a switch to another tab waits as any other (a page can time a switch:
+ * a tab it opened closes itself, and its opener comes to the front; it can
+ * hold back its first read), but unseen, as after the dialog: the switches
+ * show at once whether they are on (DEC-228).
  */
 let shownTab: number | undefined;
 let toolsRead = false;
-let switchedUntil = 0;
-const SWITCH_MS = 1000;
 
 function showQuestions(questions: QuestionSummary[], expired: string[]): void {
 	const ids = new Set(questions.map((q) => q.id));
@@ -701,18 +697,19 @@ function showTab(s: PanelState): void {
 	// The page changed what the switch over the list is for (other tools, so
 	// also on or off, or it just came): it and the switches below wait, so a
 	// click meant to turn it off cannot turn on a tool the page just added.
-	// Not when only the user's own click turned it: that would flicker. Not
-	// for the list that comes with a switch to another tab either.
+	// Not when only the user's own click turned it: that would flicker. The
+	// list that comes with a switch to another tab waits unseen.
 	if (tab?.tabId !== shownTab) {
 		shownTab = tab?.tabId;
 		toolsRead = false;
-		switchedUntil = Date.now() + SWITCH_MS;
 	}
-	const switched = !toolsRead && Date.now() < switchedUntil;
+	const switched = !toolsRead;
 	if (tab?.origin !== undefined) toolsRead = true;
 	const shownAs = JSON.stringify([allowAll.shown, allowAll.names]);
-	if (allowAll.shown && shownAs !== allowAllShown && !switched) {
-		movedUntil = Date.now() + ALLOW_DELAY_MS;
+	if (allowAll.shown && shownAs !== allowAllShown) {
+		if (switched)
+			quietUntil = Math.max(quietUntil, Date.now() + ALLOW_DELAY_MS);
+		else movedUntil = Date.now() + ALLOW_DELAY_MS;
 		arm();
 	}
 	allowAllShown = shownAs;

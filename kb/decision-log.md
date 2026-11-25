@@ -5946,22 +5946,25 @@ Against the draft of 24 November 2026 (`registerTool` steps, WebIDL of
   Chrome without WebMCP) copies Chrome 156, not the draft; moving it to the draft is its
   own change.
 
-## DEC-228: a switch to another tab does not make the panel's switches wait (owner)
+## DEC-228: after a switch to another tab the panel's switches wait unseen (owner)
 
 2026-11-25. The owner asked why the "Always allow" switches took about a second to show
 "on" again after switching back to a tab. The wait after the layout moved (ES 5, review
 of 2026-11-13) started whenever the tool list changed, so also when the panel moved to
 another tab; for 750 ms the switches were flat and grey (DEC-160), which reads as off.
 
-- The wait guards against a change someone else times: an AI app's question (now in a
-  modal dialog, which moves nothing) or a page's own change of its tools. The user times
-  a tab switch, and a page cannot switch the active tab without the user's click.
-- The worker now sends Chrome's tab id with the tab (`TabView.tabId`). The list that
-  comes with a switch takes clicks at once: the panel's first state of a tab whose
-  tools were read (`origin` given), within a second of the tab coming to the front.
-  A later change of the same tab's tools (`toolchange`, a navigation, a reload) still
-  waits, and so does a first read that comes later than that second: a page that
-  answers slowly on purpose must not choose when its switches appear.
-- Opening the panel is a switch too: its first list does not wait.
-- The waiting look stays as DEC-160 has it (no opacity): the switch still looks off
-  while it waits after the page's own change.
+- The wait stays: a page can time a switch too. A tab it opened by script closes itself
+  when it likes and Chrome brings its opener to the front; `window.open` under a click's
+  activation opens a tab later; and the page in the new tab can hold back the first
+  read of its tools (its `page-info` and `getTools()` answers run on its main thread,
+  up to 5 s). A first version of this change let the list that came with a switch take
+  clicks at once (within a second of the panel seeing the tab) and its review showed
+  each of these paths; the premise "a page cannot switch the active tab" was wrong.
+- The worker sends Chrome's tab id with the tab (`TabView.tabId`). The first list of a
+  tab whose tools were read (`origin` given) since it came to the front, opening the
+  panel included, waits as the panel does after the questions' dialog closed
+  (`quietUntil`): a click does nothing for 750 ms, and nothing looks disabled, so each
+  switch shows at once whether its tool is allowed.
+- A later change of the same tab's tools (`toolchange`, a navigation, a reload) waits in
+  the disabled look as before (DEC-160: flat, no opacity), so a click that did nothing
+  there is explained.
