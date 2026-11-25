@@ -588,8 +588,13 @@ describe("ToolRegistry (WebMCP rules)", () => {
 			);
 		}
 		// Not a list at all.
-		expect(() => r.register(tool(), { callers: "relay" as never })).toThrow(
-			new TypeError("registerTool: callers must be a list"),
+		for (const callers of ["relay", null])
+			expect(() => r.register(tool(), { callers: callers as never })).toThrow(
+				new TypeError("registerTool: callers must be a list"),
+			);
+		// The same message for exposedTo (Sitegloss's probe of 0.25.0-rc.1).
+		expect(() => r.register(tool(), { exposedTo: null as never })).toThrow(
+			new TypeError("registerTool: exposedTo must be a list"),
 		);
 		expect(() => r.register(tool(), { callers: {} as never })).toThrow(
 			TypeError,
