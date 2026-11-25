@@ -17,7 +17,7 @@ How the library, the relay and the tab-mcp browser extension fit together, with 
 picture:
 [How the parts fit together](https://github.com/ractive/tab-mcp#how-the-parts-fit-together).
 
-**Status: 0.25.0-rc.1.** Until 1.0, a new minor version can still change the API. Which AI apps
+**Status: 0.25.0.** Until 1.0, a new minor version can still change the API. Which AI apps
 work is listed in [compatibility](https://github.com/ractive/tab-mcp/blob/main/docs/compatibility.md).
 
 ## With a coding agent
@@ -76,7 +76,7 @@ Or without a bundler, from a CDN as an ES module:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0-rc.1/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -890,8 +890,8 @@ mcp.addEventListener("grantschange", drawSwitches);
   that does not import it loads nothing of it. Take both from the same version:
 
   ```js
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0-rc.1/cdn/tab-mcp-client.min.js";
-  import { allowedTools } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0-rc.1/cdn/allowed.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0/cdn/tab-mcp-client.min.js";
+  import { allowedTools } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0/cdn/allowed.min.js";
   ```
 
 **The risk.** An allowance outlives the user's attention: for up to the grant's 90 days,

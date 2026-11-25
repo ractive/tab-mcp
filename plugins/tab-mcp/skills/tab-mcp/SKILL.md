@@ -7,10 +7,10 @@ compatibility: Browser library for any web page (ES modules); the relay needs Bu
 
 # Add tab-mcp to a web app
 
-This skill describes `@ractive-ch/tab-mcp-client` 0.25.0-rc.1. The package's
-[README](https://github.com/ractive/tab-mcp/blob/client-v0.25.0-rc.1/packages/tab-mcp-client/README.md)
+This skill describes `@ractive-ch/tab-mcp-client` 0.25.0. The package's
+[README](https://github.com/ractive/tab-mcp/blob/client-v0.25.0/packages/tab-mcp-client/README.md)
 is the full reference; read the section you need there when this skill is not enough. Its
-[CHANGELOG](https://github.com/ractive/tab-mcp/blob/client-v0.25.0-rc.1/packages/tab-mcp-client/CHANGELOG.md)
+[CHANGELOG](https://github.com/ractive/tab-mcp/blob/client-v0.25.0/packages/tab-mcp-client/CHANGELOG.md)
 says what changed between versions. The package ships this skill for its own version as
 `node_modules/@ractive-ch/tab-mcp-client/skill/SKILL.md`: when the project has another
 version installed, follow that copy; an installed version without it is older than this
@@ -49,7 +49,7 @@ Without a bundler, import the self-contained build from a CDN:
 
 ```html
 <script type="module">
-  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0-rc.1/cdn/tab-mcp-client.min.js";
+  import { TabMcp } from "https://cdn.jsdelivr.net/npm/@ractive-ch/tab-mcp-client@0.25.0/cdn/tab-mcp-client.min.js";
 </script>
 ```
 
@@ -209,9 +209,9 @@ reason? }`, `reason` when a session ended), `pairingcode` (`{ pairingCode }`),
 `error`. Every detail is an object; a value that is gone is `undefined`. Methods that ask
 the relay reject with an `InvalidStateError` while not connected. The dialogs' texts can
 be replaced (`ui: { strings }`, the keys of
-[`STRINGS`](https://github.com/ractive/tab-mcp/blob/client-v0.25.0-rc.1/packages/tab-mcp-client/src/strings.ts),
+[`STRINGS`](https://github.com/ractive/tab-mcp/blob/client-v0.25.0/packages/tab-mcp-client/src/strings.ts),
 with `lang` and `dir`; see
-[Translating](https://github.com/ractive/tab-mcp/blob/client-v0.25.0-rc.1/packages/tab-mcp-client/README.md#translating)),
+[Translating](https://github.com/ractive/tab-mcp/blob/client-v0.25.0/packages/tab-mcp-client/README.md#translating)),
 and their help gets its own guide link and steps (`ui: { setup: { guide,
 instructions } }`).
 
@@ -247,7 +247,7 @@ const served = await mcp.serve(port, {
   `fetch` of the MCP SDK's client, pinned to `2026-07-28` (an agent framework's own MCP
   client may not speak it), and passes the messages over its own channel; it hands the
   framework the tools as function tools. The README's
-  [Your own assistant on the page](https://github.com/ractive/tab-mcp/blob/client-v0.25.0-rc.1/packages/tab-mcp-client/README.md#your-own-assistant-on-the-page)
+  [Your own assistant on the page](https://github.com/ractive/tab-mcp/blob/client-v0.25.0/packages/tab-mcp-client/README.md#your-own-assistant-on-the-page)
   has the whole setup and a tested backend recipe.
 - A port is a key: whoever holds the other end calls the tools without pairing. Hand it
   only to a frame whose origin you checked, with that origin as the `postMessage` target,
@@ -375,7 +375,7 @@ Whether anyone asks before a tool that asks runs, and who, depends on the caller
   (`{ name, host }`), else `undefined`: while AI access is off, the extension answers no
   page and sends it nothing, so do not try to tell "extension off" from "no extension".
   The connect dialog already says so. Details:
-  [With the tab-mcp browser extension](https://github.com/ractive/tab-mcp/blob/client-v0.25.0-rc.1/packages/tab-mcp-client/README.md#with-the-tab-mcp-browser-extension).
+  [With the tab-mcp browser extension](https://github.com/ractive/tab-mcp/blob/client-v0.25.0/packages/tab-mcp-client/README.md#with-the-tab-mcp-browser-extension).
 - A WebMCP call gets the same argument check as an AI app's and fires `toolcall` and
   `toolcallend` with `client.kind === "webmcp"`, so the page's record of calls still
   lists it.
