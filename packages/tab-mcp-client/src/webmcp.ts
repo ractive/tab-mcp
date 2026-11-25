@@ -104,7 +104,7 @@ export function mirror(
 	 * The warning about a tool that asks with `exposedTo` (DEC-215), once its
 	 * native registration succeeded (so Chrome accepted every origin), once
 	 * per name. Decided then: a handler the page removes later is not
-	 * caught. Never throws, whatever `exposedTo` holds.
+	 * caught. Never throws.
 	 */
 	const warnUnasked = (tool: RegisteredTool, asks: boolean | undefined) => {
 		try {
@@ -112,15 +112,8 @@ export function mirror(
 			// page gave one.
 			const ask = options.onConfirm as { own?: boolean } | undefined;
 			const page = globalThis.document?.location?.origin;
-			const others = (
-				Array.isArray(tool.exposedTo) ? tool.exposedTo : []
-			).filter((entry: unknown) => {
-				try {
-					return new URL(String(entry)).origin !== page;
-				} catch {
-					return false; // the browser refuses it anyway
-				}
-			});
+			// Origins: the registry checked and normalized them (DEC-227).
+			const others = (tool.exposedTo ?? []).filter((origin) => origin !== page);
 			if (
 				asks !== true ||
 				others.length === 0 ||

@@ -6,12 +6,12 @@
 
 import { describe, expect, test } from "bun:test";
 import type {
+	ModelContextTool,
 	RelayClient,
-	Tool,
 	ToolCallEnd,
 	ToolCallOutcome,
 	ToolCallStart,
-	ToolExecuteOptions,
+	ToolExecuteCallbackOptions,
 } from "@ractive-ch/tab-mcp-client";
 import type { CallView } from "../src/protocol.ts";
 import { MAX_TITLE_HOST } from "../src/worker/navigation.ts";
@@ -214,7 +214,7 @@ describe("the record (DEC-226)", () => {
 
 	test("`wrap`: the tool's own `execute` runs, after its call is bound", async () => {
 		const { recent } = recorded();
-		const tool: Tool = {
+		const tool: ModelContextTool = {
 			name: "page_info",
 			description: "",
 			inputSchema: { type: "object" },
@@ -224,7 +224,7 @@ describe("the record (DEC-226)", () => {
 			},
 		};
 		recent.started(start(1));
-		const options: ToolExecuteOptions = {
+		const options: ToolExecuteCallbackOptions = {
 			signal: new AbortController().signal,
 			client: CLAUDE,
 		};

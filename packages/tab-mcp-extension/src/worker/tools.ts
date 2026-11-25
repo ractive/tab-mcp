@@ -3,7 +3,7 @@
  * WebMCP tools themselves come from the bridge (`bridge.ts`) as `page_<name>`.
  */
 
-import type { Tool } from "@ractive-ch/tab-mcp-client";
+import type { ModelContextTool } from "@ractive-ch/tab-mcp-client";
 import { PRODUCT } from "../browser.ts";
 import type { PageInfo } from "../messages.ts";
 import type { TargetTab } from "../tabs.ts";
@@ -87,7 +87,7 @@ export type BridgeAccess = Pick<
 export function createTools(
 	tabs: TabBridge,
 	bridge: () => BridgeAccess,
-): Tool[] {
+): ModelContextTool[] {
 	return [
 		{
 			name: "page_info",

@@ -5,8 +5,8 @@
 
 import type {
 	JsonSchema,
-	RegisterToolOptions,
-	Tool,
+	ModelContextRegisterToolOptions,
+	ModelContextTool,
 	ToolAnnotations,
 	ToolCaller,
 } from "./types.ts";
@@ -21,13 +21,13 @@ export interface RegisteredTool {
 	readonly inputSchema: JsonSchema;
 	readonly outputSchema?: JsonSchema | undefined;
 	readonly annotations: ToolAnnotations;
-	readonly execute: Tool["execute"];
+	readonly execute: ModelContextTool["execute"];
 	/**
-	 * `RegisterToolOptions.callers`, copied; `undefined`: the default, which
+	 * `ModelContextRegisterToolOptions.callers`, copied; `undefined`: the default, which
 	 * `toolsFor` (serve.ts, the relay and a port) and `mirror` (webmcp.ts) apply.
 	 */
 	readonly callers?: readonly ToolCaller[] | undefined;
-	/** `RegisterToolOptions.exposedTo`, passed on to the native registration. */
+	/** `ModelContextRegisterToolOptions.exposedTo` as origins, passed on to the native registration. */
 	readonly exposedTo?: string[] | undefined;
 }
 
@@ -122,84 +122,49 @@ function schemaProblem(root: unknown): string | undefined {
 	return undefined;
 }
 
-/** Validate a tool; throws a `TypeError` naming the problem. */
-export function validateTool(tool: Tool): RegisteredTool {
-	if (!isPlainObject(tool))
-		throw new TypeError("registerTool: the tool must be an object");
-	const {
-		name,
-		title,
-		description,
-		inputSchema,
-		outputSchema,
-		execute,
-		annotations,
-	} = tool;
-	if (typeof name !== "string" || !NAME.test(name)) {
-		throw new TypeError(
-			`registerTool: the name must be 1–128 characters of A–Z, a–z, 0–9, "_", "-" or "." (got ${JSON.stringify(name)})`,
-		);
-	}
-	if (typeof description !== "string" || description.trim() === "") {
-		throw new TypeError(`registerTool: tool ${name} needs a description`);
-	}
-	if (title !== undefined && typeof title !== "string") {
-		throw new TypeError(`registerTool: the title of ${name} must be a string`);
-	}
-	if (typeof execute !== "function") {
-		throw new TypeError(`registerTool: tool ${name} needs an execute function`);
-	}
-	/**
-	 * An object schema (MCP wants `"type": "object"`), copied as JSON and
-	 * checked by `schemaProblem`: an AI app compiles the output schema too.
-	 */
-	const copy = (schema: unknown, what: string): JsonSchema => {
-		if (!isPlainObject(schema) || schema["type"] !== "object") {
-			throw new TypeError(
-				`registerTool: the ${what} of ${name} must be a JSON Schema object with "type": "object"`,
-			);
-		}
-		let copied: JsonSchema;
-		try {
-			copied = JSON.parse(JSON.stringify(schema)) as JsonSchema;
-		} catch {
-			throw new TypeError(`registerTool: the ${what} of ${name} must be JSON`);
-		}
-		const problem = schemaProblem(copied);
-		if (problem !== undefined)
-			throw new TypeError(`registerTool: the ${what} of ${name}: ${problem}`);
-		return copied;
-	};
-	const copied = copy(inputSchema ?? { type: "object" }, "inputSchema");
-	if (annotations !== undefined && !isPlainObject(annotations)) {
-		throw new TypeError(
-			`registerTool: the annotations of ${name} must be an object`,
-		);
-	}
-	// A hint that is not a boolean is refused, not dropped: a dropped
-	// `consequentialHint: "true"` would run the tool without asking (CC 2).
-	// Every key ending in `Hint`, and `debugging`, counts as a hint, also
-	// one tab-mcp does not know (a later draft's, or a misspelt one); other
-	// keys that are not booleans are ignored.
-	const hints: ToolAnnotations = {};
-	for (const [key, value] of Object.entries(annotations ?? {})) {
-		if (typeof value === "boolean")
-			(hints as Record<string, boolean>)[key] = value;
-		else if (value !== undefined && /Hint$|^debugging$/.test(key))
-			throw new TypeError(`registerTool: ${key} of ${name} must be a boolean`);
-	}
-	return {
-		name,
-		title,
-		description,
-		inputSchema: copied,
-		outputSchema:
-			outputSchema === undefined
-				? undefined
-				: copy(outputSchema, "outputSchema"),
-		annotations: hints,
-		execute,
-	};
+/**
+ * Throw `registerTool`'s error: a `TypeError`, or a `DOMException` of the
+ * name `kind`.
+ */
+function fail(message: string, kind?: string): never {
+	message = `registerTool: ${message}`;
+	throw kind ? new DOMException(message, kind) : new TypeError(message);
+}
+
+/** WebIDL's conversion to a string: a Symbol throws a `TypeError`. */
+const text = (value: unknown): string => `${value}`;
+
+/**
+ * A copy of a list of the page's, as WebIDL converts a sequence of strings:
+ * `undefined` stays, anything but a list (a string, `null`) is a `TypeError`.
+ */
+function listOf(value: unknown, what: string): string[] | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === "string") fail(`${what} must be a list`);
+	return [...(value as string[])].map(text);
+}
+
+/**
+ * The origin of `entry` if it is potentially trustworthy (`https:`, `wss:`
+ * or a loopback host), as the draft wants an `exposedTo` entry; a
+ * `SecurityError` otherwise.
+ */
+function trustworthy(entry: string): string {
+	try {
+		// The origin's own URL, as Secure Contexts asks of the origin: a
+		// `blob:https://a.example/x` is `https://a.example`; an opaque origin
+		// ("null") does not parse.
+		const url = new URL(new URL(entry).origin);
+		if (
+			/^(https|wss):$/.test(url.protocol) ||
+			/^(127(\.\d+){3}|\[::1\]|(.+\.)?localhost\.?)$/.test(url.hostname)
+		)
+			return url.origin;
+	} catch {}
+	fail(
+		`exposedTo ${JSON.stringify(entry)} is not a potentially trustworthy origin`,
+		"SecurityError",
+	);
 }
 
 /** The validator's check of a schema: throws a `TypeError` naming the problem. */
@@ -211,37 +176,135 @@ export class ToolRegistry {
 	#compile: SchemaCompiler | undefined;
 
 	/**
-	 * Register a tool; throws `TypeError` for an invalid tool, an
-	 * `InvalidStateError` `DOMException` for a duplicate name and the abort
-	 * reason for an aborted signal (as WebMCP).
+	 * Register a tool, with the checks of the WebMCP draft's `registerTool`
+	 * in its order (DEC-227): a `TypeError` for what WebIDL refuses (no
+	 * object, no name, description or `execute`), an `InvalidStateError`
+	 * `DOMException` for a duplicate, a bad name or an empty description,
+	 * the schema's `TypeError`, the abort reason of an aborted signal, a
+	 * `SecurityError` for an `exposedTo` entry that is no potentially
+	 * trustworthy origin. tab-mcp's own checks are `TypeError`s: a schema
+	 * without `"type": "object"` or that the validator cannot use (with the
+	 * schemas), a hint that is not a boolean, unknown `callers` and the old
+	 * option `webmcp` (with WebIDL's conversion).
 	 */
-	register(tool: Tool, options: RegisterToolOptions = {}): void {
-		const { signal, exposedTo } = options;
-		// A copy: the page's array may change later, what was registered does
-		// not. Not a list: the spread throws a `TypeError` itself.
-		const callers = options.callers && [...options.callers];
-		// The option of 0.15 and before, refused rather than ignored: an ignored
-		// `webmcp: false` would put the tool into WebMCP (DEC-165).
+	register(
+		tool: ModelContextTool,
+		options: ModelContextRegisterToolOptions | null = {},
+	): void {
+		// WebIDL's conversion of both dictionaries comes first.
+		if (!isPlainObject(tool)) fail("the tool must be an object");
+		const {
+			name: rawName,
+			title,
+			description,
+			inputSchema,
+			outputSchema,
+			execute,
+			annotations,
+		} = tool;
+		if (rawName === undefined || description === undefined)
+			fail("a tool needs a name and a description");
+		// Each converted once, as WebIDL does: a page's `toString` runs once.
+		const name = text(rawName);
+		const about = text(description);
+		const heading = title === undefined ? undefined : text(title);
+		if (typeof execute !== "function")
+			fail(`${name} needs an execute function`);
+		for (const [what, schema] of [
+			["inputSchema", inputSchema],
+			["outputSchema", outputSchema],
+		])
+			if (schema !== undefined && (typeof schema !== "object" || !schema))
+				fail(`the ${what} of ${name} must be an object`);
+		if (annotations != null && !isPlainObject(annotations))
+			fail(`the annotations of ${name} must be an object`);
+		// A hint that is not a boolean is refused, not converted: WebIDL would
+		// make `readOnlyHint: "false"` true, and a tool that asks would run
+		// unasked (CC 2). Every key ending in `Hint`, and `debugging`, counts
+		// as a hint, also one tab-mcp does not know (a later draft's, or a
+		// misspelt one); other keys that are not booleans are ignored.
+		const hints: ToolAnnotations = {};
+		for (const [key, value] of Object.entries(annotations ?? {})) {
+			if (typeof value === "boolean")
+				(hints as Record<string, boolean>)[key] = value;
+			else if (value !== undefined && /Hint$|^debugging$/.test(key))
+				fail(`${key} of ${name} must be a boolean`);
+		}
+		// WebIDL takes `null` options as none.
+		const given = options ?? {};
+		const { signal } = given;
+		if (signal !== undefined && typeof signal?.throwIfAborted !== "function")
+			fail("signal must be an AbortSignal");
+		// Copies: the page's arrays may change later, what was registered
+		// does not.
+		const callers = listOf(given.callers, "callers") as
+			| ToolCaller[]
+			| undefined;
+		// The option of 0.15 and before, refused rather than ignored: an
+		// ignored `webmcp: false` would put the tool into WebMCP (DEC-165).
 		if (
-			"webmcp" in options ||
+			"webmcp" in given ||
 			callers?.some((c) => !/^(relay|local|webmcp)$/.test(c))
 		)
-			throw new TypeError(
-				'registerTool: callers must be "relay", "local" or "webmcp"; option webmcp is gone',
+			fail(
+				'callers must be "relay", "local" or "webmcp"; option webmcp is gone',
 			);
-		const registered: RegisteredTool = {
-			...validateTool(tool),
-			callers,
-			exposedTo,
+		const exposed = listOf(given.exposedTo, "exposedTo");
+		const taken = () => {
+			if (this.#tools.has(name))
+				fail(`a tool named ${name} is already registered`, "InvalidStateError");
 		};
-		signal?.throwIfAborted();
-		if (this.#tools.has(registered.name)) {
-			throw new DOMException(
-				`registerTool: a tool named ${registered.name} is already registered`,
+		taken();
+		if (!NAME.test(name))
+			fail(
+				`the name must be 1–128 characters of A–Z, a–z, 0–9, "_", "-" or "." (got ${JSON.stringify(name)})`,
 				"InvalidStateError",
 			);
-		}
-		this.#compile?.(registered);
+		if (about === "") fail(`${name} needs a description`, "InvalidStateError");
+		/**
+		 * An object schema (MCP wants `"type": "object"`), copied as JSON and
+		 * checked by `schemaProblem`: an AI app compiles the output schema too.
+		 */
+		const copy = (schema: unknown, what: string): JsonSchema => {
+			if (!isPlainObject(schema) || schema["type"] !== "object")
+				fail(
+					`the ${what} of ${name} must be a JSON Schema object with "type": "object"`,
+				);
+			let copied: JsonSchema;
+			try {
+				copied = JSON.parse(JSON.stringify(schema)) as JsonSchema;
+			} catch {
+				fail(`the ${what} of ${name} must be JSON`);
+			}
+			const problem = schemaProblem(copied);
+			if (problem !== undefined) fail(`the ${what} of ${name}: ${problem}`);
+			return copied;
+		};
+		const checked: RegisteredTool = {
+			name,
+			title: heading,
+			description: about,
+			inputSchema:
+				inputSchema === undefined
+					? { type: "object" }
+					: copy(inputSchema, "inputSchema"),
+			outputSchema:
+				outputSchema === undefined
+					? undefined
+					: copy(outputSchema, "outputSchema"),
+			annotations: hints,
+			execute,
+			callers,
+		};
+		// The validator's check is the schemas' too.
+		this.#compile?.(checked);
+		// Script in a schema's `toJSON` may have registered the name meanwhile.
+		taken();
+		signal?.throwIfAborted();
+		const registered: RegisteredTool = {
+			...checked,
+			exposedTo: exposed?.map(trustworthy),
+		};
 		this.#tools.set(registered.name, registered);
 		signal?.addEventListener("abort", () => this.remove(registered), {
 			once: true,

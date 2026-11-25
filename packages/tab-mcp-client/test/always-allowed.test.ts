@@ -18,9 +18,9 @@ import type { TabMcp } from "../src/tab-mcp.ts";
 import type {
 	ConfirmRequest,
 	Grant,
+	ModelContextTool,
 	RelayClient,
 	TabMcpOptions,
-	Tool,
 } from "../src/types.ts";
 import {
 	MemoryStorage,
@@ -43,8 +43,8 @@ const grant = (grantId: string): Grant => ({
 const asking = (
 	name: string,
 	description = `Does ${name}`,
-	extra: Partial<Tool> = {},
-): Tool => ({
+	extra: Partial<ModelContextTool> = {},
+): ModelContextTool => ({
 	name,
 	description,
 	annotations: { consequentialHint: true },

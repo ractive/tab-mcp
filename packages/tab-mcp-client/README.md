@@ -133,11 +133,16 @@ answers.
 
 ### Tools
 
-`registerTool(tool, { signal, callers, exposedTo })` takes a tool in the shape of the
-WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-callers-see-a-tool);
-`exposedTo`: see [WebMCP](#webmcp)):
+`registerTool(tool, { signal, exposedTo, callers })` is the WebMCP draft's
+`document.modelContext.registerTool()` (of 24 November 2026), with its types'
+names (`ModelContextTool`, `ModelContextRegisterToolOptions`,
+`ToolExecuteCallbackOptions`, `ToolAnnotations`), its checks and its errors, plus
+`callers` ([which callers see a tool](#which-callers-see-a-tool); `exposedTo`: see
+[WebMCP](#webmcp)). Code written for the native API runs here; the few places where it
+behaves differently are [listed below](#where-registertool-differs-from-the-draft).
 
 - `name` (1-128 characters of `A-Z a-z 0-9 _ - .`), `title`, `description` (not empty);
+  like the draft, the library converts each to a string (`42` is `"42"`);
 - `inputSchema`: a JSON Schema with `"type": "object"`. Arguments are checked against it
   before `execute` runs. `registerTool` rejects a schema the validator cannot use (a
   pattern that is not a regular expression, a `$ref` that does not resolve; values of
@@ -175,33 +180,52 @@ WebMCP draft's `registerTool` (`callers`: [which callers see a tool](#which-call
 - `annotations`: the WebMCP hints `readOnlyHint`, `consequentialHint`,
   `untrustedContentHint` and `debugging` (a tool meant for the page's developers), and
   the MCP hints `destructiveHint`, `idempotentHint`, `openWorldHint`. A hint must be
-  `true` or `false`: `registerTool` rejects any other value with a `TypeError`, since a
-  `consequentialHint: "true"` that was dropped would run the tool without asking. MCP has
+  `true` or `false`: `registerTool` rejects any other value with a `TypeError` (below). MCP has
   no `untrustedContentHint`: every result of such a tool carries a marker in its `_meta`
   ([untrusted results](#untrusted-results)).
 
-Where `registerTool` differs from the WebMCP draft's (of 12 November 2026), so that code
-written for the native API behaves differently here:
+#### Where `registerTool` differs from the draft
 
-- An invalid name, an empty description or an invalid schema is a `TypeError`; the
-  draft rejects the first two with an `InvalidStateError`. A duplicate name is an
-  `InvalidStateError` in both.
+`registerTool` checks what the draft checks, in the same order, and rejects with the
+same errors (DEC-227): a `TypeError` for what is no tool at all (no object, no `name`,
+`description` or `execute`, a schema or `annotations` that are no object, a `signal`
+that is no `AbortSignal`, an `exposedTo` that is no list), an `InvalidStateError` for
+a name that is taken, a name that breaks the rules above and an empty description, the
+schema's error (also the validator's, once `connect()` loaded it), the reason of an already aborted
+`signal` (nothing is registered then), and a `SecurityError` for an `exposedTo` entry
+that is no potentially trustworthy origin (`https:`, `wss:`, or a loopback host such as
+`http://localhost`). Where code written for the native API behaves differently here:
+
+- `registerTool` refuses the option `webmcp` of 0.15 and before with a `TypeError`,
+  rather than ignoring it: an ignored `webmcp: false` would put the tool into WebMCP.
+
 - `inputSchema` and `outputSchema` need `"type": "object"`, as MCP does; the draft takes
-  any object. The library also checks the patterns and `$ref`s of both (above).
+  any object. The library also checks the patterns and `$ref`s of both (above). Each is a
+  `TypeError`.
+- A hint that is not a boolean is a `TypeError`. The draft converts it, so
+  `readOnlyHint: "false"` would be `true`, and a tool that asks would run without a
+  question. Hints the draft does not know (MCP's, `destructiveHint` among them) are kept.
+- `callers` is tab-mcp's own option; a value other than `"relay"`, `"local"` and
+  `"webmcp"` is a `TypeError`.
 - The library checks the arguments against `inputSchema` before `execute` runs; the
   draft leaves that to the page.
-- `execute` may return an MCP result; through WebMCP it goes out as its
+- `execute`'s second argument has `client` next to the draft's `signal`, and
+  `execute` may return an MCP result; through WebMCP it goes out as its
   `structuredContent` or its text ([WebMCP](#webmcp)).
-- `exposedTo` matters only for WebMCP: it is passed on to the native registration of a
-  mirrored tool, and AI apps never see it. A document of a listed origin can run the
-  tool, and the library does not ask it ([who asks](#who-asks-before-a-tool-that-asks-runs)).
-  A tool that asks, with an `exposedTo` naming other origins, on a page without
-  `onConfirm` gets a console warning once, when it is registered with WebMCP.
+- `exposedTo` matters only for WebMCP: the library keeps its origins and passes them on
+  to the native registration of a mirrored tool, and AI apps never see it. A document of
+  a listed origin can run the tool, and the library does not ask it
+  ([who asks](#who-asks-before-a-tool-that-asks-runs)). A tool that asks, with an
+  `exposedTo` naming other origins, on a page without `onConfirm` gets a console
+  warning once, when it is registered with WebMCP.
+- The promise settles at once: the tool is registered (or refused) before
+  `registerTool` returns. The draft resolves it in a later task.
+- The tool list is `mcp.tools` (names) and the event `toolchange` (as the draft's
+  `toolchange`, with the names in `detail.tools`); calls are `toolcall` and
+  `toolcallend`, with the caller and the outcome, not the draft's `toolactivated` and
+  `toolcancel`.
 
-An already aborted `signal` rejects with its reason and registers nothing, as in the
-draft.
-
-In TypeScript, `Tool<Input>` types the `input` of `execute`, and `registerTool` and
+In TypeScript, `ModelContextTool<Input>` types the `input` of `execute`, and `registerTool` and
 `useTool` infer it from the tool or take it explicitly
 (`registerTool<{ a: number; b: number }>(…)`); without it, `input` is a
 `Record<string, unknown>`. The library checks the arguments against `inputSchema`, not
@@ -305,7 +329,7 @@ which ask nothing either.
 - The native registration gets the WebMCP fields: `name`, `title`, `description`,
   `inputSchema`, `outputSchema` and the WebMCP hints, and `exposedTo` from
   `registerTool`'s options (origins of other documents in the tab that may see the
-  tool; the browser checks it, and an invalid list only warns, as below).
+  tool, checked by `registerTool` as the draft checks them).
 - A WebMCP call takes the same path as an AI app's: the arguments are checked against
   `inputSchema` (Chrome does not check them), a tool that asks goes to `onConfirm` if
   the page has one (above), and `toolcall` and `toolcallend` fire with
@@ -1195,7 +1219,7 @@ properties (`grantschange` has `grants`), and a value that is gone is `undefined
 | `pairingcode` | `{ pairingCode }` |
 | `pairinguntil` | `{ pairingUntil }` |
 | `identitychange` | `{ identity, identityMessage }` |
-| `toolschange` | `{ tools }` |
+| `toolchange` | `{ tools }` |
 | `extensionchange` | `{ extension }` |
 | `replaced` | `{ sibling }` (see above) |
 | `error` | `{ error }` |

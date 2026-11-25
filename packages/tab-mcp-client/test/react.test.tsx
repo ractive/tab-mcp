@@ -29,7 +29,7 @@ import {
 	useToolCalls,
 } from "../src/react.ts";
 import { STRINGS } from "../src/strings.ts";
-import type { Tool, ToolCaller } from "../src/types.ts";
+import type { ModelContextTool, ToolCaller } from "../src/types.ts";
 import {
 	connectClient,
 	MemoryStorage,
@@ -94,17 +94,17 @@ function tab(options: Parameters<typeof newTab>[1] = {}): TabMcp {
 	return t;
 }
 
-/** Every `toolschange` of a tab, as lists of names. */
+/** Every `toolchange` of a tab, as lists of names. */
 function toolChanges(t: TabMcp): string[][] {
 	const changes: string[][] = [];
-	t.addEventListener("toolschange", (e) => changes.push([...e.detail.tools]));
+	t.addEventListener("toolchange", (e) => changes.push([...e.detail.tools]));
 	return changes;
 }
 
 const addTool = (
-	execute: Tool["execute"],
+	execute: ModelContextTool["execute"],
 	description = "Add two numbers",
-): Tool => ({
+): ModelContextTool => ({
 	name: "add",
 	description,
 	inputSchema: {
@@ -1082,7 +1082,7 @@ test("ConnectButton says what the TabMcp's ui.strings say, plural forms by its l
 });
 
 test("game feedback 8: useTool and registerTool take the input's type", () => {
-	const add: Tool<{ a: number; b: number }> = {
+	const add: ModelContextTool<{ a: number; b: number }> = {
 		name: "add",
 		description: "Add two numbers",
 		inputSchema: {
@@ -1103,7 +1103,7 @@ test("game feedback 8: useTool and registerTool take the input's type", () => {
 	}
 	// review of PR 68: the input is always a JSON object, so a primitive is refused.
 	// @ts-expect-error string does not satisfy `object`
-	const wrong: Tool<string> | undefined = undefined;
+	const wrong: ModelContextTool<string> | undefined = undefined;
 	expect(wrong).toBeUndefined();
 	expect(typeof Adder).toBe("function");
 	expect(add.execute({ a: 1, b: 2 }, {} as never)).toBe(3);

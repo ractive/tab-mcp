@@ -101,10 +101,11 @@ test("importing the library loads only the core; connect() loads the rest", asyn
 	console.log(
 		`core ${coreGz} B gzipped, connection ${(connection / 1024).toFixed(1)} KB gzipped`,
 	);
+	// 6.5 KB since registerTool checks as the WebMCP draft does (DEC-227);
 	// 6.25 KB since `serve` and the optional relay (DEC-122); 6 KB since
 	// client 0.8.0 (DEC-103); 5.5 KB since the fixes of iteration 13
 	// (DEC-086); 5.25 KB since the per-page secret key (DEC-083); 5 KB before.
-	expect(coreGz).toBeLessThanOrEqual(6.25 * 1024);
+	expect(coreGz).toBeLessThanOrEqual(6.5 * 1024);
 	// `serve` itself is in the lazy chunk, with the tunnel.
 	expect(coreCode).not.toContain("bad_message");
 	expect(connection).toBeLessThanOrEqual(100 * 1024);
@@ -202,9 +203,10 @@ const STRING_PROBE = "Step by step, and what to do when it fails";
 /**
  * What a React page loads first, gzipped: 13.0 KB before DEC-208, about 16 KB
  * while `./react` imported the whole table, 13.2 KB with the button's few
- * texts inline (review of PR 181).
+ * texts inline (review of PR 181), 13.6 KB with registerTool's checks as the
+ * WebMCP draft has them (DEC-227).
  */
-const REACT_CLOSURE_LIMIT = 13.5 * 1024;
+const REACT_CLOSURE_LIMIT = 13.75 * 1024;
 
 test("the tunnel entry stands alone: no DOM, nothing of the page's library", async () => {
 	const result = await Bun.build({
@@ -418,13 +420,13 @@ test("the build produces a package whose declarations type-check for a consumer"
 
 	await Bun.write(
 		join(consumer, "page.ts"),
-		`import { TabMcp, type Tool, type SessionInfo, type ServeHandle, type TunnelPort, type DialogOptions, type DialogStrings } from "@ractive-ch/tab-mcp-client";
+		`import { TabMcp, type ModelContextTool, type SessionInfo, type ServeHandle, type TunnelPort, type DialogOptions, type DialogStrings } from "@ractive-ch/tab-mcp-client";
 import { createTunnelFetch, type TunnelFetch, type TunnelRequestMessage, type TunnelCancelMessage } from "@ractive-ch/tab-mcp-client/tunnel";
 import { SETUP_GUIDE, setupInstructions, type SetupInstruction } from "@ractive-ch/tab-mcp-client/setup";
 import { allowedTools, type AllowedTool, type AllowedTools } from "@ractive-ch/tab-mcp-client/allowed";
 import { pickStrings, type PluralText, STRINGS, withEnglish } from "@ractive-ch/tab-mcp-client/strings";
 const mcp = new TabMcp({ relay: "https://relay.example", server: { name: "x", version: "1" }, appName: "demo", webmcp: true });
-const tool: Tool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
+const tool: ModelContextTool = { name: "add", description: "Add", execute: ({ a, b }) => Number(a) + Number(b), annotations: { readOnlyHint: true } };
 void mcp.registerTool(tool, { signal: new AbortController().signal, callers: ["relay", "webmcp"] });
 mcp.addEventListener("toolcall", (e) => { const c = e.detail.client; console.log(c.kind === "relay" ? c.host : c.kind === "local" ? c.id : c.kind); });
 // @ts-expect-error: the caller may be an agent in the browser, which has no host

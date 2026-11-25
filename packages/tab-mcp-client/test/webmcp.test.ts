@@ -445,9 +445,9 @@ describe("mirroring", () => {
 		});
 
 		test("not when the native registration fails: only that warning", async () => {
-			native.refuse = new DOMException("insecure origin", "SecurityError");
+			native.refuse = new DOMException("refused", "NotAllowedError");
 			const t = tab();
-			await t.registerTool(wipe, { exposedTo: ["http://embedder.example"] });
+			await t.registerTool(wipe, { exposedTo: ["https://embedder.example"] });
 			await settle();
 			expect(exposedWarnings()).toEqual([]);
 			expect(warn.mock.calls.map((args) => String(args[0]))).toContain(
@@ -455,30 +455,31 @@ describe("mirroring", () => {
 			);
 		});
 
-		test("an exposedTo of the wrong type never breaks registration or the mirror of later tools", async () => {
+		test("an exposedTo the registry refuses registers nothing and never breaks the mirror of later tools (DEC-227)", async () => {
 			const t = tab();
-			const bad: unknown[] = [
-				"https://embedder.example",
-				5,
-				null,
-				[1, { origin: "x" }],
-				["not a url"],
+			const bad: [unknown, string][] = [
+				["https://embedder.example", "TypeError"],
+				[5, "TypeError"],
+				[null, "TypeError"],
+				[[1, { origin: "x" }], "SecurityError"],
+				[["not a url"], "SecurityError"],
+				[["http://embedder.example"], "SecurityError"],
 			];
-			for (const [i, exposedTo] of bad.entries())
+			for (const [i, [exposedTo, error]] of bad.entries())
 				await expect(
 					t.registerTool(
 						{ ...wipe, name: `bad_${i}` },
 						{ exposedTo: exposedTo as string[] },
 					),
-				).resolves.toBeUndefined();
-			await t.registerTool(add);
+				).rejects.toHaveProperty("name", error);
+			await t.registerTool(add, {
+				exposedTo: ["https://embedder.example/page"],
+			});
 			await settle();
-			for (const i of bad.keys())
-				expect(native.tools.has(`bad_${i}`)).toBe(true);
-			expect(native.tools.has("add")).toBe(true);
+			expect(t.tools).toEqual(["add"]);
+			expect([...native.tools.keys()]).toEqual(["add"]);
 			expect(native.options.map((o): unknown => o.exposedTo)).toEqual([
-				...bad,
-				undefined,
+				["https://embedder.example"],
 			]);
 			expect(exposedWarnings()).toEqual([]);
 		});

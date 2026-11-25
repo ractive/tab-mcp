@@ -89,8 +89,9 @@ relay's `TAB_MCP_ALLOWED_ORIGINS`. Take the relay address from the app's configu
 
 Rules for tools:
 
-- The shape follows the WebMCP draft (`document.modelContext.registerTool`); the second
-  argument is `{ signal, callers, exposedTo }`. There is no `unregisterTool`: abort the
+- `registerTool` is the WebMCP draft's `document.modelContext.registerTool` (its type
+  names: `ModelContextTool`, `ModelContextRegisterToolOptions`); the second argument is
+  `{ signal, exposedTo, callers }`. There is no `unregisterTool`: abort the
   registration signal. AI apps that listen get a tool-list-changed notification.
 - `callers` (default: all) lists who sees a tool: `"relay"` (AI apps), `"local"` (the
   site's own assistant on a served port), `"webmcp"` (whatever calls through the
@@ -105,8 +106,11 @@ Rules for tools:
   identity (`["relay"]`: the tool needs to know which AI app calls), or for a tool no
   unvouched WebMCP caller may run (`["relay", "local"]`). For the others the tool does
   not exist (not listed, no list-changed, a call answered as for an unknown tool).
-- `registerTool` returns a promise. It rejects with a `TypeError` for an invalid tool and
-  an `InvalidStateError` for a duplicate name. Do not use `x-mcp-header` in schemas.
+- `registerTool` returns a promise. It rejects as the draft does: a `TypeError` when
+  `name`, `description` or `execute` is missing, an `InvalidStateError` for a taken or
+  invalid name and an empty description, a `SecurityError` for an `exposedTo` entry that
+  is no `https:` (or loopback) origin. A schema without `"type": "object"` is a
+  `TypeError`. Do not use `x-mcp-header` in schemas.
 - Arguments are validated against `inputSchema` before `execute` runs, so `execute`
   needs no casts such as `String(text)`; give the type as `registerTool<{ text: string }>`
   and keep it in step with the schema. Still treat the values as untrusted input (limits

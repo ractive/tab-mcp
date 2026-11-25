@@ -20,9 +20,10 @@ import type {
 	Grant,
 	IdentityAssertionHandler,
 	IdentityState,
+	ModelContextRegisterToolOptions,
+	ModelContextTool,
 	PairingCode,
 	ReconnectingInfo,
-	RegisterToolOptions,
 	RelayClient,
 	ServeHandle,
 	ServeOptions,
@@ -30,7 +31,6 @@ import type {
 	SessionInfo,
 	TabMcpEventMap,
 	TabMcpOptions,
-	Tool,
 	ToolCallClient,
 	TunnelPort,
 } from "./types.ts";
@@ -335,7 +335,7 @@ export class TabMcp extends EventTarget {
 			this.#tabs = options.storage === null ? undefined : `${key}#tabs`;
 		}
 		this.#registry.onChange(() =>
-			this.#emit("toolschange", { tools: this.tools }),
+			this.#emit("toolchange", { tools: this.tools }),
 		);
 		// Also through the browser's own WebMCP, where it has it (DEC-115):
 		// every tool whose `callers` do not leave "webmcp" out (DEC-209). The getter
@@ -379,19 +379,22 @@ export class TabMcp extends EventTarget {
 	}
 
 	/**
-	 * Register a tool (WebMCP shape). Allowed before and after `connect()`;
-	 * aborting `options.signal` unregisters it. Rejects with a `TypeError` for
-	 * an invalid tool and an `InvalidStateError` for a duplicate name (the
-	 * tool is registered, or refused, before it returns); await it or catch
-	 * the rejection (DEC-010).
+	 * Register a tool, as the WebMCP draft's `registerTool` (DEC-227).
+	 * Allowed before and after `connect()`; aborting `options.signal`
+	 * unregisters it. Rejects as the draft does: a `TypeError` for what is no
+	 * tool (no name, description or `execute`) and for a schema or hint
+	 * tab-mcp refuses, an `InvalidStateError` for a taken or invalid name and
+	 * an empty description, a `SecurityError` for an `exposedTo` entry that
+	 * is no potentially trustworthy origin. The tool is registered, or
+	 * refused, before it returns; await it or catch the rejection (DEC-010).
 	 */
 	registerTool<Input extends object = Record<string, unknown>>(
-		tool: Tool<Input>,
-		options: RegisterToolOptions = {},
+		tool: ModelContextTool<Input>,
+		options: ModelContextRegisterToolOptions = {},
 	): Promise<void> {
 		try {
 			// The arguments are checked against `inputSchema` before `execute` runs.
-			this.#registry.register(tool as unknown as Tool, options);
+			this.#registry.register(tool as unknown as ModelContextTool, options);
 		} catch (error) {
 			return Promise.reject(error);
 		}
