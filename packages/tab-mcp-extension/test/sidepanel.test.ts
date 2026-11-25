@@ -639,6 +639,53 @@ describe("Always allow all, a switch over the list", () => {
 	});
 });
 
+describe("a switch to another tab", () => {
+	/** `state` as the worker sends it for the tab with Chrome's id `tabId`. */
+	const onTab = (tabId: number, state: PanelState, read = true): PanelState => {
+		const tab = { ...state.tab, tabId } as NonNullable<PanelState["tab"]>;
+		if (!read) delete tab.origin;
+		return { ...state, tab };
+	};
+
+	test("its list takes clicks at once; the page's own change, or a first read later than a second, still waits", async () => {
+		const panel = await openPanel();
+		const head = () => panel.$<HTMLInputElement>("#allow-tools");
+		// The panel opens on a tab: no wait.
+		panel.show(onTab(1, stateWith([tool("place_order")])));
+		expect(disabled(head())).toBeNull();
+		expect(disabled(panel.$(switchOf("place_order")))).toBeNull();
+		// Another tab comes to the front, read first without its tools, then
+		// with them: on stays on, and a click counts.
+		panel.show(onTab(2, stateWith([]), false));
+		panel.later(300);
+		panel.show(onTab(2, stateWith([tool("add_note", true), tool("clear")])));
+		const allowed = panel.$<HTMLInputElement>(switchOf("add_note"));
+		expect(allowed?.checked).toBe(true);
+		expect(disabled(allowed)).toBeNull();
+		panel.take();
+		panel.$<HTMLInputElement>(switchOf("clear"))?.click();
+		expect(panel.take()).toEqual([
+			{ type: "set-allowed", origin: SITE, name: "clear", on: true },
+		]);
+		// The same tab's page adds a tool right then: it waits.
+		panel.show(
+			onTab(2, stateWith([tool("add_note", true), tool("clear"), tool("x")])),
+		);
+		expect(disabled(head())).toBe("true");
+		expect(disabled(panel.$(switchOf("clear")))).toBe("true");
+		panel.later(WAIT_MS);
+		// Back to the first tab: at once.
+		panel.show(onTab(1, stateWith([tool("place_order")])));
+		expect(disabled(panel.$(switchOf("place_order")))).toBeNull();
+		// A tab whose tools come more than a second after it came to the
+		// front: the page chose when, so they wait.
+		panel.show(onTab(3, stateWith([]), false));
+		panel.later(1001);
+		panel.show(onTab(3, stateWith([tool("late_order")])));
+		expect(disabled(panel.$(switchOf("late_order")))).toBe("true");
+	});
+});
+
 describe("questions in the panel", () => {
 	test("a modal dialog; the question left after an answer waits again; a click right after the dialog closed allows nothing; the switches under it keep their look", async () => {
 		const modal: string[] = [];
