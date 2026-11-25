@@ -20,8 +20,19 @@ costs nothing (DEC-227): its names, its checks in its order, its errors.
 - **Errors.** A name that breaks the rules and an empty description reject with an
   `InvalidStateError`, as a duplicate already did (they were `TypeError`s). A missing
   `name` or `description` is a `TypeError`. A description of only spaces is accepted,
-  as the draft accepts it. A duplicate is found before the schemas are checked, and the
-  schemas before an aborted `signal`, as in the draft.
+  as the draft accepts it. `InvalidStateError`, `SecurityError` and an aborted
+  signal's `AbortError` are `DOMException`s (the kind is their `name`); the others are
+  `TypeError`s: code that tells them apart reads `error.name`.
+- **The order of the checks**, as in the draft: (1) WebIDL's conversion, `TypeError`s
+  (no object; no `name`, `description` or `execute`; a schema, `annotations`,
+  `signal`, `exposedTo` or `callers` of the wrong kind; a hint that is not a boolean;
+  the old option `webmcp`); (2) a duplicate, (3) a bad name, (4) an empty description,
+  each an `InvalidStateError`; (5) the schemas' content (`"type": "object"`, patterns,
+  `$ref`s, the validator once `connect()` loaded it), `TypeError`s; (6) a duplicate
+  again; (7) an aborted `signal`, its reason; (8) `exposedTo`'s origins,
+  `SecurityError`. So a duplicate whose `inputSchema` is a string is a `TypeError` (1),
+  and a duplicate whose `inputSchema` lacks `"type": "object"` an `InvalidStateError`
+  (2).
 - **WebIDL's conversions.** `name`, `title` and `description` are converted to strings
   (`42` is `"42"`; a `title` of another type was a `TypeError`). `annotations: null`
   means no hints, `null` options no options. An `exposedTo` or `callers` that is a
@@ -34,8 +45,6 @@ costs nothing (DEC-227): its names, its checks in its order, its errors.
   registered and only its WebMCP mirror failed, with a console warning. The library keeps
   the origins (`https://a.example/page` is `https://a.example`,
   `blob:https://a.example/x` too) and passes those on.
-- **The validator's check** (once `connect()` loaded it) comes with the schemas' checks,
-  before an aborted `signal` and `exposedTo`.
 
 Unchanged, and still where the library differs from the draft: schemas need
 `"type": "object"`, a hint that is not a boolean is a `TypeError` (the draft would make

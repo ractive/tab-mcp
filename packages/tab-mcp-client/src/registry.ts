@@ -140,7 +140,8 @@ const text = (value: unknown): string => `${value}`;
  */
 function listOf(value: unknown, what: string): string[] | undefined {
 	if (value === undefined) return undefined;
-	if (typeof value === "string") fail(`${what} must be a list`);
+	if (typeof value === "string" || value === null)
+		fail(`${what} must be a list`);
 	return [...(value as string[])].map(text);
 }
 
